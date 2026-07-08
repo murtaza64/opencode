@@ -223,3 +223,66 @@ Before stabilizing the client API:
 ## Flagged ambiguities
 
 - Legacy `experimental.chat.system.transform` can mutate the assembled baseline system prompt arbitrarily, but V2 plugins do not yet expose an equivalent hook. Decide separately whether to port it, replace dynamic uses with plugin-defined **Context Sources**, or narrow its semantics.
+
+---
+
+## Fork: editspace integration (fork(session-umbrella))
+
+Fork-owned vocabulary; upstream terms above are untouched. See
+prds/session-umbrella.md.
+
+**Umbrella**:
+An es-declared directory tree that is ONE semantic project: every session
+whose directory sits anywhere under the umbrella root belongs to it,
+regardless of VCS root. Declared in `umbrellas.json` (one root per umbrella,
+written once by `es create`).
+_Avoid_: project group, workspace group
+
+**Umbrella Member**:
+The derived location of a session inside its **Umbrella**, computed from the
+editspace-canonical path shape under the root: `root` (the root working
+copy), `sidecar` (`.editspace/` outside lanes), or `lane:<name>`
+(`.editspace/lanes/<name>/...`). Never declared, always derived.
+
+**Project Move**:
+Moving a session across project boundaries into another **Umbrella** or
+project ("Move session to project" in the UI). Implemented as a
+fork-continuation — deep-copied history in a new session at the target
+directory, a move context injected into the continuation, and the source
+session archived with a title marker. Distinct from **Directory Move**.
+
+**Directory Move**:
+Upstream's same-project move (`move-session` route / `session.next.moved`):
+re-points the SAME session's directory within one project, optionally
+carrying uncommitted changes as a git patch. Cannot cross projects.
+_Avoid_: calling this "project move"
+
+**Umbrella Project**:
+The identity model for umbrella'd trees: the editspace IS the project.
+Every session under an umbrella root — root working copy, sidecar, lanes —
+belongs to the umbrella's project, regardless of VCS roots. Identity is
+umbrella-driven, never VCS-driven; lane sessions anchor their write boundary
+at the lane root (which need not be a git or jj repo).
+_Avoid_: per-repo project identity for lane sessions
+
+**Lane** (from the editspace context):
+A workstream containing 1..N repo checkouts (jj workspaces) under
+`lanes/<name>/`. Claims, records, and lifecycle are lane-level; a session
+sits in at most one lane; the lane exists independently of any session.
+_Avoid_: lane = a single jj workspace, session-owned lanes
+
+**Baseline**:
+The jj operation a session last oriented against, per (session, jj
+workspace). All staleness/drift is defined relative to it. Advances only
+when an Orientation is delivered or the session itself mutates the
+workspace — never silently.
+
+**Orientation**:
+The payload that grounds a session in its jj workspace's reality: current
+change (ID, description), working-copy status, and operations since the
+Baseline. Workspace-scoped.
+
+**Reorientation**:
+An Orientation delivered because drift was detected (ops advanced past the
+Baseline without the session seeing them) — at turn start, session resume,
+post-compaction, or attached to a refused write.
