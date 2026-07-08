@@ -17,6 +17,7 @@ import { Spinner } from "./spinner"
 import { errorMessage } from "../util/error"
 import { DialogSessionDeleteFailed } from "./dialog-session-delete-failed"
 import { useCommandShortcut } from "../keymap"
+import { fetchUmbrellaSessions } from "../fork/umbrella" // fork(session-umbrella)
 import { useEvent } from "../context/event"
 
 type SessionListFilter = { scope?: "project"; path?: string }
@@ -63,6 +64,12 @@ export function DialogSessionList() {
     () => sync.session.query(),
     (filter) => loadDialogSessionList({ filter, list: (query) => sdk.client.session.list(query) }),
   )
+  // fork(session-umbrella): the umbrella universe replaces project-scoped
+  // browsing when this directory belongs to an umbrella (undefined otherwise,
+  // including against a stock server — stock behavior falls through).
+  const [umbrellaResults] = createResource(() =>
+    fetchUmbrellaSessions({ url: sdk.url, directory: sdk.directory, fetch: sdk.fetch }),
+  )
   const [searchResults, { refetch }] = createResource(
     () => ({ query: search(), filter: sync.session.query() }),
     (input) => {
@@ -77,7 +84,9 @@ export function DialogSessionList() {
 
   const currentSessionID = createMemo(() => (route.data.type === "session" ? route.data.sessionID : undefined))
   const sessions = createMemo(() => {
-    const result = searchResults() ?? browseResults() ?? sync.data.session
+    // fork(session-umbrella): umbrella mode ignores project-scoped search
+    // results; the query filter below narrows the umbrella universe instead.
+    const result = umbrellaResults() ?? searchResults() ?? browseResults() ?? sync.data.session
     const synced = new Map(sync.data.session.map((session) => [session.id, session]))
     const ids = new Set(result.map((session) => session.id))
     const extra = [currentSessionID(), ...local.session.pinned()].flatMap((id) => {
@@ -214,7 +223,8 @@ export function DialogSessionList() {
     )
 
     const searchResult = searchResults()
-    const order = searchResult ? orderByRecency(sessions()) : browseOrder()
+    // fork(session-umbrella): umbrella universe stays flat, activity-sorted
+    const order = umbrellaResults() || searchResult ? orderByRecency(sessions()) : browseOrder()
     const current = currentSessionID()
     const displayOrder = current && sessionMap.has(current) && !order.includes(current) ? [...order, current] : order
 
