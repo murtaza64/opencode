@@ -60,6 +60,10 @@ export const Flag = {
   get OPENCODE_TUI_CONFIG() {
     return process.env["OPENCODE_TUI_CONFIG"]
   },
+  // fork(session-umbrella): umbrella mapping file override
+  get OPENCODE_UMBRELLA_CONFIG() {
+    return process.env["OPENCODE_UMBRELLA_CONFIG"]
+  },
   get OPENCODE_CONFIG_DIR() {
     return process.env["OPENCODE_CONFIG_DIR"]
   },

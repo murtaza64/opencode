@@ -24,6 +24,7 @@ import { QuestionApi } from "./groups/question"
 import { SessionApi } from "./groups/session"
 import { SyncApi } from "./groups/sync"
 import { TuiApi } from "./groups/tui"
+import { UmbrellaApi } from "./groups/umbrella" // fork(session-umbrella)
 import { WorkspaceApi } from "./groups/workspace"
 import { makeApi } from "@opencode-ai/protocol/api"
 import { LocationMiddleware } from "@opencode-ai/server/location"
@@ -73,6 +74,7 @@ export const InstanceHttpApi = HttpApi.make("opencode-instance")
   .addHttpApi(SessionApi)
   .addHttpApi(SyncApi)
   .addHttpApi(TuiApi)
+  .addHttpApi(UmbrellaApi) // fork(session-umbrella)
   .addHttpApi(WorkspaceApi)
   .middleware(SchemaErrorMiddleware)
 
