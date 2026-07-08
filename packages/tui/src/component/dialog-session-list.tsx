@@ -17,7 +17,7 @@ import { Spinner } from "./spinner"
 import { errorMessage } from "../util/error"
 import { DialogSessionDeleteFailed } from "./dialog-session-delete-failed"
 import { useCommandShortcut } from "../keymap"
-import { fetchUmbrellaSessions } from "../fork/umbrella" // fork(session-umbrella)
+import { fetchUmbrellaSessions, memberChips } from "../fork/umbrella" // fork(session-umbrella)
 import { useEvent } from "../context/event"
 
 type SessionListFilter = { scope?: "project"; path?: string }
@@ -231,6 +231,9 @@ export function DialogSessionList() {
     const pinned = local.session.pinned().filter((id) => sessionMap.has(id))
     const pinnedSet = new Set(pinned)
     const slotByID = new Map<string, number>(local.session.slots().map((id, i) => [id, i + 1]))
+    // fork(session-umbrella): chips come from the resource — the sessions()
+    // memo may swap in sync-store copies that lack .member
+    const chipByID = memberChips(umbrellaResults())
 
     function buildOption(id: string, category: string) {
       const x = sessionMap.get(id)
@@ -240,8 +243,14 @@ export function DialogSessionList() {
           ? x.directory.slice(0, -x.path.length).replace(/\/$/, "")
           : undefined
         : x.directory
+      // fork(session-umbrella): umbrella members get location chips
+      const chip = chipByID.get(id)
       const footer =
-        directory && directory !== project.data.project.mainDir ? Locale.truncate(path.basename(directory), 20) : ""
+        chip !== undefined
+          ? Locale.truncate(chip, 28)
+          : directory && directory !== project.data.project.mainDir
+            ? Locale.truncate(path.basename(directory), 20)
+            : ""
 
       const isDeleting = toDelete() === x.id
       const status = sync.data.session_status?.[x.id]
