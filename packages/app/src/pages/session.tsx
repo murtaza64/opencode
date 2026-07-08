@@ -2264,6 +2264,7 @@ export default function Page() {
                     reviewHasFocusableContent={() => hasReview() || reviewV2State.sidebarOpened()}
                     reviewCount={reviewCount}
                     reviewPanel={reviewPanelV2}
+                    fileBrowserState={reviewV2State}
                     activeDiff={activeReviewFile()}
                     focusReviewDiff={focusReviewDiff}
                     reviewSnap={ui.reviewSnap}
