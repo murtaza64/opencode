@@ -55,6 +55,7 @@ import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, u
 import { useTuiConfig } from "../../config"
 import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
+import { usePluginRuntime } from "../../plugin/runtime" // fork(session-umbrella)
 import { readLocalAttachment } from "./local-attachment"
 
 registerOpencodeSpinner()
@@ -207,6 +208,7 @@ export function Prompt(props: PromptProps) {
   const [auto, setAuto] = createSignal<AutocompleteRef>()
   const workspace = usePromptWorkspace(props.sessionID)
   const move = usePromptMove({ projectID: project.project, sessionID: () => props.sessionID })
+  const pluginRuntime = usePluginRuntime() // fork(session-umbrella)
   const [cursorVersion, setCursorVersion] = createSignal(0)
   const currentProviderLabel = createMemo(() => local.model.parsed().provider)
   const hasRightContent = createMemo(() => Boolean(props.right))
@@ -1641,6 +1643,10 @@ export function Prompt(props: PromptProps) {
           </Switch>
           <Show when={status().type !== "retry"}>
             <box gap={2} flexDirection="row">
+              {/* fork(session-umbrella): footer-right slot seam */}
+              <Show when={props.sessionID}>
+                {(id) => <pluginRuntime.Slot name="session_prompt_footer_right" session_id={id()} />}
+              </Show>
               <Show when={editorContextLabelState() !== "none" ? editorFileLabelDisplay() : undefined}>
                 {(file) => (
                   <text fg={editorContextLabelState() === "pending" ? theme.secondary : theme.textMuted}>{file()}</text>

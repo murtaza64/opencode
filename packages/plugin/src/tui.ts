@@ -470,6 +470,10 @@ export type TuiHostSlotMap = {
   session_prompt_right: {
     session_id: string
   }
+  // fork(session-umbrella): bottom status line, right group (next to tokens/cost)
+  session_prompt_footer_right: {
+    session_id: string
+  }
   home_bottom: {}
   home_footer: {}
   sidebar_title: {
