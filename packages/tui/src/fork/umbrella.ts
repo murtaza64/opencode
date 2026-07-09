@@ -9,7 +9,7 @@ import type { Session } from "@opencode-ai/sdk/v2/client"
 export type UmbrellaMember = {
   directory: string
   label: string
-  kind: "root" | "sidecar" | "lane"
+  kind: "root" | "sidecar" | "lane" | "mirror"
 }
 
 export type UmbrellaSession = Session & {
@@ -45,11 +45,14 @@ export async function fetchUmbrellaSessions(input: {
  * viewer-relative — the universe looks identical from every member:
  *   lane     -> `lane:<name>`
  *   sidecar  -> `editspace`
+ *   mirror   -> `mirror` (multi-repo root mirror — read-only, sessions
+ *               there are unusual and worth flagging)
  *   root     -> `root`
  */
 export function memberChip(member: UmbrellaMember): string {
   if (member.kind === "lane") return `lane:${member.label}`
   if (member.kind === "sidecar") return "editspace"
+  if (member.kind === "mirror") return "mirror"
   return "root"
 }
 

@@ -60,7 +60,7 @@ type UmbrellaSessionJson = {
   directory: string
   title: string
   umbrella: string
-  member: { directory: string; label: string; kind: "root" | "sidecar" | "lane" }
+  member: { directory: string; label: string; kind: "root" | "sidecar" | "lane" | "mirror" }
 }
 
 const listFor = (directory: string) =>
@@ -127,6 +127,87 @@ describe("umbrella HttpApi", () => {
 
       // non-member directory: stock behavior, empty result
       expect(yield* listFor(otherDir)).toHaveLength(0)
+    }),
+  )
+
+  it.live("reunifies multi-repo editspace lanes, mirror, and umbrella-root sessions", () =>
+    Effect.gen(function* () {
+      const root = yield* tmpdirScoped({ git: true })
+      const configDir = yield* tmpdirScoped()
+      yield* writeMapping(configDir, [{ name: "es", root }])
+
+      // multi-repo editspace canonical layout (no .editspace segment) —
+      // shape verified against the live api-testing editspace in the
+      // dotfiles#42 landing check (2026-07-09): tracker at the root repo,
+      // read-only mirrors at repos/<owner>/<repo>, lane workspaces at
+      // lanes/<lane>/repos/<owner>/<repo>.
+      const laneDir = path.join(root, "lanes", "esd-rollout", "repos", "duolingo", "goals-backend")
+      const mirrorDir = path.join(root, "repos", "duolingo", "goals-backend")
+      yield* Effect.promise(() => mkdir(laneDir, { recursive: true }))
+      yield* Effect.promise(() => mkdir(mirrorDir, { recursive: true }))
+
+      const rootSession = yield* Session.use.create({ title: "tracker session" }).pipe(provideInstanceEffect(root))
+      const laneSession = yield* Session.use.create({ title: "lane session" }).pipe(provideInstanceEffect(laneDir))
+      const mirrorSession = yield* Session.use
+        .create({ title: "mirror session" })
+        .pipe(provideInstanceEffect(mirrorDir))
+
+      for (const requester of [root, laneDir, mirrorDir]) {
+        const sessions = yield* listFor(requester)
+        expect(sessions.map((session) => session.id).toSorted()).toEqual(
+          [rootSession.id, laneSession.id, mirrorSession.id].toSorted(),
+        )
+      }
+
+      const sessions = yield* listFor(root)
+      const byID = new Map(sessions.map((session) => [session.id, session]))
+      expect(byID.get(rootSession.id)?.member).toEqual({ directory: root, label: "repo root", kind: "root" })
+      expect(byID.get(laneSession.id)?.member).toEqual({
+        directory: path.join(root, "lanes", "esd-rollout"),
+        label: "esd-rollout",
+        kind: "lane",
+      })
+      expect(byID.get(mirrorSession.id)?.member).toEqual({
+        directory: path.join(root, "repos"),
+        label: "mirror",
+        kind: "mirror",
+      })
+    }),
+  )
+
+  it.live(".editspace patterns win over bare lanes/ when both shapes coexist", () =>
+    Effect.gen(function* () {
+      const root = yield* tmpdirScoped({ git: true })
+      const configDir = yield* tmpdirScoped()
+      yield* writeMapping(configDir, [{ name: "demo", root }])
+
+      // single-repo sidecars live under a repo root, and that repo may also
+      // contain directories literally named lanes/ or repos/ — the sidecar
+      // dialect must take precedence for its own subtree.
+      const sidecarLaneDir = path.join(root, ".editspace", "lanes", "alpha", "repos", "me", "demo")
+      const bareLaneDir = path.join(root, "lanes", "beta", "repos", "me", "demo")
+      yield* Effect.promise(() => mkdir(sidecarLaneDir, { recursive: true }))
+      yield* Effect.promise(() => mkdir(bareLaneDir, { recursive: true }))
+
+      const sidecarLaneSession = yield* Session.use
+        .create({ title: "sidecar lane" })
+        .pipe(provideInstanceEffect(sidecarLaneDir))
+      const bareLaneSession = yield* Session.use
+        .create({ title: "bare lane" })
+        .pipe(provideInstanceEffect(bareLaneDir))
+
+      const sessions = yield* listFor(root)
+      const byID = new Map(sessions.map((session) => [session.id, session]))
+      expect(byID.get(sidecarLaneSession.id)?.member).toEqual({
+        directory: path.join(root, ".editspace", "lanes", "alpha"),
+        label: "alpha",
+        kind: "lane",
+      })
+      expect(byID.get(bareLaneSession.id)?.member).toEqual({
+        directory: path.join(root, "lanes", "beta"),
+        label: "beta",
+        kind: "lane",
+      })
     }),
   )
 

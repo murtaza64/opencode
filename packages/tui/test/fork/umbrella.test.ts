@@ -25,6 +25,22 @@ describe("memberChips", () => {
     expect(chips.get("c")).toBe("editspace")
   })
 
+  test("multi-repo umbrella: mirror sessions get a mirror chip", () => {
+    const chips = memberChips([
+      session("a", "root"),
+      session("b", "lane", "esd-rollout"),
+      session("c", "mirror"),
+    ])
+    expect(chips.get("b")).toBe("lane:esd-rollout")
+    expect(chips.get("c")).toBe("mirror")
+  })
+
+  test("root + mirror only still disambiguates (mirror is not root)", () => {
+    const chips = memberChips([session("a", "root"), session("b", "mirror")])
+    expect(chips.get("a")).toBe("root")
+    expect(chips.get("b")).toBe("mirror")
+  })
+
   test("all-root umbrella (no editspace machinery in play): no chips at all", () => {
     const chips = memberChips([session("a", "root"), session("b", "root")])
     expect(chips.size).toBe(0)

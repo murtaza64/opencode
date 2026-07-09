@@ -8,10 +8,27 @@
 // Config is minimal by design (one root per umbrella, written once by
 // `es create`, no lane-create/close hooks): membership is a pure
 // directory-prefix test, and member labels are DERIVED from the
-// editspace-canonical path shape under the root:
+// editspace-canonical path shape under the root. Two dialects share one
+// derivation (fork issue session-umbrella/07):
+//
+// single-repo embedded sidecar (<root> is an on-disk repo):
 //   <root>/.editspace/lanes/<lane>/...  -> { label: <lane>, kind: lane }
 //   <root>/.editspace/...               -> { label: sidecar, kind: sidecar }
+//
+// multi-repo editspace (<root> is the umbrella itself, e.g. ~/editspaces/<es>;
+// canonical shape verified against the api-testing editspace in the
+// dotfiles#42 landing check, 2026-07-09):
+//   <root>/lanes/<lane>/...             -> { label: <lane>, kind: lane }
+//   <root>/repos/...                    -> { label: mirror, kind: mirror }
+//
+// everything else:
 //   <root>/...                          -> { label: repo root, kind: root }
+//
+// Precedence: .editspace/ patterns win over bare lanes/ and repos/ — a
+// single-repo sidecar lives under a repo root that may legitimately contain
+// directories named lanes/ or repos/. The root mirror gets its own kind
+// rather than folding into root because mirrors are read-only for agents;
+// a session sitting there is unusual and worth flagging, not hiding.
 //
 // Mapping file: <config-dir>/umbrellas.json (or .jsonc), overridable via
 // OPENCODE_UMBRELLA_CONFIG. See prds/session-umbrella.md.
@@ -32,7 +49,7 @@ export namespace Umbrella {
   export const Member = Schema.Struct({
     directory: Schema.String,
     label: Schema.String,
-    kind: Schema.Literals(["root", "sidecar", "lane"]),
+    kind: Schema.Literals(["root", "sidecar", "lane", "mirror"]),
   }).annotate({ identifier: "UmbrellaMember" })
   export type Member = typeof Member.Type
 
@@ -87,16 +104,22 @@ export namespace Umbrella {
     if (!contains(root, directory)) return undefined
     const relative = normalize(directory).slice(root.length).replace(/^\//, "")
     const segments = relative === "" ? [] : relative.split("/")
-    if (segments[0] !== SIDECAR) {
-      return { directory: root, label: "repo root", kind: "root" }
-    }
-    if (segments[1] === "lanes" && segments[2]) {
-      return {
-        directory: [root, SIDECAR, "lanes", segments[2]].join("/"),
-        label: segments[2],
-        kind: "lane",
+    if (segments[0] === SIDECAR) {
+      if (segments[1] === "lanes" && segments[2]) {
+        return {
+          directory: [root, SIDECAR, "lanes", segments[2]].join("/"),
+          label: segments[2],
+          kind: "lane",
+        }
       }
+      return { directory: [root, SIDECAR].join("/"), label: "sidecar", kind: "sidecar" }
     }
-    return { directory: [root, SIDECAR].join("/"), label: "sidecar", kind: "sidecar" }
+    if (segments[0] === "lanes" && segments[1]) {
+      return { directory: [root, "lanes", segments[1]].join("/"), label: segments[1], kind: "lane" }
+    }
+    if (segments[0] === "repos") {
+      return { directory: [root, "repos"].join("/"), label: "mirror", kind: "mirror" }
+    }
+    return { directory: root, label: "repo root", kind: "root" }
   }
 }
