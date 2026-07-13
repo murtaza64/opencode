@@ -85,8 +85,27 @@ _Avoid_: Local implementation
 A bounded ordered result containing `items` and opaque `previous` and `next` cursor links for navigating the same query in either direction.
 _Avoid_: Response envelope
 
+**TUI Prompt Editor**:
+The multiline terminal input where a user composes a prompt before submitting it to a Session.
+_Avoid_: Code editor, external editor
+
+**TUI Vim Mode**:
+An optional modal editing behavior for the **TUI Prompt Editor**, limited to Normal and Insert modes. It does not include Visual mode or web and desktop prompt inputs.
+_Avoid_: App-wide Vim mode
+
+**Unnamed Prompt Register**:
+The single text slot used by **TUI Vim Mode** yank, delete, and paste commands. It is separate from the system clipboard and has no named-register variants.
+_Avoid_: Clipboard, register bank
+
+**Prompt Line**:
+One rendered terminal row in the **TUI Prompt Editor**, including a row created by wrapping. Normal-mode vertical movement treats these visible rows as lines.
+_Avoid_: Logical line
+
 ## Relationships
 
+- In **TUI Vim Mode**, Enter submits from Normal mode and inserts a newline from Insert mode.
+- In **TUI Vim Mode**, `j` and `k` move between visible **Prompt Lines** rather than newline-delimited text lines.
+- **TUI Vim Mode** remains active when the prompt contains shell input.
 - A **System Context** is an opaque carrier composed from zero or more **Context Sources**.
 - **Session History** contains projected conversational messages and admitted **Mid-Conversation System Messages**; the active **Baseline System Context** remains separate provider-request state.
 - The **System Context Registry** uses stable-keyed scoped contributions to assemble the current **System Context**; contributor removal naturally removes its sources at the next **Safe Provider-Turn Boundary**.
