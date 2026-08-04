@@ -285,10 +285,20 @@ at the lane root (which need not be a git or jj repo).
 _Avoid_: per-repo project identity for lane sessions
 
 **Lane** (from the editspace context):
-A workstream containing 1..N repo checkouts (jj workspaces) under
-`lanes/<name>/`. Claims, records, and lifecycle are lane-level; a session
-sits in at most one lane; the lane exists independently of any session.
-_Avoid_: lane = a single jj workspace, session-owned lanes
+A set of repo checkouts (jj workspaces) under `lanes/<name>/`. Claims,
+records, and lifecycle are lane-level; the lane exists independently of any
+session. Demoted from "= workstream" (dotfiles glossary, 2026-08-03): in
+practice sessions work multiple lanes and lanes pass through multiple
+sessions, so the unit of human attention is the **Thread** (ticket-anchored,
+session fallback — see dotfiles CONTEXT.md), not the lane.
+_Avoid_: lane = a single jj workspace, session-owned lanes, lane = workstream
+
+**es-app**:
+The fork's editspace-native browser shell (`packages/es-app`): dashboard
+home (attention queue, Thread cards from the es dashboard server), live
+transcripts, chat, and permission/question replies. Composes
+`@opencode-ai/sdk` + `session-ui` + `ui`; see ADR 0003 and prds/es-app.md.
+_Avoid_: web app (that's the stock packages/app served by the daemon)
 
 **Baseline**:
 The jj operation a session last oriented against, per (session, jj
