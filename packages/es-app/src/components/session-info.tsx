@@ -4,6 +4,7 @@
 import { createMemo, For, Show } from "solid-js"
 import type { Part, Session } from "@opencode-ai/sdk/v2"
 import { ago, jiraUrl, linkUrl, useDashboard } from "../state"
+import { TicketIcon } from "./icons"
 import { rightOpen, rightWidth, toggleRight } from "../ui"
 import { PrList } from "./pr"
 
@@ -50,6 +51,13 @@ function SessionInfoBody(props: {
     (state()?.threads ?? []).find((t: any) => t.sessions.some((s: any) => s.id === props.sessionID)),
   )
 
+  // open attention items for this thread only; renders nothing when empty
+  const needsYou = createMemo(() => {
+    const key = thread()?.key
+    if (!key) return []
+    return (state()?.attention ?? []).filter((i: any) => i.thread === key)
+  })
+
   const links = createMemo(() => {
     const seen = new Map<string, string>()
     for (const parts of Object.values(props.parts)) {
@@ -72,6 +80,19 @@ function SessionInfoBody(props: {
       <button class="mini-btn panel-collapse" title="collapse info panel (^l)" onClick={toggleRight}>
         ⟩
       </button>
+      <Show when={needsYou().length}>
+        <div class="info-section">
+          <div class="info-heading">needs you</div>
+          <For each={needsYou()}>
+            {(i: any) => (
+              <div class="needs-you-row" title={i.detail}>
+                <span class={`att-mini r${i.rank}`}>{i.type}</span>
+                <a href={`/#q-${thread().key}`}>{i.detail}</a>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
       <Show when={props.session}>
         {(s) => (
           <>
@@ -132,6 +153,7 @@ function SessionInfoBody(props: {
             {(tk: any) => (
               <div class="info-row">
                 <a href={jiraUrl(tk.key)} target="_blank">
+                  <TicketIcon />
                   {tk.key}
                 </a>
                 <Show when={tk.status}>

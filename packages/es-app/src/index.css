@@ -360,16 +360,31 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 .msg-wrap:hover .fork-here { display: inline-block; }
 .msg-wrap .fork-here:hover { box-shadow: inset 0 0 0 1px var(--mauve); }
 
-/* board */
-.attention { display: flex; flex-direction: column; gap: 4px; }
+/* board: attention queue grouped by thread */
+.attention { display: flex; flex-direction: column; gap: 10px; max-width: 980px; }
+.queue-group { background: var(--mantle); padding: 6px 0 6px; }
+.queue-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 12px 6px;
+  border-bottom: 1px solid var(--surface0);
+  font-size: 13px;
+}
+.queue-head .title { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queue-head .card-link { font-size: 11px; color: var(--overlay1); margin-left: auto; flex-shrink: 0; }
 .att {
   display: flex;
-  gap: 10px;
-  align-items: baseline;
+  flex-direction: column;
   background: var(--mantle);
   box-shadow: inset 3px 0 0 var(--yellow);
-  padding: 6px 12px;
+  padding: 5px 12px;
 }
+.att-line { display: flex; gap: 10px; align-items: baseline; }
+.att-line.expandable { cursor: pointer; }
+.att-line.expandable:hover .att-text { color: var(--lavender); }
+.att .att-text { flex: 1; min-width: 0; }
+.att .subtitle { display: block; color: var(--subtext0); font-size: 12px; }
 .att.r0, .att.r1 { box-shadow: inset 3px 0 0 var(--red); }
 .att.r2 { box-shadow: inset 3px 0 0 var(--yellow); }
 .att.r3 { box-shadow: inset 3px 0 0 var(--mauve); }
@@ -388,6 +403,13 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 .card .head .title { flex: 1; color: var(--text); }
 .card .head a.title:hover { color: var(--blue); }
 .key { color: var(--blue); font-weight: bold; }
+
+/* kind glyphs: ticket (tag) vs session (terminal) vs PR (octicon in pr.tsx).
+ * display: tailwind preflight makes svg block-level, which wraps the glyph
+ * onto its own line inside anchors */
+.kind-icon { display: inline-block; vertical-align: -2px; margin-right: 4px; flex-shrink: 0; }
+.icon-ticket { color: var(--blue); }
+.icon-session { color: var(--lavender); }
 
 .chip {
   font-size: 11px;
@@ -446,6 +468,30 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 .digest ul { margin: 4px 0; padding-left: 20px; }
 .gates li { color: var(--yellow); }
 .needs li { color: var(--red); }
+
+/* review brief: same visual budget as the digest box, teal accent */
+.brief { box-shadow: inset 3px 0 0 var(--teal); }
+.brief .verify li { color: var(--teal); }
+.brief .brief-prs li { color: var(--subtext1); }
+.brief .risks li { color: var(--peach); }
+.brief .brief-links { display: flex; flex-direction: column; margin-top: 4px; }
+.brief .brief-links a { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att .brief { margin: 6px 0 2px 88px; }
+
+/* session view: needs-you lines */
+.needs-you-row { display: flex; gap: 6px; align-items: baseline; padding: 1px 0; min-width: 0; }
+.needs-you-row a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); flex: 1; }
+.needs-you-row a:hover { color: var(--blue); }
+.att-mini {
+  font-size: 10px;
+  text-transform: uppercase;
+  font-weight: bold;
+  color: var(--yellow);
+  flex-shrink: 0;
+}
+.att-mini.r0, .att-mini.r1 { color: var(--red); }
+.att-mini.r3 { color: var(--mauve); }
+.att-mini.r4 { color: var(--overlay1); }
 .prs { margin-top: 8px; font-size: 12px; }
 
 /* baymax PR rows: crust row, octicon state icon, diff stats, flat badges */

@@ -125,4 +125,6 @@ export const es = {
     fetch(`/es/api/refresh?${esQ(esName)}`, { method: "POST" }).then(json),
   digest: (sessionID: string, esName?: string): Promise<any> =>
     fetch(`/es/api/digest/${sessionID}?force=true&${esQ(esName)}`, { method: "POST" }).then(json),
+  brief: (ticket: string, esName?: string): Promise<any> =>
+    fetch(`/es/api/brief/${ticket}?force=true&${esQ(esName)}`, { method: "POST" }).then(json),
 }

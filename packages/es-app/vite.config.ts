@@ -15,7 +15,8 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/oc/, ""),
       },
       "/es": {
-        target: "http://127.0.0.1:7777",
+        // ES_DASHBOARD_URL lets a dev instance point at its own dashboard
+        target: process.env.ES_DASHBOARD_URL ?? "http://127.0.0.1:7777",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/es/, ""),
       },

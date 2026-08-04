@@ -1,13 +1,16 @@
 /* Home = the es dashboard: attention queue + thread cards, from :7777. */
-import { createSignal, For, Show } from "solid-js"
+import { createMemo, createSignal, For, onMount, Show } from "solid-js"
 import { A } from "@solidjs/router"
 import { ago, jiraUrl, sessionHref, useDashboard } from "../state"
 import { PrList } from "../components/pr"
+import BriefBox from "../components/brief"
+import { SessionIcon, TicketIcon } from "../components/icons"
 
 function TicketRow(props: { tk: any }) {
   return (
     <div class="ticket-row">
       <a class="key" href={jiraUrl(props.tk.key)} target="_blank">
+        <TicketIcon />
         {props.tk.key}
       </a>
       <span class="title">{props.tk.summary ?? ""}</span>
@@ -24,7 +27,13 @@ function TicketRow(props: { tk: any }) {
   )
 }
 
-function ThreadCard(props: { t: any; directory: string; onDigest: (sid: string) => void }) {
+function ThreadCard(props: {
+  t: any
+  directory: string
+  onDigest: (sid: string) => void
+  onBrief: (ticket: string) => void
+  briefing: string[]
+}) {
   const { dotFor } = useDashboard()
   const s0 = () => props.t.sessions[0]
   const digest = () => props.t.digest?.result
@@ -42,6 +51,7 @@ function ThreadCard(props: { t: any; directory: string; onDigest: (sid: string) 
         >
           <span class={`dot ${dotFor(s0())}`} />
           <A class="title" href={sessionHref(s0().id, s0().directory ?? props.directory)}>
+            <SessionIcon />
             {props.t.title}
           </A>
           <span class="dim">
@@ -65,38 +75,197 @@ function ThreadCard(props: { t: any; directory: string; onDigest: (sid: string) 
       <Show when={laneStatuses()}>
         <div class="status-line">{laneStatuses()}</div>
       </Show>
-      <Show when={digest()}>
-        <div class="digest">
-          {digest().digest}
-          <Show when={digest().true_status}>
-            {" "}
-            <span class="chip">{digest().true_status}</span>
+      {/* a review brief replaces the digest display; the digest stays cached
+          underneath for resume */}
+      <Show
+        when={props.t.brief}
+        fallback={
+          <Show when={digest()}>
+            <div class="digest">
+              {digest().digest}
+              <Show when={digest().true_status}>
+                {" "}
+                <span class="chip">{digest().true_status}</span>
+              </Show>
+              <Show when={digest().needs_from_human?.length}>
+                <ul class="needs">
+                  <For each={digest().needs_from_human}>{(n: string) => <li>{n}</li>}</For>
+                </ul>
+              </Show>
+              <Show when={digest().gates?.length}>
+                <ul class="gates">
+                  <For each={digest().gates}>
+                    {(g: any) => (
+                      <li>
+                        {g.kind}: {g.ref} — {g.note}
+                      </li>
+                    )}
+                  </For>
+                </ul>
+              </Show>
+              <div class="meta">
+                digested {ago(props.t.digest.generated_at * 1000)} · {props.t.digest.model}
+              </div>
+            </div>
           </Show>
-          <Show when={digest().needs_from_human?.length}>
-            <ul class="needs">
-              <For each={digest().needs_from_human}>{(n: string) => <li>{n}</li>}</For>
-            </ul>
-          </Show>
-          <Show when={digest().gates?.length}>
-            <ul class="gates">
-              <For each={digest().gates}>
-                {(g: any) => (
-                  <li>
-                    {g.kind}: {g.ref} — {g.note}
-                  </li>
-                )}
-              </For>
-            </ul>
-          </Show>
-          <div class="meta">
-            digested {ago(props.t.digest.generated_at * 1000)} · {props.t.digest.model}
-          </div>
-        </div>
+        }
+      >
+        <BriefBox
+          brief={props.t.brief}
+          onRegen={() => props.onBrief(props.t.brief.ticket)}
+          regenerating={props.briefing.includes(props.t.brief.ticket)}
+        />
       </Show>
       <Show when={props.t.prs.length}>
         <div class="prs">
           <PrList prs={props.t.prs} />
         </div>
+      </Show>
+    </div>
+  )
+}
+
+/* --- thread-grouped attention queue -------------------------------------- */
+
+type QueueGroup = { key: string | null; thread: any | null; items: any[]; hottest: number; activity: number }
+
+function QueueGroupHeader(props: { g: QueueGroup; directory: string }) {
+  const t = () => props.g.thread
+  const tickets = () => t()?.tickets ?? []
+  const s0 = () => t()?.sessions?.[0]
+  return (
+    <div class="queue-head">
+      <Show when={t()} fallback={<span class="dim">unassigned</span>}>
+        <For each={tickets()}>
+          {(tk: any) => (
+            <a class="key" href={jiraUrl(tk.key)} target="_blank">
+              <TicketIcon />
+              {tk.key}
+            </a>
+          )}
+        </For>
+        <Show
+          when={tickets().length}
+          fallback={
+            <Show when={s0()} fallback={<span class="title">{t().title}</span>}>
+              <A class="title" href={sessionHref(s0().id, s0().directory ?? props.directory)}>
+                <SessionIcon />
+                {t().title}
+              </A>
+            </Show>
+          }
+        >
+          <span class="title">{tickets()[0].summary ?? t().title}</span>
+        </Show>
+        <a class="card-link" href={`#t-${t().key}`}>
+          card
+        </a>
+      </Show>
+    </div>
+  )
+}
+
+function QueueItem(props: {
+  item: any
+  group: QueueGroup
+  directory: string
+  briefing: string[]
+  onBrief: (ticket: string) => void
+  sessionLink: (item: any) => string | undefined
+}) {
+  const [open, setOpen] = createSignal(false)
+  // the review gate's brief, when the group's thread carries one for this ticket
+  const brief = () =>
+    props.item.type === "review" && props.item.ticket && props.group.thread?.brief?.ticket === props.item.ticket
+      ? props.group.thread.brief
+      : undefined
+  const generating = () => !!props.item.ticket && props.briefing.includes(props.item.ticket)
+  return (
+    <div class={`att r${props.item.rank}`}>
+      <div class="att-line" classList={{ expandable: !!brief() }} onClick={() => brief() && setOpen(!open())}>
+        <span class="type">{props.item.type}</span>
+        <span class="att-text">
+          <Show when={props.sessionLink(props.item)}>
+            {(href) => (
+              <A href={href()}>
+                <SessionIcon />
+                {props.group.thread?.sessions?.[0]?.title ?? "session"}{" "}
+              </A>
+            )}
+          </Show>
+          {props.item.detail}
+          <Show when={props.item.subtitle}>
+            <span class="subtitle">{props.item.subtitle}</span>
+          </Show>
+        </span>
+        <Show when={brief()}>
+          <span class="dim">{open() ? "▾" : "▸ brief"}</span>
+        </Show>
+        <Show when={!brief() && generating()}>
+          <span class="dim">brief…</span>
+        </Show>
+      </div>
+      <Show when={open() && brief()}>
+        <BriefBox brief={brief()} onRegen={() => props.onBrief(props.item.ticket)} regenerating={generating()} />
+      </Show>
+    </div>
+  )
+}
+
+function Queue(props: {
+  attention: any[]
+  threads: any[]
+  directory: string
+  briefing: string[]
+  onBrief: (ticket: string) => void
+}) {
+  const groups = createMemo<QueueGroup[]>(() => {
+    const byKey = new Map<string, any>(props.threads.map((t: any) => [t.key, t]))
+    const map = new Map<string | null, QueueGroup>()
+    for (const item of props.attention) {
+      const key = item.thread ?? null
+      let g = map.get(key)
+      if (!g) {
+        const thread = key ? byKey.get(key) : null
+        g = { key, thread, items: [], hottest: 99, activity: thread?.activity ?? 0 }
+        map.set(key, g)
+      }
+      g.items.push(item)
+      g.hottest = Math.min(g.hottest, item.rank)
+    }
+    // hottest item rank first, then thread activity
+    return [...map.values()].sort((a, b) => a.hottest - b.hottest || b.activity - a.activity)
+  })
+
+  const sessionLink = (item: any) => {
+    if (!item.session) return undefined
+    const t = props.threads.find((t: any) => t.sessions.some((s: any) => s.id === item.session))
+    const s = t?.sessions.find((s: any) => s.id === item.session)
+    return s ? sessionHref(s.id, s.directory ?? props.directory) : undefined
+  }
+
+  return (
+    <div class="attention">
+      <Show when={groups().length} fallback={<div class="dim">nothing — go touch grass</div>}>
+        <For each={groups()}>
+          {(g) => (
+            <div class="queue-group" id={g.key ? `q-${g.key}` : undefined}>
+              <QueueGroupHeader g={g} directory={props.directory} />
+              <For each={g.items}>
+                {(item) => (
+                  <QueueItem
+                    item={item}
+                    group={g}
+                    directory={props.directory}
+                    briefing={props.briefing}
+                    onBrief={props.onBrief}
+                    sessionLink={sessionLink}
+                  />
+                )}
+              </For>
+            </div>
+          )}
+        </For>
       </Show>
     </div>
   )
@@ -118,7 +287,10 @@ function AllSessions() {
           <For each={sessions()}>
             {(s) => (
               <div class="pr">
-                <A href={sessionHref(s.id, s.directory)}>{s.title || s.id}</A>
+                <A href={sessionHref(s.id, s.directory)}>
+                  <SessionIcon />
+                  {s.title || s.id}
+                </A>
                 <span class="dim">
                   {s.directory?.split("/").slice(-1)[0]} · {ago(s.updated)}
                 </span>
@@ -135,6 +307,11 @@ export default function Home() {
   const dashboard = useDashboard()
   const state = dashboard.state
   const [refreshing, setRefreshing] = createSignal(false)
+
+  // deep links from the session view's needs-you land on a queue group
+  onMount(() => {
+    if (location.hash) document.querySelector(location.hash)?.scrollIntoView()
+  })
 
   const refresh = async () => {
     setRefreshing(true)
@@ -153,13 +330,12 @@ export default function Home() {
     }
   }
 
-  const attentionHref = (item: any) => {
-    if (item.session) {
-      const t = state()?.threads.find((t: any) => t.sessions.some((s: any) => s.id === item.session))
-      const s = t?.sessions.find((s: any) => s.id === item.session)
-      if (s) return sessionHref(s.id, s.directory ?? state()?.root)
+  const brief = async (ticket: string) => {
+    try {
+      await dashboard.brief(ticket)
+    } catch (e) {
+      alert(String(e))
     }
-    return item.thread ? `#t-${item.thread}` : undefined
   }
 
   return (
@@ -184,33 +360,27 @@ export default function Home() {
           </header>
 
           <h2>Needs you</h2>
-          <div class="attention">
-            <Show when={st().attention.length} fallback={<div class="dim">nothing — go touch grass</div>}>
-              <For each={st().attention}>
-                {(i: any) => (
-                  <div class={`att r${i.rank}`}>
-                    <span class="type">{i.type}</span>
-                    <span>
-                      <Show when={attentionHref(i)}>
-                        {(href) =>
-                          href().startsWith("#") ? (
-                            <a href={href()}>{i.thread} </a>
-                          ) : (
-                            <A href={href()}>{i.thread ?? "session"} </A>
-                          )
-                        }
-                      </Show>
-                      {i.detail}
-                    </span>
-                  </div>
-                )}
-              </For>
-            </Show>
-          </div>
+          <Queue
+            attention={st().attention}
+            threads={st().threads}
+            directory={st().root}
+            briefing={st().briefing ?? []}
+            onBrief={brief}
+          />
 
           <h2>Threads</h2>
           <div class="grid">
-            <For each={st().threads}>{(t: any) => <ThreadCard t={t} directory={st().root} onDigest={digest} />}</For>
+            <For each={st().threads}>
+              {(t: any) => (
+                <ThreadCard
+                  t={t}
+                  directory={st().root}
+                  onDigest={digest}
+                  onBrief={brief}
+                  briefing={st().briefing ?? []}
+                />
+              )}
+            </For>
           </div>
 
           <h2>Unattached PRs</h2>

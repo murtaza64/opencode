@@ -21,6 +21,7 @@ type DashboardCtx = {
   refetch: () => void
   refresh: () => Promise<void>
   digest: (sessionID: string) => Promise<void>
+  brief: (ticket: string) => Promise<void>
   markViewed: (sessionID: string) => void
   dotFor: (s: { id: string; live?: string; updated?: number }) => DotState
   editspace: () => string | undefined
@@ -123,6 +124,13 @@ export function DashboardProvider(props: ParentProps) {
     digest: async (sessionID: string) => {
       try {
         await es.digest(sessionID, editspace())
+      } finally {
+        refetch()
+      }
+    },
+    brief: async (ticket: string) => {
+      try {
+        await es.brief(ticket, editspace())
       } finally {
         refetch()
       }
