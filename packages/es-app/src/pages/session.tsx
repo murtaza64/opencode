@@ -196,12 +196,14 @@ function SessionView(props: { sessionID: string; directory: string }) {
     vim.refresh(promptEl)
   })
 
-  // chat stick-to-bottom: pinned while the user is at the bottom (initial
-  // load, streaming turns, late shiki/markdown height settles), released the
-  // moment they scroll up, re-engaged when they scroll back down or send.
-  // the ResizeObserver watches the inner content div — the transcript column
-  // itself is fixed-height, only its content grows
+  // chat stick-to-bottom. Scroll events only ever RE-stick (at bottom) —
+  // they must never unstick: programmatic pins deliver their scroll events
+  // asynchronously, so content growth between a pin and its event would
+  // read as "user scrolled up" and strand the view short of the bottom.
+  // Unsticking happens only on explicit intent: wheel-up, touch, ^u, jumps.
   let stick = true
+  const atBottom = () =>
+    !!transcriptEl && transcriptEl.scrollHeight - transcriptEl.scrollTop - transcriptEl.clientHeight < 4
   const pin = () => {
     if (transcriptEl) transcriptEl.scrollTop = transcriptEl.scrollHeight
   }
@@ -213,10 +215,18 @@ function SessionView(props: { sessionID: string; directory: string }) {
     transcriptEl?.addEventListener(
       "scroll",
       () => {
-        stick = transcriptEl!.scrollHeight - transcriptEl!.scrollTop - transcriptEl!.clientHeight < 40
+        if (atBottom()) stick = true
       },
       { passive: true },
     )
+    transcriptEl?.addEventListener(
+      "wheel",
+      (e) => {
+        if (e.deltaY < 0) stick = false
+      },
+      { passive: true },
+    )
+    transcriptEl?.addEventListener("touchmove", () => (stick = false), { passive: true })
     const observer = new ResizeObserver(() => {
       if (stick) pin()
     })
@@ -263,6 +273,25 @@ function SessionView(props: { sessionID: string; directory: string }) {
       return { tokens, percent: limit ? Math.round((tokens / limit) * 100) : null }
     }
     return null
+  })
+
+  // busy with nothing visibly moving (no running tool, no streaming part):
+  // the model is thinking or the first token hasn't landed — show a pulse
+  const thinking = createMemo(() => {
+    const st = status()
+    if (st !== "busy" && st !== "retry") return false
+    const msgs = messages() as any[]
+    const last = msgs[msgs.length - 1]
+    if (!last || last.role === "user") return true
+    const parts = (live.data.part[last.id] ?? []) as any[]
+    const lastPart = parts[parts.length - 1]
+    if (!lastPart) return true
+    if (lastPart.type === "tool") {
+      const s = lastPart.state?.status
+      return !(s === "running" || s === "pending")
+    }
+    // text/reasoning still streaming renders its own motion
+    return !!lastPart.time?.end
   })
 
   const headerDot = () => {
@@ -746,6 +775,11 @@ function SessionView(props: { sessionID: string; directory: string }) {
               )}
             </For>
             </DataProvider>
+            <Show when={thinking()}>
+              <div class="thinking" title="agent is thinking">
+                <span /><span /><span />
+              </div>
+            </Show>
             <Show when={pendingMsg()}>
               {(p) => (
                 <div class="pending-msg">
