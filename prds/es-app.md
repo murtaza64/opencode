@@ -1,6 +1,11 @@
 # es-app: editspace-native web frontend
 
-Status: ready-for-agent (spike gate first — see Risks)
+Status: v1 landed 2026-08-04 (iterating). Spike gate PASSED — see ADR 0003.
+Beyond the v1 scope below, landed iterations added: vim modal input
+(normal/insert, core motions/operators, ^u/^d/^n/^p/Tab nav, floating
+composer), baymax design language (dark flat palette, octicon PR rows,
+colored tool names), model-per-turn dropdown, image paste, context gauge,
+session sidebars, unread tracking.
 
 Grilled 2026-08-04 (api-testing dashboard session, light grill). Decision
 record: fork ADR 0003 (custom shell over patching packages/app). Sibling:

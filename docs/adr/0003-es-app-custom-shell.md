@@ -40,3 +40,10 @@ chrome.
 Before building: a ~1-day spike rendering one real transcript with
 `session-ui` outside `packages/app`'s providers. Entanglement beyond
 extraction flips the decision to the packages/app patch alternative.
+
+**Outcome (2026-08-04): PASSED.** `packages/es-app` spike renders a real
+66-message transcript (65 Message components, 118 parts) against the live
+daemon with only `MetaProvider`, `DialogProvider`, `MarkedProvider`, a
+stub `FileComponentProvider`, and `session-ui`'s own `DataProvider` fed a
+plain object built from `GET /session/:id/message`. No app code imported.
+Decision confirmed.
