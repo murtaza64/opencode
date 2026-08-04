@@ -12,7 +12,7 @@ import {
   type ParentProps,
   type Resource,
 } from "solid-js"
-import { es } from "./api"
+import { es, oc } from "./api"
 
 export type DotState = "pending" | "busy" | "unread" | "idle"
 
@@ -26,6 +26,8 @@ type DashboardCtx = {
   editspace: () => string | undefined
   setEditspace: (name: string) => void
   editspaces: Resource<{ editspaces: { name: string; root: string }[]; default: string | null }>
+  archivedIds: () => Set<string>
+  refetchArchived: () => void
 }
 
 const Ctx = createContext<DashboardCtx>()
@@ -80,6 +82,30 @@ export function DashboardProvider(props: ParentProps) {
     return out
   })
 
+  // archived session ids, editspace-wide: the dashboard payload doesn't carry
+  // the flag, so ask the daemon per distinct directory. Keyed on state() so it
+  // refreshes with the dashboard's SSE ticks; the session page also refetches
+  // explicitly after archiving.
+  const [archived, { refetch: refetchArchived }] = createResource(state, async (st: any) => {
+    const dirs = [
+      ...new Set<string>(
+        (st?.threads ?? [])
+          .filter((t: any) => t.kind === "session" && t.sessions[0]?.directory)
+          .map((t: any) => t.sessions[0].directory as string),
+      ),
+    ]
+    const out = new Set<string>()
+    await Promise.all(
+      dirs.map(async (d) => {
+        for (const s of await oc.sessions(d).catch(() => [])) {
+          if ((s as any).time?.archived) out.add(s.id)
+        }
+      }),
+    )
+    return out
+  })
+  const archivedIds = () => archived() ?? new Set<string>()
+
   const dotFor = (s: { id: string; live?: string; updated?: number }): DotState => {
     if (pendingSessions().has(s.id)) return "pending"
     if (s.live === "busy" || s.live === "retry") return "busy"
@@ -106,6 +132,8 @@ export function DashboardProvider(props: ParentProps) {
     editspace,
     setEditspace,
     editspaces,
+    archivedIds,
+    refetchArchived,
   }
   return <Ctx.Provider value={value}>{props.children}</Ctx.Provider>
 }

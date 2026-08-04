@@ -64,6 +64,33 @@ export const oc = {
     if (!res.ok) throw new Error(`prompt failed: HTTP ${res.status} ${await res.text()}`)
   },
 
+  // fire-and-forget: the status SSE flips busy->idle on its own
+  abort: async (id: string, directory: string) => {
+    const res = await fetch(`/oc/session/${id}/abort?${q(directory)}`, { method: "POST" })
+    if (!res.ok) throw new Error(`abort failed: HTTP ${res.status} ${await res.text()}`)
+  },
+
+  // messageID = fork point: the new session copies history strictly before it;
+  // omitted = fork at tip (full history)
+  fork: (id: string, directory: string, messageID?: string): Promise<Session> =>
+    fetch(`/oc/session/${id}/fork?${q(directory)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(messageID ? { messageID } : {}),
+    }).then(json<Session>),
+
+  archive: (id: string, directory: string): Promise<Session> =>
+    fetch(`/oc/session/${id}?${q(directory)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ time: { archived: Date.now() } }),
+    }).then(json<Session>),
+
+  remove: async (id: string, directory: string) => {
+    const res = await fetch(`/oc/session/${id}?${q(directory)}`, { method: "DELETE" })
+    if (!res.ok) throw new Error(`delete failed: HTTP ${res.status} ${await res.text()}`)
+  },
+
   permissionReply: async (requestID: string, directory: string, reply: "once" | "always" | "reject") => {
     const res = await fetch(`/oc/permission/${requestID}/reply?${q(directory)}`, {
       method: "POST",

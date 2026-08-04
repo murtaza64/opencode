@@ -1,7 +1,7 @@
 /* Conversation view: live transcript (session-ui renderer over an SSE-fed
  * store), prompt input, and inline permission/question replies. */
 import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js"
-import { useNavigate, useParams, useSearchParams } from "@solidjs/router"
+import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router"
 import { DataProvider } from "@opencode-ai/session-ui/context"
 import { Message } from "@opencode-ai/session-ui/message-part"
 import { oc } from "../api"
@@ -231,7 +231,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
 
   // viewing the session clears its unread state, including as new content
   // streams in while the page is open
-  const { markViewed } = useDashboard()
+  const { markViewed, refetchArchived } = useDashboard()
   createEffect(() => {
     messages()
     status()
@@ -260,15 +260,98 @@ function SessionView(props: { sessionID: string; directory: string }) {
     return "idle"
   }
 
-  // total wall-clock per agent turn (user prompt -> last assistant message
-  // completed), keyed by the turn's final message id; in-flight turns are
-  // omitted until they complete
-  const turnDurations = createMemo(() => {
-    const out = new Map<string, number>()
+  const busy = () => status() === "busy" || status() === "retry"
+
+  // --- abort / fork ------------------------------------------------------
+
+  // fire-and-forget: the status SSE flips busy->idle, no local state to sync
+  const [aborting, setAborting] = createSignal(false)
+  const abort = async () => {
+    if (aborting() || !busy()) return
+    setAborting(true)
+    try {
+      await oc.abort(sessionID, directory)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setAborting(false)
+    }
+  }
+
+  // Esc Esc within 400ms in normal mode aborts; the insert->normal Escape
+  // doesn't count (only taps landing while already in normal mode do)
+  let lastEsc = 0
+  const escTap = () => {
+    const now = Date.now()
+    if (now - lastEsc < 400) {
+      lastEsc = 0
+      abort()
+      return
+    }
+    lastEsc = now
+  }
+
+  const [forking, setForking] = createSignal(false)
+  const fork = async (messageID?: string) => {
+    if (forking()) return
+    setForking(true)
+    try {
+      const next = await oc.fork(sessionID, directory, messageID)
+      navigate(sessionHref(next.id, directory))
+    } catch (e) {
+      setError(String(e))
+      setForking(false)
+    }
+  }
+
+  // archive is a soft flag (time.archived); the live store doesn't reduce
+  // session.updated events, so reload it to reflect the new state
+  const archive = async () => {
+    try {
+      await oc.archive(sessionID, directory)
+      await live.load()
+      refetchArchived() // moves it to the sidebar's archived section immediately
+    } catch (e) {
+      setError(String(e))
+    }
+  }
+
+  const remove = async () => {
+    if (!window.confirm("Delete this session permanently?")) return
+    try {
+      await oc.remove(sessionID, directory)
+      navigate("/")
+    } catch (e) {
+      setError(String(e))
+    }
+  }
+
+  // "forked from …" breadcrumb target (child sessions carry parentID)
+  const [parent] = createResource(
+    () => (session() as any)?.parentID as string | undefined,
+    (pid) => oc.session(pid, directory).catch(() => null),
+  )
+
+  // TUI-style turn footer, keyed by the turn's final assistant message id:
+  // agent, model, wall-clock (user prompt -> completed), and an interrupted
+  // marker for aborted turns. In-flight turns are omitted until they complete
+  // or get aborted.
+  type TurnSummary = { agent?: string; providerID?: string; modelID?: string; duration?: number; interrupted: boolean }
+  const turnSummaries = createMemo(() => {
+    const out = new Map<string, TurnSummary>()
     let turnStart: number | undefined
-    let last: { id: string; end: number } | undefined
+    let last: any | undefined
     const flush = () => {
-      if (turnStart !== undefined && last) out.set(last.id, last.end - turnStart)
+      if (last) {
+        const end = last.time?.completed
+        out.set(last.id, {
+          agent: last.agent ?? last.mode,
+          providerID: last.providerID,
+          modelID: last.modelID,
+          duration: turnStart !== undefined && end ? end - turnStart : undefined,
+          interrupted: last.error?.name === "MessageAbortedError",
+        })
+      }
       last = undefined
     }
     for (const m of messages()) {
@@ -276,13 +359,21 @@ function SessionView(props: { sessionID: string; directory: string }) {
       if (m.role === "user") {
         flush()
         turnStart = time.created
-      } else if (time.completed) {
-        last = { id: m.id, end: time.completed }
+      } else if (time.completed || (m as any).error) {
+        last = m
       }
     }
     flush()
     return out
   })
+
+  const modelName = (providerID?: string, modelID?: string) => {
+    if (!modelID) return ""
+    const prov = (providers()?.providers ?? []).find((p: any) => p.id === providerID)
+    return prov?.models?.[modelID]?.name ?? modelID
+  }
+
+  const titlecase = (s?: string) => (s ? s[0]!.toUpperCase() + s.slice(1) : "")
 
   const fmtDuration = (ms: number) => {
     const s = Math.round(ms / 1000)
@@ -383,10 +474,11 @@ function SessionView(props: { sessionID: string; directory: string }) {
   // --- vim-like modal input + navigation --------------------------------
 
   const navigate = useNavigate()
-  const { state: dashState } = useDashboard()
+  const { state: dashState, archivedIds } = useDashboard()
   const switchSession = (back: boolean) => {
+    // skip archived sessions, matching the sidebar's main list
     const list = (dashState()?.threads ?? [])
-      .filter((t: any) => t.kind === "session" && t.sessions[0])
+      .filter((t: any) => t.kind === "session" && t.sessions[0] && !archivedIds().has(t.sessions[0].id))
       .map((t: any) => t.sessions[0])
     if (!list.length) return
     const i = list.findIndex((s: any) => s.id === sessionID)
@@ -468,6 +560,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
       send()
       return
     }
+    if (e.key === "Escape" && vim.mode() === "normal") escTap()
     if (navKeys(e)) return
     vim.handleKeyDown(e)
   }
@@ -484,6 +577,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
         return
       }
       if (e.key === "Escape") {
+        if (vim.mode() === "normal") escTap()
         vim.setMode("normal")
         return
       }
@@ -543,15 +637,45 @@ function SessionView(props: { sessionID: string; directory: string }) {
           <span class={`dot ${headerDot()}`} />
           <h1>{session()?.title ?? sessionID}</h1>
           <span class="dim">{status()}</span>
+          <Show when={(session() as any)?.parentID}>
+            {(pid) => (
+              <span class="fork-crumb">
+                forked from{" "}
+                <A href={sessionHref(pid(), directory)} title={pid()}>
+                  {parent()?.title ?? pid()}
+                </A>
+              </span>
+            )}
+          </Show>
           <span style="flex:1" />
-          <button
-            onClick={() => {
-              stick = true
-              pin()
-            }}
-          >
-            ↓ bottom
+          <button title="fork this session at its tip" disabled={forking()} onClick={() => fork()}>
+            {forking() ? "forking…" : "fork"}
           </button>
+          <Show when={!(session() as any)?.time?.archived} fallback={<span class="archived-chip">archived</span>}>
+            <button title="archive this session (hides it from lists)" onClick={archive}>
+              archive
+            </button>
+          </Show>
+          <button class="danger" title="delete this session permanently" onClick={remove}>
+            delete
+          </button>
+          <Show
+            when={busy()}
+            fallback={
+              <button
+                onClick={() => {
+                  stick = true
+                  pin()
+                }}
+              >
+                ↓ bottom
+              </button>
+            }
+          >
+            <button class="stop" title="abort this session (esc esc)" disabled={aborting()} onClick={abort}>
+              ■ stop <span class="hint">esc esc</span>
+            </button>
+          </Show>
         </header>
 
         <Show when={error()}>
@@ -571,9 +695,29 @@ function SessionView(props: { sessionID: string; directory: string }) {
             <For each={messages()}>
               {(m) => (
                 <>
-                  <Message message={m} parts={live.data.part[m.id] ?? []} />
-                  <Show when={turnDurations().get(m.id)}>
-                    {(d) => <div class="turn-time">turn took {fmtDuration(d())}</div>}
+                  <Show when={m.role === "user"} fallback={<Message message={m} parts={live.data.part[m.id] ?? []} />}>
+                    <div class="msg-wrap">
+                      <Message message={m} parts={live.data.part[m.id] ?? []} />
+                      <button
+                        class="fork-here"
+                        title="fork: new session with the history before this message"
+                        disabled={forking()}
+                        onClick={() => fork(m.id)}
+                      >
+                        fork from here
+                      </button>
+                    </div>
+                  </Show>
+                  <Show when={turnSummaries().get(m.id)}>
+                    {(s) => (
+                      <div class="turn-summary" classList={{ interrupted: s().interrupted }}>
+                        <span class="marker">▣</span> <span class="agent">{titlecase(s().agent)}</span>
+                        {" · "}
+                        {modelName(s().providerID, s().modelID)}
+                        <Show when={s().duration}>{(d) => <> · {fmtDuration(d())}</>}</Show>
+                        <Show when={s().interrupted}> · interrupted</Show>
+                      </div>
+                    )}
                   </Show>
                 </>
               )}
