@@ -412,13 +412,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     }
   })
 
-  const pasteImages = (e: ClipboardEvent) => {
-    const files = [...(e.clipboardData?.items ?? [])]
-      .filter((i) => i.kind === "file" && i.type.startsWith("image/"))
-      .map((i) => i.getAsFile())
-      .filter((f): f is File => !!f)
-    if (!files.length) return
-    e.preventDefault()
+  const addImageFiles = (files: File[]) => {
     for (const f of files) {
       const reader = new FileReader()
       reader.onload = () => {
@@ -436,6 +430,24 @@ function SessionView(props: { sessionID: string; directory: string }) {
       }
       reader.readAsDataURL(f)
     }
+  }
+
+  const pasteImages = (e: ClipboardEvent) => {
+    const files = [...(e.clipboardData?.items ?? [])]
+      .filter((i) => i.kind === "file" && i.type.startsWith("image/"))
+      .map((i) => i.getAsFile())
+      .filter((f): f is File => !!f)
+    if (!files.length) return
+    e.preventDefault()
+    addImageFiles(files)
+  }
+
+  // dropping image files on the composer behaves like paste
+  const dropImages = (e: DragEvent) => {
+    const files = [...(e.dataTransfer?.files ?? [])].filter((f) => f.type.startsWith("image/"))
+    if (!files.length) return
+    e.preventDefault()
+    addImageFiles(files)
   }
 
   // model for the next turn: follows the latest agent turn unless the user
@@ -773,6 +785,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
                 value={draft()}
                 onInput={(e) => setDraft(e.currentTarget.value)}
                 onPaste={pasteImages}
+                onDrop={dropImages}
+                onDragOver={(e) => e.preventDefault()}
                 onKeyDown={promptKeyDown}
                 onFocus={focusInsert}
                 onClick={focusInsert}
@@ -831,6 +845,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
               value={draft()}
               onInput={(e) => setDraft(e.currentTarget.value)}
               onPaste={pasteImages}
+              onDrop={dropImages}
+              onDragOver={(e) => e.preventDefault()}
               onKeyDown={promptKeyDown}
               onFocus={focusInsert}
               onClick={focusInsert}

@@ -6,15 +6,12 @@ import { Route, Router } from "@solidjs/router"
 import { DialogProvider } from "@opencode-ai/ui/context/dialog"
 import { FileComponentProvider } from "@opencode-ai/ui/context/file"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
+import { File } from "@opencode-ai/session-ui/file"
 import Home from "./pages/home"
 import SessionPage from "./pages/session"
 import Sidebar from "./components/sidebar"
 import { DashboardProvider, linkUrl } from "./state"
 import { installSidebarKeys, leftOpen, startDrag } from "./ui"
-
-function FileStub(props: { path?: string }) {
-  return <span data-component="file-stub">{props.path ?? "[file]"}</span>
-}
 
 // Route EVERY GitHub anchor through ink, wherever it was rendered (transcript
 // markdown, tool output) — components calling linkUrl() themselves are already
@@ -44,7 +41,9 @@ function Providers(props: ParentProps) {
     <MetaProvider>
       <DialogProvider>
         <MarkedProvider>
-          <FileComponentProvider component={FileStub}>
+          {/* same component packages/app mounts here: code/diff viewer for
+            * tool renders (edit/write/read) incl. inline image media */}
+          <FileComponentProvider component={File}>
             <DashboardProvider>
               <div class="shell">
                 <Sidebar />

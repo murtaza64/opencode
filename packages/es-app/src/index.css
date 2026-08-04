@@ -53,6 +53,22 @@
   border: 1px solid color-mix(in srgb, var(--pink) 55%, transparent);
 }
 
+/* pasted/attached images in the transcript: session-ui's 48px thumbnails are
+ * too small to read — show them inline up to ~300px (click still opens the
+ * full-size preview dialog) */
+.transcript [data-slot="user-message-attachment"][data-type="image"] {
+  width: auto;
+  height: auto;
+  max-width: min(82%, 420px);
+}
+.transcript [data-slot="user-message-attachment-image"] {
+  width: auto;
+  height: auto;
+  max-height: 300px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
 /* optimistic echo of a just-sent message, cleared once the daemon has it */
 .pending-msg { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; margin: 10px 0; }
 .pending-bubble {
@@ -97,6 +113,14 @@
   --font-sans: -apple-system, "Inter", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Merriweather", Georgia, serif;
   --font-mono: "UbuntuMono Nerd Font", "SF Mono", ui-monospace, Menlo, monospace;
+  /* ui theme tokens the Pierre file/diff viewer reads (--diffs-font-size:
+   * var(--font-size-small) etc). es-app imports ui's tailwind layer but not
+   * its theme.css, so without these the viewer falls back to a larger
+   * default; 13px matches transcript .shiki code blocks. */
+  --font-size-small: 13px;
+  --font-size-base: 14px;
+  --font-family-mono: var(--font-mono);
+  --font-family-sans: var(--font-sans);
 }
 
 /* sans-serif UI; serif for agent prose; monospace only for code/shell.
