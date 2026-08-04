@@ -9,6 +9,7 @@ import { createLiveSession } from "../live-session"
 import FakeCaret from "../components/fake-caret"
 import SessionInfo from "../components/session-info"
 import { sessionHref, useDashboard } from "../state"
+import { rightOpen, startDrag } from "../ui"
 import { createVim } from "../vim"
 
 function PermissionBanner(props: { p: any; directory: string; onDone: () => void }) {
@@ -293,6 +294,21 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const [draft, setDraft] = createSignal("")
   const [sending, setSending] = createSignal(false)
   const [images, setImages] = createSignal<{ id: string; mime: string; url: string; filename: string }[]>([])
+  // optimistic echo: shown greyed-out from click until the daemon registers
+  // the user message (cleared by the effect below watching messages)
+  const [pendingMsg, setPendingMsg] = createSignal<{ text: string; images: number; at: number } | null>(null)
+  createEffect(() => {
+    const p = pendingMsg()
+    if (!p) return
+    const msgs = messages() as any[]
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i]
+      if (m.role === "user" && (m.time?.created ?? 0) >= p.at) {
+        setPendingMsg(null)
+        return
+      }
+    }
+  })
 
   const pasteImages = (e: ClipboardEvent) => {
     const files = [...(e.clipboardData?.items ?? [])]
@@ -339,6 +355,10 @@ function SessionView(props: { sessionID: string; directory: string }) {
     const s = session()
     if ((!text && !images().length) || !s) return
     setSending(true)
+    // echo immediately — the round-trip to the daemon is perceptible
+    setPendingMsg({ text, images: images().length, at: Date.now() - 2000 })
+    stick = true
+    queueMicrotask(pin)
     try {
       await oc.prompt(s, directory, text, { model: nextModel() ?? undefined, images: images() })
       setDraft("")
@@ -346,9 +366,9 @@ function SessionView(props: { sessionID: string; directory: string }) {
       setFloating(false)
       vim.setMode("normal")
       queueMicrotask(() => vim.refresh(promptEl))
-      stick = true
       pin()
     } catch (e) {
+      setPendingMsg(null)
       alert(String(e))
     } finally {
       setSending(false)
@@ -379,6 +399,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     value: draft,
     setValue: setDraft,
     onTab: switchSession,
+    onEnter: () => send(),
     onCursor: setCaret,
   })
 
@@ -558,6 +579,19 @@ function SessionView(props: { sessionID: string; directory: string }) {
               )}
             </For>
             </DataProvider>
+            <Show when={pendingMsg()}>
+              {(p) => (
+                <div class="pending-msg">
+                  <div class="pending-bubble">
+                    {p().text || ""}
+                    <Show when={p().images > 0}>
+                      <span class="dim"> [{p().images} image{p().images > 1 ? "s" : ""}]</span>
+                    </Show>
+                  </div>
+                  <span class="pending-hint dim">sending…</span>
+                </div>
+              )}
+            </Show>
           </div>
         </div>
 
@@ -592,9 +626,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
               <FakeCaret target={promptEl} caret={caret()} mode={vim.mode()} />
             </div>
             <div class="prompt-side">
-              <button onClick={send} disabled={sending() || (!draft().trim() && !images().length)}>
-                {sending() ? "sending…" : "send ⌘⏎"}
-              </button>
+              <span class="send-hint dim">{sending() ? "sending…" : "⌘⏎ to send"}</span>
               <select
                 class="model-select"
                 title="model for the next turn (defaults to the previous turn's)"
@@ -653,6 +685,9 @@ function SessionView(props: { sessionID: string; directory: string }) {
         </div>
       </Show>
 
+      <Show when={rightOpen()}>
+        <div class="drag-handle" onMouseDown={(e) => startDrag("right", e)} />
+      </Show>
       <SessionInfo sessionID={sessionID} session={session()} parts={live.data.part} />
     </main>
   )

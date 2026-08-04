@@ -3,7 +3,8 @@
  * conversation. */
 import { createMemo, For, Show } from "solid-js"
 import type { Part, Session } from "@opencode-ai/sdk/v2"
-import { ago, jiraUrl, useDashboard } from "../state"
+import { ago, jiraUrl, linkUrl, useDashboard } from "../state"
+import { rightOpen, rightWidth, toggleRight } from "../ui"
 import { PrList } from "./pr"
 
 const URL_RE = /https?:\/\/[^\s)\]}"'`>]+/g
@@ -18,6 +19,27 @@ const compact = (n?: number) => {
 const home = (p: string) => p.replace(/^\/Users\/[^/]+/, "~")
 
 export default function SessionInfo(props: {
+  sessionID: string
+  session?: Session
+  parts: Record<string, Part[]>
+}) {
+  return (
+    <Show
+      when={rightOpen()}
+      fallback={
+        <aside class="session-info sidebar-mini">
+          <button class="mini-btn" title="expand info panel (^l)" onClick={toggleRight}>
+            ⟨
+          </button>
+        </aside>
+      }
+    >
+      <SessionInfoBody {...props} />
+    </Show>
+  )
+}
+
+function SessionInfoBody(props: {
   sessionID: string
   session?: Session
   parts: Record<string, Part[]>
@@ -46,7 +68,10 @@ export default function SessionInfo(props: {
   const tokens = () => (props.session as any)?.tokens
 
   return (
-    <aside class="session-info">
+    <aside class="session-info" style={{ width: `${rightWidth()}px` }}>
+      <button class="mini-btn panel-collapse" title="collapse info panel (^l)" onClick={toggleRight}>
+        ⟩
+      </button>
       <Show when={props.session}>
         {(s) => (
           <>
@@ -138,7 +163,7 @@ export default function SessionInfo(props: {
           <For each={links()}>
             {(url) => (
               <div class="info-link" title={url}>
-                <a href={url} target="_blank">
+                <a href={linkUrl(url)} target="_blank">
                   {url.replace(/^https?:\/\//, "").slice(0, 42)}
                 </a>
               </div>

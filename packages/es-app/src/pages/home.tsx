@@ -1,7 +1,6 @@
 /* Home = the es dashboard: attention queue + thread cards, from :7777. */
-import { createResource, createSignal, For, Show } from "solid-js"
+import { createSignal, For, Show } from "solid-js"
 import { A } from "@solidjs/router"
-import { oc } from "../api"
 import { ago, jiraUrl, sessionHref, useDashboard } from "../state"
 import { PrList } from "../components/pr"
 
@@ -103,29 +102,25 @@ function ThreadCard(props: { t: any; directory: string; onDigest: (sid: string) 
   )
 }
 
-function AllSessions(props: { root: string }) {
-  // umbrella listing is fork-only; fall back to the root directory's sessions
-  const [sessions] = createResource(async () => {
-    const list = await oc.umbrellaSessions(props.root).catch(() => oc.sessions(props.root))
-    return list
-      .filter((s) => !s.parentID)
-      .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
-      .slice(0, 40)
-  })
+function AllSessions() {
+  // the dashboard collects sessions from every anchor dir (incl. single-repo
+  // sidecars' on-disk repo) — richer than any single daemon directory query
+  const { state } = useDashboard()
+  const sessions = () => (state()?.sessions ?? []) as any[]
   const [open, setOpen] = createSignal(false)
   return (
     <>
       <h2 style="cursor:pointer" onClick={() => setOpen(!open())}>
-        All sessions {open() ? "▾" : "▸"} <span class="dim">({sessions()?.length ?? "…"})</span>
+        All sessions {open() ? "▾" : "▸"} <span class="dim">({sessions().length})</span>
       </h2>
       <Show when={open()}>
         <div class="session-list">
-          <For each={sessions() ?? []}>
+          <For each={sessions()}>
             {(s) => (
               <div class="pr">
                 <A href={sessionHref(s.id, s.directory)}>{s.title || s.id}</A>
                 <span class="dim">
-                  {s.directory?.split("/").slice(-1)[0]} · {ago(s.time?.updated)}
+                  {s.directory?.split("/").slice(-1)[0]} · {ago(s.updated)}
                 </span>
               </div>
             )}
@@ -225,7 +220,7 @@ export default function Home() {
             </Show>
           </div>
 
-          <AllSessions root={st().root} />
+          <AllSessions />
 
           <h2>Frontier</h2>
           <Show when={st().frontier.length} fallback={<span class="dim">empty</span>}>

@@ -3,6 +3,7 @@
  * check, pending-reviewer names, per-check CI symbols. Wraps for the narrow
  * info panel. */
 import { For, Index, Show } from "solid-js"
+import { linkUrl } from "../state"
 
 // GitHub Octicons (16px) paths, via baymax
 const ICON_PATHS: Record<string, string> = {
@@ -65,7 +66,7 @@ export function Pr(props: { pr: any; compact?: boolean }) {
   const requested = () => pr().review_requested ?? []
   const cap = (n: number) => Math.min(n, 5)
   return (
-    <a class="pr-title-row" href={pr().url} target="_blank" rel="noopener noreferrer" title={pr().title}>
+    <a class="pr-title-row" href={linkUrl(pr().url)} target="_blank" rel="noopener noreferrer" title={pr().title}>
       <span class="pr-key-group">
         <Icon class={`pr-icon icon-${prState(pr())}`} path={ICON_PATHS[prState(pr())]!} size={16} />
         <span class="pr-number">

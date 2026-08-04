@@ -97,6 +97,7 @@ export function createVim(opts: {
   setValue: (v: string) => void
   /** navigation hooks (normal mode) */
   onTab?: (back: boolean) => void
+  onEnter?: () => void
   /** fired whenever the normal-mode cursor moves; hasChar=false means the
    * selection block can't render (EOL/empty) and a fake caret is needed */
   onCursor?: (info: { el: HTMLTextAreaElement; pos: number; hasChar: boolean }) => void
@@ -400,6 +401,10 @@ export function createVim(opts: {
       }
       case "Tab": {
         opts.onTab?.(e.shiftKey)
+        return true
+      }
+      case "Enter": {
+        opts.onEnter?.()
         return true
       }
       default:

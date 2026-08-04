@@ -2,6 +2,7 @@
  * and session info panel, refreshed on the dashboard's SSE ticks. */
 import {
   createContext,
+  createEffect,
   createMemo,
   createResource,
   createSignal,
@@ -22,16 +23,34 @@ type DashboardCtx = {
   digest: (sessionID: string) => Promise<void>
   markViewed: (sessionID: string) => void
   dotFor: (s: { id: string; live?: string; updated?: number }) => DotState
+  editspace: () => string | undefined
+  setEditspace: (name: string) => void
+  editspaces: Resource<{ editspaces: { name: string; root: string }[]; default: string | null }>
 }
 
 const Ctx = createContext<DashboardCtx>()
 
 export function DashboardProvider(props: ParentProps) {
-  const [state, { refetch }] = createResource(es.state)
+  const [editspace, setEditspaceRaw] = createSignal<string | undefined>(
+    localStorage.getItem("es-app-editspace") ?? undefined,
+  )
+  const setEditspace = (name: string) => {
+    localStorage.setItem("es-app-editspace", name)
+    setEditspaceRaw(name)
+  }
+  const [editspaces] = createResource(es.editspaces)
+  const [state, { refetch }] = createResource(
+    () => editspace() ?? "",
+    (name) => es.state(name || undefined),
+  )
 
-  const source = new EventSource("/es/api/events")
-  source.onmessage = () => refetch()
-  onCleanup(() => source.close())
+  // one SSE subscription per selected editspace
+  createEffect(() => {
+    const name = editspace()
+    const source = new EventSource(`/es/api/events?${name ? `es=${encodeURIComponent(name)}` : ""}`)
+    source.onmessage = () => refetch()
+    onCleanup(() => source.close())
+  })
   const interval = setInterval(refetch, 60_000)
   onCleanup(() => clearInterval(interval))
 
@@ -72,18 +91,21 @@ export function DashboardProvider(props: ParentProps) {
     state,
     refetch,
     refresh: async () => {
-      await es.refresh()
+      await es.refresh(editspace())
       refetch()
     },
     digest: async (sessionID: string) => {
       try {
-        await es.digest(sessionID)
+        await es.digest(sessionID, editspace())
       } finally {
         refetch()
       }
     },
     markViewed,
     dotFor,
+    editspace,
+    setEditspace,
+    editspaces,
   }
   return <Ctx.Provider value={value}>{props.children}</Ctx.Provider>
 }
@@ -107,3 +129,7 @@ export const ago = (ts?: number) => {
 }
 
 export const jiraUrl = (key: string) => `https://duolingo.atlassian.net/browse/${key}`
+
+/** route GitHub links through ink (duo.fyi/ink), the preferred frontend */
+export const linkUrl = (url: string) =>
+  url.startsWith("https://github.com/") ? `https://duo.fyi/ink/${url}` : url

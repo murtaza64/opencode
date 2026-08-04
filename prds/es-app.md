@@ -59,6 +59,31 @@ One shell instance = one editspace, mirroring the dashboard.
 5. I browse all sessions in the editspace (umbrella-wide), not just those
    with lane/ticket cards.
 
+## Planned iterations (grilled 2026-08-04, post-v1)
+
+All three have existing daemon endpoints — no fork/server changes needed:
+
+1. **Interrupt/cancel** — `POST /session/:id/abort`. UI: a stop control in
+   the session header while status=busy (replaces the ↓-bottom slot), plus
+   `Esc Esc` (double-tap) in normal mode as the keyboard path. Abort is
+   fire-and-forget; the status SSE flips busy→idle and the transcript
+   shows the aborted step.
+2. **Fork** — `POST /session/:id/fork` with optional `{messageID}` (fork
+   point), returns the new Session.Info; navigate to it on success. UI:
+   per-user-message hover action ("fork from here") + a session-header
+   fork button (fork at tip). Forked sessions appear via the existing
+   session list/sidebar; consider a `forked from …` breadcrumb using
+   parentID.
+3. **MCP toggles** — `GET /mcp` (status per server), `POST
+   /mcp/:name/{connect,disconnect}`. UI: an "MCP" section in the right
+   info panel listing servers with status dots and a connect/disconnect
+   toggle. Note: connection state is per-directory-instance; the panel
+   should query with the session's directory. Auth flows
+   (`/mcp/:name/auth*`) are out of scope — deep-link to the TUI when a
+   server needs auth.
+
+Order: 1 (highest leverage, trivial payload), 3, 2.
+
 ## Explicitly deferred
 
 - Spawning lanes/sessions from the UI (`es agent spawn` stays CLI)

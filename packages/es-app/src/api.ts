@@ -88,9 +88,14 @@ export const oc = {
   },
 }
 
+const esQ = (es?: string) => (es ? `es=${encodeURIComponent(es)}` : "")
+
 export const es = {
-  state: (): Promise<any> => fetch("/es/api/state").then(json),
-  refresh: (): Promise<any> => fetch("/es/api/refresh", { method: "POST" }).then(json),
-  digest: (sessionID: string): Promise<any> =>
-    fetch(`/es/api/digest/${sessionID}?force=true`, { method: "POST" }).then(json),
+  editspaces: (): Promise<{ editspaces: { name: string; root: string }[]; default: string | null }> =>
+    fetch("/es/api/editspaces").then(json<{ editspaces: { name: string; root: string }[]; default: string | null }>),
+  state: (esName?: string): Promise<any> => fetch(`/es/api/state?${esQ(esName)}`).then(json),
+  refresh: (esName?: string): Promise<any> =>
+    fetch(`/es/api/refresh?${esQ(esName)}`, { method: "POST" }).then(json),
+  digest: (sessionID: string, esName?: string): Promise<any> =>
+    fetch(`/es/api/digest/${sessionID}?force=true&${esQ(esName)}`, { method: "POST" }).then(json),
 }
