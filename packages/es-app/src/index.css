@@ -297,6 +297,20 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
   font-weight: bold;
 }
 .nav-empty { padding: 4px 14px; }
+.notification-section {
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--surface0);
+}
+.notification-section .nav-heading { color: var(--peach); padding-top: 4px; }
+.notification-item { align-items: flex-start; }
+.notification-copy { display: flex; min-width: 0; flex-direction: column; }
+.notification-meta {
+  color: var(--overlay1);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+}
 
 /* topbar */
 .topbar {

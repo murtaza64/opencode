@@ -8,7 +8,8 @@ import { sessionHref, useDashboard } from "../state"
 import { leftOpen, leftWidth, toggleLeft } from "../ui"
 
 export default function Sidebar() {
-  const { state, dotFor, editspace, setEditspace, editspaces, archivedIds } = useDashboard()
+  const { state, dotFor, editspace, setEditspace, editspaces, archivedIds, notifications, markViewed } =
+    useDashboard()
   const all = () =>
     (state()?.threads ?? [])
       .filter((t: any) => t.kind === "session" && t.sessions[0])
@@ -17,6 +18,10 @@ export default function Sidebar() {
   const archived = () => all().filter((s: any) => archivedIds().has(s.id))
   const [showArchived, setShowArchived] = createSignal(false)
   const current = () => editspace() ?? editspaces()?.default ?? state()?.editspace ?? ""
+  const openNotification = (item: ReturnType<typeof notifications>[number]) => {
+    setEditspace(item.editspace)
+    markViewed(item.session, true)
+  }
 
   const item = (s: any, cls = "") => (
     <A
@@ -72,6 +77,35 @@ export default function Sidebar() {
             ⟨
           </button>
         </div>
+        <Show when={notifications().length}>
+          <div class="notification-section">
+            <div class="nav-heading">needs you</div>
+            <For each={notifications()}>
+              {(notification) => (
+                <A
+                  href={sessionHref(notification.session, notification.directory)}
+                  class="nav-item notification-item"
+                  title={`${notification.kind} · ${notification.editspace}`}
+                  onClick={() => openNotification(notification)}
+                >
+                  <span
+                    class={`dot ${dotFor({
+                      id: notification.session,
+                      updated: notification.updated,
+                      pending: notification.kind !== "idle",
+                    })}`}
+                  />
+                  <span class="notification-copy">
+                    <span class="nav-title">{notification.title}</span>
+                    <span class="notification-meta">
+                      {notification.editspace} · {notification.kind}
+                    </span>
+                  </span>
+                </A>
+              )}
+            </For>
+          </div>
+        </Show>
         <A href="/" end activeClass="active" class="nav-item board-link">
           ▦ board
         </A>

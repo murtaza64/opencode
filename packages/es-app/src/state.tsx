@@ -12,7 +12,7 @@ import {
   type ParentProps,
   type Resource,
 } from "solid-js"
-import { es, oc } from "./api"
+import { es, oc, type AttentionNotification } from "./api"
 
 export type DotState = "pending" | "busy" | "unread" | "idle"
 
@@ -22,8 +22,9 @@ type DashboardCtx = {
   refresh: () => Promise<void>
   digest: (sessionID: string) => Promise<void>
   brief: (ticket: string) => Promise<void>
-  markViewed: (sessionID: string) => void
-  dotFor: (s: { id: string; live?: string; updated?: number }) => DotState
+  markViewed: (sessionID: string, force?: boolean) => void
+  dotFor: (s: { id: string; live?: string; updated?: number; pending?: boolean }) => DotState
+  notifications: () => AttentionNotification[]
   editspace: () => string | undefined
   setEditspace: (name: string) => void
   editspaces: Resource<{ editspaces: { name: string; root: string }[]; default: string | null }>
@@ -42,6 +43,7 @@ export function DashboardProvider(props: ParentProps) {
     setEditspaceRaw(name)
   }
   const [editspaces] = createResource(es.editspaces)
+  const [notificationState, { refetch: refetchNotifications }] = createResource(es.notifications)
   const [state, { refetch }] = createResource(
     () => editspace() ?? "",
     (name) => es.state(name || undefined),
@@ -54,6 +56,9 @@ export function DashboardProvider(props: ParentProps) {
     source.onmessage = () => refetch()
     onCleanup(() => source.close())
   })
+  const notificationSource = new EventSource("/es/api/notification-events")
+  notificationSource.onmessage = () => refetchNotifications()
+  onCleanup(() => notificationSource.close())
   const interval = setInterval(refetch, 60_000)
   onCleanup(() => clearInterval(interval))
 
@@ -65,10 +70,10 @@ export function DashboardProvider(props: ParentProps) {
   // untracked read: callers invoke this from effects that must not subscribe
   // to `viewed` (writing a tracked signal from its own effect loops forever);
   // throttled so streaming sessions don't rerender the sidebar every event
-  const markViewed = (sessionID: string) => {
+  const markViewed = (sessionID: string, force = false) => {
     const current = untrack(viewed)
     const now = Date.now()
-    if (now - (current[sessionID] ?? 0) < 10_000) return
+    if (!force && now - (current[sessionID] ?? 0) < 10_000) return
     const next = { ...current, [sessionID]: now }
     setViewed(next)
     localStorage.setItem(VIEWED_KEY, JSON.stringify(next))
@@ -107,12 +112,21 @@ export function DashboardProvider(props: ParentProps) {
   })
   const archivedIds = () => archived() ?? new Set<string>()
 
-  const dotFor = (s: { id: string; live?: string; updated?: number }): DotState => {
-    if (pendingSessions().has(s.id)) return "pending"
+  const dotFor = (s: { id: string; live?: string; updated?: number; pending?: boolean }): DotState => {
+    if (s.pending ?? pendingSessions().has(s.id)) return "pending"
     if (s.live === "busy" || s.live === "retry") return "busy"
     if (s.updated && s.updated > (viewed()[s.id] ?? 0)) return "unread"
     return "idle"
   }
+  const notifications = () =>
+    (notificationState()?.notifications ?? []).filter(
+      (item) =>
+        dotFor({
+          id: item.session,
+          updated: item.updated,
+          pending: item.kind === "permission" || item.kind === "question",
+        }) !== "idle",
+    )
 
   const value: DashboardCtx = {
     state,
@@ -137,6 +151,7 @@ export function DashboardProvider(props: ParentProps) {
     },
     markViewed,
     dotFor,
+    notifications,
     editspace,
     setEditspace,
     editspaces,

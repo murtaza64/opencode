@@ -3,6 +3,15 @@
 import type { Message, Part, Session } from "@opencode-ai/sdk/v2"
 
 export type MessageWithParts = { info: Message; parts: Part[] }
+export type AttentionNotification = {
+  id: string
+  kind: "permission" | "question" | "idle"
+  session: string
+  title: string
+  directory: string
+  editspace: string
+  updated: number
+}
 
 const q = (directory: string) => `directory=${encodeURIComponent(directory)}`
 
@@ -121,6 +130,8 @@ export const es = {
   editspaces: (): Promise<{ editspaces: { name: string; root: string }[]; default: string | null }> =>
     fetch("/es/api/editspaces").then(json<{ editspaces: { name: string; root: string }[]; default: string | null }>),
   state: (esName?: string): Promise<any> => fetch(`/es/api/state?${esQ(esName)}`).then(json),
+  notifications: (): Promise<{ notifications: AttentionNotification[] }> =>
+    fetch("/es/api/notifications").then(json<{ notifications: AttentionNotification[] }>),
   refresh: (esName?: string): Promise<any> =>
     fetch(`/es/api/refresh?${esQ(esName)}`, { method: "POST" }).then(json),
   digest: (sessionID: string, esName?: string): Promise<any> =>
