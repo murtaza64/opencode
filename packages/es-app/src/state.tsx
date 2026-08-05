@@ -22,6 +22,7 @@ type DashboardCtx = {
   refresh: () => Promise<void>
   digest: (sessionID: string) => Promise<void>
   brief: (ticket: string) => Promise<void>
+  curate: () => Promise<void>
   markViewed: (sessionID: string, force?: boolean) => void
   dotFor: (s: { id: string; live?: string; updated?: number; pending?: boolean }) => DotState
   notifications: () => AttentionNotification[]
@@ -145,6 +146,13 @@ export function DashboardProvider(props: ParentProps) {
     brief: async (ticket: string) => {
       try {
         await es.brief(ticket, editspace())
+      } finally {
+        refetch()
+      }
+    },
+    curate: async () => {
+      try {
+        await es.curate(editspace())
       } finally {
         refetch()
       }

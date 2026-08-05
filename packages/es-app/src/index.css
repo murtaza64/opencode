@@ -409,6 +409,7 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
   border-bottom: 1px solid var(--surface0);
   font-size: 13px;
 }
+.queue-head .key { white-space: nowrap; flex-shrink: 0; }
 .queue-head .title { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .queue-head .card-link { font-size: 11px; color: var(--overlay1); margin-left: auto; flex-shrink: 0; }
 .att {
@@ -462,6 +463,12 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 .chip.parked { color: var(--mauve); border-color: var(--mauve); }
 .chip.review, .chip.unblock, .chip.pending { color: var(--yellow); border-color: var(--yellow); }
 .chip.failing { color: var(--red); border-color: var(--red); }
+
+/* curator additions: thread description + extra member sessions */
+.thread-desc { margin-top: 4px; font-size: 12.5px; color: var(--subtext0); }
+.more-sessions { display: flex; flex-direction: column; margin-top: 4px; font-size: 12.5px; }
+.more-sessions a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip.blocked { color: var(--red); border-color: var(--red); }
 
 .ticket-row { display: flex; gap: 8px; align-items: baseline; margin-top: 5px; font-size: 13px; }
 .ticket-row .title { flex: 1; }

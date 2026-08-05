@@ -48,7 +48,9 @@ function ThreadCard(props: {
       <div class="head">
         <Show
           when={props.t.kind === "session" && s0()}
-          fallback={<span class="title dim">no live session</span>}
+          fallback={
+            <span class="title dim">{props.t.curated ? props.t.title : "no live session"}</span>
+          }
         >
           <span class={`dot ${dotFor(s0())}`} />
           <A class="title" href={sessionHref(s0().id, s0().directory ?? props.directory)}>
@@ -66,7 +68,26 @@ function ThreadCard(props: {
             {s0().digesting ? "…" : "digest"}
           </button>
         </Show>
+        <Show when={props.t.curated_status}>
+          <span class={`chip ${props.t.curated_status}`}>{props.t.curated_status}</span>
+        </Show>
       </div>
+      <Show when={props.t.description}>
+        <div class="thread-desc">{props.t.description}</div>
+      </Show>
+      {/* curated threads can hold several sessions; s0 is in the head */}
+      <Show when={props.t.sessions.length > 1}>
+        <div class="more-sessions">
+          <For each={props.t.sessions.slice(1)}>
+            {(sv: any) => (
+              <A href={sessionHref(sv.id, sv.directory ?? props.directory)}>
+                <SessionIcon />
+                {sv.title || sv.id}
+              </A>
+            )}
+          </For>
+        </div>
+      </Show>
       <For each={props.t.tickets ?? []}>{(tk) => <TicketRow tk={tk} />}</For>
       <Show when={props.t.lanes.length}>
         <div class="lanes">
@@ -156,7 +177,7 @@ function QueueGroupHeader(props: { g: QueueGroup; directory: string }) {
             </Show>
           }
         >
-          <span class="title">{tickets()[0].summary ?? t().title}</span>
+          <span class="title">{t().curated ? t().title : (tickets()[0].summary ?? t().title)}</span>
         </Show>
         <a class="card-link" href={`#t-${t().key}`}>
           card
@@ -374,6 +395,18 @@ export default function Home() {
     }
   }
 
+  const [curating, setCurating] = createSignal(false)
+  const curate = async () => {
+    setCurating(true)
+    try {
+      await dashboard.curate()
+    } catch (e) {
+      alert(String(e))
+    } finally {
+      setCurating(false)
+    }
+  }
+
   return (
     <Show when={state()} fallback={<div class="dim">loading… (is es-dashboard running on :7777?)</div>}>
       {(st) => (
@@ -390,6 +423,12 @@ export default function Home() {
                 .join(" · ")}
             </span>
             <span style="flex:1" />
+            <Show when={st().curated_at}>
+              <span class="dim">curated {ago(st().curated_at * 1000)}</span>
+            </Show>
+            <button onClick={curate} disabled={curating() || st().curating}>
+              {curating() || st().curating ? "curating…" : "curate"}
+            </button>
             <button onClick={refresh} disabled={refreshing()}>
               {refreshing() ? "refreshing…" : "refresh"}
             </button>

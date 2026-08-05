@@ -198,4 +198,6 @@ export const es = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ question }),
     }).then(json),
+  curate: (esName?: string): Promise<any> =>
+    fetch(`/es/api/curate?force=true&${esQ(esName)}`, { method: "POST" }).then(json),
 }
