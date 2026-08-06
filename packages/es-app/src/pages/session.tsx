@@ -21,11 +21,22 @@ function PermissionBanner(props: { p: any; directory: string; onDone: () => void
       alert(String(e))
     }
   }
-  // metadata carries the actual request (command, pattern, …) — the action
-  // alone ("bash", "external_directory") doesn't tell the human what to judge
+  // metadata carries the actual request (command, cwd, directories, …) — the
+  // action alone ("bash", "external_directory") doesn't tell the human what to
+  // judge. Arrays of scalars (directories, patterns) render joined.
   const meta = () => {
     const m = props.p.metadata ?? {}
-    return Object.entries(m).filter(([, v]) => v != null && typeof v !== "object")
+    return Object.entries(m)
+      .map(([k, v]): [string, string] | null => {
+        if (v == null) return null
+        if (Array.isArray(v)) {
+          const scalars = v.filter((x) => x != null && typeof x !== "object")
+          return scalars.length ? [k, scalars.map(String).join("\n")] : null
+        }
+        if (typeof v === "object") return null
+        return [k, String(v)]
+      })
+      .filter((e): e is [string, string] => e != null)
   }
   return (
     <div class="banner permission">
