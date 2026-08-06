@@ -9,6 +9,8 @@ import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import { File } from "@opencode-ai/session-ui/file"
 import Home from "./pages/home"
 import SessionPage from "./pages/session"
+import IssuePage from "./pages/issue"
+import DocPage from "./pages/doc"
 import Sidebar from "./components/sidebar"
 import { DashboardProvider, linkUrl } from "./state"
 import { installSidebarKeys, leftOpen, startDrag } from "./ui"
@@ -65,6 +67,8 @@ render(
     <Router root={(p) => <Providers>{p.children}</Providers>}>
       <Route path="/" component={Home} />
       <Route path="/session/:id" component={SessionPage} />
+      <Route path="/issue" component={IssuePage} />
+      <Route path="/doc" component={DocPage} />
     </Router>
   ),
   document.getElementById("root")!,

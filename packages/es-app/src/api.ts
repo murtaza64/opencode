@@ -124,6 +124,48 @@ export const oc = {
   },
 }
 
+export type IssueRow = {
+  ref: string
+  number: number | null
+  title: string
+  state: "open" | "closed"
+  status?: string
+  feature?: string
+  markers: string[]
+  claims: string[]
+  labels: string[]
+  assignees: string[]
+  updated_at: string
+  url: string
+}
+export type IssueList = { backend: string; repo?: string; issues: IssueRow[]; error?: string }
+export type IssueDetail = IssueRow & {
+  backend: string
+  body: string
+  comments: { author: string; created_at: string; body: string }[]
+  blockers?: string[]
+  reviewers?: string[]
+  state_reason?: string
+  created_at?: string
+}
+export type DocMeta = { path: string; name: string; title: string; status: string }
+export type DocList = {
+  sources: { key: string; kind: string; groups: Record<string, DocMeta[]> }[]
+  roots: { source: string; root: string; lane: string }[]
+  error?: string
+}
+export type DocContent = {
+  source: string
+  path: string
+  variant: string
+  variant_label: string
+  exists: boolean
+  content: string
+  variants: { name: string; label: string }[]
+  title?: string
+  error?: string
+}
+
 const esQ = (es?: string) => (es ? `es=${encodeURIComponent(es)}` : "")
 
 export const es = {
@@ -138,4 +180,14 @@ export const es = {
     fetch(`/es/api/digest/${sessionID}?force=true&${esQ(esName)}`, { method: "POST" }).then(json),
   brief: (ticket: string, esName?: string): Promise<any> =>
     fetch(`/es/api/brief/${ticket}?force=true&${esQ(esName)}`, { method: "POST" }).then(json),
+  // tickets + docs browser (read-only)
+  issues: (esName?: string): Promise<IssueList> => fetch(`/es/api/issues?${esQ(esName)}`).then(json<IssueList>),
+  issue: (ref: string, esName?: string): Promise<IssueDetail> =>
+    fetch(`/es/api/issue?ref=${encodeURIComponent(ref)}&${esQ(esName)}`).then(json<IssueDetail>),
+  docs: (esName?: string): Promise<DocList> => fetch(`/es/api/docs?${esQ(esName)}`).then(json<DocList>),
+  doc: (source: string, path: string, variant?: string, esName?: string): Promise<DocContent> =>
+    fetch(
+      `/es/api/doc?source=${encodeURIComponent(source)}&path=${encodeURIComponent(path)}` +
+        `${variant ? `&variant=${encodeURIComponent(variant)}` : ""}&${esQ(esName)}`,
+    ).then(json<DocContent>),
 }

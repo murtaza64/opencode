@@ -771,3 +771,83 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
   resize: none;
 }
 .float-editor textarea:focus { outline: none; }
+
+/* --- tickets + docs browser (dotfiles#79) ---------------------------------- */
+
+/* right-panel referenced tickets/docs */
+.info-ref {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 2px 0;
+  font-size: 12px;
+  color: var(--subtext1);
+  min-width: 0;
+}
+.info-ref:hover { text-decoration: none; color: var(--text); }
+.info-ref .issue-ref { color: var(--blue); font-family: var(--font-mono); flex-shrink: 0; }
+.info-ref .ref-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.info-ref .ref-title.mono { font-size: 11.5px; }
+.issue-marker {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: bold;
+  padding: 0 4px;
+  color: var(--overlay1);
+  border: 1px solid var(--surface1);
+}
+.issue-marker.parked, .issue-marker.ready-for-human { color: var(--mauve); border-color: var(--mauve); }
+.issue-marker.needs-human, .issue-marker.flagged { color: var(--red); border-color: var(--red); }
+.issue-marker.ready-for-agent { color: var(--green); border-color: var(--green); }
+.issue-marker.needs-info { color: var(--yellow); border-color: var(--yellow); }
+.issue-marker.in-review { color: var(--blue); border-color: var(--blue); }
+.issue-marker.claimed { color: var(--peach); border-color: var(--peach); }
+
+/* reader pages */
+.browse-page { max-width: 860px; }
+.browse-head {
+  padding: 14px 0 10px;
+  border-bottom: 1px solid var(--surface0);
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.browse-head h1 { font-size: 17px; line-height: 1.4; }
+.browse-head .issue-num { color: var(--blue); font-family: var(--font-mono); }
+.browse-meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.chip.claim { color: var(--peach); border-color: var(--peach); font-family: var(--font-mono); }
+.chip.plain { color: var(--subtext0); }
+.variant-picker { display: inline-flex; gap: 4px; }
+.variant-picker button { font-size: 11px; font-family: var(--font-mono); }
+
+/* rendered markdown: serif prose like the transcript, mono code */
+.doc-prose {
+  font-family: var(--font-serif);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+.doc-prose :is(p, ul, ol, li, blockquote, td, th, em, strong) { font-family: var(--font-serif); }
+.doc-prose :is(h1, h2, h3, h4, h5, h6) {
+  font-family: var(--font-sans);
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: 0;
+  margin: 18px 0 8px;
+}
+.doc-prose h1 { font-size: 16px; }
+.doc-prose h2 { font-size: 14px; }
+.doc-prose h3 { font-size: 13px; }
+.doc-prose :is(pre, code, kbd, samp), .doc-prose :is(pre, code) * { font-family: var(--font-mono) !important; }
+.doc-prose pre { background: var(--mantle); padding: 10px 12px; overflow-x: auto; font-size: 12px; }
+.doc-prose :not(pre) > code { background: var(--mantle); padding: 0 4px; font-size: 12px; }
+.doc-prose blockquote { border-left: 3px solid var(--surface1); margin: 8px 0; padding: 2px 12px; color: var(--subtext0); }
+.doc-prose table { border-collapse: collapse; margin: 10px 0; }
+.doc-prose :is(td, th) { border: 1px solid var(--surface1); padding: 3px 10px; font-size: 12.5px; }
+.doc-prose img { max-width: 100%; }
+
+.issue-comment { margin: 14px 0; background: var(--mantle); padding: 10px 14px; }
+.issue-comment .comment-head { display: flex; gap: 10px; align-items: baseline; margin-bottom: 6px; font-size: 12.5px; }
