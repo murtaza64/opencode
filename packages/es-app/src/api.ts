@@ -190,4 +190,12 @@ export const es = {
       `/es/api/doc?source=${encodeURIComponent(source)}&path=${encodeURIComponent(path)}` +
         `${variant ? `&variant=${encodeURIComponent(variant)}` : ""}&${esQ(esName)}`,
     ).then(json<DocContent>),
+  // front desk (dotfiles prds/front-desk.md): returns {session, directory,
+  // existing} — existing=true means a busy front desk absorbed the ask
+  frontdesk: (question: string, esName?: string): Promise<any> =>
+    fetch(`/es/api/frontdesk?${esQ(esName)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ question }),
+    }).then(json),
 }

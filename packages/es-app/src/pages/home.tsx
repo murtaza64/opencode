@@ -1,7 +1,8 @@
 /* Home = the es dashboard: attention queue + thread cards, from :7777. */
 import { createMemo, createSignal, For, onMount, Show } from "solid-js"
-import { A } from "@solidjs/router"
+import { A, useNavigate } from "@solidjs/router"
 import { ago, jiraUrl, sessionHref, useDashboard } from "../state"
+import { es as esApi } from "../api"
 import { PrList } from "../components/pr"
 import BriefBox from "../components/brief"
 import { SessionIcon, TicketIcon } from "../components/icons"
@@ -303,6 +304,41 @@ function AllSessions() {
   )
 }
 
+/* Front desk composer: one ask opens the concierge session (a normal session
+ * view). A busy front desk absorbs the ask — we navigate to it either way. */
+function FrontDesk() {
+  const { editspace } = useDashboard()
+  const navigate = useNavigate()
+  const [q, setQ] = createSignal("")
+  const [busy, setBusy] = createSignal(false)
+  const ask = async (e: Event) => {
+    e.preventDefault()
+    const question = q().trim()
+    if (!question || busy()) return
+    setBusy(true)
+    try {
+      const res = await esApi.frontdesk(question, editspace())
+      navigate(sessionHref(res.session, res.directory))
+    } catch (err) {
+      alert(String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <form class="frontdesk" onSubmit={ask}>
+      <input
+        value={q()}
+        onInput={(e) => setQ(e.currentTarget.value)}
+        placeholder="ask the front desk — who/what/why about anything in flight"
+      />
+      <button type="submit" disabled={busy() || !q().trim()}>
+        {busy() ? "asking…" : "ask"}
+      </button>
+    </form>
+  )
+}
+
 export default function Home() {
   const dashboard = useDashboard()
   const state = dashboard.state
@@ -358,6 +394,8 @@ export default function Home() {
               {refreshing() ? "refreshing…" : "refresh"}
             </button>
           </header>
+
+          <FrontDesk />
 
           <h2>Needs you</h2>
           <Queue

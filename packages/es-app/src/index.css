@@ -672,6 +672,22 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   padding: 4px 8px;
 }
 
+/* front desk composer (home page) */
+.frontdesk {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+.frontdesk input {
+  flex: 1;
+  background: var(--crust);
+  border: 1px solid var(--surface0);
+  color: var(--text);
+  font: inherit;
+  padding: 5px 10px;
+}
+.frontdesk input:focus { outline: 1px solid var(--lavender); }
+
 /* prompt: the fixed bottom of the chat column */
 .prompt-box {
   display: flex;
