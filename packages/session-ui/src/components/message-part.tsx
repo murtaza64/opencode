@@ -2060,7 +2060,9 @@ ToolRegistry.register({
               <span data-slot="basic-tool-tool-title">
                 <TextShimmer text={i18n.t("ui.tool.shell")} active={pending()} />
               </span>
-              <Show when={!pending() && !open() && props.input.command}>
+              {/* show the command as soon as it streams in, not only after the
+                * tool finishes — a running sleep/build should be identifiable */}
+              <Show when={!open() && props.input.command}>
                 <ShellSubmessage text={props.input.command} animate={sawPending} />
               </Show>
             </div>
