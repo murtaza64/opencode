@@ -6,6 +6,7 @@ import { createResource, createSignal, onCleanup, onMount, Show } from "solid-js
 import { es, type IssueDetail } from "./api"
 import { ago, jiraUrl, linkUrl, useDashboard } from "./state"
 import { IssueChips } from "./pages/issue"
+import { Pr } from "./components/pr"
 
 // SD-123 / DLAA-31571 (jira) · owner/repo#12 · dotfiles#77 · bare #77
 const REF_RE = /\b[A-Z][A-Z0-9]{1,9}-\d+\b|(?:\b[\w.-]+\/)?(?:\b[\w.-]+)?#\d+(?![\w-])/g
@@ -35,6 +36,15 @@ export function refFromHref(href: string): string | null {
   m = url.match(/^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/(\d+)\b/)
   if (m) return `${m[1]}#${m[2]}`
   return null
+}
+
+/* PR from a link target — the href is authoritative: a repo#N text inside an
+ * anchor pointing at /pull/N is a PR, not a ticket. */
+export function prFromHref(href: string): { repo: string; number: number; url: string } | null {
+  const url = href.replace(/^https:\/\/duo\.fyi\/ink\//, "")
+  const m = url.match(/^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)\b/)
+  if (!m) return null
+  return { repo: m[1]!, number: Number(m[2]), url: `https://github.com/${m[1]}/pull/${m[2]}` }
 }
 
 /* Wrap ticket refs found in text nodes under root — including inside anchors
@@ -77,28 +87,35 @@ const detailCache = new Map<string, Promise<IssueDetail>>()
 
 /* Floating hover card. Mount once per page; delegates on `container`. */
 export function TicketTip(props: { container: () => HTMLElement | undefined }) {
-  const { editspace } = useDashboard()
-  // anchor = the hovered element + its resolved ticket text; measured lazily
+  const { editspace, state } = useDashboard()
+  // anchor = the hovered element + its resolved ticket/PR; measured lazily
   // so transcript auto-pin scrolls reposition the card instead of killing it
-  const [anchor, setAnchor] = createSignal<{ el: HTMLElement; ticket: string } | null>(null)
+  type Anchor = { el: HTMLElement; ticket: string; pr?: { repo: string; number: number; url: string } }
+  const [anchor, setAnchor] = createSignal<Anchor | null>(null)
   const [tick, setTick] = createSignal(0)
   let hideTimer: ReturnType<typeof setTimeout> | undefined
 
-  const show = (el: HTMLElement, ticket: string) => {
+  const show = (hit: Anchor) => {
     clearTimeout(hideTimer)
-    setAnchor({ el, ticket })
+    setAnchor(hit)
   }
   const scheduleHide = () => {
     clearTimeout(hideTimer)
     hideTimer = setTimeout(() => setAnchor(null), 200)
   }
 
-  // wrapped text ref, else a link whose target is a ticket (github/jira URL)
-  const resolve = (e: Event): { el: HTMLElement; ticket: string } | null => {
+  // wrapped text ref or a link whose target is a ticket/PR; a /pull/ href
+  // wins over ref-shaped anchor text
+  const resolve = (e: Event): Anchor | null => {
     const t = e.target as Element | null
     const ref = t?.closest?.(".ticket-ref")
-    if (ref instanceof HTMLElement) return { el: ref, ticket: ref.dataset.ticket ?? "" }
     const a = t?.closest?.("a[href]")
+    const pr = a instanceof HTMLAnchorElement ? prFromHref(a.href) : null
+    if (pr) {
+      const el = ref instanceof HTMLElement ? ref : (a as HTMLAnchorElement)
+      return { el, ticket: `${pr.repo}#${pr.number}`, pr }
+    }
+    if (ref instanceof HTMLElement) return { el: ref, ticket: ref.dataset.ticket ?? "" }
     if (a instanceof HTMLAnchorElement) {
       const ticket = refFromHref(a.href)
       if (ticket) return { el: a, ticket }
@@ -109,7 +126,7 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
   onMount(() => {
     const over = (e: Event) => {
       const hit = resolve(e)
-      if (hit) show(hit.el, hit.ticket)
+      if (hit) show(hit)
     }
     const out = (e: Event) => {
       if (resolve(e)) scheduleHide()
@@ -137,9 +154,29 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
     })
   })
 
+  // known PRs from dashboard state (thread PRs + unattached) by repo+number
+  const findPr = (repo: string, number: number) => {
+    const st = state() as any
+    if (!st) return null
+    const all = [...(st.unattached_prs ?? []), ...(st.threads ?? []).flatMap((t: any) => t.prs ?? [])]
+    return all.find((p: any) => p.number === number && (p.repo === repo || p.repo?.endsWith(`/${repo}`))) ?? null
+  }
+
+  /* PR resolution: an explicit /pull/ href, or a repo#N text ref matching a
+   * PR the dashboard tracks. */
+  const prHit = () => {
+    const a = anchor()
+    if (!a) return null
+    if (a.pr) return { url: a.pr.url, data: findPr(a.pr.repo, a.pr.number) }
+    const m = a.ticket.match(/^([\w.-]+(?:\/[\w.-]+)?)#(\d+)$/)
+    if (!m) return null
+    const found = findPr(m[1]!, Number(m[2]))
+    return found ? { url: found.url as string, data: found } : null
+  }
+
   const info = () => {
     const a = anchor()
-    return a ? classifyRef(a.ticket) : null
+    return a && !prHit() ? classifyRef(a.ticket) : null
   }
 
   // jira keys resolve through the same API (es_browse_lib bypasses the
@@ -194,6 +231,18 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
             return !expect || doc.url === expect ? doc : undefined
           }
           return (
+          <Show when={!prHit()} fallback={
+            <Show when={prHit()?.data} fallback={
+              <div class="tip-row">
+                <span class="mono">{anchor()!.ticket}</span>
+                <a href={linkUrl(prHit()!.url)} target="_blank">open PR ↗</a>
+              </div>
+            }>
+              <div class="tip-pr">
+                <Pr pr={prHit()!.data} />
+              </div>
+            </Show>
+          }>
           <Show when={verified()} fallback={
             <div class="tip-row">
               <span class="mono">{anchor()!.ticket}</span>
@@ -234,6 +283,7 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
                 </div>
               </>
             )}
+          </Show>
           </Show>
           )
         })()}

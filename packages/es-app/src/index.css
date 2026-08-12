@@ -129,6 +129,7 @@
 }
 .ticket-tip .tip-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .ticket-tip .tip-links a { color: var(--sapphire); }
+.ticket-tip .tip-pr .pr-title-row { margin: 0; }
 
 * {
   border-radius: 0 !important;
