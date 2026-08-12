@@ -12,12 +12,29 @@ const REF_RE = /\b[A-Z][A-Z0-9]{1,9}-\d+\b|(?:\b[\w.-]+\/)?(?:\b[\w.-]+)?#\d+(?!
 
 type RefKind = "jira" | "github" | "tracker"
 
-export function classifyRef(text: string): { kind: RefKind; ref: string; href?: string } {
+/* verifyUrl: qualified github refs fetch from the editspace tracker by bare
+ * number, which silently resolves against the WRONG repo when the ref points
+ * elsewhere — only show metadata when the fetched issue's url matches. */
+export function classifyRef(text: string): { kind: RefKind; ref: string; href?: string; verifyUrl?: string } {
   if (/^[A-Z][A-Z0-9]{1,9}-\d+$/.test(text)) return { kind: "jira", ref: text, href: jiraUrl(text) }
   const m = text.match(/^(?:([\w.-]+\/[\w.-]+))?(?:[\w.-]*)#(\d+)$/)
-  if (m?.[1]) return { kind: "github", ref: text, href: `https://github.com/${m[1]}/issues/${m[2]}` }
+  if (m?.[1]) {
+    const href = `https://github.com/${m[1]}/issues/${m[2]}`
+    return { kind: "github", ref: m[2]!, href, verifyUrl: href }
+  }
   // bare #N or name#N: resolve against the editspace tracker
   return { kind: "tracker", ref: text.slice(text.indexOf("#") + 1) }
+}
+
+/* Ticket ref from a link target: github issue links (incl. ink-wrapped) and
+ * jira browse links — covers refs rendered as URLs with no ref-shaped text. */
+export function refFromHref(href: string): string | null {
+  const url = href.replace(/^https:\/\/duo\.fyi\/ink\//, "")
+  let m = url.match(/^https:\/\/[\w.-]+\.atlassian\.net\/browse\/([A-Z][A-Z0-9]{1,9}-\d+)\b/)
+  if (m) return m[1]!
+  m = url.match(/^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/(\d+)\b/)
+  if (m) return `${m[1]}#${m[2]}`
+  return null
 }
 
 /* Wrap ticket refs found in text nodes under root — including inside anchors
@@ -61,31 +78,44 @@ const detailCache = new Map<string, Promise<IssueDetail>>()
 /* Floating hover card. Mount once per page; delegates on `container`. */
 export function TicketTip(props: { container: () => HTMLElement | undefined }) {
   const { editspace } = useDashboard()
-  // anchor = the hovered ref element; measured lazily so transcript auto-pin
-  // scrolls reposition the card instead of killing it
-  const [anchor, setAnchor] = createSignal<HTMLElement | null>(null)
+  // anchor = the hovered element + its resolved ticket text; measured lazily
+  // so transcript auto-pin scrolls reposition the card instead of killing it
+  const [anchor, setAnchor] = createSignal<{ el: HTMLElement; ticket: string } | null>(null)
   const [tick, setTick] = createSignal(0)
   let hideTimer: ReturnType<typeof setTimeout> | undefined
 
-  const show = (el: HTMLElement) => {
+  const show = (el: HTMLElement, ticket: string) => {
     clearTimeout(hideTimer)
-    setAnchor(el)
+    setAnchor({ el, ticket })
   }
   const scheduleHide = () => {
     clearTimeout(hideTimer)
     hideTimer = setTimeout(() => setAnchor(null), 200)
   }
 
+  // wrapped text ref, else a link whose target is a ticket (github/jira URL)
+  const resolve = (e: Event): { el: HTMLElement; ticket: string } | null => {
+    const t = e.target as Element | null
+    const ref = t?.closest?.(".ticket-ref")
+    if (ref instanceof HTMLElement) return { el: ref, ticket: ref.dataset.ticket ?? "" }
+    const a = t?.closest?.("a[href]")
+    if (a instanceof HTMLAnchorElement) {
+      const ticket = refFromHref(a.href)
+      if (ticket) return { el: a, ticket }
+    }
+    return null
+  }
+
   onMount(() => {
     const over = (e: Event) => {
-      const el = (e.target as Element | null)?.closest?.(".ticket-ref")
-      if (el instanceof HTMLElement) show(el)
+      const hit = resolve(e)
+      if (hit) show(hit.el, hit.ticket)
     }
     const out = (e: Event) => {
-      if ((e.target as Element | null)?.closest?.(".ticket-ref")) scheduleHide()
+      if (resolve(e)) scheduleHide()
     }
     const reposition = () => {
-      const el = anchor()
+      const el = anchor()?.el
       if (!el) return
       if (!el.isConnected) return setAnchor(null)
       const r = el.getBoundingClientRect()
@@ -108,16 +138,17 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
   })
 
   const info = () => {
-    const el = anchor()
-    return el ? classifyRef(el.dataset.ticket ?? "") : null
+    const a = anchor()
+    return a ? classifyRef(a.ticket) : null
   }
 
   // jira keys resolve through the same API (es_browse_lib bypasses the
-  // editspace backend for them); only qualified owner/repo#N stays link-only
+  // editspace backend for them); qualified github refs fetch too but their
+  // metadata renders only after the url verification below
   const [detail] = createResource(
     () => {
       const i = info()
-      return i && i.kind !== "github" ? { ref: i.ref, es: editspace() } : null
+      return i ? { ref: i.ref, es: editspace() } : null
     },
     (src) => {
       const key = `${src.es ?? ""}\u0000${src.ref}`
@@ -133,7 +164,7 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
 
   const pos = () => {
     tick() // re-measure on container scroll
-    const r = anchor()!.getBoundingClientRect()
+    const r = anchor()!.el.getBoundingClientRect()
     // keep the card on-screen: flip above the ref when close to the bottom
     const width = 380
     const x = Math.min(r.left, window.innerWidth - width - 12)
@@ -152,19 +183,24 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
         onMouseEnter={() => clearTimeout(hideTimer)}
         onMouseLeave={scheduleHide}
       >
-        <Show when={info()?.kind !== "github"} fallback={
-          <div class="tip-row">
-            <span class="mono">{anchor()!.dataset.ticket}</span>
-            <a href={linkUrl(info()!.href!)} target="_blank">
-              open in github ↗
-            </a>
-          </div>
-        }>
-          <Show when={!detail.error && detail()} fallback={
+        {(() => {
+          // reject cross-repo hits: qualified refs fetched by bare number must
+          // round-trip to the same github issue url
+          const verified = () => {
+            if (detail.error) return undefined
+            const doc = detail()
+            if (!doc) return undefined
+            const expect = info()?.verifyUrl
+            return !expect || doc.url === expect ? doc : undefined
+          }
+          return (
+          <Show when={verified()} fallback={
             <div class="tip-row">
-              <span class="dim">{detail.error ? "no ticket info" : "loading…"}</span>
-              <Show when={detail.error && info()?.href}>
-                <a href={linkUrl(info()!.href!)} target="_blank">open in jira ↗</a>
+              <span class="mono">{anchor()!.ticket}</span>
+              <Show when={info()?.href} fallback={<span class="dim">{detail.loading ? "loading…" : "no ticket info"}</span>}>
+                <a href={linkUrl(info()!.href!)} target="_blank">
+                  open in {info()?.kind === "jira" ? "jira" : "github"} ↗
+                </a>
               </Show>
             </div>
           }>
@@ -199,7 +235,8 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
               </>
             )}
           </Show>
-        </Show>
+          )
+        })()}
       </div>
     </Show>
   )
