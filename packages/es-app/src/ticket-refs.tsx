@@ -1,13 +1,11 @@
 /* Ticket-ref hover cards: agents cite tickets bare (SD-123, dotfiles#77, #77)
- * with no context — wrap refs found in the rendered transcript and show
- * tracker info on hover, with links to the in-app ticket page and the
- * external tracker (jira/github). */
+ * with no context — wrap refs found anywhere in the shell (transcript,
+ * sidebar, panels) and show tracker info on hover, with links to the in-app
+ * ticket page and the external tracker (jira/github). */
 import { createResource, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { es, type IssueDetail } from "./api"
-import { ago, linkUrl, useDashboard } from "./state"
+import { ago, jiraUrl, linkUrl, useDashboard } from "./state"
 import { IssueChips } from "./pages/issue"
-
-const JIRA_BASE = "https://duolingo.atlassian.net/browse/"
 
 // SD-123 / DLAA-31571 (jira) · owner/repo#12 · dotfiles#77 · bare #77
 const REF_RE = /\b[A-Z][A-Z0-9]{1,9}-\d+\b|(?:\b[\w.-]+\/)?(?:\b[\w.-]+)?#\d+(?![\w-])/g
@@ -15,21 +13,23 @@ const REF_RE = /\b[A-Z][A-Z0-9]{1,9}-\d+\b|(?:\b[\w.-]+\/)?(?:\b[\w.-]+)?#\d+(?!
 type RefKind = "jira" | "github" | "tracker"
 
 export function classifyRef(text: string): { kind: RefKind; ref: string; href?: string } {
-  if (/^[A-Z][A-Z0-9]{1,9}-\d+$/.test(text)) return { kind: "jira", ref: text, href: JIRA_BASE + text }
+  if (/^[A-Z][A-Z0-9]{1,9}-\d+$/.test(text)) return { kind: "jira", ref: text, href: jiraUrl(text) }
   const m = text.match(/^(?:([\w.-]+\/[\w.-]+))?(?:[\w.-]*)#(\d+)$/)
   if (m?.[1]) return { kind: "github", ref: text, href: `https://github.com/${m[1]}/issues/${m[2]}` }
   // bare #N or name#N: resolve against the editspace tracker
   return { kind: "tracker", ref: text.slice(text.indexOf("#") + 1) }
 }
 
-/* Wrap ticket refs found in text nodes under root. Idempotent: already
- * wrapped refs (and anchors, which the ink rewrite owns) are skipped, so the
- * MutationObserver that calls this converges. */
+/* Wrap ticket refs found in text nodes under root — including inside anchors
+ * (sidebar rows, linkified refs): the span doesn't affect navigation and the
+ * hover card is still useful there. Idempotent: already wrapped refs are
+ * skipped, so the MutationObserver that calls this converges. */
 export function wrapTicketRefs(root: HTMLElement) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       const p = node.parentElement
-      if (!p || p.closest("a, .ticket-ref, textarea, script, style")) return NodeFilter.FILTER_REJECT
+      if (!p || p.closest(".ticket-ref, .ticket-tip, textarea, select, script, style"))
+        return NodeFilter.FILTER_REJECT
       REF_RE.lastIndex = 0
       return REF_RE.test(node.nodeValue ?? "") ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
     },
@@ -96,11 +96,13 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
     if (!c) return
     c.addEventListener("mouseover", over)
     c.addEventListener("mouseout", out)
-    c.addEventListener("scroll", reposition, { passive: true })
+    // capture: scrolls happen in inner scrollers (transcript, sidebar) and
+    // scroll events don't bubble
+    window.addEventListener("scroll", reposition, { passive: true, capture: true })
     onCleanup(() => {
       c.removeEventListener("mouseover", over)
       c.removeEventListener("mouseout", out)
-      c.removeEventListener("scroll", reposition)
+      window.removeEventListener("scroll", reposition, { capture: true })
       clearTimeout(hideTimer)
     })
   })
@@ -110,10 +112,12 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
     return el ? classifyRef(el.dataset.ticket ?? "") : null
   }
 
+  // jira keys resolve through the same API (es_browse_lib bypasses the
+  // editspace backend for them); only qualified owner/repo#N stays link-only
   const [detail] = createResource(
     () => {
       const i = info()
-      return i?.kind === "tracker" ? { ref: i.ref, es: editspace() } : null
+      return i && i.kind !== "github" ? { ref: i.ref, es: editspace() } : null
     },
     (src) => {
       const key = `${src.es ?? ""}\u0000${src.ref}`
@@ -148,20 +152,30 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
         onMouseEnter={() => clearTimeout(hideTimer)}
         onMouseLeave={scheduleHide}
       >
-        <Show when={info()?.kind === "tracker"} fallback={
+        <Show when={info()?.kind !== "github"} fallback={
           <div class="tip-row">
             <span class="mono">{anchor()!.dataset.ticket}</span>
             <a href={linkUrl(info()!.href!)} target="_blank">
-              open in {info()?.kind === "jira" ? "jira" : "github"} ↗
+              open in github ↗
             </a>
           </div>
         }>
-          <Show when={detail()} fallback={<div class="dim">{detail.error ? `no ticket info (${anchor()!.dataset.ticket})` : "loading…"}</div>}>
+          <Show when={!detail.error && detail()} fallback={
+            <div class="tip-row">
+              <span class="dim">{detail.error ? "no ticket info" : "loading…"}</span>
+              <Show when={detail.error && info()?.href}>
+                <a href={linkUrl(info()!.href!)} target="_blank">open in jira ↗</a>
+              </Show>
+            </div>
+          }>
             {(doc) => (
               <>
                 <div class="tip-title">
-                  <span class="issue-num">#{doc().number ?? doc().ref}</span> {doc().title}
+                  <span class="issue-num">{doc().number != null ? `#${doc().number}` : doc().ref}</span> {doc().title}
                 </div>
+                <Show when={doc().status && doc().backend === "jira"}>
+                  <div class="tip-row dim">{doc().status}</div>
+                </Show>
                 <div class="tip-row">
                   <IssueChips row={doc()} />
                 </div>
@@ -178,7 +192,7 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
                   <a href={`/issue?ref=${encodeURIComponent(doc().ref)}`}>ticket page</a>
                   <Show when={doc().url}>
                     <a href={linkUrl(doc().url)} target="_blank">
-                      {doc().backend === "gh" ? "github ↗" : "open ↗"}
+                      {doc().backend === "gh" ? "github ↗" : doc().backend === "jira" ? "jira ↗" : "open ↗"}
                     </a>
                   </Show>
                 </div>

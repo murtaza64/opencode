@@ -13,6 +13,7 @@ import IssuePage from "./pages/issue"
 import DocPage from "./pages/doc"
 import Sidebar from "./components/sidebar"
 import { DashboardProvider, linkUrl } from "./state"
+import { TicketTip, wrapTicketRefs } from "./ticket-refs"
 import { installSidebarKeys, leftOpen, startDrag } from "./ui"
 
 // Route EVERY GitHub anchor through ink, wherever it was rendered (transcript
@@ -39,6 +40,28 @@ function installInkLinks() {
 function Providers(props: ParentProps) {
   onMount(() => onCleanup(installSidebarKeys()))
   onMount(() => onCleanup(installInkLinks()))
+  let shellEl: HTMLDivElement | undefined
+  // ticket refs everywhere in the shell (transcript, sidebar, panels):
+  // rAF-debounced since streaming produces mutation bursts, and the wrap
+  // itself mutates the DOM (idempotent, so the observer converges)
+  onMount(() => {
+    if (!shellEl) return
+    let frame: number | undefined
+    const wrap = () => {
+      if (frame !== undefined) return
+      frame = requestAnimationFrame(() => {
+        frame = undefined
+        if (shellEl) wrapTicketRefs(shellEl)
+      })
+    }
+    wrap()
+    const mo = new MutationObserver(wrap)
+    mo.observe(shellEl, { childList: true, subtree: true })
+    onCleanup(() => {
+      mo.disconnect()
+      if (frame !== undefined) cancelAnimationFrame(frame)
+    })
+  })
   return (
     <MetaProvider>
       <DialogProvider>
@@ -47,12 +70,13 @@ function Providers(props: ParentProps) {
             * tool renders (edit/write/read) incl. inline image media */}
           <FileComponentProvider component={File}>
             <DashboardProvider>
-              <div class="shell">
+              <div class="shell" ref={shellEl}>
                 <Sidebar />
                 <Show when={leftOpen()}>
                   <div class="drag-handle" onMouseDown={(e) => startDrag("left", e)} />
                 </Show>
                 <div class="content">{props.children}</div>
+                <TicketTip container={() => shellEl} />
               </div>
             </DashboardProvider>
           </FileComponentProvider>
