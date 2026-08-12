@@ -97,6 +97,39 @@
   40% { opacity: 1; transform: scale(1); }
 }
 
+/* ticket refs (SD-123, dotfiles#77) wrapped in the transcript: subtle
+ * affordance, hover card with tracker info */
+.ticket-ref {
+  text-decoration: underline dotted color-mix(in srgb, var(--sapphire) 60%, transparent);
+  text-underline-offset: 3px;
+  cursor: help;
+}
+.ticket-tip {
+  position: fixed;
+  z-index: 60;
+  width: 380px;
+  background: var(--crust);
+  border: 1px solid var(--surface1);
+  border-left: 3px solid var(--sapphire);
+  padding: 10px 12px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+}
+.ticket-tip .tip-title { font-weight: bold; }
+.ticket-tip .tip-title .issue-num { color: var(--sapphire); font-family: var(--font-mono); }
+.ticket-tip .tip-body {
+  color: var(--subtext0);
+  max-height: 72px;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ticket-tip .tip-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ticket-tip .tip-links a { color: var(--sapphire); }
+
 * {
   border-radius: 0 !important;
 }

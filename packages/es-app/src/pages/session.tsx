@@ -8,6 +8,7 @@ import { oc } from "../api"
 import { createLiveSession } from "../live-session"
 import FakeCaret from "../components/fake-caret"
 import SessionInfo from "../components/session-info"
+import { TicketTip, wrapTicketRefs } from "../ticket-refs"
 import { sessionHref, useDashboard } from "../state"
 import { rightOpen, startDrag } from "../ui"
 import { createVim } from "../vim"
@@ -189,9 +190,22 @@ function SessionView(props: { sessionID: string; directory: string }) {
     }
   }
   onMount(() => {
-    const mo = new MutationObserver(() => stampTools())
+    // rAF-debounced: streaming produces mutation bursts, and wrapTicketRefs
+    // itself mutates the DOM (idempotent, so the observer converges)
+    let frame: number | undefined
+    const mo = new MutationObserver(() => {
+      if (frame !== undefined) return
+      frame = requestAnimationFrame(() => {
+        frame = undefined
+        stampTools()
+        if (transcriptEl) wrapTicketRefs(transcriptEl)
+      })
+    })
     if (transcriptEl) mo.observe(transcriptEl, { childList: true, subtree: true })
-    onCleanup(() => mo.disconnect())
+    onCleanup(() => {
+      mo.disconnect()
+      if (frame !== undefined) cancelAnimationFrame(frame)
+    })
     // paint the normal-mode block caret before any interaction
     vim.refresh(promptEl)
   })
@@ -894,6 +908,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
         <div class="drag-handle" onMouseDown={(e) => startDrag("right", e)} />
       </Show>
       <SessionInfo sessionID={sessionID} session={session()} parts={live.data.part} />
+      <TicketTip container={() => transcriptEl} />
     </main>
   )
 }
