@@ -238,9 +238,14 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
                 <a href={linkUrl(prHit()!.url)} target="_blank">open PR ↗</a>
               </div>
             }>
-              <div class="tip-pr">
-                <Pr pr={prHit()!.data} />
-              </div>
+              <>
+                <Show when={prHit()!.data.title}>
+                  <div class="tip-title">{prHit()!.data.title}</div>
+                </Show>
+                <div class="tip-pr">
+                  <Pr pr={prHit()!.data} />
+                </div>
+              </>
             </Show>
           }>
           <Show when={verified()} fallback={
