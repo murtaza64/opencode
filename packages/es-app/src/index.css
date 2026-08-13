@@ -102,7 +102,7 @@
 .ticket-ref {
   text-decoration: underline dotted color-mix(in srgb, var(--sapphire) 60%, transparent);
   text-underline-offset: 3px;
-  cursor: help;
+  cursor: pointer;
 }
 .ticket-tip {
   position: fixed;
