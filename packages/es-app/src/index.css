@@ -370,6 +370,31 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
   font-weight: bold;
 }
 .nav-empty { padding: 4px 14px; }
+/* sidebar transcript search */
+.search-box { padding: 8px 10px 0; }
+.search-input {
+  width: 100%;
+  background: var(--crust);
+  border: 1px solid var(--surface0);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 6px;
+}
+.search-input:focus { outline: none; border-color: var(--lavender); }
+.search-result { align-items: flex-start; }
+.search-result-body { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
+.search-snippet {
+  color: var(--overlay1);
+  font-size: 11px;
+  white-space: normal;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-all;
+}
+.search-meta { color: var(--overlay0); font-size: 10px; }
 .notification-section {
   margin-bottom: 6px;
   padding-bottom: 6px;

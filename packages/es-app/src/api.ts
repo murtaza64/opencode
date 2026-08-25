@@ -168,6 +168,16 @@ export type DocContent = {
 
 const esQ = (es?: string) => (es ? `es=${encodeURIComponent(es)}` : "")
 
+export interface SessionSearchResult {
+  id: string
+  title: string
+  directory: string
+  parent_id: string | null
+  updated: number | null
+  snippet: string
+  matches: number
+}
+
 export const es = {
   editspaces: (): Promise<{ editspaces: { name: string; root: string }[]; default: string | null }> =>
     fetch("/es/api/editspaces").then(json<{ editspaces: { name: string; root: string }[]; default: string | null }>),
@@ -200,4 +210,10 @@ export const es = {
     }).then(json),
   curate: (esName?: string): Promise<any> =>
     fetch(`/es/api/curate?force=true&${esQ(esName)}`, { method: "POST" }).then(json),
+  // substring search over session titles + transcripts (opencode sqlite);
+  // days=0 = all time (slow: full part-table scan)
+  search: (q: string, days = 30): Promise<{ query: string; results: SessionSearchResult[] }> =>
+    fetch(`/es/api/search?q=${encodeURIComponent(q)}&days=${days}`).then(
+      json<{ query: string; results: SessionSearchResult[] }>,
+    ),
 }
