@@ -360,6 +360,15 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
   box-shadow: inset 3px 0 0 var(--lavender);
 }
 .nav-item .nav-title { overflow: hidden; text-overflow: ellipsis; }
+.session-project {
+  margin-left: auto;
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  color: var(--overlay1);
+}
 .board-link { font-weight: bold; color: var(--text); }
 .nav-heading {
   font-size: 11px;
