@@ -2,7 +2,7 @@
  * mini icon rail — expand toggle up top (where the switcher lives), board
  * icon, then one status dot per session, still navigable. Archived sessions
  * drop to a collapsed section at the bottom of the expanded view. */
-import { createSignal, For, Show } from "solid-js"
+import { createMemo, createSignal, For, Show } from "solid-js"
 import { A } from "@solidjs/router"
 import { es, type SessionSearchResult } from "../api"
 import { sessionHref, useDashboard } from "../state"
@@ -11,11 +11,13 @@ import { leftOpen, leftWidth, toggleLeft } from "../ui"
 export default function Sidebar() {
   const { state, dotFor, editspace, setEditspace, editspaces, archivedIds, notifications, markViewed } =
     useDashboard()
-  const all = () =>
+  const all = (): { id: string; title: string; directory: string; live: string; updated: number }[] =>
     (state()?.threads ?? [])
       .filter((t: any) => t.kind === "session" && t.sessions[0])
       .map((t: any) => t.sessions[0])
-  const sessions = () => all().filter((s: any) => !archivedIds().has(s.id))
+  const sessions = createMemo(() =>
+    all().filter((s) => !archivedIds().has(s.id)).sort((a, b) => b.updated - a.updated),
+  )
   const archived = () => all().filter((s: any) => archivedIds().has(s.id))
   const [showArchived, setShowArchived] = createSignal(false)
   const current = () => editspace() ?? editspaces()?.default ?? state()?.editspace ?? ""
@@ -201,9 +203,22 @@ export default function Sidebar() {
             </>
           }
         >
-          <div class="nav-heading">sessions</div>
           <Show when={sessions().length} fallback={<div class="dim nav-empty">none</div>}>
-            <For each={sessions()}>{(s: any) => item(s)}</For>
+            <For each={sessions()}>
+              {(s, index) => {
+                const day = () => new Date(s.updated).toDateString()
+                return (
+                  <>
+                    <Show when={index() === 0 || day() !== new Date(sessions()[index() - 1].updated).toDateString()}>
+                      <div class="nav-heading">
+                        {day() === new Date().toDateString() ? "Today" : day()}
+                      </div>
+                    </Show>
+                    {item(s)}
+                  </>
+                )
+              }}
+            </For>
           </Show>
           <Show when={archived().length}>
             <button class="archived-toggle" onClick={() => setShowArchived(!showArchived())}>
