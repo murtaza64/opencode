@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show, untrack } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { SessionV1InputReceipt } from "@opencode-ai/sdk/v2"
-import { useTerminalDimensions } from "@opentui/solid"
+import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { useSDK } from "../../context/sdk"
 import { usePromptRef } from "../../context/prompt"
 import { useTheme } from "../../context/theme"
@@ -21,7 +21,7 @@ const createComposerState = () =>
     result: undefined as AsideResult | undefined,
     question: "",
     transaction: undefined as
-      | { requestID: string; delivery: "queue" | "steer"; text: string; revision: number }
+      | { requestID: string; delivery: "queue" | "steer"; text: string; revision: number; uncertain?: boolean }
       | undefined,
     sending: false,
     cleared: 0,
@@ -236,12 +236,28 @@ export const useComposerDelivery = (props: {
             text: transaction.text,
           },
         },
-        { throwOnError: true, signal: AbortSignal.timeout(15_000) },
+        { throwOnError: false, signal: AbortSignal.timeout(15_000) },
       )
-      acknowledge(response.data)
-    } catch {
-      if (!(await reconcile()))
-        setState("notice", "Acknowledgement unknown. Check status or retry the same saved input.")
+      const status = response.response.status
+      if (response.data) {
+        acknowledge(response.data)
+        return
+      }
+      const reason = errorMessage(response.error ?? `HTTP ${status} without a receipt`)
+      if (!transaction.uncertain && [400, 401, 403, 404, 405, 409, 413, 415, 422].includes(status)) {
+        if (state.transaction?.requestID === transaction.requestID) setState("transaction", undefined)
+        setState("notice", `Input rejected: ${reason}. Draft saved; edit and send again.`)
+        return
+      }
+      throw new Error(reason)
+    } catch (cause) {
+      if (state.transaction?.requestID === transaction.requestID)
+        setState("transaction", { ...transaction, uncertain: true })
+      if (!(await reconcile()) && state.transaction?.requestID === transaction.requestID)
+        setState(
+          "notice",
+          `Acknowledgement unknown: ${errorMessage(cause)}. Check status or retry the same saved input.`,
+        )
     } finally {
       setState("sending", false)
     }
@@ -331,9 +347,15 @@ export const ComposerDelivery = (props: {
   busy: boolean
   activate?: () => void
   submit: () => void
+  useSessionModel?: () => void
 }) => {
   const c = props.controller
   const { theme } = useTheme()
+  const renderer = useRenderer()
+  const click = (action: () => void) => () => {
+    if (renderer.getSelection()?.getSelectedText()) return
+    action()
+  }
   const dimensions = useTerminalDimensions()
   const shortcut = useCommandShortcut("prompt.delivery.cycle")
   const [now, setNow] = createSignal(Date.now())
@@ -348,16 +370,16 @@ export const ComposerDelivery = (props: {
       </Show>
       <Show when={c.state.transaction && !c.state.sending}>
         <box flexDirection="row" gap={2}>
-          <text id="composer-reconcile" fg={theme.primary} onMouseUp={() => void c.reconcile()}>
+          <text id="composer-reconcile" fg={theme.primary} onMouseUp={click(() => void c.reconcile())}>
             Check status
           </text>
-          <text id="composer-retry" fg={theme.primary} onMouseUp={() => void c.retry()}>
+          <text id="composer-retry" fg={theme.primary} onMouseUp={click(() => void c.retry())}>
             Retry same input
           </text>
         </box>
       </Show>
       <Show when={c.rows().length || c.listError()}>
-        <text fg={theme.textMuted} onMouseUp={() => void c.refresh()}>
+        <text fg={theme.textMuted} onMouseUp={click(() => void c.refresh())}>
           Pending task inputs (click to refresh)
         </text>
         <text fg={theme.warning}>{c.listError()}</text>
@@ -366,7 +388,7 @@ export const ComposerDelivery = (props: {
             {(row) => (
               <text
                 fg={theme.textMuted}
-                onMouseUp={() => void c.cancelInput(row.requestID)}
+                onMouseUp={click(() => void c.cancelInput(row.requestID))}
               >{`${row.delivery}: ${row.text.slice(0, 60)} [cancel]`}</text>
             )}
           </For>
@@ -376,7 +398,7 @@ export const ComposerDelivery = (props: {
         <box border={["left"]} borderColor={theme.primary} paddingLeft={1}>
           <box flexDirection="row" gap={2}>
             <text fg={theme.primary}>Aside (not sent to task)</text>
-            <text id="aside-close" fg={theme.textMuted} onMouseUp={c.closeAside}>
+            <text id="aside-close" fg={theme.textMuted} onMouseUp={click(c.closeAside)}>
               {c.asideBusy() ? "Cancel / Close Aside" : "Close Aside"}
             </text>
           </box>
@@ -405,10 +427,10 @@ export const ComposerDelivery = (props: {
               <text
                 id={`composer-${mode}`}
                 fg={c.state.mode === mode ? theme.primary : theme.textMuted}
-                onMouseUp={() => {
+                onMouseUp={click(() => {
                   props.activate?.()
                   c.select(mode)
-                }}
+                })}
               >
                 {c.state.mode === mode
                   ? `[${mode[0].toUpperCase()}${mode.slice(1)}]`
@@ -418,14 +440,14 @@ export const ComposerDelivery = (props: {
           </For>
           <text fg={theme.textMuted}>{shortcut()} mode</text>
           <Show when={!props.busy && !c.state.transaction}>
-            <text id="composer-send" fg={theme.textMuted} onMouseUp={() => c.select("send")}>
+            <text id="composer-send" fg={theme.textMuted} onMouseUp={click(() => c.select("send"))}>
               Use normal Send
             </text>
           </Show>
         </box>
         <text fg={theme.textMuted}>
           {c.state.mode === "aside"
-            ? "Task draft saved. Ephemeral snapshot; no tools."
+            ? "Task draft saved. Snapshot only; no tools. Esc closes Aside."
             : c.state.mode === "queue"
               ? "After task is idle. Uses session agent/model."
               : "At next safe boundary. Uses session agent/model."}
@@ -433,7 +455,12 @@ export const ComposerDelivery = (props: {
         <text minHeight={1} fg={theme.warning}>
           {c.blocked() ?? ""}
         </text>
-        <text id="composer-submit" fg={c.blocked() ? theme.textMuted : theme.primary} onMouseUp={props.submit}>
+        <Show when={props.useSessionModel}>
+          <text id="composer-session-model" fg={theme.primary} onMouseUp={click(() => props.useSessionModel?.())}>
+            Use session model
+          </text>
+        </Show>
+        <text id="composer-submit" fg={c.blocked() ? theme.textMuted : theme.primary} onMouseUp={click(props.submit)}>
           {c.state.mode === "aside"
             ? c.asideBusy()
               ? "Asking Aside..."

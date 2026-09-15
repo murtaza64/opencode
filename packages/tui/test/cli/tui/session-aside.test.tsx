@@ -57,6 +57,7 @@ const mountSession = async (
     pendingFetch?: FetchHandler
     events?: ReturnType<typeof createEventSource>
     sessionDirectory?: string
+    sessionModel?: { providerID: string; id: string }
   } = {},
 ) => {
   const state = path.join(root, "state")
@@ -69,6 +70,7 @@ const mountSession = async (
     directory: options.sessionDirectory ?? root,
     title: "Parent task",
     agent: "build",
+    ...(options.sessionModel ? { model: options.sessionModel } : {}),
     slug: "parent-task",
     version: "1",
     time: { created: 1_700_000_000_000, updated: 1_700_000_000_000 },
@@ -105,7 +107,13 @@ const mountSession = async (
       ])
     if (url.pathname === "/config/providers")
       return json({
-        providers: [{ id: "test", name: "Test", models: { model: { id: "model", name: "Test model" } } }],
+        providers: [
+          {
+            id: "test",
+            name: "Test",
+            models: { model: { id: "model", name: "Test model" }, other: { id: "other", name: "Other model" } },
+          },
+        ],
         default: { test: "model" },
       })
     return undefined
@@ -133,6 +141,7 @@ const mountSession = async (
       return json(row, { status: cancelRace ? 409 : 200 })
     }
     requests.push(request)
+    if (new URL(request.url).pathname === "/session/ses_parent/abort") return json(true)
     if (!["/session/ses_parent/aside", "/session/ses_parent/input"].includes(new URL(request.url).pathname))
       throw new Error(`Unexpected mutation: ${request.method} ${new URL(request.url).pathname}`)
     const response = Promise.withResolvers<Response>()
@@ -295,6 +304,118 @@ const mountSession = async (
     },
   }
 }
+
+test("a definitively rejected input keeps its draft editable for a corrected submission", async () => {
+  await using tmp = await tmpdir()
+  using view = await mountSession(tmp.path)
+  await view.app.mockInput.typeText("Rejected task")
+  await view.click("Enter: Queue message")
+  await wait(() => view.responses.length === 1)
+  const rejected = await view.requests[0].clone().json()
+  view.responses[0].resolve(json({ name: "InputInvalid", data: { message: "Unknown agent" } }, { status: 400 }))
+  await wait(async () => (await view.frame()).includes("Input rejected: Unknown agent"))
+  expect(view.prompt.current!.current.input).toBe("Rejected task")
+  expect(await view.frame()).not.toContain("Retry same input")
+  view.prompt.current!.set({ input: "Corrected task", parts: [] })
+  await view.click("Enter: Queue message")
+  await wait(() => view.responses.length === 2)
+  const corrected = await view.requests[1].clone().json()
+  expect(corrected.requestID).not.toBe(rejected.requestID)
+  expect(corrected.text).toBe("Corrected task")
+  view.responses[1].resolve(json({ ...corrected, state: "pending" }))
+  await wait(() => view.prompt.current!.current.input === "")
+})
+
+test("a changed model requires explicit session-model consent without discarding the future choice", async () => {
+  await using tmp = await tmpdir()
+  using view = await mountSession(tmp.path, { sessionModel: { providerID: "test", id: "model" } })
+  view.local.model.set({ providerID: "test", modelID: "other" })
+  await view.app.mockInput.typeText("Keep the task model")
+  expect(await view.frame()).toContain("Model choice saved for normal Send")
+  view.app.mockInput.pressEnter()
+  expect(view.requests).toHaveLength(0)
+  await view.click("Use session model")
+  await view.click("Enter: Queue message")
+  await wait(() => view.responses.length === 1)
+  const payload = await view.requests[0].clone().json()
+  expect(payload).not.toHaveProperty("model")
+  expect(view.local.model.current()?.modelID).toBe("other")
+  view.responses[0].resolve(json({ ...payload, state: "pending" }))
+  await wait(() => view.prompt.current!.current.input === "")
+  view.emit({
+    directory: tmp.path,
+    payload: {
+      id: "evt_idle_model",
+      type: "session.status",
+      properties: { sessionID: "ses_parent", status: { type: "idle" } },
+    },
+  })
+  await view.click("Use normal Send")
+  expect(await view.frame()).toContain("Other model")
+})
+
+test("a rejected retry does not discard an earlier uncertain admission", async () => {
+  await using tmp = await tmpdir()
+  using view = await mountSession(tmp.path)
+  await view.app.mockInput.typeText("Possibly accepted task")
+  await view.click("Enter: Queue message")
+  await wait(() => view.responses.length === 1)
+  const payload = await view.requests[0].clone().json()
+  view.responses[0].resolve(json({ message: "Gateway lost acknowledgement" }, { status: 503 }))
+  await wait(async () => (await view.frame()).includes("Acknowledgement unknown"))
+  await view.click("Retry same input")
+  await wait(() => view.responses.length === 2)
+  expect(await view.requests[1].clone().json()).toEqual(payload)
+  view.responses[1].resolve(json({ message: "Agent unavailable" }, { status: 400 }))
+  await wait(async () => (await view.frame()).includes("Agent unavailable"))
+  expect(await view.frame()).toContain("Retry same input")
+  expect(await view.frame()).not.toContain("Input rejected")
+  expect(view.prompt.current!.current.input).toBe("Possibly accepted task")
+  view.receipts.set(payload.requestID, { ...payload, state: "pending" })
+  const check = view.app.renderer.root.findDescendantById("composer-reconcile")
+  expect(check).toBeDefined()
+  await view.app.mockMouse.click(check!.x + 1, check!.y)
+  await wait(() => view.prompt.current!.current.input === "")
+})
+
+test("selecting a pending-input row does not cancel it", async () => {
+  await using tmp = await tmpdir()
+  using view = await mountSession(tmp.path)
+  view.receipts.set("select-row", {
+    requestID: "select-row",
+    delivery: "queue",
+    text: "Select this pending text",
+    state: "pending",
+  })
+  view.emit({
+    directory: tmp.path,
+    payload: {
+      id: "evt_refresh",
+      type: "session.status",
+      properties: { sessionID: "ses_parent", status: { type: "busy" } },
+    },
+  })
+  await wait(async () => (await view.frame()).includes("Select this pending text"))
+  const lines = (await view.frame()).split("\n")
+  const y = lines.findIndex((line) => line.includes("Select this pending text"))
+  const x = lines[y].indexOf("Select")
+  await view.app.mockMouse.drag(x, y, x + 18, y)
+  expect(view.app.renderer.getSelection()?.getSelectedText()).toContain("Select")
+  expect(view.cancels).toHaveLength(0)
+  expect(view.receipts.get("select-row")?.state).toBe("pending")
+})
+
+test("releasing a text selection over stop-parent does not abort the task", async () => {
+  await using tmp = await tmpdir()
+  using view = await mountSession(tmp.path)
+  await view.click("Aside")
+  const lines = (await view.frame()).split("\n")
+  const y = lines.findIndex((line) => line.includes("stop parent"))
+  const x = lines[y].indexOf("stop parent")
+  await view.app.mockMouse.drag(x, y, x + 8, y)
+  expect(view.app.renderer.getSelection()?.getSelectedText()).toBeTruthy()
+  expect(view.requests).toHaveLength(0)
+})
 
 test("attach hydrates existing human requests without stealing composer focus or approving them", async () => {
   await using tmp = await tmpdir()

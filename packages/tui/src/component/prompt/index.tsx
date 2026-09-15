@@ -302,6 +302,28 @@ export function Prompt(props: PromptProps) {
     interrupt: 0,
   })
 
+  const [acceptedModelChoice, setAcceptedModelChoice] = createSignal<string>()
+  const sessionModel = createMemo(() => {
+    const model = props.sessionID ? sync.session.get(props.sessionID)?.model : undefined
+    return model
+      ? { providerID: model.providerID, modelID: model.id, variant: model.variant }
+      : lastUserMessage()?.model
+  })
+  const modelChoice = () =>
+    JSON.stringify([props.sessionID, sessionModel(), local.model.current(), local.model.variant.current()])
+  const modelOverride = createMemo(() => {
+    const actual = sessionModel()
+    const selected = local.model.current()
+    return (
+      !!actual &&
+      !!selected &&
+      (actual.providerID !== selected.providerID ||
+        actual.modelID !== selected.modelID ||
+        (actual.variant ?? "default") !== (local.model.variant.current() ?? "default")) &&
+      acceptedModelChoice() !== modelChoice()
+    )
+  })
+  const useSessionModel = () => setAcceptedModelChoice(modelChoice())
   const delivery = useComposerDelivery({
     sessionID: props.sessionID,
     directory: props.sessionID ? (sync.session.get(props.sessionID)?.directory ?? sdk.directory) : sdk.directory,
@@ -328,6 +350,7 @@ export function Prompt(props: PromptProps) {
       if (store.prompt.parts.some((part) => part.type !== "text"))
         return "Text only. Remove attachments or mentions to send; draft saved."
       if (editorContext()) return "Editor context is unsupported. Remove it explicitly to send."
+      if (modelOverride()) return "Model choice saved for normal Send. This mode uses the active session's model."
     },
   })
   createEffect(
@@ -373,6 +396,16 @@ export function Prompt(props: PromptProps) {
 
   const promptCommands = createMemo(() =>
     [
+      {
+        title: "Use session model for this message",
+        name: "prompt.delivery.session_model",
+        category: "Prompt",
+        enabled: delivery.state.mode !== "send" && modelOverride(),
+        run: () => {
+          dialog.clear()
+          useSessionModel()
+        },
+      },
       {
         title: "Check task input acknowledgement",
         name: "prompt.delivery.reconcile",
@@ -1455,6 +1488,7 @@ export function Prompt(props: PromptProps) {
           busy={status().type !== "idle" || !!props.humanPending}
           activate={props.onActivate}
           submit={() => void submit()}
+          useSessionModel={modelOverride() ? useSessionModel : undefined}
         />
         <box
           width="100%"
@@ -1702,10 +1736,11 @@ export function Prompt(props: PromptProps) {
                 <text
                   fg={store.interrupt > 0 ? theme.primary : theme.text}
                   onMouseUp={() => {
+                    if (renderer.getSelection()?.getSelectedText()) return
                     if (props.sessionID) void sdk.client.session.abort({ sessionID: props.sessionID })
                   }}
                 >
-                  {delivery.state.mode === "aside" ? "esc closes Aside; click to stop parent" : "esc "}
+                  {delivery.state.mode === "aside" ? "stop parent" : "esc "}
                   <span style={{ fg: store.interrupt > 0 ? theme.primary : theme.textMuted }}>
                     {delivery.state.mode === "aside"
                       ? ""
