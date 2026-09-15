@@ -1,9 +1,9 @@
 /* Ticket reader: read-only view of one tracker issue — gh (body + comments)
  * or sidecar markdown (the file is the whole record, comments inline). */
-import { createResource, For, Show } from "solid-js"
+import { createMemo, createResource, For, Show } from "solid-js"
 import { useSearchParams } from "@solidjs/router"
 import { Markdown } from "@opencode-ai/session-ui/markdown"
-import { es, type IssueDetail } from "../api"
+import { es } from "../api"
 import { ago, linkUrl, useDashboard } from "../state"
 
 const markerCls = (m: string) =>
@@ -31,17 +31,29 @@ export function IssueChips(props: { row: { state?: string; markers: string[]; cl
 export default function IssuePage() {
   const [params] = useSearchParams()
   const { editspace } = useDashboard()
+  const source = createMemo(() => ({ ref: String(params.ref ?? ""), es: editspace() }))
   const [issue] = createResource(
-    () => ({ ref: String(params.ref ?? ""), es: editspace() }),
-    (src) => (src.ref ? es.issue(src.ref, src.es) : Promise.resolve(undefined as unknown as IssueDetail)),
+    source,
+    async (src) => ({ source: src, doc: src.ref ? await es.issue(src.ref, src.es) : undefined }),
   )
+  const current = () => {
+    if (issue.loading || issue.error) return undefined
+    const result = issue()
+    return result?.source === source() ? result.doc : undefined
+  }
   const date = (iso?: string) => (iso ? ago(Date.parse(iso)) : "")
   return (
     <main class="browse-page">
+      <Show when={issue.loading}>
+        <div class="dim">Loading ticket...</div>
+      </Show>
       <Show when={issue.error}>
         <div class="err">{String(issue.error)}</div>
       </Show>
-      <Show when={issue()}>
+      <Show when={!source().ref}>
+        <div class="dim">Select a ticket.</div>
+      </Show>
+      <Show when={current()}>
         {(doc) => (
           <>
             <div class="browse-head">

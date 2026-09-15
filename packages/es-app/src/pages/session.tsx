@@ -12,13 +12,20 @@ import { sessionHref, useDashboard } from "../state"
 import { rightOpen, startDrag } from "../ui"
 import { createVim } from "../vim"
 
-function PermissionBanner(props: { p: any; directory: string; onDone: () => void }) {
+function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
+  const [error, setError] = createSignal("")
+  const [sending, setSending] = createSignal(false)
   const act = async (reply: "once" | "always" | "reject") => {
+    if (sending()) return
+    setSending(true)
+    setError("")
     try {
       await oc.permissionReply(props.p.id, props.directory, reply)
-      props.onDone()
+      await props.onDone()
     } catch (e) {
-      alert(String(e))
+      setError(String(e))
+    } finally {
+      setSending(false)
     }
   }
   // metadata carries the actual request (command, cwd, directories, …) — the
@@ -40,35 +47,39 @@ function PermissionBanner(props: { p: any; directory: string; onDone: () => void
   }
   return (
     <div class="banner permission">
+      <Show when={props.owner}><div class="dim">from subagent: {props.owner}</div></Show>
       <div class="banner-head">
-        permission: <b>{props.p.action ?? "?"}</b>
+        permission: <b>{props.p.permission}</b>
       </div>
-      <Show when={props.p.resources?.length}>
-        <div class="banner-body mono">{props.p.resources.join("\n")}</div>
+      <Show when={props.p.patterns?.length}>
+        <div class="banner-body mono">{props.p.patterns.join("\n")}</div>
       </Show>
       <Show when={meta().length}>
         <div class="banner-body mono">
           <For each={meta()}>
             {([k, v]) => (
               <div>
-                <span class="dim">{k}:</span> {String(v).slice(0, 500)}
+                <span class="dim">{k}:</span> {String(v)}
               </div>
             )}
           </For>
         </div>
       </Show>
       <div class="banner-actions">
-        <button onClick={() => act("once")}>allow once</button>
-        <button onClick={() => act("always")}>always</button>
-        <button class="danger" onClick={() => act("reject")}>
+        <button disabled={sending()} onClick={() => act("once")}>allow once</button>
+        <button disabled={sending()} onClick={() => act("always")}>always</button>
+        <button disabled={sending()} class="danger" onClick={() => act("reject")}>
           reject
         </button>
       </div>
+      <Show when={error()}><div class="err" role="alert">{error()}</div></Show>
     </div>
   )
 }
 
-function QuestionBanner(props: { q: any; directory: string; onDone: () => void }) {
+function QuestionBanner(props: { q: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
+  const [error, setError] = createSignal("")
+  const [sending, setSending] = createSignal(false)
   // answers[i] = selected labels for question i (custom text as a single label)
   const [answers, setAnswers] = createSignal<string[][]>(props.q.questions.map(() => []))
   const [custom, setCustom] = createSignal<string[]>(props.q.questions.map(() => ""))
@@ -84,30 +95,41 @@ function QuestionBanner(props: { q: any; directory: string; onDone: () => void }
   }
 
   const submit = async () => {
+    if (sending()) return
     const final = answers().map((a, i) => (custom()[i]?.trim() ? [...a, custom()[i]!.trim()] : a))
     if (final.some((a) => a.length === 0)) {
-      alert("answer every question (pick an option or type a custom answer)")
+      setError("Answer every question (pick an option or type a custom answer).")
       return
     }
+    setSending(true)
+    setError("")
     try {
       await oc.questionReply(props.q.id, props.directory, final)
-      props.onDone()
+      await props.onDone()
     } catch (e) {
-      alert(String(e))
+      setError(String(e))
+    } finally {
+      setSending(false)
     }
   }
 
   const reject = async () => {
+    if (sending()) return
+    setSending(true)
+    setError("")
     try {
       await oc.questionReject(props.q.id, props.directory)
-      props.onDone()
+      await props.onDone()
     } catch (e) {
-      alert(String(e))
+      setError(String(e))
+    } finally {
+      setSending(false)
     }
   }
 
   return (
     <div class="banner question">
+      <Show when={props.owner}><div class="dim">from subagent: {props.owner}</div></Show>
       <For each={props.q.questions}>
         {(question: any, qi) => (
           <div class="banner-body">
@@ -141,11 +163,12 @@ function QuestionBanner(props: { q: any; directory: string; onDone: () => void }
         )}
       </For>
       <div class="banner-actions">
-        <button onClick={submit}>answer</button>
-        <button class="danger" onClick={reject}>
+        <button disabled={sending()} onClick={submit}>answer</button>
+        <button disabled={sending()} class="danger" onClick={reject}>
           dismiss
         </button>
       </div>
+      <Show when={error()}><div class="err" role="alert">{error()}</div></Show>
     </div>
   )
 }
@@ -170,11 +193,9 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const sessionID = props.sessionID
   const directory = props.directory
 
-  const live = createLiveSession(sessionID, directory, (event) => {
-    if (event.type.startsWith("permission.") || event.type.startsWith("question.")) {
-      refetchPending()
-    }
-  })
+  const { activity, sessionsError } = useDashboard()
+  const live = createLiveSession(sessionID, directory)
+  onMount(() => { void activity.refreshDirectory(directory) })
   // stamp data-tool onto rendered tool wrappers (session-ui doesn't expose
   // the tool name in the DOM) so CSS can color tool types
   const stampTools = () => {
@@ -211,7 +232,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     live
       .load()
       .then(() => pin())
-      .catch((e) => setError(String(e)))
+      .catch(() => {}) // live.connectionError reports load failures and recovery
     transcriptEl?.addEventListener(
       "scroll",
       () => {
@@ -235,16 +256,9 @@ function SessionView(props: { sessionID: string; directory: string }) {
   })
   const [error, setError] = createSignal("")
 
-  const [pending, { refetch: refetchPending }] = createResource(async () => {
-    const [permissions, questions] = await Promise.all([
-      oc.permissions(directory).catch(() => []),
-      oc.questions(directory).catch(() => []),
-    ])
-    return {
-      permissions: permissions.filter((p: any) => p.sessionID === sessionID),
-      questions: questions.filter((q: any) => q.sessionID === sessionID),
-    }
-  })
+  const pending = createMemo(() => activity.pending(sessionID))
+  const subagentsRunning = () => activity.running(sessionID).filter((id) => id !== sessionID).length
+  const attentionError = () => sessionsError() || activity.error(sessionID, directory)
 
   const session = () => live.data.session[0]
   const status = () => live.data.session_status[sessionID]?.type ?? "idle"
@@ -253,6 +267,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
   // viewing the session clears its unread state, including as new content
   // streams in while the page is open
   const { markViewed, refetchArchived } = useDashboard()
+  onMount(() => markViewed(sessionID, true))
   createEffect(() => {
     messages()
     status()
@@ -278,6 +293,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
   // busy with nothing visibly moving (no running tool, no streaming part):
   // the model is thinking or the first token hasn't landed — show a pulse
   const thinking = createMemo(() => {
+    if (live.error() || live.connectionError() || error() || pending().length) return false
     const st = status()
     if (st !== "busy" && st !== "retry") return false
     const msgs = messages() as any[]
@@ -295,8 +311,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
   })
 
   const headerDot = () => {
-    if ((pending()?.permissions.length ?? 0) + (pending()?.questions.length ?? 0) > 0) return "pending"
-    if (status() === "busy" || status() === "retry") return "busy"
+    if (pending().length > 0) return "pending"
+    if (subagentsRunning() || status() === "busy" || status() === "retry") return "busy"
     return "idle"
   }
 
@@ -432,6 +448,10 @@ function SessionView(props: { sessionID: string; directory: string }) {
   createEffect(() => {
     const p = pendingMsg()
     if (!p) return
+    if (live.error() || live.connectionError()) {
+      setPendingMsg(null)
+      return
+    }
     const msgs = messages() as any[]
     for (let i = msgs.length - 1; i >= 0; i--) {
       const m = msgs[i]
@@ -497,7 +517,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const send = async () => {
     const text = draft().trim()
     const s = session()
-    if ((!text && !images().length) || !s) return
+    if (sending() || (!text && !images().length) || !s) return
+    setError("")
     setSending(true)
     // echo immediately — the round-trip to the daemon is perceptible
     setPendingMsg({ text, images: images().length, at: Date.now() - 2000 })
@@ -513,7 +534,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
       pin()
     } catch (e) {
       setPendingMsg(null)
-      alert(String(e))
+      setError(String(e))
     } finally {
       setSending(false)
     }
@@ -687,7 +708,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
         <header class="topbar">
           <span class={`dot ${headerDot()}`} />
           <h1>{session()?.title ?? sessionID}</h1>
-          <span class="dim">{status()}</span>
+          <span class="dim">{live.connectionError() ? "disconnected" : live.error() ? "failed" : pending().length ? "needs permission or answer" : subagentsRunning() ? "busy" : status()}</span>
+          <Show when={subagentsRunning()}><span class="dim">{subagentsRunning()} subagent(s) running</span></Show>
           <Show when={(session() as any)?.parentID}>
             {(pid) => (
               <span class="fork-crumb">
@@ -729,16 +751,25 @@ function SessionView(props: { sessionID: string; directory: string }) {
           </Show>
         </header>
 
-        <Show when={error()}>
-          <div class="err">{error()}</div>
-        </Show>
-
-        <For each={pending()?.permissions ?? []}>
-          {(p: any) => <PermissionBanner p={p} directory={directory} onDone={refetchPending} />}
-        </For>
-        <For each={pending()?.questions ?? []}>
-          {(q: any) => <QuestionBanner q={q} directory={directory} onDone={refetchPending} />}
-        </For>
+        <div class="session-alerts">
+          <Show when={error() || live.error()}><div class="err" role="alert">{error() || live.error()}</div></Show>
+          <Show when={live.connectionError()}>
+            <div class="err" role="alert">{live.connectionError()}
+              <button disabled={live.loading()} onClick={() => { void live.load().catch(() => {}) }}>reconnect</button>
+            </div>
+          </Show>
+          <Show when={live.retry()}>{(retry) => <div role="status" class="dim">Retry {retry().attempt}: {retry().message}</div>}</Show>
+          <Show when={attentionError()}><div class="err" role="alert">{attentionError()}</div></Show>
+          <For each={pending()}>
+            {(item) => {
+              const owner = () => item.request.sessionID !== sessionID
+                ? activity.session(item.request.sessionID)?.title ?? item.request.sessionID : undefined
+              return item.kind === "permission"
+                ? <PermissionBanner p={item.request} directory={item.directory} owner={owner()} onDone={() => activity.refreshDirectory(item.directory, true)} />
+                : <QuestionBanner q={item.request} directory={item.directory} owner={owner()} onDone={() => activity.refreshDirectory(item.directory, true)} />
+            }}
+          </For>
+        </div>
 
         <div class="transcript" ref={transcriptEl}>
           <div ref={inner} class="transcript-inner">
