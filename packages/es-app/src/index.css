@@ -360,6 +360,15 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
   box-shadow: inset 3px 0 0 var(--lavender);
 }
 .nav-item .nav-title { overflow: hidden; text-overflow: ellipsis; }
+.session-project {
+  margin-left: auto;
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  color: var(--overlay1);
+}
 .board-link { font-weight: bold; color: var(--text); }
 .nav-heading {
   font-size: 11px;
@@ -370,6 +379,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
   font-weight: bold;
 }
 .nav-empty { padding: 4px 14px; }
+.session-alerts { flex-shrink: 0; max-height: 40vh; overflow-y: auto; }
+.session-alerts .err { white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px; }
 /* sidebar transcript search */
 .search-box { padding: 8px 10px 0; }
 .search-input {

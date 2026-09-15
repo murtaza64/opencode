@@ -568,7 +568,55 @@ export const SessionInfo = Schema.Struct({
 }).annotate({ identifier: "Session" })
 export type SessionInfo = typeof SessionInfo.Type
 
+export const InputPayload = Schema.Struct({
+  requestID: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+  delivery: Schema.Literals(["queue", "steer"]),
+  text: Schema.String.check(Schema.isPattern(/\S/)),
+  agent: optional(Schema.String.check(Schema.isMinLength(1))),
+}).annotate({ identifier: "SessionV1.InputPayload", parseOptions: { onExcessProperty: "error" } })
+export interface InputPayload extends Schema.Schema.Type<typeof InputPayload> {}
+
+const InputBase = {
+  ...InputPayload.fields,
+  sessionID: SessionID,
+  agent: Schema.String,
+  admittedSeq: NonNegativeInt,
+  timeCreated: NonNegativeInt,
+}
+export const InputReceipt = Schema.Union([
+  Schema.Struct({ ...InputBase, state: Schema.Literal("pending") }),
+  Schema.Struct({
+    ...InputBase,
+    state: Schema.Literal("promoted"),
+    messageID: MessageID,
+    timePromoted: NonNegativeInt,
+  }),
+  Schema.Struct({ ...InputBase, state: Schema.Literal("cancelled"), timeCancelled: NonNegativeInt }),
+]).annotate({ identifier: "SessionV1.InputReceipt" })
+export type InputReceipt = typeof InputReceipt.Type
+
 const events = {
+  InputAdmitted: define({
+    type: "session.input.admitted",
+    ...options,
+    schema: {
+      sessionID: SessionID,
+      payload: InputPayload,
+      agent: Schema.String,
+      model: User.fields.model,
+      time: NonNegativeInt,
+    },
+  }),
+  InputCancelled: define({
+    type: "session.input.cancelled",
+    ...options,
+    schema: { sessionID: SessionID, requestID: Schema.String, time: NonNegativeInt },
+  }),
+  InputPromoted: define({
+    type: "session.input.promoted",
+    ...options,
+    schema: { sessionID: SessionID, requestID: Schema.String, info: User, part: TextPart },
+  }),
   Created: define({
     type: "session.created",
     ...options,
@@ -661,6 +709,7 @@ export const Event = {
   PartDelta,
   Diff,
   Error,
+  InputDefinitions: inventory(events.InputAdmitted, events.InputCancelled, events.InputPromoted),
   Definitions: inventory(
     events.Created,
     events.Updated,

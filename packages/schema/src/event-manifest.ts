@@ -62,6 +62,7 @@ export const ServerDefinitions = Event.inventory(
 
 export const Definitions = Event.inventory(
   ...foundationDefinitions,
+  ...SessionV1.Event.InputDefinitions,
   ...sessionV1LiveDefinitions,
   ...InstallationEvent.Definitions,
   ...featureDefinitions,

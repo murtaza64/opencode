@@ -2,31 +2,28 @@
  * mini icon rail — expand toggle up top (where the switcher lives), board
  * icon, then one status dot per session, still navigable. Archived sessions
  * drop to a collapsed section at the bottom of the expanded view. */
-import { createSignal, For, Show } from "solid-js"
+import { createEffect, createSignal, For, Show } from "solid-js"
 import { A } from "@solidjs/router"
 import { es, type SessionSearchResult } from "../api"
-import { sessionHref, useDashboard } from "../state"
+import { sessionHref, useDashboard, type SessionRow } from "../state"
 import { leftOpen, leftWidth, toggleLeft } from "../ui"
 
 export default function Sidebar() {
-  const { state, dotFor, editspace, setEditspace, editspaces, archivedIds, notifications, markViewed } =
+  const { state, dotFor, editspace, setEditspace, editspaces, archivedIds, notifications, markViewed,
+    allProjects, setAllProjects, sessionRows, sessions, sessionsLoading, sessionsError } =
     useDashboard()
-  const all = () =>
-    (state()?.threads ?? [])
-      .filter((t: any) => t.kind === "session" && t.sessions[0])
-      .map((t: any) => t.sessions[0])
-  const sessions = () => all().filter((s: any) => !archivedIds().has(s.id))
-  const archived = () => all().filter((s: any) => archivedIds().has(s.id))
+  const archived = () => sessionRows().filter((s) => archivedIds().has(s.id)).sort((a, b) => b.updated - a.updated)
   const [showArchived, setShowArchived] = createSignal(false)
   const current = () => editspace() ?? editspaces()?.default ?? state()?.editspace ?? ""
   const openNotification = (item: ReturnType<typeof notifications>[number]) => {
-    setEditspace(item.editspace)
+    if (item.editspace && !allProjects()) setEditspace(item.editspace)
     markViewed(item.session, true)
   }
 
   // transcript search: ≥3 chars, debounced; null results = search inactive
   const [query, setQuery] = createSignal("")
   const [results, setResults] = createSignal<SessionSearchResult[] | null>(null)
+  const searchResults = () => (results() ?? []).filter((s) => !allProjects() || !s.parent_id)
   const [searching, setSearching] = createSignal(false)
   const [allTime, setAllTime] = createSignal(false)
   const [searchError, setSearchError] = createSignal("")
@@ -78,20 +75,23 @@ export default function Sidebar() {
         <Show when={r.snippet}>
           <span class="search-snippet">{r.snippet}</span>
         </Show>
-        <span class="search-meta">{r.directory.split("/").slice(-2).join("/")}</span>
+        <span class="search-meta">{allProjects()
+          ? sessionRows().find((s) => s.id === r.id)?.project || r.directory.split("/").filter(Boolean).at(-1)
+          : r.directory.split("/").slice(-2).join("/")}</span>
       </span>
     </A>
   )
 
-  const item = (s: any, cls = "") => (
+  const item = (s: SessionRow, cls = "") => (
     <A
       href={sessionHref(s.id, s.directory)}
       activeClass="active"
       class={`nav-item ${cls}`}
-      title={`${s.title} (${s.live})`}
+      title={`${s.title} (${dotFor(s)})${allProjects() ? ` · ${s.directory}` : ""}`}
     >
       <span class={`dot ${dotFor(s)}`} />
       <span class="nav-title">{s.title || s.id}</span>
+      <Show when={allProjects()}><span class="session-project">{s.project}</span></Show>
     </A>
   )
 
@@ -112,7 +112,7 @@ export default function Sidebar() {
                 href={sessionHref(s.id, s.directory)}
                 activeClass="active"
                 class="mini-item"
-                title={`${s.title} (${s.live})`}
+                title={`${s.title} (${dotFor(s)})${allProjects() ? ` · ${s.project}` : ""}`}
               >
                 <span class={`dot ${dotFor(s)}`} />
               </A>
@@ -125,10 +125,18 @@ export default function Sidebar() {
         <div class="sidebar-top">
           <select
             class="es-switcher"
-            title="editspace"
-            value={current()}
-            onChange={(e) => setEditspace(e.currentTarget.value)}
+            title="project"
+            ref={(select) => createEffect(() => {
+              editspaces()
+              select.value = allProjects() ? "__all__" : current()
+            })}
+            onChange={(e) => {
+              clearSearch()
+              if (e.currentTarget.value === "__all__") setAllProjects(true)
+              else setEditspace(e.currentTarget.value)
+            }}
           >
+            <option value="__all__">All</option>
             <For each={editspaces()?.editspaces ?? []}>
               {(item) => <option value={item.name}>{item.name}</option>}
             </For>
@@ -158,7 +166,7 @@ export default function Sidebar() {
                   <span class="notification-copy">
                     <span class="nav-title">{notification.title}</span>
                     <span class="notification-meta">
-                      {notification.editspace} · {notification.kind}
+                      {notification.editspace ? `${notification.editspace} · ` : ""}{notification.kind}
                     </span>
                   </span>
                 </A>
@@ -167,7 +175,7 @@ export default function Sidebar() {
           </div>
         </Show>
         <A href="/" end activeClass="active" class="nav-item board-link">
-          ▦ board
+          ▦ {allProjects() ? `${current()} board` : "board"}
         </A>
         <div class="search-box">
           <input
@@ -184,15 +192,15 @@ export default function Sidebar() {
           fallback={
             <>
               <div class="nav-heading">
-                results{searching() ? " ·" : ` (${results()!.length})`}
+                results{searching() ? " ·" : ` (${searchResults().length})`}
               </div>
               <Show when={searchError()}>
                 <div class="dim nav-empty">{searchError()}</div>
               </Show>
-              <Show when={!searching() && !searchError() && !results()!.length}>
+              <Show when={!searching() && !searchError() && !searchResults().length}>
                 <div class="dim nav-empty">no matches</div>
               </Show>
-              <For each={results()!}>{resultItem}</For>
+              <For each={searchResults()}>{resultItem}</For>
               <Show when={!allTime() && !searching() && !searchError()}>
                 <button class="archived-toggle" onClick={searchAllTime}>
                   ⌕ all time (slow)
@@ -201,9 +209,25 @@ export default function Sidebar() {
             </>
           }
         >
-          <div class="nav-heading">sessions</div>
-          <Show when={sessions().length} fallback={<div class="dim nav-empty">none</div>}>
-            <For each={sessions()}>{(s: any) => item(s)}</For>
+          <Show when={sessionsError()}><div class="err nav-empty">{sessionsError()}</div></Show>
+          <Show when={sessions().length} fallback={
+            <Show when={!sessionsError()}><div class="dim nav-empty">{sessionsLoading() ? "loading..." : "none"}</div></Show>
+          }>
+            <For each={sessions()}>
+              {(s, index) => {
+                const day = () => new Date(s.updated).toDateString()
+                return (
+                  <>
+                    <Show when={index() === 0 || day() !== new Date(sessions()[index() - 1].updated).toDateString()}>
+                      <div class="nav-heading">
+                        {day() === new Date().toDateString() ? "Today" : day()}
+                      </div>
+                    </Show>
+                    {item(s)}
+                  </>
+                )
+              }}
+            </For>
           </Show>
           <Show when={archived().length}>
             <button class="archived-toggle" onClick={() => setShowArchived(!showArchived())}>

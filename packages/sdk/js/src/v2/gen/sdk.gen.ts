@@ -199,6 +199,14 @@ import type {
   SessionGetResponses,
   SessionInitErrors,
   SessionInitResponses,
+  SessionInputAdmitErrors,
+  SessionInputAdmitResponses,
+  SessionInputCancelErrors,
+  SessionInputCancelResponses,
+  SessionInputGetErrors,
+  SessionInputGetResponses,
+  SessionInputListErrors,
+  SessionInputListResponses,
   SessionListErrors,
   SessionListResponses,
   SessionMessageErrors,
@@ -227,6 +235,7 @@ import type {
   SessionUnshareResponses,
   SessionUpdateErrors,
   SessionUpdateResponses,
+  SessionV1InputPayload,
   SubtaskPartInput,
   SyncHistoryListErrors,
   SyncHistoryListResponses,
@@ -3365,6 +3374,147 @@ export class Provider extends HeyApiClient {
   }
 }
 
+export class Input extends HeyApiClient {
+  /**
+   * List session input receipts
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      state?: "pending" | "promoted" | "cancelled" | "all"
+      after?: string
+      limit?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "state" },
+            { in: "query", key: "after" },
+            { in: "query", key: "limit" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SessionInputListResponses, SessionInputListErrors, ThrowOnError>({
+      url: "/session/{sessionID}/input",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Admit durable session input
+   */
+  public admit<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      sessionV1InputPayload?: SessionV1InputPayload
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "sessionV1InputPayload", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionInputAdmitResponses, SessionInputAdmitErrors, ThrowOnError>({
+      url: "/session/{sessionID}/input",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Cancel pending session input
+   */
+  public cancel<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      requestID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "requestID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<SessionInputCancelResponses, SessionInputCancelErrors, ThrowOnError>(
+      {
+        url: "/session/{sessionID}/input/{requestID}",
+        ...options,
+        ...params,
+      },
+    )
+  }
+
+  /**
+   * Get session input receipt
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      requestID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "requestID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SessionInputGetResponses, SessionInputGetErrors, ThrowOnError>({
+      url: "/session/{sessionID}/input/{requestID}",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Session2 extends HeyApiClient {
   /**
    * List sessions
@@ -4414,6 +4564,11 @@ export class Session2 extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+
+  private _input?: Input
+  get input(): Input {
+    return (this._input ??= new Input({ client: this.client }))
   }
 }
 

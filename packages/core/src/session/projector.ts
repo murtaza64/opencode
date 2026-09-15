@@ -12,7 +12,7 @@ import { SessionMessage } from "./message"
 import { SessionMessageUpdater } from "./message-updater"
 import { SessionInput } from "./input"
 import { WorkspaceV2 } from "../workspace"
-import { MessageTable, PartTable, SessionInputTable, SessionMessageTable, SessionTable } from "./sql"
+import { MessageTable, PartTable, SessionInputTable, SessionMessageTable, SessionTable, V1InputTable } from "./sql"
 import type { DeepMutable } from "../schema"
 
 type DatabaseService = Database.Interface["db"]
@@ -21,6 +21,7 @@ const decodeMessage = Schema.decodeUnknownSync(SessionMessage.Message)
 const encodeMessage = Schema.encodeSync(SessionMessage.Message)
 
 export class SessionAlreadyProjected extends Error {}
+export class InputLifecycleConflict extends Error {}
 
 type Usage = {
   cost: number
@@ -267,6 +268,111 @@ const layer = Layer.effectDiscard(
           .insert(MessageTable)
           .values({ id, session_id: sessionID, time_created, data })
           .onConflictDoUpdate({ target: MessageTable.id, set: { data } })
+          .run()
+          .pipe(Effect.orDie)
+      }),
+    )
+    yield* events.project(SessionV1.Event.InputAdmitted, (event) =>
+      Effect.gen(function* () {
+        const seq = event.durable?.seq
+        if (seq === undefined) return yield* Effect.die("Input admission requires a durable sequence")
+        const stored = yield* db
+          .insert(V1InputTable)
+          .values({
+            request_id: event.data.payload.requestID,
+            session_id: event.data.sessionID,
+            admitted_seq: seq,
+            state: "pending",
+            payload: event.data.payload,
+            model: event.data.model,
+            receipt: {
+              ...event.data.payload,
+              sessionID: event.data.sessionID,
+              agent: event.data.agent,
+              admittedSeq: seq,
+              state: "pending",
+              timeCreated: event.data.time,
+            },
+          })
+          .onConflictDoNothing()
+          .returning({ id: V1InputTable.request_id })
+          .get()
+          .pipe(Effect.orDie)
+        if (!stored) return yield* Effect.die(new InputLifecycleConflict())
+      }),
+    )
+    yield* events.project(SessionV1.Event.InputCancelled, (event) =>
+      Effect.gen(function* () {
+        const row = yield* db
+          .select()
+          .from(V1InputTable)
+          .where(
+            and(
+              eq(V1InputTable.request_id, event.data.requestID),
+              eq(V1InputTable.session_id, event.data.sessionID),
+              eq(V1InputTable.state, "pending"),
+            ),
+          )
+          .get()
+          .pipe(Effect.orDie)
+        if (!row) return yield* Effect.die(new InputLifecycleConflict())
+        yield* db
+          .update(V1InputTable)
+          .set({ state: "cancelled", receipt: { ...row.receipt, state: "cancelled", timeCancelled: event.data.time } })
+          .where(eq(V1InputTable.request_id, row.request_id))
+          .run()
+          .pipe(Effect.orDie)
+      }),
+    )
+    yield* events.project(SessionV1.Event.InputPromoted, (event) =>
+      Effect.gen(function* () {
+        const row = yield* db
+          .select()
+          .from(V1InputTable)
+          .where(
+            and(
+              eq(V1InputTable.request_id, event.data.requestID),
+              eq(V1InputTable.session_id, event.data.sessionID),
+              eq(V1InputTable.state, "pending"),
+            ),
+          )
+          .get()
+          .pipe(Effect.orDie)
+        if (!row) return yield* Effect.die(new InputLifecycleConflict())
+        const info = event.data.info
+        yield* db
+          .insert(MessageTable)
+          .values({ id: info.id, session_id: info.sessionID, time_created: info.time.created, data: messageData(info) })
+          .run()
+          .pipe(Effect.orDie)
+        yield* db
+          .insert(PartTable)
+          .values({
+            id: event.data.part.id,
+            message_id: info.id,
+            session_id: info.sessionID,
+            time_created: info.time.created,
+            data: partData(event.data.part),
+          })
+          .run()
+          .pipe(Effect.orDie)
+        yield* db
+          .update(V1InputTable)
+          .set({
+            state: "promoted",
+            receipt: { ...row.receipt, state: "promoted", messageID: info.id, timePromoted: info.time.created },
+          })
+          .where(eq(V1InputTable.request_id, row.request_id))
+          .run()
+          .pipe(Effect.orDie)
+        yield* db
+          .update(SessionTable)
+          .set({
+            agent: info.agent,
+            model: { id: info.model.modelID, providerID: info.model.providerID, variant: info.model.variant },
+            time_updated: info.time.created,
+          })
+          .where(eq(SessionTable.id, info.sessionID))
           .run()
           .pipe(Effect.orDie)
       }),

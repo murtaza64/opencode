@@ -4,39 +4,13 @@
  * ticket page and the external tracker (jira/github). */
 import { createResource, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { es, type IssueDetail } from "./api"
-import { ago, jiraUrl, linkUrl, useDashboard } from "./state"
+import { ago, linkUrl, useDashboard } from "./state"
+import { classifyRef, refFromHref, ticketLookupRef, ticketMatchesRef } from "./ticket-url"
 import { IssueChips } from "./pages/issue"
 import { Pr } from "./components/pr"
 
 // SD-123 / DLAA-31571 (jira) · owner/repo#12 · dotfiles#77 · bare #77
 const REF_RE = /\b[A-Z][A-Z0-9]{1,9}-\d+\b|(?:\b[\w.-]+\/)?(?:\b[\w.-]+)?#\d+(?![\w-])/g
-
-type RefKind = "jira" | "github" | "tracker"
-
-/* verifyUrl: qualified github refs fetch from the editspace tracker by bare
- * number, which silently resolves against the WRONG repo when the ref points
- * elsewhere — only show metadata when the fetched issue's url matches. */
-export function classifyRef(text: string): { kind: RefKind; ref: string; href?: string; verifyUrl?: string } {
-  if (/^[A-Z][A-Z0-9]{1,9}-\d+$/.test(text)) return { kind: "jira", ref: text, href: jiraUrl(text) }
-  const m = text.match(/^(?:([\w.-]+\/[\w.-]+))?(?:[\w.-]*)#(\d+)$/)
-  if (m?.[1]) {
-    const href = `https://github.com/${m[1]}/issues/${m[2]}`
-    return { kind: "github", ref: m[2]!, href, verifyUrl: href }
-  }
-  // bare #N or name#N: resolve against the editspace tracker
-  return { kind: "tracker", ref: text.slice(text.indexOf("#") + 1) }
-}
-
-/* Ticket ref from a link target: github issue links (incl. ink-wrapped) and
- * jira browse links — covers refs rendered as URLs with no ref-shaped text. */
-export function refFromHref(href: string): string | null {
-  const url = href.replace(/^https:\/\/duo\.fyi\/ink\//, "")
-  let m = url.match(/^https:\/\/[\w.-]+\.atlassian\.net\/browse\/([A-Z][A-Z0-9]{1,9}-\d+)\b/)
-  if (m) return m[1]!
-  m = url.match(/^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/(\d+)\b/)
-  if (m) return `${m[1]}#${m[2]}`
-  return null
-}
 
 /* PR from a link target — the href is authoritative: a repo#N text inside an
  * anchor pointing at /pull/N is a PR, not a ticket. */
@@ -90,7 +64,7 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
   const { editspace, state } = useDashboard()
   // anchor = the hovered element + its resolved ticket/PR; measured lazily
   // so transcript auto-pin scrolls reposition the card instead of killing it
-  type Anchor = { el: HTMLElement; ticket: string; pr?: { repo: string; number: number; url: string } }
+  type Anchor = { el: HTMLElement; ticket: string; href?: string; pr?: { repo: string; number: number; url: string } }
   const [anchor, setAnchor] = createSignal<Anchor | null>(null)
   const [tick, setTick] = createSignal(0)
   let hideTimer: ReturnType<typeof setTimeout> | undefined
@@ -104,8 +78,7 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
     hideTimer = setTimeout(() => setAnchor(null), 200)
   }
 
-  // wrapped text ref or a link whose target is a ticket/PR; a /pull/ href
-  // wins over ref-shaped anchor text
+  // Explicit ticket/PR targets take precedence over ref-shaped anchor text.
   const resolve = (e: Event): Anchor | null => {
     const t = e.target as Element | null
     const ref = t?.closest?.(".ticket-ref")
@@ -115,11 +88,11 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
       const el = ref instanceof HTMLElement ? ref : (a as HTMLAnchorElement)
       return { el, ticket: `${pr.repo}#${pr.number}`, pr }
     }
-    if (ref instanceof HTMLElement) return { el: ref, ticket: ref.dataset.ticket ?? "" }
     if (a instanceof HTMLAnchorElement) {
       const ticket = refFromHref(a.href)
-      if (ticket) return { el: a, ticket }
+      if (ticket) return { el: ref instanceof HTMLElement ? ref : a, ticket, href: a.href }
     }
+    if (ref instanceof HTMLElement) return { el: ref, ticket: ref.dataset.ticket ?? "" }
     return null
   }
 
@@ -168,6 +141,7 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
     const a = anchor()
     if (!a) return null
     if (a.pr) return { url: a.pr.url, data: findPr(a.pr.repo, a.pr.number) }
+    if (a.href) return null
     const m = a.ticket.match(/^([\w.-]+(?:\/[\w.-]+)?)#(\d+)$/)
     if (!m) return null
     const found = findPr(m[1]!, Number(m[2]))
@@ -176,17 +150,27 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
 
   const info = () => {
     const a = anchor()
-    return a && !prHit() ? classifyRef(a.ticket) : null
+    return a && !prHit() ? classifyRef(a.ticket, a.href) : null
   }
 
-  // jira keys resolve through the same API (es_browse_lib bypasses the
-  // editspace backend for them); qualified github refs fetch too but their
-  // metadata renders only after the url verification below
-  const [detail] = createResource(
-    () => {
-      const i = info()
-      return i ? { ref: i.ref, es: editspace() } : null
+  const [tracker] = createResource(
+    () => info()?.repo ? editspace() ?? "" : false,
+    async (name) => {
+      const list = await es.issues(name || undefined).catch(() => undefined)
+      return { name, repo: list?.backend === "gh" ? list.repo : undefined }
     },
+  )
+
+  const detailSource = () => {
+    const i = info()
+    if (!i) return null
+    const repo = !tracker.loading && tracker()?.name === (editspace() ?? "") ? tracker()?.repo : undefined
+    const ref = ticketLookupRef(i, repo)
+    return ref ? { ref, ticket: i.ref, es: editspace() } : null
+  }
+
+  const [detail] = createResource(
+    detailSource,
     (src) => {
       const key = `${src.es ?? ""}\u0000${src.ref}`
       let p = detailCache.get(key)
@@ -195,7 +179,7 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
         detailCache.set(key, p)
         p.catch(() => detailCache.delete(key)) // don't cache flakes
       }
-      return p
+      return p.then((doc) => ({ ...src, doc }))
     },
   )
 
@@ -221,14 +205,13 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
         onMouseLeave={scheduleHide}
       >
         {(() => {
-          // reject cross-repo hits: qualified refs fetched by bare number must
-          // round-trip to the same github issue url
+          // Resources retain their previous value when disabled or refetching.
           const verified = () => {
-            if (detail.error) return undefined
-            const doc = detail()
-            if (!doc) return undefined
-            const expect = info()?.verifyUrl
-            return !expect || doc.url === expect ? doc : undefined
+            const src = detailSource()
+            if (!src || detail.error || detail.loading) return undefined
+            const result = detail()
+            if (!result || result.ticket !== src.ticket || result.es !== src.es) return undefined
+            return ticketMatchesRef(src.ticket, result.doc) ? result.doc : undefined
           }
           return (
           <Show when={!prHit()} fallback={
@@ -251,9 +234,9 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
           <Show when={verified()} fallback={
             <div class="tip-row">
               <span class="mono">{anchor()!.ticket}</span>
-              <Show when={info()?.href} fallback={<span class="dim">{detail.loading ? "loading…" : "no ticket info"}</span>}>
+              <Show when={info()?.href}>
                 <a href={linkUrl(info()!.href!)} target="_blank">
-                  open in {info()?.kind === "jira" ? "jira" : "github"} ↗
+                  {info()!.href.startsWith("/") ? "ticket page" : `open in ${info()?.kind === "jira" ? "jira" : "github"}`} ↗
                 </a>
               </Show>
             </div>

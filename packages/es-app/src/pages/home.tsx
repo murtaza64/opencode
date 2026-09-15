@@ -1,7 +1,8 @@
 /* Home = the es dashboard: attention queue + thread cards, from :7777. */
 import { createMemo, createSignal, For, onMount, Show } from "solid-js"
 import { A, useNavigate } from "@solidjs/router"
-import { ago, jiraUrl, sessionHref, useDashboard } from "../state"
+import { ago, linkUrl, sessionHref, useDashboard } from "../state"
+import { ticketUrl } from "../ticket-url"
 import { es as esApi } from "../api"
 import { PrList } from "../components/pr"
 import BriefBox from "../components/brief"
@@ -10,7 +11,7 @@ import { SessionIcon, TicketIcon } from "../components/icons"
 function TicketRow(props: { tk: any }) {
   return (
     <div class="ticket-row">
-      <a class="key" href={jiraUrl(props.tk.key)} target="_blank">
+      <a class="key" href={linkUrl(ticketUrl(props.tk.key, props.tk.url))} target="_blank">
         <TicketIcon />
         {props.tk.key}
       </a>
@@ -58,12 +59,12 @@ function ThreadCard(props: {
             {props.t.title}
           </A>
           <span class="dim">
-            {s0().live}
+            {dotFor(s0())}
             {s0().updated ? ` · ${ago(s0().updated)}` : ""}
           </span>
           <button
             onClick={() => props.onDigest(s0().id)}
-            disabled={s0().live === "busy" || s0().digesting}
+            disabled={dotFor(s0()) === "busy" || s0().digesting}
           >
             {s0().digesting ? "…" : "digest"}
           </button>
@@ -160,7 +161,7 @@ function QueueGroupHeader(props: { g: QueueGroup; directory: string }) {
       <Show when={t()} fallback={<span class="dim">unassigned</span>}>
         <For each={tickets()}>
           {(tk: any) => (
-            <a class="key" href={jiraUrl(tk.key)} target="_blank">
+            <a class="key" href={linkUrl(ticketUrl(tk.key, tk.url))} target="_blank">
               <TicketIcon />
               {tk.key}
             </a>
@@ -476,7 +477,7 @@ export default function Home() {
                 {(f: any) => (
                   <tr>
                     <td>
-                      <a href={jiraUrl(f.key)} target="_blank">
+                      <a href={linkUrl(ticketUrl(f.key, f.url))} target="_blank">
                         {f.key}
                       </a>
                     </td>
