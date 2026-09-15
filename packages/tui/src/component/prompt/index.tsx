@@ -58,6 +58,7 @@ import { usePromptMove } from "./move"
 import { usePluginRuntime } from "../../plugin/runtime" // fork(session-umbrella)
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
+import { ComposerDelivery, useComposerDelivery } from "./delivery"
 
 registerOpencodeSpinner()
 
@@ -65,6 +66,8 @@ export type PromptProps = {
   sessionID?: string
   visible?: boolean
   disabled?: boolean
+  humanPending?: boolean
+  onActivate?: () => void
   onSubmit?: () => void
   ref?: (ref: PromptRef | undefined) => void
   hint?: JSX.Element
@@ -95,6 +98,7 @@ export type PromptRef = {
   blur(): void
   focus(): void
   submit(): void
+  aside?(): void
 }
 
 const money = new Intl.NumberFormat("en-US", {
@@ -138,8 +142,6 @@ function formatEditorContext(selection: EditorSelection) {
 
   return `<system-reminder>${ranges.join("\n")} This may or may not be relevant to the current task.</system-reminder>\n`
 }
-
-let stashed: { prompt: PromptInfo; cursor: number } | undefined
 
 export function Prompt(props: PromptProps) {
   let input: TextareaRenderable
@@ -300,6 +302,41 @@ export function Prompt(props: PromptProps) {
     interrupt: 0,
   })
 
+  const delivery = useComposerDelivery({
+    sessionID: props.sessionID,
+    directory: props.sessionID ? (sync.session.get(props.sessionID)?.directory ?? sdk.directory) : sdk.directory,
+    workspace: props.sessionID ? sync.session.get(props.sessionID)?.workspaceID : undefined,
+    busy: () => status().type !== "idle" || !!props.humanPending,
+    read: () => {
+      if (input && !input.isDestroyed && input.plainText !== store.prompt.input) {
+        setStore("prompt", "input", input.plainText)
+        syncExtmarksWithPromptParts()
+      }
+      return { prompt: structuredClone(unwrap(store.prompt)), cursor: input?.cursorOffset ?? 0 }
+    },
+    write: (buffer) => {
+      input.setText(buffer.prompt.input)
+      setStore("prompt", structuredClone(unwrap(buffer.prompt)))
+      restoreExtmarksFromParts(buffer.prompt.parts)
+      input.cursorOffset = buffer.cursor
+    },
+    unsupported: () => {
+      const session = props.sessionID ? sync.session.get(props.sessionID) : undefined
+      if (session?.workspaceID && project.workspace.status(session.workspaceID) !== "connected")
+        return "Workspace disconnected; draft saved."
+      if (store.mode === "shell") return "Exit shell mode before sending; draft saved."
+      if (store.prompt.parts.some((part) => part.type !== "text"))
+        return "Text only. Remove attachments or mentions to send; draft saved."
+      if (editorContext()) return "Editor context is unsupported. Remove it explicitly to send."
+    },
+  })
+  createEffect(
+    on(
+      () => delivery.state.mode,
+      () => setStore("interrupt", 0),
+    ),
+  )
+
   createEffect(
     on(
       () => props.sessionID,
@@ -336,6 +373,55 @@ export function Prompt(props: PromptProps) {
 
   const promptCommands = createMemo(() =>
     [
+      {
+        title: "Check task input acknowledgement",
+        name: "prompt.delivery.reconcile",
+        category: "Prompt",
+        enabled: !!delivery.state.transaction,
+        run: () => {
+          dialog.clear()
+          void delivery.reconcile()
+        },
+      },
+      {
+        title: "Retry the same saved task input",
+        name: "prompt.delivery.retry",
+        category: "Prompt",
+        enabled: !!delivery.state.transaction && !delivery.state.sending,
+        run: () => {
+          dialog.clear()
+          void delivery.retry()
+        },
+      },
+      {
+        title: "Refresh pending task inputs",
+        name: "prompt.delivery.refresh",
+        category: "Prompt",
+        enabled: !!props.sessionID,
+        run: () => {
+          dialog.clear()
+          void delivery.refresh()
+        },
+      },
+      ...delivery.rows().map((row) => ({
+        title: `Cancel ${row.delivery}: ${row.text.slice(0, 60)}`,
+        name: `prompt.delivery.cancel.${row.requestID}`,
+        category: "Pending Inputs",
+        run: () => {
+          dialog.clear()
+          void delivery.cancelInput(row.requestID)
+        },
+      })),
+      {
+        title: "Cycle message delivery mode",
+        name: "prompt.delivery.cycle",
+        category: "Prompt",
+        enabled: !!props.sessionID,
+        run: () => {
+          if (!input.focused || auto()?.visible || dialog.stack.length) return
+          delivery.cycle()
+        },
+      },
       {
         title: "Clear prompt",
         name: "prompt.clear",
@@ -396,10 +482,14 @@ export function Prompt(props: PromptProps) {
         name: "session.interrupt",
         category: "Session",
         hidden: true,
-        enabled: status().type !== "idle",
+        enabled: status().type !== "idle" || delivery.state.mode === "aside" || delivery.asideBusy(),
         run: () => {
           if (auto()?.visible) return
           if (!input.focused) return
+          if (delivery.state.mode === "aside" || delivery.asideBusy()) {
+            delivery.closeAside()
+            return
+          }
           // TODO: this should be its own command
           if (store.mode === "shell") {
             setStore("mode", "normal")
@@ -569,6 +659,7 @@ export function Prompt(props: PromptProps) {
     mode: OPENCODE_BASE_MODE,
     bindings: tuiConfig.keybinds.gather("prompt.palette", [
       "prompt.submit",
+      "prompt.delivery.cycle",
       "prompt.editor",
       "prompt.editor_context.clear",
       "prompt.stash",
@@ -612,31 +703,19 @@ export function Prompt(props: PromptProps) {
     submit() {
       void submit()
     },
+    aside() {
+      delivery.select("aside")
+    },
   }
 
-  onMount(() => {
-    const saved = stashed
-    stashed = undefined
-    if (store.prompt.input) return
-    if (saved && saved.prompt.input) {
-      input.setText(saved.prompt.input)
-      setStore("prompt", saved.prompt)
-      restoreExtmarksFromParts(saved.prompt.parts)
-      input.cursorOffset = saved.cursor
-    }
-  })
-
   onCleanup(() => {
-    if (store.prompt.input) {
-      stashed = { prompt: unwrap(store.prompt), cursor: input.cursorOffset }
-    }
     setInputTarget(undefined)
     props.ref?.(undefined)
   })
 
   createEffect(() => {
     if (!input || input.isDestroyed) return
-    if (props.visible === false || dialog.stack.length > 0) {
+    if (props.visible === false || props.disabled || dialog.stack.length > 0) {
       if (input.focused) input.blur()
       return
     }
@@ -960,6 +1039,18 @@ export function Prompt(props: PromptProps) {
     if (workspace.creating() || move.creating()) return false
     if (auto()?.visible) return false
     if (!store.prompt.input) return false
+    if (delivery.state.mode === "send" && delivery.state.transaction) return false
+    if (delivery.state.mode !== "send") {
+      const text = expandTrackedPastedText(
+        store.prompt.input,
+        input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
+          const index = store.extmarkToPartIndex.get(extmark.id)
+          const part = index === undefined ? undefined : store.prompt.parts[index]
+          return part?.type === "text" ? [{ start: extmark.start, end: extmark.end, text: part.text }] : []
+        }),
+      )
+      return delivery.submit(text)
+    }
     const agent = local.agent.current()
     if (!agent) return false
     const trimmed = store.prompt.input.trim()
@@ -1350,6 +1441,12 @@ export function Prompt(props: PromptProps) {
   return (
     <>
       <box ref={(r: BoxRenderable) => (anchor = r)} visible={props.visible !== false} width="100%">
+        <ComposerDelivery
+          controller={delivery}
+          busy={status().type !== "idle" || !!props.humanPending}
+          activate={props.onActivate}
+          submit={() => void submit()}
+        />
         <box
           width="100%"
           border={["left"]}
@@ -1381,6 +1478,7 @@ export function Prompt(props: PromptProps) {
                 setStore("prompt", "input", value)
                 auto()?.onInput(value)
                 syncExtmarksWithPromptParts()
+                delivery.save()
                 setCursorVersion((value) => value + 1)
               }}
               onCursorChange={() => setCursorVersion((value) => value + 1)}
@@ -1437,7 +1535,10 @@ export function Prompt(props: PromptProps) {
                   if (tuiConfig.cursor) input.cursorStyle = tuiConfig.cursor
                 }, 0)
               }}
-              onMouseDown={(r: MouseEvent) => r.target?.focus()}
+              onMouseDown={(r: MouseEvent) => {
+                props.onActivate?.()
+                r.target?.focus()
+              }}
               focusedBackgroundColor={theme.backgroundElement}
               cursorColor={props.disabled ? theme.backgroundElement : theme.text}
               cursorStyle={tuiConfig.cursor}
@@ -1454,7 +1555,7 @@ export function Prompt(props: PromptProps) {
                       <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
                         <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>auto</text>
                       </Show>
-                      <Show when={store.mode === "normal"}>
+                      <Show when={store.mode === "normal" && delivery.state.mode === "send"}>
                         <box flexDirection="row" gap={1}>
                           <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
                           <text
@@ -1586,10 +1687,19 @@ export function Prompt(props: PromptProps) {
                     })()}
                   </box>
                 </box>
-                <text fg={store.interrupt > 0 ? theme.primary : theme.text}>
-                  esc{" "}
+                <text
+                  fg={store.interrupt > 0 ? theme.primary : theme.text}
+                  onMouseUp={() => {
+                    if (props.sessionID) void sdk.client.session.abort({ sessionID: props.sessionID })
+                  }}
+                >
+                  {delivery.state.mode === "aside" ? "esc closes Aside; click to stop parent" : "esc "}
                   <span style={{ fg: store.interrupt > 0 ? theme.primary : theme.textMuted }}>
-                    {store.interrupt > 0 ? "again to interrupt" : "interrupt"}
+                    {delivery.state.mode === "aside"
+                      ? ""
+                      : store.interrupt > 0
+                        ? "again to stop parent"
+                        : "stop parent"}
                   </span>
                 </text>
               </box>

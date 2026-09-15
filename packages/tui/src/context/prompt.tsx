@@ -1,5 +1,6 @@
 import { createSimpleContext } from "./helper"
 import type { PromptRef } from "../component/prompt"
+import type { ComposerState } from "../component/prompt/delivery"
 
 export const { use: usePromptRef, provider: PromptRefProvider } = createSimpleContext({
   name: "PromptRef",
@@ -7,6 +8,7 @@ export const { use: usePromptRef, provider: PromptRefProvider } = createSimpleCo
     let current: PromptRef | undefined
 
     return {
+      drafts: new Map<string, ComposerState>(),
       get current() {
         return current
       },

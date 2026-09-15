@@ -52,7 +52,6 @@ import { DialogConfirm } from "../../ui/dialog-confirm"
 import { DialogTimeline } from "./dialog-timeline"
 import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
-import { DialogAside } from "../../component/dialog-aside"
 import { Sidebar } from "./sidebar"
 import { SubagentFooter } from "./subagent-footer.tsx"
 import { filetype } from "../../util/filetype"
@@ -238,8 +237,20 @@ export function Session() {
     if (session()?.parentID) return []
     return children().flatMap((x) => sync.data.question[x.id] ?? [])
   })
-  const visible = createMemo(() => !session()?.parentID && permissions().length === 0 && questions().length === 0)
-  const disabled = createMemo(() => permissions().length > 0 || questions().length > 0)
+  const [composerFocus, setComposerFocus] = createSignal(true)
+  const humanPending = createMemo(() => permissions().length > 0 || questions().length > 0)
+  const visible = createMemo(() => !session()?.parentID)
+  const disabled = createMemo(() => humanPending() && !composerFocus())
+  const requestShortcut = useCommandShortcut("session.request.focus")
+  useBindings(() => ({
+    mode: composerFocus() || permissions().length || !questions().length ? OPENCODE_BASE_MODE : "question",
+    enabled: humanPending(),
+    bindings: tuiConfig.keybinds.get("session.request.focus"),
+  }))
+  const requestIdentity = createMemo(() =>
+    JSON.stringify([route.sessionID, permissions()[0]?.id ?? questions()[0]?.id]),
+  )
+  createEffect(on(requestIdentity, () => setComposerFocus(true)))
 
   const pending = createMemo(() => {
     const completed = messages().findLastIndex((message) => message.role === "assistant" && message.time.completed)
@@ -465,14 +476,22 @@ export function Session() {
 
   const sessionCommandList = createMemo(() => [
     {
+      title: "Switch composer / human request focus",
+      value: "session.request.focus",
+      category: "Session",
+      run: () => {
+        if (!humanPending() || dialog.stack.length) return
+        setComposerFocus((value) => !value)
+      },
+    },
+    {
       title: "Ask a side question (Aside)",
       value: "session.aside",
       category: "Session",
-      slash: { name: "btw" },
       run: () => {
-        dialog.replace(() => (
-          <DialogAside sessionID={route.sessionID} model={local.model.current()} agent={local.agent.current()?.name} />
-        ))
+        setComposerFocus(true)
+        dialog.clear()
+        promptRef.current?.aside?.()
       },
     },
     {
@@ -1306,14 +1325,21 @@ export function Session() {
                 </For>
               </scrollbox>
               <box flexShrink={0}>
+                <Show when={humanPending()}>
+                  <text fg={theme.warning} onMouseUp={() => setComposerFocus((value) => !value)}>
+                    {`${requestShortcut()} ${composerFocus() ? "Review human request (still pending)" : "Compose Aside / Queue / Steer"}`}
+                  </text>
+                </Show>
                 <Show when={permissions().length > 0}>
                   <PermissionPrompt
+                    active={!composerFocus()}
                     request={permissions()[0]}
                     directory={sync.session.get(permissions()[0].sessionID)?.directory}
                   />
                 </Show>
                 <Show when={permissions().length === 0 && questions().length > 0}>
                   <QuestionPrompt
+                    active={!composerFocus()}
                     request={questions()[0]}
                     directory={sync.session.get(questions()[0].sessionID)?.directory}
                   />
@@ -1331,16 +1357,22 @@ export function Session() {
                     on_submit={toBottom}
                     ref={bind}
                   >
-                    <Prompt
-                      visible={visible()}
-                      ref={bind}
-                      disabled={disabled()}
-                      onSubmit={() => {
-                        toBottom()
-                      }}
-                      sessionID={route.sessionID}
-                      right={<pluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />}
-                    />
+                    <Show when={JSON.stringify([route.sessionID, session()?.directory, session()?.workspaceID])} keyed>
+                      {(_scope) => (
+                        <Prompt
+                          visible={visible()}
+                          ref={bind}
+                          disabled={disabled()}
+                          humanPending={humanPending()}
+                          onActivate={() => setComposerFocus(true)}
+                          onSubmit={() => {
+                            toBottom()
+                          }}
+                          sessionID={route.sessionID}
+                          right={<pluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />}
+                        />
+                      )}
+                    </Show>
                   </pluginRuntime.Slot>
                 </Show>
               </box>

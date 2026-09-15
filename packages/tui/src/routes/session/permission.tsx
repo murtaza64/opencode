@@ -108,7 +108,7 @@ function TextBody(props: { title: string; description?: string; icon?: string })
   )
 }
 
-export function PermissionPrompt(props: { request: PermissionRequest; directory?: string }) {
+export function PermissionPrompt(props: { request: PermissionRequest; directory?: string; active?: boolean }) {
   const sdk = useSDK()
   const project = useProject()
   const sync = useSync()
@@ -137,6 +137,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
     <Switch>
       <Match when={store.stage === "always"}>
         <Prompt
+          active={props.active}
           title="Always allow"
           body={
             <Switch>
@@ -176,6 +177,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
       </Match>
       <Match when={store.stage === "reject"}>
         <RejectPrompt
+          active={props.active}
           onConfirm={(message) => {
             void sdk.client.permission.reply({
               reply: "reject",
@@ -399,6 +401,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
 
           const body = (
             <Prompt
+              active={props.active}
               title="Permission required"
               header={header()}
               body={current.body}
@@ -440,7 +443,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
   )
 }
 
-function RejectPrompt(props: { onConfirm: (message: string) => void; onCancel: () => void }) {
+function RejectPrompt(props: { onConfirm: (message: string) => void; onCancel: () => void; active?: boolean }) {
   let input: TextareaRenderable
   const { theme } = useTheme()
   const tuiConfig = useTuiConfig()
@@ -448,6 +451,7 @@ function RejectPrompt(props: { onConfirm: (message: string) => void; onCancel: (
   const narrow = createMemo(() => dimensions().width < 80)
   useBindings(() => ({
     mode: OPENCODE_BASE_MODE,
+    enabled: props.active !== false,
     commands: [
       {
         name: "app.exit",
@@ -472,6 +476,7 @@ function RejectPrompt(props: { onConfirm: (message: string) => void; onCancel: (
 
   return (
     <box
+      visible={props.active !== false}
       backgroundColor={theme.backgroundPanel}
       border={["left"]}
       borderColor={theme.error}
@@ -503,7 +508,7 @@ function RejectPrompt(props: { onConfirm: (message: string) => void; onCancel: (
             input = val
             val.traits = { status: "REJECT" }
           }}
-          focused
+          focused={props.active !== false}
           textColor={theme.text}
           focusedTextColor={theme.text}
           cursorColor={theme.primary}
@@ -523,6 +528,7 @@ function RejectPrompt(props: { onConfirm: (message: string) => void; onCancel: (
 }
 
 function Prompt<const T extends Record<string, string>>(props: {
+  active?: boolean
   title: string
   header?: JSX.Element
   body: JSX.Element
@@ -544,6 +550,7 @@ function Prompt<const T extends Record<string, string>>(props: {
 
   useBindings(() => ({
     mode: OPENCODE_BASE_MODE,
+    enabled: props.active !== false,
     commands: [
       {
         name: "app.exit",
@@ -631,6 +638,7 @@ function Prompt<const T extends Record<string, string>>(props: {
 
   const content = () => (
     <box
+      visible={props.active !== false}
       backgroundColor={theme.backgroundPanel}
       border={["left"]}
       borderColor={theme.warning}
@@ -683,6 +691,7 @@ function Prompt<const T extends Record<string, string>>(props: {
                 backgroundColor={option === store.selected ? theme.warning : theme.backgroundMenu}
                 onMouseOver={() => setStore("selected", option)}
                 onMouseUp={() => {
+                  if (props.active === false) return
                   setStore("selected", option)
                   props.onSelect(option)
                 }}
