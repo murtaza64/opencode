@@ -30,7 +30,7 @@ export default defineConfig({
     // against :4096 direct is a later step)
     proxy: {
       "/oc": {
-        target: "http://127.0.0.1:4096",
+        target: process.env.OPENCODE_URL ?? "http://127.0.0.1:4096",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/oc/, ""),
       },
