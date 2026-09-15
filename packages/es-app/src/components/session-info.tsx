@@ -5,7 +5,8 @@ import { createMemo, createResource, For, Show } from "solid-js"
 import { A } from "@solidjs/router"
 import type { Part, Session } from "@opencode-ai/sdk/v2"
 import { es, type IssueRow } from "../api"
-import { ago, jiraUrl, linkUrl, useDashboard } from "../state"
+import { ago, linkUrl, useDashboard } from "../state"
+import { refFromHref, ticketMatchesRef, ticketUrl } from "../ticket-url"
 import { docHref } from "../pages/doc"
 import { TicketIcon } from "./icons"
 import { rightOpen, rightWidth, toggleRight } from "../ui"
@@ -13,7 +14,7 @@ import { PrList } from "./pr"
 
 const URL_RE = /https?:\/\/[^\s)\]}"'`>]+/g
 // #N / repo#N / owner/repo#N mentions and markdown-ish path tokens
-const ISSUE_NUM_RE = /(?:^|[^\w/])[\w./-]*#(\d+)\b/g
+const ISSUE_NUM_RE = /(?:^|[^\w/])([\w./-]*#\d+)\b/g
 const MD_PATH_RE = /(?:^|[\s"'`(\[])((?:~\/|\/)?[\w./-]+\.md)\b/g
 
 const compact = (n?: number) => {
@@ -80,12 +81,13 @@ function SessionInfoBody(props: {
 
   // tracker issues + doc sources of the current editspace, for reference
   // matching (dotfiles#79); soft-fail so the panel renders without a tracker
+  const resourceSource = () => allProjects() && !thread() ? false : editspace() ?? ""
   const [issueList] = createResource(
-    () => allProjects() && !thread() ? false : editspace() ?? "",
+    resourceSource,
     (name) => es.issues(name || undefined).catch(() => undefined),
   )
   const [docList] = createResource(
-    () => allProjects() && !thread() ? false : editspace() ?? "",
+    resourceSource,
     (name) => es.docs(name || undefined).catch(() => undefined),
   )
 
@@ -95,15 +97,20 @@ function SessionInfoBody(props: {
   // transcript mentions (#N for gh; issues/<feature>/NN-*.md pointers for
   // markdown trackers), matched against the real issue list — never guessed
   const referencedTickets = createMemo<IssueRow[]>(() => {
+    if (resourceSource() === false || issueList.loading) return []
     const rows = issueList()?.issues ?? []
     if (!rows.length) return []
     const { texts } = scanned()
     const lanePointers = (thread()?.lanes ?? []).map((l: any) => l.issue ?? "")
     const haystack = [...texts, ...lanePointers]
-    const numbers = new Set<string>()
+    const refs = new Set<string>()
     const mdRefs = new Set<string>()
     for (const text of haystack) {
-      for (const m of text.matchAll(ISSUE_NUM_RE)) numbers.add(m[1])
+      for (const m of text.matchAll(ISSUE_NUM_RE)) refs.add(m[1])
+      for (const url of text.match(URL_RE) ?? []) {
+        const ref = refFromHref(url)
+        if (ref) refs.add(ref)
+      }
       for (const m of text.matchAll(MD_PATH_RE)) {
         const p = m[1].replace(/^.*?(issues\/)/, "$1")
         if (p.startsWith("issues/")) mdRefs.add(p)
@@ -114,7 +121,7 @@ function SessionInfoBody(props: {
     )
     return rows.filter(
       (row) =>
-        (row.url ? numbers.has(String(row.number)) : mdRefs.has(row.ref)) ||
+        (row.url ? [...refs].some((ref) => ticketMatchesRef(ref, row)) : mdRefs.has(row.ref)) ||
         row.claims.some((c) => claimed.has(c)),
     )
   })
@@ -124,6 +131,7 @@ function SessionInfoBody(props: {
   // workspace paths fold into their repo source); bare relative mentions
   // ("prds/x.md") assume the first repo source
   const referencedDocs = createMemo(() => {
+    if (resourceSource() === false || docList.loading) return []
     const roots = docList()?.roots ?? []
     if (!roots.length) return []
     const home = roots[0].root.match(/^\/Users\/[^/]+/)?.[0] ?? ""
@@ -256,7 +264,7 @@ function SessionInfoBody(props: {
           <For each={thread().tickets}>
             {(tk: any) => (
               <div class="info-row">
-                <a href={jiraUrl(tk.key)} target="_blank">
+                <a href={linkUrl(ticketUrl(tk.key, tk.url))} target="_blank">
                   <TicketIcon />
                   {tk.key}
                 </a>

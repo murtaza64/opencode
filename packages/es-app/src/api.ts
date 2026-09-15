@@ -1,6 +1,6 @@
 /* Thin fetch layer. The daemon (:4096) is reached via the /oc proxy, the es
  * dashboard server (:7777) via /es — both same-origin through vite. */
-import type { GlobalSession, Message, Part, Session } from "@opencode-ai/sdk/v2"
+import type { GlobalSession, Message, Part, PermissionRequest, QuestionRequest, Session } from "@opencode-ai/sdk/v2"
 
 export type MessageWithParts = { info: Message; parts: Part[] }
 export type AttentionNotification = {
@@ -21,13 +21,13 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 export const oc = {
-  allSessions: async (): Promise<GlobalSession[]> => {
+  allSessions: async (roots = true): Promise<GlobalSession[]> => {
     // Timestamp-only cursors can skip sessions tied at a page boundary.
     // Grow the window until it contains every row instead.
     for (let limit = 200; ; limit *= 2) {
-      const res = await fetch(`/oc/experimental/session?roots=true&archived=true&limit=${limit}`)
+      const res = await fetch(`/oc/experimental/session?roots=${roots}&archived=true&limit=${limit}`)
       const sessions = await json<GlobalSession[]>(res)
-      if (!res.headers.get("x-next-cursor")) return sessions.filter((s) => !s.parentID)
+      if (!res.headers.get("x-next-cursor")) return roots ? sessions.filter((s) => !s.parentID) : sessions
     }
   },
 
@@ -46,11 +46,11 @@ export const oc = {
   status: (directory: string): Promise<Record<string, { type: string }>> =>
     fetch(`/oc/session/status?${q(directory)}`).then(json<Record<string, { type: string }>>),
 
-  permissions: (directory: string): Promise<any[]> =>
-    fetch(`/oc/permission?${q(directory)}`).then(json<any[]>),
+  permissions: (directory: string): Promise<PermissionRequest[]> =>
+    fetch(`/oc/permission?${q(directory)}`).then(json<PermissionRequest[]>),
 
-  questions: (directory: string): Promise<any[]> =>
-    fetch(`/oc/question?${q(directory)}`).then(json<any[]>),
+  questions: (directory: string): Promise<QuestionRequest[]> =>
+    fetch(`/oc/question?${q(directory)}`).then(json<QuestionRequest[]>),
 
   providers: (directory: string): Promise<{ providers: any[]; default: Record<string, string> }> =>
     fetch(`/oc/config/providers?${q(directory)}`).then(json<{ providers: any[]; default: Record<string, string> }>),
@@ -202,8 +202,17 @@ export const es = {
     fetch(`/es/api/brief/${ticket}?force=true&${esQ(esName)}`, { method: "POST" }).then(json),
   // tickets + docs browser (read-only)
   issues: (esName?: string): Promise<IssueList> => fetch(`/es/api/issues?${esQ(esName)}`).then(json<IssueList>),
-  issue: (ref: string, esName?: string): Promise<IssueDetail> =>
-    fetch(`/es/api/issue?ref=${encodeURIComponent(ref)}&${esQ(esName)}`).then(json<IssueDetail>),
+  issue: async (ref: string, esName?: string): Promise<IssueDetail> => {
+    const { classifyRef, ticketLookupRef } = await import("./ticket-url")
+    const ticket = classifyRef(ref)
+    const tracker = ticket.repo ? await es.issues(esName) : undefined
+    if (tracker?.error) throw new Error(tracker.error)
+    const lookup = ticketLookupRef(ticket, tracker?.backend === "gh" ? tracker.repo : undefined)
+    if (lookup === undefined) {
+      throw new Error(`Ticket ${ref} does not match the selected GitHub tracker (${tracker?.repo ?? tracker?.backend ?? "unknown"}).`)
+    }
+    return fetch(`/es/api/issue?ref=${encodeURIComponent(lookup)}&${esQ(esName)}`).then(json<IssueDetail>)
+  },
   docs: (esName?: string): Promise<DocList> => fetch(`/es/api/docs?${esQ(esName)}`).then(json<DocList>),
   doc: (source: string, path: string, variant?: string, esName?: string): Promise<DocContent> =>
     fetch(

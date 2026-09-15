@@ -13,6 +13,8 @@ import {
   type Resource,
 } from "solid-js"
 import { es, oc, type AttentionNotification } from "./api"
+import { createSessionActivity } from "./session-activity"
+import type { GlobalSession } from "@opencode-ai/sdk/v2"
 
 export type DotState = "pending" | "busy" | "unread" | "idle"
 
@@ -47,6 +49,7 @@ type DashboardCtx = {
   sessions: () => SessionRow[]
   sessionsLoading: () => boolean
   sessionsError: () => string
+  activity: ReturnType<typeof createSessionActivity>
 }
 
 const Ctx = createContext<DashboardCtx>()
@@ -72,39 +75,16 @@ export function DashboardProvider(props: ParentProps) {
     (name) => es.state(name || undefined),
   )
   const [sessionsError, setSessionsError] = createSignal("")
-  const [globalSessions, { refetch: refetchGlobal }] = createResource(allProjects, async () => {
+  const [globalSessions, { refetch: refetchGlobal }] = createResource<GlobalSession[]>(async (_, info) => {
     setSessionsError("")
     try {
-      return await oc.allSessions()
+      return await oc.allSessions(false)
     } catch {
-      setSessionsError("Could not load all sessions. Retrying automatically.")
-      return []
+      setSessionsError("Could not load session relationships. Subagent activity and requests may be incomplete. Retrying automatically.")
+      return info.value ?? []
     }
   })
-  const [globalStatus, setGlobalStatus] = createSignal<Record<string, string>>({})
-  createEffect(() => {
-    if (!allProjects()) return
-    const source = new EventSource("/oc/global/event")
-    let timer: ReturnType<typeof setTimeout> | undefined
-    source.onopen = () => refetchGlobal()
-    source.onmessage = (message) => {
-      const event = JSON.parse(message.data).payload
-      if (event?.type === "session.status") {
-        setGlobalStatus((status) => ({ ...status, [event.properties.sessionID]: event.properties.status.type }))
-      }
-      if (!["session.created", "session.updated", "session.deleted"].includes(event?.type) || timer) return
-      timer = setTimeout(() => {
-        timer = undefined
-        refetchGlobal()
-      }, 1000)
-    }
-    const interval = setInterval(refetchGlobal, 60_000)
-    onCleanup(() => {
-      source.close()
-      clearTimeout(timer)
-      clearInterval(interval)
-    })
-  })
+  const activity = createSessionActivity(() => globalSessions() ?? [], refetchGlobal)
 
   // one SSE subscription per selected editspace
   createEffect(() => {
@@ -169,13 +149,12 @@ export function DashboardProvider(props: ParentProps) {
   })
   const sessionRows = createMemo<SessionRow[]>(() => {
     if (allProjects()) {
-      return (globalSessions() ?? []).map((s) => ({
+      return (globalSessions() ?? []).filter((s) => !s.parentID).map((s) => ({
         id: s.id,
         title: s.title,
         directory: s.directory,
         updated: s.time.updated,
         archived: s.time.archived,
-        live: globalStatus()[s.id],
         project: s.project?.name || s.project?.worktree.split("/").filter(Boolean).at(-1) ||
           s.directory.split("/").filter(Boolean).at(-1) || s.projectID,
       }))
@@ -198,20 +177,39 @@ export function DashboardProvider(props: ParentProps) {
   }
 
   const dotFor = (s: { id: string; live?: string; updated?: number; pending?: boolean }): DotState => {
-    if (s.pending ?? pendingSessions().has(s.id)) return "pending"
-    if (s.live === "busy" || s.live === "retry") return "busy"
+    if (activity.pending(s.id).length || (s.pending ?? pendingSessions().has(s.id))) return "pending"
+    if (activity.running(s.id).length) return "busy"
+    const status = activity.status(s.id) ?? s.live
+    if (status === "busy" || status === "retry") return "busy"
     if (s.updated && s.updated > (viewed()[s.id] ?? 0)) return "unread"
     return "idle"
   }
-  const notifications = () =>
-    (notificationState()?.notifications ?? []).filter(
+  const notifications = createMemo(() => {
+    const requests: AttentionNotification[] = activity.requests().map((item) => {
+      const parent = activity.root(item.request.sessionID)
+      return {
+        id: item.request.id,
+        kind: item.kind,
+        session: parent?.id ?? item.request.sessionID,
+        title: parent?.title ?? item.request.sessionID,
+        directory: parent?.directory ?? item.directory,
+        editspace: "",
+        updated: parent?.time.updated ?? 0,
+      }
+    })
+    const dashboard = (notificationState()?.notifications ?? []).filter(
       (item) =>
         dotFor({
           id: item.session,
           updated: item.updated,
           pending: item.kind === "permission" || item.kind === "question",
         }) !== "idle",
-    )
+    ).filter((item) => item.kind === "idle" || !activity.session(item.session)).map((item) => {
+      const parent = activity.root(item.session)
+      return parent ? { ...item, session: parent.id, directory: parent.directory, title: parent.title } : item
+    })
+    return [...requests, ...dashboard]
+  })
 
   const value: DashboardCtx = {
     state,
@@ -257,7 +255,8 @@ export function DashboardProvider(props: ParentProps) {
     sessionRows,
     sessions,
     sessionsLoading: () => allProjects() && globalSessions.loading,
-    sessionsError: () => allProjects() ? sessionsError() : "",
+    sessionsError,
+    activity,
   }
   return <Ctx.Provider value={value}>{props.children}</Ctx.Provider>
 }

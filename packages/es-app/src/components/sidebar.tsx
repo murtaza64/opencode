@@ -2,7 +2,7 @@
  * mini icon rail — expand toggle up top (where the switcher lives), board
  * icon, then one status dot per session, still navigable. Archived sessions
  * drop to a collapsed section at the bottom of the expanded view. */
-import { createSignal, For, Show } from "solid-js"
+import { createEffect, createSignal, For, Show } from "solid-js"
 import { A } from "@solidjs/router"
 import { es, type SessionSearchResult } from "../api"
 import { sessionHref, useDashboard, type SessionRow } from "../state"
@@ -16,7 +16,7 @@ export default function Sidebar() {
   const [showArchived, setShowArchived] = createSignal(false)
   const current = () => editspace() ?? editspaces()?.default ?? state()?.editspace ?? ""
   const openNotification = (item: ReturnType<typeof notifications>[number]) => {
-    setEditspace(item.editspace)
+    if (item.editspace && !allProjects()) setEditspace(item.editspace)
     markViewed(item.session, true)
   }
 
@@ -87,7 +87,7 @@ export default function Sidebar() {
       href={sessionHref(s.id, s.directory)}
       activeClass="active"
       class={`nav-item ${cls}`}
-      title={`${s.title} (${s.live ?? dotFor(s)})${allProjects() ? ` · ${s.directory}` : ""}`}
+      title={`${s.title} (${dotFor(s)})${allProjects() ? ` · ${s.directory}` : ""}`}
     >
       <span class={`dot ${dotFor(s)}`} />
       <span class="nav-title">{s.title || s.id}</span>
@@ -112,7 +112,7 @@ export default function Sidebar() {
                 href={sessionHref(s.id, s.directory)}
                 activeClass="active"
                 class="mini-item"
-                title={`${s.title} (${s.live ?? dotFor(s)})${allProjects() ? ` · ${s.project}` : ""}`}
+                title={`${s.title} (${dotFor(s)})${allProjects() ? ` · ${s.project}` : ""}`}
               >
                 <span class={`dot ${dotFor(s)}`} />
               </A>
@@ -126,7 +126,10 @@ export default function Sidebar() {
           <select
             class="es-switcher"
             title="project"
-            value={allProjects() ? "__all__" : current()}
+            ref={(select) => createEffect(() => {
+              editspaces()
+              select.value = allProjects() ? "__all__" : current()
+            })}
             onChange={(e) => {
               clearSearch()
               if (e.currentTarget.value === "__all__") setAllProjects(true)
@@ -163,7 +166,7 @@ export default function Sidebar() {
                   <span class="notification-copy">
                     <span class="nav-title">{notification.title}</span>
                     <span class="notification-meta">
-                      {notification.editspace} · {notification.kind}
+                      {notification.editspace ? `${notification.editspace} · ` : ""}{notification.kind}
                     </span>
                   </span>
                 </A>

@@ -379,6 +379,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
   font-weight: bold;
 }
 .nav-empty { padding: 4px 14px; }
+.session-alerts { flex-shrink: 0; max-height: 40vh; overflow-y: auto; }
+.session-alerts .err { white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px; }
 /* sidebar transcript search */
 .search-box { padding: 8px 10px 0; }
 .search-input {
