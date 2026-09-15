@@ -195,6 +195,14 @@ import type {
   SessionGetResponses,
   SessionInitErrors,
   SessionInitResponses,
+  SessionInputAdmitErrors,
+  SessionInputAdmitResponses,
+  SessionInputCancelErrors,
+  SessionInputCancelResponses,
+  SessionInputGetErrors,
+  SessionInputGetResponses,
+  SessionInputListErrors,
+  SessionInputListResponses,
   SessionListErrors,
   SessionListResponses,
   SessionMessageErrors,
@@ -223,6 +231,7 @@ import type {
   SessionUnshareResponses,
   SessionUpdateErrors,
   SessionUpdateResponses,
+  SessionV1InputPayload,
   SubtaskPartInput,
   SyncHistoryListErrors,
   SyncHistoryListResponses,
@@ -263,6 +272,8 @@ import type {
   TuiShowToastResponses,
   TuiSubmitPromptErrors,
   TuiSubmitPromptResponses,
+  UmbrellaSessionListErrors,
+  UmbrellaSessionListResponses,
   V2AgentListErrors,
   V2AgentListResponses,
   V2CommandListErrors,
@@ -3359,6 +3370,147 @@ export class Provider extends HeyApiClient {
   }
 }
 
+export class Input extends HeyApiClient {
+  /**
+   * List session input receipts
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      state?: "pending" | "promoted" | "cancelled" | "all"
+      after?: string
+      limit?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "state" },
+            { in: "query", key: "after" },
+            { in: "query", key: "limit" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SessionInputListResponses, SessionInputListErrors, ThrowOnError>({
+      url: "/session/{sessionID}/input",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Admit durable session input
+   */
+  public admit<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      sessionV1InputPayload?: SessionV1InputPayload
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "sessionV1InputPayload", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionInputAdmitResponses, SessionInputAdmitErrors, ThrowOnError>({
+      url: "/session/{sessionID}/input",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Cancel pending session input
+   */
+  public cancel<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      requestID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "requestID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<SessionInputCancelResponses, SessionInputCancelErrors, ThrowOnError>(
+      {
+        url: "/session/{sessionID}/input/{requestID}",
+        ...options,
+        ...params,
+      },
+    )
+  }
+
+  /**
+   * Get session input receipt
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      requestID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "requestID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SessionInputGetResponses, SessionInputGetErrors, ThrowOnError>({
+      url: "/session/{sessionID}/input/{requestID}",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Session2 extends HeyApiClient {
   /**
    * List sessions
@@ -4325,6 +4477,11 @@ export class Session2 extends HeyApiClient {
       ...params,
     })
   }
+
+  private _input?: Input
+  get input(): Input {
+    return (this._input ??= new Input({ client: this.client }))
+  }
 }
 
 export class Part extends HeyApiClient {
@@ -5021,6 +5178,45 @@ export class Tui extends HeyApiClient {
   }
 }
 
+export class Session3 extends HeyApiClient {
+  /**
+   * List sessions across the umbrella
+   *
+   * List sessions across every member directory of the umbrella containing the requesting directory. Returns an empty list when the directory belongs to no umbrella.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<UmbrellaSessionListResponses, UmbrellaSessionListErrors, ThrowOnError>({
+      url: "/umbrella/session",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Umbrella extends HeyApiClient {
+  private _session?: Session3
+  get session(): Session3 {
+    return (this._session ??= new Session3({ client: this.client }))
+  }
+}
+
 export class Health extends HeyApiClient {
   /**
    * Check server health
@@ -5423,7 +5619,7 @@ export class Question2 extends HeyApiClient {
   }
 }
 
-export class Session3 extends HeyApiClient {
+export class Session4 extends HeyApiClient {
   /**
    * List sessions
    *
@@ -7003,9 +7199,9 @@ export class V2 extends HeyApiClient {
     return (this._agent ??= new Agent({ client: this.client }))
   }
 
-  private _session?: Session3
-  get session(): Session3 {
-    return (this._session ??= new Session3({ client: this.client }))
+  private _session?: Session4
+  get session(): Session4 {
+    return (this._session ??= new Session4({ client: this.client }))
   }
 
   private _model?: Model
@@ -7210,6 +7406,11 @@ export class OpencodeClient extends HeyApiClient {
   private _tui?: Tui
   get tui(): Tui {
     return (this._tui ??= new Tui({ client: this.client }))
+  }
+
+  private _umbrella?: Umbrella
+  get umbrella(): Umbrella {
+    return (this._umbrella ??= new Umbrella({ client: this.client }))
   }
 
   private _v2?: V2

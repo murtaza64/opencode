@@ -9,6 +9,65 @@ const waitForState = <A, E>(runner: Runner.Runner<A, E>, tag: Runner.State<A, E>
   }).pipe(Effect.timeout("1 second"))
 
 describe("Runner", () => {
+  it.live(
+    "coalesces late wakes after cleanup without replacing the original result",
+    Effect.gen(function* () {
+      const scope = yield* Scope.Scope
+      const cleanup = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const called = yield* Deferred.make<void>()
+      const calls = yield* Ref.make(0)
+      const runner = Runner.make<string>(scope)
+      const original = yield* runner
+        .ensureRunning(
+          Effect.succeed("original").pipe(
+            Effect.ensuring(Deferred.succeed(cleanup, undefined).pipe(Effect.andThen(Deferred.await(release)))),
+          ),
+        )
+        .pipe(Effect.forkChild)
+      yield* Deferred.await(cleanup)
+      const wake = Ref.update(calls, (n) => n + 1).pipe(
+        Effect.andThen(Deferred.succeed(called, undefined)),
+        Effect.as("advisory"),
+      )
+      yield* runner.wake(wake)
+      yield* runner.wake(wake)
+      expect(yield* Ref.get(calls)).toBe(0)
+      yield* Deferred.succeed(release, undefined)
+      expect(yield* Fiber.join(original)).toBe("original")
+      yield* Deferred.await(called)
+      yield* waitForState(runner, "Idle")
+      expect(yield* Ref.get(calls)).toBe(1)
+    }),
+  )
+
+  it.live(
+    "drops advisory wakes when cancelled during cleanup",
+    Effect.gen(function* () {
+      const scope = yield* Scope.Scope
+      const cleanup = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const calls = yield* Ref.make(0)
+      const runner = Runner.make<string>(scope, { onInterrupt: Effect.succeed("aborted") })
+      yield* runner
+        .ensureRunning(
+          Effect.never.pipe(
+            Effect.ensuring(Deferred.succeed(cleanup, undefined).pipe(Effect.andThen(Deferred.await(release)))),
+          ),
+        )
+        .pipe(Effect.forkChild)
+      yield* waitForState(runner, "Running")
+      yield* runner.wake(Ref.update(calls, (n) => n + 1).pipe(Effect.as("unexpected")))
+      const stop = yield* runner.cancel.pipe(Effect.forkChild)
+      yield* Deferred.await(cleanup)
+      yield* runner.wake(Ref.update(calls, (n) => n + 1).pipe(Effect.as("unexpected")))
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(stop)
+      expect(yield* Ref.get(calls)).toBe(0)
+      expect(runner.busy).toBe(false)
+    }),
+  )
+
   // --- ensureRunning semantics ---
 
   it.live(
@@ -204,7 +263,7 @@ describe("Runner", () => {
   )
 
   it.live(
-    "cancel does not deadlock when replacement work starts before interrupted run exits",
+    "replacement work waits for interrupted run cleanup without deadlocking",
     Effect.gen(function* () {
       const s = yield* Scope.Scope
       const hit = yield* Deferred.make<void>()
@@ -228,11 +287,13 @@ describe("Runner", () => {
         const b = yield* runner.ensureRunning(Deferred.await(done).pipe(Effect.as("second"))).pipe(Effect.forkChild)
         yield* Effect.yieldNow
         expect(runner.busy).toBe(true)
+        expect(runner.state._tag).toBe("Stopping")
 
         yield* Deferred.succeed(hold, undefined)
         const stopExit = yield* Fiber.await(stop).pipe(Effect.timeout("250 millis"))
         expect(Exit.isSuccess(stopExit)).toBe(true)
 
+        yield* waitForState(runner, "Running")
         expect(runner.busy).toBe(true)
         yield* Deferred.succeed(done, undefined)
         expect(yield* Fiber.join(b).pipe(Effect.timeout("250 millis"))).toBe("second")

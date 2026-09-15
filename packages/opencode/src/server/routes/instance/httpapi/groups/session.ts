@@ -20,7 +20,13 @@ import {
   WorkspaceRoutingQuery,
   WorkspaceRoutingQueryFields,
 } from "../middleware/workspace-routing"
-import { ApiNotFoundError, PermissionNotFoundError, SessionBusyError } from "../errors"
+import {
+  ApiNotFoundError,
+  PermissionNotFoundError,
+  SessionBusyError,
+  ConflictError,
+  InvalidRequestError,
+} from "../errors"
 import { described } from "./metadata"
 import { QueryBoolean } from "./query"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -46,6 +52,14 @@ export const MessagesQuery = Schema.Struct({
   before: Schema.optional(Schema.String),
 })
 export const StatusMap = Schema.Record(Schema.String, SessionStatus.Info)
+export const InputsQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  state: Schema.optional(Schema.Literals(["pending", "promoted", "cancelled", "all"])),
+  after: Schema.optional(Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
+  limit: Schema.optional(
+    Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 1000 })),
+  ),
+})
 export const UpdatePayload = Schema.Struct({
   title: Schema.optional(Schema.String),
   metadata: Schema.optional(Session.Metadata),
@@ -108,6 +122,39 @@ export const SessionApi = HttpApi.make("session")
   .add(
     HttpApiGroup.make("session")
       .add(
+        HttpApiEndpoint.post("admitInput", `${root}/:sessionID/input`, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: SessionV1.InputPayload,
+          success: SessionV1.InputReceipt,
+          error: [ApiNotFoundError, ConflictError, InvalidRequestError, HttpApiError.BadRequest],
+        }).annotateMerge(
+          OpenApi.annotations({ identifier: "session.input.admit", summary: "Admit durable session input" }),
+        ),
+        HttpApiEndpoint.get("listInputs", `${root}/:sessionID/input`, {
+          params: { sessionID: SessionID },
+          query: InputsQuery,
+          success: Schema.Struct({ items: Schema.Array(SessionV1.InputReceipt), next: Schema.NullOr(Schema.Number) }),
+          error: [ApiNotFoundError, InvalidRequestError, HttpApiError.BadRequest],
+        }).annotateMerge(
+          OpenApi.annotations({ identifier: "session.input.list", summary: "List session input receipts" }),
+        ),
+        HttpApiEndpoint.get("getInput", `${root}/:sessionID/input/:requestID`, {
+          params: { sessionID: SessionID, requestID: Schema.String },
+          query: WorkspaceRoutingQuery,
+          success: SessionV1.InputReceipt,
+          error: [ApiNotFoundError, InvalidRequestError, HttpApiError.BadRequest],
+        }).annotateMerge(
+          OpenApi.annotations({ identifier: "session.input.get", summary: "Get session input receipt" }),
+        ),
+        HttpApiEndpoint.delete("cancelInput", `${root}/:sessionID/input/:requestID`, {
+          params: { sessionID: SessionID, requestID: Schema.String },
+          query: WorkspaceRoutingQuery,
+          success: SessionV1.InputReceipt,
+          error: [ApiNotFoundError, ConflictError, InvalidRequestError, HttpApiError.BadRequest],
+        }).annotateMerge(
+          OpenApi.annotations({ identifier: "session.input.cancel", summary: "Cancel pending session input" }),
+        ),
         HttpApiEndpoint.get("list", SessionPaths.list, {
           query: ListQuery,
           success: described(Schema.Array(Session.Info), "List of sessions"),

@@ -37,7 +37,15 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const flags = yield* RuntimeFlags.Service
 
     const capabilities = Effect.fn("ExperimentalHttpApi.capabilities")(function* () {
-      return { backgroundSubagents: flags.experimentalBackgroundSubagents }
+      return {
+        backgroundSubagents: flags.experimentalBackgroundSubagents,
+        sessionInput: {
+          version: 1 as const,
+          delivery: ["queue", "steer"] as const,
+          list: true as const,
+          cancel: true as const,
+        },
+      }
     })
 
     const getConsole = Effect.fn("ExperimentalHttpApi.console")(function* () {

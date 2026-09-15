@@ -27,6 +27,12 @@ const ConsoleStateResponse = Schema.Struct({
 
 const CapabilitiesResponse = Schema.Struct({
   backgroundSubagents: Schema.Boolean,
+  sessionInput: Schema.Struct({
+    version: Schema.Literal(1),
+    delivery: Schema.Array(Schema.Literals(["queue", "steer"])),
+    list: Schema.Literal(true),
+    cancel: Schema.Literal(true),
+  }),
 }).annotate({ identifier: "ExperimentalCapabilities" })
 
 const ConsoleOrgOption = Schema.Struct({
