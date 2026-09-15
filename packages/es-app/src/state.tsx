@@ -16,6 +16,16 @@ import { es, oc, type AttentionNotification } from "./api"
 
 export type DotState = "pending" | "busy" | "unread" | "idle"
 
+export type SessionRow = {
+  id: string
+  title: string
+  directory: string
+  updated: number
+  live?: string
+  project?: string
+  archived?: number
+}
+
 type DashboardCtx = {
   state: Resource<any>
   refetch: () => void
@@ -31,15 +41,27 @@ type DashboardCtx = {
   editspaces: Resource<{ editspaces: { name: string; root: string }[]; default: string | null }>
   archivedIds: () => Set<string>
   refetchArchived: () => void
+  allProjects: () => boolean
+  setAllProjects: (value: boolean) => void
+  sessionRows: () => SessionRow[]
+  sessions: () => SessionRow[]
+  sessionsLoading: () => boolean
+  sessionsError: () => string
 }
 
 const Ctx = createContext<DashboardCtx>()
 
 export function DashboardProvider(props: ParentProps) {
+  const [allProjects, setAllProjectsRaw] = createSignal(localStorage.getItem("es-app-all-projects") === "true")
+  const setAllProjects = (value: boolean) => {
+    localStorage.setItem("es-app-all-projects", String(value))
+    setAllProjectsRaw(value)
+  }
   const [editspace, setEditspaceRaw] = createSignal<string | undefined>(
     localStorage.getItem("es-app-editspace") ?? undefined,
   )
   const setEditspace = (name: string) => {
+    setAllProjects(false)
     localStorage.setItem("es-app-editspace", name)
     setEditspaceRaw(name)
   }
@@ -49,6 +71,40 @@ export function DashboardProvider(props: ParentProps) {
     () => editspace() ?? "",
     (name) => es.state(name || undefined),
   )
+  const [sessionsError, setSessionsError] = createSignal("")
+  const [globalSessions, { refetch: refetchGlobal }] = createResource(allProjects, async () => {
+    setSessionsError("")
+    try {
+      return await oc.allSessions()
+    } catch {
+      setSessionsError("Could not load all sessions. Retrying automatically.")
+      return []
+    }
+  })
+  const [globalStatus, setGlobalStatus] = createSignal<Record<string, string>>({})
+  createEffect(() => {
+    if (!allProjects()) return
+    const source = new EventSource("/oc/global/event")
+    let timer: ReturnType<typeof setTimeout> | undefined
+    source.onopen = () => refetchGlobal()
+    source.onmessage = (message) => {
+      const event = JSON.parse(message.data).payload
+      if (event?.type === "session.status") {
+        setGlobalStatus((status) => ({ ...status, [event.properties.sessionID]: event.properties.status.type }))
+      }
+      if (!["session.created", "session.updated", "session.deleted"].includes(event?.type) || timer) return
+      timer = setTimeout(() => {
+        timer = undefined
+        refetchGlobal()
+      }, 1000)
+    }
+    const interval = setInterval(refetchGlobal, 60_000)
+    onCleanup(() => {
+      source.close()
+      clearTimeout(timer)
+      clearInterval(interval)
+    })
+  })
 
   // one SSE subscription per selected editspace
   createEffect(() => {
@@ -93,7 +149,7 @@ export function DashboardProvider(props: ParentProps) {
   // the flag, so ask the daemon per distinct directory. Keyed on state() so it
   // refreshes with the dashboard's SSE ticks; the session page also refetches
   // explicitly after archiving.
-  const [archived, { refetch: refetchArchived }] = createResource(state, async (st: any) => {
+  const [archived, { refetch: refetchProjectArchived }] = createResource(state, async (st: any) => {
     const dirs = [
       ...new Set<string>(
         (st?.threads ?? [])
@@ -111,7 +167,35 @@ export function DashboardProvider(props: ParentProps) {
     )
     return out
   })
-  const archivedIds = () => archived() ?? new Set<string>()
+  const sessionRows = createMemo<SessionRow[]>(() => {
+    if (allProjects()) {
+      return (globalSessions() ?? []).map((s) => ({
+        id: s.id,
+        title: s.title,
+        directory: s.directory,
+        updated: s.time.updated,
+        archived: s.time.archived,
+        live: globalStatus()[s.id],
+        project: s.project?.name || s.project?.worktree.split("/").filter(Boolean).at(-1) ||
+          s.directory.split("/").filter(Boolean).at(-1) || s.projectID,
+      }))
+    }
+    return (state()?.threads ?? [])
+      .filter((t: any) => t.kind === "session" && t.sessions[0])
+      .map((t: any) => t.sessions[0])
+  })
+  const archivedIds = createMemo(() => allProjects()
+    ? new Set(sessionRows().filter((s) => s.archived).map((s) => s.id))
+    : archived() ?? new Set<string>(),
+  )
+  const sessions = createMemo(() => sessionRows()
+    .filter((s) => !archivedIds().has(s.id))
+    .sort((a, b) => b.updated - a.updated),
+  )
+  const refetchArchived = () => {
+    refetchProjectArchived()
+    if (allProjects()) refetchGlobal()
+  }
 
   const dotFor = (s: { id: string; live?: string; updated?: number; pending?: boolean }): DotState => {
     if (s.pending ?? pendingSessions().has(s.id)) return "pending"
@@ -131,7 +215,10 @@ export function DashboardProvider(props: ParentProps) {
 
   const value: DashboardCtx = {
     state,
-    refetch,
+    refetch: () => {
+      refetch()
+      if (allProjects()) refetchGlobal()
+    },
     refresh: async () => {
       await es.refresh(editspace())
       refetch()
@@ -165,6 +252,12 @@ export function DashboardProvider(props: ParentProps) {
     editspaces,
     archivedIds,
     refetchArchived,
+    allProjects,
+    setAllProjects,
+    sessionRows,
+    sessions,
+    sessionsLoading: () => allProjects() && globalSessions.loading,
+    sessionsError: () => allProjects() ? sessionsError() : "",
   }
   return <Ctx.Provider value={value}>{props.children}</Ctx.Provider>
 }

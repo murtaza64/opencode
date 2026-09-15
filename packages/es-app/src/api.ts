@@ -1,6 +1,6 @@
 /* Thin fetch layer. The daemon (:4096) is reached via the /oc proxy, the es
  * dashboard server (:7777) via /es — both same-origin through vite. */
-import type { Message, Part, Session } from "@opencode-ai/sdk/v2"
+import type { GlobalSession, Message, Part, Session } from "@opencode-ai/sdk/v2"
 
 export type MessageWithParts = { info: Message; parts: Part[] }
 export type AttentionNotification = {
@@ -21,6 +21,16 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 export const oc = {
+  allSessions: async (): Promise<GlobalSession[]> => {
+    // Timestamp-only cursors can skip sessions tied at a page boundary.
+    // Grow the window until it contains every row instead.
+    for (let limit = 200; ; limit *= 2) {
+      const res = await fetch(`/oc/experimental/session?roots=true&archived=true&limit=${limit}`)
+      const sessions = await json<GlobalSession[]>(res)
+      if (!res.headers.get("x-next-cursor")) return sessions.filter((s) => !s.parentID)
+    }
+  },
+
   sessions: (directory: string): Promise<Session[]> =>
     fetch(`/oc/session?${q(directory)}`).then(json<Session[]>),
 

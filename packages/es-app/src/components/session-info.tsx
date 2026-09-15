@@ -72,7 +72,7 @@ function SessionInfoBody(props: {
   session?: Session
   parts: Record<string, Part[]>
 }) {
-  const { state, editspace } = useDashboard()
+  const { state, editspace, allProjects } = useDashboard()
 
   const thread = createMemo(() =>
     (state()?.threads ?? []).find((t: any) => t.sessions.some((s: any) => s.id === props.sessionID)),
@@ -81,11 +81,11 @@ function SessionInfoBody(props: {
   // tracker issues + doc sources of the current editspace, for reference
   // matching (dotfiles#79); soft-fail so the panel renders without a tracker
   const [issueList] = createResource(
-    () => editspace() ?? "",
+    () => allProjects() && !thread() ? false : editspace() ?? "",
     (name) => es.issues(name || undefined).catch(() => undefined),
   )
   const [docList] = createResource(
-    () => editspace() ?? "",
+    () => allProjects() && !thread() ? false : editspace() ?? "",
     (name) => es.docs(name || undefined).catch(() => undefined),
   )
 

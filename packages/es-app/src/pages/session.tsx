@@ -360,6 +360,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     if (!window.confirm("Delete this session permanently?")) return
     try {
       await oc.remove(sessionID, directory)
+      refetchArchived()
       navigate("/")
     } catch (e) {
       setError(String(e))
@@ -526,12 +527,10 @@ function SessionView(props: { sessionID: string; directory: string }) {
   // --- vim-like modal input + navigation --------------------------------
 
   const navigate = useNavigate()
-  const { state: dashState, archivedIds } = useDashboard()
+  const { sessions } = useDashboard()
   const switchSession = (back: boolean) => {
     // skip archived sessions, matching the sidebar's main list
-    const list = (dashState()?.threads ?? [])
-      .filter((t: any) => t.kind === "session" && t.sessions[0] && !archivedIds().has(t.sessions[0].id))
-      .map((t: any) => t.sessions[0])
+    const list = sessions()
     if (!list.length) return
     const i = list.findIndex((s: any) => s.id === sessionID)
     const next = list[(i + (back ? -1 : 1) + list.length) % list.length]
