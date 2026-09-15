@@ -21,6 +21,9 @@ const workerNo304: Plugin = {
 
 export default defineConfig({
   plugins: [solid(), tailwindcss(), workerNo304],
+  worker: {
+    format: "es",
+  },
   server: {
     port: 3100,
     // spike: proxy the daemon so the browser stays same-origin (CORS check
