@@ -3,6 +3,7 @@ import { Permission } from "@/permission"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 
 import { Session } from "@/session/session"
+import { SessionAside } from "@/session/aside"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionRevert } from "@/session/revert"
@@ -20,7 +21,7 @@ import {
   WorkspaceRoutingQuery,
   WorkspaceRoutingQueryFields,
 } from "../middleware/workspace-routing"
-import { ApiNotFoundError, PermissionNotFoundError, SessionBusyError } from "../errors"
+import { ApiNotFoundError, AsideError, PermissionNotFoundError, SessionBusyError } from "../errors"
 import { described } from "./metadata"
 import { QueryBoolean } from "./query"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -89,6 +90,8 @@ export const SessionPaths = {
   update: `${root}/:sessionID`,
   fork: `${root}/:sessionID/fork`,
   abort: `${root}/:sessionID/abort`,
+  aside: `${root}/:sessionID/aside`,
+  cancelAside: `${root}/:sessionID/aside/:requestID`,
   share: `${root}/:sessionID/share`,
   init: `${root}/:sessionID/init`,
   summarize: `${root}/:sessionID/summarize`,
@@ -248,6 +251,33 @@ export const SessionApi = HttpApi.make("session")
             identifier: "session.fork",
             summary: "Fork session",
             description: "Create a new session by forking an existing session at a specific message point.",
+          }),
+        ),
+        HttpApiEndpoint.post("aside", SessionPaths.aside, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: SessionAside.Input,
+          success: described(SessionAside.Result, "Ephemeral snapshot answer"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError, AsideError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.aside",
+            summary: "Ask an Aside",
+            description:
+              "Answer a tool-free question from a frozen session snapshot without modifying the session. Results are not stored; only simultaneous duplicate IDs are rejected. Cancelled IDs are blocked for 60 seconds. Use a fresh request ID for a new attempt.",
+          }),
+        ),
+        HttpApiEndpoint.delete("cancelAside", SessionPaths.cancelAside, {
+          params: { sessionID: SessionID, requestID: SessionAside.RequestID },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Boolean, "Whether an active Aside was found"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError, AsideError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.cancelAside",
+            summary: "Cancel an Aside",
+            description:
+              "Cancel only this ephemeral Aside. Returns true if active, false otherwise. Both outcomes block this session/request ID for 60 seconds, including cancellation before the ask arrives. Records are instance-local, bounded, and lost on restart or instance disposal.",
           }),
         ),
         HttpApiEndpoint.post("abort", SessionPaths.abort, {

@@ -52,6 +52,7 @@ import { DialogConfirm } from "../../ui/dialog-confirm"
 import { DialogTimeline } from "./dialog-timeline"
 import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
+import { DialogAside } from "../../component/dialog-aside"
 import { Sidebar } from "./sidebar"
 import { SubagentFooter } from "./subagent-footer.tsx"
 import { filetype } from "../../util/filetype"
@@ -463,6 +464,17 @@ export function Session() {
   }
 
   const sessionCommandList = createMemo(() => [
+    {
+      title: "Ask a side question (Aside)",
+      value: "session.aside",
+      category: "Session",
+      slash: { name: "btw" },
+      run: () => {
+        dialog.replace(() => (
+          <DialogAside sessionID={route.sessionID} model={local.model.current()} agent={local.agent.current()?.name} />
+        ))
+      },
+    },
     {
       title: session()?.share?.url ? "Copy share link" : "Share session",
       value: "session.share",

@@ -87,6 +87,8 @@ function init() {
   let focus: Renderable | null
   function refocus() {
     setTimeout(() => {
+      // A palette action may have opened another dialog before this callback runs.
+      if (store.stack.length > 0) return
       if (!focus) return
       if (focus.isDestroyed) return
       function find(item: Renderable) {

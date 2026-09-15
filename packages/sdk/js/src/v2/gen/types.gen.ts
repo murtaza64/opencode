@@ -2550,6 +2550,11 @@ export type NotFoundError = {
   }
 }
 
+export type AsideError = {
+  _tag: "AsideError"
+  message: string
+}
+
 export type TextPartInput = {
   id?: string
   type: "text"
@@ -2653,6 +2658,67 @@ export type EventTuiSessionSelect = {
      */
     sessionID: string
   }
+}
+
+export type UmbrellaMember = {
+  directory: string
+  label: string
+  kind: "root" | "sidecar" | "lane" | "mirror"
+}
+
+export type UmbrellaSession = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+  umbrella: string
+  member: UmbrellaMember
 }
 
 export type Workspace = {
@@ -9959,6 +10025,98 @@ export type SessionForkResponses = {
 
 export type SessionForkResponse = SessionForkResponses[keyof SessionForkResponses]
 
+export type SessionAsideData = {
+  body?: {
+    requestID: string
+    question: string
+    model?: {
+      providerID: string
+      modelID: string
+    }
+    agent?: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/aside"
+}
+
+export type SessionAsideErrors = {
+  /**
+   * BadRequest | AsideError | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | AsideError | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionAsideError = SessionAsideErrors[keyof SessionAsideErrors]
+
+export type SessionAsideResponses = {
+  /**
+   * Ephemeral snapshot answer
+   */
+  200: {
+    requestID: string
+    text: string
+    snapshot: {
+      capturedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      throughMessageID?: string
+      excludedMessageCount: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      activity: {
+        status: "idle" | "busy" | "retry"
+        tools: Array<{
+          name: string
+          status: "running" | "pending"
+        }>
+      }
+    }
+  }
+}
+
+export type SessionAsideResponse = SessionAsideResponses[keyof SessionAsideResponses]
+
+export type SessionCancelAsideData = {
+  body?: never
+  path: {
+    sessionID: string
+    requestID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/aside/{requestID}"
+}
+
+export type SessionCancelAsideErrors = {
+  /**
+   * BadRequest | AsideError | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | AsideError | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionCancelAsideError = SessionCancelAsideErrors[keyof SessionCancelAsideErrors]
+
+export type SessionCancelAsideResponses = {
+  /**
+   * Whether an active Aside was found
+   */
+  200: boolean
+}
+
+export type SessionCancelAsideResponse = SessionCancelAsideResponses[keyof SessionCancelAsideResponses]
+
 export type SessionAbortData = {
   body?: never
   path: {
@@ -11002,6 +11160,34 @@ export type TuiControlResponseResponses = {
 }
 
 export type TuiControlResponseResponse = TuiControlResponseResponses[keyof TuiControlResponseResponses]
+
+export type UmbrellaSessionListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/umbrella/session"
+}
+
+export type UmbrellaSessionListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type UmbrellaSessionListError = UmbrellaSessionListErrors[keyof UmbrellaSessionListErrors]
+
+export type UmbrellaSessionListResponses = {
+  /**
+   * Sessions across all umbrella members, tagged with their member
+   */
+  200: Array<UmbrellaSession>
+}
+
+export type UmbrellaSessionListResponse = UmbrellaSessionListResponses[keyof UmbrellaSessionListResponses]
 
 export type ExperimentalWorkspaceAdapterListData = {
   body?: never

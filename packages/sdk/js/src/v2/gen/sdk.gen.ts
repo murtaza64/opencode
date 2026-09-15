@@ -177,6 +177,10 @@ import type {
   QuestionV2Reply,
   SessionAbortErrors,
   SessionAbortResponses,
+  SessionAsideErrors,
+  SessionAsideResponses,
+  SessionCancelAsideErrors,
+  SessionCancelAsideResponses,
   SessionChildrenErrors,
   SessionChildrenResponses,
   SessionCommandErrors,
@@ -263,6 +267,8 @@ import type {
   TuiShowToastResponses,
   TuiSubmitPromptErrors,
   TuiSubmitPromptResponses,
+  UmbrellaSessionListErrors,
+  UmbrellaSessionListResponses,
   V2AgentListErrors,
   V2AgentListResponses,
   V2CommandListErrors,
@@ -3906,6 +3912,90 @@ export class Session2 extends HeyApiClient {
   }
 
   /**
+   * Ask an Aside
+   *
+   * Answer a tool-free question from a frozen session snapshot without modifying the session. Results are not stored; only simultaneous duplicate IDs are rejected. Cancelled IDs are blocked for 60 seconds. Use a fresh request ID for a new attempt.
+   */
+  public aside<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      requestID?: string
+      question?: string
+      model?: {
+        providerID: string
+        modelID: string
+      }
+      agent?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "requestID" },
+            { in: "body", key: "question" },
+            { in: "body", key: "model" },
+            { in: "body", key: "agent" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionAsideResponses, SessionAsideErrors, ThrowOnError>({
+      url: "/session/{sessionID}/aside",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Cancel an Aside
+   *
+   * Cancel only this ephemeral Aside. Returns true if active, false otherwise. Both outcomes block this session/request ID for 60 seconds, including cancellation before the ask arrives. Records are instance-local, bounded, and lost on restart or instance disposal.
+   */
+  public cancelAside<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      requestID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "requestID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<SessionCancelAsideResponses, SessionCancelAsideErrors, ThrowOnError>(
+      {
+        url: "/session/{sessionID}/aside/{requestID}",
+        ...options,
+        ...params,
+      },
+    )
+  }
+
+  /**
    * Abort session
    *
    * Abort an active session and stop any ongoing AI processing or command execution.
@@ -5021,6 +5111,45 @@ export class Tui extends HeyApiClient {
   }
 }
 
+export class Session3 extends HeyApiClient {
+  /**
+   * List sessions across the umbrella
+   *
+   * List sessions across every member directory of the umbrella containing the requesting directory. Returns an empty list when the directory belongs to no umbrella.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<UmbrellaSessionListResponses, UmbrellaSessionListErrors, ThrowOnError>({
+      url: "/umbrella/session",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Umbrella extends HeyApiClient {
+  private _session?: Session3
+  get session(): Session3 {
+    return (this._session ??= new Session3({ client: this.client }))
+  }
+}
+
 export class Health extends HeyApiClient {
   /**
    * Check server health
@@ -5423,7 +5552,7 @@ export class Question2 extends HeyApiClient {
   }
 }
 
-export class Session3 extends HeyApiClient {
+export class Session4 extends HeyApiClient {
   /**
    * List sessions
    *
@@ -7003,9 +7132,9 @@ export class V2 extends HeyApiClient {
     return (this._agent ??= new Agent({ client: this.client }))
   }
 
-  private _session?: Session3
-  get session(): Session3 {
-    return (this._session ??= new Session3({ client: this.client }))
+  private _session?: Session4
+  get session(): Session4 {
+    return (this._session ??= new Session4({ client: this.client }))
   }
 
   private _model?: Model
@@ -7210,6 +7339,11 @@ export class OpencodeClient extends HeyApiClient {
   private _tui?: Tui
   get tui(): Tui {
     return (this._tui ??= new Tui({ client: this.client }))
+  }
+
+  private _umbrella?: Umbrella
+  get umbrella(): Umbrella {
+    return (this._umbrella ??= new Umbrella({ client: this.client }))
   }
 
   private _v2?: V2

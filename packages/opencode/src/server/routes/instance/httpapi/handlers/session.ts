@@ -6,6 +6,7 @@ import { Command } from "@/command"
 import { Permission } from "@/permission"
 import { SessionShare } from "@/share/session"
 import { Session } from "@/session/session"
+import { SessionAside } from "@/session/aside"
 import { SessionCompaction } from "@/session/compaction"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
@@ -36,7 +37,7 @@ import {
   SummarizePayload,
   UpdatePayload,
 } from "../groups/session"
-import { PermissionNotFoundError } from "../errors"
+import { AsideError, PermissionNotFoundError } from "../errors"
 import * as SessionError from "./session-errors"
 
 const tryParseJson = (text: string) =>
@@ -48,6 +49,7 @@ const tryParseJson = (text: string) =>
 export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", (handlers) =>
   Effect.gen(function* () {
     const session = yield* Session.Service
+    const asideSvc = yield* SessionAside.Service
     const shareSvc = yield* SessionShare.Service
     const promptSvc = yield* SessionPrompt.Service
     const revertSvc = yield* SessionRevert.Service
@@ -232,6 +234,25 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const abort = Effect.fn("SessionHttpApi.abort")(function* (ctx: { params: { sessionID: SessionID } }) {
       yield* promptSvc.cancel(ctx.params.sessionID)
       return true
+    })
+
+    const aside = Effect.fn("SessionHttpApi.aside")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof SessionAside.Input.Type
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      return yield* asideSvc
+        .ask(ctx.params.sessionID, ctx.payload)
+        .pipe(Effect.mapError((error) => new AsideError({ message: error.message })))
+    })
+
+    const cancelAside = Effect.fn("SessionHttpApi.cancelAside")(function* (ctx: {
+      params: { sessionID: SessionID; requestID: string }
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      return yield* asideSvc
+        .cancel(ctx.params.sessionID, ctx.params.requestID)
+        .pipe(Effect.mapError((error) => new AsideError({ message: error.message })))
     })
 
     const init = Effect.fn("SessionHttpApi.init")(function* (ctx: {
@@ -424,6 +445,8 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("update", update)
       .handleRaw("fork", forkRaw)
       .handle("abort", abort)
+      .handle("aside", aside)
+      .handle("cancelAside", cancelAside)
       .handle("init", init)
       .handle("share", share)
       .handle("unshare", unshare)
