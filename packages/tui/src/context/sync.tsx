@@ -28,7 +28,7 @@ import { useTuiStartup } from "./runtime"
 import { createSimpleContext } from "./helper"
 import { useExit } from "./exit"
 import { useArgs } from "./args"
-import { batch, onMount } from "solid-js"
+import { batch, onCleanup, onMount } from "solid-js"
 import path from "path"
 import { useKV } from "./kv"
 import { usePermission } from "./permission"
@@ -146,6 +146,78 @@ export const {
     const event = useEvent()
     const project = useProject()
     const sdk = useSDK()
+    const requestOwners = { permission: new Map<string, string>(), question: new Map<string, string>() }
+    const requestSnapshots = new Map<string, { permission: Set<string>; question: Set<string> }>()
+    let requestScope: { directory: string; workspace?: string } | undefined
+    let requestScopeVersion = 0
+    let disposed = false
+    onCleanup(() => {
+      disposed = true
+      requestSnapshots.clear()
+    })
+
+    const touchRequest = (
+      kind: "permission" | "question",
+      id: string,
+      directory: string,
+      workspace: string | undefined,
+      asked: boolean,
+    ) => {
+      requestSnapshots.forEach((tracker) => tracker[kind].add(id))
+      if (asked) requestOwners[kind].set(id, JSON.stringify([directory, workspace]))
+      if (!asked) requestOwners[kind].delete(id)
+    }
+
+    const syncRequests = async (scope: { directory: string; workspace?: string }) => {
+      if (disposed) return
+      const owner = JSON.stringify([scope.directory, scope.workspace])
+      const tracker = { permission: new Set<string>(), question: new Set<string>() }
+      requestSnapshots.set(owner, tracker)
+      await Promise.all([
+        sdk.client.permission
+          .list(scope, { throwOnError: true, signal: AbortSignal.timeout(10_000) })
+          .then((response) => {
+            if (requestSnapshots.get(owner) !== tracker) return
+            setStore(
+              "permission",
+              reconcile(
+                mergePendingRequests(
+                  response.data,
+                  store.permission,
+                  tracker.permission,
+                  requestOwners.permission,
+                  owner,
+                ),
+              ),
+            )
+          })
+          .catch(() => {}),
+        sdk.client.question
+          .list(scope, { throwOnError: true, signal: AbortSignal.timeout(10_000) })
+          .then((response) => {
+            if (requestSnapshots.get(owner) !== tracker) return
+            setStore(
+              "question",
+              reconcile(
+                mergePendingRequests(response.data, store.question, tracker.question, requestOwners.question, owner),
+              ),
+            )
+          })
+          .catch(() => {}),
+      ])
+      if (requestSnapshots.get(owner) === tracker) requestSnapshots.delete(owner)
+    }
+
+    const refreshRequests = async () => {
+      if (!requestScope || requestScope.workspace !== project.workspace.current()) return
+      const scopes = [
+        requestScope,
+        ...store.session
+          .filter((session) => fullSyncedSessions.has(session.id) || fullSyncedSessions.has(session.parentID ?? ""))
+          .map((session) => ({ directory: session.directory, workspace: session.workspaceID })),
+      ]
+      await Promise.all([...new Map(scopes.map((scope) => [JSON.stringify(scope), scope])).values()].map(syncRequests))
+    }
 
     const fullSyncedSessions = new Set<string>()
     const syncingSessions = new Map<string, Promise<void>>()
@@ -173,12 +245,16 @@ export const {
         .then((x) => (x.data ?? []).toSorted((a, b) => a.id.localeCompare(b.id)))
     }
 
-    event.subscribe((event, { directory, workspace }) => {
+    const unsubscribe = event.subscribe((event, { directory, workspace }) => {
       switch (event.type) {
+        case "server.connected":
+          void refreshRequests()
+          break
         case "server.instance.disposed":
           void bootstrap()
           break
         case "permission.replied": {
+          touchRequest("permission", event.properties.requestID, directory, workspace, false)
           const requests = store.permission[event.properties.sessionID]
           if (!requests) break
           const match = search(requests, event.properties.requestID, (r) => r.id)
@@ -195,6 +271,7 @@ export const {
 
         case "permission.asked": {
           const request = event.properties
+          touchRequest("permission", request.id, directory, workspace, true)
           if (permission.mode === "auto") {
             void sdk.client.permission.reply({
               requestID: request.id,
@@ -226,6 +303,7 @@ export const {
 
         case "question.replied":
         case "question.rejected": {
+          touchRequest("question", event.properties.requestID, directory, workspace, false)
           const requests = store.question[event.properties.sessionID]
           if (!requests) break
           const match = search(requests, event.properties.requestID, (r) => r.id)
@@ -242,6 +320,7 @@ export const {
 
         case "question.asked": {
           const request = event.properties
+          touchRequest("question", request.id, directory, workspace, true)
           const requests = store.question[request.sessionID]
           if (!requests) {
             setStore("question", request.sessionID, [request])
@@ -444,6 +523,7 @@ export const {
         }
       }
     })
+    onCleanup(unsubscribe)
 
     const exit = useExit()
     const args = useArgs()
@@ -451,7 +531,14 @@ export const {
     async function bootstrap(input: { fatal?: boolean } = {}) {
       const fatal = input.fatal ?? true
       const workspace = project.workspace.current()
+      const scopeVersion = ++requestScopeVersion
+      requestScope = undefined
       const projectPromise = project.sync()
+      const requestsPromise = projectPromise.then(() => {
+        if (scopeVersion !== requestScopeVersion || workspace !== project.workspace.current()) return
+        requestScope = { directory: project.instance.directory(), workspace }
+        return refreshRequests()
+      })
       const sessionListPromise = projectPromise.then(() => listSessions())
 
       // blocking - include session.list when continuing a session
@@ -474,6 +561,7 @@ export const {
         agentsPromise,
         configPromise,
         projectPromise,
+        requestsPromise,
         ...(args.continue ? [sessionListPromise] : []),
       ])
         .then(async () => {
@@ -658,6 +746,7 @@ export const {
               }),
             )
             fullSyncedSessions.add(sessionID)
+            await refreshRequests()
           })().finally(() => {
             syncingSessions.delete(sessionID)
             hydratingSessions.delete(sessionID)
@@ -671,3 +760,34 @@ export const {
     return result
   },
 })
+
+const mergePendingRequests = <T extends { id: string; sessionID: string }>(
+  snapshot: T[],
+  current: Record<string, T[]>,
+  touched: Set<string>,
+  owners: Map<string, string>,
+  scope: string,
+): Record<string, T[]> => {
+  const next = new Map(
+    Object.values(current)
+      .flat()
+      .filter((request) => owners.get(request.id) !== scope || touched.has(request.id))
+      .map((request) => [request.id, request]),
+  )
+  snapshot.forEach((request) => {
+    // A concurrent reply is a tombstone even if the request was never hydrated.
+    if (touched.has(request.id)) return
+    next.set(request.id, request)
+    owners.set(request.id, scope)
+  })
+  owners.forEach((owner, id) => {
+    if (owner === scope && !next.has(id)) owners.delete(id)
+  })
+  const grouped = Object.groupBy(
+    [...next.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+    (request) => request.sessionID,
+  )
+  return Object.fromEntries(
+    Object.keys({ ...current, ...grouped }).map((sessionID) => [sessionID, grouped[sessionID] ?? []]),
+  )
+}

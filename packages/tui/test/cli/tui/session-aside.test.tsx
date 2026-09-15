@@ -1,5 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { InputRenderable, TextareaRenderable } from "@opentui/core"
+import type { GlobalEvent, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2"
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { testRender, useRenderer } from "@opentui/solid"
 import { expect, test } from "bun:test"
@@ -16,7 +17,7 @@ import { EpilogueProvider } from "../../../src/context/epilogue"
 import { useEvent } from "../../../src/context/event"
 import { ExitProvider } from "../../../src/context/exit"
 import { KVProvider, useKV } from "../../../src/context/kv"
-import { LocalProvider } from "../../../src/context/local"
+import { LocalProvider, useLocal } from "../../../src/context/local"
 import { PermissionProvider } from "../../../src/context/permission"
 import { ProjectProvider } from "../../../src/context/project"
 import { PromptRefProvider, usePromptRef } from "../../../src/context/prompt"
@@ -36,7 +37,7 @@ import { ToastProvider, useToast } from "../../../src/ui/toast"
 import { tmpdir } from "../../fixture/fixture"
 import { TestTuiContexts } from "../../fixture/tui-environment"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
-import { createEventSource, createFetch, json } from "../../fixture/tui-sdk"
+import { createEventSource, createFetch, json, type FetchHandler } from "../../fixture/tui-sdk"
 
 const wait = async (check: () => boolean | Promise<boolean>) => {
   const start = Date.now()
@@ -46,21 +47,35 @@ const wait = async (check: () => boolean | Promise<boolean>) => {
   }
 }
 
-const mountSession = async (root: string, options: { width?: number; supported?: boolean; seed?: PromptInfo } = {}) => {
+const mountSession = async (
+  root: string,
+  options: {
+    width?: number
+    supported?: boolean
+    seed?: PromptInfo
+    pending?: { permission: PermissionRequest[]; question: QuestionRequest[] }
+    pendingFetch?: FetchHandler
+    events?: ReturnType<typeof createEventSource>
+    sessionDirectory?: string
+  } = {},
+) => {
   const state = path.join(root, "state")
   await mkdir(state, { recursive: true })
   await Bun.write(path.join(state, "kv.json"), JSON.stringify({ animations_enabled: false }))
-  const events = createEventSource()
+  const events = options.events ?? createEventSource()
   const session = {
     id: "ses_parent",
     projectID: "proj_test",
-    directory: root,
+    directory: options.sessionDirectory ?? root,
     title: "Parent task",
+    agent: "build",
     slug: "parent-task",
     version: "1",
     time: { created: 1_700_000_000_000, updated: 1_700_000_000_000 },
   }
   const defaults = createFetch((url) => {
+    if (url.pathname === "/permission") return options.pendingFetch?.(url) ?? json(options.pending?.permission ?? [])
+    if (url.pathname === "/question") return options.pendingFetch?.(url) ?? json(options.pending?.question ?? [])
     if (url.pathname === "/experimental/capabilities")
       return json(
         options.supported === false
@@ -83,7 +98,11 @@ const mountSession = async (root: string, options: { width?: number; supported?:
     if (url.pathname === "/session") return json([session])
     if (url.pathname === "/session/status") return json({ ses_parent: { type: "busy" } })
     if (/\/session\/ses_(parent|other)\/(message|todo|diff)$/.test(url.pathname)) return json([])
-    if (url.pathname === "/agent") return json([{ name: "build", mode: "primary", options: {}, permission: [] }])
+    if (url.pathname === "/agent")
+      return json([
+        { name: "build", mode: "primary", options: {}, permission: [] },
+        { name: "plan", mode: "primary", options: {}, permission: [] },
+      ])
     if (url.pathname === "/config/providers")
       return json({
         providers: [{ id: "test", name: "Test", models: { model: { id: "model", name: "Test model" } } }],
@@ -123,11 +142,13 @@ const mountSession = async (root: string, options: { width?: number; supported?:
   let prompt!: ReturnType<typeof usePromptRef>
   let sync!: ReturnType<typeof useSync>
   let route!: ReturnType<typeof useRoute>
+  let local!: ReturnType<typeof useLocal>
 
   const Screen = () => {
     prompt = usePromptRef()
     sync = useSync()
     route = useRoute()
+    local = useLocal()
     const dialog = useDialog()
     const renderer = useRenderer()
     const runtime = usePluginRuntime()
@@ -233,6 +254,7 @@ const mountSession = async (root: string, options: { width?: number; supported?:
     app.renderer.destroy()
     throw new Error(`${error.message}: status=${sync?.status}, reads=${reads.join(",")}\n${frame}`)
   })
+  await sync.session.sync("ses_parent")
   const editor = app.renderer.currentFocusedEditor
   if (!(editor instanceof TextareaRenderable)) throw new Error("Main Prompt textarea not mounted")
   if (!options.seed) prompt.current!.reset()
@@ -242,6 +264,7 @@ const mountSession = async (root: string, options: { width?: number; supported?:
     prompt,
     sync,
     route,
+    local,
     receipts,
     setCancelRace() {
       cancelRace = true
@@ -261,6 +284,7 @@ const mountSession = async (root: string, options: { width?: number; supported?:
     requests,
     cancels,
     responses,
+    reads,
     async frame() {
       await app.renderOnce()
       return app.captureCharFrame()
@@ -271,6 +295,260 @@ const mountSession = async (root: string, options: { width?: number; supported?:
     },
   }
 }
+
+test("attach hydrates existing human requests without stealing composer focus or approving them", async () => {
+  await using tmp = await tmpdir()
+  using view = await mountSession(tmp.path, {
+    pending: {
+      permission: [
+        {
+          id: "per_existing",
+          sessionID: "ses_parent",
+          permission: "bash",
+          patterns: ["*"],
+          always: ["*"],
+          metadata: {},
+        },
+      ],
+      question: [
+        {
+          id: "que_existing",
+          sessionID: "ses_parent",
+          questions: [
+            { header: "Choice", question: "Existing question?", options: [{ label: "One", description: "First" }] },
+          ],
+        },
+      ],
+    },
+  })
+  expect(await view.frame()).toContain("Review human request")
+  expect(view.sync.data.permission.ses_parent.map((item) => item.id)).toEqual(["per_existing"])
+  expect(view.sync.data.question.ses_parent.map((item) => item.id)).toEqual(["que_existing"])
+  expect(view.editor.focused).toBe(true)
+  await view.app.mockInput.typeText("Not an approval 123")
+  view.app.mockInput.pressKey("g", { meta: true })
+  expect(await view.frame()).toContain("Permission required")
+  view.app.mockInput.pressKey("g", { meta: true })
+  expect(view.editor.focused).toBe(true)
+  expect(view.prompt.current!.current.input).toBe("Not an approval 123")
+  expect(view.requests).toHaveLength(0)
+})
+
+test("explicit modes display the session agent rather than local selection without changing the payload", async () => {
+  await using tmp = await tmpdir()
+  using view = await mountSession(tmp.path)
+  view.local.agent.set("plan")
+  expect(view.local.agent.current()?.name).toBe("plan")
+  expect(await view.frame()).toContain("Build")
+  expect(await view.frame()).not.toContain("Plan")
+  expect(await view.frame()).not.toContain("agents")
+  await view.click("Steer")
+  expect(await view.frame()).toContain("Build")
+  expect(await view.frame()).not.toContain("Plan")
+  await view.click("Aside")
+  expect(await view.frame()).toContain("Build")
+  expect(await view.frame()).not.toContain("Plan")
+  await view.app.mockInput.typeText("Which agent is handling this?")
+  view.app.mockInput.pressEnter()
+  await wait(() => view.requests.length === 1)
+  expect(await view.requests[0].clone().json()).toEqual({
+    requestID: expect.any(String),
+    question: "Which agent is handling this?",
+  })
+  expect(view.sync.session.get("ses_parent")?.agent).toBe("build")
+  view.app.mockInput.pressEscape()
+  view.emit({
+    directory: tmp.path,
+    payload: {
+      id: "evt_idle",
+      type: "session.status",
+      properties: { sessionID: "ses_parent", status: { type: "idle" } },
+    },
+  })
+  await wait(() => view.sync.data.session_status.ses_parent.type === "idle")
+  await view.click("Use normal Send")
+  expect(await view.frame()).toContain("Plan")
+  expect(await view.frame()).toContain("agents")
+})
+
+test("unscoped reconnect replaces missed human requests without stealing focus", async () => {
+  await using tmp = await tmpdir()
+  const pending = {
+    permission: [
+      { id: "per_old", sessionID: "ses_parent", permission: "bash", patterns: ["*"], always: ["*"], metadata: {} },
+    ],
+    question: [
+      {
+        id: "que_old",
+        sessionID: "ses_parent",
+        questions: [{ header: "Old", question: "Old question?", options: [] }],
+      },
+    ],
+  }
+  using view = await mountSession(tmp.path, { pending })
+  await view.app.mockInput.typeText("Keep composing")
+  pending.permission = []
+  pending.question = [
+    { ...pending.question[0], id: "que_new", questions: [{ header: "New", question: "New question?", options: [] }] },
+  ]
+  // /global/event sends server.connected without location metadata.
+  view.emit({ payload: { id: "evt_connected", type: "server.connected", properties: {} } } as GlobalEvent)
+  await wait(() => view.sync.data.question.ses_parent?.[0]?.id === "que_new")
+  expect(view.sync.data.permission.ses_parent).toEqual([])
+  expect(await view.frame()).toContain("Review human request")
+  expect(view.editor.focused).toBe(true)
+  expect(view.prompt.current!.current.input).toBe("Keep composing")
+  view.app.mockInput.pressKey("g", { meta: true })
+  expect(await view.frame()).toContain("New question?")
+  expect(await view.frame()).not.toContain("Old question?")
+  view.app.mockInput.pressKey("g", { meta: true })
+  expect(view.editor.focused).toBe(true)
+  expect(view.requests).toHaveLength(0)
+})
+
+test("a reply during initial attach cannot resurrect a stale snapshot gate", async () => {
+  await using tmp = await tmpdir()
+  const events = createEventSource()
+  const snapshot = Promise.withResolvers<Response>()
+  let requested = false
+  const mounted = mountSession(tmp.path, {
+    events,
+    pendingFetch: (url) => {
+      if (url.pathname !== "/question") return
+      if (requested) return json([])
+      requested = true
+      return snapshot.promise
+    },
+  })
+  await wait(() => requested)
+  events.emit({
+    directory: tmp.path,
+    payload: {
+      id: "evt_reply",
+      type: "question.rejected",
+      properties: { sessionID: "ses_parent", requestID: "que_answered" },
+    },
+  })
+  snapshot.resolve(
+    json([
+      {
+        id: "que_answered",
+        sessionID: "ses_parent",
+        questions: [{ header: "Old", question: "Already answered?", options: [] }],
+      },
+    ]),
+  )
+  using view = await mounted
+  expect(view.sync.data.question.ses_parent ?? []).toEqual([])
+  expect(await view.frame()).not.toContain("Review human request")
+  expect(view.editor.focused).toBe(true)
+  expect(view.requests).toHaveLength(0)
+})
+
+test("concurrent reconnect events win over stale human-request snapshots in the rendered session", async () => {
+  await using tmp = await tmpdir()
+  const permissions = Promise.withResolvers<Response>()
+  const questions = Promise.withResolvers<Response>()
+  let delayed = false
+  const requested: string[] = []
+  using view = await mountSession(tmp.path, {
+    pendingFetch: (url) => {
+      if (!delayed) return
+      requested.push(url.pathname)
+      return url.pathname === "/permission" ? permissions.promise : questions.promise
+    },
+  })
+  delayed = true
+  view.emit({ payload: { id: "evt_connected", type: "server.connected", properties: {} } } as GlobalEvent)
+  await wait(() => requested.length === 2)
+  view.emit({
+    directory: tmp.path,
+    payload: {
+      id: "evt_replied",
+      type: "permission.replied",
+      properties: { sessionID: "ses_parent", requestID: "per_old", reply: "once" },
+    },
+  })
+  view.emit({
+    directory: tmp.path,
+    payload: {
+      id: "evt_rejected",
+      type: "question.rejected",
+      properties: { sessionID: "ses_parent", requestID: "que_old" },
+    },
+  })
+  view.emit({
+    directory: tmp.path,
+    payload: {
+      id: "evt_asked",
+      type: "question.asked",
+      properties: {
+        id: "que_live",
+        sessionID: "ses_parent",
+        questions: [{ header: "Live", question: "Live question?", options: [] }],
+      },
+    },
+  })
+  await wait(() => view.sync.data.question.ses_parent?.[0]?.id === "que_live")
+  permissions.resolve(
+    json([
+      { id: "per_old", sessionID: "ses_parent", permission: "bash", patterns: ["*"], always: ["*"], metadata: {} },
+    ]),
+  )
+  questions.resolve(
+    json([
+      {
+        id: "que_old",
+        sessionID: "ses_parent",
+        questions: [{ header: "Old", question: "Stale question?", options: [] }],
+      },
+      {
+        id: "que_snapshot",
+        sessionID: "ses_parent",
+        questions: [{ header: "Snapshot", question: "Snapshot question?", options: [] }],
+      },
+    ]),
+  )
+  await wait(() => view.sync.data.question.ses_parent?.length === 2)
+  expect(view.sync.data.question.ses_parent.map((item) => item.id)).toEqual(["que_live", "que_snapshot"])
+  expect(view.sync.data.permission.ses_parent ?? []).toEqual([])
+  expect(view.editor.focused).toBe(true)
+  view.app.mockInput.pressKey("g", { meta: true })
+  expect(await view.frame()).toContain("Live question?")
+  expect(await view.frame()).not.toContain("Stale question?")
+  view.app.mockInput.pressKey("g", { meta: true })
+  expect(view.requests).toHaveLength(0)
+})
+
+test("attach and reconnect hydrate the resumed session directory rather than just the attach directory", async () => {
+  await using tmp = await tmpdir()
+  const sessionDirectory = `${tmp.path}/resumed`
+  let requestID = "que_existing"
+  using view = await mountSession(tmp.path, {
+    sessionDirectory,
+    pendingFetch: (url) => {
+      if (url.pathname !== "/question") return json([])
+      if (url.searchParams.get("directory") !== sessionDirectory) return json([])
+      return json([
+        {
+          id: requestID,
+          sessionID: "ses_parent",
+          questions: [{ header: "Resumed", question: "Resumed session question?", options: [] }],
+        },
+      ])
+    },
+  })
+  expect(view.sync.data.question.ses_parent.map((item) => item.id)).toEqual(["que_existing"])
+  expect(await view.frame()).toContain("Review human request")
+  expect(view.editor.focused).toBe(true)
+  requestID = "que_reconnected"
+  view.emit({ payload: { id: "evt_connected", type: "server.connected", properties: {} } } as GlobalEvent)
+  await wait(() => view.sync.data.question.ses_parent?.[0]?.id === "que_reconnected")
+  view.app.mockInput.pressKey("g", { meta: true })
+  expect(await view.frame()).toContain("Resumed session question?")
+  view.app.mockInput.pressKey("g", { meta: true })
+  expect(view.requests).toHaveLength(0)
+})
 
 test("Aside palette selection preserves the real Session Prompt draft, attachment, cursor and focus", async () => {
   await using tmp = await tmpdir()

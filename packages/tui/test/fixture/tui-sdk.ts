@@ -74,6 +74,8 @@ export function createFetch(override?: FetchHandler, events?: ReturnType<typeof 
       [
         "/agent",
         "/command",
+        "/permission",
+        "/question",
         "/experimental/workspace",
         "/experimental/workspace/status",
         "/formatter",

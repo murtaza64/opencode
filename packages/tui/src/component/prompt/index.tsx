@@ -1378,12 +1378,19 @@ export function Prompt(props: PromptProps) {
     setStore("extmarkToPartIndex", new Map())
   }
 
+  const agentName = createMemo(() =>
+    delivery.state.mode === "send"
+      ? local.agent.current()?.name
+      : props.sessionID
+        ? sync.session.get(props.sessionID)?.agent
+        : undefined,
+  )
   const highlight = createMemo(() => {
     if (leader()) return theme.border
     if (store.mode === "shell") return theme.primary
-    const agent = local.agent.current()
+    const agent = agentName()
     if (!agent) return theme.border
-    return local.agent.color(agent.name)
+    return local.agent.color(agent)
   })
 
   const showVariant = createMemo(() => {
@@ -1393,7 +1400,7 @@ export function Prompt(props: PromptProps) {
     return !!current
   })
 
-  const agentMetaAlpha = createFadeIn(() => !!local.agent.current(), animationsEnabled)
+  const agentMetaAlpha = createFadeIn(() => delivery.state.mode !== "send" || !!agentName(), animationsEnabled)
   const modelMetaAlpha = createFadeIn(() => !!local.agent.current() && store.mode === "normal", animationsEnabled)
   const variantMetaAlpha = createFadeIn(
     () => !!local.agent.current() && store.mode === "normal" && showVariant(),
@@ -1414,10 +1421,12 @@ export function Prompt(props: PromptProps) {
 
   const spinnerDef = createMemo(() => {
     const agent =
-      status().type !== "idle"
-        ? (local.agent.list().find((a) => a.name === lastUserMessage()?.agent) ?? local.agent.current())
-        : local.agent.current()
-    const color = agent ? local.agent.color(agent.name) : theme.border
+      delivery.state.mode !== "send"
+        ? agentName()
+        : status().type !== "idle"
+          ? (local.agent.list().find((a) => a.name === lastUserMessage()?.agent) ?? local.agent.current())?.name
+          : local.agent.current()?.name
+    const color = agent ? local.agent.color(agent) : theme.border
     return {
       frames: createFrames({
         color,
@@ -1546,11 +1555,14 @@ export function Prompt(props: PromptProps) {
             />
             <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="space-between">
               <box flexDirection="row" gap={1}>
-                <Show when={local.agent.current()} fallback={<box height={1} />}>
+                <Show
+                  when={agentName() ?? (delivery.state.mode !== "send" ? "session agent" : undefined)}
+                  fallback={<box height={1} />}
+                >
                   {(agent) => (
                     <>
                       <text fg={fadeColor(highlight(), agentMetaAlpha())}>
-                        {store.mode === "shell" ? "Shell" : Locale.titlecase(agent().name)}
+                        {store.mode === "shell" ? "Shell" : Locale.titlecase(agent())}
                       </text>
                       <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
                         <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>auto</text>
@@ -1785,7 +1797,7 @@ export function Prompt(props: PromptProps) {
                         </text>
                       )}
                     </Match>
-                    <Match when={true}>
+                    <Match when={delivery.state.mode === "send"}>
                       <text fg={theme.text}>
                         {agentShortcut()} <span style={{ fg: theme.textMuted }}>agents</span>
                       </text>
