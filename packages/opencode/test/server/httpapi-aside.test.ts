@@ -115,6 +115,51 @@ const writeAssistant = Effect.fn("test.writeAsideAssistant")(function* (
   return info
 })
 
+it.live("aside uses the active agent before its promoted user has an assistant", () =>
+  Effect.gen(function* () {
+    const llm = yield* TestLLMServer
+    const directory = yield* tmpdirScoped({
+      config: {
+        ...testProviderConfig(llm.url),
+        agent: { build: { top_p: 0.2 }, plan: { top_p: 0.8 } },
+      },
+    })
+    yield* Effect.gen(function* () {
+      const session = yield* Session.Service
+      const parent = yield* session.create({ title: "Promoted agent" })
+      const user = yield* writeUser(parent, 1, "Completed build task")
+      const answer = yield* writeAssistant(parent, user.id, { created: 2, completed: 3, text: "Build answer" })
+      const promoted = yield* writeUser(parent, 4, "New plan task excluded from snapshot")
+      yield* session.updateMessage({ ...promoted, agent: "plan" })
+      yield* session.setAgentModel({
+        sessionID: parent.id,
+        agent: "plan",
+        model: { providerID: promoted.model.providerID, id: promoted.model.modelID },
+        time: 4,
+      })
+      const before = yield* session.messages({ sessionID: parent.id })
+      yield* llm.text("Using the active agent")
+      const response = yield* aside(directory, parent.id)
+      expect(response.status).toBe(200)
+      expect(yield* response.json).toMatchObject({
+        snapshot: { throughMessageID: answer.id, excludedMessageCount: 1 },
+      })
+      expect((yield* llm.inputs)[0]).toMatchObject({ top_p: 0.8 })
+      expect(JSON.stringify((yield* llm.inputs)[0])).not.toContain("New plan task excluded from snapshot")
+      expect(yield* session.messages({ sessionID: parent.id })).toEqual(before)
+      yield* llm.text("Using the explicit agent")
+      const explicit = yield* post(directory, `/session/${parent.id}/aside`, {
+        requestID: "explicit-agent",
+        question: "Explain with build",
+        agent: "build",
+      })
+      expect(explicit.status).toBe(200)
+      expect((yield* llm.inputs)[1]).toMatchObject({ top_p: 0.2 })
+      expect((yield* session.get(parent.id)).agent).toBe("plan")
+    }).pipe(provideInstanceEffect(directory))
+  }).pipe(Effect.provide(Layer.fresh(TestLLMServer.layer))),
+)
+
 it.live("untrusted compaction markers cannot reorder a previous trusted retained tail", () =>
   Effect.gen(function* () {
     const llm = yield* TestLLMServer

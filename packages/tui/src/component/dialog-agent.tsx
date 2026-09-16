@@ -3,7 +3,7 @@ import { useLocal } from "../context/local"
 import { DialogSelect } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
 
-export function DialogAgent() {
+export function DialogAgent(props: { selection?: { current?: string; select: (agent: string) => void } } = {}) {
   const local = useLocal()
   const dialog = useDialog()
 
@@ -19,11 +19,12 @@ export function DialogAgent() {
 
   return (
     <DialogSelect
-      title="Select agent"
-      current={local.agent.current()?.name}
+      title={props.selection ? "Queue agent" : "Select agent"}
+      current={props.selection ? props.selection.current : local.agent.current()?.name}
       options={options()}
       onSelect={(option) => {
-        local.agent.set(option.value)
+        if (props.selection) props.selection.select(option.value)
+        if (!props.selection) local.agent.set(option.value)
         dialog.clear()
       }}
     />

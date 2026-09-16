@@ -122,7 +122,9 @@ const live = Layer.effect(
                   .join("\n"),
         }))
         const previous = selectedHistory.previous
-        const agent = yield* agents.get(input.agent ?? previous?.agent ?? (yield* agents.defaultAgent()))
+        const agent = yield* agents.get(
+          input.agent ?? captured.parent.agent ?? previous?.agent ?? (yield* agents.defaultAgent()),
+        )
         if (!agent) return yield* new AsideError({ message: "Aside agent not found" })
         const selected =
           input.model ??

@@ -51,6 +51,7 @@ const mountSession = async (
   root: string,
   options: {
     width?: number
+    height?: number
     supported?: boolean
     seed?: PromptInfo
     pending?: { permission: PermissionRequest[]; question: QuestionRequest[] }
@@ -256,7 +257,11 @@ const mountSession = async (
     )
   }
 
-  const app = await testRender(() => <Harness />, { width: options.width ?? 100, height: 48, kittyKeyboard: true })
+  const app = await testRender(() => <Harness />, {
+    width: options.width ?? 100,
+    height: options.height ?? 48,
+    kittyKeyboard: true,
+  })
   await wait(() => sync?.status === "complete" && !!prompt?.current?.focused).catch(async (error) => {
     await app.renderOnce()
     const frame = app.captureCharFrame()
@@ -289,6 +294,12 @@ const mountSession = async (
       if (y < 0) throw new Error(`Missing clickable label ${label}\n${lines.join("\n")}`)
       await app.mockMouse.click(lines[y].indexOf(label) + 1, y)
     },
+    async clickID(id: string) {
+      await wait(() => !!app.renderer.root.findDescendantById(id))
+      await app.renderOnce()
+      const target = app.renderer.root.findDescendantById(id)!
+      await app.mockMouse.click(target.x + 1, target.y)
+    },
     emit: events.emit,
     requests,
     cancels,
@@ -305,11 +316,193 @@ const mountSession = async (
   }
 }
 
+const chooseAgent = async (view: Awaited<ReturnType<typeof mountSession>>, name: string) => {
+  await view.clickID("composer-agent")
+  await wait(() => view.app.renderer.currentFocusedRenderable instanceof InputRenderable).catch(async (error) => {
+    throw new Error(`Opening ${name} picker: ${error.message}\n${await view.frame()}`)
+  })
+  await view.app.mockInput.typeText(name)
+  await view.frame()
+  view.app.mockInput.pressArrow("down")
+  view.app.mockInput.pressEnter()
+  await wait(() => !!view.prompt.current?.focused).catch(async (error) => {
+    throw new Error(`Selecting ${name}: ${error.message}\n${await view.frame()}`)
+  })
+}
+
+test.each([48, 80, 100])("mode controls share the existing one-line textbox footer at width %i", async (width) => {
+  await using tmp = await tmpdir()
+  using view = await mountSession(tmp.path, { width, height: 24 })
+  await view.app.mockInput.typeText("Footer position")
+  await view.frame()
+  const footer = view.app.renderer.root.findDescendantById("prompt-footer")!
+  const agent = view.app.renderer.root.findDescendantById("composer-agent")!
+  const modes = view.app.renderer.root.findDescendantById("composer-modes")!
+  expect(modes.y).toBe(agent.y)
+  expect(modes.y).toBeGreaterThanOrEqual(view.editor.y + view.editor.height)
+  expect(footer.height).toBe(2)
+  expect(view.editor.parent!.height).toBe(4)
+  expect(modes.x).toBeGreaterThan(agent.x)
+  expect(modes.x + modes.width).toBeLessThanOrEqual(width)
+  expect(view.app.renderer.root.findDescendantById("composer-submit")).toBeUndefined()
+  expect(await view.frame()).not.toContain("After task is idle.")
+  view.app.mockInput.pressKey("m", { meta: true })
+  view.app.mockInput.pressKey("m", { meta: true })
+  expect(await view.frame()).toContain("Build active")
+  expect(footer.height).toBe(2)
+  expect(modes.y).toBe(agent.y)
+  expect(view.editor.parent!.height).toBe(4)
+  view.app.mockInput.pressKey("m", { meta: true })
+  view.app.mockInput.pressKey("m", { meta: true })
+  expect(footer.height).toBe(2)
+  expect(modes.y).toBe(agent.y)
+  view.local.permission.toggle()
+  expect(await view.frame()).toContain("auto")
+  expect(footer.height).toBe(2)
+  view.emit({
+    directory: tmp.path,
+    payload: {
+      id: "evt_idle_footer",
+      type: "session.status",
+      properties: { sessionID: "ses_parent", status: { type: "idle" } },
+    },
+  })
+  await wait(() => view.sync.data.session_status.ses_parent.type === "idle")
+  await view.frame()
+  expect(view.app.renderer.root.findDescendantById("composer-send")).toBeDefined()
+  expect(footer.height).toBe(2)
+  expect(modes.y).toBe(agent.y)
+})
+
+test("Queue picker preserves draft and cursor and keeps its choice separate from active modes and normal Send", async () => {
+  await using tmp = await tmpdir()
+  using view = await mountSession(tmp.path)
+  await view.app.mockInput.typeText("Retained task draft")
+  view.editor.cursorOffset = 5
+  await chooseAgent(view, "plan")
+  expect(view.editor.cursorOffset).toBe(5)
+  expect(view.prompt.current!.current.input).toBe("Retained task draft")
+  expect(view.local.agent.current()?.name).toBe("build")
+  expect(await view.frame()).toContain("Plan >")
+  await view.clickID("composer-aside")
+  expect(await view.frame()).toContain("Build active")
+  await view.clickID("composer-agent")
+  expect(view.editor.focused).toBe(true)
+  expect(await view.frame()).not.toContain("Queue agent")
+  await view.clickID("composer-steer")
+  expect(await view.frame()).toContain("Build active")
+  await view.clickID("composer-agent")
+  expect(view.editor.focused).toBe(true)
+  await view.clickID("composer-queue")
+  expect(await view.frame()).toContain("Plan >")
+  view.emit({
+    directory: tmp.path,
+    payload: {
+      id: "evt_idle",
+      type: "session.status",
+      properties: { sessionID: "ses_parent", status: { type: "idle" } },
+    },
+  })
+  await view.clickID("composer-send")
+  expect(await view.frame()).toContain("Build >")
+  await chooseAgent(view, "plan")
+  expect(view.local.agent.current()?.name).toBe("plan")
+})
+
+test("Queue agent is immutable across unknown acknowledgement, picker changes, and exact retry", async () => {
+  await using tmp = await tmpdir()
+  using view = await mountSession(tmp.path)
+  await chooseAgent(view, "plan")
+  await view.app.mockInput.typeText("Run this task")
+  view.app.mockInput.pressEnter()
+  await wait(() => view.requests.length === 1)
+  const submitted = await view.requests[0].clone().json()
+  expect(submitted).toEqual({ requestID: expect.any(String), delivery: "queue", text: "Run this task", agent: "plan" })
+  view.responses[0].resolve(json({ message: "Lost acknowledgement" }, { status: 503 }))
+  await wait(async () => (await view.frame()).includes("Acknowledgement unknown"))
+  await chooseAgent(view, "build")
+  await view.clickID("composer-retry")
+  await wait(() => view.requests.length === 2)
+  expect(await view.requests[1].clone().json()).toEqual(submitted)
+  view.responses[1].resolve(json({ ...submitted, state: "pending" }))
+  await wait(async () => (await view.frame()).includes("Input pending"))
+  expect(view.prompt.current!.current.input).toBe("Run this task")
+  expect(await view.frame()).toContain("Build >")
+  view.app.mockInput.pressEnter()
+  await wait(() => view.requests.length === 3)
+  const next = await view.requests[2].clone().json()
+  expect(next.agent).toBe("build")
+  expect(next.requestID).not.toBe(submitted.requestID)
+  view.responses[2].resolve(json({ ...next, state: "pending" }))
+  await wait(() => view.prompt.current!.current.input === "")
+})
+
+test("saved Queue agent survives remount and never overrides Aside or Steer", async () => {
+  await using tmp = await tmpdir()
+  using view = await mountSession(tmp.path)
+  await chooseAgent(view, "plan")
+  view.route.navigate({ type: "session", sessionID: "ses_other" })
+  await wait(() => view.sync.session.get("ses_other") !== undefined)
+  view.route.navigate({ type: "session", sessionID: "ses_parent" })
+  await wait(async () => (await view.frame()).includes("Plan >"))
+  await view.clickID("composer-steer")
+  await view.app.mockInput.typeText("Steer without override")
+  view.app.mockInput.pressEnter()
+  await wait(() => view.requests.length === 1)
+  const steer = await view.requests[0].clone().json()
+  expect(steer).toEqual({ requestID: expect.any(String), delivery: "steer", text: "Steer without override" })
+  view.responses[0].resolve(json({ ...steer, state: "pending" }))
+  await wait(() => view.prompt.current!.current.input === "")
+  await view.clickID("composer-aside")
+  await view.app.mockInput.typeText("Aside without override")
+  view.app.mockInput.pressEnter()
+  await wait(() => view.requests.length === 2)
+  expect(await view.requests[1].clone().json()).toEqual({
+    requestID: expect.any(String),
+    question: "Aside without override",
+  })
+  expect(view.sync.session.get("ses_parent")?.agent).toBe("build")
+  view.app.mockInput.pressEscape()
+  expect(await view.frame()).toContain("Plan >")
+})
+
+test("selection drags over footer modes and agent never switch drafts or open the picker", async () => {
+  await using tmp = await tmpdir()
+  using view = await mountSession(tmp.path)
+  await view.app.mockInput.typeText("Keep this draft")
+  await view.frame()
+  const modes = view.app.renderer.root.findDescendantById("composer-modes")!
+  await view.app.mockMouse.drag(modes.x, modes.y, modes.x + 12, modes.y)
+  expect(view.app.renderer.getSelection()?.getSelectedText()).toBeTruthy()
+  expect(await view.frame()).toContain("[Queue]")
+  const agent = view.app.renderer.root.findDescendantById("composer-agent")!
+  await view.app.mockMouse.drag(agent.x, agent.y, agent.x + 4, agent.y)
+  expect(await view.frame()).not.toContain("Queue agent")
+  expect(view.prompt.current!.current.input).toBe("Keep this draft")
+  expect(view.requests).toHaveLength(0)
+})
+
+test("leaving a session closes its Queue picker without changing either session's agent choice", async () => {
+  await using tmp = await tmpdir()
+  using view = await mountSession(tmp.path)
+  await view.clickID("composer-agent")
+  await wait(() => view.app.renderer.currentFocusedRenderable instanceof InputRenderable)
+  await view.app.mockInput.typeText("plan")
+  view.route.navigate({ type: "session", sessionID: "ses_other" })
+  await wait(() => !!view.prompt.current?.focused && !!view.sync.session.get("ses_other"))
+  expect(await view.frame()).not.toContain("Queue agent")
+  expect(await view.frame()).toContain("Build >")
+  view.route.navigate({ type: "session", sessionID: "ses_parent" })
+  await wait(async () => (await view.frame()).includes("[Queue]"))
+  expect(await view.frame()).toContain("Build >")
+  expect(view.local.agent.current()?.name).toBe("build")
+})
+
 test("a definitively rejected input keeps its draft editable for a corrected submission", async () => {
   await using tmp = await tmpdir()
   using view = await mountSession(tmp.path)
   await view.app.mockInput.typeText("Rejected task")
-  await view.click("Enter: Queue message")
+  view.app.mockInput.pressEnter()
   await wait(() => view.responses.length === 1)
   const rejected = await view.requests[0].clone().json()
   view.responses[0].resolve(json({ name: "InputInvalid", data: { message: "Unknown agent" } }, { status: 400 }))
@@ -317,7 +510,7 @@ test("a definitively rejected input keeps its draft editable for a corrected sub
   expect(view.prompt.current!.current.input).toBe("Rejected task")
   expect(await view.frame()).not.toContain("Retry same input")
   view.prompt.current!.set({ input: "Corrected task", parts: [] })
-  await view.click("Enter: Queue message")
+  view.app.mockInput.pressEnter()
   await wait(() => view.responses.length === 2)
   const corrected = await view.requests[1].clone().json()
   expect(corrected.requestID).not.toBe(rejected.requestID)
@@ -335,7 +528,7 @@ test("a changed model requires explicit session-model consent without discarding
   view.app.mockInput.pressEnter()
   expect(view.requests).toHaveLength(0)
   await view.click("Use session model")
-  await view.click("Enter: Queue message")
+  view.app.mockInput.pressEnter()
   await wait(() => view.responses.length === 1)
   const payload = await view.requests[0].clone().json()
   expect(payload).not.toHaveProperty("model")
@@ -350,7 +543,7 @@ test("a changed model requires explicit session-model consent without discarding
       properties: { sessionID: "ses_parent", status: { type: "idle" } },
     },
   })
-  await view.click("Use normal Send")
+  await view.clickID("composer-send")
   expect(await view.frame()).toContain("Other model")
 })
 
@@ -358,7 +551,7 @@ test("a rejected retry does not discard an earlier uncertain admission", async (
   await using tmp = await tmpdir()
   using view = await mountSession(tmp.path)
   await view.app.mockInput.typeText("Possibly accepted task")
-  await view.click("Enter: Queue message")
+  view.app.mockInput.pressEnter()
   await wait(() => view.responses.length === 1)
   const payload = await view.requests[0].clone().json()
   view.responses[0].resolve(json({ message: "Gateway lost acknowledgement" }, { status: 503 }))
@@ -487,7 +680,7 @@ test("explicit modes display the session agent rather than local selection witho
     },
   })
   await wait(() => view.sync.data.session_status.ses_parent.type === "idle")
-  await view.click("Use normal Send")
+  await view.clickID("composer-send")
   expect(await view.frame()).toContain("Plan")
   expect(await view.frame()).toContain("agents")
 })
@@ -798,7 +991,7 @@ test("Queue defaults while busy, duplicate Enter admits once, and acknowledgemen
     },
   })
   await wait(() => view.sync.data.session_status.ses_parent.type === "idle")
-  expect(await view.frame()).toContain("Enter: Steer task")
+  expect(await view.frame()).toContain("[Steer]")
   view.app.mockInput.pressEnter()
   await wait(() => view.requests.length === 2)
   const second = await view.requests[1].clone().json()
@@ -834,7 +1027,8 @@ test("unsupported servers and attachments never fall back to legacy prompt", asy
   await view.app.mockInput.typeText("Keep this draft")
   await wait(async () => (await view.frame()).includes("Server does not support"))
   view.app.mockInput.pressEnter()
-  await view.click("Aside")
+  await view.clickID("composer-mode-cycle")
+  await view.clickID("composer-mode-cycle")
   view.app.mockInput.pressEnter()
   await Bun.sleep(30)
   expect(view.requests).toHaveLength(0)
@@ -975,7 +1169,7 @@ test("reconnect reconciles a lost acknowledgement without resubmission or normal
     },
   })
   await wait(() => view.sync.data.session_status.ses_parent.type === "idle")
-  expect(await view.frame()).not.toContain("Use normal Send")
+  expect(view.app.renderer.root.findDescendantById("composer-send")).toBeUndefined()
   view.receipts.set(body.requestID, { ...body, state: "pending" })
   view.emit({ directory: tmp.path, payload: { id: "evt_connected", type: "server.connected", properties: {} } })
   await wait(() => view.prompt.current?.current.input === "")

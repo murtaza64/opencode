@@ -58,7 +58,8 @@ import { usePromptMove } from "./move"
 import { usePluginRuntime } from "../../plugin/runtime" // fork(session-umbrella)
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
-import { ComposerDelivery, useComposerDelivery } from "./delivery"
+import { ComposerDelivery, ComposerModes, useComposerDelivery } from "./delivery"
+import { DialogAgent } from "../dialog-agent"
 
 registerOpencodeSpinner()
 
@@ -99,6 +100,7 @@ export type PromptRef = {
   focus(): void
   submit(): void
   aside?(): void
+  agent?: { select(): void; cycle(direction: 1 | -1): void }
 }
 
 const money = new Intl.NumberFormat("en-US", {
@@ -146,6 +148,7 @@ function formatEditorContext(selection: EditorSelection) {
 export function Prompt(props: PromptProps) {
   let input: TextareaRenderable
   let anchor: BoxRenderable
+  let selectingAgent = false
   const [inputTarget, setInputTarget] = createSignal<TextareaRenderable | undefined>()
 
   const leader = useLeaderActive()
@@ -739,9 +742,33 @@ export function Prompt(props: PromptProps) {
     aside() {
       delivery.select("aside")
     },
+    agent: {
+      select() {
+        if (props.disabled || delivery.state.mode === "aside" || delivery.state.mode === "steer") return
+        const selection =
+          delivery.state.mode === "queue" ? { current: agentName(), select: delivery.chooseAgent } : undefined
+        dialog.replace(
+          () => <DialogAgent selection={selection} />,
+          () => {
+            selectingAgent = false
+          },
+        )
+        selectingAgent = true
+      },
+      cycle(direction) {
+        if (props.disabled || !input.focused || auto()?.visible || dialog.stack.length) return
+        if (delivery.state.mode === "send") return local.agent.move(direction)
+        if (delivery.state.mode !== "queue") return
+        const agents = local.agent.list()
+        if (!agents.length) return
+        const current = agents.findIndex((agent) => agent.name === agentName())
+        delivery.chooseAgent(agents[(current + direction + agents.length) % agents.length].name)
+      },
+    },
   }
 
   onCleanup(() => {
+    if (selectingAgent) dialog.clear()
     setInputTarget(undefined)
     props.ref?.(undefined)
   })
@@ -1414,9 +1441,11 @@ export function Prompt(props: PromptProps) {
   const agentName = createMemo(() =>
     delivery.state.mode === "send"
       ? local.agent.current()?.name
-      : props.sessionID
-        ? sync.session.get(props.sessionID)?.agent
-        : undefined,
+      : delivery.state.mode === "queue" && delivery.state.queueAgent
+        ? delivery.state.queueAgent
+        : props.sessionID
+          ? sync.session.get(props.sessionID)?.agent
+          : undefined,
   )
   const highlight = createMemo(() => {
     if (leader()) return theme.border
@@ -1443,6 +1472,9 @@ export function Prompt(props: PromptProps) {
 
   const placeholderText = createMemo(() => {
     if (props.showPlaceholder === false) return undefined
+    if (delivery.state.mode === "aside") return "Ask a snapshot question (task draft saved)"
+    if (delivery.state.mode === "queue") return "Queue for after the current task"
+    if (delivery.state.mode === "steer") return "Steer at the next safe boundary"
     if (store.mode === "shell") {
       if (!shell().length) return undefined
       const example = shell()[store.placeholder % shell().length]
@@ -1483,13 +1515,7 @@ export function Prompt(props: PromptProps) {
   return (
     <>
       <box ref={(r: BoxRenderable) => (anchor = r)} visible={props.visible !== false} width="100%">
-        <ComposerDelivery
-          controller={delivery}
-          busy={status().type !== "idle" || !!props.humanPending}
-          activate={props.onActivate}
-          submit={() => void submit()}
-          useSessionModel={modelOverride() ? useSessionModel : undefined}
-        />
+        <ComposerDelivery controller={delivery} />
         <box
           width="100%"
           border={["left"]}
@@ -1587,16 +1613,39 @@ export function Prompt(props: PromptProps) {
               cursorStyle={tuiConfig.cursor}
               syntaxStyle={syntax()}
             />
-            <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="space-between">
-              <box flexDirection="row" gap={1}>
+            <box
+              id="prompt-footer"
+              flexDirection="row"
+              flexShrink={0}
+              paddingTop={1}
+              gap={1}
+              justifyContent="space-between"
+              flexWrap="wrap"
+            >
+              <box flexDirection="row" gap={1} flexWrap="wrap">
                 <Show
                   when={agentName() ?? (delivery.state.mode !== "send" ? "session agent" : undefined)}
                   fallback={<box height={1} />}
                 >
                   {(agent) => (
                     <>
-                      <text fg={fadeColor(highlight(), agentMetaAlpha())}>
-                        {store.mode === "shell" ? "Shell" : Locale.titlecase(agent())}
+                      <text
+                        id="composer-agent"
+                        fg={fadeColor(highlight(), agentMetaAlpha())}
+                        onMouseUp={() => {
+                          if (renderer.getSelection()?.getSelectedText()) return
+                          if (delivery.state.mode === "aside" || delivery.state.mode === "steer") return
+                          props.onActivate?.()
+                          ref.agent?.select()
+                        }}
+                      >
+                        {store.mode === "shell"
+                          ? "Shell"
+                          : Locale.truncateMiddle(
+                              Locale.titlecase(agent()),
+                              Math.max(8, Math.min(20, dimensions().width - 40)),
+                            )}
+                        {delivery.state.mode === "aside" || delivery.state.mode === "steer" ? " active" : " >"}
                       </text>
                       <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
                         <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>auto</text>
@@ -1624,6 +1673,11 @@ export function Prompt(props: PromptProps) {
                     </>
                   )}
                 </Show>
+                <ComposerModes
+                  controller={delivery}
+                  busy={status().type !== "idle" || !!props.humanPending}
+                  activate={props.onActivate}
+                />
               </box>
               <Show when={hasRightContent()}>
                 <box flexDirection="row" gap={1} alignItems="center">
@@ -1631,6 +1685,21 @@ export function Prompt(props: PromptProps) {
                 </box>
               </Show>
             </box>
+            <Show when={delivery.state.mode !== "send" && delivery.blocked()}>
+              <text fg={theme.warning}>{delivery.blocked()}</text>
+              <Show when={modelOverride()}>
+                <text
+                  id="composer-session-model"
+                  fg={theme.primary}
+                  onMouseUp={() => {
+                    if (renderer.getSelection()?.getSelectedText()) return
+                    useSessionModel()
+                  }}
+                >
+                  Use session model
+                </text>
+              </Show>
+            </Show>
           </box>
         </box>
         <box
