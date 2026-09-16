@@ -56,10 +56,16 @@ try {
   await expect(active(page).getByRole("button", { name: "Queue message", exact: true })).toBeDisabled()
   await editor(page).fill("task draft")
   await expect(active(page).getByRole("button", { name: "Queue message", exact: true })).toBeEnabled()
+  const top = (await editor(page).boundingBox()).y
+  expect((await active(page).locator(".composer-controls").boundingBox()).height).toBeLessThanOrEqual(32)
+  await expect(active(page).getByRole("button", { name: "Refresh availability", exact: true })).toHaveCount(0)
   await mode(page, "Aside").click()
+  expect((await editor(page).boundingBox()).y).toBe(top)
+  await active(page).screenshot({ path: `${artifacts}/compact-desktop.png` })
   await expect(editor(page)).toHaveValue("task draft")
   await editor(page).fill("aside question")
   await mode(page, "Queue").click()
+  expect((await editor(page).boundingBox()).y).toBe(top)
   await expect(editor(page)).toHaveValue("task draft")
   expect(mutations()).toHaveLength(0)
 
@@ -293,6 +299,8 @@ try {
   await page.locator('.sidebar a[href*="/session/ses_a"]').first().click()
   await expect(editor(page)).toHaveValue("")
   fixture.capabilities = false
+  await page.reload()
+  await expect(active(page)).toContainText("does not support")
   await active(page).getByRole("button", { name: "Refresh availability", exact: true }).click()
   await expect(active(page)).toContainText("does not support")
   await expect(active(page).getByRole("button", { name: "Queue message", exact: true })).toBeDisabled()
