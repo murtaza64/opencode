@@ -2,6 +2,7 @@ import * as Tool from "./tool"
 import DESCRIPTION from "./task.txt"
 import { ToolJsonSchema } from "./json-schema"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { BackgroundJob } from "@/background/job"
 import { Session } from "@/session/session"
 import { SessionID, MessageID } from "../session/schema"
@@ -14,6 +15,10 @@ import { Effect, Exit, Schema, Scope } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@opencode-ai/core/database/database"
+import { EventV2Bridge } from "@/event-v2-bridge"
+import { InstanceState } from "@/effect/instance-state"
+import { Permission } from "@/permission"
+import { Question } from "@/question"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
@@ -26,16 +31,18 @@ const BACKGROUND_DESCRIPTION = [
   "Background mode: background=true launches the subagent asynchronously and returns immediately.",
   "Foreground is the default; use it when you need the result before continuing.",
   "Use background only for independent work that can run while you continue elsewhere.",
-  "You will be notified automatically when it finishes.",
+  "Best-effort lifecycle notices report completion, failure, and waiting for permission or user input.",
+  "Use task_status with task_id to inspect or cancel your own child, not for routine polling.",
+  "Jobs and notice delivery are process-local. After restart, status is unknown; inspect the child before explicitly resuming, never automatically replay uncertain effects.",
 ].join(" ")
 const BACKGROUND_STARTED = [
-  "The task is working in the background. You will be notified automatically when it finishes.",
+  "The task is working in the background. Lifecycle notices are best-effort while this process remains running; after restart use task_status and treat missing jobs as unknown.",
   "DO NOT sleep, poll for progress, ask the task for status, or duplicate this task's work — avoid working with the same files or topics it is using.",
   "Work on non-overlapping tasks, or briefly tell the user what you launched and end your response.",
 ].join("\n")
 const BACKGROUND_UPDATED = [
   "Additional context sent to the running background task.",
-  "The task is still working in the background. You will be notified automatically when it finishes.",
+  "The task is still working in the background. Updates run sequentially in this process; lifecycle notices are best-effort and do not survive restart.",
   "DO NOT sleep, poll for progress, ask the task for status, or duplicate this task's work — avoid working with the same files or topics it is using.",
   "Work on non-overlapping tasks, or briefly tell the user what you sent and end your response.",
 ].join("\n")
@@ -63,13 +70,15 @@ export const Parameters = Schema.Struct({
 
 function renderOutput(input: {
   sessionID: SessionID
-  state: "running" | "completed" | "error"
+  runID?: string
+  state: "running" | "completed" | "error" | "cancelled" | "waiting"
   summary?: string
   text: string
 }) {
   const tag = input.state === "error" ? "task_error" : "task_result"
   return [
     `<task id="${input.sessionID}" state="${input.state}">`,
+    ...(input.runID ? [`<run_id>${input.runID}</run_id>`] : []),
     ...(input.summary ? [`<summary>${input.summary}</summary>`] : []),
     `<${tag}>`,
     input.text,
@@ -88,6 +97,9 @@ export const TaskTool = Tool.define(
     const scope = yield* Scope.Scope
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
+    const events = yield* EventV2Bridge.Service
+    const permissions = yield* Permission.Service
+    const questions = yield* Question.Service
 
     const run = Effect.fn("TaskTool.execute")(function* (
       params: Schema.Schema.Type<typeof Parameters>,
@@ -133,9 +145,35 @@ export const TaskTool = Tool.define(
         return yield* Effect.fail(new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`))
       }
 
-      const session = params.task_id
-        ? yield* sessions.get(SessionID.make(params.task_id)).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-        : undefined
+      const session = params.task_id ? yield* sessions.get(SessionID.make(params.task_id)) : undefined
+      const directory = yield* InstanceState.directory
+      if (
+        parent.directory !== directory ||
+        (session && (session.parentID !== parent.id || session.directory !== directory))
+      )
+        return yield* Effect.fail(new Error("Task must belong to the caller session and directory"))
+      if (session?.agent && session.agent !== next.name)
+        return yield* Effect.fail(new Error("Resume must use the existing child agent"))
+      if (session) {
+        const denies = (parent.permission ?? []).filter((rule) => rule.action === "deny")
+        const missing = denies.some(
+          (rule) =>
+            !(session.permission ?? []).some(
+              (child) =>
+                child.permission === rule.permission && child.pattern === rule.pattern && child.action === "deny",
+            ),
+        )
+        const external = (session.permission ?? []).filter((rule) => rule.permission === "external_directory")
+        const currentExternal = (parent.permission ?? []).filter((rule) => rule.permission === "external_directory")
+        const changed = JSON.stringify(external) !== JSON.stringify(currentExternal)
+        // Active V1 runners captured their scope already; do not silently change it under a queued extension.
+        if (missing || changed)
+          return yield* Effect.fail(
+            new Error(
+              "Parent scope changed. Reconcile the child permissions while idle before resuming; no work was dispatched.",
+            ),
+          )
+      }
       const childPermission = deriveSubagentSessionPermission({
         parentSessionPermission: parent.permission ?? [],
         subagent: next,
@@ -197,40 +235,70 @@ export const TaskTool = Tool.define(
       const ops = ctx.extra?.promptOps as TaskPromptOps
       if (!ops) return yield* Effect.fail(new Error("TaskTool requires promptOps in ctx.extra"))
 
+      const seen = new Set<string>()
+      const waiting = Effect.fn("TaskTool.waiting")(function* (requestID: string, kind: string) {
+        const job = yield* background.get(nextSession.id)
+        if (job?.status !== "running" || job.metadata?.background !== true || seen.has(requestID)) return
+        seen.add(requestID)
+        yield* inject(
+          "waiting",
+          `Waiting for ${kind}; request_id=${requestID}. Ask the user to resolve the child request. This notice is not approval.`,
+          job.run_id,
+        )
+      })
       const runTask = Effect.fn("TaskTool.runTask")(function* () {
-        const parts = yield* ops.resolvePromptParts(params.prompt)
-        const result = yield* ops.prompt({
-          messageID: MessageID.ascending(),
-          sessionID: nextSession.id,
-          model: {
-            modelID: model.modelID,
-            providerID: model.providerID,
-          },
-          variant: next.model ? undefined : variant,
-          agent: next.name,
-          parts,
-        })
-        if (result.info.role === "assistant" && result.info.error) {
-          const message =
-            "message" in result.info.error.data && typeof result.info.error.data.message === "string"
-              ? result.info.error.data.message
-              : result.info.error.name
-          return yield* Effect.fail(new Error(`Subagent failed (task_id: ${nextSession.id}): ${message}`))
-        }
-        const failed = result.parts.findLast((item) => item.type === "tool" && item.state.status === "error")
-        if (failed?.type === "tool" && failed.state.status === "error") {
-          return yield* Effect.fail(new Error(`Subagent failed (task_id: ${nextSession.id}): ${failed.state.error}`))
-        }
-        return result.parts.findLast((item) => item.type === "text")?.text ?? ""
+        return yield* Effect.acquireUseRelease(
+          events.listen((event) =>
+            Effect.gen(function* () {
+              if (event.type !== Permission.Event.Asked.type && event.type !== Question.Event.Asked.type) return
+              if (!Schema.is(Schema.Union([PermissionV1.Request, Question.Request]))(event.data)) return
+              if (event.data.sessionID !== nextSession.id || event.location?.directory !== directory) return
+              yield* waiting(event.data.id, event.type === Permission.Event.Asked.type ? "permission" : "user input")
+            }),
+          ),
+          () =>
+            Effect.gen(function* () {
+              const parts = yield* ops.resolvePromptParts(params.prompt)
+              const result = yield* ops.prompt({
+                messageID: MessageID.ascending(),
+                sessionID: nextSession.id,
+                model: {
+                  modelID: model.modelID,
+                  providerID: model.providerID,
+                },
+                variant: next.model ? undefined : variant,
+                agent: next.name,
+                parts,
+              })
+              if (result.info.role === "assistant" && result.info.error) {
+                const message =
+                  "message" in result.info.error.data && typeof result.info.error.data.message === "string"
+                    ? result.info.error.data.message
+                    : result.info.error.name
+                return yield* Effect.fail(new Error(`Subagent failed (task_id: ${nextSession.id}): ${message}`))
+              }
+              const failed = result.parts.findLast((item) => item.type === "tool" && item.state.status === "error")
+              if (failed?.type === "tool" && failed.state.status === "error") {
+                return yield* Effect.fail(
+                  new Error(`Subagent failed (task_id: ${nextSession.id}): ${failed.state.error}`),
+                )
+              }
+              return result.parts.findLast((item) => item.type === "text")?.text ?? ""
+            }),
+          (unsubscribe) => unsubscribe,
+        )
       })
 
       const inject = Effect.fn("TaskTool.injectBackgroundResult")(function* (
-        state: "completed" | "error",
+        state: "completed" | "error" | "cancelled" | "waiting",
         text: string,
+        runID: string,
       ) {
-        const currentParent = yield* sessions.get(ctx.sessionID)
+        const currentParent = yield* sessions.get(ctx.sessionID).pipe(Effect.catch(() => Effect.succeed(undefined)))
+        if (!currentParent) return
         yield* ops
           .prompt({
+            messageID: MessageID.ascending(),
             sessionID: ctx.sessionID,
             agent: currentParent.agent ?? ctx.agent,
             variant,
@@ -240,31 +308,32 @@ export const TaskTool = Tool.define(
                 synthetic: true,
                 text: renderOutput({
                   sessionID: nextSession.id,
+                  runID,
                   state,
-                  summary:
-                    state === "completed"
-                      ? `Background task completed: ${params.description}`
-                      : `Background task failed: ${params.description}`,
-                  text,
+                  summary: `Background task ${state}: ${params.description}`,
+                  text: `[Agent lifecycle notice; not a user request or approval]\n${text}`,
                 }),
               },
             ],
           })
-          .pipe(Effect.ignore, Effect.forkIn(scope, { startImmediately: true }))
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.logError("Background task notice delivery failed", {
+                sessionID: ctx.sessionID,
+                taskID: nextSession.id,
+                cause,
+              }),
+            ),
+            Effect.forkIn(scope, { startImmediately: true }),
+          )
       })
 
-      const notify = Effect.fn("TaskTool.notifyBackgroundResult")(function* (jobID: string) {
-        yield* background.wait({ id: jobID }).pipe(
-          Effect.flatMap((result) => {
-            if (result.info?.status === "completed") return inject("completed", result.info.output ?? "")
-            if (result.info?.status === "error") return inject("error", result.info.error ?? "")
-            return Effect.void
-          }),
-          Effect.forkIn(scope, { startImmediately: true }),
-        )
-      })
-
-      if (yield* background.extend({ id: nextSession.id, run: runTask() })) {
+      if (
+        yield* background.extend({
+          id: nextSession.id,
+          run: runTask().pipe(Effect.onInterrupt(() => ops.cancel(nextSession.id))),
+        })
+      ) {
         return {
           title: params.description,
           metadata: {
@@ -286,13 +355,29 @@ export const TaskTool = Tool.define(
         type: id,
         title: params.description,
         metadata,
-        onPromote: Effect.all([
-          ctx.metadata({
-            title: params.description,
-            metadata: { ...metadata, background: true, jobId: nextSession.id },
-          }),
-          notify(nextSession.id),
-        ]),
+        onPromote: Effect.all(
+          [
+            ctx.metadata({
+              title: params.description,
+              metadata: { ...metadata, background: true, jobId: nextSession.id },
+            }),
+            Effect.gen(function* () {
+              const pending = [...(yield* permissions.list()), ...(yield* questions.list())].filter(
+                (request) => request.sessionID === nextSession.id,
+              )
+              yield* Effect.forEach(pending, (request) => waiting(request.id, "permission or user input"), {
+                discard: true,
+              })
+            }),
+          ],
+          { discard: true },
+        ),
+        // Parent interruption must not schedule a new parent turn via a cancellation notice.
+        onSettled: (job) =>
+          job.metadata?.background === true && (job.status === "completed" || job.status === "error")
+            ? inject(job.status, job.error ?? job.output ?? "", job.run_id)
+            : Effect.void,
+        onCancel: ops.cancel(nextSession.id),
         run: runTask().pipe(Effect.onInterrupt(() => ops.cancel(nextSession.id))),
       })
 
@@ -303,9 +388,11 @@ export const TaskTool = Tool.define(
             ...metadata,
             background: true,
             jobId: info.id,
+            runId: info.run_id,
           },
           output: renderOutput({
             sessionID: nextSession.id,
+            runID: info.run_id,
             state: "running",
             summary: "Background task started",
             text: BACKGROUND_STARTED,
@@ -314,7 +401,6 @@ export const TaskTool = Tool.define(
       }
 
       if (runInBackground) {
-        yield* notify(info.id)
         return backgroundResult()
       }
 

@@ -12,6 +12,8 @@ import { fileURLToPath } from "url"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { BackgroundJob } from "@/background/job"
+import { TaskTool } from "@/tool/task"
+import { TaskStatusTool } from "@/tool/task-status"
 import { Command } from "../../src/command"
 import { Config } from "@/config/config"
 import { LSP } from "@/lsp/lsp"
@@ -221,13 +223,26 @@ function makePrompt(input?: { mcpInstructions?: MCP.ServerInstructions[]; proces
   return LayerNode.compile(promptRoot, replacements)
 }
 
-function makeHttp(input?: { mcpInstructions?: MCP.ServerInstructions[]; processor?: "blocking" }) {
+function makeHttp(input?: {
+  mcpInstructions?: MCP.ServerInstructions[]
+  processor?: "blocking"
+  background?: boolean
+}) {
   const root = LayerNode.group([promptRoot, testLLMServerNode])
   const replacements = [
     [SessionSummary.node, summary],
     [LSP.node, lsp],
     [MCP.node, makeMcp(input?.mcpInstructions)],
-    [RuntimeFlags.node, runtimeFlags],
+    [
+      RuntimeFlags.node,
+      input?.background
+        ? RuntimeFlags.layer({
+            experimentalEventSystem: true,
+            experimentalBackgroundSubagents: true,
+            enableQuestionTool: true,
+          })
+        : runtimeFlags,
+    ],
   ] as const
   if (input?.processor === "blocking") {
     return LayerNode.compile(root, [...replacements, [SessionProcessor.node, blockingProcessor]])
@@ -240,6 +255,7 @@ function makeHttpNoLLMServer(input?: { mcpInstructions?: MCP.ServerInstructions[
 }
 
 const it = testEffect(makeHttp())
+const backgroundLifecycle = testEffect(makeHttp({ background: true }))
 const noLLMServer = testEffect(makeHttpNoLLMServer())
 const raceNoLLMServer = testEffect(makeHttpNoLLMServer({ processor: "blocking" }))
 const withMcpInstructions = testEffect(
@@ -942,6 +958,158 @@ it.instance("loop continues when finish is stop but assistant has tool parts", (
       expect(result.parts.some((part) => part.type === "text" && part.text === "second")).toBe(true)
       expect(result.info.finish).toBe("stop")
     }
+  }),
+)
+
+backgroundLifecycle.instance(
+  "native background lifecycle proof: parent continues while child awaits user and receives completion",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig((url) => ({
+        ...providerCfg(url),
+        provider: {
+          test: {
+            ...providerCfg(url).provider.test,
+            models: {
+              ...cfg.provider.test.models,
+              "child-model": { ...cfg.provider.test.models["test-model"], id: "child-model" },
+            },
+          },
+        },
+        agent: { general: { model: "test/child-model", permission: { question: "allow" } } },
+      }))
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const questions = yield* Question.Service
+      const jobs = yield* BackgroundJob.Service
+      const chat = yield* sessions.create({
+        title: "Native lifecycle proof",
+        permission: [
+          { permission: "task", pattern: "general", action: "allow" },
+          { permission: "edit", pattern: "*", action: "deny" },
+        ],
+      })
+      yield* llm.toolMatch((hit) => hit.body.model === "test-model", "task", {
+        description: "Independent child",
+        prompt: "Ask the user which decoy to inspect",
+        subagent_type: "general",
+        background: true,
+      })
+      yield* llm.textMatch((hit) => hit.body.model === "test-model", "Parent independent work completed")
+      yield* llm.toolMatch((hit) => hit.body.model === "child-model", "question", {
+        questions: [
+          { header: "Decoy", question: "Which decoy?", options: [{ label: "One", description: "First decoy" }] },
+        ],
+      })
+      yield* llm.textMatch((hit) => hit.body.model === "child-model", "Child inspected decoy One")
+      yield* user(chat.id, "Delegate independent work and continue")
+      const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+      const request = yield* pollWithTimeout(
+        questions.list().pipe(Effect.map((requests) => requests[0])),
+        "child never requested user input",
+      )
+      yield* pollWithTimeout(
+        Effect.gen(function* () {
+          const history = yield* MessageV2.filterCompactedEffect(chat.id)
+          return history.some((message) =>
+            message.parts.some((part) => part.type === "text" && part.text === "Parent independent work completed"),
+          )
+            ? true
+            : undefined
+        }),
+        "parent did not continue while child held",
+      )
+      expect((yield* jobs.get(request.sessionID))?.status).toBe("running")
+      expect((yield* sessions.get(request.sessionID)).permission).toContainEqual({
+        permission: "edit",
+        pattern: "*",
+        action: "deny",
+      })
+      yield* pollWithTimeout(
+        Effect.gen(function* () {
+          const history = yield* MessageV2.filterCompactedEffect(chat.id)
+          return history
+            .flatMap((message) => message.parts)
+            .find((part) => part.type === "text" && part.synthetic && part.text.includes('state="waiting"'))
+        }),
+        "parent did not receive waiting notice",
+      )
+      yield* questions.reply({ requestID: request.id, answers: [["One"]] })
+      yield* pollWithTimeout(
+        Effect.gen(function* () {
+          const history = yield* MessageV2.filterCompactedEffect(chat.id)
+          return history
+            .flatMap((message) => message.parts)
+            .find((part) => part.type === "text" && part.synthetic && part.text.includes("Child inspected decoy One"))
+        }),
+        "parent did not receive child result",
+      )
+      expect((yield* jobs.get(request.sessionID))?.status).toBe("completed")
+      const history = yield* MessageV2.filterCompactedEffect(chat.id)
+      expect(
+        history
+          .flatMap((message) => message.parts)
+          .filter((part) => part.type === "text" && part.synthetic && part.text.includes('state="completed"')),
+      ).toHaveLength(1)
+      yield* Fiber.join(fiber)
+      yield* prompt.cancel(chat.id)
+    }),
+)
+
+backgroundLifecycle.instance("cancelling an extension stops the real child runner and clears its question", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig((url) => ({
+      ...providerCfg(url),
+      agent: { general: { permission: { question: "allow" } } },
+    }))
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const questions = yield* Question.Service
+    const status = yield* SessionStatus.Service
+    const chat = yield* sessions.create({ title: "Extension cancellation" })
+    const { assistant } = yield* seed(chat.id, { finish: "stop" })
+    const tool = yield* TaskTool
+    const task = yield* tool.init()
+    const control = yield* TaskStatusTool
+    const cancel = yield* control.init()
+    const context = {
+      sessionID: chat.id,
+      messageID: assistant.id,
+      agent: "build",
+      abort: new AbortController().signal,
+      messages: [],
+      metadata: () => Effect.void,
+      ask: () => Effect.void,
+      extra: {
+        promptOps: { prompt: prompt.prompt, cancel: prompt.cancel, resolvePromptParts: prompt.resolvePromptParts },
+      },
+    }
+    const first = defer<void>()
+    yield* llm.hold("first finished", first.promise)
+    const child = yield* task.execute(
+      { description: "First task", prompt: "first", subagent_type: "general", background: true },
+      context,
+    )
+    yield* llm.wait(1)
+    yield* task.execute(
+      { description: "Extension", prompt: "ask the user", subagent_type: "general", task_id: child.metadata.sessionId },
+      context,
+    )
+    yield* llm.tool("question", {
+      questions: [{ header: "Hold", question: "Proceed?", options: [{ label: "Yes", description: "Continue" }] }],
+    })
+    first.resolve()
+    const request = yield* pollWithTimeout(
+      questions.list().pipe(Effect.map((requests) => requests[0])),
+      "extension did not ask question",
+    )
+    expect(request.sessionID).toBe(child.metadata.sessionId)
+    const jobs = yield* BackgroundJob.Service
+    expect((yield* jobs.get(child.metadata.sessionId))?.status).toBe("running")
+    yield* cancel.execute({ task_id: child.metadata.sessionId, action: "cancel" }, context)
+    expect(yield* questions.list()).toEqual([])
+    expect(yield* status.get(child.metadata.sessionId)).toEqual({ type: "idle" })
+    yield* prompt.cancel(chat.id)
   }),
 )
 

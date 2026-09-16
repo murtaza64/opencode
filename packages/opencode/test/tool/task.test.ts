@@ -3,7 +3,7 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Queue } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -15,8 +15,12 @@ import type { SessionPrompt } from "../../src/session/prompt"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
+import { Permission } from "@/permission"
+import { Question } from "@/question"
 
 import { TaskTool, type TaskPromptOps } from "../../src/tool/task"
+import { TaskStatusTool } from "../../src/tool/task-status"
+import { ToolJsonSchema } from "../../src/tool/json-schema"
 import { Truncate } from "@/tool/truncate"
 import { ToolRegistry } from "@/tool/registry"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -38,6 +42,8 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
   LayerNode.compile(
     LayerNode.group([
       Agent.node,
+      Permission.node,
+      Question.node,
       BackgroundJob.node,
       EventV2Bridge.node,
       Config.node,
@@ -168,6 +174,351 @@ function reply(
 }
 
 describe("tool.task", () => {
+  it.instance("disabled background capability hides dispatch and control fields", () =>
+    Effect.gen(function* () {
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const registry = yield* ToolRegistry.Service
+      expect(ToolJsonSchema.fromTool({ id: tool.id, ...def }).properties).not.toHaveProperty("background")
+      expect(yield* registry.ids()).not.toContain("task_status")
+    }),
+  )
+
+  background.instance("enabled background capability exposes dispatch and control fields", () =>
+    Effect.gen(function* () {
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const registry = yield* ToolRegistry.Service
+      expect(ToolJsonSchema.fromTool({ id: tool.id, ...def }).properties).toHaveProperty("background")
+      expect(yield* registry.ids()).toContain("task_status")
+    }),
+  )
+
+  background.instance(
+    "a permission-held child notifies its parent and targeted cancellation cleans only that child",
+    () =>
+      Effect.gen(function* () {
+        const permissions = yield* Permission.Service
+        const jobs = yield* BackgroundJob.Service
+        const events = yield* EventV2Bridge.Service
+        const { chat, assistant } = yield* seed()
+        const notices = yield* Queue.unbounded<SessionPrompt.PromptInput>()
+        const tool = yield* TaskTool
+        const task = yield* tool.init()
+        const statusTool = yield* TaskStatusTool
+        const status = yield* statusTool.init()
+        const context = {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+          extra: {
+            promptOps: {
+              ...stubOps(),
+              prompt: (input: SessionPrompt.PromptInput) =>
+                input.sessionID === chat.id
+                  ? Queue.offer(notices, input).pipe(Effect.as(reply(input, "received")))
+                  : permissions
+                      .ask({
+                        sessionID: input.sessionID,
+                        permission: "edit",
+                        patterns: ["decoy.txt"],
+                        always: [],
+                        metadata: {},
+                        ruleset: [{ permission: "edit", pattern: "*", action: "ask" }],
+                      })
+                      .pipe(Effect.as(reply(input, "approved")), Effect.orDie),
+            },
+          },
+        }
+        const child = yield* task.execute(
+          { description: "Held child", prompt: "edit decoy", subagent_type: "general", background: true },
+          context,
+        )
+        // Reaching this independent operation before replying is the nonblocking contract.
+        const sibling = yield* jobs.start({ type: "task", run: Effect.never })
+        const notice = yield* Queue.take(notices)
+        expect(notice.parts[0]).toMatchObject({ synthetic: true })
+        const requests = yield* permissions.list()
+        expect(requests).toHaveLength(1)
+        expect(notice.parts[0]).toHaveProperty("text", expect.stringContaining(requests[0].id))
+        expect(notice.parts[0]).toHaveProperty("text", expect.stringContaining(child.metadata.sessionId))
+        expect(
+          JSON.parse((yield* status.execute({ task_id: child.metadata.sessionId, action: "inspect" }, context)).output)
+            .status,
+        ).toBe("waiting")
+        // A duplicated event must not produce a second request notice.
+        const event = yield* events.publish(Permission.Event.Asked, requests[0])
+        yield* events.publish(Permission.Event.Asked, requests[0], { id: event.id })
+        expect(yield* Queue.size(notices)).toBe(0)
+        yield* status.execute({ task_id: child.metadata.sessionId, action: "cancel" }, context)
+        expect(yield* permissions.list()).toEqual([])
+        expect((yield* jobs.get(child.metadata.sessionId))?.status).toBe("cancelled")
+        expect((yield* jobs.get(sibling.id))?.status).toBe("running")
+      }),
+  )
+
+  background.instance("question-held child sends a waiting notice then one completion after the user answers", () =>
+    Effect.gen(function* () {
+      const questions = yield* Question.Service
+      const { chat, assistant } = yield* seed()
+      const notices = yield* Queue.unbounded<SessionPrompt.PromptInput>()
+      const tool = yield* TaskTool
+      const task = yield* tool.init()
+      const context = {
+        sessionID: chat.id,
+        messageID: assistant.id,
+        agent: "build",
+        abort: new AbortController().signal,
+        messages: [],
+        metadata: () => Effect.void,
+        ask: () => Effect.void,
+        extra: {
+          promptOps: {
+            ...stubOps(),
+            prompt: (input: SessionPrompt.PromptInput) =>
+              input.sessionID === chat.id
+                ? Queue.offer(notices, input).pipe(Effect.as(reply(input, "received")))
+                : questions
+                    .ask({
+                      sessionID: input.sessionID,
+                      questions: [
+                        {
+                          header: "Choose",
+                          question: "Which decoy?",
+                          options: [{ label: "One", description: "First decoy" }],
+                        },
+                      ],
+                    })
+                    .pipe(Effect.as(reply(input, "user answered")), Effect.orDie),
+          },
+        },
+      }
+      const child = yield* task.execute(
+        { description: "Question child", prompt: "ask user", subagent_type: "general", background: true },
+        context,
+      )
+      expect((yield* Queue.take(notices)).parts[0]).toHaveProperty("text", expect.stringContaining('state="waiting"'))
+      const requests = yield* questions.list()
+      expect(requests).toHaveLength(1)
+      yield* questions.reply({ requestID: requests[0].id, answers: [["One"]] })
+      const completed = yield* Queue.take(notices)
+      expect(completed.parts[0]).toHaveProperty("text", expect.stringContaining('state="completed"'))
+      expect(completed.parts[0]).toHaveProperty("text", expect.stringContaining(child.metadata.sessionId))
+      expect(completed.parts[0]).toHaveProperty("text", expect.stringContaining("user answered"))
+      expect(yield* questions.list()).toEqual([])
+    }),
+  )
+
+  background.instance("assistant provider errors produce failure notices instead of empty success", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const notice = yield* Deferred.make<SessionPrompt.PromptInput>()
+      const tool = yield* TaskTool
+      const task = yield* tool.init()
+      yield* task.execute(
+        { description: "Failing child", prompt: "fail", subagent_type: "general", background: true },
+        {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+          extra: {
+            promptOps: {
+              ...stubOps(),
+              prompt: (input: SessionPrompt.PromptInput) => {
+                if (input.sessionID === chat.id)
+                  return Deferred.succeed(notice, input).pipe(Effect.as(reply(input, "received")))
+                const result = reply(input, "")
+                if (result.info.role === "assistant")
+                  result.info.error = { name: "UnknownError", data: { message: "provider failed" } }
+                return Effect.succeed(result)
+              },
+            },
+          },
+        },
+      )
+      expect((yield* Deferred.await(notice)).parts[0]).toHaveProperty("text", expect.stringContaining('state="error"'))
+    }),
+  )
+
+  background.instance("foreign children cannot be inspected, cancelled, or resumed", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const other = yield* sessions.create({ title: "Other parent" })
+      const child = yield* sessions.create({ parentID: other.id, title: "Foreign child", agent: "general" })
+      const jobs = yield* BackgroundJob.Service
+      yield* jobs.start({ id: child.id, type: "task", metadata: { parentSessionId: other.id }, run: Effect.never })
+      const tool = yield* TaskTool
+      const task = yield* tool.init()
+      const statusTool = yield* TaskStatusTool
+      const status = yield* statusTool.init()
+      const context = {
+        sessionID: chat.id,
+        messageID: assistant.id,
+        agent: "build",
+        abort: new AbortController().signal,
+        messages: [],
+        metadata: () => Effect.void,
+        ask: () => Effect.void,
+        extra: { promptOps: stubOps() },
+      }
+      expect(
+        Exit.isFailure(yield* status.execute({ task_id: child.id, action: "inspect" }, context).pipe(Effect.exit)),
+      ).toBe(true)
+      expect(
+        Exit.isFailure(yield* status.execute({ task_id: child.id, action: "cancel" }, context).pipe(Effect.exit)),
+      ).toBe(true)
+      expect(
+        Exit.isFailure(
+          yield* task
+            .execute(
+              { task_id: child.id, description: "Hijack", prompt: "hi", subagent_type: "general", background: true },
+              context,
+            )
+            .pipe(Effect.exit),
+        ),
+      ).toBe(true)
+      expect((yield* jobs.get(child.id))?.status).toBe("running")
+    }),
+  )
+
+  background.instance("persisted child without a local job is unknown and only resumes on explicit dispatch", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const child = yield* sessions.create({
+        parentID: chat.id,
+        title: "Previous process",
+        agent: "general",
+        permission: [{ permission: "edit", pattern: "*", action: "deny" }],
+      })
+      const tool = yield* TaskTool
+      const task = yield* tool.init()
+      const statusTool = yield* TaskStatusTool
+      const status = yield* statusTool.init()
+      const context = {
+        sessionID: chat.id,
+        messageID: assistant.id,
+        agent: "build",
+        abort: new AbortController().signal,
+        messages: [],
+        metadata: () => Effect.void,
+        ask: () => Effect.void,
+        extra: { promptOps: stubOps() },
+      }
+      expect(JSON.parse((yield* status.execute({ task_id: child.id, action: "inspect" }, context)).output).status).toBe(
+        "unknown",
+      )
+      expect(JSON.parse((yield* status.execute({ task_id: child.id, action: "cancel" }, context)).output).status).toBe(
+        "unknown",
+      )
+      expect(yield* jobs.list()).toEqual([])
+      expect(
+        Exit.isFailure(
+          yield* task
+            .execute(
+              { task_id: child.id, description: "Changed agent", prompt: "hi", subagent_type: "explore" },
+              context,
+            )
+            .pipe(Effect.exit),
+        ),
+      ).toBe(true)
+      yield* task.execute(
+        { task_id: child.id, description: "Resume explicitly", prompt: "hi", subagent_type: "general" },
+        context,
+      )
+      expect((yield* jobs.get(child.id))?.status).toBe("completed")
+      expect((yield* sessions.get(child.id)).permission).toEqual(child.permission)
+    }),
+  )
+
+  background.instance("revoked parent scope rejects resume without changing the child or dispatching", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const child = yield* sessions.create({
+        parentID: chat.id,
+        title: "Previously allowed",
+        agent: "general",
+        permission: [],
+      })
+      yield* sessions.setPermission({
+        sessionID: chat.id,
+        permission: [{ permission: "edit", pattern: "*", action: "deny" }],
+      })
+      const tool = yield* TaskTool
+      const task = yield* tool.init()
+      const exit = yield* task
+        .execute(
+          { task_id: child.id, description: "Resume", prompt: "edit", subagent_type: "general" },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+            extra: { promptOps: stubOps() },
+          },
+        )
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(yield* jobs.list()).toEqual([])
+      expect((yield* sessions.get(child.id)).permission).toEqual([])
+    }),
+  )
+
+  background.instance("an overriding external-directory ask rule rejects resume", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const child = yield* sessions.create({
+        parentID: chat.id,
+        title: "External scope",
+        agent: "general",
+        permission: [{ permission: "external_directory", pattern: "/tmp/*", action: "allow" }],
+      })
+      yield* sessions.setPermission({
+        sessionID: chat.id,
+        permission: [
+          { permission: "external_directory", pattern: "/tmp/*", action: "allow" },
+          { permission: "external_directory", pattern: "/tmp/private/*", action: "ask" },
+        ],
+      })
+      const tool = yield* TaskTool
+      const task = yield* tool.init()
+      const exit = yield* task
+        .execute(
+          { task_id: child.id, description: "Resume", prompt: "inspect", subagent_type: "general" },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+            extra: { promptOps: stubOps() },
+          },
+        )
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(yield* jobs.list()).toEqual([])
+    }),
+  )
+
   it.instance(
     "description sorts subagents by name and is stable across calls",
     () =>
@@ -467,7 +818,7 @@ describe("tool.task", () => {
     }),
   )
 
-  it.instance("execute creates a child when task_id does not exist", () =>
+  it.instance("missing resume ID fails without dispatching a replacement child", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
       const { chat, assistant } = yield* seed()
@@ -476,31 +827,31 @@ describe("tool.task", () => {
       let seen: SessionPrompt.PromptInput | undefined
       const promptOps = stubOps({ text: "created", onPrompt: (input) => (seen = input) })
 
-      const result = yield* def.execute(
-        {
-          description: "inspect bug",
-          prompt: "look into the cache key path",
-          subagent_type: "general",
-          task_id: "ses_missing",
-        },
-        {
-          sessionID: chat.id,
-          messageID: assistant.id,
-          agent: "build",
-          abort: new AbortController().signal,
-          extra: { promptOps },
-          messages: [],
-          metadata: () => Effect.void,
-          ask: () => Effect.void,
-        },
-      )
+      const result = yield* def
+        .execute(
+          {
+            description: "inspect bug",
+            prompt: "look into the cache key path",
+            subagent_type: "general",
+            task_id: "ses_missing",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+        .pipe(Effect.exit)
 
       const kids = yield* sessions.children(chat.id)
-      expect(kids).toHaveLength(1)
-      expect(kids[0]?.id).toBe(result.metadata.sessionId)
-      expect(result.metadata.sessionId).not.toBe("ses_missing")
-      expect(result.output).toContain(`<task id="${result.metadata.sessionId}" state="completed">`)
-      expect(seen?.sessionID).toBe(result.metadata.sessionId)
+      expect(kids).toHaveLength(0)
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(seen).toBeUndefined()
     }),
   )
 

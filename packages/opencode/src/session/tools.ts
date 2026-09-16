@@ -7,6 +7,7 @@ import { McpCatalog } from "@/mcp/catalog"
 import { Permission } from "@/permission"
 import { Tool } from "@/tool/tool"
 import { ToolJsonSchema } from "@/tool/json-schema"
+import { ShellID } from "@/tool/shell/id"
 import { ToolRegistry } from "@/tool/registry"
 import { Truncate } from "@/tool/truncate"
 
@@ -79,14 +80,19 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
         }
       }),
     ask: (req) =>
-      permission
-        .ask({
-          ...req,
-          sessionID: input.session.id,
-          tool: { messageID: input.processor.message.id, callID: options.toolCallId },
-          ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []),
-        })
-        .pipe(Effect.orDie),
+      Effect.promise(() =>
+        run.promise(
+          permission
+            .ask({
+              ...req,
+              sessionID: input.session.id,
+              tool: { messageID: input.processor.message.id, callID: options.toolCallId },
+              ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []),
+            })
+            .pipe(Effect.orDie),
+          { signal: options.abortSignal },
+        ),
+      ),
   })
 
   for (const item of yield* registry.tools({
@@ -128,6 +134,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             }
             return output
           }),
+          // Shell owns abort handling so its partial output can finish normal truncation.
+          { signal: item.id === ShellID.ToolID ? undefined : options.abortSignal },
         )
       },
     })
@@ -215,6 +223,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             }
             return output
           }),
+          { signal: opts.abortSignal },
         )
       },
     })
@@ -298,6 +307,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             }
             return output
           }),
+          { signal: opts.abortSignal },
         )
       },
     })
@@ -380,6 +390,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             }
             return output
           }),
+          { signal: opts.abortSignal },
         )
       },
     })
@@ -485,6 +496,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           }
           return output
         }),
+        { signal: opts.abortSignal },
       )
     tools[key] = item
   }

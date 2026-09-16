@@ -181,6 +181,25 @@ const mustTruncate = (result: {
 }
 
 describe("tool.shell", () => {
+  it.live("cancellation after preparation does not launch a command", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      const controller = new AbortController()
+      yield* runIn(
+        tmp,
+        run(
+          { command: `${bin} -e ${evalarg("await Bun.write('cancelled-decoy.txt', 'unexpected')")}`, workdir: tmp },
+          {
+            ...ctx,
+            abort: controller.signal,
+            metadata: () => Effect.sync(() => controller.abort()),
+          },
+        ),
+      )
+      expect(yield* Effect.promise(() => Bun.file(path.join(tmp, "cancelled-decoy.txt")).exists())).toBe(false)
+    }),
+  )
+
   each("basic", () =>
     runIn(
       projectRoot,
