@@ -12,8 +12,9 @@ import SessionInfo from "../components/session-info"
 import { sessionHref, useDashboard } from "../state"
 import { rightOpen, startDrag } from "../ui"
 import { createVim } from "../vim"
-import { getComposer, type ComposerMode } from "../composer"
-import { ComposerControls, ComposerResults } from "../components/composer-controls"
+import { getComposer, type ComposerAction } from "../composer"
+import { ComposerResults } from "../components/composer-controls"
+import { DirectComposer } from "../components/direct-composer"
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const [error, setError] = createSignal("")
@@ -471,14 +472,14 @@ function SessionView(props: { sessionID: string; directory: string }) {
     return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
   }
 
-  const activeDraft = () => composer.state.mode === "aside" ? composer.state.aside : composer.state.task
+  const activeDraft = composer.visibleDraft
   const draft = () => activeDraft().text
-  const setDraft = composer.setText
+  const setDraft = composer.setVisibleText
   const images = () => activeDraft().images
   const sending = () => composer.state.sending
 
   const addImageFiles = (files: File[]) => {
-    const buffer = composer.state.mode === "aside" ? "aside" : "task"
+    const buffer = composer.state.visibleBuffer
     for (const f of files) {
       const reader = new FileReader()
       reader.onload = () => {
@@ -525,10 +526,10 @@ function SessionView(props: { sessionID: string; directory: string }) {
   ))
   const activeAgent = () => {
     const previous = messages().findLast((message) => message.role === "user")
-    return composer.state.mode === "aside" ? previous?.agent : session()?.agent ?? previous?.agent
+    return session()?.agent ?? previous?.agent
   }
   const modelChoice = () => activeDraft().model
-  const setModelChoice = composer.setModel
+  const setModelChoice = composer.setVisibleModel
   const lastTurnModel = createMemo(() => {
     for (let i = messages().length - 1; i >= 0; i--) {
       const m = messages()[i] as any
@@ -560,15 +561,17 @@ function SessionView(props: { sessionID: string; directory: string }) {
     }
   }
 
-  const send = async () => {
+  const send = async (action: ComposerAction = composer.state.keyboardTarget) => {
     const s = session()
-    if (!s || !connected() || sending() || nudgePhase() || aborting()) return
+    if (!s || !connected() || nudgePhase() || aborting()) return
+    const editor = floating() ? floatEl : promptEl
+    if (editor) saveSelection(editor)
     setError("")
     // Read status again at submission; a mode switch never sends by itself.
     composer.observeBusy(busy())
     stick = true
     queueMicrotask(pin)
-    await composer.submit(s, nextModel())
+    await composer.submitVisible(action, s, nextModel())
   }
 
   let transcriptEl: HTMLDivElement | undefined
@@ -600,34 +603,28 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const asideVim = createVim({ value: draft, setValue: setDraft, onTab: switchSession, onEnter: () => send(), onCursor: setCaret })
   taskVim.setMode("insert")
   asideVim.setMode("insert")
-  const activeVim = () => composer.state.mode === "aside" ? asideVim : taskVim
+  const activeVim = () => composer.state.visibleBuffer === "aside" ? asideVim : taskVim
   const vim = {
     mode: () => activeVim().mode(),
     setMode: (mode: "normal" | "insert") => activeVim().setMode(mode),
     refresh: (el: HTMLTextAreaElement | undefined) => activeVim().refresh(el),
     handleKeyDown: (event: KeyboardEvent) => activeVim().handleKeyDown(event),
   }
-  const saveSelection = (el: HTMLTextAreaElement) => composer.setSelection(el.selectionStart, el.selectionEnd)
-  const selectMode = (mode: ComposerMode, keyboard = false) => {
+  const saveSelection = (el: HTMLTextAreaElement) => composer.setVisibleSelection(el.selectionStart, el.selectionEnd)
+  const restoreDraft = () => {
     lastEsc = 0
     const inputMode = vim.mode()
     const el = floating() ? floatEl : promptEl
     if (el) saveSelection(el)
-    composer.selectMode(mode)
+    composer.restoreDraft(composer.state.visibleBuffer === "task" ? "aside" : "task")
     vim.setMode(inputMode)
     const selection = [...activeDraft().selection] as const
     const revision = activeDraft().revision
     const focused = document.activeElement
-    const group = focused instanceof HTMLElement ? focused.closest('[role="radiogroup"]') : null
-    if (keyboard) {
-      (floating() ? floatEl : promptEl)?.setSelectionRange(selection[0], selection[1])
-      setCaret(null)
-      return
-    }
+    const buffer = composer.state.visibleBuffer
     // Restore after the pointer's default selection update, without undoing newer typing.
     requestAnimationFrame(() => {
-      if (composer.state.mode !== mode || activeDraft().revision !== revision) return
-      if (document.activeElement !== focused && !group?.contains(document.activeElement)) return
+      if (composer.state.visibleBuffer !== buffer || activeDraft().revision !== revision || document.activeElement !== focused) return
       const target = floating() ? floatEl : promptEl
       if (!target?.isConnected) return
       target?.setSelectionRange(selection[0], selection[1])
@@ -642,17 +639,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
     e.preventDefault()
     e.stopPropagation()
     if (e.repeat) return true
-    const editing = document.activeElement === promptEl || document.activeElement === floatEl
-    const inputMode = vim.mode()
-    selectMode(composer.state.mode === "aside" ? "queue" : composer.state.mode === "queue" ? "steer" : "aside", true)
-    if (editing) queueMicrotask(() => {
-      const target = floating() ? floatEl : promptEl
-      target?.focus()
-      vim.setMode(inputMode)
-      vim.refresh(target)
-    })
-    const group = (e.target as HTMLElement).closest('[role="radiogroup"]')
-    if (group) queueMicrotask(() => group.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus())
+    lastEsc = 0
+    composer.selectTarget(composer.state.keyboardTarget === "steer" ? "queue" : composer.state.keyboardTarget === "queue" ? "aside" : "steer")
     return true
   }
 
@@ -721,7 +709,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
       send()
       return
     }
-    if (e.key === "Escape" && vim.mode() === "normal" && composer.state.mode !== "aside") escTap()
+    if (e.key === "Escape" && vim.mode() === "normal" && composer.state.keyboardTarget !== "aside") escTap()
     if (navKeys(e)) return
     vim.handleKeyDown(e)
   }
@@ -804,11 +792,27 @@ function SessionView(props: { sessionID: string; directory: string }) {
     })
   }
 
-  const Footer = (props: { expanded?: boolean }) => (
-    <ComposerControls composer={composer} connected={connected() && !nudgePhase() && !aborting()} busy={busy()} selectMode={selectMode} submit={send}
-      normalMode={vim.mode() === "normal"}
+  const Editor = (props: { expanded?: boolean }) => <div class="ta-wrap" classList={{ "numbered-editor": props.expanded }}>
+    <textarea ref={(el) => props.expanded ? (floatEl = el) : (promptEl = el)}
+      aria-label="Message" dir="auto" placeholder="Write a message…"
+      classList={{ "vim-normal": vim.mode() === "normal", "vim-insert": vim.mode() === "insert" }}
+      value={draft()} onInput={(e) => { saveSelection(e.currentTarget); setDraft(e.currentTarget.value) }}
+      onPaste={pasteImages} onDrop={dropImages} onDragOver={(e) => e.preventDefault()}
+      onKeyDown={promptKeyDown} onFocus={focusInsert} onClick={focusInsert} onBlur={(e) => saveSelection(e.currentTarget)} />
+    <Show when={props.expanded}><RelativeLines target={floatEl!} value={draft()} /></Show>
+    <FakeCaret target={props.expanded ? floatEl : promptEl} caret={caret()} mode={vim.mode()} />
+  </div>
+  const Attachments = () => <Show when={images().length}><div class="attachments"><For each={images()}>{(image) => (
+    <span class="attachment-chip" title={image.filename}><img src={image.url} alt={image.filename} />{image.filename.slice(0, 24)}
+      <button aria-label={`Remove ${image.filename}`} onClick={() => composer.setImages(images().filter((item) => item.id !== image.id), composer.state.visibleBuffer)}>×</button>
+    </span>
+  )}</For></div></Show>
+  const ComposerPanel = (props: { expanded?: boolean }) => (
+    <DirectComposer composer={composer} connected={connected() && !nudgePhase() && !aborting()} submit={send} restoreDraft={restoreDraft}
+      editor={<Editor expanded={props.expanded} />} attachments={<Attachments />}
       activeAgent={activeAgent()} agents={agents()?.items ?? []} agentError={agents()?.error} retryAgents={() => { void refetchAgents() }}
       sessionActions={<>
+        <Show when={!props.expanded}><button aria-label="Expand editor" title="Expand editor (Ctrl+E)" onClick={toggleFloat}>Expand editor</button></Show>
         <button title="Fork this session at its tip" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
           {forking() ? "Forking…" : "Fork"}
         </button>
@@ -829,8 +833,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
           {nudgePhase() === "stopping" ? "Stopping…" : nudgePhase() === "resuming" ? "Sending resume…" : "Nudge"}
         </button>
       </>}>
-      <select class="model-select" aria-label="Model override"
-        disabled={composer.state.mode === "queue" || composer.state.mode === "steer"}
+      <label class="direct-setting">Model<select class="model-select" aria-label="Model override"
         title="model for the next turn (defaults to the previous turn's)"
         value={modelChoice() ? `${modelChoice()!.providerID}\u0000${modelChoice()!.modelID}` : ""}
         onChange={(e) => {
@@ -847,9 +850,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
             </optgroup>
           )}
         </For>
-      </select>
+      </select></label>
       <Show when={modelChoice()}><button onClick={() => setModelChoice(null)}>Use session model</button></Show>
-      <Show when={!props.expanded}><button aria-label="Expand editor" title="Expand editor (Ctrl+E)" onClick={toggleFloat}>Expand</button></Show>
       <Show when={contextUsage()}>
         {(u) => (
           <span class="context-pct"
@@ -859,7 +861,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
           </span>
         )}
       </Show>
-    </ComposerControls>
+    </DirectComposer>
   )
 
   return (
@@ -946,41 +948,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
 
         <Show when={!floating()}><WorkStatus /><ComposerResults composer={composer} connected={connected()} /></Show>
         <div class="prompt-box" inert={floating()}>
-          <Show when={images().length}>
-            <div class="attachments">
-              <For each={images()}>
-                {(img) => (
-                  <span class="attachment-chip" title={img.filename}>
-                    <img src={img.url} alt={img.filename} />
-                    {img.filename.slice(0, 24)}
-                    <button aria-label={`Remove ${img.filename}`} onClick={() => composer.setImages(images().filter((i) => i.id !== img.id))}>×</button>
-                  </span>
-                )}
-              </For>
-            </div>
-          </Show>
-          <div class="prompt-row">
-            <div class="ta-wrap">
-              <textarea
-                ref={promptEl}
-                aria-label={composer.state.mode === "aside" ? "Aside question" : "Task message"}
-                dir="auto"
-                classList={{ "vim-normal": vim.mode() === "normal", "vim-insert": vim.mode() === "insert" }}
-                placeholder={composer.state.mode === "aside" ? "Ask about the current task..." : "Reply to this session..."}
-                value={draft()}
-                onInput={(e) => { saveSelection(e.currentTarget); setDraft(e.currentTarget.value) }}
-                onPaste={pasteImages}
-                onDrop={dropImages}
-                onDragOver={(e) => e.preventDefault()}
-                onKeyDown={promptKeyDown}
-                onFocus={focusInsert}
-                onClick={focusInsert}
-                onBlur={(e) => saveSelection(e.currentTarget)}
-              />
-              <FakeCaret target={promptEl} caret={caret()} mode={vim.mode()} />
-            </div>
-          </div>
-          <Footer />
+          <ComposerPanel />
         </div>
       </div>
 
@@ -993,33 +961,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
           </div>
           <WorkStatus />
           <ComposerResults composer={composer} connected={connected()} />
-          <Show when={images().length}>
-            <div class="attachments"><For each={images()}>{(image) => (
-              <span class="attachment-chip"><img src={image.url} alt={image.filename} />{image.filename.slice(0, 24)}
-                <button aria-label={`Remove ${image.filename}`} onClick={() => composer.setImages(images().filter((item) => item.id !== image.id))}>×</button>
-              </span>
-            )}</For></div>
-          </Show>
-          <div class="ta-wrap numbered-editor">
-            <textarea
-              ref={floatEl}
-              aria-label={composer.state.mode === "aside" ? "Aside question" : "Task message"}
-              dir="auto"
-              classList={{ "vim-normal": vim.mode() === "normal", "vim-insert": vim.mode() === "insert" }}
-              value={draft()}
-              onInput={(e) => { saveSelection(e.currentTarget); setDraft(e.currentTarget.value) }}
-              onPaste={pasteImages}
-              onDrop={dropImages}
-              onDragOver={(e) => e.preventDefault()}
-              onKeyDown={promptKeyDown}
-              onFocus={focusInsert}
-              onClick={focusInsert}
-              onBlur={(e) => saveSelection(e.currentTarget)}
-            />
-            <RelativeLines target={floatEl!} value={draft()} />
-            <FakeCaret target={floatEl} caret={caret()} mode={vim.mode()} />
-          </div>
-          <Footer expanded />
+          <ComposerPanel expanded />
         </div>
       </Show>
 

@@ -1,3 +1,4 @@
+// Historical four-mode UI coverage. Chosen direct-action UI runs composer-direct.browser.mjs.
 import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
 import { mkdir } from "node:fs/promises"
