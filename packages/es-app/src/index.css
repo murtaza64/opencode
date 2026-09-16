@@ -883,6 +883,10 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
   resize: none;
 }
 .float-editor textarea:focus { outline: none; }
+.numbered-editor textarea { padding-inline-start: calc(var(--line-number-width, 4ch) + 1ch); }
+.relative-lines { position: absolute; inset-block: 0; inset-inline-start: 0; width: var(--line-number-width, 4ch); overflow: hidden; pointer-events: none; user-select: none; color: var(--overlay0); }
+.relative-lines span { position: absolute; inset-inline: 0; text-align: end; line-height: inherit; }
+.relative-lines .current { color: var(--lavender); }
 
 /* Both editor surfaces share controls; receipts and Asides stay outside history. */
 .composer-controls { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 4px 8px; min-width: 0; flex-shrink: 0; }

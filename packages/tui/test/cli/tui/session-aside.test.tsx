@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { InputRenderable, TextareaRenderable } from "@opentui/core"
-import type { GlobalEvent, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2"
+import type { GlobalEvent, Message, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2"
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { testRender, useRenderer } from "@opentui/solid"
 import { expect, test } from "bun:test"
@@ -59,6 +59,8 @@ const mountSession = async (
     events?: ReturnType<typeof createEventSource>
     sessionDirectory?: string
     sessionModel?: { providerID: string; id: string }
+    history?: { info: Message; parts: Part[] }[]
+    historyDelayMs?: number
   } = {},
 ) => {
   const state = path.join(root, "state")
@@ -76,6 +78,7 @@ const mountSession = async (
     version: "1",
     time: { created: 1_700_000_000_000, updated: 1_700_000_000_000 },
   }
+  const historyRequests: { limit: string | null; responseMs: number }[] = []
   const defaults = createFetch((url) => {
     if (url.pathname === "/permission") return options.pendingFetch?.(url) ?? json(options.pending?.permission ?? [])
     if (url.pathname === "/question") return options.pendingFetch?.(url) ?? json(options.pending?.question ?? [])
@@ -100,6 +103,14 @@ const mountSession = async (
     if (url.pathname === "/session/ses_other") return json({ ...session, id: "ses_other" })
     if (url.pathname === "/session") return json([session])
     if (url.pathname === "/session/status") return json({ ses_parent: { type: "busy" } })
+    if (url.pathname === "/session/ses_parent/message" && options.history) {
+      const started = performance.now()
+      return Bun.sleep(options.historyDelayMs ?? 0).then(() => {
+        const response = json(options.history)
+        historyRequests.push({ limit: url.searchParams.get("limit"), responseMs: performance.now() - started })
+        return response
+      })
+    }
     if (/\/session\/ses_(parent|other)\/(message|todo|diff)$/.test(url.pathname)) return json([])
     if (url.pathname === "/agent")
       return json([
@@ -112,7 +123,10 @@ const mountSession = async (
           {
             id: "test",
             name: "Test",
-            models: { model: { id: "model", name: "Test model" }, other: { id: "other", name: "Other model" } },
+            models: {
+              model: { id: "model", name: "Test model", limit: { context: 200_000, output: 8192 } },
+              other: { id: "other", name: "Other model", limit: { context: 200_000, output: 8192 } },
+            },
           },
         ],
         default: { test: "model" },
@@ -305,6 +319,7 @@ const mountSession = async (
     cancels,
     responses,
     reads,
+    historyRequests,
     async frame() {
       await app.renderOnce()
       return app.captureCharFrame()
@@ -497,6 +512,143 @@ test("leaving a session closes its Queue picker without changing either session'
   expect(await view.frame()).toContain("Build >")
   expect(view.local.agent.current()?.name).toBe("build")
 })
+
+test.skipIf(process.env.OPENCODE_TUI_SESSION_BENCH !== "1")(
+  "diagnostic: synthetic latest-100 Session cold opening and warm reopening",
+  async () => {
+    await using tmp = await tmpdir()
+    const sentinel = "LATEST_SESSION_BENCH_SENTINEL"
+    const history = Array.from({ length: 100 }, (_, index): { info: Message; parts: Part[] } => {
+      const messageID = `msg_bench_${String(index).padStart(3, "0")}`
+      const base = { sessionID: "ses_parent", messageID }
+      const time = 1_700_000_000_000 + index * 1000
+      if (index % 2 === 0)
+        return {
+          info: {
+            id: messageID,
+            sessionID: base.sessionID,
+            role: "user",
+            time: { created: time },
+            agent: "build",
+            model: { providerID: "test", modelID: "model" },
+          },
+          parts: [{ ...base, id: `${messageID}_text`, type: "text", text: `Inspect synthetic change ${index}.` }],
+        }
+      return {
+        info: {
+          id: messageID,
+          sessionID: base.sessionID,
+          role: "assistant",
+          parentID: `msg_bench_${String(index - 1).padStart(3, "0")}`,
+          time: { created: time, completed: time + 900 },
+          agent: "build",
+          mode: "build",
+          providerID: "test",
+          modelID: "model",
+          path: { cwd: tmp.path, root: tmp.path },
+          cost: 0,
+          tokens: { input: 1000, output: 500, reasoning: 200, cache: { read: 0, write: 0 } },
+          finish: "stop",
+        },
+        parts: [
+          ...Array.from(
+            { length: index < 80 ? 3 : 2 },
+            (_, part): Part => ({
+              ...base,
+              id: `${messageID}_reasoning_${part}`,
+              type: "reasoning",
+              text: `Compare the implementation and verify the boundary for change ${index}.\n`
+                .repeat(60)
+                .slice(0, 3500),
+              time: { start: time, end: time + 100 },
+            }),
+          ),
+          ...Array.from(
+            { length: 4 },
+            (_, part): Part => ({
+              ...base,
+              id: `${messageID}_tool_${part}`,
+              type: "tool",
+              callID: `call_${index}_${part}`,
+              tool: part % 2 === 0 ? "bash" : "read",
+              state: {
+                status: "completed",
+                input:
+                  part % 2 === 0
+                    ? { command: "bun test", description: "Check synthetic change" }
+                    : { filePath: "src/example.ts" },
+                output: `Synthetic output for message ${index}, tool ${part}: checked source and assertions.\n`
+                  .repeat(100)
+                  .slice(0, 6500),
+                title: "Synthetic check",
+                metadata: {},
+                time: { start: time + 100, end: time + 800 },
+              },
+            }),
+          ),
+          {
+            ...base,
+            id: `${messageID}_text`,
+            type: "text",
+            text:
+              `## Change ${index}\n\nChecked **source**, \`types\`, and tests.\n\n- Retained history\n- Verified output\n\n`
+                .repeat(30)
+                .slice(0, 2000) + (index === 99 ? `\n\n${sentinel}` : ""),
+          },
+        ],
+      }
+    })
+    const bytes = Buffer.byteLength(JSON.stringify(history))
+    expect(history).toHaveLength(100)
+    expect(history.flatMap((row) => row.parts).filter((part) => part.type === "tool")).toHaveLength(200)
+    expect(history.flatMap((row) => row.parts).filter((part) => part.type === "reasoning")).toHaveLength(140)
+    expect(bytes).toBeGreaterThan(1_900_000)
+    expect(bytes).toBeLessThan(2_300_000)
+
+    // Cold starts at fixture mount, not process startup; warm reopens the cached route.
+    const started = performance.now()
+    using view = await mountSession(tmp.path, { history, historyDelayMs: 40 })
+    const mountReadyMs = performance.now() - started
+    await wait(async () => (await view.frame()).includes(sentinel))
+    const coldSentinelMs = performance.now() - started
+    expect(view.sync.data.message.ses_parent).toEqual(history.map((row) => row.info))
+    expect(history.map((row) => view.sync.data.part[row.info.id])).toEqual(history.map((row) => row.parts))
+    expect(view.historyRequests.map((request) => request.limit)).toEqual(["100"])
+
+    const warmSentinelMs: number[] = []
+    for (let attempt = 0; attempt < 3; attempt++) {
+      view.route.navigate({ type: "session", sessionID: "ses_other" })
+      await view.sync.session.sync("ses_other")
+      await wait(async () => !(await view.frame()).includes(sentinel))
+      const reopened = performance.now()
+      view.route.navigate({ type: "session", sessionID: "ses_parent" })
+      await wait(async () => (await view.frame()).includes(sentinel))
+      warmSentinelMs.push(performance.now() - reopened)
+      expect(view.sync.data.message.ses_parent).toEqual(history.map((row) => row.info))
+      expect(history.map((row) => view.sync.data.part[row.info.id])).toEqual(history.map((row) => row.parts))
+    }
+    expect(await view.frame()).toContain(sentinel)
+    expect(view.historyRequests).toHaveLength(1)
+    expect(view.requests).toHaveLength(0)
+    console.log(
+      "TUI_SESSION_BENCH",
+      JSON.stringify({
+        bytes,
+        messages: 100,
+        tools: 200,
+        reasoning: 140,
+        width: 100,
+        height: 48,
+        historyDelayMs: 40,
+        historyRequests: view.historyRequests,
+        mountReadyMs,
+        coldSentinelMs,
+        warmSentinelMs,
+      }),
+    )
+  },
+  30_000,
+)
 
 test("a definitively rejected input keeps its draft editable for a corrected submission", async () => {
   await using tmp = await tmpdir()

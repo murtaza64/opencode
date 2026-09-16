@@ -7,6 +7,7 @@ import { Message } from "@opencode-ai/session-ui/message-part"
 import { oc } from "../api"
 import { createLiveSession } from "../live-session"
 import FakeCaret from "../components/fake-caret"
+import { RelativeLines } from "../components/relative-lines"
 import SessionInfo from "../components/session-info"
 import { sessionHref, useDashboard } from "../state"
 import { rightOpen, startDrag } from "../ui"
@@ -215,23 +216,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     onCleanup(() => window.clearInterval(timer))
   })
   onMount(() => { void activity.refreshDirectory(directory) })
-  // stamp data-tool onto rendered tool wrappers (session-ui doesn't expose
-  // the tool name in the DOM) so CSS can color tool types
-  const stampTools = () => {
-    if (!transcriptEl) return
-    const byId = new Map<string, string>()
-    for (const parts of Object.values(live.data.part)) {
-      for (const p of parts as any[]) if (p.type === "tool") byId.set(p.id, p.tool)
-    }
-    for (const el of transcriptEl.querySelectorAll("[data-timeline-part-id]:not([data-tool])")) {
-      const tool = byId.get(el.getAttribute("data-timeline-part-id") ?? "")
-      if (tool) el.setAttribute("data-tool", tool)
-    }
-  }
   onMount(() => {
-    const mo = new MutationObserver(() => stampTools())
-    if (transcriptEl) mo.observe(transcriptEl, { childList: true, subtree: true })
-    onCleanup(() => mo.disconnect())
     promptEl?.setSelectionRange(...activeDraft().selection)
     // paint the normal-mode block caret before any interaction
     vim.refresh(promptEl)
@@ -984,7 +969,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
               </span>
             )}</For></div>
           </Show>
-          <div class="ta-wrap">
+          <div class="ta-wrap numbered-editor">
             <textarea
               ref={floatEl}
               aria-label={composer.state.mode === "aside" ? "Aside question" : "Task message"}
@@ -1000,6 +985,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
               onClick={focusInsert}
               onBlur={(e) => saveSelection(e.currentTarget)}
             />
+            <RelativeLines target={floatEl!} value={draft()} />
             <FakeCaret target={floatEl} caret={caret()} mode={vim.mode()} />
           </div>
           <Footer expanded />

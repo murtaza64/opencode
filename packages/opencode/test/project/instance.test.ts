@@ -152,6 +152,37 @@ describe("InstanceStore", () => {
     }),
   )
 
+  it.live("a cancelled waiter leaves shared bootstrap running without blocking another directory", () =>
+    Effect.gen(function* () {
+      const cold = yield* tmpdirScoped({ git: true })
+      const warm = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      let boots = 0
+      yield* setBootstrap(
+        Effect.gen(function* () {
+          const ctx = yield* InstanceRef
+          if (ctx?.directory !== cold) return
+          boots++
+          yield* Deferred.succeed(started, undefined)
+          yield* Deferred.await(release)
+        }),
+      )
+      const first = yield* store.load({ directory: cold }).pipe(Effect.forkScoped)
+      yield* Deferred.await(started)
+      // Release before store finalization even if an assertion fails.
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+      yield* Fiber.interrupt(first)
+      const other = yield* store.load({ directory: warm })
+      expect(other.directory).toBe(warm)
+      const retry = yield* store.load({ directory: cold }).pipe(Effect.forkScoped)
+      yield* Deferred.succeed(release, undefined)
+      expect((yield* Fiber.join(retry)).directory).toBe(cold)
+      expect(boots).toBe(1)
+    }),
+  )
+
   it.live("reload replaces the cached context", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped({ git: true })
