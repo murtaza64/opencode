@@ -177,7 +177,10 @@ export function DashboardProvider(props: ParentProps) {
   }
 
   const dotFor = (s: { id: string; live?: string; updated?: number; pending?: boolean }): DotState => {
-    if (activity.pending(s.id).length || (s.pending ?? pendingSessions().has(s.id))) return "pending"
+    if (activity.pending(s.id).length) return "pending"
+    const directory = activity.session(s.id)?.directory ?? ""
+    if ((s.pending ?? pendingSessions().has(s.id)) &&
+      ["permission", "question"].some((kind) => activity.requestState(kind as "permission" | "question", s.id, directory) === "unknown")) return "pending"
     if (activity.running(s.id).length) return "busy"
     const status = activity.status(s.id) ?? s.live
     if (status === "busy" || status === "retry") return "busy"
@@ -197,17 +200,14 @@ export function DashboardProvider(props: ParentProps) {
         updated: parent?.time.updated ?? 0,
       }
     })
-    const dashboard = (notificationState()?.notifications ?? []).filter(
-      (item) =>
-        dotFor({
-          id: item.session,
-          updated: item.updated,
-          pending: item.kind === "permission" || item.kind === "question",
-        }) !== "idle",
-    ).filter((item) => item.kind === "idle" || !activity.session(item.session)).map((item) => {
+    const dashboard = (notificationState()?.notifications ?? []).filter((item) => {
+      if (item.kind === "idle") return true
+      const requestID = item.id.startsWith(`${item.kind}:`) ? item.id.slice(item.kind.length + 1) : item.id
+      return activity.requestState(item.kind, item.session, item.directory, requestID) === "unknown"
+    }).map((item) => {
       const parent = activity.root(item.session)
       return parent ? { ...item, session: parent.id, directory: parent.directory, title: parent.title } : item
-    })
+    }).filter((item) => item.kind !== "idle" || (activity.idle(item.session) && item.updated > (viewed()[item.session] ?? 0)))
     return [...requests, ...dashboard]
   })
 
