@@ -42,6 +42,9 @@ export type ComposerAdmission = {
 }
 export type ComposerState = {
   mode: ComposerMode
+  busy: boolean
+  normalExplicit: boolean
+  normalSubmission: { text: string; images: number; status: "sending" | "accepted" | "unknown" } | null
   queueAgent: string | null
   task: ComposerDraft
   aside: ComposerDraft
@@ -86,6 +89,9 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     `/oc/session/${encodeURIComponent(sessionID)}${path}?directory=${encodeURIComponent(directory)}${query}`
   const [state, setState] = createStore<ComposerState>({
     mode: "send",
+    busy: false,
+    normalExplicit: false,
+    normalSubmission: null,
     queueAgent: null,
     task: emptyDraft(),
     aside: emptyDraft(),
@@ -131,6 +137,24 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         throw new Error("Invalid saved composer draft")
       }
       setState({ task: saved.task, aside: saved.aside, mode: saved.mode, asideSeeded: saved.asideSeeded === true })
+      setState(
+        "normalExplicit",
+        saved.normalExplicit === true ||
+          (saved.normalExplicit === undefined &&
+            saved.mode === "send" &&
+            (!!saved.task.text || !!saved.task.images.length)),
+      )
+      if (
+        record(saved.normalSubmission) &&
+        typeof saved.normalSubmission.text === "string" &&
+        typeof saved.normalSubmission.images === "number"
+      ) {
+        setState("normalSubmission", {
+          text: saved.normalSubmission.text,
+          images: saved.normalSubmission.images,
+          status: "unknown",
+        })
+      }
       if (typeof saved.queueAgent === "string") setState("queueAgent", saved.queueAgent)
       if (record(saved.missingImages)) {
         setMissingImages({ task: saved.missingImages.task === true, aside: saved.missingImages.aside === true })
@@ -170,6 +194,11 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     const saved = {
       version: 1,
       mode: state.mode,
+      normalExplicit: state.normalExplicit,
+      normalSubmission:
+        state.normalSubmission?.status === "sending" || state.normalSubmission?.status === "unknown"
+          ? { ...state.normalSubmission }
+          : null,
       queueAgent: state.queueAgent,
       task: copyDraft(state.task),
       aside: copyDraft(state.aside),
@@ -249,7 +278,11 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     }
     if (state.sending) return "A task message is being sent."
     if (state.admission) return "Reconcile or retry the existing input before sending another task message."
-    if (state.mode === "send") return ""
+    if (state.mode === "send") {
+      if (state.normalSubmission?.status === "unknown")
+        return "Previous normal Send outcome is unknown. Check the conversation, then dismiss its status before sending again."
+      return state.busy ? "Task busy. Normal Send is unavailable; choose Aside, Queue or Steer." : ""
+    }
     if (state.task.images.length)
       return "Queue and Steer are text-only. Images remain saved; remove them or select Send."
     if (state.task.model) return "Queue and Steer use the session model. Clear the model override or select Send."
@@ -418,6 +451,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     const text = draft.text.trim()
     if (!text && (mode !== "send" || !draft.images.length)) return
     setState("error", "")
+    if (state.normalSubmission?.status === "accepted") setState("normalSubmission", null)
     if (mode === "aside") {
       const id = requestID()
       const abort = new AbortController()
@@ -450,10 +484,14 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     }
     setState("sending", true)
     if (mode === "send") {
+      setState({ normalExplicit: true, normalSubmission: { text, images: draft.images.length, status: "sending" } })
+      persist()
       try {
         await prompt(session, directory, text, { images: draft.images, model: draft.model ?? nextModel ?? undefined })
         clearTask(draft.revision)
+        setState("normalSubmission", "status", "accepted")
       } catch (error) {
+        setState("normalSubmission", "status", "unknown")
         setState("error", `Send not confirmed: ${message(error)}. Check the conversation before sending again.`)
       } finally {
         setState("sending", false)
@@ -594,7 +632,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         setMissingImages("aside", missingImages.task)
         setState("asideSeeded", true)
       }
-      setState({ mode, error: "" })
+      setState({ mode, normalExplicit: mode === "send", error: "" })
     })
     persist()
   }
@@ -613,8 +651,26 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     setModel: (model: ComposerModel | null) => updateDraft({ model: model ? { ...model } : null }),
     setSelection: (start: number, end: number) => updateDraft({ selection: [start, end] }, false),
     selectMode,
+    dismissNormalSubmission: () => {
+      if (state.normalSubmission?.status === "sending") return
+      setState("normalSubmission", null)
+      persist()
+    },
     observeBusy: (busy: boolean) => {
-      if (busy && state.mode === "send") selectMode("queue")
+      setState("busy", busy)
+      if (busy && state.mode === "send" && !state.normalExplicit && !state.task.text && !state.task.images.length)
+        selectMode("queue")
+      if (
+        !busy &&
+        (state.mode === "queue" || state.mode === "steer") &&
+        !state.task.text &&
+        !state.task.images.length &&
+        !state.admission &&
+        !state.sending
+      ) {
+        setState({ mode: "send", normalExplicit: false, error: "" })
+        persist()
+      }
     },
     loadCapabilities,
     refreshInputs,

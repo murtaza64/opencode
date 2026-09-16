@@ -5,7 +5,7 @@ export const ComposerControls = (props: {
   composer: Composer
   connected: boolean
   busy: boolean
-  selectMode: (mode: ComposerMode) => void
+  selectMode: (mode: ComposerMode, keyboard?: boolean) => void
   submit: () => void
   activeAgent?: string
   agents: { name: string; description?: string }[]
@@ -23,7 +23,19 @@ export const ComposerControls = (props: {
   return (
     <div class="composer-controls" data-composer-controls>
       <div class="composer-mode-row">
-      <Show when={state.mode !== "send" || props.busy} fallback={<span class="dim">Modes</span>}>
+        <Show
+          when={state.mode !== "send"}
+          fallback={
+            <>
+              <span class="composer-normal-mode" role="status">
+                Normal Send
+              </span>
+              <button aria-label="Choose message delivery" onClick={() => props.selectMode("queue")}>
+                Modes
+              </button>
+            </>
+          }
+        >
           <div
             class="composer-modes"
             role="radiogroup"
@@ -48,7 +60,7 @@ export const ComposerControls = (props: {
                     const back = e.key === "ArrowUp" || e.key === (rtl ? "ArrowRight" : "ArrowLeft")
                     const next = e.key === "Home" ? 0 : e.key === "End" ? 2 : (index() + (back ? 2 : 1)) % 3
                     const group = e.currentTarget.parentElement
-                    props.selectMode(modes[next]!)
+                    props.selectMode(modes[next]!, true)
                     group?.querySelectorAll<HTMLButtonElement>("button")[next]?.focus()
                   }}
                 >
@@ -57,12 +69,16 @@ export const ComposerControls = (props: {
               )}
             </For>
           </div>
-      </Show>
-        <kbd class="composer-key" aria-label="Alt plus M to cycle modes">Alt+M</kbd>
+        </Show>
+        <kbd class="composer-key" aria-label="Alt plus M to cycle modes">
+          Alt+M
+        </kbd>
       </div>
       <div class="composer-settings" role="group" aria-label="Agent and model settings">
         <Show when={state.mode !== "send" && !props.busy && props.connected}>
-          <button aria-label="Use normal Send" title="Use normal Send" onClick={() => props.selectMode("send")}>Send</button>
+          <button class="composer-reset" aria-label="Use normal Send" onClick={() => props.selectMode("send")}>
+            Switch to normal Send
+          </button>
         </Show>
         <Show when={state.mode !== "send"}>
           <Show
@@ -111,30 +127,64 @@ export const ComposerControls = (props: {
           onClick={props.submit}
         >
           <span>{props.composer.actionLabel()}</span>
-          <kbd class="composer-key" aria-label={props.normalMode ? "Enter in normal mode, or Command or Control plus Enter" : "Command or Control plus Enter"}>
+          <kbd
+            class="composer-key"
+            aria-label={
+              props.normalMode
+                ? "Enter in normal mode, or Command or Control plus Enter"
+                : "Command or Control plus Enter"
+            }
+          >
             {props.normalMode ? "Enter · ⌘/Ctrl↵" : "⌘/Ctrl↵"}
           </kbd>
         </button>
       </div>
       <div class="composer-meta">
-        <div class="composer-summary composer-help dim" role="status" aria-live="polite"
-          title={state.mode === "aside" ? "Ask about a snapshot without changing the task. Task draft saved; the first Aside starts as a copy."
-            : state.mode === "queue" ? "Queue uses the selected next-task agent and the session model."
-            : state.mode === "steer" ? "Steer uses the active agent and session model." : "Send to this session."}>
-          {state.mode === "aside" ? "Snapshot only. Task draft saved."
-            : state.mode === "queue" ? "Send when the task finishes."
-            : state.mode === "steer" ? "Send at the next safe boundary." : "Send to this session."}
+        <div
+          class="composer-summary composer-help dim"
+          role="status"
+          aria-live="polite"
+          title={
+            state.mode === "aside"
+              ? "Ask about a snapshot without changing the task. Task draft saved; the first Aside starts as a copy."
+              : state.mode === "queue"
+                ? "Queue uses the selected next-task agent and the session model."
+                : state.mode === "steer"
+                  ? "Steer uses the active agent and session model."
+                  : "Send to this session."
+          }
+        >
+          {state.mode === "aside"
+            ? "Snapshot only. Task draft saved."
+            : state.mode === "queue"
+              ? "Send when the task finishes."
+              : state.mode === "steer"
+                ? "Send at the next safe boundary."
+                : "Send to this session."}
         </div>
-        <div class="composer-session-actions" role="group" aria-label="Session actions">{props.sessionActions}</div>
+        <div class="composer-session-actions" role="group" aria-label="Session actions">
+          {props.sessionActions}
+        </div>
       </div>
       <Show when={state.mode === "queue" && props.agentError}>
-        <div class="composer-help err" role="alert">Agent list unavailable; current choice kept. <button onClick={props.retryAgents}>Retry agents</button></div>
+        <div class="composer-help err" role="alert">
+          Agent list unavailable; current choice kept. <button onClick={props.retryAgents}>Retry agents</button>
+        </div>
       </Show>
-      <Show when={reason()}><div class="composer-help dim">{reason()}</div></Show>
+      <Show when={reason()}>
+        <div class="composer-help dim">{reason()}</div>
+      </Show>
       <Show when={state.storageError}>
-        <div class="err" role="alert">{state.storageError}<button onClick={() => props.composer.setImages([])}>Clear saved images</button></div>
+        <div class="err" role="alert">
+          {state.storageError}
+          <button onClick={() => props.composer.setImages([])}>Clear saved images</button>
+        </div>
       </Show>
-      <Show when={state.error}><div class="err" role="alert">{state.error}</div></Show>
+      <Show when={state.error}>
+        <div class="err" role="alert">
+          {state.error}
+        </div>
+      </Show>
       <Show when={props.composer.capabilityReason()}>
         <button
           disabled={!props.connected || state.inputLoading}
@@ -152,8 +202,36 @@ export const ComposerControls = (props: {
 
 export const ComposerResults = (props: { composer: Composer; connected: boolean }) => {
   const state = props.composer.state
+  const pending = () => state.receipts.filter((item) => item.state === "pending")
+  const queued = () => pending().filter((item) => item.delivery === "queue").length
+  const steers = () => pending().filter((item) => item.delivery === "steer").length
   return (
     <div class="composer-results" data-composer-controls>
+      <Show when={state.normalSubmission}>
+        {(submission) => (
+          <section class="normal-submission" aria-label="Normal Send status">
+            <div class="composer-actions">
+              <span role="status">
+                <b>Normal Send</b> ·{" "}
+                {submission().status === "sending"
+                  ? "Sending…"
+                  : submission().status === "accepted"
+                    ? "Accepted by server"
+                    : "Outcome unknown — check the conversation before resending"}
+              </span>
+              <Show when={submission().status !== "sending"}>
+                <button aria-label="Dismiss send status" onClick={() => props.composer.dismissNormalSubmission()}>
+                  Dismiss
+                </button>
+              </Show>
+            </div>
+            <p dir="auto">
+              {submission().text}
+              {submission().images ? ` [${submission().images} image(s)]` : ""}
+            </p>
+          </section>
+        )}
+      </Show>
       <Show when={state.admission}>
         {(admission) => (
           <section class="input-admission" aria-label="Input admission" aria-live="polite">
@@ -174,21 +252,23 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
           </section>
         )}
       </Show>
-      <Show when={state.receipts.length}>
+      <Show when={pending().length}>
         <details class="input-receipts" open={!state.asideRequest}>
-          <summary>Task inputs ({state.receipts.filter((item) => item.state === "pending").length} pending)</summary>
+          <summary>
+            Task inputs ({queued()} queued, {steers()} steer)
+          </summary>
           <div class="dim">Added to conversation does not mean the model has finished.</div>
           <button disabled={!props.connected || state.inputLoading} onClick={() => props.composer.refreshInputs()}>
             Refresh inputs
           </button>
           <ul>
-            <For each={state.receipts}>
+            <For each={pending()}>
               {(item) => (
                 <li data-request-id={item.requestID}>
                   <span>
                     <b>{item.delivery}</b>{" "}
                     <span class="dim" role="status">
-                      {item.state === "promoted" ? "Added to conversation" : item.state}
+                      {item.state}
                     </span>
                   </span>
                   <p dir="auto">{item.text}</p>

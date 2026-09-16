@@ -218,8 +218,10 @@ function SessionView(props: { sessionID: string; directory: string }) {
   onMount(() => { void activity.refreshDirectory(directory) })
   onMount(() => {
     promptEl?.setSelectionRange(...activeDraft().selection)
-    // paint the normal-mode block caret before any interaction
-    vim.refresh(promptEl)
+    const focused = document.activeElement
+    if (!(focused instanceof HTMLElement && focused.closest("input, textarea, select, button, [contenteditable]"))) {
+      (floating() ? floatEl : promptEl)?.focus({ preventScroll: true })
+    }
   })
 
   // chat stick-to-bottom. Scroll events only ever RE-stick (at bottom) —
@@ -323,6 +325,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const busy = () => status() === "busy" || status() === "retry"
   createEffect(() => {
     const running = busy()
+    if (!connected()) return
     untrack(() => composer.observeBusy(running))
   })
 
@@ -551,6 +554,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
     onCursor: setCaret,
   })
   const asideVim = createVim({ value: draft, setValue: setDraft, onTab: switchSession, onEnter: () => send(), onCursor: setCaret })
+  taskVim.setMode("insert")
+  asideVim.setMode("insert")
   const activeVim = () => composer.state.mode === "aside" ? asideVim : taskVim
   const vim = {
     mode: () => activeVim().mode(),
@@ -559,16 +564,26 @@ function SessionView(props: { sessionID: string; directory: string }) {
     handleKeyDown: (event: KeyboardEvent) => activeVim().handleKeyDown(event),
   }
   const saveSelection = (el: HTMLTextAreaElement) => composer.setSelection(el.selectionStart, el.selectionEnd)
-  const selectMode = (mode: ComposerMode) => {
+  const selectMode = (mode: ComposerMode, keyboard = false) => {
     lastEsc = 0
+    const inputMode = vim.mode()
     const el = floating() ? floatEl : promptEl
     if (el) saveSelection(el)
     composer.selectMode(mode)
+    vim.setMode(inputMode)
     const selection = [...activeDraft().selection] as const
     const revision = activeDraft().revision
+    const focused = document.activeElement
+    const group = focused instanceof HTMLElement ? focused.closest('[role="radiogroup"]') : null
+    if (keyboard) {
+      (floating() ? floatEl : promptEl)?.setSelectionRange(selection[0], selection[1])
+      setCaret(null)
+      return
+    }
     // Restore after the pointer's default selection update, without undoing newer typing.
     requestAnimationFrame(() => {
       if (composer.state.mode !== mode || activeDraft().revision !== revision) return
+      if (document.activeElement !== focused && !group?.contains(document.activeElement)) return
       const target = floating() ? floatEl : promptEl
       if (!target?.isConnected) return
       target?.setSelectionRange(selection[0], selection[1])
@@ -585,7 +600,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     if (e.repeat) return true
     const editing = document.activeElement === promptEl || document.activeElement === floatEl
     const inputMode = vim.mode()
-    selectMode(composer.state.mode === "aside" ? "queue" : composer.state.mode === "queue" ? "steer" : "aside")
+    selectMode(composer.state.mode === "aside" ? "queue" : composer.state.mode === "queue" ? "steer" : "aside", true)
     if (editing) queueMicrotask(() => {
       const target = floating() ? floatEl : promptEl
       target?.focus()
@@ -708,19 +723,23 @@ function SessionView(props: { sessionID: string; directory: string }) {
     }
     if (!floating() && !floatDismissed && (d.length > 400 || d.split("\n").length > 5)) {
       const selection = untrack(() => [...activeDraft().selection] as const)
+      const inputMode = untrack(vim.mode)
       setFloating(true)
       queueMicrotask(() => {
         floatEl?.focus()
+        vim.setMode(inputMode)
         floatEl?.setSelectionRange(selection[0], selection[1])
         vim.refresh(floatEl)
       })
     }
   })
   const closeFloat = () => {
+    const inputMode = vim.mode()
     if (floatEl) saveSelection(floatEl)
     floatDismissed = true
     setFloating(false)
     promptEl?.focus()
+    vim.setMode(inputMode)
     promptEl?.setSelectionRange(...activeDraft().selection)
     vim.refresh(promptEl)
   }
@@ -730,10 +749,12 @@ function SessionView(props: { sessionID: string; directory: string }) {
       return
     }
     floatDismissed = false
+    const inputMode = vim.mode()
     if (promptEl) saveSelection(promptEl)
     setFloating(true)
     queueMicrotask(() => {
       floatEl?.focus()
+      vim.setMode(inputMode)
       floatEl?.setSelectionRange(...activeDraft().selection)
       vim.refresh(floatEl)
     })

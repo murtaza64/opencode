@@ -921,6 +921,9 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .composer-results li { padding-block: 8px; border-block-end: 1px solid var(--surface0); }
 .composer-results li p { max-height: 5em; overflow: auto; }
 .input-admission > p { max-height: 5em; overflow: auto; }
+.normal-submission > p { max-height: 3em; overflow: auto; }
+.composer-normal-mode { color: var(--green); font-size: 12px; white-space: nowrap; }
+.composer-settings .composer-reset { color: var(--lavender); }
 .aside-result { border-inline-start: 2px solid var(--mauve); }
 .aside-question { font-weight: 600; }
 .aside-snapshot { font-size: 11px; }

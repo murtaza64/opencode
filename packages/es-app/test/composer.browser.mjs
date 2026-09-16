@@ -141,7 +141,7 @@ try {
     .locator(".input-receipts")
     .getByRole("button", { name: /Cancel steer/ })
     .click()
-  await expect(page.locator(".input-receipts")).toContainText("cancelled")
+  await expect(page.locator(".input-receipts")).toHaveCount(0)
 
   await mode(page, "Aside").click()
   await expect(editor(page)).toHaveValue("aside question")
@@ -185,6 +185,7 @@ try {
   fixture.loseInput = true
   await active(page).getByRole("button", { name: "Queue message", exact: true }).click()
   await expect(page.locator(".input-admission")).toContainText("Admission unknown")
+  await expect(page.locator(".input-receipts")).toHaveCount(0)
   const unknown = inputPosts().at(-1).body
   expect(unknown.agent).toBe("plan")
   await queueAgent().selectOption("build")
@@ -205,7 +206,7 @@ try {
     .locator(".input-receipts")
     .getByRole("button", { name: /Cancel queue/ })
     .click()
-  await expect(page.locator(".input-receipts")).toContainText("Added to conversation")
+  await expect(page.locator(".input-receipts")).toHaveCount(0)
   await expect(active(page)).toContainText("cancellation was not applied")
   fixture.promoteOnCancel = false
 
@@ -220,9 +221,8 @@ try {
   await expect(editor(page)).toHaveValue("")
 
   fixture.setStatus("idle")
-  await expect(page.getByRole("button", { name: "Use normal Send", exact: true })).toBeVisible()
-
-  await page.getByRole("button", { name: "Use normal Send", exact: true }).click()
+  await expect(active(page).locator(".composer-normal-mode")).toHaveText("Normal Send")
+  await expect(active(page).getByRole("radio")).toHaveCount(0)
   await active(page).getByLabel("Model override").selectOption("fixture\u0000test")
   await editor(page).evaluate((el) => {
     const data = new DataTransfer()
@@ -231,6 +231,8 @@ try {
   })
   await expect(active(page).getByRole("button", { name: "Remove draft.png", exact: true })).toBeVisible()
   fixture.setStatus("busy")
+  await expect(active(page)).toContainText("Normal Send is unavailable")
+  await active(page).getByRole("button", { name: "Choose message delivery", exact: true }).click()
   await expect(mode(page, "Queue")).toHaveAttribute("aria-checked", "true")
   await expect(active(page)).toContainText("text-only")
   await mode(page, "Aside").click()
@@ -302,7 +304,7 @@ try {
   await expect(lastPending).toBeVisible()
   await reachable(lastPending)
   await lastPending.click()
-  await expect(page.locator('[data-request-id="many-29"]')).toContainText("cancelled")
+  await expect(page.locator('[data-request-id="many-29"]')).toHaveCount(0)
   await reachable(editor(page))
   await noOverflow(page)
   await page.keyboard.press("Control+h")
@@ -391,7 +393,7 @@ try {
     artifacts,
   )
 } finally {
+  await fixture.close()
   await browser.close()
   await vite.close()
-  await fixture.close()
 }

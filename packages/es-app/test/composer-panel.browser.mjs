@@ -34,11 +34,13 @@ const open = async (options) => {
 }
 const reachable = async (locator) => {
   await locator.scrollIntoViewIfNeeded()
-  expect(await locator.evaluate((el) => {
-    const rect = el.getBoundingClientRect()
-    const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
-    return rect.top >= 0 && rect.bottom <= innerHeight && (hit === el || el.contains(hit))
-  })).toBe(true)
+  expect(
+    await locator.evaluate((el) => {
+      const rect = el.getBoundingClientRect()
+      const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+      return rect.top >= 0 && rect.bottom <= innerHeight && (hit === el || el.contains(hit))
+    }),
+  ).toBe(true)
 }
 const checkPanel = async (page, maxHeight) => {
   await expect(page.locator(".topbar button")).toHaveCount(0)
@@ -54,7 +56,18 @@ const checkPanel = async (page, maxHeight) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 }
 try {
+  console.log("panel: desktop editor and selection")
   const page = await open({ viewport: { width: 1440, height: 1000 } })
+  await expect(editor(page)).toBeFocused()
+  await page.keyboard.type("start typing")
+  await expect(editor(page)).toHaveValue("start typing")
+  await editor(page).press("Escape")
+  await editor(page).press("0")
+  await editor(page).press("l")
+  expect(await editor(page).evaluate((el) => el.selectionStart)).toBe(1)
+  await editor(page).press("i")
+  await page.keyboard.type("X")
+  await expect(editor(page)).toHaveValue("sXtart typing")
   await editor(page).fill("Keep this draft and its selection.")
   await checkPanel(page, 84)
   await page.screenshot({ path: `${artifacts}/desktop.png`, fullPage: true })
@@ -70,23 +83,44 @@ try {
   await footer(page).getByRole("radio", { name: "Queue", exact: true }).click()
   await expect(editor(page)).toHaveValue("Keep this draft and its selection.")
   await expect.poll(() => editor(page).evaluate((el) => [el.selectionStart, el.selectionEnd])).toEqual([5, 15])
+  await footer(page).getByRole("radio", { name: "Queue", exact: true }).focus()
+  await page.keyboard.press("ArrowLeft")
+  await expect(footer(page).getByRole("radio", { name: "Aside", exact: true })).toBeFocused()
+  await page.keyboard.press("ArrowRight")
+  await expect(footer(page).getByRole("radio", { name: "Queue", exact: true })).toBeFocused()
+  await expect.poll(() => editor(page).evaluate((el) => [el.selectionStart, el.selectionEnd])).toEqual([5, 15])
 
   await editor(page).press("Control+e")
   await checkPanel(page, 104)
   await expect(page.locator(".relative-lines")).toBeVisible()
+  await expect(editor(page)).toBeFocused()
+  await editor(page).fill("Expanded typing")
+  await page.keyboard.type(" works")
+  await expect(editor(page)).toHaveValue("Expanded typing works")
+  await editor(page).press("Escape")
+  await editor(page).press("0")
+  await editor(page).press("l")
+  expect(await editor(page).evaluate((el) => el.selectionStart)).toBe(1)
   await page.screenshot({ path: `${artifacts}/floating-desktop.png`, fullPage: true })
   await editor(page).press("Alt+m")
   await expect(footer(page).getByRole("radio", { name: "Steer", exact: true })).toHaveAttribute("aria-checked", "true")
   await expect(editor(page)).toBeFocused()
+  await expect(editor(page)).toHaveClass(/vim-normal/)
   page.once("dialog", (dialog) => dialog.dismiss())
   await actions(page).getByRole("button", { name: "Delete", exact: true }).click()
   expect(mutations()).toEqual([])
   await page.getByRole("button", { name: /collapse/ }).click()
+  await expect(editor(page)).toHaveClass(/vim-normal/)
 
   const mobile = await open({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  console.log("panel: mobile and RTL")
   await editor(mobile).fill("Touch-sized controls; no overflow.")
   await checkPanel(mobile, 164)
-  expect(await footer(mobile).getByRole("radio", { name: "Aside", exact: true }).evaluate((el) => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44)
+  expect(
+    await footer(mobile)
+      .getByRole("radio", { name: "Aside", exact: true })
+      .evaluate((el) => el.getBoundingClientRect().height),
+  ).toBeGreaterThanOrEqual(44)
   await mobile.screenshot({ path: `${artifacts}/mobile.png`, fullPage: true })
   await footer(mobile).getByRole("button", { name: "Expand editor", exact: true }).tap()
   await checkPanel(mobile, 180)
@@ -94,7 +128,9 @@ try {
   await mobile.getByRole("button", { name: /collapse/ }).tap()
   await mobile.keyboard.press("Control+h")
   await mobile.keyboard.press("Control+l")
-  await mobile.evaluate(() => { document.documentElement.dir = "rtl" })
+  await mobile.evaluate(() => {
+    document.documentElement.dir = "rtl"
+  })
   await editor(mobile).fill("\u0645\u0631\u062d\u0628\u0627 README.md 123")
   await checkPanel(mobile, 164)
   await footer(mobile).getByRole("radio", { name: "Queue", exact: true }).focus()
@@ -103,8 +139,24 @@ try {
   await mobile.screenshot({ path: `${artifacts}/mobile-rtl.png`, fullPage: true })
   await mobile.context().close()
 
-  fixture.permissions = [{ id: "permission-1", sessionID: "ses_a", permission: "bash", patterns: ["fixture command"], metadata: {} }]
-  fixture.questions = [{ id: "question-1", sessionID: "ses_a", questions: [{ header: "Decision", question: "Which step should continue?", options: [{ label: "Continue", description: "Continue later" }], custom: true }] }]
+  fixture.permissions = [
+    { id: "permission-1", sessionID: "ses_a", permission: "bash", patterns: ["fixture command"], metadata: {} },
+  ]
+  console.log("panel: gates and shortcuts")
+  fixture.questions = [
+    {
+      id: "question-1",
+      sessionID: "ses_a",
+      questions: [
+        {
+          header: "Decision",
+          question: "Which step should continue?",
+          options: [{ label: "Continue", description: "Continue later" }],
+          custom: true,
+        },
+      ],
+    },
+  ]
   await page.reload()
   const answer = page.locator(".banner.question input")
   await answer.fill("Human answer in progress")
@@ -137,11 +189,84 @@ try {
   await expect(footer(page).locator(".composer-send kbd")).toContainText("Enter ·")
   await editor(page).press("Enter")
   await expect.poll(() => posts().length).toBe(3)
-  expect(posts().map((call) => call.body.text)).toEqual(["Control shortcut", "Command shortcut", "Normal Enter shortcut"])
+  expect(posts().map((call) => call.body.text)).toEqual([
+    "Control shortcut",
+    "Command shortcut",
+    "Normal Enter shortcut",
+  ])
   await expect(editor(page)).toHaveValue("")
+  await expect(page.locator(".input-receipts summary")).toHaveText("Task inputs (3 queued, 0 steer)")
+  await footer(page).getByRole("radio", { name: "Steer", exact: true }).click()
+  await editor(page).fill("One steer")
+  await editor(page).press("Control+Enter")
+  await expect(page.locator(".input-receipts summary")).toHaveText("Task inputs (3 queued, 1 steer)")
+  for (const receipt of fixture.receipts.filter((item) => item.delivery === "queue"))
+    Object.assign(receipt, { state: "promoted", messageID: `msg_${receipt.requestID}`, timePromoted: Date.now() })
+  fixture.emit("session.input.updated", { sessionID: "ses_a" })
+  await expect(page.locator(".input-receipts summary")).toHaveText("Task inputs (0 queued, 1 steer)")
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(page.locator(".input-receipts summary")).toHaveText("Task inputs (0 queued, 1 steer)")
+  await page
+    .locator(".input-receipts")
+    .getByRole("button", { name: /Cancel steer input/ })
+    .click()
+  await expect(page.locator(".input-receipts")).toHaveCount(0)
+
+  await editor(page).fill("Normal click send")
+  fixture.setStatus("idle")
+  console.log("panel: retained mode and normal sending")
+  await expect(footer(page).getByRole("radio", { name: "Steer", exact: true })).toHaveAttribute("aria-checked", "true")
+  await expect(footer(page).getByRole("button", { name: "Steer task", exact: true })).toBeVisible()
+  await expect(footer(page).getByRole("button", { name: "Use normal Send", exact: true })).toHaveText(
+    "Switch to normal Send",
+  )
+  await active(page).screenshot({ path: `${artifacts}/idle-retained-steer.png` })
+  await footer(page).getByRole("button", { name: "Use normal Send", exact: true }).click()
+  await expect(footer(page).locator(".composer-normal-mode")).toHaveText("Normal Send")
+  await expect(editor(page)).toHaveValue("Normal click send")
+  fixture.holdNormal = true
+  const normalPosts = () => mutations().filter((call) => call.path.endsWith("/prompt_async"))
+  await footer(page).getByRole("button", { name: "Send", exact: true }).click()
+  await expect(page.getByRole("region", { name: "Normal Send status" })).toContainText("Sending…")
+  await expect(page.getByRole("region", { name: "Normal Send status" })).toContainText("Normal click send")
+  await expect(page.locator(".transcript")).not.toContainText("Normal click send")
+  await editor(page).press("Control+Enter")
+  expect(normalPosts()).toHaveLength(1)
+  await editor(page).fill("Newer normal draft")
+  fixture.setStatus("busy")
+  fixture.holdNormal = false
+  fixture.normalReplies.shift()()
+  await expect(page.getByRole("region", { name: "Normal Send status" })).toContainText("Accepted by server")
+  await expect(editor(page)).toHaveValue("Newer normal draft")
+  await expect(footer(page).locator(".composer-normal-mode")).toHaveText("Normal Send")
+  await expect(footer(page).getByRole("button", { name: "Send", exact: true })).toBeDisabled()
+  await expect(footer(page)).toContainText("Normal Send is unavailable")
+  await active(page).screenshot({ path: `${artifacts}/explicit-normal-busy.png` })
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(footer(page).locator(".composer-normal-mode")).toHaveText("Normal Send")
+  await expect(footer(page).getByRole("button", { name: "Send", exact: true })).toBeDisabled()
+  fixture.setStatus("idle")
+  await expect(footer(page).getByRole("button", { name: "Send", exact: true })).toBeEnabled()
+  await editor(page).press("Control+e")
+  await expect(footer(page).locator(".composer-normal-mode")).toHaveText("Normal Send")
+  await editor(page).press("Control+Enter")
+  await expect.poll(() => normalPosts().length).toBe(2)
+  await expect(page.getByRole("region", { name: "Normal Send status" })).toContainText("Accepted by server")
+  await expect(page.locator(".float-editor")).toHaveCount(0)
+  await editor(page).fill("Unknown normal outcome")
+  fixture.loseNormal = true
+  await footer(page).getByRole("button", { name: "Send", exact: true }).click()
+  await expect(page.getByRole("region", { name: "Normal Send status" })).toContainText("Outcome unknown")
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(page.getByRole("region", { name: "Normal Send status" })).toContainText("Outcome unknown")
+  await expect(page.locator(".input-receipts")).toHaveCount(0)
+  expect(normalPosts()).toHaveLength(3)
+  await page.getByRole("button", { name: "Dismiss send status", exact: true }).click()
+  fixture.setStatus("busy")
   await editor(page).fill("Draft survives session actions")
 
   fixture.holdAction = true
+  console.log("panel: session actions")
   await actions(page).getByRole("button", { name: "Stop session", exact: true }).click()
   await expect(actions(page).getByRole("button", { name: "Stop session", exact: true })).toBeDisabled()
   expect(mutations().filter((call) => call.path.endsWith("/abort"))).toHaveLength(1)
@@ -174,8 +299,13 @@ try {
   expect(fixture.unexpected).toEqual([])
   expect(errors).toEqual([])
   expect(external).toEqual([])
-  console.log("PASS panel: visible shortcuts, footer grouping, touch/RTL, inline/floating, gates/selection, native delete confirmation, fork/archive/stop semantics")
+  console.log(
+    "PASS panel: visible shortcuts, footer grouping, touch/RTL, inline/floating, gates/selection, native delete confirmation, fork/archive/stop semantics",
+  )
+} catch (error) {
+  console.error(error)
+  throw error
 } finally {
-  await browser.close()
   await preview.close()
+  await browser.close()
 }

@@ -138,6 +138,7 @@ test("busy chooses Queue once and idle never reinterprets the prepared mode or s
   const { composer, requests } = harness()
   composer.observeBusy(true)
   expect(composer.state.mode).toBe("queue")
+  composer.setText("prepared draft")
   composer.observeBusy(false)
   expect(composer.state.mode).toBe("queue")
   composer.selectMode("steer")
@@ -148,6 +149,125 @@ test("busy chooses Queue once and idle never reinterprets the prepared mode or s
   composer.observeBusy(true)
   expect(composer.state.mode).toBe("aside")
   expect(requests).toEqual([])
+})
+
+test("an empty idle task composer returns to normal Send without sending or dropping settings", () => {
+  const { composer, requests } = harness()
+  composer.observeBusy(true)
+  composer.setQueueAgent("plan")
+  composer.selectMode("steer")
+  composer.observeBusy(false)
+  expect(composer.state.mode).toBe("send")
+  expect(composer.state.queueAgent).toBe("plan")
+  expect(requests).toEqual([])
+})
+
+test("normal drafting before a busy update is not reinterpreted as Queue", () => {
+  const { composer, requests } = harness()
+  composer.setText("normal draft")
+  composer.observeBusy(true)
+  expect(composer.state.mode).toBe("send")
+  expect(composer.state.task.text).toBe("normal draft")
+  expect(composer.blockedReason()).toContain("Normal Send is unavailable")
+  expect(requests).toEqual([])
+})
+
+test("explicit normal Send stays selected on busy transitions and never falls through to input admission", async () => {
+  const sent: string[] = []
+  const { composer, requests } = harness(undefined, {
+    prompt: async (_session, _directory, text) => {
+      sent.push(text)
+    },
+  })
+  composer.observeBusy(true)
+  composer.selectMode("steer")
+  composer.setText("prepared")
+  composer.observeBusy(false)
+  expect(composer.state.mode).toBe("steer")
+  composer.selectMode("send")
+  composer.observeBusy(true)
+  await composer.submit(session)
+  expect(composer.state.mode).toBe("send")
+  expect(composer.state.task.text).toBe("prepared")
+  expect(composer.blockedReason()).toContain("Normal Send is unavailable")
+  expect(sent).toEqual([])
+  expect(requests).toEqual([])
+  composer.observeBusy(false)
+  await composer.submit(session)
+  expect(sent).toEqual(["prepared"])
+  expect(composer.state.normalSubmission?.status).toBe("accepted")
+})
+
+test("normal Send has immediate scoped sending feedback and a late ACK cannot clear newer typing", async () => {
+  const ack = deferred<void>()
+  let calls = 0
+  const { composer } = harness(undefined, {
+    prompt: () => {
+      calls++
+      return ack.promise
+    },
+  })
+  composer.setText("first")
+  const sending = composer.submit(session)
+  expect(composer.state.normalSubmission?.text).toBe("first")
+  expect(composer.state.normalSubmission?.status).toBe("sending")
+  composer.dismissNormalSubmission()
+  expect(composer.state.normalSubmission?.status).toBe("sending")
+  await composer.submit(session)
+  expect(calls).toBe(1)
+  composer.setText("newer")
+  composer.observeBusy(true)
+  expect(composer.state.mode).toBe("send")
+  ack.resolve()
+  await sending
+  expect(composer.state.normalSubmission?.status).toBe("accepted")
+  expect(composer.state.task.text).toBe("newer")
+  expect(composer.state.receipts).toEqual([])
+})
+
+test("reload preserves explicit Send and shows unknown legacy outcome without retrying", async () => {
+  const ack = deferred<void>()
+  let calls = 0
+  const { composer, dependencies } = harness(undefined, {
+    prompt: () => {
+      calls++
+      return ack.promise
+    },
+  })
+  composer.setText("unconfirmed")
+  const sending = composer.submit(session)
+  const restored = createComposer(session.id, directory, dependencies)
+  restored.observeBusy(true)
+  expect(restored.state.mode).toBe("send")
+  expect(restored.state.normalSubmission?.status).toBe("unknown")
+  expect(restored.state.normalSubmission?.text).toBe("unconfirmed")
+  expect(restored.state.task.text).toBe("unconfirmed")
+  expect(calls).toBe(1)
+  ack.reject(new Error("connection lost"))
+  await sending
+  expect(composer.state.normalSubmission?.status).toBe("unknown")
+})
+
+test("unknown normal outcome remains visible until explicitly dismissed before another normal Send", async () => {
+  let calls = 0
+  const { composer } = harness(undefined, {
+    prompt: async () => {
+      if (++calls === 1) throw new Error("lost ack")
+    },
+  })
+  composer.setText("original")
+  await composer.submit(session)
+  composer.setText("different draft")
+  await composer.submit(session)
+  expect(calls).toBe(1)
+  expect(composer.state.normalSubmission?.text).toBe("original")
+  expect(composer.state.normalSubmission?.status).toBe("unknown")
+  expect(composer.state.task.text).toBe("different draft")
+  composer.dismissNormalSubmission()
+  await composer.submit(session)
+  expect(calls).toBe(2)
+  expect(composer.state.normalSubmission?.text).toBe("different draft")
+  expect(composer.state.normalSubmission?.status).toBe("accepted")
 })
 
 test("capability loading, failure, missing features and unknown versions fail closed", async () => {

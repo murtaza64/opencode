@@ -8,12 +8,48 @@ export const startPanelPreview = async () => {
   fixture.permissions = []
   fixture.messages = [
     {
-      info: { id: "msg_1", sessionID: "ses_a", role: "user", agent: "build", model: { providerID: "fixture", modelID: "test" }, time: { created: 1 } },
-      parts: [{ id: "part_1", messageID: "msg_1", sessionID: "ses_a", type: "text", text: "Review the composer and its session controls." }],
+      info: {
+        id: "msg_1",
+        sessionID: "ses_a",
+        role: "user",
+        agent: "build",
+        model: { providerID: "fixture", modelID: "test" },
+        time: { created: 1 },
+      },
+      parts: [
+        {
+          id: "part_1",
+          messageID: "msg_1",
+          sessionID: "ses_a",
+          type: "text",
+          text: "Review the composer and its session controls.",
+        },
+      ],
     },
     {
-      info: { id: "msg_2", parentID: "msg_1", sessionID: "ses_a", role: "assistant", agent: "build", mode: "build", providerID: "fixture", modelID: "test", path: { cwd: directory, root: directory }, time: { created: 2 }, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } },
-      parts: [{ id: "part_2", messageID: "msg_2", sessionID: "ses_a", type: "text", text: "This is an isolated UI preview. Session actions affect only disposable fixture state.\n\nThe task is paused. Try **Aside**, **Queue**, or **Steer** below. Queue and Steer remain text-only; attached images stay saved in the draft." }],
+      info: {
+        id: "msg_2",
+        parentID: "msg_1",
+        sessionID: "ses_a",
+        role: "assistant",
+        agent: "build",
+        mode: "build",
+        providerID: "fixture",
+        modelID: "test",
+        path: { cwd: directory, root: directory },
+        time: { created: 2 },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      parts: [
+        {
+          id: "part_2",
+          messageID: "msg_2",
+          sessionID: "ses_a",
+          type: "text",
+          text: "This is an isolated UI preview. Session actions affect only disposable fixture state.\n\nThe task is paused. Try **Aside**, **Queue**, or **Steer** below. Queue and Steer remain text-only; attached images stay saved in the draft.",
+        },
+      ],
     },
   ]
   process.env.OPENCODE_URL = fixture.url
