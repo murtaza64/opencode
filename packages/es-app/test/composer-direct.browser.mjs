@@ -4,6 +4,7 @@ import { startPanelPreview } from "./composer-panel-preview.mjs"
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const preview = await startPanelPreview()
 const fixture = preview.fixture
+fixture.messages[1].info.tokens = { input: 200, output: 800, reasoning: 0, cache: { read: 0, write: 0 } }
 const browser = await chromium.launch({ channel: "chrome", headless: true })
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
 await context.route("**/*", (route) =>
@@ -22,11 +23,34 @@ await mkdir("artifacts/direct-composer", { recursive: true })
 try {
   await page.goto(preview.url, { waitUntil: "domcontentloaded" })
   await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
+  await expect(button("Steer").locator("kbd")).toHaveText("⌘/Ctrl↵")
+  await expect(button("Queue").locator("kbd")).toHaveText("Alt+M →")
+  await expect(active().locator(".direct-shortcuts")).toHaveCount(0)
+  await expect(active().getByLabel("Queue agent", { exact: true })).toBeDisabled()
+  await expect(active().locator(".direct-session-actions .direct-active-agent")).toContainText("build")
+  await expect(active().locator(".direct-session-actions .context-pct")).toContainText("ctx 1k")
+  await expect(active().locator(".direct-controls .context-pct, .direct-controls .direct-active-agent")).toHaveCount(0)
+  expect(
+    await active()
+      .locator(".direct-setting")
+      .evaluateAll((labels) =>
+        labels.map((label) =>
+          [...label.childNodes]
+            .filter((node) => node.nodeType === Node.TEXT_NODE)
+            .map((node) => node.textContent)
+            .join("")
+            .trim(),
+        ),
+      ),
+  ).toEqual(["", ""])
   await expect(editor()).toBeFocused()
   await page.keyboard.type("current visible message")
   await editor().evaluate((el) => el.setSelectionRange(2, 7))
   await editor().press("Alt+m")
   await expect(button("Queue")).toHaveAttribute("data-keyboard-target", "true")
+  await expect(button("Queue").locator("kbd")).toHaveText("⌘/Ctrl↵")
+  await expect(button("Aside").locator("kbd")).toHaveText("Alt+M →")
+  await expect(active().getByLabel("Queue agent", { exact: true })).toBeEnabled()
   await expect(editor()).toHaveValue("current visible message")
   expect(await editor().evaluate((el) => [el.selectionStart, el.selectionEnd])).toEqual([2, 7])
   expect(inputs()).toHaveLength(0)
@@ -46,6 +70,10 @@ try {
   await expect(button("Aside")).toHaveAttribute("data-keyboard-target", "true")
   await page.getByRole("button", { name: "Close aside", exact: true }).click()
 
+  await expect(active().getByLabel("Queue agent", { exact: true })).toBeDisabled()
+  await editor().press("Alt+m")
+  await expect(active().getByLabel("Queue agent", { exact: true })).toBeDisabled()
+  await editor().press("Alt+m")
   await active().getByLabel("Queue agent", { exact: true }).selectOption("plan")
   fixture.loseInput = true
   await button("Queue").click()
@@ -54,6 +82,9 @@ try {
   expect(unknown).toMatchObject({ text: "newer visible text", delivery: "queue", agent: "plan" })
   await editor().fill("draft after unknown")
   await active().getByLabel("Queue agent", { exact: true }).selectOption("build")
+  await active().getByLabel("Queue agent", { exact: true }).focus()
+  await page.keyboard.press("Alt+m")
+  await expect(editor()).toBeFocused()
   await page.reload({ waitUntil: "domcontentloaded" })
   await expect(editor()).toHaveValue("draft after unknown")
   await expect(button("Aside")).toHaveAttribute("data-keyboard-target", "true")
