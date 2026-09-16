@@ -935,7 +935,7 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .aside-question { font-weight: 600; }
 .aside-snapshot { font-size: 11px; }
 .aside-snapshot span { display: block; }
-.aside-answer { white-space: pre-wrap; font-family: var(--font-serif); font-size: 13px; line-height: 1.65; padding-block: 10px; }
+.aside-answer { --text-strong: var(--text); --text-base: var(--subtext1); --v2-text-text-base: var(--text); --font-family-sans: var(--font-serif); white-space: normal; font-family: var(--font-serif); font-size: 13px; line-height: 1.65; padding-block: 10px; }
 .prompt-box { flex-shrink: 0; max-height: 55dvh; overflow-y: auto; container-type: inline-size; }
 .prompt-box textarea { max-height: 25dvh; }
 .prompt-side { flex-shrink: 0; max-width: 35%; }
