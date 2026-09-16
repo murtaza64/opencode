@@ -1,0 +1,47 @@
+{
+  "name": "@opencode-ai/es-desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Electron shell for es-app",
+  "author": "OpenCode",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "dev": "bun scripts/dev.ts",
+    "start": "electron .",
+    "preview": "node scripts/preview.mjs",
+    "package": "electron-builder --dir --publish never",
+    "test": "bun test src",
+    "test:electron": "node test/smoke.mjs",
+    "typecheck": "tsgo --noEmit"
+  },
+  "devDependencies": {
+    "@opencode-ai/es-app": "workspace:*",
+    "@playwright/test": "catalog:",
+    "@types/bun": "catalog:",
+    "@types/node": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "electron": "42.3.3",
+    "electron-builder": "26.15.2",
+    "vite": "catalog:"
+  },
+  "build": {
+    "appId": "ai.opencode.es-desktop",
+    "productName": "Editspace",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "package.json",
+      "!node_modules{,/**/*}"
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "mac": {
+      "identity": null,
+      "category": "public.app-category.developer-tools"
+    }
+  }
+}
