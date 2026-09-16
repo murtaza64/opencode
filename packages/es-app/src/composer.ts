@@ -42,6 +42,7 @@ export type ComposerAdmission = {
 }
 export type ComposerState = {
   mode: ComposerMode
+  queueAgent: string | null
   task: ComposerDraft
   aside: ComposerDraft
   asideSeeded: boolean
@@ -85,6 +86,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     `/oc/session/${encodeURIComponent(sessionID)}${path}?directory=${encodeURIComponent(directory)}${query}`
   const [state, setState] = createStore<ComposerState>({
     mode: "send",
+    queueAgent: null,
     task: emptyDraft(),
     aside: emptyDraft(),
     asideSeeded: false,
@@ -129,6 +131,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         throw new Error("Invalid saved composer draft")
       }
       setState({ task: saved.task, aside: saved.aside, mode: saved.mode, asideSeeded: saved.asideSeeded === true })
+      if (typeof saved.queueAgent === "string") setState("queueAgent", saved.queueAgent)
       if (record(saved.missingImages)) {
         setMissingImages({ task: saved.missingImages.task === true, aside: saved.missingImages.aside === true })
         setState("storageError", imageWarning())
@@ -167,6 +170,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     const saved = {
       version: 1,
       mode: state.mode,
+      queueAgent: state.queueAgent,
       task: copyDraft(state.task),
       aside: copyDraft(state.aside),
       asideSeeded: state.asideSeeded,
@@ -458,7 +462,12 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       return
     }
     const admission: ComposerAdmission = {
-      payload: Object.freeze({ requestID: requestID(), delivery: mode, text }),
+      payload: Object.freeze({
+        requestID: requestID(),
+        delivery: mode,
+        text,
+        ...(mode === "queue" && state.queueAgent ? { agent: state.queueAgent } : {}),
+      }),
       revision: draft.revision,
       status: "sending",
     }
@@ -592,6 +601,11 @@ export const createComposer = (sessionID: string, directory: string, dependencie
   return {
     state,
     setText: (text: string) => updateDraft({ text }),
+    setQueueAgent: (agent: string | null) => {
+      if (state.queueAgent === agent) return
+      setState("queueAgent", agent)
+      updateDraft({}, true, "task")
+    },
     setImages: (images: ComposerImage[], buffer: ComposerBuffer = draftKey()) => {
       setMissingImages(buffer, false)
       updateDraft({ images: images.map((image) => ({ ...image })) }, true, buffer)

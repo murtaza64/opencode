@@ -509,6 +509,14 @@ function SessionView(props: { sessionID: string; directory: string }) {
   // model for the next turn: follows the latest agent turn unless the user
   // explicitly picks one from the dropdown
   const [providers] = createResource(() => oc.providers(directory).catch(() => ({ providers: [], default: {} })))
+  const [agents, { refetch: refetchAgents }] = createResource(() => oc.agents(directory).then(
+    (items) => ({ items: items.filter((agent) => !agent.hidden && agent.mode !== "subagent"), error: "" }),
+    (error: unknown) => ({ items: [], error: String(error) }),
+  ))
+  const activeAgent = () => {
+    const previous = messages().findLast((message) => message.role === "user")
+    return composer.state.mode === "aside" ? previous?.agent : session()?.agent ?? previous?.agent
+  }
   const modelChoice = () => activeDraft().model
   const setModelChoice = composer.setModel
   const lastTurnModel = createMemo(() => {
@@ -742,6 +750,42 @@ function SessionView(props: { sessionID: string; directory: string }) {
     })
   }
 
+  const Footer = (props: { expanded?: boolean }) => (
+    <ComposerControls composer={composer} connected={connected()} busy={busy()} selectMode={selectMode} submit={send}
+      activeAgent={activeAgent()} agents={agents()?.items ?? []} agentError={agents()?.error} retryAgents={() => { void refetchAgents() }}>
+      <select class="model-select" aria-label="Model override"
+        disabled={composer.state.mode === "queue" || composer.state.mode === "steer"}
+        title="model for the next turn (defaults to the previous turn's)"
+        value={modelChoice() ? `${modelChoice()!.providerID}\u0000${modelChoice()!.modelID}` : ""}
+        onChange={(e) => {
+          const [providerID, modelID] = e.currentTarget.value.split("\u0000")
+          setModelChoice(providerID && modelID ? { providerID, modelID } : null)
+        }}>
+        <option value="" selected={!modelChoice()}>Session model</option>
+        <For each={providers()?.providers ?? []}>
+          {(prov) => (
+            <optgroup label={prov.id}>
+              <For each={Object.keys(prov.models ?? {})}>
+                {(mid) => <option value={`${prov.id}\u0000${mid}`} selected={modelChoice()?.providerID === prov.id && modelChoice()?.modelID === mid}>{mid}</option>}
+              </For>
+            </optgroup>
+          )}
+        </For>
+      </select>
+      <Show when={modelChoice()}><button onClick={() => setModelChoice(null)}>Use session model</button></Show>
+      <Show when={!props.expanded}><button aria-label="Expand editor" title="Expand editor (Ctrl+E)" onClick={toggleFloat}>Expand</button></Show>
+      <Show when={contextUsage()}>
+        {(u) => (
+          <span class="context-pct"
+            classList={{ warn: (u().percent ?? 0) >= 70, high: (u().percent ?? 0) >= 90 }}
+            title="context of the last completed turn (input + output + reasoning + cache)">
+            ctx {Math.round(u().tokens / 1000)}k{u().percent != null ? ` (${u().percent}%)` : ""}
+          </span>
+        )}
+      </Show>
+    </ComposerControls>
+  )
+
   return (
     <main class="session-page">
       <div class="session-main">
@@ -855,7 +899,6 @@ function SessionView(props: { sessionID: string; directory: string }) {
 
         <Show when={!floating()}><ComposerResults composer={composer} connected={connected()} /></Show>
         <div class="prompt-box" inert={floating()}>
-          <ComposerControls composer={composer} connected={connected()} busy={busy()} selectMode={selectMode} submit={send} />
           <Show when={images().length}>
             <div class="attachments">
               <For each={images()}>
@@ -889,44 +932,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
               />
               <FakeCaret target={promptEl} caret={caret()} mode={vim.mode()} />
             </div>
-            <div class="prompt-side">
-              <button onClick={toggleFloat}>Expand editor</button>
-              <select
-                class="model-select"
-                aria-label="Model override"
-                disabled={composer.state.mode === "queue" || composer.state.mode === "steer"}
-                title="model for the next turn (defaults to the previous turn's)"
-                value={modelChoice() ? `${modelChoice()!.providerID}\u0000${modelChoice()!.modelID}` : ""}
-                onChange={(e) => {
-                  const [providerID, modelID] = e.currentTarget.value.split("\u0000")
-                  setModelChoice(providerID && modelID ? { providerID, modelID } : null)
-                }}
-              >
-                <option value="">Session model</option>
-                <For each={providers()?.providers ?? []}>
-                  {(prov: any) => (
-                    <optgroup label={prov.id}>
-                      <For each={Object.keys(prov.models ?? {})}>
-                        {(mid) => <option value={`${prov.id}\u0000${mid}`}>{mid}</option>}
-                      </For>
-                    </optgroup>
-                  )}
-                </For>
-              </select>
-              <Show when={modelChoice()}><button onClick={() => setModelChoice(null)}>Use session model</button></Show>
-              <Show when={contextUsage()}>
-                {(u) => (
-                  <span
-                    class="context-pct"
-                    classList={{ warn: (u().percent ?? 0) >= 70, high: (u().percent ?? 0) >= 90 }}
-                    title="context of the last completed turn (input + output + reasoning + cache)"
-                  >
-                    ctx {Math.round(u().tokens / 1000)}k{u().percent != null ? ` (${u().percent}%)` : ""}
-                  </span>
-                )}
-              </Show>
-            </div>
           </div>
+          <Footer />
         </div>
       </div>
 
@@ -938,7 +945,6 @@ function SessionView(props: { sessionID: string; directory: string }) {
             <button onClick={closeFloat}>⤡ collapse</button>
           </div>
           <ComposerResults composer={composer} connected={connected()} />
-          <ComposerControls composer={composer} connected={connected()} busy={busy()} selectMode={selectMode} submit={send} />
           <Show when={images().length}>
             <div class="attachments"><For each={images()}>{(image) => (
               <span class="attachment-chip"><img src={image.url} alt={image.filename} />{image.filename.slice(0, 24)}
@@ -946,7 +952,6 @@ function SessionView(props: { sessionID: string; directory: string }) {
               </span>
             )}</For></div>
           </Show>
-          <Show when={modelChoice()}><div class="dim">Saved model: {modelChoice()!.modelID} <button onClick={() => setModelChoice(null)}>Use session model</button></div></Show>
           <div class="ta-wrap">
             <textarea
               ref={floatEl}
@@ -965,6 +970,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
             />
             <FakeCaret target={floatEl} caret={caret()} mode={vim.mode()} />
           </div>
+          <Footer expanded />
         </div>
       </Show>
 

@@ -2,3 +2,8 @@
 
 - 2026-09-15: Verifying the upstream merge, `packages/es-app` production build failed because Vite's default IIFE worker format cannot bundle the diff worker's split chunks. Set `worker.format` to `es`.
 - 2026-09-15: The fork install script points agents at `.editspace/AGENTS.md`, but this checkout has no sidecar. Verification used an isolated jj workspace; the global install and daemon were left untouched.
+- 2026-09-16: Coordinating multiple lanes required joining tracker markers, revision ancestry and daemon state manually; idle and parked records often did not describe integration or installation status. Track the missing status join in #93.
+- 2026-09-16: Read-only verification commands repeatedly stopped on drift notices for unrelated lanes, producing large repo-wide diffs before retries. Warnings need dependency scope without removing real write checks (#93).
+- 2026-09-16: Foreground Task calls blocked parents that planned concurrent work, while external es sessions lacked an automatic completion return path. A typed durable agent inbox and capability-aware dispatch are tracked in #93; temporary synthetic notices are not that guarantee.
+- 2026-09-16: Helper edits stalled on inherited ask permissions, and some tests resolved dependencies through the default checkout before a lane-local install. Dispatch must verify scope/capabilities and dependencies before starting dependent helper work (#93).
+- 2026-09-16: A full jj fetch timed out, while fetching origin alone completed. Remote freshness and a slow unrelated remote must not silently block local orchestration.

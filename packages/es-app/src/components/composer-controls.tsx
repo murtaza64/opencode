@@ -1,4 +1,4 @@
-import { For, Show } from "solid-js"
+import { For, Show, type JSX } from "solid-js"
 import type { Composer, ComposerMode } from "../composer"
 
 export const ComposerControls = (props: {
@@ -7,6 +7,11 @@ export const ComposerControls = (props: {
   busy: boolean
   selectMode: (mode: ComposerMode) => void
   submit: () => void
+  activeAgent?: string
+  agents: { name: string; description?: string }[]
+  agentError?: string
+  retryAgents: () => void
+  children: JSX.Element
 }) => {
   const state = props.composer.state
   const draft = () => (state.mode === "aside" ? state.aside : state.task)
@@ -66,7 +71,9 @@ export const ComposerControls = (props: {
             ? "Ask about a snapshot without changing the task. Task draft saved; the first Aside starts as a copy."
             : state.mode === "send"
               ? "Send to this session."
-              : "Queue and Steer use the session agent and model."
+              : state.mode === "queue"
+                ? "Queue uses the selected next-task agent and the session model."
+                : "Steer uses the active agent and session model."
         }
       >
         {state.mode === "aside"
@@ -77,6 +84,49 @@ export const ComposerControls = (props: {
               ? "Send at the next safe boundary."
               : "Send to this session."}
       </div>
+      <div class="composer-settings">
+        <Show when={state.mode !== "send"}>
+          <Show
+            when={state.mode === "queue"}
+            fallback={
+              <span class="composer-agent dim" title="Active agent; Aside and Steer cannot change it">
+                {props.activeAgent ?? "Session agent"}
+              </span>
+            }
+          >
+            <select
+              class="model-select agent-select"
+              aria-label="Queue agent"
+              title="Agent for the next queued task only"
+              disabled={!props.connected || !props.agents.length}
+              value={state.queueAgent ?? ""}
+              onChange={(e) => props.composer.setQueueAgent(e.currentTarget.value || null)}
+            >
+              <option value="" selected={!state.queueAgent}>
+                {props.activeAgent ? `Current: ${props.activeAgent}` : "Current agent"}
+              </option>
+              <Show when={state.queueAgent && !props.agents.some((agent) => agent.name === state.queueAgent)}>
+                <option value={state.queueAgent!} selected>
+                  {state.queueAgent} (saved)
+                </option>
+              </Show>
+              <For each={props.agents}>
+                {(agent) => (
+                  <option value={agent.name} selected={state.queueAgent === agent.name} title={agent.description}>
+                    {agent.name}
+                  </option>
+                )}
+              </For>
+            </select>
+          </Show>
+        </Show>
+        {props.children}
+      </div>
+      <Show when={state.mode === "queue" && props.agentError}>
+        <div class="composer-help err" role="alert">
+          Agent list unavailable; current choice kept. <button onClick={props.retryAgents}>Retry agents</button>
+        </div>
+      </Show>
       <Show when={reason()}>
         <div class="composer-help dim">{reason()}</div>
       </Show>

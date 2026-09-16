@@ -305,6 +305,75 @@ test("late admission cannot clear newer typing or a different controller", async
   expect(other.state.task.text).toBe("other session")
 })
 
+test("Queue captures its selected agent across a lost ack, edited choice, reload and exact retry", async () => {
+  let posts = 0
+  const { composer, requests, dependencies } = harness((request) => {
+    if (request.method === "GET") return new Response(null, { status: 404 })
+    if (++posts === 1) throw new Error("lost ack")
+    return Response.json({ ...pending(), agent: "plan" })
+  })
+  await composer.loadCapabilities()
+  composer.selectMode("queue")
+  composer.setText("task")
+  composer.setQueueAgent("plan")
+  await composer.submit(session)
+  expect(requests[1].body).toEqual({ requestID: "request-1", delivery: "queue", text: "task", agent: "plan" })
+  composer.setQueueAgent("build")
+  const restored = createComposer(session.id, directory, dependencies)
+  expect(restored.state.queueAgent).toBe("build")
+  await restored.loadCapabilities()
+  await restored.retryAdmission()
+  expect(requests.at(-1)?.body).toEqual(requests[1].body)
+  expect(restored.state.task.text).toBe("task")
+  expect(restored.state.queueAgent).toBe("build")
+})
+
+test("Aside and Steer omit a saved Queue-agent override, and normal Send keeps its session settings", async () => {
+  const prompts: { session: Session; options: unknown }[] = []
+  const { composer, requests } = harness(
+    (request) =>
+      request.url.pathname.endsWith("/aside")
+        ? Response.json({ requestID: "request-1", text: "answer", snapshot })
+        : Response.json(pending("request-2", "task", "steer")),
+    {
+      prompt: async (session, _directory, _text, options) => {
+        prompts.push({ session, options })
+      },
+    },
+  )
+  await composer.loadCapabilities()
+  composer.setQueueAgent("plan")
+  composer.setText("task")
+  composer.selectMode("aside")
+  await composer.submit(session)
+  expect(requests[1].body).toEqual({ requestID: "request-1", question: "task" })
+  composer.selectMode("steer")
+  await composer.submit(session)
+  expect(requests[2].body).toEqual({ requestID: "request-2", delivery: "steer", text: "task" })
+  composer.selectMode("send")
+  composer.setText("normal")
+  composer.setModel(model)
+  composer.setImages([image])
+  await composer.submit(session)
+  expect(prompts).toEqual([{ session, options: { model, images: [image] } }])
+  expect(composer.state.queueAgent).toBe("plan")
+})
+
+test("changing the Queue agent during admission keeps the prepared next draft", async () => {
+  const ack = deferred<Response>()
+  const { composer } = harness(() => ack.promise)
+  await composer.loadCapabilities()
+  composer.selectMode("queue")
+  composer.setText("task")
+  composer.setQueueAgent("plan")
+  const sending = composer.submit(session)
+  composer.setQueueAgent(null)
+  ack.resolve(Response.json({ ...pending(), agent: "plan" }))
+  await sending
+  expect(composer.state.task.text).toBe("task")
+  expect(composer.state.queueAgent).toBeNull()
+})
+
 test("authoritative reconciliation unlocks a stalled POST without letting its late completion unlock a newer send", async () => {
   const first = deferred<Response>()
   const second = deferred<Response>()
