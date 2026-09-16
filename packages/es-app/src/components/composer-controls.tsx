@@ -1,5 +1,6 @@
 import { For, Show, type JSX } from "solid-js"
 import type { Composer, ComposerMode } from "../composer"
+import { ComposerImages } from "./composer-images"
 
 export const ComposerControls = (props: {
   composer: Composer
@@ -178,6 +179,7 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
               {admission().status === "sending" ? "Confirming admission..." : "Admission unknown"}
             </b>
             <p dir="auto">{admission().payload.text}</p>
+            <ComposerImages images={admission().payload.images} />
             <div class="dim">{admission().error}</div>
             <Show when={admission().status === "unknown"}>
               <button disabled={!props.connected || state.inputLoading} onClick={() => props.composer.refreshInputs()}>
@@ -208,6 +210,7 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
                     </span>
                   </span>
                   <p dir="auto">{item.text}</p>
+                  <ComposerImages images={item.images} />
                   <Show when={item.state === "pending"}>
                     <button
                       disabled={!props.connected}
@@ -239,6 +242,7 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
             <p class="aside-question" dir="auto">
               {aside().question}
             </p>
+            <ComposerImages images={aside().images} />
             <Show when={aside().snapshot}>
               {(snapshot) => (
                 <div class="dim aside-snapshot">

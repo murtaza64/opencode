@@ -232,7 +232,7 @@ try {
   await expect(active(page).getByRole("button", { name: "Remove draft.png", exact: true })).toBeVisible()
   fixture.setStatus("busy")
   await expect(mode(page, "Queue")).toHaveAttribute("aria-checked", "true")
-  await expect(active(page)).toContainText("text-only")
+  await expect(active(page)).toContainText("does not support images")
   await mode(page, "Aside").click()
   await expect(active(page).getByRole("button", { name: "Remove draft.png", exact: true })).toHaveCount(0)
   await mode(page, "Queue").click()

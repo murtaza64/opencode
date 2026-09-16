@@ -9,6 +9,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Agent } from "@/agent/agent"
 import { Provider } from "@/provider/provider"
+import { SessionInputMedia } from "./input-media"
 import { Session } from "./session"
 import { MessageID, PartID, SessionID } from "./schema"
 
@@ -22,6 +23,7 @@ const make = Effect.gen(function* () {
   const sessions = yield* Session.Service
   const agents = yield* Agent.Service
   const provider = yield* Provider.Service
+  const media = yield* SessionInputMedia.Service
   const db = database.db
   const reconcile = <A>(effect: Effect.Effect<A>) =>
     effect.pipe(
@@ -40,6 +42,10 @@ const make = Effect.gen(function* () {
   })
 
   const admit = Effect.fn("SessionInput.admit")(function* (sessionID: SessionID, payload: SessionV1.InputPayload) {
+    if (!payload.text.trim() && !payload.images?.length)
+      return yield* new Invalid({ message: "Input requires text or images" })
+    if (payload.images?.length && payload.text.length > 128_000)
+      return yield* new Invalid({ message: "Image input text is too large" })
     const existing = yield* find(payload.requestID)
     if (existing) {
       if (existing.session_id !== sessionID || !isDeepStrictEqual(existing.payload, payload))
@@ -59,14 +65,31 @@ const make = Effect.gen(function* () {
           ...(session.model.variant && session.model.variant !== "default" ? { variant: session.model.variant } : {}),
         }
       : (user?.model ?? (yield* provider.defaultModel().pipe(Effect.orDie)))
+    const images = payload.images?.length
+      ? yield* provider.getModel(model.providerID, model.modelID).pipe(
+          Effect.mapError(() => new Invalid({ message: "Selected image model is unavailable" })),
+          Effect.flatMap((selected) => media.normalize(payload.images ?? [], selected)),
+          Effect.mapError((error) => new Invalid({ message: error.message })),
+        )
+      : undefined
     yield* reconcile(
       events.publish(SessionV1.Event.InputAdmitted, {
         sessionID,
         payload,
         agent: agent.name,
         model,
+        ...(images ? { images } : {}),
         time: yield* Clock.currentTimeMillis,
       }),
+    ).pipe(
+      Effect.catchDefect((error) =>
+        error instanceof SessionProjector.InputCapacityExceeded
+          ? new Invalid({
+              message:
+                "Session input storage limit exceeded; start a new session or remove this session's retained data",
+            })
+          : Effect.die(error),
+      ),
     )
     const row = yield* find(payload.requestID)
     if (!row) return yield* Effect.die("Input admission was not projected")
@@ -124,7 +147,17 @@ const make = Effect.gen(function* () {
       .pipe(Effect.orDie)
     const selected = idle ? rows : rows.filter((row) => row.payload.delivery === "steer")
     let promoted = false
+    let promotedModel: SessionV1.User["model"] | undefined
     for (const row of selected) {
+      // Every newly promoted image must reach a turn using its admitted model.
+      if (promotedModel && !isDeepStrictEqual(promotedModel, row.model)) break
+      if (row.images?.length) {
+        const selectedModel = yield* provider.getModel(row.model.providerID, row.model.modelID).pipe(Effect.option)
+        if (Option.isNone(selectedModel) || !selectedModel.value.capabilities.input.image) {
+          if (idle) break
+          continue
+        }
+      }
       const info: SessionV1.User = {
         id: MessageID.ascending(),
         role: "user",
@@ -140,15 +173,29 @@ const make = Effect.gen(function* () {
         type: "text",
         text: row.payload.text,
       }
+      const images = (row.images ?? []).map((image) => ({
+        ...image,
+        id: PartID.ascending(),
+        sessionID,
+        messageID: info.id,
+      }))
       yield* reconcile(
-        events.publish(SessionV1.Event.InputPromoted, { sessionID, requestID: row.request_id, info, part }),
+        events.publish(SessionV1.Event.InputPromoted, {
+          sessionID,
+          requestID: row.request_id,
+          info,
+          part,
+          ...(images.length ? { images } : {}),
+        }),
       )
       const receipt = yield* get(sessionID, row.request_id).pipe(Effect.orDie)
       if (receipt.state !== "promoted" || receipt.messageID !== info.id) continue
       // Existing transcript subscribers consume the legacy message/part events.
       yield* sessions.updateMessage(info)
       yield* sessions.updatePart(part)
+      for (const image of images) yield* sessions.updatePart(image)
       promoted = true
+      promotedModel = row.model
       if (idle) break
     }
     return promoted
@@ -160,6 +207,6 @@ export class Service extends Context.Service<Service, Effect.Success<typeof make
 export const node = LayerNode.make({
   service: Service,
   layer: Layer.effect(Service, make),
-  deps: [Database.node, EventV2Bridge.node, Session.node, Agent.node, Provider.node],
+  deps: [Database.node, EventV2Bridge.node, Session.node, Agent.node, Provider.node, SessionInputMedia.node],
 })
 export * as SessionInput from "./input"

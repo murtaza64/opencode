@@ -1,6 +1,19 @@
 import { createServer } from "node:http"
 
 export const directory = "/fixture with spaces/a&b?#"
+export const imageCapability = {
+  version: 1,
+  encoding: "data-url",
+  mimeTypes: ["image/png", "image/jpeg", "image/webp", "image/gif"],
+  maxCount: 8,
+  maxBytes: 5242880,
+  maxTotalBytes: 10485760,
+  maxWidth: 8192,
+  maxHeight: 8192,
+  maxPixels: 16777216,
+  animated: false,
+  compressedMetadata: false,
+}
 export const session = (id) => ({
   id,
   title: id === "ses_a" ? "Composer fixture" : "Other session",
@@ -16,6 +29,8 @@ export const createFixture = async () => {
   const fixture = {
     status: "busy",
     capabilities: true,
+    images: undefined,
+    rejectImages: false,
     failSnapshot: false,
     holdInput: false,
     loseInput: false,
@@ -68,8 +83,14 @@ export const createFixture = async () => {
       return json(
         fixture.capabilities
           ? {
-              sessionAside: { version: 1, cancel: true },
-              sessionInput: { version: 1, delivery: ["queue", "steer"], list: true, cancel: true },
+              sessionAside: { version: 1, cancel: true, images: fixture.images },
+              sessionInput: {
+                version: 1,
+                delivery: ["queue", "steer"],
+                list: true,
+                cancel: true,
+                images: fixture.images,
+              },
             }
           : {},
       )
@@ -125,7 +146,7 @@ export const createFixture = async () => {
       if (action === "/message")
         return json(
           id === "ses_a"
-            ? fixture.messages ?? [
+            ? (fixture.messages ?? [
                 {
                   info: {
                     id: "msg_user",
@@ -154,10 +175,12 @@ export const createFixture = async () => {
                   },
                   parts: [],
                 },
-              ]
+              ])
             : [],
         )
       if (action === "/prompt_async" && request.method === "POST") {
+        if (fixture.rejectImages && body.parts.some((part) => part.type === "file"))
+          return json({ error: "Selected model does not support image input" }, 400)
         response.writeHead(204)
         response.end()
         return
@@ -168,6 +191,8 @@ export const createFixture = async () => {
             items: fixture.receipts.filter((item) => item.sessionID === id && item.state === "pending"),
             next: null,
           })
+        if (fixture.rejectImages && body.images?.length)
+          return json({ error: "Selected model does not support image input" }, 400)
         const receipt = fixture.receipts.find((item) => item.requestID === body.requestID) ?? {
           ...body,
           sessionID: id,
@@ -207,6 +232,8 @@ export const createFixture = async () => {
         return json(receipt)
       }
       if (action === "/aside") {
+        if (fixture.rejectImages && body.images?.length)
+          return json({ error: "Selected model does not support image input" }, 400)
         const answer = () =>
           json({
             requestID: body.requestID,

@@ -11,6 +11,7 @@ import { ascending } from "../identifier"
 import { SessionID } from "../session-id"
 import { WorkspaceID } from "../workspace-id"
 import { PermissionV1 } from "./permission"
+import { InputImageValidation } from "./input-image-validation"
 
 const Timestamp = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
 
@@ -568,10 +569,45 @@ export const SessionInfo = Schema.Struct({
 }).annotate({ identifier: "Session" })
 export type SessionInfo = typeof SessionInfo.Type
 
+export const ImageSupport = InputImageValidation.Support
+export const ImageCapabilities = Schema.Struct({
+  version: Schema.Literal(1),
+  encoding: Schema.Literal("data-url"),
+  mimeTypes: Schema.Array(Schema.String),
+  maxCount: NonNegativeInt,
+  maxBytes: NonNegativeInt,
+  maxTotalBytes: NonNegativeInt,
+  maxWidth: NonNegativeInt,
+  maxHeight: NonNegativeInt,
+  maxPixels: NonNegativeInt,
+  animated: Schema.Literal(false),
+  compressedMetadata: Schema.Literal(false),
+})
+export const InputImage = Schema.Struct({
+  type: FilePartInput.fields.type,
+  mime: Schema.Literals(ImageSupport.mimeTypes),
+  url: FilePartInput.fields.url.check(Schema.isMaxLength(Math.ceil(ImageSupport.maxBytes / 3) * 4 + 100)),
+  filename: optional(Schema.String.check(Schema.isMaxLength(1024))),
+}).annotate({ identifier: "SessionV1.InputImage", parseOptions: { onExcessProperty: "error" } })
+export interface InputImage extends Schema.Schema.Type<typeof InputImage> {}
+export const InputImages = Schema.Array(InputImage).check(
+  Schema.isMaxLength(ImageSupport.maxCount),
+  Schema.makeFilter(InputImageValidation.issue),
+)
+const InputImageParts = Schema.Array(
+  Schema.Struct({
+    ...InputImage.fields,
+    id: PartID,
+    sessionID: SessionID,
+    messageID: MessageID,
+  }),
+).check(Schema.isMaxLength(ImageSupport.maxCount), Schema.makeFilter(InputImageValidation.issue))
+
 export const InputPayload = Schema.Struct({
   requestID: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
   delivery: Schema.Literals(["queue", "steer"]),
-  text: Schema.String.check(Schema.isPattern(/\S/)),
+  text: Schema.String,
+  images: optional(InputImages),
   agent: optional(Schema.String.check(Schema.isMinLength(1))),
 }).annotate({ identifier: "SessionV1.InputPayload", parseOptions: { onExcessProperty: "error" } })
 export interface InputPayload extends Schema.Schema.Type<typeof InputPayload> {}
@@ -604,6 +640,7 @@ const events = {
       payload: InputPayload,
       agent: Schema.String,
       model: User.fields.model,
+      images: optional(InputImages),
       time: NonNegativeInt,
     },
   }),
@@ -615,7 +652,13 @@ const events = {
   InputPromoted: define({
     type: "session.input.promoted",
     ...options,
-    schema: { sessionID: SessionID, requestID: Schema.String, info: User, part: TextPart },
+    schema: {
+      sessionID: SessionID,
+      requestID: Schema.String,
+      info: User,
+      part: TextPart,
+      images: optional(InputImageParts),
+    },
   }),
   Created: define({
     type: "session.created",

@@ -21,6 +21,7 @@ import { MessageV2 } from "./message-v2"
 import { MessageID, SessionID } from "./schema"
 import { Session } from "./session"
 import { SessionStatus } from "./status"
+import { SessionInputMedia } from "./input-media"
 
 const TIMEOUT = 60_000
 
@@ -28,7 +29,8 @@ export const RequestID = Schema.String.check(Schema.isMinLength(1), Schema.isMax
 
 export const Input = Schema.Struct({
   requestID: RequestID,
-  question: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(32_000)),
+  question: Schema.String.check(Schema.isMaxLength(32_000)),
+  images: Schema.optionalKey(SessionV1.InputImages),
   model: Schema.optional(Schema.Struct({ providerID: ProviderV2.ID, modelID: ModelV2.ID })),
   agent: Schema.optional(Schema.String),
 })
@@ -67,6 +69,7 @@ const live = Layer.effect(
     const llm = yield* LLM.Service
     const database = yield* Database.Service
     const status = yield* SessionStatus.Service
+    const media = yield* SessionInputMedia.Service
     const state = yield* InstanceState.make(() =>
       Effect.gen(function* () {
         const active = new Map<string, Deferred.Deferred<void>>()
@@ -88,7 +91,8 @@ const live = Layer.effect(
 
     const answer = Effect.fn("SessionAside.answer")(
       function* (sessionID: SessionID, input: typeof Input.Type) {
-        if (!input.question.trim()) return yield* new AsideError({ message: "Aside question must not be blank" })
+        if (!input.question.trim() && !input.images?.length)
+          return yield* new AsideError({ message: "Aside question must not be blank" })
         // Reserve one read transaction for message metadata and parts, never for inference.
         const captured = yield* database.db
           .transaction(() =>
@@ -137,6 +141,9 @@ const live = Layer.effect(
           .getModel(selected.providerID, selected.modelID)
           .pipe(Effect.mapError(() => new AsideError({ message: "Aside model not found" })))
         const identity = MessageID.ascending()
+        const images = yield* media
+          .normalize(input.images ?? [], model)
+          .pipe(Effect.mapError((error) => new AsideError({ message: error.message })))
         const user: SessionV1.User = {
           id: identity,
           sessionID: SessionID.descending(),
@@ -162,12 +169,20 @@ const live = Layer.effect(
                 "No tools, actions, approvals, permission grants, or changes to the parent are possible. Never grant approval. " +
                 "State when information is omitted, unavailable, or cannot be inferred. Activity is a captured snapshot of status and recorded tool states, not live execution. " +
                 "Never treat activity as an approval or infer tool arguments or results from it. " +
-                "Attachments, reasoning, tool inputs/outputs, and unconfirmed user admissions are omitted. Unfinished assistant messages and their later tail are excluded. " +
+                "Historical attachments, reasoning, tool inputs/outputs, and unconfirmed user admissions are omitted. Newly attached question images are available. Unfinished assistant messages and their later tail are excluded. " +
                 "Earlier compacted history is represented only by the saved summary and retained messages.",
             ],
             messages: [
               { role: "user", content: `Frozen snapshot:\n${JSON.stringify({ snapshot, history })}` },
-              { role: "user", content: input.question },
+              {
+                role: "user",
+                content: images.length
+                  ? [
+                      ...(input.question.trim() ? [{ type: "text" as const, text: input.question }] : []),
+                      ...images.map((image) => ({ type: "image" as const, image: image.url, mediaType: image.mime })),
+                    ]
+                  : input.question,
+              },
             ],
           })
           .pipe(
@@ -288,7 +303,7 @@ const live = Layer.effect(
 export const node = LayerNode.make({
   service: Service,
   layer: live,
-  deps: [Session.node, Agent.node, Provider.node, LLM.node, Database.node, SessionStatus.node],
+  deps: [Session.node, Agent.node, Provider.node, LLM.node, Database.node, SessionStatus.node, SessionInputMedia.node],
 })
 
 const selectHistory = (messages: SessionV1.WithParts[], revert?: MessageID) => {

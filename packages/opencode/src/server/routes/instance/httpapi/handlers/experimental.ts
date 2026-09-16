@@ -7,6 +7,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { MCP } from "@/mcp"
 import { Project } from "@/project/project"
 import { Session } from "@/session/session"
+import { SessionV1 } from "@opencode-ai/core/v1/session"
 import type { SessionID } from "@/session/schema"
 import { ToolJsonSchema } from "@/tool/json-schema"
 import { ToolRegistry } from "@/tool/registry"
@@ -39,12 +40,13 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const capabilities = Effect.fn("ExperimentalHttpApi.capabilities")(function* () {
       return {
         backgroundSubagents: flags.experimentalBackgroundSubagents,
-        sessionAside: { version: 1 as const, cancel: true as const },
+        sessionAside: { version: 1 as const, cancel: true as const, images: SessionV1.ImageSupport },
         sessionInput: {
           version: 1 as const,
           delivery: ["queue", "steer"] as const,
           list: true as const,
           cancel: true as const,
+          images: SessionV1.ImageSupport,
         },
       }
     })

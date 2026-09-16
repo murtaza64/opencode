@@ -235,6 +235,7 @@ import type {
   SessionUnshareResponses,
   SessionUpdateErrors,
   SessionUpdateResponses,
+  SessionV1InputImage,
   SessionV1InputPayload,
   SubtaskPartInput,
   SyncHistoryListErrors,
@@ -4073,6 +4074,7 @@ export class Session2 extends HeyApiClient {
       workspace?: string
       requestID?: string
       question?: string
+      images?: Array<SessionV1InputImage>
       model?: {
         providerID: string
         modelID: string
@@ -4091,6 +4093,7 @@ export class Session2 extends HeyApiClient {
             { in: "query", key: "workspace" },
             { in: "body", key: "requestID" },
             { in: "body", key: "question" },
+            { in: "body", key: "images" },
             { in: "body", key: "model" },
             { in: "body", key: "agent" },
           ],
