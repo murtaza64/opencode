@@ -56,6 +56,15 @@ try {
   await expect(active(page).getByRole("button", { name: "Queue message", exact: true })).toBeDisabled()
   await editor(page).fill("task draft")
   await expect(active(page).getByRole("button", { name: "Queue message", exact: true })).toBeEnabled()
+  const queueAgent = () => active(page).getByLabel("Queue agent", { exact: true })
+  await expect(queueAgent()).toBeEnabled()
+  expect(await queueAgent().locator("option").allTextContents()).toEqual(["Current: build", "build", "plan"])
+  await queueAgent().selectOption("plan")
+  const textarea = await editor(page).boundingBox()
+  const footer = await active(page).locator(".composer-controls").boundingBox()
+  expect(footer.y).toBeGreaterThanOrEqual(textarea.y + textarea.height)
+  expect((await queueAgent().boundingBox()).y).toBe((await mode(page, "Queue").boundingBox()).y)
+  await active(page).screenshot({ path: `${artifacts}/footer-queue-desktop.png` })
   const top = (await editor(page).boundingBox()).y
   expect((await active(page).locator(".composer-controls").boundingBox()).height).toBeLessThanOrEqual(32)
   await expect(active(page).getByRole("button", { name: "Refresh availability", exact: true })).toHaveCount(0)
@@ -63,10 +72,13 @@ try {
   expect((await editor(page).boundingBox()).y).toBe(top)
   await active(page).screenshot({ path: `${artifacts}/compact-desktop.png` })
   await expect(editor(page)).toHaveValue("task draft")
+  await expect(active(page).locator(".composer-agent")).toHaveText("build")
+  await expect(queueAgent()).toHaveCount(0)
   await editor(page).fill("aside question")
   await mode(page, "Queue").click()
   expect((await editor(page).boundingBox()).y).toBe(top)
   await expect(editor(page)).toHaveValue("task draft")
+  await expect(queueAgent()).toHaveValue("plan")
   expect(mutations()).toHaveLength(0)
 
   await editor(page).focus()
@@ -110,6 +122,7 @@ try {
   fixture.holdInput = true
   await editor(page).press("Control+Enter")
   await expect.poll(() => inputPosts().length).toBe(1)
+  expect(inputPosts()[0].body.agent).toBeUndefined()
   await editor(page).press("Control+Enter")
   await editor(page).fill("newer typing")
   fixture.holdInput = false
@@ -173,9 +186,12 @@ try {
   await active(page).getByRole("button", { name: "Queue message", exact: true }).click()
   await expect(page.locator(".input-admission")).toContainText("Admission unknown")
   const unknown = inputPosts().at(-1).body
+  expect(unknown.agent).toBe("plan")
+  await queueAgent().selectOption("build")
   await editor(page).fill("draft after unknown")
   await page.reload()
   await expect(editor(page)).toHaveValue("draft after unknown")
+  await expect(queueAgent()).toHaveValue("build")
   await page.getByRole("button", { name: "Check and retry same input", exact: true }).click()
   await expect(page.locator(".input-admission")).toHaveCount(0)
   expect(inputPosts().at(-1).body).toEqual(unknown)
@@ -249,6 +265,10 @@ try {
   await expect(editor(page)).toHaveValue("aside question")
   await mode(page, "Steer").click()
   await expect(editor(page)).toHaveValue("long draft line\n".repeat(12))
+  const floatingTextarea = await editor(page).boundingBox()
+  expect((await active(page).locator(".composer-controls").boundingBox()).y).toBeGreaterThanOrEqual(
+    floatingTextarea.y + floatingTextarea.height,
+  )
   await noOverflow(page)
   await reachable(editor(page))
   await reachable(active(page).getByRole("button", { name: "Steer task", exact: true }))
@@ -337,13 +357,33 @@ try {
   await page.locator('.sidebar a[href*="/session/ses_a"]').first().click()
   await expect(editor(page)).toHaveValue("")
   fixture.capabilities = false
+  fixture.failAgents = true
   await page.reload()
+  await expect(active(page)).toContainText("Agent list unavailable")
+  await expect(queueAgent()).toHaveValue("build")
+  await expect(queueAgent()).toBeDisabled()
+  fixture.failAgents = false
+  await active(page).getByRole("button", { name: "Retry agents", exact: true }).click()
+  await expect(queueAgent()).toBeEnabled()
   await expect(active(page)).toContainText("does not support")
   await active(page).getByRole("button", { name: "Refresh availability", exact: true }).click()
   await expect(active(page)).toContainText("does not support")
   await expect(active(page).getByRole("button", { name: "Queue message", exact: true })).toBeDisabled()
   expect(mutations().some((call) => /permission|question|abort|ses_a\/prompt_async/.test(call.path))).toBe(false)
-  expect(inputPosts().every((call) => call.directory === directory && !call.body.agent && !call.body.model)).toBe(true)
+  expect(
+    inputPosts().every(
+      (call) =>
+        call.directory === directory && !call.body.model && (call.body.delivery === "queue" || !call.body.agent),
+    ),
+  ).toBe(true)
+  expect(
+    mutations()
+      .filter((call) => call.path.endsWith("/aside"))
+      .every((call) => !call.body.agent),
+  ).toBe(true)
+  expect(fixture.calls.filter((call) => call.path === "/agent").every((call) => call.directory === directory)).toBe(
+    true,
+  )
   expect(fixture.unexpected).toEqual([])
   expect(errors).toEqual([])
   console.log(

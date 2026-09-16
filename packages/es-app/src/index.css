@@ -882,11 +882,17 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .float-editor textarea:focus { outline: none; }
 
 /* Both editor surfaces share controls; receipts and Asides stay outside history. */
-.composer-controls { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 8px; min-width: 0; }
+.composer-controls { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 4px 8px; min-width: 0; flex-shrink: 0; }
 .composer-controls > * { grid-column: 1 / -1; }
 .composer-controls > .composer-mode-row { grid-column: 1; grid-row: 1; flex-wrap: nowrap; }
 .composer-controls > .composer-summary { grid-column: 2; grid-row: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.composer-controls > .composer-actions { grid-column: 3; grid-row: 1; }
+.composer-controls > .composer-settings { grid-column: 3; grid-row: 1; }
+.composer-controls > .composer-actions { grid-column: 4; grid-row: 1; }
+.composer-settings { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.composer-settings .model-select { width: 110px; max-width: 100%; height: 26px; font-family: inherit; }
+.composer-settings .agent-select, .composer-agent { width: 100px; }
+.composer-agent { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-settings button { padding: 3px 6px; min-height: 26px; font-size: 11px; }
 .composer-mode-row, .composer-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .composer-modes { display: flex; flex-wrap: wrap; gap: 2px; }
 .composer-modes button { min-width: 54px; min-height: 26px; padding: 3px 8px; font-size: 12px; }
@@ -952,7 +958,8 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
   .prompt-box { padding-block: 6px; max-height: 50dvh; }
   .composer-controls { grid-template-columns: minmax(0, 1fr) auto; }
   .composer-controls > .composer-actions { grid-column: 2; }
-  .composer-controls > .composer-summary { grid-column: 1 / -1; grid-row: 2; }
+  .composer-controls > .composer-settings { grid-column: 1 / -1; grid-row: 2; }
+  .composer-controls > .composer-summary { grid-column: 1 / -1; grid-row: 3; }
   .composer-mode-row { gap: 4px; }
   .composer-controls button { min-height: 30px; }
   .composer-results button { min-height: 36px; }

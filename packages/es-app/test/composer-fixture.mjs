@@ -103,6 +103,15 @@ export const createFixture = async () => {
         providers: [{ id: "fixture", models: { test: { id: "test", name: "Fixture model" } } }],
         default: { fixture: "test" },
       })
+    if (url.pathname === "/agent")
+      return fixture.failAgents
+        ? json({ error: "agent list unavailable" }, 503)
+        : json([
+            { name: "build", mode: "primary" },
+            { name: "plan", mode: "all" },
+            { name: "explore", mode: "subagent" },
+            { name: "hidden", mode: "primary", hidden: true },
+          ])
     if (url.pathname === "/permission")
       return json([
         { id: "permission-1", sessionID: "ses_a", permission: "bash", patterns: ["fixture command"], metadata: {} },
@@ -112,7 +121,41 @@ export const createFixture = async () => {
     if (match) {
       const [, id, action] = match
       if (!action) return json(session(id), fixture.failSnapshot ? 503 : 200)
-      if (action === "/message") return json([])
+      if (action === "/message")
+        return json(
+          id === "ses_a"
+            ? [
+                {
+                  info: {
+                    id: "msg_user",
+                    sessionID: id,
+                    role: "user",
+                    agent: "build",
+                    model: { providerID: "fixture", modelID: "test" },
+                    time: { created: 1 },
+                  },
+                  parts: [],
+                },
+                {
+                  info: {
+                    id: "msg_zcompaction",
+                    sessionID: id,
+                    role: "assistant",
+                    agent: "compaction",
+                    parentID: "msg_user",
+                    providerID: "fixture",
+                    modelID: "test",
+                    mode: "compaction",
+                    path: { cwd: directory, root: directory },
+                    cost: 0,
+                    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+                    time: { created: 2, completed: 3 },
+                  },
+                  parts: [],
+                },
+              ]
+            : [],
+        )
       if (action === "/prompt_async" && request.method === "POST") {
         response.writeHead(204)
         response.end()
@@ -127,7 +170,7 @@ export const createFixture = async () => {
         const receipt = fixture.receipts.find((item) => item.requestID === body.requestID) ?? {
           ...body,
           sessionID: id,
-          agent: "build",
+          agent: body.agent ?? "build",
           admittedSeq: fixture.receipts.length + 1,
           timeCreated: Date.now(),
           state: "pending",
