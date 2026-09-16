@@ -47,6 +47,33 @@ export const DirectComposer = (props: {
         </Show>
       </div>
       <aside class="direct-controls" aria-label="Message actions and settings">
+        <label class="direct-setting">
+          <select
+            aria-label="Queue agent"
+            value={state.queueAgent ?? ""}
+            disabled={!state.busy || state.keyboardTarget !== "queue" || !props.agents.length}
+            onChange={(e) => props.composer.setQueueAgent(e.currentTarget.value || null)}
+          >
+            <option value="" selected={!state.queueAgent}>
+              {props.activeAgent ? `Current: ${props.activeAgent}` : "Current agent"}
+            </option>
+            <Show when={state.queueAgent && !props.agents.some((agent) => agent.name === state.queueAgent)}>
+              <option value={state.queueAgent!} selected>
+                {state.queueAgent} (saved)
+              </option>
+            </Show>
+            <For each={props.agents}>
+              {(agent) => (
+                <option value={agent.name} selected={state.queueAgent === agent.name} title={agent.description}>
+                  {agent.name}
+                </option>
+              )}
+            </For>
+          </select>
+        </label>
+        <div class="direct-model" role="group" aria-label="Model settings">
+          {props.children}
+        </div>
         <div class="direct-submit-actions" role="group" aria-label="Submit current message">
           <For each={visibleActions()}>
             {(action) => (
@@ -90,33 +117,6 @@ export const DirectComposer = (props: {
               </button>
             )}
           </For>
-        </div>
-        <label class="direct-setting">
-          <select
-            aria-label="Queue agent"
-            value={state.queueAgent ?? ""}
-            disabled={!state.busy || state.keyboardTarget !== "queue" || !props.agents.length}
-            onChange={(e) => props.composer.setQueueAgent(e.currentTarget.value || null)}
-          >
-            <option value="" selected={!state.queueAgent}>
-              {props.activeAgent ? `Current: ${props.activeAgent}` : "Current agent"}
-            </option>
-            <Show when={state.queueAgent && !props.agents.some((agent) => agent.name === state.queueAgent)}>
-              <option value={state.queueAgent!} selected>
-                {state.queueAgent} (saved)
-              </option>
-            </Show>
-            <For each={props.agents}>
-              {(agent) => (
-                <option value={agent.name} selected={state.queueAgent === agent.name} title={agent.description}>
-                  {agent.name}
-                </option>
-              )}
-            </For>
-          </select>
-        </label>
-        <div class="direct-model" role="group" aria-label="Model settings">
-          {props.children}
         </div>
       </aside>
       <Show when={props.agentError}>

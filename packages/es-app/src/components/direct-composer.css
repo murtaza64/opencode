@@ -3,7 +3,7 @@
 .direct-writing > .ta-wrap { flex: 1; min-height: 110px; }
 .direct-writing textarea { min-height: 110px; }
 .direct-controls { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding-inline-start: 8px; border-inline-start: 1px solid var(--surface0); }
-.direct-submit-actions { display: flex; flex-direction: column; gap: 4px; }
+.direct-submit-actions { display: flex; flex-direction: column; gap: 4px; min-height: 98px; flex-shrink: 0; }
 .direct-submit-actions button { display: flex; justify-content: space-between; align-items: center; min-height: 30px; padding: 4px 10px; font-size: 12px; border: 1px solid transparent; }
 .direct-submit-actions button.keyboard-target { background: var(--crust); color: var(--green); border-color: var(--green); }
 .direct-submit-actions button:disabled { color: var(--overlay1); }
@@ -31,4 +31,5 @@
 }
 @media (pointer: coarse) {
   .direct-composer button, .direct-setting select { min-height: 44px; }
+  .direct-submit-actions { min-height: 140px; }
 }
