@@ -16,6 +16,8 @@ export {
   FileSource,
   Format,
   Info,
+  InputPayload,
+  InputReceipt,
   MessageID,
   OutputFormatJsonSchema,
   OutputFormatText,

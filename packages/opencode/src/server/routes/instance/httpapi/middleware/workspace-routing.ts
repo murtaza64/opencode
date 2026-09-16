@@ -229,6 +229,18 @@ function routeHttpApiWorkspace<E>(
           Effect.catchDefect(() => Effect.succeed(undefined)),
         )
       : undefined
+    if (
+      /^\/session\/[^/]+\/input(?:\/|$)/.test(requestURL(request).pathname) &&
+      (session?.workspaceID || requestURL(request).searchParams.has("workspace") || configuredWorkspaceID())
+    ) {
+      return HttpServerResponse.jsonUnsafe(
+        new InvalidRequestError({
+          message: "Session input does not support explicit workspace placement",
+          field: "workspace",
+        }),
+        { status: 400 },
+      )
+    }
     const plan = yield* planRequest(request, session)
     return yield* routeWorkspace(client, effect, plan)
   })

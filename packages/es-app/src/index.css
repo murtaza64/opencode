@@ -185,6 +185,7 @@
   font-size: 13.5px;
   line-height: 1.65;
 }
+.transcript { --v2-text-text-base: var(--text); --text-strong: var(--text); --text-base: var(--subtext1); }
 .transcript [data-component="text-part"]
   :is(p, ul, ol, li, blockquote, h1, h2, h3, h4, h5, h6, td, th, em, strong, span:not(.pr-badge)) {
   font-family: var(--font-serif);
@@ -882,6 +883,96 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
   resize: none;
 }
 .float-editor textarea:focus { outline: none; }
+
+/* Both editor surfaces share controls; receipts and Asides stay outside history. */
+.composer-controls { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 4px 8px; min-width: 0; flex-shrink: 0; }
+.composer-controls > * { grid-column: 1 / -1; }
+.composer-controls > .composer-mode-row { grid-column: 1; grid-row: 1; flex-wrap: nowrap; }
+.composer-controls > .composer-summary { grid-column: 2; grid-row: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.composer-controls > .composer-settings { grid-column: 3; grid-row: 1; }
+.composer-controls > .composer-actions { grid-column: 4; grid-row: 1; }
+.composer-settings { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.composer-settings .model-select { width: 110px; max-width: 100%; height: 26px; font-family: inherit; }
+.composer-settings .agent-select, .composer-agent { width: 100px; }
+.composer-agent { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-settings button { padding: 3px 6px; min-height: 26px; font-size: 11px; }
+.composer-mode-row, .composer-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.composer-modes { display: flex; flex-wrap: wrap; gap: 2px; }
+.composer-modes button { min-width: 54px; min-height: 26px; padding: 3px 8px; font-size: 12px; }
+.composer-controls button:focus-visible, .composer-results button:focus-visible,
+.composer-results summary:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
+.composer-help { line-height: 1.4; overflow-wrap: anywhere; }
+.composer-send { color: var(--green); border: 1px solid var(--surface1); min-height: 26px; width: 112px; padding: 3px 8px; font-size: 12px; }
+.composer-results { flex-shrink: 0; max-height: 30dvh; overflow-y: auto; overflow-wrap: anywhere; }
+.composer-results:empty { display: none; }
+.composer-results :is(section, details) { border-block-start: 1px solid var(--surface1); padding: 8px 10px; background: var(--mantle); }
+.composer-results summary { cursor: pointer; }
+.composer-results p { white-space: pre-wrap; margin-block: 6px; }
+.composer-results ul { padding: 0; list-style: none; }
+.composer-results li { padding-block: 8px; border-block-end: 1px solid var(--surface0); }
+.composer-results li p { max-height: 5em; overflow: auto; }
+.input-admission > p { max-height: 5em; overflow: auto; }
+.aside-result { border-inline-start: 2px solid var(--mauve); }
+.aside-question { font-weight: 600; }
+.aside-snapshot { font-size: 11px; }
+.aside-snapshot span { display: block; }
+.aside-answer { white-space: pre-wrap; font-family: var(--font-serif); font-size: 13px; line-height: 1.65; padding-block: 10px; }
+.prompt-box { flex-shrink: 0; max-height: 55dvh; overflow-y: auto; }
+.prompt-box textarea { max-height: 25dvh; }
+.prompt-side { flex-shrink: 0; max-width: 35%; }
+.attachment-chip { max-width: 100%; overflow-wrap: anywhere; }
+.float-editor { height: min(80dvh, 900px); max-height: 90dvh; }
+.float-editor > :is(.composer-controls, .attachments, .dim) { padding: 8px 12px; }
+.float-editor > .ta-wrap { min-height: 80px; overflow: auto; }
+.float-editor .composer-results { max-height: 25dvh; }
+.float-head { flex-wrap: wrap; }
+.session-page .topbar { flex-wrap: wrap; flex-shrink: 0; gap: 6px; }
+.session-page .topbar h1 { min-width: 0; overflow-wrap: anywhere; }
+.session-alerts { flex-shrink: 0; max-height: 25dvh; overflow: auto; }
+.session-page .transcript { min-height: 32px; }
+.session-main { overflow-y: auto; }
+
+@media (max-width: 1100px) {
+  .sidebar:not(.sidebar-mini) { max-width: 200px; }
+  .session-info:not(.sidebar-mini) { max-width: 210px; }
+  .session-page { gap: 8px; padding-inline: 10px; }
+  .session-info { margin-inline-end: -10px; }
+  .prompt-row { flex-wrap: wrap; }
+  .prompt-row > .ta-wrap { flex-basis: 100%; }
+  .prompt-side { flex-direction: row; flex-wrap: wrap; width: 100%; max-width: none; align-items: center; }
+  .prompt-side .model-select { width: auto; max-width: 55%; }
+}
+
+@media (max-width: 600px) {
+  .shell { flex-direction: column; height: 100dvh; }
+  .shell > .sidebar { width: 100% !important; max-width: none; height: auto; max-height: 18dvh; flex-shrink: 0; }
+  .shell > .sidebar-mini { flex-direction: row; overflow-x: auto; padding: 2px !important; }
+  .shell > .sidebar-mini > * { width: auto; min-width: 36px; }
+  .shell > .content { height: auto; min-height: 0; }
+  .drag-handle { display: none; }
+  .session-page { height: 100%; flex-direction: column; gap: 0; padding-inline: 8px; }
+  .session-main { min-height: 0; height: auto; }
+  .session-info, .session-info:not(.sidebar-mini) { width: 100% !important; max-width: none; max-height: 16dvh; height: auto; margin: 0; padding: 4px 8px; }
+  .session-info.sidebar-mini { min-height: 28px; align-items: flex-end; }
+  .session-info.sidebar-mini button { width: auto; }
+  .session-page .topbar { padding-block: 6px; }
+  .session-page .topbar h1 { flex-basis: 70%; font-size: 14px; }
+  .session-page .topbar button { padding: 4px 8px; }
+  .prompt-box { padding-block: 6px; max-height: 50dvh; }
+  .composer-controls { grid-template-columns: minmax(0, 1fr) auto; }
+  .composer-controls > .composer-actions { grid-column: 2; }
+  .composer-controls > .composer-settings { grid-column: 1 / -1; grid-row: 2; }
+  .composer-controls > .composer-summary { grid-column: 1 / -1; grid-row: 3; }
+  .composer-mode-row { gap: 4px; }
+  .composer-controls button { min-height: 30px; }
+  .composer-results button { min-height: 36px; }
+  .composer-actions { gap: 4px 8px; }
+  .composer-help { font-size: 11px; }
+  .float-editor { top: 2dvh; width: calc(100vw - 16px); height: 94dvh; max-height: 94dvh; }
+  .float-editor textarea { font-size: 16px; }
+  .float-editor > .composer-controls { padding: 6px 8px; }
+  .composer-results { max-height: 24dvh; }
+}
 
 /* --- tickets + docs browser (dotfiles#79) ---------------------------------- */
 

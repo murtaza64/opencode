@@ -1,6 +1,6 @@
 /* Thin fetch layer. The daemon (:4096) is reached via the /oc proxy, the es
  * dashboard server (:7777) via /es — both same-origin through vite. */
-import type { GlobalSession, Message, Part, PermissionRequest, QuestionRequest, Session } from "@opencode-ai/sdk/v2"
+import type { Agent, GlobalSession, Message, Part, PermissionRequest, QuestionRequest, Session } from "@opencode-ai/sdk/v2"
 
 export type MessageWithParts = { info: Message; parts: Part[] }
 export type AttentionNotification = {
@@ -54,6 +54,8 @@ export const oc = {
 
   providers: (directory: string): Promise<{ providers: any[]; default: Record<string, string> }> =>
     fetch(`/oc/config/providers?${q(directory)}`).then(json<{ providers: any[]; default: Record<string, string> }>),
+
+  agents: (directory: string): Promise<Agent[]> => fetch(`/oc/agent?${q(directory)}`).then(json<Agent[]>),
 
   prompt: async (
     session: Session,

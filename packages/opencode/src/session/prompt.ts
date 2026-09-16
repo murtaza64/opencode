@@ -46,6 +46,7 @@ import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Type
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
+import { SessionInput } from "./input"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
@@ -99,8 +100,27 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
   return part.state.status === "error" && part.state.metadata?.interrupted === true
 }
 
+const completedTurn = (
+  user: SessionV1.User | undefined,
+  assistant: SessionV1.Assistant | undefined,
+  parts: readonly SessionV1.Part[],
+  allowInterruptedTools = false,
+) => {
+  if (!user || !assistant || assistant.parentID !== user.id || assistant.error) return false
+  if (assistant.structured !== undefined) return true
+  if (!assistant.finish || ["tool-calls", "unknown"].includes(assistant.finish)) return false
+  // "stop" with tool calls still needs continuation, except legacy interrupted-orphan cleanup.
+  return !parts.some(
+    (part) =>
+      part.type === "tool" &&
+      !part.metadata?.providerExecuted &&
+      !(allowInterruptedTools && isOrphanedInterruptedTool(part)),
+  )
+}
+
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
+  readonly wake: (sessionID: SessionID) => Effect.Effect<void>
   readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts>
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
@@ -133,6 +153,7 @@ const layer = Layer.effect(
     const scope = yield* Scope.Scope
     const instruction = yield* Instruction.Service
     const state = yield* SessionRunState.Service
+    const inputs = yield* SessionInput.Service
     const revert = yield* SessionRevert.Service
     const summary = yield* SessionSummary.Service
     const sys = yield* SystemPrompt.Service
@@ -1083,6 +1104,8 @@ const layer = Layer.effect(
         const ctx = yield* InstanceState.context
         let structured: unknown
         let step = 0
+        let started = false
+        let boundary = true
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         while (true) {
@@ -1100,27 +1123,22 @@ const layer = Layer.effect(
           const lastAssistantMsg = msgs.findLast(
             (msg) => msg.info.role === "assistant" && msg.info.id === lastAssistant?.id,
           )
-          // Some providers return "stop" even when the assistant message contains
-          // tool calls. Keep the loop running so tool results can be sent back to
-          // the model, but ignore cleanup-marked interrupted orphans.
-          const hasToolCalls =
-            lastAssistantMsg?.parts.some(
-              (part) => part.type === "tool" && !part.metadata?.providerExecuted && !isOrphanedInterruptedTool(part),
-            ) ?? false
-
-          if (
-            lastAssistant?.finish &&
-            !["tool-calls"].includes(lastAssistant.finish) &&
-            !hasToolCalls &&
-            lastAssistant.parentID === lastUser.id
-          ) {
+          const idle = completedTurn(lastUser, lastAssistant, lastAssistantMsg?.parts ?? [], true)
+          const natural = completedTurn(lastUser, lastAssistant, lastAssistantMsg?.parts ?? [])
+          if (boundary && (!idle || natural) && (yield* inputs.promote(sessionID, idle))) {
+            step = 0
+            structured = undefined
+            boundary = false
+            continue
+          }
+          if (idle) {
             const orphan = lastAssistantMsg?.parts.find(
               (part): part is SessionV1.ToolPart => part.type === "tool" && isOrphanedInterruptedTool(part),
             )
             if (orphan) {
               yield* Effect.logWarning("loop exit with orphaned interrupted tool", {
                 "session.id": sessionID,
-                messageID: lastAssistant.id,
+                messageID: lastAssistant?.id,
                 tool: orphan.tool,
                 callID: orphan.callID,
               })
@@ -1130,19 +1148,21 @@ const layer = Layer.effect(
           }
 
           step++
-          if (step === 1)
+          if (!started)
             yield* title({
               session,
               modelID: lastUser.model.modelID,
               providerID: lastUser.model.providerID,
               history: msgs,
             }).pipe(Effect.ignore, Effect.forkIn(scope))
+          started = true
 
           const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
           const task = tasks.pop()
 
           if (task?.type === "subtask") {
             yield* handleSubtask({ task, model, lastUser, sessionID, session, msgs })
+            boundary = true
             continue
           }
 
@@ -1155,6 +1175,7 @@ const layer = Layer.effect(
               overflow: task.overflow,
             })
             if (result === "stop") break
+            boundary = true
             continue
           }
 
@@ -1285,13 +1306,7 @@ const layer = Layer.effect(
               toolChoice: format.type === "json_schema" ? "required" : undefined,
             })
 
-            if (structured !== undefined) {
-              handle.message.structured = structured
-              handle.message.finish = handle.message.finish ?? "stop"
-              yield* sessions.updateMessage(handle.message)
-              return "break" as const
-            }
-
+            if (result === "stop") return "break" as const
             const finished = handle.message.finish && !["tool-calls", "unknown"].includes(handle.message.finish)
             if (finished && !handle.message.error) {
               // Surface any content-filter finish (e.g. Anthropic stop_reason:
@@ -1306,7 +1321,7 @@ const layer = Layer.effect(
                 yield* events.publish(Session.Event.Error, { sessionID, error: handle.message.error })
                 return "break" as const
               }
-              if (format.type === "json_schema") {
+              if (format.type === "json_schema" && structured === undefined) {
                 handle.message.error = new SessionV1.StructuredOutputError({
                   message: "Model did not produce structured output",
                   retries: 0,
@@ -1316,7 +1331,13 @@ const layer = Layer.effect(
               }
             }
 
-            if (result === "stop") return "break" as const
+            if (structured !== undefined) {
+              handle.message.structured = structured
+              handle.message.finish = handle.message.finish ?? "stop"
+              yield* sessions.updateMessage(handle.message)
+              return "continue" as const
+            }
+
             if (result === "compact") {
               yield* compaction.create({
                 sessionID,
@@ -1332,6 +1353,7 @@ const layer = Layer.effect(
             Effect.onInterrupt(() => finalizeInterruptedAssistant),
           )
           if (outcome === "break") break
+          boundary = true
           continue
         }
 
@@ -1344,6 +1366,23 @@ const layer = Layer.effect(
       input: LoopInput,
     ) {
       return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID))
+    })
+
+    const wake = Effect.fn("SessionPrompt.wake")(function* (sessionID: SessionID) {
+      yield* state.wake(
+        sessionID,
+        Effect.gen(function* () {
+          const history = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
+            Effect.provideService(Database.Service, database),
+          )
+          const latest = MessageV2.latest(history)
+          const assistant = history.findLast((m) => m.info.id === latest.assistant?.id)
+          // An advisory wake never resumes uncertain work left by a crash, abort, or error.
+          if (latest.user && !completedTurn(latest.user, latest.assistant, assistant?.parts ?? [])) return
+          if (!(yield* inputs.promote(sessionID, true))) return
+          return yield* runLoop(sessionID)
+        }),
+      )
     })
 
     const shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError> = Effect.fn(
@@ -1481,6 +1520,7 @@ const layer = Layer.effect(
     })
 
     return Service.of({
+      wake,
       cancel,
       prompt,
       loop,
@@ -1618,6 +1658,7 @@ export const node = LayerNode.make({
     CrossSpawnSpawner.node,
     Instruction.node,
     SessionRunState.node,
+    SessionInput.node,
     SessionRevert.node,
     SessionSummary.node,
     SystemPrompt.node,

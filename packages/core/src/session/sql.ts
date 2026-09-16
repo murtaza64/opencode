@@ -79,6 +79,23 @@ export const MessageTable = sqliteTable(
   (table) => [index("message_session_time_created_id_idx").on(table.session_id, table.time_created, table.id)],
 )
 
+export const V1InputTable = sqliteTable(
+  "v1_session_input",
+  {
+    request_id: text().primaryKey(),
+    session_id: text()
+      .$type<SessionSchema.ID>()
+      .notNull()
+      .references(() => SessionTable.id, { onDelete: "cascade" }),
+    admitted_seq: integer().notNull(),
+    state: text().$type<SessionV1.InputReceipt["state"]>().notNull(),
+    payload: text({ mode: "json" }).$type<SessionV1.InputPayload>().notNull(),
+    model: text({ mode: "json" }).$type<SessionV1.User["model"]>().notNull(),
+    receipt: text({ mode: "json" }).$type<SessionV1.InputReceipt>().notNull(),
+  },
+  (table) => [index("v1_session_input_pending_idx").on(table.session_id, table.state, table.admitted_seq)],
+)
+
 export const PartTable = sqliteTable(
   "part",
   {

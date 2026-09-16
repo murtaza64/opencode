@@ -161,6 +161,8 @@ export const Definitions = {
   input_clear: keybind("ctrl+c", "Clear input field"),
   input_paste: keybind({ key: "ctrl+v", preventDefault: false }, "Paste from clipboard"),
   input_submit: keybind("return", "Submit input"),
+  "prompt.delivery.cycle": keybind("alt+m", "Cycle Aside / Queue / Steer"),
+  "session.request.focus": keybind("alt+g", "Switch between composer and human request"),
   input_newline: keybind("shift+return,ctrl+return,alt+return,ctrl+j", "Insert newline in input"),
   input_move_left: keybind("left,ctrl+b", "Move cursor left in input"),
   input_move_right: keybind("right,ctrl+f", "Move cursor right in input"),

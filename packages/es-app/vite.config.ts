@@ -21,13 +21,16 @@ const workerNo304: Plugin = {
 
 export default defineConfig({
   plugins: [solid(), tailwindcss(), workerNo304],
+  worker: {
+    format: "es",
+  },
   server: {
     port: 3100,
     // spike: proxy the daemon so the browser stays same-origin (CORS check
     // against :4096 direct is a later step)
     proxy: {
       "/oc": {
-        target: "http://127.0.0.1:4096",
+        target: process.env.OPENCODE_URL ?? "http://127.0.0.1:4096",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/oc/, ""),
       },

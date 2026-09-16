@@ -14,7 +14,6 @@ import {
   untrack,
   useContext,
 } from "solid-js"
-import { Dynamic } from "solid-js/web"
 import path from "node:path"
 import { mkdir, writeFile } from "node:fs/promises"
 import { useRoute, useRouteData } from "../../context/route"
@@ -40,7 +39,7 @@ import type {
 import { useLocal } from "../../context/local"
 import { Locale } from "../../util/locale"
 import { webSearchProviderLabel } from "../../util/tool-display"
-import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
+import { Dynamic, useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import { useSDK } from "../../context/sdk"
 import { useEditorContext } from "../../context/editor"
 import { openEditor } from "../../editor"
@@ -238,8 +237,20 @@ export function Session() {
     if (session()?.parentID) return []
     return children().flatMap((x) => sync.data.question[x.id] ?? [])
   })
-  const visible = createMemo(() => !session()?.parentID && permissions().length === 0 && questions().length === 0)
-  const disabled = createMemo(() => permissions().length > 0 || questions().length > 0)
+  const [composerFocus, setComposerFocus] = createSignal(true)
+  const humanPending = createMemo(() => permissions().length > 0 || questions().length > 0)
+  const visible = createMemo(() => !session()?.parentID)
+  const disabled = createMemo(() => humanPending() && !composerFocus())
+  const requestShortcut = useCommandShortcut("session.request.focus")
+  useBindings(() => ({
+    mode: composerFocus() || permissions().length || !questions().length ? OPENCODE_BASE_MODE : "question",
+    enabled: humanPending(),
+    bindings: tuiConfig.keybinds.get("session.request.focus"),
+  }))
+  const requestIdentity = createMemo(() =>
+    JSON.stringify([route.sessionID, permissions()[0]?.id ?? questions()[0]?.id]),
+  )
+  createEffect(on(requestIdentity, () => setComposerFocus(true)))
 
   const pending = createMemo(() => {
     const completed = messages().findLastIndex((message) => message.role === "assistant" && message.time.completed)
@@ -464,6 +475,25 @@ export function Session() {
   }
 
   const sessionCommandList = createMemo(() => [
+    {
+      title: "Switch composer / human request focus",
+      value: "session.request.focus",
+      category: "Session",
+      run: () => {
+        if (!humanPending() || dialog.stack.length) return
+        setComposerFocus((value) => !value)
+      },
+    },
+    {
+      title: "Ask a side question (Aside)",
+      value: "session.aside",
+      category: "Session",
+      run: () => {
+        setComposerFocus(true)
+        dialog.clear()
+        promptRef.current?.aside?.()
+      },
+    },
     {
       title: session()?.share?.url ? "Copy share link" : "Share session",
       value: "session.share",
@@ -1295,14 +1325,21 @@ export function Session() {
                 </For>
               </scrollbox>
               <box flexShrink={0}>
+                <Show when={humanPending()}>
+                  <text fg={theme.warning} onMouseUp={() => setComposerFocus((value) => !value)}>
+                    {`${requestShortcut()} ${composerFocus() ? "Review human request (still pending)" : "Compose Aside / Queue / Steer"}`}
+                  </text>
+                </Show>
                 <Show when={permissions().length > 0}>
                   <PermissionPrompt
+                    active={!composerFocus()}
                     request={permissions()[0]}
                     directory={sync.session.get(permissions()[0].sessionID)?.directory}
                   />
                 </Show>
                 <Show when={permissions().length === 0 && questions().length > 0}>
                   <QuestionPrompt
+                    active={!composerFocus()}
                     request={questions()[0]}
                     directory={sync.session.get(questions()[0].sessionID)?.directory}
                   />
@@ -1320,16 +1357,22 @@ export function Session() {
                     on_submit={toBottom}
                     ref={bind}
                   >
-                    <Prompt
-                      visible={visible()}
-                      ref={bind}
-                      disabled={disabled()}
-                      onSubmit={() => {
-                        toBottom()
-                      }}
-                      sessionID={route.sessionID}
-                      right={<pluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />}
-                    />
+                    <Show when={JSON.stringify([route.sessionID, session()?.directory, session()?.workspaceID])} keyed>
+                      {(_scope) => (
+                        <Prompt
+                          visible={visible()}
+                          ref={bind}
+                          disabled={disabled()}
+                          humanPending={humanPending()}
+                          onActivate={() => setComposerFocus(true)}
+                          onSubmit={() => {
+                            toBottom()
+                          }}
+                          sessionID={route.sessionID}
+                          right={<pluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />}
+                        />
+                      )}
+                    </Show>
                   </pluginRuntime.Slot>
                 </Show>
               </box>
@@ -1595,6 +1638,7 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
     // OpenRouter encrypts some reasoning blocks; drop the placeholder.
     return props.part.text.replace("[REDACTED]", "").trim()
   })
+  const opaque = createMemo(() => !content() && Boolean(props.part.metadata))
   // Reasoning is finalized when the server sets `time.end` (see processor.ts).
   // Flips independently of the parent message completing.
   const isDone = createMemo(() => props.part.time.end !== undefined)
@@ -1607,12 +1651,12 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
   const syntax = createSyntaxStyleMemo(() => generateSubtleSyntax(theme))
 
   const toggle = () => {
-    if (!inMinimal()) return
+    if (!inMinimal() || opaque()) return
     setExpanded((prev) => !prev)
   }
 
   return (
-    <Show when={content()}>
+    <Show when={content() || opaque()}>
       <box
         ref={(el: BoxRenderable) => alwaysSeparate.add(el)}
         paddingLeft={3}
@@ -1622,14 +1666,15 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
       >
         <box onMouseUp={toggle}>
           <ReasoningHeader
-            toggleable={inMinimal()}
+            toggleable={inMinimal() && !opaque()}
             open={!inMinimal() || expanded()}
             done={isDone()}
             title={summary().title}
             duration={isDone() ? Locale.duration(duration()) : undefined}
+            encrypted={opaque()}
           />
         </box>
-        <Show when={(!inMinimal() || expanded()) && summary().body}>
+        <Show when={!opaque() && (!inMinimal() || expanded()) && summary().body}>
           <box paddingLeft={inMinimal() ? 2 : 0} marginTop={1}>
             <code
               filetype="markdown"
@@ -1653,12 +1698,18 @@ function ReasoningHeader(props: {
   done: boolean
   title: string | null
   duration?: string
+  encrypted?: boolean
 }) {
   const { theme } = useTheme()
   const fg = () =>
     props.open
       ? RGBA.fromValues(theme.warning.r, theme.warning.g, theme.warning.b, theme.thinkingOpacity)
       : theme.warning
+  const completed = () => {
+    if (props.encrypted) return `Thought${props.duration ? ` · ${props.duration}` : ""}`
+    const detail = [props.title, props.duration].filter(Boolean).join(" · ")
+    return `${props.toggleable ? (props.open ? "- " : "+ ") : ""}Thought${detail ? `: ${detail}` : ""}`
+  }
 
   return (
     <Switch>
@@ -1669,22 +1720,7 @@ function ReasoningHeader(props: {
       </Match>
       <Match when={true}>
         <text fg={fg()} wrapMode="none">
-          <Show when={props.toggleable}>
-            <span>{props.open ? "- " : "+ "}</span>
-          </Show>
-          <span>Thought</span>
-          <Show when={props.title || props.duration}>
-            <span>: </span>
-          </Show>
-          <Show when={props.title}>
-            <span>{props.title}</span>
-          </Show>
-          <Show when={props.duration}>
-            <span>
-              {props.title ? " · " : ""}
-              {props.duration}
-            </span>
-          </Show>
+          {completed()}
         </text>
       </Match>
     </Switch>
@@ -1820,7 +1856,7 @@ function GenericTool(props: ToolProps) {
     <Show
       when={props.output && ctx.showGenericToolOutput()}
       fallback={
-        <InlineTool icon="⚙" pending="Writing command..." complete={true} part={props.part}>
+        <InlineTool icon="⚙" pending="Writing command…" complete={true} part={props.part}>
           {props.tool} {input(props.input)}
         </InlineTool>
       }
@@ -2102,7 +2138,7 @@ function Shell(props: ToolProps) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="$" pending="Writing command..." complete={stringValue(props.input.command)} part={props.part}>
+        <InlineTool icon="$" pending="Writing command…" complete={stringValue(props.input.command)} part={props.part}>
           {stringValue(props.input.command)}
         </InlineTool>
       </Match>
@@ -2134,12 +2170,7 @@ function Write(props: ToolProps) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool
-          icon="←"
-          pending="Preparing write..."
-          complete={stringValue(props.input.filePath)}
-          part={props.part}
-        >
+        <InlineTool icon="←" pending="Preparing write…" complete={stringValue(props.input.filePath)} part={props.part}>
           Write {pathFormatter.format(stringValue(props.input.filePath))}
         </InlineTool>
       </Match>
@@ -2150,7 +2181,7 @@ function Write(props: ToolProps) {
 function Glob(props: ToolProps) {
   const pathFormatter = usePathFormatter()
   return (
-    <InlineTool icon="✱" pending="Finding files..." complete={stringValue(props.input.pattern)} part={props.part}>
+    <InlineTool icon="✱" pending="Finding files…" complete={stringValue(props.input.pattern)} part={props.part}>
       Glob "{stringValue(props.input.pattern)}"{" "}
       <Show when={stringValue(props.input.path)}>in {pathFormatter.format(stringValue(props.input.path))} </Show>
       <Show when={numberValue(props.metadata.count)}>
@@ -2175,7 +2206,7 @@ function Read(props: ToolProps) {
     <>
       <InlineTool
         icon="→"
-        pending="Reading file..."
+        pending="Reading file…"
         complete={stringValue(props.input.filePath)}
         spinner={isRunning()}
         part={props.part}
@@ -2198,7 +2229,7 @@ function Read(props: ToolProps) {
 function Grep(props: ToolProps) {
   const pathFormatter = usePathFormatter()
   return (
-    <InlineTool icon="✱" pending="Searching content..." complete={stringValue(props.input.pattern)} part={props.part}>
+    <InlineTool icon="✱" pending="Searching content…" complete={stringValue(props.input.pattern)} part={props.part}>
       Grep "{stringValue(props.input.pattern)}"{" "}
       <Show when={stringValue(props.input.path)}>in {pathFormatter.format(stringValue(props.input.path))} </Show>
       <Show when={numberValue(props.metadata.matches)}>
@@ -2210,7 +2241,7 @@ function Grep(props: ToolProps) {
 
 function WebFetch(props: ToolProps) {
   return (
-    <InlineTool icon="%" pending="Fetching from the web..." complete={stringValue(props.input.url)} part={props.part}>
+    <InlineTool icon="%" pending="Fetching from the web…" complete={stringValue(props.input.url)} part={props.part}>
       WebFetch {stringValue(props.input.url)}
     </InlineTool>
   )
@@ -2218,7 +2249,7 @@ function WebFetch(props: ToolProps) {
 
 function WebSearch(props: ToolProps) {
   return (
-    <InlineTool icon="◈" pending="Searching web..." complete={stringValue(props.input.query)} part={props.part}>
+    <InlineTool icon="◈" pending="Searching web…" complete={stringValue(props.input.query)} part={props.part}>
       {webSearchProviderLabel(props.metadata.provider)} "{stringValue(props.input.query)}"{" "}
       <Show when={numberValue(props.metadata.numResults)}>({numberValue(props.metadata.numResults)} results)</Show>
     </InlineTool>
@@ -2308,7 +2339,7 @@ function Task(props: ToolProps) {
       color={retry() ? theme.error : undefined}
       spinner={isRunning()}
       complete={stringValue(props.input.description)}
-      pending="Delegating..."
+      pending="Delegating…"
       part={props.part}
       onClick={() => {
         if (sessionID()) {
@@ -2445,7 +2476,7 @@ function Edit(props: ToolProps) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="←" pending="Preparing edit..." complete={stringValue(props.input.filePath)} part={props.part}>
+        <InlineTool icon="←" pending="Preparing edit…" complete={stringValue(props.input.filePath)} part={props.part}>
           Edit {pathFormatter.format(stringValue(props.input.filePath))} {input({ replaceAll: props.input.replaceAll })}
         </InlineTool>
       </Match>
@@ -2521,7 +2552,7 @@ function ApplyPatch(props: ToolProps) {
         </For>
       </Match>
       <Match when={true}>
-        <InlineTool icon="%" pending="Preparing patch..." failure="Patch failed" complete={false} part={props.part}>
+        <InlineTool icon="%" pending="Preparing patch…" failure="Patch failed" complete={false} part={props.part}>
           Patch
         </InlineTool>
       </Match>
@@ -2541,14 +2572,8 @@ function TodoWrite(props: ToolProps) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool
-          icon="⚙"
-          pending="Updating todos..."
-          failure="Todo update failed"
-          complete={false}
-          part={props.part}
-        >
-          Updating todos...
+        <InlineTool icon="⚙" pending="Updating todos…" failure="Todo update failed" complete={false} part={props.part}>
+          Updating todos…
         </InlineTool>
       </Match>
     </Switch>
@@ -2583,7 +2608,7 @@ function Question(props: ToolProps) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="→" pending="Asking questions..." complete={count()} part={props.part}>
+        <InlineTool icon="→" pending="Asking questions…" complete={count()} part={props.part}>
           Asked {count()} question{count() !== 1 ? "s" : ""}
         </InlineTool>
       </Match>
@@ -2593,7 +2618,7 @@ function Question(props: ToolProps) {
 
 function Skill(props: ToolProps) {
   return (
-    <InlineTool icon="→" pending="Loading skill..." complete={stringValue(props.input.name)} part={props.part}>
+    <InlineTool icon="→" pending="Loading skill…" complete={stringValue(props.input.name)} part={props.part}>
       Skill "{stringValue(props.input.name)}"
     </InlineTool>
   )

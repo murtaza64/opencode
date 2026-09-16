@@ -6,9 +6,11 @@ import { Command } from "@/command"
 import { Permission } from "@/permission"
 import { SessionShare } from "@/share/session"
 import { Session } from "@/session/session"
+import { SessionAside } from "@/session/aside"
 import { SessionCompaction } from "@/session/compaction"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
+import { SessionInput } from "@/session/input"
 import { SessionRevert } from "@/session/revert"
 import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
@@ -36,7 +38,7 @@ import {
   SummarizePayload,
   UpdatePayload,
 } from "../groups/session"
-import { PermissionNotFoundError } from "../errors"
+import { AsideError, PermissionNotFoundError, ApiNotFoundError, ConflictError, InvalidRequestError } from "../errors"
 import * as SessionError from "./session-errors"
 
 const tryParseJson = (text: string) =>
@@ -48,8 +50,10 @@ const tryParseJson = (text: string) =>
 export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", (handlers) =>
   Effect.gen(function* () {
     const session = yield* Session.Service
+    const asideSvc = yield* SessionAside.Service
     const shareSvc = yield* SessionShare.Service
     const promptSvc = yield* SessionPrompt.Service
+    const inputs = yield* SessionInput.Service
     const revertSvc = yield* SessionRevert.Service
     const compactSvc = yield* SessionCompaction.Service
     const runState = yield* SessionRunState.Service
@@ -234,6 +238,25 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return true
     })
 
+    const aside = Effect.fn("SessionHttpApi.aside")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof SessionAside.Input.Type
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      return yield* asideSvc
+        .ask(ctx.params.sessionID, ctx.payload)
+        .pipe(Effect.mapError((error) => new AsideError({ message: error.message })))
+    })
+
+    const cancelAside = Effect.fn("SessionHttpApi.cancelAside")(function* (ctx: {
+      params: { sessionID: SessionID; requestID: string }
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      return yield* asideSvc
+        .cancel(ctx.params.sessionID, ctx.params.requestID)
+        .pipe(Effect.mapError((error) => new AsideError({ message: error.message })))
+    })
+
     const init = Effect.fn("SessionHttpApi.init")(function* (ctx: {
       params: { sessionID: SessionID }
       payload: typeof InitPayload.Type
@@ -411,6 +434,50 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     return handlers
+      .handle("admitInput", (ctx) =>
+        Effect.gen(function* () {
+          yield* requireSession(ctx.params.sessionID)
+          const receipt = yield* inputs.admit(ctx.params.sessionID, ctx.payload).pipe(
+            Effect.catchTags({
+              InputConflict: (error) => new ConflictError({ message: error.message }),
+              InputInvalid: (error) => new InvalidRequestError({ message: error.message }),
+            }),
+          )
+          if (receipt.state === "pending") yield* promptSvc.wake(ctx.params.sessionID)
+          return receipt
+        }),
+      )
+      .handle("listInputs", (ctx) =>
+        Effect.gen(function* () {
+          yield* requireSession(ctx.params.sessionID)
+          return yield* inputs.list(ctx.params.sessionID, ctx.query)
+        }),
+      )
+      .handle("getInput", (ctx) =>
+        Effect.gen(function* () {
+          yield* requireSession(ctx.params.sessionID)
+          return yield* inputs
+            .get(ctx.params.sessionID, ctx.params.requestID)
+            .pipe(
+              Effect.catchTag(
+                "InputMissing",
+                (error) => new ApiNotFoundError({ name: "NotFoundError", data: { message: error.message } }),
+              ),
+            )
+        }),
+      )
+      .handle("cancelInput", (ctx) =>
+        Effect.gen(function* () {
+          yield* requireSession(ctx.params.sessionID)
+          return yield* inputs.cancel(ctx.params.sessionID, ctx.params.requestID).pipe(
+            Effect.catchTags({
+              InputConflict: (error) => new ConflictError({ message: error.message }),
+              InputMissing: (error) =>
+                new ApiNotFoundError({ name: "NotFoundError", data: { message: error.message } }),
+            }),
+          )
+        }),
+      )
       .handle("list", list)
       .handle("status", status)
       .handle("get", get)
@@ -424,6 +491,8 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("update", update)
       .handleRaw("fork", forkRaw)
       .handle("abort", abort)
+      .handle("aside", aside)
+      .handle("cancelAside", cancelAside)
       .handle("init", init)
       .handle("share", share)
       .handle("unshare", unshare)

@@ -1,5 +1,5 @@
 import { createStore } from "solid-js/store"
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { useRenderer } from "@opentui/solid"
 import type { TextareaRenderable } from "@opentui/core"
 import { selectedForeground, tint, useTheme } from "../../context/theme"
@@ -11,7 +11,7 @@ import { useBindings, useOpencodeModeStack } from "../../keymap"
 
 const QUESTION_MODE = "question"
 
-export function QuestionPrompt(props: { request: QuestionRequest; directory?: string }) {
+export function QuestionPrompt(props: { request: QuestionRequest; directory?: string; active?: boolean }) {
   const sdk = useSDK()
   const { theme } = useTheme()
   const renderer = useRenderer()
@@ -46,6 +46,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
   })
 
   function submit() {
+    if (props.active === false) return
     const answers = questions().map((_, i) => store.answers[i] ?? [])
     void sdk.client.question.reply({
       requestID: props.request.id,
@@ -55,6 +56,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
   }
 
   function reject() {
+    if (props.active === false) return
     void sdk.client.question.reject({
       requestID: props.request.id,
       directory: props.directory,
@@ -103,6 +105,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
   }
 
   function selectOption() {
+    if (props.active === false) return
     if (other()) {
       if (!multi()) {
         setStore("editing", true)
@@ -125,14 +128,19 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
     pick(opt.label)
   }
 
-  onMount(() => {
+  createEffect(() => {
+    if (props.active === false) {
+      textarea?.blur()
+      return
+    }
     const popMode = modeStack.push(QUESTION_MODE)
+    if (store.editing) textarea?.focus()
     onCleanup(popMode)
   })
 
   useBindings(() => ({
     mode: QUESTION_MODE,
-    enabled: store.editing && !confirm(),
+    enabled: props.active !== false && store.editing && !confirm(),
     commands: [
       {
         name: "prompt.clear",
@@ -213,7 +221,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
 
     return {
       mode: QUESTION_MODE,
-      enabled: !store.editing,
+      enabled: props.active !== false && !store.editing,
       commands: [
         {
           name: "app.exit",
@@ -287,6 +295,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
 
   return (
     <box
+      visible={props.active !== false}
       backgroundColor={theme.backgroundPanel}
       border={["left"]}
       borderColor={theme.accent}
@@ -429,7 +438,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
                           textarea = val
                           val.traits = { status: "ANSWER" }
                           queueMicrotask(() => {
-                            val.focus()
+                            if (props.active !== false && !val.isDestroyed) val.focus()
                             val.gotoLineEnd()
                           })
                         }}

@@ -58,6 +58,8 @@ import { usePromptMove } from "./move"
 import { usePluginRuntime } from "../../plugin/runtime" // fork(session-umbrella)
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
+import { ComposerDelivery, ComposerModes, useComposerDelivery } from "./delivery"
+import { DialogAgent } from "../dialog-agent"
 
 registerOpencodeSpinner()
 
@@ -65,6 +67,8 @@ export type PromptProps = {
   sessionID?: string
   visible?: boolean
   disabled?: boolean
+  humanPending?: boolean
+  onActivate?: () => void
   onSubmit?: () => void
   ref?: (ref: PromptRef | undefined) => void
   hint?: JSX.Element
@@ -95,6 +99,8 @@ export type PromptRef = {
   blur(): void
   focus(): void
   submit(): void
+  aside?(): void
+  agent?: { select(): void; cycle(direction: 1 | -1): void }
 }
 
 const money = new Intl.NumberFormat("en-US", {
@@ -139,11 +145,10 @@ function formatEditorContext(selection: EditorSelection) {
   return `<system-reminder>${ranges.join("\n")} This may or may not be relevant to the current task.</system-reminder>\n`
 }
 
-let stashed: { prompt: PromptInfo; cursor: number } | undefined
-
 export function Prompt(props: PromptProps) {
   let input: TextareaRenderable
   let anchor: BoxRenderable
+  let selectingAgent = false
   const [inputTarget, setInputTarget] = createSignal<TextareaRenderable | undefined>()
 
   const leader = useLeaderActive()
@@ -300,6 +305,64 @@ export function Prompt(props: PromptProps) {
     interrupt: 0,
   })
 
+  const [acceptedModelChoice, setAcceptedModelChoice] = createSignal<string>()
+  const sessionModel = createMemo(() => {
+    const model = props.sessionID ? sync.session.get(props.sessionID)?.model : undefined
+    return model
+      ? { providerID: model.providerID, modelID: model.id, variant: model.variant }
+      : lastUserMessage()?.model
+  })
+  const modelChoice = () =>
+    JSON.stringify([props.sessionID, sessionModel(), local.model.current(), local.model.variant.current()])
+  const modelOverride = createMemo(() => {
+    const actual = sessionModel()
+    const selected = local.model.current()
+    return (
+      !!actual &&
+      !!selected &&
+      (actual.providerID !== selected.providerID ||
+        actual.modelID !== selected.modelID ||
+        (actual.variant ?? "default") !== (local.model.variant.current() ?? "default")) &&
+      acceptedModelChoice() !== modelChoice()
+    )
+  })
+  const useSessionModel = () => setAcceptedModelChoice(modelChoice())
+  const delivery = useComposerDelivery({
+    sessionID: props.sessionID,
+    directory: props.sessionID ? (sync.session.get(props.sessionID)?.directory ?? sdk.directory) : sdk.directory,
+    workspace: props.sessionID ? sync.session.get(props.sessionID)?.workspaceID : undefined,
+    busy: () => status().type !== "idle" || !!props.humanPending,
+    read: () => {
+      if (input && !input.isDestroyed && input.plainText !== store.prompt.input) {
+        setStore("prompt", "input", input.plainText)
+        syncExtmarksWithPromptParts()
+      }
+      return { prompt: structuredClone(unwrap(store.prompt)), cursor: input?.cursorOffset ?? 0 }
+    },
+    write: (buffer) => {
+      input.setText(buffer.prompt.input)
+      setStore("prompt", structuredClone(unwrap(buffer.prompt)))
+      restoreExtmarksFromParts(buffer.prompt.parts)
+      input.cursorOffset = buffer.cursor
+    },
+    unsupported: () => {
+      const session = props.sessionID ? sync.session.get(props.sessionID) : undefined
+      if (session?.workspaceID && project.workspace.status(session.workspaceID) !== "connected")
+        return "Workspace disconnected; draft saved."
+      if (store.mode === "shell") return "Exit shell mode before sending; draft saved."
+      if (store.prompt.parts.some((part) => part.type !== "text"))
+        return "Text only. Remove attachments or mentions to send; draft saved."
+      if (editorContext()) return "Editor context is unsupported. Remove it explicitly to send."
+      if (modelOverride()) return "Model choice saved for normal Send. This mode uses the active session's model."
+    },
+  })
+  createEffect(
+    on(
+      () => delivery.state.mode,
+      () => setStore("interrupt", 0),
+    ),
+  )
+
   createEffect(
     on(
       () => props.sessionID,
@@ -336,6 +399,65 @@ export function Prompt(props: PromptProps) {
 
   const promptCommands = createMemo(() =>
     [
+      {
+        title: "Use session model for this message",
+        name: "prompt.delivery.session_model",
+        category: "Prompt",
+        enabled: delivery.state.mode !== "send" && modelOverride(),
+        run: () => {
+          dialog.clear()
+          useSessionModel()
+        },
+      },
+      {
+        title: "Check task input acknowledgement",
+        name: "prompt.delivery.reconcile",
+        category: "Prompt",
+        enabled: !!delivery.state.transaction,
+        run: () => {
+          dialog.clear()
+          void delivery.reconcile()
+        },
+      },
+      {
+        title: "Retry the same saved task input",
+        name: "prompt.delivery.retry",
+        category: "Prompt",
+        enabled: !!delivery.state.transaction && !delivery.state.sending,
+        run: () => {
+          dialog.clear()
+          void delivery.retry()
+        },
+      },
+      {
+        title: "Refresh pending task inputs",
+        name: "prompt.delivery.refresh",
+        category: "Prompt",
+        enabled: !!props.sessionID,
+        run: () => {
+          dialog.clear()
+          void delivery.refresh()
+        },
+      },
+      ...delivery.rows().map((row) => ({
+        title: `Cancel ${row.delivery}: ${row.text.slice(0, 60)}`,
+        name: `prompt.delivery.cancel.${row.requestID}`,
+        category: "Pending Inputs",
+        run: () => {
+          dialog.clear()
+          void delivery.cancelInput(row.requestID)
+        },
+      })),
+      {
+        title: "Cycle message delivery mode",
+        name: "prompt.delivery.cycle",
+        category: "Prompt",
+        enabled: !!props.sessionID,
+        run: () => {
+          if (!input.focused || auto()?.visible || dialog.stack.length) return
+          delivery.cycle()
+        },
+      },
       {
         title: "Clear prompt",
         name: "prompt.clear",
@@ -396,10 +518,14 @@ export function Prompt(props: PromptProps) {
         name: "session.interrupt",
         category: "Session",
         hidden: true,
-        enabled: status().type !== "idle",
+        enabled: status().type !== "idle" || delivery.state.mode === "aside" || delivery.asideBusy(),
         run: () => {
           if (auto()?.visible) return
           if (!input.focused) return
+          if (delivery.state.mode === "aside" || delivery.asideBusy()) {
+            delivery.closeAside()
+            return
+          }
           // TODO: this should be its own command
           if (store.mode === "shell") {
             setStore("mode", "normal")
@@ -569,6 +695,7 @@ export function Prompt(props: PromptProps) {
     mode: OPENCODE_BASE_MODE,
     bindings: tuiConfig.keybinds.gather("prompt.palette", [
       "prompt.submit",
+      "prompt.delivery.cycle",
       "prompt.editor",
       "prompt.editor_context.clear",
       "prompt.stash",
@@ -612,31 +739,43 @@ export function Prompt(props: PromptProps) {
     submit() {
       void submit()
     },
+    aside() {
+      delivery.select("aside")
+    },
+    agent: {
+      select() {
+        if (props.disabled || delivery.state.mode === "aside" || delivery.state.mode === "steer") return
+        const selection =
+          delivery.state.mode === "queue" ? { current: agentName(), select: delivery.chooseAgent } : undefined
+        dialog.replace(
+          () => <DialogAgent selection={selection} />,
+          () => {
+            selectingAgent = false
+          },
+        )
+        selectingAgent = true
+      },
+      cycle(direction) {
+        if (props.disabled || !input.focused || auto()?.visible || dialog.stack.length) return
+        if (delivery.state.mode === "send") return local.agent.move(direction)
+        if (delivery.state.mode !== "queue") return
+        const agents = local.agent.list()
+        if (!agents.length) return
+        const current = agents.findIndex((agent) => agent.name === agentName())
+        delivery.chooseAgent(agents[(current + direction + agents.length) % agents.length].name)
+      },
+    },
   }
 
-  onMount(() => {
-    const saved = stashed
-    stashed = undefined
-    if (store.prompt.input) return
-    if (saved && saved.prompt.input) {
-      input.setText(saved.prompt.input)
-      setStore("prompt", saved.prompt)
-      restoreExtmarksFromParts(saved.prompt.parts)
-      input.cursorOffset = saved.cursor
-    }
-  })
-
   onCleanup(() => {
-    if (store.prompt.input) {
-      stashed = { prompt: unwrap(store.prompt), cursor: input.cursorOffset }
-    }
+    if (selectingAgent) dialog.clear()
     setInputTarget(undefined)
     props.ref?.(undefined)
   })
 
   createEffect(() => {
     if (!input || input.isDestroyed) return
-    if (props.visible === false || dialog.stack.length > 0) {
+    if (props.visible === false || props.disabled || dialog.stack.length > 0) {
       if (input.focused) input.blur()
       return
     }
@@ -960,6 +1099,18 @@ export function Prompt(props: PromptProps) {
     if (workspace.creating() || move.creating()) return false
     if (auto()?.visible) return false
     if (!store.prompt.input) return false
+    if (delivery.state.mode === "send" && delivery.state.transaction) return false
+    if (delivery.state.mode !== "send") {
+      const text = expandTrackedPastedText(
+        store.prompt.input,
+        input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
+          const index = store.extmarkToPartIndex.get(extmark.id)
+          const part = index === undefined ? undefined : store.prompt.parts[index]
+          return part?.type === "text" ? [{ start: extmark.start, end: extmark.end, text: part.text }] : []
+        }),
+      )
+      return delivery.submit(text)
+    }
     const agent = local.agent.current()
     if (!agent) return false
     const trimmed = store.prompt.input.trim()
@@ -1287,12 +1438,21 @@ export function Prompt(props: PromptProps) {
     setStore("extmarkToPartIndex", new Map())
   }
 
+  const agentName = createMemo(() =>
+    delivery.state.mode === "send"
+      ? local.agent.current()?.name
+      : delivery.state.mode === "queue" && delivery.state.queueAgent
+        ? delivery.state.queueAgent
+        : props.sessionID
+          ? sync.session.get(props.sessionID)?.agent
+          : undefined,
+  )
   const highlight = createMemo(() => {
     if (leader()) return theme.border
     if (store.mode === "shell") return theme.primary
-    const agent = local.agent.current()
+    const agent = agentName()
     if (!agent) return theme.border
-    return local.agent.color(agent.name)
+    return local.agent.color(agent)
   })
 
   const showVariant = createMemo(() => {
@@ -1302,7 +1462,7 @@ export function Prompt(props: PromptProps) {
     return !!current
   })
 
-  const agentMetaAlpha = createFadeIn(() => !!local.agent.current(), animationsEnabled)
+  const agentMetaAlpha = createFadeIn(() => delivery.state.mode !== "send" || !!agentName(), animationsEnabled)
   const modelMetaAlpha = createFadeIn(() => !!local.agent.current() && store.mode === "normal", animationsEnabled)
   const variantMetaAlpha = createFadeIn(
     () => !!local.agent.current() && store.mode === "normal" && showVariant(),
@@ -1312,21 +1472,26 @@ export function Prompt(props: PromptProps) {
 
   const placeholderText = createMemo(() => {
     if (props.showPlaceholder === false) return undefined
+    if (delivery.state.mode === "aside") return "Ask a snapshot question (task draft saved)"
+    if (delivery.state.mode === "queue") return "Queue for after the current task"
+    if (delivery.state.mode === "steer") return "Steer at the next safe boundary"
     if (store.mode === "shell") {
       if (!shell().length) return undefined
       const example = shell()[store.placeholder % shell().length]
-      return `Run a command... "${example}"`
+      return `Run a command… "${example}"`
     }
     if (!list().length) return undefined
-    return `Ask anything... "${list()[store.placeholder % list().length]}"`
+    return `Ask anything… "${list()[store.placeholder % list().length]}"`
   })
 
   const spinnerDef = createMemo(() => {
     const agent =
-      status().type !== "idle"
-        ? (local.agent.list().find((a) => a.name === lastUserMessage()?.agent) ?? local.agent.current())
-        : local.agent.current()
-    const color = agent ? local.agent.color(agent.name) : theme.border
+      delivery.state.mode !== "send"
+        ? agentName()
+        : status().type !== "idle"
+          ? (local.agent.list().find((a) => a.name === lastUserMessage()?.agent) ?? local.agent.current())?.name
+          : local.agent.current()?.name
+    const color = agent ? local.agent.color(agent) : theme.border
     return {
       frames: createFrames({
         color,
@@ -1350,6 +1515,7 @@ export function Prompt(props: PromptProps) {
   return (
     <>
       <box ref={(r: BoxRenderable) => (anchor = r)} visible={props.visible !== false} width="100%">
+        <ComposerDelivery controller={delivery} />
         <box
           width="100%"
           border={["left"]}
@@ -1381,6 +1547,7 @@ export function Prompt(props: PromptProps) {
                 setStore("prompt", "input", value)
                 auto()?.onInput(value)
                 syncExtmarksWithPromptParts()
+                delivery.save()
                 setCursorVersion((value) => value + 1)
               }}
               onCursorChange={() => setCursorVersion((value) => value + 1)}
@@ -1437,24 +1604,53 @@ export function Prompt(props: PromptProps) {
                   if (tuiConfig.cursor) input.cursorStyle = tuiConfig.cursor
                 }, 0)
               }}
-              onMouseDown={(r: MouseEvent) => r.target?.focus()}
+              onMouseDown={(r: MouseEvent) => {
+                props.onActivate?.()
+                r.target?.focus()
+              }}
               focusedBackgroundColor={theme.backgroundElement}
               cursorColor={props.disabled ? theme.backgroundElement : theme.text}
               cursorStyle={tuiConfig.cursor}
               syntaxStyle={syntax()}
             />
-            <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="space-between">
-              <box flexDirection="row" gap={1}>
-                <Show when={local.agent.current()} fallback={<box height={1} />}>
+            <box
+              id="prompt-footer"
+              flexDirection="row"
+              flexShrink={0}
+              paddingTop={1}
+              gap={1}
+              justifyContent="space-between"
+              flexWrap="wrap"
+            >
+              <box flexDirection="row" gap={1} flexWrap="wrap">
+                <Show
+                  when={agentName() ?? (delivery.state.mode !== "send" ? "session agent" : undefined)}
+                  fallback={<box height={1} />}
+                >
                   {(agent) => (
                     <>
-                      <text fg={fadeColor(highlight(), agentMetaAlpha())}>
-                        {store.mode === "shell" ? "Shell" : Locale.titlecase(agent().name)}
+                      <text
+                        id="composer-agent"
+                        fg={fadeColor(highlight(), agentMetaAlpha())}
+                        onMouseUp={() => {
+                          if (renderer.getSelection()?.getSelectedText()) return
+                          if (delivery.state.mode === "aside" || delivery.state.mode === "steer") return
+                          props.onActivate?.()
+                          ref.agent?.select()
+                        }}
+                      >
+                        {store.mode === "shell"
+                          ? "Shell"
+                          : Locale.truncateMiddle(
+                              Locale.titlecase(agent()),
+                              Math.max(8, Math.min(20, dimensions().width - 40)),
+                            )}
+                        {delivery.state.mode === "aside" || delivery.state.mode === "steer" ? " active" : " >"}
                       </text>
                       <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
                         <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>auto</text>
                       </Show>
-                      <Show when={store.mode === "normal"}>
+                      <Show when={store.mode === "normal" && delivery.state.mode === "send"}>
                         <box flexDirection="row" gap={1}>
                           <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
                           <text
@@ -1477,6 +1673,11 @@ export function Prompt(props: PromptProps) {
                     </>
                   )}
                 </Show>
+                <ComposerModes
+                  controller={delivery}
+                  busy={status().type !== "idle" || !!props.humanPending}
+                  activate={props.onActivate}
+                />
               </box>
               <Show when={hasRightContent()}>
                 <box flexDirection="row" gap={1} alignItems="center">
@@ -1484,6 +1685,21 @@ export function Prompt(props: PromptProps) {
                 </box>
               </Show>
             </box>
+            <Show when={delivery.state.mode !== "send" && delivery.blocked()}>
+              <text fg={theme.warning}>{delivery.blocked()}</text>
+              <Show when={modelOverride()}>
+                <text
+                  id="composer-session-model"
+                  fg={theme.primary}
+                  onMouseUp={() => {
+                    if (renderer.getSelection()?.getSelectedText()) return
+                    useSessionModel()
+                  }}
+                >
+                  Use session model
+                </text>
+              </Show>
+            </Show>
           </box>
         </box>
         <box
@@ -1539,7 +1755,7 @@ export function Prompt(props: PromptProps) {
                         if (!r) return
                         if (r.message.includes("exceeded your current quota") && r.message.includes("gemini"))
                           return "gemini is way too hot right now"
-                        if (r.message.length > 80) return r.message.slice(0, 80) + "..."
+                        if (r.message.length > 80) return r.message.slice(0, 80) + "…"
                         return r.message
                       })
                       const isTruncated = createMemo(() => {
@@ -1586,10 +1802,20 @@ export function Prompt(props: PromptProps) {
                     })()}
                   </box>
                 </box>
-                <text fg={store.interrupt > 0 ? theme.primary : theme.text}>
-                  esc{" "}
+                <text
+                  fg={store.interrupt > 0 ? theme.primary : theme.text}
+                  onMouseUp={() => {
+                    if (renderer.getSelection()?.getSelectedText()) return
+                    if (props.sessionID) void sdk.client.session.abort({ sessionID: props.sessionID })
+                  }}
+                >
+                  {delivery.state.mode === "aside" ? "stop parent" : "esc "}
                   <span style={{ fg: store.interrupt > 0 ? theme.primary : theme.textMuted }}>
-                    {store.interrupt > 0 ? "again to interrupt" : "interrupt"}
+                    {delivery.state.mode === "aside"
+                      ? ""
+                      : store.interrupt > 0
+                        ? "again to stop parent"
+                        : "stop parent"}
                   </span>
                 </text>
               </box>
@@ -1646,7 +1872,7 @@ export function Prompt(props: PromptProps) {
             </Match>
             <Match when={true}>
               {props.hint ?? (
-                <Show when={props.sessionID}>
+                <Show when={props.sessionID} fallback={<text />}>
                   <box marginLeft={1}>
                     <text fg={theme.textMuted}>{location()?.directory ?? paths.cwd}</text>
                   </box>
@@ -1675,7 +1901,7 @@ export function Prompt(props: PromptProps) {
                         </text>
                       )}
                     </Match>
-                    <Match when={true}>
+                    <Match when={delivery.state.mode === "send"}>
                       <text fg={theme.text}>
                         {agentShortcut()} <span style={{ fg: theme.textMuted }}>agents</span>
                       </text>

@@ -3,6 +3,7 @@ import { Permission } from "@/permission"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 
 import { Session } from "@/session/session"
+import { SessionAside } from "@/session/aside"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionRevert } from "@/session/revert"
@@ -20,7 +21,14 @@ import {
   WorkspaceRoutingQuery,
   WorkspaceRoutingQueryFields,
 } from "../middleware/workspace-routing"
-import { ApiNotFoundError, PermissionNotFoundError, SessionBusyError } from "../errors"
+import {
+  ApiNotFoundError,
+  AsideError,
+  PermissionNotFoundError,
+  SessionBusyError,
+  ConflictError,
+  InvalidRequestError,
+} from "../errors"
 import { described } from "./metadata"
 import { QueryBoolean } from "./query"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -46,6 +54,14 @@ export const MessagesQuery = Schema.Struct({
   before: Schema.optional(Schema.String),
 })
 export const StatusMap = Schema.Record(Schema.String, SessionStatus.Info)
+export const InputsQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  state: Schema.optional(Schema.Literals(["pending", "promoted", "cancelled", "all"])),
+  after: Schema.optional(Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
+  limit: Schema.optional(
+    Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 1000 })),
+  ),
+})
 export const UpdatePayload = Schema.Struct({
   title: Schema.optional(Schema.String),
   metadata: Schema.optional(Session.Metadata),
@@ -89,6 +105,8 @@ export const SessionPaths = {
   update: `${root}/:sessionID`,
   fork: `${root}/:sessionID/fork`,
   abort: `${root}/:sessionID/abort`,
+  aside: `${root}/:sessionID/aside`,
+  cancelAside: `${root}/:sessionID/aside/:requestID`,
   share: `${root}/:sessionID/share`,
   init: `${root}/:sessionID/init`,
   summarize: `${root}/:sessionID/summarize`,
@@ -108,6 +126,39 @@ export const SessionApi = HttpApi.make("session")
   .add(
     HttpApiGroup.make("session")
       .add(
+        HttpApiEndpoint.post("admitInput", `${root}/:sessionID/input`, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: SessionV1.InputPayload,
+          success: SessionV1.InputReceipt,
+          error: [ApiNotFoundError, ConflictError, InvalidRequestError, HttpApiError.BadRequest],
+        }).annotateMerge(
+          OpenApi.annotations({ identifier: "session.input.admit", summary: "Admit durable session input" }),
+        ),
+        HttpApiEndpoint.get("listInputs", `${root}/:sessionID/input`, {
+          params: { sessionID: SessionID },
+          query: InputsQuery,
+          success: Schema.Struct({ items: Schema.Array(SessionV1.InputReceipt), next: Schema.NullOr(Schema.Number) }),
+          error: [ApiNotFoundError, InvalidRequestError, HttpApiError.BadRequest],
+        }).annotateMerge(
+          OpenApi.annotations({ identifier: "session.input.list", summary: "List session input receipts" }),
+        ),
+        HttpApiEndpoint.get("getInput", `${root}/:sessionID/input/:requestID`, {
+          params: { sessionID: SessionID, requestID: Schema.String },
+          query: WorkspaceRoutingQuery,
+          success: SessionV1.InputReceipt,
+          error: [ApiNotFoundError, InvalidRequestError, HttpApiError.BadRequest],
+        }).annotateMerge(
+          OpenApi.annotations({ identifier: "session.input.get", summary: "Get session input receipt" }),
+        ),
+        HttpApiEndpoint.delete("cancelInput", `${root}/:sessionID/input/:requestID`, {
+          params: { sessionID: SessionID, requestID: Schema.String },
+          query: WorkspaceRoutingQuery,
+          success: SessionV1.InputReceipt,
+          error: [ApiNotFoundError, ConflictError, InvalidRequestError, HttpApiError.BadRequest],
+        }).annotateMerge(
+          OpenApi.annotations({ identifier: "session.input.cancel", summary: "Cancel pending session input" }),
+        ),
         HttpApiEndpoint.get("list", SessionPaths.list, {
           query: ListQuery,
           success: described(Schema.Array(Session.Info), "List of sessions"),
@@ -248,6 +299,33 @@ export const SessionApi = HttpApi.make("session")
             identifier: "session.fork",
             summary: "Fork session",
             description: "Create a new session by forking an existing session at a specific message point.",
+          }),
+        ),
+        HttpApiEndpoint.post("aside", SessionPaths.aside, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: SessionAside.Input,
+          success: described(SessionAside.Result, "Ephemeral snapshot answer"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError, AsideError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.aside",
+            summary: "Ask an Aside",
+            description:
+              "Answer a tool-free question from a frozen session snapshot without modifying the session. Results are not stored; only simultaneous duplicate IDs are rejected. Cancelled IDs are blocked for 60 seconds. Use a fresh request ID for a new attempt.",
+          }),
+        ),
+        HttpApiEndpoint.delete("cancelAside", SessionPaths.cancelAside, {
+          params: { sessionID: SessionID, requestID: SessionAside.RequestID },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Boolean, "Whether an active Aside was found"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError, AsideError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.cancelAside",
+            summary: "Cancel an Aside",
+            description:
+              "Cancel only this ephemeral Aside. Returns true if active, false otherwise. Both outcomes block this session/request ID for 60 seconds, including cancellation before the ask arrives. Records are instance-local, bounded, and lost on restart or instance disposal.",
           }),
         ),
         HttpApiEndpoint.post("abort", SessionPaths.abort, {

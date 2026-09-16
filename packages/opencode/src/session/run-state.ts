@@ -11,6 +11,7 @@ import { SessionStatus } from "./status"
 export interface Interface {
   readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
+  readonly wake: (sessionID: SessionID, work: Effect.Effect<SessionV1.WithParts | undefined>) => Effect.Effect<void>
   readonly ensureRunning: (
     sessionID: SessionID,
     onInterrupt: Effect.Effect<SessionV1.WithParts>,
@@ -25,6 +26,7 @@ export interface Interface {
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionRunState") {}
+const noAdvisoryWork = Symbol("noAdvisoryWork")
 
 const layer = Layer.effect(
   Service,
@@ -35,7 +37,7 @@ const layer = Layer.effect(
     const state = yield* InstanceState.make(
       Effect.fn("SessionRunState.state")(function* () {
         const scope = yield* Scope.Scope
-        const runners = new Map<SessionID, Runner.Runner<SessionV1.WithParts>>()
+        const runners = new Map<SessionID, Runner.Runner<SessionV1.WithParts | typeof noAdvisoryWork | undefined>>()
         yield* Effect.addFinalizer(
           Effect.fnUntraced(function* () {
             yield* Effect.forEach(runners.values(), (runner) => runner.cancel, {
@@ -51,16 +53,14 @@ const layer = Layer.effect(
 
     const runner = Effect.fn("SessionRunState.runner")(function* (
       sessionID: SessionID,
-      onInterrupt: Effect.Effect<SessionV1.WithParts>,
+      onInterrupt: Effect.Effect<SessionV1.WithParts | undefined>,
     ) {
       const data = yield* InstanceState.get(state)
       const existing = data.runners.get(sessionID)
       if (existing) return existing
-      const next = Runner.make<SessionV1.WithParts>(data.scope, {
-        onIdle: Effect.gen(function* () {
-          data.runners.delete(sessionID)
-          yield* status.set(sessionID, { type: "idle" })
-        }),
+      const next = Runner.make<SessionV1.WithParts | typeof noAdvisoryWork | undefined>(data.scope, {
+        // Retain the owner while callers may still hold it across cancellation cleanup.
+        onIdle: status.set(sessionID, { type: "idle" }),
         onBusy: status.set(sessionID, { type: "busy" }),
         onInterrupt,
       })
@@ -90,7 +90,20 @@ const layer = Layer.effect(
       onInterrupt: Effect.Effect<SessionV1.WithParts>,
       work: Effect.Effect<SessionV1.WithParts>,
     ) {
-      return yield* (yield* runner(sessionID, onInterrupt)).ensureRunning(work)
+      const owner = yield* runner(sessionID, onInterrupt)
+      while (true) {
+        const result = yield* owner.ensureRunning(work)
+        if (result === noAdvisoryWork) continue
+        return result ?? (yield* onInterrupt)
+      }
+    })
+
+    const wake = Effect.fn("SessionRunState.wake")(function* (
+      sessionID: SessionID,
+      work: Effect.Effect<SessionV1.WithParts | undefined>,
+    ) {
+      const owner = yield* runner(sessionID, Effect.succeed(undefined))
+      yield* owner.wake(work.pipe(Effect.map((result) => result ?? noAdvisoryWork)))
     })
 
     const startShell = Effect.fn("SessionRunState.startShell")(function* (
@@ -99,12 +112,14 @@ const layer = Layer.effect(
       work: Effect.Effect<SessionV1.WithParts>,
       ready?: Latch.Latch,
     ) {
-      return yield* (yield* runner(sessionID, onInterrupt))
+      const owner = yield* runner(sessionID, onInterrupt)
+      const result = yield* owner
         .startShell(work, ready)
         .pipe(Effect.catchTag("RunnerBusy", () => Effect.fail(busyError(sessionID))))
+      return result === noAdvisoryWork || result === undefined ? yield* onInterrupt : result
     })
 
-    return Service.of({ assertNotBusy, cancel, ensureRunning, startShell })
+    return Service.of({ assertNotBusy, cancel, ensureRunning, startShell, wake })
   }),
 )
 

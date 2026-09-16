@@ -48,6 +48,9 @@ export type Event =
   | EventSessionNextRevertStaged
   | EventSessionNextRevertCleared
   | EventSessionNextRevertCommitted
+  | EventSessionInputAdmitted
+  | EventSessionInputCancelled
+  | EventSessionInputPromoted
   | EventMessagePartDelta
   | EventSessionDiff
   | EventSessionError
@@ -1192,6 +1195,40 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "session.input.admitted"
+        properties: {
+          sessionID: string
+          payload: SessionV1InputPayload
+          agent: string
+          model: {
+            providerID: string
+            modelID: string
+            variant?: string
+          }
+          time: number
+        }
+      }
+    | {
+        id: string
+        type: "session.input.cancelled"
+        properties: {
+          sessionID: string
+          requestID: string
+          time: number
+        }
+      }
+    | {
+        id: string
+        type: "session.input.promoted"
+        properties: {
+          sessionID: string
+          requestID: string
+          info: UserMessage
+          part: TextPart
+        }
+      }
+    | {
+        id: string
         type: "message.part.delta"
         properties: {
           sessionID: string
@@ -1636,6 +1673,9 @@ export type GlobalEvent = {
     | SyncEventSessionNextRevertStaged
     | SyncEventSessionNextRevertCleared
     | SyncEventSessionNextRevertCommitted
+    | SyncEventSessionInputAdmitted
+    | SyncEventSessionInputCancelled
+    | SyncEventSessionInputPromoted
 }
 
 /**
@@ -1751,11 +1791,14 @@ export type ProviderConfig = {
      */
     timeout?: number | false
     /**
-     * Timeout in milliseconds to wait for response headers. Provider integrations may set defaults. Set to false to disable timeout.
+     * Timeout in milliseconds to wait for response headers (default: 300000). Set to false to disable timeout.
      */
     headerTimeout?: number | false
-    chunkTimeout?: number
-    [key: string]: unknown | string | boolean | number | false | number | false | number | undefined
+    /**
+     * Timeout in milliseconds between streamed SSE chunks for this provider (default: 300000). If no chunk arrives within this window, the request is aborted. Set to false to disable timeout.
+     */
+    chunkTimeout?: number | false
+    [key: string]: unknown | string | boolean | number | false | number | false | number | false | undefined
   }
   models?: {
     [key: string]: {
@@ -2128,6 +2171,16 @@ export type Provider = {
 
 export type ExperimentalCapabilities = {
   backgroundSubagents: boolean
+  sessionAside: {
+    version: 1
+    cancel: true
+  }
+  sessionInput: {
+    version: 1
+    delivery: Array<"queue" | "steer">
+    list: true
+    cancel: true
+  }
 }
 
 export type ConsoleState = {
@@ -2547,6 +2600,17 @@ export type NotFoundError = {
   }
 }
 
+export type ConflictError = {
+  _tag: "ConflictError"
+  message: string
+  resource?: string
+}
+
+export type AsideError = {
+  _tag: "AsideError"
+  message: string
+}
+
 export type TextPartInput = {
   id?: string
   type: "text"
@@ -2652,6 +2716,67 @@ export type EventTuiSessionSelect = {
   }
 }
 
+export type UmbrellaMember = {
+  directory: string
+  label: string
+  kind: "root" | "sidecar" | "lane" | "mirror"
+}
+
+export type UmbrellaSession = {
+  id: string
+  slug: string
+  projectID: string
+  workspaceID?: string
+  directory: string
+  path?: string
+  parentID?: string
+  summary?: {
+    additions: number
+    deletions: number
+    files: number
+    diffs?: Array<SnapshotFileDiff>
+  }
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  share?: {
+    url: string
+  }
+  title: string
+  agent?: string
+  model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  version: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  time: {
+    created: number
+    updated: number
+    compacting?: number
+    archived?: number
+  }
+  permission?: PermissionRuleset
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
+  umbrella: string
+  member: UmbrellaMember
+}
+
 export type Workspace = {
   id: string
   type: string
@@ -2709,12 +2834,6 @@ export type PromptInput = {
   text: string
   files?: Array<PromptInputFileAttachment>
   agents?: Array<PromptAgentAttachment>
-}
-
-export type ConflictError = {
-  _tag: "ConflictError"
-  message: string
-  resource?: string
 }
 
 export type ServiceUnavailableError = {
@@ -2796,6 +2915,31 @@ export type OutputFormat1 =
       schema: JsonSchema
       retryCount?: number
     }
+
+export type SessionInputAdmitted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.input.admitted"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    payload: SessionV1InputPayload
+    agent: string
+    model: {
+      providerID: string
+      modelID: string
+      variant?: string
+    }
+    time: number
+  }
+}
 
 export type SessionStatus2 = {
   id: string
@@ -2896,6 +3040,9 @@ export type V2Event =
   | SessionNextRevertStaged
   | SessionNextRevertCleared
   | SessionNextRevertCommitted
+  | SessionInputAdmitted
+  | SessionInputCancelled
+  | SessionInputPromoted
   | MessagePartDelta
   | SessionDiff
   | SessionError
@@ -3117,6 +3264,13 @@ export type RevertState = {
   snapshot?: string
   diff?: string
   files?: Array<FileDiff>
+}
+
+export type SessionV1InputPayload = {
+  requestID: string
+  delivery: "queue" | "steer"
+  text: string
+  agent?: string
 }
 
 export type PermissionV2Source = {
@@ -3823,6 +3977,61 @@ export type SyncEventSessionNextRevertCommitted = {
   }
 }
 
+export type SyncEventSessionInputAdmitted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.input.admitted.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      payload: SessionV1InputPayload
+      agent: string
+      model: {
+        providerID: string
+        modelID: string
+        variant?: string
+      }
+      time: number
+    }
+  }
+}
+
+export type SyncEventSessionInputCancelled = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.input.cancelled.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      requestID: string
+      time: number
+    }
+  }
+}
+
+export type SyncEventSessionInputPromoted = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.input.promoted.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      requestID: string
+      info: UserMessage
+      part: TextPart
+    }
+  }
+}
+
 export type ConfigV2ReferenceGit = {
   repository: string
   branch?: string
@@ -3853,6 +4062,41 @@ export type PtyTicketConnectToken = {
   ticket: string
   expires_in: number
 }
+
+export type SessionV1InputReceipt =
+  | {
+      requestID: string
+      delivery: "queue" | "steer"
+      text: string
+      agent: string
+      sessionID: string
+      admittedSeq: number
+      timeCreated: number
+      state: "pending"
+    }
+  | {
+      requestID: string
+      delivery: "queue" | "steer"
+      text: string
+      agent: string
+      sessionID: string
+      admittedSeq: number
+      timeCreated: number
+      state: "promoted"
+      messageID: string
+      timePromoted: number
+    }
+  | {
+      requestID: string
+      delivery: "queue" | "steer"
+      text: string
+      agent: string
+      sessionID: string
+      admittedSeq: number
+      timeCreated: number
+      state: "cancelled"
+      timeCancelled: number
+    }
 
 export type WorkspaceEventConnectionStatus = {
   workspaceID: string
@@ -3936,7 +4180,7 @@ export type PromptInputFileAttachment = {
   source?: PromptSource
 }
 
-export type SessionInputAdmitted = {
+export type SessionInputAdmitted2 = {
   admittedSeq: number
   id: string
   sessionID: string
@@ -5300,6 +5544,45 @@ export type SessionNextCompactionDelta = {
   }
 }
 
+export type SessionInputCancelled = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.input.cancelled"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    requestID: string
+    time: number
+  }
+}
+
+export type SessionInputPromoted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.input.promoted"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    requestID: string
+    info: UserMessage
+    part: TextPart
+  }
+}
+
 export type MessagePartDelta = {
   id: string
   metadata?: {
@@ -6652,6 +6935,43 @@ export type EventSessionNextRevertCommitted = {
   }
 }
 
+export type EventSessionInputAdmitted = {
+  id: string
+  type: "session.input.admitted"
+  properties: {
+    sessionID: string
+    payload: SessionV1InputPayload
+    agent: string
+    model: {
+      providerID: string
+      modelID: string
+      variant?: string
+    }
+    time: number
+  }
+}
+
+export type EventSessionInputCancelled = {
+  id: string
+  type: "session.input.cancelled"
+  properties: {
+    sessionID: string
+    requestID: string
+    time: number
+  }
+}
+
+export type EventSessionInputPromoted = {
+  id: string
+  type: "session.input.promoted"
+  properties: {
+    sessionID: string
+    requestID: string
+    info: UserMessage
+    part: TextPart
+  }
+}
+
 export type EventMessagePartDelta = {
   id: string
   type: "message.part.delta"
@@ -7353,7 +7673,7 @@ export type GlobalDisposeResponse = GlobalDisposeResponses[keyof GlobalDisposeRe
 
 export type GlobalUpgradeData = {
   body?: {
-    target?: string
+    target: string
   }
   path?: never
   query?: never
@@ -9436,6 +9756,158 @@ export type ProviderOauthCallbackResponses = {
 
 export type ProviderOauthCallbackResponse = ProviderOauthCallbackResponses[keyof ProviderOauthCallbackResponses]
 
+export type SessionInputListData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+    state?: "pending" | "promoted" | "cancelled" | "all"
+    after?: string
+    limit?: string
+  }
+  url: "/session/{sessionID}/input"
+}
+
+export type SessionInputListErrors = {
+  /**
+   * InvalidRequestError | BadRequest
+   */
+  400: InvalidRequestError | EffectHttpApiErrorBadRequest
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionInputListError = SessionInputListErrors[keyof SessionInputListErrors]
+
+export type SessionInputListResponses = {
+  /**
+   * Success
+   */
+  200: {
+    items: Array<SessionV1InputReceipt>
+    next: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }
+}
+
+export type SessionInputListResponse = SessionInputListResponses[keyof SessionInputListResponses]
+
+export type SessionInputAdmitData = {
+  body?: SessionV1InputPayload
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/input"
+}
+
+export type SessionInputAdmitErrors = {
+  /**
+   * InvalidRequestError | BadRequest
+   */
+  400: InvalidRequestError | EffectHttpApiErrorBadRequest
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type SessionInputAdmitError = SessionInputAdmitErrors[keyof SessionInputAdmitErrors]
+
+export type SessionInputAdmitResponses = {
+  /**
+   * SessionV1.InputReceipt
+   */
+  200: SessionV1InputReceipt
+}
+
+export type SessionInputAdmitResponse = SessionInputAdmitResponses[keyof SessionInputAdmitResponses]
+
+export type SessionInputCancelData = {
+  body?: never
+  path: {
+    sessionID: string
+    requestID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/input/{requestID}"
+}
+
+export type SessionInputCancelErrors = {
+  /**
+   * InvalidRequestError | BadRequest
+   */
+  400: InvalidRequestError | EffectHttpApiErrorBadRequest
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type SessionInputCancelError = SessionInputCancelErrors[keyof SessionInputCancelErrors]
+
+export type SessionInputCancelResponses = {
+  /**
+   * SessionV1.InputReceipt
+   */
+  200: SessionV1InputReceipt
+}
+
+export type SessionInputCancelResponse = SessionInputCancelResponses[keyof SessionInputCancelResponses]
+
+export type SessionInputGetData = {
+  body?: never
+  path: {
+    sessionID: string
+    requestID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/input/{requestID}"
+}
+
+export type SessionInputGetErrors = {
+  /**
+   * InvalidRequestError | BadRequest
+   */
+  400: InvalidRequestError | EffectHttpApiErrorBadRequest
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionInputGetError = SessionInputGetErrors[keyof SessionInputGetErrors]
+
+export type SessionInputGetResponses = {
+  /**
+   * SessionV1.InputReceipt
+   */
+  200: SessionV1InputReceipt
+}
+
+export type SessionInputGetResponse = SessionInputGetResponses[keyof SessionInputGetResponses]
+
 export type SessionListData = {
   body?: never
   path?: never
@@ -9955,6 +10427,98 @@ export type SessionForkResponses = {
 }
 
 export type SessionForkResponse = SessionForkResponses[keyof SessionForkResponses]
+
+export type SessionAsideData = {
+  body?: {
+    requestID: string
+    question: string
+    model?: {
+      providerID: string
+      modelID: string
+    }
+    agent?: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/aside"
+}
+
+export type SessionAsideErrors = {
+  /**
+   * BadRequest | AsideError | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | AsideError | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionAsideError = SessionAsideErrors[keyof SessionAsideErrors]
+
+export type SessionAsideResponses = {
+  /**
+   * Ephemeral snapshot answer
+   */
+  200: {
+    requestID: string
+    text: string
+    snapshot: {
+      capturedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      throughMessageID?: string
+      excludedMessageCount: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      activity: {
+        status: "idle" | "busy" | "retry"
+        tools: Array<{
+          name: string
+          status: "running" | "pending"
+        }>
+      }
+    }
+  }
+}
+
+export type SessionAsideResponse = SessionAsideResponses[keyof SessionAsideResponses]
+
+export type SessionCancelAsideData = {
+  body?: never
+  path: {
+    sessionID: string
+    requestID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/aside/{requestID}"
+}
+
+export type SessionCancelAsideErrors = {
+  /**
+   * BadRequest | AsideError | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | AsideError | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionCancelAsideError = SessionCancelAsideErrors[keyof SessionCancelAsideErrors]
+
+export type SessionCancelAsideResponses = {
+  /**
+   * Whether an active Aside was found
+   */
+  200: boolean
+}
+
+export type SessionCancelAsideResponse = SessionCancelAsideResponses[keyof SessionCancelAsideResponses]
 
 export type SessionAbortData = {
   body?: never
@@ -11000,6 +11564,34 @@ export type TuiControlResponseResponses = {
 
 export type TuiControlResponseResponse = TuiControlResponseResponses[keyof TuiControlResponseResponses]
 
+export type UmbrellaSessionListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/umbrella/session"
+}
+
+export type UmbrellaSessionListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type UmbrellaSessionListError = UmbrellaSessionListErrors[keyof UmbrellaSessionListErrors]
+
+export type UmbrellaSessionListResponses = {
+  /**
+   * Sessions across all umbrella members, tagged with their member
+   */
+  200: Array<UmbrellaSession>
+}
+
+export type UmbrellaSessionListResponse = UmbrellaSessionListResponses[keyof UmbrellaSessionListResponses]
+
 export type ExperimentalWorkspaceAdapterListData = {
   body?: never
   path?: never
@@ -11590,7 +12182,7 @@ export type V2SessionPromptResponses = {
    * Success
    */
   200: {
-    data: SessionInputAdmitted
+    data: SessionInputAdmitted2
   }
 }
 

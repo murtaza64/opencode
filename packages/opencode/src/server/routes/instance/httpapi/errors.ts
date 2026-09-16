@@ -1,5 +1,11 @@
 import { Schema } from "effect"
 
+export class AsideError extends Schema.TaggedErrorClass<AsideError>()(
+  "AsideError",
+  { message: Schema.String },
+  { httpApiStatus: 400 },
+) {}
+
 export class InvalidRequestError extends Schema.TaggedErrorClass<InvalidRequestError>()(
   "InvalidRequestError",
   {

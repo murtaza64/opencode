@@ -1,6 +1,6 @@
 /* Conversation view: live transcript (session-ui renderer over an SSE-fed
  * store), prompt input, and inline permission/question replies. */
-import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js"
+import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js"
 import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router"
 import { DataProvider } from "@opencode-ai/session-ui/context"
 import { Message } from "@opencode-ai/session-ui/message-part"
@@ -11,6 +11,8 @@ import SessionInfo from "../components/session-info"
 import { sessionHref, useDashboard } from "../state"
 import { rightOpen, startDrag } from "../ui"
 import { createVim } from "../vim"
+import { getComposer, type ComposerMode } from "../composer"
+import { ComposerControls, ComposerResults } from "../components/composer-controls"
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const [error, setError] = createSignal("")
@@ -192,9 +194,26 @@ export default function SessionPage() {
 function SessionView(props: { sessionID: string; directory: string }) {
   const sessionID = props.sessionID
   const directory = props.directory
+  const composer = getComposer(sessionID, directory)
 
   const { activity, sessionsError } = useDashboard()
-  const live = createLiveSession(sessionID, directory)
+  const live = createLiveSession(sessionID, directory, (event) => {
+    if (event.type.startsWith("session.input.")) void composer.refreshInputs()
+  })
+  const connected = () => !!session() && !live.loading() && !live.connectionError()
+  createEffect(() => {
+    if (!connected()) return
+    untrack(async () => {
+      await composer.loadCapabilities()
+      await composer.refreshInputs()
+    })
+  })
+  onMount(() => {
+    const timer = window.setInterval(() => {
+      if (connected()) void composer.refreshInputs()
+    }, 5000)
+    onCleanup(() => window.clearInterval(timer))
+  })
   onMount(() => { void activity.refreshDirectory(directory) })
   // stamp data-tool onto rendered tool wrappers (session-ui doesn't expose
   // the tool name in the DOM) so CSS can color tool types
@@ -213,6 +232,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     const mo = new MutationObserver(() => stampTools())
     if (transcriptEl) mo.observe(transcriptEl, { childList: true, subtree: true })
     onCleanup(() => mo.disconnect())
+    promptEl?.setSelectionRange(...activeDraft().selection)
     // paint the normal-mode block caret before any interaction
     vim.refresh(promptEl)
   })
@@ -317,6 +337,10 @@ function SessionView(props: { sessionID: string; directory: string }) {
   }
 
   const busy = () => status() === "busy" || status() === "retry"
+  createEffect(() => {
+    const running = busy()
+    untrack(() => composer.observeBusy(running))
+  })
 
   // --- abort / fork ------------------------------------------------------
 
@@ -440,44 +464,28 @@ function SessionView(props: { sessionID: string; directory: string }) {
     return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
   }
 
-  const [draft, setDraft] = createSignal("")
-  const [sending, setSending] = createSignal(false)
-  const [images, setImages] = createSignal<{ id: string; mime: string; url: string; filename: string }[]>([])
-  // optimistic echo: shown greyed-out from click until the daemon registers
-  // the user message (cleared by the effect below watching messages)
-  const [pendingMsg, setPendingMsg] = createSignal<{ text: string; images: number; at: number } | null>(null)
-  createEffect(() => {
-    const p = pendingMsg()
-    if (!p) return
-    if (live.error() || live.connectionError()) {
-      setPendingMsg(null)
-      return
-    }
-    const msgs = messages() as any[]
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i]
-      if (m.role === "user" && (m.time?.created ?? 0) >= p.at) {
-        setPendingMsg(null)
-        return
-      }
-    }
-  })
+  const activeDraft = () => composer.state.mode === "aside" ? composer.state.aside : composer.state.task
+  const draft = () => activeDraft().text
+  const setDraft = composer.setText
+  const images = () => activeDraft().images
+  const sending = () => composer.state.sending
 
   const addImageFiles = (files: File[]) => {
+    const buffer = composer.state.mode === "aside" ? "aside" : "task"
     for (const f of files) {
       const reader = new FileReader()
       reader.onload = () => {
         const url = typeof reader.result === "string" ? reader.result : ""
         if (!url) return
-        setImages((prev) => [
-          ...prev,
+        composer.setImages([
+          ...composer.state[buffer].images,
           {
             id: Math.random().toString(36).slice(2),
             mime: f.type,
             url,
-            filename: f.name || `pasted-${prev.length + 1}.${(f.type.split("/")[1] ?? "png").split("+")[0]}`,
+            filename: f.name || `pasted.${(f.type.split("/")[1] ?? "png").split("+")[0]}`,
           },
-        ])
+        ], buffer)
       }
       reader.readAsDataURL(f)
     }
@@ -504,7 +512,16 @@ function SessionView(props: { sessionID: string; directory: string }) {
   // model for the next turn: follows the latest agent turn unless the user
   // explicitly picks one from the dropdown
   const [providers] = createResource(() => oc.providers(directory).catch(() => ({ providers: [], default: {} })))
-  const [modelChoice, setModelChoice] = createSignal<{ providerID: string; modelID: string } | null>(null)
+  const [agents, { refetch: refetchAgents }] = createResource(() => oc.agents(directory).then(
+    (items) => ({ items: items.filter((agent) => !agent.hidden && agent.mode !== "subagent"), error: "" }),
+    (error: unknown) => ({ items: [], error: String(error) }),
+  ))
+  const activeAgent = () => {
+    const previous = messages().findLast((message) => message.role === "user")
+    return composer.state.mode === "aside" ? previous?.agent : session()?.agent ?? previous?.agent
+  }
+  const modelChoice = () => activeDraft().model
+  const setModelChoice = composer.setModel
   const lastTurnModel = createMemo(() => {
     for (let i = messages().length - 1; i >= 0; i--) {
       const m = messages()[i] as any
@@ -518,9 +535,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const nudge = async () => {
     const s = session()
     if (!s || nudgePhase() || aborting() || sending()) return
-    const model = nextModel() ?? undefined
+    const model = composer.state.task.model ?? lastTurnModel() ?? undefined
     setError("")
-    setPendingMsg(null)
     setNudgePhase("stopping")
     try {
       await oc.abort(sessionID, directory)
@@ -538,29 +554,14 @@ function SessionView(props: { sessionID: string; directory: string }) {
   }
 
   const send = async () => {
-    const text = draft().trim()
     const s = session()
-    if (sending() || nudgePhase() || aborting() || (!text && !images().length) || !s) return
+    if (!s || !connected() || sending() || nudgePhase() || aborting()) return
     setError("")
-    setSending(true)
-    // echo immediately — the round-trip to the daemon is perceptible
-    setPendingMsg({ text, images: images().length, at: Date.now() - 2000 })
+    // Read status again at submission; a mode switch never sends by itself.
+    composer.observeBusy(busy())
     stick = true
     queueMicrotask(pin)
-    try {
-      await oc.prompt(s, directory, text, { model: nextModel() ?? undefined, images: images() })
-      setDraft("")
-      setImages([])
-      setFloating(false)
-      vim.setMode("normal")
-      queueMicrotask(() => vim.refresh(promptEl))
-      pin()
-    } catch (e) {
-      setPendingMsg(null)
-      setError(String(e))
-    } finally {
-      setSending(false)
-    }
+    await composer.submit(s, nextModel())
   }
 
   let transcriptEl: HTMLDivElement | undefined
@@ -582,15 +583,55 @@ function SessionView(props: { sessionID: string; directory: string }) {
   }
 
   const [caret, setCaret] = createSignal<{ el: HTMLTextAreaElement; pos: number; hasChar: boolean } | null>(null)
-  const vim = createVim({
+  const taskVim = createVim({
     value: draft,
     setValue: setDraft,
     onTab: switchSession,
     onEnter: () => send(),
     onCursor: setCaret,
   })
+  const asideVim = createVim({ value: draft, setValue: setDraft, onTab: switchSession, onEnter: () => send(), onCursor: setCaret })
+  const activeVim = () => composer.state.mode === "aside" ? asideVim : taskVim
+  const vim = {
+    mode: () => activeVim().mode(),
+    setMode: (mode: "normal" | "insert") => activeVim().setMode(mode),
+    refresh: (el: HTMLTextAreaElement | undefined) => activeVim().refresh(el),
+    handleKeyDown: (event: KeyboardEvent) => activeVim().handleKeyDown(event),
+  }
+  const saveSelection = (el: HTMLTextAreaElement) => composer.setSelection(el.selectionStart, el.selectionEnd)
+  const selectMode = (mode: ComposerMode) => {
+    lastEsc = 0
+    const el = floating() ? floatEl : promptEl
+    if (el) saveSelection(el)
+    composer.selectMode(mode)
+    const selection = [...activeDraft().selection] as const
+    queueMicrotask(() => {
+      const target = floating() ? floatEl : promptEl
+      target?.setSelectionRange(selection[0], selection[1])
+      setCaret(null)
+    })
+  }
 
   const focusInsert = () => vim.setMode("insert")
+  const cycleMode = (e: KeyboardEvent) => {
+    // macOS Option+M reports a symbol in key, but still reports KeyM in code.
+    if (e.isComposing || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.code !== "KeyM") return false
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.repeat) return true
+    const editing = document.activeElement === promptEl || document.activeElement === floatEl
+    const inputMode = vim.mode()
+    selectMode(composer.state.mode === "aside" ? "queue" : composer.state.mode === "queue" ? "steer" : "aside")
+    if (editing) queueMicrotask(() => {
+      const target = floating() ? floatEl : promptEl
+      target?.focus()
+      vim.setMode(inputMode)
+      vim.refresh(target)
+    })
+    const group = (e.target as HTMLElement).closest('[role="radiogroup"]')
+    if (group) queueMicrotask(() => group.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus())
+    return true
+  }
 
   const scrollTranscript = (dir: 1 | -1) => {
     if (!transcriptEl) return
@@ -650,12 +691,14 @@ function SessionView(props: { sessionID: string; directory: string }) {
   }
 
   const promptKeyDown = (e: KeyboardEvent) => {
+    if (e.isComposing) return
+    if (cycleMode(e)) return
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
       send()
       return
     }
-    if (e.key === "Escape" && vim.mode() === "normal") escTap()
+    if (e.key === "Escape" && vim.mode() === "normal" && composer.state.mode !== "aside") escTap()
     if (navKeys(e)) return
     vim.handleKeyDown(e)
   }
@@ -664,7 +707,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
   onMount(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement
-      if (target.tagName === "TEXTAREA" || target.tagName === "INPUT" || target.tagName === "SELECT") return
+      if (target.closest(".prompt-box, .float-editor") && cycleMode(e)) return
+      if (e.isComposing || target.closest("textarea, input, select, button, a, [contenteditable], [data-composer-controls]")) return
       if (navKeys(e)) return
       if (e.key === "Tab" && vim.mode() === "normal") {
         e.preventDefault()
@@ -699,17 +743,21 @@ function SessionView(props: { sessionID: string; directory: string }) {
       return
     }
     if (!floating() && !floatDismissed && (d.length > 400 || d.split("\n").length > 5)) {
+      const selection = untrack(() => [...activeDraft().selection] as const)
       setFloating(true)
       queueMicrotask(() => {
         floatEl?.focus()
+        floatEl?.setSelectionRange(selection[0], selection[1])
         vim.refresh(floatEl)
       })
     }
   })
   const closeFloat = () => {
+    if (floatEl) saveSelection(floatEl)
     floatDismissed = true
     setFloating(false)
     promptEl?.focus()
+    promptEl?.setSelectionRange(...activeDraft().selection)
     vim.refresh(promptEl)
   }
   const toggleFloat = () => {
@@ -718,12 +766,50 @@ function SessionView(props: { sessionID: string; directory: string }) {
       return
     }
     floatDismissed = false
+    if (promptEl) saveSelection(promptEl)
     setFloating(true)
     queueMicrotask(() => {
       floatEl?.focus()
+      floatEl?.setSelectionRange(...activeDraft().selection)
       vim.refresh(floatEl)
     })
   }
+
+  const Footer = (props: { expanded?: boolean }) => (
+    <ComposerControls composer={composer} connected={connected() && !nudgePhase() && !aborting()} busy={busy()} selectMode={selectMode} submit={send}
+      activeAgent={activeAgent()} agents={agents()?.items ?? []} agentError={agents()?.error} retryAgents={() => { void refetchAgents() }}>
+      <select class="model-select" aria-label="Model override"
+        disabled={composer.state.mode === "queue" || composer.state.mode === "steer"}
+        title="model for the next turn (defaults to the previous turn's)"
+        value={modelChoice() ? `${modelChoice()!.providerID}\u0000${modelChoice()!.modelID}` : ""}
+        onChange={(e) => {
+          const [providerID, modelID] = e.currentTarget.value.split("\u0000")
+          setModelChoice(providerID && modelID ? { providerID, modelID } : null)
+        }}>
+        <option value="" selected={!modelChoice()}>Session model</option>
+        <For each={providers()?.providers ?? []}>
+          {(prov) => (
+            <optgroup label={prov.id}>
+              <For each={Object.keys(prov.models ?? {})}>
+                {(mid) => <option value={`${prov.id}\u0000${mid}`} selected={modelChoice()?.providerID === prov.id && modelChoice()?.modelID === mid}>{mid}</option>}
+              </For>
+            </optgroup>
+          )}
+        </For>
+      </select>
+      <Show when={modelChoice()}><button onClick={() => setModelChoice(null)}>Use session model</button></Show>
+      <Show when={!props.expanded}><button aria-label="Expand editor" title="Expand editor (Ctrl+E)" onClick={toggleFloat}>Expand</button></Show>
+      <Show when={contextUsage()}>
+        {(u) => (
+          <span class="context-pct"
+            classList={{ warn: (u().percent ?? 0) >= 70, high: (u().percent ?? 0) >= 90 }}
+            title="context of the last completed turn (input + output + reasoning + cache)">
+            ctx {Math.round(u().tokens / 1000)}k{u().percent != null ? ` (${u().percent}%)` : ""}
+          </span>
+        )}
+      </Show>
+    </ComposerControls>
+  )
 
   return (
     <main class="session-page">
@@ -840,23 +926,11 @@ function SessionView(props: { sessionID: string; directory: string }) {
                 <span /><span /><span />
               </div>
             </Show>
-            <Show when={pendingMsg()}>
-              {(p) => (
-                <div class="pending-msg">
-                  <div class="pending-bubble">
-                    {p().text || ""}
-                    <Show when={p().images > 0}>
-                      <span class="dim"> [{p().images} image{p().images > 1 ? "s" : ""}]</span>
-                    </Show>
-                  </div>
-                  <span class="pending-hint dim">sending…</span>
-                </div>
-              )}
-            </Show>
           </div>
         </div>
 
-        <div class="prompt-box">
+        <Show when={!floating()}><ComposerResults composer={composer} connected={connected()} /></Show>
+        <div class="prompt-box" inert={floating()}>
           <Show when={images().length}>
             <div class="attachments">
               <For each={images()}>
@@ -864,7 +938,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
                   <span class="attachment-chip" title={img.filename}>
                     <img src={img.url} alt={img.filename} />
                     {img.filename.slice(0, 24)}
-                    <button onClick={() => setImages((prev) => prev.filter((i) => i.id !== img.id))}>×</button>
+                    <button aria-label={`Remove ${img.filename}`} onClick={() => composer.setImages(images().filter((i) => i.id !== img.id))}>×</button>
                   </span>
                 )}
               </For>
@@ -874,54 +948,24 @@ function SessionView(props: { sessionID: string; directory: string }) {
             <div class="ta-wrap">
               <textarea
                 ref={promptEl}
+                aria-label={composer.state.mode === "aside" ? "Aside question" : "Task message"}
+                dir="auto"
                 classList={{ "vim-normal": vim.mode() === "normal", "vim-insert": vim.mode() === "insert" }}
-                placeholder={status() === "busy" ? "session is busy — message will queue" : "reply to this session…"}
+                placeholder={composer.state.mode === "aside" ? "Ask about the current task..." : "Reply to this session..."}
                 value={draft()}
-                onInput={(e) => setDraft(e.currentTarget.value)}
+                onInput={(e) => { saveSelection(e.currentTarget); setDraft(e.currentTarget.value) }}
                 onPaste={pasteImages}
                 onDrop={dropImages}
                 onDragOver={(e) => e.preventDefault()}
                 onKeyDown={promptKeyDown}
                 onFocus={focusInsert}
                 onClick={focusInsert}
-                onBlur={(e) => vim.refresh(e.currentTarget)}
+                onBlur={(e) => saveSelection(e.currentTarget)}
               />
               <FakeCaret target={promptEl} caret={caret()} mode={vim.mode()} />
             </div>
-            <div class="prompt-side">
-              <span class="send-hint dim">{nudgePhase() ? "nudging..." : sending() ? "sending…" : "⌘⏎ to send"}</span>
-              <select
-                class="model-select"
-                title="model for the next turn (defaults to the previous turn's)"
-                value={nextModel() ? `${nextModel()!.providerID}\u0000${nextModel()!.modelID}` : ""}
-                onChange={(e) => {
-                  const [providerID, modelID] = e.currentTarget.value.split("\u0000")
-                  setModelChoice(providerID && modelID ? { providerID, modelID } : null)
-                }}
-              >
-                <For each={providers()?.providers ?? []}>
-                  {(prov: any) => (
-                    <optgroup label={prov.id}>
-                      <For each={Object.keys(prov.models ?? {})}>
-                        {(mid) => <option value={`${prov.id}\u0000${mid}`}>{mid}</option>}
-                      </For>
-                    </optgroup>
-                  )}
-                </For>
-              </select>
-              <Show when={contextUsage()}>
-                {(u) => (
-                  <span
-                    class="context-pct"
-                    classList={{ warn: (u().percent ?? 0) >= 70, high: (u().percent ?? 0) >= 90 }}
-                    title="context of the last completed turn (input + output + reasoning + cache)"
-                  >
-                    ctx {Math.round(u().tokens / 1000)}k{u().percent != null ? ` (${u().percent}%)` : ""}
-                  </span>
-                )}
-              </Show>
-            </div>
           </div>
+          <Footer />
         </div>
       </div>
 
@@ -932,21 +976,33 @@ function SessionView(props: { sessionID: string; directory: string }) {
             <span style="flex:1" />
             <button onClick={closeFloat}>⤡ collapse</button>
           </div>
+          <ComposerResults composer={composer} connected={connected()} />
+          <Show when={images().length}>
+            <div class="attachments"><For each={images()}>{(image) => (
+              <span class="attachment-chip"><img src={image.url} alt={image.filename} />{image.filename.slice(0, 24)}
+                <button aria-label={`Remove ${image.filename}`} onClick={() => composer.setImages(images().filter((item) => item.id !== image.id))}>×</button>
+              </span>
+            )}</For></div>
+          </Show>
           <div class="ta-wrap">
             <textarea
               ref={floatEl}
+              aria-label={composer.state.mode === "aside" ? "Aside question" : "Task message"}
+              dir="auto"
               classList={{ "vim-normal": vim.mode() === "normal", "vim-insert": vim.mode() === "insert" }}
               value={draft()}
-              onInput={(e) => setDraft(e.currentTarget.value)}
+              onInput={(e) => { saveSelection(e.currentTarget); setDraft(e.currentTarget.value) }}
               onPaste={pasteImages}
               onDrop={dropImages}
               onDragOver={(e) => e.preventDefault()}
               onKeyDown={promptKeyDown}
               onFocus={focusInsert}
               onClick={focusInsert}
+              onBlur={(e) => saveSelection(e.currentTarget)}
             />
             <FakeCaret target={floatEl} caret={caret()} mode={vim.mode()} />
           </div>
+          <Footer expanded />
         </div>
       </Show>
 
