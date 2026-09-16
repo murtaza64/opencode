@@ -218,8 +218,10 @@ function SessionView(props: { sessionID: string; directory: string }) {
   onMount(() => { void activity.refreshDirectory(directory) })
   onMount(() => {
     promptEl?.setSelectionRange(...activeDraft().selection)
-    // paint the normal-mode block caret before any interaction
-    vim.refresh(promptEl)
+    const focused = document.activeElement
+    if (!(focused instanceof HTMLElement && focused.closest("input, textarea, select, button, [contenteditable]"))) {
+      (floating() ? floatEl : promptEl)?.focus({ preventScroll: true })
+    }
   })
 
   // chat stick-to-bottom. Scroll events only ever RE-stick (at bottom) —
@@ -324,6 +326,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const busy = () => status() === "busy" || status() === "retry"
   createEffect(() => {
     const running = busy()
+    if (!connected()) return
     untrack(() => composer.observeBusy(running))
   })
 
@@ -576,6 +579,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
     onCursor: setCaret,
   })
   const asideVim = createVim({ value: draft, setValue: setDraft, onTab: switchSession, onEnter: () => send(), onCursor: setCaret })
+  taskVim.setMode("insert")
+  asideVim.setMode("insert")
   const activeVim = () => composer.state.mode === "aside" ? asideVim : taskVim
   const vim = {
     mode: () => activeVim().mode(),
@@ -584,14 +589,28 @@ function SessionView(props: { sessionID: string; directory: string }) {
     handleKeyDown: (event: KeyboardEvent) => activeVim().handleKeyDown(event),
   }
   const saveSelection = (el: HTMLTextAreaElement) => composer.setSelection(el.selectionStart, el.selectionEnd)
-  const selectMode = (mode: ComposerMode) => {
+  const selectMode = (mode: ComposerMode, keyboard = false) => {
     lastEsc = 0
+    const inputMode = vim.mode()
     const el = floating() ? floatEl : promptEl
     if (el) saveSelection(el)
     composer.selectMode(mode)
+    vim.setMode(inputMode)
     const selection = [...activeDraft().selection] as const
-    queueMicrotask(() => {
+    const revision = activeDraft().revision
+    const focused = document.activeElement
+    const group = focused instanceof HTMLElement ? focused.closest('[role="radiogroup"]') : null
+    if (keyboard) {
+      (floating() ? floatEl : promptEl)?.setSelectionRange(selection[0], selection[1])
+      setCaret(null)
+      return
+    }
+    // Restore after the pointer's default selection update, without undoing newer typing.
+    requestAnimationFrame(() => {
+      if (composer.state.mode !== mode || activeDraft().revision !== revision) return
+      if (document.activeElement !== focused && !group?.contains(document.activeElement)) return
       const target = floating() ? floatEl : promptEl
+      if (!target?.isConnected) return
       target?.setSelectionRange(selection[0], selection[1])
       setCaret(null)
     })
@@ -606,7 +625,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     if (e.repeat) return true
     const editing = document.activeElement === promptEl || document.activeElement === floatEl
     const inputMode = vim.mode()
-    selectMode(composer.state.mode === "aside" ? "queue" : composer.state.mode === "queue" ? "steer" : "aside")
+    selectMode(composer.state.mode === "aside" ? "queue" : composer.state.mode === "queue" ? "steer" : "aside", true)
     if (editing) queueMicrotask(() => {
       const target = floating() ? floatEl : promptEl
       target?.focus()
@@ -729,19 +748,23 @@ function SessionView(props: { sessionID: string; directory: string }) {
     }
     if (!floating() && !floatDismissed && (d.length > 400 || d.split("\n").length > 5)) {
       const selection = untrack(() => [...activeDraft().selection] as const)
+      const inputMode = untrack(vim.mode)
       setFloating(true)
       queueMicrotask(() => {
         floatEl?.focus()
+        vim.setMode(inputMode)
         floatEl?.setSelectionRange(selection[0], selection[1])
         vim.refresh(floatEl)
       })
     }
   })
   const closeFloat = () => {
+    const inputMode = vim.mode()
     if (floatEl) saveSelection(floatEl)
     floatDismissed = true
     setFloating(false)
     promptEl?.focus()
+    vim.setMode(inputMode)
     promptEl?.setSelectionRange(...activeDraft().selection)
     vim.refresh(promptEl)
   }
@@ -751,10 +774,12 @@ function SessionView(props: { sessionID: string; directory: string }) {
       return
     }
     floatDismissed = false
+    const inputMode = vim.mode()
     if (promptEl) saveSelection(promptEl)
     setFloating(true)
     queueMicrotask(() => {
       floatEl?.focus()
+      vim.setMode(inputMode)
       floatEl?.setSelectionRange(...activeDraft().selection)
       vim.refresh(floatEl)
     })
@@ -762,7 +787,29 @@ function SessionView(props: { sessionID: string; directory: string }) {
 
   const Footer = (props: { expanded?: boolean }) => (
     <ComposerControls composer={composer} connected={connected() && !nudgePhase() && !aborting()} busy={busy()} selectMode={selectMode} submit={send}
-      activeAgent={activeAgent()} agents={agents()?.items ?? []} agentError={agents()?.error} retryAgents={() => { void refetchAgents() }}>
+      normalMode={vim.mode() === "normal"}
+      activeAgent={activeAgent()} agents={agents()?.items ?? []} agentError={agents()?.error} retryAgents={() => { void refetchAgents() }}
+      sessionActions={<>
+        <button title="Fork this session at its tip" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
+          {forking() ? "Forking…" : "Fork"}
+        </button>
+        <Show when={!session()?.time?.archived} fallback={<span class="archived-chip">Archived</span>}>
+          <button title="Archive this session (hides it from lists)" disabled={!!nudgePhase()} onClick={archive}>Archive</button>
+        </Show>
+        <button class="danger" title="Delete this session permanently" disabled={!!nudgePhase()} onClick={remove}>Delete</button>
+        <Show when={busy()} fallback={<button onClick={() => { stick = true; pin() }}>↓ Bottom</button>}>
+          <button class="stop" aria-label="Stop session" title="Stop the parent session" disabled={aborting() || !!nudgePhase() || sending()} onClick={abort}>
+            <span aria-hidden="true">■</span> Stop
+          </button>
+        </Show>
+        <button
+          title="Interrupt this session, then send a resume message"
+          disabled={!session() || !!nudgePhase() || aborting() || sending()}
+          onClick={nudge}
+        >
+          {nudgePhase() === "stopping" ? "Stopping…" : nudgePhase() === "resuming" ? "Sending resume…" : "Nudge"}
+        </button>
+      </>}>
       <select class="model-select" aria-label="Model override"
         disabled={composer.state.mode === "queue" || composer.state.mode === "steer"}
         title="model for the next turn (defaults to the previous turn's)"
@@ -813,42 +860,6 @@ function SessionView(props: { sessionID: string; directory: string }) {
                 </A>
               </span>
             )}
-          </Show>
-          <span style="flex:1" />
-          <button
-            title="Interrupt this session, then send a resume message"
-            disabled={!session() || !!nudgePhase() || aborting() || sending()}
-            onClick={nudge}
-          >
-            {nudgePhase() === "stopping" ? "stopping..." : nudgePhase() === "resuming" ? "sending resume..." : "nudge"}
-          </button>
-          <button title="fork this session at its tip" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
-            {forking() ? "forking…" : "fork"}
-          </button>
-          <Show when={!(session() as any)?.time?.archived} fallback={<span class="archived-chip">archived</span>}>
-            <button title="archive this session (hides it from lists)" disabled={!!nudgePhase()} onClick={archive}>
-              archive
-            </button>
-          </Show>
-          <button class="danger" title="delete this session permanently" disabled={!!nudgePhase()} onClick={remove}>
-            delete
-          </button>
-          <Show
-            when={busy()}
-            fallback={
-              <button
-                onClick={() => {
-                  stick = true
-                  pin()
-                }}
-              >
-                ↓ bottom
-              </button>
-            }
-          >
-            <button class="stop" title="abort this session (esc esc)" disabled={aborting() || !!nudgePhase() || sending()} onClick={abort}>
-              ■ stop <span class="hint">esc esc</span>
-            </button>
           </Show>
         </header>
 
@@ -957,9 +968,9 @@ function SessionView(props: { sessionID: string; directory: string }) {
       <Show when={floating()}>
         <div class="float-editor">
           <div class="float-head">
-            <span class="dim">composing — ⌘⏎ sends · ^e collapses</span>
+            <span class="dim">Expanded editor</span>
             <span style="flex:1" />
-            <button onClick={closeFloat}>⤡ collapse</button>
+            <button onClick={closeFloat}>⤡ collapse <kbd class="composer-key">Ctrl+E</kbd></button>
           </div>
           <ComposerResults composer={composer} connected={connected()} />
           <Show when={images().length}>
