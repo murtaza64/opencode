@@ -322,8 +322,9 @@ function SessionView(props: { sessionID: string; directory: string }) {
 
   // fire-and-forget: the status SSE flips busy->idle, no local state to sync
   const [aborting, setAborting] = createSignal(false)
+  const [nudgePhase, setNudgePhase] = createSignal<"stopping" | "resuming">()
   const abort = async () => {
-    if (aborting() || !busy()) return
+    if (aborting() || nudgePhase() || sending() || !busy()) return
     setAborting(true)
     try {
       await oc.abort(sessionID, directory)
@@ -514,10 +515,32 @@ function SessionView(props: { sessionID: string; directory: string }) {
   })
   const nextModel = () => modelChoice() ?? lastTurnModel()
 
+  const nudge = async () => {
+    const s = session()
+    if (!s || nudgePhase() || aborting() || sending()) return
+    const model = nextModel() ?? undefined
+    setError("")
+    setPendingMsg(null)
+    setNudgePhase("stopping")
+    try {
+      await oc.abort(sessionID, directory)
+      setNudgePhase("resuming")
+      await oc.prompt(s, directory, "Resume where you left off. Reorient briefly and continue the outstanding work.", { model })
+      stick = true
+      queueMicrotask(pin)
+      void live.load().catch(() => {})
+      void activity.refreshDirectory(directory, true)
+    } catch (e) {
+      setError(`${nudgePhase() === "stopping" ? "Could not interrupt session" : "Session interrupted, but resume failed"}: ${String(e)}`)
+    } finally {
+      setNudgePhase(undefined)
+    }
+  }
+
   const send = async () => {
     const text = draft().trim()
     const s = session()
-    if (sending() || (!text && !images().length) || !s) return
+    if (sending() || nudgePhase() || aborting() || (!text && !images().length) || !s) return
     setError("")
     setSending(true)
     // echo immediately — the round-trip to the daemon is perceptible
@@ -721,15 +744,22 @@ function SessionView(props: { sessionID: string; directory: string }) {
             )}
           </Show>
           <span style="flex:1" />
-          <button title="fork this session at its tip" disabled={forking()} onClick={() => fork()}>
+          <button
+            title="Interrupt this session, then send a resume message"
+            disabled={!session() || !!nudgePhase() || aborting() || sending()}
+            onClick={nudge}
+          >
+            {nudgePhase() === "stopping" ? "stopping..." : nudgePhase() === "resuming" ? "sending resume..." : "nudge"}
+          </button>
+          <button title="fork this session at its tip" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
             {forking() ? "forking…" : "fork"}
           </button>
           <Show when={!(session() as any)?.time?.archived} fallback={<span class="archived-chip">archived</span>}>
-            <button title="archive this session (hides it from lists)" onClick={archive}>
+            <button title="archive this session (hides it from lists)" disabled={!!nudgePhase()} onClick={archive}>
               archive
             </button>
           </Show>
-          <button class="danger" title="delete this session permanently" onClick={remove}>
+          <button class="danger" title="delete this session permanently" disabled={!!nudgePhase()} onClick={remove}>
             delete
           </button>
           <Show
@@ -745,7 +775,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
               </button>
             }
           >
-            <button class="stop" title="abort this session (esc esc)" disabled={aborting()} onClick={abort}>
+            <button class="stop" title="abort this session (esc esc)" disabled={aborting() || !!nudgePhase() || sending()} onClick={abort}>
               ■ stop <span class="hint">esc esc</span>
             </button>
           </Show>
@@ -783,7 +813,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
                       <button
                         class="fork-here"
                         title="fork: new session with the history before this message"
-                        disabled={forking()}
+                        disabled={forking() || !!nudgePhase()}
                         onClick={() => fork(m.id)}
                       >
                         fork from here
@@ -859,7 +889,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
               <FakeCaret target={promptEl} caret={caret()} mode={vim.mode()} />
             </div>
             <div class="prompt-side">
-              <span class="send-hint dim">{sending() ? "sending…" : "⌘⏎ to send"}</span>
+              <span class="send-hint dim">{nudgePhase() ? "nudging..." : sending() ? "sending…" : "⌘⏎ to send"}</span>
               <select
                 class="model-select"
                 title="model for the next turn (defaults to the previous turn's)"

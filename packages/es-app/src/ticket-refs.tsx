@@ -2,24 +2,16 @@
  * with no context — wrap refs found anywhere in the shell (transcript,
  * sidebar, panels) and show tracker info on hover, with links to the in-app
  * ticket page and the external tracker (jira/github). */
-import { createResource, createSignal, onCleanup, onMount, Show } from "solid-js"
+import { createMemo, createResource, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { es, type IssueDetail } from "./api"
 import { ago, linkUrl, useDashboard } from "./state"
 import { classifyRef, refFromHref, ticketLookupRef, ticketMatchesRef } from "./ticket-url"
 import { IssueChips } from "./pages/issue"
 import { Pr } from "./components/pr"
+import { matchPrRef, prFromHref } from "./pr-matching"
 
 // SD-123 / DLAA-31571 (jira) · owner/repo#12 · dotfiles#77 · bare #77
 const REF_RE = /\b[A-Z][A-Z0-9]{1,9}-\d+\b|(?:\b[\w.-]+\/)?(?:\b[\w.-]+)?#\d+(?![\w-])/g
-
-/* PR from a link target — the href is authoritative: a repo#N text inside an
- * anchor pointing at /pull/N is a PR, not a ticket. */
-export function prFromHref(href: string): { repo: string; number: number; url: string } | null {
-  const url = href.replace(/^https:\/\/duo\.fyi\/ink\//, "")
-  const m = url.match(/^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)\b/)
-  if (!m) return null
-  return { repo: m[1]!, number: Number(m[2]), url: `https://github.com/${m[1]}/pull/${m[2]}` }
-}
 
 /* Wrap ticket refs found in text nodes under root — including inside anchors
  * (sidebar rows, linkified refs): the span doesn't affect navigation and the
@@ -127,26 +119,27 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
     })
   })
 
-  // known PRs from dashboard state (thread PRs + unattached) by repo+number
-  const findPr = (repo: string, number: number) => {
+  const allPrs = () => {
     const st = state() as any
-    if (!st) return null
-    const all = [...(st.unattached_prs ?? []), ...(st.threads ?? []).flatMap((t: any) => t.prs ?? [])]
-    return all.find((p: any) => p.number === number && (p.repo === repo || p.repo?.endsWith(`/${repo}`))) ?? null
+    return [...(st?.unattached_prs ?? []), ...(st?.threads ?? []).flatMap((t: any) => t.prs ?? [])]
   }
 
-  /* PR resolution: an explicit /pull/ href, or a repo#N text ref matching a
-   * PR the dashboard tracks. */
-  const prHit = () => {
+  const prHit = createMemo(() => {
     const a = anchor()
     if (!a) return null
-    if (a.pr) return { url: a.pr.url, data: findPr(a.pr.repo, a.pr.number) }
     if (a.href) return null
-    const m = a.ticket.match(/^([\w.-]+(?:\/[\w.-]+)?)#(\d+)$/)
-    if (!m) return null
-    const found = findPr(m[1]!, Number(m[2]))
-    return found ? { url: found.url as string, data: found } : null
-  }
+    const all = allPrs()
+    // Read only this transcript at hover time: sidebar titles and prior sessions
+    // must not contribute PR identities to the active conversation.
+    const links = a.el.closest(".transcript")?.querySelectorAll<HTMLAnchorElement>("a[href]") ?? []
+    const pr = matchPrRef(
+      a.ticket,
+      [...all.map((p: { url: string }) => p.url), ...Array.from(links, (link) => link.href)],
+      a.pr?.url,
+    )
+    if (!pr) return null
+    return { url: pr.url, data: all.find((p: { url: string }) => prFromHref(p.url)?.url === pr.url) }
+  })
 
   const info = () => {
     const a = anchor()

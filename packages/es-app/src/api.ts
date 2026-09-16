@@ -83,7 +83,7 @@ export const oc = {
     if (!res.ok) throw new Error(`prompt failed: HTTP ${res.status} ${await res.text()}`)
   },
 
-  // fire-and-forget: the status SSE flips busy->idle on its own
+  // The response waits for runner interruption and cleanup.
   abort: async (id: string, directory: string) => {
     const res = await fetch(`/oc/session/${id}/abort?${q(directory)}`, { method: "POST" })
     if (!res.ok) throw new Error(`abort failed: HTTP ${res.status} ${await res.text()}`)
