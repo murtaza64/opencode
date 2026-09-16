@@ -14,6 +14,10 @@ const deferred = <T>() => {
 const harness = (
   handle: (url: string, init?: RequestInit) => Promise<Response>,
   options: ComposerDependencies = {},
+  capabilities = {
+    sessionAside: { version: 1, cancel: true },
+    sessionInput: { version: 1, delivery: ["queue", "steer"], list: true, cancel: true },
+  },
 ) => {
   const records = new Map<string, string>()
   let id = 0
@@ -27,12 +31,7 @@ const harness = (
     requestID: () => `request-${++id}`,
     fetch: (url, init) =>
       url.includes("/capabilities")
-        ? Promise.resolve(
-            Response.json({
-              sessionAside: { version: 1, cancel: true },
-              sessionInput: { version: 1, delivery: ["queue", "steer"], list: true, cancel: true },
-            }),
-          )
+        ? Promise.resolve(Response.json(capabilities))
         : handle(url, init),
     prompt: async () => {
       throw new Error("Unexpected chat-start transport")
@@ -214,4 +213,112 @@ test("late Aside answer retains newer visible text and duplicate requests are bl
   await asking
   expect(composer.visibleDraft().text).toBe("new question")
   expect(composer.state.keyboardTarget).toBe("queue")
+})
+
+const imageCapability = {
+  version: 1,
+  encoding: "data-url",
+  mimeTypes: ["image/png"],
+  maxCount: 8,
+  maxBytes: 5242880,
+  maxTotalBytes: 10485760,
+  maxWidth: 8192,
+  maxHeight: 8192,
+  maxPixels: 16777216,
+  animated: false,
+  compressedMetadata: false,
+}
+const imageCapabilities = {
+  sessionAside: { version: 1, cancel: true, images: imageCapability },
+  sessionInput: { version: 1, delivery: ["queue", "steer"], list: true, cancel: true, images: imageCapability },
+}
+const visibleImage = { id: "visible", mime: "image/png", filename: "visible.png", url: "data:image/png;base64,YQ==" }
+const wireImage = { type: "file", mime: "image/png", filename: "visible.png", url: "data:image/png;base64,YQ==" }
+
+test.each(["aside", "queue", "steer"] as const)("direct image-only %s captures the visible recovered buffer", async (action) => {
+  const posts: unknown[] = []
+  const { composer } = harness(async (_url, init) => {
+    const body = JSON.parse(String(init?.body))
+    posts.push(body)
+    return Response.json(action === "aside"
+      ? { requestID: body.requestID, text: "answer", snapshot }
+      : { ...receipt(body.requestID, "", action), images: body.images })
+  }, {}, imageCapabilities)
+  await composer.loadCapabilities()
+  composer.setVisibleText("hidden task")
+  composer.setImages([{ ...visibleImage, filename: "hidden.png" }], "task")
+  composer.restoreDraft("aside")
+  composer.setImages([visibleImage, visibleImage], "aside")
+  composer.selectTarget(action === "aside" ? "queue" : "aside")
+  composer.observeBusy(true)
+  expect(composer.state.mode).toBe("send")
+  expect(composer.reasonForAction(action)).toBe("")
+  await composer.submitVisible(action, session)
+  expect(posts).toEqual([action === "aside"
+    ? { requestID: "request-1", question: "", images: [wireImage, wireImage] }
+    : { requestID: "request-1", delivery: action, text: "", images: [wireImage, wireImage] }])
+  expect(composer.visibleDraft().images).toEqual([])
+  expect(composer.state.task.text).toBe("hidden task")
+  expect(composer.state.task.images[0]?.filename).toBe("hidden.png")
+  expect(composer.state.keyboardTarget).toBe("steer")
+})
+
+test("direct image capability checks use the named action rather than legacy mode or keyboard target", async () => {
+  const posts: unknown[] = []
+  const { composer } = harness(async (_url, init) => {
+    posts.push(JSON.parse(String(init?.body)))
+    return Response.json({ requestID: "request-1", text: "answer", snapshot })
+  }, {}, {
+    ...imageCapabilities,
+    sessionInput: { version: 1, delivery: ["queue", "steer"], list: true, cancel: true },
+  })
+  await composer.loadCapabilities()
+  composer.setImages([visibleImage], "task")
+  composer.selectTarget("queue")
+  composer.observeBusy(true)
+  expect(composer.state.mode).toBe("send")
+  expect(composer.reasonForAction("queue")).toContain("does not support images for queue")
+  expect(composer.reasonForAction("steer")).toContain("does not support images for steer")
+  await composer.submitVisible("queue", session)
+  await composer.submitVisible("steer", session)
+  expect(posts).toEqual([])
+  expect(composer.visibleDraft().images).toEqual([visibleImage])
+  await composer.submitVisible("aside", session)
+  expect(posts).toEqual([{ requestID: "request-1", question: "", images: [wireImage] }])
+})
+
+test("image retry after reload preserves captured buffer, payload and later target choices", async () => {
+  const calls: string[] = []
+  const posts: unknown[] = []
+  const { composer, dependencies, records } = harness(async (_url, init) => {
+    calls.push(init?.method ?? "GET")
+    if (!init?.method) return new Response(null, { status: 404 })
+    const body = JSON.parse(String(init.body))
+    posts.push(body)
+    if (posts.length === 1) throw new Error("lost ACK")
+    return Response.json({ ...receipt(body.requestID, ""), images: body.images })
+  }, {}, imageCapabilities)
+  await composer.loadCapabilities()
+  composer.setVisibleText("hidden task")
+  composer.restoreDraft("aside")
+  composer.setImages([visibleImage, visibleImage], "aside")
+  composer.selectTarget("queue")
+  await composer.submitVisible("queue", session)
+  composer.setImages([{ ...visibleImage, filename: "newer.png" }], "aside")
+  composer.selectTarget("aside")
+  const saved = JSON.parse([...records.values()][0]!)
+  expect(saved).toMatchObject({ directView: 1, visibleBuffer: "aside", keyboardTarget: "aside", targetRevision: 3 })
+  expect(saved.admission).toMatchObject({ buffer: "aside", targetRevision: 2, payload: { images: [wireImage, wireImage] } })
+  const restored = createComposer(session.id, directory, dependencies)
+  await restored.loadCapabilities()
+  await restored.retryAdmission()
+  expect(calls).toEqual(["POST", "GET", "POST"])
+  expect(posts).toEqual([
+    { requestID: "request-1", delivery: "queue", text: "", images: [wireImage, wireImage] },
+    { requestID: "request-1", delivery: "queue", text: "", images: [wireImage, wireImage] },
+  ])
+  expect(restored.state.visibleBuffer).toBe("aside")
+  expect(restored.visibleDraft().images[0]?.filename).toBe("newer.png")
+  expect(restored.state.task.text).toBe("hidden task")
+  expect(restored.state.keyboardTarget).toBe("aside")
 })

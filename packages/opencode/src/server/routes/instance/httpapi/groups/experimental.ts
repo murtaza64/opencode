@@ -6,6 +6,7 @@ import { SessionID } from "@/session/schema"
 import { Worktree } from "@/worktree"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { Schema } from "effect"
+import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
@@ -27,12 +28,17 @@ const ConsoleStateResponse = Schema.Struct({
 
 const CapabilitiesResponse = Schema.Struct({
   backgroundSubagents: Schema.Boolean,
-  sessionAside: Schema.Struct({ version: Schema.Literal(1), cancel: Schema.Literal(true) }),
+  sessionAside: Schema.Struct({
+    version: Schema.Literal(1),
+    cancel: Schema.Literal(true),
+    images: Schema.optionalKey(SessionV1.ImageCapabilities),
+  }),
   sessionInput: Schema.Struct({
     version: Schema.Literal(1),
     delivery: Schema.Array(Schema.Literals(["queue", "steer"])),
     list: Schema.Literal(true),
     cancel: Schema.Literal(true),
+    images: Schema.optionalKey(SessionV1.ImageCapabilities),
   }),
 }).annotate({ identifier: "ExperimentalCapabilities" })
 

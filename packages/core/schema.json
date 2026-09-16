@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "7e5a6b09-5d1d-41a6-917f-7bab9944917a",
+  "id": "9cbf2b9f-92a3-4ca2-93ca-5b69d8db150f",
   "prevIds": [
-    "f14a9b18-8207-487e-a3d3-227e629ba9ad"
+    "7e5a6b09-5d1d-41a6-917f-7bab9944917a"
   ],
   "ddl": [
     {
@@ -1473,6 +1473,16 @@
       "default": null,
       "generated": null,
       "name": "payload",
+      "entityType": "columns",
+      "table": "v1_session_input"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "images",
       "entityType": "columns",
       "table": "v1_session_input"
     },

@@ -1205,6 +1205,7 @@ export type GlobalEvent = {
             modelID: string
             variant?: string
           }
+          images?: Array<SessionV1InputImage>
           time: number
         }
       }
@@ -1225,6 +1226,15 @@ export type GlobalEvent = {
           requestID: string
           info: UserMessage
           part: TextPart
+          images?: Array<{
+            type: "file"
+            mime: "image/png" | "image/jpeg" | "image/webp" | "image/gif"
+            url: string
+            filename?: string
+            id: string
+            sessionID: string
+            messageID: string
+          }>
         }
       }
     | {
@@ -2174,12 +2184,38 @@ export type ExperimentalCapabilities = {
   sessionAside: {
     version: 1
     cancel: true
+    images?: {
+      version: 1
+      encoding: "data-url"
+      mimeTypes: Array<string>
+      maxCount: number
+      maxBytes: number
+      maxTotalBytes: number
+      maxWidth: number
+      maxHeight: number
+      maxPixels: number
+      animated: false
+      compressedMetadata: false
+    }
   }
   sessionInput: {
     version: 1
     delivery: Array<"queue" | "steer">
     list: true
     cancel: true
+    images?: {
+      version: 1
+      encoding: "data-url"
+      mimeTypes: Array<string>
+      maxCount: number
+      maxBytes: number
+      maxTotalBytes: number
+      maxWidth: number
+      maxHeight: number
+      maxPixels: number
+      animated: false
+      compressedMetadata: false
+    }
   }
 }
 
@@ -2930,13 +2966,14 @@ export type SessionInputAdmitted = {
   location?: LocationRef
   data: {
     sessionID: string
-    payload: SessionV1InputPayload
+    payload: SessionV1InputPayload1
     agent: string
     model: {
       providerID: string
       modelID: string
       variant?: string
     }
+    images?: Array<SessionV1InputImage>
     time: number
   }
 }
@@ -3266,10 +3303,18 @@ export type RevertState = {
   files?: Array<FileDiff>
 }
 
+export type SessionV1InputImage = {
+  type: "file"
+  mime: "image/png" | "image/jpeg" | "image/webp" | "image/gif"
+  url: string
+  filename?: string
+}
+
 export type SessionV1InputPayload = {
   requestID: string
   delivery: "queue" | "steer"
   text: string
+  images?: Array<SessionV1InputImage>
   agent?: string
 }
 
@@ -3994,6 +4039,7 @@ export type SyncEventSessionInputAdmitted = {
         modelID: string
         variant?: string
       }
+      images?: Array<SessionV1InputImage>
       time: number
     }
   }
@@ -4028,6 +4074,15 @@ export type SyncEventSessionInputPromoted = {
       requestID: string
       info: UserMessage
       part: TextPart
+      images?: Array<{
+        type: "file"
+        mime: "image/png" | "image/jpeg" | "image/webp" | "image/gif"
+        url: string
+        filename?: string
+        id: string
+        sessionID: string
+        messageID: string
+      }>
     }
   }
 }
@@ -4068,6 +4123,7 @@ export type SessionV1InputReceipt =
       requestID: string
       delivery: "queue" | "steer"
       text: string
+      images?: Array<SessionV1InputImage>
       agent: string
       sessionID: string
       admittedSeq: number
@@ -4078,6 +4134,7 @@ export type SessionV1InputReceipt =
       requestID: string
       delivery: "queue" | "steer"
       text: string
+      images?: Array<SessionV1InputImage>
       agent: string
       sessionID: string
       admittedSeq: number
@@ -4090,6 +4147,7 @@ export type SessionV1InputReceipt =
       requestID: string
       delivery: "queue" | "steer"
       text: string
+      images?: Array<SessionV1InputImage>
       agent: string
       sessionID: string
       admittedSeq: number
@@ -5544,6 +5602,14 @@ export type SessionNextCompactionDelta = {
   }
 }
 
+export type SessionV1InputPayload1 = {
+  requestID: string
+  delivery: "queue" | "steer"
+  text: string
+  images?: Array<SessionV1InputImage>
+  agent?: string
+}
+
 export type SessionInputCancelled = {
   id: string
   metadata?: {
@@ -5580,6 +5646,15 @@ export type SessionInputPromoted = {
     requestID: string
     info: UserMessage
     part: TextPart
+    images?: Array<{
+      type: "file"
+      mime: "image/png" | "image/jpeg" | "image/webp" | "image/gif"
+      url: string
+      filename?: string
+      id: string
+      sessionID: string
+      messageID: string
+    }>
   }
 }
 
@@ -6947,6 +7022,7 @@ export type EventSessionInputAdmitted = {
       modelID: string
       variant?: string
     }
+    images?: Array<SessionV1InputImage>
     time: number
   }
 }
@@ -6969,6 +7045,15 @@ export type EventSessionInputPromoted = {
     requestID: string
     info: UserMessage
     part: TextPart
+    images?: Array<{
+      type: "file"
+      mime: "image/png" | "image/jpeg" | "image/webp" | "image/gif"
+      url: string
+      filename?: string
+      id: string
+      sessionID: string
+      messageID: string
+    }>
   }
 }
 
@@ -10432,6 +10517,7 @@ export type SessionAsideData = {
   body?: {
     requestID: string
     question: string
+    images?: Array<SessionV1InputImage>
     model?: {
       providerID: string
       modelID: string

@@ -232,6 +232,7 @@ export default {
           \`admitted_seq\` integer NOT NULL,
           \`state\` text NOT NULL,
           \`payload\` text NOT NULL,
+          \`images\` text,
           \`model\` text NOT NULL,
           \`receipt\` text NOT NULL,
           CONSTRAINT \`fk_v1_session_input_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
