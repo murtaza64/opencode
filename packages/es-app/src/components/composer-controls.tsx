@@ -1,4 +1,5 @@
 import { For, Show, type JSX } from "solid-js"
+import { Markdown } from "@opencode-ai/session-ui/markdown"
 import type { Composer, ComposerMode } from "../composer"
 
 export const ComposerControls = (props: {
@@ -321,7 +322,7 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
             </Show>
             <Show when={aside().text}>
               <div class="aside-answer" dir="auto" tabIndex={0}>
-                {aside().text}
+                <Markdown text={aside().text!} cacheKey={`aside:${aside().requestID}`} />
               </div>
             </Show>
           </section>
