@@ -82,7 +82,11 @@ const layer = Layer.effect(
         yield* flock.acquire(`npm-install:${input.dir}`)
         const { Arborist } = yield* Effect.promise(() => import("@npmcli/arborist"))
         const add = input.add ?? []
-        const npmOptions = yield* NpmConfig.load(input.dir)
+        const npmOptions = {
+          ...(yield* NpmConfig.load(input.dir)),
+          // OpenCode consumes installed packages, not Arborist's audit report.
+          audit: false,
+        }
         const arborist = new Arborist({
           ...npmOptions,
           path: input.dir,
