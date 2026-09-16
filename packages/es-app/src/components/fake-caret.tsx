@@ -1,75 +1,49 @@
 /* Block caret for normal mode at positions the selection trick can't render
  * (end of line, empty buffer): measures the caret x/y with a hidden mirror of
  * the textarea's content and overlays a block. */
-import { createMemo, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js"
 import type { VimMode } from "../vim"
-
-let mirror: HTMLDivElement | null = null
-const MIRROR_PROPS = [
-  "fontFamily",
-  "fontSize",
-  "fontWeight",
-  "lineHeight",
-  "letterSpacing",
-  "paddingTop",
-  "paddingRight",
-  "paddingBottom",
-  "paddingLeft",
-  "borderTopWidth",
-  "borderRightWidth",
-  "borderBottomWidth",
-  "borderLeftWidth",
-  "boxSizing",
-] as const
-
-function measure(t: HTMLTextAreaElement, pos: number) {
-  if (!mirror) {
-    mirror = document.createElement("div")
-    mirror.style.position = "fixed"
-    mirror.style.visibility = "hidden"
-    mirror.style.left = "-9999px"
-    mirror.style.top = "0"
-    mirror.style.whiteSpace = "pre-wrap"
-    mirror.style.wordBreak = "break-word"
-    mirror.style.overflowWrap = "break-word"
-    document.body.appendChild(mirror)
-  }
-  const cs = getComputedStyle(t)
-  for (const p of MIRROR_PROPS) (mirror.style as any)[p] = (cs as any)[p]
-  mirror.style.width = `${t.clientWidth}px`
-  mirror.textContent = t.value.slice(0, pos)
-  const marker = document.createElement("span")
-  marker.textContent = "M"
-  mirror.appendChild(marker)
-  const left = marker.offsetLeft - t.scrollLeft
-  const top = marker.offsetTop - t.scrollTop
-  const width = marker.offsetWidth
-  const height = marker.offsetHeight
-  mirror.textContent = ""
-  return { left, top, width, height }
-}
+import { invalidateTextareaLayout, textareaLayout } from "../textarea-layout"
 
 export default function FakeCaret(props: {
   target: HTMLTextAreaElement | undefined
   caret: { el: HTMLTextAreaElement; pos: number; hasChar: boolean } | null
   mode: VimMode
 }) {
+  const [version, setVersion] = createSignal(0)
+  createEffect(() => {
+    const target = props.target
+    if (!target) return
+    const update = () => setVersion((value) => value + 1)
+    const observer = new ResizeObserver(update)
+    observer.observe(target)
+    target.addEventListener("scroll", update)
+    const fontsLoaded = () => {
+      invalidateTextareaLayout()
+      update()
+    }
+    document.fonts.addEventListener("loadingdone", fontsLoaded)
+    onCleanup(() => {
+      observer.disconnect()
+      target.removeEventListener("scroll", update)
+      document.fonts.removeEventListener("loadingdone", fontsLoaded)
+    })
+  })
   const style = createMemo(() => {
+    version()
     const c = props.caret
     if (props.mode !== "normal" || !c || c.hasChar || !props.target || c.el !== props.target) return null
-    const m = measure(c.el, c.pos)
+    const point = textareaLayout(c.el).points.find((point) => point.pos === c.pos)
+    if (!point) return null
+    const top = point.top - c.el.scrollTop + c.el.clientTop
     // clip when scrolled out of the textarea's visible box
-    if (m.top < 0 || m.top > c.el.clientHeight - 4) return null
+    if (top < 0 || top > c.el.clientHeight - 4) return null
     return {
-      left: `${m.left}px`,
-      top: `${m.top}px`,
-      width: `${Math.max(6, m.width)}px`,
-      height: `${m.height}px`,
+      left: `${point.left - c.el.scrollLeft + c.el.clientLeft}px`,
+      top: `${top}px`,
+      width: "0.6em",
+      height: `${point.height}px`,
     }
   })
-  return (
-    <Show when={style()}>
-      {(s) => <div class="vim-caret" style={s()} />}
-    </Show>
-  )
+  return <Show when={style()}>{(s) => <div class="vim-caret" style={s()} />}</Show>
 }

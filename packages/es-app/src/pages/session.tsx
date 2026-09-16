@@ -7,6 +7,7 @@ import { Message } from "@opencode-ai/session-ui/message-part"
 import { oc } from "../api"
 import { createLiveSession } from "../live-session"
 import FakeCaret from "../components/fake-caret"
+import { RelativeLines } from "../components/relative-lines"
 import SessionInfo from "../components/session-info"
 import { sessionHref, useDashboard } from "../state"
 import { rightOpen, startDrag } from "../ui"
@@ -952,7 +953,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
               </span>
             )}</For></div>
           </Show>
-          <div class="ta-wrap">
+          <div class="ta-wrap numbered-editor">
             <textarea
               ref={floatEl}
               aria-label={composer.state.mode === "aside" ? "Aside question" : "Task message"}
@@ -968,6 +969,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
               onClick={focusInsert}
               onBlur={(e) => saveSelection(e.currentTarget)}
             />
+            <RelativeLines target={floatEl!} value={draft()} />
             <FakeCaret target={floatEl} caret={caret()} mode={vim.mode()} />
           </div>
           <Footer expanded />

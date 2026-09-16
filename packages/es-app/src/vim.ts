@@ -1,9 +1,11 @@
 /* Modal (vim-like) editing for a textarea: normal/insert modes with the core
  * motions and operators — h j k l, w b e, 0 ^ $, gg G, i a I A o O, x s D C S,
- * d/c/y + motion, dd cc yy, p P, u / ctrl-r. No counts, marks, registers
+ * d/c/y + motion, dd cc yy, p P, u / ctrl-r. Counts on j/k and gj/gk only.
+ * No marks, registers
  * beyond one internal, or visual mode. The block cursor in normal mode is a
- * one-char selection styled via ::selection. */
+ * one-grapheme selection styled via ::selection. */
 import { createSignal } from "solid-js"
+import { textareaLayout } from "./textarea-layout"
 
 export type VimMode = "normal" | "insert"
 
@@ -13,7 +15,8 @@ const isWordChar = (c: string) => /[\w]/.test(c)
 const isSpace = (c: string) => /\s/.test(c)
 
 function lineStart(text: string, pos: number): number {
-  const i = text.lastIndexOf("\n", Math.max(0, pos - 1))
+  const i = text.lastIndexOf("\n", pos - 1)
+  if (pos === 0) return 0
   return i === -1 ? 0 : i + 1
 }
 
@@ -76,20 +79,16 @@ function wordEnd(text: string, pos: number): number {
   return i
 }
 
-function verticalMove(text: string, pos: number, dir: 1 | -1, goalCol: number): { pos: number; col: number } {
-  const start = lineStart(text, pos)
-  const col = goalCol >= 0 ? goalCol : pos - start
-  if (dir === 1) {
-    const end = lineEnd(text, pos)
-    if (end >= text.length) return { pos, col }
-    const nextStart = end + 1
-    const nextEnd = lineEnd(text, nextStart)
-    return { pos: Math.min(nextStart + col, nextEnd), col }
+// Both layout points and logical line starts are ordered UTF-16 boundaries.
+const boundaryIndex = (points: { pos: number }[], pos: number) => {
+  let low = 0
+  let high = points.length
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2)
+    if (points[mid]!.pos <= pos) low = mid + 1
+    else high = mid
   }
-  if (start === 0) return { pos, col }
-  const prevStart = lineStart(text, start - 1)
-  const prevEnd = start - 1
-  return { pos: Math.min(prevStart + col, prevEnd), col }
+  return Math.max(0, low - 1)
 }
 
 export function createVim(opts: {
@@ -102,12 +101,17 @@ export function createVim(opts: {
    * selection block can't render (EOL/empty) and a fake caret is needed */
   onCursor?: (info: { el: HTMLTextAreaElement; pos: number; hasChar: boolean }) => void
 }) {
-  const [mode, setMode] = createSignal<VimMode>("normal")
+  const [mode, updateMode] = createSignal<VimMode>("normal")
   let pendingOp: "d" | "c" | "y" | null = null
   let gPending = false
   let register = ""
   let registerLinewise = false
-  let goalCol = -1
+  let goal: { kind: "visual" | "logical"; value: number } | undefined
+  let count = 0
+  let operatorCount = 1
+  let observed:
+    | { el: HTMLTextAreaElement; value: string; start: number; end: number; layout: ReturnType<typeof textareaLayout> }
+    | undefined
   const undoStack: Snapshot[] = []
   const redoStack: Snapshot[] = []
 
@@ -115,16 +119,107 @@ export function createVim(opts: {
 
   const cursor = (t: HTMLTextAreaElement) => t.selectionStart ?? 0
 
-  const paint = (t: HTMLTextAreaElement, pos: number) => {
+  const resetCommand = () => {
+    pendingOp = null
+    gPending = false
+    count = 0
+    operatorCount = 1
+  }
+
+  const setMode = (next: VimMode) => {
+    goal = undefined
+    resetCommand()
+    return updateMode(next)
+  }
+
+  const remember = (t: HTMLTextAreaElement) => {
+    observed = { el: t, value: t.value, start: t.selectionStart, end: t.selectionEnd, layout: textareaLayout(t) }
+  }
+
+  const sync = (t: HTMLTextAreaElement) => {
+    if (
+      observed?.el === t &&
+      observed.value === t.value &&
+      observed.start === t.selectionStart &&
+      observed.end === t.selectionEnd &&
+      observed.layout === textareaLayout(t)
+    )
+      return false
+    goal = undefined
+    resetCommand()
+    remember(t)
+    return true
+  }
+
+  const adjacent = (t: HTMLTextAreaElement, pos: number, dir: 1 | -1) => {
+    const points = textareaLayout(t).points
+    const i = boundaryIndex(points, pos)
+    return points[Math.max(0, Math.min(points.length - 1, i + (dir === 1 ? 1 : points[i]!.pos < pos ? 0 : -1)))]!.pos
+  }
+
+  const paint = (t: HTMLTextAreaElement, pos: number, scroll = true) => {
     const text = t.value
-    const p = Math.max(0, Math.min(pos, text.length))
+    const layout = textareaLayout(t)
+    const i = boundaryIndex(layout.points, Math.max(0, Math.min(pos, text.length)))
+    const point = layout.points[i]!
+    const p = point.pos
     const hasChar = p < text.length && text[p] !== "\n"
     if (mode() === "normal" && hasChar) {
-      t.setSelectionRange(p, p + 1)
+      t.setSelectionRange(p, layout.points[i + 1]!.pos, "forward")
     } else {
       t.setSelectionRange(p, p)
     }
+    if (scroll) {
+      // Layout coordinates already include padding, but not the textarea border.
+      const bottom = point.top + (point.height || layout.lineHeight)
+      if (point.top < t.scrollTop) t.scrollTop = point.top
+      else if (bottom > t.scrollTop + t.clientHeight) t.scrollTop = bottom - t.clientHeight
+    }
+    remember(t)
     opts.onCursor?.({ el: t, pos: p, hasChar })
+  }
+
+  const verticalMove = (t: HTMLTextAreaElement, dir: 1 | -1, amount: number, logical: boolean) => {
+    const layout = textareaLayout(t)
+    const i = boundaryIndex(layout.points, cursor(t))
+    const point = layout.points[i]!
+    if (!logical) {
+      // Match native textarea navigation's integer-pixel horizontal goal.
+      if (goal?.kind !== "visual") goal = { kind: "visual", value: Math.floor(point.left) }
+      const x = goal.value
+      const row = layout.rows[Math.max(0, Math.min(layout.rows.length - 1, point.row + dir * amount))]!
+      return row.reduce((best, next) => (Math.abs(next.left - x) < Math.abs(best.left - x) ? next : best)).pos
+    }
+
+    const line = boundaryIndex(layout.lines, point.pos)
+    const target = layout.lines[Math.max(0, Math.min(layout.lines.length - 1, line + dir * amount))]!
+    const style = getComputedStyle(t)
+    const tab = Math.max(1, Number.parseFloat(style.tabSize) || 8)
+    const tabSize = (() => {
+      if (!style.tabSize.endsWith("px")) return tab
+      const context = t.ownerDocument.createElement("canvas").getContext("2d")!
+      context.font = style.font
+      return tab / (context.measureText(" ").width || 1)
+    })()
+    const nextColumn = (col: number, pos: number) =>
+      t.value[pos] === "\t" ? (Math.floor(col / tabSize) + 1) * tabSize : col + 1
+    if (goal?.kind !== "logical") {
+      let col = 0
+      for (let j = boundaryIndex(layout.points, layout.lines[line]!.pos); j < i; j++) {
+        col = nextColumn(col, layout.points[j]!.pos)
+      }
+      goal = { kind: "logical", value: col }
+    }
+    const end = lineEnd(t.value, target.pos)
+    let j = boundaryIndex(layout.points, target.pos)
+    let col = 0
+    while (layout.points[j + 1] && layout.points[j + 1]!.pos <= end) {
+      const next = nextColumn(col, layout.points[j]!.pos)
+      if (next > goal.value) break
+      col = next
+      j++
+    }
+    return layout.points[j]!.pos
   }
 
   const snapshot = (t: HTMLTextAreaElement) => {
@@ -134,6 +229,7 @@ export function createVim(opts: {
   }
 
   const apply = (t: HTMLTextAreaElement, value: string, pos: number) => {
+    goal = undefined
     opts.setValue(value)
     t.value = value
     paint(t, pos)
@@ -141,26 +237,26 @@ export function createVim(opts: {
 
   const enterInsert = (t: HTMLTextAreaElement, pos: number) => {
     setMode("insert")
-    pendingOp = null
-    t.setSelectionRange(pos, pos)
+    const points = textareaLayout(t).points
+    const p = points[boundaryIndex(points, pos)]!.pos
+    t.setSelectionRange(p, p)
+    remember(t)
   }
 
-  const enterNormal = (t: HTMLTextAreaElement) => {
-    setMode("normal")
-    pendingOp = null
-    gPending = false
-    paint(t, Math.max(0, cursor(t) - (mode() === "insert" ? 1 : 0)))
-  }
-
-  const motionTarget = (t: HTMLTextAreaElement, key: string, forOperator: boolean): [number, number, boolean] | null => {
+  const motionTarget = (
+    t: HTMLTextAreaElement,
+    key: string,
+    forOperator: boolean,
+    amount = 1,
+  ): [number, number, boolean] | null => {
     // returns [from, to, linewise]
     const text = t.value
     const pos = cursor(t)
     switch (key) {
       case "h":
-        return [Math.max(lineStart(text, pos), pos - 1), pos, false]
+        return [Math.max(lineStart(text, pos), adjacent(t, pos, -1)), pos, false]
       case "l":
-        return [pos, Math.min(lineEnd(text, pos), pos + 1), false]
+        return [pos, Math.min(lineEnd(text, pos), adjacent(t, pos, 1)), false]
       case "w": {
         const to = wordForward(text, pos)
         // dw/cw stop at line end when the word continues past it (approximation)
@@ -184,15 +280,16 @@ export function createVim(opts: {
         return [firstNonBlank(text, pos), pos, false]
       case "$":
         return [pos, lineEnd(text, pos), false]
-      case "j": {
-        const from = lineStart(text, pos)
-        const to = lineEnd(text, verticalMove(text, pos, 1, -1).pos)
-        return [from, Math.min(to + 1, text.length), true]
-      }
+      case "j":
       case "k": {
-        const up = verticalMove(text, pos, -1, -1).pos
-        const from = lineStart(text, up)
-        return [from, Math.min(lineEnd(text, pos) + 1, text.length), true]
+        const lines = textareaLayout(t).lines
+        const line = boundaryIndex(lines, pos)
+        const target = lines[Math.max(0, Math.min(lines.length - 1, line + (key === "j" ? amount : -amount)))]!.pos
+        return [
+          lineStart(text, Math.min(pos, target)),
+          Math.min(lineEnd(text, Math.max(pos, target)) + 1, text.length),
+          true,
+        ]
       }
       case "G":
         return [lineStart(text, pos), text.length, true]
@@ -202,6 +299,11 @@ export function createVim(opts: {
   }
 
   const runOperator = (t: HTMLTextAreaElement, op: "d" | "c" | "y", from: number, to: number, linewise: boolean) => {
+    goal = undefined
+    const points = textareaLayout(t).points
+    from = points[boundaryIndex(points, from)]!.pos
+    const end = boundaryIndex(points, to)
+    to = points[Math.min(points.length - 1, end + (points[end]!.pos < to ? 1 : 0))]!.pos
     const text = t.value
     const chunk = text.slice(from, to)
     register = chunk
@@ -223,6 +325,7 @@ export function createVim(opts: {
 
   const handleNormal = (e: KeyboardEvent): boolean => {
     const t = el(e)
+    sync(t)
     const text = t.value
     const pos = cursor(t)
     const key = e.key
@@ -239,11 +342,28 @@ export function createVim(opts: {
       return false
     }
 
+    if (/^[0-9]$/.test(key) && (key !== "0" || count > 0)) {
+      count = Math.min(1000000, count * 10 + Number(key))
+      return true
+    }
+    const amount = (count || 1) * operatorCount
+    if (key !== "g" && key !== "d" && key !== "c" && key !== "y") count = 0
+
     // pending operator: expect a motion (or doubled operator for linewise)
     if (pendingOp) {
       const op = pendingOp
       pendingOp = null
+      if (gPending) {
+        resetCommand()
+        if (key === "g") runOperator(t, op, 0, Math.min(lineEnd(text, pos) + 1, text.length), true)
+        if (key === "j" || key === "k") {
+          const m = motionTarget(t, key, true, amount)
+          if (m) runOperator(t, op, m[0], m[1], m[2])
+        }
+        return true
+      }
       if (key === op) {
+        resetCommand()
         const [from, to] = lineRange(text, pos)
         runOperator(t, op, from, to, true)
         return true
@@ -253,37 +373,33 @@ export function createVim(opts: {
         pendingOp = op
         return true
       }
-      if (gPending) {
-        gPending = false
-        if (key === "g") {
-          runOperator(t, op, 0, Math.min(lineEnd(text, pos) + 1, text.length), true)
-          return true
-        }
-        return true
-      }
-      const m = motionTarget(t, key, true)
+      resetCommand()
+      const m = motionTarget(t, key, true, amount)
       if (m) runOperator(t, op, m[0], m[1], m[2])
       return true
     }
 
     if (gPending) {
-      gPending = false
+      resetCommand()
       if (key === "g") {
-        goalCol = -1
+        goal = undefined
         paint(t, 0)
         return true
       }
+      if (key === "j" || key === "k") paint(t, verticalMove(t, key === "j" ? 1 : -1, amount, true))
       return true
     }
 
     switch (key) {
       case "Escape":
+        goal = undefined
+        resetCommand()
         return true
       case "i":
         enterInsert(t, pos)
         return true
       case "a":
-        enterInsert(t, Math.min(pos + 1, lineEnd(text, pos)))
+        enterInsert(t, Math.min(adjacent(t, pos, 1), lineEnd(text, pos)))
         return true
       case "I":
         enterInsert(t, firstNonBlank(text, pos))
@@ -315,42 +431,41 @@ export function createVim(opts: {
       case "0":
       case "^":
       case "$": {
-        goalCol = -1
+        goal = undefined
         const m = motionTarget(t, key, false)
         if (!m) return true
         let target = ["h", "b", "B", "0", "^"].includes(key) ? m[0] : m[1]
         // $ sits ON the last character, not past it
-        if (key === "$" && target > lineStart(text, pos)) target -= 1
+        if (key === "$" && target > lineStart(text, pos)) target = adjacent(t, target, -1)
         paint(t, target)
         return true
       }
       case "j":
       case "k": {
-        const r = verticalMove(text, pos, key === "j" ? 1 : -1, goalCol)
-        goalCol = r.col
-        paint(t, r.pos)
+        paint(t, verticalMove(t, key === "j" ? 1 : -1, amount, false))
         return true
       }
       case "g":
         gPending = true
         return true
       case "G": {
-        goalCol = -1
+        goal = undefined
         paint(t, lineStart(text, text.length))
         return true
       }
       case "x": {
         if (pos < text.length && text[pos] !== "\n") {
           snapshot(t)
-          register = text[pos]!
+          const end = adjacent(t, pos, 1)
+          register = text.slice(pos, end)
           registerLinewise = false
-          apply(t, text.slice(0, pos) + text.slice(pos + 1), pos)
+          apply(t, text.slice(0, pos) + text.slice(end), pos)
         }
         return true
       }
       case "s": {
         snapshot(t)
-        apply(t, text.slice(0, pos) + text.slice(pos + 1), pos)
+        apply(t, text.slice(0, pos) + text.slice(adjacent(t, pos, 1)), pos)
         enterInsert(t, pos)
         return true
       }
@@ -376,6 +491,8 @@ export function createVim(opts: {
       case "c":
       case "y":
         pendingOp = key as "d" | "c" | "y"
+        operatorCount = count || 1
+        count = 0
         return true
       case "p":
       case "P": {
@@ -386,7 +503,7 @@ export function createVim(opts: {
           const chunk = register.endsWith("\n") ? register : register + "\n"
           apply(t, text.slice(0, at) + chunk + text.slice(at), at)
         } else {
-          const at = key === "p" ? Math.min(pos + 1, text.length) : pos
+          const at = key === "p" ? adjacent(t, pos, 1) : pos
           apply(t, text.slice(0, at) + register + text.slice(at), at + register.length - 1)
         }
         return true
@@ -420,9 +537,11 @@ export function createVim(opts: {
       if (e.key === "Escape") {
         snapshot(t)
         undoStack.pop() // snapshot() cleared redo; keep a light heuristic:
-        undoStack.push({ value: t.value, sel: Math.max(0, cursor(t) - 1) })
+        const pos = adjacent(t, cursor(t), -1)
+        undoStack.push({ value: t.value, sel: pos })
         setMode("normal")
-        paint(t, Math.max(0, cursor(t) - 1))
+        paint(t, pos)
+        e.preventDefault()
         return true
       }
       // emacs-style word motion; match on code — macOS alt+f/b types ƒ/∫
@@ -442,7 +561,10 @@ export function createVim(opts: {
 
   /** re-assert the block cursor (e.g. after focus or external value change) */
   const refresh = (t: HTMLTextAreaElement | undefined) => {
-    if (t && mode() === "normal") paint(t, cursor(t))
+    if (t && mode() === "normal") {
+      sync(t)
+      paint(t, cursor(t), false)
+    }
   }
 
   return { mode, setMode, handleKeyDown, refresh, enterInsertAt: enterInsert }

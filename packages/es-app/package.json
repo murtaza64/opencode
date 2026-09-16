@@ -8,6 +8,7 @@
     "build": "vite build",
     "test": "bun test --conditions=browser ./src",
     "test:browser": "node test/composer.browser.mjs",
+    "test:browser:vim": "node test/vim.browser.mjs",
     "test:browser:real": "node test/composer.real.browser.mjs",
     "typecheck": "tsgo --noEmit"
   },
