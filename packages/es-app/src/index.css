@@ -886,13 +886,21 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .relative-lines .current { color: var(--lavender); }
 
 /* Both editor surfaces share controls; receipts and Asides stay outside history. */
-.composer-controls { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 4px 8px; min-width: 0; flex-shrink: 0; }
+.composer-controls { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px 10px; min-width: 0; flex-shrink: 0; }
 .composer-controls > * { grid-column: 1 / -1; }
 .composer-controls > .composer-mode-row { grid-column: 1; grid-row: 1; flex-wrap: nowrap; }
-.composer-controls > .composer-summary { grid-column: 2; grid-row: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.composer-controls > .composer-settings { grid-column: 3; grid-row: 1; }
-.composer-controls > .composer-actions { grid-column: 4; grid-row: 1; }
-.composer-settings { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.composer-controls > .composer-settings { grid-column: 2; grid-row: 1; }
+.composer-controls > .composer-actions { grid-column: 3; grid-row: 1; }
+.composer-controls > .composer-meta { grid-row: 2; }
+.composer-settings { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.composer-meta { display: flex; align-items: center; gap: 12px; border-block-start: 1px solid var(--surface0); padding-block-start: 4px; min-width: 0; }
+.composer-summary { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.composer-session-actions { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
+.composer-session-actions button { min-height: 28px; padding: 3px 10px; background: transparent; color: var(--subtext0); font-size: 11px; }
+.composer-session-actions button:hover { background: var(--surface0); color: var(--text); }
+.composer-session-actions button.danger { color: var(--red); }
+.composer-session-actions button.stop { color: var(--pink); border-inline-start: 1px solid var(--surface1); margin-inline-start: 4px; }
+.composer-key { color: var(--subtext0); font-size: 10px; line-height: 1.2; white-space: nowrap; font-weight: 400; }
 .composer-settings .model-select { width: 110px; max-width: 100%; height: 26px; font-family: inherit; }
 .composer-settings .agent-select, .composer-agent { width: 100px; }
 .composer-agent { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -903,7 +911,7 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .composer-controls button:focus-visible, .composer-results button:focus-visible,
 .composer-results summary:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
 .composer-help { line-height: 1.4; overflow-wrap: anywhere; }
-.composer-send { color: var(--green); border: 1px solid var(--surface1); min-height: 26px; width: 112px; padding: 3px 8px; font-size: 12px; }
+.composer-send { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 2px; color: var(--green); border: 1px solid var(--surface1); min-height: 36px; width: 128px; padding: 3px 8px; font-size: 12px; }
 .composer-results { flex-shrink: 0; max-height: 30dvh; overflow-y: auto; overflow-wrap: anywhere; }
 .composer-results:empty { display: none; }
 .composer-results :is(section, details) { border-block-start: 1px solid var(--surface1); padding: 8px 10px; background: var(--mantle); }
@@ -918,11 +926,11 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .aside-snapshot { font-size: 11px; }
 .aside-snapshot span { display: block; }
 .aside-answer { white-space: pre-wrap; font-family: var(--font-serif); font-size: 13px; line-height: 1.65; padding-block: 10px; }
-.prompt-box { flex-shrink: 0; max-height: 55dvh; overflow-y: auto; }
+.prompt-box { flex-shrink: 0; max-height: 55dvh; overflow-y: auto; container-type: inline-size; }
 .prompt-box textarea { max-height: 25dvh; }
 .prompt-side { flex-shrink: 0; max-width: 35%; }
 .attachment-chip { max-width: 100%; overflow-wrap: anywhere; }
-.float-editor { height: min(80dvh, 900px); max-height: 90dvh; }
+.float-editor { height: min(80dvh, 900px); max-height: 90dvh; container-type: inline-size; }
 .float-editor > :is(.composer-controls, .attachments, .dim) { padding: 8px 12px; }
 .float-editor > .ta-wrap { min-height: 80px; overflow: auto; }
 .float-editor .composer-results { max-height: 25dvh; }
@@ -932,6 +940,15 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .session-alerts { flex-shrink: 0; max-height: 25dvh; overflow: auto; }
 .session-page .transcript { min-height: 32px; }
 .session-main { overflow-y: auto; }
+
+@container (max-width: 760px) {
+  .composer-controls { grid-template-columns: minmax(0, 1fr) auto; }
+  .composer-controls > .composer-actions { grid-column: 2; }
+  .composer-controls > .composer-settings { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; }
+  .composer-controls > .composer-meta { grid-row: 3; }
+  .composer-meta .composer-summary { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .composer-session-actions { margin-inline-start: auto; }
+}
 
 @media (max-width: 1100px) {
   .sidebar:not(.sidebar-mini) { max-width: 200px; }
@@ -960,12 +977,12 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
   .session-page .topbar h1 { flex-basis: 70%; font-size: 14px; }
   .session-page .topbar button { padding: 4px 8px; }
   .prompt-box { padding-block: 6px; max-height: 50dvh; }
-  .composer-controls { grid-template-columns: minmax(0, 1fr) auto; }
-  .composer-controls > .composer-actions { grid-column: 2; }
-  .composer-controls > .composer-settings { grid-column: 1 / -1; grid-row: 2; }
-  .composer-controls > .composer-summary { grid-column: 1 / -1; grid-row: 3; }
   .composer-mode-row { gap: 4px; }
-  .composer-controls button { min-height: 30px; }
+  .composer-controls button, .composer-settings .model-select { min-height: 40px; }
+  .composer-controls .composer-send { width: 116px; }
+  .composer-modes button { min-width: 48px; padding-inline: 6px; }
+  .composer-session-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; }
+  .composer-session-actions button { padding-inline: 6px; }
   .composer-results button { min-height: 36px; }
   .composer-actions { gap: 4px 8px; }
   .composer-help { font-size: 11px; }
@@ -973,6 +990,10 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
   .float-editor textarea { font-size: 16px; }
   .float-editor > .composer-controls { padding: 6px 8px; }
   .composer-results { max-height: 24dvh; }
+}
+
+@media (pointer: coarse) {
+  .composer-controls button, .composer-settings .model-select, .float-head button, .attachment-chip button { min-height: 44px; }
 }
 
 /* --- tickets + docs browser (dotfiles#79) ---------------------------------- */

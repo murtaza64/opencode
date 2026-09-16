@@ -565,8 +565,12 @@ function SessionView(props: { sessionID: string; directory: string }) {
     if (el) saveSelection(el)
     composer.selectMode(mode)
     const selection = [...activeDraft().selection] as const
-    queueMicrotask(() => {
+    const revision = activeDraft().revision
+    // Restore after the pointer's default selection update, without undoing newer typing.
+    requestAnimationFrame(() => {
+      if (composer.state.mode !== mode || activeDraft().revision !== revision) return
       const target = floating() ? floatEl : promptEl
+      if (!target?.isConnected) return
       target?.setSelectionRange(selection[0], selection[1])
       setCaret(null)
     })
@@ -737,7 +741,22 @@ function SessionView(props: { sessionID: string; directory: string }) {
 
   const Footer = (props: { expanded?: boolean }) => (
     <ComposerControls composer={composer} connected={connected()} busy={busy()} selectMode={selectMode} submit={send}
-      activeAgent={activeAgent()} agents={agents()?.items ?? []} agentError={agents()?.error} retryAgents={() => { void refetchAgents() }}>
+      normalMode={vim.mode() === "normal"}
+      activeAgent={activeAgent()} agents={agents()?.items ?? []} agentError={agents()?.error} retryAgents={() => { void refetchAgents() }}
+      sessionActions={<>
+        <button title="Fork this session at its tip" disabled={forking()} onClick={() => fork()}>
+          {forking() ? "Forking…" : "Fork"}
+        </button>
+        <Show when={!session()?.time?.archived} fallback={<span class="archived-chip">Archived</span>}>
+          <button title="Archive this session (hides it from lists)" onClick={archive}>Archive</button>
+        </Show>
+        <button class="danger" title="Delete this session permanently" onClick={remove}>Delete</button>
+        <Show when={busy()} fallback={<button onClick={() => { stick = true; pin() }}>↓ Bottom</button>}>
+          <button class="stop" aria-label="Stop session" title="Stop the parent session" disabled={aborting()} onClick={abort}>
+            <span aria-hidden="true">■</span> Stop
+          </button>
+        </Show>
+      </>}>
       <select class="model-select" aria-label="Model override"
         disabled={composer.state.mode === "queue" || composer.state.mode === "steer"}
         title="model for the next turn (defaults to the previous turn's)"
@@ -788,35 +807,6 @@ function SessionView(props: { sessionID: string; directory: string }) {
                 </A>
               </span>
             )}
-          </Show>
-          <span style="flex:1" />
-          <button title="fork this session at its tip" disabled={forking()} onClick={() => fork()}>
-            {forking() ? "forking…" : "fork"}
-          </button>
-          <Show when={!(session() as any)?.time?.archived} fallback={<span class="archived-chip">archived</span>}>
-            <button title="archive this session (hides it from lists)" onClick={archive}>
-              archive
-            </button>
-          </Show>
-          <button class="danger" title="delete this session permanently" onClick={remove}>
-            delete
-          </button>
-          <Show
-            when={busy()}
-            fallback={
-              <button
-                onClick={() => {
-                  stick = true
-                  pin()
-                }}
-              >
-                ↓ bottom
-              </button>
-            }
-          >
-            <button class="stop" title="abort this session (esc esc)" disabled={aborting()} onClick={abort}>
-              ■ stop <span class="hint">esc esc</span>
-            </button>
           </Show>
         </header>
 
@@ -925,9 +915,9 @@ function SessionView(props: { sessionID: string; directory: string }) {
       <Show when={floating()}>
         <div class="float-editor">
           <div class="float-head">
-            <span class="dim">composing — ⌘⏎ sends · ^e collapses</span>
+            <span class="dim">Expanded editor</span>
             <span style="flex:1" />
-            <button onClick={closeFloat}>⤡ collapse</button>
+            <button onClick={closeFloat}>⤡ collapse <kbd class="composer-key">Ctrl+E</kbd></button>
           </div>
           <ComposerResults composer={composer} connected={connected()} />
           <Show when={images().length}>

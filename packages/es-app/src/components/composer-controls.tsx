@@ -11,6 +11,8 @@ export const ComposerControls = (props: {
   agents: { name: string; description?: string }[]
   agentError?: string
   retryAgents: () => void
+  normalMode: boolean
+  sessionActions: JSX.Element
   children: JSX.Element
 }) => {
   const state = props.composer.state
@@ -20,8 +22,8 @@ export const ComposerControls = (props: {
     !props.connected ? "Disconnected or loading. Reconnect before sending." : props.composer.blockedReason()
   return (
     <div class="composer-controls" data-composer-controls>
-      <Show when={state.mode !== "send" || props.busy}>
-        <div class="composer-mode-row">
+      <div class="composer-mode-row">
+      <Show when={state.mode !== "send" || props.busy} fallback={<span class="dim">Modes</span>}>
           <div
             class="composer-modes"
             role="radiogroup"
@@ -55,36 +57,13 @@ export const ComposerControls = (props: {
               )}
             </For>
           </div>
-          <Show when={!props.busy && props.connected}>
-            <button aria-label="Use normal Send" title="Use normal Send" onClick={() => props.selectMode("send")}>
-              Send
-            </button>
-          </Show>
-        </div>
       </Show>
-      <div
-        class="composer-summary composer-help dim"
-        role="status"
-        aria-live="polite"
-        title={
-          state.mode === "aside"
-            ? "Ask about a snapshot without changing the task. Task draft saved; the first Aside starts as a copy."
-            : state.mode === "send"
-              ? "Send to this session."
-              : state.mode === "queue"
-                ? "Queue uses the selected next-task agent and the session model."
-                : "Steer uses the active agent and session model."
-        }
-      >
-        {state.mode === "aside"
-          ? "Snapshot only. Task draft saved."
-          : state.mode === "queue"
-            ? "Send when the task finishes."
-            : state.mode === "steer"
-              ? "Send at the next safe boundary."
-              : "Send to this session."}
+        <kbd class="composer-key" aria-label="Alt plus M to cycle modes">Alt+M</kbd>
       </div>
-      <div class="composer-settings">
+      <div class="composer-settings" role="group" aria-label="Agent and model settings">
+        <Show when={state.mode !== "send" && !props.busy && props.connected}>
+          <button aria-label="Use normal Send" title="Use normal Send" onClick={() => props.selectMode("send")}>Send</button>
+        </Show>
         <Show when={state.mode !== "send"}>
           <Show
             when={state.mode === "queue"}
@@ -122,35 +101,40 @@ export const ComposerControls = (props: {
         </Show>
         {props.children}
       </div>
-      <Show when={state.mode === "queue" && props.agentError}>
-        <div class="composer-help err" role="alert">
-          Agent list unavailable; current choice kept. <button onClick={props.retryAgents}>Retry agents</button>
-        </div>
-      </Show>
-      <Show when={reason()}>
-        <div class="composer-help dim">{reason()}</div>
-      </Show>
-      <Show when={state.storageError}>
-        <div class="err" role="alert">
-          {state.storageError}
-          <button onClick={() => props.composer.setImages([])}>Clear saved images</button>
-        </div>
-      </Show>
-      <Show when={state.error}>
-        <div class="err" role="alert">
-          {state.error}
-        </div>
-      </Show>
       <div class="composer-actions">
         <button
           class="composer-send"
+          aria-label={props.composer.actionLabel()}
+          aria-keyshortcuts="Meta+Enter Control+Enter"
           title="Cmd/Ctrl+Enter"
           disabled={!!reason() || (!draft().text.trim() && !draft().images.length)}
           onClick={props.submit}
         >
-          {props.composer.actionLabel()}
+          <span>{props.composer.actionLabel()}</span>
+          <kbd class="composer-key" aria-label={props.normalMode ? "Enter in normal mode, or Command or Control plus Enter" : "Command or Control plus Enter"}>
+            {props.normalMode ? "Enter · ⌘/Ctrl↵" : "⌘/Ctrl↵"}
+          </kbd>
         </button>
       </div>
+      <div class="composer-meta">
+        <div class="composer-summary composer-help dim" role="status" aria-live="polite"
+          title={state.mode === "aside" ? "Ask about a snapshot without changing the task. Task draft saved; the first Aside starts as a copy."
+            : state.mode === "queue" ? "Queue uses the selected next-task agent and the session model."
+            : state.mode === "steer" ? "Steer uses the active agent and session model." : "Send to this session."}>
+          {state.mode === "aside" ? "Snapshot only. Task draft saved."
+            : state.mode === "queue" ? "Send when the task finishes."
+            : state.mode === "steer" ? "Send at the next safe boundary." : "Send to this session."}
+        </div>
+        <div class="composer-session-actions" role="group" aria-label="Session actions">{props.sessionActions}</div>
+      </div>
+      <Show when={state.mode === "queue" && props.agentError}>
+        <div class="composer-help err" role="alert">Agent list unavailable; current choice kept. <button onClick={props.retryAgents}>Retry agents</button></div>
+      </Show>
+      <Show when={reason()}><div class="composer-help dim">{reason()}</div></Show>
+      <Show when={state.storageError}>
+        <div class="err" role="alert">{state.storageError}<button onClick={() => props.composer.setImages([])}>Clear saved images</button></div>
+      </Show>
+      <Show when={state.error}><div class="err" role="alert">{state.error}</div></Show>
       <Show when={props.composer.capabilityReason()}>
         <button
           disabled={!props.connected || state.inputLoading}

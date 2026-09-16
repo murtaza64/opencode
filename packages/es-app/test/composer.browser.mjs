@@ -66,7 +66,7 @@ try {
   expect((await queueAgent().boundingBox()).y).toBe((await mode(page, "Queue").boundingBox()).y)
   await active(page).screenshot({ path: `${artifacts}/footer-queue-desktop.png` })
   const top = (await editor(page).boundingBox()).y
-  expect((await active(page).locator(".composer-controls").boundingBox()).height).toBeLessThanOrEqual(32)
+  expect((await active(page).locator(".composer-controls").boundingBox()).height).toBeLessThanOrEqual(84)
   await expect(active(page).getByRole("button", { name: "Refresh availability", exact: true })).toHaveCount(0)
   await mode(page, "Aside").click()
   expect((await editor(page).boundingBox()).y).toBe(top)

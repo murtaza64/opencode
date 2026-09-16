@@ -26,6 +26,13 @@ export const createFixture = async () => {
     promoteOnCancel: false,
     receipts: [],
     messages: undefined,
+    permissions: undefined,
+    questions: [],
+    archived: new Set(),
+    deleted: new Set(),
+    failAction: "",
+    holdAction: false,
+    actionReplies: [],
     calls: [],
     unexpected: [],
     inputReplies: [],
@@ -80,7 +87,7 @@ export const createFixture = async () => {
         editspace: "fixture",
         root: directory,
         generated_at: 1,
-        threads: ["ses_a", "ses_b"].map((id) => ({
+        threads: ["ses_a", "ses_b"].filter((id) => !fixture.deleted.has(id)).map((id) => ({
           key: id,
           kind: "session",
           title: session(id).title,
@@ -97,7 +104,7 @@ export const createFixture = async () => {
     if (url.pathname === "/api/notifications") return json({ notifications: [] })
     if (url.pathname === "/api/issues") return json({ backend: "gh", repo: "fixture/test", issues: [] })
     if (url.pathname === "/api/docs") return json({ roots: [], sources: [] })
-    if (["/experimental/session", "/session"].includes(url.pathname)) return json([session("ses_a"), session("ses_b")])
+    if (["/experimental/session", "/session"].includes(url.pathname)) return json(["ses_a", "ses_b"].filter((id) => !fixture.deleted.has(id)).map((id) => ({ ...session(id), time: { ...session(id).time, ...(fixture.archived.has(id) ? { archived: 5 } : {}) } })))
     if (url.pathname === "/session/status") return json({ ses_a: { type: fixture.status }, ses_b: { type: "idle" } })
     if (url.pathname === "/config/providers")
       return json({
@@ -114,14 +121,29 @@ export const createFixture = async () => {
             { name: "hidden", mode: "primary", hidden: true },
           ])
     if (url.pathname === "/permission")
-      return json([
+      return json(fixture.permissions ?? [
         { id: "permission-1", sessionID: "ses_a", permission: "bash", patterns: ["fixture command"], metadata: {} },
       ])
-    if (url.pathname === "/question") return json([])
+    if (url.pathname === "/question") return json(fixture.questions)
     const match = /^\/session\/(ses_[ab])(.*)$/.exec(url.pathname)
     if (match) {
       const [, id, action] = match
-      if (!action) return json(session(id), fixture.failSnapshot ? 503 : 200)
+      const operation = request.method === "POST" && action === "/fork" ? "fork"
+        : request.method === "POST" && action === "/abort" ? "abort"
+        : request.method === "PATCH" && !action ? "archive"
+        : request.method === "DELETE" && !action ? "delete" : undefined
+      if (operation) {
+        if (fixture.failAction === operation) return json({ error: `${operation} unavailable` }, 503)
+        const complete = () => {
+          if (operation === "archive") fixture.archived.add(id)
+          if (operation === "delete") fixture.deleted.add(id)
+          if (operation === "abort") fixture.setStatus("idle")
+          return json(operation === "fork" ? session("ses_b") : session(id))
+        }
+        if (fixture.holdAction) { fixture.actionReplies.push(complete); return }
+        return complete()
+      }
+      if (!action) return json({ ...session(id), time: { ...session(id).time, ...(fixture.archived.has(id) ? { archived: 5 } : {}) } }, fixture.failSnapshot ? 503 : 200)
       if (action === "/message")
         return json(
           id === "ses_a"
