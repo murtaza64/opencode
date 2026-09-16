@@ -13,6 +13,7 @@ const lock = Semaphore.makeUnsafe(1)
 export type Migration = {
   id: string
   up: (tx: Transaction) => Effect.Effect<void, unknown>
+  fresh?: true
 }
 
 export function apply(db: Database) {
@@ -26,6 +27,12 @@ export function apply(db: Database) {
       yield* db.transaction((tx) =>
         Effect.gen(function* () {
           yield* schema.up(tx)
+          // Generated table DDL cannot express runtime compatibility triggers.
+          yield* Effect.forEach(
+            migrations,
+            (migration) => ("fresh" in migration && migration.fresh ? migration.up(tx) : Effect.void),
+            { discard: true },
+          )
           yield* tx.run(
             sql`CREATE TABLE ${sql.identifier("migration")} (id TEXT PRIMARY KEY, time_completed INTEGER NOT NULL)`,
           )

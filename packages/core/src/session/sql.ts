@@ -90,6 +90,7 @@ export const V1InputTable = sqliteTable(
     admitted_seq: integer().notNull(),
     state: text().$type<SessionV1.InputReceipt["state"]>().notNull(),
     payload: text({ mode: "json" }).$type<SessionV1.InputPayload>().notNull(),
+    images: text({ mode: "json" }).$type<readonly SessionV1.InputImage[]>(),
     model: text({ mode: "json" }).$type<SessionV1.User["model"]>().notNull(),
     receipt: text({ mode: "json" }).$type<SessionV1.InputReceipt>().notNull(),
   },

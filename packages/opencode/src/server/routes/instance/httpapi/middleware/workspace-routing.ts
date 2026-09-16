@@ -8,8 +8,8 @@ import * as Fence from "@/server/shared/fence"
 import { getWorkspaceRouteSessionID, isLocalWorkspaceRoute, workspaceProxyURL } from "@/server/shared/workspace-routing"
 import { NotFoundError } from "@/storage/storage"
 import { Flag } from "@opencode-ai/core/flag/flag"
-import { Context, Data, Effect, Layer, Option, Schema } from "effect"
-import { HttpClient, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { Context, Data, Effect, FileSystem, Layer, Option, Schema } from "effect"
+import { HttpClient, HttpIncomingMessage, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import * as Socket from "effect/unstable/socket/Socket"
 import { InvalidRequestError } from "../errors"
@@ -242,7 +242,12 @@ function routeHttpApiWorkspace<E>(
       )
     }
     const plan = yield* planRequest(request, session)
-    return yield* routeWorkspace(client, effect, plan)
+    const routed = routeWorkspace(client, effect, plan)
+    if (/^\/session\/[^/]+\/(?:input|aside)$/.test(requestURL(request).pathname))
+      return yield* routed.pipe(
+        Effect.provideService(HttpIncomingMessage.MaxBodySize, FileSystem.Size(16 * 1024 * 1024)),
+      )
+    return yield* routed
   })
 }
 

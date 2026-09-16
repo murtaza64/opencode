@@ -1,7 +1,12 @@
 import { batch } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
-import type { Session, SessionV1InputPayload, SessionV1InputReceipt } from "@opencode-ai/sdk/v2"
-import { oc } from "./api"
+import type {
+  ExperimentalCapabilities,
+  Session,
+  SessionV1InputPayload,
+  SessionV1InputReceipt,
+} from "@opencode-ai/sdk/v2"
+import { oc, inputImages, type InputImage } from "./api"
 import { composerStorage } from "./composer-storage"
 
 export type ComposerMode = "send" | "aside" | "queue" | "steer"
@@ -16,10 +21,15 @@ export type ComposerDraft = {
   revision: number
 }
 export type ComposerCapabilities = {
-  sessionAside?: { version: number; cancel: boolean }
-  sessionInput?: { version: number; delivery: string[]; list: boolean; cancel: boolean }
+  sessionAside?: { version: number; cancel: boolean; images?: ImageCapability }
+  sessionInput?: { version: number; delivery: string[]; list: boolean; cancel: boolean; images?: ImageCapability }
 }
-export type InputPayload = Readonly<SessionV1InputPayload>
+export type ImageCapability = NonNullable<ExperimentalCapabilities["sessionInput"]["images"]> & {
+  compressedMetadata: false
+}
+export type InputPayload = {
+  readonly [Key in keyof SessionV1InputPayload]: Readonly<SessionV1InputPayload[Key]>
+}
 export type InputReceipt = SessionV1InputReceipt
 export type AsideSnapshot = {
   capturedAt: number
@@ -30,6 +40,7 @@ export type AsideSnapshot = {
 export type AsideRequest = {
   requestID: string
   question: string
+  images?: readonly InputImage[]
   status: "running" | "done" | "error" | "cancelled" | "unknown"
   text?: string
   snapshot?: AsideSnapshot
@@ -170,6 +181,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           throw new Error("Invalid saved input identity; do not resubmit without checking inputs")
         setState("admission", {
           ...saved.admission,
+          payload: copyPayload(saved.admission.payload),
           status: "unknown",
           error: "Admission needs reconciliation after reload.",
         })
@@ -183,6 +195,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         setState("asideRequest", {
           requestID: saved.asideRequest.requestID,
           question: saved.asideRequest.question,
+          ...(isImages(saved.asideRequest.images) ? { images: inputImages(saved.asideRequest.images) } : {}),
           status: "unknown",
           error: "Aside completion is unknown after reload. Cancel this request before asking another.",
         })
@@ -196,7 +209,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
   }
 
   const persist = () => {
-    if (!storage) return
+    if (!storage) return false
     const saved = {
       version: 1,
       mode: state.mode,
@@ -210,11 +223,15 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       aside: copyDraft(state.aside),
       asideSeeded: state.asideSeeded,
       admission: state.admission
-        ? { ...state.admission, payload: { ...state.admission.payload }, status: "unknown" }
+        ? { ...state.admission, payload: copyPayload(state.admission.payload), status: "unknown" }
         : null,
       asideRequest:
         state.asideRequest?.status === "running" || state.asideRequest?.status === "unknown"
-          ? { requestID: state.asideRequest.requestID, question: state.asideRequest.question }
+          ? {
+              requestID: state.asideRequest.requestID,
+              question: state.asideRequest.question,
+              images: state.asideRequest.images,
+            }
           : null,
       missingImages: { ...missingImages },
       tracked: [...tracked],
@@ -222,8 +239,9 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     try {
       storage.setItem(key, JSON.stringify(saved))
       setState("storageError", imageWarning())
+      return true
     } catch (error) {
-      // Keep images in the live buffers even when browser storage cannot hold them.
+      // Drop draft copies only; uncertain requests must keep their exact submitted images.
       try {
         storage.setItem(
           key,
@@ -241,8 +259,10 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           "storageError",
           imageWarning() || "Images could not be saved and remain in this tab only. Keep this tab open.",
         )
+        return true
       } catch {
         setState("storageError", `Drafts and request IDs could not be saved: ${message(error)}. Keep this tab open.`)
+        return false
       }
     }
   }
@@ -255,6 +275,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
   }
   const clearTask = (revision: number) => {
     if (state.task.revision !== revision) return
+    setMissingImages("task", false)
     setState("task", { text: "", images: [], selection: [0, 0], revision: revision + 1 })
   }
   const capabilityReason = (mode: ComposerMode) => {
@@ -271,17 +292,24 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       ? ""
       : `This server does not support ${mode} inputs with listing and cancellation.`
   }
+  const imageCapabilityReason = (mode: ComposerMode, images: readonly { mime: string; url: string }[]) => {
+    if (!images.length || mode === "send") return ""
+    const capability =
+      mode === "aside" ? state.capabilities?.sessionAside?.images : state.capabilities?.sessionInput?.images
+    if (!capability) return `This server does not support images for ${mode}. The draft is kept.`
+    return imageReason(images, capability)
+  }
   const blockedReason = () => {
     if (restoreError) return restoreError
     if (missingImages[draftKey()])
       return "Images are missing from this restored draft. Reattach or explicitly clear images before sending."
     const unavailable = capabilityReason(state.mode)
     if (unavailable) return unavailable
+    const media = imageCapabilityReason(state.mode, state[draftKey()].images)
+    if (media) return media
     if (state.mode === "aside") {
       if (state.asideRequest?.status === "running" || state.asideRequest?.status === "unknown")
         return "Cancel or resolve the current Aside before asking another."
-      if (state.aside.images.length)
-        return "Aside is text-only. Remove images from the Aside draft; the task draft stays saved."
       if (state.aside.text.length > 32_000) return "Aside questions are limited to 32,000 characters."
       return ""
     }
@@ -292,8 +320,6 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         return "Previous normal Send outcome is unknown. Check the conversation, then dismiss its status before sending again."
       return state.busy ? "Task busy. Normal Send is unavailable; choose Aside, Queue or Steer." : ""
     }
-    if (state.task.images.length)
-      return "Queue and Steer are text-only. Images remain saved; remove them or select Send."
     if (state.task.model) return "Queue and Steer use the session model. Clear the model override or select Send."
     return ""
   }
@@ -305,6 +331,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       admission?.payload.requestID === receipt.requestID &&
       (receipt.delivery !== admission.payload.delivery ||
         receipt.text !== admission.payload.text ||
+        !sameImages(receipt.images, admission.payload.images) ||
         (admission.payload.agent !== undefined && receipt.agent !== admission.payload.agent))
     )
       throw new Error("Input ID belongs to a different payload. The draft was not cleared.")
@@ -354,7 +381,11 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       const input = value.sessionInput
       const capabilities: ComposerCapabilities = {}
       if (record(aside) && typeof aside.version === "number" && typeof aside.cancel === "boolean") {
-        capabilities.sessionAside = { version: aside.version, cancel: aside.cancel }
+        capabilities.sessionAside = {
+          version: aside.version,
+          cancel: aside.cancel,
+          images: imageCapability(aside.images),
+        }
       }
       if (
         record(input) &&
@@ -369,6 +400,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           delivery: input.delivery,
           list: input.list,
           cancel: input.cancel,
+          images: imageCapability(input.images),
         }
       }
       if (version === capabilityVersion) setState("capabilities", capabilities)
@@ -425,7 +457,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       accept(receipt, admission.payload.requestID)
     } catch (error) {
       if (state.admission?.payload.requestID !== admission.payload.requestID) return
-      if (error instanceof HttpError && [400, 401, 403, 404, 413, 422].includes(error.status)) {
+      if (error instanceof HttpError && [400, 401, 403, 404, 413, 415, 422].includes(error.status)) {
         tracked.delete(admission.payload.requestID)
         setState({
           admission: null,
@@ -458,7 +490,11 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     const mode = state.mode
     const draft = copyDraft(state[draftKey()])
     const text = draft.text.trim()
-    if (!text && (mode !== "send" || !draft.images.length)) return
+    if (!text && !draft.images.length) return
+    const images =
+      mode !== "send" && draft.images.length
+        ? inputImages(draft.images.map((image) => ({ ...image, mime: requireImageMime(image.mime) })))
+        : undefined
     setState("error", "")
     if (state.normalSubmission?.status === "accepted") setState("normalSubmission", null)
     if (mode === "aside") {
@@ -466,15 +502,27 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       const abort = new AbortController()
       asideAbort = abort
       setState("asideRequest", null)
-      setState("asideRequest", { requestID: id, question: text, status: "running" })
-      persist()
+      setState("asideRequest", { requestID: id, question: text, ...(images ? { images } : {}), status: "running" })
+      if (!persist() && images) {
+        setState({
+          asideRequest: null,
+          error:
+            "Cannot save the image Aside for recovery. No Aside was sent; draft kept. Free browser storage and try again.",
+        })
+        return
+      }
       try {
         const result = await json<{ requestID: string; text: string; snapshot: AsideSnapshot }>(
           await request(url("/aside"), {
             method: "POST",
             headers: { "content-type": "application/json" },
             signal: abort.signal,
-            body: JSON.stringify({ requestID: id, question: text, ...(draft.model ? { model: draft.model } : {}) }),
+            body: JSON.stringify({
+              requestID: id,
+              question: text,
+              ...(images ? { images } : {}),
+              ...(draft.model ? { model: draft.model } : {}),
+            }),
           }),
         )
         if (result.requestID !== id) throw new Error("Aside response identity did not match this request")
@@ -513,6 +561,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         requestID: requestID(),
         delivery: mode,
         text,
+        ...(images ? { images } : {}),
         ...(mode === "queue" && state.queueAgent ? { agent: state.queueAgent } : {}),
       }),
       revision: draft.revision,
@@ -520,12 +569,21 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     }
     tracked.add(admission.payload.requestID)
     setState("admission", admission)
-    persist()
+    if (!persist() && images) {
+      tracked.delete(admission.payload.requestID)
+      setState({
+        admission: null,
+        sending: false,
+        error:
+          "Cannot save the exact image input for retry. No input was sent; draft kept. Free browser storage and try again.",
+      })
+      return
+    }
     await admit(admission)
   }
   const retryAdmission = async () => {
     if (!state.admission || state.sending) return
-    const admission = { ...state.admission, payload: { ...state.admission.payload } }
+    const admission = { ...state.admission, payload: copyPayload(state.admission.payload) }
     const reason = capabilityReason(admission.payload.delivery)
     if (reason) {
       setState("error", reason)
@@ -536,6 +594,15 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     try {
       if (await readInput(admission.payload.requestID)) return
       if (state.admission?.payload.requestID !== admission.payload.requestID) return
+      const media = imageCapabilityReason(admission.payload.delivery, admission.payload.images ?? [])
+      if (media) {
+        setState("error", media)
+        return
+      }
+      if (admission.payload.images?.length && !persist()) {
+        setState("error", "Cannot save the exact image input for retry. No retry was sent; keep this tab open.")
+        return
+      }
       setState("admission", { status: "sending", error: undefined })
       await admit(admission)
     } catch (error) {
@@ -689,7 +756,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     cancelAside,
     closeAside,
     blockedReason,
-    capabilityReason: () => capabilityReason(state.mode),
+    capabilityReason: () => capabilityReason(state.mode) || imageCapabilityReason(state.mode, state[draftKey()].images),
     actionLabel: () => ({ send: "Send", aside: "Ask aside", queue: "Queue message", steer: "Steer task" })[state.mode],
   }
 }
@@ -701,6 +768,85 @@ const copyDraft = (draft: ComposerDraft): ComposerDraft => ({
   model: draft.model ? { ...draft.model } : null,
   selection: [draft.selection[0], draft.selection[1]],
 })
+const copyPayload = (payload: InputPayload): InputPayload =>
+  Object.freeze({
+    ...payload,
+    ...(payload.images ? { images: inputImages(payload.images) } : {}),
+  })
+const imageMimeTypes = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const
+const requireImageMime = (mime: string) => {
+  const supported = imageMimeTypes.find((value) => value === mime)
+  if (!supported) throw new Error("Unsupported image MIME type")
+  return supported
+}
+const imageCapability = (value: unknown): ImageCapability | undefined => {
+  if (
+    !record(value) ||
+    value.version !== 1 ||
+    value.encoding !== "data-url" ||
+    !Array.isArray(value.mimeTypes) ||
+    !value.mimeTypes.length ||
+    !value.mimeTypes.every((mime) => imageMimeTypes.some((supported) => supported === mime)) ||
+    value.animated !== false ||
+    value.compressedMetadata !== false ||
+    ![value.maxCount, value.maxBytes, value.maxTotalBytes, value.maxWidth, value.maxHeight, value.maxPixels].every(
+      (limit) => typeof limit === "number" && Number.isSafeInteger(limit) && limit > 0,
+    )
+  )
+    return
+  return {
+    version: 1,
+    encoding: "data-url",
+    mimeTypes: value.mimeTypes,
+    maxCount: Math.min(value.maxCount as number, 8),
+    maxBytes: Math.min(value.maxBytes as number, 5_242_880),
+    maxTotalBytes: Math.min(value.maxTotalBytes as number, 10_485_760),
+    maxWidth: Math.min(value.maxWidth as number, 8192),
+    maxHeight: Math.min(value.maxHeight as number, 8192),
+    maxPixels: Math.min(value.maxPixels as number, 16_777_216),
+    animated: false,
+    compressedMetadata: false,
+  }
+}
+const imageReason = (images: readonly { mime: string; url: string }[], capability: ImageCapability) => {
+  if (images.length > capability.maxCount) return `At most ${capability.maxCount} images are allowed. Draft kept.`
+  let total = 0
+  for (const image of images) {
+    if (!capability.mimeTypes.includes(image.mime))
+      return "Unsupported image format. Use PNG, JPEG, WebP or GIF. Draft kept."
+    const prefix = `data:${image.mime};base64,`
+    if (!image.url.startsWith(prefix)) return "Images must be base64 data URLs matching their MIME type. Draft kept."
+    const encoded = image.url.slice(prefix.length)
+    const bytes = (encoded.length / 4) * 3 - (encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0)
+    if (bytes > capability.maxBytes) return `Each image is limited to ${capability.maxBytes} bytes. Draft kept.`
+    if (!encoded.length || encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded))
+      return "Invalid base64 image data. Draft kept."
+    total += bytes
+    if (total > capability.maxTotalBytes)
+      return `Images are limited to ${capability.maxTotalBytes} total bytes. Draft kept.`
+  }
+  return ""
+}
+const isImages = (value: unknown): value is InputImage[] =>
+  Array.isArray(value) &&
+  value.every(
+    (image) =>
+      record(image) &&
+      image.type === "file" &&
+      typeof image.mime === "string" &&
+      imageMimeTypes.some((mime) => mime === image.mime) &&
+      typeof image.url === "string" &&
+      (image.filename === undefined || typeof image.filename === "string"),
+  )
+const sameImages = (left: readonly InputImage[] | undefined, right: readonly InputImage[] | undefined) =>
+  (left?.length ?? 0) === (right?.length ?? 0) &&
+  (left ?? []).every(
+    (image, index) =>
+      image.type === right?.[index]?.type &&
+      image.mime === right[index].mime &&
+      image.url === right[index].url &&
+      image.filename === right[index].filename,
+  )
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
 const isMode = (value: unknown): value is ComposerMode =>
@@ -729,7 +875,8 @@ const isAdmission = (value: unknown): value is ComposerAdmission =>
   value.payload.requestID.length <= 200 &&
   (value.payload.delivery === "queue" || value.payload.delivery === "steer") &&
   typeof value.payload.text === "string" &&
-  /\S/.test(value.payload.text) &&
+  (value.payload.images === undefined || isImages(value.payload.images)) &&
+  (/\S/.test(value.payload.text) || (isImages(value.payload.images) && value.payload.images.length > 0)) &&
   (value.payload.agent === undefined || typeof value.payload.agent === "string") &&
   typeof value.revision === "number" &&
   Number.isSafeInteger(value.revision)

@@ -4,7 +4,7 @@ import { fileURLToPath } from "url"
 import path from "path"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { EffectDrizzleSqlite } from "@opencode-ai/effect-drizzle-sqlite"
-import { Effect, Layer } from "effect"
+import { Cause, Effect, Exit, Layer } from "effect"
 import { eq, inArray, sql } from "drizzle-orm"
 import { DatabaseMigration } from "@opencode-ai/core/database/migration"
 import { migrations } from "@opencode-ai/core/database/migration.gen"
@@ -39,6 +39,78 @@ const run = <A, E>(effect: Effect.Effect<A, E, SqlClientService>) =>
 const makeDb = EffectDrizzleSqlite.makeWithDefaults()
 
 describe("DatabaseMigration", () => {
+  test.each(["fresh", "upgrade"])("%s databases prevent an old runtime dropping admitted images", async (mode) => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* DatabaseMigration.apply(db)
+        if (mode === "upgrade") {
+          yield* db.run(sql`DROP TRIGGER IF EXISTS v1_input_images_require_parts`)
+          yield* db.run(sql`DELETE FROM migration WHERE id = '20260916205955_v1_input_media_guard'`)
+        }
+        yield* db
+          .insert(ProjectTable)
+          .values({ id: ProjectV2.ID.global, worktree: AbsolutePath.make("/fixture"), sandboxes: [] })
+          .run()
+        const sessionID = SessionSchema.ID.make("ses_media_guard")
+        yield* db
+          .insert(SessionTable)
+          .values({
+            id: sessionID,
+            project_id: ProjectV2.ID.global,
+            slug: "guard",
+            directory: "/fixture",
+            title: "Guard",
+            version: "test",
+          })
+          .run()
+        const image = {
+          type: "file",
+          mime: "image/png",
+          filename: "fixture.png",
+          url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAIAAAA2iEnWAAAAFElEQVR4nGOM6rnEwMDAxAAGUAoAIIQBvq4LkJkAAAAASUVORK5CYII=",
+        }
+        yield* db.run(sql`INSERT INTO v1_session_input(request_id, session_id, admitted_seq, state, payload, images, model, receipt)
+        VALUES ('image', ${sessionID}, 1, 'pending', ${JSON.stringify({ requestID: "image", delivery: "queue", text: "image prompt", images: [image] })},
+          ${JSON.stringify([image])}, '{}', ${JSON.stringify({ requestID: "image", state: "pending", images: [image] })}),
+        ('text', ${sessionID}, 2, 'pending', '{"requestID":"text","delivery":"queue","text":"text prompt"}', NULL, '{}', '{"requestID":"text","state":"pending"}')`)
+        if (mode === "upgrade") yield* DatabaseMigration.apply(db)
+
+        // This is the pre-image projector's transaction, bypassing new service-level validation.
+        const legacyPromote = (requestID: string) =>
+          db.transaction((tx) =>
+            Effect.gen(function* () {
+              yield* tx.run(
+                sql`INSERT INTO message(id,session_id,time_created,time_updated,data) VALUES (${`msg_${requestID}`},${sessionID},1,1,'{"role":"user"}')`,
+              )
+              yield* tx.run(
+                sql`INSERT INTO part(id,message_id,session_id,time_created,time_updated,data) VALUES (${`prt_${requestID}`},${`msg_${requestID}`},${sessionID},1,1,'{"type":"text","text":"legacy text"}')`,
+              )
+              yield* tx.run(
+                sql`UPDATE v1_session_input SET state='promoted', receipt=json_set(receipt,'$.state','promoted','$.messageID',${`msg_${requestID}`},'$.timePromoted',1) WHERE request_id=${requestID}`,
+              )
+            }),
+          )
+        const rejected = yield* legacyPromote("image").pipe(Effect.exit)
+        expect(Exit.isFailure(rejected)).toBe(true)
+        if (Exit.isFailure(rejected)) expect(Cause.pretty(rejected.cause)).toContain("image-capable runtime")
+        expect(yield* db.get(sql`SELECT state FROM v1_session_input WHERE request_id='image'`)).toEqual({
+          state: "pending",
+        })
+        expect(yield* db.get(sql`SELECT id FROM message WHERE id='msg_image'`)).toBeUndefined()
+        expect(yield* db.get(sql`SELECT id FROM part WHERE message_id='msg_image'`)).toBeUndefined()
+        yield* legacyPromote("text")
+        expect(yield* db.get(sql`SELECT state FROM v1_session_input WHERE request_id='text'`)).toEqual({
+          state: "promoted",
+        })
+        yield* db.run(sql`UPDATE v1_session_input SET state='cancelled' WHERE request_id='image'`)
+        expect(yield* db.get(sql`SELECT images FROM v1_session_input WHERE request_id='image'`)).toEqual({
+          images: JSON.stringify([image]),
+        })
+      }),
+    )
+  })
+
   test("defaults missing workspace names while preserving legacy workspace data", async () => {
     await run(
       Effect.gen(function* () {

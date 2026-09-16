@@ -1,8 +1,22 @@
 /* Thin fetch layer. The daemon (:4096) is reached via the /oc proxy, the es
  * dashboard server (:7777) via /es — both same-origin through vite. */
-import type { Agent, GlobalSession, Message, Part, PermissionRequest, QuestionRequest, Session } from "@opencode-ai/sdk/v2"
+import type { Agent, GlobalSession, Message, Part, PermissionRequest, QuestionRequest, Session, SessionV1InputImage } from "@opencode-ai/sdk/v2"
 
 export type MessageWithParts = { info: Message; parts: Part[] }
+export type InputImage = Readonly<SessionV1InputImage>
+export const inputImages = <Mime extends string>(
+  images: readonly { mime: Mime; url: string; filename?: string }[],
+) =>
+  Object.freeze(
+    images.map((image) =>
+      Object.freeze({
+        type: "file" as const,
+        mime: image.mime,
+        url: image.url,
+        ...(image.filename !== undefined ? { filename: image.filename } : {}),
+      }),
+    ),
+  )
 export type AttentionNotification = {
   id: string
   kind: "permission" | "question" | "idle"
@@ -63,14 +77,12 @@ export const oc = {
     text: string,
     opts: {
       model?: { providerID: string; modelID: string }
-      images?: { mime: string; url: string; filename: string }[]
+      images?: readonly { mime: string; url: string; filename?: string }[]
     } = {},
   ) => {
     const parts: Record<string, unknown>[] = []
     if (text) parts.push({ type: "text", text })
-    for (const img of opts.images ?? []) {
-      parts.push({ type: "file", mime: img.mime, url: img.url, filename: img.filename })
-    }
+    parts.push(...inputImages(opts.images ?? []))
     // reuse the session's own agent; model defaults to the previous turn's
     const body: Record<string, unknown> = { parts, agent: session.agent }
     const model =

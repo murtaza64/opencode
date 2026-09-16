@@ -1,6 +1,7 @@
 export * as SessionProjector from "./projector"
 
 import { and, desc, eq, gt, or, sql } from "drizzle-orm"
+import { isDeepStrictEqual } from "node:util"
 import { DateTime, Effect, Layer, Schema } from "effect"
 import { Database } from "../database/database"
 import { EventV2 } from "../event"
@@ -22,6 +23,7 @@ const encodeMessage = Schema.encodeSync(SessionMessage.Message)
 
 export class SessionAlreadyProjected extends Error {}
 export class InputLifecycleConflict extends Error {}
+export class InputCapacityExceeded extends Error {}
 
 type Usage = {
   cost: number
@@ -276,6 +278,38 @@ const layer = Layer.effectDiscard(
       Effect.gen(function* () {
         const seq = event.durable?.seq
         if (seq === undefined) return yield* Effect.die("Input admission requires a durable sequence")
+        const existing = yield* db
+          .select({ id: V1InputTable.request_id })
+          .from(V1InputTable)
+          .where(eq(V1InputTable.request_id, event.data.payload.requestID))
+          .get()
+          .pipe(Effect.orDie)
+        if (existing) return yield* Effect.die(new InputLifecycleConflict())
+        if (!event.data.payload.text.trim() && !event.data.payload.images?.length)
+          return yield* Effect.die(new InputLifecycleConflict())
+        if (
+          (event.data.payload.images?.length ?? 0) !== (event.data.images?.length ?? 0) ||
+          event.data.images?.some((image, index) => image.filename !== event.data.payload.images?.[index]?.filename)
+        )
+          return yield* Effect.die(new InputLifecycleConflict())
+        const pending = yield* db
+          .select({
+            count: sql<number>`coalesce(sum(case when ${V1InputTable.state} = 'pending' then 1 else 0 end), 0)`,
+            bytes: sql<number>`coalesce(sum(length(cast(${V1InputTable.payload} as blob)) + coalesce(length(cast(${V1InputTable.images} as blob)), 0) + length(cast(${V1InputTable.receipt} as blob))), 0)`,
+          })
+          .from(V1InputTable)
+          .where(eq(V1InputTable.session_id, event.data.sessionID))
+          .get()
+          .pipe(Effect.orDie)
+        const incoming =
+          Buffer.byteLength(JSON.stringify(event.data.payload)) * 2 +
+          Buffer.byteLength(JSON.stringify(event.data.images ?? [])) +
+          1024
+        if (
+          event.data.images?.length &&
+          ((pending?.count ?? 0) >= 64 || (pending?.bytes ?? 0) + incoming > 64 * 1024 * 1024)
+        )
+          return yield* Effect.die(new InputCapacityExceeded())
         const stored = yield* db
           .insert(V1InputTable)
           .values({
@@ -284,6 +318,7 @@ const layer = Layer.effectDiscard(
             admitted_seq: seq,
             state: "pending",
             payload: event.data.payload,
+            images: event.data.images,
             model: event.data.model,
             receipt: {
               ...event.data.payload,
@@ -340,6 +375,32 @@ const layer = Layer.effectDiscard(
           .pipe(Effect.orDie)
         if (!row) return yield* Effect.die(new InputLifecycleConflict())
         const info = event.data.info
+        const images = event.data.images ?? []
+        if (
+          info.sessionID !== event.data.sessionID ||
+          info.agent !== row.receipt.agent ||
+          !isDeepStrictEqual(info.model, row.model) ||
+          event.data.part.sessionID !== info.sessionID ||
+          event.data.part.messageID !== info.id ||
+          event.data.part.text !== row.payload.text ||
+          images.some((image) => image.sessionID !== info.sessionID || image.messageID !== info.id) ||
+          (images.length > 0 && !/^prt_[A-Za-z0-9]+$/.test(event.data.part.id)) ||
+          images.some(
+            (image, index) =>
+              !/^prt_[A-Za-z0-9]+$/.test(image.id) ||
+              image.id <= (index === 0 ? event.data.part.id : images[index - 1].id),
+          ) ||
+          !isDeepStrictEqual(
+            images.map((image) => ({
+              type: image.type,
+              mime: image.mime,
+              url: image.url,
+              ...(image.filename === undefined ? {} : { filename: image.filename }),
+            })),
+            row.images ?? [],
+          )
+        )
+          return yield* Effect.die(new InputLifecycleConflict())
         yield* db
           .insert(MessageTable)
           .values({ id: info.id, session_id: info.sessionID, time_created: info.time.created, data: messageData(info) })
@@ -356,6 +417,19 @@ const layer = Layer.effectDiscard(
           })
           .run()
           .pipe(Effect.orDie)
+        for (const image of event.data.images ?? []) {
+          yield* db
+            .insert(PartTable)
+            .values({
+              id: image.id,
+              message_id: info.id,
+              session_id: info.sessionID,
+              time_created: info.time.created,
+              data: partData(image),
+            })
+            .run()
+            .pipe(Effect.orDie)
+        }
         yield* db
           .update(V1InputTable)
           .set({

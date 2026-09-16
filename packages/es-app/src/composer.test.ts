@@ -2,7 +2,13 @@ import { expect, test } from "bun:test"
 import { createComputed, createRoot } from "solid-js"
 import { unwrap } from "solid-js/store"
 import type { Session } from "@opencode-ai/sdk/v2"
-import { createComposer, getComposer, type ComposerDependencies, type InputReceipt } from "./composer"
+import {
+  createComposer,
+  getComposer,
+  type ComposerDependencies,
+  type ImageCapability,
+  type InputReceipt,
+} from "./composer"
 
 const session = { id: "ses_composer", agent: "build" } as Session
 const directory = "/repo with spaces/a&b?#"
@@ -10,7 +16,25 @@ const capabilities = {
   sessionAside: { version: 1, cancel: true },
   sessionInput: { version: 1, delivery: ["queue", "steer"], list: true, cancel: true },
 }
-const image = { id: "image-1", mime: "image/png", url: "data:image/png;base64,aGVsbG8=", filename: "shot.png" }
+const image = { id: "image-1", mime: "image/png" as const, url: "data:image/png;base64,aGVsbG8=", filename: "shot.png" }
+const wireImage = { type: "file" as const, mime: image.mime, url: image.url, filename: image.filename }
+const imageCapability = {
+  version: 1,
+  encoding: "data-url",
+  mimeTypes: ["image/png", "image/jpeg", "image/webp", "image/gif"],
+  maxCount: 8,
+  maxBytes: 5_242_880,
+  maxTotalBytes: 10_485_760,
+  maxWidth: 8192,
+  maxHeight: 8192,
+  maxPixels: 16_777_216,
+  animated: false,
+  compressedMetadata: false,
+} satisfies ImageCapability
+const imageCapabilities = {
+  sessionAside: { ...capabilities.sessionAside, images: imageCapability },
+  sessionInput: { ...capabilities.sessionInput, images: imageCapability },
+}
 const model = { providerID: "provider", modelID: "model" }
 const snapshot = {
   capturedAt: 123,
@@ -57,6 +81,7 @@ const harness = (
     throw new Error(`Unexpected request: ${request.method} ${request.url}`)
   },
   options: ComposerDependencies = {},
+  serverCapabilities: unknown = capabilities,
 ) => {
   const requests: Request[] = []
   const storage = options.storage ?? new MemoryStorage()
@@ -75,7 +100,7 @@ const harness = (
         signal: init?.signal,
       }
       requests.push(request)
-      if (request.url.pathname === "/oc/experimental/capabilities") return Response.json(capabilities)
+      if (request.url.pathname === "/oc/experimental/capabilities") return Response.json(serverCapabilities)
       return handle(request)
     },
     ...options,
@@ -319,13 +344,13 @@ test("media and model limits block without stripping drafts or falling back to n
   composer.setModel(model)
   composer.selectMode("queue")
   await composer.submit(session)
-  expect(composer.blockedReason()).toContain("text-only")
+  expect(composer.blockedReason()).toContain("does not support images")
   composer.setImages([])
   expect(composer.blockedReason()).toContain("session model")
   composer.selectMode("aside")
   composer.setImages([image])
   await composer.submit(session)
-  expect(composer.blockedReason()).toContain("text-only")
+  expect(composer.blockedReason()).toContain("does not support images")
   composer.setImages([])
   composer.setText("x".repeat(32_001))
   expect(composer.blockedReason()).toContain("32,000")
@@ -961,4 +986,346 @@ test("malformed saved storage produces a visible warning without crashing the co
   expect(composer.state.storageError).toContain("Cannot restore")
   composer.setText("usable draft")
   expect(composer.state.task.text).toBe("usable draft")
+})
+
+test.each(["queue", "steer", "aside"] as const)(
+  "%s accepts image-only and repeated images without UI metadata",
+  async (mode) => {
+    const { composer, requests } = harness(
+      (request) => {
+        const body = request.body as { requestID: string; images: unknown }
+        return Response.json(
+          mode === "aside"
+            ? { requestID: body.requestID, text: "answer", snapshot }
+            : { ...pending(body.requestID, "", mode), images: body.images },
+        )
+      },
+      {},
+      imageCapabilities,
+    )
+    await composer.loadCapabilities()
+    const attachments = [
+      { ...image, source: { type: "file", path: "/not-sent" } },
+      { ...image, id: "repeat" },
+    ]
+    composer.setImages(attachments)
+    composer.selectMode(mode)
+    await composer.submit(session)
+    expect(requests[1].body).toEqual({
+      requestID: "request-1",
+      ...(mode === "aside" ? { question: "" } : { text: "", delivery: mode }),
+      images: [wireImage, wireImage],
+    })
+    if (mode === "aside") {
+      expect(composer.state.asideRequest?.status).toBe("done")
+      expect(composer.state.task.images).toHaveLength(2)
+      expect(composer.state.aside.images).toHaveLength(2)
+      return
+    }
+    expect(composer.state.admission).toBeNull()
+    expect(composer.state.task.images).toEqual([])
+  },
+)
+
+test.each([
+  undefined,
+  { ...imageCapability, version: 2 },
+  { ...imageCapability, encoding: "url" },
+  { ...imageCapability, maxCount: 0 },
+  { ...imageCapability, maxBytes: "5242880" },
+  { ...imageCapability, maxTotalBytes: 1.5 },
+  { ...imageCapability, mimeTypes: ["image/svg+xml"] },
+  { ...imageCapability, maxWidth: undefined },
+  { ...imageCapability, maxHeight: 0 },
+  { ...imageCapability, maxPixels: "16777216" },
+  { ...imageCapability, animated: true },
+  { ...imageCapability, compressedMetadata: undefined },
+  { ...imageCapability, compressedMetadata: true },
+])("unknown image descriptor %j fails closed while text-only remains compatible", async (images) => {
+  const { composer, requests } = harness(
+    () => Response.json(pending()),
+    {},
+    {
+      sessionAside: { ...capabilities.sessionAside, images },
+      sessionInput: { ...capabilities.sessionInput, images },
+    },
+  )
+  await composer.loadCapabilities()
+  composer.setText("task")
+  composer.setImages([image])
+  for (const mode of ["queue", "steer", "aside"] as const) {
+    composer.selectMode(mode)
+    await composer.submit(session)
+    expect(composer.blockedReason()).toContain("does not support images")
+  }
+  expect(requests).toHaveLength(1)
+  expect(composer.state.task.images).toEqual([image])
+  expect(composer.state.aside.images).toEqual([image])
+  composer.selectMode("queue")
+  composer.setImages([])
+  await composer.submit(session)
+  expect(requests[1].body).toEqual({ requestID: "request-1", text: "task", delivery: "queue" })
+})
+
+test.each([
+  [{ ...image, mime: "image/svg+xml" }, "Unsupported image format"],
+  [{ ...image, url: "https://example.test/image.png" }, "data URLs"],
+  [{ ...image, url: "file:///tmp/image.png" }, "data URLs"],
+  [{ ...image, url: "data:image/jpeg;base64,aGVsbG8=" }, "MIME type"],
+  [{ ...image, url: "data:image/png;base64," }, "Invalid base64"],
+  [{ ...image, url: "data:image/png;base64,%%%=" }, "Invalid base64"],
+  [{ ...image, url: "data:image/png;base64,aGVsbG8" }, "Invalid base64"],
+] as const)("invalid image %j stays in the draft without a POST", async (attachment, reason) => {
+  const { composer, requests } = harness(undefined, {}, imageCapabilities)
+  await composer.loadCapabilities()
+  composer.selectMode("queue")
+  composer.setImages([attachment])
+  await composer.submit(session)
+  expect(composer.state.error).toContain(reason)
+  expect(composer.state.task.images).toEqual([attachment])
+  expect(requests).toHaveLength(1)
+})
+
+test("decoded per-image, total-byte and count bounds include repeated attachments", async () => {
+  const { composer, requests } = harness(undefined, {}, imageCapabilities)
+  await composer.loadCapabilities()
+  composer.selectMode("steer")
+  const large = { ...image, url: `data:image/png;base64,${Buffer.alloc(5_242_880).toString("base64")}` }
+  composer.setImages([large, large])
+  expect(composer.blockedReason()).toBe("")
+  composer.setImages([large, large, image])
+  await composer.submit(session)
+  expect(composer.state.error).toContain("10485760 total bytes")
+  composer.setImages([{ ...image, url: `data:image/png;base64,${Buffer.alloc(5_242_881).toString("base64")}` }])
+  await composer.submit(session)
+  expect(composer.state.error).toContain("5242880 bytes")
+  composer.setImages(Array.from({ length: 8 }, () => image))
+  expect(composer.blockedReason()).toBe("")
+  composer.setImages(Array.from({ length: 9 }, () => image))
+  await composer.submit(session)
+  expect(composer.state.error).toContain("At most 8")
+  expect(composer.state.task.images).toHaveLength(9)
+  expect(requests).toHaveLength(1)
+})
+
+test("image validation honors tighter advertised bounds and supported MIME types", async () => {
+  const { composer } = harness(
+    undefined,
+    {},
+    {
+      ...imageCapabilities,
+      sessionInput: { ...imageCapabilities.sessionInput, images: { ...imageCapability, maxBytes: 4 } },
+    },
+  )
+  await composer.loadCapabilities()
+  composer.selectMode("queue")
+  composer.setImages([image])
+  expect(composer.blockedReason()).toContain("4 bytes")
+  expect(composer.state.capabilities?.sessionInput?.images).toEqual({ ...imageCapability, maxBytes: 4 })
+  for (const mime of imageCapability.mimeTypes) {
+    composer.setImages([{ ...image, mime, url: `data:${mime};base64,AQID` }])
+    expect(composer.blockedReason()).toBe("")
+  }
+})
+
+test("lost image admission restores immutable original bytes, order and repeats for explicit retry", async () => {
+  let posts = 0
+  const { composer, requests, dependencies } = harness(
+    (request) => {
+      if (request.method === "GET") return new Response(null, { status: 404 })
+      if (++posts === 1) throw new Error("lost ack")
+      return Response.json({
+        ...pending("request-1", ""),
+        images: [wireImage, { ...wireImage, filename: "second.png" }, wireImage],
+      })
+    },
+    {},
+    imageCapabilities,
+  )
+  await composer.loadCapabilities()
+  composer.selectMode("queue")
+  composer.setImages([image, { ...image, filename: "second.png" }, image])
+  await composer.submit(session)
+  Reflect.set(composer.state.admission!.payload.images![0], "url", "data:image/png;base64,AQID")
+  expect(composer.state.admission!.payload.images![0].url).toBe(image.url)
+  composer.setImages([{ ...image, url: "data:image/png;base64,AQID" }])
+  composer.setText("next draft")
+  const restored = createComposer(session.id, directory, dependencies)
+  expect(restored.state.admission!.payload.images![0]).toEqual(wireImage)
+  await restored.loadCapabilities()
+  await restored.retryAdmission()
+  expect(requests.slice(1).map((request) => request.method)).toEqual(["POST", "GET", "GET", "POST"])
+  expect(requests.at(-1)?.body).toEqual(requests[1].body)
+  expect(restored.state.admission).toBeNull()
+  expect(restored.state.task.text).toBe("next draft")
+  expect(restored.state.task.images[0].url).toBe("data:image/png;base64,AQID")
+})
+
+test.each([
+  undefined,
+  [wireImage],
+  [wireImage, wireImage],
+  [{ ...wireImage, filename: "second.png" }, wireImage],
+  [wireImage, { ...wireImage, url: "data:image/png;base64,AQID", filename: "second.png" }],
+  [wireImage, { ...wireImage, mime: "image/jpeg", filename: "second.png" }],
+])("changed image receipt %j never clears a draft or permits a conflicting retry", async (images) => {
+  const { composer, requests } = harness(() => Response.json({ ...pending(), images }), {}, imageCapabilities)
+  await composer.loadCapabilities()
+  composer.selectMode("queue")
+  composer.setText("task")
+  composer.setImages([image, { ...image, filename: "second.png" }])
+  await composer.submit(session)
+  expect(composer.state.admission?.status).toBe("unknown")
+  await composer.retryAdmission()
+  expect(composer.state.admission?.error).toContain("different payload")
+  expect(composer.state.task.images).toHaveLength(2)
+  expect(composer.state.task.text).toBe("task")
+  expect(composer.state.receipts).toEqual([])
+  expect(requests.filter((request) => request.method === "POST")).toHaveLength(1)
+})
+
+test("capability loss permits receipt reconciliation but blocks another image POST", async () => {
+  let found = false
+  const { composer, dependencies, requests } = harness(
+    (request) => {
+      if (request.method === "POST") throw new Error("lost ack")
+      return found ? Response.json({ ...pending(), images: [wireImage] }) : new Response(null, { status: 404 })
+    },
+    {},
+    imageCapabilities,
+  )
+  await composer.loadCapabilities()
+  composer.selectMode("queue")
+  composer.setText("task")
+  composer.setImages([image])
+  await composer.submit(session)
+  const restored = createComposer(session.id, directory, {
+    ...dependencies,
+    fetch: (url, init) =>
+      url.includes("capabilities") ? Promise.resolve(Response.json(capabilities)) : dependencies.fetch!(url, init),
+  })
+  await restored.loadCapabilities()
+  await restored.retryAdmission()
+  expect(restored.state.error).toContain("does not support images")
+  expect(restored.state.admission?.status).toBe("unknown")
+  found = true
+  await restored.retryAdmission()
+  expect(restored.state.admission).toBeNull()
+  expect(restored.state.task.images).toEqual([])
+  expect(requests.filter((request) => request.method === "POST")).toHaveLength(1)
+})
+
+test.each([400, 413, 415, 422, 500])("HTTP %i image rejection retains task and Aside drafts", async (status) => {
+  const { composer } = harness(() => new Response("unsupported image/model", { status }), {}, imageCapabilities)
+  await composer.loadCapabilities()
+  composer.setText("task")
+  composer.setImages([image])
+  composer.selectMode("queue")
+  await composer.submit(session)
+  expect(composer.state.task.text).toBe("task")
+  expect(composer.state.task.images).toEqual([image])
+  expect(composer.state.admission?.status ?? null).toBe(status < 500 ? null : "unknown")
+  composer.selectMode("aside")
+  await composer.submit(session)
+  expect(composer.state.aside.text).toBe("task")
+  expect(composer.state.aside.images).toEqual([image])
+  expect(composer.state.asideRequest?.error).toContain("unsupported image/model")
+})
+
+test("Aside keeps the submitted image snapshot independent of later edits and task acknowledgement", async () => {
+  const answer = deferred<Response>()
+  const { composer, requests, dependencies } = harness(
+    (request) =>
+      request.url.pathname.endsWith("/aside")
+        ? answer.promise
+        : Response.json({ ...pending("request-2", ""), images: [wireImage] }),
+    {},
+    imageCapabilities,
+  )
+  await composer.loadCapabilities()
+  composer.setImages([image])
+  composer.selectMode("aside")
+  composer.setModel(model)
+  const asking = composer.submit(session)
+  composer.setImages([{ ...image, filename: "next.png" }])
+  composer.setText("next question")
+  composer.selectMode("queue")
+  await composer.submit(session)
+  expect(composer.state.task.images).toEqual([])
+  const restored = createComposer(session.id, directory, dependencies)
+  expect(unwrap(restored.state.asideRequest)).toMatchObject({ question: "", images: [wireImage], status: "unknown" })
+  answer.resolve(Response.json({ requestID: "request-1", text: "answer", snapshot }))
+  await asking
+  expect(requests[1].body).toEqual({ requestID: "request-1", question: "", images: [wireImage], model })
+  expect(unwrap(composer.state.asideRequest)).toMatchObject({
+    question: "",
+    images: [wireImage],
+    status: "done",
+    snapshot,
+  })
+  expect(composer.state.aside.text).toBe("next question")
+  expect(composer.state.aside.images[0].filename).toBe("next.png")
+})
+
+test("quota cannot allow an image POST without saving exact retry identity", async () => {
+  class ImageQuotaStorage extends MemoryStorage {
+    override setItem(key: string, value: string) {
+      if (value.includes("data:image")) throw new Error("quota exceeded")
+      super.setItem(key, value)
+    }
+  }
+  const { composer, requests, dependencies } = harness(
+    undefined,
+    { storage: new ImageQuotaStorage() },
+    imageCapabilities,
+  )
+  await composer.loadCapabilities()
+  composer.setText("task")
+  composer.setImages([image])
+  composer.selectMode("queue")
+  await composer.submit(session)
+  expect(requests).toHaveLength(1)
+  expect(composer.state.error).toContain("No input was sent")
+  expect(composer.state.admission).toBeNull()
+  expect(composer.state.sending).toBe(false)
+  expect(composer.state.task.images).toEqual([image])
+  const restored = createComposer(session.id, directory, dependencies)
+  expect(restored.state.admission).toBeNull()
+  expect(restored.state.storageError).toContain("could not be restored")
+  composer.selectMode("aside")
+  await composer.submit(session)
+  expect(composer.state.error).toContain("No Aside was sent")
+  expect(composer.state.asideRequest).toBeNull()
+  expect(composer.state.aside.images).toEqual([image])
+  expect(requests).toHaveLength(1)
+})
+
+test("quota fallback preserves admitted images even when draft copies no longer fit", async () => {
+  class SingleCopyStorage extends MemoryStorage {
+    override setItem(key: string, value: string) {
+      if (value.split("data:image").length > 2) throw new Error("quota exceeded")
+      super.setItem(key, value)
+    }
+  }
+  const { composer, dependencies } = harness(
+    (request) => {
+      if (request.method === "POST") throw new Error("lost ack")
+      return Response.json({ ...pending("request-1", ""), images: [wireImage] })
+    },
+    { storage: new SingleCopyStorage() },
+    imageCapabilities,
+  )
+  await composer.loadCapabilities()
+  composer.setImages([image])
+  composer.selectMode("queue")
+  await composer.submit(session)
+  expect(composer.state.admission?.status).toBe("unknown")
+  expect(composer.state.storageError).toContain("this tab only")
+  const restored = createComposer(session.id, directory, dependencies)
+  expect(restored.state.admission?.payload.images).toEqual([wireImage])
+  await restored.loadCapabilities()
+  await restored.retryAdmission()
+  expect(restored.state.admission).toBeNull()
+  expect(restored.blockedReason()).toBe("")
+  expect(restored.state.storageError).toBe("")
 })
