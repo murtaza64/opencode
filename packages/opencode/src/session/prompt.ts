@@ -100,24 +100,6 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
   return part.state.status === "error" && part.state.metadata?.interrupted === true
 }
 
-const completedTurn = (
-  user: SessionV1.User | undefined,
-  assistant: SessionV1.Assistant | undefined,
-  parts: readonly SessionV1.Part[],
-  allowInterruptedTools = false,
-) => {
-  if (!user || !assistant || assistant.parentID !== user.id || assistant.error) return false
-  if (assistant.structured !== undefined) return true
-  if (!assistant.finish || ["tool-calls", "unknown"].includes(assistant.finish)) return false
-  // "stop" with tool calls still needs continuation, except legacy interrupted-orphan cleanup.
-  return !parts.some(
-    (part) =>
-      part.type === "tool" &&
-      !part.metadata?.providerExecuted &&
-      !(allowInterruptedTools && isOrphanedInterruptedTool(part)),
-  )
-}
-
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly wake: (sessionID: SessionID) => Effect.Effect<void>
@@ -129,6 +111,11 @@ export interface Interface {
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionPrompt") {}
+
+// Tests can hold the final history decision without replacing the runner or store.
+export const FinalBoundary = Context.Reference<Effect.Effect<void>>("@opencode/SessionPrompt/FinalBoundary", {
+  defaultValue: () => Effect.void,
+})
 
 const layer = Layer.effect(
   Service,
@@ -1088,7 +1075,7 @@ const layer = Layer.effect(
       }
 
       if (input.noReply === true) return message
-      return yield* loop({ sessionID: input.sessionID })
+      return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID), true)
     })
 
     const lastAssistant = Effect.fnUntraced(function* (sessionID: SessionID) {
@@ -1112,6 +1099,7 @@ const layer = Layer.effect(
           yield* status.set(sessionID, { type: "busy" })
           yield* Effect.logInfo("loop", { "session.id": sessionID, step })
 
+          yield* state.consume(sessionID)
           let msgs = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
             Effect.provideService(Database.Service, database),
           )
@@ -1123,8 +1111,8 @@ const layer = Layer.effect(
           const lastAssistantMsg = msgs.findLast(
             (msg) => msg.info.role === "assistant" && msg.info.id === lastAssistant?.id,
           )
-          const idle = completedTurn(lastUser, lastAssistant, lastAssistantMsg?.parts ?? [], true)
-          const natural = completedTurn(lastUser, lastAssistant, lastAssistantMsg?.parts ?? [])
+          const idle = SessionRunState.completedTurn(lastUser, lastAssistant, lastAssistantMsg?.parts ?? [], true)
+          const natural = SessionRunState.completedTurn(lastUser, lastAssistant, lastAssistantMsg?.parts ?? [])
           if (boundary && (!idle || natural) && (yield* inputs.promote(sessionID, idle))) {
             step = 0
             structured = undefined
@@ -1144,6 +1132,8 @@ const layer = Layer.effect(
               })
             }
             yield* Effect.logInfo("exiting loop", { "session.id": sessionID })
+            const finalBoundary = yield* FinalBoundary
+            yield* finalBoundary
             break
           }
 
@@ -1378,7 +1368,8 @@ const layer = Layer.effect(
           const latest = MessageV2.latest(history)
           const assistant = history.findLast((m) => m.info.id === latest.assistant?.id)
           // An advisory wake never resumes uncertain work left by a crash, abort, or error.
-          if (latest.user && !completedTurn(latest.user, latest.assistant, assistant?.parts ?? [])) return
+          if (latest.user && !SessionRunState.completedTurn(latest.user, latest.assistant, assistant?.parts ?? []))
+            return
           if (!(yield* inputs.promote(sessionID, true))) return
           return yield* runLoop(sessionID)
         }),

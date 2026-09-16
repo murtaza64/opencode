@@ -39,6 +39,7 @@ import { SessionProcessor } from "../../src/session/processor"
 import { SessionPrompt } from "../../src/session/prompt"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
+import { SessionInput } from "../../src/session/input"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { SessionV2 } from "@opencode-ai/core/session"
@@ -190,6 +191,7 @@ const promptRoot = LayerNode.group([
   BackgroundJob.node,
   SessionStatus.node,
   SessionRunState.node,
+  SessionInput.node,
   Database.node,
   EventV2Bridge.node,
   Question.node,
@@ -1564,6 +1566,90 @@ it.instance(
 )
 
 // Queue semantics
+
+for (const synthetic of [false, true]) {
+  it.instance(
+    `late ${synthetic ? "synthetic" : "ordinary"} prompt is consumed before queued input after the final history check`,
+    () =>
+      Effect.gen(function* () {
+        const { llm } = yield* useServerConfig(providerCfg)
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const inputs = yield* SessionInput.Service
+        const run = yield* SessionRunState.Service
+        const chat = yield* sessions.create({ title: "Pinned" })
+        const provider = yield* Deferred.make<void>()
+        const checked = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+        yield* llm.hold("original answer", deferredAsPromise(provider))
+        yield* llm.text("late answer")
+        yield* llm.text("queued answer")
+        yield* llm.text("second queued answer")
+        const original = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            agent: "build",
+            model: ref,
+            parts: [{ type: "text", text: "original task" }],
+          })
+          .pipe(
+            Effect.provideService(
+              SessionPrompt.FinalBoundary,
+              Effect.gen(function* () {
+                if (yield* Deferred.isDone(checked)) return
+                yield* Deferred.succeed(checked, undefined)
+                yield* Deferred.await(release)
+              }),
+            ),
+            Effect.forkChild,
+          )
+        yield* llm.wait(1)
+        yield* Deferred.succeed(provider, undefined)
+        yield* Deferred.await(checked)
+        const id = MessageID.ascending()
+        const late = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            messageID: id,
+            agent: "build",
+            model: ref,
+            parts: [{ type: "text", text: "late task", synthetic }],
+          })
+          .pipe(Effect.forkChild)
+        yield* pollWithTimeout(
+          sessions
+            .messages({ sessionID: chat.id })
+            .pipe(Effect.map((messages) => (messages.some((message) => message.info.id === id) ? true : undefined))),
+          "late prompt was not appended",
+        )
+        yield* inputs.admit(chat.id, { requestID: "late-queue", delivery: "queue", text: "queued task" })
+        yield* prompt.wake(chat.id)
+        yield* inputs.admit(chat.id, { requestID: "late-queue-2", delivery: "queue", text: "second queued task" })
+        yield* prompt.wake(chat.id)
+        yield* Effect.yieldNow
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(original)
+        yield* Fiber.join(late)
+        yield* pollWithTimeout(
+          run.assertNotBusy(chat.id).pipe(
+            Effect.as(true),
+            Effect.catchTag("SessionBusyError", () => Effect.succeed(undefined)),
+          ),
+          "runner did not become idle",
+        )
+        expect((yield* inputs.get(chat.id, "late-queue")).state).toBe("promoted")
+        expect((yield* inputs.get(chat.id, "late-queue-2")).state).toBe("promoted")
+        expect(yield* llm.calls).toBe(4)
+        const requests = yield* llm.inputs
+        expect(requests[1]?.messages).toContainEqual({ role: "user", content: "late task" })
+        expect(requests[1]?.messages).not.toContainEqual({ role: "user", content: "queued task" })
+        expect(requests[2]?.messages).toContainEqual({ role: "user", content: "queued task" })
+        expect(requests[2]?.messages).not.toContainEqual({ role: "user", content: "second queued task" })
+        expect(requests[3]?.messages).toContainEqual({ role: "user", content: "second queued task" })
+      }),
+  )
+}
 
 noLLMServer.instance("concurrent loop callers get same result", () =>
   Effect.gen(function* () {
