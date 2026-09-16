@@ -8,8 +8,8 @@
 .direct-submit-actions button.keyboard-target { background: var(--crust); color: var(--green); border-color: var(--green); }
 .direct-submit-actions button:disabled { color: var(--overlay1); }
 .direct-submit-actions button.keyboard-target:disabled { border-color: var(--green); }
-.direct-shortcuts { color: var(--subtext0); font-size: 10px; line-height: 1.5; white-space: nowrap; }
-.direct-shortcuts kbd { font-size: 10px; }
+.direct-button-hint { color: var(--subtext0); font-size: 10px; line-height: 1.2; white-space: nowrap; }
+.direct-session-metadata { display: inline-flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-inline-start: auto; padding: 4px; }
 .direct-setting { display: flex; flex-direction: column; gap: 3px; color: var(--subtext0); font-size: 10px; }
 .direct-setting select { width: 100%; height: 27px; min-width: 0; border: 1px solid var(--surface1); background: var(--mantle); color: var(--text); font: 11px var(--font-sans); padding: 3px 5px; }
 .direct-active-agent { color: var(--subtext0); font-size: 10px; overflow-wrap: anywhere; }

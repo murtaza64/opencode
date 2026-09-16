@@ -4,6 +4,7 @@ import { startPanelPreview } from "./composer-panel-preview.mjs"
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const preview = await startPanelPreview()
 const fixture = preview.fixture
+fixture.messages[1].info.tokens = { input: 200, output: 800, reasoning: 0, cache: { read: 0, write: 0 } }
 const browser = await chromium.launch({ channel: "chrome", headless: true })
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
 await context.route("**/*", (route) =>
@@ -22,11 +23,34 @@ await mkdir("artifacts/direct-composer", { recursive: true })
 try {
   await page.goto(preview.url, { waitUntil: "domcontentloaded" })
   await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
+  await expect(button("Steer").locator("kbd")).toHaveText("⌘/Ctrl↵")
+  await expect(button("Queue").locator("kbd")).toHaveText("Alt+M →")
+  await expect(active().locator(".direct-shortcuts")).toHaveCount(0)
+  await expect(active().getByLabel("Queue agent", { exact: true })).toBeDisabled()
+  await expect(active().locator(".direct-session-actions .direct-active-agent")).toContainText("build")
+  await expect(active().locator(".direct-session-actions .context-pct")).toContainText("ctx 1k")
+  await expect(active().locator(".direct-controls .context-pct, .direct-controls .direct-active-agent")).toHaveCount(0)
+  expect(
+    await active()
+      .locator(".direct-setting")
+      .evaluateAll((labels) =>
+        labels.map((label) =>
+          [...label.childNodes]
+            .filter((node) => node.nodeType === Node.TEXT_NODE)
+            .map((node) => node.textContent)
+            .join("")
+            .trim(),
+        ),
+      ),
+  ).toEqual(["", ""])
   await expect(editor()).toBeFocused()
   await page.keyboard.type("current visible message")
   await editor().evaluate((el) => el.setSelectionRange(2, 7))
   await editor().press("Alt+m")
   await expect(button("Queue")).toHaveAttribute("data-keyboard-target", "true")
+  await expect(button("Queue").locator("kbd")).toHaveText("⌘/Ctrl↵")
+  await expect(button("Aside").locator("kbd")).toHaveText("Alt+M →")
+  await expect(active().getByLabel("Queue agent", { exact: true })).toBeEnabled()
   await expect(editor()).toHaveValue("current visible message")
   expect(await editor().evaluate((el) => [el.selectionStart, el.selectionEnd])).toEqual([2, 7])
   expect(inputs()).toHaveLength(0)
@@ -46,6 +70,10 @@ try {
   await expect(button("Aside")).toHaveAttribute("data-keyboard-target", "true")
   await page.getByRole("button", { name: "Close aside", exact: true }).click()
 
+  await expect(active().getByLabel("Queue agent", { exact: true })).toBeDisabled()
+  await editor().press("Alt+m")
+  await expect(active().getByLabel("Queue agent", { exact: true })).toBeDisabled()
+  await editor().press("Alt+m")
   await active().getByLabel("Queue agent", { exact: true }).selectOption("plan")
   fixture.loseInput = true
   await button("Queue").click()
@@ -54,6 +82,9 @@ try {
   expect(unknown).toMatchObject({ text: "newer visible text", delivery: "queue", agent: "plan" })
   await editor().fill("draft after unknown")
   await active().getByLabel("Queue agent", { exact: true }).selectOption("build")
+  await active().getByLabel("Queue agent", { exact: true }).focus()
+  await page.keyboard.press("Alt+m")
+  await expect(editor()).toBeFocused()
   await page.reload({ waitUntil: "domcontentloaded" })
   await expect(editor()).toHaveValue("draft after unknown")
   await expect(button("Aside")).toHaveAttribute("data-keyboard-target", "true")
@@ -79,17 +110,29 @@ try {
   await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
   await page.screenshot({ path: "artifacts/direct-composer/desktop.png", fullPage: true })
 
-  fixture.setStatus("idle")
   await editor().fill("idle starts in chat")
+  await editor().press("Alt+m")
+  await expect(button("Queue")).toHaveAttribute("data-keyboard-target", "true")
+  fixture.setStatus("idle")
   await expect(page.locator(".topbar")).toContainText("idle")
+  await expect(active().locator(".direct-submit-actions button")).toHaveCount(1)
+  await expect(button("Send").locator("kbd")).toHaveText("⌘/Ctrl↵")
+  await expect(button("Steer")).toHaveCount(0)
+  await expect(button("Queue")).toHaveCount(0)
+  await expect(button("Aside")).toHaveCount(0)
+  await expect(active().getByLabel("Queue agent", { exact: true })).toBeDisabled()
+  await editor().press("Alt+m")
+  await expect(editor()).toHaveValue("idle starts in chat")
   const before = inputs().length
   fixture.holdNormal = true
-  await button("Steer").click()
+  await button("Send").click()
   await expect(page.getByRole("region", { name: "Message status", exact: true })).toContainText("Sending")
   await expect.poll(() => normal().length).toBe(1)
   expect(inputs()).toHaveLength(before)
   await editor().press("Control+Enter")
   expect(normal()).toHaveLength(1)
+  fixture.setStatus("busy")
+  await expect(button("Queue")).toHaveAttribute("data-keyboard-target", "true")
   await editor().fill("new draft while chat sends")
   await editor().press("Alt+m")
   fixture.holdNormal = false
@@ -97,7 +140,10 @@ try {
   await expect(page.getByRole("region", { name: "Message status", exact: true })).toContainText("Accepted")
   await expect(active()).not.toContainText("A task message is being sent")
   await expect(editor()).toHaveValue("new draft while chat sends")
-  await expect(button("Queue")).toHaveAttribute("data-keyboard-target", "true")
+  await expect(button("Aside")).toHaveAttribute("data-keyboard-target", "true")
+  expect(inputs()).toHaveLength(before)
+  fixture.setStatus("idle")
+  await expect(button("Send")).toBeVisible()
   await expect(active().getByRole("radio")).toHaveCount(0)
   await expect(active()).not.toContainText("Normal Send")
   await page.screenshot({ path: "artifacts/direct-composer/idle.png", fullPage: true })
@@ -106,7 +152,8 @@ try {
   await expect(page.locator(".relative-lines")).toBeVisible()
   await expect(editor()).toHaveValue("new draft while chat sends")
   await editor().press("Alt+m")
-  await expect(button("Aside")).toHaveAttribute("data-keyboard-target", "true")
+  await expect(active().locator(".direct-submit-actions button")).toHaveCount(1)
+  await expect(button("Send")).toBeVisible()
   await expect(editor()).toHaveValue("new draft while chat sends")
   await editor().press("Escape")
   await editor().press("0")
@@ -115,12 +162,16 @@ try {
   await editor().press("i")
   await page.screenshot({ path: "artifacts/direct-composer/expanded.png", fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
+  await expect(button("Send")).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await page.screenshot({ path: "artifacts/direct-composer/mobile.png", fullPage: true })
   await page.evaluate(() => {
     document.documentElement.dir = "rtl"
   })
-  await expect(button("Steer")).toBeVisible()
+  await expect(button("Send")).toBeVisible()
+  fixture.setStatus("busy")
+  await expect(button("Aside")).toHaveAttribute("data-keyboard-target", "true")
+  await expect(active().locator(".direct-submit-actions button")).toHaveCount(3)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await page.screenshot({ path: "artifacts/direct-composer/rtl.png", fullPage: true })
   await page.getByRole("button", { name: /collapse/ }).click()
@@ -128,6 +179,8 @@ try {
   await page.evaluate(() => {
     document.documentElement.dir = "ltr"
   })
+  fixture.setStatus("idle")
+  await expect(button("Send")).toBeVisible()
 
   await editor().evaluate((el) => {
     const data = new DataTransfer()
@@ -135,9 +188,9 @@ try {
     el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true }))
   })
   await expect(button("Remove saved.png")).toBeVisible()
-  await expect(button("Queue")).toBeDisabled()
-  await expect(button("Aside")).toBeDisabled()
-  await expect(button("Steer")).toBeEnabled()
+  await expect(button("Queue")).toHaveCount(0)
+  await expect(button("Aside")).toHaveCount(0)
+  await expect(button("Send")).toBeEnabled()
   await editor().press("Alt+m")
   await expect(button("Remove saved.png")).toBeVisible()
   await button("Remove saved.png").click()
@@ -150,6 +203,12 @@ try {
   await expect.poll(() => normal().length).toBe(2)
   expect(normal().at(-1).body.parts[0].text).toContain("Resume where you left off")
   await expect(editor()).toHaveValue(draftBefore)
+  await expect(button("Nudge")).toBeEnabled()
+  await editor().press("Control+Enter")
+  await expect.poll(() => normal().length).toBe(3)
+  expect(normal().at(-1).body.parts[0].text).toBe(draftBefore)
+  expect(inputs()).toHaveLength(before)
+  expect(asides()).toHaveLength(1)
   expect(errors).toEqual([])
   expect(fixture.unexpected).toEqual([])
   console.log(

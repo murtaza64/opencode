@@ -561,7 +561,7 @@ export function getToolInfo(
     case "skill":
       return {
         icon: "brain",
-        title: input.name || i18n.t("ui.tool.skill"),
+        title: input.name ? `${i18n.t("ui.tool.skill")} ${input.name}` : i18n.t("ui.tool.skill"),
       }
     default:
       return {
@@ -2624,7 +2624,7 @@ ToolRegistry.register({
   name: "skill",
   render(props) {
     const i18n = useI18n()
-    const title = createMemo(() => props.input.name || i18n.t("ui.tool.skill"))
+    const title = createMemo(() => props.input.name ? `${i18n.t("ui.tool.skill")} ${props.input.name}` : i18n.t("ui.tool.skill"))
     const running = createMemo(() => props.status === "pending" || props.status === "running")
 
     const titleContent = () => <TextShimmer text={title()} active={running()} />
@@ -2632,7 +2632,7 @@ ToolRegistry.register({
     const trigger = () => (
       <div data-slot="basic-tool-tool-info-structured">
         <div data-slot="basic-tool-tool-info-main">
-          <span data-slot="basic-tool-tool-title" class="capitalize agent-title">
+          <span data-slot="basic-tool-tool-title" class="agent-title">
             {titleContent()}
           </span>
         </div>
