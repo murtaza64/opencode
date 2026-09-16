@@ -6,6 +6,9 @@ type Snapshot = {
   status: Record<string, { type: string }>
   permissions: PermissionRequest[]
   questions: QuestionRequest[]
+  statusKnown?: boolean
+  permissionsKnown?: boolean
+  questionsKnown?: boolean
   error: string
 }
 
@@ -88,8 +91,12 @@ export const createSessionActivity = (sessions: () => GlobalSession[], refreshSe
   }
 
   let disposed = false
+  const settled = new Set<string>()
+  const requestKey = (directory: string, kind: string, id: string) => `${directory}\u0000${kind}\u0000${id}`
   const inflight = new Map<string, { events: Event[]; promise: Promise<void> }>()
   const apply = (directory: string, event: Event) => {
+    if (event.type === "permission.replied") settled.add(requestKey(directory, "permission", event.properties.requestID))
+    if (event.type === "question.replied" || event.type === "question.rejected") settled.add(requestKey(directory, "question", event.properties.requestID))
     setSnapshots((previous) => {
       const snapshot: Snapshot = previous[directory] ?? { status: {}, permissions: [], questions: [], error: "" }
       switch (event.type) {
@@ -108,6 +115,7 @@ export const createSessionActivity = (sessions: () => GlobalSession[], refreshSe
           return { ...previous, [directory]: { ...snapshot, status: { ...snapshot.status, [id]: { type: "idle" } } } }
         }
         case "permission.asked":
+          if (settled.has(requestKey(directory, "permission", event.properties.id))) return previous
           return {
             ...previous,
             [directory]: {
@@ -124,6 +132,7 @@ export const createSessionActivity = (sessions: () => GlobalSession[], refreshSe
             },
           }
         case "question.asked":
+          if (settled.has(requestKey(directory, "question", event.properties.id))) return previous
           return {
             ...previous,
             [directory]: {
@@ -140,6 +149,14 @@ export const createSessionActivity = (sessions: () => GlobalSession[], refreshSe
               questions: snapshot.questions.filter((q) => q.id !== event.properties.requestID),
             },
           }
+        case "session.deleted": {
+          const id = event.properties.info.id
+          return { ...previous, [directory]: { ...snapshot,
+            status: { ...snapshot.status, [id]: { type: "idle" } },
+            permissions: snapshot.permissions.filter((p) => p.sessionID !== id),
+            questions: snapshot.questions.filter((q) => q.sessionID !== id),
+          } }
+        }
         default:
           return previous
       }
@@ -162,9 +179,14 @@ export const createSessionActivity = (sessions: () => GlobalSession[], refreshSe
           ...previous,
           [directory]: {
             status: status.status === "fulfilled" ? status.value : (previous[directory]?.status ?? {}),
+            statusKnown: status.status === "fulfilled",
+            permissionsKnown: permissions.status === "fulfilled",
+            questionsKnown: questions.status === "fulfilled",
             permissions:
-              permissions.status === "fulfilled" ? permissions.value : (previous[directory]?.permissions ?? []),
-            questions: questions.status === "fulfilled" ? questions.value : (previous[directory]?.questions ?? []),
+              (permissions.status === "fulfilled" ? permissions.value : (previous[directory]?.permissions ?? []))
+                .filter((p) => !settled.has(requestKey(directory, "permission", p.id))),
+            questions: (questions.status === "fulfilled" ? questions.value : (previous[directory]?.questions ?? []))
+              .filter((q) => !settled.has(requestKey(directory, "question", q.id))),
             error: [status, permissions, questions].some((result) => result.status === "rejected")
               ? `Unable to refresh activity or requests for ${directory}. Retrying automatically.`
               : "",
@@ -207,6 +229,8 @@ export const createSessionActivity = (sessions: () => GlobalSession[], refreshSe
   source.onerror = () => {
     if (disposed) return
     setConnectionError("Activity connection lost. Reconnecting; requests and status may be outdated.")
+    setSnapshots((current) => Object.fromEntries(Object.entries(current).map(([directory, snapshot]) =>
+      [directory, { ...snapshot, statusKnown: false, permissionsKnown: false, questionsKnown: false }])))
   }
   source.onmessage = (message) => {
     if (disposed) return
@@ -248,10 +272,23 @@ export const createSessionActivity = (sessions: () => GlobalSession[], refreshSe
     const snapshot = snapshots()[index().get(id)?.directory ?? ""]
     return snapshot?.status[id]?.type ?? (snapshot && !snapshot.error ? "idle" : undefined)
   }
+  const idle = (id: string) => !connectionError() && [...family(id)].every((owner) => {
+    const snapshot = snapshots()[index().get(owner)?.directory ?? ""]
+    return snapshot?.statusKnown && (snapshot.status[owner]?.type ?? "idle") === "idle"
+  })
+  const requestState = (kind: "permission" | "question", id: string, directory: string, requestID?: string) => {
+    const snapshot = snapshots()[directory]
+    if (requestID && settled.has(requestKey(directory, kind, requestID))) return "cleared"
+    const items = kind === "permission" ? snapshot?.permissions : snapshot?.questions
+    if (items?.some((item) => item.sessionID === id && (!requestID || item.id === requestID))) return "pending"
+    return !connectionError() && (kind === "permission" ? snapshot?.permissionsKnown : snapshot?.questionsKnown) ? "cleared" : "unknown"
+  }
   return {
     pending,
     running,
     status,
+    idle,
+    requestState,
     root,
     requests,
     error,

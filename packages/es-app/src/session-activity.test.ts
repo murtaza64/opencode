@@ -83,6 +83,35 @@ const start = (
 const load = (activity: ReturnType<typeof createSessionActivity>) =>
   Promise.all(directories.map((directory) => activity.refreshDirectory(directory)))
 
+test("failed refresh cannot use an old empty snapshot to dismiss a newly reported gate", async () => {
+  const { activity } = start()
+  await load(activity)
+  expect(activity.requestState("permission", "ses_child", childDirectory, "per_new")).toBe("cleared")
+  failures.add(`${childDirectory}:/oc/permission`)
+  await activity.refreshDirectory(childDirectory)
+  expect(activity.requestState("permission", "ses_child", childDirectory, "per_new")).toBe("unknown")
+})
+
+test("stream loss invalidates empty snapshots but preserves known requests and reply tombstones", async () => {
+  const { activity } = start()
+  await load(activity)
+  ActivityEvents.current.send(childDirectory, "permission.asked", permission("per_pending"))
+  ActivityEvents.current.send(childDirectory, "permission.replied", { sessionID: "ses_child", requestID: "per_done", reply: "once" })
+  ActivityEvents.current.onerror?.()
+  expect(activity.requestState("question", "ses_child", childDirectory, "q_new")).toBe("unknown")
+  expect(activity.requestState("permission", "ses_child", childDirectory, "per_pending")).toBe("pending")
+  expect(activity.requestState("permission", "ses_child", childDirectory, "per_done")).toBe("cleared")
+})
+
+test("replied requests cannot resurrect through a later stale snapshot", async () => {
+  const { activity } = start()
+  await load(activity)
+  ActivityEvents.current.send(childDirectory, "permission.replied", { sessionID: "ses_child", requestID: "per_done", reply: "once" })
+  snapshots[childDirectory]!.permissions = [permission("per_done")]
+  await activity.refreshDirectory(childDirectory)
+  expect(activity.pending("ses_parent")).toEqual([])
+})
+
 test("reply refresh cannot reuse a snapshot started before the reply", async () => {
   const { activity } = start()
   await load(activity)

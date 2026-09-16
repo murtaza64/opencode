@@ -264,11 +264,13 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const [error, setError] = createSignal("")
 
   const pending = createMemo(() => activity.pending(sessionID))
-  const subagentsRunning = () => activity.running(sessionID).filter((id) => id !== sessionID).length
+  const subagentsRunning = () => activity.error(sessionID, directory) ? 0 :
+    activity.running(sessionID).filter((id) => id !== sessionID).length
   const attentionError = () => sessionsError() || activity.error(sessionID, directory)
 
   const session = () => live.data.session[0]
-  const status = () => live.data.session_status[sessionID]?.type ?? "idle"
+  const status = () => live.data.session_status[sessionID]?.type ??
+    (!activity.error(sessionID, directory) ? activity.status(sessionID) : undefined) ?? "idle"
   const messages = createMemo(() => live.data.message[sessionID] ?? [])
 
   // viewing the session clears its unread state, including as new content
@@ -319,11 +321,28 @@ function SessionView(props: { sessionID: string; directory: string }) {
 
   const headerDot = () => {
     if (pending().length > 0) return "pending"
-    if (subagentsRunning() || status() === "busy" || status() === "retry") return "busy"
+    if (!live.error() && !live.connectionError() && (subagentsRunning() || busy())) return "busy"
     return "idle"
   }
 
-  const busy = () => status() === "busy" || status() === "retry"
+  const busy = () => !live.error() && !live.connectionError() && (status() === "busy" || status() === "retry")
+  const workState = () => {
+    if (live.error()) return "failed"
+    if (live.connectionError()) return "disconnected"
+    if (pending().length) return "waiting"
+    if (status() === "retry") return "retry"
+    if (busy() || subagentsRunning()) return "working"
+    return activity.error(sessionID, directory) ? "disconnected" : "idle"
+  }
+  const WorkStatus = () => (
+    <Show when={workState() !== "idle"}>
+      <div class="session-work-status" role="status" data-state={workState()}>
+        <Show when={workState() === "working" || workState() === "retry"}><span class="session-work-spinner" aria-hidden="true" /></Show>
+        <span>{workState() === "working" ? "Working" : workState() === "retry" ? "Retrying" :
+          workState() === "waiting" ? "Waiting for your reply" : workState() === "failed" ? "Session failed — see error above" : "Reconnecting — activity unavailable"}</span>
+      </div>
+    </Show>
+  )
   createEffect(() => {
     const running = busy()
     if (!connected()) return
@@ -849,7 +868,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
         <header class="topbar">
           <span class={`dot ${headerDot()}`} />
           <h1>{session()?.title ?? sessionID}</h1>
-          <span class="dim">{live.connectionError() ? "disconnected" : live.error() ? "failed" : pending().length ? "needs permission or answer" : subagentsRunning() ? "busy" : status()}</span>
+          <span class="dim">{workState() === "working" ? "busy" : workState()}</span>
           <Show when={subagentsRunning()}><span class="dim">{subagentsRunning()} subagent(s) running</span></Show>
           <Show when={(session() as any)?.parentID}>
             {(pid) => (
@@ -925,7 +944,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
           </div>
         </div>
 
-        <Show when={!floating()}><ComposerResults composer={composer} connected={connected()} /></Show>
+        <Show when={!floating()}><WorkStatus /><ComposerResults composer={composer} connected={connected()} /></Show>
         <div class="prompt-box" inert={floating()}>
           <Show when={images().length}>
             <div class="attachments">
@@ -972,6 +991,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
             <span style="flex:1" />
             <button onClick={closeFloat}>⤡ collapse <kbd class="composer-key">Ctrl+E</kbd></button>
           </div>
+          <WorkStatus />
           <ComposerResults composer={composer} connected={connected()} />
           <Show when={images().length}>
             <div class="attachments"><For each={images()}>{(image) => (
