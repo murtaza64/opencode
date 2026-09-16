@@ -1,4 +1,4 @@
-import { For, Show, createUniqueId, type JSX } from "solid-js"
+import { For, Show, type JSX } from "solid-js"
 import type { Composer, ComposerAction } from "../composer"
 import "./direct-composer.css"
 
@@ -14,17 +14,19 @@ export const DirectComposer = (props: {
   editor: JSX.Element
   attachments: JSX.Element
   sessionActions: JSX.Element
+  sessionMetadata?: JSX.Element
   children: JSX.Element
 }) => {
-  const hint = createUniqueId()
   const state = props.composer.state
   const actions = ["steer", "queue", "aside"] as const
-  const label = (action: ComposerAction) => action[0]!.toUpperCase() + action.slice(1)
+  const visibleActions = () => (state.busy ? actions : (["steer"] as const))
+  const nextTarget = () => actions[(actions.indexOf(state.keyboardTarget) + 1) % actions.length]
+  const label = (action: ComposerAction) => (state.busy ? action[0]!.toUpperCase() + action.slice(1) : "Send")
   const reason = (action: ComposerAction) =>
     !props.connected
       ? "Session unavailable or another session action is running."
       : props.composer.reasonForAction(action)
-  const reasons = () => [...new Set(actions.map(reason).filter(Boolean))]
+  const reasons = () => [...new Set(visibleActions().map(reason).filter(Boolean))]
   const other = () => state[state.visibleBuffer === "task" ? "aside" : "task"]
   return (
     <div class="direct-composer" data-composer-controls>
@@ -33,6 +35,10 @@ export const DirectComposer = (props: {
         {props.editor}
         <div class="direct-session-actions" role="group" aria-label="Session actions">
           {props.sessionActions}
+          <span class="direct-session-metadata">
+            <span class="direct-active-agent">Active agent: {props.activeAgent ?? "session default"}</span>
+            {props.sessionMetadata}
+          </span>
         </div>
         <Show when={other().text || other().images.length}>
           <button class="direct-recover" onClick={props.restoreDraft}>
@@ -42,14 +48,22 @@ export const DirectComposer = (props: {
       </div>
       <aside class="direct-controls" aria-label="Message actions and settings">
         <div class="direct-submit-actions" role="group" aria-label="Submit current message">
-          <For each={actions}>
+          <For each={visibleActions()}>
             {(action) => (
               <button
-                classList={{ "keyboard-target": state.keyboardTarget === action }}
-                data-keyboard-target={state.keyboardTarget === action}
+                classList={{ "keyboard-target": !state.busy || state.keyboardTarget === action }}
+                data-keyboard-target={!state.busy || state.keyboardTarget === action}
                 aria-label={label(action)}
-                aria-describedby={hint}
-                aria-keyshortcuts={state.keyboardTarget === action ? "Meta+Enter Control+Enter" : undefined}
+                aria-description={
+                  !state.busy || state.keyboardTarget === action
+                    ? "Current keyboard target; Command or Control plus Enter submits this message."
+                    : nextTarget() === action
+                      ? "Alt+M selects this keyboard target without submitting; clicking submits directly."
+                      : "Click to submit the current visible message."
+                }
+                aria-keyshortcuts={
+                  !state.busy || state.keyboardTarget === action ? "Meta+Enter Control+Enter" : undefined
+                }
                 title={reason(action) || `Submit the visible message with ${label(action)}`}
                 disabled={
                   !!reason(action) ||
@@ -65,22 +79,23 @@ export const DirectComposer = (props: {
                 }}
                 onClick={() => props.submit(action)}
               >
-                {label(action)} <span aria-hidden="true">{state.keyboardTarget === action ? "↵" : ""}</span>
+                {label(action)}{" "}
+                <kbd class="direct-button-hint" aria-hidden="true">
+                  {!state.busy || state.keyboardTarget === action
+                    ? "⌘/Ctrl↵"
+                    : nextTarget() === action
+                      ? "Alt+M →"
+                      : ""}
+                </kbd>
               </button>
             )}
           </For>
         </div>
-        <div id={hint} class="direct-shortcuts">
-          <kbd>⌘/Ctrl+Enter</kbd> → <b>{label(state.keyboardTarget)}</b>
-          <br />
-          <kbd>Alt+M</kbd>: next target
-        </div>
         <label class="direct-setting">
-          Queue agent
           <select
             aria-label="Queue agent"
             value={state.queueAgent ?? ""}
-            disabled={!props.agents.length}
+            disabled={!state.busy || state.keyboardTarget !== "queue" || !props.agents.length}
             onChange={(e) => props.composer.setQueueAgent(e.currentTarget.value || null)}
           >
             <option value="" selected={!state.queueAgent}>
@@ -103,7 +118,6 @@ export const DirectComposer = (props: {
         <div class="direct-model" role="group" aria-label="Model settings">
           {props.children}
         </div>
-        <span class="direct-active-agent">Active agent: {props.activeAgent ?? "session default"}</span>
       </aside>
       <Show when={props.agentError}>
         <div class="direct-feedback err" role="alert">

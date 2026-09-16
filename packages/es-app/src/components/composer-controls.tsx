@@ -214,7 +214,7 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
           <section class="normal-submission" aria-label="Message status">
             <div class="composer-actions">
               <span role="status">
-                <b>{submission().action === "steer" ? "Steer" : "Previous message"}</b> ·{" "}
+                <b>{submission().action === "steer" ? "Send" : "Previous message"}</b> ·{" "}
                 {submission().status === "sending"
                   ? "Sending…"
                   : submission().status === "accepted"

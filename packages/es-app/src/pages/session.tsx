@@ -561,7 +561,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     }
   }
 
-  const send = async (action: ComposerAction = composer.state.keyboardTarget) => {
+  const send = async (action?: ComposerAction) => {
     const s = session()
     if (!s || !connected() || nudgePhase() || aborting()) return
     const editor = floating() ? floatEl : promptEl
@@ -571,7 +571,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     composer.observeBusy(busy())
     stick = true
     queueMicrotask(pin)
-    await composer.submitVisible(action, s, nextModel())
+    await composer.submitVisible(action ?? (composer.state.busy ? composer.state.keyboardTarget : "steer"), s, nextModel())
   }
 
   let transcriptEl: HTMLDivElement | undefined
@@ -638,9 +638,18 @@ function SessionView(props: { sessionID: string; directory: string }) {
     if (e.isComposing || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.code !== "KeyM") return false
     e.preventDefault()
     e.stopPropagation()
+    if (!composer.state.busy) return true
     if (e.repeat) return true
     lastEsc = 0
+    const inputMode = vim.mode()
     composer.selectTarget(composer.state.keyboardTarget === "steer" ? "queue" : composer.state.keyboardTarget === "queue" ? "aside" : "steer")
+    if (e.target instanceof HTMLSelectElement && e.target.disabled) {
+      const editor = floating() ? floatEl : promptEl
+      editor?.focus()
+      vim.setMode(inputMode)
+      editor?.setSelectionRange(...activeDraft().selection)
+      vim.refresh(editor)
+    }
     return true
   }
 
@@ -811,6 +820,15 @@ function SessionView(props: { sessionID: string; directory: string }) {
     <DirectComposer composer={composer} connected={connected() && !nudgePhase() && !aborting()} submit={send} restoreDraft={restoreDraft}
       editor={<Editor expanded={props.expanded} />} attachments={<Attachments />}
       activeAgent={activeAgent()} agents={agents()?.items ?? []} agentError={agents()?.error} retryAgents={() => { void refetchAgents() }}
+      sessionMetadata={<Show when={contextUsage()}>
+        {(u) => (
+          <span class="context-pct"
+            classList={{ warn: (u().percent ?? 0) >= 70, high: (u().percent ?? 0) >= 90 }}
+            title="context of the last completed turn (input + output + reasoning + cache)">
+            ctx {Math.round(u().tokens / 1000)}k{u().percent != null ? ` (${u().percent}%)` : ""}
+          </span>
+        )}
+      </Show>}
       sessionActions={<>
         <Show when={!props.expanded}><button aria-label="Expand editor" title="Expand editor (Ctrl+E)" onClick={toggleFloat}>Expand editor</button></Show>
         <button title="Fork this session at its tip" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
@@ -833,7 +851,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
           {nudgePhase() === "stopping" ? "Stopping…" : nudgePhase() === "resuming" ? "Sending resume…" : "Nudge"}
         </button>
       </>}>
-      <label class="direct-setting">Model<select class="model-select" aria-label="Model override"
+      <label class="direct-setting"><select class="model-select" aria-label="Model override"
         title="model for the next turn (defaults to the previous turn's)"
         value={modelChoice() ? `${modelChoice()!.providerID}\u0000${modelChoice()!.modelID}` : ""}
         onChange={(e) => {
@@ -852,15 +870,6 @@ function SessionView(props: { sessionID: string; directory: string }) {
         </For>
       </select></label>
       <Show when={modelChoice()}><button onClick={() => setModelChoice(null)}>Use session model</button></Show>
-      <Show when={contextUsage()}>
-        {(u) => (
-          <span class="context-pct"
-            classList={{ warn: (u().percent ?? 0) >= 70, high: (u().percent ?? 0) >= 90 }}
-            title="context of the last completed turn (input + output + reasoning + cache)">
-            ctx {Math.round(u().tokens / 1000)}k{u().percent != null ? ` (${u().percent}%)` : ""}
-          </span>
-        )}
-      </Show>
     </DirectComposer>
   )
 
