@@ -1,3 +1,4 @@
+// Historical four-mode UI coverage. Real direct-action probes run composer-direct.real.browser.mjs.
 import { createRequire } from "node:module"
 import { mkdir } from "node:fs/promises"
 import { fileURLToPath } from "node:url"

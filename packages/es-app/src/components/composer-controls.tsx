@@ -210,10 +210,10 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
     <div class="composer-results" data-composer-controls>
       <Show when={state.normalSubmission}>
         {(submission) => (
-          <section class="normal-submission" aria-label="Normal Send status">
+          <section class="normal-submission" aria-label="Message status">
             <div class="composer-actions">
               <span role="status">
-                <b>Normal Send</b> ·{" "}
+                <b>{submission().action === "steer" ? "Steer" : "Previous message"}</b> ·{" "}
                 {submission().status === "sending"
                   ? "Sending…"
                   : submission().status === "accepted"
