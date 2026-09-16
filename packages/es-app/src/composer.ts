@@ -2,6 +2,7 @@ import { batch } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import type { Session, SessionV1InputPayload, SessionV1InputReceipt } from "@opencode-ai/sdk/v2"
 import { oc } from "./api"
+import { composerStorage } from "./composer-storage"
 
 export type ComposerMode = "send" | "aside" | "queue" | "steer"
 export type ComposerBuffer = "task" | "aside"
@@ -117,12 +118,14 @@ export const createComposer = (sessionID: string, directory: string, dependencie
   let activeInput: string | undefined
   let capabilityVersion = 0
   let storage: ComposerDependencies["storage"]
+  let restored = false
+  let restoreError = ""
   try {
     storage =
       dependencies.storage === undefined
         ? typeof window === "undefined"
           ? null
-          : window.sessionStorage
+          : composerStorage(navigator.userAgent, window.sessionStorage, () => window.localStorage)
         : dependencies.storage
     const raw = storage?.getItem(key)
     if (raw) {
@@ -184,9 +187,12 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           error: "Aside completion is unknown after reload. Cancel this request before asking another.",
         })
       }
+      restored = true
     }
   } catch (error) {
-    setState("storageError", `Cannot restore saved drafts: ${message(error)}. Keep this tab open.`)
+    restoreError = `Cannot restore saved drafts: ${message(error)}. Keep this tab open; saved request identity must be recovered before sending.`
+    setState("storageError", restoreError)
+    storage = null
   }
 
   const persist = () => {
@@ -217,7 +223,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       storage.setItem(key, JSON.stringify(saved))
       setState("storageError", imageWarning())
     } catch (error) {
-      // Keep images in the live buffers even when sessionStorage cannot hold them.
+      // Keep images in the live buffers even when browser storage cannot hold them.
       try {
         storage.setItem(
           key,
@@ -240,6 +246,8 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       }
     }
   }
+  // Restore/migrate before exposing the controller; no late async load can replace newer typing.
+  if (restored) persist()
   const draftKey = () => (state.mode === "aside" ? "aside" : "task")
   const updateDraft = (value: Partial<ComposerDraft>, revise = true, key: ComposerBuffer = draftKey()) => {
     setState(key, { ...value, revision: state[key].revision + (revise ? 1 : 0) })
@@ -264,6 +272,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       : `This server does not support ${mode} inputs with listing and cancellation.`
   }
   const blockedReason = () => {
+    if (restoreError) return restoreError
     if (missingImages[draftKey()])
       return "Images are missing from this restored draft. Reattach or explicitly clear images before sending."
     const unavailable = capabilityReason(state.mode)
