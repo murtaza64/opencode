@@ -17,7 +17,13 @@ export const ComposerControls = (props: {
     <div class="composer-controls" data-composer-controls>
       <Show when={state.mode !== "send" || props.busy}>
         <div class="composer-mode-row">
-          <div class="composer-modes" role="radiogroup" aria-label="Message delivery">
+          <div
+            class="composer-modes"
+            role="radiogroup"
+            aria-label="Message delivery"
+            aria-keyshortcuts="Alt+M"
+            title="Cycle modes: Alt+M (Option+M on Mac)"
+          >
             <For each={modes}>
               {(mode, index) => (
                 <button
@@ -45,18 +51,31 @@ export const ComposerControls = (props: {
             </For>
           </div>
           <Show when={!props.busy && props.connected}>
-            <button onClick={() => props.selectMode("send")}>Use normal Send</button>
+            <button aria-label="Use normal Send" title="Use normal Send" onClick={() => props.selectMode("send")}>
+              Send
+            </button>
           </Show>
         </div>
       </Show>
-      <div class="composer-help dim" role="status" aria-live="polite">
+      <div
+        class="composer-summary composer-help dim"
+        role="status"
+        aria-live="polite"
+        title={
+          state.mode === "aside"
+            ? "Ask about a snapshot without changing the task. Task draft saved; the first Aside starts as a copy."
+            : state.mode === "send"
+              ? "Send to this session."
+              : "Queue and Steer use the session agent and model."
+        }
+      >
         {state.mode === "aside"
-          ? "Ask about a snapshot without changing the task. Task draft saved; the first Aside starts as a copy."
+          ? "Snapshot only. Task draft saved."
           : state.mode === "queue"
-            ? "Wait until the task would otherwise finish. Uses the session agent and model."
+            ? "Send when the task finishes."
             : state.mode === "steer"
-              ? "Guide the task at its next safe boundary. Uses the session agent and model."
-              : "Send a message to this session."}
+              ? "Send at the next safe boundary."
+              : "Send to this session."}
       </div>
       <Show when={reason()}>
         <div class="composer-help dim">{reason()}</div>
@@ -75,24 +94,24 @@ export const ComposerControls = (props: {
       <div class="composer-actions">
         <button
           class="composer-send"
+          title="Cmd/Ctrl+Enter"
           disabled={!!reason() || (!draft().text.trim() && !draft().images.length)}
           onClick={props.submit}
         >
           {props.composer.actionLabel()}
         </button>
-        <span class="dim send-hint">{state.sending ? "Sending..." : "Cmd/Ctrl+Enter"}</span>
-        <Show when={state.mode !== "send"}>
-          <button
-            disabled={!props.connected || state.inputLoading}
-            onClick={async () => {
-              await props.composer.loadCapabilities()
-              await props.composer.refreshInputs()
-            }}
-          >
-            Refresh availability
-          </button>
-        </Show>
       </div>
+      <Show when={props.composer.capabilityReason()}>
+        <button
+          disabled={!props.connected || state.inputLoading}
+          onClick={async () => {
+            await props.composer.loadCapabilities()
+            await props.composer.refreshInputs()
+          }}
+        >
+          Refresh availability
+        </button>
+      </Show>
     </div>
   )
 }

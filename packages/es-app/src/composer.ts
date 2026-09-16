@@ -610,6 +610,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     cancelAside,
     closeAside,
     blockedReason,
+    capabilityReason: () => capabilityReason(state.mode),
     actionLabel: () => ({ send: "Send", aside: "Ask aside", queue: "Queue message", steer: "Steer task" })[state.mode],
   }
 }
