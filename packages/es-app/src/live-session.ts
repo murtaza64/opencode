@@ -111,16 +111,17 @@ export function createLiveSession(
       batch(() => {
         const previous = latest()
         if (previous && (messages.findLast((m) => m.info.role === "user")?.info.id ?? "") > previous.id) clearFailure()
+        // Reconnect snapshots must not remount the unchanged transcript.
+        setData("session", reconcile([session]))
+        setData("session_status", reconcile({ ...status, [sessionID]: status[sessionID] ?? { type: "idle" } }))
+        setData("message", sessionID, reconcile(messages.map((m) => m.info)))
         setData(
-          produce((draft) => {
-            draft.session = [session]
-            draft.session_status = { ...status, [sessionID]: status[sessionID] ?? { type: "idle" } }
-            draft.message[sessionID] = messages.map((m) => m.info)
-            draft.part = {}
-            draft.part_text_accum_delta = {}
-            for (const m of messages) draft.part[m.info.id] = m.parts.filter((p) => !SKIP_PARTS.has(p.type))
-          }),
+          "part",
+          reconcile(
+            Object.fromEntries(messages.map((m) => [m.info.id, m.parts.filter((p) => !SKIP_PARTS.has(p.type))])),
+          ),
         )
+        setData("part_text_accum_delta", reconcile({}))
         const bases = new Set<string>()
         uncertainParts.clear()
         // Without a snapshot cursor, only a full SSE part gives concurrent

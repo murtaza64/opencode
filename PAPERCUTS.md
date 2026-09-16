@@ -9,3 +9,4 @@
 - 2026-09-16: A full jj fetch timed out, while fetching origin alone completed. Remote freshness and a slow unrelated remote must not silently block local orchestration.
 - 2026-09-16: Initial modes activation can lose old es-app drafts because the already-loaded client has no persistence yet. Serve the new build on a separate port until old tabs are checkpointed; daemon reconnect alone does not require a frontend reload (#93).
 - 2026-09-16: A spawned #97 lane lacked dependencies, and its no-production-install constraint was interpreted as forbidding lane-local dependency installation. Clarify dispatch scope and use a frozen lane-local install instead of links that can resolve foreign workspace source (#93).
+- 2026-09-16: Running the es-app Vite/Playwright harness directly with Bun hung before browser startup; the package's documented Node runner completed. Use `node test/*.browser.mjs`, not `bun`, for these harnesses.

@@ -25,6 +25,7 @@ export const createFixture = async () => {
     acceptedAckLost: false,
     promoteOnCancel: false,
     receipts: [],
+    messages: undefined,
     calls: [],
     unexpected: [],
     inputReplies: [],
@@ -124,7 +125,7 @@ export const createFixture = async () => {
       if (action === "/message")
         return json(
           id === "ses_a"
-            ? [
+            ? fixture.messages ?? [
                 {
                   info: {
                     id: "msg_user",
