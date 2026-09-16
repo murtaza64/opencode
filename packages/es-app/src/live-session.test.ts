@@ -191,6 +191,49 @@ test("disconnect stops stale busy and reconnect resnapshots missed messages and 
   expect(fetchSpy.mock.calls.every(([input]) => !String(input).includes("prompt"))).toBe(true)
 })
 
+test("refresh retains existing message and part identities while applying authoritative changes", async () => {
+  snapshot = [
+    { info: user(), parts: [] },
+    { info: assistant("msg_002", null), parts: [text("Before refresh")] },
+    { info: user("msg_003"), parts: [] },
+  ]
+  const live = start()
+  await live.load()
+  const message = live.data.message.ses_current![1]
+  const part = live.data.part.msg_002![0]
+  snapshot = [
+    { info: user(), parts: [] },
+    { info: { ...assistant("msg_002", null), time: { created: 2, completed: 3 } }, parts: [text("After refresh")] },
+  ]
+  await live.load()
+  expect(live.data.message.ses_current?.map((m) => m.id)).toEqual(["msg_001", "msg_002"])
+  expect(live.data.message.ses_current![1]).toBe(message)
+  expect(live.data.part.msg_002![0]).toBe(part)
+  expect(message?.time).toEqual({ created: 2, completed: 3 })
+  expect(part).toMatchObject({ text: "After refresh" })
+  expect(live.data.part.msg_003).toBeUndefined()
+})
+
+test("refresh removes missing parts and preserves surviving parts through reordering", async () => {
+  snapshot = [{ info: assistant("msg_002", null), parts: [text("Removed"), { ...text("Retained"), id: "prt_002" }] }]
+  const live = start()
+  await live.load()
+  const retained = live.data.part.msg_002![1]
+  snapshot = [
+    {
+      info: assistant("msg_002", null),
+      parts: [
+        { ...text("Updated"), id: "prt_002" },
+        { ...text("Added"), id: "prt_003" },
+      ],
+    },
+  ]
+  await live.load()
+  expect(live.data.part.msg_002?.map((p) => p.id)).toEqual(["prt_002", "prt_003"])
+  expect(live.data.part.msg_002![0]).toBe(retained)
+  expect(retained).toMatchObject({ text: "Updated" })
+})
+
 test("events during snapshot loading cannot be overwritten by an older snapshot", async () => {
   const live = start()
   await live.load()

@@ -1569,7 +1569,7 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
 
   return (
     <Show when={!hideQuestion()}>
-      <div data-component="tool-part-wrapper" data-timeline-part-id={part().id}>
+      <div data-component="tool-part-wrapper" data-timeline-part-id={part().id} data-tool={part().tool}>
         <Switch>
           <Match when={part().state.status === "error" && (part().state as any).error}>
             {(error) => {

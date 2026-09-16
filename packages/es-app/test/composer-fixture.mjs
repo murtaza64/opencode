@@ -25,6 +25,7 @@ export const createFixture = async () => {
     acceptedAckLost: false,
     promoteOnCancel: false,
     receipts: [],
+    messages: [],
     calls: [],
     unexpected: [],
     inputReplies: [],
@@ -112,7 +113,7 @@ export const createFixture = async () => {
     if (match) {
       const [, id, action] = match
       if (!action) return json(session(id), fixture.failSnapshot ? 503 : 200)
-      if (action === "/message") return json([])
+      if (action === "/message") return json(id === "ses_a" ? fixture.messages : [])
       if (action === "/prompt_async" && request.method === "POST") {
         response.writeHead(204)
         response.end()
