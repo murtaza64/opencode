@@ -6,6 +6,7 @@ import { createStore, produce, reconcile } from "solid-js/store"
 import { batch, createSignal, onCleanup } from "solid-js"
 import type { Message, Part, Session, SessionStatus } from "@opencode-ai/sdk/v2"
 import { oc } from "./api"
+import { createServerEvents, type ServerEvents } from "./event-source"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 type LiveEvent = { type: string; properties?: any }
@@ -291,9 +292,9 @@ export function createLiveSession(
       stopOnFailure()
     })
   }
-  let source: EventSource | undefined
+  let source: ServerEvents | undefined
   try {
-    source = new EventSource(`/oc/event?directory=${encodeURIComponent(directory)}`)
+    source = createServerEvents(`/oc/event?directory=${encodeURIComponent(directory)}`)
     source.onopen = () => {
       if (disposed) return
       setConnection("stream", "")
