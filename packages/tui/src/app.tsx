@@ -682,6 +682,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "Agent",
         slashName: "agents",
         run: () => {
+          if (promptRef.current?.agent) return promptRef.current.agent.select()
           dialog.replace(() => <DialogAgent />)
         },
       },
@@ -700,6 +701,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "Agent",
         hidden: true,
         run: () => {
+          if (promptRef.current?.agent) return promptRef.current.agent.cycle(1)
           local.agent.move(1)
         },
       },
@@ -734,6 +736,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "Agent",
         hidden: true,
         run: () => {
+          if (promptRef.current?.agent) return promptRef.current.agent.cycle(-1)
           local.agent.move(-1)
         },
       },

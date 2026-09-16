@@ -16,12 +16,20 @@ const empty = (): Buffer => ({ prompt: { input: "", parts: [] }, cursor: 0, revi
 const createComposerState = () =>
   createStore({
     mode: "send" as Delivery,
+    queueAgent: undefined as string | undefined,
     task: empty(),
     aside: undefined as Buffer | undefined,
     result: undefined as AsideResult | undefined,
     question: "",
     transaction: undefined as
-      | { requestID: string; delivery: "queue" | "steer"; text: string; revision: number; uncertain?: boolean }
+      | {
+          requestID: string
+          delivery: "queue" | "steer"
+          text: string
+          revision: number
+          agent?: string
+          uncertain?: boolean
+        }
       | undefined,
     sending: false,
     cleared: 0,
@@ -79,6 +87,12 @@ export const useComposerDelivery = (props: {
     restore()
   }
   const cycle = () => select(state.mode === "aside" ? "queue" : state.mode === "queue" ? "steer" : "aside")
+  const chooseAgent = (agent: string) => {
+    if (!mounted || state.queueAgent === agent) return
+    save()
+    setState("queueAgent", agent)
+    setState("task", "revision", (value) => value + 1)
+  }
   const cancelAside = () => {
     if (!active) return
     const request = active
@@ -218,6 +232,7 @@ export const useComposerDelivery = (props: {
       delivery: state.mode,
       text,
       revision: state.task.revision,
+      agent: state.mode === "queue" ? state.queueAgent : undefined,
     })
     await retry()
     return true
@@ -234,6 +249,7 @@ export const useComposerDelivery = (props: {
             requestID: transaction.requestID,
             delivery: transaction.delivery,
             text: transaction.text,
+            agent: transaction.agent,
           },
         },
         { throwOnError: false, signal: AbortSignal.timeout(15_000) },
@@ -327,6 +343,7 @@ export const useComposerDelivery = (props: {
     save,
     select,
     cycle,
+    chooseAgent,
     submit,
     retry,
     reconcile,
@@ -342,13 +359,7 @@ export const useComposerDelivery = (props: {
   }
 }
 
-export const ComposerDelivery = (props: {
-  controller: ReturnType<typeof useComposerDelivery>
-  busy: boolean
-  activate?: () => void
-  submit: () => void
-  useSessionModel?: () => void
-}) => {
+export const ComposerDelivery = (props: { controller: ReturnType<typeof useComposerDelivery> }) => {
   const c = props.controller
   const { theme } = useTheme()
   const renderer = useRenderer()
@@ -357,7 +368,6 @@ export const ComposerDelivery = (props: {
     action()
   }
   const dimensions = useTerminalDimensions()
-  const shortcut = useCommandShortcut("prompt.delivery.cycle")
   const [now, setNow] = createSignal(Date.now())
   onMount(() => {
     const timer = setInterval(() => setNow(Date.now()), 5_000)
@@ -420,58 +430,57 @@ export const ComposerDelivery = (props: {
           </scrollbox>
         </box>
       </Show>
-      <Show when={c.state.mode !== "send" || props.busy}>
-        <box flexDirection="row" gap={1} flexWrap="wrap">
+    </>
+  )
+}
+
+export const ComposerModes = (props: {
+  controller: ReturnType<typeof useComposerDelivery>
+  busy: boolean
+  activate?: () => void
+}) => {
+  const c = props.controller
+  const { theme } = useTheme()
+  const renderer = useRenderer()
+  const dimensions = useTerminalDimensions()
+  const shortcut = useCommandShortcut("prompt.delivery.cycle")
+  const click = (action: () => void) => () => {
+    if (renderer.getSelection()?.getSelectedText()) return
+    props.activate?.()
+    action()
+  }
+  return (
+    <Show when={c.state.mode !== "send" || props.busy}>
+      <box id="composer-modes" flexDirection="row" gap={1} flexShrink={0}>
+        <Show
+          when={dimensions().width >= 80}
+          fallback={
+            <text id="composer-mode-cycle" fg={theme.primary} onMouseUp={click(c.cycle)}>
+              {`[${c.state.mode[0].toUpperCase()}${c.state.mode.slice(1)}]`}
+            </text>
+          }
+        >
           <For each={["aside", "queue", "steer"] as const}>
             {(mode) => (
               <text
                 id={`composer-${mode}`}
                 fg={c.state.mode === mode ? theme.primary : theme.textMuted}
-                onMouseUp={click(() => {
-                  props.activate?.()
-                  c.select(mode)
-                })}
+                onMouseUp={click(() => c.select(mode))}
               >
                 {c.state.mode === mode
                   ? `[${mode[0].toUpperCase()}${mode.slice(1)}]`
-                  : ` ${mode[0].toUpperCase()}${mode.slice(1)} `}
+                  : `${mode[0].toUpperCase()}${mode.slice(1)}`}
               </text>
             )}
           </For>
-          <text fg={theme.textMuted}>{shortcut()} mode</text>
-          <Show when={!props.busy && !c.state.transaction}>
-            <text id="composer-send" fg={theme.textMuted} onMouseUp={click(() => c.select("send"))}>
-              Use normal Send
-            </text>
-          </Show>
-        </box>
-        <text fg={theme.textMuted}>
-          {c.state.mode === "aside"
-            ? "Task draft saved. Snapshot only; no tools. Esc closes Aside."
-            : c.state.mode === "queue"
-              ? "After task is idle. Uses session agent/model."
-              : "At next safe boundary. Uses session agent/model."}
-        </text>
-        <text minHeight={1} fg={theme.warning}>
-          {c.blocked() ?? ""}
-        </text>
-        <Show when={props.useSessionModel}>
-          <text id="composer-session-model" fg={theme.primary} onMouseUp={click(() => props.useSessionModel?.())}>
-            Use session model
+        </Show>
+        <text fg={theme.textMuted}>{shortcut()}</text>
+        <Show when={!props.busy && !c.state.transaction}>
+          <text id="composer-send" fg={theme.textMuted} onMouseUp={click(() => c.select("send"))}>
+            Send
           </text>
         </Show>
-        <text id="composer-submit" fg={c.blocked() ? theme.textMuted : theme.primary} onMouseUp={click(props.submit)}>
-          {c.state.mode === "aside"
-            ? c.asideBusy()
-              ? "Asking Aside..."
-              : "Enter: Ask aside"
-            : c.state.sending
-              ? "Admitting..."
-              : c.state.mode === "queue"
-                ? "Enter: Queue message"
-                : "Enter: Steer task"}
-        </text>
-      </Show>
-    </>
+      </box>
+    </Show>
   )
 }
