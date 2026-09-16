@@ -17,7 +17,13 @@ export const ComposerControls = (props: {
     <div class="composer-controls" data-composer-controls>
       <Show when={state.mode !== "send" || props.busy}>
         <div class="composer-mode-row">
-          <div class="composer-modes" role="radiogroup" aria-label="Message delivery">
+          <div
+            class="composer-modes"
+            role="radiogroup"
+            aria-label="Message delivery"
+            aria-keyshortcuts="Alt+M"
+            title="Cycle modes: Alt+M (Option+M on Mac)"
+          >
             <For each={modes}>
               {(mode, index) => (
                 <button

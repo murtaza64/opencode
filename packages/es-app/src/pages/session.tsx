@@ -580,6 +580,25 @@ function SessionView(props: { sessionID: string; directory: string }) {
   }
 
   const focusInsert = () => vim.setMode("insert")
+  const cycleMode = (e: KeyboardEvent) => {
+    // macOS Option+M reports a symbol in key, but still reports KeyM in code.
+    if (e.isComposing || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.code !== "KeyM") return false
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.repeat) return true
+    const editing = document.activeElement === promptEl || document.activeElement === floatEl
+    const inputMode = vim.mode()
+    selectMode(composer.state.mode === "aside" ? "queue" : composer.state.mode === "queue" ? "steer" : "aside")
+    if (editing) queueMicrotask(() => {
+      const target = floating() ? floatEl : promptEl
+      target?.focus()
+      vim.setMode(inputMode)
+      vim.refresh(target)
+    })
+    const group = (e.target as HTMLElement).closest('[role="radiogroup"]')
+    if (group) queueMicrotask(() => group.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus())
+    return true
+  }
 
   const scrollTranscript = (dir: 1 | -1) => {
     if (!transcriptEl) return
@@ -640,6 +659,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
 
   const promptKeyDown = (e: KeyboardEvent) => {
     if (e.isComposing) return
+    if (cycleMode(e)) return
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
       send()
@@ -654,6 +674,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
   onMount(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement
+      if (target.closest(".prompt-box, .float-editor") && cycleMode(e)) return
       if (e.isComposing || target.closest("textarea, input, select, button, a, [contenteditable], [data-composer-controls]")) return
       if (navKeys(e)) return
       if (e.key === "Tab" && vim.mode() === "normal") {
