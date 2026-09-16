@@ -10,6 +10,121 @@ const waitForState = <A, E>(runner: Runner.Runner<A, E>, tag: Runner.State<A, E>
 
 describe("Runner", () => {
   it.live(
+    "unconsumed admission hands off before advisory work and keeps callers waiting",
+    Effect.gen(function* () {
+      const scope = yield* Scope.Scope
+      const checked = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const consumed = yield* Deferred.make<void>()
+      const finish = yield* Deferred.make<void>()
+      const calls = yield* Ref.make<string[]>([])
+      const runner = Runner.make<string>(scope)
+      const original = yield* runner
+        .ensureRunning(
+          runner.consume.pipe(
+            Effect.andThen(Deferred.succeed(checked, undefined)),
+            Effect.andThen(Deferred.await(release)),
+            Effect.as("original"),
+          ),
+        )
+        .pipe(Effect.forkChild)
+      yield* Deferred.await(checked)
+      const late = yield* runner
+        .ensureRunning(
+          runner.consume.pipe(
+            Effect.andThen(Ref.update(calls, (items) => [...items, "admission"])),
+            Effect.andThen(Deferred.succeed(consumed, undefined)),
+            Effect.andThen(Deferred.await(finish)),
+            Effect.as("late"),
+          ),
+          true,
+        )
+        .pipe(Effect.forkChild({ startImmediately: true }))
+      yield* runner.wake(Ref.update(calls, (items) => [...items, "advisory"]).pipe(Effect.as("wake")))
+      yield* Deferred.succeed(release, undefined)
+      yield* Deferred.await(consumed)
+      expect(original.pollUnsafe()).toBeUndefined()
+      expect(late.pollUnsafe()).toBeUndefined()
+      expect(yield* Ref.get(calls)).toEqual(["admission"])
+      yield* Deferred.succeed(finish, undefined)
+      expect(yield* Fiber.join(original)).toBe("late")
+      expect(yield* Fiber.join(late)).toBe("late")
+      yield* waitForState(runner, "Idle")
+      expect(yield* Ref.get(calls)).toEqual(["admission", "advisory"])
+    }),
+  )
+
+  it.live(
+    "consumed admission does not start another run",
+    Effect.gen(function* () {
+      const scope = yield* Scope.Scope
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const runner = Runner.make<string>(scope)
+      const original = yield* runner
+        .ensureRunning(
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.andThen(runner.consume),
+            Effect.as("consumed"),
+          ),
+        )
+        .pipe(Effect.forkChild)
+      yield* Deferred.await(started)
+      const late = yield* runner
+        .ensureRunning(Effect.die("admission already consumed"), true)
+        .pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.succeed(release, undefined)
+      expect(yield* Fiber.join(original)).toBe("consumed")
+      expect(yield* Fiber.join(late)).toBe("consumed")
+      expect(runner.busy).toBe(false)
+    }),
+  )
+
+  it.live(
+    "unsuccessful domain completion does not replay unconsumed admission",
+    Effect.gen(function* () {
+      const scope = yield* Scope.Scope
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const runner = Runner.make<string>(scope, { canContinue: (result) => result !== "error" })
+      const original = yield* runner
+        .ensureRunning(
+          Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.as("error")),
+        )
+        .pipe(Effect.forkChild)
+      yield* Deferred.await(started)
+      const late = yield* runner
+        .ensureRunning(Effect.die("must not replay after error"), true)
+        .pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.succeed(release, undefined)
+      expect(yield* Fiber.join(original)).toBe("error")
+      expect(yield* Fiber.join(late)).toBe("error")
+      expect(runner.busy).toBe(false)
+    }),
+  )
+
+  it.live(
+    "cancellation drops unconsumed admission",
+    Effect.gen(function* () {
+      const scope = yield* Scope.Scope
+      const started = yield* Deferred.make<void>()
+      const runner = Runner.make<string>(scope, { onInterrupt: Effect.succeed("cancelled") })
+      const original = yield* runner
+        .ensureRunning(Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)))
+        .pipe(Effect.forkChild)
+      yield* Deferred.await(started)
+      const late = yield* runner
+        .ensureRunning(Effect.die("must not replay after cancellation"), true)
+        .pipe(Effect.forkChild({ startImmediately: true }))
+      yield* runner.cancel
+      expect(yield* Fiber.join(original)).toBe("cancelled")
+      expect(yield* Fiber.join(late)).toBe("cancelled")
+      expect(yield* runner.ensureRunning(Effect.succeed("next"))).toBe("next")
+    }),
+  )
+
+  it.live(
     "coalesces late wakes after cleanup without replacing the original result",
     Effect.gen(function* () {
       const scope = yield* Scope.Scope

@@ -12,10 +12,12 @@ export interface Interface {
   readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly wake: (sessionID: SessionID, work: Effect.Effect<SessionV1.WithParts | undefined>) => Effect.Effect<void>
+  readonly consume: (sessionID: SessionID) => Effect.Effect<void>
   readonly ensureRunning: (
     sessionID: SessionID,
     onInterrupt: Effect.Effect<SessionV1.WithParts>,
     work: Effect.Effect<SessionV1.WithParts>,
+    admission?: boolean,
   ) => Effect.Effect<SessionV1.WithParts>
   readonly startShell: (
     sessionID: SessionID,
@@ -27,6 +29,24 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionRunState") {}
 const noAdvisoryWork = Symbol("noAdvisoryWork")
+
+export const completedTurn = (
+  user: Pick<SessionV1.User, "id"> | undefined,
+  assistant: SessionV1.Assistant | undefined,
+  parts: readonly SessionV1.Part[],
+  allowInterruptedTools = false,
+) => {
+  if (!user || !assistant || assistant.parentID !== user.id || assistant.error) return false
+  if (assistant.structured !== undefined) return true
+  if (!assistant.finish || ["tool-calls", "unknown"].includes(assistant.finish)) return false
+  // "stop" with tool calls still needs continuation, except legacy interrupted-orphan cleanup.
+  return !parts.some(
+    (part) =>
+      part.type === "tool" &&
+      !part.metadata?.providerExecuted &&
+      !(allowInterruptedTools && part.state.status === "error" && part.state.metadata?.interrupted === true),
+  )
+}
 
 const layer = Layer.effect(
   Service,
@@ -63,6 +83,9 @@ const layer = Layer.effect(
         onIdle: status.set(sessionID, { type: "idle" }),
         onBusy: status.set(sessionID, { type: "busy" }),
         onInterrupt,
+        canContinue: (result) =>
+          result === noAdvisoryWork ||
+          (result?.info.role === "assistant" && completedTurn({ id: result.info.parentID }, result.info, result.parts)),
       })
       data.runners.set(sessionID, next)
       return next
@@ -89,10 +112,11 @@ const layer = Layer.effect(
       sessionID: SessionID,
       onInterrupt: Effect.Effect<SessionV1.WithParts>,
       work: Effect.Effect<SessionV1.WithParts>,
+      admission = false,
     ) {
       const owner = yield* runner(sessionID, onInterrupt)
       while (true) {
-        const result = yield* owner.ensureRunning(work)
+        const result = yield* owner.ensureRunning(work, admission)
         if (result === noAdvisoryWork) continue
         return result ?? (yield* onInterrupt)
       }
@@ -104,6 +128,12 @@ const layer = Layer.effect(
     ) {
       const owner = yield* runner(sessionID, Effect.succeed(undefined))
       yield* owner.wake(work.pipe(Effect.map((result) => result ?? noAdvisoryWork)))
+    })
+
+    const consume = Effect.fn("SessionRunState.consume")(function* (sessionID: SessionID) {
+      const data = yield* InstanceState.get(state)
+      const owner = data.runners.get(sessionID)
+      if (owner) yield* owner.consume
     })
 
     const startShell = Effect.fn("SessionRunState.startShell")(function* (
@@ -119,7 +149,7 @@ const layer = Layer.effect(
       return result === noAdvisoryWork || result === undefined ? yield* onInterrupt : result
     })
 
-    return Service.of({ assertNotBusy, cancel, ensureRunning, startShell, wake })
+    return Service.of({ assertNotBusy, cancel, ensureRunning, startShell, wake, consume })
   }),
 )
 

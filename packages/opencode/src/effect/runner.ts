@@ -3,7 +3,8 @@ import { Cause, Deferred, Effect, Exit, Fiber, Latch, Schema, Scope, Synchronize
 export interface Runner<A, E = never> {
   readonly state: State<A, E>
   readonly busy: boolean
-  readonly ensureRunning: (work: Effect.Effect<A, E>) => Effect.Effect<A, E>
+  readonly ensureRunning: (work: Effect.Effect<A, E>, admission?: boolean) => Effect.Effect<A, E>
+  readonly consume: Effect.Effect<void>
   readonly wake: (work: Effect.Effect<A, E>) => Effect.Effect<void>
   readonly startShell: (work: Effect.Effect<A, E>, ready?: Latch.Latch) => Effect.Effect<A, E | Busy>
   readonly cancel: Effect.Effect<void>
@@ -44,6 +45,7 @@ export const make = <A, E = never>(
     onIdle?: Effect.Effect<void>
     onBusy?: Effect.Effect<void>
     onInterrupt?: Effect.Effect<A, E>
+    canContinue?: (result: A) => boolean
   },
 ): Runner<A, E> => {
   const ref = SynchronizedRef.makeUnsafe<State<A, E>>({ _tag: "Idle" })
@@ -52,6 +54,7 @@ export const make = <A, E = never>(
   const onInterrupt = opts?.onInterrupt
   let ids = 0
   let pending: Effect.Effect<A, E> | undefined
+  let unconsumed: Effect.Effect<A, E> | undefined
 
   const state = () => SynchronizedRef.getUnsafe(ref)
   const next = () => {
@@ -76,6 +79,13 @@ export const make = <A, E = never>(
       ref,
       Effect.fnUntraced(function* (st) {
         if (st._tag !== "Running" || st.run.id !== id) return [complete(done, exit), st] as const
+        const admission = unconsumed
+        unconsumed = undefined
+        // A new prompt must be observed before successful completion can release its waiters.
+        if (admission && Exit.isSuccess(exit) && (opts?.canContinue?.(exit.value) ?? true)) {
+          const run = yield* startRun(admission, done)
+          return [Effect.void, { _tag: "Running", run }] as const
+        }
         const work = pending
         pending = undefined
         if (work && Exit.isSuccess(exit)) {
@@ -123,13 +133,14 @@ export const make = <A, E = never>(
       yield* Fiber.interrupt(shell.fiber)
     })
 
-  const ensureRunning = (work: Effect.Effect<A, E>): Effect.Effect<A, E> =>
+  const ensureRunning = (work: Effect.Effect<A, E>, admission = false): Effect.Effect<A, E> =>
     SynchronizedRef.modifyEffect(
       ref,
       Effect.fnUntraced(function* (st) {
+        if (admission && st._tag !== "Stopping") unconsumed = work
         switch (st._tag) {
           case "Stopping":
-            return [Deferred.await(st.done).pipe(Effect.andThen(() => ensureRunning(work))), st] as const
+            return [Deferred.await(st.done).pipe(Effect.andThen(() => ensureRunning(work, admission))), st] as const
           case "Running":
           case "ShellThenRun":
             return [awaitDone(st.run.done), st] as const
@@ -202,6 +213,7 @@ export const make = <A, E = never>(
     ref,
     Effect.fnUntraced(function* (st) {
       pending = undefined
+      unconsumed = undefined
       if (st._tag === "Idle") return [Effect.void, st] as const
       if (st._tag === "Stopping") return [Deferred.await(st.done), st] as const
       const done = yield* Deferred.make<void>()
@@ -234,6 +246,10 @@ export const make = <A, E = never>(
       return state()._tag !== "Idle"
     },
     ensureRunning,
+    // Called before reading the inputs that the current work will consume.
+    consume: Effect.sync(() => {
+      unconsumed = undefined
+    }),
     wake,
     startShell,
     cancel,
