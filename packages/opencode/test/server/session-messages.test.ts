@@ -87,6 +87,55 @@ function json<T>(response: HttpClientResponse.HttpClientResponse) {
 
 describe("session messages endpoint", () => {
   it.instance(
+    "optionally omits summary patches without changing history or stored messages",
+    withoutWatcher(
+      Effect.gen(function* () {
+        const current = yield* sessionScoped
+        yield* fill(current.id, 2)
+        const session = yield* SessionNs.Service
+        const id = MessageID.ascending()
+        const patch = "+synthetic patch\n".repeat(10_000)
+        yield* session.updateMessage({
+          id,
+          sessionID: current.id,
+          role: "user",
+          agent: "test",
+          model,
+          time: { created: Date.now() + 10 },
+          summary: { diffs: [{ file: "fixture.ts", additions: 10, deletions: 2, status: "modified", patch }] },
+        })
+        yield* session.updatePart({
+          id: PartID.ascending(),
+          sessionID: current.id,
+          messageID: id,
+          type: "text",
+          text: "Keep the full visible message",
+        })
+        const full = yield* request(`/session/${current.id}/message`).pipe(Effect.flatMap(json<SessionV1.WithParts[]>))
+        const slim = yield* request(`/session/${current.id}/message?summaryPatches=false`).pipe(
+          Effect.flatMap(json<SessionV1.WithParts[]>),
+        )
+        expect(slim.map((item) => item.info.id)).toEqual(full.map((item) => item.info.id))
+        expect(slim.map((item) => item.parts)).toEqual(full.map((item) => item.parts))
+        expect(slim.at(-1)?.info).toMatchObject({
+          summary: { diffs: [{ file: "fixture.ts", additions: 10, deletions: 2, status: "modified" }] },
+        })
+        expect(JSON.stringify(slim)).not.toContain("synthetic patch")
+        expect(JSON.stringify(slim).length).toBeLessThan(JSON.stringify(full).length / 10)
+        const page = yield* request(`/session/${current.id}/message?limit=1&summaryPatches=false`)
+        expect(page.headers["x-next-cursor"]).toBeTruthy()
+        expect(page.headers.link).toContain("summaryPatches=false")
+        expect(yield* page.json).toEqual(slim.slice(-1))
+        const stored = yield* request(`/session/${current.id}/message/${id}`).pipe(
+          Effect.flatMap(json<SessionV1.WithParts>),
+        )
+        expect(stored.info).toMatchObject({ summary: { diffs: [{ patch }] } })
+      }),
+    ),
+    { git: true },
+  )
+
+  it.instance(
     "returns cursor headers for older pages",
     withoutWatcher(
       Effect.gen(function* () {

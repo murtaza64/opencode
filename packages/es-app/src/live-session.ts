@@ -9,6 +9,21 @@ import { oc } from "./api"
 import { createServerEvents, type ServerEvents } from "./event-source"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
+// Keep diff statistics without retaining patch bodies unused by this transcript.
+const visibleMessage = (info: Message): Message => {
+  if (info.role !== "user" || !info.summary || !info.summary.diffs.some((diff) => diff.patch !== undefined)) return info
+  return {
+    ...info,
+    summary: {
+      ...info.summary,
+      diffs: info.summary.diffs.map((diff) => {
+        const metadata = { ...diff }
+        delete metadata.patch
+        return metadata
+      }),
+    },
+  }
+}
 type LiveEvent = { type: string; properties?: any }
 
 const isTerminal = (event: LiveEvent) =>
@@ -115,7 +130,7 @@ export function createLiveSession(
         // Reconnect snapshots must not remount the unchanged transcript.
         setData("session", reconcile([session]))
         setData("session_status", reconcile({ ...status, [sessionID]: status[sessionID] ?? { type: "idle" } }))
-        setData("message", sessionID, reconcile(messages.map((m) => m.info)))
+        setData("message", sessionID, reconcile(messages.map((m) => visibleMessage(m.info))))
         setData(
           "part",
           reconcile(
@@ -194,7 +209,7 @@ export function createLiveSession(
         setData(
           produce((draft) => {
             draft.message[sessionID] ??= []
-            insertSorted(draft.message[sessionID]!, info, (m) => m.id)
+            insertSorted(draft.message[sessionID]!, visibleMessage(info), (m) => m.id)
           }),
         )
         break

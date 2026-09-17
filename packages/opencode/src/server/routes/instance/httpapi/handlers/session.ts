@@ -111,6 +111,26 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       query: typeof MessagesQuery.Type
     }) {
+      const project = (items: SessionV1.WithParts[]) =>
+        ctx.query.summaryPatches !== false
+          ? items
+          : items.map((message) => {
+              if (message.info.role !== "user" || !message.info.summary) return message
+              return {
+                ...message,
+                info: {
+                  ...message.info,
+                  summary: {
+                    ...message.info.summary,
+                    diffs: message.info.summary.diffs.map((diff) => {
+                      const metadata = { ...diff }
+                      delete metadata.patch
+                      return metadata
+                    }),
+                  },
+                },
+              }
+            })
       if (ctx.query.before && ctx.query.limit === undefined) return yield* new HttpApiError.BadRequest({})
       if (ctx.query.before) {
         const before = ctx.query.before
@@ -121,7 +141,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       }
       yield* requireSession(ctx.params.sessionID)
       if (ctx.query.limit === undefined || ctx.query.limit === 0) {
-        return yield* SessionError.mapStorageNotFound(session.messages({ sessionID: ctx.params.sessionID }))
+        return project(yield* SessionError.mapStorageNotFound(session.messages({ sessionID: ctx.params.sessionID })))
       }
 
       const page = yield* SessionError.mapStorageNotFound(
@@ -131,7 +151,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
           before: ctx.query.before,
         }),
       )
-      if (!page.cursor) return page.items
+      if (!page.cursor) return project(page.items)
 
       const request = yield* HttpServerRequest.HttpServerRequest
       // toURL() honors the Host + x-forwarded-proto headers, so the Link
@@ -139,7 +159,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       const url = Option.getOrElse(HttpServerRequest.toURL(request), () => new URL(request.url, "http://localhost"))
       url.searchParams.set("limit", ctx.query.limit.toString())
       url.searchParams.set("before", page.cursor)
-      return HttpServerResponse.jsonUnsafe(page.items, {
+      return HttpServerResponse.jsonUnsafe(project(page.items), {
         headers: {
           "Access-Control-Expose-Headers": "Link, X-Next-Cursor",
           Link: `<${url.toString()}>; rel="next"`,

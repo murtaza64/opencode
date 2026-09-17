@@ -52,6 +52,9 @@ export const MessagesQuery = Schema.Struct({
   ...WorkspaceRoutingQueryFields,
   limit: Schema.optional(Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
   before: Schema.optional(Schema.String),
+  summaryPatches: Schema.optional(QueryBoolean).annotate({
+    description: "Include user-summary patch text (default true).",
+  }),
 })
 export const StatusMap = Schema.Record(Schema.String, SessionStatus.Info)
 export const InputsQuery = Schema.Struct({
