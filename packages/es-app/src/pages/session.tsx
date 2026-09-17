@@ -321,12 +321,6 @@ function SessionView(props: { sessionID: string; directory: string }) {
     return !!lastPart.time?.end
   })
 
-  const headerDot = () => {
-    if (pending().length > 0) return "pending"
-    if (!live.error() && !live.connectionError() && (subagentsRunning() || busy())) return "busy"
-    return "idle"
-  }
-
   const busy = () => !live.error() && !live.connectionError() && (status() === "busy" || status() === "retry")
   const workState = () => {
     if (live.error()) return "failed"
@@ -877,7 +871,6 @@ function SessionView(props: { sessionID: string; directory: string }) {
     <main class="session-page">
       <div class="session-main">
         <AppHeader>
-          <span class={`dot ${headerDot()}`} />
           <h1 dir="auto" title={session()?.title ?? sessionID}>{session()?.title ?? sessionID}</h1>
           <span class="dim">{workState() === "working" ? "busy" : workState()}</span>
           <Show when={subagentsRunning()}><span class="dim">{subagentsRunning()} subagent(s) running</span></Show>
