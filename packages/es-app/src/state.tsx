@@ -15,6 +15,7 @@ import {
 import { es, oc, type AttentionNotification } from "./api"
 import { createSessionActivity } from "./session-activity"
 import { createServerEvents } from "./event-source"
+import { resolveProjectName } from "./project-name"
 import type { GlobalSession } from "@opencode-ai/sdk/v2"
 
 export type DotState = "pending" | "busy" | "unread" | "idle"
@@ -176,8 +177,7 @@ export function DashboardProvider(props: ParentProps) {
         directory: s.directory,
         updated: s.time.updated,
         archived: s.time.archived,
-        project: s.project?.name || s.project?.worktree.split("/").filter(Boolean).at(-1) ||
-          s.directory.split("/").filter(Boolean).at(-1) || s.projectID,
+        project: resolveProjectName(s, editspaces()?.editspaces ?? []),
       }))
     }
     return (state()?.threads ?? [])
