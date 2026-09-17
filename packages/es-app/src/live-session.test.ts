@@ -85,6 +85,31 @@ test("model connection failure stops thinking without waiting for an idle event"
   expect(live.connectionError()).toBe("")
 })
 
+test("snapshot and live updates retain summary metadata without unused patch bodies", async () => {
+  const summary = {
+    title: "Changes",
+    diffs: [{ file: "fixture.ts", patch: "+large fixture patch", additions: 1, deletions: 0, status: "modified" }],
+  }
+  snapshot = [{ info: { ...user(), summary }, parts: [{ ...text("visible text"), messageID: "msg_001" }] }]
+  const live = start()
+  await live.load()
+  expect(JSON.parse(JSON.stringify(live.data.message.ses_current?.[0]))).toMatchObject({
+    summary: { title: "Changes", diffs: [{ file: "fixture.ts", additions: 1, deletions: 0, status: "modified" }] },
+  })
+  expect(JSON.stringify(live.data.message.ses_current)).not.toContain("large fixture patch")
+  expect(live.data.part.msg_001?.[0]).toMatchObject({ text: "visible text" })
+  expect(summary.diffs[0]?.patch).toBe("+large fixture patch")
+  SessionEvents.current.send("message.updated", {
+    info: { ...user(), summary: { diffs: [{ ...summary.diffs[0], patch: "+updated patch", additions: 2 }] } },
+  })
+  expect(JSON.stringify(live.data.message.ses_current)).not.toContain("updated patch")
+  expect(JSON.parse(JSON.stringify(live.data.message.ses_current?.[0]))).toMatchObject({
+    summary: { diffs: [{ additions: 2 }] },
+  })
+  SessionEvents.current.send("message.updated", { info: { ...assistant("msg_002", null), summary: true } })
+  expect(live.data.message.ses_current?.[1]).toMatchObject({ role: "assistant", summary: true })
+})
+
 test("persisted assistant failure overrides stale busy and survives idle and reload", async () => {
   snapshot = [
     { info: user(), parts: [] },

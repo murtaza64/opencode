@@ -55,7 +55,7 @@ export const oc = {
     fetch(`/oc/session/${id}?${q(directory)}`).then(json<Session>),
 
   messages: (id: string, directory: string): Promise<MessageWithParts[]> =>
-    fetch(`/oc/session/${id}/message?${q(directory)}`).then(json<MessageWithParts[]>),
+    fetch(`/oc/session/${id}/message?${q(directory)}&summaryPatches=false`).then(json<MessageWithParts[]>),
 
   status: (directory: string): Promise<Record<string, { type: string }>> =>
     fetch(`/oc/session/status?${q(directory)}`).then(json<Record<string, { type: string }>>),

@@ -10319,6 +10319,7 @@ export type SessionMessagesData = {
     workspace?: string
     limit?: number
     before?: string
+    summaryPatches?: "true" | "false"
   }
   url: "/session/{sessionID}/message"
 }
