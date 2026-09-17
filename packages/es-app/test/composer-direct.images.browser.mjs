@@ -76,7 +76,7 @@ try {
   await clearImages()
   await paste([b])
   await editor().fill("Newer visible Aside draft")
-  await editor().press("Alt+m")
+  await editor().press("Meta+m")
   fixture.holdAside = false
   fixture.asideReplies.shift()()
   await expect(page.locator(".aside-answer")).toContainText("ASIDE ONLY")
@@ -101,7 +101,7 @@ try {
   await expect.poll(() => fixture.inputReplies.length).toBe(1)
   expect(posts("/input")[0].body).toEqual({ requestID: expect.any(String), delivery: "queue", text: "", images: [a, b, a] })
   expect(hashes(posts("/input")[0].body.images)).toEqual([expectedHashes[0], expectedHashes[1], expectedHashes[0]])
-  await editor().press("Alt+m")
+  await editor().press("Meta+m")
   fixture.holdInput = false
   fixture.inputReplies.shift()()
   await expect(active().getByRole("button", { name: /^Remove / })).toHaveCount(0)
@@ -121,7 +121,7 @@ try {
   const original = posts("/input").at(-1).body
   await editor().fill("Newer draft after unknown")
   await action("Remove b.png").click()
-  await editor().press("Alt+m")
+  await editor().press("Meta+m")
   await page.reload({ waitUntil: "domcontentloaded" })
   await expect(editor()).toHaveValue("Newer draft after unknown")
   await expect(active().getByRole("button", { name: /^Remove / })).toHaveCount(2)

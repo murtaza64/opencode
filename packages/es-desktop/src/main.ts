@@ -114,7 +114,14 @@ const start = async () => {
           { role: "togglefullscreen" },
         ],
       },
-      { role: "windowMenu" },
+      {
+        role: "windowMenu",
+        // Reserve Command+M for the composer's target cycle, retaining the menu action.
+        submenu:
+          process.platform === "darwin"
+            ? [{ role: "minimize", accelerator: "" }, { role: "zoom" }, { type: "separator" }, { role: "front" }]
+            : undefined,
+      },
     ]),
   )
   const state = { closing: false }

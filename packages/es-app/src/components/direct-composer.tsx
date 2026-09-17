@@ -85,7 +85,7 @@ export const DirectComposer = (props: {
                   !state.busy || state.keyboardTarget === action
                     ? "Current keyboard target; Command or Control plus Enter submits this message."
                     : nextTarget() === action
-                      ? "Alt+M selects this keyboard target without submitting; clicking submits directly."
+                      ? "Command+M selects this keyboard target without submitting; clicking submits directly."
                       : "Click to submit the current visible message."
                 }
                 aria-keyshortcuts={
@@ -108,11 +108,7 @@ export const DirectComposer = (props: {
               >
                 {label(action)}{" "}
                 <kbd class="direct-button-hint" aria-hidden="true">
-                  {!state.busy || state.keyboardTarget === action
-                    ? "⌘/Ctrl↵"
-                    : nextTarget() === action
-                      ? "Alt+M →"
-                      : ""}
+                  {!state.busy || state.keyboardTarget === action ? "⌘/Ctrl↵" : nextTarget() === action ? "⌘M →" : ""}
                 </kbd>
               </button>
             )}

@@ -634,8 +634,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
 
   const focusInsert = () => vim.setMode("insert")
   const cycleMode = (e: KeyboardEvent) => {
-    // macOS Option+M reports a symbol in key, but still reports KeyM in code.
-    if (e.isComposing || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.code !== "KeyM") return false
+    if (e.isComposing || !e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.code !== "KeyM") return false
     e.preventDefault()
     e.stopPropagation()
     if (!composer.state.busy) return true
