@@ -56,6 +56,7 @@
   margin: 0;
   padding: 0;
   border: 0;
+  background: transparent;
   min-inline-size: 0;
 }
 .native-header .topbar h1 {
