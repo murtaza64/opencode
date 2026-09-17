@@ -7,6 +7,7 @@ import { A } from "@solidjs/router"
 import { es, type SessionSearchResult } from "../api"
 import { sessionHref, useDashboard, type SessionRow } from "../state"
 import { leftOpen, leftWidth, toggleLeft } from "../ui"
+import { nativeHeader, NativeHeader } from "./native-header"
 
 export default function Sidebar() {
   const { state, dotFor, editspace, setEditspace, editspaces, archivedIds, notifications, markViewed,
@@ -123,14 +124,35 @@ export default function Sidebar() {
     </A>
   )
 
-  return (
+  const projectControls = () => <>
+    <select class="es-switcher" title="project" aria-label="Project"
+      ref={(select) => createEffect(() => {
+        editspaces()
+        select.value = allProjects() ? "__all__" : current()
+      })}
+      onChange={(e) => {
+        clearSearch()
+        if (e.currentTarget.value === "__all__") setAllProjects(true)
+        else setEditspace(e.currentTarget.value)
+      }}>
+      <option value="__all__">All</option>
+      <For each={editspaces()?.editspaces ?? []}>{(item) => <option value={item.name}>{item.name}</option>}</For>
+    </select>
+    <button class="mini-btn" title={leftOpen() ? "collapse sidebar (^h)" : "expand sidebar (^h)"}
+      aria-label={leftOpen() ? "Collapse sidebar" : "Expand sidebar"} onClick={toggleLeft}>
+      {leftOpen() ? "⟨" : "⟩"}
+    </button>
+  </>
+
+  return (<>
+    <Show when={nativeHeader}><NativeHeader>{projectControls()}</NativeHeader></Show>
     <Show
       when={leftOpen()}
       fallback={
         <nav class="sidebar sidebar-mini">
-          <button class="mini-btn" title="expand sidebar (^h)" onClick={toggleLeft}>
+          <Show when={!nativeHeader}><button class="mini-btn" title="expand sidebar (^h)" onClick={toggleLeft}>
             ⟩
-          </button>
+          </button></Show>
           <A href="/" end activeClass="active" class="mini-item" title={`board — ${current()}`}>
             ▦
           </A>
@@ -151,29 +173,7 @@ export default function Sidebar() {
       }
     >
       <nav class="sidebar" style={{ width: `${leftWidth()}px` }}>
-        <div class="sidebar-top">
-          <select
-            class="es-switcher"
-            title="project"
-            ref={(select) => createEffect(() => {
-              editspaces()
-              select.value = allProjects() ? "__all__" : current()
-            })}
-            onChange={(e) => {
-              clearSearch()
-              if (e.currentTarget.value === "__all__") setAllProjects(true)
-              else setEditspace(e.currentTarget.value)
-            }}
-          >
-            <option value="__all__">All</option>
-            <For each={editspaces()?.editspaces ?? []}>
-              {(item) => <option value={item.name}>{item.name}</option>}
-            </For>
-          </select>
-          <button class="mini-btn" title="collapse sidebar (^h)" onClick={toggleLeft}>
-            ⟨
-          </button>
-        </div>
+        <Show when={!nativeHeader}><div class="sidebar-top">{projectControls()}</div></Show>
         <Show when={notifications().length}>
           <div class="notification-section">
             <div class="nav-heading">needs you</div>
@@ -269,5 +269,6 @@ export default function Sidebar() {
         </Show>
       </nav>
     </Show>
+    </>
   )
 }

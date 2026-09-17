@@ -52,6 +52,13 @@ const start = async () => {
     minHeight: 480,
     backgroundColor: "#171819",
     show: false,
+    ...(process.platform === "darwin"
+      ? {
+          titleBarStyle: "hidden" as const,
+          trafficLightPosition: { x: 12, y: 14 },
+          titleBarOverlay: { height: 44 },
+        }
+      : {}),
     webPreferences: {
       session: isolated,
       contextIsolation: true,
@@ -62,6 +69,12 @@ const start = async () => {
       webviewTag: false,
     },
   })
+  if (process.platform === "darwin")
+    window.webContents.on("did-finish-load", () => {
+      void window.webContents.insertCSS(
+        "body:not(:has(#root))::before { content: ''; position: fixed; top: 0; left: 84px; right: 0; height: 44px; -webkit-app-region: drag; }",
+      )
+    })
   const opening = { active: false }
   const openExternal = async (value: string) => {
     const url = externalURL(value)

@@ -15,6 +15,7 @@ import { createVim } from "../vim"
 import { getComposer, type ComposerAction } from "../composer"
 import { ComposerResults } from "../components/composer-controls"
 import { DirectComposer } from "../components/direct-composer"
+import { AppHeader } from "../components/native-header"
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const [error, setError] = createSignal("")
@@ -875,9 +876,9 @@ function SessionView(props: { sessionID: string; directory: string }) {
   return (
     <main class="session-page">
       <div class="session-main">
-        <header class="topbar">
+        <AppHeader>
           <span class={`dot ${headerDot()}`} />
-          <h1>{session()?.title ?? sessionID}</h1>
+          <h1 dir="auto" title={session()?.title ?? sessionID}>{session()?.title ?? sessionID}</h1>
           <span class="dim">{workState() === "working" ? "busy" : workState()}</span>
           <Show when={subagentsRunning()}><span class="dim">{subagentsRunning()} subagent(s) running</span></Show>
           <Show when={(session() as any)?.parentID}>
@@ -890,7 +891,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
               </span>
             )}
           </Show>
-        </header>
+        </AppHeader>
 
         <div class="session-alerts">
           <Show when={error() || live.error()}><div class="err" role="alert">{error() || live.error()}</div></Show>

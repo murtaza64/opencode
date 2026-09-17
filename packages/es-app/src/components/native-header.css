@@ -1,0 +1,93 @@
+:root.native-mac-header {
+  --native-header-height: max(44px, env(titlebar-area-height, 44px));
+}
+.native-mac-header .shell {
+  margin-block-start: var(--native-header-height);
+  height: calc(100dvh - var(--native-header-height));
+}
+.native-mac-header .shell > .sidebar,
+.native-mac-header .shell > .content,
+.native-mac-header .session-page {
+  height: 100%;
+}
+.native-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--native-header-height);
+  z-index: 20;
+  background: var(--mantle);
+  border-block-end: 1px solid var(--surface0);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.native-header-safe {
+  position: absolute;
+  /* Native traffic lights stay physically left, including in RTL. */
+  left: max(84px, env(titlebar-area-x, 84px));
+  right: max(0px, calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%)));
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-inline: 10px;
+}
+.native-header-project {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  inline-size: clamp(120px, 18vw, 220px);
+  min-inline-size: 0;
+  flex-shrink: 0;
+}
+.native-header-session {
+  min-inline-size: 0;
+  flex: 1;
+}
+.native-header-session > div {
+  min-inline-size: 0;
+}
+.native-header .topbar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-inline-size: 0;
+}
+.native-header .topbar h1 {
+  font-size: 14px;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-inline-size: 0;
+}
+.native-header .topbar .dim,
+.native-header .fork-crumb {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.native-header :is(button, select, input, a, [role="button"], [tabindex], [contenteditable="true"]) {
+  -webkit-app-region: no-drag;
+}
+.native-header :focus-visible {
+  outline: 2px solid var(--lavender);
+  outline-offset: 2px;
+}
+@media (max-width: 800px) {
+  .native-header-safe {
+    gap: 8px;
+  }
+  .native-header-project {
+    inline-size: 140px;
+  }
+  .native-header .fork-crumb,
+  .native-header .topbar > .dim {
+    display: none;
+  }
+}

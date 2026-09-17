@@ -7,6 +7,7 @@ import { es as esApi } from "../api"
 import { PrList } from "../components/pr"
 import BriefBox from "../components/brief"
 import { SessionIcon, TicketIcon } from "../components/icons"
+import { AppHeader } from "../components/native-header"
 
 function TicketRow(props: { tk: any }) {
   return (
@@ -412,7 +413,7 @@ export default function Home() {
     <Show when={state()} fallback={<div class="dim">loading… (is es-dashboard running on :7777?)</div>}>
       {(st) => (
         <main>
-          <header class="topbar">
+          <AppHeader>
             <h1>{st().editspace}</h1>
             <span class="dim">
               updated {ago(st().generated_at * 1000)} · tracker {st().tracker_at ? ago(st().tracker_at * 1000) : "never"} · prs{" "}
@@ -433,7 +434,7 @@ export default function Home() {
             <button onClick={refresh} disabled={refreshing()}>
               {refreshing() ? "refreshing…" : "refresh"}
             </button>
-          </header>
+          </AppHeader>
 
           <FrontDesk />
 
