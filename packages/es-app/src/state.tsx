@@ -14,6 +14,7 @@ import {
 } from "solid-js"
 import { es, oc, type AttentionNotification } from "./api"
 import { createSessionActivity } from "./session-activity"
+import { createServerEvents } from "./event-source"
 import type { GlobalSession } from "@opencode-ai/sdk/v2"
 
 export type DotState = "pending" | "busy" | "unread" | "idle"
@@ -90,11 +91,11 @@ export function DashboardProvider(props: ParentProps) {
   // one SSE subscription per selected editspace
   createEffect(() => {
     const name = editspace()
-    const source = new EventSource(`/es/api/events?${name ? `es=${encodeURIComponent(name)}` : ""}`)
+    const source = createServerEvents(`/es/api/events?${name ? `es=${encodeURIComponent(name)}` : ""}`)
     source.onmessage = () => refetch()
     onCleanup(() => source.close())
   })
-  const notificationSource = new EventSource("/es/api/notification-events")
+  const notificationSource = createServerEvents("/es/api/notification-events")
   notificationSource.onmessage = () => refetchNotifications()
   onCleanup(() => notificationSource.close())
   const interval = setInterval(refetch, 60_000)

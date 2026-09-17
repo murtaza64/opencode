@@ -44,6 +44,7 @@ export const createFixture = async () => {
     promoteOnCancel: false,
     receipts: [],
     messages: undefined,
+    messagesB: [],
     permissions: undefined,
     questions: [],
     archived: new Set(),
@@ -52,6 +53,8 @@ export const createFixture = async () => {
     holdAction: false,
     actionReplies: [],
     calls: [],
+    eventStreams: new Map(),
+    eventAuthorization: undefined,
     unexpected: [],
     inputReplies: [],
     asideReplies: [],
@@ -76,6 +79,7 @@ export const createFixture = async () => {
       method: request.method,
       path: url.pathname,
       directory: url.searchParams.get("directory"),
+      es: url.searchParams.get("es"),
       body,
     })
     const json = (value, status = 200) => {
@@ -83,10 +87,24 @@ export const createFixture = async () => {
       response.end(JSON.stringify(value))
     }
     if (["/event", "/global/event", "/api/events", "/api/notification-events"].includes(url.pathname)) {
+      if (fixture.eventAuthorization && request.headers.authorization !== fixture.eventAuthorization) {
+        response.writeHead(401, { "www-authenticate": 'Basic realm="fixture"', "content-type": "application/json" })
+        response.end(JSON.stringify({ error: "Authentication required" }))
+        return
+      }
       response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" })
-      response.write(": connected\n\n")
+      response.write(url.pathname.startsWith("/api/") ? "data: connected\n\n" : ": connected\n\n")
+      fixture.eventStreams.set(response, {
+        path: url.pathname,
+        directory: url.searchParams.get("directory"),
+        es: url.searchParams.get("es"),
+        lastEventId: request.headers["last-event-id"],
+      })
       if (url.pathname === "/event") streams.add(response)
-      response.on("close", () => streams.delete(response))
+      response.on("close", () => {
+        streams.delete(response)
+        fixture.eventStreams.delete(response)
+      })
       return
     }
     if (url.pathname === "/experimental/capabilities")
@@ -226,7 +244,7 @@ export const createFixture = async () => {
                   parts: [],
                 },
               ])
-            : [],
+            : fixture.messagesB,
         )
       if (action === "/prompt_async" && request.method === "POST") {
         if (fixture.rejectImages && body.parts.some((part) => part.type === "file"))

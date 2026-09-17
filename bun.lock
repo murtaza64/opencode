@@ -509,10 +509,13 @@
         "@tailwindcss/vite": "catalog:",
         "@tsconfig/node22": "catalog:",
         "@types/bun": "catalog:",
+        "@types/ws": "8.18.1",
         "@typescript/native-preview": "catalog:",
+        "eventsource": "3.0.7",
         "typescript": "catalog:",
         "vite": "catalog:",
         "vite-plugin-solid": "catalog:",
+        "ws": "8.21.0",
       },
     },
     "packages/es-desktop": {

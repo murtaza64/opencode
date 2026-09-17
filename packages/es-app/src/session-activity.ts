@@ -1,6 +1,7 @@
 import { batch, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js"
 import type { Event, GlobalSession, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2"
 import { oc } from "./api"
+import { createServerEvents } from "./event-source"
 
 type Snapshot = {
   status: Record<string, { type: string }>
@@ -211,7 +212,7 @@ export const createSessionActivity = (sessions: () => GlobalSession[], refreshSe
       void refresh(dirs.filter((directory) => !snapshots()[directory]))
     })
   })
-  const source = new EventSource("/oc/global/event")
+  const source = createServerEvents("/oc/global/event")
   let timer: ReturnType<typeof setTimeout> | undefined
   const scheduleSessions = () => {
     if (timer) return

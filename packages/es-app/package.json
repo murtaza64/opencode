@@ -14,13 +14,16 @@
     "typecheck": "tsgo --noEmit"
   },
   "devDependencies": {
+    "@types/ws": "8.18.1",
+    "eventsource": "3.0.7",
     "@tailwindcss/vite": "catalog:",
     "@types/bun": "catalog:",
     "@typescript/native-preview": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plugin-solid": "catalog:",
-    "@tsconfig/node22": "catalog:"
+    "@tsconfig/node22": "catalog:",
+    "ws": "8.21.0"
   },
   "dependencies": {
     "@opencode-ai/sdk": "workspace:*",

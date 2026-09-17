@@ -136,6 +136,15 @@ try {
             new URL(route.request().url()).origin === origin ? route.continue() : route.abort(),
           )
         const page = await context.newPage()
+        let streamRejected = false
+        page.on("websocket", (socket) =>
+          socket.on("framereceived", ({ payload }) => {
+            if (!["/oc/global/event", "/es/api/notification-events"].includes(new URL(socket.url()).pathname)) return
+            if (typeof payload !== "string") return
+            const packet = JSON.parse(payload)
+            if (packet.type === "error" && packet.code === 401) streamRejected = true
+          }),
+        )
         const challenges = []
         const cdp = process.env.AUTH_BROWSER === "firefox" ? undefined : await context.newCDPSession(page)
         if (cdp) {
@@ -155,7 +164,7 @@ try {
           })
           await cdp.send("Fetch.enable", { handleAuthRequests: true })
         }
-        const responses = ["/oc/session/ses_a", "/oc/event", "/es/api/state"].map((pathname) =>
+        const responses = ["/oc/session/ses_a", "/es/api/state"].map((pathname) =>
           page.waitForResponse(
             (response) => new URL(response.url()).pathname === pathname && response.status() === 401,
           ),
@@ -165,9 +174,10 @@ try {
           ...responses,
         ])
         await expect(page.getByRole("alert").filter({ hasText: "HTTP 401" }).first()).toBeVisible({ timeout: 30000 })
+        await expect.poll(() => streamRejected).toBe(true)
         if (cdp)
           expect([...new Set(challenges.map((challenge) => challenge.path))].sort()).toEqual(
-            baseline ? ["/es/api/state", "/oc/event", "/oc/session/ses_a"] : [],
+            baseline ? ["/es/api/state", "/oc/session/ses_a"] : [],
           )
         console.log(
           JSON.stringify({
