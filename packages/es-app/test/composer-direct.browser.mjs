@@ -142,7 +142,8 @@ try {
   await editor().press("Meta+m")
   fixture.holdNormal = false
   fixture.normalReplies.shift()()
-  await expect(page.getByRole("region", { name: "Message status", exact: true })).toContainText("Accepted")
+  await expect(page.getByRole("region", { name: "Message status", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Dismiss send status", exact: true })).toHaveCount(0)
   await expect(active()).not.toContainText("A task message is being sent")
   await expect(editor()).toHaveValue("new draft while chat sends")
   await expect(button("Aside")).toHaveAttribute("data-keyboard-target", "true")
@@ -214,6 +215,18 @@ try {
   expect(normal().at(-1).body.parts[0].text).toBe(draftBefore)
   expect(inputs()).toHaveLength(before)
   expect(asides()).toHaveLength(1)
+  await expect(page.getByRole("region", { name: "Message status", exact: true })).toHaveCount(0)
+  await editor().fill("uncertain normal message")
+  fixture.loseNormal = true
+  await button("Send").click()
+  await expect(page.getByRole("region", { name: "Message status", exact: true })).toContainText("Outcome unknown")
+  await expect(page.getByRole("button", { name: "Dismiss send status", exact: true })).toBeVisible()
+  await expect(editor()).toHaveValue("uncertain normal message")
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(page.getByRole("region", { name: "Message status", exact: true })).toContainText("Outcome unknown")
+  await expect(page.getByRole("button", { name: "Dismiss send status", exact: true })).toBeVisible()
+  await expect(editor()).toHaveValue("uncertain normal message")
+  expect(normal()).toHaveLength(4)
   expect(errors).toEqual([])
   expect(fixture.unexpected).toEqual([])
   console.log(

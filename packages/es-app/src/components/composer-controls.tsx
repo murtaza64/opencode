@@ -209,7 +209,7 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
   const steers = () => pending().filter((item) => item.delivery === "steer").length
   return (
     <div class="composer-results" data-composer-controls>
-      <Show when={state.normalSubmission}>
+      <Show when={state.normalSubmission?.status !== "accepted" && state.normalSubmission}>
         {(submission) => (
           <section class="normal-submission" aria-label="Message status">
             <div class="composer-actions">
@@ -217,9 +217,7 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
                 <b>{submission().action === "steer" ? "Send" : "Previous message"}</b> ·{" "}
                 {submission().status === "sending"
                   ? "Sending…"
-                  : submission().status === "accepted"
-                    ? "Accepted by server"
-                    : "Outcome unknown — check the conversation before resending"}
+                  : "Outcome unknown — check the conversation before resending"}
               </span>
               <Show when={submission().status !== "sending"}>
                 <button aria-label="Dismiss send status" onClick={() => props.composer.dismissNormalSubmission()}>
