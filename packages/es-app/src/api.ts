@@ -51,14 +51,14 @@ export const oc = {
   umbrellaSessions: (directory: string): Promise<Session[]> =>
     fetch(`/oc/umbrella/session?${q(directory)}`).then(json<Session[]>),
 
-  session: (id: string, directory: string): Promise<Session> =>
-    fetch(`/oc/session/${id}?${q(directory)}`).then(json<Session>),
+  session: (id: string, directory: string, signal?: AbortSignal): Promise<Session> =>
+    fetch(`/oc/session/${id}?${q(directory)}`, { signal }).then(json<Session>),
 
-  messages: (id: string, directory: string): Promise<MessageWithParts[]> =>
-    fetch(`/oc/session/${id}/message?${q(directory)}&summaryPatches=false`).then(json<MessageWithParts[]>),
+  messages: (id: string, directory: string, signal?: AbortSignal): Promise<MessageWithParts[]> =>
+    fetch(`/oc/session/${id}/message?${q(directory)}&summaryPatches=false`, { signal }).then(json<MessageWithParts[]>),
 
-  status: (directory: string): Promise<Record<string, { type: string }>> =>
-    fetch(`/oc/session/status?${q(directory)}`).then(json<Record<string, { type: string }>>),
+  status: (directory: string, signal?: AbortSignal): Promise<Record<string, { type: string }>> =>
+    fetch(`/oc/session/status?${q(directory)}`, { signal }).then(json<Record<string, { type: string }>>),
 
   permissions: (directory: string): Promise<PermissionRequest[]> =>
     fetch(`/oc/permission?${q(directory)}`).then(json<PermissionRequest[]>),

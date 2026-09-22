@@ -45,6 +45,7 @@ export const createFixture = async () => {
     receipts: [],
     messages: undefined,
     messagesB: [],
+    children: new Map(),
     permissions: undefined,
     questions: [],
     archived: new Set(),
@@ -85,6 +86,20 @@ export const createFixture = async () => {
     const json = (value, status = 200) => {
       response.writeHead(status, { "content-type": "application/json" })
       response.end(JSON.stringify(value))
+    }
+    const childMatch = /^\/session\/([^/]+)(\/message)?$/.exec(url.pathname)
+    const child = childMatch && fixture.children.get(childMatch[1])
+    if (child && request.method === "GET") {
+      const messages = !!childMatch[2]
+      const complete = () => json(messages ? child.messages : child.session, child.failure || 200)
+      if (messages && url.searchParams.get("directory") !== child.session.directory)
+        return json({ error: "wrong child directory" }, 400)
+      if (child.hold === (messages ? "messages" : "metadata")) {
+        child.replies.push(complete)
+        response.on("close", () => { child.closed++ })
+        return
+      }
+      return complete()
     }
     if (["/event", "/global/event", "/api/events", "/api/notification-events"].includes(url.pathname)) {
       if (fixture.eventAuthorization && request.headers.authorization !== fixture.eventAuthorization) {

@@ -104,6 +104,7 @@ export function createLiveSession(
     if (error() || connectionError()) setData("session_status", sessionID, reconcile({ type: "idle" }))
   }
   let disposed = false
+  const controller = new AbortController()
   let activeLoad: Promise<void> | undefined
   let duringLoad: LiveEvent[] | undefined
   let refreshAfterLoad = false
@@ -116,9 +117,9 @@ export function createLiveSession(
     duringLoad = []
     activeLoad = (async () => {
       const [session, messages, status] = await Promise.all([
-        oc.session(sessionID, directory),
-        oc.messages(sessionID, directory),
-        oc.status(directory),
+        oc.session(sessionID, directory, controller.signal),
+        oc.messages(sessionID, directory, controller.signal),
+        oc.status(directory, controller.signal),
       ])
       if (disposed) return
       const events = duringLoad!
@@ -340,6 +341,7 @@ export function createLiveSession(
   }
   onCleanup(() => {
     disposed = true
+    controller.abort()
     source?.close()
   })
 

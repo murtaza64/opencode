@@ -4,6 +4,7 @@ import { createEffect, createMemo, createResource, createSignal, For, onCleanup,
 import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router"
 import { DataProvider } from "@opencode-ai/session-ui/context"
 import { Message } from "@opencode-ai/session-ui/message-part"
+import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { oc } from "../api"
 import { createLiveSession } from "../live-session"
 import FakeCaret from "../components/fake-caret"
@@ -16,6 +17,7 @@ import { getComposer, type ComposerAction } from "../composer"
 import { ComposerResults } from "../components/composer-controls"
 import { DirectComposer } from "../components/direct-composer"
 import { AppHeader } from "../components/native-header"
+import { SubagentTranscript } from "../components/subagent-transcript"
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const [error, setError] = createSignal("")
@@ -198,6 +200,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const sessionID = props.sessionID
   const directory = props.directory
   const composer = getComposer(sessionID, directory)
+  const dialog = useDialog()
+  let inspecting = false
 
   const { activity, sessionsError } = useDashboard()
   const live = createLiveSession(sessionID, directory, (event) => {
@@ -235,8 +239,30 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const atBottom = () =>
     !!transcriptEl && transcriptEl.scrollHeight - transcriptEl.scrollTop - transcriptEl.clientHeight < 4
   const pin = () => {
-    if (transcriptEl) transcriptEl.scrollTop = transcriptEl.scrollHeight
+    if (transcriptEl && !inspecting) transcriptEl.scrollTop = transcriptEl.scrollHeight
   }
+  const inspectSubagent = (id: string) => {
+    if (inspecting || !/^ses_[A-Za-z0-9]+$/.test(id) || id === sessionID) return
+    // Only Task metadata authorizes child inspection, never IDs in prose/output.
+    const trusted = messages().some((message) => live.data.part[message.id]?.some((part) =>
+      part.type === "tool" && part.tool === "task" && "metadata" in part.state && part.state.metadata?.sessionId === id,
+    ))
+    if (!trusted) return
+    const focus = document.activeElement
+    const scroll = transcriptEl?.scrollTop ?? 0
+    const wasStuck = stick
+    inspecting = true
+    void dialog.show(() => <SubagentTranscript sessionID={id} directory={activity.session(id)?.directory || directory}
+      onDispose={() => {
+        inspecting = false
+        queueMicrotask(() => {
+          if (focus instanceof HTMLElement && focus.isConnected) focus.focus({ preventScroll: true })
+          if (transcriptEl) transcriptEl.scrollTop = scroll
+          stick = wasStuck
+        })
+      }} />)
+  }
+  onCleanup(() => { if (inspecting) dialog.close() })
   onMount(() => {
     live
       .load()
@@ -245,7 +271,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     transcriptEl?.addEventListener(
       "scroll",
       () => {
-        if (atBottom()) stick = true
+        if (!inspecting && atBottom()) stick = true
       },
       { passive: true },
     )
@@ -720,6 +746,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
   // global keys when focus is outside the prompt: nav + mode entry
   onMount(() => {
     const handler = (e: KeyboardEvent) => {
+      if (dialog.active || e.defaultPrevented) return
       const target = e.target as HTMLElement
       if (target.closest(".prompt-box, .float-editor") && cycleMode(e)) return
       if (e.isComposing || target.closest("textarea, input, select, button, a, [contenteditable], [data-composer-controls]")) return
@@ -908,7 +935,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
 
         <div class="transcript" ref={transcriptEl}>
           <div ref={inner} class="transcript-inner">
-            <DataProvider data={live.data} directory={directory}>
+            <DataProvider data={live.data} directory={directory} sessionID={sessionID} onNavigateToSession={inspectSubagent}>
             <For each={messages()}>
               {(m) => (
                 <>

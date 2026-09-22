@@ -710,6 +710,16 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   overflow-y: auto;
   padding: 16px 4px 16px 0;
 }
+.subagent-transcript-dialog {
+  height: 100%;
+  [data-slot="dialog-body"] { min-height: 0; box-sizing: border-box; padding: 0 20px 16px; }
+  [data-slot="dialog-title"] { overflow-wrap: anywhere; }
+  [data-slot="dialog-description"] { margin-inline: 0 !important; }
+  .subagent-transcript-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; padding-block-end: 12px; }
+  .subagent-transcript-meta bdi { overflow-wrap: anywhere; color: var(--subtext0); }
+  .subagent-transcript { min-height: 0; overflow: auto; overscroll-behavior: contain; padding-inline: 4px; }
+}
+
 /* TUI-style turn footer: left-aligned (right is the user side) —
  * ▣ Agent · model · duration [· interrupted] */
 .turn-summary {

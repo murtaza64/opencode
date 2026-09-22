@@ -17,6 +17,7 @@ export interface ToolErrorCardProps extends Omit<ComponentProps<typeof Card>, "c
   subtitle?: string
   href?: string
   onSubtitleClick?: (event: MouseEvent) => void
+  onSubtitleOpen?: () => void
 }
 
 export function ToolErrorCard(props: ToolErrorCardProps) {
@@ -37,6 +38,7 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
     "subtitle",
     "href",
     "onSubtitleClick",
+    "onSubtitleOpen",
   ])
   const setOpen = (value: boolean) => {
     if (props.open === undefined) setState("open", value)
@@ -109,7 +111,17 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
                     <span data-slot="basic-tool-tool-title">{name()}</span>
                     <Show
                       when={split.href && split.subtitle}
-                      fallback={<span data-slot="basic-tool-tool-subtitle">{subtitle()}</span>}
+                      fallback={<Show when={split.onSubtitleOpen && split.subtitle}
+                        fallback={<span data-slot="basic-tool-tool-subtitle">{subtitle()}</span>}>
+                        <span data-slot="basic-tool-tool-subtitle" class="clickable subagent-link" role="button" tabIndex={0}
+                          onClick={(event) => { event.stopPropagation(); split.onSubtitleOpen?.() }}
+                          onKeyDown={(event) => {
+                            if (event.key !== "Enter" && event.key !== " ") return
+                            event.preventDefault()
+                            event.stopPropagation()
+                            split.onSubtitleOpen?.()
+                          }}>{subtitle()}</span>
+                      </Show>}
                     >
                       <a
                         data-slot="basic-tool-tool-subtitle"

@@ -54,6 +54,7 @@ export function startDrag(side: "left" | "right", down: MouseEvent) {
 /** window-level ^h/^l toggles; safe inside textareas (no browser default) */
 export function installSidebarKeys(): () => void {
   const handler = (e: KeyboardEvent) => {
+    if (e.defaultPrevented || (e.target instanceof Element && e.target.closest('[role="dialog"]'))) return
     if (!e.ctrlKey || e.metaKey || e.altKey) return
     if (e.key === "h") {
       e.preventDefault()
