@@ -47,6 +47,28 @@
 .transcript :is([data-tool="todowrite"], [data-tool="todoread"]) [data-slot="basic-tool-tool-title"] { color: var(--yellow); }
 .transcript [data-tool="question"] [data-slot="basic-tool-tool-title"] { color: var(--pink); }
 
+.transcript [data-tool="task"] {
+  --text-strong: var(--text);
+  --text-base: var(--subtext1);
+  --v2-text-text-base: var(--text);
+  --v2-text-text-muted: var(--subtext0);
+  --v2-text-text-faint: var(--overlay1);
+  --icon-weak: var(--subtext0);
+  --icon-critical-base: var(--red);
+  [data-component="task-tool-card"], [data-kind="tool-error-card"] {
+    background: var(--mantle);
+    border: 1px solid var(--surface0);
+  }
+  [data-component="task-tool-surface"] { background: transparent; }
+  [data-component="task-tool-title"], [data-component="task-tool-spinner"] > * { color: var(--mauve); }
+  [role="button"]:focus-visible { outline: 1px solid var(--lavender); outline-offset: 2px; }
+  [role="button"]:is(:hover, :focus-visible) [data-component="task-tool-card"] {
+    background: var(--surface0);
+    border-color: var(--surface1);
+    [data-component="task-tool-action"] { opacity: 1; color: var(--lavender); }
+  }
+}
+
 /* user messages: dark speech bubble with a pink border */
 .transcript :is([data-component="user-message-text"], [data-slot="user-message-text"]) {
   background: var(--mantle);
