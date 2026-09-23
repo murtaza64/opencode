@@ -27,6 +27,7 @@ export const createFixture = async () => {
   const streams = new Set()
   const sockets = new Set()
   const fixture = {
+    sessionIDs: ["ses_a", "ses_b"],
     status: "busy",
     capabilities: true,
     images: undefined,
@@ -144,7 +145,7 @@ export const createFixture = async () => {
         editspace: "fixture",
         root: directory,
         generated_at: 1,
-        threads: ["ses_a", "ses_b"]
+        threads: fixture.sessionIDs
           .filter((id) => !fixture.deleted.has(id))
           .map((id) => ({
             key: id,
@@ -158,14 +159,14 @@ export const createFixture = async () => {
         attention: [],
         frontier: [],
         unattached_prs: [],
-        sessions: [session("ses_a"), session("ses_b")],
+        sessions: fixture.sessionIDs.map(session),
       })
     if (url.pathname === "/api/notifications") return json({ notifications: [] })
     if (url.pathname === "/api/issues") return json({ backend: "gh", repo: "fixture/test", issues: [] })
     if (url.pathname === "/api/docs") return json({ roots: [], sources: [] })
     if (["/experimental/session", "/session"].includes(url.pathname))
       return json(
-        ["ses_a", "ses_b"]
+        fixture.sessionIDs
           .filter((id) => !fixture.deleted.has(id))
           .map((id) => ({
             ...session(id),
@@ -194,7 +195,7 @@ export const createFixture = async () => {
         ],
       )
     if (url.pathname === "/question") return json(fixture.questions)
-    const match = /^\/session\/(ses_[ab])(.*)$/.exec(url.pathname)
+    const match = /^\/session\/(ses_[abc])(.*)$/.exec(url.pathname)
     if (match) {
       const [, id, action] = match
       const operation =

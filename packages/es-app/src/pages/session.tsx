@@ -610,7 +610,10 @@ function SessionView(props: { sessionID: string; directory: string }) {
     if (!list.length) return
     const i = list.findIndex((s: any) => s.id === sessionID)
     const next = list[(i + (back ? -1 : 1) + list.length) % list.length]
-    if (next && next.id !== sessionID) navigate(sessionHref(next.id, next.directory ?? directory))
+    if (!next || next.id === sessionID) return
+    const editor = floating() ? floatEl : promptEl
+    if (editor) saveSelection(editor)
+    navigate(sessionHref(next.id, next.directory ?? directory))
   }
 
   const [caret, setCaret] = createSignal<{ el: HTMLTextAreaElement; pos: number; hasChar: boolean } | null>(null)
@@ -731,7 +734,14 @@ function SessionView(props: { sessionID: string; directory: string }) {
   }
 
   const promptKeyDown = (e: KeyboardEvent) => {
-    if (e.isComposing) return
+    if (e.isComposing || e.defaultPrevented || dialog.active) return
+    if (e.key === "Tab") {
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (!e.repeat) switchSession(e.shiftKey)
+      return
+    }
     if (cycleMode(e)) return
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
@@ -751,9 +761,9 @@ function SessionView(props: { sessionID: string; directory: string }) {
       if (target.closest(".prompt-box, .float-editor") && cycleMode(e)) return
       if (e.isComposing || target.closest("textarea, input, select, button, a, [contenteditable], [data-composer-controls]")) return
       if (navKeys(e)) return
-      if (e.key === "Tab" && vim.mode() === "normal") {
+      if (e.key === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey && vim.mode() === "normal") {
         e.preventDefault()
-        switchSession(e.shiftKey)
+        if (!e.repeat) switchSession(e.shiftKey)
         return
       }
       if (e.key === "Escape") {
