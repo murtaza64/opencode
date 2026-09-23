@@ -75,26 +75,10 @@ const start = async () => {
         "body:not(:has(#root))::before { content: ''; position: fixed; top: 0; left: 84px; right: 0; height: 44px; -webkit-app-region: drag; }",
       )
     })
-  const opening = { active: false }
   const openExternal = async (value: string) => {
     const url = externalURL(value)
-    if (!url || opening.active || window.isDestroyed()) return
-    opening.active = true
-    try {
-      const choice = await dialog.showMessageBox(window, {
-        type: "question",
-        title: "Open external link?",
-        message: "Open this address in your browser?",
-        detail: url,
-        buttons: ["Cancel", "Open browser"],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true,
-      })
-      if (choice.response === 1) await shell.openExternal(url)
-    } finally {
-      opening.active = false
-    }
+    if (!url || window.isDestroyed()) return
+    await shell.openExternal(url)
   }
   window.webContents.setWindowOpenHandler(({ url }) => {
     void openExternal(url).catch(() => console.error("External browser unavailable"))

@@ -5,6 +5,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { createFixture, directory } from "../../es-app/test/composer-fixture.mjs"
 import { createRenderer } from "../scripts/renderer.ts"
+import { checkExternalLinks } from "./external-links.mjs"
 
 const root = fileURLToPath(new URL("..", import.meta.url))
 const fixture = await createFixture()
@@ -81,32 +82,7 @@ try {
   await expect(page.getByRole("button", { name: "Use normal Send", exact: true })).toBeVisible()
   expect(fixture.calls.find((call) => call.path.endsWith("/input") && call.method === "POST").directory).toBe(directory)
 
-  // Stub only the OS boundary: exercise the actual native link handlers without opening a browser.
-  await app.evaluate(({ app, dialog, shell }) => {
-    app.linkChecks = { dialogs: [], opened: [], response: 0 }
-    dialog.showMessageBox = async (_window, options) => {
-      app.linkChecks.dialogs.push(options)
-      return { response: app.linkChecks.response, checkboxChecked: false }
-    }
-    shell.openExternal = async (url) => {
-      app.linkChecks.opened.push(url)
-    }
-  })
-  await page.evaluate(() => window.open("file:///tmp/es-desktop-decoy"))
-  await page.evaluate(() => window.open("ink://open"))
-  await page.evaluate(() => window.open("https://example.com/review"))
-  await expect.poll(() => app.evaluate(({ app }) => app.linkChecks.dialogs.length)).toBe(1)
-  expect(await app.evaluate(({ app }) => app.linkChecks.opened)).toEqual([])
-  expect(await app.evaluate(({ app }) => app.linkChecks.dialogs[0].defaultId)).toBe(0)
-  await app.evaluate(({ app }) => {
-    app.linkChecks.response = 1
-  })
-  await page.evaluate(() => {
-    window.location.href = "https://example.com/approved"
-  })
-  await expect.poll(() => app.evaluate(({ app }) => app.linkChecks.opened)).toEqual(["https://example.com/approved"])
-  expect(new URL(page.url()).origin).toBe(origin)
-  expect(app.windows()).toHaveLength(1)
+  await checkExternalLinks(app, page, origin)
   await page.evaluate(() => {
     window.location.href = "/oc/session"
   })
