@@ -26,7 +26,7 @@ export const SubagentTranscript = (props: { sessionID: string; directory: string
   })
   return (
     <Dialog title={<bdi>{result()?.session?.title || "Subagent transcript"}</bdi>}
-      description="Read-only inspection" size="x-large" class="subagent-transcript-dialog">
+      size="x-large" class="subagent-transcript-dialog">
       <Show when={result.loading}><p role="status">Loading subagent…</p></Show>
       <Show when={result()?.error}>{(error) => <div role="alert" class="err">
         {error()} <button disabled={result.loading} onClick={() => void refetch()}>Retry</button>
@@ -44,9 +44,10 @@ const Transcript = (props: { session: Session }) => {
   onMount(() => { void live.load().catch(() => {}) })
   return <>
     <div class="subagent-transcript-meta">
+      <span>Read-only inspection</span>
       <span role="status">{live.loading() ? "Loading transcript…" : live.connectionError() ? "Disconnected" :
         live.error() ? "Failed" : live.data.session_status[props.session.id]?.type ?? "idle"}</span>
-      <bdi dir="ltr">{props.session.directory}</bdi>
+      <bdi dir="ltr" title={props.session.directory}>{props.session.directory}</bdi>
     </div>
     <Show when={live.connectionError()}>{(error) => <div role="alert" class="err">
       {error()} <button disabled={live.loading()} onClick={() => void live.load().catch(() => {})}>Retry</button>

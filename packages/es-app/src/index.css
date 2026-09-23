@@ -710,14 +710,105 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   overflow-y: auto;
   padding: 16px 4px 16px 0;
 }
-.subagent-transcript-dialog {
-  height: 100%;
-  [data-slot="dialog-body"] { min-height: 0; box-sizing: border-box; padding: 0 20px 16px; }
-  [data-slot="dialog-title"] { overflow-wrap: anywhere; }
-  [data-slot="dialog-description"] { margin-inline: 0 !important; }
-  .subagent-transcript-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; padding-block-end: 12px; }
-  .subagent-transcript-meta bdi { overflow-wrap: anywhere; color: var(--subtext0); }
-  .subagent-transcript { min-height: 0; overflow: auto; overscroll-behavior: contain; padding-inline: 4px; }
+[data-component="dialog-overlay"]:has(+ [data-dialog-layer] .subagent-transcript-dialog) {
+  background: color-mix(in srgb, var(--crust) 65%, transparent);
+}
+[data-component="dialog"]:has(.subagent-transcript-dialog) {
+  [data-slot="dialog-container"] {
+    width: min(calc(100vw - 24px), 980px);
+    height: min(calc(100dvh - 48px), 800px);
+  }
+  .subagent-transcript-dialog {
+    --color-background-stronger: var(--mantle);
+    --v2-background-bg-layer-02: var(--mantle);
+    --v2-border-border-base: var(--surface0);
+    --v2-border-border-muted: var(--surface0);
+    --syntax-comment: var(--overlay1);
+    --syntax-property: var(--blue);
+    --syntax-constant: var(--peach);
+    --syntax-type: var(--yellow);
+    --syntax-primitive: var(--blue);
+    --syntax-punctuation: var(--subtext1);
+    --syntax-keyword: var(--mauve);
+    --syntax-operator: var(--sky);
+    --syntax-string: var(--green);
+    --syntax-object: var(--text);
+    --syntax-variable: var(--text);
+    --syntax-critical: var(--red);
+    --syntax-regexp: var(--pink);
+    --syntax-info: var(--blue);
+    --syntax-unknown: var(--subtext1);
+    --syntax-warning: var(--yellow);
+    height: 100%;
+    min-height: 0;
+    box-sizing: border-box;
+    overflow: hidden;
+    background: var(--base);
+    color: var(--text);
+    border: 1px solid var(--surface1);
+    box-shadow: 0 8px 40px color-mix(in srgb, var(--crust) 55%, transparent);
+    [data-slot="dialog-header"] {
+      padding: 6px 12px;
+      gap: 12px;
+      background: var(--mantle);
+      border-block-end: 1px solid var(--surface0);
+    }
+    [data-slot="dialog-title"] {
+      min-width: 0;
+      margin: 0;
+      color: var(--text);
+      font: 600 14px/1.4 var(--font-sans);
+      text-transform: none;
+      letter-spacing: normal;
+      overflow-wrap: anywhere;
+    }
+    [data-slot="dialog-close-button"] {
+      flex-shrink: 0;
+      width: 32px;
+      height: 32px;
+      padding: 6px;
+      color: var(--subtext1);
+      background: transparent;
+      border: 1px solid var(--surface1);
+      &:hover { background: var(--surface0); color: var(--text); }
+    }
+    :is(button, .subagent-transcript):focus-visible { outline: 1px solid var(--lavender); outline-offset: -2px; }
+    [data-slot="dialog-body"] { min-height: 0; padding: 0; }
+    [data-slot="dialog-body"] > :is(p, .err) { margin: 0; padding: 8px 12px; }
+    .subagent-transcript-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 4px 12px;
+      padding: 6px 12px;
+      color: var(--subtext0);
+      font-size: 12px;
+      border-block-end: 1px solid var(--surface0);
+    }
+    .subagent-transcript-meta bdi {
+      flex: 1 1 240px;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: var(--font-mono);
+    }
+    .subagent-transcript {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      overscroll-behavior: contain;
+      padding: 12px;
+      [data-component="text-part"] { margin-block-start: 12px; }
+      .shiki { border-color: var(--surface0); }
+    }
+  }
+}
+@media (max-width: 600px) {
+  [data-component="dialog"]:has(.subagent-transcript-dialog) {
+    [data-slot="dialog-container"] { width: calc(100vw - 16px); height: calc(100dvh - 24px); }
+    .subagent-transcript-dialog [data-slot="dialog-close-button"] { width: 44px; height: 44px; }
+  }
 }
 
 /* TUI-style turn footer: left-aligned (right is the user side) —
