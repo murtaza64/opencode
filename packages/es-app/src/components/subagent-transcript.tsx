@@ -1,7 +1,7 @@
 import { createResource, For, onCleanup, onMount, Show } from "solid-js"
 import type { Session } from "@opencode-ai/sdk/v2"
 import { DataProvider } from "@opencode-ai/session-ui/context"
-import { Message } from "@opencode-ai/session-ui/message-part"
+import { TranscriptMessage } from "./transcript-message"
 import { Dialog } from "@opencode-ai/ui/dialog"
 import { oc } from "../api"
 import { createLiveSession } from "../live-session"
@@ -60,7 +60,7 @@ const Transcript = (props: { session: Session }) => {
       <Show when={valid()}>
         <Show when={!live.loading() && !messages().length}><p role="status">No messages yet.</p></Show>
         <DataProvider data={live.data} directory={props.session.directory} sessionID={props.session.id}>
-          <For each={messages()}>{(message) => <Message message={message} parts={live.data.part[message.id] ?? []} />}</For>
+          <For each={messages()}>{(message) => <TranscriptMessage message={message} parts={live.data.part[message.id] ?? []} />}</For>
         </DataProvider>
       </Show>
     </div>

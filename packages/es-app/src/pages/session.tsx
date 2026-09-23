@@ -3,7 +3,6 @@
 import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js"
 import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router"
 import { DataProvider } from "@opencode-ai/session-ui/context"
-import { Message } from "@opencode-ai/session-ui/message-part"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { oc } from "../api"
 import { createLiveSession } from "../live-session"
@@ -18,6 +17,7 @@ import { ComposerResults } from "../components/composer-controls"
 import { DirectComposer } from "../components/direct-composer"
 import { AppHeader } from "../components/native-header"
 import { SubagentTranscript } from "../components/subagent-transcript"
+import { TranscriptMessage } from "../components/transcript-message"
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const [error, setError] = createSignal("")
@@ -759,7 +759,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
       if (dialog.active || e.defaultPrevented) return
       const target = e.target as HTMLElement
       if (target.closest(".prompt-box, .float-editor") && cycleMode(e)) return
-      if (e.isComposing || target.closest("textarea, input, select, button, a, [contenteditable], [data-composer-controls]")) return
+      if (e.isComposing || target.closest("textarea, input, select, button, a, [contenteditable], [data-composer-controls], .generated-input")) return
       if (navKeys(e)) return
       if (e.key === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey && vim.mode() === "normal") {
         e.preventDefault()
@@ -949,9 +949,9 @@ function SessionView(props: { sessionID: string; directory: string }) {
             <For each={messages()}>
               {(m) => (
                 <>
-                  <Show when={m.role === "user"} fallback={<Message message={m} parts={live.data.part[m.id] ?? []} />}>
+                  <Show when={m.role === "user"} fallback={<TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} />}>
                     <div class="msg-wrap">
-                      <Message message={m} parts={live.data.part[m.id] ?? []} />
+                      <TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} />
                       <button
                         class="fork-here"
                         title="fork: new session with the history before this message"

@@ -710,6 +710,35 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .context-pct.high { color: var(--red); }
 
 /* session page: no outer scroll — transcript and info panel scroll */
+.generated-input {
+  min-width: 0;
+  margin-block: 8px;
+  border: 1px solid var(--surface0);
+  background: var(--mantle);
+  color: var(--subtext1);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  .activity-row {
+    display: grid;
+    grid-template-columns: 9rem minmax(0, 1fr) 16px;
+    align-items: baseline;
+    gap: 10px;
+    padding: 8px 10px;
+    list-style: none;
+    cursor: pointer;
+    &::-webkit-details-marker { display: none; }
+    &:hover { background: var(--surface0); }
+  }
+  .activity-kind { color: var(--lavender); font-weight: 600; }
+  .activity-description { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .activity-disclosure { text-align: center; color: var(--subtext0); font-size: 16px; line-height: 1; }
+  &:dir(rtl) .activity-disclosure { transform: rotate(180deg); }
+  &[open] .activity-disclosure { transform: rotate(90deg); }
+  .activity-details { border-block-start: 1px solid var(--surface0); padding: 8px 10px 10px; }
+  .activity-detail-actions { display: flex; justify-content: flex-end; margin-block-end: 6px; }
+  .generated-input-body { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; max-height: 50vh; overflow: auto; }
+  :is(summary, button, [role="region"]):focus-visible { outline: 1px solid var(--lavender); outline-offset: -2px; }
+}
 .session-page {
   display: flex;
   gap: 20px;
