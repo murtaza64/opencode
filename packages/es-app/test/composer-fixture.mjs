@@ -49,6 +49,7 @@ export const createFixture = async () => {
     children: new Map(),
     permissions: undefined,
     questions: [],
+    issue: undefined,
     archived: new Set(),
     deleted: new Set(),
     failAction: "",
@@ -163,6 +164,7 @@ export const createFixture = async () => {
       })
     if (url.pathname === "/api/notifications") return json({ notifications: [] })
     if (url.pathname === "/api/issues") return json({ backend: "gh", repo: "fixture/test", issues: [] })
+    if (url.pathname === "/api/issue" && fixture.issue) return json(fixture.issue)
     if (url.pathname === "/api/docs") return json({ roots: [], sources: [] })
     if (["/experimental/session", "/session"].includes(url.pathname))
       return json(

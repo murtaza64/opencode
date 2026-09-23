@@ -17,6 +17,7 @@ import { createSessionActivity } from "./session-activity"
 import { createServerEvents } from "./event-source"
 import { resolveProjectName } from "./project-name"
 import type { GlobalSession } from "@opencode-ai/sdk/v2"
+export { linkUrl } from "./link-url"
 
 export type DotState = "pending" | "busy" | "unread" | "idle"
 
@@ -303,7 +304,3 @@ export const ago = (ts?: number) => {
 }
 
 export const jiraUrl = (key: string) => `https://duolingo.atlassian.net/browse/${key}`
-
-/** route GitHub links through ink (duo.fyi/ink), the preferred frontend */
-export const linkUrl = (url: string) =>
-  url.startsWith("https://github.com/") ? `https://duo.fyi/ink/${url}` : url
