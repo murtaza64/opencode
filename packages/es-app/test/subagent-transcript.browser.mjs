@@ -49,7 +49,7 @@ await context.route("**/*", route => new URL(route.request().url()).origin === p
 const errors = []
 page.on("pageerror", error => errors.push(error.message))
 const dialog = page.getByRole("dialog")
-const trigger = page.getByRole("button", { name: "Explore inspect-child" })
+const trigger = page.getByRole("button", { name: "Agent Explore · inspect-child" })
 const requests = () => fixture.calls.filter(call => call.path.startsWith(`/session/${childID}`))
 const childStreams = () => [...fixture.eventStreams.values()].filter(stream => stream.directory === childDirectory)
 const saved = () => page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith("es-app:composer:"))))
@@ -117,7 +117,7 @@ try {
   for (const direction of ["ltr", "rtl"]) {
     await page.setViewportSize({ width: direction === "rtl" ? 390 : 1440, height: 1000 })
     await page.evaluate(dir => { document.documentElement.dir = dir }, direction)
-    const failed = page.getByRole("button", { name: "failed-child", exact: true })
+    const failed = page.getByRole("button", { name: "Explore · failed-child", exact: true })
     await failed.focus()
     await failed.press("Enter")
     await expect(dialog).toContainText("No messages yet.")

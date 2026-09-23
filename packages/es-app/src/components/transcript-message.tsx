@@ -23,7 +23,7 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message>) => {
     const result = copied || await navigator.clipboard?.writeText(generated()).then(() => true, () => false)
     setCopyState(result ? "Copied" : "Copy failed")
   }
-  return <Show when={generated()} fallback={<Message {...props} />}>
+  return <Show when={generated()} fallback={<Message {...props} activityRows />}>
     <details class="generated-input" data-generated-message-id={props.message.id} onToggle={event => setOpen(event.currentTarget.open)}>
       <summary class="activity-row">
         <span class="activity-kind">Generated input</span>

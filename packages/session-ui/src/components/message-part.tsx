@@ -3,6 +3,8 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  createContext,
+  useContext,
   For,
   Match,
   onMount,
@@ -67,8 +69,11 @@ import { attached, inline, kind, typeLabel } from "./message-file"
 import { readPartText } from "./message-part-text"
 import { SessionProgressIndicatorV2 } from "../v2/components/session-progress-indicator-v2"
 
-async function writeClipboard(text: string): Promise<boolean> {
-  const body = typeof document === "undefined" ? undefined : document.body
+// Opt-in semantic layout; its visual treatment belongs to the consuming app.
+const ActivityRows = createContext(false)
+
+async function writeClipboard(text: string, container?: Element): Promise<boolean> {
+  const body = container ?? (typeof document === "undefined" ? undefined : document.body)
   if (body) {
     const textarea = document.createElement("textarea")
     textarea.value = text
@@ -164,6 +169,7 @@ function DiagnosticsDisplay(props: { diagnostics: Diagnostic[] }): JSX.Element {
 }
 
 export interface MessageProps {
+  activityRows?: boolean
   message: MessageType
   parts: PartType[]
   actions?: UserActions
@@ -844,7 +850,7 @@ function contextToolDetail(part: ToolPart): string | undefined {
   return undefined
 }
 
-function contextToolTrigger(part: ToolPart, i18n: ReturnType<typeof useI18n>) {
+function contextToolTrigger(part: ToolPart, i18n: ReturnType<typeof useI18n>, fullPaths = false) {
   const input = (part.state.input ?? {}) as Record<string, unknown>
   const path = typeof input.path === "string" ? input.path : "/"
   const filePath = typeof input.filePath === "string" ? input.filePath : undefined
@@ -860,19 +866,19 @@ function contextToolTrigger(part: ToolPart, i18n: ReturnType<typeof useI18n>) {
       if (limit !== undefined) args.push("limit=" + limit)
       return {
         title: i18n.t("ui.tool.read"),
-        subtitle: filePath ? getFilename(filePath) : "",
+        subtitle: filePath ? (fullPaths ? filePath : getFilename(filePath)) : "",
         args,
       }
     }
     case "list":
       return {
         title: i18n.t("ui.tool.list"),
-        subtitle: getDirectory(path),
+        subtitle: fullPaths ? path : getDirectory(path),
       }
     case "glob":
       return {
         title: i18n.t("ui.tool.glob"),
-        subtitle: getDirectory(path),
+        subtitle: fullPaths ? path : getDirectory(path),
         args: pattern ? ["pattern=" + pattern] : [],
       }
     case "grep": {
@@ -881,7 +887,7 @@ function contextToolTrigger(part: ToolPart, i18n: ReturnType<typeof useI18n>) {
       if (include) args.push("include=" + include)
       return {
         title: i18n.t("ui.tool.grep"),
-        subtitle: getDirectory(path),
+        subtitle: fullPaths ? path : getDirectory(path),
         args,
       }
     }
@@ -935,6 +941,7 @@ export function registerPartComponent(type: string, component: PartComponent) {
 
 export function Message(props: MessageProps) {
   return (
+    <ActivityRows.Provider value={props.activityRows ?? false}>
     <Switch>
       <Match when={props.message.role === "user" && props.message}>
         {(userMessage) => (
@@ -959,6 +966,7 @@ export function Message(props: MessageProps) {
         )}
       </Match>
     </Switch>
+    </ActivityRows.Provider>
   )
 }
 
@@ -1048,6 +1056,7 @@ export function ContextToolGroup(props: {
   onSizeChange?: () => void
 }) {
   const i18n = useI18n()
+  const activityRows = useContext(ActivityRows)
   const [localOpen, setLocalOpen] = createSignal(false)
   const open = () => props.open ?? localOpen()
   const pending = createMemo(
@@ -1068,6 +1077,7 @@ export function ContextToolGroup(props: {
       variant="ghost"
       class="tool-collapsible"
       data-timeline-part-ids={props.parts.map((part) => part.id).join(",")}
+      data-activity-group={activityRows ? "true" : undefined}
     >
       <Collapsible.Trigger>
         <div data-component="context-tool-group-trigger">
@@ -1113,7 +1123,7 @@ export function ContextToolGroup(props: {
         <div data-component="context-tool-group-list">
           <Index each={props.parts}>
             {(partAccessor) => {
-              const trigger = createMemo(() => contextToolTrigger(partAccessor(), i18n))
+              const trigger = createMemo(() => contextToolTrigger(partAccessor(), i18n, activityRows))
               const running = createMemo(
                 () => partAccessor().state.status === "pending" || partAccessor().state.status === "running",
               )
@@ -1128,7 +1138,9 @@ export function ContextToolGroup(props: {
                               <TextShimmer text={trigger().title} active={running()} />
                             </span>
                             <Show when={trigger().subtitle}>
-                              <span data-slot="basic-tool-tool-subtitle">{trigger().subtitle}</span>
+                              <span data-slot="basic-tool-tool-subtitle" dir={activityRows ? "ltr" : undefined}>
+                                {trigger().subtitle}
+                              </span>
                             </Show>
                             <Show when={trigger().args?.length}>
                               <For each={trigger().args}>
@@ -1140,6 +1152,9 @@ export function ContextToolGroup(props: {
                       </div>
                     </div>
                   </div>
+                  <Show when={activityRows && partAccessor().state.status === "error"}>
+                    <div class="activity-group-error">{(partAccessor().state as { error: string }).error}</div>
+                  </Show>
                 </div>
               )
             }}
@@ -1534,6 +1549,7 @@ function ToolFileAccordion(props: { path: string; actions?: JSX.Element; childre
 PART_MAPPING["tool"] = function ToolPartDisplay(props) {
   const data = useData()
   const i18n = useI18n()
+  const activityRows = useContext(ActivityRows)
   const part = () => props.part as ToolPart
   if (part().tool === "todowrite") return null
 
@@ -1559,7 +1575,9 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
   const taskSubtitle = createMemo(() => {
     if (part().tool !== "task") return undefined
     const value = input().description
-    if (typeof value === "string" && value) return value
+    if (typeof value === "string" && value) return activityRows
+      ? `${taskAgent(input().subagent_type, data.store.agent).name ?? i18n.t("ui.tool.agent.default")} · ${value}`
+      : value
     return taskId()
   })
 
@@ -1569,7 +1587,8 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
 
   return (
     <Show when={!hideQuestion()}>
-      <div data-component="tool-part-wrapper" data-timeline-part-id={part().id} data-tool={part().tool}>
+      <div data-component="tool-part-wrapper" data-timeline-part-id={part().id} data-tool={part().tool}
+        data-activity-row={activityRows ? "true" : undefined} data-status={part().state.status}>
         <Switch>
           <Match when={part().state.status === "error" && (part().state as any).error}>
             {(error) => {
@@ -1588,6 +1607,7 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
                   tool={part().tool}
                   error={error()}
                   title={
+                    activityRows && part().tool === "task" ? i18n.t("ui.tool.agent.default") :
                     part().tool === "websearch" ? webSearchProviderLabel(partMetadata().provider, i18n) : undefined
                   }
                   defaultOpen={props.defaultOpen}
@@ -1779,6 +1799,7 @@ ToolRegistry.register({
   render(props) {
     const data = useData()
     const i18n = useI18n()
+    const activityRows = useContext(ActivityRows)
     const args: string[] = []
     if (props.input.offset) args.push("offset=" + props.input.offset)
     if (props.input.limit) args.push("limit=" + props.input.limit)
@@ -1795,7 +1816,7 @@ ToolRegistry.register({
           icon="glasses"
           trigger={{
             title: i18n.t("ui.tool.read"),
-            subtitle: props.input.filePath ? getFilename(props.input.filePath) : "",
+            subtitle: props.input.filePath ? (activityRows ? props.input.filePath : getFilename(props.input.filePath)) : "",
             args,
           }}
         />
@@ -1981,6 +2002,7 @@ ToolRegistry.register({
   render(props) {
     const data = useData()
     const i18n = useI18n()
+    const activityRows = useContext(ActivityRows)
     const childSessionId = createMemo(() => {
       const value = props.metadata.sessionId
       if (typeof value === "string" && value) return value
@@ -2071,7 +2093,21 @@ ToolRegistry.register({
       <BasicTool
         icon="task"
         status={props.status}
-        trigger={trigger()}
+        trigger={activityRows ? <>
+          <div data-slot="basic-tool-tool-info-structured" class="activity-task">
+            <div data-slot="basic-tool-tool-info-main">
+              <span data-slot="basic-tool-tool-title">{i18n.t("ui.tool.agent.default")}</span>
+              <span data-slot="basic-tool-tool-subtitle" dir="auto">
+                <bdi class="activity-agent-role">{title()}</bdi>
+                <Show when={subtitle()}> · <bdi>{subtitle()}</bdi></Show>
+              </span>
+            </div>
+            <span class="activity-task-action" aria-hidden="true">
+              <Show when={running()}><Spinner /></Show>
+              <Show when={clickable()}><Icon name="square-arrow-top-right" size="small" /></Show>
+            </span>
+          </div>
+        </> : trigger()}
         hideDetails
         triggerAsLink
         triggerHref={href()}
@@ -2087,6 +2123,7 @@ ToolRegistry.register({
   name: "shell",
   render(props) {
     const i18n = useI18n()
+    const activityRows = useContext(ActivityRows)
     const pending = () => props.status === "pending" || props.status === "running"
     const sawPending = pending()
     const text = createMemo(() => {
@@ -2096,10 +2133,14 @@ ToolRegistry.register({
     })
     const [copied, setCopied] = createSignal(false)
 
-    const handleCopy = async () => {
+    const handleCopy: JSX.EventHandler<HTMLButtonElement, MouseEvent> = async (event) => {
       const content = text()
       if (!content) return
-      if (await writeClipboard(content)) {
+      const button = event.currentTarget
+      // A portaled modal traps focus; its temporary copy selection must stay inside it.
+      const copied = await writeClipboard(content, activityRows ? button.closest('[role="dialog"]') ?? undefined : undefined)
+      if (activityRows) button.focus({ preventScroll: true })
+      if (copied) {
         setCopied(true)
         setTimeout(() => setCopied(false), 2000)
       }
@@ -2325,6 +2366,7 @@ ToolRegistry.register({
   name: "patch",
   render(props) {
     const i18n = useI18n()
+    const activityRows = useContext(ActivityRows)
     const fileComponent = useFileComponent()
     const files = createMemo(() => patchFiles(props.metadata.files))
     const pending = createMemo(() => props.status === "pending" || props.status === "running")
@@ -2458,7 +2500,12 @@ ToolRegistry.register({
             {...props}
             icon="code-lines"
             defer={props.deferContent !== false}
-            trigger={
+            trigger={activityRows ? {
+              title: i18n.t("ui.tool.patch"),
+              subtitle: single()!.relativePath,
+              subtitleClass: "activity-path",
+              action: <DiffChanges changes={{ additions: single()!.additions, deletions: single()!.deletions }} />,
+            } :
               <div data-component="edit-trigger">
                 <div data-slot="message-part-title-area">
                   <div data-slot="message-part-title">
@@ -2625,6 +2672,7 @@ ToolRegistry.register({
   name: "skill",
   render(props) {
     const i18n = useI18n()
+    const activityRows = useContext(ActivityRows)
     const title = createMemo(() => props.input.name ? `${i18n.t("ui.tool.skill")} ${props.input.name}` : i18n.t("ui.tool.skill"))
     const running = createMemo(() => props.status === "pending" || props.status === "running")
 
@@ -2640,6 +2688,8 @@ ToolRegistry.register({
       </div>
     )
 
-    return <BasicTool icon="brain" status={props.status} trigger={trigger()} hideDetails />
+    return <BasicTool icon="brain" status={props.status} trigger={activityRows ? {
+      title: i18n.t("ui.tool.skill"), subtitle: props.input.name,
+    } : trigger()} hideDetails />
   },
 })

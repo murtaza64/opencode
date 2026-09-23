@@ -32,10 +32,122 @@
   color-scheme: dark;
 }
 
-/* tool-call type accents: colored tool names (data-tool stamped by the
- * session page), lightened trigger background */
-.transcript [data-component="tool-part-wrapper"] :is([data-component="collapsible-trigger"], [data-slot="collapsible-trigger"]) {
-  background: var(--crust);
+/* Activity markup is opt-in; shared session-ui consumers keep their layout. */
+.transcript :is([data-activity-row], [data-activity-group]) {
+  --activity-kind-width: 9rem;
+  --v2-text-text-base: var(--text);
+  --v2-text-text-muted: var(--subtext1);
+  --v2-text-text-faint: var(--subtext0);
+  --icon-weaker: var(--subtext0);
+  --icon-critical-base: var(--red);
+  min-width: 0;
+  margin-block: 6px;
+  border: 1px solid var(--surface0);
+  background: var(--mantle);
+  color: var(--subtext1);
+  .tool-collapsible { gap: 0; }
+  [data-slot="collapsible-trigger"] {
+    min-height: 36px;
+    height: auto;
+    padding: 7px 10px;
+    background: transparent;
+    text-align: start;
+    user-select: text;
+    &:is(:hover, :focus-visible) { background: var(--surface0); }
+    &:focus-visible { outline: 1px solid var(--lavender); outline-offset: -2px; }
+  }
+  [data-component="tool-trigger"], [data-component="context-tool-group-trigger"] {
+    gap: 10px;
+    min-width: 0;
+    content-visibility: visible;
+  }
+  [data-slot="basic-tool-tool-trigger-content"],
+  [data-slot="basic-tool-tool-info"],
+  [data-slot="basic-tool-tool-info-structured"],
+  [data-slot="context-tool-group-title"] {
+    display: flex;
+    flex: 1;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+  [data-slot="basic-tool-tool-info-main"], [data-slot="context-tool-group-title"] {
+    display: grid;
+    grid-template-columns: var(--activity-kind-width) minmax(0, 1fr);
+    align-items: baseline;
+    gap: 0 10px;
+    width: 100%;
+    min-width: 0;
+    overflow: visible;
+  }
+  [data-slot="basic-tool-tool-title"], [data-slot="context-tool-group-label"] {
+    font: 600 13px/20px var(--font-sans);
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+  [data-slot="basic-tool-tool-subtitle"], [data-slot="basic-tool-tool-arg"], [data-slot="context-tool-group-summary"] {
+    font: 400 13px/20px var(--font-sans);
+    color: var(--subtext1);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    overflow: visible;
+    min-width: 0;
+    unicode-bidi: plaintext;
+  }
+  [data-slot="basic-tool-tool-arg"] { grid-column: 2; font-family: var(--font-mono); }
+  [data-slot="basic-tool-tool-subtitle"].activity-path { font-family: var(--font-mono); direction: ltr; unicode-bidi: isolate; }
+  [data-slot="collapsible-arrow"], .activity-task-action {
+    opacity: 1;
+    width: 16px;
+    min-width: 16px;
+    color: var(--subtext0);
+    flex-shrink: 0;
+  }
+  &:dir(rtl) [aria-expanded="false"] [data-slot="collapsible-arrow-icon"] { transform: rotate(90deg); }
+  [data-slot="collapsible-content"] {
+    min-width: 0;
+    max-width: 100%;
+    background: var(--crust);
+    &[data-expanded] { border-block-start: 1px solid var(--surface0); }
+  }
+  [data-component="context-tool-group-list"] { padding: 8px 10px; gap: 8px; }
+  [data-component="context-tool-group-list"] :is([data-slot="basic-tool-tool-subtitle"], [data-slot="basic-tool-tool-arg"]) {
+    font-family: var(--font-mono);
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+  .activity-group-error { color: var(--red); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .activity-agent-role { color: var(--mauve); }
+  .activity-task-action { display: flex; align-items: center; justify-content: flex-end; gap: 6px; width: auto; }
+  .activity-task-action [data-component="spinner"] { width: 14px; height: 14px; }
+  [data-component="shell-submessage"] {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    [data-slot="shell-submessage-width"] { display: block; max-width: 100%; }
+    [data-slot="basic-tool-tool-subtitle"] { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    [data-slot="shell-submessage-value"] { display: inline; }
+  }
+  [data-component="bash-output"] { background: var(--crust); border: 0; }
+  [data-slot="bash-copy"] {
+    position: static;
+    display: flex;
+    justify-content: flex-end;
+    padding: 4px 6px 0;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  [data-slot="bash-scroll"] { max-height: 50vh; overflow: auto; min-width: 0; }
+  [data-slot="bash-pre"] { white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; }
+  [data-kind="tool-error-card"] { padding: 0; border: 0; background: transparent; &::before { display: none; } }
+  [data-component="tool-error-card-icon"] { display: none; }
+  [data-slot="tool-error-card-content"] { color: var(--red); overflow-wrap: anywhere; }
+  &[data-status="error"] { border-inline-start: 2px solid var(--red); }
+  :is(button, [role="button"], [role="region"]):focus-visible { outline: 1px solid var(--lavender); outline-offset: -2px; }
+}
+.transcript [data-activity-row][data-tool="read"] [data-slot="basic-tool-tool-subtitle"] { font-family: var(--font-mono); direction: ltr; unicode-bidi: isolate; }
+@media (max-width: 600px) {
+  .transcript :is([data-activity-row], [data-activity-group]) { --activity-kind-width: 4.5rem; }
 }
 .transcript [data-tool] [data-slot="basic-tool-tool-title"] { color: var(--subtext1); }
 .transcript [data-tool="bash"] [data-slot="basic-tool-tool-title"] { color: var(--green); }
@@ -46,28 +158,6 @@
 .transcript [data-tool="webfetch"] [data-slot="basic-tool-tool-title"] { color: var(--teal); }
 .transcript :is([data-tool="todowrite"], [data-tool="todoread"]) [data-slot="basic-tool-tool-title"] { color: var(--yellow); }
 .transcript [data-tool="question"] [data-slot="basic-tool-tool-title"] { color: var(--pink); }
-
-.transcript [data-tool="task"] {
-  --text-strong: var(--text);
-  --text-base: var(--subtext1);
-  --v2-text-text-base: var(--text);
-  --v2-text-text-muted: var(--subtext0);
-  --v2-text-text-faint: var(--overlay1);
-  --icon-weak: var(--subtext0);
-  --icon-critical-base: var(--red);
-  [data-component="task-tool-card"], [data-kind="tool-error-card"] {
-    background: var(--mantle);
-    border: 1px solid var(--surface0);
-  }
-  [data-component="task-tool-surface"] { background: transparent; }
-  [data-component="task-tool-title"], [data-component="task-tool-spinner"] > * { color: var(--mauve); }
-  [role="button"]:focus-visible { outline: 1px solid var(--lavender); outline-offset: 2px; }
-  [role="button"]:is(:hover, :focus-visible) [data-component="task-tool-card"] {
-    background: var(--surface0);
-    border-color: var(--surface1);
-    [data-component="task-tool-action"] { opacity: 1; color: var(--lavender); }
-  }
-}
 
 /* user messages: dark speech bubble with a pink border */
 .transcript :is([data-component="user-message-text"], [data-slot="user-message-text"]) {

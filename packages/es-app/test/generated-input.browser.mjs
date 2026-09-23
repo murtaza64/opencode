@@ -84,7 +84,7 @@ try {
   await generated.locator("summary").click()
   await expect(generated.getByRole("region")).toHaveCount(0)
 
-  const trigger = page.getByRole("button", { name: "Explore Inspect generated child" })
+  const trigger = page.getByRole("button", { name: "Agent Explore · Inspect generated child" })
   await trigger.click()
   const dialog = page.getByRole("dialog")
   await expect(dialog.locator(".generated-input")).toHaveCount(1)
