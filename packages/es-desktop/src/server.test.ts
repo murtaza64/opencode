@@ -87,6 +87,8 @@ test("external links only accept credential-free HTTP(S)", () => {
 })
 
 test("API surface excludes direct shell, PTY, file, and config access", () => {
+  expect(apiAllowed("POST", "/oc/session")).toBe(true)
+  expect(apiAllowed("PUT", "/oc/session")).toBe(false)
   expect(apiAllowed("POST", "/oc/session/ses_a/input")).toBe(true)
   expect(apiAllowed("DELETE", "/oc/session/ses_a/aside/request-1")).toBe(true)
   for (const pathname of ["/oc/pty", "/oc/session/ses_a/shell", "/oc/config", "/oc/file/content", "/es/api/run"])

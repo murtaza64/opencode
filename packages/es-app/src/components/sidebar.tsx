@@ -8,6 +8,7 @@ import { es, type SessionSearchResult } from "../api"
 import { sessionHref, useDashboard, type SessionRow } from "../state"
 import { leftOpen, leftWidth, toggleLeft } from "../ui"
 import { nativeHeader, NativeHeader } from "./native-header"
+import { NewSession } from "./new-session"
 
 export default function Sidebar() {
   const { state, dotFor, editspace, setEditspace, editspaces, archivedIds, notifications, markViewed,
@@ -156,6 +157,7 @@ export default function Sidebar() {
           <A href="/" end activeClass="active" class="mini-item" title={`board — ${current()}`}>
             ▦
           </A>
+          <NewSession compact />
           <For each={sessions()}>
             {(s: any) => (
               <A
@@ -206,6 +208,7 @@ export default function Sidebar() {
         <A href="/" end activeClass="active" class="nav-item board-link">
           ▦ {allProjects() ? `${current()} board` : "board"}
         </A>
+        <NewSession />
         <div class="search-box">
           <input
             class="search-input"

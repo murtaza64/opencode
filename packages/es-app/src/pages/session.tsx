@@ -224,8 +224,10 @@ function SessionView(props: { sessionID: string; directory: string }) {
   onMount(() => { void activity.refreshDirectory(directory) })
   onMount(() => {
     promptEl?.setSelectionRange(...activeDraft().selection)
+    const requested = sessionStorage.getItem("es-app-focus-session") === sessionID
+    if (requested) sessionStorage.removeItem("es-app-focus-session")
     const focused = document.activeElement
-    if (!(focused instanceof HTMLElement && focused.closest("input, textarea, select, button, [contenteditable]"))) {
+    if (requested || !(focused instanceof HTMLElement && focused.closest("input, textarea, select, button, [contenteditable]"))) {
       (floating() ? floatEl : promptEl)?.focus({ preventScroll: true })
     }
   })

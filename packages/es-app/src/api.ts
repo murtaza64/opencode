@@ -27,6 +27,12 @@ export type AttentionNotification = {
   updated: number
 }
 
+export class SessionCreateError extends Error {
+  constructor(message: string, readonly uncertain: boolean) {
+    super(message)
+  }
+}
+
 const q = (directory: string) => `directory=${encodeURIComponent(directory)}`
 
 async function json<T>(res: Response): Promise<T> {
@@ -35,6 +41,29 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 export const oc = {
+  createSession: async (directory: string): Promise<Session> => {
+    let res: Response
+    try {
+      res = await fetch(`/oc/session?${q(directory)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      })
+    } catch {
+      throw new SessionCreateError("The server response was lost. A session may have been created; check the session list before trying again.", true)
+    }
+    if (!res.ok) {
+      const detail = await res.text()
+      if ((res.status >= 500 && !detail.trim()) || [502, 504].includes(res.status))
+        throw new SessionCreateError("The server response was lost. A session may have been created; check the session list before trying again.", true)
+      throw new SessionCreateError(`Session creation failed: HTTP ${res.status} ${detail}`, false)
+    }
+    const value = await res.json()
+    if (!value || typeof value.id !== "string" || !/^ses_[\w-]+$/.test(value.id) || value.directory !== directory || value.parentID)
+      throw new SessionCreateError("The server returned an invalid confirmation. A session may have been created; check the session list before trying again.", true)
+    return value as Session
+  },
+
   allSessions: async (roots = true): Promise<GlobalSession[]> => {
     // Timestamp-only cursors can skip sessions tied at a page boundary.
     // Grow the window until it contains every row instead.

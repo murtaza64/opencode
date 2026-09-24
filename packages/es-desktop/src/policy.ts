@@ -36,6 +36,7 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/es\/api\/(editspaces|state|notifications|events|notification-events|issues|issue|docs|doc|search)$/,
     ],
     POST: [
+      /^\/oc\/session$/,
       /^\/oc\/session\/[\w-]+\/(prompt_async|abort|fork|input|aside)$/,
       /^\/oc\/(permission|question)\/[\w-]+\/(reply|reject)$/,
       /^\/es\/api\/(refresh|frontdesk|curate|(?:digest|brief)\/[^/]+)$/,

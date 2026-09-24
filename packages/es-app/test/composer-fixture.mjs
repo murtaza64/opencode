@@ -61,6 +61,11 @@ export const createFixture = async () => {
     unexpected: [],
     inputReplies: [],
     asideReplies: [],
+    editspaces: [{ name: "fixture", root: `${directory}/.editspace` }, { name: "other", root: "/other project" }],
+    createMode: "complete",
+    createReplies: [],
+    created: [],
+    workspaceSessions: [],
     emit(type, properties) {
       for (const response of streams) response.write(`data: ${JSON.stringify({ type, properties })}\n\n`)
     },
@@ -140,7 +145,7 @@ export const createFixture = async () => {
           : {},
       )
     if (url.pathname === "/api/editspaces")
-      return json({ editspaces: [{ name: "fixture", root: directory }], default: "fixture" })
+      return json({ editspaces: fixture.editspaces, default: "fixture" })
     if (url.pathname === "/api/state")
       return json({
         editspace: "fixture",
@@ -156,7 +161,10 @@ export const createFixture = async () => {
             lanes: [],
             tickets: [],
             prs: [],
-          })),
+          })).concat(fixture.workspaceSessions.map((item) => ({
+            key: item.id, kind: "session", title: item.title,
+            sessions: [{ ...item, updated: item.time.updated }], lanes: [], tickets: [], prs: [],
+          }))),
         attention: [],
         frontier: [],
         unattached_prs: [],
@@ -166,13 +174,28 @@ export const createFixture = async () => {
     if (url.pathname === "/api/issues") return json({ backend: "gh", repo: "fixture/test", issues: [] })
     if (url.pathname === "/api/issue" && fixture.issue) return json(fixture.issue)
     if (url.pathname === "/api/docs") return json({ roots: [], sources: [] })
+    if (url.pathname === "/session" && request.method === "POST") {
+      if (fixture.createMode === "fail") return json({ error: "creation unavailable" }, 503)
+      if (fixture.createMode === "lose") {
+        fixture.createMode = "complete"
+        response.destroy()
+        return
+      }
+      const created = { ...session(`ses_new_${fixture.created.length + 1}`), directory: url.searchParams.get("directory") }
+      const complete = () => { fixture.created.push(created); json(created) }
+      if (fixture.createMode === "hold") {
+        fixture.createReplies.push(complete)
+        return
+      }
+      return complete()
+    }
     if (["/experimental/session", "/session"].includes(url.pathname))
       return json(
-        fixture.sessionIDs
-          .filter((id) => !fixture.deleted.has(id))
-          .map((id) => ({
-            ...session(id),
-            time: { ...session(id).time, ...(fixture.archived.has(id) ? { archived: 5 } : {}) },
+        [...fixture.sessionIDs.map(session), ...fixture.created, ...fixture.workspaceSessions]
+          .filter((value) => !fixture.deleted.has(value.id))
+          .map((value) => ({
+            ...(typeof value === "string" ? session(value) : value),
+            time: { ...(typeof value === "string" ? session(value).time : value.time), ...(fixture.archived.has(typeof value === "string" ? value : value.id) ? { archived: 5 } : {}) },
           })),
       )
     if (url.pathname === "/session/status") return json({ ses_a: { type: fixture.status }, ses_b: { type: "idle" } })
@@ -197,7 +220,7 @@ export const createFixture = async () => {
         ],
       )
     if (url.pathname === "/question") return json(fixture.questions)
-    const match = /^\/session\/(ses_[abc])(.*)$/.exec(url.pathname)
+    const match = /^\/session\/(ses_[\w-]+)(.*)$/.exec(url.pathname)
     if (match) {
       const [, id, action] = match
       const operation =
@@ -224,11 +247,13 @@ export const createFixture = async () => {
         }
         return complete()
       }
-      if (!action)
+      if (!action) {
+        const created = fixture.created.find((item) => item.id === id)
         return json(
-          { ...session(id), time: { ...session(id).time, ...(fixture.archived.has(id) ? { archived: 5 } : {}) } },
+          { ...(created ?? session(id)), time: { ...(created ?? session(id)).time, ...(fixture.archived.has(id) ? { archived: 5 } : {}) } },
           fixture.failSnapshot ? 503 : 200,
         )
+      }
       if (action === "/message")
         return json(
           id === "ses_a"

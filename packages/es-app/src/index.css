@@ -483,6 +483,37 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
   color: var(--overlay1);
 }
 .board-link { font-weight: bold; color: var(--text); }
+.new-session { position: relative; }
+.new-session-button { width: 100%; text-align: start; color: var(--green); font-weight: bold; }
+.new-session-form {
+  margin: 4px 10px 8px;
+  padding: 8px;
+  border: 1px solid var(--surface1);
+  background: var(--crust);
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  label { display: grid; gap: 3px; color: var(--subtext0); }
+  select { min-width: 0; width: 100%; }
+  button[type="submit"] { border-color: var(--green); color: var(--green); }
+  .err { white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+.new-session-directory {
+  display: grid;
+  gap: 3px;
+  color: var(--subtext0);
+  bdi { color: var(--text); font-family: var(--font-mono); overflow-wrap: anywhere; user-select: text; }
+}
+.sidebar-mini .new-session { width: 100%; }
+.sidebar-mini .new-session-form {
+  position: fixed;
+  z-index: 50;
+  inset-inline-start: 38px;
+  top: 82px;
+  width: min(310px, calc(100vw - 50px));
+  margin: 0;
+  box-shadow: 0 6px 24px #000a;
+}
 .nav-heading {
   font-size: 11px;
   text-transform: uppercase;
