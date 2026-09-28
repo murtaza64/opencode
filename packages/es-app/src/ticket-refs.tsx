@@ -73,6 +73,7 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
   // Explicit ticket/PR targets take precedence over ref-shaped anchor text.
   const resolve = (e: Event): Anchor | null => {
     const t = e.target as Element | null
+    if (t?.closest?.(".ticket-tip")) return null
     const ref = t?.closest?.(".ticket-ref")
     const a = t?.closest?.("a[href]")
     const pr = a instanceof HTMLAnchorElement ? prFromHref(a.href) : null
@@ -93,8 +94,13 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
       const hit = resolve(e)
       if (hit) show(hit)
     }
-    const out = (e: Event) => {
-      if (resolve(e)) scheduleHide()
+    const out = (e: MouseEvent) => {
+      const current = anchor()?.el
+      if (!current?.contains(e.target as Node)) return
+      const next = e.relatedTarget
+      if (next instanceof Node && (current.contains(next) ||
+        (next instanceof Element && next.closest(".ticket-tip")))) return
+      scheduleHide()
     }
     const reposition = () => {
       const el = anchor()?.el
@@ -185,7 +191,7 @@ export function TicketTip(props: { container: () => HTMLElement | undefined }) {
     const below = r.bottom + 200 < window.innerHeight
     return {
       left: `${Math.max(4, x)}px`,
-      ...(below ? { top: `${r.bottom + 4}px` } : { bottom: `${window.innerHeight - r.top + 4}px` }),
+      ...(below ? { top: `${r.bottom}px` } : { bottom: `${window.innerHeight - r.top}px` }),
     }
   }
 
