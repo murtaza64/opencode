@@ -3,14 +3,15 @@
  * this session references, and links shared in the conversation. */
 import { createMemo, createResource, For, Show } from "solid-js"
 import { A } from "@solidjs/router"
-import type { Part, Session } from "@opencode-ai/sdk/v2"
+import type { Message, Part, Session } from "@opencode-ai/sdk/v2"
 import { es, type IssueRow } from "../api"
 import { ago, linkUrl, useDashboard } from "../state"
 import { refFromHref, ticketMatchesRef, ticketUrl } from "../ticket-url"
 import { docHref } from "../pages/doc"
 import { TicketIcon } from "./icons"
 import { rightOpen, rightWidth, toggleRight } from "../ui"
-import { PrList } from "./pr"
+import { Pr } from "./pr"
+import { prFromHref } from "../pr-matching"
 
 const URL_RE = /https?:\/\/[^\s)\]}"'`>]+/g
 // #N / repo#N / owner/repo#N mentions and markdown-ish path tokens
@@ -29,6 +30,7 @@ const home = (p: string) => p.replace(/^\/Users\/[^/]+/, "~")
 export default function SessionInfo(props: {
   sessionID: string
   session?: Session
+  messages: Message[]
   parts: Record<string, Part[]>
 }) {
   return (
@@ -71,6 +73,7 @@ function transcriptStrings(parts: Record<string, Part[]>): { texts: string[]; to
 function SessionInfoBody(props: {
   sessionID: string
   session?: Session
+  messages: Message[]
   parts: Record<string, Part[]>
 }) {
   const { state, editspace, allProjects } = useDashboard()
@@ -91,7 +94,10 @@ function SessionInfoBody(props: {
     (name) => es.docs(name || undefined).catch(() => undefined),
   )
 
-  const scanned = createMemo(() => transcriptStrings(props.parts))
+  const sessionParts = createMemo(() => Object.fromEntries(props.messages
+    .filter((message) => message.sessionID === props.sessionID)
+    .map((message) => [message.id, props.parts[message.id] ?? []])))
+  const scanned = createMemo(() => transcriptStrings(sessionParts()))
 
   // tracker tickets this session references: the lane's claimed issue plus
   // transcript mentions (#N for gh; issues/<feature>/NN-*.md pointers for
@@ -172,7 +178,7 @@ function SessionInfoBody(props: {
 
   const links = createMemo(() => {
     const seen = new Map<string, string>()
-    for (const parts of Object.values(props.parts)) {
+    for (const parts of Object.values(sessionParts())) {
       for (const part of parts) {
         if (part.type !== "text") continue
         for (const raw of (part as any).text?.match(URL_RE) ?? []) {
@@ -183,6 +189,31 @@ function SessionInfoBody(props: {
       }
     }
     return [...seen.keys()].slice(-25).reverse()
+  })
+
+  const linkedPrs = createMemo(() => {
+    const found = new Map<string, { repo: string; number: number; url: string }>()
+    for (const parts of Object.values(sessionParts())) {
+      for (const part of parts) {
+        const text = part.type === "text" ? part.text : part.type === "tool" &&
+          part.state.status === "completed" ? part.state.output : ""
+        for (const raw of text.match(URL_RE) ?? []) {
+          const pr = prFromHref(raw.replace(/[.,;:]+$/, ""))
+          if (pr) found.set(pr.url, pr)
+        }
+      }
+    }
+    return found
+  })
+
+  const prs = createMemo(() => {
+    const found = new Map(linkedPrs())
+    const rich = new Map<string, { url: string }>((thread()?.prs ?? []).flatMap((pr: { url: string }) => {
+      const ref = prFromHref(pr.url)
+      return ref ? [[ref.url, pr] as const] : []
+    }))
+    for (const [url, pr] of rich) if (!found.has(url)) found.set(url, prFromHref(url)!)
+    return [...found.values()].map((ref) => ({ ref, data: rich.get(ref.url) }))
   })
 
   const tokens = () => (props.session as any)?.tokens
@@ -314,10 +345,16 @@ function SessionInfoBody(props: {
         </div>
       </Show>
 
-      <Show when={thread()?.prs?.length}>
+      <Show when={prs().length}>
         <div class="info-section">
-          <div class="info-heading">open PRs</div>
-          <PrList prs={thread().prs} compact />
+          <div class="info-heading">PRs referenced</div>
+          <For each={prs()}>{(pr) => pr.data
+            ? <Pr pr={pr.data} compact />
+            : <a class="pr-title-row" href={linkUrl(pr.ref.url)} target="_blank" rel="noopener noreferrer"
+                title={`${pr.ref.repo}#${pr.ref.number}`}>
+                <span class="pr-number" dir="ltr">{pr.ref.repo}#{pr.ref.number}</span>
+              </a>}
+          </For>
         </div>
       </Show>
 

@@ -1009,7 +1009,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
       <Show when={rightOpen()}>
         <div class="drag-handle" onMouseDown={(e) => startDrag("right", e)} />
       </Show>
-      <SessionInfo sessionID={sessionID} session={session()} parts={live.data.part} />
+      <SessionInfo sessionID={sessionID} session={session()} messages={messages()} parts={live.data.part} />
     </main>
   )
 }
