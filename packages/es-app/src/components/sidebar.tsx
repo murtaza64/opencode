@@ -49,10 +49,24 @@ export default function Sidebar() {
     markViewed(item.session, true)
   }
 
-  // transcript search: ≥3 chars, debounced; null results = search inactive
+  // Titles filter immediately; transcript search starts at three characters.
   const [query, setQuery] = createSignal("")
   const [results, setResults] = createSignal<SessionSearchResult[] | null>(null)
-  const searchResults = () => (results() ?? []).filter((s) => !allProjects() || !s.parent_id)
+  const searchResults = () => {
+    const titleMatches = sessionRows().filter((s) => s.title.toLocaleLowerCase().includes(query().trim().toLocaleLowerCase()))
+      .map((s) => ({ id: s.id, title: s.title, directory: s.directory, parent_id: null,
+        updated: s.updated, snippet: "", matches: 0 }))
+    const root = editspaces()?.editspaces.find((s) => s.name === current())?.root.replace(/\/\.editspace\/?$/, "")
+    const rows = sessionRows()
+    const directories = new Set(rows.map((s) => s.directory))
+    const remote = (results() ?? []).filter((s) =>
+      (!allProjects() || !s.parent_id) && (allProjects() || directories.has(s.directory) ||
+        (s.parent_id !== null && rows.some((row) => row.id === s.parent_id)) ||
+        (root !== undefined && (s.directory === root || s.directory.startsWith(`${root}/`)))))
+    const byID = new Map<string, SessionSearchResult>(titleMatches.map((s) => [s.id, s]))
+    remote.forEach((s) => byID.set(s.id, s))
+    return [...byID.values()]
+  }
   const [searching, setSearching] = createSignal(false)
   const [allTime, setAllTime] = createSignal(false)
   const [searchError, setSearchError] = createSignal("")
@@ -70,7 +84,7 @@ export default function Sidebar() {
     } catch {
       if (seq !== searchSeq) return
       setResults([])
-      setSearchError("search unavailable — es-dashboard too old?")
+      setSearchError("transcript search unavailable; showing matching titles")
     } finally {
       if (seq === searchSeq) setSearching(false)
     }
@@ -81,8 +95,9 @@ export default function Sidebar() {
     setAllTime(false)
     clearTimeout(searchTimer)
     searchSeq++ // invalidate in-flight responses
+    setResults(null)
+    setSearchError("")
     if (v.trim().length < 3) {
-      setResults(null)
       setSearching(false)
       return
     }
@@ -220,12 +235,13 @@ export default function Sidebar() {
           />
         </div>
         <Show
-          when={results() === null}
+          when={!query().trim()}
           fallback={
             <>
               <div class="nav-heading">
-                results{searching() ? " ·" : ` (${searchResults().length})`}
+                results ({searchResults().length})
               </div>
+              <Show when={searching()}><div class="dim nav-empty">searching transcripts…</div></Show>
               <Show when={searchError()}>
                 <div class="dim nav-empty">{searchError()}</div>
               </Show>
@@ -233,7 +249,7 @@ export default function Sidebar() {
                 <div class="dim nav-empty">no matches</div>
               </Show>
               <For each={searchResults()}>{resultItem}</For>
-              <Show when={!allTime() && !searching() && !searchError()}>
+              <Show when={query().trim().length >= 3 && !allTime() && !searching() && !searchError()}>
                 <button class="archived-toggle" onClick={searchAllTime}>
                   ⌕ all time (slow)
                 </button>
