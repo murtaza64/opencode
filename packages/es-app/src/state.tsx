@@ -50,6 +50,10 @@ type DashboardCtx = {
   setAllProjects: (value: boolean) => void
   sessionRows: () => SessionRow[]
   sessions: () => SessionRow[]
+  pinnedSessions: () => SessionRow[]
+  unpinnedSessions: () => SessionRow[]
+  isPinned: (s: Pick<SessionRow, "id" | "directory">) => boolean
+  togglePin: (s: Pick<SessionRow, "id" | "directory">) => void
   sessionsLoading: () => boolean
   sessionsError: () => string
   activity: ReturnType<typeof createSessionActivity>
@@ -193,6 +197,32 @@ export function DashboardProvider(props: ParentProps) {
     .filter((s) => !archivedIds().has(s.id))
     .sort((a, b) => b.updated - a.updated),
   )
+  const PIN_KEY = "es-app-sidebar-pins"
+  const pinKey = (s: Pick<SessionRow, "id" | "directory">) => JSON.stringify([s.directory, s.id])
+  const loadPins = () => {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem(PIN_KEY) ?? "[]")
+      return Array.isArray(value) ? [...new Set(value.filter((key): key is string => typeof key === "string"))] : []
+    } catch {
+      return []
+    }
+  }
+  const [pins, setPins] = createSignal<string[]>(loadPins())
+  const isPinned = (s: Pick<SessionRow, "id" | "directory">) => pins().includes(pinKey(s))
+  const togglePin = (s: Pick<SessionRow, "id" | "directory">) => {
+    const key = pinKey(s)
+    const next = pins().includes(key) ? pins().filter((item) => item !== key) : [...pins(), key]
+    localStorage.setItem(PIN_KEY, JSON.stringify(next))
+    setPins(next)
+  }
+  const pinnedSessions = createMemo(() => {
+    const byKey = new Map(sessions().map((s) => [pinKey(s), s]))
+    return pins().flatMap((key) => {
+      const row = byKey.get(key)
+      return row ? [row] : []
+    })
+  })
+  const unpinnedSessions = createMemo(() => sessions().filter((s) => !isPinned(s)))
   const refetchArchived = () => {
     refetchProjectArchived()
     if (allProjects()) refetchGlobal()
@@ -277,6 +307,10 @@ export function DashboardProvider(props: ParentProps) {
     setAllProjects,
     sessionRows,
     sessions,
+    pinnedSessions,
+    unpinnedSessions,
+    isPinned,
+    togglePin,
     sessionsLoading: () => allProjects() && globalSessions.loading,
     sessionsError,
     activity,

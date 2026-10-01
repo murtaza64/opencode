@@ -12,7 +12,8 @@ import { NewSession } from "./new-session"
 
 export default function Sidebar() {
   const { state, dotFor, editspace, setEditspace, editspaces, archivedIds, notifications, markViewed,
-    allProjects, setAllProjects, sessionRows, sessions, sessionsLoading, sessionsError, setVisibleSessions } =
+    allProjects, setAllProjects, sessionRows, sessions, pinnedSessions, unpinnedSessions, isPinned, togglePin,
+    sessionsLoading, sessionsError, setVisibleSessions } =
     useDashboard()
   const observed = new Map<Element, string>()
   const visible = new Set<Element>()
@@ -63,8 +64,8 @@ export default function Sidebar() {
       (!allProjects() || !s.parent_id) && (allProjects() || directories.has(s.directory) ||
         (s.parent_id !== null && rows.some((row) => row.id === s.parent_id)) ||
         (root !== undefined && (s.directory === root || s.directory.startsWith(`${root}/`)))))
-    const byID = new Map<string, SessionSearchResult>(titleMatches.map((s) => [s.id, s]))
-    remote.forEach((s) => byID.set(s.id, s))
+    const byID = new Map<string, SessionSearchResult>(titleMatches.map((s) => [JSON.stringify([s.directory, s.id]), s]))
+    remote.forEach((s) => byID.set(JSON.stringify([s.directory, s.id]), s))
     return [...byID.values()]
   }
   const [searching, setSearching] = createSignal(false)
@@ -126,18 +127,49 @@ export default function Sidebar() {
     </A>
   )
 
-  const item = (s: SessionRow, cls = "") => (
+  const item = (s: SessionRow, cls = "") => cls === "archived" ? (
     <A
-      ref={(el) => { if (cls !== "archived") observeSession(el, s.id) }}
       href={sessionHref(s.id, s.directory)}
       activeClass="active"
-      class={`nav-item ${cls}`}
+      class="nav-item archived"
       title={`${s.title} (${dotFor(s)})${allProjects() ? ` · ${s.directory}` : ""}`}
     >
       <span class={`dot ${dotFor(s)}`} />
       <span class="nav-title">{s.title || s.id}</span>
       <Show when={allProjects()}><span class="session-project">{s.project}</span></Show>
     </A>
+  ) : (
+    <div class="session-entry">
+      <A
+        ref={(el) => observeSession(el, s.id)}
+        href={sessionHref(s.id, s.directory)}
+        activeClass="active"
+        class="nav-item"
+        title={`${s.title} (${dotFor(s)})${allProjects() ? ` · ${s.directory}` : ""}`}
+      >
+        <span class={`dot ${dotFor(s)}`} />
+        <span class="nav-title">{s.title || s.id}</span>
+        <Show when={allProjects()}><span class="session-project">{s.project}</span></Show>
+      </A>
+      <button type="button" class="pin-action" classList={{ pinned: isPinned(s) }}
+        aria-label={`${isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
+        title={`${isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
+        onClick={() => togglePin(s)}>{isPinned(s) ? "◆" : "◇"}</button>
+    </div>
+  )
+
+  const miniItem = (s: SessionRow) => (
+    <div class="mini-session">
+      <A ref={(el) => observeSession(el, s.id)} href={sessionHref(s.id, s.directory)}
+        activeClass="active" class="mini-item"
+        title={`${s.title} (${dotFor(s)})${allProjects() ? ` · ${s.project}` : ""}`}>
+        <span class={`dot ${dotFor(s)}`} />
+      </A>
+      <button type="button" class="mini-pin" classList={{ pinned: isPinned(s) }}
+        aria-label={`${isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
+        title={`${isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
+        onClick={() => togglePin(s)}>{isPinned(s) ? "◆" : "◇"}</button>
+    </div>
   )
 
   const projectControls = () => <>
@@ -173,24 +205,22 @@ export default function Sidebar() {
             ▦
           </A>
           <NewSession compact />
-          <For each={sessions()}>
-            {(s: any) => (
-              <A
-                ref={(el) => observeSession(el, s.id)}
-                href={sessionHref(s.id, s.directory)}
-                activeClass="active"
-                class="mini-item"
-                title={`${s.title} (${dotFor(s)})${allProjects() ? ` · ${s.project}` : ""}`}
-              >
-                <span class={`dot ${dotFor(s)}`} />
-              </A>
-            )}
-          </For>
+          <Show when={pinnedSessions().length}>
+            <div class="mini-pinned-heading" title="Pinned sessions" aria-label="Pinned sessions" />
+            <For each={pinnedSessions()}>{miniItem}</For>
+          </Show>
+          <For each={unpinnedSessions()}>{miniItem}</For>
         </nav>
       }
     >
       <nav class="sidebar" style={{ width: `${leftWidth()}px` }}>
         <Show when={!nativeHeader}><div class="sidebar-top">{projectControls()}</div></Show>
+        <Show when={!query().trim() && pinnedSessions().length}>
+          <section class="pinned-section" aria-label="Pinned sessions">
+            <div class="nav-heading">Pinned</div>
+            <For each={pinnedSessions()}>{(s) => item(s)}</For>
+          </section>
+        </Show>
         <Show when={notifications().length}>
           <div class="notification-section">
             <div class="nav-heading">needs you</div>
@@ -258,15 +288,15 @@ export default function Sidebar() {
           }
         >
           <Show when={sessionsError()}><div class="err nav-empty">{sessionsError()}</div></Show>
-          <Show when={sessions().length} fallback={
-            <Show when={!sessionsError()}><div class="dim nav-empty">{sessionsLoading() ? "loading..." : "none"}</div></Show>
+          <Show when={unpinnedSessions().length} fallback={
+            <Show when={!sessionsError()}><div class="dim nav-empty">{sessionsLoading() ? "loading..." : pinnedSessions().length ? "All active sessions pinned" : "none"}</div></Show>
           }>
-            <For each={sessions()}>
+            <For each={unpinnedSessions()}>
               {(s, index) => {
                 const day = () => new Date(s.updated).toDateString()
                 return (
                   <>
-                    <Show when={index() === 0 || day() !== new Date(sessions()[index() - 1].updated).toDateString()}>
+                    <Show when={index() === 0 || day() !== new Date(unpinnedSessions()[index() - 1].updated).toDateString()}>
                       <div class="nav-heading">
                         {day() === new Date().toDateString() ? "Today" : day()}
                       </div>

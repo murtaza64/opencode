@@ -446,6 +446,19 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 }
 .mini-item:hover { background: var(--surface0); text-decoration: none; }
 .mini-item.active { background: var(--crust); box-shadow: inset 3px 0 0 var(--lavender); }
+.mini-session { width: 100%; display: flex; align-items: center; }
+.mini-session .mini-item { flex: 1; min-width: 0; }
+.mini-pin {
+  width: 14px;
+  padding: 4px 0;
+  background: transparent;
+  color: var(--overlay0);
+  font-size: 10px;
+  opacity: 0;
+}
+.mini-session:hover .mini-pin, .mini-session:focus-within .mini-pin, .mini-pin.pinned { opacity: 1; }
+.mini-pin.pinned { color: var(--mauve); }
+.mini-pinned-heading { width: 60%; border-top: 1px solid var(--mauve); margin-block: 6px 2px; }
 
 /* drag-to-resize */
 .drag-handle {
@@ -473,8 +486,23 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
   box-shadow: inset 3px 0 0 var(--lavender);
 }
 .nav-item .nav-title { overflow: hidden; text-overflow: ellipsis; }
+.session-entry { display: flex; align-items: center; }
+.session-entry .nav-item { flex: 1; min-width: 0; }
+.pin-action {
+  flex: none;
+  padding: 4px 7px;
+  margin-inline-end: 5px;
+  background: transparent;
+  color: var(--overlay0);
+  opacity: 0;
+}
+.session-entry:hover .pin-action, .session-entry:focus-within .pin-action, .pin-action.pinned { opacity: 1; }
+.pin-action.pinned { color: var(--mauve); }
+.pin-action:hover, .mini-pin:hover { background: var(--surface0); }
+.pinned-section { padding-bottom: 6px; border-bottom: 1px solid var(--surface0); }
+.pinned-section .nav-heading { padding-top: 4px; }
 .session-project {
-  margin-left: auto;
+  margin-inline-start: auto;
   flex-shrink: 0;
   max-width: 40%;
   overflow: hidden;
