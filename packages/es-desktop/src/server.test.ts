@@ -93,6 +93,11 @@ test("API surface excludes direct shell, PTY, file, and config access", () => {
   expect(apiAllowed("DELETE", "/oc/session/ses_a/aside/request-1")).toBe(true)
   for (const pathname of ["/oc/pty", "/oc/session/ses_a/shell", "/oc/config", "/oc/file/content", "/es/api/run"])
     expect(apiAllowed("POST", pathname)).toBe(false)
+  // read-only session insight and PR detail lookups (dotfiles#139) are GET only
+  expect(apiAllowed("GET", "/es/api/session-insights")).toBe(true)
+  expect(apiAllowed("GET", "/es/api/pr-detail")).toBe(true)
+  expect(apiAllowed("POST", "/es/api/session-insights")).toBe(false)
+  expect(apiAllowed("POST", "/es/api/pr-detail")).toBe(false)
 })
 
 test("rejects unauthenticated, cross-origin, and foreign Host requests", async () => {

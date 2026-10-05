@@ -33,7 +33,7 @@ export const apiAllowed = (method: string, pathname: string) => {
     GET: [
       /^\/oc\/(event|global\/event|experimental\/(session|capabilities)|umbrella\/session|session|session\/status|permission|question|config\/providers|agent)$/,
       /^\/oc\/session\/[\w-]+(?:\/(message|input)(?:\/[\w-]+)?)?$/,
-      /^\/es\/api\/(editspaces|state|notifications|events|notification-events|issues|issue|docs|doc|search)$/,
+      /^\/es\/api\/(editspaces|state|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail)$/,
     ],
     POST: [
       /^\/oc\/session$/,
