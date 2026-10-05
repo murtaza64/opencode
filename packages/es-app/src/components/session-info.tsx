@@ -15,7 +15,7 @@ import { prFromHref } from "../pr-matching"
 import { linkUrl } from "../link-url"
 import { compactTokens, contextUsage, countCompletedTurns, latestCompletedTurn, usageLevel, type ProviderList } from "../context-usage"
 import { compositionSlices, estimateComposition } from "../context-composition"
-import { CompositionBar } from "./context-viz"
+import { CompositionBar, ProviderAccounting } from "./context-viz"
 import { prDetail, requestPrDetails } from "../pr-details"
 
 const URL_RE = /https?:\/\/[^\s)\]}"'`>]+/g
@@ -258,7 +258,7 @@ function SessionInfoBody(props: {
   const usage = createMemo(() => contextUsage(latestTurn(), props.providers))
   const turns = createMemo(() => countCompletedTurns(props.messages.filter((m) => m.sessionID === props.sessionID)))
   const composition = createMemo(() => estimateComposition(props.messages.filter((m) => m.sessionID === props.sessionID), props.parts))
-  const slices = createMemo(() => compositionSlices(composition(), usage()?.tokens))
+  const slices = createMemo(() => compositionSlices(composition()))
 
   const tokens = () => (props.session as any)?.tokens
 
@@ -320,7 +320,7 @@ function SessionInfoBody(props: {
         )}
       </Show>
 
-      <Show when={props.messages.some((m) => m.sessionID === props.sessionID)}>
+       <Show when={props.session || props.messages.some((m) => m.sessionID === props.sessionID)}>
         <div class="info-section" data-section="context">
           <div class="info-heading">context</div>
           <div class="info-row">
@@ -348,9 +348,15 @@ function SessionInfoBody(props: {
               </>
             )}</Show>
           </div>
-          <CompositionBar slices={slices()}
-            caption={`estimated: ${composition().basis === "since_compaction" ? "visible content since the last compaction" : "visible history"}, chars ÷ 4; ` +
-              (usage() ? "other = exact total − visible estimates" : "shares of visible content only") + ". Not provider token attribution."} />
+           <ProviderAccounting tokens={usage() ? latestTurn()?.tokens : null} />
+           <div class="ctx-subheading">estimated visible content</div>
+           <Show when={slices().length} fallback={<div class="ctx-caption">visible estimate unknown or empty</div>}>
+             <CompositionBar slices={slices()} />
+           </Show>
+           <div class="ctx-caption">
+             {composition().basis === "since_compaction" ? "since the last completed compaction" : "full stored visible history (no completed compaction marker)"}
+             {" · chars ÷ 4; shares of visible estimate only. System/developer instructions, hidden context, compaction, cache and provider tokenization cannot be precisely allocated from stored parts."}
+           </div>
         </div>
       </Show>
 

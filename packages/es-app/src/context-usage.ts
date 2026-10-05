@@ -45,6 +45,7 @@ export const contextLimit = (providers: ProviderList | undefined, providerID: st
 export const contextUsage = (turn: LatestTurn | null, providers: ProviderList | undefined) => {
   if (!turn) return null
   const tokens = contextTokens(turn.tokens)
+  if (!Number.isFinite(tokens) || tokens <= 0) return null
   const limit = contextLimit(providers, turn.providerID, turn.modelID)
   return { tokens, limit: limit ?? null, percent: limit ? Math.round((tokens / limit) * 100) : null }
 }

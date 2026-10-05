@@ -11,7 +11,7 @@ import { useDashboard, type SessionRow } from "../state"
 import { compactTokens, contextUsage, usageLevel } from "../context-usage"
 import { compositionSlices } from "../context-composition"
 import { cancelInsights, providersFor, sessionInsights } from "../session-insights"
-import { ContextDonut, CompositionDots } from "./context-viz"
+import { ContextDonut, CompositionDots, ProviderAccounting } from "./context-viz"
 
 const WIDTH = 268
 const GAP = 6
@@ -142,7 +142,7 @@ export function SessionPeek(props: { container: () => HTMLElement | undefined })
   const insights = () => insightsState()?.()
   const [providers] = createResource(() => row()?.directory, (directory) => providersFor(directory))
   const usage = createMemo(() => contextUsage(insights()?.value?.latest ?? null, providers()))
-  const slices = createMemo(() => compositionSlices(insights()?.value?.composition, usage()?.tokens))
+  const slices = createMemo(() => compositionSlices(insights()?.value?.composition))
   const cost = () => global()?.cost ?? insights()?.value?.cost ?? null
   const sessionModel = () => global()?.model?.id ?? insights()?.value?.sessionModel ?? undefined
   const latestModel = () => insights()?.value?.latest?.modelID || undefined
@@ -214,12 +214,17 @@ export function SessionPeek(props: { container: () => HTMLElement | undefined })
               </span>
             )}</Show>
           </div>
+          <ProviderAccounting tokens={usage() ? insights()?.value?.latest?.tokens : null} compact />
           <Show when={slices().length}>
+            <div class="ctx-subheading">estimated visible content</div>
             <CompositionDots slices={slices()} />
-            <div class="ctx-caption">
-              estimated from visible {insights()?.value?.composition?.basis === "since_compaction" ? "content since last compaction" : "history"} · not provider attribution
-            </div>
           </Show>
+          <div class="ctx-caption">
+            {insights()?.value?.composition
+              ? `${insights()!.value!.composition!.basis === "since_compaction" ? "since last completed compaction" : "full stored visible history (no compaction marker)"} · chars ÷ 4; shares of visible estimate only`
+              : "visible estimate unknown"}
+            {" · hidden instructions, cache and provider tokens cannot be allocated to content sources"}
+          </div>
           <Show when={degraded() && !insights()?.loading}>
             <div class="ctx-caption peek-degraded">
               {insights()?.value?.source === "tail" ? "insights API offline: turns and composition unavailable" : insights()?.value?.error ?? "insights unavailable"}

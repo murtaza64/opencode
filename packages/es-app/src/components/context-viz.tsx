@@ -1,9 +1,8 @@
-/* Context visuals shared by the sidebar hover card (donut) and the right
- * info panel (stacked bar). The ring length is the exact latest-turn usage;
- * the colour segments inside it are the estimated composition. Each visual
- * carries a text alternative so the numbers are never only colour. */
+/* The ring length is exact provider usage / limit; its coloured segments
+ * depict relative visible estimates, never shares of provider tokens. */
 import { For, Show } from "solid-js"
 import { compactTokens, usageLevel } from "../context-usage"
+import type { TokenCounts } from "../context-usage"
 import { describeSlices, type CompositionSlice } from "../context-composition"
 
 const R = 22
@@ -20,7 +19,7 @@ export function ContextDonut(props: {
   const level = () => usageLevel(props.percent)
   const segments = () => {
     const total = props.slices.reduce((sum, s) => sum + s.tokens, 0)
-    if (!total) return []
+    if (!total || props.percent == null) return []
     let offset = 0
     return props.slices.filter((s) => s.tokens > 0).map((s) => {
       const length = (s.tokens / total) * filled() * CIRCUMFERENCE
@@ -34,7 +33,7 @@ export function ContextDonut(props: {
       ? props.tokens == null ? "context usage unknown" : `context ${compactTokens(props.tokens)} tokens, limit unknown`
       : `context ${props.percent}% of limit`
     const parts = describeSlices(props.slices)
-    return parts ? `${usage}; estimated composition ${parts}` : usage
+    return parts ? `${usage}; estimated visible content shares (independent of provider usage): ${parts}` : usage
   }
   return (
     <div class="ctx-donut" classList={{ unknown: props.percent == null, warn: level() === "warn", high: level() === "high" }}
@@ -63,12 +62,12 @@ export function CompositionBar(props: { slices: CompositionSlice[]; caption?: st
   const visible = () => props.slices.filter((s) => s.tokens > 0)
   return (
     <Show when={visible().length}>
-      <div class="ctx-bar" role="img" aria-label={`estimated context composition: ${describeSlices(props.slices)}`}>
+      <div class="ctx-bar" role="img" aria-label={`estimated visible content shares: ${describeSlices(props.slices)}`}>
         <For each={visible()}>{(s) => (
           <span class="ctx-bar-seg" style={{ "flex-grow": String(Math.max(s.share, 0.01)), background: s.color }} />
         )}</For>
       </div>
-      <ul class="ctx-legend" aria-label="estimated context composition">
+      <ul class="ctx-legend" aria-label="estimated visible content shares">
         <For each={props.slices}>{(s) => (
           <li>
             <span class="ctx-swatch" style={{ background: s.color }} aria-hidden="true" />
@@ -85,7 +84,7 @@ export function CompositionBar(props: { slices: CompositionSlice[]; caption?: st
 
 export function CompositionDots(props: { slices: CompositionSlice[] }) {
   return (
-    <ul class="ctx-dots" aria-label="estimated context composition">
+    <ul class="ctx-dots" aria-label="estimated visible content shares">
       <For each={props.slices.filter((s) => s.tokens > 0)}>{(s) => (
         <li title={`${s.label}: ~${compactTokens(s.tokens)} tokens (${Math.round(s.share * 100)}%)`}>
           <span class="ctx-swatch" style={{ background: s.color }} aria-hidden="true" />
@@ -94,5 +93,33 @@ export function CompositionDots(props: { slices: CompositionSlice[] }) {
         </li>
       )}</For>
     </ul>
+  )
+}
+
+export function ProviderAccounting(props: { tokens: TokenCounts | null | undefined; compact?: boolean }) {
+  const rows = () => props.tokens ? [
+    { label: "cache read", value: props.tokens.cache?.read ?? 0 },
+    { label: "cache write", value: props.tokens.cache?.write ?? 0 },
+    { label: "uncached input", value: props.tokens.input },
+    { label: "generated output", value: props.tokens.output },
+    { label: "reasoning", value: props.tokens.reasoning },
+  ] : []
+  const total = () => rows().reduce((sum, row) => sum + row.value, 0)
+  return (
+    <div class="ctx-accounting">
+      <div class="ctx-subheading">provider accounting · exact latest turn</div>
+      <Show when={total() > 0} fallback={<div class="ctx-caption">provider usage unknown</div>}>
+        <ul class="ctx-provider" aria-label="exact latest-turn provider token accounting">
+          <For each={rows().filter((row) => !props.compact || row.value > 0)}>{(row) => (
+            <li>
+              <span>{row.label}</span>
+              <span class="mono" title={`${row.value.toLocaleString()} tokens`}>{row.value.toLocaleString()}</span>
+              <span class="mono">{Math.round((row.value / total()) * 100)}%</span>
+            </li>
+          )}</For>
+        </ul>
+        <div class="ctx-caption">cache read/write are provider accounting classes, not content sources</div>
+      </Show>
+    </div>
   )
 }

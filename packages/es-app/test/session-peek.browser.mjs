@@ -14,7 +14,7 @@ import { directory } from "./composer-fixture.mjs"
 const { chromium, _electron, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const preview = await startPanelPreview()
 const fixture = preview.fixture
-const tokens = { input: 52000, output: 1800, reasoning: 600, cache: { read: 70000, write: 4000 } }
+const tokens = { input: 3, output: 608, reasoning: 0, cache: { read: 471919, write: 491 } }
 fixture.messages[1].info.time.completed = 3
 fixture.messages[1].info.tokens = tokens
 // a big completed tool output: the open session's bar must attribute it, and
@@ -34,7 +34,7 @@ fixture.insights = (id) => id === "ses_a"
       latest: { model: { providerID: "fixture", modelID: "test-mini" }, cost: 0.1, tokens },
       composition: { unit: "characters", scope: "since_last_compaction", user_text: 60000, assistant_text: 30000, tool_call_metadata: 20000, tool_output: 240000, other_unattributed: 12000 } }
   : { session_id: id, directory, cost: null, completed_turns: 0, session_model: null, latest: null, composition: null }
-const providers = { providers: [{ id: "fixture", models: { test: { id: "test", limit: { context: 200000 } }, "test-mini": { id: "test-mini", limit: { context: 200000 } } } }], default: {} }
+const providers = { providers: [{ id: "fixture", models: { test: { id: "test", limit: { context: 500000 } }, "test-mini": { id: "test-mini", limit: { context: 500000 } } } }], default: {} }
 
 const profile = process.env.ES_DESKTOP_EXECUTABLE ? await mkdtemp(path.join(tmpdir(), "session-peek-")) : undefined
 const app = profile ? await _electron.launch({ executablePath: process.env.ES_DESKTOP_EXECUTABLE,
@@ -56,10 +56,16 @@ const rowB = page.locator(".session-entry[data-peek-id='ses_b']")
 try {
   await page.goto(preview.url)
   await expect(page.locator(".session-info [data-section='context']")).toContainText("1 completed")
-  await expect(page.locator(".session-info .ctx-exact")).toContainText("128k / 200k (64%)")
-  await expect(page.locator(".session-info .ctx-legend li", { hasText: "tool output" })).toContainText("10k")
-  await expect(page.locator(".session-info .ctx-legend li", { hasText: "other" })).toContainText("92%")
-  await expect(page.locator(".session-info .ctx-caption")).toContainText("Not provider token attribution")
+   await expect(page.locator(".session-info .ctx-exact")).toContainText("473k / 500k (95%)")
+   await expect(page.locator(".session-info .ctx-provider li", { hasText: "cache read" })).toContainText("471,919")
+   await expect(page.locator(".session-info .ctx-provider li", { hasText: "uncached input" })).toContainText("3")
+   await expect(page.locator(".session-info .ctx-provider li", { hasText: "cache write" })).toContainText("491")
+   await expect(page.locator(".session-info .ctx-provider li", { hasText: "generated output" })).toContainText("608")
+   await expect(page.locator(".session-info .ctx-provider li", { hasText: "reasoning" })).toContainText("0")
+   await expect(page.locator(".session-info .ctx-legend li", { hasText: "tool output" })).toContainText("10k")
+   await expect(page.locator(".session-info .ctx-legend li", { hasText: "other visible" })).toContainText("0%")
+   await expect(page.locator(".session-info .ctx-caption").last()).toContainText("shares of visible estimate only")
+   await expect(page.locator(".session-info .ctx-caption").last()).toContainText("compaction, cache and provider tokenization cannot be precisely allocated")
   await expect(page.locator(".session-info [data-section='context'] .info-row", { hasText: "latest" })).toHaveCount(0)
   await expect(card).toHaveCount(0)
 
@@ -70,11 +76,13 @@ try {
   await expect(card.locator("[data-fact='turns']")).toHaveText("12")
   await expect(card.locator("[data-fact='model']")).toHaveText("test")
   await expect(card.locator("[data-fact='latest']")).toHaveText("test-mini")
-  await expect(card.locator(".ctx-donut-label")).toHaveText("64%")
-  await expect(card.locator(".ctx-donut-seg")).toHaveCount(5)
-  await expect(card.locator(".ctx-dots li", { hasText: "output" })).toContainText("47%")
-  await expect(card.locator(".peek-context")).toContainText("ctx 128k / 200k")
-  await expect(card).toContainText("since last compaction")
+   await expect(card.locator(".ctx-donut-label")).toHaveText("95%")
+   await expect(card.locator(".ctx-donut-seg")).toHaveCount(5)
+   await expect(card.locator(".ctx-dots li", { hasText: "output" })).toContainText("66%")
+   await expect(card.locator(".ctx-dots li", { hasText: "other visible" })).toContainText("3%")
+   await expect(card.locator(".peek-context")).toContainText("ctx 473k / 500k")
+   await expect(card.locator(".ctx-provider li", { hasText: "cache read" })).toContainText("471,919")
+   await expect(card).toContainText("since last completed compaction")
   await expect(card.locator(".peek-degraded")).toHaveCount(0)
   const rect = await rowA.boundingBox()
   const cardRect = await card.boundingBox()
@@ -90,17 +98,21 @@ try {
   await page.mouse.move(cardRect.x + 400, cardRect.y + 400)
   await expect(card).toHaveCount(0)
   // re-hover is served from cache: no second insights request
-  await rowA.hover()
-  await expect(card).toHaveCount(1)
-  expect(insightCalls().length).toBe(1)
+   await rowA.hover()
+   await expect(card).toHaveCount(1)
+   expect(insightCalls().length).toBe(1)
 
-  // unknown stays unknown: ses_b has no latest turn/limit; never fetches its 4MB transcript
-  await rowB.hover()
+   // unknown stays unknown: ses_b has no latest turn/limit; never fetches its 4MB transcript
+   await page.mouse.move(700, 600)
+   await expect(card).toHaveCount(0)
+   await rowB.hover()
   await expect(card.locator("[data-fact='turns']")).toHaveText("0")
   await expect(card.locator("[data-fact='cost']")).toHaveText("unknown")
   await expect(card.locator("[data-fact='model']")).toHaveText("unknown")
   await expect(card.locator(".ctx-donut-label")).toHaveText("?")
-  await expect(card.locator(".peek-context")).toContainText("latest turn context unknown")
+   await expect(card.locator(".peek-context")).toContainText("latest turn context unknown")
+   await expect(card.locator(".ctx-accounting")).toContainText("provider usage unknown")
+   await expect(card).toContainText("visible estimate unknown")
   expect(messageCalls("ses_b")).toEqual([])
   await page.mouse.move(700, 600)
   await expect(card).toHaveCount(0)
@@ -152,11 +164,25 @@ try {
   const rtlCard = await card.boundingBox()
   expect(rtlCard.x + rtlCard.width).toBeLessThanOrEqual(rtlRow.x + 1)
   await expect(card).toHaveAttribute("data-side", "end")
-  await page.mouse.move(700, 600)
-  await expect(card).toHaveCount(0)
-  await page.evaluate(() => { document.documentElement.dir = "ltr" })
+   await page.mouse.move(700, 600)
+   await expect(card).toHaveCount(0)
+   await page.evaluate(() => { document.documentElement.dir = "ltr" })
 
-  // degraded: endpoint missing -> bounded tail only, labelled, no transcript fetch
+   // A visible estimate larger than provider usage is not squeezed into the exact total.
+   const normalInsights = fixture.insights
+   fixture.insights = (id) => id === "ses_a" ? {
+     ...normalInsights(id), composition: { ...normalInsights(id).composition, user_text: 4000000 },
+   } : normalInsights(id)
+   await page.reload()
+   await rowA.hover()
+   await expect(card.locator(".ctx-dots li", { hasText: "user" })).toContainText("93%")
+   await expect(card.locator(".ctx-provider li", { hasText: "cache read" })).toContainText("471,919")
+   await expect(card.locator(".ctx-donut-label")).toHaveText("95%")
+   await expect(card.locator(".ctx-dots li", { hasText: "other visible" })).toContainText("0%")
+   await page.mouse.move(700, 600)
+   await expect(card).toHaveCount(0)
+
+   // degraded: endpoint missing -> bounded tail only, labelled, no transcript fetch
   fixture.insights = undefined
   fixture.calls.length = 0
   await page.reload()
@@ -189,7 +215,7 @@ try {
   )
   await page.reload()
   await expect(page.locator(".session-info [data-section='context']")).toContainText("2 completed")
-  await expect(page.locator(".session-info .ctx-caption")).toContainText("since the last compaction")
+   await expect(page.locator(".session-info .ctx-caption").last()).toContainText("since the last completed compaction")
   await expect(page.locator(".session-info .ctx-legend li", { hasText: "user text" })).not.toContainText("20k")
   expect(fixture.calls.filter(call => !["GET", "HEAD", "OPTIONS"].includes(call.method))).toEqual([])
   console.log(`PASS session peek ${app ? "native" : "browser"}: hover/focus/Escape, gap, cache, unknowns, pin stability, compact, RTL, degraded tail (limit=6, one probe), compaction scope, zero mutations`)
