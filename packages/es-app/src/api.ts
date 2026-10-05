@@ -86,6 +86,10 @@ export const oc = {
   messages: (id: string, directory: string, signal?: AbortSignal): Promise<MessageWithParts[]> =>
     fetch(`/oc/session/${id}/message?${q(directory)}&summaryPatches=false`, { signal }).then(json<MessageWithParts[]>),
 
+  // bounded tail: the newest `limit` messages only (hover insights fallback)
+  messagesTail: (id: string, directory: string, limit: number, signal?: AbortSignal): Promise<MessageWithParts[]> =>
+    fetch(`/oc/session/${id}/message?${q(directory)}&summaryPatches=false&limit=${limit}`, { signal }).then(json<MessageWithParts[]>),
+
   status: (directory: string, signal?: AbortSignal): Promise<Record<string, { type: string }>> =>
     fetch(`/oc/session/status?${q(directory)}`, { signal }).then(json<Record<string, { type: string }>>),
 
@@ -231,7 +235,53 @@ export interface SessionSearchResult {
   matches: number
 }
 
+// dotfiles#139 read-only insight endpoints; `status` lets callers tell "not
+// deployed" (404/501) apart from a failed lookup
+export class ApiStatusError extends Error {
+  constructor(readonly status: number, url: string, readonly body: unknown) {
+    super(`${url}: HTTP ${status}`)
+  }
+  /** the route itself is absent (FastAPI's unregistered-route 404 / 501), as opposed to a lookup failure */
+  get routeMissing() {
+    return this.status === 501 || (this.status === 404 && typeof this.body === "object" && this.body !== null && (this.body as any).detail === "Not Found")
+  }
+}
+const statusJson = async <T,>(res: Response): Promise<T> => {
+  if (!res.ok) throw new ApiStatusError(res.status, res.url, await res.json().catch(() => undefined))
+  return res.json()
+}
+
+// shape served by es-dashboard (dotfiles#139 `session_insights`); sizes are
+// visible character counts, never text
+export type SessionInsights = {
+  session_id: string
+  directory: string
+  cost: number | null
+  completed_turns: number
+  session_model: { providerID: string; modelID: string } | null
+  latest: {
+    model: { providerID: string; modelID: string }
+    cost: number
+    tokens: { input: number; output: number; reasoning: number; cache: { read: number; write: number } }
+  } | null
+  composition: {
+    unit: "characters"
+    scope: "since_last_compaction" | "full_visible_history"
+    user_text: number
+    assistant_text: number
+    tool_call_metadata: number
+    tool_output: number
+    other_unattributed: number
+  } | null
+  error?: string
+}
+
 export const es = {
+  sessionInsights: (sessionID: string, directory: string, signal?: AbortSignal): Promise<SessionInsights> =>
+    fetch(`/es/api/session-insights?session_id=${encodeURIComponent(sessionID)}&${q(directory)}`, { signal })
+      .then(statusJson<SessionInsights>),
+  prDetail: (url: string, signal?: AbortSignal): Promise<any> =>
+    fetch(`/es/api/pr-detail?url=${encodeURIComponent(url)}`, { signal }).then(statusJson),
   editspaces: (): Promise<{ editspaces: { name: string; root: string }[]; default: string | null }> =>
     fetch("/es/api/editspaces").then(json<{ editspaces: { name: string; root: string }[]; default: string | null }>),
   state: (esName?: string): Promise<any> => fetch(`/es/api/state?${esQ(esName)}`).then(json),

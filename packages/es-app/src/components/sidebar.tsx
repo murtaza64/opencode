@@ -9,6 +9,7 @@ import { sessionHref, useDashboard, type SessionRow } from "../state"
 import { leftOpen, leftWidth, toggleLeft } from "../ui"
 import { nativeHeader, NativeHeader } from "./native-header"
 import { NewSession } from "./new-session"
+import { peekAttrs, SessionPeek } from "./session-peek"
 
 export default function Sidebar() {
   const { state, dotFor, editspace, setEditspace, editspaces, archivedIds, notifications, markViewed,
@@ -44,6 +45,8 @@ export default function Sidebar() {
   })
   const archived = () => sessionRows().filter((s) => archivedIds().has(s.id)).sort((a, b) => b.updated - a.updated)
   const [showArchived, setShowArchived] = createSignal(false)
+  // hover/focus insight card delegates from whichever nav is mounted
+  const [navEl, setNavEl] = createSignal<HTMLElement>()
   const current = () => editspace() ?? editspaces()?.default ?? state()?.editspace ?? ""
   const openNotification = (item: ReturnType<typeof notifications>[number]) => {
     if (item.editspace && !allProjects()) setEditspace(item.editspace)
@@ -133,13 +136,14 @@ export default function Sidebar() {
       activeClass="active"
       class="nav-item archived"
       title={`${s.title} (${dotFor(s)})${allProjects() ? ` · ${s.directory}` : ""}`}
+      {...peekAttrs(s)}
     >
       <span class={`dot ${dotFor(s)}`} />
       <span class="nav-title">{s.title || s.id}</span>
       <Show when={allProjects()}><span class="session-project">{s.project}</span></Show>
     </A>
   ) : (
-    <div class="session-entry">
+    <div class="session-entry" {...peekAttrs(s)}>
       <A
         ref={(el) => observeSession(el, s.id)}
         href={sessionHref(s.id, s.directory)}
@@ -159,7 +163,7 @@ export default function Sidebar() {
   )
 
   const miniItem = (s: SessionRow) => (
-    <div class="mini-session">
+    <div class="mini-session" {...peekAttrs(s)}>
       <A ref={(el) => observeSession(el, s.id)} href={sessionHref(s.id, s.directory)}
         activeClass="active" class="mini-item"
         title={`${s.title} (${dotFor(s)})${allProjects() ? ` · ${s.project}` : ""}`}>
@@ -197,7 +201,7 @@ export default function Sidebar() {
     <Show
       when={leftOpen()}
       fallback={
-        <nav class="sidebar sidebar-mini">
+        <nav class="sidebar sidebar-mini" ref={setNavEl}>
           <Show when={!nativeHeader}><button class="mini-btn" title="expand sidebar (^h)" onClick={toggleLeft}>
             ⟩
           </button></Show>
@@ -213,7 +217,7 @@ export default function Sidebar() {
         </nav>
       }
     >
-      <nav class="sidebar" style={{ width: `${leftWidth()}px` }}>
+      <nav class="sidebar" ref={setNavEl} style={{ width: `${leftWidth()}px` }}>
         <Show when={!nativeHeader}><div class="sidebar-top">{projectControls()}</div></Show>
         <Show when={!query().trim() && pinnedSessions().length}>
           <section class="pinned-section" aria-label="Pinned sessions">
@@ -318,6 +322,7 @@ export default function Sidebar() {
         </Show>
       </nav>
     </Show>
+    <SessionPeek container={navEl} />
     </>
   )
 }

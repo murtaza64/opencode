@@ -12,6 +12,7 @@ import SessionInfo from "../components/session-info"
 import { sessionHref, useDashboard } from "../state"
 import { rightOpen, startDrag } from "../ui"
 import { createVim } from "../vim"
+import { contextUsage, latestCompletedTurn } from "../context-usage"
 import { getComposer, type ComposerAction } from "../composer"
 import { ComposerResults } from "../components/composer-controls"
 import { DirectComposer } from "../components/direct-composer"
@@ -313,22 +314,6 @@ function SessionView(props: { sessionID: string; directory: string }) {
     markViewed(sessionID)
   })
 
-  // context usage of the latest completed turn, TUI formula: all token
-  // classes of the last assistant message vs the model's context limit
-  const contextUsage = createMemo(() => {
-    const msgs = messages() as any[]
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i]
-      if (m.role !== "assistant" || !(m.tokens?.output > 0)) continue
-      const t = m.tokens
-      const tokens = t.input + t.output + t.reasoning + (t.cache?.read ?? 0) + (t.cache?.write ?? 0)
-      const model = (providers()?.providers ?? []).find((p: any) => p.id === m.providerID)?.models?.[m.modelID]
-      const limit = model?.limit?.context
-      return { tokens, percent: limit ? Math.round((tokens / limit) * 100) : null }
-    }
-    return null
-  })
-
   // busy with nothing visibly moving (no running tool, no streaming part):
   // the model is thinking or the first token hasn't landed — show a pulse
   const thinking = createMemo(() => {
@@ -543,6 +528,10 @@ function SessionView(props: { sessionID: string; directory: string }) {
   // model for the next turn: follows the latest agent turn unless the user
   // explicitly picks one from the dropdown
   const [providers] = createResource(() => oc.providers(directory).catch(() => ({ providers: [], default: {} })))
+  // context usage of the latest completed turn (shared formula with the info
+  // panel and sidebar hover card: all token classes vs the model's limit)
+  const latestUsage = createMemo(() => contextUsage(latestCompletedTurn(messages()), providers()))
+
   const [agents, { refetch: refetchAgents }] = createResource(() => oc.agents(directory).then(
     (items) => ({ items: items.filter((agent) => !agent.hidden && agent.mode !== "subagent"), error: "" }),
     (error: unknown) => ({ items: [], error: String(error) }),
@@ -853,7 +842,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     <DirectComposer composer={composer} connected={connected() && !nudgePhase() && !aborting()} submit={send} restoreDraft={restoreDraft}
       editor={<Editor expanded={props.expanded} />} attachments={<Attachments />}
       activeAgent={activeAgent()} agents={agents()?.items ?? []} agentError={agents()?.error} retryAgents={() => { void refetchAgents() }}
-      sessionMetadata={<Show when={contextUsage()}>
+      sessionMetadata={<Show when={latestUsage()}>
         {(u) => (
           <span class="context-pct"
             classList={{ warn: (u().percent ?? 0) >= 70, high: (u().percent ?? 0) >= 90 }}
@@ -1009,7 +998,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
       <Show when={rightOpen()}>
         <div class="drag-handle" onMouseDown={(e) => startDrag("right", e)} />
       </Show>
-      <SessionInfo sessionID={sessionID} session={session()} messages={messages()} parts={live.data.part} />
+      <SessionInfo sessionID={sessionID} session={session()} messages={messages()} parts={live.data.part} providers={providers()} />
     </main>
   )
 }

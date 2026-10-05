@@ -62,6 +62,11 @@ export const createFixture = async () => {
     inputReplies: [],
     asideReplies: [],
     editspaces: [{ name: "fixture", root: `${directory}/.editspace` }, { name: "other", root: "/other project" }],
+    // dotfiles#139 endpoints: undefined = not deployed (404); otherwise a
+    // function (session_id, directory) => body | {status, body}, or url => ...
+    insights: undefined,
+    prDetails: undefined,
+    insightDelayMs: 0,
     createMode: "complete",
     createReplies: [],
     created: [],
@@ -88,6 +93,7 @@ export const createFixture = async () => {
       path: url.pathname,
       directory: url.searchParams.get("directory"),
       es: url.searchParams.get("es"),
+      limit: url.searchParams.get("limit"),
       body,
     })
     const json = (value, status = 200) => {
@@ -171,6 +177,19 @@ export const createFixture = async () => {
         sessions: fixture.sessionIDs.map(session),
       })
     if (url.pathname === "/api/notifications") return json({ notifications: [] })
+    if (url.pathname === "/api/session-insights") {
+      if (!fixture.insights) return json({ detail: "Not Found" }, 404)
+      const reply = fixture.insights(url.searchParams.get("session_id"), url.searchParams.get("directory"))
+      const send = () => reply && reply.status ? json(reply.body ?? {}, reply.status) : json(reply)
+      if (fixture.insightDelayMs) return void setTimeout(send, fixture.insightDelayMs)
+      return send()
+    }
+    if (url.pathname === "/api/pr-detail") {
+      if (!fixture.prDetails) return json({ detail: "Not Found" }, 404)
+      const reply = fixture.prDetails(url.searchParams.get("url"))
+      if (reply === undefined) return json({ error: "not_found" }, 404)
+      return reply && reply.status ? json(reply.body ?? {}, reply.status) : json(reply)
+    }
     if (url.pathname === "/api/issues") return json({ backend: "gh", repo: "fixture/test", issues: [] })
     if (url.pathname === "/api/issue" && fixture.issue) return json(fixture.issue)
     if (url.pathname === "/api/docs") return json({ roots: [], sources: [] })
@@ -254,8 +273,10 @@ export const createFixture = async () => {
           fixture.failSnapshot ? 503 : 200,
         )
       }
-      if (action === "/message")
-        return json(
+      if (action === "/message") {
+        const limit = url.searchParams.get("limit")
+        const slice = (list) => limit ? list.slice(-Number(limit)) : list
+        return json(slice(
           id === "ses_a"
             ? (fixture.messages ?? [
                 {
@@ -288,7 +309,8 @@ export const createFixture = async () => {
                 },
               ])
             : fixture.messagesB,
-        )
+        ))
+      }
       if (action === "/prompt_async" && request.method === "POST") {
         if (fixture.rejectImages && body.parts.some((part) => part.type === "file"))
           return json({ error: "Selected model does not support image input" }, 400)

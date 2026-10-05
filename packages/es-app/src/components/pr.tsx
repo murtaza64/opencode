@@ -41,7 +41,10 @@ function Icon(props: { path: string; size?: number; class?: string; title?: stri
   )
 }
 
-export const prState = (pr: any): "open" | "draft" | "merged" | "closed" => {
+/** "unknown" when no metadata has been loaded for a bare reference: never
+ * guess open/CI/review state from a URL alone */
+export const prState = (pr: any): "open" | "draft" | "merged" | "closed" | "unknown" => {
+  if (pr.state == null) return "unknown"
   if (pr.state === "merged") return "merged"
   if (pr.state === "closed") return "closed"
   return pr.isDraft ? "draft" : "open"
@@ -51,7 +54,7 @@ const isOpen = (pr: any) => prState(pr) === "open" || prState(pr) === "draft"
 
 /** open/draft first, then merged, then closed — each newest first */
 export function sortPrs(prs: any[]): any[] {
-  const order: Record<string, number> = { open: 0, draft: 0, merged: 1, closed: 2 }
+  const order: Record<string, number> = { open: 0, draft: 0, merged: 1, closed: 2, unknown: 3 }
   return [...prs].sort(
     (a, b) =>
       order[prState(a)]! - order[prState(b)]! ||
@@ -59,19 +62,28 @@ export function sortPrs(prs: any[]): any[] {
   )
 }
 
-export function Pr(props: { pr: any; compact?: boolean }) {
+export function Pr(props: { pr: any; compact?: boolean; mentions?: number }) {
   const pr = () => props.pr
   const approvals = () => (pr().reviews ?? []).filter((r: any) => r.state === "APPROVED")
   const rejections = () => (pr().reviews ?? []).filter((r: any) => r.state === "CHANGES_REQUESTED")
   const requested = () => pr().review_requested ?? []
   const cap = (n: number) => Math.min(n, 5)
+  const unresolved = () => prState(pr()) === "unknown"
+  const label = () => `${pr().repo}#${pr().number}`
   return (
-    <a class="pr-title-row" href={linkUrl(pr().url)} target="_blank" rel="noopener noreferrer" title={pr().title}>
+    <a class="pr-title-row" classList={{ "pr-unresolved": unresolved() }} href={linkUrl(pr().url)} target="_blank"
+      rel="noopener noreferrer" title={`${pr().title ?? label()}${props.mentions ? ` · mentioned ${props.mentions}×` : ""}${unresolved() ? " · status not loaded" : ""}`}
+      data-pr-state={prState(pr())} data-mentions={props.mentions || undefined}>
       <span class="pr-key-group">
-        <Icon class={`pr-icon icon-${prState(pr())}`} path={ICON_PATHS[prState(pr())]!} size={16} />
-        <span class="pr-number">
+        <Show when={!unresolved()} fallback={<span class="pr-state-placeholder" aria-hidden="true" />}>
+          <Icon class={`pr-icon icon-${prState(pr())}`} path={ICON_PATHS[prState(pr())]!} size={16} />
+        </Show>
+        <span class="pr-number" dir="ltr">
           {props.compact ? pr().repo.split("/")[1] : pr().repo}#{pr().number}
         </span>
+        <Show when={(props.mentions ?? 0) > 1}>
+          <span class="pr-mentions" title={`mentioned ${props.mentions} times in this session`}>×{props.mentions}</span>
+        </Show>
       </span>
 
       <Show when={pr().additions != null || pr().deletions != null}>

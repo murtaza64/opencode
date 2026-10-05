@@ -1,17 +1,22 @@
 /* Right panel on the session page: identity, spend, editspace joins (lane,
  * tickets, PRs via the dashboard's thread model), tracker tickets and docs
  * this session references, and links shared in the conversation. */
-import { createMemo, createResource, For, Show } from "solid-js"
+import { createEffect, createMemo, createResource, For, Show } from "solid-js"
 import { A } from "@solidjs/router"
 import type { Message, Part, Session } from "@opencode-ai/sdk/v2"
 import { es, type IssueRow } from "../api"
-import { ago, linkUrl, useDashboard } from "../state"
+import { ago, useDashboard } from "../state"
 import { refFromHref, ticketMatchesRef, ticketUrl } from "../ticket-url"
 import { docHref } from "../pages/doc"
 import { TicketIcon } from "./icons"
 import { rightOpen, rightWidth, toggleRight } from "../ui"
 import { Pr } from "./pr"
 import { prFromHref } from "../pr-matching"
+import { linkUrl } from "../link-url"
+import { compactTokens, contextUsage, countCompletedTurns, latestCompletedTurn, usageLevel, type ProviderList } from "../context-usage"
+import { compositionSlices, estimateComposition } from "../context-composition"
+import { CompositionBar } from "./context-viz"
+import { prDetail, requestPrDetails } from "../pr-details"
 
 const URL_RE = /https?:\/\/[^\s)\]}"'`>]+/g
 // #N / repo#N / owner/repo#N mentions and markdown-ish path tokens
@@ -32,6 +37,7 @@ export default function SessionInfo(props: {
   session?: Session
   messages: Message[]
   parts: Record<string, Part[]>
+  providers?: ProviderList
 }) {
   return (
     <Show
@@ -75,6 +81,7 @@ function SessionInfoBody(props: {
   session?: Session
   messages: Message[]
   parts: Record<string, Part[]>
+  providers?: ProviderList
 }) {
   const { state, editspace, allProjects } = useDashboard()
 
@@ -191,30 +198,67 @@ function SessionInfoBody(props: {
     return [...seen.keys()].slice(-25).reverse()
   })
 
+  // PRs cited in this session's text and completed tool output, counted by
+  // mention: one count per part a PR appears in (copies of the same URL within
+  // one part don't inflate it). Ranked by count, ties in first-mention order.
   const linkedPrs = createMemo(() => {
-    const found = new Map<string, { repo: string; number: number; url: string }>()
+    const found = new Map<string, { repo: string; number: number; url: string; mentions: number; first: number }>()
+    let order = 0
     for (const parts of Object.values(sessionParts())) {
       for (const part of parts) {
         const text = part.type === "text" ? part.text : part.type === "tool" &&
           part.state.status === "completed" ? part.state.output : ""
+        const inPart = new Set<string>()
         for (const raw of text.match(URL_RE) ?? []) {
           const pr = prFromHref(raw.replace(/[.,;:]+$/, ""))
-          if (pr) found.set(pr.url, pr)
+          if (!pr || inPart.has(pr.url)) continue
+          inPart.add(pr.url)
+          const existing = found.get(pr.url)
+          if (existing) existing.mentions++
+          else found.set(pr.url, { ...pr, mentions: 1, first: order++ })
         }
       }
     }
-    return found
+    return [...found.values()].sort((a, b) => b.mentions - a.mentions || a.first - b.first)
   })
 
+  const richPrs = createMemo(() => new Map<string, any>((thread()?.prs ?? []).flatMap((pr: { url: string }) => {
+    const ref = prFromHref(pr.url)
+    return ref ? [[ref.url, pr] as const] : []
+  })))
+
+  // cited PRs first (by rank), then dashboard-only PRs; every chip renders
+  // the same component with whatever real data exists: dashboard record,
+  // on-demand detail (dotfiles#139), or the bare reference while loading
   const prs = createMemo(() => {
-    const found = new Map(linkedPrs())
-    const rich = new Map<string, { url: string }>((thread()?.prs ?? []).flatMap((pr: { url: string }) => {
-      const ref = prFromHref(pr.url)
-      return ref ? [[ref.url, pr] as const] : []
-    }))
-    for (const [url, pr] of rich) if (!found.has(url)) found.set(url, prFromHref(url)!)
-    return [...found.values()].map((ref) => ({ ref, data: rich.get(ref.url) }))
+    const cited = linkedPrs().map((ref) => ({ ref, mentions: ref.mentions, data: richPrs().get(ref.url) ?? prDetail(ref.url), cited: true }))
+    const seen = new Set(cited.map((p) => p.ref.url))
+    const dashboardOnly = [...richPrs().entries()].filter(([url]) => !seen.has(url))
+      .map(([url, data]) => ({ ref: prFromHref(url)!, mentions: 0, data, cited: false }))
+    const all = [...cited, ...dashboardOnly]
+    // compact labels drop the owner; keep it when two owners share a repo name
+    const owners = new Map<string, Set<string>>()
+    for (const pr of all) {
+      const [owner, name] = pr.ref.repo.split("/")
+      owners.set(name!, (owners.get(name!) ?? new Set()).add(owner!))
+    }
+    return all.map((pr) => ({ ...pr, compact: (owners.get(pr.ref.repo.split("/")[1]!)?.size ?? 1) === 1 }))
   })
+
+  // enrich cited PRs the dashboard doesn't know, highest-ranked first, bounded
+  const ENRICH_LIMIT = 30
+  createEffect(() => {
+    const missing = linkedPrs().filter((ref) => !richPrs().has(ref.url)).slice(0, ENRICH_LIMIT).map((ref) => ref.url)
+    if (missing.length) requestPrDetails(missing)
+  })
+
+  // exact latest-turn usage plus the estimated composition of the context
+  // still represented (since the last compaction when one exists)
+  const latestTurn = createMemo(() => latestCompletedTurn(props.messages.filter((m) => m.sessionID === props.sessionID)))
+  const usage = createMemo(() => contextUsage(latestTurn(), props.providers))
+  const turns = createMemo(() => countCompletedTurns(props.messages.filter((m) => m.sessionID === props.sessionID)))
+  const composition = createMemo(() => estimateComposition(props.messages.filter((m) => m.sessionID === props.sessionID), props.parts))
+  const slices = createMemo(() => compositionSlices(composition(), usage()?.tokens))
 
   const tokens = () => (props.session as any)?.tokens
 
@@ -274,6 +318,40 @@ function SessionInfoBody(props: {
             </div>
           </>
         )}
+      </Show>
+
+      <Show when={props.messages.some((m) => m.sessionID === props.sessionID)}>
+        <div class="info-section" data-section="context">
+          <div class="info-heading">context</div>
+          <div class="info-row">
+            <span class="dim">turns</span>
+            <span title="completed assistant turns">{turns()} completed</span>
+          </div>
+          <Show when={latestTurn()}>{(t) => (
+            <Show when={props.session && (props.session as any).model?.id && (props.session as any).model.id !== t().modelID}>
+              <div class="info-row" title="model of the latest completed turn differs from the session model">
+                <span class="dim">latest</span>
+                <span class="mono" dir="ltr">{t().modelID}</span>
+              </div>
+            </Show>
+          )}</Show>
+          <div class={`ctx-exact ${usageLevel(usage()?.percent)}`} title="context of the latest completed turn (input + output + reasoning + cache), exact provider count">
+            <Show when={usage()} fallback={<span class="dim">latest turn context unknown</span>}>{(u) => (
+              <>
+                <span class="mono">
+                  {compactTokens(u().tokens)}
+                  <Show when={u().limit} fallback={<span class="dim"> · limit unknown</span>}>
+                    {" / "}{compactTokens(u().limit!)} ({u().percent}%)
+                  </Show>
+                </span>
+                <span class="ctx-exact-meta">exact · latest turn</span>
+              </>
+            )}</Show>
+          </div>
+          <CompositionBar slices={slices()}
+            caption={`estimated: ${composition().basis === "since_compaction" ? "visible content since the last compaction" : "visible history"}, chars ÷ 4; ` +
+              (usage() ? "other = exact total − visible estimates" : "shares of visible content only") + ". Not provider token attribution."} />
+        </div>
       </Show>
 
       <Show when={thread()?.lanes?.length}>
@@ -346,15 +424,11 @@ function SessionInfoBody(props: {
       </Show>
 
       <Show when={prs().length}>
-        <div class="info-section">
+        <div class="info-section" data-section="prs">
           <div class="info-heading">PRs referenced</div>
-          <For each={prs()}>{(pr) => pr.data
-            ? <Pr pr={pr.data} compact />
-            : <a class="pr-title-row" href={linkUrl(pr.ref.url)} target="_blank" rel="noopener noreferrer"
-                title={`${pr.ref.repo}#${pr.ref.number}`}>
-                <span class="pr-number" dir="ltr">{pr.ref.repo}#{pr.ref.number}</span>
-              </a>}
-          </For>
+          <For each={prs()}>{(pr) => (
+            <Pr pr={pr.data ?? { repo: pr.ref.repo, number: pr.ref.number, url: pr.ref.url }} compact={pr.compact} mentions={pr.mentions} />
+          )}</For>
         </div>
       </Show>
 

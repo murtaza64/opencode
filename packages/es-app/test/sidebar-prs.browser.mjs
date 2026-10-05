@@ -56,7 +56,7 @@ try {
   fixture.emit("message.updated", { info })
   fixture.emit("message.part.updated", { part })
   await expect(chips).toHaveCount(33)
-  await expect(chips.filter({ hasText: "live/repo#43" })).toHaveAttribute("href", "https://duo.fyi/ink/https://github.com/live/repo/pull/43")
+  await expect(chips.filter({ hasText: "repo#43" })).toHaveAttribute("href", "https://duo.fyi/ink/https://github.com/live/repo/pull/43")
   expect(fixture.calls.filter(call => !["GET", "HEAD", "OPTIONS"].includes(call.method))).toEqual([])
   console.log(`PASS sidebar PRs ${app ? "native" : "browser"}: >25, metadata/unknown, tool output, strict links, other session, reload, live addition; zero mutations`)
 } finally {
