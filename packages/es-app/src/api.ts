@@ -260,7 +260,7 @@ export type SessionInsights = {
   completed_turns: number
   session_model: { providerID: string; modelID: string } | null
   latest: {
-    model: { providerID: string; modelID: string }
+    model: { providerID: string; modelID: string } | null
     cost: number
     tokens: { input: number; output: number; reasoning: number; cache: { read: number; write: number } }
   } | null

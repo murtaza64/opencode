@@ -42,7 +42,8 @@ const fromDashboard = (record: SessionInsights): Insights => ({
   cost: record.cost ?? null,
   sessionModel: record.session_model?.modelID ?? null,
   turns: record.error ? null : record.completed_turns ?? null,
-  latest: record.latest ? { providerID: record.latest.model.providerID, modelID: record.latest.model.modelID, tokens: record.latest.tokens } : null,
+  // a latest turn without a model still carries exact usage; the limit lookup then fails -> percent unknown
+  latest: record.latest ? { providerID: record.latest.model?.providerID ?? "", modelID: record.latest.model?.modelID ?? "", tokens: record.latest.tokens } : null,
   composition: record.composition ? {
     basis: record.composition.scope === "since_last_compaction" ? "since_compaction" : "full_history",
     messages: 0,

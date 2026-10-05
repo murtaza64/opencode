@@ -145,7 +145,7 @@ export function SessionPeek(props: { container: () => HTMLElement | undefined })
   const slices = createMemo(() => compositionSlices(insights()?.value?.composition, usage()?.tokens))
   const cost = () => global()?.cost ?? insights()?.value?.cost ?? null
   const sessionModel = () => global()?.model?.id ?? insights()?.value?.sessionModel ?? undefined
-  const latestModel = () => insights()?.value?.latest?.modelID
+  const latestModel = () => insights()?.value?.latest?.modelID || undefined
   const degraded = () => {
     const v = insights()?.value
     return !!v && v.source !== "dashboard"
