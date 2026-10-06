@@ -18,7 +18,11 @@ type Request = { directory: string } & (
   | { kind: "question"; request: QuestionRequest }
 )
 
-export const createSessionActivity = (sessions: () => GlobalSession[], refreshSessions: () => void) => {
+export const createSessionActivity = (
+  sessions: () => GlobalSession[],
+  refreshSessions: () => void,
+  options?: { directories: () => string[]; sessionEvent: (event: Event, directory: string) => boolean },
+) => {
   const [snapshots, setSnapshots] = createSignal<Record<string, Snapshot>>({})
   const [connectionError, setConnectionError] = createSignal("")
   const index = createMemo(() => new Map(sessions().map((s) => [s.id, s])))
@@ -200,30 +204,48 @@ export const createSessionActivity = (sessions: () => GlobalSession[], refreshSe
     inflight.set(directory, { events, promise })
     return promise
   }
-  const refresh = async (dirs = [...new Set([...sessions().map((s) => s.directory), ...Object.keys(snapshots())])]) => {
-    // Avoid initializing every historical directory concurrently.
-    for (let offset = 0; offset < dirs.length && !disposed; offset += 8) {
-      await Promise.all(dirs.slice(offset, offset + 8).map((directory) => refreshDirectory(directory)))
+  const relevant = () => [...new Set([
+    ...(options?.directories() ?? sessions().map((s) => s.directory)),
+    ...Object.entries(snapshots()).filter(([, snapshot]) =>
+      snapshot.error || snapshot.permissions.length || snapshot.questions.length ||
+      Object.values(snapshot.status).some((status) => status.type === "busy" || status.type === "retry"))
+      .map(([directory]) => directory),
+  ])]
+  const refresh = async (dirs = relevant()) => {
+    for (let offset = 0; offset < dirs.length && !disposed; offset += 4) {
+      await Promise.all(dirs.slice(offset, offset + 4).map((directory) => refreshDirectory(directory)))
     }
   }
+  const initializing = new Set<string>()
   createEffect(() => {
-    const dirs = [...new Set(sessions().map((s) => s.directory))]
+    const dirs = relevant()
     untrack(() => {
-      void refresh(dirs.filter((directory) => !snapshots()[directory]))
+      const missing = dirs.filter((directory) => !snapshots()[directory] && !initializing.has(directory))
+      missing.forEach((directory) => initializing.add(directory))
+      void refresh(missing).finally(() => missing.forEach((directory) => initializing.delete(directory)))
     })
   })
   const source = createServerEvents("/oc/global/event")
+  let opened = false
   let timer: ReturnType<typeof setTimeout> | undefined
+  let lastSessionRefresh = 0
   const scheduleSessions = () => {
     if (timer) return
+    const delay = Math.max(500, 15_000 - (Date.now() - lastSessionRefresh))
     timer = setTimeout(() => {
       timer = undefined
+      lastSessionRefresh = Date.now()
       refreshSessions()
-    }, 500)
+    }, delay)
   }
   source.onopen = () => {
     if (disposed) return
     setConnectionError("")
+    if (!opened) {
+      opened = true
+      return
+    }
+    lastSessionRefresh = Date.now()
     refreshSessions()
     void refresh()
   }
@@ -246,12 +268,11 @@ export const createSessionActivity = (sessions: () => GlobalSession[], refreshSe
         inflight.get(directory)?.events.push(event)
         apply(directory, event)
       }
-      if (
-        ["session.created", "session.updated", "session.deleted", "permission.asked", "question.asked"].includes(
-          event.type,
-        )
-      )
+      if (["session.created", "session.updated", "session.deleted"].includes(event.type) &&
+        !options?.sessionEvent(event, directory))
         scheduleSessions()
+      if ((event.type === "permission.asked" || event.type === "question.asked") &&
+        !index().has(event.properties.sessionID)) scheduleSessions()
       if (event.type.startsWith("permission.v2.") || event.type.startsWith("question.v2."))
         void refreshDirectory(directory)
     } catch {
@@ -259,9 +280,22 @@ export const createSessionActivity = (sessions: () => GlobalSession[], refreshSe
       void refresh()
     }
   }
+  let relevantCursor = 0
+  let backgroundCursor = 0
   const interval = setInterval(() => {
+    lastSessionRefresh = Date.now()
     refreshSessions()
-    void refresh()
+    const dirs = relevant()
+    const background = [...new Set(sessions().map((session) => session.directory))].filter((directory) => !dirs.includes(directory))
+    // The global stream and dashboard notifications handle immediate attention;
+    // scan historical directories slowly for missed events without polling all of them each tick.
+    const next = [
+      ...Array.from({ length: Math.min(2, dirs.length) }, (_, i) => dirs[(relevantCursor + i) % dirs.length]!),
+      ...Array.from({ length: Math.min(4, background.length) }, (_, i) => background[(backgroundCursor + i) % background.length]!),
+    ]
+    relevantCursor += 2
+    backgroundCursor += 4
+    void refresh(next)
   }, 30_000)
   onCleanup(() => {
     disposed = true

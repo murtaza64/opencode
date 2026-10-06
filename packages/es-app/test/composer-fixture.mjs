@@ -49,6 +49,9 @@ export const createFixture = async () => {
     children: new Map(),
     permissions: undefined,
     questions: [],
+    permissionsByDirectory: undefined,
+    questionsByDirectory: undefined,
+    notifications: undefined,
     issue: undefined,
     archived: new Set(),
     deleted: new Set(),
@@ -176,7 +179,7 @@ export const createFixture = async () => {
         unattached_prs: [],
         sessions: fixture.sessionIDs.map(session),
       })
-    if (url.pathname === "/api/notifications") return json({ notifications: [] })
+    if (url.pathname === "/api/notifications") return json({ notifications: fixture.notifications ?? [] })
     if (url.pathname === "/api/session-insights") {
       if (!fixture.insights) return json({ detail: "Not Found" }, 404)
       const reply = fixture.insights(url.searchParams.get("session_id"), url.searchParams.get("directory"))
@@ -234,11 +237,11 @@ export const createFixture = async () => {
           ])
     if (url.pathname === "/permission")
       return json(
-        fixture.permissions ?? [
+        fixture.permissionsByDirectory?.get(url.searchParams.get("directory")) ?? fixture.permissions ?? [
           { id: "permission-1", sessionID: "ses_a", permission: "bash", patterns: ["fixture command"], metadata: {} },
         ],
       )
-    if (url.pathname === "/question") return json(fixture.questions)
+    if (url.pathname === "/question") return json(fixture.questionsByDirectory?.get(url.searchParams.get("directory")) ?? fixture.questions)
     const match = /^\/session\/(ses_[\w-]+)(.*)$/.exec(url.pathname)
     if (match) {
       const [, id, action] = match

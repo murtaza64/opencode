@@ -3,7 +3,7 @@ import net from "node:net"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { createFixture, directory } from "./composer-fixture.mjs"
 
-export const startPanelPreview = async () => {
+export const startPanelPreview = async (plugins = []) => {
   const fixture = await createFixture()
   fixture.permissions = []
   fixture.messages = [
@@ -60,6 +60,7 @@ export const startPanelPreview = async () => {
   await new Promise((resolve) => probe.close(resolve))
   const vite = await createServer({
     root: fileURLToPath(new URL("..", import.meta.url)),
+    plugins,
     server: { host: "127.0.0.1", port, strictPort: true },
   })
   await vite.listen()

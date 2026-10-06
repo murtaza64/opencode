@@ -17,6 +17,8 @@ import { createSessionActivity } from "./session-activity"
 import { createServerEvents } from "./event-source"
 import { resolveProjectName } from "./project-name"
 import type { GlobalSession } from "@opencode-ai/sdk/v2"
+import type { Event } from "@opencode-ai/sdk/v2"
+import { useLocation } from "@solidjs/router"
 export { linkUrl } from "./link-url"
 
 export type DotState = "pending" | "busy" | "unread" | "idle"
@@ -63,6 +65,7 @@ type DashboardCtx = {
 const Ctx = createContext<DashboardCtx>()
 
 export function DashboardProvider(props: ParentProps) {
+  const route = useLocation()
   const [allProjects, setAllProjectsRaw] = createSignal(localStorage.getItem("es-app-all-projects") === "true")
   const setAllProjects = (value: boolean) => {
     localStorage.setItem("es-app-all-projects", String(value))
@@ -83,16 +86,91 @@ export function DashboardProvider(props: ParentProps) {
     (name) => es.state(name || undefined),
   )
   const [sessionsError, setSessionsError] = createSignal("")
-  const [globalSessions, { refetch: refetchGlobal }] = createResource<GlobalSession[]>(async (_, info) => {
+  let revision = 0
+  const changed = new Map<string, { revision: number; session: GlobalSession | null }>()
+  const merge = (sessions: GlobalSession[], updates: Iterable<[string, { session: GlobalSession | null }]>) => {
+    const rows = new Map(sessions.map((session) => [session.id, session]))
+    for (const [id, value] of updates) {
+      if (value.session) rows.set(id, value.session)
+      else rows.delete(id)
+    }
+    return [...rows.values()]
+  }
+  const [globalSessions, { refetch: refetchGlobal, mutate: mutateGlobal }] = createResource<GlobalSession[]>(async (_, info) => {
     setSessionsError("")
+    const before = revision
     try {
-      return await oc.allSessions(false)
+      const sessions = await oc.allSessions(false)
+      const updates = [...changed].filter(([, item]) => item.revision > before)
+      for (const [id, item] of changed) if (item.revision <= before) changed.delete(id)
+      return merge(sessions, updates)
     } catch {
       setSessionsError("Could not load session relationships. Subagent activity and requests may be incomplete. Retrying automatically.")
-      return info.value ?? []
+      return merge(info.value ?? [], changed)
     }
   })
-  const activity = createSessionActivity(() => globalSessions() ?? [], refetchGlobal)
+  const [visibleSessions, setVisibleSessions] = createSignal(new Set<string>())
+  const PIN_KEY = "es-app-sidebar-pins"
+  const pinKey = (s: Pick<SessionRow, "id" | "directory">) => JSON.stringify([s.directory, s.id])
+  const loadPins = () => {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem(PIN_KEY) ?? "[]")
+      return Array.isArray(value) ? [...new Set(value.filter((key): key is string => typeof key === "string"))] : []
+    } catch {
+      return []
+    }
+  }
+  const [pins, setPins] = createSignal<string[]>(loadPins())
+  const relevantDirectories = () => {
+    const rows = globalSessions() ?? []
+    const selected = /^\/session\/([^/]+)/.exec(route.pathname)?.[1]
+    const ids = new Set([
+      ...visibleSessions(),
+      ...pins().flatMap((key) => rows.filter((row) => pinKey(row) === key).map((row) => row.id)),
+      ...(selected ? [selected] : []),
+      ...(state()?.attention ?? []).flatMap((item: { session?: string }) => item.session ? [item.session] : []),
+      ...(notificationState()?.notifications ?? []).map((item) => item.session),
+      ...(state()?.threads ?? []).flatMap((thread: { sessions?: { id: string; live?: string }[] }) =>
+        (thread.sessions ?? []).filter((session) => session.live === "busy" || session.live === "retry").map((session) => session.id)),
+    ])
+    // A visible root needs its descendants' requests even when they have no sidebar rows.
+    const children = new Map<string, string[]>()
+    for (const row of rows) {
+      if (!row.parentID) continue
+      children.set(row.parentID, [...(children.get(row.parentID) ?? []), row.id])
+    }
+    const queue = [...ids]
+    for (const id of queue) for (const child of children.get(id) ?? []) {
+      if (ids.has(child)) continue
+      ids.add(child)
+      queue.push(child)
+    }
+    const dirs = rows.filter((row) => ids.has(row.id)).map((row) => row.directory)
+    const direct = new URLSearchParams(route.search).get("directory")
+    if (selected && direct) dirs.push(direct)
+    dirs.push(...(notificationState()?.notifications ?? []).map((item) => item.directory))
+    return [...new Set(dirs.filter(Boolean))]
+  }
+  const sessionEvent = (event: Event, directory: string) => {
+    if (event.type !== "session.created" && event.type !== "session.updated" && event.type !== "session.deleted") return false
+    const info = event.properties.info
+    if (!info || typeof info !== "object" || !("id" in info) || info.id !== event.properties.sessionID ||
+      !("directory" in info) || info.directory !== directory || !info.id) return false
+    const removed = event.type === "session.deleted"
+    if (!removed && (!("title" in info) || typeof info.title !== "string" ||
+      !("time" in info) || !info.time || typeof info.time.updated !== "number" ||
+      !("projectID" in info) || typeof info.projectID !== "string" ||
+      !("slug" in info) || typeof info.slug !== "string" ||
+      !("version" in info) || typeof info.version !== "string")) return false
+    const session = removed ? null : info as GlobalSession
+    changed.set(info.id, { revision: ++revision, session })
+    mutateGlobal((previous) => merge(previous ?? [], [[info.id, { session }]]))
+    return true
+  }
+  const activity = createSessionActivity(() => globalSessions() ?? [], refetchGlobal, {
+    directories: relevantDirectories,
+    sessionEvent,
+  })
 
   // one SSE subscription per selected editspace
   createEffect(() => {
@@ -112,7 +190,6 @@ export function DashboardProvider(props: ParentProps) {
   const [viewed, setViewed] = createSignal<Record<string, number>>(
     JSON.parse(localStorage.getItem(VIEWED_KEY) ?? "{}"),
   )
-  const [visibleSessions, setVisibleSessions] = createSignal(new Set<string>())
   const [idleSeen, setIdleSeen] = createSignal<Record<string, number>>(
     JSON.parse(localStorage.getItem("es-app-idle-seen") ?? "{}"),
   )
@@ -197,17 +274,6 @@ export function DashboardProvider(props: ParentProps) {
     .filter((s) => !archivedIds().has(s.id))
     .sort((a, b) => b.updated - a.updated),
   )
-  const PIN_KEY = "es-app-sidebar-pins"
-  const pinKey = (s: Pick<SessionRow, "id" | "directory">) => JSON.stringify([s.directory, s.id])
-  const loadPins = () => {
-    try {
-      const value: unknown = JSON.parse(localStorage.getItem(PIN_KEY) ?? "[]")
-      return Array.isArray(value) ? [...new Set(value.filter((key): key is string => typeof key === "string"))] : []
-    } catch {
-      return []
-    }
-  }
-  const [pins, setPins] = createSignal<string[]>(loadPins())
   const isPinned = (s: Pick<SessionRow, "id" | "directory">) => pins().includes(pinKey(s))
   const togglePin = (s: Pick<SessionRow, "id" | "directory">) => {
     const key = pinKey(s)

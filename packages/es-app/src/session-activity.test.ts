@@ -381,7 +381,7 @@ test("reconnect repairs missed requests and statuses without clearing disconnect
   ActivityEvents.current.onopen?.()
   expect(fetchSpy.mock.calls.length).toBe(calls + 12)
   await load(activity)
-  expect(refreshes).toHaveLength(2)
+  expect(refreshes).toHaveLength(1)
   expect(activity.pending("ses_parent")).toEqual([
     { kind: "question", request: question("que_missed"), directory: grandchildDirectory },
   ])
