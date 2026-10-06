@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { startPanelPreview } from "./composer-panel-preview.mjs"
+import { session } from "./composer-fixture.mjs"
 
 const { chromium, _electron, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const preview = await startPanelPreview()
@@ -138,6 +139,25 @@ try {
   await page.goto(preview.origin)
   await expect(page.locator(".sidebar-mini")).toBeVisible()
   await expect(page.locator(".sidebar-mini").getByRole("button", { name: "New session" })).toBeVisible()
+
+  // A button pushed near the bottom of a short viewport (pinned rows above it) flips the popover upward, still on screen.
+  fixture.sessionIDs = ["ses_a", "ses_b"]
+  for (let i = 0; i < 10; i++) fixture.workspaceSessions.push({ ...session(`ses_pin_${i}`), title: `Pinned ${i}` })
+  await page.evaluate((keys) => { localStorage.setItem("es-app-left-open", "1"); localStorage.setItem("es-app-sidebar-pins", JSON.stringify(keys)) },
+    Array.from({ length: 10 }, (_, i) => JSON.stringify(["/fixture with spaces/a&b?#", `ses_pin_${i}`])))
+  await page.setViewportSize({ width: 1280, height: 420 })
+  await page.goto(preview.origin, { waitUntil: "domcontentloaded" })
+  await expect(page.locator(".sidebar .pinned-section .nav-item")).toHaveCount(10)
+  const lowButton = page.locator(".sidebar").getByRole("button", { name: "New session", exact: true })
+  await lowButton.click()
+  await expect(dialog).toBeVisible()
+  const lowButtonBox = await lowButton.boundingBox()
+  const flipped = await dialog.boundingBox()
+  expect(lowButtonBox.y).toBeGreaterThan(190)
+  expect(flipped.y + flipped.height).toBeLessThanOrEqual(lowButtonBox.y)
+  expect(flipped.y).toBeGreaterThanOrEqual(0)
+  await shot("flipped")
+  await page.keyboard.press("Escape")
   expect(fixture.unexpected).toEqual([])
   console.log(`PASS ${app ? "packaged native" : "browser"} new session: popover keeps rows in place, focus/Escape/outside-click, current safe directory, explicit All chooser, confirmed navigation/focus, prior draft/selection, pending duplicate guard, known/uncertain failure, compact/RTL/390px placement`)
 } finally {
