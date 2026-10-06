@@ -257,12 +257,14 @@ export default function Sidebar() {
           </div>
         </Show>
         {/* the board is per project; All has no board until it is redesigned */}
-        <Show when={!allProjects()}>
-          <A href="/" end activeClass="active" class="nav-item board-link">
-            ▦ board
-          </A>
-        </Show>
-        <NewSession />
+        <div class="sidebar-actions">
+          <Show when={!allProjects()}>
+            <A href="/" end activeClass="active" class="nav-item board-link">
+              ▦ board
+            </A>
+          </Show>
+          <NewSession />
+        </div>
         <div class="search-box">
           <input
             class="search-input"

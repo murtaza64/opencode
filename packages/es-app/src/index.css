@@ -601,38 +601,61 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
   font-size: 10px;
   color: var(--overlay1);
 }
+.sidebar-actions { display: flex; align-items: center; gap: 4px; padding-inline-end: 10px; }
+.sidebar-actions .board-link { flex: 1; min-width: 0; }
 .board-link { font-weight: bold; color: var(--text); }
-.new-session { position: relative; }
-.new-session-button { width: 100%; text-align: start; color: var(--green); font-weight: bold; }
+.new-session { position: relative; flex-shrink: 0; margin-inline-start: auto; }
+.sidebar-mini .new-session { width: 100%; margin: 0; }
+.new-session-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px 3px 8px;
+  background: transparent;
+  color: var(--green);
+  font-weight: bold;
+  font-size: 12px;
+  box-shadow: inset 0 0 0 1px var(--surface1);
+  white-space: nowrap;
+}
+.new-session-button:hover, .new-session-button[aria-expanded="true"] { background: var(--surface0); box-shadow: inset 0 0 0 1px var(--green); }
+.new-session-button.mini-item { box-shadow: none; padding: 6px 0; }
+.new-session-button.mini-item:hover, .new-session-button.mini-item[aria-expanded="true"] { background: var(--surface0); }
+/* popover: fixed so it floats over the scrolling sidebar; placed from the button rect */
 .new-session-form {
-  margin: 4px 10px 8px;
-  padding: 8px;
+  position: fixed;
+  z-index: 50;
+  width: min(320px, calc(100vw - 16px));
+  padding: 10px;
   border: 1px solid var(--surface1);
   background: var(--crust);
+  box-shadow: 0 8px 28px #000a;
   display: grid;
   gap: 8px;
   font-size: 12px;
-  label { display: grid; gap: 3px; color: var(--subtext0); }
-  select { min-width: 0; width: 100%; }
-  button[type="submit"] { border-color: var(--green); color: var(--green); }
   .err { white-space: pre-wrap; overflow-wrap: anywhere; }
 }
-.new-session-directory {
+.new-session-field {
   display: grid;
-  gap: 3px;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
   color: var(--subtext0);
-  bdi { color: var(--text); font-family: var(--font-mono); overflow-wrap: anywhere; user-select: text; }
+  select { min-width: 0; width: 100%; }
+  select:disabled { color: var(--text); opacity: 1; appearance: none; }
 }
-.sidebar-mini .new-session { width: 100%; }
-.sidebar-mini .new-session-form {
-  position: fixed;
-  z-index: 50;
-  inset-inline-start: 38px;
-  top: 82px;
-  width: min(310px, calc(100vw - 50px));
-  margin: 0;
-  box-shadow: 0 6px 24px #000a;
+.new-session-directory {
+  padding-inline-start: 80px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--subtext1);
+  overflow-wrap: anywhere;
+  user-select: text;
 }
+.new-session-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.new-session-create { padding: 4px 14px; background: var(--green); color: var(--crust); font-weight: bold; }
+.new-session-create:hover { background: var(--teal); }
+.new-session-create:disabled { background: var(--surface1); color: var(--overlay0); }
 .nav-heading {
   font-size: 11px;
   text-transform: uppercase;

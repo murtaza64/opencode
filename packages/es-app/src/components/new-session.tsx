@@ -1,9 +1,19 @@
-import { createMemo, createSignal, For, Show } from "solid-js"
+/* New session: a compact popover anchored to its sidebar button, so opening it
+ * never displaces session rows. Project view preselects the current project;
+ * All requires an explicit choice. Only a confirmed create response navigates. */
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { oc, SessionCreateError } from "../api"
 import { sessionHref, useDashboard } from "../state"
 
 const projectDirectory = (root: string) => root.replace(/\/+$/, "").replace(/\/\.editspace$/, "")
+// "lanes/<lane>/repos/<owner>/<repo>" reads as "<lane> · <repo>"; anything else by its basename
+const workspaceLabel = (directory: string) => {
+  const lane = /\/lanes\/([^/]+)(?:\/(.*))?$/.exec(directory)
+  if (!lane) return directory.split("/").filter(Boolean).at(-1) ?? directory
+  const tail = lane[2]?.split("/").filter(Boolean).at(-1)
+  return tail && tail !== lane[1] ? `${lane[1]} · ${tail}` : lane[1]
+}
 
 export const NewSession = (props: { compact?: boolean }) => {
   const dashboard = useDashboard()
@@ -13,6 +23,9 @@ export const NewSession = (props: { compact?: boolean }) => {
   const [directory, setDirectory] = createSignal("")
   const [pending, setPending] = createSignal(false)
   const [error, setError] = createSignal("")
+  const [anchor, setAnchor] = createSignal({ top: 0, start: 0 })
+  let button: HTMLButtonElement | undefined
+  let form: HTMLFormElement | undefined
   const projects = () => dashboard.editspaces()?.editspaces ?? []
   const current = () => dashboard.editspace() ?? dashboard.editspaces()?.default ?? dashboard.state()?.editspace ?? ""
   const selected = createMemo(() => projects().find((item) => item.name === project()))
@@ -26,14 +39,55 @@ export const NewSession = (props: { compact?: boolean }) => {
       .map((session) => session.directory)]
       .filter((value, index, values) => !!value && values.indexOf(value) === index)
   })
+  // fixed positioning escapes the scrolling sidebar: below the expanded button, beside the mini
+  // rail; clamped inside the viewport for 390px and RTL
+  const place = () => {
+    if (!button) return
+    const rect = button.getBoundingClientRect()
+    const rtl = getComputedStyle(button).direction === "rtl"
+    const width = Math.min(320, window.innerWidth - 16)
+    const beside = props.compact && window.innerWidth > 600 // the mini rail runs horizontally on phones
+    const start = beside ? (rtl ? window.innerWidth - rect.left : rect.right) + 4 : rtl ? window.innerWidth - rect.right : rect.left
+    const top = beside ? rect.top : rect.bottom + 4
+    setAnchor({ top: Math.min(top, window.innerHeight - 60), start: Math.max(8, Math.min(start, window.innerWidth - width - 8)) })
+  }
   const show = () => {
     const initial = dashboard.allProjects() ? "" : current()
     const item = projects().find((entry) => entry.name === initial)
     setProject(initial)
     setDirectory(item ? projectDirectory(item.root) : "")
     setError("")
+    place()
     setOpen(true)
+    queueMicrotask(() => form?.querySelector<HTMLElement>("select:not([disabled]), button[type=submit]")?.focus())
   }
+  const close = (restoreFocus: boolean) => {
+    setOpen(false)
+    if (restoreFocus) button?.focus()
+  }
+  createEffect(() => {
+    if (!open()) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      event.preventDefault()
+      close(true)
+    }
+    // outside clicks dismiss; a pending create stays visible until it settles
+    const onPointer = (event: PointerEvent) => {
+      if (pending() || form?.contains(event.target as Node) || button?.contains(event.target as Node)) return
+      close(false)
+    }
+    document.addEventListener("keydown", onKey)
+    document.addEventListener("pointerdown", onPointer)
+    window.addEventListener("resize", place)
+    document.addEventListener("scroll", place, true)
+    onCleanup(() => {
+      document.removeEventListener("keydown", onKey)
+      document.removeEventListener("pointerdown", onPointer)
+      window.removeEventListener("resize", place)
+      document.removeEventListener("scroll", place, true)
+    })
+  })
   const chooseProject = (name: string) => {
     setProject(name)
     const item = projects().find((entry) => entry.name === name)
@@ -55,27 +109,38 @@ export const NewSession = (props: { compact?: boolean }) => {
       setPending(false)
     }
   }
-  return <div class="new-session">
-    <button class={props.compact ? "mini-item new-session-button" : "nav-item new-session-button"}
-      title="New session" aria-label="New session" aria-expanded={open()} onClick={() => open() ? setOpen(false) : show()}>
-      <span aria-hidden="true">＋</span><Show when={!props.compact}> <span>New session</span></Show>
+  return <div class="new-session" classList={{ "new-session-compact": props.compact }}>
+    <button ref={button} class={props.compact ? "mini-item new-session-button" : "new-session-button"}
+      title="New session" aria-label="New session" aria-haspopup="dialog" aria-expanded={open()}
+      onClick={() => open() ? close(false) : show()}>
+      <span aria-hidden="true">＋</span><Show when={!props.compact}><span>New session</span></Show>
     </button>
     <Show when={open()}>
-      <form class="new-session-form" onSubmit={(event) => { event.preventDefault(); void create() }}>
-        <label>Project
+      <form ref={form} class="new-session-form" role="dialog" aria-label="New session"
+        style={{ top: `${anchor().top}px`, "inset-inline-start": `${anchor().start}px` }}
+        onSubmit={(event) => { event.preventDefault(); void create() }}>
+        <label class="new-session-field">
+          <span>Project</span>
           <select aria-label="New session project" value={project()} onChange={(event) => chooseProject(event.currentTarget.value)} disabled={pending()}>
-            <option value="" disabled>Select a project</option>
+            <option value="" disabled>Choose…</option>
             <For each={projects()}>{(item) => <option value={item.name}>{item.name}</option>}</For>
           </select>
         </label>
         <Show when={selected()}>
-          <label>Workspace
-            <select aria-label="New session workspace" value={directory()} onChange={(event) => setDirectory(event.currentTarget.value)} disabled={pending()}>
-              <For each={directories()}>{(value, index) => <option value={value}>{index() === 0 ? "Project" : value.split("/").filter(Boolean).at(-1)}</option>}</For>
+          <label class="new-session-field">
+            <span>Workspace</span>
+            <select aria-label="New session workspace" value={directory()} onChange={(event) => setDirectory(event.currentTarget.value)}
+              disabled={pending() || directories().length < 2}>
+              <For each={directories()}>{(value, index) => <option value={value}>{index() === 0 ? "project root" : workspaceLabel(value)}</option>}</For>
             </select>
           </label>
-          <div class="new-session-directory"><span>Directory</span><bdi dir="ltr">{directory()}</bdi></div>
-          <button type="submit" disabled={pending() || !directory()}>{pending() ? "Creating…" : "Create session"}</button>
+          <div class="new-session-directory"><bdi dir="ltr">{directory()}</bdi></div>
+          <div class="new-session-actions">
+            <button type="submit" class="new-session-create" aria-label={pending() ? "Creating…" : "Create session"} disabled={pending() || !directory()}>
+              {pending() ? "Creating…" : "Create"}
+            </button>
+            <span class="dim">esc closes</span>
+          </div>
         </Show>
         <Show when={error()}><div class="err" role="alert">{error()}</div></Show>
       </form>
