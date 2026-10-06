@@ -12,6 +12,7 @@ import { compactTokens, contextUsage, usageLevel } from "../context-usage"
 import { compositionSlices } from "../context-composition"
 import { cancelInsights, providersFor, sessionInsights } from "../session-insights"
 import { ContextDonut, CompositionDots, ProviderAccounting } from "./context-viz"
+import { CurrentWorkView } from "../current-work"
 
 const WIDTH = 268
 const GAP = 6
@@ -201,6 +202,7 @@ export function SessionPeek(props: { container: () => HTMLElement | undefined })
               </Show>
             </dl>
           </div>
+          <CurrentWorkView id={r().id} directory={r().directory} compact />
           <div class="peek-context" classList={{ warn: usageLevel(usage()?.percent) === "warn", high: usageLevel(usage()?.percent) === "high" }}>
             <Show when={usage()} fallback={
               <span class="dim">{insights()?.loading && !insights()?.value ? "loading context…" : "latest turn context unknown"}</span>

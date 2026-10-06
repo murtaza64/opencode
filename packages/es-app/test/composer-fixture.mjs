@@ -104,6 +104,7 @@ export const createFixture = async () => {
       directory: url.searchParams.get("directory"),
       es: url.searchParams.get("es"),
       limit: url.searchParams.get("limit"),
+      generate: url.searchParams.get("generate"),
       body,
     })
     const json = (value, status = 200) => {
@@ -193,6 +194,11 @@ export const createFixture = async () => {
       const send = () => reply && reply.status ? json(reply.body ?? {}, reply.status) : json(reply)
       if (fixture.insightDelayMs) return void setTimeout(send, fixture.insightDelayMs)
       return send()
+    }
+    if (url.pathname === "/api/current-work") {
+      if (!fixture.currentWork) return json({ detail: "Not Found" }, 404)
+      const reply = await fixture.currentWork(url.searchParams.get("session_id"), url.searchParams.get("directory"), url.searchParams.get("generate"))
+      return reply?.status ? json(reply.body ?? {}, reply.status) : json(reply)
     }
     if (url.pathname === "/api/pr-detail") {
       if (!fixture.prDetails) return json({ detail: "Not Found" }, 404)

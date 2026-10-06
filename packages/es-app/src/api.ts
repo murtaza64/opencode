@@ -276,7 +276,29 @@ export type SessionInsights = {
   error?: string
 }
 
+export type CurrentWork = {
+  turn: {
+    started_at: number | null
+    elapsed_seconds: number | null
+    status: "busy" | "idle" | "unknown"
+    user_messages: number | null
+    assistant_messages: number | null
+    tool_calls: number | null
+    active_tools: { name: string; status: string }[]
+    watermark: string | null
+  }
+  summary: {
+    status: "ready" | "stale" | "error" | "unavailable"
+    text: string | null
+    generated_at: number | null // Unix seconds, unlike turn.started_at (milliseconds)
+    watermark: string | null
+  }
+}
+
 export const es = {
+  currentWork: (sessionID: string, directory: string, generate = false, signal?: AbortSignal): Promise<CurrentWork> =>
+    fetch(`/es/api/current-work?session_id=${encodeURIComponent(sessionID)}&${q(directory)}${generate ? "&generate=true" : ""}`, { signal })
+      .then(statusJson<CurrentWork>),
   sessionInsights: (sessionID: string, directory: string, signal?: AbortSignal): Promise<SessionInsights> =>
     fetch(`/es/api/session-insights?session_id=${encodeURIComponent(sessionID)}&${q(directory)}`, { signal })
       .then(statusJson<SessionInsights>),

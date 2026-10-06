@@ -17,6 +17,7 @@ import { compactTokens, contextUsage, countCompletedTurns, latestCompletedTurn, 
 import { compositionSlices, estimateComposition } from "../context-composition"
 import { accountingGist, CompositionBar, ProviderAccounting } from "./context-viz"
 import { prDetail, requestPrDetails } from "../pr-details"
+import { CurrentWorkView } from "../current-work"
 
 const URL_RE = /https?:\/\/[^\s)\]}"'`>]+/g
 // #N / repo#N / owner/repo#N mentions and markdown-ish path tokens
@@ -326,6 +327,10 @@ function SessionInfoBody(props: {
             </div>
           </>
         )}
+      </Show>
+
+      <Show when={props.session?.directory}>
+        {(directory) => <div class="info-section"><CurrentWorkView id={props.sessionID} directory={directory()} /></div>}
       </Show>
 
        <Show when={props.session || props.messages.some((m) => m.sessionID === props.sessionID)}>

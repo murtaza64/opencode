@@ -465,6 +465,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
  * the gap without the card vanishing */
 .session-peek {
   position: fixed;
+  max-height: calc(100dvh - 12px);
+  overflow-y: auto;
   z-index: 60;
   box-sizing: border-box;
   background: var(--crust);
@@ -495,6 +497,11 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 .peek-context.warn .mono { color: var(--yellow); }
 .peek-context.high .mono { color: var(--red); }
 .peek-degraded { color: var(--peach); }
+.current-work { min-width: 0; overflow-wrap: anywhere; }
+.current-work.compact { padding: 7px 0; border-block: 1px solid var(--border); }
+.current-work-line, .current-work-tools { font-size: 11px; line-height: 1.5; }
+.current-work .ctx-caption { margin-top: 3px; }
+.current-work-generate { color: var(--lavender); font-size: 11px; text-align: start; padding: 2px 0; }
 
 /* context ring: exact usage arc; segments show relative visible estimates only */
 .ctx-donut { position: relative; display: inline-grid; place-items: center; flex-shrink: 0; }
