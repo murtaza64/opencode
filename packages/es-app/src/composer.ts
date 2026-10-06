@@ -78,6 +78,8 @@ export type ComposerState = {
   receipts: InputReceipt[]
   capabilities: ComposerCapabilities | null
   capabilityError: string
+  modelSelection: { model: ComposerModel; status: "pending" | "unknown" } | null
+  sessionModel: ComposerModel | null
   error: string
   storageError: string
   inputLoading: boolean
@@ -128,6 +130,8 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     receipts: [],
     capabilities: null,
     capabilityError: "",
+    modelSelection: null,
+    sessionModel: null,
     error: "",
     storageError: "",
     inputLoading: false,
@@ -198,6 +202,8 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         })
       }
       if (typeof saved.queueAgent === "string") setState("queueAgent", saved.queueAgent)
+      if (record(saved.modelSelection) && isModel(saved.modelSelection.model))
+        setState("modelSelection", { model: saved.modelSelection.model, status: "unknown" })
       if (record(saved.missingImages)) {
         setMissingImages({ task: saved.missingImages.task === true, aside: saved.missingImages.aside === true })
         setState("storageError", imageWarning())
@@ -251,6 +257,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           ? { ...state.normalSubmission }
           : null,
       queueAgent: state.queueAgent,
+      modelSelection: state.modelSelection,
       task: copyDraft(state.task),
       aside: copyDraft(state.aside),
       asideSeeded: state.asideSeeded,
@@ -301,6 +308,83 @@ export const createComposer = (sessionID: string, directory: string, dependencie
   // Restore/migrate before exposing the controller; no late async load can replace newer typing.
   if (restored) persist()
   const draftKey = () => (state.mode === "aside" ? "aside" : "task")
+  let selectionChain = Promise.resolve()
+  let sessionModelTime = 0
+  let selectionVersion = 0
+  let selectionBlocked = false
+  const matchesModel = (session: Session, model: ComposerModel) =>
+    session.preferredModel?.providerID === model.providerID && session.preferredModel.id === model.modelID
+  const reconcileModel = async () => {
+    const selection = state.modelSelection
+    if (!selection) return true
+    const version = selectionVersion
+    try {
+      const actual = await json<Session>(await request(url("")))
+      if (version !== selectionVersion) return false
+      if (!matchesModel(actual, selection.model)) throw new Error("Server model does not match this selection")
+      sessionModelTime = actual.time.updated
+      selectionBlocked = false
+      setState({ modelSelection: null, sessionModel: { ...selection.model }, error: "" })
+      if (state.task.model?.providerID === selection.model.providerID && state.task.model.modelID === selection.model.modelID)
+        updateDraft({ model: null }, false, "task")
+      persist()
+      return true
+    } catch (error) {
+      if (version !== selectionVersion) return false
+      setState("modelSelection", "status", "unknown")
+      setState("error", `Model selection is unconfirmed: ${message(error)}. No task input was sent.`)
+      persist()
+      return false
+    }
+  }
+  const chooseSessionModel = (model: ComposerModel) => {
+    const target = { ...model }
+    const version = ++selectionVersion
+    setState({ modelSelection: { model: target, status: "pending" }, error: "" })
+    persist()
+    // Serialize PATCHes: a slow earlier response cannot overwrite a newer selection.
+    const apply = async () => {
+      if (selectionBlocked) return
+      try {
+        const actual = await json<Session>(await request(url(""), {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ model: target }),
+        }))
+        if (!matchesModel(actual, target)) throw new Error("Server returned a different model")
+        sessionModelTime = actual.time.updated
+        if (version !== selectionVersion) return
+        setState({ modelSelection: null, sessionModel: target })
+        if (state.task.model?.providerID === target.providerID && state.task.model.modelID === target.modelID)
+          updateDraft({ model: null }, false, "task")
+      } catch (error) {
+        if (error instanceof HttpError && error.status < 500) {
+          if (version !== selectionVersion) return
+          setState("modelSelection", null)
+          setState("error", `Model not selected: ${message(error)}. Draft kept.`)
+          persist()
+          return
+        }
+        const actual = await json<Session>(await request(url(""))).catch(() => null)
+        if (actual && matchesModel(actual, target)) {
+          sessionModelTime = actual.time.updated
+          if (version === selectionVersion) {
+            setState({ modelSelection: null, sessionModel: target, error: "" })
+            if (state.task.model?.providerID === target.providerID && state.task.model.modelID === target.modelID)
+              updateDraft({ model: null }, false, "task")
+          }
+          persist()
+          return
+        }
+        selectionBlocked = true
+        setState("modelSelection", "status", "unknown")
+        setState("error", "Model selection is unconfirmed. No task input was sent; refresh before selecting again.")
+        persist()
+      }
+    }
+    selectionChain = selectionChain.then(apply, apply)
+    return selectionChain
+  }
   const updateDraft = (value: Partial<ComposerDraft>, revise = true, key: ComposerBuffer = draftKey()) => {
     const hadContent = !!state[key].text || !!state[key].images.length
     setState(key, { ...value, revision: state[key].revision + (revise ? 1 : 0) })
@@ -355,12 +439,12 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     }
     if (state.sending) return "A task message is being sent."
     if (state.admission) return "Reconcile or retry the existing input before sending another task message."
+    if (state.modelSelection) return "Model selection is pending. Task messages wait for confirmation."
     if (mode === "send") {
       if (state.normalSubmission?.status === "unknown")
         return "Previous normal Send outcome is unknown. Check the conversation, then dismiss its status before sending again."
       return state.busy ? "Task busy. Normal Send is unavailable; choose Aside, Queue or Steer." : ""
     }
-    if (draft.model) return "Task delivery uses the session model. Clear the override or use Aside."
     return ""
   }
   const accept = (receipt: InputReceipt, expectedID = receipt.requestID) => {
@@ -524,6 +608,27 @@ export const createComposer = (sessionID: string, directory: string, dependencie
   ) => {
     const mode = direct?.mode ?? state.mode
     const buffer = direct?.buffer ?? draftKey()
+    if (mode !== "aside" && (state.sending || state.admission || restoreError || missingImages[buffer])) {
+      if (!direct) setState("error", blockedReason(mode, buffer))
+      return
+    }
+    if (mode === "send" && state.normalSubmission?.status === "unknown") {
+      if (!direct) setState("error", blockedReason(mode, buffer))
+      return
+    }
+    const media = imageCapabilityReason(mode, state[buffer].images)
+    if (media) {
+      if (!direct) setState("error", media)
+      return
+    }
+    if (mode !== "aside" && (state.modelSelection || state[buffer].model)) {
+      if (state.modelSelection) await selectionChain
+      if (state.modelSelection && !(await reconcileModel())) return
+      if (state[buffer].model && (state.sessionModel?.providerID !== state[buffer].model?.providerID || state.sessionModel?.modelID !== state[buffer].model?.modelID))
+        await chooseSessionModel(state[buffer].model!)
+      if (state.modelSelection) return
+      if (state.error.startsWith("Model not selected:")) return
+    }
     const reason = blockedReason(mode, buffer)
     if (reason) {
       if (!direct) setState("error", reason)
@@ -598,7 +703,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       })
       persist()
       try {
-        await prompt(session, directory, text, { images: draft.images, model: draft.model ?? nextModel ?? undefined })
+        await prompt(state.sessionModel ? { ...session, preferredModel: { id: state.sessionModel.modelID, providerID: state.sessionModel.providerID } } : session, directory, text, { images: draft.images, model: state.sessionModel ? undefined : draft.model ?? nextModel ?? undefined })
         clearTask(draft.revision, buffer, direct?.targetRevision)
         setState("normalSubmission", "status", "accepted")
       } catch (error) {
@@ -781,6 +886,13 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     setVisibleText: (text: string) => updateDraft({ text }, true, state.visibleBuffer),
     setVisibleModel: (model: ComposerModel | null) =>
       updateDraft({ model: model ? { ...model } : null }, true, state.visibleBuffer),
+    chooseSessionModel,
+    reconcileSessionModel: reconcileModel,
+    observeSessionModel: (session: Session) => {
+      if (state.modelSelection || session.time.updated < sessionModelTime) return
+      sessionModelTime = session.time.updated
+      setState("sessionModel", session.preferredModel ? { providerID: session.preferredModel.providerID, modelID: session.preferredModel.id } : null)
+    },
     setVisibleSelection: (start: number, end: number) =>
       updateDraft({ selection: [start, end] }, false, state.visibleBuffer),
     reasonForAction: (action: ComposerAction) =>
@@ -931,6 +1043,8 @@ const isMode = (value: unknown): value is ComposerMode =>
   value === "send" || value === "aside" || value === "queue" || value === "steer"
 const isAction = (value: unknown): value is ComposerAction =>
   value === "aside" || value === "queue" || value === "steer"
+const isModel = (value: unknown): value is ComposerModel =>
+  record(value) && typeof value.providerID === "string" && typeof value.modelID === "string"
 const isDraft = (value: unknown): value is ComposerDraft =>
   record(value) &&
   typeof value.text === "string" &&

@@ -92,6 +92,13 @@ export function fromRow(row: SessionRow): Info {
           variant: row.model.variant,
         }
       : undefined,
+    preferredModel: row.model?.preferred
+      ? {
+          id: ModelV2.ID.make(row.model.preferred.id),
+          providerID: ProviderV2.ID.make(row.model.preferred.providerID),
+          variant: row.model.preferred.variant,
+        }
+      : undefined,
     version: row.version,
     summary,
     cost: row.cost,
@@ -128,7 +135,7 @@ export function toRow(info: Info) {
     path: info.path,
     title: info.title,
     agent: info.agent,
-    model: info.model,
+    model: info.model ? { ...info.model, preferred: info.preferredModel } : undefined,
     version: info.version,
     share_url: info.share?.url,
     summary_additions: info.summary?.additions,
@@ -236,6 +243,7 @@ export const Info = Schema.Struct({
   title: Schema.String,
   agent: optional(Schema.String),
   model: optional(Model),
+  preferredModel: optional(Model),
   version: Schema.String,
   metadata: optional(Metadata),
   time: Time,
@@ -434,6 +442,7 @@ export interface Interface {
     model: NonNullable<Info["model"]>
     time: number
   }) => Effect.Effect<void>
+  readonly setPreferredModel: (input: { sessionID: SessionID; model: NonNullable<Info["model"]> }) => Effect.Effect<void>
   readonly setPermission: (input: { sessionID: SessionID; permission: PermissionV1.Ruleset }) => Effect.Effect<void>
   readonly setRevert: (input: {
     sessionID: SessionID
@@ -775,6 +784,18 @@ const layer: Layer.Layer<
       }).pipe(Effect.orDie)
     })
 
+    const setPreferredModel = Effect.fn("Session.setPreferredModel")(function* (input: {
+      sessionID: SessionID
+      model: NonNullable<Info["model"]>
+    }) {
+      const current = yield* get(input.sessionID).pipe(Effect.orDie)
+      yield* patch(input.sessionID, {
+        model: input.model,
+        preferredModel: input.model,
+        time: { updated: Math.max(Date.now(), current.time.updated + 1) },
+      }).pipe(Effect.orDie)
+    })
+
     const setPermission = Effect.fn("Session.setPermission")(function* (input: {
       sessionID: SessionID
       permission: PermissionV1.Ruleset
@@ -914,6 +935,7 @@ const layer: Layer.Layer<
       setArchived,
       setMetadata,
       setAgentModel,
+      setPreferredModel,
       setPermission,
       setRevert,
       clearRevert,

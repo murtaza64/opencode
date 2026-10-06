@@ -36,6 +36,7 @@ const imageCapabilities = {
   sessionInput: { ...capabilities.sessionInput, images: imageCapability },
 }
 const model = { providerID: "provider", modelID: "model" }
+const selectedSession = { ...session, time: { created: 1, updated: 2 }, preferredModel: { id: "model", providerID: "provider", variant: "default" } } as Session
 const snapshot = {
   capturedAt: 123,
   throughMessageID: "msg_boundary",
@@ -108,6 +109,107 @@ const harness = (
   const composer = createComposer(session.id, directory, dependencies)
   return { composer, requests, storage, dependencies }
 }
+
+test("busy model selection waits for PATCH before admitting Queue and keeps Aside separate", async () => {
+  const patch = deferred<Response>()
+  const { composer, requests } = harness((request) => {
+    if (request.method === "PATCH") return patch.promise
+    if (request.method === "POST" && request.url.pathname.endsWith("/input")) return Response.json(pending())
+    throw new Error(`Unexpected ${request.method} ${request.url.pathname}`)
+  })
+  await composer.loadCapabilities()
+  composer.observeBusy(true)
+  composer.setText("next task")
+  composer.selectMode("aside")
+  composer.setModel({ providerID: "aside", modelID: "aside-model" })
+  composer.selectMode("queue")
+  const choosing = composer.chooseSessionModel(model)
+  const sending = composer.submit(session)
+  await Promise.resolve()
+  expect(requests.filter((request) => request.method === "POST")).toHaveLength(0)
+  expect(composer.state.task.text).toBe("next task")
+  expect(composer.state.aside.model).toEqual({ providerID: "aside", modelID: "aside-model" })
+  patch.resolve(Response.json(selectedSession))
+  await choosing
+  await sending
+  expect(requests.filter((request) => request.method === "POST")).toHaveLength(1)
+  expect(composer.state.sessionModel).toEqual(model)
+  expect(composer.state.aside.model).toEqual({ providerID: "aside", modelID: "aside-model" })
+})
+
+test("lost model PATCH response reconciles GET without replay, and mismatched GET blocks task input", async () => {
+  const { composer, requests } = harness((request) => {
+    if (request.method === "PATCH") throw new Error("connection lost")
+    if (request.method === "GET" && request.url.pathname.endsWith(session.id)) return Response.json(session)
+    throw new Error(`Unexpected ${request.method} ${request.url.pathname}`)
+  })
+  await composer.loadCapabilities()
+  composer.observeBusy(true)
+  composer.setText("do not admit")
+  await composer.chooseSessionModel(model)
+  await composer.submit(session)
+  expect(composer.state.modelSelection?.status).toBe("unknown")
+  expect(composer.state.task.text).toBe("do not admit")
+  expect(requests.filter((request) => request.method === "PATCH")).toHaveLength(1)
+  expect(requests.filter((request) => request.method === "POST")).toHaveLength(0)
+})
+
+test("two rapid selections serialize PATCHes and old replies cannot win", async () => {
+  const first = deferred<Response>()
+  const second = { providerID: "provider", modelID: "new-model" }
+  const { composer, requests } = harness((request) => {
+    if (request.method === "PATCH" && (request.body as { model: typeof model }).model.modelID === "model") return first.promise
+    if (request.method === "PATCH") return Response.json({ ...selectedSession, time: { created: 1, updated: 3 }, preferredModel: { id: "new-model", providerID: "provider" } })
+    throw new Error(`Unexpected ${request.method} ${request.url.pathname}`)
+  })
+  const older = composer.chooseSessionModel(model)
+  const newer = composer.chooseSessionModel(second)
+  await Promise.resolve()
+  expect(requests.filter((request) => request.method === "PATCH")).toHaveLength(1)
+  first.resolve(Response.json(selectedSession))
+  await Promise.all([older, newer])
+  expect(composer.state.sessionModel).toEqual(second)
+  expect(requests.filter((request) => request.method === "PATCH")).toHaveLength(2)
+  expect(requests.filter((request) => request.method === "POST")).toHaveLength(0)
+})
+
+test("restored task model reconciles only on submit and keeps image and input identity on rejection", async () => {
+  const storage = new MemoryStorage()
+  const first = harness((request) => {
+    if (request.method === "PATCH") return new Response("unavailable", { status: 400 })
+    throw new Error(`Unexpected ${request.method} ${request.url.pathname}`)
+  }, { storage }, imageCapabilities)
+  await first.composer.loadCapabilities()
+  first.composer.observeBusy(true)
+  first.composer.setText("legacy task")
+  first.composer.setImages([image])
+  first.composer.setModel(model)
+  const restored = createComposer(session.id, directory, first.dependencies)
+  await restored.loadCapabilities()
+  expect(first.requests.filter((request) => request.method === "PATCH")).toHaveLength(0)
+  await restored.submit(session)
+  expect(first.requests.filter((request) => request.method === "PATCH")).toHaveLength(1)
+  expect(first.requests.filter((request) => request.method === "POST")).toHaveLength(0)
+  expect(unwrap(restored.state.task)).toMatchObject({ text: "legacy task", model, images: [image] })
+  expect(restored.state.admission).toBeNull()
+})
+
+test("legacy model with lost PATCH acknowledgment reconciles before one admission without PATCH replay", async () => {
+  const { composer, requests } = harness((request) => {
+    if (request.method === "PATCH") throw new Error("lost response")
+    if (request.method === "GET" && request.url.pathname.endsWith(session.id)) return Response.json(selectedSession)
+    if (request.method === "POST" && request.url.pathname.endsWith("/input")) return Response.json(pending())
+    throw new Error(`Unexpected ${request.method} ${request.url.pathname}`)
+  })
+  await composer.loadCapabilities()
+  composer.observeBusy(true)
+  composer.setModel(model)
+  composer.setText("legacy selection")
+  await composer.submit(session)
+  expect(requests.filter((request) => request.method === "PATCH")).toHaveLength(1)
+  expect(requests.filter((request) => request.method === "POST")).toHaveLength(1)
+  expect(composer.state.task.model).toBeNull()
+})
 
 test("cached controllers survive reactive owner disposal and are keyed by both session and directory", () => {
   const first = createRoot((dispose) => {
@@ -346,7 +448,7 @@ test("media and model limits block without stripping drafts or falling back to n
   await composer.submit(session)
   expect(composer.blockedReason()).toContain("does not support images")
   composer.setImages([])
-  expect(composer.blockedReason()).toContain("session model")
+  expect(composer.blockedReason()).toBe("")
   composer.selectMode("aside")
   composer.setImages([image])
   await composer.submit(session)
@@ -386,13 +488,12 @@ test("normal acknowledgement clears only task contents, even while Aside is sele
   const ack = deferred<void>()
   const { composer } = harness(undefined, { prompt: () => ack.promise })
   composer.setText("task")
-  composer.setModel(model)
   const sending = composer.submit(session)
   composer.selectMode("aside")
   composer.setText("question")
   ack.resolve()
   await sending
-  expect(unwrap(composer.state.task)).toMatchObject({ text: "", images: [], model, selection: [0, 0] })
+  expect(unwrap(composer.state.task)).toMatchObject({ text: "", images: [], model: null, selection: [0, 0] })
   expect(composer.state.aside.text).toBe("question")
 })
 
@@ -479,7 +580,7 @@ test("Aside and Steer omit a saved Queue-agent override, and normal Send keeps i
     (request) =>
       request.url.pathname.endsWith("/aside")
         ? Response.json({ requestID: "request-1", text: "answer", snapshot })
-        : Response.json(pending("request-2", "task", "steer")),
+        : request.method === "PATCH" ? Response.json(selectedSession) : Response.json(pending("request-2", "task", "steer")),
     {
       prompt: async (session, _directory, _text, options) => {
         prompts.push({ session, options })
@@ -497,10 +598,10 @@ test("Aside and Steer omit a saved Queue-agent override, and normal Send keeps i
   expect(requests[2].body).toEqual({ requestID: "request-2", delivery: "steer", text: "task" })
   composer.selectMode("send")
   composer.setText("normal")
-  composer.setModel(model)
+  await composer.chooseSessionModel(model)
   composer.setImages([image])
   await composer.submit(session)
-  expect(prompts).toEqual([{ session, options: { model, images: [image] } }])
+  expect(prompts).toEqual([{ session: { ...session, preferredModel: { id: "model", providerID: "provider" } }, options: { model: undefined, images: [image] } }])
   expect(composer.state.queueAgent).toBe("plan")
 })
 

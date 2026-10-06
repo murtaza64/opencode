@@ -61,6 +61,11 @@ cliIt.live(
       yield* llm.wait(2)
       const pendingPayload = { requestID: "restart-pending", delivery: "steer", text: "keep pending" }
       const pending = yield* (yield* post(first.url, url, pendingPayload)).json
+      const preference = yield* client.patch(`${first.url}/session/${session.id}`, {
+        body: HttpBody.jsonUnsafe({ model: { providerID: "test", modelID: "test-model" } }),
+      })
+      expect(preference.status).toBe(200)
+      expect(yield* preference.json).toMatchObject({ preferredModel: { id: "test-model", providerID: "test" } })
       const cancelledPayload = { requestID: "restart-cancelled", delivery: "queue", text: "cancel this" }
       yield* post(first.url, url, cancelledPayload)
       const cancelled = yield* (yield* client.del(`${first.url}${url}/restart-cancelled`)).json
@@ -68,6 +73,9 @@ cliIt.live(
       yield* Effect.promise(() => first.exited)
 
       const second = yield* opencode.serve({ env, hostname: "127.0.0.1", port: yield* freePort })
+      expect(yield* (yield* client.get(`${second.url}/session/${session.id}`)).json).toMatchObject({
+        preferredModel: { id: "test-model", providerID: "test" },
+      })
       expect(yield* (yield* client.get(`${second.url}${url}/restart-pending`)).json).toEqual(pending)
       expect(yield* (yield* post(second.url, url, completedPayload)).json).toEqual(completed)
       expect(yield* (yield* post(second.url, url, cancelledPayload)).json).toEqual(cancelled)

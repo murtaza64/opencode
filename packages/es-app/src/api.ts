@@ -116,11 +116,11 @@ export const oc = {
     const parts: Record<string, unknown>[] = []
     if (text) parts.push({ type: "text", text })
     parts.push(...inputImages(opts.images ?? []))
-    // reuse the session's own agent; model defaults to the previous turn's
+    // A selected preference is resolved server-side, including its variant.
     const body: Record<string, unknown> = { parts, agent: session.agent }
     const model =
       opts.model ??
-      (session.model ? { providerID: session.model.providerID, modelID: session.model.id } : undefined)
+      (session.preferredModel ? undefined : session.model ? { providerID: session.model.providerID, modelID: session.model.id } : undefined)
     if (model) body.model = model
     const res = await fetch(`/oc/session/${session.id}/prompt_async?${q(directory)}`, {
       method: "POST",

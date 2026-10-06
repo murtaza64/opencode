@@ -49,10 +49,12 @@ export const SessionTable = sqliteTable(
     revert: text({ mode: "json" }).$type<Revert.State>(),
     permission: text({ mode: "json" }).$type<PermissionV1.Ruleset>(),
     agent: text(),
+    // Keep the explicit preference in the existing JSON column; historical rows have none.
     model: text({ mode: "json" }).$type<{
       id: string
       providerID: string
       variant?: string
+      preferred?: { id: string; providerID: string; variant?: string }
     }>(),
     ...Timestamps,
     time_compacting: integer(),

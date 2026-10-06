@@ -204,6 +204,11 @@ export type Session = {
     providerID: string
     variant?: string
   }
+  preferredModel?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
   version: string
   metadata?: {
     [key: string]: unknown
@@ -2315,6 +2320,11 @@ export type GlobalSession = {
     providerID: string
     variant?: string
   }
+  preferredModel?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
   version: string
   metadata?: {
     [key: string]: unknown
@@ -2788,6 +2798,11 @@ export type UmbrellaSession = {
   title: string
   agent?: string
   model?: {
+    id: string
+    providerID: string
+    variant?: string
+  }
+  preferredModel?: {
     id: string
     providerID: string
     variant?: string
@@ -10169,6 +10184,11 @@ export type SessionGetResponse = SessionGetResponses[keyof SessionGetResponses]
 
 export type SessionUpdateData = {
   body?: {
+    model?: {
+      providerID: string
+      modelID: string
+      variant?: string
+    }
     title?: string
     metadata?: {
       [key: string]: unknown

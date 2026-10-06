@@ -66,6 +66,7 @@ export const InputsQuery = Schema.Struct({
   ),
 })
 export const UpdatePayload = Schema.Struct({
+  model: Schema.optional(Schema.Struct({ providerID: ProviderV2.ID, modelID: ModelV2.ID, variant: Schema.optional(Schema.String) })),
   title: Schema.optional(Schema.String),
   metadata: Schema.optional(Session.Metadata),
   permission: Schema.optional(PermissionV1.Ruleset),
@@ -283,7 +284,7 @@ export const SessionApi = HttpApi.make("session")
           query: WorkspaceRoutingQuery,
           payload: UpdatePayload,
           success: described(Session.Info, "Successfully updated session"),
-          error: [HttpApiError.BadRequest, ApiNotFoundError],
+          error: [HttpApiError.BadRequest, ApiNotFoundError, InvalidRequestError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "session.update",

@@ -1,5 +1,6 @@
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Agent } from "@/agent/agent"
+import { Provider } from "@/provider/provider"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Command } from "@/command"
@@ -50,6 +51,7 @@ const tryParseJson = (text: string) =>
 export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", (handlers) =>
   Effect.gen(function* () {
     const session = yield* Session.Service
+    const provider = yield* Provider.Service
     const asideSvc = yield* SessionAside.Service
     const shareSvc = yield* SessionShare.Service
     const promptSvc = yield* SessionPrompt.Service
@@ -209,6 +211,20 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof UpdatePayload.Type
     }) {
       const current = yield* requireSession(ctx.params.sessionID)
+      if (ctx.payload.model) {
+        const selected = yield* provider.getModel(ctx.payload.model.providerID, ctx.payload.model.modelID).pipe(
+          Effect.mapError(() => new InvalidRequestError({ message: "Selected model is unavailable" })),
+        )
+        if (!selected.capabilities.input.text || !selected.capabilities.output.text)
+          return yield* new InvalidRequestError({ message: "Selected model does not support text turns" })
+        const variant = ctx.payload.model.variant
+        if (variant && variant !== "default" && !selected.variants?.[variant])
+          return yield* new InvalidRequestError({ message: "Selected model variant is unavailable" })
+        yield* session.setPreferredModel({
+          sessionID: ctx.params.sessionID,
+          model: { id: selected.id, providerID: selected.providerID, variant: variant ?? "default" },
+        })
+      }
       if (ctx.payload.title !== undefined) {
         yield* session.setTitle({ sessionID: ctx.params.sessionID, title: ctx.payload.title })
       }

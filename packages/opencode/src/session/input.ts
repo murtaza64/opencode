@@ -58,11 +58,12 @@ const make = Effect.gen(function* () {
     const name = payload.agent ?? session.agent ?? user?.agent
     const agent = name ? yield* agents.get(name) : yield* agents.defaultInfo()
     if (!agent) return yield* new Invalid({ message: `Unknown agent: ${name}` })
-    const model = session.model
+    const selected = session.preferredModel ?? session.model
+    const model = selected
       ? {
-          providerID: session.model.providerID,
-          modelID: session.model.id,
-          ...(session.model.variant && session.model.variant !== "default" ? { variant: session.model.variant } : {}),
+          providerID: selected.providerID,
+          modelID: selected.id,
+          ...(selected.variant && selected.variant !== "default" ? { variant: selected.variant } : {}),
         }
       : (user?.model ?? (yield* provider.defaultModel().pipe(Effect.orDie)))
     const images = payload.images?.length

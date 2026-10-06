@@ -227,6 +227,10 @@ function SessionView(props: { sessionID: string; directory: string }) {
   })
   const connected = () => !!session() && !live.loading() && !live.connectionError()
   createEffect(() => {
+    const current = session()
+    if (current) composer.observeSessionModel(current)
+  })
+  createEffect(() => {
     if (!connected()) return
     untrack(async () => {
       await composer.loadCapabilities()
@@ -542,8 +546,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     addImageFiles(files)
   }
 
-  // model for the next turn: follows the latest agent turn unless the user
-  // explicitly picks one from the dropdown
+  // Task selections persist on the session; Aside keeps its own draft model.
   const [providers] = createResource(() => oc.providers(directory).catch(() => ({ providers: [], default: {} })))
   // context usage of the latest completed turn (shared formula with the info
   // panel and sidebar hover card: all token classes vs the model's limit)
@@ -557,8 +560,9 @@ function SessionView(props: { sessionID: string; directory: string }) {
     const previous = messages().findLast((message) => message.role === "user")
     return session()?.agent ?? previous?.agent
   }
-  const modelChoice = () => activeDraft().model
-  const setModelChoice = composer.setVisibleModel
+  const modelChoice = () => composer.state.visibleBuffer === "aside"
+    ? composer.state.aside.model
+    : composer.state.modelSelection?.model ?? composer.state.sessionModel ?? composer.state.task.model
   const lastTurnModel = createMemo(() => {
     for (let i = messages().length - 1; i >= 0; i--) {
       const m = messages()[i] as any
@@ -567,12 +571,12 @@ function SessionView(props: { sessionID: string; directory: string }) {
     const s = session() as any
     return s?.model ? { providerID: s.model.providerID, modelID: s.model.id } : null
   })
-  const nextModel = () => modelChoice() ?? lastTurnModel()
+  const nextModel = () => composer.state.sessionModel ?? lastTurnModel()
 
   const nudge = async () => {
     const s = session()
     if (!s || nudgePhase() || aborting() || sending()) return
-    const model = composer.state.task.model ?? lastTurnModel() ?? undefined
+    const model = composer.state.sessionModel ?? lastTurnModel() ?? undefined
     setError("")
     setNudgePhase("stopping")
     try {
@@ -890,14 +894,23 @@ function SessionView(props: { sessionID: string; directory: string }) {
           {nudgePhase() === "stopping" ? "Stopping…" : nudgePhase() === "resuming" ? "Sending resume…" : "Nudge"}
         </button>
       </>}>
-      <label class="direct-setting"><select class="model-select" aria-label="Model override"
-        title="model for the next turn (defaults to the previous turn's)"
+      <label class="direct-setting"><select class="model-select" aria-label={composer.state.visibleBuffer === "aside" ? "Aside model" : "Session model"}
+        title={composer.state.visibleBuffer === "aside" ? "Model for this Aside only" : "Session model for future turns, including Steer and Queue"}
         value={modelChoice() ? `${modelChoice()!.providerID}\u0000${modelChoice()!.modelID}` : ""}
         onChange={(e) => {
           const [providerID, modelID] = e.currentTarget.value.split("\u0000")
-          setModelChoice(providerID && modelID ? { providerID, modelID } : null)
+          const model = providerID && modelID ? { providerID, modelID } : null
+          if (composer.state.visibleBuffer === "aside") composer.setVisibleModel(model)
+          else if (model) {
+            const selected = providers()?.providers.find((provider) => provider.id === providerID)?.models?.[modelID]
+            if (composer.state.task.images.length && selected?.capabilities?.input?.image === false) {
+              setError("Selected model does not support image input. Images and session model were not changed.")
+              return
+            }
+            void composer.chooseSessionModel(model)
+          }
         }}>
-        <option value="" selected={!modelChoice()}>Session model</option>
+        <option value="" disabled={composer.state.visibleBuffer !== "aside"} selected={!modelChoice()}>{composer.state.visibleBuffer === "aside" ? "Use session model" : "Choose session model"}</option>
         <For each={providers()?.providers ?? []}>
           {(prov) => (
             <optgroup label={prov.id}>
@@ -908,7 +921,9 @@ function SessionView(props: { sessionID: string; directory: string }) {
           )}
         </For>
       </select></label>
-      <Show when={modelChoice()}><button onClick={() => setModelChoice(null)}>Use session model</button></Show>
+      <Show when={composer.state.visibleBuffer === "aside" && modelChoice()}><button onClick={() => composer.setVisibleModel(null)}>Use session model</button></Show>
+      <Show when={composer.state.visibleBuffer !== "aside" && (busy() || composer.state.modelSelection)}><span class="dim">{composer.state.modelSelection ? "Confirming model…" : "Model changes apply to future turns"}</span></Show>
+      <Show when={composer.state.modelSelection?.status === "unknown"}><button onClick={() => { void composer.reconcileSessionModel() }}>Check session model</button></Show>
     </DirectComposer>
   )
 

@@ -213,6 +213,11 @@ export function createLiveSession(
   const reduce = (event: LiveEvent) => {
     const props = event.properties ?? {}
     switch (event.type) {
+      case "session.updated": {
+        if (props.sessionID !== sessionID || !props.info) break
+        setData("session", reconcile([props.info]))
+        break
+      }
       case "session.status": {
         setData("session_status", props.sessionID, reconcile(props.status))
         break

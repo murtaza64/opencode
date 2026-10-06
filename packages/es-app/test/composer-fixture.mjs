@@ -61,6 +61,11 @@ export const createFixture = async () => {
     notifications: undefined,
     issue: undefined,
     archived: new Set(),
+    sessionModels: new Map(),
+    holdModel: false,
+    modelReplies: [],
+    loseModel: false,
+    rejectModel: false,
     deleted: new Set(),
     failAction: "",
     holdAction: false,
@@ -236,7 +241,7 @@ export const createFixture = async () => {
     if (url.pathname === "/session/status") return json({ ses_a: { type: fixture.status }, ses_b: { type: "idle" } })
     if (url.pathname === "/config/providers")
       return json({
-        providers: [{ id: "fixture", models: { test: { id: "test", name: "Fixture model" } } }],
+        providers: [{ id: "fixture", models: { test: { id: "test", name: "Fixture model" }, next: { id: "next", name: "Next model" } } }],
         default: { fixture: "test" },
       })
     if (url.pathname === "/agent")
@@ -277,7 +282,7 @@ export const createFixture = async () => {
           ? "fork"
           : request.method === "POST" && action === "/abort"
             ? "abort"
-            : request.method === "PATCH" && !action
+            : request.method === "PATCH" && !action && !body?.model
               ? "archive"
               : request.method === "DELETE" && !action
                 ? "delete"
@@ -296,10 +301,22 @@ export const createFixture = async () => {
         }
         return complete()
       }
+      if (!action && request.method === "PATCH" && body?.model) {
+        if (fixture.rejectModel) return json({ error: "Selected model is unavailable" }, 400)
+        const complete = () => {
+          fixture.sessionModels.set(id, { id: body.model.modelID, providerID: body.model.providerID, variant: "default" })
+          const updated = { ...session(id), model: fixture.sessionModels.get(id), preferredModel: fixture.sessionModels.get(id), time: { created: 1, updated: Date.now() } }
+          fixture.emit("session.updated", { sessionID: id, info: updated })
+          if (fixture.loseModel) { fixture.loseModel = false; response.destroy(); return }
+          return json(updated)
+        }
+        if (fixture.holdModel) { fixture.modelReplies.push(complete); return }
+        return complete()
+      }
       if (!action) {
         const created = fixture.created.find((item) => item.id === id)
         return json(
-          { ...(created ?? session(id)), time: { ...(created ?? session(id)).time, ...(fixture.archived.has(id) ? { archived: 5 } : {}) } },
+          { ...(created ?? session(id)), ...(fixture.sessionModels.has(id) ? { model: fixture.sessionModels.get(id), preferredModel: fixture.sessionModels.get(id) } : {}), time: { ...(created ?? session(id)).time, ...(fixture.sessionModels.has(id) ? { updated: Date.now() } : {}), ...(fixture.archived.has(id) ? { archived: 5 } : {}) } },
           fixture.failSnapshot ? 503 : 200,
         )
       }
