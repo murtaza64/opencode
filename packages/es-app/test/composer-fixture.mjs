@@ -51,6 +51,10 @@ export const createFixture = async () => {
     abortedMessages: [],
     children: new Map(),
     permissions: undefined,
+    failPermissionReply: false,
+    holdPermissionReply: false,
+    permissionReplies: [],
+    permissionReplyQueue: [],
     questions: [],
     permissionsByDirectory: undefined,
     questionsByDirectory: undefined,
@@ -238,6 +242,20 @@ export const createFixture = async () => {
             { name: "explore", mode: "subagent" },
             { name: "hidden", mode: "primary", hidden: true },
           ])
+    const reply = /^\/permission\/([^/]+)\/reply$/.exec(url.pathname)
+    if (reply && request.method === "POST") {
+      if (fixture.failPermissionReply) return json({ error: "reply unavailable" }, 503)
+      const complete = () => {
+        fixture.permissions = (fixture.permissions ?? []).filter((item) => item.id !== reply[1])
+        fixture.permissionReplies.push({ id: reply[1], reply: body?.reply })
+        return json(true)
+      }
+      if (fixture.holdPermissionReply) {
+        fixture.permissionReplyQueue.push(complete)
+        return
+      }
+      return complete()
+    }
     if (url.pathname === "/permission")
       return json(
         fixture.permissionsByDirectory?.get(url.searchParams.get("directory")) ?? fixture.permissions ?? [

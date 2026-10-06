@@ -53,35 +53,52 @@ function PermissionBanner(props: { p: any; directory: string; owner?: string; on
       })
       .filter((e): e is [string, string] => e != null)
   }
+  // one-line gist for the sticky rail: the command, else the patterns, else the first path-like field
+  const summary = () => {
+    const m = props.p.metadata ?? {}
+    if (typeof m.command === "string" && m.command.trim()) return m.command.trim()
+    const patterns = (props.p.patterns ?? []).filter((x: unknown) => typeof x === "string" && x)
+    if (patterns.length) return patterns.join("  ")
+    return meta().find(([k]) => /path|file|dir|cwd|url/i.test(k))?.[1] ?? meta()[0]?.[1] ?? ""
+  }
+  const label = () => `Permission ${props.p.permission}${props.owner ? ` from subagent ${props.owner}` : ""}`
   return (
-    <div class="banner permission">
-      <Show when={props.owner}><div class="dim">from subagent: {props.owner}</div></Show>
-      <div class="banner-head">
-        permission: <b>{props.p.permission}</b>
-      </div>
-      <Show when={props.p.patterns?.length}>
-        <div class="banner-body mono">{props.p.patterns.join("\n")}</div>
-      </Show>
-      <Show when={meta().length}>
-        <div class="banner-body mono">
-          <For each={meta()}>
-            {([k, v]) => (
-              <div>
-                <span class="dim">{k}:</span> {String(v)}
-              </div>
-            )}
-          </For>
+    <section class="banner permission" aria-label={label()}>
+      {/* actions stay pinned while long details scroll beneath them */}
+      <div class="permission-rail">
+        <div class="permission-identity">
+          <span class="dot pending" aria-hidden="true" />
+          <span class="permission-kind">permission: <b>{props.p.permission}</b></span>
+          <Show when={props.owner}><span class="dim permission-owner">from subagent: {props.owner}</span></Show>
         </div>
-      </Show>
-      <div class="banner-actions">
-        <button disabled={sending()} onClick={() => act("once")}>allow once</button>
-        <button disabled={sending()} onClick={() => act("always")}>always</button>
-        <button disabled={sending()} class="danger" onClick={() => act("reject")}>
-          reject
-        </button>
+        <Show when={summary()}><bdi class="permission-summary mono" dir="ltr" title={summary()}>{summary()}</bdi></Show>
+        <div class="banner-actions">
+          <button disabled={sending()} onClick={() => act("once")}>allow once</button>
+          <button disabled={sending()} onClick={() => act("always")}>always</button>
+          <button disabled={sending()} class="danger" onClick={() => act("reject")}>reject</button>
+        </div>
       </div>
+      <Show when={props.p.patterns?.length || meta().length}>
+        <details class="permission-details">
+          <summary>details</summary>
+          <Show when={props.p.patterns?.length}>
+            <div class="banner-body mono">{props.p.patterns.join("\n")}</div>
+          </Show>
+          <Show when={meta().length}>
+            <div class="banner-body mono">
+              <For each={meta()}>
+                {([k, v]) => (
+                  <div>
+                    <span class="dim">{k}:</span> {String(v)}
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+        </details>
+      </Show>
       <Show when={error()}><div class="err" role="alert">{error()}</div></Show>
-    </div>
+    </section>
   )
 }
 
