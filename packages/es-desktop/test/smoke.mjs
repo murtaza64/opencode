@@ -50,7 +50,12 @@ try {
   const origin = new URL(page.url()).origin
   await page.goto(`${origin}/session/ses_a?directory=${encodeURIComponent(directory)}`)
   const active = page.locator(".float-editor").or(page.locator(".prompt-box:not([inert])"))
-  await expect(active.getByRole("radio", { name: "Queue", exact: true })).toHaveAttribute("aria-checked", "true")
+  const queue = active.getByRole("button", { name: "Queue", exact: true })
+  const queueAgent = active.getByRole("combobox", { name: "Queue agent", exact: true })
+  await expect(active.locator(".direct-composer")).toBeVisible()
+  await expect(active.getByRole("button", { name: "Steer", exact: true })).toHaveAttribute("data-keyboard-target", "true")
+  await expect(queue).toBeDisabled()
+  await expect(queueAgent).toBeDisabled()
   expect(
     await app.evaluate(({ BrowserWindow }) => {
       const prefs = BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences()
@@ -70,17 +75,26 @@ try {
   ])
   expect((await fetch(origin)).status).toBe(403)
   expect(await page.evaluate(() => fetch("/oc/pty", { method: "POST" }).then((res) => res.status))).toBe(403)
-  await expect(active.getByRole("combobox", { name: "Queue agent", exact: true })).toBeEnabled()
-  await active.getByRole("combobox", { name: "Queue agent", exact: true }).selectOption("plan")
+  await active.locator("textarea").press("Meta+m")
+  await expect(queue).toHaveAttribute("data-keyboard-target", "true")
+  await expect(queueAgent).toBeEnabled()
+  await queueAgent.selectOption("plan")
   await active.locator("textarea").fill("Electron fixture queue")
-  await active.getByRole("button", { name: "Queue message", exact: true }).click()
+  await expect(queue).toBeEnabled()
+  await queue.click()
   await expect(page.locator(".input-receipts")).toContainText("Electron fixture queue")
   expect(fixture.receipts).toHaveLength(1)
   expect(fixture.receipts[0].agent).toBe("plan")
+  expect(fixture.calls.filter((call) => call.method === "POST" && call.path.endsWith("/input"))).toMatchObject([
+    { directory, body: { delivery: "queue", agent: "plan", text: "Electron fixture queue" } },
+  ])
+  expect(fixture.calls.filter((call) => call.method === "POST" && call.path.endsWith("/prompt_async"))).toEqual([])
   await page.screenshot({ path: path.join(artifacts, "native-session.png") })
   fixture.setStatus("idle")
-  await expect(page.getByRole("button", { name: "Use normal Send", exact: true })).toBeVisible()
-  expect(fixture.calls.find((call) => call.path.endsWith("/input") && call.method === "POST").directory).toBe(directory)
+  await expect(active.getByRole("button", { name: "Send", exact: true })).toBeVisible()
+  await expect(queue).toHaveCount(0)
+  await expect(queueAgent).toBeDisabled()
+  expect(fixture.receipts).toHaveLength(1)
 
   await checkExternalLinks(app, page, origin)
   await page.evaluate(() => {
@@ -112,10 +126,13 @@ try {
   })
   await expect(active.locator("textarea")).toBeVisible()
   await page.screenshot({ path: path.join(artifacts, "native-rtl.png") })
+  expect(
+    fixture.calls.filter((call) => !["GET", "HEAD", "OPTIONS"].includes(call.method)).map((call) => [call.method, call.path]),
+  ).toEqual([["POST", "/session/ses_a/input"]])
   expect(errors).toEqual([])
   await page.evaluate(() => localStorage.setItem("es-app-left-open", "0"))
   console.info(
-    "PASS native UI, sandbox, queue/API/SSE, protected loopback, navigation, safe links, denied permissions, WASM, RTL",
+    "PASS native UI, sandbox, direct Queue/API/events, protected loopback, navigation, safe links, denied permissions, WASM, RTL",
   )
 
   await fixture.close()
