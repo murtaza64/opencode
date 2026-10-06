@@ -23,7 +23,7 @@ export const NewSession = (props: { compact?: boolean }) => {
   const [directory, setDirectory] = createSignal("")
   const [pending, setPending] = createSignal(false)
   const [error, setError] = createSignal("")
-  const [anchor, setAnchor] = createSignal<{ top?: number; bottom?: number; start: number }>({ top: 0, start: 0 })
+  const [anchor, setAnchor] = createSignal({ top: 0, start: 0 })
   let button: HTMLButtonElement | undefined
   let form: HTMLFormElement | undefined
   const projects = () => dashboard.editspaces()?.editspaces ?? []
@@ -49,11 +49,8 @@ export const NewSession = (props: { compact?: boolean }) => {
     const beside = props.compact && window.innerWidth > 600 // the mini rail runs horizontally on phones
     const start = Math.max(8, Math.min(beside ? (rtl ? window.innerWidth - rect.left : rect.right) + 4 : rtl ? window.innerWidth - rect.right : rect.left,
       window.innerWidth - width - 8))
-    // flip above a button near the bottom of a scrolled sidebar so the form stays on screen
-    const estimate = 190
-    const below = beside ? rect.top : rect.bottom + 4
-    if (below + estimate <= window.innerHeight || rect.top < estimate) return setAnchor({ top: Math.max(8, Math.min(below, window.innerHeight - estimate)), start })
-    setAnchor({ bottom: window.innerHeight - (beside ? rect.bottom : rect.top - 4), start })
+    // the button sits atop the sidebar, so only a very short viewport needs the form pulled up
+    setAnchor({ top: Math.max(8, Math.min(beside ? rect.top : rect.bottom + 4, window.innerHeight - 190)), start })
   }
   const show = () => {
     const initial = dashboard.allProjects() ? "" : current()
@@ -121,8 +118,7 @@ export const NewSession = (props: { compact?: boolean }) => {
     </button>
     <Show when={open()}>
       <form ref={form} class="new-session-form" role="dialog" aria-label="New session"
-        style={{ top: anchor().top === undefined ? undefined : `${anchor().top}px`, bottom: anchor().bottom === undefined ? undefined : `${anchor().bottom}px`,
-          "inset-inline-start": `${anchor().start}px` }}
+        style={{ top: `${anchor().top}px`, "inset-inline-start": `${anchor().start}px` }}
         onSubmit={(event) => { event.preventDefault(); void create() }}>
         <label class="new-session-field">
           <span>Project</span>

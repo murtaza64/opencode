@@ -221,6 +221,15 @@ export default function Sidebar() {
     >
       <nav class="sidebar" ref={setNavEl} style={{ width: `${leftWidth()}px` }}>
         <Show when={!nativeHeader}><div class="sidebar-top">{projectControls()}</div></Show>
+        {/* always above the fold: the board is per project (All has none until it is redesigned) */}
+        <div class="sidebar-actions">
+          <Show when={!allProjects()}>
+            <A href="/" end activeClass="active" class="nav-item board-link">
+              ▦ board
+            </A>
+          </Show>
+          <NewSession />
+        </div>
         <Show when={!query().trim() && pinnedSessions().length}>
           <section class="pinned-section" aria-label="Pinned sessions">
             <div class="nav-heading">Pinned</div>
@@ -256,15 +265,6 @@ export default function Sidebar() {
             </For>
           </div>
         </Show>
-        {/* the board is per project; All has no board until it is redesigned */}
-        <div class="sidebar-actions">
-          <Show when={!allProjects()}>
-            <A href="/" end activeClass="active" class="nav-item board-link">
-              ▦ board
-            </A>
-          </Show>
-          <NewSession />
-        </div>
         <div class="search-box">
           <input
             class="search-input"

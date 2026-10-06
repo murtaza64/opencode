@@ -601,7 +601,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
   font-size: 10px;
   color: var(--overlay1);
 }
-.sidebar-actions { display: flex; align-items: center; gap: 4px; padding-inline-end: 10px; }
+.sidebar-actions { display: flex; align-items: center; gap: 4px; padding: 0 10px 6px 0; margin-bottom: 4px; border-bottom: 1px solid var(--surface0); }
+.sidebar-actions:not(:has(.board-link)) { justify-content: flex-end; }
 .sidebar-actions .board-link { flex: 1; min-width: 0; }
 .board-link { font-weight: bold; color: var(--text); }
 .new-session { position: relative; flex-shrink: 0; margin-inline-start: auto; }
