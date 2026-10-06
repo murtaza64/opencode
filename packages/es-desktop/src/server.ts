@@ -4,6 +4,8 @@ import { realpath, stat } from "node:fs/promises"
 import path from "node:path"
 import { randomBytes } from "node:crypto"
 import { apiAllowed, serviceURL } from "./policy"
+import { eventMux } from "../../es-app/event-mux"
+import { eventProtocol, eventPaths } from "../../es-app/event-protocol"
 
 const csp =
   "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
@@ -66,6 +68,11 @@ export const serve = async (options: {
   const root = await realpath(options.root)
   const key = randomBytes(32).toString("hex")
   const upstreams = new Set<ReturnType<typeof request>>()
+  const allowed = (req: { headers: IncomingHttpHeaders }) =>
+    req.headers.host === new URL(origin).host &&
+    req.headers["x-editspace-key"] === key &&
+    (!req.headers.origin || req.headers.origin === origin) &&
+    req.headers["sec-fetch-site"] !== "cross-site"
   const server = createServer(async (req, res) => {
     res.setHeader("Content-Security-Policy", csp)
     res.setHeader("X-Content-Type-Options", "nosniff")
@@ -75,17 +82,16 @@ export const serve = async (options: {
       res.writeHead(status, { "content-type": type })
       res.end(body)
     }
-    if (
-      req.headers.host !== new URL(origin).host ||
-      req.headers["x-editspace-key"] !== key ||
-      (req.headers.origin && req.headers.origin !== origin) ||
-      req.headers["sec-fetch-site"] === "cross-site"
-    ) {
+    if (!allowed(req)) {
       finish(403, "Forbidden")
       return
     }
     const url = new URL(req.url ?? "/", origin)
     if (url.origin !== origin) return finish(403, "Forbidden")
+    if (url.pathname === "/__es/events") {
+      if (req.method !== "GET" || url.search) return finish(403, "Forbidden")
+      return finish(200, JSON.stringify({ protocol: eventProtocol }), "application/json")
+    }
     const api = /^\/(oc|es)(\/|$)/.exec(url.pathname)
     if (api && !apiAllowed(req.method ?? "", url.pathname)) return finish(403, "API route not exposed")
     const target = api ? targets[api[1] as keyof typeof targets] : renderer
@@ -173,6 +179,24 @@ export const serve = async (options: {
     res.on("close", () => stream.destroy())
     stream.pipe(res)
   })
+  const mux = eventMux({
+    rejectUnknown: true,
+    origin: () => origin,
+    authorize: (req) =>
+      allowed(req) && req.headers.origin === origin && req.method === "GET" &&
+      !new URL(req.url ?? "/", origin).search,
+    upstream: (prefix, requested) => {
+      if (!eventPaths.includes(requested.pathname) || !apiAllowed("GET", requested.pathname))
+        throw new Error("Event path not exposed")
+      const target = targets[prefix === "/oc" ? "oc" : "es"]
+      if (!target) throw new Error("Event service not configured")
+      return {
+        url: `${target}${requested.pathname.slice(prefix.length)}${requested.search}`,
+        headers: prefix === "/oc" && options.opencodeAuth ? { authorization: options.opencodeAuth } : undefined,
+      }
+    },
+  })
+  server.on("upgrade", mux.upgrade)
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject)
     server.listen(options.port ?? 0, "127.0.0.1", resolve)
@@ -184,6 +208,8 @@ export const serve = async (options: {
     origin,
     key,
     close: async () => {
+      server.off("upgrade", mux.upgrade)
+      mux.close()
       upstreams.forEach((upstream) => upstream.destroy())
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()))

@@ -36,12 +36,16 @@ const start = async () => {
   isolated.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   isolated.setPermissionCheckHandler(() => false)
   isolated.on("will-download", (event) => event.preventDefault())
+  const local = (value: string) => {
+    const url = new URL(value)
+    return url.host === new URL(server.origin).host && ["http:", "ws:"].includes(url.protocol)
+  }
   isolated.webRequest.onBeforeRequest((details, callback) => {
-    callback({ cancel: new URL(details.url).origin !== server.origin })
+    callback({ cancel: !local(details.url) })
   })
   isolated.webRequest.onBeforeSendHeaders((details, callback) => {
     // The renderer never receives the capability protecting the loopback listener.
-    if (new URL(details.url).origin === server.origin) details.requestHeaders["x-editspace-key"] = server.key
+    if (local(details.url)) details.requestHeaders["x-editspace-key"] = server.key
     callback({ requestHeaders: details.requestHeaders })
   })
   const window = new BrowserWindow({

@@ -181,6 +181,14 @@ test("streams events before upstream completion and cancels on client disconnect
   await reader.cancel().catch(() => {})
 })
 
+test("exposes only a keyed protocol capability and no unauthenticated access", async () => {
+  const { server, get } = await setup()
+  expect(await (await get("/__es/events")).json()).toEqual({ protocol: "opencode-events-v1" })
+  expect((await fetch(`${server.origin}/__es/events`)).status).toBe(403)
+  expect((await get("/__es/events", { headers: { origin: "https://evil.test" } })).status).toBe(403)
+  expect((await get("/__es/events?unexpected=1")).status).toBe(403)
+})
+
 test("shows an offline document and API failure when attached services stop", async () => {
   const { get, upstream } = await setup()
   await upstream.stop(true)

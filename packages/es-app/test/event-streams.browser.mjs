@@ -303,18 +303,20 @@ try {
     const { serve } = await dev.ssrLoadModule(fileURLToPath(new URL("../../es-desktop/src/server.ts", import.meta.url)))
     const native = await serve({ root: path.join(scratch, "dist"), opencode: fixture.url, dashboard: fixture.url })
     cleanups.push(() => native.close())
-    const nativeContext = await browser.newContext({
-      userAgent: "Mozilla/5.0 Electron/40.0",
-      extraHTTPHeaders: { "x-editspace-key": native.key },
-    })
-    try {
+    for (const fallback of [false, true]) {
+      const nativeContext = await browser.newContext({
+        userAgent: "Mozilla/5.0 Electron/40.0",
+        extraHTTPHeaders: { "x-editspace-key": native.key },
+      })
+      try {
       const page = await nativeContext.newPage()
+      if (fallback) await page.route("**/__es/events", (route) => route.fulfill({ status: 404, body: "Unavailable" }))
       const sockets = []
       page.on("websocket", (socket) => sockets.push(socket.url()))
       await page.goto(`${native.origin}/session/ses_a?directory=${encodeURIComponent(directory)}`)
       await expect(page.locator(".topbar")).toContainText("Composer fixture")
       await expect.poll(() => fixture.eventStreams.size).toBe(4)
-      expect(sockets).toEqual([])
+      expect(sockets.map((url) => new URL(url).pathname).sort()).toEqual(fallback ? [] : ["/es/api/notification-events", "/oc/global/event"])
       const nativeInfo = {
         id: "msg_native",
         sessionID: "ses_a",
@@ -351,11 +353,12 @@ try {
       const denied = await fetch(`${native.origin}/oc/session/status`)
       expect(denied.status).toBe(403)
       await denied.body?.cancel()
-      console.log(JSON.stringify({ nativeServerFallback: "passed", unauthorized: 403, websocketConnections: 0 }))
-    } finally {
-      await nativeContext.close()
+      console.log(JSON.stringify({ native: fallback ? "SSE fallback" : "WS mux", unauthorized: 403, websocketConnections: sockets.length }))
+      } finally {
+        await nativeContext.close()
+      }
+      await expect.poll(() => fixture.eventStreams.size).toBe(0)
     }
-    await expect.poll(() => fixture.eventStreams.size).toBe(0)
   }
 } finally {
   await Promise.allSettled(cleanups.map((close) => Promise.resolve().then(close)))

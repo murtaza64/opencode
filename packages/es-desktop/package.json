@@ -20,6 +20,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "devDependencies": {
+    "@types/ws": "8.18.1",
     "@opencode-ai/es-app": "workspace:*",
     "@playwright/test": "catalog:",
     "@types/bun": "catalog:",
@@ -28,6 +29,10 @@
     "electron": "42.3.3",
     "electron-builder": "26.15.2",
     "vite": "catalog:"
+  },
+  "dependencies": {
+    "eventsource": "3.0.7",
+    "ws": "8.21.0"
   },
   "build": {
     "appId": "ai.opencode.es-desktop",

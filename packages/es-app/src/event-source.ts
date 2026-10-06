@@ -158,8 +158,7 @@ const hubs = new Map<string, ReturnType<typeof createEventHub>>()
 let capability: Promise<boolean> | undefined
 
 export const createServerEvents = (url: string): ServerEvents => {
-  // The protected Electron origin has no WebSocket bridge; retain its keyed HTTP transport.
-  if (typeof window === "undefined" || /Electron\//.test(navigator.userAgent)) return new EventSource(url)
+  if (typeof window === "undefined") return new EventSource(url)
   capability ??= fetch("/__es/events")
     .then(async (response) => {
       if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) {
