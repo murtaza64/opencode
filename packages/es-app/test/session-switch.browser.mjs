@@ -1,4 +1,6 @@
 import { createRequire } from "node:module"
+import { execFileSync } from "node:child_process"
+import { fileURLToPath } from "node:url"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -6,7 +8,10 @@ import { startPanelPreview } from "./composer-panel-preview.mjs"
 import { session } from "./composer-fixture.mjs"
 
 const { chromium, _electron, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
-const preview = await startPanelPreview()
+const prior = process.argv.includes("--pre147") && execFileSync("jj", ["file", "show", "-r", "849a6b4238ff", "packages/es-app/src/live-session.ts"],
+  { cwd: fileURLToPath(new URL("../../..", import.meta.url)), encoding: "utf8" })
+const preview = await startPanelPreview(prior ? [{ name: "pre147-session-switch", enforce: "pre",
+  transform(_code, id) { return id.endsWith("/src/live-session.ts") ? prior : undefined } }] : [])
 const fixture = preview.fixture
 fixture.sessionIDs.push("ses_c")
 fixture.children.set("ses_child", { session: { ...session("ses_child"), parentID: "ses_a", title: "Child inspection" }, messages: [] })
@@ -95,7 +100,8 @@ try {
   await tab()
   expect(new URL(page.url()).pathname).toBe("/session/ses_a")
   await expect(page.getByLabel("Model override", { exact: true })).not.toBeFocused()
-  await page.getByRole("button", { name: "Explore Inspect child" }).click()
+  await expect(page.locator(".topbar")).toContainText("Composer fixture")
+  await page.locator('[data-tool="task"]').getByRole("button", { name: /Inspect child/ }).click()
   const dialog = page.getByRole("dialog")
   await expect(dialog).toContainText("No messages yet.")
   await dialog.locator(".subagent-transcript").focus()
