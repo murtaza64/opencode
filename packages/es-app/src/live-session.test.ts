@@ -404,6 +404,43 @@ test("concurrent loads share one snapshot request", async () => {
   expect(fetchSpy).toHaveBeenCalledTimes(3)
 })
 
+test("initial stream open during a snapshot does not fetch messages again", async () => {
+  const gate = Promise.withResolvers<void>()
+  fetchSpy.mockImplementation(async (input) => {
+    if (String(input).includes("/message?")) await gate.promise
+    return response(input)
+  })
+  const live = start()
+  const loading = live.load()
+  SessionEvents.current.onopen?.()
+  gate.resolve()
+  await loading
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(fetchSpy.mock.calls.filter(([input]) => String(input).includes("/message?"))).toHaveLength(1)
+})
+
+test("a lost stream reopening during a snapshot still repairs the missed gap", async () => {
+  const gate = Promise.withResolvers<void>()
+  const started = Promise.withResolvers<void>()
+  fetchSpy.mockImplementation(async (input) => {
+    if (String(input).includes("/message?")) started.resolve()
+    await gate.promise
+    return response(input)
+  })
+  const live = start()
+  const loading = live.load()
+  SessionEvents.current.onerror?.()
+  await started.promise
+  snapshot = [{ info: user(), parts: [] }]
+  SessionEvents.current.onopen?.()
+  gate.resolve()
+  await loading
+  await live.load()
+  expect(fetchSpy.mock.calls.filter(([input]) => String(input).includes("/message?"))).toHaveLength(2)
+  expect(live.data.message.ses_current?.map((message) => message.id)).toEqual(["msg_001"])
+})
+
 test("automatic reconnect load failures reach reactive accessors without an explicit caller", async () => {
   const live = start()
   await live.load()
@@ -635,12 +672,16 @@ test("a full part repairs ambiguous text without another snapshot", async () => 
 test("SSE opening during a stale snapshot schedules recovery of the subscription gap", async () => {
   const live = start()
   const gate = Promise.withResolvers<void>()
+  const started = Promise.withResolvers<void>()
   fetchSpy.mockImplementation(async (input) => {
     const result = response(input)
+    if (String(input).includes("/message?")) started.resolve()
     await gate.promise
     return result
   })
   const loading = live.load()
+  SessionEvents.current.onerror?.()
+  await started.promise
   snapshot = [{ info: user("msg_003"), parts: [] }]
   SessionEvents.current.onopen?.()
   fetchSpy.mockImplementation(async (input) => response(input))

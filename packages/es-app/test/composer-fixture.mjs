@@ -46,6 +46,9 @@ export const createFixture = async () => {
     receipts: [],
     messages: undefined,
     messagesB: [],
+    holdMessages: new Map(),
+    messageReplies: [],
+    abortedMessages: [],
     children: new Map(),
     permissions: undefined,
     questions: [],
@@ -279,7 +282,7 @@ export const createFixture = async () => {
       if (action === "/message") {
         const limit = url.searchParams.get("limit")
         const slice = (list) => limit ? list.slice(-Number(limit)) : list
-        return json(slice(
+        const messages = slice(
           id === "ses_a"
             ? (fixture.messages ?? [
                 {
@@ -312,7 +315,15 @@ export const createFixture = async () => {
                 },
               ])
             : fixture.messagesB,
-        ))
+        )
+        if (fixture.holdMessages.has(id)) {
+          response.on("close", () => {
+            if (!response.writableEnded) fixture.abortedMessages.push(id)
+          })
+          fixture.messageReplies.push(() => json(messages))
+          return
+        }
+        return json(messages)
       }
       if (action === "/prompt_async" && request.method === "POST") {
         if (fixture.rejectImages && body.parts.some((part) => part.type === "file"))

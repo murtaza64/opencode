@@ -108,6 +108,9 @@ export function createLiveSession(
   let activeLoad: Promise<void> | undefined
   let duringLoad: LiveEvent[] | undefined
   let refreshAfterLoad = false
+  let snapshotStarted = false
+  let streamOpened = false
+  let releaseInitial: (() => void) | undefined
   const uncertainParts = new Set<string>()
 
   const load = (): Promise<void> => {
@@ -116,6 +119,20 @@ export function createLiveSession(
     setLoading(true)
     duringLoad = []
     activeLoad = (async () => {
+      if (!snapshotStarted && !streamOpened && source) {
+        // Subscribe before the first snapshot so its one GET cannot miss events
+        // between server capture and stream admission. Do not block offline loads.
+        await new Promise<void>((resolve) => {
+          const timeout = setTimeout(resolve, 200)
+          releaseInitial = () => {
+            clearTimeout(timeout)
+            resolve()
+          }
+        })
+        releaseInitial = undefined
+      }
+      if (disposed) return
+      snapshotStarted = true
       const [session, messages, status] = await Promise.all([
         oc.session(sessionID, directory, controller.signal),
         oc.messages(sessionID, directory, controller.signal),
@@ -314,10 +331,13 @@ export function createLiveSession(
     source.onopen = () => {
       if (disposed) return
       setConnection("stream", "")
-      refresh()
+      streamOpened = true
+      releaseInitial?.()
+      if (!activeLoad || snapshotStarted) refresh()
     }
     source.onerror = () => {
       if (disposed) return
+      releaseInitial?.()
       batch(() => {
         setConnection("stream", "Session connection lost. Reconnecting...")
         stopOnFailure()
