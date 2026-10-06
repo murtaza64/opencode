@@ -945,6 +945,14 @@ table { border-collapse: collapse; font-size: 12.5px; width: 100%; max-width: 98
 td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .session-list { font-size: 13px; }
 
+/* All-projects landing (no per-project board under All) */
+.all-landing .session-list { max-width: 980px; }
+.all-landing .session-list .pr { display: flex; gap: 10px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid var(--surface0); }
+.all-landing .session-list .pr > a { display: inline-flex; gap: 6px; align-items: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.all-landing .session-list .pr > .dim { margin-inline-start: auto; flex-shrink: 0; font-size: 12px; white-space: nowrap; }
+.all-landing-project h2 { display: flex; gap: 8px; align-items: baseline; }
+.all-landing-board { font-size: 11px; padding: 1px 8px; color: var(--lavender); background: var(--mantle); text-transform: none; letter-spacing: normal; font-weight: normal; }
+
 .context-pct { font-size: 11px; color: var(--subtext0); font-family: var(--font-mono); text-align: right; }
 .context-pct.warn { color: var(--yellow); }
 .context-pct.high { color: var(--red); }

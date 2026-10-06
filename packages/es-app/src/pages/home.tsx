@@ -1,7 +1,7 @@
 /* Home = the es dashboard: attention queue + thread cards, from :7777. */
 import { createMemo, createSignal, For, onMount, Show } from "solid-js"
 import { A, useNavigate } from "@solidjs/router"
-import { ago, linkUrl, sessionHref, useDashboard } from "../state"
+import { ago, linkUrl, sessionHref, useDashboard, type SessionRow } from "../state"
 import { ticketUrl } from "../ticket-url"
 import { es as esApi } from "../api"
 import { PrList } from "../components/pr"
@@ -327,6 +327,87 @@ function AllSessions() {
   )
 }
 
+/* All-projects landing: the board is per project, so `/` under All lists every
+ * active root session grouped by project instead of one project's board. */
+function AllProjectsLanding() {
+  const { sessions, sessionsLoading, sessionsError, notifications, dotFor, editspaces, setEditspace, markViewed } =
+    useDashboard()
+  const groups = createMemo(() => {
+    const byProject = new Map<string, SessionRow[]>()
+    for (const s of sessions()) {
+      const key = s.project || s.directory.split("/").filter(Boolean).at(-1) || s.directory
+      byProject.set(key, [...(byProject.get(key) ?? []), s])
+    }
+    // sessions() is activity-sorted, so each group's first row is its newest
+    return [...byProject].sort((a, b) => b[1][0].updated - a[1][0].updated)
+  })
+  // a group has a board when any of its sessions lives under a registered editspace
+  const boardFor = (name: string, rows: SessionRow[]) => (editspaces()?.editspaces ?? []).find((item) => {
+    const root = item.root.replace(/\/+$/, "").replace(/\/\.editspace$/, "")
+    return item.name === name || rows.some((s) => s.directory === root || s.directory.startsWith(`${root}/`))
+  })?.name
+  return (
+    <main class="all-landing">
+      <AppHeader>
+        <h1>All projects</h1>
+        <span class="dim">
+          {sessions().length} active session{sessions().length === 1 ? "" : "s"} · {groups().length} project{groups().length === 1 ? "" : "s"}
+        </span>
+        <span style="flex:1" />
+        <span class="dim">choose a project for its board</span>
+      </AppHeader>
+      <Show when={notifications().length}>
+        <h2>Needs you</h2>
+        <div class="session-list">
+          <For each={notifications()}>
+            {(n) => (
+              <div class="pr">
+                <A href={sessionHref(n.session, n.directory)} onClick={() => markViewed(n.session, true)}>
+                  <span class={`dot ${dotFor({ id: n.session, updated: n.updated, pending: n.kind !== "idle" })}`} />
+                  <SessionIcon />
+                  {n.title}
+                </A>
+                <span class="dim">{n.editspace ? `${n.editspace} · ` : ""}{n.kind}</span>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
+      <Show when={sessionsError()}><div class="err">{sessionsError()}</div></Show>
+      <Show when={groups().length} fallback={<div class="dim">{sessionsLoading() ? "loading…" : "no active sessions"}</div>}>
+        <For each={groups()}>
+          {([project, rows]) => (
+            <section class="all-landing-project" aria-label={project}>
+              <h2>
+                {project} <span class="dim">({rows.length})</span>
+                <Show when={boardFor(project, rows)}>
+                  {(name) => <button type="button" class="all-landing-board" title={`${name()} board`} onClick={() => setEditspace(name())}>
+                    {name() === project ? "board" : `${name()} board`}
+                  </button>}
+                </Show>
+              </h2>
+              <div class="session-list">
+                <For each={rows}>
+                  {(s) => (
+                    <div class="pr">
+                      <A href={sessionHref(s.id, s.directory)} title={s.directory}>
+                        <span class={`dot ${dotFor(s)}`} />
+                        <SessionIcon />
+                        {s.title || s.id}
+                      </A>
+                      <span class="dim">{dotFor(s)} · {ago(s.updated)}</span>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </section>
+          )}
+        </For>
+      </Show>
+    </main>
+  )
+}
+
 /* Front desk composer: one ask opens the concierge session (a normal session
  * view). A busy front desk absorbs the ask — we navigate to it either way. */
 function FrontDesk() {
@@ -410,87 +491,89 @@ export default function Home() {
   }
 
   return (
-    <Show when={state()} fallback={<div class="dim">loading… (is es-dashboard running on :7777?)</div>}>
-      {(st) => (
-        <main>
-          <AppHeader>
-            <h1>{st().editspace}</h1>
-            <span class="dim">
-              updated {ago(st().generated_at * 1000)} · tracker {st().tracker_at ? ago(st().tracker_at * 1000) : "never"} · prs{" "}
-              {st().prs_at ? ago(st().prs_at * 1000) : "never"}
-            </span>
-            <span class="err">
-              {[st().tracker_error && `tracker: ${st().tracker_error}`, st().prs_error && `prs: ${st().prs_error}`]
-                .filter(Boolean)
-                .join(" · ")}
-            </span>
-            <span style="flex:1" />
-            <Show when={st().curated_at}>
-              <span class="dim">curated {ago(st().curated_at * 1000)}</span>
-            </Show>
-            <button onClick={curate} disabled={curating() || st().curating}>
-              {curating() || st().curating ? "curating…" : "curate"}
-            </button>
-            <button onClick={refresh} disabled={refreshing()}>
-              {refreshing() ? "refreshing…" : "refresh"}
-            </button>
-          </AppHeader>
+    <Show when={!dashboard.allProjects()} fallback={<AllProjectsLanding />}>
+      <Show when={state()} fallback={<div class="dim">loading… (is es-dashboard running on :7777?)</div>}>
+        {(st) => (
+          <main>
+            <AppHeader>
+              <h1>{st().editspace}</h1>
+              <span class="dim">
+                updated {ago(st().generated_at * 1000)} · tracker {st().tracker_at ? ago(st().tracker_at * 1000) : "never"} · prs{" "}
+                {st().prs_at ? ago(st().prs_at * 1000) : "never"}
+              </span>
+              <span class="err">
+                {[st().tracker_error && `tracker: ${st().tracker_error}`, st().prs_error && `prs: ${st().prs_error}`]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+              <span style="flex:1" />
+              <Show when={st().curated_at}>
+                <span class="dim">curated {ago(st().curated_at * 1000)}</span>
+              </Show>
+              <button onClick={curate} disabled={curating() || st().curating}>
+                {curating() || st().curating ? "curating…" : "curate"}
+              </button>
+              <button onClick={refresh} disabled={refreshing()}>
+                {refreshing() ? "refreshing…" : "refresh"}
+              </button>
+            </AppHeader>
 
-          <FrontDesk />
+            <FrontDesk />
 
-          <h2>Needs you</h2>
-          <Queue
-            attention={st().attention}
-            threads={st().threads}
-            directory={st().root}
-            briefing={st().briefing ?? []}
-            onBrief={brief}
-          />
+            <h2>Needs you</h2>
+            <Queue
+              attention={st().attention}
+              threads={st().threads}
+              directory={st().root}
+              briefing={st().briefing ?? []}
+              onBrief={brief}
+            />
 
-          <h2>Threads</h2>
-          <div class="grid">
-            <For each={st().threads}>
-              {(t: any) => (
-                <ThreadCard
-                  t={t}
-                  directory={st().root}
-                  onDigest={digest}
-                  onBrief={brief}
-                  briefing={st().briefing ?? []}
-                />
-              )}
-            </For>
-          </div>
-
-          <h2>Unattached PRs</h2>
-          <div>
-            <Show when={st().unattached_prs.length} fallback={<span class="dim">none</span>}>
-              <PrList prs={st().unattached_prs} />
-            </Show>
-          </div>
-
-          <AllSessions />
-
-          <h2>Frontier</h2>
-          <Show when={st().frontier.length} fallback={<span class="dim">empty</span>}>
-            <table>
-              <For each={st().frontier}>
-                {(f: any) => (
-                  <tr>
-                    <td>
-                      <a href={linkUrl(ticketUrl(f.key, f.url))} target="_blank">
-                        {f.key}
-                      </a>
-                    </td>
-                    <td class="dim">{f.issue_type}</td>
-                    <td>{f.summary}</td>
-                  </tr>
+            <h2>Threads</h2>
+            <div class="grid">
+              <For each={st().threads}>
+                {(t: any) => (
+                  <ThreadCard
+                    t={t}
+                    directory={st().root}
+                    onDigest={digest}
+                    onBrief={brief}
+                    briefing={st().briefing ?? []}
+                  />
                 )}
               </For>
-            </table>
-          </Show>
-        </main>
-      )}
+            </div>
+
+            <h2>Unattached PRs</h2>
+            <div>
+              <Show when={st().unattached_prs.length} fallback={<span class="dim">none</span>}>
+                <PrList prs={st().unattached_prs} />
+              </Show>
+            </div>
+
+            <AllSessions />
+
+            <h2>Frontier</h2>
+            <Show when={st().frontier.length} fallback={<span class="dim">empty</span>}>
+              <table>
+                <For each={st().frontier}>
+                  {(f: any) => (
+                    <tr>
+                      <td>
+                        <a href={linkUrl(ticketUrl(f.key, f.url))} target="_blank">
+                          {f.key}
+                        </a>
+                      </td>
+                      <td class="dim">{f.issue_type}</td>
+                      <td>{f.summary}</td>
+                    </tr>
+                  )}
+                </For>
+              </table>
+            </Show>
+          </main>
+        )}
+      </Show>
     </Show>
   )
 }

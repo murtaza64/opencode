@@ -1,5 +1,5 @@
-/* Left nav: the board plus every active session. Collapsed, it becomes a
- * mini icon rail — expand toggle up top (where the switcher lives), board
+/* Left nav: the project board plus every active session. Collapsed, it becomes
+ * a mini icon rail — expand toggle up top (where the switcher lives), board
  * icon, then one status dot per session, still navigable. Archived sessions
  * drop to a collapsed section at the bottom of the expanded view. */
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js"
@@ -205,9 +205,11 @@ export default function Sidebar() {
           <Show when={!nativeHeader}><button class="mini-btn" title="expand sidebar (^h)" onClick={toggleLeft}>
             ⟩
           </button></Show>
-          <A href="/" end activeClass="active" class="mini-item" title={`board — ${current()}`}>
-            ▦
-          </A>
+          <Show when={!allProjects()}>
+            <A href="/" end activeClass="active" class="mini-item" title={`board — ${current()}`}>
+              ▦
+            </A>
+          </Show>
           <NewSession compact />
           <Show when={pinnedSessions().length}>
             <div class="mini-pinned-heading" title="Pinned sessions" aria-label="Pinned sessions" />
@@ -254,9 +256,12 @@ export default function Sidebar() {
             </For>
           </div>
         </Show>
-        <A href="/" end activeClass="active" class="nav-item board-link">
-          ▦ {allProjects() ? `${current()} board` : "board"}
-        </A>
+        {/* the board is per project; All has no board until it is redesigned */}
+        <Show when={!allProjects()}>
+          <A href="/" end activeClass="active" class="nav-item board-link">
+            ▦ board
+          </A>
+        </Show>
         <NewSession />
         <div class="search-box">
           <input
