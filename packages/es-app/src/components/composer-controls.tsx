@@ -254,35 +254,44 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
         )}
       </Show>
       <Show when={pending().length}>
+        {/* every listed receipt is server-accepted and still pending delivery; the
+          * header carries the counts and refresh so rows stay one line each */}
         <details class="input-receipts" open={!state.asideRequest}>
           <summary>
-            Task inputs ({queued()} queued, {steers()} steer)
+            <span class="receipts-title">Pending inputs</span>
+            <span class="dim receipts-counts" dir="ltr">({queued()} queued, {steers()} steer)</span>
+            <button
+              class="receipts-refresh"
+              aria-label="Refresh inputs"
+              title="Refresh inputs"
+              disabled={!props.connected || state.inputLoading}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                void props.composer.refreshInputs()
+              }}
+            >
+              ↻
+            </button>
           </summary>
-          <div class="dim">Added to conversation does not mean the model has finished.</div>
-          <button disabled={!props.connected || state.inputLoading} onClick={() => props.composer.refreshInputs()}>
-            Refresh inputs
-          </button>
           <ul>
             <For each={pending()}>
               {(item) => (
                 <li data-request-id={item.requestID}>
-                  <span>
-                    <b>{item.delivery}</b>{" "}
-                    <span class="dim" role="status">
-                      {item.state}
-                    </span>
-                  </span>
-                  <p dir="auto">{item.text}</p>
-                  <ComposerImages images={item.images} />
-                  <Show when={item.state === "pending"}>
+                  <div class="receipt-row">
+                    <span class={`receipt-kind ${item.delivery}`}>{item.delivery}</span>
+                    <p class="receipt-text" dir="auto">{item.text}</p>
                     <button
+                      class="receipt-cancel"
                       disabled={!props.connected}
                       aria-label={`Cancel ${item.delivery} input: ${item.text}`}
+                      title="Cancel this input"
                       onClick={() => props.composer.cancelInput(item.requestID)}
                     >
-                      Cancel input
+                      Cancel
                     </button>
-                  </Show>
+                  </div>
+                  <ComposerImages images={item.images} />
                 </li>
               )}
             </For>
