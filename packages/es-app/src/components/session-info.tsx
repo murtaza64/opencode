@@ -1,7 +1,7 @@
 /* Right panel on the session page: identity, spend, editspace joins (lane,
  * tickets, PRs via the dashboard's thread model), tracker tickets and docs
  * this session references, and links shared in the conversation. */
-import { createEffect, createMemo, createResource, For, Show } from "solid-js"
+import { createEffect, createMemo, createResource, createSignal, For, Show } from "solid-js"
 import { A } from "@solidjs/router"
 import type { Message, Part, Session } from "@opencode-ai/sdk/v2"
 import { es, type IssueRow } from "../api"
@@ -15,7 +15,7 @@ import { prFromHref } from "../pr-matching"
 import { linkUrl } from "../link-url"
 import { compactTokens, contextUsage, countCompletedTurns, latestCompletedTurn, usageLevel, type ProviderList } from "../context-usage"
 import { compositionSlices, estimateComposition } from "../context-composition"
-import { CompositionBar, ProviderAccounting } from "./context-viz"
+import { accountingGist, CompositionBar, ProviderAccounting } from "./context-viz"
 import { prDetail, requestPrDetails } from "../pr-details"
 
 const URL_RE = /https?:\/\/[^\s)\]}"'`>]+/g
@@ -31,6 +31,14 @@ const compact = (n?: number) => {
 }
 
 const home = (p: string) => p.replace(/^\/Users\/[^/]+/, "~")
+
+// per-client memory of the provider-accounting disclosure; collapsed unless the user opened it
+const ACCOUNTING_KEY = "es-app-ctx-accounting-open"
+const [accountingOpen, setAccountingOpenRaw] = createSignal(localStorage.getItem(ACCOUNTING_KEY) === "1")
+const setAccountingOpen = (open: boolean) => {
+  localStorage.setItem(ACCOUNTING_KEY, open ? "1" : "0")
+  setAccountingOpenRaw(open)
+}
 
 export default function SessionInfo(props: {
   sessionID: string
@@ -348,7 +356,17 @@ function SessionInfoBody(props: {
               </>
             )}</Show>
           </div>
-           <ProviderAccounting tokens={usage() ? latestTurn()?.tokens : null} />
+           {/* exact per-class counts collapse by default: cache read is usually ~100% and the
+             * five-row table otherwise dominates the panel; the gist keeps the key numbers visible */}
+           <details class="ctx-accounting-disclosure" open={accountingOpen()}>
+             {/* drive the state ourselves so persistence is synchronous with the click/Enter, not the queued toggle event */}
+             <summary aria-label="exact latest-turn provider accounting"
+               onClick={(event) => { event.preventDefault(); setAccountingOpen(!accountingOpen()) }}>
+               <span class="ctx-subheading">provider accounting</span>
+               <span class="ctx-gist mono" dir="ltr">{usage() ? accountingGist(latestTurn()?.tokens) : "unknown"}</span>
+             </summary>
+             <ProviderAccounting tokens={usage() ? latestTurn()?.tokens : null} heading={false} />
+           </details>
            <div class="ctx-subheading">estimated visible content</div>
            <Show when={slices().length} fallback={<div class="ctx-caption">visible estimate unknown or empty</div>}>
              <CompositionBar slices={slices()} />

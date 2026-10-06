@@ -96,18 +96,30 @@ export function CompositionDots(props: { slices: CompositionSlice[] }) {
   )
 }
 
-export function ProviderAccounting(props: { tokens: TokenCounts | null | undefined; compact?: boolean }) {
-  const rows = () => props.tokens ? [
-    { label: "cache read", value: props.tokens.cache?.read ?? 0 },
-    { label: "cache write", value: props.tokens.cache?.write ?? 0 },
-    { label: "uncached input", value: props.tokens.input },
-    { label: "generated output", value: props.tokens.output },
-    { label: "reasoning", value: props.tokens.reasoning },
-  ] : []
+const accountingRows = (tokens: TokenCounts | null | undefined) => tokens ? [
+  { label: "cache read", value: tokens.cache?.read ?? 0 },
+  { label: "cache write", value: tokens.cache?.write ?? 0 },
+  { label: "uncached input", value: tokens.input },
+  { label: "generated output", value: tokens.output },
+  { label: "reasoning", value: tokens.reasoning },
+] : []
+
+// one-line gist for a collapsed disclosure: the dominant class plus generated output
+export const accountingGist = (tokens: TokenCounts | null | undefined) => {
+  const rows = accountingRows(tokens)
+  const total = rows.reduce((sum, row) => sum + row.value, 0)
+  if (!total) return "provider usage unknown"
+  const top = rows.slice(0, 3).reduce((best, row) => row.value > best.value ? row : best)
+  const output = rows.find((row) => row.label === "generated output")!
+  return `${top.label} ${Math.round((top.value / total) * 100)}% · output ${output.value.toLocaleString()}`
+}
+
+export function ProviderAccounting(props: { tokens: TokenCounts | null | undefined; compact?: boolean; heading?: boolean }) {
+  const rows = () => accountingRows(props.tokens)
   const total = () => rows().reduce((sum, row) => sum + row.value, 0)
   return (
     <div class="ctx-accounting">
-      <div class="ctx-subheading">provider accounting · exact latest turn</div>
+      <Show when={props.heading !== false}><div class="ctx-subheading">provider accounting · exact latest turn</div></Show>
       <Show when={total() > 0} fallback={<div class="ctx-caption">provider usage unknown</div>}>
         <ul class="ctx-provider" aria-label="exact latest-turn provider token accounting">
           <For each={rows().filter((row) => !props.compact || row.value > 0)}>{(row) => (

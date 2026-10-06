@@ -57,6 +57,10 @@ try {
   await page.goto(preview.url)
   await expect(page.locator(".session-info [data-section='context']")).toContainText("1 completed")
    await expect(page.locator(".session-info .ctx-exact")).toContainText("473k / 500k (95%)")
+   // #157: exact per-class rows sit behind a collapsed disclosure whose gist stays visible
+   await expect(page.locator(".session-info .ctx-accounting-disclosure > summary .ctx-gist")).toHaveText("cache read 100% · output 608")
+   await expect(page.locator(".session-info .ctx-provider")).not.toBeVisible()
+   await page.locator(".session-info .ctx-accounting-disclosure > summary").click()
    await expect(page.locator(".session-info .ctx-provider li", { hasText: "cache read" })).toContainText("471,919")
    await expect(page.locator(".session-info .ctx-provider li", { hasText: "uncached input" })).toContainText("3")
    await expect(page.locator(".session-info .ctx-provider li", { hasText: "cache write" })).toContainText("491")
