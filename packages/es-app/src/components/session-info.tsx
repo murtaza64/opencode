@@ -297,6 +297,13 @@ function SessionInfoBody(props: {
     const user = latestUser()
     if (user?.model?.providerID && user.model.modelID) return { id: user.model.modelID, providerID: user.model.providerID }
   })
+  const assistants = createMemo(() => props.messages.filter((m): m is Extract<Message, { role: "assistant" }> =>
+    m.sessionID === props.sessionID && m.role === "assistant"))
+  const transcriptUsage = createMemo(() => assistants().reduce((total, message) => ({
+    cost: total.cost + (message.cost ?? 0),
+    input: total.input + (message.tokens?.input ?? 0),
+    output: total.output + (message.tokens?.output ?? 0),
+  }), { cost: 0, input: 0, output: 0 }))
   const tokens = () => (props.session as any)?.tokens
 
   return (
@@ -322,32 +329,32 @@ function SessionInfoBody(props: {
           <>
             <div class="info-section">
               <div class="info-heading">session</div>
-               <div class="info-row" data-fact="agent">
-                 <span class="dim">agent</span>
-                 <span>{agent()}</span>
-               </div>
-               <div class="info-row" data-fact="provider" title={s().model ? "session provider" : model() ? "latest observed provider" : "provider not recorded"}>
-                 <span class="dim">provider</span>
-                 <span>{model()?.providerID ?? "unknown"}</span>
-               </div>
-               <Show when={model()?.id}>
-                 <div class="info-row" data-fact="model">
-                   <span class="dim">model</span>
-                   <span>{model()?.id}</span>
-                </div>
-              </Show>
-              <div class="info-row">
-                <span class="dim">cost</span>
-                <span>${((s() as any).cost ?? 0).toFixed(2)}</span>
+              <div class="info-row" data-fact="agent">
+                <span class="dim">agent</span>
+                <span>{agent()}</span>
               </div>
-              <Show when={tokens()}>
-                <div class="info-row" title="lifetime session totals, not current context">
-                  <span class="dim">tok total</span>
-                  <span>
-                    {compact(tokens().input)} in · {compact(tokens().output)} out
-                  </span>
+              <div class="info-row" data-fact="provider" title={s().model ? "session provider" : model() ? "latest observed provider" : "provider not recorded"}>
+                <span class="dim">provider</span>
+                <span>{model()?.providerID ?? "unknown"}</span>
+              </div>
+              <Show when={model()?.id}>
+                <div class="info-row" data-fact="model">
+                  <span class="dim">model</span>
+                  <span>{model()?.id}</span>
                 </div>
               </Show>
+               <div class="info-row">
+                 <span class="dim">cost</span>
+                 <span>${((s() as any).cost || transcriptUsage().cost).toFixed(2)}</span>
+               </div>
+               <Show when={tokens() || assistants().length}>
+                 <div class="info-row" title="lifetime session totals, not current context">
+                   <span class="dim">tok total</span>
+                   <span>
+                     {compact(tokens()?.input || transcriptUsage().input)} in · {compact(tokens()?.output || transcriptUsage().output)} out
+                   </span>
+                 </div>
+               </Show>
               <div class="info-row">
                 <span class="dim">updated</span>
                 <span>{ago(s().time?.updated)}</span>
