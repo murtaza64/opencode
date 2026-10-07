@@ -3,6 +3,8 @@
 import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js"
 import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router"
 import { DataProvider } from "@opencode-ai/session-ui/context"
+import type { MessagePartProps } from "@opencode-ai/session-ui/message-part"
+import type { ToolPart } from "@opencode-ai/sdk/v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { oc } from "../api"
 import { createLiveSession } from "../live-session"
@@ -19,6 +21,7 @@ import { DirectComposer } from "../components/direct-composer"
 import { AppHeader } from "../components/native-header"
 import { SubagentTranscript } from "../components/subagent-transcript"
 import { TranscriptMessage } from "../components/transcript-message"
+import { InlineQuestion } from "../components/inline-question"
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const [error, setError] = createSignal("")
@@ -99,102 +102,6 @@ function PermissionBanner(props: { p: any; directory: string; owner?: string; on
       </Show>
       <Show when={error()}><div class="err" role="alert">{error()}</div></Show>
     </section>
-  )
-}
-
-function QuestionBanner(props: { q: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
-  const [error, setError] = createSignal("")
-  const [sending, setSending] = createSignal(false)
-  // answers[i] = selected labels for question i (custom text as a single label)
-  const [answers, setAnswers] = createSignal<string[][]>(props.q.questions.map(() => []))
-  const [custom, setCustom] = createSignal<string[]>(props.q.questions.map(() => ""))
-
-  const toggle = (qi: number, label: string, multiple: boolean | undefined) => {
-    setAnswers((prev) => {
-      const next = prev.map((a) => [...a])
-      const current = next[qi]!
-      const has = current.includes(label)
-      next[qi] = multiple ? (has ? current.filter((l) => l !== label) : [...current, label]) : has ? [] : [label]
-      return next
-    })
-  }
-
-  const submit = async () => {
-    if (sending()) return
-    const final = answers().map((a, i) => (custom()[i]?.trim() ? [...a, custom()[i]!.trim()] : a))
-    if (final.some((a) => a.length === 0)) {
-      setError("Answer every question (pick an option or type a custom answer).")
-      return
-    }
-    setSending(true)
-    setError("")
-    try {
-      await oc.questionReply(props.q.id, props.directory, final)
-      await props.onDone()
-    } catch (e) {
-      setError(String(e))
-    } finally {
-      setSending(false)
-    }
-  }
-
-  const reject = async () => {
-    if (sending()) return
-    setSending(true)
-    setError("")
-    try {
-      await oc.questionReject(props.q.id, props.directory)
-      await props.onDone()
-    } catch (e) {
-      setError(String(e))
-    } finally {
-      setSending(false)
-    }
-  }
-
-  return (
-    <div class="banner question">
-      <Show when={props.owner}><div class="dim">from subagent: {props.owner}</div></Show>
-      <For each={props.q.questions}>
-        {(question: any, qi) => (
-          <div class="banner-body">
-            <div class="banner-head">{question.header || "question"}</div>
-            <div>{question.question}</div>
-            <div class="banner-options">
-              <For each={question.options}>
-                {(opt: any) => (
-                  <button
-                    classList={{ selected: answers()[qi()]!.includes(opt.label) }}
-                    title={opt.description}
-                    onClick={() => toggle(qi(), opt.label, question.multiple)}
-                  >
-                    {opt.label}
-                  </button>
-                )}
-              </For>
-            </div>
-            <Show when={question.custom !== false}>
-              <input
-                placeholder="custom answer…"
-                value={custom()[qi()]}
-                onInput={(e) => {
-                  const next = [...custom()]
-                  next[qi()] = e.currentTarget.value
-                  setCustom(next)
-                }}
-              />
-            </Show>
-          </div>
-        )}
-      </For>
-      <div class="banner-actions">
-        <button disabled={sending()} onClick={submit}>answer</button>
-        <button disabled={sending()} class="danger" onClick={reject}>
-          dismiss
-        </button>
-      </div>
-      <Show when={error()}><div class="err" role="alert">{error()}</div></Show>
-    </div>
   )
 }
 
@@ -316,6 +223,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const [error, setError] = createSignal("")
 
   const pending = createMemo(() => activity.pending(sessionID))
+  const pendingQuestions = createMemo(() => pending().flatMap((item) => item.kind === "question" ? [item] : []))
   const subagentsRunning = () => activity.error(sessionID, directory) ? 0 :
     activity.running(sessionID).filter((id) => id !== sessionID).length
   const attentionError = () => sessionsError() || activity.error(sessionID, directory)
@@ -324,6 +232,27 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const status = () => live.data.session_status[sessionID]?.type ??
     (!activity.error(sessionID, directory) ? activity.status(sessionID) : undefined) ?? "idle"
   const messages = createMemo(() => live.data.message[sessionID] ?? [])
+  const transcriptQuestionTools = createMemo(() => new Set(messages().flatMap((message) =>
+    (live.data.part[message.id] ?? []).flatMap((part) =>
+      part.type === "tool" && part.tool === "question" ? [`${message.id}\u0000${part.callID}`] : [],
+    ),
+  )))
+  const appendedQuestions = createMemo(() => pendingQuestions().filter((item) =>
+    !item.request.tool || !transcriptQuestionTools().has(`${item.request.tool.messageID}\u0000${item.request.tool.callID}`),
+  ))
+  const QuestionPart = (partProps: MessagePartProps) => {
+    const part = () => partProps.part as ToolPart
+    const item = createMemo(() => pendingQuestions().find((pending) =>
+      pending.request.tool?.messageID === partProps.message.id && pending.request.tool.callID === part().callID,
+    ))
+    const owner = () => {
+      const request = item()?.request
+      if (!request || request.sessionID === sessionID) return
+      return activity.session(request.sessionID)?.title ?? request.sessionID
+    }
+    return <InlineQuestion part={part()} request={item()?.request} directory={item()?.directory ?? directory} owner={owner()}
+      onDone={() => item() ? activity.refreshDirectory(item()!.directory, true) : Promise.resolve()} />
+  }
 
   // viewing the session clears its unread state, including as new content
   // streams in while the page is open
@@ -955,13 +884,11 @@ function SessionView(props: { sessionID: string; directory: string }) {
           </Show>
           <Show when={live.retry()}>{(retry) => <div role="status" class="dim">Retry {retry().attempt}: {retry().message}</div>}</Show>
           <Show when={attentionError()}><div class="err" role="alert">{attentionError()}</div></Show>
-          <For each={pending()}>
+          <For each={pending().filter((item) => item.kind === "permission")}>
             {(item) => {
               const owner = () => item.request.sessionID !== sessionID
                 ? activity.session(item.request.sessionID)?.title ?? item.request.sessionID : undefined
-              return item.kind === "permission"
-                ? <PermissionBanner p={item.request} directory={item.directory} owner={owner()} onDone={() => activity.refreshDirectory(item.directory, true)} />
-                : <QuestionBanner q={item.request} directory={item.directory} owner={owner()} onDone={() => activity.refreshDirectory(item.directory, true)} />
+              return <PermissionBanner p={item.request} directory={item.directory} owner={owner()} onDone={() => activity.refreshDirectory(item.directory, true)} />
             }}
           </For>
         </div>
@@ -972,9 +899,9 @@ function SessionView(props: { sessionID: string; directory: string }) {
             <For each={messages()}>
               {(m) => (
                 <>
-                  <Show when={m.role === "user"} fallback={<TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} />}>
+                  <Show when={m.role === "user"} fallback={<TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} renderQuestion={QuestionPart} />}>
                     <div class="msg-wrap">
-                      <TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} />
+                      <TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} renderQuestion={QuestionPart} />
                       <button
                         class="fork-here"
                         title="fork: new session with the history before this message"
@@ -998,6 +925,14 @@ function SessionView(props: { sessionID: string; directory: string }) {
                   </Show>
                 </>
               )}
+            </For>
+            <For each={appendedQuestions()}>
+              {(item) => {
+                const owner = () => item.request.sessionID !== sessionID
+                  ? activity.session(item.request.sessionID)?.title ?? item.request.sessionID : undefined
+                return <InlineQuestion request={item.request} directory={item.directory} owner={owner()}
+                  onDone={() => activity.refreshDirectory(item.directory, true)} />
+              }}
             </For>
             </DataProvider>
             <Show when={thinking()}>

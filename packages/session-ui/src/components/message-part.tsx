@@ -170,6 +170,7 @@ function DiagnosticsDisplay(props: { diagnostics: Diagnostic[] }): JSX.Element {
 
 export interface MessageProps {
   activityRows?: boolean
+  renderQuestion?: Component<MessagePartProps>
   message: MessageType
   parts: PartType[]
   actions?: UserActions
@@ -199,6 +200,7 @@ export type UserMessageComment = {
 export interface MessagePartProps {
   part: PartType
   message: MessageType
+  renderQuestion?: Component<MessagePartProps>
   hideDetails?: boolean
   defaultOpen?: boolean
   toolOpen?: boolean
@@ -714,10 +716,10 @@ function index<T extends { id: string }>(items: readonly T[]) {
   return new Map(items.map((item) => [item.id, item] as const))
 }
 
-export function renderable(part: PartType, showReasoningSummaries = true) {
+export function renderable(part: PartType, showReasoningSummaries = true, renderQuestion = false) {
   if (part.type === "tool") {
     if (HIDDEN_TOOLS.has(part.tool)) return false
-    if (part.tool === "question") return part.state.status !== "pending" && part.state.status !== "running"
+    if (part.tool === "question") return renderQuestion || (part.state.status !== "pending" && part.state.status !== "running")
     return true
   }
   if (part.type === "text") return !!part.text?.trim()
@@ -959,6 +961,7 @@ export function Message(props: MessageProps) {
           <AssistantMessageDisplay
             message={assistantMessage() as AssistantMessage}
             parts={props.parts}
+            renderQuestion={props.renderQuestion}
             showAssistantCopyPartID={props.showAssistantCopyPartID}
             showReasoningSummaries={props.showReasoningSummaries}
             useV2Actions={props.useV2Actions}
@@ -973,6 +976,7 @@ export function Message(props: MessageProps) {
 export function AssistantMessageDisplay(props: {
   message: AssistantMessage
   parts: PartType[]
+  renderQuestion?: Component<MessagePartProps>
   showAssistantCopyPartID?: string | null
   showReasoningSummaries?: boolean
   useV2Actions?: boolean
@@ -983,7 +987,7 @@ export function AssistantMessageDisplay(props: {
     () =>
       groupParts(
         props.parts
-          .filter((part) => renderable(part, props.showReasoningSummaries ?? true))
+          .filter((part) => renderable(part, props.showReasoningSummaries ?? true, !!props.renderQuestion))
           .map((part) => ({
             messageID: props.message.id,
             part,
@@ -1034,6 +1038,7 @@ export function AssistantMessageDisplay(props: {
                     <Part
                       part={item()!}
                       message={props.message}
+                      renderQuestion={props.renderQuestion}
                       showAssistantCopyPartID={props.showAssistantCopyPartID}
                       useV2Actions={props.useV2Actions}
                     />
@@ -1446,13 +1451,18 @@ function HighlightedText(props: { text: string; references: FilePart[]; agents: 
 }
 
 export function Part(props: MessagePartProps) {
-  const component = createMemo(() => PART_MAPPING[props.part.type])
+  const component = createMemo(() =>
+    props.renderQuestion && props.part.type === "tool" && props.part.tool === "question"
+      ? props.renderQuestion
+      : PART_MAPPING[props.part.type],
+  )
   return (
     <Show when={component()}>
       <Dynamic
         component={component()}
         part={props.part}
         message={props.message}
+        renderQuestion={props.renderQuestion}
         hideDetails={props.hideDetails}
         defaultOpen={props.defaultOpen}
         toolOpen={props.toolOpen}

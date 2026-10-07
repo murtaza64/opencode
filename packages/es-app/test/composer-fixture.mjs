@@ -56,6 +56,8 @@ export const createFixture = async () => {
     permissionReplies: [],
     permissionReplyQueue: [],
     questions: [],
+    questionReplies: [],
+    questionRejects: [],
     permissionsByDirectory: undefined,
     questionsByDirectory: undefined,
     notifications: undefined,
@@ -274,6 +276,22 @@ export const createFixture = async () => {
         ],
       )
     if (url.pathname === "/question") return json(fixture.questionsByDirectory?.get(url.searchParams.get("directory")) ?? fixture.questions)
+    const questionReply = /^\/question\/([^/]+)\/reply$/.exec(url.pathname)
+    if (questionReply && request.method === "POST") {
+      const requestID = questionReply[1]
+      fixture.questions = fixture.questions.filter((item) => item.id !== requestID)
+      fixture.questionsByDirectory?.forEach((items, key) => fixture.questionsByDirectory.set(key, items.filter((item) => item.id !== requestID)))
+      fixture.questionReplies.push({ id: requestID, answers: body?.answers })
+      return json(true)
+    }
+    const questionReject = /^\/question\/([^/]+)\/reject$/.exec(url.pathname)
+    if (questionReject && request.method === "POST") {
+      const requestID = questionReject[1]
+      fixture.questions = fixture.questions.filter((item) => item.id !== requestID)
+      fixture.questionsByDirectory?.forEach((items, key) => fixture.questionsByDirectory.set(key, items.filter((item) => item.id !== requestID)))
+      fixture.questionRejects.push(requestID)
+      return json(true)
+    }
     const match = /^\/session\/(ses_[\w-]+)(.*)$/.exec(url.pathname)
     if (match) {
       const [, id, action] = match

@@ -10,6 +10,7 @@
     "test:browser": "node test/composer-direct.browser.mjs",
     "test:browser:panel": "node test/composer-direct.browser.mjs",
     "test:browser:vim": "node test/vim.browser.mjs",
+    "test:browser:question": "node test/question-inline.browser.mjs",
     "test:browser:real": "node test/composer-direct.real.browser.mjs",
     "typecheck": "tsgo --noEmit"
   },
