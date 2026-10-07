@@ -411,6 +411,8 @@ test("dashboard reconciliation recovers a missed gate in an offscreen directory 
 
 test("dashboard reconciliation does not invent a gate from a stale notification", async () => {
   const { activity } = start(undefined, { directories: () => [rootDirectory], sessionEvent: () => true })
+  ActivityEvents.current.onerror?.()
+  expect(activity.requestState("question", "ses_unrelated", unrelatedDirectory, "que_answered")).toBe("unknown")
   await activity.reconcileNotifications([{
     id: "que_answered", kind: "question", session: "ses_unrelated", directory: unrelatedDirectory,
     title: "ses_unrelated", editspace: "test", updated: 1,

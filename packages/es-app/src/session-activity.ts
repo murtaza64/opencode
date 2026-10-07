@@ -335,7 +335,7 @@ export const createSessionActivity = (
     if (requestID && settled.has(requestKey(directory, kind, requestID))) return "cleared"
     const items = kind === "permission" ? snapshot?.permissions : snapshot?.questions
     if (items?.some((item) => item.sessionID === id && (!requestID || item.id === requestID))) return "pending"
-    return !connectionError() && (kind === "permission" ? snapshot?.permissionsKnown : snapshot?.questionsKnown) ? "cleared" : "unknown"
+    return (kind === "permission" ? snapshot?.permissionsKnown : snapshot?.questionsKnown) ? "cleared" : "unknown"
   }
   return {
     pending,
