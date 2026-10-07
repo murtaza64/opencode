@@ -1,6 +1,6 @@
 import { batch, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js"
 import type { Event, GlobalSession, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2"
-import { oc } from "./api"
+import { oc, type AttentionNotification } from "./api"
 import { createServerEvents } from "./event-source"
 
 type Snapshot = {
@@ -216,6 +216,25 @@ export const createSessionActivity = (
       await Promise.all(dirs.slice(offset, offset + 4).map((directory) => refreshDirectory(directory)))
     }
   }
+  let seenNotifications = new Set<string>()
+  const reconcileNotifications = async (notifications: readonly AttentionNotification[]) => {
+    const current = new Set<string>()
+    const directories = new Set<string>()
+    for (const item of notifications) {
+      if (item.kind === "idle" || !item.directory || !item.session || !item.id) continue
+      const key = `${item.kind}\u0000${item.id}\u0000${item.session}\u0000${item.directory}`
+      current.add(key)
+      if (!seenNotifications.has(key)) directories.add(item.directory)
+    }
+    seenNotifications = current
+    // Dashboard polling can discover a gate whose event never reached this client.
+    // Recheck its owner directory even if an earlier snapshot said it was empty.
+    await Promise.all([...directories].map((directory) => refreshDirectory(directory, true)))
+    for (const item of notifications) {
+      if (item.kind === "idle") continue
+      if (snapshots()[item.directory]?.error) seenNotifications.delete(`${item.kind}\u0000${item.id}\u0000${item.session}\u0000${item.directory}`)
+    }
+  }
   const initializing = new Set<string>()
   createEffect(() => {
     const dirs = relevant()
@@ -329,6 +348,7 @@ export const createSessionActivity = (
     error,
     refresh,
     refreshDirectory,
+    reconcileNotifications,
     session: (id: string) => index().get(id),
   }
 }

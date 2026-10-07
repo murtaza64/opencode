@@ -72,12 +72,13 @@ const start = (
     session("ses_grandchild", grandchildDirectory, "ses_child"),
     session("ses_unrelated", unrelatedDirectory),
   ],
+  options?: Parameters<typeof createSessionActivity>[2],
 ) =>
   createRoot((cleanup) => {
     dispose = cleanup
     const [sessions, setSessions] = createSignal(initial)
     const refreshes: number[] = []
-    const activity = createSessionActivity(sessions, () => refreshes.push(1))
+    const activity = createSessionActivity(sessions, () => refreshes.push(1), options)
     return { activity, setSessions, refreshes }
   })
 const load = (activity: ReturnType<typeof createSessionActivity>) =>
@@ -387,6 +388,52 @@ test("reconnect repairs missed requests and statuses without clearing disconnect
   ])
   expect(activity.running("ses_parent")).toEqual(["ses_grandchild"])
   expect(activity.error("ses_parent")).toBe("")
+})
+
+test("dashboard reconciliation recovers a missed gate in an offscreen directory without sweeping other directories", async () => {
+  const { activity } = start(undefined, { directories: () => [rootDirectory], sessionEvent: () => true })
+  await activity.refreshDirectory(unrelatedDirectory)
+  snapshots[unrelatedDirectory].permissions = [permission("per_missed", "ses_unrelated")]
+  const before = fetchSpy.mock.calls.length
+  const notification = {
+    id: "per_missed", kind: "permission" as const, session: "ses_unrelated", directory: unrelatedDirectory,
+    title: "ses_unrelated", editspace: "test", updated: 1,
+  }
+  await activity.reconcileNotifications([notification])
+  expect(activity.pending("ses_unrelated")).toEqual([
+    { kind: "permission", request: permission("per_missed", "ses_unrelated"), directory: unrelatedDirectory },
+  ])
+  expect(fetchSpy.mock.calls.slice(before).map(([input]) => new URL(String(input), "http://localhost").searchParams.get("directory")))
+    .toEqual([unrelatedDirectory, unrelatedDirectory, unrelatedDirectory])
+  await activity.reconcileNotifications([notification])
+  expect(fetchSpy.mock.calls.length).toBe(before + 3)
+})
+
+test("dashboard reconciliation does not invent a gate from a stale notification", async () => {
+  const { activity } = start(undefined, { directories: () => [rootDirectory], sessionEvent: () => true })
+  await activity.reconcileNotifications([{
+    id: "que_answered", kind: "question", session: "ses_unrelated", directory: unrelatedDirectory,
+    title: "ses_unrelated", editspace: "test", updated: 1,
+  }])
+  expect(activity.pending("ses_unrelated")).toEqual([])
+  expect(activity.requestState("question", "ses_unrelated", unrelatedDirectory, "que_answered")).toBe("cleared")
+})
+
+test("dashboard reconciliation retries a failed gate snapshot on its next poll", async () => {
+  const { activity } = start(undefined, { directories: () => [rootDirectory], sessionEvent: () => true })
+  snapshots[unrelatedDirectory].questions = [question("que_missed", "ses_unrelated")]
+  const notification = {
+    id: "que_missed", kind: "question" as const, session: "ses_unrelated", directory: unrelatedDirectory,
+    title: "ses_unrelated", editspace: "test", updated: 1,
+  }
+  failures.add(`${unrelatedDirectory}:/oc/question`)
+  await activity.reconcileNotifications([notification])
+  expect(activity.pending("ses_unrelated")).toEqual([])
+  failures.clear()
+  await activity.reconcileNotifications([notification])
+  expect(activity.pending("ses_unrelated")).toEqual([
+    { kind: "question", request: question("que_missed", "ses_unrelated"), directory: unrelatedDirectory },
+  ])
 })
 
 test("an unknown child's asked request joins its family when metadata arrives and keeps the event's owner directory", async () => {

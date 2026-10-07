@@ -171,6 +171,10 @@ export function DashboardProvider(props: ParentProps) {
     directories: relevantDirectories,
     sessionEvent,
   })
+  createEffect(() => {
+    const notifications = notificationState()?.notifications
+    if (notifications) void activity.reconcileNotifications(notifications)
+  })
 
   // one SSE subscription per selected editspace
   createEffect(() => {
@@ -182,6 +186,8 @@ export function DashboardProvider(props: ParentProps) {
   const notificationSource = createServerEvents("/es/api/notification-events")
   notificationSource.onmessage = () => refetchNotifications()
   onCleanup(() => notificationSource.close())
+  const notificationInterval = setInterval(refetchNotifications, 30_000)
+  onCleanup(() => clearInterval(notificationInterval))
   const interval = setInterval(refetch, 60_000)
   onCleanup(() => clearInterval(interval))
 
