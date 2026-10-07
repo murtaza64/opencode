@@ -439,11 +439,22 @@ const layer = Layer.effectDiscard(
           .where(eq(V1InputTable.request_id, row.request_id))
           .run()
           .pipe(Effect.orDie)
+        const current = yield* db
+          .select({ model: SessionTable.model })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, info.sessionID))
+          .get()
+          .pipe(Effect.orDie)
         yield* db
           .update(SessionTable)
           .set({
             agent: info.agent,
-            model: { id: info.model.modelID, providerID: info.model.providerID, variant: info.model.variant },
+            model: {
+              id: info.model.modelID,
+              providerID: info.model.providerID,
+              variant: info.model.variant,
+              preferred: current?.model?.preferred,
+            },
             time_updated: info.time.created,
           })
           .where(eq(SessionTable.id, info.sessionID))

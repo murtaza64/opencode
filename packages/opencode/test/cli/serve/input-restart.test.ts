@@ -87,3 +87,63 @@ cliIt.live(
     }),
   60_000,
 )
+
+cliIt.live(
+  "model preference survives promoted input and process restart without replay",
+  ({ opencode, home, llm }) =>
+    Effect.gen(function* () {
+      const client = yield* HttpClient.HttpClient
+      const env = {
+        OPENCODE_DB: `${home}/model-preference-restart.sqlite`,
+        OPENCODE_TEST_MANAGED_CONFIG_DIR: `${home}/managed`,
+        OPENCODE_CONFIG: "",
+        OPENCODE_CONFIG_DIR: `${home}/.config/opencode`,
+        OPENCODE_PERMISSION: "{}",
+        OPENCODE_EXPERIMENTAL: "false",
+        OPENCODE_EXPERIMENTAL_EVENT_SYSTEM: "true",
+      }
+      const first = yield* opencode.serve({ env, hostname: "127.0.0.1", port: yield* freePort })
+      const created = yield* client.post(`${first.url}/session`, {
+        body: HttpBody.jsonUnsafe({ title: "Preference restart", agent: "build", model: { id: "test-model", providerID: "test" } }),
+      })
+      expect(created.status).toBe(200)
+      const session = yield* created.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(SessionV1.SessionInfo)))
+      const path = `/session/${session.id}`
+      const preference = yield* client.patch(`${first.url}${path}`, {
+        body: HttpBody.jsonUnsafe({ model: { providerID: "test", modelID: "test-model" } }),
+      })
+      expect(preference.status).toBe(200)
+      expect(yield* preference.json).toMatchObject({ preferredModel: { id: "test-model" } })
+      yield* llm.text("synthetic turn")
+      const payload = { requestID: "model-preference-restart", delivery: "queue", text: "synthetic input" }
+      expect((yield* client.post(`${first.url}${path}/input`, { body: HttpBody.jsonUnsafe(payload) })).status).toBe(200)
+      yield* llm.wait(1)
+      const receipt = yield* pollWithTimeout(
+        Effect.gen(function* () {
+          const response = yield* client.get(`${first.url}${path}/input/${payload.requestID}`)
+          const row = yield* response.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(SessionV1.InputReceipt)))
+          return row.state === "promoted" ? row : undefined
+        }),
+        "input did not promote",
+        "15 seconds",
+      )
+      yield* pollWithTimeout(
+        Effect.gen(function* () {
+          const response = yield* client.get(`${first.url}${path}/message`)
+          const messages = yield* response.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(SessionV1.WithParts))))
+          return messages.some((item) => item.info.role === "assistant" && item.info.finish === "stop") ? true : undefined
+        }),
+        "input turn did not finish",
+        "15 seconds",
+      )
+      expect(yield* (yield* client.get(`${first.url}${path}`)).json).toMatchObject({ preferredModel: { id: "test-model" } })
+      first.kill()
+      yield* Effect.promise(() => first.exited)
+      const second = yield* opencode.serve({ env, hostname: "127.0.0.1", port: yield* freePort })
+      expect(yield* (yield* client.get(`${second.url}${path}`)).json).toMatchObject({ preferredModel: { id: "test-model" } })
+      expect(yield* (yield* client.get(`${second.url}${path}/input/${payload.requestID}`)).json).toEqual(receipt)
+      expect(yield* (yield* client.post(`${second.url}${path}/input`, { body: HttpBody.jsonUnsafe(payload) })).json).toEqual(receipt)
+      expect(yield* llm.inputs).toHaveLength(1)
+    }),
+  60_000,
+)

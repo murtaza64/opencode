@@ -75,6 +75,7 @@ it.live("validated model PATCH freezes earlier inputs and preserves the active p
         expect(messages.flatMap((item) => item.info.role === "assistant" ? [item.info.modelID] : [])).toEqual([
           ModelV2.ID.make("test-model"), ModelV2.ID.make("test-model"), ModelV2.ID.make("next-model"),
         ])
+        expect(yield* (yield* requestInDirectory(path, dir)).json).toMatchObject({ preferredModel: { id: "next-model" } })
         expect(yield* (yield* post("input", { requestID: "before", delivery: "queue", text: "queued before switch" })).json)
           .toEqual(yield* (yield* requestInDirectory(`${path}/input/before`, dir)).json)
         expect((yield* post("prompt_async", { agent: "build", parts: [{ type: "text", text: "normal after switch" }] })).status).toBe(204)
