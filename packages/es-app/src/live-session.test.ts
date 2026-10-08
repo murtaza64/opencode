@@ -193,6 +193,37 @@ test("snapshot failures are visible, reject explicit loads, and stop stale busy"
   expect(live.connectionError()).toBe("")
 })
 
+test("a transient snapshot failure recovers without a stream reconnect or page reload", async () => {
+  snapshot = [{ info: user(), parts: [] }]
+  const live = start()
+  fetchSpy.mockImplementationOnce(async () => { throw new Error("temporary socket failure") })
+  await expect(live.load()).rejects.toThrow("temporary socket failure")
+  expect(live.connectionError()).toContain("temporary socket failure")
+  const recovered = Promise.withResolvers<void>()
+  const cleanup = createRoot((cleanup) => {
+    createComputed(() => {
+      if (live.data.message.ses_current?.length === 1 && !live.connectionError()) recovered.resolve()
+    })
+    return cleanup
+  })
+  try {
+    await recovered.promise
+    expect(fetchSpy.mock.calls).toHaveLength(6)
+    expect(fetchSpy.mock.calls.every(([input]) => !String(input).includes("prompt"))).toBe(true)
+  } finally {
+    cleanup()
+  }
+})
+
+test("disposing a failed session stops its scheduled snapshot retry", async () => {
+  const live = start()
+  fetchSpy.mockRejectedValue(new Error("temporary socket failure"))
+  await expect(live.load()).rejects.toThrow("temporary socket failure")
+  dispose()
+  await Bun.sleep(1100)
+  expect(fetchSpy.mock.calls).toHaveLength(3)
+})
+
 test("disconnect stops stale busy and reconnect resnapshots missed messages and status", async () => {
   const live = start()
   await live.load()

@@ -111,6 +111,8 @@ export function createLiveSession(
   let snapshotStarted = false
   let streamOpened = false
   let releaseInitial: (() => void) | undefined
+  let retryTimer: ReturnType<typeof setTimeout> | undefined
+  let retryDelay = 1000
   const uncertainParts = new Set<string>()
 
   const load = (): Promise<void> => {
@@ -180,6 +182,9 @@ export function createLiveSession(
         setConnection("snapshot", "")
         stopOnFailure()
       })
+      clearTimeout(retryTimer)
+      retryTimer = undefined
+      retryDelay = 1000
     })().finally(() => {
       activeLoad = undefined
       duringLoad = undefined
@@ -198,6 +203,12 @@ export function createLiveSession(
         setConnection("snapshot", `Unable to load session: ${errorText(failure)}`)
         stopOnFailure()
       })
+      if (retryTimer) return
+      retryTimer = setTimeout(() => {
+        retryTimer = undefined
+        if (!disposed) void load()
+      }, retryDelay)
+      retryDelay = Math.min(retryDelay * 2, 30_000)
     })
     return activeLoad
   }
@@ -367,6 +378,7 @@ export function createLiveSession(
   onCleanup(() => {
     disposed = true
     controller.abort()
+    clearTimeout(retryTimer)
     source?.close()
   })
 
