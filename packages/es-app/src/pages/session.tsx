@@ -175,6 +175,21 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const pin = () => {
     if (transcriptEl && !inspecting) transcriptEl.scrollTop = transcriptEl.scrollHeight
   }
+  let userScroll = false
+  const loadEarlier = async () => {
+    if (!transcriptEl || !live.hasOlder() || live.loadingOlder()) return
+    stick = false
+    userScroll = false
+    const height = transcriptEl.scrollHeight
+    const top = transcriptEl.scrollTop
+    try {
+      await live.older()
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      if (transcriptEl) transcriptEl.scrollTop = top + transcriptEl.scrollHeight - height
+    } catch (failure) {
+      setError(`Unable to load earlier messages: ${errorText(failure)}`)
+    }
+  }
   const inspectSubagent = (id: string) => {
     if (inspecting || !/^ses_[A-Za-z0-9]+$/.test(id) || id === sessionID) return
     // Only Task metadata authorizes child inspection, never IDs in prose/output.
@@ -206,17 +221,23 @@ function SessionView(props: { sessionID: string; directory: string }) {
       "scroll",
       () => {
         if (!inspecting && atBottom()) stick = true
+        if (userScroll && transcriptEl && transcriptEl.scrollTop <= 200) void loadEarlier()
+        userScroll = false
       },
       { passive: true },
     )
     transcriptEl?.addEventListener(
       "wheel",
       (e) => {
-        if (e.deltaY < 0) stick = false
+        if (e.deltaY < 0) {
+          stick = false
+          userScroll = true
+          if (transcriptEl?.scrollTop === 0) void loadEarlier()
+        }
       },
       { passive: true },
     )
-    transcriptEl?.addEventListener("touchmove", () => (stick = false), { passive: true })
+    transcriptEl?.addEventListener("touchmove", () => { stick = false; userScroll = true }, { passive: true })
     const observer = new ResizeObserver(() => {
       if (stick) pin()
     })
@@ -633,6 +654,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const scrollTranscript = (dir: 1 | -1) => {
     if (!transcriptEl) return
     stick = false
+    userScroll = true
     transcriptEl.scrollBy({ top: (dir * transcriptEl.clientHeight) / 2, behavior: "instant" as ScrollBehavior })
   }
 
@@ -657,6 +679,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
         : [...nodes].reverse().find((n) => offset(n) < top - 30)
     if (target) {
       stick = false
+      userScroll = true
       transcriptEl.scrollTo({ top: offset(target) - 8, behavior: "instant" as ScrollBehavior })
     }
   }
@@ -975,6 +998,11 @@ function SessionView(props: { sessionID: string; directory: string }) {
 
         <div class="transcript" ref={transcriptEl}>
           <div ref={inner} class="transcript-inner">
+            <Show when={live.hasOlder()}>
+              <button class="transcript-older" disabled={live.loadingOlder()} onClick={loadEarlier}>
+                {live.loadingOlder() ? "Loading…" : "Load earlier messages"}
+              </button>
+            </Show>
             <DataProvider data={live.data} directory={directory} sessionID={sessionID} onNavigateToSession={inspectSubagent}>
             <For each={messages()}>
               {(m) => (

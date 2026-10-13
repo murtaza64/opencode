@@ -8,6 +8,7 @@ import type { Message, Part, Session, SessionStatus } from "@opencode-ai/sdk/v2"
 import { oc } from "./api"
 import { createServerEvents, type ServerEvents } from "./event-source"
 
+export const TAIL = 80
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 // Keep diff statistics without retaining patch bodies unused by this transcript.
 const visibleMessage = (info: Message): Message => {
@@ -81,6 +82,9 @@ export function createLiveSession(
   const [clearedThrough, setClearedThrough] = createSignal("")
   const [connection, setConnection] = createStore({ stream: "", snapshot: "", event: "" })
   const [loading, setLoading] = createSignal(false)
+  const [loadingOlder, setLoadingOlder] = createSignal(false)
+  const [olderCursor, setOlderCursor] = createSignal<string | undefined>()
+  const hasOlder = () => olderCursor() !== undefined
   const latest = () => data.message[sessionID]?.at(-1)
   const error = () => {
     const message = latest()
@@ -136,28 +140,43 @@ export function createLiveSession(
       }
       if (disposed) return
       snapshotStarted = true
-      const [session, messages, status] = await Promise.all([
+      const [session, page, status] = await Promise.all([
         oc.session(sessionID, directory, controller.signal),
-        oc.messages(sessionID, directory, controller.signal),
+        oc.messagesPage(sessionID, directory, TAIL, undefined, controller.signal),
         oc.status(directory, controller.signal),
       ])
       if (disposed) return
       const events = duringLoad!
       duringLoad = undefined
-      messages.sort((a, b) => a.info.id.localeCompare(b.info.id))
+      const messages = page.items.sort((a, b) => a.info.id.localeCompare(b.info.id))
       batch(() => {
         const previous = latest()
         if (previous && (messages.findLast((m) => m.info.role === "user")?.info.id ?? "") > previous.id) clearFailure()
+        const existing = data.message[sessionID] ?? []
+        const first = messages[0]?.info.id
+        // A fresh tail supersedes its overlapping window; already-loaded older
+        // messages remain available across reconnects and explicit refreshes.
+        const retained = olderCursor() || page.cursor
+          ? existing.filter((message) => !first || message.id < first)
+          : []
+        const merged = [...retained, ...messages.map((message) => visibleMessage(message.info))]
+        const cursor = !page.cursor && first && (!existing.length || first <= existing[0]!.id)
+          ? undefined
+          : olderCursor() ?? (existing.length ? undefined : page.cursor)
         // Reconnect snapshots must not remount the unchanged transcript.
         setData("session", reconcile([session]))
         setData("session_status", reconcile({ ...status, [sessionID]: status[sessionID] ?? { type: "idle" } }))
-        setData("message", sessionID, reconcile(messages.map((m) => visibleMessage(m.info))))
+        setData("message", sessionID, reconcile(merged))
         setData(
           "part",
           reconcile(
-            Object.fromEntries(messages.map((m) => [m.info.id, m.parts.filter((p) => !SKIP_PARTS.has(p.type))])),
+            Object.fromEntries([
+              ...retained.map((message) => [message.id, data.part[message.id] ?? []] as const),
+              ...messages.map((message) => [message.info.id, message.parts.filter((part) => !SKIP_PARTS.has(part.type))] as const),
+            ]),
           ),
         )
+        setOlderCursor(cursor)
         setData("part_text_accum_delta", reconcile({}))
         const bases = new Set<string>()
         uncertainParts.clear()
@@ -214,6 +233,30 @@ export function createLiveSession(
     return activeLoad
   }
 
+  const older = async (): Promise<void> => {
+    if (disposed || loadingOlder() || !hasOlder()) return
+    setLoadingOlder(true)
+    try {
+      if (activeLoad) await activeLoad
+      const before = olderCursor()
+      if (disposed || !before) return
+      const page = await oc.messagesPage(sessionID, directory, TAIL, before, controller.signal)
+      if (disposed) return
+      batch(() => {
+        const existing = data.message[sessionID] ?? []
+        const byID = new Map(existing.map((message) => [message.id, message]))
+        page.items.forEach((message) => byID.set(message.info.id, visibleMessage(message.info)))
+        setData("message", sessionID, reconcile([...byID.values()].sort((a, b) => a.id.localeCompare(b.id))))
+        page.items.forEach((message) =>
+          setData("part", message.info.id, reconcile(message.parts.filter((part) => !SKIP_PARTS.has(part.type)))),
+        )
+        setOlderCursor(page.cursor)
+      })
+    } finally {
+      setLoadingOlder(false)
+    }
+  }
+
   const refresh = () => {
     if (activeLoad || duringLoad) {
       refreshAfterLoad = true
@@ -241,6 +284,7 @@ export function createLiveSession(
       case "message.updated": {
         const info: Message = props.info
         if (info.sessionID !== sessionID) break
+        if (hasOlder() && data.message[sessionID]?.[0] && info.id < data.message[sessionID]![0]!.id) break
         setData(
           produce((draft) => {
             draft.message[sessionID] ??= []
@@ -265,7 +309,7 @@ export function createLiveSession(
       }
       case "message.part.updated": {
         const part: Part = props.part
-        if (part.sessionID !== sessionID || SKIP_PARTS.has(part.type)) break
+        if (part.sessionID !== sessionID || SKIP_PARTS.has(part.type) || !data.message[sessionID]?.some((message) => message.id === part.messageID)) break
         setData(
           produce((draft) => {
             delete draft.part_text_accum_delta[part.id]
@@ -383,5 +427,5 @@ export function createLiveSession(
     source?.close()
   })
 
-  return { data, load, apply, error, connectionError, loading, retry }
+  return { data, load, older, hasOlder, loadingOlder, apply, error, connectionError, loading, retry }
 }

@@ -90,6 +90,15 @@ export const oc = {
   messagesTail: (id: string, directory: string, limit: number, signal?: AbortSignal): Promise<MessageWithParts[]> =>
     fetch(`/oc/session/${id}/message?${q(directory)}&summaryPatches=false&limit=${limit}`, { signal }).then(json<MessageWithParts[]>),
 
+  messagesPage: async (id: string, directory: string, limit: number, before?: string, signal?: AbortSignal) => {
+    const res = await fetch(
+      `/oc/session/${id}/message?${q(directory)}&summaryPatches=false&limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ""}`,
+      { signal },
+    )
+    const items = await json<MessageWithParts[]>(res)
+    return { items, cursor: res.headers.get("X-Next-Cursor") ?? undefined }
+  },
+
   status: (directory: string, signal?: AbortSignal): Promise<Record<string, { type: string }>> =>
     fetch(`/oc/session/status?${q(directory)}`, { signal }).then(json<Record<string, { type: string }>>),
 

@@ -111,6 +111,7 @@ export const createFixture = async () => {
       directory: url.searchParams.get("directory"),
       es: url.searchParams.get("es"),
       limit: url.searchParams.get("limit"),
+      before: url.searchParams.get("before"),
       generate: url.searchParams.get("generate"),
       body,
     })
@@ -340,10 +341,8 @@ export const createFixture = async () => {
       }
       if (action === "/message") {
         const limit = url.searchParams.get("limit")
-        const slice = (list) => limit ? list.slice(-Number(limit)) : list
-        const messages = slice(
-          id === "ses_a"
-            ? (fixture.messages ?? [
+        const all = id === "ses_a"
+          ? (fixture.messages ?? [
                 {
                   info: {
                     id: "msg_user",
@@ -372,17 +371,25 @@ export const createFixture = async () => {
                   },
                   parts: [],
                 },
-              ])
-            : fixture.messagesB,
-        )
+            ])
+          : fixture.messagesB
+        const before = url.searchParams.get("before")
+        const eligible = before ? all.filter((message) => message.info.id < before) : all
+        const messages = limit ? eligible.slice(-Number(limit)) : eligible
+        const cursor = limit && eligible.length > messages.length ? messages[0]?.info.id : undefined
+        const send = () => {
+          if (cursor) response.setHeader("X-Next-Cursor", cursor)
+          response.setHeader("Access-Control-Expose-Headers", "X-Next-Cursor")
+          json(messages)
+        }
         if (fixture.holdMessages.has(id)) {
           response.on("close", () => {
             if (!response.writableEnded) fixture.abortedMessages.push(id)
           })
-          fixture.messageReplies.push(() => json(messages))
+          fixture.messageReplies.push(send)
           return
         }
-        return json(messages)
+        return send()
       }
       if (action === "/prompt_async" && request.method === "POST") {
         if (fixture.rejectImages && body.parts.some((part) => part.type === "file"))

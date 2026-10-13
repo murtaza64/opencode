@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, spyOn, test, type Mock } from "bun:test"
 import { createComputed, createRoot } from "solid-js"
-import { createLiveSession } from "./live-session"
+import { createLiveSession, TAIL } from "./live-session"
 
 const failure = "Cannot connect to API: Unable to connect. Is the computer able to access the url?"
 const modelError = { name: "UnknownError", data: { message: failure } }
@@ -46,7 +46,15 @@ let statuses: Record<string, unknown>
 
 const response = (input: string | URL | Request) => {
   const path = String(input).split("?")[0]
-  if (path === "/oc/session/ses_current/message") return Response.json(snapshot)
+  if (path === "/oc/session/ses_current/message") {
+    const query = new URL(String(input), "http://fixture").searchParams
+    const before = query.get("before")
+    const eligible = before ? snapshot.filter((message) => (message.info as { id: string }).id < before) : snapshot
+    const items = query.has("limit") ? eligible.slice(-Number(query.get("limit"))) : eligible
+    return Response.json(items, {
+      headers: eligible.length > items.length ? { "X-Next-Cursor": (items[0]?.info as { id: string }).id } : {},
+    })
+  }
   if (path === "/oc/session/status") return Response.json(statuses)
   if (path === "/oc/session/ses_current") return Response.json({ id: "ses_current", title: "Test" })
   throw new Error(`Unexpected fetch: ${path}`)
@@ -83,6 +91,74 @@ test("model connection failure stops thinking without waiting for an idle event"
   expect(live.data.session_status.ses_current.type).toBe("idle")
   expect(live.error()).toBe(failure)
   expect(live.connectionError()).toBe("")
+})
+
+test("initial snapshot requests 80 messages and retains the older-page cursor", async () => {
+  snapshot = Array.from({ length: 162 }, (_, index) => ({ info: user(`msg_${String(index).padStart(3, "0")}`), parts: [] }))
+  const live = start()
+  await live.load()
+  expect(TAIL).toBe(80)
+  expect(fetchSpy.mock.calls.filter(([input]) => String(input).includes("/message?"))).toHaveLength(1)
+  expect(new URL(String(fetchSpy.mock.calls.find(([input]) => String(input).includes("/message?"))![0]), "http://fixture").searchParams.get("limit")).toBe("80")
+  expect(live.data.message.ses_current?.[0]?.id).toBe("msg_082")
+  expect(live.hasOlder()).toBe(true)
+})
+
+test("older pages prepend in order without duplicates and stop at the first message", async () => {
+  snapshot = Array.from({ length: 162 }, (_, index) => ({ info: user(`msg_${String(index).padStart(3, "0")}`), parts: [] }))
+  const live = start()
+  await live.load()
+  SessionEvents.current.send("message.updated", { info: user("msg_090") })
+  await live.older()
+  expect(live.data.message.ses_current).toHaveLength(160)
+  expect(live.data.message.ses_current?.[0]?.id).toBe("msg_002")
+  expect(live.hasOlder()).toBe(true)
+  await live.older()
+  expect(live.data.message.ses_current?.map((message) => message.id)).toEqual(
+    snapshot.map((message) => (message.info as { id: string }).id),
+  )
+  expect(live.hasOlder()).toBe(false)
+  expect(live.loadingOlder()).toBe(false)
+  expect(fetchSpy.mock.calls.filter(([input]) => String(input).includes("/message?"))).toHaveLength(3)
+})
+
+test("older SSE updates do not open gaps until older history is loaded", async () => {
+  snapshot = Array.from({ length: 81 }, (_, index) => ({ info: user(`msg_${String(index).padStart(3, "0")}`), parts: [] }))
+  const live = start()
+  await live.load()
+  SessionEvents.current.send("message.updated", { info: user("msg_000") })
+  expect(live.data.message.ses_current?.[0]?.id).toBe("msg_001")
+  await live.older()
+  expect(live.hasOlder()).toBe(false)
+  SessionEvents.current.send("message.updated", { info: user("msg_000") })
+  expect(live.data.message.ses_current?.[0]?.id).toBe("msg_000")
+})
+
+test("refresh retains older pages and their cursor while updating the new tail", async () => {
+  snapshot = Array.from({ length: 162 }, (_, index) => ({ info: user(`msg_${String(index).padStart(3, "0")}`), parts: [] }))
+  const live = start()
+  await live.load()
+  await live.older()
+  snapshot.push({ info: user("msg_162"), parts: [] })
+  await live.load()
+  expect(live.data.message.ses_current).toHaveLength(161)
+  expect(live.data.message.ses_current?.[0]?.id).toBe("msg_002")
+  expect(live.data.message.ses_current?.at(-1)?.id).toBe("msg_162")
+  expect(live.hasOlder()).toBe(true)
+  await live.older()
+  expect(live.data.message.ses_current).toHaveLength(163)
+  expect(live.hasOlder()).toBe(false)
+})
+
+test("refresh clears an old cursor when its complete tail reaches the first message", async () => {
+  snapshot = Array.from({ length: 81 }, (_, index) => ({ info: user(`msg_${String(index).padStart(3, "0")}`), parts: [] }))
+  const live = start()
+  await live.load()
+  expect(live.hasOlder()).toBe(true)
+  snapshot = snapshot.slice(1)
+  await live.load()
+  expect(live.data.message.ses_current?.[0]?.id).toBe("msg_001")
+  expect(live.hasOlder()).toBe(false)
 })
 
 test("snapshot and live updates retain summary metadata without unused patch bodies", async () => {

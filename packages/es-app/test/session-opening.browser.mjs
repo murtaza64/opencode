@@ -165,11 +165,11 @@ try {
         ...result,
       }),
     )
-    expect(result.user_nodes).toBe(200)
+    expect(result.user_nodes).toBe(40)
     await expect(page.locator('[data-timeline-part-id="prt_msg_000399_1"]')).toBeInViewport()
-    await expect(page.locator('[data-component="tool-part-wrapper"][data-tool="bash"]')).toHaveCount(800)
-    await expect(page.locator('[data-component="reasoning-part"]')).toHaveCount(600)
-    await expect(page.locator('[data-timeline-part-id="prt_msg_000000"]')).toContainText("Synthetic request 0")
+    await expect(page.locator('[data-component="tool-part-wrapper"][data-tool="bash"]')).toHaveCount(160)
+    await expect(page.locator('[data-component="reasoning-part"]')).toHaveCount(120)
+    await expect(page.locator('[data-timeline-part-id="prt_msg_000320"]')).toContainText("Synthetic request 160")
     if (profiler) {
       const { profile } = await profiler.send("Profiler.stop")
       const nodes = new Map(profile.nodes.map((node) => [node.id, node.callFrame]))
@@ -198,8 +198,8 @@ try {
       await expect(page.locator('[data-timeline-part-id="prt_msg_000399_1"]')).toContainText("REFRESH-SENTINEL")
       expect(await retained.evaluate((node) => node.isConnected)).toBe(true)
       await expect(trigger).toHaveAttribute("aria-expanded", "true")
-      await expect(page.locator('[data-component="user-message"]')).toHaveCount(199)
-      await expect(page.locator('[data-timeline-part-id="prt_msg_000000"]')).toHaveCount(0)
+      await expect(page.locator('[data-component="user-message"]')).toHaveCount(40)
+      await expect(page.locator('[data-timeline-part-id="prt_msg_000320"]')).toContainText("Synthetic request 160")
       await page.setViewportSize({ width: 390, height: 844 })
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       await page.setViewportSize({ width: 1440, height: 1000 })
