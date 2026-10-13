@@ -597,6 +597,66 @@ describe("Session.findMessage", () => {
 })
 
 describe("MessageV2.filterCompacted", () => {
+  test("stepper preserves no, repeated, retained and incomplete compaction histories", () => {
+    const user = (id: string, tail?: string): SessionV1.WithParts => ({
+      info: { id, role: "user" } as SessionV1.User,
+      parts: tail === undefined ? [] : [{ type: "compaction", tail_start_id: tail } as SessionV1.CompactionPart],
+    })
+    const assistant = (id: string, parentID: string, completed = false): SessionV1.WithParts => ({
+      info: {
+        id,
+        role: "assistant",
+        parentID,
+        summary: completed,
+        finish: completed ? "end_turn" : undefined,
+      } as SessionV1.Assistant,
+      parts: [],
+    })
+    const oldest = user("old")
+    const tail = user("tail")
+    const first = user("first", "")
+    const firstSummary = assistant("first-summary", "first", true)
+    const second = user("second", "tail")
+    const secondSummary = assistant("second-summary", "second", true)
+    const next = user("next")
+    const pending = assistant("pending", "next")
+    const cases = [
+      { history: [pending, next, oldest], expected: ["old", "next", "pending"] },
+      { history: [pending, next, firstSummary, first, oldest], expected: ["first", "first-summary", "next", "pending"] },
+      {
+        history: [pending, next, secondSummary, second, firstSummary, first, tail, oldest],
+        expected: ["second", "second-summary", "tail", "first", "first-summary", "next", "pending"],
+      },
+      { history: [pending, next, second, tail, oldest], expected: ["old", "tail", "second", "next", "pending"] },
+    ]
+    for (const { history, expected } of cases) {
+      const stepper = MessageV2.compactedFilter()
+      for (const msg of history) if (stepper.push(msg)) break
+      expect(stepper.result().map((msg) => String(msg.info.id))).toEqual(expected)
+      expect(stepper.result()).toEqual(MessageV2.filterCompacted(history))
+    }
+  })
+
+  it.instance("reads only pages through the retained tail after compaction", () =>
+    withSession(({ session, sessionID }) =>
+      Effect.gen(function* () {
+        const ids = yield* fill(sessionID, 300, (i: number) => 1000 + i)
+        yield* addCompactionPart(sessionID, ids[249]!, ids[239]!)
+        yield* addAssistant(sessionID, ids[249]!, { summary: true, finish: "end_turn" })
+        const expected = MessageV2.filterCompacted(yield* MessageV2.stream(sessionID))
+        let reads = 0
+        const actual = yield* MessageV2.filterCompactedEffect(sessionID, (input) => {
+          reads++
+          return MessageV2.page(input)
+        })
+        expect(actual).toEqual(expected)
+        expect(reads).toBe(2)
+        expect(reads).toBeLessThan(Math.ceil(301 / 50))
+        expect(actual.map((msg) => msg.info.id)).toContain(ids[239])
+      }),
+    ),
+  )
+
   it.instance("returns all messages when no compaction", () =>
     withSession(({ sessionID }) =>
       Effect.gen(function* () {
@@ -966,6 +1026,27 @@ describe("MessageV2.filterCompacted", () => {
     expect(result).toHaveLength(1)
     expect(result[0].info.id).toBe(id)
   })
+})
+
+describe("MessageV2.turn", () => {
+  it.instance("returns the target and its children up to the next user, across pages", () =>
+    withSession(({ sessionID }) =>
+      Effect.gen(function* () {
+        yield* fill(sessionID, 60, (i: number) => 1000 + i)
+        const target = yield* addUser(sessionID, "target")
+        const children: MessageID[] = []
+        for (let i = 0; i < 55; i++) children.push(yield* addAssistant(sessionID, target))
+        yield* addAssistant(sessionID, MessageID.ascending())
+        yield* addUser(sessionID, "next")
+        yield* addAssistant(sessionID, target)
+        expect((yield* MessageV2.turn({ sessionID, messageID: target })).map((msg) => msg.info.id)).toEqual([
+          target,
+          ...children,
+        ])
+        expect(yield* MessageV2.turn({ sessionID, messageID: MessageID.ascending() })).toEqual([])
+      }),
+    ),
+  )
 })
 
 describe("MessageV2.cursor", () => {

@@ -21,7 +21,7 @@ import { APICallError, convertToModelMessages, LoadAPIKeyError, type ModelMessag
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { NotFoundError } from "@/storage/storage"
-import { and } from "drizzle-orm"
+import { and, asc, gte, gt } from "drizzle-orm"
 import { desc } from "drizzle-orm"
 import { eq } from "drizzle-orm"
 import { inArray } from "drizzle-orm"
@@ -518,61 +518,111 @@ export const get = Effect.fn("MessageV2.get")(function* (input: { sessionID: Ses
   }
 })
 
-export function filterCompacted(msgs: Iterable<WithParts>) {
+export const turn = Effect.fn("MessageV2.turn")(function* (input: { sessionID: SessionID; messageID: MessageID }) {
+  const { db } = yield* Database.Service
+  const result: WithParts[] = []
+  let after: MessageID | undefined
+  while (true) {
+    const rows = yield* db
+      .select()
+      .from(MessageTable)
+      .where(
+        and(
+          eq(MessageTable.session_id, input.sessionID),
+          after ? gt(MessageTable.id, after) : gte(MessageTable.id, input.messageID),
+        ),
+      )
+      .orderBy(asc(MessageTable.id))
+      .limit(50)
+      .all()
+      .pipe(Effect.orDie)
+    if (!rows.length) return result
+    const messages = yield* hydrate(db, rows)
+    for (const msg of messages) {
+      if (msg.info.role === "user") {
+        if (msg.info.id !== input.messageID) return result
+        result.push(msg)
+        continue
+      }
+      if (result.length && msg.info.role === "assistant" && msg.info.parentID === input.messageID)
+        result.push(msg)
+    }
+    if (rows.length < 50) return result
+    after = rows.at(-1)!.id
+  }
+})
+
+export function compactedFilter() {
   const result = [] as WithParts[]
   const completed = new Set<string>()
   let retain: MessageID | undefined
-  for (const msg of msgs) {
-    result.push(msg)
-    if (retain) {
-      if (msg.info.id === retain) break
-      continue
-    }
-    if (msg.info.role === "user" && completed.has(msg.info.id)) {
-      const part = msg.parts.find((item): item is CompactionPart => item.type === "compaction")
-      if (!part) continue
-      if (!part.tail_start_id) break
-      retain = part.tail_start_id
-      if (msg.info.id === retain) break
-      continue
-    }
-    if (msg.info.role === "user" && completed.has(msg.info.id) && msg.parts.some((part) => part.type === "compaction"))
-      break
-    if (msg.info.role === "assistant" && msg.info.summary && msg.info.finish && !msg.info.error)
-      completed.add(msg.info.parentID)
-  }
-  result.reverse()
-  const compactionIndex = result.findLastIndex(
-    (msg) =>
-      msg.info.role === "user" &&
-      msg.parts.some((item): item is CompactionPart => item.type === "compaction" && item.tail_start_id !== undefined),
-  )
-  const compaction = result[compactionIndex]
-  const part = compaction?.parts.find(
-    (item): item is CompactionPart => item.type === "compaction" && item.tail_start_id !== undefined,
-  )
-  const summaryIndex = compaction
-    ? result.findIndex(
-        (msg, index) =>
-          index > compactionIndex &&
-          msg.info.role === "assistant" &&
-          msg.info.summary &&
-          msg.info.parentID === compaction.info.id,
+  return {
+    push(msg: WithParts) {
+      result.push(msg)
+      if (retain) return msg.info.id === retain
+      if (msg.info.role === "user" && completed.has(msg.info.id)) {
+        const part = msg.parts.find((item): item is CompactionPart => item.type === "compaction")
+        if (!part) return false
+        if (!part.tail_start_id) return true
+        retain = part.tail_start_id
+        return msg.info.id === retain
+      }
+      if (msg.info.role === "assistant" && msg.info.summary && msg.info.finish && !msg.info.error)
+        completed.add(msg.info.parentID)
+      return false
+    },
+    result() {
+      const ordered = result.slice().reverse()
+      const compactionIndex = ordered.findLastIndex(
+        (msg) =>
+          msg.info.role === "user" &&
+          msg.parts.some((item): item is CompactionPart => item.type === "compaction" && item.tail_start_id !== undefined),
       )
-    : -1
-  const tailIndex = part?.tail_start_id ? result.findIndex((msg) => msg.info.id === part.tail_start_id) : -1
-  if (tailIndex >= 0 && tailIndex < compactionIndex && summaryIndex > compactionIndex) {
-    return [
-      ...result.slice(compactionIndex, summaryIndex + 1),
-      ...result.slice(tailIndex, compactionIndex),
-      ...result.slice(summaryIndex + 1),
-    ]
+      const compaction = ordered[compactionIndex]
+      const part = compaction?.parts.find(
+        (item): item is CompactionPart => item.type === "compaction" && item.tail_start_id !== undefined,
+      )
+      const summaryIndex = compaction
+        ? ordered.findIndex(
+            (msg, index) =>
+              index > compactionIndex &&
+              msg.info.role === "assistant" &&
+              msg.info.summary &&
+              msg.info.parentID === compaction.info.id,
+          )
+        : -1
+      const tailIndex = part?.tail_start_id ? ordered.findIndex((msg) => msg.info.id === part.tail_start_id) : -1
+      if (tailIndex >= 0 && tailIndex < compactionIndex && summaryIndex > compactionIndex) {
+        return [
+          ...ordered.slice(compactionIndex, summaryIndex + 1),
+          ...ordered.slice(tailIndex, compactionIndex),
+          ...ordered.slice(summaryIndex + 1),
+        ]
+      }
+      return ordered
+    },
   }
-  return result
 }
 
-export const filterCompactedEffect = Effect.fnUntraced(function* (sessionID: SessionID) {
-  return filterCompacted(yield* stream(sessionID))
+export function filterCompacted(msgs: Iterable<WithParts>) {
+  const filter = compactedFilter()
+  for (const msg of msgs) if (filter.push(msg)) break
+  return filter.result()
+}
+
+export const filterCompactedEffect = Effect.fnUntraced(function* (sessionID: SessionID, readPage: typeof page = page) {
+  const filter = compactedFilter()
+  let before: string | undefined
+  while (true) {
+    const next = yield* readPage({ sessionID, limit: 50, before }).pipe(
+      Effect.catchIf(NotFoundError.isInstance, () =>
+        Effect.succeed({ items: [] as WithParts[], more: false, cursor: undefined }),
+      ),
+    )
+    for (let i = next.items.length - 1; i >= 0; i--) if (filter.push(next.items[i]!)) return filter.result()
+    if (!next.more || !next.cursor) return filter.result()
+    before = next.cursor
+  }
 })
 
 // filterCompacted reorders messages for model consumption

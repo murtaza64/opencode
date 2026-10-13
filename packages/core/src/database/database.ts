@@ -27,7 +27,8 @@ const layer = Layer.effect(
     yield* db.run("PRAGMA journal_mode = WAL")
     yield* db.run("PRAGMA synchronous = NORMAL")
     yield* db.run("PRAGMA busy_timeout = 5000")
-    yield* db.run("PRAGMA cache_size = -64000")
+    // Keep hot SQLite pages resident when memory pressure evicts the OS cache of the multi-GB database.
+    yield* db.run("PRAGMA cache_size = -524288")
     yield* db.run("PRAGMA foreign_keys = ON")
     yield* db.run("PRAGMA wal_checkpoint(PASSIVE)")
     yield* DatabaseMigration.apply(db)

@@ -31,6 +31,7 @@ import { LSP } from "@/lsp/lsp"
 import { MCP } from "../../src/mcp"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { MessageID } from "../../src/session/schema"
 
 const mcp = Layer.succeed(
   MCP.Service,
@@ -122,6 +123,31 @@ const providerCfg = (url: string) => ({
     },
   },
 })
+
+it.instance("diff reads only the requested user message and treats missing IDs as empty", () =>
+  Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const summary = yield* SessionSummary.Service
+    const created = yield* sessions.create({})
+    const messageID = MessageID.ascending()
+    yield* sessions.updateMessage({
+      id: messageID,
+      sessionID: created.id,
+      role: "user",
+      time: { created: Date.now() },
+      agent: "test",
+      model: { providerID: "test", modelID: "test" },
+      tools: {},
+      mode: "",
+      summary: { diffs: [{ file: "changed.txt", patch: "new", additions: 1, deletions: 0 }] },
+    } as unknown as SessionV1.User)
+    expect(yield* summary.diff({ sessionID: created.id, messageID })).toEqual([
+      { file: "changed.txt", patch: "new", additions: 1, deletions: 0 },
+    ])
+    expect(yield* summary.diff({ sessionID: created.id, messageID: MessageID.ascending() })).toEqual([])
+    yield* sessions.remove(created.id)
+  }),
+)
 
 it.live("tool execution produces non-empty session diff (snapshot race)", () =>
   provideTmpdirServer(
