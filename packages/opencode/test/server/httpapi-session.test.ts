@@ -249,6 +249,11 @@ describe("session HttpApi", () => {
         expect(yield* responseJson(response)).toEqual(body)
         expect(store.size()).toBe(0)
       }
+      // Listing resolves the project without pinning an Instance either.
+      const listed = yield* request(`/session?directory=${encodeURIComponent(dir)}`, { headers })
+      expect(listed.status).toBe(200)
+      expect(yield* responseJson(listed)).toEqual([])
+      expect(store.size()).toBe(0)
       const created = yield* requestJson<Session.Info>(`/session?directory=${encodeURIComponent(dir)}`, {
         method: "POST", headers,
       })

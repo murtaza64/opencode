@@ -33,7 +33,11 @@ function provideInstanceContext<E>(
       const cached = yield* store.peek(directory)
       if (!cached) return HttpServerResponse.jsonUnsafe(pathname === "/session/status" ? {} : [])
     }
-    const ctx = yield* store.load({ directory })
+    // Listing is DB-only; resolve project identity without pinning an Instance.
+    const ctx =
+      request.method === "GET" && ["/session", "/umbrella/session"].includes(pathname)
+        ? yield* store.resolve(directory)
+        : yield* store.load({ directory })
     return yield* effect.pipe(
       Effect.provideService(InstanceRef, ctx),
       Effect.provideService(WorkspaceRef, route.workspaceID),

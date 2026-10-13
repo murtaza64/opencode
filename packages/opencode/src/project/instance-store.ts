@@ -25,6 +25,7 @@ export interface LoadInput {
 export interface Interface {
   readonly load: (input: LoadInput) => Effect.Effect<InstanceContext>
   readonly peek: (directory: string) => Effect.Effect<InstanceContext | undefined>
+  readonly resolve: (directory: string) => Effect.Effect<InstanceContext>
   readonly size: () => number
   readonly reload: (input: LoadInput) => Effect.Effect<InstanceContext>
   readonly dispose: (ctx: InstanceContext) => Effect.Effect<void>
@@ -234,6 +235,17 @@ const layer: Layer.Layer<
         return Exit.isSuccess(exit) ? exit.value : undefined
       })
 
+    // Project identity without bootstrapping: DB-only routes (session listing)
+    // need only the project id and directory, never plugins, LSP or MCP.
+    const resolve = (input: string) =>
+      Effect.gen(function* () {
+        const cached = yield* peek(input)
+        if (cached) return cached
+        const directory = FSUtil.resolve(input)
+        const result = yield* project.fromDirectory(directory)
+        return { directory, worktree: result.sandbox, project: result.project } satisfies InstanceContext
+      })
+
     const sweep = Effect.fn("InstanceStore.sweep")(function* () {
       const now = yield* Clock.currentTimeMillis
       let evicted = 0
@@ -276,6 +288,7 @@ const layer: Layer.Layer<
     return Service.of({
       load,
       peek,
+      resolve,
       size: () => cache.size,
       reload,
       dispose,
