@@ -67,6 +67,7 @@ export type ComposerState = {
     text: string
     images: number
     status: "sending" | "accepted" | "unknown"
+    after?: string
     action?: ComposerAction
   } | null
   queueAgent: string | null
@@ -198,7 +199,8 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         setState("normalSubmission", {
           text: saved.normalSubmission.text,
           images: saved.normalSubmission.images,
-          status: "unknown",
+          status: saved.normalSubmission.status === "accepted" ? "accepted" : "unknown",
+          ...(typeof saved.normalSubmission.after === "string" ? { after: saved.normalSubmission.after } : {}),
           ...(isAction(saved.normalSubmission.action) ? { action: saved.normalSubmission.action } : {}),
         })
       }
@@ -253,10 +255,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       targetRevision: state.targetRevision,
       mode: state.mode,
       normalExplicit: state.normalExplicit,
-      normalSubmission:
-        state.normalSubmission?.status === "sending" || state.normalSubmission?.status === "unknown"
-          ? { ...state.normalSubmission }
-          : null,
+      normalSubmission: state.normalSubmission ? { ...state.normalSubmission } : null,
       queueAgent: state.queueAgent,
       modelSelection: state.modelSelection,
       task: copyDraft(state.task),
@@ -606,6 +605,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     session: Session,
     nextModel?: ComposerModel | null,
     direct?: { mode: ComposerMode; buffer: ComposerBuffer; targetRevision: number; action: ComposerAction },
+    latestMessageID?: string,
   ) => {
     const mode = direct?.mode ?? state.mode
     const buffer = direct?.buffer ?? draftKey()
@@ -699,6 +699,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           text,
           images: draft.images.length,
           status: "sending",
+          after: latestMessageID,
           ...(direct ? { action: direct.action } : {}),
         },
       })
@@ -898,13 +899,13 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       updateDraft({ selection: [start, end] }, false, state.visibleBuffer),
     reasonForAction: (action: ComposerAction) =>
       blockedReason(action === "steer" && !state.busy ? "send" : action, state.visibleBuffer),
-    submitVisible: (action: ComposerAction, session: Session, nextModel?: ComposerModel | null) =>
+    submitVisible: (action: ComposerAction, session: Session, nextModel?: ComposerModel | null, latestMessageID?: string) =>
       submit(session, nextModel, {
         action,
         mode: action === "steer" && !state.busy ? "send" : action,
         buffer: state.visibleBuffer,
         targetRevision: state.targetRevision,
-      }),
+      }, latestMessageID),
     setText: (text: string) => updateDraft({ text }),
     setQueueAgent: (agent: string | null) => {
       if (state.queueAgent === agent) return

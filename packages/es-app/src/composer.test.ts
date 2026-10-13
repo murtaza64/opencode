@@ -376,11 +376,23 @@ test("reload preserves explicit Send and shows unknown legacy outcome without re
   expect(restored.state.mode).toBe("send")
   expect(restored.state.normalSubmission?.status).toBe("unknown")
   expect(restored.state.normalSubmission?.text).toBe("unconfirmed")
+  expect(restored.state.normalSubmission?.after).toBeUndefined()
   expect(restored.state.task.text).toBe("unconfirmed")
   expect(calls).toBe(1)
   ack.reject(new Error("connection lost"))
   await sending
   expect(composer.state.normalSubmission?.status).toBe("unknown")
+})
+
+test("normal Send retains its transcript boundary through acknowledgement and reload", async () => {
+  const { composer, dependencies } = harness(undefined, { prompt: async () => {} })
+  composer.setText("new message")
+  await composer.submitVisible("steer", session, undefined, "msg_previous")
+  expect(composer.state.normalSubmission?.after).toBe("msg_previous")
+  expect(composer.state.normalSubmission?.status).toBe("accepted")
+  const restored = createComposer(session.id, directory, dependencies)
+  expect(restored.state.normalSubmission?.after).toBe("msg_previous")
+  expect(restored.state.normalSubmission?.status).toBe("accepted")
 })
 
 test("unknown normal outcome remains visible until explicitly dismissed before another normal Send", async () => {

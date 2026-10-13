@@ -19,6 +19,7 @@ import { rightOpen, startDrag } from "../ui"
 import { createVim } from "../vim"
 import { contextUsage, latestCompletedTurn } from "../context-usage"
 import { getComposer, type ComposerAction } from "../composer"
+import { pendingEcho } from "../pending-echo"
 import { defaultImageCapability, prepareImageFile } from "../image-fit"
 import { ComposerResults } from "../components/composer-controls"
 import { DirectComposer } from "../components/direct-composer"
@@ -257,6 +258,19 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const status = () => live.data.session_status[sessionID]?.type ??
     (!activity.error(sessionID, directory) ? activity.status(sessionID) : undefined) ?? "idle"
   const messages = createMemo(() => live.data.message[sessionID] ?? [])
+  const echo = createMemo(() => pendingEcho(composer.state.normalSubmission, messages().map((message) => ({
+    id: message.id,
+    role: message.role,
+    text: message.role === "user"
+      ? (live.data.part[message.id] ?? []).filter((part) => part.type === "text").map((part) => part.text).join("")
+      : undefined,
+  }))))
+  createEffect(() => {
+    const visible = echo()
+    if (visible && stick) queueMicrotask(pin)
+    if (!visible && composer.state.normalSubmission?.status === "accepted")
+      untrack(() => composer.dismissNormalSubmission())
+  })
   const inlineError = () => {
     const latest = messages().at(-1)
     return latest?.role === "assistant" && latest.error?.name !== "MessageAbortedError" && latest.error
@@ -570,7 +584,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     composer.observeBusy(busy())
     stick = true
     queueMicrotask(pin)
-    await composer.submitVisible(action ?? (composer.state.busy ? composer.state.keyboardTarget : "steer"), s, nextModel())
+    await composer.submitVisible(action ?? (composer.state.busy ? composer.state.keyboardTarget : "steer"), s, nextModel(), messages().at(-1)?.id)
   }
 
   let transcriptEl: HTMLDivElement | undefined
@@ -1037,6 +1051,14 @@ function SessionView(props: { sessionID: string; directory: string }) {
                 </>
               )}
             </For>
+            <Show when={echo() && composer.state.normalSubmission}>
+              {(submission) => (
+                <div class="pending-msg" data-status={submission().status}>
+                  <div class="pending-bubble" dir="auto">{submission().text}{submission().images ? ` · ${submission().images} image(s)` : ""}</div>
+                  <div class="pending-hint">{submission().status === "sending" ? "Sending…" : submission().status === "accepted" ? "Sent — waiting for the daemon…" : "Send not confirmed"}</div>
+                </div>
+              )}
+            </Show>
             <For each={appendedQuestions()}>
               {(item) => {
                 const owner = () => item.request.sessionID !== sessionID
