@@ -216,6 +216,11 @@
   text-underline-offset: 3px;
   cursor: pointer;
 }
+.session-ref { position: relative; display: inline-block; padding-inline: 4px; border: 1px solid var(--lavender); border-radius: 5px; color: var(--lavender); background: var(--mantle); max-width: 100%; vertical-align: baseline; }
+.session-ref[data-resolved] { cursor: pointer; }
+.session-ref[data-unknown], .session-ref[data-current] { color: var(--subtext0); border-color: var(--surface1); }
+.session-ref-label { display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; vertical-align: bottom; }
+.session-ref-id { position: absolute; width: 1px; height: 1px; clip: rect(0, 0, 0, 0); overflow: hidden; white-space: nowrap; }
 .ticket-tip {
   position: fixed;
   z-index: 60;
@@ -1418,6 +1423,26 @@ textarea.vim-normal { caret-color: transparent; }
 textarea.vim-normal::selection { background: var(--lavender); color: var(--crust); }
 .ta-wrap { position: relative; flex: 1; display: flex; min-width: 0; }
 .ta-wrap textarea { width: 100%; }
+/* Outer box covers the fixed-width @ses_ token's glyphs with the textarea's
+ * own background; the pill inside sizes to its content. */
+.session-chip { position: absolute; z-index: 1; pointer-events: none; box-sizing: border-box; display: flex; align-items: center; background: var(--chip-cover, var(--mantle)); overflow: hidden; white-space: nowrap; font-size: 0.86em; }
+.session-chip-pill { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0; height: 100%; padding-inline: 7px 8px; box-sizing: border-box; border-radius: 999px; color: var(--lavender); background: color-mix(in srgb, var(--lavender) 16%, var(--mantle)); border: 1px solid color-mix(in srgb, var(--lavender) 45%, var(--mantle)); overflow: hidden; }
+.session-chip-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--lavender) 55%, var(--mantle)); }
+.session-chip-dot[data-live] { background: var(--green); box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 30%, transparent); }
+.session-chip-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.session-chip-meta { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: color-mix(in srgb, var(--lavender) 60%, var(--subtext0)); opacity: 0.85; }
+.session-chip-meta::before { content: "·"; margin-inline-end: 5px; }
+.session-chip[data-unknown] .session-chip-pill { color: var(--subtext0); background: var(--surface0); border-color: var(--surface1); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; }
+.session-chip[data-unknown] .session-chip-dot { background: var(--surface1); }
+.session-chip[data-unknown] .session-chip-title { font-weight: 400; }
+.session-picker { position: absolute; inset-inline: 0; bottom: 100%; z-index: 55; max-height: min(320px, 40vh); overflow-y: auto; background: var(--crust); border: 1px solid var(--surface1); box-shadow: 0 4px 18px rgba(0,0,0,0.5); font-size: 12px; }
+.session-picker-head { padding: 5px 10px; color: var(--subtext0); border-bottom: 1px solid var(--surface0); }
+.session-picker-row { padding: 5px 10px; cursor: pointer; }
+.session-picker-row[aria-selected="true"], .session-picker-row:hover { background: var(--surface0); }
+.session-picker-meta, .session-picker-empty { color: var(--subtext0); font-size: 11px; }
+.session-picker-empty { padding: 8px 10px; }
+.session-picker-live { display: inline-block; width: 6px; height: 6px; margin-inline-end: 5px; border-radius: 50%; background: var(--green); }
+.prompt-box:has(.session-picker), .float-editor > .direct-composer:has(.session-picker) { overflow: visible; }
 .vim-caret {
   position: absolute;
   background: var(--lavender);

@@ -9,9 +9,12 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { oc } from "../api"
 import { createLiveSession, errorText } from "../live-session"
 import FakeCaret from "../components/fake-caret"
+import { SessionChips } from "../components/session-chips"
+import { SessionPicker } from "../components/session-picker"
+import { insertMention, mentionQuery, rankSessions, tokenBefore } from "../session-mention"
 import { RelativeLines } from "../components/relative-lines"
 import SessionInfo from "../components/session-info"
-import { sessionHref, useDashboard } from "../state"
+import { sessionHref, useDashboard, type SessionRow } from "../state"
 import { rightOpen, startDrag } from "../ui"
 import { createVim } from "../vim"
 import { contextUsage, latestCompletedTurn } from "../context-usage"
@@ -554,7 +557,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
   // --- vim-like modal input + navigation --------------------------------
 
   const navigate = useNavigate()
-  const { sessions } = useDashboard()
+  const { sessions, sessionRows, archivedIds } = useDashboard()
   const switchSession = (back: boolean) => {
     // skip archived sessions, matching the sidebar's main list
     const list = sessions()
@@ -783,16 +786,83 @@ function SessionView(props: { sessionID: string; directory: string }) {
     })
   }
 
-  const Editor = (props: { expanded?: boolean }) => <div class="ta-wrap" classList={{ "numbered-editor": props.expanded }}>
-    <textarea ref={(el) => props.expanded ? (floatEl = el) : (promptEl = el)}
-      aria-label="Message" dir="auto" placeholder="Write a message…"
-      classList={{ "vim-normal": vim.mode() === "normal", "vim-insert": vim.mode() === "insert" }}
-      value={draft()} onInput={(e) => { saveSelection(e.currentTarget); setDraft(e.currentTarget.value) }}
-      onPaste={pasteImages} onDrop={dropImages} onDragOver={(e) => e.preventDefault()}
-      onKeyDown={promptKeyDown} onFocus={focusInsert} onClick={focusInsert} onBlur={(e) => saveSelection(e.currentTarget)} />
-    <Show when={props.expanded}><RelativeLines target={floatEl!} value={draft()} /></Show>
-    <FakeCaret target={props.expanded ? floatEl : promptEl} caret={caret()} mode={vim.mode()} />
-  </div>
+  const Editor = (props: { expanded?: boolean }) => {
+    const [query, setQuery] = createSignal<ReturnType<typeof mentionQuery>>()
+    const [selected, setSelected] = createSignal(0)
+    let composing = false
+    const target = () => props.expanded ? floatEl : promptEl
+    const rows = () => query() ? rankSessions(sessionRows().filter((row) => !archivedIds().has(row.id)), query()!.query, sessionID) : []
+    const update = (el: HTMLTextAreaElement, isComposing = false) => {
+      saveSelection(el)
+      if (composing || isComposing || vim.mode() === "normal" || document.activeElement !== el || el.selectionStart !== el.selectionEnd) return setQuery(undefined)
+      const next = mentionQuery(el.value, el.selectionStart)
+      setQuery(next)
+      setSelected(0)
+    }
+    const apply = (el: HTMLTextAreaElement, text: string, position: number) => {
+      el.value = text
+      el.setSelectionRange(position, position)
+      setDraft(text)
+      saveSelection(el)
+      vim.refresh(el)
+      setQuery(undefined)
+    }
+    const insert = (row: SessionRow) => {
+      const el = target()
+      const active = query()
+      if (!el || !active) return
+      const next = insertMention(el.value, active.start, el.selectionStart, row.id)
+      apply(el, next.text, next.caret)
+    }
+    const keyDown = (event: KeyboardEvent) => {
+      const el = event.currentTarget as HTMLTextAreaElement
+      if (event.isComposing || composing || vim.mode() === "normal" || dialog.active) return
+      if (!event.metaKey && !event.altKey && !event.ctrlKey && event.key === "Backspace" && el.selectionStart === el.selectionEnd) {
+        const token = tokenBefore(el.value, el.selectionStart)
+        if (token) {
+          event.preventDefault()
+          event.stopPropagation()
+          apply(el, el.value.slice(0, token.start) + el.value.slice(token.end), token.start)
+          return
+        }
+      }
+      if (!query()) return
+      const count = rows().length
+      const down = !event.metaKey && !event.altKey && (event.key === "ArrowDown" && !event.ctrlKey || event.ctrlKey && event.key.toLowerCase() === "n")
+      const up = !event.metaKey && !event.altKey && (event.key === "ArrowUp" && !event.ctrlKey || event.ctrlKey && event.key.toLowerCase() === "p")
+      const choose = (event.key === "Enter" || event.key === "Tab") && !event.ctrlKey && !event.metaKey && !event.altKey
+      if (!down && !up && !choose && event.key !== "Escape") return
+      if (event.key === "Escape") setQuery(undefined)
+      if (down && count) setSelected((selected() + 1) % count)
+      if (up && count) setSelected((selected() + count - 1) % count)
+      if (choose && count) insert(rows()[selected()] ?? rows()[0]!)
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    return <div class="ta-wrap" classList={{ "numbered-editor": props.expanded }}>
+      <textarea ref={(el) => {
+        if (props.expanded) floatEl = el
+        if (!props.expanded) promptEl = el
+        el.addEventListener("keydown", keyDown, true)
+        onCleanup(() => el.removeEventListener("keydown", keyDown, true))
+      }}
+        aria-label="Message" dir="auto" placeholder="Write a message…"
+        classList={{ "vim-normal": vim.mode() === "normal", "vim-insert": vim.mode() === "insert" }}
+        value={draft()} onInput={(e) => { setDraft(e.currentTarget.value); update(e.currentTarget, e.isComposing) }}
+        onPaste={pasteImages} onDrop={dropImages} onDragOver={(e) => e.preventDefault()}
+        onKeyDown={promptKeyDown}
+        onCompositionStart={() => { composing = true; setQuery(undefined) }}
+        onCompositionEnd={() => { composing = false; setQuery(undefined) }}
+        onSelect={(e) => { saveSelection(e.currentTarget); if (query() && (e.currentTarget.selectionStart !== e.currentTarget.selectionEnd || !mentionQuery(e.currentTarget.value, e.currentTarget.selectionStart))) setQuery(undefined) }}
+        onKeyUp={(e) => { if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) update(e.currentTarget, e.isComposing); else saveSelection(e.currentTarget) }}
+        onFocus={focusInsert} onClick={(e) => { focusInsert(); update(e.currentTarget) }}
+        onBlur={(e) => { saveSelection(e.currentTarget); setQuery(undefined) }} />
+      <SessionChips target={target()} text={draft()} selection={activeDraft().selection} />
+      <Show when={query() && vim.mode() !== "normal" && !composing}><SessionPicker rows={rows()} selected={selected()} select={setSelected} insert={insert} /></Show>
+      <Show when={props.expanded}><RelativeLines target={floatEl!} value={draft()} /></Show>
+      <FakeCaret target={target()} caret={caret()} mode={vim.mode()} />
+    </div>
+  }
   const Attachments = () => <Show when={images().length}><div class="attachments"><For each={images()}>{(image) => (
     <span class="attachment-chip" title={image.filename}><img src={image.url} alt={image.filename} />{image.filename.slice(0, 24)}
       <button aria-label={`Remove ${image.filename}`} onClick={() => composer.setImages(images().filter((item) => item.id !== image.id), composer.state.visibleBuffer)}>×</button>

@@ -14,6 +14,7 @@ import DocPage from "./pages/doc"
 import Sidebar from "./components/sidebar"
 import { DashboardProvider } from "./state"
 import { TicketTip, wrapTicketRefs } from "./ticket-refs"
+import { SessionRefs, wrapSessionRefs } from "./session-mention-dom"
 import { installSidebarKeys, leftOpen, startDrag } from "./ui"
 import { installInkLinks } from "./link-url"
 
@@ -31,7 +32,11 @@ function Providers(props: ParentProps) {
       if (frame !== undefined) return
       frame = requestAnimationFrame(() => {
         frame = undefined
-        if (shellEl) wrapTicketRefs(shellEl)
+        if (shellEl) {
+          wrapTicketRefs(shellEl)
+          wrapSessionRefs(shellEl)
+          shellEl.dispatchEvent(new Event("session-refs-wrapped"))
+        }
       })
     }
     wrap()
@@ -57,6 +62,7 @@ function Providers(props: ParentProps) {
                 </Show>
                 <div class="content">{props.children}</div>
                 <TicketTip container={() => shellEl} />
+                <SessionRefs container={() => shellEl} />
               </div>
             </DashboardProvider>
           </FileComponentProvider>
