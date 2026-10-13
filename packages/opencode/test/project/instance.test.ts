@@ -2,6 +2,12 @@ import { describe, expect } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { Deferred, Effect, Fiber, Layer } from "effect"
+import * as TestClock from "effect/testing/TestClock"
+import { GlobalBus } from "../../src/bus/global"
+import { SessionStatus } from "../../src/session/status"
+import { SessionID } from "../../src/session/schema"
+import { Permission } from "../../src/permission"
+import { Question } from "../../src/question"
 import { InstanceRef } from "../../src/effect/instance-ref"
 import { registerDisposer } from "../../src/effect/instance-registry"
 import { InstanceBootstrap } from "../../src/project/bootstrap"
@@ -16,7 +22,7 @@ const noopBootstrap = Layer.succeed(
 )
 
 const it = testEffect(
-  LayerNode.compile(LayerNode.group([InstanceStore.node, CrossSpawnSpawner.node]), [
+  LayerNode.compile(LayerNode.group([InstanceStore.node, SessionStatus.node, Permission.node, Question.node, CrossSpawnSpawner.node]), [
     [InstanceStore.bootstrapNode, noopBootstrap],
   ]),
 )
@@ -39,6 +45,144 @@ const registerDisposerScoped = (disposer: (directory: string) => Promise<void>) 
   )
 
 describe("InstanceStore", () => {
+  it.live("peek does not bootstrap unknown directories and returns the cached context after load", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      let boots = 0
+      yield* setBootstrap(Effect.sync(() => { boots++ }))
+      expect(yield* store.peek(dir)).toBeUndefined()
+      expect(store.size()).toBe(0)
+      expect(boots).toBe(0)
+      const ctx = yield* store.load({ directory: dir })
+      expect(yield* store.peek(dir)).toBe(ctx)
+      expect(store.size()).toBe(1)
+      expect(boots).toBe(1)
+    }),
+  )
+
+  it.effect("sweeps idle instances and emits disposal without evicting cwd", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      const events: string[] = []
+      const onEvent = (event: { payload: { type: string }; directory?: string }) => {
+        if (event.payload.type === "server.instance.disposed" && event.directory) events.push(event.directory)
+      }
+      GlobalBus.on("event", onEvent)
+      yield* Effect.addFinalizer(() => Effect.sync(() => { GlobalBus.off("event", onEvent) }))
+      yield* store.load({ directory: dir })
+      yield* store.load({ directory: process.cwd() })
+      yield* TestClock.adjust("11 minutes")
+      expect(yield* store.peek(dir)).toBeUndefined()
+      expect(yield* store.peek(process.cwd())).toBeDefined()
+      expect(events).toContain(dir)
+    }),
+  )
+
+  it.effect("keeps a busy instance during a sweep", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      const status = yield* SessionStatus.Service
+      const ctx = yield* store.load({ directory: dir })
+      yield* status.set(SessionID.descending(), { type: "busy" }).pipe(Effect.provideService(InstanceRef, ctx))
+      yield* TestClock.adjust("11 minutes")
+      expect(yield* store.peek(dir)).toBe(ctx)
+    }),
+  )
+
+  it.effect("keeps an instance with a pending permission during a sweep", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      const permission = yield* Permission.Service
+      const ctx = yield* store.load({ directory: dir })
+      const ask = yield* permission.ask({ sessionID: SessionID.descending(), permission: "read", patterns: ["*"], always: [], metadata: {}, ruleset: [] }).pipe(
+        Effect.provideService(InstanceRef, ctx), Effect.forkScoped,
+      )
+      yield* Effect.yieldNow
+      expect((yield* permission.list().pipe(Effect.provideService(InstanceRef, ctx))).length).toBe(1)
+      yield* TestClock.adjust("11 minutes")
+      expect(yield* store.peek(dir)).toBe(ctx)
+      yield* Fiber.interrupt(ask)
+    }),
+  )
+
+  it.effect("keeps an instance with a pending question during a sweep", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      const question = yield* Question.Service
+      const ctx = yield* store.load({ directory: dir })
+      const ask = yield* question.ask({ sessionID: SessionID.descending(), questions: [] }).pipe(
+        Effect.provideService(InstanceRef, ctx), Effect.forkScoped,
+      )
+      yield* Effect.yieldNow
+      expect((yield* question.list().pipe(Effect.provideService(InstanceRef, ctx))).length).toBe(1)
+      yield* TestClock.adjust("11 minutes")
+      expect(yield* store.peek(dir)).toBe(ctx)
+      yield* Fiber.interrupt(ask)
+    }),
+  )
+
+  it.effect("does not sweep an unfinished bootstrap", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      yield* setBootstrap(Effect.gen(function* () {
+        yield* Deferred.succeed(started, undefined)
+        yield* Deferred.await(release)
+      }))
+      const loading = yield* store.load({ directory: dir }).pipe(Effect.forkScoped)
+      yield* Deferred.await(started)
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+      yield* TestClock.adjust("11 minutes")
+      expect(yield* store.peek(dir)).toBeUndefined()
+      expect(store.size()).toBe(1)
+      yield* Deferred.succeed(release, undefined)
+      const ctx = yield* Fiber.join(loading)
+      expect(yield* store.peek(dir)).toBe(ctx)
+    }),
+  )
+
+  it.effect("a load refreshes lastUsed before the next sweep", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      const ctx = yield* store.load({ directory: dir })
+      yield* TestClock.adjust("9 minutes")
+      expect(yield* store.load({ directory: dir })).toBe(ctx)
+      yield* TestClock.adjust("2 minutes")
+      expect(yield* store.peek(dir)).toBe(ctx)
+    }),
+  )
+
+  it.effect("a concurrent load during a sweep retains the refreshed entry", () =>
+    Effect.gen(function* () {
+      const first = yield* tmpdirScoped({ git: true })
+      const second = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      const disposing = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+      yield* registerDisposerScoped(async (directory) => {
+        if (directory !== first) return
+        Deferred.doneUnsafe(disposing, Effect.void)
+        await Effect.runPromise(Deferred.await(release))
+      })
+      yield* store.load({ directory: first })
+      const ctx = yield* store.load({ directory: second })
+      const advancing = yield* TestClock.adjust("11 minutes").pipe(Effect.forkScoped)
+      yield* Deferred.await(disposing)
+      expect(yield* store.load({ directory: second })).toBe(ctx)
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(advancing)
+      expect(yield* store.peek(second)).toBe(ctx)
+    }),
+  )
   it.live("loads instance context", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped({ git: true })

@@ -6,7 +6,12 @@ import { WorkspaceContext } from "@/control-plane/workspace-context"
 import { InstanceRef } from "@/effect/instance-ref"
 import { disposeInstance as runDisposers } from "@/effect/instance-registry"
 import { FSUtil } from "@opencode-ai/core/fs-util"
-import { Context, Deferred, Duration, Effect, Exit, Layer, Scope } from "effect"
+import { Flag } from "@opencode-ai/core/flag/flag"
+import { SessionExecution } from "@opencode-ai/core/session/execution"
+import { Permission } from "@/permission"
+import { Question } from "@/question"
+import { SessionStatus } from "@/session/status"
+import { Clock, Context, Deferred, Duration, Effect, Exit, Layer, Scope } from "effect"
 import { type InstanceContext } from "./instance-context"
 import { InstanceBootstrap } from "./bootstrap-service"
 import * as Project from "./project"
@@ -19,6 +24,8 @@ export interface LoadInput {
 
 export interface Interface {
   readonly load: (input: LoadInput) => Effect.Effect<InstanceContext>
+  readonly peek: (directory: string) => Effect.Effect<InstanceContext | undefined>
+  readonly size: () => number
   readonly reload: (input: LoadInput) => Effect.Effect<InstanceContext>
   readonly dispose: (ctx: InstanceContext) => Effect.Effect<void>
   readonly disposeDirectory: (directory: string) => Effect.Effect<void>
@@ -32,15 +39,31 @@ export const use = serviceUse(Service)
 
 interface Entry {
   readonly deferred: Deferred.Deferred<InstanceContext>
+  lastUsed: number
 }
 
-const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Service> = Layer.effect(
+const layer: Layer.Layer<
+  Service,
+  never,
+  | Project.Service
+  | InstanceBootstrap.Service
+  | SessionStatus.Service
+  | Permission.Service
+  | Question.Service
+  | SessionExecution.Service
+> = Layer.effect(
   Service,
   Effect.gen(function* () {
     const project = yield* Project.Service
     const bootstrap = yield* InstanceBootstrap.Service
+    const status = yield* SessionStatus.Service
+    const permission = yield* Permission.Service
+    const question = yield* Question.Service
+    const execution = yield* SessionExecution.Service
     const scope = yield* Scope.Scope
     const cache = new Map<string, Entry>()
+    const interval = Number(Flag.OPENCODE_INSTANCE_SWEEP_MS ?? 60_000)
+    const ttl = Number(Flag.OPENCODE_INSTANCE_IDLE_TTL_MS ?? 600_000)
 
     const boot = (input: LoadInput & { directory: string }) =>
       Effect.gen(function* () {
@@ -110,15 +133,24 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
       return Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
           const existing = cache.get(directory)
-          if (existing) return yield* restore(Deferred.await(existing.deferred))
+          if (existing) {
+            const ctx = yield* restore(Deferred.await(existing.deferred))
+            existing.lastUsed = yield* Clock.currentTimeMillis
+            return ctx
+          }
 
-          const entry: Entry = { deferred: Deferred.makeUnsafe<InstanceContext>() }
+          const entry: Entry = {
+            deferred: Deferred.makeUnsafe<InstanceContext>(),
+            lastUsed: yield* Clock.currentTimeMillis,
+          }
           cache.set(directory, entry)
           yield* Effect.gen(function* () {
             yield* Effect.logInfo("creating instance", { directory: directory })
             yield* completeLoad(directory, input, entry)
           }).pipe(Effect.forkIn(scope, { startImmediately: true }))
-          return yield* restore(Deferred.await(entry.deferred))
+          const ctx = yield* restore(Deferred.await(entry.deferred))
+          entry.lastUsed = yield* Clock.currentTimeMillis
+          return ctx
         }),
       ).pipe(Effect.withSpan("InstanceStore.load"))
     }
@@ -128,7 +160,10 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
       return Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
           const previous = cache.get(directory)
-          const entry: Entry = { deferred: Deferred.makeUnsafe<InstanceContext>() }
+          const entry: Entry = {
+            deferred: Deferred.makeUnsafe<InstanceContext>(),
+            lastUsed: yield* Clock.currentTimeMillis,
+          }
           cache.set(directory, entry)
           yield* Effect.gen(function* () {
             yield* Effect.logInfo("reloading instance", { directory: directory })
@@ -139,7 +174,9 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
             }
             yield* completeLoad(directory, input, entry)
           }).pipe(Effect.forkIn(scope, { startImmediately: true }))
-          return yield* restore(Deferred.await(entry.deferred))
+          const ctx = yield* restore(Deferred.await(entry.deferred))
+          entry.lastUsed = yield* Clock.currentTimeMillis
+          return ctx
         }),
       ).pipe(Effect.withSpan("InstanceStore.reload"))
     }
@@ -189,10 +226,57 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
     const provide = <A, E, R>(input: LoadInput, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
       load(input).pipe(Effect.flatMap((ctx) => effect.pipe(Effect.provideService(InstanceRef, ctx))))
 
+    const peek = (input: string) =>
+      Effect.gen(function* () {
+        const entry = cache.get(FSUtil.resolve(input))
+        if (!entry || !(yield* Deferred.isDone(entry.deferred))) return undefined
+        const exit = yield* Effect.exit(Deferred.await(entry.deferred))
+        return Exit.isSuccess(exit) ? exit.value : undefined
+      })
+
+    const sweep = Effect.fn("InstanceStore.sweep")(function* () {
+      const now = yield* Clock.currentTimeMillis
+      let evicted = 0
+      for (const [directory, entry] of cache) {
+        if (directory === FSUtil.resolve(process.cwd()) || now - entry.lastUsed < ttl) continue
+        if (!(yield* Deferred.isDone(entry.deferred))) continue
+        const exit = yield* Effect.exit(Deferred.await(entry.deferred))
+        if (Exit.isFailure(exit) || (yield* execution.activeDirectory(directory))) continue
+        const ctx = exit.value
+        const safe = yield* Effect.gen(function* () {
+          if ([...(yield* status.list()).values()].some((s) => s.type === "busy" || s.type === "retry")) return false
+          if ((yield* permission.list()).length) return false
+          if ((yield* question.list()).length) return false
+          return true
+        }).pipe(Effect.provideService(InstanceRef, ctx))
+        if (!safe || (yield* execution.activeDirectory(directory)) || now - entry.lastUsed < ttl || cache.get(directory) !== entry)
+          continue
+        yield* Effect.logInfo("evicting idle instance", { directory, idleMs: now - entry.lastUsed })
+        if (yield* disposeEntry(directory, entry, ctx)) evicted++
+      }
+      return evicted
+    })
+
+    if (Number.isFinite(interval) && interval > 0 && Number.isFinite(ttl) && ttl >= 0) {
+      yield* Effect.gen(function* () {
+        let count = 0
+        while (true) {
+          yield* Effect.sleep(Duration.millis(interval))
+          const evicted = yield* sweep().pipe(
+            Effect.catchCause((cause) => Effect.logWarning("instance sweep failed", { cause }).pipe(Effect.as(0))),
+          )
+          count++
+          if (evicted || count % 10 === 0) yield* Effect.logInfo("instance sweep", { instances: cache.size, evicted })
+        }
+      }).pipe(Effect.forkScoped)
+    }
+
     yield* Effect.addFinalizer(() => disposeAll().pipe(Effect.ignore))
 
     return Service.of({
       load,
+      peek,
+      size: () => cache.size,
       reload,
       dispose,
       disposeDirectory,
@@ -203,11 +287,12 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
 )
 
 export const bootstrapNode = LayerNode.unbound(InstanceBootstrap.Service, Node.tags.values.global)
+export const executionNode = makeGlobalNode({ service: SessionExecution.Service, layer: SessionExecution.noopLayer, deps: [] })
 
 export const node = makeGlobalNode({
   service: Service,
   layer: layer,
-  deps: [Project.node, bootstrapNode],
+  deps: [Project.node, bootstrapNode, SessionStatus.node, Permission.node, Question.node, executionNode],
 })
 
 export * as InstanceStore from "./instance-store"

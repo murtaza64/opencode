@@ -79,4 +79,10 @@ export const Flag = {
   get OPENCODE_CLIENT() {
     return process.env["OPENCODE_CLIENT"] ?? "cli"
   },
+  get OPENCODE_INSTANCE_SWEEP_MS() {
+    return process.env["OPENCODE_INSTANCE_SWEEP_MS"]
+  },
+  get OPENCODE_INSTANCE_IDLE_TTL_MS() {
+    return process.env["OPENCODE_INSTANCE_IDLE_TTL_MS"]
+  },
 }

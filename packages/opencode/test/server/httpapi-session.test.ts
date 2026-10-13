@@ -18,6 +18,8 @@ import { Workspace } from "../../src/control-plane/workspace"
 
 import { InstanceBootstrap as InstanceBootstrapService } from "../../src/project/bootstrap-service"
 import { InstanceStore } from "../../src/project/instance-store"
+import { InstanceRef } from "../../src/effect/instance-ref"
+import { SessionStatus } from "../../src/session/status"
 import { Project } from "../../src/project/project"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
 import * as HttpSessionError from "../../src/server/routes/instance/httpapi/handlers/session-errors"
@@ -44,7 +46,7 @@ const noopBootstrapLayer = Layer.succeed(
   InstanceBootstrapService.Service.of({ run: Effect.void }),
 )
 const appLayer = AppNodeBuilder.build(
-  LayerNode.group([InstanceStore.node, Project.node, Session.node, Workspace.node, Database.node, Ripgrep.node]),
+  LayerNode.group([InstanceStore.node, Project.node, Session.node, SessionStatus.node, Workspace.node, Database.node, Ripgrep.node]),
   [[InstanceStore.bootstrapNode, noopBootstrapLayer]],
 )
 const servedRoutes: Layer.Layer<never, Config.ConfigError, HttpServer.HttpServer> = HttpRouter.serve(
@@ -235,6 +237,34 @@ afterEach(async () => {
 })
 
 describe("session HttpApi", () => {
+  it.live("polling unknown directories does not create instances; status reads a loaded instance", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      const headers = { "x-opencode-directory": dir }
+      expect(store.size()).toBe(0)
+      for (const [route, body] of [["/session/status", {}], ["/permission", []], ["/question", []]] as const) {
+        const response = yield* request(`${route}?directory=${encodeURIComponent(dir)}`, { headers })
+        expect(response.status).toBe(200)
+        expect(yield* responseJson(response)).toEqual(body)
+        expect(store.size()).toBe(0)
+      }
+      const created = yield* requestJson<Session.Info>(`/session?directory=${encodeURIComponent(dir)}`, {
+        method: "POST", headers,
+      })
+      const prompted = yield* request(`/session/${created.id}/message?directory=${encodeURIComponent(dir)}`, {
+        method: "POST", headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({ agent: "build", noReply: true, parts: [{ type: "text", text: "hello" }] }),
+      })
+      expect(prompted.status).toBe(200)
+      const ctx = yield* store.peek(dir)
+      expect(ctx).toBeDefined()
+      if (!ctx) return
+      const status = yield* SessionStatus.Service
+      yield* status.set(created.id, { type: "busy" }).pipe(Effect.provideService(InstanceRef, ctx))
+      expect(yield* requestJson<Record<string, unknown>>(`/session/status?directory=${encodeURIComponent(dir)}`, { headers })).toMatchObject({ [created.id]: { type: "busy" } })
+    }),
+  )
   it.effect("maps busy sessions to public session busy errors", () =>
     Effect.gen(function* () {
       const sessionID = SessionID.descending()

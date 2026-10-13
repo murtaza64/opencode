@@ -30,6 +30,13 @@ const layer = Layer.effect(
 
     return SessionExecution.Service.of({
       active: coordinator.active,
+      activeDirectory: (directory) => Effect.gen(function* () {
+        for (const sessionID of yield* coordinator.active) {
+          const session = yield* store.get(sessionID)
+          if (session?.location.directory === directory) return true
+        }
+        return false
+      }),
       interrupt: coordinator.interrupt,
       resume: coordinator.run,
       wake: coordinator.wake,
