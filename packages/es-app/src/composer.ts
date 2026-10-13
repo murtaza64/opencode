@@ -8,12 +8,13 @@ import type {
 } from "@opencode-ai/sdk/v2"
 import { oc, inputImages, type InputImage } from "./api"
 import { composerStorage } from "./composer-storage"
+import { defaultImageCapability } from "./image-fit"
 
 export type ComposerMode = "send" | "aside" | "queue" | "steer"
 export type ComposerAction = Exclude<ComposerMode, "send">
 export type ComposerBuffer = "task" | "aside"
 export type ComposerModel = { providerID: string; modelID: string }
-export type ComposerImage = { id: string; mime: string; url: string; filename: string }
+export type ComposerImage = { id: string; mime: string; url: string; filename: string; normalized?: boolean }
 export type ComposerDraft = {
   text: string
   images: ComposerImage[]
@@ -914,6 +915,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       setMissingImages(buffer, false)
       updateDraft({ images: images.map((image) => ({ ...image })) }, true, buffer)
     },
+    setError: (error: string) => setState("error", error),
     setModel: (model: ComposerModel | null) => updateDraft({ model: model ? { ...model } : null }),
     setSelection: (start: number, end: number) => updateDraft({ selection: [start, end] }, false),
     selectMode,
@@ -963,7 +965,7 @@ const copyPayload = (payload: InputPayload): InputPayload =>
     ...payload,
     ...(payload.images ? { images: inputImages(payload.images) } : {}),
   })
-const imageMimeTypes = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const
+const imageMimeTypes = defaultImageCapability.mimeTypes
 const requireImageMime = (mime: string) => {
   const supported = imageMimeTypes.find((value) => value === mime)
   if (!supported) throw new Error("Unsupported image MIME type")
@@ -989,11 +991,11 @@ const imageCapability = (value: unknown): ImageCapability | undefined => {
     encoding: "data-url",
     mimeTypes: value.mimeTypes,
     maxCount: Math.min(value.maxCount as number, 8),
-    maxBytes: Math.min(value.maxBytes as number, 5_242_880),
-    maxTotalBytes: Math.min(value.maxTotalBytes as number, 10_485_760),
-    maxWidth: Math.min(value.maxWidth as number, 8192),
-    maxHeight: Math.min(value.maxHeight as number, 8192),
-    maxPixels: Math.min(value.maxPixels as number, 16_777_216),
+    maxBytes: Math.min(value.maxBytes as number, defaultImageCapability.maxBytes),
+    maxTotalBytes: Math.min(value.maxTotalBytes as number, defaultImageCapability.maxTotalBytes),
+    maxWidth: Math.min(value.maxWidth as number, defaultImageCapability.maxWidth),
+    maxHeight: Math.min(value.maxHeight as number, defaultImageCapability.maxHeight),
+    maxPixels: Math.min(value.maxPixels as number, defaultImageCapability.maxPixels),
     animated: false,
     compressedMetadata: false,
   }
@@ -1051,7 +1053,8 @@ const isDraft = (value: unknown): value is ComposerDraft =>
   Array.isArray(value.images) &&
   value.images.every(
     (image) =>
-      record(image) && [image.id, image.mime, image.url, image.filename].every((item) => typeof item === "string"),
+      record(image) && [image.id, image.mime, image.url, image.filename].every((item) => typeof item === "string") &&
+      (image.normalized === undefined || typeof image.normalized === "boolean"),
   ) &&
   (value.model === null ||
     (record(value.model) && typeof value.model.providerID === "string" && typeof value.model.modelID === "string")) &&

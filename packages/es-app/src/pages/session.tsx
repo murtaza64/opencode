@@ -19,6 +19,7 @@ import { rightOpen, startDrag } from "../ui"
 import { createVim } from "../vim"
 import { contextUsage, latestCompletedTurn } from "../context-usage"
 import { getComposer, type ComposerAction } from "../composer"
+import { defaultImageCapability, prepareImageFile } from "../image-fit"
 import { ComposerResults } from "../components/composer-controls"
 import { DirectComposer } from "../components/direct-composer"
 import { AppHeader } from "../components/native-header"
@@ -470,25 +471,27 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const images = () => activeDraft().images
   const sending = () => composer.state.sending
 
+  let imageQueue = Promise.resolve()
   const addImageFiles = (files: File[]) => {
     const buffer = composer.state.visibleBuffer
-    for (const f of files) {
-      const reader = new FileReader()
-      reader.onload = () => {
-        const url = typeof reader.result === "string" ? reader.result : ""
-        if (!url) return
-        composer.setImages([
-          ...composer.state[buffer].images,
-          {
-            id: Math.random().toString(36).slice(2),
-            mime: f.type,
-            url,
-            filename: f.name || `pasted.${(f.type.split("/")[1] ?? "png").split("+")[0]}`,
-          },
-        ], buffer)
+    imageQueue = imageQueue.then(async () => {
+      for (const file of files) {
+        try {
+          const total = composer.state[buffer].images.reduce((sum, image) => {
+            const encoded = image.url.slice(image.url.indexOf(",") + 1)
+            return sum + (encoded.length / 4) * 3 - (encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0)
+          }, 0)
+          const prepared = await prepareImageFile(file, composer.state.capabilities?.sessionInput?.images ?? defaultImageCapability, total)
+          composer.setImages([
+            ...composer.state[buffer].images,
+            { id: Math.random().toString(36).slice(2), ...prepared },
+          ], buffer)
+          composer.setError("")
+        } catch (error) {
+          composer.setError(error instanceof Error ? error.message : String(error))
+        }
       }
-      reader.readAsDataURL(f)
-    }
+    })
   }
 
   const pasteImages = (e: ClipboardEvent) => {
@@ -887,7 +890,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     </div>
   }
   const Attachments = () => <Show when={images().length}><div class="attachments"><For each={images()}>{(image) => (
-    <span class="attachment-chip" title={image.filename}><img src={image.url} alt={image.filename} />{image.filename.slice(0, 24)}
+    <span class="attachment-chip" data-normalized={image.normalized ? "true" : undefined} title={`${image.filename}${image.normalized ? " · resized to fit" : ""}`}><img src={image.url} alt={image.filename} />{image.filename.slice(0, 24)}
       <button aria-label={`Remove ${image.filename}`} onClick={() => composer.setImages(images().filter((item) => item.id !== image.id), composer.state.visibleBuffer)}>×</button>
     </span>
   )}</For></div></Show>

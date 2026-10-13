@@ -194,6 +194,14 @@ test("restored task model reconciles only on submit and keeps image and input id
   expect(restored.state.admission).toBeNull()
 })
 
+test("restores the normalized attachment marker with its original draft", () => {
+  const storage = new MemoryStorage()
+  const first = harness(undefined, { storage })
+  first.composer.setImages([{ ...image, normalized: true }])
+  const restored = createComposer(session.id, directory, first.dependencies)
+  expect(restored.state.task.images).toEqual([{ ...image, normalized: true }])
+})
+
 test("legacy model with lost PATCH acknowledgment reconciles before one admission without PATCH replay", async () => {
   const { composer, requests } = harness((request) => {
     if (request.method === "PATCH") throw new Error("lost response")
