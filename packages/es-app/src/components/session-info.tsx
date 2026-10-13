@@ -269,6 +269,19 @@ function SessionInfoBody(props: {
   const composition = createMemo(() => estimateComposition(props.messages.filter((m) => m.sessionID === props.sessionID), props.parts))
   const slices = createMemo(() => compositionSlices(composition()))
 
+  const latestAssistant = createMemo(() => props.messages.findLast((message): message is Extract<Message, { role: "assistant" }> =>
+    message.sessionID === props.sessionID && message.role === "assistant" &&
+    message.agent !== "compaction" && message.mode !== "compaction"))
+  const latestUser = createMemo(() => props.messages.findLast((message): message is Extract<Message, { role: "user" }> =>
+    message.sessionID === props.sessionID && message.role === "user"))
+  const agent = () => props.session?.agent || latestAssistant()?.agent || latestAssistant()?.mode || latestUser()?.agent || "unknown"
+  const model = createMemo(() => {
+    if (props.session?.model) return props.session.model
+    const assistant = latestAssistant()
+    if (assistant?.providerID && assistant.modelID) return { id: assistant.modelID, providerID: assistant.providerID }
+    const user = latestUser()
+    if (user?.model?.providerID && user.model.modelID) return { id: user.model.modelID, providerID: user.model.providerID }
+  })
   const tokens = () => (props.session as any)?.tokens
 
   return (
@@ -294,14 +307,18 @@ function SessionInfoBody(props: {
           <>
             <div class="info-section">
               <div class="info-heading">session</div>
-              <div class="info-row">
-                <span class="dim">agent</span>
-                <span>{(s() as any).agent ?? "?"}</span>
-              </div>
-              <Show when={(s() as any).model}>
-                <div class="info-row">
-                  <span class="dim">model</span>
-                  <span>{(s() as any).model.id}</span>
+               <div class="info-row" data-fact="agent">
+                 <span class="dim">agent</span>
+                 <span>{agent()}</span>
+               </div>
+               <div class="info-row" data-fact="provider" title={s().model ? "session provider" : model() ? "latest observed provider" : "provider not recorded"}>
+                 <span class="dim">provider</span>
+                 <span>{model()?.providerID ?? "unknown"}</span>
+               </div>
+               <Show when={model()?.id}>
+                 <div class="info-row" data-fact="model">
+                   <span class="dim">model</span>
+                   <span>{model()?.id}</span>
                 </div>
               </Show>
               <div class="info-row">
