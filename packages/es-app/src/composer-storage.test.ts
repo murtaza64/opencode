@@ -36,7 +36,7 @@ test("native durable snapshot takes precedence over stale tab data", () => {
   expect(composerStorage("Chrome/130 Electron/42.3.3", tab, () => durable).getItem(key)).toBe("durable unknown request")
 })
 
-test("native migration retains tab data until validated state is durably saved", () => {
+test("native migration retains tab data until validated state is durably saved", async () => {
   const tab = new MemoryStorage()
   const durable = new MemoryStorage()
   const original = createComposer("ses_test", "/fixture", { storage: tab })
@@ -44,6 +44,7 @@ test("native migration retains tab data until validated state is durably saved",
   original.setImages([{ id: "image", mime: "image/png", filename: "fixture.png", url: "data:image/png;base64,AA==" }])
   original.selectMode("aside")
   original.setText("aside draft")
+  await original.persistAsync()
   const saved = tab.getItem(key)
   const storage = composerStorage("Electron/42.3.3", tab, () => durable)
   expect(storage.getItem(key)).toBe(saved)
@@ -53,6 +54,7 @@ test("native migration retains tab data until validated state is durably saved",
   const restored = createComposer("ses_test", "/fixture", {
     storage: composerStorage("Electron/42.3.3", new MemoryStorage(), () => durable),
   })
+  await restored.persistAsync()
   expect(restored.state.task.text).toBe("task draft")
   expect(restored.state.aside.text).toBe("aside draft")
   expect(restored.state.task.images[0]?.url).toBe("data:image/png;base64,AA==")

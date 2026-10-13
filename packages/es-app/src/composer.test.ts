@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import { createComputed, createRoot } from "solid-js"
 import { unwrap } from "solid-js/store"
 import type { Session } from "@opencode-ai/sdk/v2"
+import { createImageStore } from "./image-store"
 import {
   createComposer,
   getComposer,
@@ -89,6 +90,7 @@ const harness = (
   let sequence = 0
   const dependencies: ComposerDependencies = {
     storage,
+    images: createImageStore(),
     requestID: () => `request-${++sequence}`,
     prompt: async () => {
       throw new Error("Unexpected normal prompt")
@@ -184,6 +186,7 @@ test("restored task model reconciles only on submit and keeps image and input id
   first.composer.setText("legacy task")
   first.composer.setImages([image])
   first.composer.setModel(model)
+  await first.composer.persistAsync()
   const restored = createComposer(session.id, directory, first.dependencies)
   await restored.loadCapabilities()
   expect(first.requests.filter((request) => request.method === "PATCH")).toHaveLength(0)
@@ -194,12 +197,28 @@ test("restored task model reconciles only on submit and keeps image and input id
   expect(restored.state.admission).toBeNull()
 })
 
-test("restores the normalized attachment marker with its original draft", () => {
+test("restores the normalized attachment marker with its original draft", async () => {
   const storage = new MemoryStorage()
   const first = harness(undefined, { storage })
   first.composer.setImages([{ ...image, normalized: true }])
+  await first.composer.persistAsync()
   const restored = createComposer(session.id, directory, first.dependencies)
+  expect(restored.state.hydrating).toBe(true)
+  await restored.persistAsync()
   expect(restored.state.task.images).toEqual([{ ...image, normalized: true }])
+})
+
+test("hydration does not replace newer typing or reinterpret an image-only Send as Queue", async () => {
+  const { composer, dependencies } = harness()
+  composer.setImages([image])
+  await composer.persistAsync()
+  const restored = createComposer(session.id, directory, dependencies)
+  restored.observeBusy(true)
+  restored.setText("newer")
+  await restored.persistAsync()
+  expect(restored.state.mode).toBe("send")
+  expect(restored.state.task.text).toBe("newer")
+  expect(restored.state.task.images).toEqual([image])
 })
 
 test("legacy model with lost PATCH acknowledgment reconciles before one admission without PATCH replay", async () => {
@@ -585,6 +604,7 @@ test("Queue captures its selected agent across a lost ack, edited choice, reload
   await composer.submit(session)
   expect(requests[1].body).toEqual({ requestID: "request-1", delivery: "queue", text: "task", agent: "plan" })
   composer.setQueueAgent("build")
+  await composer.persistAsync()
   const restored = createComposer(session.id, directory, dependencies)
   expect(restored.state.queueAgent).toBe("build")
   await restored.loadCapabilities()
@@ -1027,9 +1047,11 @@ test("uncertain admission and draft buffers restore with the same ID and indepen
   composer.setText("question")
   composer.setSelection(2, 5)
   composer.setImages([image])
+  await composer.persistAsync()
   const restored = createComposer(session.id, directory, dependencies)
   expect(restored.state.mode).toBe("aside")
   expect(restored.state.task.selection).toEqual([1, 3])
+  await restored.persistAsync()
   expect(unwrap(restored.state.aside)).toMatchObject({ text: "question", selection: [2, 5], images: [image] })
   expect(restored.state.admission).toMatchObject({
     status: "unknown",
@@ -1042,37 +1064,113 @@ test("uncertain admission and draft buffers restore with the same ID and indepen
   expect(restored.state.aside.text).toBe("question")
 })
 
-test("quota fallback keeps live images and persists a reload warning that typing cannot silently clear", async () => {
+test("large image persists by reference despite a 200 KB localStorage quota", async () => {
   class ImageQuotaStorage extends MemoryStorage {
     override setItem(key: string, value: string) {
-      if (value.includes("data:image")) throw new Error("quota exceeded")
+      if (value.length > 200_000) throw new Error("quota exceeded")
       super.setItem(key, value)
     }
   }
   const storage = new ImageQuotaStorage()
-  const { composer, dependencies } = harness(undefined, { storage })
-  composer.setText("task with image")
-  composer.setImages([image])
-  expect(composer.state.task.images).toEqual([image])
-  expect(composer.state.storageError).toContain("this tab only")
-  composer.setText("still with image")
+  const images = createImageStore()
+  const { composer, dependencies } = harness(undefined, { storage, images })
+  const large = { ...image, url: `data:image/png;base64,${"a".repeat(400_000)}` }
+  composer.setImages([large])
+  expect(await composer.persistAsync()).toBe(true)
+  expect([...storage.data.values()][0]).not.toContain(large.url)
   const restored = createComposer(session.id, directory, dependencies)
+  await restored.persistAsync()
+  expect(restored.state.task.images).toEqual([large])
+})
+
+test("a missing image reference blocks a restored draft with a warning", async () => {
+  const storage = new MemoryStorage()
+  const images = createImageStore()
+  const { composer, dependencies } = harness(undefined, { storage, images })
+  composer.setImages([image])
+  await composer.persistAsync()
+  const saved = JSON.parse([...storage.data.values()][0]!)
+  await images.remove([saved.task.images[0].ref])
+  const restored = createComposer(session.id, directory, dependencies)
+  await restored.persistAsync()
   expect(restored.state.task.images).toEqual([])
   expect(restored.state.storageError).toContain("could not be restored")
-  restored.setText("typed after reload")
-  expect(restored.state.storageError).toContain("could not be restored")
   expect(restored.blockedReason()).toContain("Images are missing")
-  await restored.submit(session)
-  expect(restored.state.task.text).toBe("typed after reload")
-  const again = createComposer(session.id, directory, dependencies)
-  expect(again.state.storageError).toContain("could not be restored")
-  again.selectMode("aside")
-  expect(again.blockedReason()).toContain("Images are missing")
-  again.setImages([], "aside")
-  again.selectMode("send")
-  expect(again.blockedReason()).toContain("Images are missing")
-  again.setImages([], "task")
-  expect(again.state.storageError).toBe("")
+})
+
+test("missing admission image is reconciled by ID but cannot be retried", async () => {
+  const storage = new MemoryStorage()
+  const images = createImageStore()
+  const { composer, dependencies, requests } = harness(
+    (request) => request.method === "POST" ? Promise.reject(new Error("lost ACK")) : new Response(null, { status: 404 }),
+    { storage, images }, imageCapabilities,
+  )
+  await composer.loadCapabilities()
+  composer.observeBusy(true)
+  composer.selectMode("steer")
+  composer.setImages([image])
+  await composer.submit(session)
+  const saved = JSON.parse([...storage.data.values()][0]!)
+  await images.remove([saved.admission.payload.images[0].ref])
+  const restored = createComposer(session.id, directory, dependencies)
+  await restored.loadCapabilities()
+  await restored.retryAdmission()
+  expect(restored.state.admission?.error).toContain("Saved images are missing")
+  expect(requests.filter((request) => request.method === "POST")).toHaveLength(1)
+})
+
+test("Steer waits for image persistence and sends the original data URL", async () => {
+  const gate = deferred<string>()
+  const store = createImageStore()
+  const { composer, requests, storage } = harness(
+    (request) => Response.json({ ...pending("request-1", "task", "steer"), images: (request.body as { images: unknown }).images }),
+    { images: { ...store, get volatile() { return false }, put: async (value) => { await gate.promise; return store.put(value) } } },
+    imageCapabilities,
+  )
+  await composer.loadCapabilities()
+  composer.observeBusy(true)
+  composer.setText("task")
+  composer.setImages([image])
+  const sending = composer.submit(session)
+  await Promise.resolve()
+  expect(requests.filter((request) => request.method === "POST")).toHaveLength(0)
+  gate.resolve("ready")
+  await sending
+  expect((requests[1].body as { images: typeof wireImage[] }).images[0].url).toBe(image.url)
+  expect([...((storage as MemoryStorage).data.values())][0]).not.toContain(image.url)
+})
+
+test("GC removes an image when its acknowledged admission and draft are cleared", async () => {
+  const images = createImageStore()
+  let ref = ""
+  const { composer, storage } = harness(
+    (request) => {
+      ref = JSON.parse([...(storage as MemoryStorage).data.values()][0]!).admission.payload.images[0].ref
+      return Response.json({ ...pending("request-1", "", "steer"), images: (request.body as { images: unknown }).images })
+    },
+    { images }, imageCapabilities,
+  )
+  await composer.loadCapabilities()
+  composer.observeBusy(true)
+  composer.setImages([image])
+  composer.selectMode("steer")
+  await composer.submit(session)
+  await composer.persistAsync()
+  expect(composer.state.task.images).toEqual([])
+  expect(JSON.stringify([...((storage as MemoryStorage).data.values())])).not.toContain(ref)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(await images.get(ref)).toBeUndefined()
+})
+
+test("GC removes an image after it is removed from a saved draft", async () => {
+  const images = createImageStore()
+  const { composer, storage } = harness(undefined, { images })
+  composer.setImages([image])
+  await composer.persistAsync()
+  const ref = JSON.parse([...((storage as MemoryStorage).data.values())][0]!).task.images[0].ref
+  composer.setImages([])
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(await images.get(ref)).toBeUndefined()
 })
 
 test("unavailable storage does not discard in-memory drafts or request IDs", async () => {
@@ -1091,6 +1189,7 @@ test("unavailable storage does not discard in-memory drafts or request IDs", asy
   await composer.loadCapabilities()
   composer.setImages([image])
   expect(composer.state.task.images).toEqual([image])
+  await composer.persistAsync()
   expect(composer.state.storageError).toContain("storage denied")
   composer.setImages([])
   composer.setText("task")
@@ -1271,7 +1370,9 @@ test("lost image admission restores immutable original bytes, order and repeats 
   expect(composer.state.admission!.payload.images![0].url).toBe(image.url)
   composer.setImages([{ ...image, url: "data:image/png;base64,AQID" }])
   composer.setText("next draft")
+  await composer.persistAsync()
   const restored = createComposer(session.id, directory, dependencies)
+  await restored.persistAsync()
   expect(restored.state.admission!.payload.images![0]).toEqual(wireImage)
   await restored.loadCapabilities()
   await restored.retryAdmission()
@@ -1373,7 +1474,9 @@ test("Aside keeps the submitted image snapshot independent of later edits and ta
   composer.selectMode("queue")
   await composer.submit(session)
   expect(composer.state.task.images).toEqual([])
+  await composer.persistAsync()
   const restored = createComposer(session.id, directory, dependencies)
+  await restored.persistAsync()
   expect(unwrap(restored.state.asideRequest)).toMatchObject({ question: "", images: [wireImage], status: "unknown" })
   answer.resolve(Response.json({ requestID: "request-1", text: "answer", snapshot }))
   await asking
@@ -1388,12 +1491,9 @@ test("Aside keeps the submitted image snapshot independent of later edits and ta
   expect(composer.state.aside.images[0].filename).toBe("next.png")
 })
 
-test("quota cannot allow an image POST without saving exact retry identity", async () => {
+test("an image POST requires durable retry identity when localStorage denies writes", async () => {
   class ImageQuotaStorage extends MemoryStorage {
-    override setItem(key: string, value: string) {
-      if (value.includes("data:image")) throw new Error("quota exceeded")
-      super.setItem(key, value)
-    }
+    override setItem() { throw new Error("quota exceeded") }
   }
   const { composer, requests, dependencies } = harness(
     undefined,
@@ -1412,7 +1512,6 @@ test("quota cannot allow an image POST without saving exact retry identity", asy
   expect(composer.state.task.images).toEqual([image])
   const restored = createComposer(session.id, directory, dependencies)
   expect(restored.state.admission).toBeNull()
-  expect(restored.state.storageError).toContain("could not be restored")
   composer.selectMode("aside")
   await composer.submit(session)
   expect(composer.state.error).toContain("No Aside was sent")
@@ -1421,10 +1520,10 @@ test("quota cannot allow an image POST without saving exact retry identity", asy
   expect(requests).toHaveLength(1)
 })
 
-test("quota fallback preserves admitted images even when draft copies no longer fit", async () => {
+test("admission and draft images persist as references with separate identities", async () => {
   class SingleCopyStorage extends MemoryStorage {
     override setItem(key: string, value: string) {
-      if (value.split("data:image").length > 2) throw new Error("quota exceeded")
+      if (value.includes("data:image")) throw new Error("quota exceeded")
       super.setItem(key, value)
     }
   }
@@ -1441,8 +1540,8 @@ test("quota fallback preserves admitted images even when draft copies no longer 
   composer.selectMode("queue")
   await composer.submit(session)
   expect(composer.state.admission?.status).toBe("unknown")
-  expect(composer.state.storageError).toContain("this tab only")
   const restored = createComposer(session.id, directory, dependencies)
+  await restored.persistAsync()
   expect(restored.state.admission?.payload.images).toEqual([wireImage])
   await restored.loadCapabilities()
   await restored.retryAdmission()
