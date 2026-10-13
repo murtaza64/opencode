@@ -5,9 +5,10 @@ export interface Runner<A, E = never> {
   readonly busy: boolean
   readonly ensureRunning: (work: Effect.Effect<A, E>, admission?: boolean) => Effect.Effect<A, E>
   readonly consume: Effect.Effect<void>
-  readonly wake: (work: Effect.Effect<A, E>) => Effect.Effect<void>
+  readonly wake: (work: Effect.Effect<A, E>) => Effect.Effect<void, E>
   readonly startShell: (work: Effect.Effect<A, E>, ready?: Latch.Latch) => Effect.Effect<A, E | Busy>
   readonly cancel: Effect.Effect<void>
+  readonly locked: <B, F, R>(work: (idle: boolean) => Effect.Effect<B, F, R>) => Effect.Effect<B, F, R>
 }
 
 export class Cancelled extends Schema.TaggedErrorClass<Cancelled>()("RunnerCancelled", {}) {}
@@ -46,6 +47,8 @@ export const make = <A, E = never>(
     onBusy?: Effect.Effect<void>
     onInterrupt?: Effect.Effect<A, E>
     canContinue?: (result: A) => boolean
+    onAdmission?: (idle: boolean) => Effect.Effect<void, E>
+    onSettled?: Effect.Effect<boolean>
   },
 ): Runner<A, E> => {
   const ref = SynchronizedRef.makeUnsafe<State<A, E>>({ _tag: "Idle" })
@@ -79,6 +82,13 @@ export const make = <A, E = never>(
       ref,
       Effect.fnUntraced(function* (st) {
         if (st._tag !== "Running" || st.run.id !== id) return [complete(done, exit), st] as const
+        const fenced = yield* (opts?.onSettled ?? Effect.succeed(false))
+        if (fenced) {
+          pending = undefined
+          unconsumed = undefined
+          yield* idle
+          return [complete(done, exit), { _tag: "Idle" }] as const
+        }
         const admission = unconsumed
         unconsumed = undefined
         // A new prompt must be observed before successful completion can release its waiters.
@@ -116,9 +126,14 @@ export const make = <A, E = never>(
       ref,
       Effect.fnUntraced(function* (st) {
         if (st._tag === "Shell" && st.shell.id === id) {
+          yield* opts?.onSettled ?? Effect.succeed(false)
           return [idle, { _tag: "Idle" }] as const
         }
         if (st._tag === "ShellThenRun" && st.shell.id === id) {
+          if (yield* opts?.onSettled ?? Effect.succeed(false)) {
+            yield* Deferred.fail(st.run.done, new Cancelled())
+            return [idle, { _tag: "Idle" }] as const
+          }
           const run = yield* startRun(st.run.work, st.run.done)
           return [Effect.void, { _tag: "Running", run }] as const
         }
@@ -137,6 +152,7 @@ export const make = <A, E = never>(
     SynchronizedRef.modifyEffect(
       ref,
       Effect.fnUntraced(function* (st) {
+        yield* opts?.onAdmission?.(st._tag === "Idle") ?? Effect.void
         if (admission && st._tag !== "Stopping") unconsumed = work
         switch (st._tag) {
           case "Stopping":
@@ -165,6 +181,7 @@ export const make = <A, E = never>(
     SynchronizedRef.updateEffect(
       ref,
       Effect.fnUntraced(function* (st) {
+        yield* opts?.onAdmission?.(st._tag === "Idle") ?? Effect.void
         if (st._tag === "Stopping") return st
         if (st._tag === "Running" || st._tag === "ShellThenRun") {
           pending = work
@@ -182,6 +199,7 @@ export const make = <A, E = never>(
     SynchronizedRef.modifyEffect(
       ref,
       Effect.fnUntraced(function* (st) {
+        yield* opts?.onAdmission?.(st._tag === "Idle") ?? Effect.void
         if (st._tag !== "Idle") {
           const reject: Effect.Effect<A, E | Busy> = Effect.fail(new Busy())
           return [reject, st] as const
@@ -253,6 +271,14 @@ export const make = <A, E = never>(
     wake,
     startShell,
     cancel,
+    locked: <B, F, R>(work: (idle: boolean) => Effect.Effect<B, F, R>) =>
+      SynchronizedRef.modifyEffect(
+        ref,
+        Effect.fnUntraced(function* (st) {
+          const result = yield* work(st._tag === "Idle")
+          return [result, st] as const
+        }),
+      ),
   }
 }
 

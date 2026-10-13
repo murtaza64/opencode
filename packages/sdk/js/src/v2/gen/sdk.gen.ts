@@ -205,8 +205,11 @@ import type {
   SessionInputCancelResponses,
   SessionInputGetErrors,
   SessionInputGetResponses,
+  SessionInputHandleErrors,
+  SessionInputHandleResponses,
   SessionInputListErrors,
   SessionInputListResponses,
+  SessionInputMailSource,
   SessionListErrors,
   SessionListResponses,
   SessionMessageErrors,
@@ -227,6 +230,8 @@ import type {
   SessionStatusResponses,
   SessionSummarizeErrors,
   SessionSummarizeResponses,
+  SessionSupersedeErrors,
+  SessionSupersedeResponses,
   SessionTodoErrors,
   SessionTodoResponses,
   SessionUnrevertErrors,
@@ -235,6 +240,7 @@ import type {
   SessionUnshareResponses,
   SessionUpdateErrors,
   SessionUpdateResponses,
+  SessionV1InputHandlePayload,
   SessionV1InputImage,
   SessionV1InputPayload,
   SubtaskPartInput,
@@ -3384,7 +3390,7 @@ export class Input extends HeyApiClient {
       sessionID: string
       directory?: string
       workspace?: string
-      state?: "pending" | "promoted" | "cancelled" | "all"
+      state?: "pending" | "promoted" | "presented" | "handled" | "cancelled" | "all"
       after?: string
       limit?: string
     },
@@ -3514,6 +3520,45 @@ export class Input extends HeyApiClient {
       ...params,
     })
   }
+
+  /**
+   * Record explicit mail handling
+   */
+  public handle<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      requestID: string
+      directory?: string
+      workspace?: string
+      sessionV1InputHandlePayload?: SessionV1InputHandlePayload
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "requestID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "sessionV1InputHandlePayload", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionInputHandleResponses, SessionInputHandleErrors, ThrowOnError>({
+      url: "/session/{sessionID}/input/{requestID}/handle",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
 }
 
 export class Session2 extends HeyApiClient {
@@ -3568,6 +3613,7 @@ export class Session2 extends HeyApiClient {
     parameters?: {
       directory?: string
       workspace?: string
+      id?: string
       parentID?: string
       title?: string
       agent?: string
@@ -3591,6 +3637,7 @@ export class Session2 extends HeyApiClient {
           args: [
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
+            { in: "body", key: "id" },
             { in: "body", key: "parentID" },
             { in: "body", key: "title" },
             { in: "body", key: "agent" },
@@ -4185,6 +4232,43 @@ export class Session2 extends HeyApiClient {
       url: "/session/{sessionID}/abort",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Fence a legacy session at its idle boundary
+   */
+  public supersede<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      successor?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "successor" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionSupersedeResponses, SessionSupersedeErrors, ThrowOnError>({
+      url: "/session/{sessionID}/supersede",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 
@@ -5920,6 +6004,7 @@ export class Session4 extends HeyApiClient {
       id?: string
       prompt?: PromptInput
       delivery?: "steer" | "queue"
+      source?: SessionInputMailSource
       resume?: boolean
     },
     options?: Options<never, ThrowOnError>,
@@ -5933,6 +6018,7 @@ export class Session4 extends HeyApiClient {
             { in: "body", key: "id" },
             { in: "body", key: "prompt" },
             { in: "body", key: "delivery" },
+            { in: "body", key: "source" },
             { in: "body", key: "resume" },
           ],
         },

@@ -1004,6 +1004,20 @@ export const createComposer = (sessionID: string, directory: string, dependencie
   return {
     state,
     persistAsync,
+    importHandoffDrafts: (source: ComposerState) => {
+      // A handoff never moves an in-flight admission or sends a prompt. Existing
+      // successor edits take precedence over the predecessor's saved draft.
+      const hasSuccessorDraft = !!state.task.text || !!state.task.images.length || !!state.aside.text || !!state.aside.images.length
+      batch(() => {
+        for (const buffer of ["task", "aside"] as const) {
+          if (state[buffer].text || state[buffer].images.length) continue
+          setState(buffer, copyDraft(source[buffer]))
+        }
+        if (!state.asideSeeded && source.asideSeeded) setState("asideSeeded", true)
+        if (!hasSuccessorDraft) setState({ visibleBuffer: source.visibleBuffer, keyboardTarget: source.keyboardTarget })
+      })
+      return persistAsync()
+    },
     visibleDraft: () => state[state.visibleBuffer],
     selectTarget: (keyboardTarget: ComposerAction) => {
       setState({ keyboardTarget, targetRevision: state.targetRevision + 1 })

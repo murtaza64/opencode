@@ -1173,6 +1173,47 @@ describe("session.compaction.process", () => {
   )
 
   it.instance(
+    "retains peer mail source on overflow replay across a newer human message",
+    Effect.gen(function* () {
+      const ssn = yield* SessionNs.Service
+      const session = yield* ssn.create({})
+      yield* createUserMessage(session.id, "root")
+      const mail = yield* ssn.updateMessage({
+        id: MessageID.ascending(),
+        role: "user",
+        sessionID: session.id,
+        agent: "build",
+        model: ref,
+        source: { type: "editspace-mail", id: "project#31", sender: "peer-lane", recipient: "parent" },
+        time: { created: Date.now() },
+      })
+      yield* ssn.updatePart({
+        id: PartID.ascending(),
+        messageID: mail.id,
+        sessionID: session.id,
+        type: "text",
+        text: "peer request",
+      })
+      const current = yield* createUserMessage(session.id, "new human request")
+      const msgs = yield* ssn.messages({ sessionID: session.id })
+
+      expect(
+        yield* SessionCompaction.use.process({
+          parentID: current.id,
+          messages: msgs,
+          sessionID: session.id,
+          auto: true,
+          overflow: true,
+        }),
+      ).toBe("continue")
+
+      const last = (yield* ssn.messages({ sessionID: session.id })).at(-1)
+      expect(last?.info).toMatchObject({ role: "user", source: mail.source })
+      expect(last?.parts).toContainEqual(expect.objectContaining({ type: "text", text: "peer request" }))
+    }),
+  )
+
+  it.instance(
     "falls back to overflow guidance when no replayable turn exists",
     Effect.gen(function* () {
       const ssn = yield* SessionNs.Service
@@ -1418,6 +1459,47 @@ describe("session.compaction.process", () => {
           config: cfg({ tail_turns: 2, preserve_recent_tokens: 10_000 }),
         }),
       )
+    },
+    { git: true },
+  )
+
+  itCompaction.instance(
+    "labels sourced peer mail in the compaction model request without relabeling human turns",
+    () => {
+      const stub = llm()
+      let captured = ""
+      stub.push(reply("summary", (input) => (captured = JSON.stringify(input.messages))))
+      return Effect.gen(function* () {
+        const ssn = yield* SessionNs.Service
+        const session = yield* ssn.create({})
+        yield* createUserMessage(session.id, "human request")
+        const mail = yield* ssn.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          source: { type: "editspace-mail", id: "project#31", sender: "peer-lane", recipient: "parent" },
+          time: { created: Date.now() },
+        })
+        yield* ssn.updatePart({
+          id: PartID.ascending(),
+          messageID: mail.id,
+          sessionID: session.id,
+          type: "text",
+          text: "peer request",
+        })
+        yield* createCompactionMarker(session.id)
+        const msgs = yield* ssn.messages({ sessionID: session.id })
+        const parent = msgs.at(-1)?.info.id
+        expect(parent).toBeTruthy()
+        yield* SessionCompaction.use.process({ parentID: parent!, messages: msgs, sessionID: session.id, auto: false })
+
+        expect(captured).toContain("[User]: human request")
+        expect(captured).toContain("[Peer agent mail]: Peer agent mail (lower-trust context")
+        expect(captured).toContain('\\"id\\":\\"project#31\\",\\"sender\\":\\"peer-lane\\"')
+        expect(captured).not.toContain("[User]: peer request")
+      }).pipe(withCompaction({ llm: stub.llmLayer, config: cfg({ tail_turns: 0 }) }))
     },
     { git: true },
   )

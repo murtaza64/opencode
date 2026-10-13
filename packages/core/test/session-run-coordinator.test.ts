@@ -66,6 +66,46 @@ describe("SessionRunCoordinator", () => {
     ),
   )
 
+  it.effect("keeps active registration across coalesced wakes until the final drain settles", () =>
+    Effect.scoped(Effect.gen(function* () {
+      const started = yield* Deferred.make<void>()
+      const second = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const finish = yield* Deferred.make<void>()
+      const idle = yield* Deferred.make<void>()
+      const events: string[] = []
+      let turns = 0
+      const coordinator = yield* SessionRunCoordinator.make({
+        onActive: () => events.push("active"),
+        onIdle: () => {
+          events.push("idle")
+          Deferred.doneUnsafe(idle, Effect.void)
+        },
+        drain: () => Effect.gen(function* () {
+          turns++
+          if (turns === 1) {
+            yield* Deferred.succeed(started, undefined)
+            yield* Deferred.await(release)
+            return
+          }
+          yield* Deferred.succeed(second, undefined)
+          yield* Deferred.await(finish)
+        }),
+      })
+      yield* coordinator.wake("session")
+      expect(events).toEqual(["active"])
+      yield* Deferred.await(started)
+      yield* coordinator.wake("session")
+      yield* coordinator.wake("session")
+      yield* Deferred.succeed(release, undefined)
+      yield* Deferred.await(second)
+      expect(events).toEqual(["active"])
+      yield* Deferred.succeed(finish, undefined)
+      yield* Deferred.await(idle)
+      expect(events).toEqual(["active", "idle"])
+    })),
+  )
+
   it.effect("snapshots only active executions", () =>
     Effect.scoped(
       Effect.gen(function* () {

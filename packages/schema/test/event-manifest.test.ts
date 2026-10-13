@@ -9,12 +9,14 @@ import { WorkspaceEvent } from "../src/workspace-event"
 
 describe("public event manifest", () => {
   test("owns the complete public event surface", () => {
-    expect(EventManifest.ServerDefinitions.length).toBe(58)
-    expect(EventManifest.Definitions.length).toBe(91)
+    expect(EventManifest.ServerDefinitions.length).toBe(59)
+    expect(EventManifest.Definitions.length).toBe(94)
     expect(SessionV1.Event.InputDefinitions).toEqual([
       SessionV1.Event.InputAdmitted,
       SessionV1.Event.InputCancelled,
       SessionV1.Event.InputPromoted,
+      SessionV1.Event.InputPresented,
+      SessionV1.Event.InputHandled,
     ])
     expect(EventManifest.ServerDefinitions.some((event) => event.type.startsWith("session.input."))).toBe(false)
     expect(SessionV1.Event.Definitions).toEqual([
@@ -29,8 +31,9 @@ describe("public event manifest", () => {
       SessionV1.Event.Diff,
       SessionV1.Event.Error,
     ])
-    expect(EventManifest.Latest.size).toBe(91)
-    expect(EventManifest.Durable.size).toBe(38)
+    expect(EventManifest.Latest.size).toBe(94)
+    expect(EventManifest.Durable.size).toBe(41)
+    expect(EventManifest.Latest.get("session.next.prompt.presented")).toBe(SessionEvent.PromptPresented)
   })
 
   test("uses canonical definitions for current public events", () => {
@@ -48,7 +51,7 @@ describe("public event manifest", () => {
     expect(Reference.Event.Definitions).toEqual([Reference.Event.Updated])
     expect(EventManifest.Latest.has("ide.installed")).toBe(false)
     expect(IdeEvent.Definitions).toEqual([IdeEvent.Installed])
-    expect(EventManifest.Definitions.slice(46, 49)).toEqual([
+    expect(EventManifest.Definitions.slice(49, 52)).toEqual([
       SessionV1.Event.PartDelta,
       SessionV1.Event.Diff,
       SessionV1.Event.Error,

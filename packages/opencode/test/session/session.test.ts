@@ -2,10 +2,12 @@ import { describe, expect } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { EventV2 } from "@opencode-ai/core/event"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
+import { ModelV2 } from "@opencode-ai/core/model"
+import { ProviderV2 } from "@opencode-ai/core/provider"
 import { Deferred, Effect, Exit, Layer } from "effect"
 import { Session as SessionNs } from "@/session/session"
 import { MessageV2 } from "../../src/session/message-v2"
-import { MessageID, PartID, type SessionID } from "../../src/session/schema"
+import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { provideInstance, tmpdirScoped } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -206,6 +208,92 @@ describe("step-finish token propagation via event", () => {
 })
 
 describe("Session", () => {
+  it.instance("recovers a lost create response without publishing another session", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const events = yield* EventV2Bridge.Service
+      const createdEvents: string[] = []
+      const unsub = yield* events.listen((event) => {
+        if (event.type === SessionNs.Event.Created.type)
+          createdEvents.push((event.data as typeof SessionNs.Event.Created.data.Type).sessionID)
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+      const id = SessionID.descending()
+      const input = {
+        id,
+        title: "Delegated task",
+        agent: "build",
+        model: { providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("model"), variant: "fast" },
+      }
+      const created = yield* session.create(input)
+      const retried = yield* session.create(input)
+      expect(retried).toEqual(created)
+      expect(retried.model).toEqual(input.model)
+      expect(retried.agent).toBe("build")
+      expect(createdEvents.filter((value) => value === id)).toHaveLength(1)
+    }),
+  )
+
+  it.instance("rejects conflicting reuse of a caller-provided session ID", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const id = SessionID.descending()
+      yield* session.create({
+        id,
+        title: "Original",
+        agent: "build",
+        model: { providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("model") },
+      })
+      const conflicts = [
+        { id, title: "Other", agent: "build" },
+        { id, title: "Original", agent: "plan" },
+        { id, title: "Original", model: { providerID: ProviderV2.ID.make("other"), id: ModelV2.ID.make("model") } },
+      ]
+      for (const input of conflicts) {
+        const exit = yield* session.create(input).pipe(Effect.exit)
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit))
+          expect(exit.cause.reasons[0]).toMatchObject({ defect: { _tag: "SessionCreateConflictError" } })
+      }
+      expect((yield* session.get(id)).title).toBe("Original")
+    }),
+  )
+
+  it.instance("rejects reuse of a session ID from another directory", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const id = SessionID.descending()
+      yield* session.create({ id, title: "Original" })
+      const other = yield* tmpdirScoped({ git: true })
+      const exit = yield* provideInstance(other)(session.create({ id, title: "Original" })).pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit))
+        expect(exit.cause.reasons[0]).toMatchObject({ defect: { _tag: "SessionCreateConflictError" } })
+    }),
+  )
+
+  it.instance("reconciles simultaneous create requests for the same ID", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const events = yield* EventV2Bridge.Service
+      const createdEvents: string[] = []
+      const unsub = yield* events.listen((event) => {
+        if (event.type === SessionNs.Event.Created.type)
+          createdEvents.push((event.data as typeof SessionNs.Event.Created.data.Type).sessionID)
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+      const id = SessionID.descending()
+      const results = yield* Effect.all(
+        Array.from({ length: 8 }, () => session.create({ id, title: "One", agent: "build" })),
+        { concurrency: "unbounded" },
+      )
+      expect(results.map((result) => result.id)).toEqual(Array(8).fill(id))
+      expect(createdEvents.filter((value) => value === id)).toHaveLength(1)
+    }),
+  )
+
   it.live("remove works without an instance", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

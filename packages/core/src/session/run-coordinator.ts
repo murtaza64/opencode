@@ -23,6 +23,8 @@ type Entry<E> = {
 
 export const make = <Key, E>(options: {
   readonly drain: (key: Key, force: boolean) => Effect.Effect<void, E>
+  readonly onActive?: (key: Key) => void
+  readonly onIdle?: (key: Key) => void
 }): Effect.Effect<Coordinator<Key, E>, never, Scope.Scope> =>
   Effect.gen(function* () {
     const active = new Map<Key, Entry<E>>()
@@ -56,8 +58,10 @@ export const make = <Key, E>(options: {
       }
 
       const successor = entry.pendingWake ? makeEntry() : undefined
-      if (successor === undefined) active.delete(key)
-      else {
+      if (successor === undefined) {
+        active.delete(key)
+        options.onIdle?.(key)
+      } else {
         active.set(key, successor)
         start(key, successor, false, true)
       }
@@ -74,6 +78,7 @@ export const make = <Key, E>(options: {
 
         const next = makeEntry()
         active.set(key, next)
+        options.onActive?.(key)
         start(key, next, true)
         return restore(Deferred.await(next.done))
       })
@@ -88,6 +93,7 @@ export const make = <Key, E>(options: {
 
         const next = makeEntry()
         active.set(key, next)
+        options.onActive?.(key)
         start(key, next, false)
       })
 

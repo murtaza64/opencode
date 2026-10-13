@@ -2,6 +2,7 @@ import { afterEach, describe, expect, mock } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Effect, Layer } from "effect"
 import { Session as SessionNs } from "@/session/session"
+import { SessionID } from "@/session/schema"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { httpApiLayer, requestInDirectory } from "./httpapi-layer"
@@ -14,6 +15,36 @@ afterEach(async () => {
 })
 
 describe("session action routes", () => {
+  it.instance(
+    "retries caller-provided create IDs and rejects conflicting requests",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const id = SessionID.descending()
+        const input = { id, title: "Handoff", agent: "build", model: { providerID: "test", id: "model" } }
+        const send = (body: object) =>
+          requestInDirectory("/session", test.directory, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          })
+
+        const first = yield* send(input)
+        expect(first.status).toBe(200)
+        const original = (yield* first.json) as SessionNs.Info
+        expect(original).toMatchObject(input)
+
+        const retry = yield* send(input)
+        expect(retry.status).toBe(200)
+        expect(yield* retry.json).toEqual(original)
+
+        const conflict = yield* send({ ...input, title: "Different task" })
+        expect(conflict.status).toBe(409)
+        expect(yield* conflict.json).toMatchObject({ _tag: "ConflictError" })
+      }),
+    { git: true },
+  )
+
   it.instance(
     "session routes expose metadata on create, update, get, and fork",
     () =>

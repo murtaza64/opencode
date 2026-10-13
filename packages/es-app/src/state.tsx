@@ -16,6 +16,7 @@ import { es, oc, type AttentionNotification } from "./api"
 import { createSessionActivity } from "./session-activity"
 import { createServerEvents } from "./event-source"
 import { resolveProjectName } from "./project-name"
+import { transferPins, type Handoff } from "./handoffs"
 import type { GlobalSession } from "@opencode-ai/sdk/v2"
 import type { Event } from "@opencode-ai/sdk/v2"
 import { useLocation } from "@solidjs/router"
@@ -46,6 +47,12 @@ type DashboardCtx = {
   editspace: () => string | undefined
   setEditspace: (name: string) => void
   editspaces: Resource<{ editspaces: { name: string; root: string }[]; default: string | null }>
+  mailRevision: () => number
+  handoffs: Resource<Handoff[]>
+  handoffsError: () => string
+  refetchHandoffs: () => void
+  laneOwners: () => { lane: string; owner: string }[]
+  transferPin: (from: string, to: string, directory: string) => void
   archivedIds: () => Set<string>
   refetchArchived: () => void
   allProjects: () => boolean
@@ -80,11 +87,29 @@ export function DashboardProvider(props: ParentProps) {
     setEditspaceRaw(name)
   }
   const [editspaces] = createResource(es.editspaces)
+  const [mailRevision, setMailRevision] = createSignal(0)
   const [notificationState, { refetch: refetchNotifications }] = createResource(es.notifications)
   const [state, { refetch }] = createResource(
     () => editspace() ?? "",
     (name) => es.state(name || undefined),
   )
+  const [handoffsError, setHandoffsError] = createSignal("")
+  const [handoffs, { refetch: refetchHandoffs }] = createResource<Handoff[], { name: string; revision: unknown }>(
+    () => ({ name: editspace() ?? editspaces()?.default ?? "", revision: state() }),
+    async ({ name }, info) => {
+      if (!name) return []
+      try {
+        const result = await es.handoffs(name)
+        setHandoffsError("")
+        return result.handoffs
+      } catch (error) {
+        setHandoffsError(`Handoff lineage unavailable: ${String(error)}`)
+        return info.value ?? []
+      }
+    },
+  )
+  const laneOwners = createMemo(() => (state()?.threads ?? []).flatMap((thread: any) =>
+    (thread.lanes ?? []).filter((lane: any) => lane.owner).map((lane: any) => ({ lane: lane.lane as string, owner: lane.owner as string }))))
   const [sessionsError, setSessionsError] = createSignal("")
   let revision = 0
   const changed = new Map<string, { revision: number; session: GlobalSession | null }>()
@@ -180,7 +205,15 @@ export function DashboardProvider(props: ParentProps) {
   createEffect(() => {
     const name = editspace()
     const source = createServerEvents(`/es/api/events?${name ? `es=${encodeURIComponent(name)}` : ""}`)
-    source.onmessage = () => refetch()
+    let opened = false
+    source.onopen = () => {
+      if (opened) setMailRevision((value) => value + 1)
+      opened = true
+    }
+    source.onmessage = (event) => {
+      refetch()
+      if (event.data === "mail") setMailRevision((value) => value + 1)
+    }
     onCleanup(() => source.close())
   })
   const notificationSource = createServerEvents("/es/api/notification-events")
@@ -284,6 +317,12 @@ export function DashboardProvider(props: ParentProps) {
     localStorage.setItem(PIN_KEY, JSON.stringify(next))
     setPins(next)
   }
+  const transferPin = (from: string, to: string, directory: string) => {
+    const next = transferPins(pins(), from, to, directory)
+    if (next.every((key, index) => key === pins()[index])) return
+    localStorage.setItem(PIN_KEY, JSON.stringify(next))
+    setPins(next)
+  }
   const pinnedSessions = createMemo(() => {
     const byKey = new Map(sessions().map((s) => [pinKey(s), s]))
     return pins().flatMap((key) => {
@@ -382,6 +421,12 @@ export function DashboardProvider(props: ParentProps) {
     editspace,
     setEditspace,
     editspaces,
+    mailRevision,
+    handoffs,
+    handoffsError,
+    refetchHandoffs: () => { void refetchHandoffs() },
+    laneOwners,
+    transferPin,
     archivedIds,
     refetchArchived,
     allProjects,

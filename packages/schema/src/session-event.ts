@@ -11,6 +11,7 @@ import { FileAttachment, Prompt } from "./prompt"
 import { SessionID } from "./session-id"
 import { Location } from "./location"
 import { SessionMessage } from "./session-message"
+import { MailSource } from "./session-mail-source"
 import { Revert } from "./revert"
 
 export { FileAttachment }
@@ -33,6 +34,7 @@ const PromptFields = {
   messageID: SessionMessage.ID,
   prompt: Prompt,
   delivery: Delivery,
+  source: MailSource.pipe(optional),
 }
 
 const options = {
@@ -97,6 +99,16 @@ export const PromptAdmitted = Event.define({
   schema: PromptFields,
 })
 export type PromptAdmitted = typeof PromptAdmitted.Type
+
+export const PromptPresented = Event.define({
+  type: "session.next.prompt.presented",
+  ...options,
+  schema: {
+    ...Base,
+    messageID: SessionMessage.ID,
+  },
+})
+export type PromptPresented = typeof PromptPresented.Type
 
 export const ContextUpdated = Event.define({
   type: "session.next.context.updated",
@@ -451,6 +463,7 @@ export const DurableDefinitions = Event.inventory(
   Moved,
   Prompted,
   PromptAdmitted,
+  PromptPresented,
   ContextUpdated,
   Synthetic,
   Shell.Started,
@@ -482,6 +495,7 @@ export const Definitions = Event.inventory(
   Moved,
   Prompted,
   PromptAdmitted,
+  PromptPresented,
   ContextUpdated,
   Synthetic,
   Shell.Started,

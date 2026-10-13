@@ -4,6 +4,7 @@ import { Slug } from "@opencode-ai/core/util/slug"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import path from "path"
+import { isDeepStrictEqual } from "node:util"
 import { BackgroundJob } from "@/background/job"
 import { Decimal } from "decimal.js"
 import type { ProviderMetadata, Usage } from "@opencode-ai/llm"
@@ -11,6 +12,7 @@ import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { SessionV2 } from "@opencode-ai/core/session"
+import { SessionAlreadyProjected } from "@opencode-ai/core/session/projector"
 import * as SessionExecutionLocal from "@opencode-ai/core/session/execution/local"
 import { locationServiceMapLayer } from "@opencode-ai/core/location-services"
 
@@ -267,6 +269,7 @@ export type GlobalInfo = Types.DeepMutable<Schema.Schema.Type<typeof GlobalInfo>
 
 export const CreateInput = Schema.optional(
   Schema.Struct({
+    id: Schema.optional(SessionID),
     parentID: Schema.optional(SessionID),
     title: Schema.optional(Schema.String),
     agent: Schema.optional(Schema.String),
@@ -416,12 +419,17 @@ export class BusyError extends Schema.TaggedErrorClass<BusyError>()("SessionBusy
   sessionID: SessionID,
 }) {}
 
+export class CreateConflictError extends Schema.TaggedErrorClass<CreateConflictError>()("SessionCreateConflictError", {
+  sessionID: SessionID,
+}) {}
+
 export type NotFound = NotFoundError
 
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<Info[]>
   readonly listGlobal: (input?: GlobalListInput) => Effect.Effect<GlobalInfo[]>
   readonly create: (input?: {
+    id?: SessionID
     parentID?: SessionID
     title?: string
     agent?: string
@@ -674,6 +682,7 @@ const layer: Layer.Layer<
     })
 
     const create = Effect.fn("Session.create")(function* (input?: {
+      id?: SessionID
       parentID?: SessionID
       title?: string
       agent?: string
@@ -684,7 +693,33 @@ const layer: Layer.Layer<
     }) {
       const ctx = yield* InstanceState.context
       const workspace = yield* InstanceState.workspaceID
+      const workspaceID = input?.workspaceID ?? workspace
+      const existing = input?.id
+        ? yield* db.select().from(SessionTable).where(eq(SessionTable.id, input.id)).get().pipe(Effect.orDie)
+        : undefined
+      const reconcile = (row: SessionRow) => {
+        const info = fromRow(row)
+        if (
+          info.projectID !== ctx.project.id ||
+          info.directory !== ctx.directory ||
+          info.path !== sessionPath(ctx.worktree, ctx.directory) ||
+          info.workspaceID !== workspaceID ||
+          info.parentID !== input?.parentID ||
+          (input?.title !== undefined && info.title !== input.title) ||
+          (input?.agent !== undefined && info.agent !== input.agent) ||
+          (input?.model !== undefined &&
+            (info.model?.id !== input.model.id ||
+              info.model.providerID !== input.model.providerID ||
+              info.model.variant !== input.model.variant)) ||
+          (input?.metadata !== undefined && !isDeepStrictEqual(info.metadata, input.metadata)) ||
+          (input?.permission !== undefined && !isDeepStrictEqual(info.permission, input.permission))
+        )
+          return Effect.die(new CreateConflictError({ sessionID: row.id }))
+        return Effect.succeed(info)
+      }
+      if (existing) return yield* reconcile(existing)
       return yield* createNext({
+        id: input?.id,
         parentID: input?.parentID,
         directory: ctx.directory,
         path: sessionPath(ctx.worktree, ctx.directory),
@@ -693,8 +728,22 @@ const layer: Layer.Layer<
         model: input?.model,
         metadata: input?.metadata,
         permission: input?.permission,
-        workspaceID: input?.workspaceID ?? workspace,
-      })
+        workspaceID,
+      }).pipe(
+        Effect.catchDefect((defect) => {
+          // The projector enforces ID uniqueness inside the event transaction; a simultaneous create can lose there.
+          if (!(defect instanceof SessionAlreadyProjected) || !input?.id) return Effect.die(defect)
+          return db
+            .select()
+            .from(SessionTable)
+            .where(eq(SessionTable.id, input.id))
+            .get()
+            .pipe(
+              Effect.orDie,
+              Effect.flatMap((row) => (row ? reconcile(row) : Effect.die(defect))),
+            )
+        }),
+      )
     })
 
     const fork = Effect.fn("Session.fork")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {

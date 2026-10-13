@@ -16,7 +16,7 @@ import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionInput } from "@opencode-ai/core/session/input"
-import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionInputTable, SessionMessageTable, SessionSupersessionTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { testEffect } from "./lib/effect"
 
@@ -28,6 +28,7 @@ const execution = Layer.succeed(
   SessionExecution.Service,
   SessionExecution.Service.of({
     active: Effect.sync(() => new Set(activeSessions)),
+    activeDirectory: () => Effect.succeed(false),
     resume: (sessionID) =>
       Effect.sync(() => {
         executionCalls.push(sessionID)
@@ -99,6 +100,29 @@ const eventCount = (type: string) =>
   )
 
 describe("SessionV2.prompt", () => {
+  for (const state of ["pending", "committed"] as const) {
+    it.effect(`rejects prompt admission and resume for a ${state} supersession`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        const { db } = yield* Database.Service
+        const successor = SessionV2.ID.make("ses_prompt_successor")
+        yield* db.insert(SessionSupersessionTable).values({ session_id: sessionID, successor_id: successor, state }).run()
+        const session = yield* SessionV2.Service
+        wakeCalls.length = 0
+        executionCalls.length = 0
+
+        const prompt = yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Closed" }) }).pipe(Effect.flip)
+        expect(prompt).toMatchObject({ _tag: "SessionSuperseded", sessionID, successor, state })
+        expect(yield* admittedCount).toBe(0)
+        expect(wakeCalls).toEqual([])
+
+        const resume = yield* session.resume(sessionID).pipe(Effect.flip)
+        expect(resume).toMatchObject({ _tag: "SessionSuperseded", sessionID, successor, state })
+        expect(executionCalls).toEqual([])
+      }),
+    )
+  }
+
   it.effect("exposes the execution registry", () =>
     Effect.gen(function* () {
       activeSessions.add(sessionID)
@@ -265,6 +289,36 @@ describe("SessionV2.prompt", () => {
 
       expect(retried).toEqual(first)
       expect(yield* session.messages({ sessionID })).toEqual([])
+      expect(yield* admittedCount).toBe(1)
+    }),
+  )
+
+  it.effect("persists mail provenance across admission, promotion and exact retry", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const events = yield* EventV2.Service
+      const { db } = yield* Database.Service
+      const source = { type: "editspace-mail" as const, id: "project#31", sender: "reviewer", recipient: "parent" }
+      const input = {
+        sessionID,
+        id: SessionMessage.ID.make("msg_mail_regression"),
+        prompt: Prompt.make({ text: "Review is complete" }),
+        source,
+        resume: false,
+      }
+
+      const first = yield* session.prompt(input)
+      expect(first.source).toEqual(source)
+      expect(yield* session.prompt(input)).toEqual(first)
+      expect(yield* admittedCount).toBe(1)
+
+      yield* SessionInput.promoteSteers(db, events, sessionID, Number.MAX_SAFE_INTEGER)
+      expect(yield* session.messages({ sessionID })).toMatchObject([{ type: "user", source }])
+      expect((yield* admitted(input.id))?.source).toEqual(source)
+
+      const failure = yield* session.prompt({ ...input, source: { ...source, sender: "other" } }).pipe(Effect.flip)
+      expect(failure._tag).toBe("Session.PromptConflictError")
       expect(yield* admittedCount).toBe(1)
     }),
   )

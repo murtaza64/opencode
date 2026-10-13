@@ -93,6 +93,7 @@ const execution = Layer.effect(
     })
     return SessionExecution.Service.of({
       active: coordinator.active,
+      activeDirectory: () => Effect.succeed(false),
       resume: coordinator.run,
       wake: coordinator.wake,
       interrupt: coordinator.interrupt,
@@ -183,6 +184,7 @@ describe("SessionRunnerLLM recorded", () => {
       ).toEqual([
         "session.next.prompt.admitted.1",
         "session.next.prompted.1",
+        "session.next.prompt.presented.1",
         "session.next.step.started.1",
         "session.next.text.started.1",
         "session.next.text.ended.1",

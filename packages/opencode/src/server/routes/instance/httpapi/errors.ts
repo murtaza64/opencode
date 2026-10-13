@@ -128,6 +128,17 @@ export class SessionBusyError extends Schema.TaggedErrorClass<SessionBusyError>(
   { httpApiStatus: 409 },
 ) {}
 
+export class SessionSupersededError extends Schema.TaggedErrorClass<SessionSupersededError>()(
+  "SessionSupersededError",
+  {
+    sessionID: Schema.String,
+    successor: Schema.String,
+    state: Schema.Literals(["pending", "committed"]),
+    message: Schema.String,
+  },
+  { httpApiStatus: 409 },
+) {}
+
 export class QuestionNotFoundError extends Schema.TaggedErrorClass<QuestionNotFoundError>()(
   "QuestionNotFoundError",
   {

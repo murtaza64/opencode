@@ -9,6 +9,7 @@ import {
   MessageNotFoundError,
   ServiceUnavailableError,
   SessionNotFoundError,
+  SessionSupersededError,
   UnknownError,
 } from "@opencode-ai/protocol/errors"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -146,6 +147,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                 id: ctx.payload.id,
                 prompt: ctx.payload.prompt,
                 delivery: ctx.payload.delivery,
+                source: ctx.payload.source,
                 resume: ctx.payload.resume,
               })
               .pipe(
@@ -164,6 +166,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                       resource: error.messageID,
                     }),
                   ),
+                ),
+                Effect.catchTag("SessionSuperseded", (error) =>
+                  new SessionSupersededError({
+                    sessionID: error.sessionID,
+                    successor: error.successor,
+                    state: error.state,
+                    message: `Session is superseded by ${error.successor}`,
+                  }),
                 ),
               ),
           }

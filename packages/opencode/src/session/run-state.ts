@@ -7,24 +7,28 @@ import { Effect, Latch, Layer, Scope, Context } from "effect"
 import { Session } from "./session"
 import { SessionID } from "./schema"
 import { SessionStatus } from "./status"
+import { SessionSupersession } from "./supersession"
+import { SessionExecutionLocal } from "@opencode-ai/core/session/execution/local"
 
 export interface Interface {
   readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
-  readonly wake: (sessionID: SessionID, work: Effect.Effect<SessionV1.WithParts | undefined>) => Effect.Effect<void>
+  readonly wake: (sessionID: SessionID, work: Effect.Effect<SessionV1.WithParts | undefined>) => Effect.Effect<void, SessionSupersession.Closed>
+  readonly admit: <A, E, R>(sessionID: SessionID, work: Effect.Effect<A, E, R>) => Effect.Effect<A, E | SessionSupersession.Closed, R>
+  readonly supersede: (sessionID: SessionID, successor: SessionID) => Effect.Effect<SessionSupersession.Receipt, SessionSupersession.Invalid | SessionSupersession.Closed>
   readonly consume: (sessionID: SessionID) => Effect.Effect<void>
   readonly ensureRunning: (
     sessionID: SessionID,
     onInterrupt: Effect.Effect<SessionV1.WithParts>,
     work: Effect.Effect<SessionV1.WithParts>,
     admission?: boolean,
-  ) => Effect.Effect<SessionV1.WithParts>
+  ) => Effect.Effect<SessionV1.WithParts, SessionSupersession.Closed>
   readonly startShell: (
     sessionID: SessionID,
     onInterrupt: Effect.Effect<SessionV1.WithParts>,
     work: Effect.Effect<SessionV1.WithParts>,
     ready?: Latch.Latch,
-  ) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
+  ) => Effect.Effect<SessionV1.WithParts, Session.BusyError | SessionSupersession.Closed>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionRunState") {}
@@ -53,11 +57,12 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const background = yield* BackgroundJob.Service
     const status = yield* SessionStatus.Service
+    const supersession = yield* SessionSupersession.Service
 
     const state = yield* InstanceState.make(
       Effect.fn("SessionRunState.state")(function* () {
         const scope = yield* Scope.Scope
-        const runners = new Map<SessionID, Runner.Runner<SessionV1.WithParts | typeof noAdvisoryWork | undefined>>()
+        const runners = new Map<SessionID, Runner.Runner<SessionV1.WithParts | typeof noAdvisoryWork | undefined, SessionSupersession.Closed>>()
         yield* Effect.addFinalizer(
           Effect.fnUntraced(function* () {
             yield* Effect.forEach(runners.values(), (runner) => runner.cancel, {
@@ -71,6 +76,15 @@ const layer = Layer.effect(
       }),
     )
 
+    const gate = (sessionID: SessionID, idle: boolean) => Effect.gen(function* () {
+      const current = yield* supersession.get(sessionID)
+      if (!current) return
+      if (idle && current.state === "pending" && !SessionExecutionLocal.isActive(sessionID)) {
+        return yield* new SessionSupersession.Closed((yield* supersession.commit(sessionID)) ?? current)
+      }
+      return yield* new SessionSupersession.Closed(current)
+    })
+
     const runner = Effect.fn("SessionRunState.runner")(function* (
       sessionID: SessionID,
       onInterrupt: Effect.Effect<SessionV1.WithParts | undefined>,
@@ -78,11 +92,19 @@ const layer = Layer.effect(
       const data = yield* InstanceState.get(state)
       const existing = data.runners.get(sessionID)
       if (existing) return existing
-      const next = Runner.make<SessionV1.WithParts | typeof noAdvisoryWork | undefined>(data.scope, {
+      const settle = Effect.gen(function* () {
+        if (!(yield* supersession.get(sessionID))) return false
+        if (SessionExecutionLocal.isActive(sessionID)) return true
+        yield* supersession.commit(sessionID)
+        return true
+      })
+      const next = Runner.make<SessionV1.WithParts | typeof noAdvisoryWork | undefined, SessionSupersession.Closed>(data.scope, {
         // Retain the owner while callers may still hold it across cancellation cleanup.
-        onIdle: status.set(sessionID, { type: "idle" }),
+        onIdle: Effect.andThen(settle, status.set(sessionID, { type: "idle" })),
         onBusy: status.set(sessionID, { type: "busy" }),
         onInterrupt,
+        onSettled: settle,
+        onAdmission: (idle) => gate(sessionID, idle),
         canContinue: (result) =>
           result === noAdvisoryWork ||
           (result?.info.role === "assistant" && completedTurn({ id: result.info.parentID }, result.info, result.parts)),
@@ -95,6 +117,22 @@ const layer = Layer.effect(
       const data = yield* InstanceState.get(state)
       const existing = data.runners.get(sessionID)
       if (existing?.busy) yield* busyError(sessionID)
+    })
+
+    const admit = <A, E, R>(sessionID: SessionID, work: Effect.Effect<A, E, R>) =>
+      Effect.gen(function* () {
+        const owner = yield* runner(sessionID, Effect.succeed(undefined))
+        return yield* owner.locked((idle) => Effect.andThen(gate(sessionID, idle), work))
+      })
+
+    const supersede = Effect.fn("SessionRunState.supersede")(function* (sessionID: SessionID, successor: SessionID) {
+      const owner = yield* runner(sessionID, Effect.succeed(undefined))
+      return yield* owner.locked((idle) => Effect.gen(function* () {
+        const receipt = yield* supersession.request(sessionID, successor)
+        if (idle && receipt.state === "pending" && !SessionExecutionLocal.isActive(sessionID))
+          return (yield* supersession.commit(sessionID)) ?? receipt
+        return receipt
+      }))
     })
 
     const cancel = Effect.fn("SessionRunState.cancel")(function* (sessionID: SessionID) {
@@ -149,7 +187,7 @@ const layer = Layer.effect(
       return result === noAdvisoryWork || result === undefined ? yield* onInterrupt : result
     })
 
-    return Service.of({ assertNotBusy, cancel, ensureRunning, startShell, wake, consume })
+    return Service.of({ assertNotBusy, cancel, ensureRunning, startShell, wake, consume, admit, supersede })
   }),
 )
 
@@ -191,6 +229,6 @@ function busyError(sessionID: SessionID) {
   return new Session.BusyError({ sessionID })
 }
 
-export const node = LayerNode.make({ service: Service, layer: layer, deps: [BackgroundJob.node, SessionStatus.node] })
+export const node = LayerNode.make({ service: Service, layer: layer, deps: [BackgroundJob.node, SessionStatus.node, SessionSupersession.node] })
 
 export * as SessionRunState from "./run-state"

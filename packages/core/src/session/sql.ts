@@ -67,6 +67,16 @@ export const SessionTable = sqliteTable(
   ],
 )
 
+export const SessionSupersessionTable = sqliteTable("session_supersession", {
+  session_id: text()
+    .$type<SessionSchema.ID>()
+    .primaryKey()
+    .references(() => SessionTable.id, { onDelete: "cascade" }),
+  successor_id: text().$type<SessionSchema.ID>().notNull(),
+  state: text().$type<"pending" | "committed">().notNull(),
+  time_committed: integer(),
+})
+
 export const MessageTable = sqliteTable(
   "message",
   {
@@ -167,8 +177,11 @@ export const SessionInputTable = sqliteTable(
       .references(() => SessionTable.id, { onDelete: "cascade" }),
     prompt: text({ mode: "json" }).notNull().$type<Prompt>(),
     delivery: text().$type<SessionInput.Delivery>().notNull(),
+    source: text({ mode: "json" }).$type<SessionInput.MailSource>(),
     admitted_seq: integer().notNull(),
     promoted_seq: integer(),
+    presented_seq: integer(),
+    time_presented: integer(),
     time_created: integer()
       .notNull()
       .$default(() => Date.now()),

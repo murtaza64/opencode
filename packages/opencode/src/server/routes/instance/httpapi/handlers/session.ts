@@ -39,7 +39,7 @@ import {
   SummarizePayload,
   UpdatePayload,
 } from "../groups/session"
-import { AsideError, PermissionNotFoundError, ApiNotFoundError, ConflictError, InvalidRequestError } from "../errors"
+import { AsideError, PermissionNotFoundError, ApiNotFoundError, ConflictError, InvalidRequestError, SessionSupersededError } from "../errors"
 import * as SessionError from "./session-errors"
 
 const tryParseJson = (text: string) =>
@@ -179,7 +179,15 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     const create = Effect.fn("SessionHttpApi.create")(function* (ctx: { payload?: Session.CreateInput }) {
-      return yield* shareSvc.create(ctx.payload)
+      return yield* shareSvc
+        .create(ctx.payload)
+        .pipe(
+          Effect.catchDefect((defect) =>
+            defect instanceof Session.CreateConflictError
+              ? Effect.fail(new ConflictError({ message: `Session ID already used: ${defect.sessionID}` }))
+              : Effect.die(defect),
+          ),
+        )
     })
 
     const createRaw = Effect.fn("SessionHttpApi.createRaw")(function* (ctx: {
@@ -274,6 +282,17 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return true
     })
 
+    const supersede = Effect.fn("SessionHttpApi.supersede")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: { successor: SessionID }
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      return yield* runState.supersede(ctx.params.sessionID, ctx.payload.successor).pipe(
+        Effect.catchTag("SessionSuperseded", SessionError.superseded),
+        Effect.catchTag("SessionSupersessionInvalid", (error) => new InvalidRequestError({ message: error.message })),
+      )
+    })
+
     const aside = Effect.fn("SessionHttpApi.aside")(function* (ctx: {
       params: { sessionID: SessionID }
       payload: typeof SessionAside.Input.Type
@@ -306,7 +325,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
           command: Command.Default.INIT,
           arguments: "",
         })
-        .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+        .pipe(Effect.catchTag("SessionSuperseded", SessionError.superseded), Effect.mapError((error) => error instanceof SessionSupersededError ? error : new HttpApiError.BadRequest({})))
       return true
     })
 
@@ -333,21 +352,19 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof SummarizePayload.Type
     }) {
-      yield* revertSvc.cleanup(yield* requireSession(ctx.params.sessionID))
-      const messages = yield* SessionError.mapStorageNotFound(session.messages({ sessionID: ctx.params.sessionID }))
-      const defaultAgent = yield* agentSvc.defaultAgent()
-      const currentAgent = messages.findLast((message) => message.info.role === "user")?.info.agent ?? defaultAgent
-
-      yield* compactSvc.create({
-        sessionID: ctx.params.sessionID,
-        agent: currentAgent,
-        model: {
-          providerID: ctx.payload.providerID,
-          modelID: ctx.payload.modelID,
-        },
-        auto: ctx.payload.auto ?? false,
-      })
-      yield* promptSvc.loop({ sessionID: ctx.params.sessionID })
+      yield* runState.admit(ctx.params.sessionID, Effect.gen(function* () {
+        yield* revertSvc.cleanup(yield* requireSession(ctx.params.sessionID))
+        const messages = yield* SessionError.mapStorageNotFound(session.messages({ sessionID: ctx.params.sessionID }))
+        const defaultAgent = yield* agentSvc.defaultAgent()
+        const currentAgent = messages.findLast((message) => message.info.role === "user")?.info.agent ?? defaultAgent
+        yield* compactSvc.create({
+          sessionID: ctx.params.sessionID,
+          agent: currentAgent,
+          model: { providerID: ctx.payload.providerID, modelID: ctx.payload.modelID },
+          auto: ctx.payload.auto ?? false,
+        })
+      })).pipe(Effect.catchTag("SessionSuperseded", SessionError.superseded))
+      yield* promptSvc.loop({ sessionID: ctx.params.sessionID }).pipe(Effect.catchTag("SessionSuperseded", SessionError.superseded))
       return true
     })
 
@@ -361,7 +378,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
           ...ctx.payload,
           sessionID: ctx.params.sessionID,
         })
-        .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+        .pipe(Effect.catchTag("SessionSuperseded", SessionError.superseded), Effect.mapError((error) => error instanceof SessionSupersededError ? error : new HttpApiError.BadRequest({})))
       return HttpServerResponse.stream(Stream.make(JSON.stringify(message)).pipe(Stream.encodeText), {
         contentType: "application/json",
       })
@@ -372,7 +389,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof PromptPayload.Type
     }) {
       yield* requireSession(ctx.params.sessionID)
+      yield* runState.admit(ctx.params.sessionID, Effect.void).pipe(Effect.catchTag("SessionSuperseded", SessionError.superseded))
       yield* promptSvc.prompt({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
+        // The request may have returned 204 before the fence committed. Do not write an error event to the closed transcript.
+        Effect.catchTag("SessionSuperseded", () => Effect.void),
         Effect.catchCause((cause) =>
           Effect.gen(function* () {
             yield* Effect.logError("prompt_async failed", { sessionID: ctx.params.sessionID, cause })
@@ -394,7 +414,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       yield* requireSession(ctx.params.sessionID)
       return yield* promptSvc
         .command({ ...ctx.payload, sessionID: ctx.params.sessionID })
-        .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+        .pipe(Effect.catchTag("SessionSuperseded", SessionError.superseded), Effect.mapError((error) => error instanceof SessionSupersededError ? error : new HttpApiError.BadRequest({})))
     })
 
     const shell = Effect.fn("SessionHttpApi.shell")(function* (ctx: {
@@ -402,7 +422,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof ShellPayload.Type
     }) {
       yield* requireSession(ctx.params.sessionID)
-      return yield* SessionError.mapBusy(promptSvc.shell({ ...ctx.payload, sessionID: ctx.params.sessionID }))
+      return yield* promptSvc.shell({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
+        Effect.catchTag("SessionSuperseded", SessionError.superseded),
+        SessionError.mapBusy,
+      )
     })
 
     const revert = Effect.fn("SessionHttpApi.revert")(function* (ctx: {
@@ -474,12 +497,13 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
         Effect.gen(function* () {
           yield* requireSession(ctx.params.sessionID)
           const receipt = yield* inputs.admit(ctx.params.sessionID, ctx.payload).pipe(
+            Effect.catchTag("SessionSuperseded", SessionError.superseded),
             Effect.catchTags({
               InputConflict: (error) => new ConflictError({ message: error.message }),
               InputInvalid: (error) => new InvalidRequestError({ message: error.message }),
             }),
           )
-          if (receipt.state === "pending") yield* promptSvc.wake(ctx.params.sessionID)
+          if (receipt.state === "pending") yield* promptSvc.wake(ctx.params.sessionID).pipe(Effect.catchTag("SessionSuperseded", SessionError.superseded))
           return receipt
         }),
       )
@@ -514,6 +538,18 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
           )
         }),
       )
+      .handle("handleInput", (ctx) =>
+        Effect.gen(function* () {
+          yield* requireSession(ctx.params.sessionID)
+          return yield* inputs.handle(ctx.params.sessionID, ctx.params.requestID, ctx.payload).pipe(
+            Effect.catchTags({
+              InputConflict: (error) => new ConflictError({ message: error.message }),
+              InputMissing: (error) =>
+                new ApiNotFoundError({ name: "NotFoundError", data: { message: error.message } }),
+            }),
+          )
+        }),
+      )
       .handle("list", list)
       .handle("status", status)
       .handle("get", get)
@@ -527,6 +563,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("update", update)
       .handleRaw("fork", forkRaw)
       .handle("abort", abort)
+      .handle("supersede", supersede)
       .handle("aside", aside)
       .handle("cancelAside", cancelAside)
       .handle("init", init)

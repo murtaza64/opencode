@@ -1,11 +1,13 @@
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Permission } from "@/permission"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { InputHandlePayload } from "@opencode-ai/schema/session-v1"
 
 import { Session } from "@/session/session"
 import { SessionAside } from "@/session/aside"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
+import { SessionInput } from "@/session/input"
 import { SessionRevert } from "@/session/revert"
 import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
@@ -28,6 +30,7 @@ import {
   SessionBusyError,
   ConflictError,
   InvalidRequestError,
+  SessionSupersededError,
 } from "../errors"
 import { described } from "./metadata"
 import { QueryBoolean } from "./query"
@@ -59,7 +62,7 @@ export const MessagesQuery = Schema.Struct({
 export const StatusMap = Schema.Record(Schema.String, SessionStatus.Info)
 export const InputsQuery = Schema.Struct({
   ...WorkspaceRoutingQueryFields,
-  state: Schema.optional(Schema.Literals(["pending", "promoted", "cancelled", "all"])),
+  state: Schema.optional(Schema.Literals(["pending", "promoted", "presented", "handled", "cancelled", "all"])),
   after: Schema.optional(Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
   limit: Schema.optional(
     Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 1000 })),
@@ -90,6 +93,12 @@ export const SummarizePayload = Schema.Struct({
 export const PromptPayload = Schema.Struct(Struct.omit(SessionPrompt.PromptInput.fields, ["sessionID"]))
 export const CommandPayload = Schema.Struct(Struct.omit(SessionPrompt.CommandInput.fields, ["sessionID"]))
 export const ShellPayload = Schema.Struct(Struct.omit(SessionPrompt.ShellInput.fields, ["sessionID"]))
+export const SupersedePayload = Schema.Struct({ successor: SessionID })
+export const SupersedeReceipt = Schema.Struct({
+  sessionID: SessionID,
+  successor: SessionID,
+  state: Schema.Literals(["pending", "committed"]),
+})
 export const RevertPayload = Schema.Struct(Struct.omit(SessionRevert.RevertInput.fields, ["sessionID"]))
 export const PermissionResponsePayload = Schema.Struct({
   response: PermissionV1.Reply,
@@ -109,8 +118,10 @@ export const SessionPaths = {
   update: `${root}/:sessionID`,
   fork: `${root}/:sessionID/fork`,
   abort: `${root}/:sessionID/abort`,
+  supersede: `${root}/:sessionID/supersede`,
   aside: `${root}/:sessionID/aside`,
   cancelAside: `${root}/:sessionID/aside/:requestID`,
+  handleInput: `${root}/:sessionID/input/:requestID/handle`,
   share: `${root}/:sessionID/share`,
   init: `${root}/:sessionID/init`,
   summarize: `${root}/:sessionID/summarize`,
@@ -133,9 +144,9 @@ export const SessionApi = HttpApi.make("session")
         HttpApiEndpoint.post("admitInput", `${root}/:sessionID/input`, {
           params: { sessionID: SessionID },
           query: WorkspaceRoutingQuery,
-          payload: SessionV1.InputPayload,
+          payload: SessionInput.InputPayload,
           success: SessionV1.InputReceipt,
-          error: [ApiNotFoundError, ConflictError, InvalidRequestError, HttpApiError.BadRequest],
+          error: [ApiNotFoundError, ConflictError, InvalidRequestError, SessionSupersededError, HttpApiError.BadRequest],
         }).annotateMerge(
           OpenApi.annotations({ identifier: "session.input.admit", summary: "Admit durable session input" }),
         ),
@@ -162,6 +173,15 @@ export const SessionApi = HttpApi.make("session")
           error: [ApiNotFoundError, ConflictError, InvalidRequestError, HttpApiError.BadRequest],
         }).annotateMerge(
           OpenApi.annotations({ identifier: "session.input.cancel", summary: "Cancel pending session input" }),
+        ),
+        HttpApiEndpoint.post("handleInput", SessionPaths.handleInput, {
+          params: { sessionID: SessionID, requestID: Schema.String },
+          query: WorkspaceRoutingQuery,
+          payload: InputHandlePayload,
+          success: SessionV1.InputReceipt,
+          error: [ApiNotFoundError, ConflictError, HttpApiError.BadRequest],
+        }).annotateMerge(
+          OpenApi.annotations({ identifier: "session.input.handle", summary: "Record explicit mail handling" }),
         ),
         HttpApiEndpoint.get("list", SessionPaths.list, {
           query: ListQuery,
@@ -259,7 +279,7 @@ export const SessionApi = HttpApi.make("session")
           query: WorkspaceRoutingQuery,
           payload: [HttpApiSchema.NoContent, Session.CreateInput],
           success: described(Session.Info, "Successfully created session"),
-          error: HttpApiError.BadRequest,
+          error: [HttpApiError.BadRequest, ConflictError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "session.create",
@@ -344,12 +364,21 @@ export const SessionApi = HttpApi.make("session")
             description: "Abort an active session and stop any ongoing AI processing or command execution.",
           }),
         ),
+        HttpApiEndpoint.post("supersede", SessionPaths.supersede, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: SupersedePayload,
+          success: SupersedeReceipt,
+          error: [HttpApiError.BadRequest, ApiNotFoundError, InvalidRequestError, SessionSupersededError],
+        }).annotateMerge(
+          OpenApi.annotations({ identifier: "session.supersede", summary: "Fence a legacy session at its idle boundary" }),
+        ),
         HttpApiEndpoint.post("init", SessionPaths.init, {
           params: { sessionID: SessionID },
           query: WorkspaceRoutingQuery,
           payload: InitPayload,
           success: described(Schema.Boolean, "200"),
-          error: [HttpApiError.BadRequest, ApiNotFoundError],
+          error: [HttpApiError.BadRequest, ApiNotFoundError, SessionSupersededError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "session.init",
@@ -387,7 +416,7 @@ export const SessionApi = HttpApi.make("session")
           query: WorkspaceRoutingQuery,
           payload: SummarizePayload,
           success: described(Schema.Boolean, "Summarized session"),
-          error: [HttpApiError.BadRequest, ApiNotFoundError],
+          error: [HttpApiError.BadRequest, ApiNotFoundError, SessionSupersededError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "session.summarize",
@@ -400,7 +429,7 @@ export const SessionApi = HttpApi.make("session")
           query: WorkspaceRoutingQuery,
           payload: PromptPayload,
           success: described(SessionV1.WithParts, "Created message"),
-          error: [HttpApiError.BadRequest, ApiNotFoundError],
+          error: [HttpApiError.BadRequest, ApiNotFoundError, SessionSupersededError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "session.prompt",
@@ -413,7 +442,7 @@ export const SessionApi = HttpApi.make("session")
           query: WorkspaceRoutingQuery,
           payload: PromptPayload,
           success: described(HttpApiSchema.NoContent, "Prompt accepted"),
-          error: [HttpApiError.BadRequest, ApiNotFoundError],
+          error: [HttpApiError.BadRequest, ApiNotFoundError, SessionSupersededError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "session.prompt_async",
@@ -427,7 +456,7 @@ export const SessionApi = HttpApi.make("session")
           query: WorkspaceRoutingQuery,
           payload: CommandPayload,
           success: described(SessionV1.WithParts, "Created message"),
-          error: [HttpApiError.BadRequest, ApiNotFoundError],
+          error: [HttpApiError.BadRequest, ApiNotFoundError, SessionSupersededError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "session.command",
@@ -440,7 +469,7 @@ export const SessionApi = HttpApi.make("session")
           query: WorkspaceRoutingQuery,
           payload: ShellPayload,
           success: described(SessionV1.WithParts, "Created message"),
-          error: [HttpApiError.BadRequest, ApiNotFoundError, SessionBusyError],
+          error: [HttpApiError.BadRequest, ApiNotFoundError, SessionBusyError, SessionSupersededError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "session.shell",
