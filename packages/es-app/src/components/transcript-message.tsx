@@ -1,7 +1,33 @@
-import { createMemo, createSignal, Show, type ComponentProps } from "solid-js"
+import { createMemo, createSignal, For, Show, type ComponentProps } from "solid-js"
 import { Message } from "@opencode-ai/session-ui/message-part"
+import type { MailDelivery, MailMessage } from "../api"
 
-export const TranscriptMessage = (props: ComponentProps<typeof Message>) => {
+type MailSource = { type: "editspace-mail"; id: string; sender: string; recipient: string }
+const mailTime = (value: string | number | null) => value == null ? "" : new Date(value).toLocaleString()
+
+// The legacy SDK message type has no source field yet. Only structured wire
+// metadata can identify mail; message text and synthetic parts cannot.
+const mailMetadata = (message: ComponentProps<typeof Message>["message"]) => {
+  if (message.role !== "user" || !("source" in message)) return
+  const source: unknown = message.source
+  if (!source || typeof source !== "object" || !("type" in source) || source.type !== "editspace-mail" ||
+    !("id" in source) || typeof source.id !== "string" ||
+    !("sender" in source) || typeof source.sender !== "string" ||
+    !("recipient" in source) || typeof source.recipient !== "string") return
+  const mail: MailSource = { type: "editspace-mail", id: source.id, sender: source.sender, recipient: source.recipient }
+  const delivery = "delivery" in message && (message.delivery === "queue" || message.delivery === "steer") ? message.delivery : undefined
+  const state = "state" in message &&
+    (message.state === "pending" || message.state === "promoted" || message.state === "cancelled") ? message.state : undefined
+  return { mail, delivery, state }
+}
+
+export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
+  mailRecord?: MailMessage
+  mailDeliveries?: MailDelivery[]
+  mailIDs?: Set<string>
+}) => {
+  const mail = createMemo(() => mailMetadata(props.message))
+  const mailText = createMemo(() => props.parts.flatMap(part => part.type === "text" && !part.ignored ? [part.text] : []).join("\n\n"))
   const generated = createMemo(() => {
     if (props.message.role !== "user" || !props.parts.length ||
       !props.parts.every(part => part.type === "text" && part.synthetic === true)) return ""
@@ -23,7 +49,7 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message>) => {
     const result = copied || await navigator.clipboard?.writeText(generated()).then(() => true, () => false)
     setCopyState(result ? "Copied" : "Copy failed")
   }
-  return <Show when={generated()} fallback={<Message {...props} activityRows />}>
+  return <Show when={mail()} fallback={<Show when={generated()} fallback={<Message {...props} activityRows />}>
     <details class="generated-input" data-generated-message-id={props.message.id} onToggle={event => setOpen(event.currentTarget.open)}>
       <summary class="activity-row">
         <span class="activity-kind">Generated input</span>
@@ -37,5 +63,44 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message>) => {
         </div>
       </Show>
     </details>
+  </Show>}>
+    {(metadata) => <details class="mail-activity" id={`mail-${metadata().mail.id}`} data-mail-message-id={props.message.id}>
+      <summary class="mail-activity-summary">
+         <span class="mail-activity-kind">Mail<Show when={props.mailRecord}> · {props.mailRecord?.direction === "sent" ? "Outbound" : "Inbound"}</Show></span>
+        <span class="mail-activity-route"><bdi dir="auto">{metadata().mail.sender}</bdi> → <bdi dir="auto">{metadata().mail.recipient}</bdi></span>
+        <span class="mail-activity-state">
+          <Show when={metadata().delivery}>{(delivery) => <span>{delivery()}</span>}</Show>
+          <Show when={metadata().state}>{(state) => <span>{state()}</span>}</Show>
+          <For each={props.mailDeliveries ?? []}>{(delivery) => <span>{delivery.state}</span>}</For>
+        </span>
+        <span class="mail-activity-disclosure" aria-hidden="true">›</span>
+      </summary>
+      <div class="mail-activity-details">
+        <div>Mail ID: <bdi dir="auto">{metadata().mail.id}</bdi></div>
+        <Show when={props.mailRecord}>{(record) => <>
+          <div>Sent: {mailTime(record().ts)}</div>
+          <For each={[
+            { label: "Reply to", id: record().in_reply_to },
+            { label: "Supersedes", id: record().supersedes },
+          ].filter((item): item is { label: string; id: string } => !!item.id)}>{(ref) => <div>{ref.label}: <Show when={props.mailIDs?.has(ref.id)} fallback={<bdi dir="auto">{ref.id}</bdi>}>
+            <a href={`#mail-${ref.id}`}><bdi dir="auto">{ref.id}</bdi></a>
+          </Show></div>}</For>
+        </>}</Show>
+        <Show when={props.parts.every(part => part.type === "text" || part.type === "file")}
+          fallback={<Message {...props} activityRows />}>
+          <Show when={mailText()}><div class="mail-activity-body" dir="auto">{mailText()}</div></Show>
+          <For each={props.parts.filter(part => part.type === "file")}>{(part) =>
+            <div class="mail-activity-attachment" dir="auto">Attachment: {part.type === "file" ? part.filename : ""}</div>
+          }</For>
+        </Show>
+        <For each={props.mailDeliveries ?? []}>{(delivery) => <div class="mail-delivery">
+          <div>To <bdi dir="auto">{delivery.recipient}</bdi> · {delivery.mode ?? "delivery"} · {delivery.state}</div>
+          <Show when={delivery.request_id}><div>Request: <bdi dir="auto">{delivery.request_id}</bdi></div></Show>
+          <Show when={delivery.presented_at}><div>Presented: {mailTime(delivery.presented_at)}</div></Show>
+          <Show when={delivery.handled_at}><div>Handled: {mailTime(delivery.handled_at)}</div></Show>
+          <Show when={delivery.error}><div class="err" role="alert">{delivery.error}</div></Show>
+        </div>}</For>
+      </div>
+    </details>}
   </Show>
 }

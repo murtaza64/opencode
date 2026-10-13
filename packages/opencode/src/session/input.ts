@@ -1,9 +1,10 @@
 import { isDeepStrictEqual } from "node:util"
-import { and, asc, eq, gt } from "drizzle-orm"
+import { and, asc, eq, gt, inArray, sql } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { InputHandlePayload } from "@opencode-ai/schema/session-v1"
 import { V1InputTable } from "@opencode-ai/core/session/sql"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -11,11 +12,14 @@ import { Agent } from "@/agent/agent"
 import { Provider } from "@/provider/provider"
 import { SessionInputMedia } from "./input-media"
 import { Session } from "./session"
+import { SessionRunState } from "./run-state"
 import { MessageID, PartID, SessionID } from "./schema"
 
 export class Conflict extends Schema.TaggedErrorClass<Conflict>()("InputConflict", { message: Schema.String }) {}
 export class Missing extends Schema.TaggedErrorClass<Missing>()("InputMissing", { message: Schema.String }) {}
 export class Invalid extends Schema.TaggedErrorClass<Invalid>()("InputInvalid", { message: Schema.String }) {}
+
+export const InputPayload = SessionV1.InputPayload
 
 const make = Effect.gen(function* () {
   const database = yield* Database.Service
@@ -24,7 +28,41 @@ const make = Effect.gen(function* () {
   const agents = yield* Agent.Service
   const provider = yield* Provider.Service
   const media = yield* SessionInputMedia.Service
+  const runState = yield* SessionRunState.Service
   const db = database.db
+  // The legacy input projector lives in Core; this V1-only extension registers
+  // alongside it so durable handling events project on publish and replay.
+  yield* events.project(SessionV1.Event.InputHandled, (event) =>
+    Effect.gen(function* () {
+      const row = yield* db
+        .select()
+        .from(V1InputTable)
+        .where(
+          and(eq(V1InputTable.session_id, event.data.sessionID), eq(V1InputTable.request_id, event.data.requestID)),
+        )
+        .get()
+        .pipe(Effect.orDie)
+      if (
+        !row ||
+        row.payload.source?.type !== "editspace-mail" ||
+        row.state !== "promoted" ||
+        !("timePresented" in row.receipt) ||
+        typeof row.receipt.timePresented !== "number" ||
+        "timeHandled" in row.receipt
+      )
+        return yield* Effect.die(new SessionProjector.InputLifecycleConflict())
+      yield* db
+        .update(V1InputTable)
+        .set({
+          receipt: event.data.replyID
+            ? sql`json_set(${V1InputTable.receipt}, '$.timeHandled', ${event.data.time}, '$.disposition', ${event.data.disposition}, '$.replyID', ${event.data.replyID})`
+            : sql`json_set(${V1InputTable.receipt}, '$.timeHandled', ${event.data.time}, '$.disposition', ${event.data.disposition})`,
+        })
+        .where(eq(V1InputTable.request_id, event.data.requestID))
+        .run()
+        .pipe(Effect.orDie)
+    }),
+  )
   const reconcile = <A>(effect: Effect.Effect<A>) =>
     effect.pipe(
       Effect.catchDefect((error) =>
@@ -35,13 +73,35 @@ const make = Effect.gen(function* () {
   const find = (requestID: string) =>
     db.select().from(V1InputTable).where(eq(V1InputTable.request_id, requestID)).get().pipe(Effect.orDie)
 
+  const receipt = (value: SessionV1.InputReceipt): SessionV1.InputReceipt => {
+    if (
+      value.state === "promoted" &&
+      "timePresented" in value &&
+      typeof value.timePresented === "number" &&
+      "timeHandled" in value &&
+      typeof value.timeHandled === "number" &&
+      "disposition" in value &&
+      (value.disposition === "acknowledged" || value.disposition === "replied")
+    )
+      return {
+        ...value,
+        state: "handled",
+        timePresented: value.timePresented,
+        timeHandled: value.timeHandled,
+        disposition: value.disposition,
+      }
+    if (value.state !== "promoted" || !("timePresented" in value) || typeof value.timePresented !== "number")
+      return value
+    return { ...value, state: "presented", timePresented: value.timePresented }
+  }
+
   const get = Effect.fn("SessionInput.get")(function* (sessionID: SessionID, requestID: string) {
     const row = yield* find(requestID)
     if (!row || row.session_id !== sessionID) return yield* new Missing({ message: "Input not found" })
-    return row.receipt
+    return receipt(row.receipt)
   })
 
-  const admit = Effect.fn("SessionInput.admit")(function* (sessionID: SessionID, payload: SessionV1.InputPayload) {
+  const admitInner = Effect.fn("SessionInput.admitInner")(function* (sessionID: SessionID, payload: typeof InputPayload.Type) {
     if (!payload.text.trim() && !payload.images?.length)
       return yield* new Invalid({ message: "Input requires text or images" })
     if (payload.images?.length && payload.text.length > 128_000)
@@ -50,7 +110,7 @@ const make = Effect.gen(function* () {
     if (existing) {
       if (existing.session_id !== sessionID || !isDeepStrictEqual(existing.payload, payload))
         return yield* new Conflict({ message: "requestID already used for a different input" })
-      return existing.receipt
+      return receipt(existing.receipt)
     }
     const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
     const previous = yield* sessions.findMessage(sessionID, (m) => m.info.role === "user").pipe(Effect.orDie)
@@ -95,8 +155,10 @@ const make = Effect.gen(function* () {
     if (!row) return yield* Effect.die("Input admission was not projected")
     if (row.session_id !== sessionID || !isDeepStrictEqual(row.payload, payload))
       return yield* new Conflict({ message: "requestID already used for a different input" })
-    return row.receipt
+    return receipt(row.receipt)
   })
+  const admit = (sessionID: SessionID, payload: typeof InputPayload.Type) =>
+    runState.admit(sessionID, admitInner(sessionID, payload))
 
   const list = Effect.fn("SessionInput.list")(function* (
     sessionID: SessionID,
@@ -112,7 +174,21 @@ const make = Effect.gen(function* () {
       .where(
         and(
           eq(V1InputTable.session_id, sessionID),
-          query.state === "all" ? undefined : eq(V1InputTable.state, query.state ?? "pending"),
+          query.state === "all"
+            ? undefined
+            : eq(
+                V1InputTable.state,
+                query.state === "presented" || query.state === "handled" ? "promoted" : (query.state ?? "pending"),
+              ),
+          query.state === "presented"
+            ? sql`json_extract(${V1InputTable.receipt}, '$.timePresented') is not null and json_extract(${V1InputTable.receipt}, '$.timeHandled') is null`
+            : undefined,
+          query.state === "handled"
+            ? sql`json_extract(${V1InputTable.receipt}, '$.timeHandled') is not null`
+            : undefined,
+          query.state === "promoted"
+            ? sql`json_extract(${V1InputTable.receipt}, '$.timePresented') is null`
+            : undefined,
           query.after === undefined ? undefined : gt(V1InputTable.admitted_seq, query.after),
         ),
       )
@@ -120,7 +196,7 @@ const make = Effect.gen(function* () {
       .limit((query.limit ?? 100) + 1)
       .all()
       .pipe(Effect.orDie)
-    const items = rows.slice(0, query.limit ?? 100).map((row) => row.receipt)
+    const items = rows.slice(0, query.limit ?? 100).map((row) => receipt(row.receipt))
     return { items, next: rows.length > items.length ? (items.at(-1)?.admittedSeq ?? null) : null }
   })
 
@@ -132,8 +208,39 @@ const make = Effect.gen(function* () {
         events.publish(SessionV1.Event.InputCancelled, { sessionID, requestID, time: yield* Clock.currentTimeMillis }),
       )
     const result = yield* get(sessionID, requestID)
-    if (result.state === "promoted") return yield* new Conflict({ message: "Input already promoted" })
+    if (result.state === "promoted" || result.state === "presented" || result.state === "handled")
+      return yield* new Conflict({ message: "Input already promoted" })
     return result
+  })
+
+  const handle = Effect.fn("SessionInput.handle")(function* (
+    sessionID: SessionID,
+    requestID: string,
+    payload: InputHandlePayload,
+  ) {
+    const current = yield* get(sessionID, requestID)
+    if (current.source?.type !== "editspace-mail")
+      return yield* new Conflict({ message: "Only editspace mail can be handled" })
+    const matches = (value: SessionV1.InputReceipt) =>
+      value.state === "handled" && value.disposition === payload.disposition && value.replyID === payload.replyID
+    if (matches(current)) return current
+    if (current.state !== "presented") return yield* new Conflict({ message: "Mail must be presented before handling" })
+    yield* events
+      .publish(SessionV1.Event.InputHandled, {
+        sessionID,
+        requestID,
+        disposition: payload.disposition,
+        ...(payload.replyID ? { replyID: payload.replyID } : {}),
+        time: yield* Clock.currentTimeMillis,
+      })
+      .pipe(
+        Effect.catchDefect((error) =>
+          error instanceof SessionProjector.InputLifecycleConflict ? Effect.void : Effect.die(error),
+        ),
+      )
+    const result = yield* get(sessionID, requestID)
+    if (matches(result)) return result
+    return yield* new Conflict({ message: "Mail already handled with a different disposition" })
   })
 
   const promote = Effect.fn("SessionInput.promote")(function* (sessionID: SessionID, idle: boolean) {
@@ -158,12 +265,14 @@ const make = Effect.gen(function* () {
           continue
         }
       }
+      const payload = Schema.decodeUnknownSync(InputPayload)(row.payload)
       const info: SessionV1.User = {
         id: MessageID.ascending(),
         role: "user",
         sessionID,
         agent: row.receipt.agent,
         model: row.model,
+        ...(payload.source ? { source: payload.source } : {}),
         time: { created: yield* Clock.currentTimeMillis },
       }
       const part: SessionV1.TextPart = {
@@ -200,13 +309,41 @@ const make = Effect.gen(function* () {
     }
     return promoted
   })
-  return { admit, get, list, cancel, promote }
+  const presented = Effect.fn("SessionInput.presented")(function* (sessionID: SessionID, messageIDs: MessageID[]) {
+    if (!messageIDs.length) return
+    const rows = yield* db
+      .select()
+      .from(V1InputTable)
+      .where(
+        and(
+          eq(V1InputTable.session_id, sessionID),
+          eq(V1InputTable.state, "promoted"),
+          inArray(sql`json_extract(${V1InputTable.receipt}, '$.messageID')`, messageIDs),
+          sql`json_extract(${V1InputTable.receipt}, '$.timePresented') is null`,
+          sql`json_extract(${V1InputTable.payload}, '$.source.type') = 'editspace-mail'`,
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)
+    for (const row of rows) {
+      if (row.receipt.state !== "promoted") continue
+      yield* reconcile(
+        events.publish(SessionV1.Event.InputPresented, {
+          sessionID,
+          requestID: row.request_id,
+          messageID: row.receipt.messageID,
+          time: yield* Clock.currentTimeMillis,
+        }),
+      )
+    }
+  })
+  return { admit, get, list, cancel, handle, promote, presented }
 })
 
 export class Service extends Context.Service<Service, Effect.Success<typeof make>>()("@opencode/SessionInput") {}
 export const node = LayerNode.make({
   service: Service,
   layer: Layer.effect(Service, make),
-  deps: [Database.node, EventV2Bridge.node, Session.node, Agent.node, Provider.node, SessionInputMedia.node],
+  deps: [Database.node, EventV2Bridge.node, Session.node, Agent.node, Provider.node, SessionInputMedia.node, SessionRunState.node],
 })
 export * as SessionInput from "./input"

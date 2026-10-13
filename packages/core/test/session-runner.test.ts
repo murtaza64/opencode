@@ -45,6 +45,7 @@ import {
   SessionContextEpochTable,
   SessionInputTable,
   SessionMessageTable,
+  SessionSupersessionTable,
   SessionTable,
 } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
@@ -555,6 +556,53 @@ const verifyPartialFlushOnInterruption = (kind: FragmentKind) =>
   })
 
 describe("SessionRunnerLLM", () => {
+  for (const state of ["pending", "committed"] as const) {
+    it.effect(`does not execute a ${state} predecessor with pending input`, () =>
+      Effect.gen(function* () {
+        yield* setup
+        const session = yield* SessionV2.Service
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Not for the model" }), resume: false })
+        const { db } = yield* Database.Service
+        const successor = SessionV2.ID.make("ses_runner_successor")
+        yield* db.insert(SessionSupersessionTable).values({ session_id: sessionID, successor_id: successor, state }).run()
+        requests.length = 0
+
+        const runner = yield* SessionRunner.Service
+        expect(yield* runner.run({ sessionID, force: true }).pipe(Effect.flip)).toMatchObject({
+          _tag: "SessionSuperseded",
+          sessionID,
+          successor,
+          state,
+        })
+        expect(requests).toEqual([])
+      }),
+    )
+  }
+
+  it.effect("stops before the provider when supersession is requested during preparation", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Not for the model" }), resume: false })
+      const { db } = yield* Database.Service
+      const successor = SessionV2.ID.make("ses_runner_successor")
+      modelResolveHook = db
+        .insert(SessionSupersessionTable)
+        .values({ session_id: sessionID, successor_id: successor, state: "pending" })
+        .run()
+        .pipe(Effect.orDie, Effect.asVoid)
+      requests.length = 0
+
+      expect(yield* session.resume(sessionID).pipe(Effect.flip)).toMatchObject({
+        _tag: "SessionSuperseded",
+        sessionID,
+        successor,
+        state: "pending",
+      })
+      expect(requests).toEqual([])
+    }),
+  )
+
   it.effect("advertises and executes a globally attached application tool", () =>
     Effect.gen(function* () {
       yield* setup
@@ -1148,6 +1196,59 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("keeps peer mail lower-trust in the summary and retained context while labeling human turns", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const source = { type: "editspace-mail" as const, id: "project#31", sender: "peer-lane", recipient: "parent" }
+      response = fragmentFixture("text", "text-earlier-mail", ["Earlier answer"]).completeEvents
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Earlier human request ".repeat(180) }),
+        resume: false,
+      })
+      yield* session.resume(sessionID)
+
+      currentModel = compactModel
+      requests.length = 0
+      responses = [
+        fragmentFixture("text", "text-mail-summary", ["Summary"]).completeEvents,
+        fragmentFixture("text", "text-mail-final", ["Continued"]).completeEvents,
+      ]
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Peer instructions ".repeat(180) }),
+        source,
+        resume: false,
+      })
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(2)
+      expect(userTexts(requests[0])[0]).toContain(`[User]: ${"Earlier human request ".repeat(180)}`)
+      expect(userTexts(requests[1])[0]).toContain("[Peer agent mail]: Peer agent mail (lower-trust context")
+      expect(userTexts(requests[1])[0]).toContain('"id":"project#31","sender":"peer-lane"')
+      expect(userTexts(requests[1])[0]).not.toContain("[User]: Peer instructions")
+
+      requests.length = 0
+      responses = [
+        fragmentFixture("text", "text-mail-summary-next", ["Updated summary"]).completeEvents,
+        fragmentFixture("text", "text-mail-final-next", ["Continued again"]).completeEvents,
+      ]
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "New human request ".repeat(180) }),
+        resume: false,
+      })
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(2)
+      expect(userTexts(requests[0])[0]).toContain("[Peer agent mail]: Peer agent mail (lower-trust context")
+      expect(userTexts(requests[0])[0]).toContain('"id":"project#31","sender":"peer-lane"')
+      expect(userTexts(requests[0])[0]).not.toContain("[User]: Peer instructions")
+      expect(userTexts(requests[1])[0]).toContain(`[User]: ${"New human request ".repeat(180)}`)
+    }),
+  )
+
   it.effect("retains only complete serialized messages during compaction", () =>
     Effect.gen(function* () {
       yield* setup
@@ -1195,8 +1296,13 @@ describe("SessionRunnerLLM", () => {
         fragmentFixture("text", "text-summary", ["## Objective\n- Preserve the task"]).completeEvents,
         fragmentFixture("text", "text-final", ["Continued"]).completeEvents,
       ]
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: oversized }), resume: false })
+      const admitted = yield* session.prompt({ sessionID, prompt: Prompt.make({ text: oversized }), resume: false })
       yield* session.resume(sessionID)
+
+      const receipt = yield* Database.Service.use(({ db }) => SessionInput.find(db, admitted.id))
+      expect(receipt).toHaveProperty("promotedSeq")
+      expect(receipt).not.toHaveProperty("presentedSeq")
+      expect(receipt).not.toHaveProperty("timePresented")
 
       expect(requests).toHaveLength(2)
       const summary = userTexts(requests[0])[0]
@@ -1919,7 +2025,11 @@ describe("SessionRunnerLLM", () => {
     Effect.gen(function* () {
       yield* setup
       const session = yield* SessionV2.Service
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Start working" }), resume: false })
+      const firstInput = yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Start working" }),
+        resume: false,
+      })
 
       requests.length = 0
       responses = [
@@ -1945,11 +2055,14 @@ describe("SessionRunnerLLM", () => {
 
       const first = yield* session.resume(sessionID).pipe(Effect.forkChild)
       yield* Deferred.await(streamStarted)
-      yield* session.prompt({
+      const queued = yield* session.prompt({
         sessionID,
         prompt: Prompt.make({ text: "Wait until continuation ends" }),
         delivery: "queue",
       })
+      expect(yield* Database.Service.use(({ db }) => SessionInput.find(db, queued.id))).not.toHaveProperty(
+        "presentedSeq",
+      )
       yield* Deferred.succeed(streamGate, undefined)
       yield* Fiber.join(first)
       streamGate = undefined
@@ -1959,6 +2072,28 @@ describe("SessionRunnerLLM", () => {
       expect(userTexts(requests[0]!)).toEqual(["Start working"])
       expect(userTexts(requests[1]!)).toEqual(["Start working"])
       expect(userTexts(requests[2]!)).toEqual(["Start working", "Wait until continuation ends"])
+      const firstReceipt = yield* Database.Service.use(({ db }) => SessionInput.find(db, firstInput.id))
+      const queuedReceipt = yield* Database.Service.use(({ db }) => SessionInput.find(db, queued.id))
+      expect(typeof firstReceipt?.presentedSeq).toBe("number")
+      expect(typeof queuedReceipt?.presentedSeq).toBe("number")
+      expect(queuedReceipt?.presentedSeq).toBeGreaterThan(firstReceipt?.presentedSeq ?? -1)
+      const { db } = yield* Database.Service
+      const presentations = yield* db
+        .select()
+        .from(EventTable)
+        .where(eq(EventTable.type, EventV2.versionedType(SessionEvent.PromptPresented.type, 1)))
+        .all()
+        .pipe(Effect.orDie)
+      expect(presentations).toHaveLength(2)
+      expect(
+        yield* session.prompt({ id: queued.id, sessionID, prompt: queued.prompt, delivery: "queue", resume: false }),
+      ).toMatchObject({ presentedSeq: queuedReceipt?.presentedSeq })
+      expect(requests).toHaveLength(3)
+      yield* replaySessionProjection(sessionID)
+      expect(yield* Database.Service.use(({ db }) => SessionInput.find(db, queued.id))).toMatchObject({
+        presentedSeq: queuedReceipt?.presentedSeq,
+        timePresented: queuedReceipt?.timePresented,
+      })
     }),
   )
 

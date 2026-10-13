@@ -9,6 +9,7 @@ import { Model } from "../model"
 import { NonNegativeInt, optional, statics } from "../schema"
 import { ascending } from "../identifier"
 import { SessionID } from "../session-id"
+import { SessionMailSource } from "../session-mail-source"
 import { WorkspaceID } from "../workspace-id"
 import { PermissionV1 } from "./permission"
 import { InputImageValidation } from "./input-image-validation"
@@ -333,6 +334,7 @@ const messageBase = {
 export const User = Schema.Struct({
   ...messageBase,
   role: Schema.Literal("user"),
+  source: optional(SessionMailSource.MailSource),
   time: Schema.Struct({
     created: Timestamp,
   }),
@@ -609,8 +611,15 @@ export const InputPayload = Schema.Struct({
   text: Schema.String,
   images: optional(InputImages),
   agent: optional(Schema.String.check(Schema.isMinLength(1))),
+  source: optional(SessionMailSource.MailSource),
 }).annotate({ identifier: "SessionV1.InputPayload", parseOptions: { onExcessProperty: "error" } })
 export interface InputPayload extends Schema.Schema.Type<typeof InputPayload> {}
+
+export const InputHandlePayload = Schema.Struct({
+  disposition: Schema.Literals(["acknowledged", "replied"]),
+  replyID: optional(Schema.String.check(Schema.isMinLength(1))),
+}).annotate({ identifier: "SessionV1.InputHandlePayload", parseOptions: { onExcessProperty: "error" } })
+export interface InputHandlePayload extends Schema.Schema.Type<typeof InputHandlePayload> {}
 
 const InputBase = {
   ...InputPayload.fields,
@@ -626,6 +635,23 @@ export const InputReceipt = Schema.Union([
     state: Schema.Literal("promoted"),
     messageID: MessageID,
     timePromoted: NonNegativeInt,
+  }),
+  Schema.Struct({
+    ...InputBase,
+    state: Schema.Literal("presented"),
+    messageID: MessageID,
+    timePromoted: NonNegativeInt,
+    timePresented: NonNegativeInt,
+  }),
+  Schema.Struct({
+    ...InputBase,
+    state: Schema.Literal("handled"),
+    messageID: MessageID,
+    timePromoted: NonNegativeInt,
+    timePresented: NonNegativeInt,
+    timeHandled: NonNegativeInt,
+    disposition: InputHandlePayload.fields.disposition,
+    replyID: optional(Schema.String),
   }),
   Schema.Struct({ ...InputBase, state: Schema.Literal("cancelled"), timeCancelled: NonNegativeInt }),
 ]).annotate({ identifier: "SessionV1.InputReceipt" })
@@ -658,6 +684,22 @@ const events = {
       info: User,
       part: TextPart,
       images: optional(InputImageParts),
+    },
+  }),
+  InputPresented: define({
+    type: "session.input.presented",
+    ...options,
+    schema: { sessionID: SessionID, requestID: Schema.String, messageID: MessageID, time: NonNegativeInt },
+  }),
+  InputHandled: define({
+    type: "session.input.handled",
+    ...options,
+    schema: {
+      sessionID: SessionID,
+      requestID: Schema.String,
+      disposition: InputHandlePayload.fields.disposition,
+      replyID: optional(Schema.String),
+      time: NonNegativeInt,
     },
   }),
   Created: define({
@@ -752,7 +794,13 @@ export const Event = {
   PartDelta,
   Diff,
   Error,
-  InputDefinitions: inventory(events.InputAdmitted, events.InputCancelled, events.InputPromoted),
+  InputDefinitions: inventory(
+    events.InputAdmitted,
+    events.InputCancelled,
+    events.InputPromoted,
+    events.InputPresented,
+    events.InputHandled,
+  ),
   Definitions: inventory(
     events.Created,
     events.Updated,

@@ -66,6 +66,10 @@ export const createFixture = async () => {
     // function (session_id, directory) => body | {status, body}, or url => ...
     insights: undefined,
     prDetails: undefined,
+    mail: undefined,
+    handoffs: undefined,
+    subscriptions: undefined,
+    laneOwners: [],
     insightDelayMs: 0,
     createMode: "complete",
     createReplies: [],
@@ -73,6 +77,11 @@ export const createFixture = async () => {
     workspaceSessions: [],
     emit(type, properties) {
       for (const response of streams) response.write(`data: ${JSON.stringify({ type, properties })}\n\n`)
+    },
+    emitDashboard(kind) {
+      for (const [response, entry] of fixture.eventStreams) {
+        if (entry.path === "/api/events") response.write(`data: ${kind}\n\n`)
+      }
     },
     setStatus(type) {
       fixture.status = type
@@ -93,6 +102,7 @@ export const createFixture = async () => {
       path: url.pathname,
       directory: url.searchParams.get("directory"),
       es: url.searchParams.get("es"),
+      recipientSession: url.searchParams.get("session"),
       limit: url.searchParams.get("limit"),
       body,
     })
@@ -164,7 +174,7 @@ export const createFixture = async () => {
             kind: "session",
             title: session(id).title,
             sessions: [session(id)],
-            lanes: [],
+             lanes: fixture.laneOwners.filter((lane) => lane.owner === id),
             tickets: [],
             prs: [],
           })).concat(fixture.workspaceSessions.map((item) => ({
@@ -177,6 +187,23 @@ export const createFixture = async () => {
         sessions: fixture.sessionIDs.map(session),
       })
     if (url.pathname === "/api/notifications") return json({ notifications: [] })
+    if (url.pathname === "/api/mail") return fixture.mail
+      ? json(fixture.mail(url.searchParams.get("es"), url.searchParams.get("lane") ?? url.searchParams.get("session")))
+      : json({ detail: "Not Found" }, 404)
+    if (url.pathname === "/api/handoffs" && fixture.handoffs)
+      return json({ handoffs: fixture.handoffs })
+    if (url.pathname === "/api/subscriptions" && fixture.subscriptions) {
+      const recipient = request.method === "GET" ? url.searchParams.get("recipient") : body?.recipient
+      if (request.method === "PUT") fixture.subscriptions.set(recipient, [
+        ...(fixture.subscriptions.get(recipient) ?? []).filter((item) =>
+          item.selector !== body.selector || item.sender !== body.sender || item.kind !== body.kind),
+        { selector: body.selector, sender: body.sender, kind: body.kind, mode: body.mode },
+      ])
+      if (request.method === "DELETE") fixture.subscriptions.set(recipient,
+        (fixture.subscriptions.get(recipient) ?? []).filter((item) =>
+          item.selector !== body.selector || item.sender !== body.sender || item.kind !== body.kind))
+      return json({ recipient, subscriptions: fixture.subscriptions.get(recipient) ?? [] })
+    }
     if (url.pathname === "/api/session-insights") {
       if (!fixture.insights) return json({ detail: "Not Found" }, 404)
       const reply = fixture.insights(url.searchParams.get("session_id"), url.searchParams.get("directory"))

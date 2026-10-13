@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "9cbf2b9f-92a3-4ca2-93ca-5b69d8db150f",
+  "id": "3282506d-3cbf-496e-aa00-affba4d28684",
   "prevIds": [
-    "7e5a6b09-5d1d-41a6-917f-7bab9944917a"
+    "f520bc25-f273-4dfb-b940-71e21e162efa"
   ],
   "ddl": [
     {
@@ -68,6 +68,10 @@
     },
     {
       "name": "session_message",
+      "entityType": "tables"
+    },
+    {
+      "name": "session_supersession",
       "entityType": "tables"
     },
     {
@@ -967,6 +971,16 @@
       "table": "session_input"
     },
     {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "source",
+      "entityType": "columns",
+      "table": "session_input"
+    },
+    {
       "type": "integer",
       "notNull": true,
       "autoincrement": false,
@@ -983,6 +997,26 @@
       "default": null,
       "generated": null,
       "name": "promoted_seq",
+      "entityType": "columns",
+      "table": "session_input"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "presented_seq",
+      "entityType": "columns",
+      "table": "session_input"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_presented",
       "entityType": "columns",
       "table": "session_input"
     },
@@ -1065,6 +1099,46 @@
       "name": "data",
       "entityType": "columns",
       "table": "session_message"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "session_supersession"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "successor_id",
+      "entityType": "columns",
+      "table": "session_supersession"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "state",
+      "entityType": "columns",
+      "table": "session_supersession"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_committed",
+      "entityType": "columns",
+      "table": "session_supersession"
     },
     {
       "type": "text",
@@ -1718,6 +1792,21 @@
     },
     {
       "columns": [
+        "session_id"
+      ],
+      "tableTo": "session",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_session_supersession_session_id_session_id_fk",
+      "entityType": "fks",
+      "table": "session_supersession"
+    },
+    {
+      "columns": [
         "project_id"
       ],
       "tableTo": "project",
@@ -1930,6 +2019,15 @@
       "nameExplicit": false,
       "name": "session_message_pk",
       "table": "session_message",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "session_id"
+      ],
+      "nameExplicit": false,
+      "name": "session_supersession_pk",
+      "table": "session_supersession",
       "entityType": "pks"
     },
     {

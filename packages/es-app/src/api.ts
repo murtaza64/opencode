@@ -223,6 +223,36 @@ export type DocContent = {
   error?: string
 }
 
+export type MailMessage = {
+  id: string
+  ts: string | number
+  from: string
+  sender_session?: string
+  origin_run?: string
+  relationship?: string
+  to: string
+  direction: "sent" | "received"
+  deliveries: MailDelivery[]
+  kind?: string
+  in_reply_to?: string | null
+  supersedes?: string | null
+  text: string
+}
+export type MailDelivery = {
+  message_id: string
+  recipient: string
+  session: string | null
+  mode: string | null
+  state: string
+  request_id: string | null
+  error: string | null
+  presented_at: string | number | null
+  handled_at: string | number | null
+}
+export type MailTimeline = { editspace: string; lane: string; messages: MailMessage[] }
+export type Handoff = { lane: string; predecessor: string; successor: string }
+export type MailSubscription = { selector: string; sender: string; kind: string; mode: "actionable" | "passive" | "mute" }
+
 const esQ = (es?: string) => (es ? `es=${encodeURIComponent(es)}` : "")
 
 export interface SessionSearchResult {
@@ -277,6 +307,32 @@ export type SessionInsights = {
 }
 
 export const es = {
+  subscriptions: (name: string, recipient: string): Promise<{ recipient: string; subscriptions: MailSubscription[] }> =>
+    fetch(`/es/api/subscriptions?es=${encodeURIComponent(name)}&recipient=${encodeURIComponent(recipient)}`)
+      .then(statusJson<{ recipient: string; subscriptions: MailSubscription[] }>),
+  setSubscription: (name: string, recipient: string, subscription: MailSubscription) =>
+    fetch(`/es/api/subscriptions?es=${encodeURIComponent(name)}`, {
+      method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ recipient, ...subscription }),
+    }).then(statusJson<unknown>),
+  removeSubscription: (name: string, recipient: string, subscription: MailSubscription) =>
+    fetch(`/es/api/subscriptions?es=${encodeURIComponent(name)}`, {
+      method: "DELETE", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ recipient, selector: subscription.selector, sender: subscription.sender, kind: subscription.kind }),
+    }).then(statusJson<unknown>),
+  // The dashboard must create the handoff document, spawn the successor, and
+  // transfer the lane owner as one server-side operation before returning.
+  handoffs: (name: string): Promise<{ handoffs: Handoff[] }> =>
+    fetch(`/es/api/handoffs?es=${encodeURIComponent(name)}`).then(statusJson<{ handoffs: Handoff[] }>),
+  handoff: (name: string, lane: string, predecessor: string, task: string, handoff: string): Promise<Handoff | { lane: string; predecessor: string; status: "pending" }> =>
+    fetch(`/es/api/handoffs?es=${encodeURIComponent(name)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ lane, predecessor, task, handoff }),
+    }).then(statusJson<Handoff | { lane: string; predecessor: string; status: "pending" }>),
+  mail: (name: string, recipient: { lane: string } | { session: string }, signal?: AbortSignal): Promise<MailTimeline> =>
+    fetch(`/es/api/mail?es=${encodeURIComponent(name)}&${"lane" in recipient
+      ? `lane=${encodeURIComponent(recipient.lane)}` : `session=${encodeURIComponent(recipient.session)}`}`, { signal }).then(statusJson<MailTimeline>),
   sessionInsights: (sessionID: string, directory: string, signal?: AbortSignal): Promise<SessionInsights> =>
     fetch(`/es/api/session-insights?session_id=${encodeURIComponent(sessionID)}&${q(directory)}`, { signal })
       .then(statusJson<SessionInsights>),

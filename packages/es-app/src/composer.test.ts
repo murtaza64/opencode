@@ -109,6 +109,29 @@ const harness = (
   return { composer, requests, storage, dependencies }
 }
 
+test("handoff copies drafts without submitting or overwriting successor edits", () => {
+  const storage = new MemoryStorage()
+  const predecessor = createComposer("ses_old", directory, { storage })
+  predecessor.setVisibleText("unfinished task")
+  predecessor.setImages([image], "task")
+  predecessor.setVisibleModel(model)
+  predecessor.restoreDraft("aside")
+  predecessor.setVisibleText("aside notes")
+  const successor = createComposer("ses_new", directory, { storage })
+  expect(successor.importHandoffDrafts(predecessor.state)).toBe(true)
+  expect(successor.state.task.text).toBe("unfinished task")
+  expect(successor.state.task.images).toEqual([image])
+  expect(successor.state.task.model).toEqual(model)
+  expect(successor.state.aside.text).toBe("aside notes")
+  expect(successor.state.visibleBuffer).toBe("aside")
+  expect(successor.state.admission).toBeNull()
+  expect(createComposer("ses_new", directory, { storage }).state.task.text).toBe("unfinished task")
+  successor.setVisibleText("newer successor edit")
+  successor.importHandoffDrafts(predecessor.state)
+  expect(successor.state.aside.text).toBe("newer successor edit")
+  expect(predecessor.state.task.text).toBe("unfinished task")
+})
+
 test("cached controllers survive reactive owner disposal and are keyed by both session and directory", () => {
   const first = createRoot((dispose) => {
     const composer = getComposer("ses_cached", "/one")

@@ -41,6 +41,16 @@ export type ConflictError = {
 export const isConflictError = (value: unknown): value is ConflictError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ConflictError"
 
+export type SessionSupersededError = {
+  readonly _tag: "SessionSupersededError"
+  readonly sessionID: string
+  readonly successor: string
+  readonly state: "pending" | "committed"
+  readonly message: string
+}
+export const isSessionSupersededError = (value: unknown): value is SessionSupersededError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SessionSupersededError"
+
 export type ServiceUnavailableError = {
   readonly _tag: "ServiceUnavailableError"
   readonly message: string
@@ -399,6 +409,18 @@ export type SessionsPromptInput = {
       }>
     }
     readonly delivery?: "steer" | "queue" | null
+    readonly source?: {
+      readonly type: "editspace-mail"
+      readonly id: string
+      readonly sender: string
+      readonly senderSession?: string
+      readonly recipient: string
+      readonly relationship?: string
+      readonly originRun?: string
+      readonly kind?: string
+      readonly in_reply_to?: string
+      readonly supersedes?: string
+    } | null
     readonly resume?: boolean | null
   }["id"]
   readonly prompt: {
@@ -417,6 +439,18 @@ export type SessionsPromptInput = {
       }>
     }
     readonly delivery?: "steer" | "queue" | null
+    readonly source?: {
+      readonly type: "editspace-mail"
+      readonly id: string
+      readonly sender: string
+      readonly senderSession?: string
+      readonly recipient: string
+      readonly relationship?: string
+      readonly originRun?: string
+      readonly kind?: string
+      readonly in_reply_to?: string
+      readonly supersedes?: string
+    } | null
     readonly resume?: boolean | null
   }["prompt"]
   readonly delivery?: {
@@ -435,8 +469,50 @@ export type SessionsPromptInput = {
       }>
     }
     readonly delivery?: "steer" | "queue" | null
+    readonly source?: {
+      readonly type: "editspace-mail"
+      readonly id: string
+      readonly sender: string
+      readonly senderSession?: string
+      readonly recipient: string
+      readonly relationship?: string
+      readonly originRun?: string
+      readonly kind?: string
+      readonly in_reply_to?: string
+      readonly supersedes?: string
+    } | null
     readonly resume?: boolean | null
   }["delivery"]
+  readonly source?: {
+    readonly id?: string | null
+    readonly prompt: {
+      readonly text: string
+      readonly files?: ReadonlyArray<{
+        readonly uri: string
+        readonly name?: string
+        readonly description?: string
+        readonly source?: { readonly start: number; readonly end: number; readonly text: string }
+      }>
+      readonly agents?: ReadonlyArray<{
+        readonly name: string
+        readonly source?: { readonly start: number; readonly end: number; readonly text: string }
+      }>
+    }
+    readonly delivery?: "steer" | "queue" | null
+    readonly source?: {
+      readonly type: "editspace-mail"
+      readonly id: string
+      readonly sender: string
+      readonly senderSession?: string
+      readonly recipient: string
+      readonly relationship?: string
+      readonly originRun?: string
+      readonly kind?: string
+      readonly in_reply_to?: string
+      readonly supersedes?: string
+    } | null
+    readonly resume?: boolean | null
+  }["source"]
   readonly resume?: {
     readonly id?: string | null
     readonly prompt: {
@@ -453,6 +529,18 @@ export type SessionsPromptInput = {
       }>
     }
     readonly delivery?: "steer" | "queue" | null
+    readonly source?: {
+      readonly type: "editspace-mail"
+      readonly id: string
+      readonly sender: string
+      readonly senderSession?: string
+      readonly recipient: string
+      readonly relationship?: string
+      readonly originRun?: string
+      readonly kind?: string
+      readonly in_reply_to?: string
+      readonly supersedes?: string
+    } | null
     readonly resume?: boolean | null
   }["resume"]
 }
@@ -477,8 +565,22 @@ export type SessionsPromptOutput = {
       }>
     }
     readonly delivery: "steer" | "queue"
+    readonly source?: {
+      readonly type: "editspace-mail"
+      readonly id: string
+      readonly sender: string
+      readonly senderSession?: string
+      readonly recipient: string
+      readonly relationship?: string
+      readonly originRun?: string
+      readonly kind?: string
+      readonly in_reply_to?: string
+      readonly supersedes?: string
+    }
     readonly timeCreated: number
     readonly promotedSeq?: number
+    readonly presentedSeq?: number
+    readonly timePresented?: number
   }
 }["data"]
 
@@ -555,6 +657,18 @@ export type SessionsContextOutput = {
           readonly source?: { readonly start: number; readonly end: number; readonly text: string }
         }>
         readonly type: "user"
+        readonly source?: {
+          readonly type: "editspace-mail"
+          readonly id: string
+          readonly sender: string
+          readonly senderSession?: string
+          readonly recipient: string
+          readonly relationship?: string
+          readonly originRun?: string
+          readonly kind?: string
+          readonly in_reply_to?: string
+          readonly supersedes?: string
+        }
       }
     | {
         readonly id: string
@@ -748,6 +862,18 @@ export type SessionsHistoryOutput = {
             }>
           }
           readonly delivery: "steer" | "queue"
+          readonly source?: {
+            readonly type: "editspace-mail"
+            readonly id: string
+            readonly sender: string
+            readonly senderSession?: string
+            readonly recipient: string
+            readonly relationship?: string
+            readonly originRun?: string
+            readonly kind?: string
+            readonly in_reply_to?: string
+            readonly supersedes?: string
+          }
         }
       }
     | {
@@ -775,7 +901,27 @@ export type SessionsHistoryOutput = {
             }>
           }
           readonly delivery: "steer" | "queue"
+          readonly source?: {
+            readonly type: "editspace-mail"
+            readonly id: string
+            readonly sender: string
+            readonly senderSession?: string
+            readonly recipient: string
+            readonly relationship?: string
+            readonly originRun?: string
+            readonly kind?: string
+            readonly in_reply_to?: string
+            readonly supersedes?: string
+          }
         }
+      }
+    | {
+        readonly id: string
+        readonly metadata?: { readonly [x: string]: JsonValue }
+        readonly type: "session.next.prompt.presented"
+        readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+        readonly location?: { readonly directory: string; readonly workspaceID?: string }
+        readonly data: { readonly timestamp: number; readonly sessionID: string; readonly messageID: string }
       }
     | {
         readonly id: string
@@ -1206,6 +1352,18 @@ export type SessionsEventsOutput =
           }>
         }
         readonly delivery: "steer" | "queue"
+        readonly source?: {
+          readonly type: "editspace-mail"
+          readonly id: string
+          readonly sender: string
+          readonly senderSession?: string
+          readonly recipient: string
+          readonly relationship?: string
+          readonly originRun?: string
+          readonly kind?: string
+          readonly in_reply_to?: string
+          readonly supersedes?: string
+        }
       }
     }
   | {
@@ -1233,7 +1391,27 @@ export type SessionsEventsOutput =
           }>
         }
         readonly delivery: "steer" | "queue"
+        readonly source?: {
+          readonly type: "editspace-mail"
+          readonly id: string
+          readonly sender: string
+          readonly senderSession?: string
+          readonly recipient: string
+          readonly relationship?: string
+          readonly originRun?: string
+          readonly kind?: string
+          readonly in_reply_to?: string
+          readonly supersedes?: string
+        }
       }
+    }
+  | {
+      readonly id: string
+      readonly metadata?: { readonly [x: string]: unknown }
+      readonly type: "session.next.prompt.presented"
+      readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+      readonly location?: { readonly directory: string; readonly workspaceID?: string }
+      readonly data: { readonly timestamp: number; readonly sessionID: string; readonly messageID: string }
     }
   | {
       readonly id: string
@@ -1633,6 +1811,18 @@ export type SessionsMessageOutput = {
           readonly source?: { readonly start: number; readonly end: number; readonly text: string }
         }>
         readonly type: "user"
+        readonly source?: {
+          readonly type: "editspace-mail"
+          readonly id: string
+          readonly sender: string
+          readonly senderSession?: string
+          readonly recipient: string
+          readonly relationship?: string
+          readonly originRun?: string
+          readonly kind?: string
+          readonly in_reply_to?: string
+          readonly supersedes?: string
+        }
       }
     | {
         readonly id: string
@@ -1805,6 +1995,18 @@ export type MessagesListOutput = {
           readonly source?: { readonly start: number; readonly end: number; readonly text: string }
         }>
         readonly type: "user"
+        readonly source?: {
+          readonly type: "editspace-mail"
+          readonly id: string
+          readonly sender: string
+          readonly senderSession?: string
+          readonly recipient: string
+          readonly relationship?: string
+          readonly originRun?: string
+          readonly kind?: string
+          readonly in_reply_to?: string
+          readonly supersedes?: string
+        }
       }
     | {
         readonly id: string

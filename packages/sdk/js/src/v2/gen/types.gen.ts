@@ -21,6 +21,7 @@ export type Event =
   | EventSessionNextMoved
   | EventSessionNextPrompted
   | EventSessionNextPromptAdmitted
+  | EventSessionNextPromptPresented
   | EventSessionNextContextUpdated
   | EventSessionNextSynthetic
   | EventSessionNextShellStarted
@@ -51,6 +52,8 @@ export type Event =
   | EventSessionInputAdmitted
   | EventSessionInputCancelled
   | EventSessionInputPromoted
+  | EventSessionInputPresented
+  | EventSessionInputHandled
   | EventMessagePartDelta
   | EventSessionDiff
   | EventSessionError
@@ -243,6 +246,7 @@ export type UserMessage = {
   id: string
   sessionID: string
   role: "user"
+  source?: SessionInputMailSource
   time: {
     created: number
   }
@@ -860,6 +864,7 @@ export type GlobalEvent = {
           messageID: string
           prompt: Prompt
           delivery: "steer" | "queue"
+          source?: SessionInputMailSource
         }
       }
     | {
@@ -871,6 +876,16 @@ export type GlobalEvent = {
           messageID: string
           prompt: Prompt
           delivery: "steer" | "queue"
+          source?: SessionInputMailSource
+        }
+      }
+    | {
+        id: string
+        type: "session.next.prompt.presented"
+        properties: {
+          timestamp: number
+          sessionID: string
+          messageID: string
         }
       }
     | {
@@ -1235,6 +1250,27 @@ export type GlobalEvent = {
             sessionID: string
             messageID: string
           }>
+        }
+      }
+    | {
+        id: string
+        type: "session.input.presented"
+        properties: {
+          sessionID: string
+          requestID: string
+          messageID: string
+          time: number
+        }
+      }
+    | {
+        id: string
+        type: "session.input.handled"
+        properties: {
+          sessionID: string
+          requestID: string
+          disposition: "acknowledged" | "replied"
+          replyID?: string
+          time: number
         }
       }
     | {
@@ -1660,6 +1696,7 @@ export type GlobalEvent = {
     | SyncEventSessionNextMoved
     | SyncEventSessionNextPrompted
     | SyncEventSessionNextPromptAdmitted
+    | SyncEventSessionNextPromptPresented
     | SyncEventSessionNextContextUpdated
     | SyncEventSessionNextSynthetic
     | SyncEventSessionNextShellStarted
@@ -1686,6 +1723,8 @@ export type GlobalEvent = {
     | SyncEventSessionInputAdmitted
     | SyncEventSessionInputCancelled
     | SyncEventSessionInputPromoted
+    | SyncEventSessionInputPresented
+    | SyncEventSessionInputHandled
 }
 
 /**
@@ -2642,6 +2681,14 @@ export type ConflictError = {
   resource?: string
 }
 
+export type SessionSupersededError = {
+  _tag: "SessionSupersededError"
+  sessionID: string
+  successor: string
+  state: "pending" | "committed"
+  message: string
+}
+
 export type AsideError = {
   _tag: "AsideError"
   message: string
@@ -2872,6 +2919,14 @@ export type PromptInput = {
   agents?: Array<PromptAgentAttachment>
 }
 
+export type SessionSupersededError1 = {
+  _tag: "SessionSupersededError"
+  sessionID: string
+  successor: string
+  state: "pending" | "committed"
+  message: string
+}
+
 export type ServiceUnavailableError = {
   _tag: "ServiceUnavailableError"
   message: string
@@ -2897,6 +2952,7 @@ export type SessionDurableEvent =
   | SessionNextMoved
   | SessionNextPrompted
   | SessionNextPromptAdmitted
+  | SessionNextPromptPresented
   | SessionNextContextUpdated
   | SessionNextSynthetic
   | SessionNextShellStarted
@@ -3050,6 +3106,7 @@ export type V2Event =
   | SessionNextMoved
   | SessionNextPrompted
   | SessionNextPromptAdmitted
+  | SessionNextPromptPresented
   | SessionNextContextUpdated
   | SessionNextSynthetic
   | SessionNextShellStarted
@@ -3080,6 +3137,8 @@ export type V2Event =
   | SessionInputAdmitted
   | SessionInputCancelled
   | SessionInputPromoted
+  | SessionInputPresented
+  | SessionInputHandled
   | MessagePartDelta
   | SessionDiff
   | SessionError
@@ -3219,6 +3278,19 @@ export type MoveSessionDestination = {
   directory: string
 }
 
+export type SessionInputMailSource = {
+  type: "editspace-mail"
+  id: string
+  sender: string
+  senderSession?: string
+  recipient: string
+  relationship?: string
+  originRun?: string
+  kind?: string
+  in_reply_to?: string
+  supersedes?: string
+}
+
 export type ModelRef = {
   id: string
   providerID: string
@@ -3316,6 +3388,7 @@ export type SessionV1InputPayload = {
   text: string
   images?: Array<SessionV1InputImage>
   agent?: string
+  source?: SessionInputMailSource
 }
 
 export type PermissionV2Source = {
@@ -3562,6 +3635,7 @@ export type SyncEventSessionNextPrompted = {
       messageID: string
       prompt: Prompt
       delivery: "steer" | "queue"
+      source?: SessionInputMailSource
     }
   }
 }
@@ -3580,6 +3654,23 @@ export type SyncEventSessionNextPromptAdmitted = {
       messageID: string
       prompt: Prompt
       delivery: "steer" | "queue"
+      source?: SessionInputMailSource
+    }
+  }
+}
+
+export type SyncEventSessionNextPromptPresented = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.prompt.presented.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
+      messageID: string
     }
   }
 }
@@ -4087,6 +4178,41 @@ export type SyncEventSessionInputPromoted = {
   }
 }
 
+export type SyncEventSessionInputPresented = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.input.presented.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      requestID: string
+      messageID: string
+      time: number
+    }
+  }
+}
+
+export type SyncEventSessionInputHandled = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.input.handled.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      requestID: string
+      disposition: "acknowledged" | "replied"
+      replyID?: string
+      time: number
+    }
+  }
+}
+
 export type ConfigV2ReferenceGit = {
   repository: string
   branch?: string
@@ -4125,6 +4251,7 @@ export type SessionV1InputReceipt =
       text: string
       images?: Array<SessionV1InputImage>
       agent: string
+      source?: SessionInputMailSource
       sessionID: string
       admittedSeq: number
       timeCreated: number
@@ -4136,6 +4263,7 @@ export type SessionV1InputReceipt =
       text: string
       images?: Array<SessionV1InputImage>
       agent: string
+      source?: SessionInputMailSource
       sessionID: string
       admittedSeq: number
       timeCreated: number
@@ -4149,12 +4277,51 @@ export type SessionV1InputReceipt =
       text: string
       images?: Array<SessionV1InputImage>
       agent: string
+      source?: SessionInputMailSource
+      sessionID: string
+      admittedSeq: number
+      timeCreated: number
+      state: "presented"
+      messageID: string
+      timePromoted: number
+      timePresented: number
+    }
+  | {
+      requestID: string
+      delivery: "queue" | "steer"
+      text: string
+      images?: Array<SessionV1InputImage>
+      agent: string
+      source?: SessionInputMailSource
+      sessionID: string
+      admittedSeq: number
+      timeCreated: number
+      state: "handled"
+      messageID: string
+      timePromoted: number
+      timePresented: number
+      timeHandled: number
+      disposition: "acknowledged" | "replied"
+      replyID?: string
+    }
+  | {
+      requestID: string
+      delivery: "queue" | "steer"
+      text: string
+      images?: Array<SessionV1InputImage>
+      agent: string
+      source?: SessionInputMailSource
       sessionID: string
       admittedSeq: number
       timeCreated: number
       state: "cancelled"
       timeCancelled: number
     }
+
+export type SessionV1InputHandlePayload = {
+  disposition: "acknowledged" | "replied"
+  replyID?: string
+}
 
 export type WorkspaceEventConnectionStatus = {
   workspaceID: string
@@ -4244,8 +4411,11 @@ export type SessionInputAdmitted2 = {
   sessionID: string
   prompt: Prompt
   delivery: "steer" | "queue"
+  source?: SessionInputMailSource
   timeCreated: number
   promotedSeq?: number
+  presentedSeq?: number
+  timePresented?: number
 }
 
 export type SessionMessageAgentSwitched = {
@@ -4284,6 +4454,7 @@ export type SessionMessageUser = {
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
   type: "user"
+  source?: SessionInputMailSource
 }
 
 export type SessionMessageSynthetic = {
@@ -4542,6 +4713,7 @@ export type SessionNextPrompted = {
     messageID: string
     prompt: Prompt
     delivery: "steer" | "queue"
+    source?: SessionInputMailSource
   }
 }
 
@@ -4563,6 +4735,26 @@ export type SessionNextPromptAdmitted = {
     messageID: string
     prompt: Prompt
     delivery: "steer" | "queue"
+    source?: SessionInputMailSource
+  }
+}
+
+export type SessionNextPromptPresented = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.prompt.presented"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    messageID: string
   }
 }
 
@@ -5608,6 +5800,7 @@ export type SessionV1InputPayload1 = {
   text: string
   images?: Array<SessionV1InputImage>
   agent?: string
+  source?: SessionInputMailSource
 }
 
 export type SessionInputCancelled = {
@@ -5655,6 +5848,47 @@ export type SessionInputPromoted = {
       sessionID: string
       messageID: string
     }>
+  }
+}
+
+export type SessionInputPresented = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.input.presented"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    requestID: string
+    messageID: string
+    time: number
+  }
+}
+
+export type SessionInputHandled = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.input.handled"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    requestID: string
+    disposition: "acknowledged" | "replied"
+    replyID?: string
+    time: number
   }
 }
 
@@ -6648,6 +6882,7 @@ export type EventSessionNextPrompted = {
     messageID: string
     prompt: Prompt
     delivery: "steer" | "queue"
+    source?: SessionInputMailSource
   }
 }
 
@@ -6660,6 +6895,17 @@ export type EventSessionNextPromptAdmitted = {
     messageID: string
     prompt: Prompt
     delivery: "steer" | "queue"
+    source?: SessionInputMailSource
+  }
+}
+
+export type EventSessionNextPromptPresented = {
+  id: string
+  type: "session.next.prompt.presented"
+  properties: {
+    timestamp: number
+    sessionID: string
+    messageID: string
   }
 }
 
@@ -7054,6 +7300,29 @@ export type EventSessionInputPromoted = {
       sessionID: string
       messageID: string
     }>
+  }
+}
+
+export type EventSessionInputPresented = {
+  id: string
+  type: "session.input.presented"
+  properties: {
+    sessionID: string
+    requestID: string
+    messageID: string
+    time: number
+  }
+}
+
+export type EventSessionInputHandled = {
+  id: string
+  type: "session.input.handled"
+  properties: {
+    sessionID: string
+    requestID: string
+    disposition: "acknowledged" | "replied"
+    replyID?: string
+    time: number
   }
 }
 
@@ -9849,7 +10118,7 @@ export type SessionInputListData = {
   query?: {
     directory?: string
     workspace?: string
-    state?: "pending" | "promoted" | "cancelled" | "all"
+    state?: "pending" | "promoted" | "presented" | "handled" | "cancelled" | "all"
     after?: string
     limit?: string
   }
@@ -9903,9 +10172,9 @@ export type SessionInputAdmitErrors = {
    */
   404: NotFoundError
   /**
-   * ConflictError
+   * ConflictError | SessionSupersededError
    */
-  409: ConflictError
+  409: ConflictError | SessionSupersededError
 }
 
 export type SessionInputAdmitError = SessionInputAdmitErrors[keyof SessionInputAdmitErrors]
@@ -9993,6 +10262,45 @@ export type SessionInputGetResponses = {
 
 export type SessionInputGetResponse = SessionInputGetResponses[keyof SessionInputGetResponses]
 
+export type SessionInputHandleData = {
+  body?: SessionV1InputHandlePayload
+  path: {
+    sessionID: string
+    requestID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/input/{requestID}/handle"
+}
+
+export type SessionInputHandleErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type SessionInputHandleError = SessionInputHandleErrors[keyof SessionInputHandleErrors]
+
+export type SessionInputHandleResponses = {
+  /**
+   * SessionV1.InputReceipt
+   */
+  200: SessionV1InputReceipt
+}
+
+export type SessionInputHandleResponse = SessionInputHandleResponses[keyof SessionInputHandleResponses]
+
 export type SessionListData = {
   body?: never
   path?: never
@@ -10029,6 +10337,7 @@ export type SessionListResponse = SessionListResponses[keyof SessionListResponse
 
 export type SessionCreateData = {
   body?: {
+    id?: string
     parentID?: string
     title?: string
     agent?: string
@@ -10056,6 +10365,10 @@ export type SessionCreateErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
 }
 
 export type SessionCreateError = SessionCreateErrors[keyof SessionCreateErrors]
@@ -10385,6 +10698,10 @@ export type SessionPromptErrors = {
    * NotFoundError
    */
   404: NotFoundError
+  /**
+   * SessionSupersededError
+   */
+  409: SessionSupersededError
 }
 
 export type SessionPromptError = SessionPromptErrors[keyof SessionPromptErrors]
@@ -10637,6 +10954,50 @@ export type SessionAbortResponses = {
 
 export type SessionAbortResponse = SessionAbortResponses[keyof SessionAbortResponses]
 
+export type SessionSupersedeData = {
+  body?: {
+    successor: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/supersede"
+}
+
+export type SessionSupersedeErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+  /**
+   * SessionSupersededError
+   */
+  409: SessionSupersededError
+}
+
+export type SessionSupersedeError = SessionSupersedeErrors[keyof SessionSupersedeErrors]
+
+export type SessionSupersedeResponses = {
+  /**
+   * Success
+   */
+  200: {
+    sessionID: string
+    successor: string
+    state: "pending" | "committed"
+  }
+}
+
+export type SessionSupersedeResponse = SessionSupersedeResponses[keyof SessionSupersedeResponses]
+
 export type SessionInitData = {
   body?: {
     modelID: string
@@ -10662,6 +11023,10 @@ export type SessionInitErrors = {
    * NotFoundError
    */
   404: NotFoundError
+  /**
+   * SessionSupersededError
+   */
+  409: SessionSupersededError
 }
 
 export type SessionInitError = SessionInitErrors[keyof SessionInitErrors]
@@ -10776,6 +11141,10 @@ export type SessionSummarizeErrors = {
    * NotFoundError
    */
   404: NotFoundError
+  /**
+   * SessionSupersededError
+   */
+  409: SessionSupersededError
 }
 
 export type SessionSummarizeError = SessionSummarizeErrors[keyof SessionSummarizeErrors]
@@ -10825,6 +11194,10 @@ export type SessionPromptAsyncErrors = {
    * NotFoundError
    */
   404: NotFoundError
+  /**
+   * SessionSupersededError
+   */
+  409: SessionSupersededError
 }
 
 export type SessionPromptAsyncError = SessionPromptAsyncErrors[keyof SessionPromptAsyncErrors]
@@ -10874,6 +11247,10 @@ export type SessionCommandErrors = {
    * NotFoundError
    */
   404: NotFoundError
+  /**
+   * SessionSupersededError
+   */
+  409: SessionSupersededError
 }
 
 export type SessionCommandError = SessionCommandErrors[keyof SessionCommandErrors]
@@ -10920,9 +11297,9 @@ export type SessionShellErrors = {
    */
   404: NotFoundError
   /**
-   * SessionBusyError
+   * SessionBusyError | SessionSupersededError
    */
-  409: SessionBusyError
+  409: SessionBusyError | SessionSupersededError
 }
 
 export type SessionShellError = SessionShellErrors[keyof SessionShellErrors]
@@ -12234,6 +12611,7 @@ export type V2SessionPromptData = {
     id?: string
     prompt: PromptInput
     delivery?: "steer" | "queue"
+    source?: SessionInputMailSource
     resume?: boolean
   }
   path: {
@@ -12257,9 +12635,9 @@ export type V2SessionPromptErrors = {
    */
   404: SessionNotFoundError
   /**
-   * ConflictError
+   * ConflictError | SessionSupersededError
    */
-  409: ConflictError
+  409: ConflictError | SessionSupersededError1
 }
 
 export type V2SessionPromptError = V2SessionPromptErrors[keyof V2SessionPromptErrors]

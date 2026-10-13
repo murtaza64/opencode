@@ -2,7 +2,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Image } from "@/image/image"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { Cause, Deferred, Effect, Exit, Layer, Context, Scope, Schema } from "effect"
+import { Cause, Deferred, Effect, Exit, Layer, Context, Schema } from "effect"
 import * as Stream from "effect/Stream"
 import { Agent } from "@/agent/agent"
 import { Config } from "@/config/config"
@@ -44,7 +44,7 @@ export interface Handle {
       attachments?: SessionV1.FilePart[]
     },
   ) => Effect.Effect<void>
-  readonly process: (streamInput: LLM.StreamInput) => Effect.Effect<Result>
+  readonly process: (streamInput: LLM.StreamInput, onModelInput?: Effect.Effect<void>) => Effect.Effect<Result>
 }
 
 type Input = {
@@ -89,7 +89,6 @@ const layer = Layer.effect(
     const permission = yield* Permission.Service
     const plugin = yield* Plugin.Service
     const summary = yield* SessionSummary.Service
-    const scope = yield* Scope.Scope
     const status = yield* SessionStatus.Service
     const image = yield* Image.Service
     const events = yield* EventV2Bridge.Service
@@ -487,7 +486,7 @@ const layer = Layer.effect(
                 sessionID: ctx.sessionID,
                 messageID: ctx.assistantMessage.parentID,
               })
-              .pipe(Effect.ignore, Effect.forkIn(scope))
+               .pipe(Effect.catchCause((cause) => Effect.logError("session summary failed", { sessionID: ctx.sessionID, cause })))
             if (
               !ctx.assistantMessage.summary &&
               isOverflow({ cfg: yield* config.get(), tokens: usage.tokens, model: ctx.model })
@@ -638,7 +637,10 @@ const layer = Layer.effect(
         yield* status.set(ctx.sessionID, { type: "idle" })
       })
 
-      const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
+      const process = Effect.fn("SessionProcessor.process")(function* (
+        streamInput: LLM.StreamInput,
+        onModelInput?: Effect.Effect<void>,
+      ) {
         yield* Effect.logInfo("process", {
           "session.id": input.sessionID,
           messageID: input.assistantMessage.id,
@@ -653,7 +655,19 @@ const layer = Layer.effect(
             yield* status.set(ctx.sessionID, { type: "busy" })
             const stream = llm.stream(streamInput)
 
+            let observed = false
             yield* stream.pipe(
+              Stream.tap((event) => {
+                // step-start is emitted by the AI SDK before the provider request;
+                // a provider error is not evidence that the model saw the input.
+                if (observed || !onModelInput || event.type === "step-start" || event.type === "provider-error")
+                  return Effect.void
+                return onModelInput.pipe(
+                  Effect.tap(() => Effect.sync(() => {
+                    observed = true
+                  })),
+                )
+              }),
               Stream.tap((event) => handleEvent(event)),
               Stream.takeUntil(() => ctx.needsCompaction),
               Stream.runDrain,

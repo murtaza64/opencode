@@ -451,6 +451,36 @@ const layer = Layer.effectDiscard(
           .pipe(Effect.orDie)
       }),
     )
+    yield* events.project(SessionV1.Event.InputPresented, (event) =>
+      Effect.gen(function* () {
+        const row = yield* db
+          .select()
+          .from(V1InputTable)
+          .where(
+            and(eq(V1InputTable.request_id, event.data.requestID), eq(V1InputTable.session_id, event.data.sessionID)),
+          )
+          .get()
+          .pipe(Effect.orDie)
+        if (
+          !row ||
+          row.state !== "promoted" ||
+          row.payload.source?.type !== "editspace-mail" ||
+          row.receipt.state !== "promoted" ||
+          row.receipt.messageID !== event.data.messageID
+        )
+          return yield* Effect.die(new InputLifecycleConflict())
+        if ("timePresented" in row.receipt) {
+          if (row.receipt.timePresented === event.data.time) return
+          return yield* Effect.die(new InputLifecycleConflict())
+        }
+        yield* db
+          .update(V1InputTable)
+          .set({ receipt: sql`json_set(${V1InputTable.receipt}, '$.timePresented', ${event.data.time})` })
+          .where(eq(V1InputTable.request_id, row.request_id))
+          .run()
+          .pipe(Effect.orDie)
+      }),
+    )
     yield* events.project(SessionV1.Event.MessageRemoved, (event) =>
       Effect.gen(function* () {
         const rows = yield* db
@@ -533,6 +563,7 @@ const layer = Layer.effectDiscard(
           sessionID: event.data.sessionID,
           prompt: event.data.prompt,
           delivery: event.data.delivery,
+          source: event.data.source,
           timeCreated: event.data.timestamp,
           promotedSeq: event.durable.seq,
         })
@@ -548,7 +579,19 @@ const layer = Layer.effectDiscard(
           sessionID: event.data.sessionID,
           prompt: event.data.prompt,
           delivery: event.data.delivery,
+          source: event.data.source,
           timeCreated: event.data.timestamp,
+        })
+      }),
+    )
+    yield* events.project(SessionEvent.PromptPresented, (event) =>
+      Effect.gen(function* () {
+        if (event.durable === undefined) return yield* Effect.die("Durable Session event is missing aggregate sequence")
+        yield* SessionInput.projectPresented(db, {
+          id: event.data.messageID,
+          sessionID: event.data.sessionID,
+          presentedSeq: event.durable.seq,
+          timePresented: event.data.timestamp,
         })
       }),
     )

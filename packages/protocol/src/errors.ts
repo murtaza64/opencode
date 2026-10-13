@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { Session } from "@opencode-ai/schema/session"
 
 export class InvalidRequestError extends Schema.TaggedErrorClass<InvalidRequestError>()(
   "InvalidRequestError",
@@ -21,6 +22,17 @@ export class ConflictError extends Schema.TaggedErrorClass<ConflictError>()(
   {
     message: Schema.String,
     resource: Schema.optional(Schema.String),
+  },
+  { httpApiStatus: 409 },
+) {}
+
+export class SessionSupersededError extends Schema.TaggedErrorClass<SessionSupersededError>()(
+  "SessionSupersededError",
+  {
+    sessionID: Session.ID,
+    successor: Session.ID,
+    state: Schema.Literals(["pending", "committed"]),
+    message: Schema.String,
   },
   { httpApiStatus: 409 },
 ) {}

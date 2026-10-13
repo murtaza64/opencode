@@ -14,6 +14,7 @@ import {
   MessageNotFoundError,
   ServiceUnavailableError,
   SessionNotFoundError,
+  SessionSupersededError,
   UnknownError,
 } from "../errors"
 import { Agent } from "@opencode-ai/schema/agent"
@@ -208,10 +209,11 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
           id: SessionMessage.ID.pipe(Schema.optional),
           prompt: PromptInput.Prompt,
           delivery: SessionInput.Delivery.pipe(Schema.optional),
+          source: SessionInput.MailSource.pipe(Schema.optional),
           resume: Schema.Boolean.pipe(Schema.optional),
         }),
         success: Schema.Struct({ data: SessionInput.Admitted }),
-        error: [ConflictError, SessionNotFoundError],
+        error: [ConflictError, SessionNotFoundError, SessionSupersededError],
       })
         .middleware(sessionLocationMiddleware)
         .annotateMerge(

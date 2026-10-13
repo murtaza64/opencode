@@ -4,7 +4,7 @@ import { createEffect, createMemo, createResource, createSignal, For, onCleanup,
 import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router"
 import { DataProvider } from "@opencode-ai/session-ui/context"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
-import { oc } from "../api"
+import { es, oc } from "../api"
 import { createLiveSession } from "../live-session"
 import FakeCaret from "../components/fake-caret"
 import { RelativeLines } from "../components/relative-lines"
@@ -19,6 +19,10 @@ import { DirectComposer } from "../components/direct-composer"
 import { AppHeader } from "../components/native-header"
 import { SubagentTranscript } from "../components/subagent-transcript"
 import { TranscriptMessage } from "../components/transcript-message"
+import { MailRow } from "../components/mail-row"
+import { MailSubscriptions } from "../components/mail-subscriptions"
+import { mailLocation, mailRows, mailSourceID } from "../mail-timeline"
+import { handoffChain, handoffNext, successorFor } from "../handoffs"
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const [error, setError] = createSignal("")
@@ -204,7 +208,39 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const dialog = useDialog()
   let inspecting = false
 
-  const { activity, sessionsError } = useDashboard()
+  const { activity, sessionsError, editspaces, mailRevision, editspace, state, handoffs, handoffsError,
+    laneOwners, refetch, refetchHandoffs, transferPin } = useDashboard()
+  const currentEditspace = () => editspace() ?? editspaces()?.default ?? state()?.editspace
+  const ownedLane = () => laneOwners().find((lane) => lane.owner === sessionID)
+  const predecessor = () => handoffChain(sessionID, handoffs() ?? [])
+  const nextHandoff = () => handoffNext(sessionID, handoffs() ?? [])
+  const successor = () => successorFor(sessionID, handoffs() ?? [], laneOwners())
+  const [wasOwner, setWasOwner] = createSignal(false)
+  let ownershipChecked = false
+  createEffect(() => {
+    if (ownershipChecked || !state() || handoffs.loading) return
+    ownershipChecked = true
+    setWasOwner(!!ownedLane())
+  })
+  const [handoffTask, setHandoffTask] = createSignal("")
+  const [handoffNotes, setHandoffNotes] = createSignal("")
+  const [handoffOpen, setHandoffOpen] = createSignal(false)
+  const [handingOff, setHandingOff] = createSignal(false)
+  const [handoffError, setHandoffError] = createSignal("")
+  const [handoffPending, setHandoffPending] = createSignal(false)
+  const [subscriptionsOpen, setSubscriptionsOpen] = createSignal(false)
+  const location = () => mailLocation(directory, editspaces()?.editspaces ?? [], sessionID)
+  const [mail] = createResource(
+    () => {
+      const scope = location()
+      if (!scope) return
+      return { ...scope, revision: mailRevision() }
+    },
+    (scope) => es.mail(scope.name, scope.lane !== undefined ? { lane: scope.lane } : { session: scope.session ?? sessionID }).then(
+      (result) => ({ ...result, error: "" }),
+       (failure: unknown) => ({ editspace: scope.name, lane: scope.lane ?? "", messages: [], error: `Unable to load mail: ${String(failure)}` }),
+    ),
+  )
   const live = createLiveSession(sessionID, directory, (event) => {
     if (event.type.startsWith("session.input.")) void composer.refreshInputs()
   })
@@ -303,6 +339,9 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const status = () => live.data.session_status[sessionID]?.type ??
     (!activity.error(sessionID, directory) ? activity.status(sessionID) : undefined) ?? "idle"
   const messages = createMemo(() => live.data.message[sessionID] ?? [])
+  const timeline = createMemo<ReturnType<typeof mailRows>>((previous) => mailRows(messages(), mail(), previous))
+  const mailIDs = createMemo(() => new Set(mail()?.messages.map((message) => message.id) ?? []))
+  const mailRecords = createMemo(() => new Map(mail()?.messages.map((message) => [message.id, message] as const) ?? []))
 
   // viewing the session clears its unread state, including as new content
   // streams in while the page is open
@@ -595,6 +634,46 @@ function SessionView(props: { sessionID: string; directory: string }) {
 
   const navigate = useNavigate()
   const { sessions } = useDashboard()
+  const followSuccessor = (next: string) => {
+    const editor = floating() ? floatEl : promptEl
+    if (editor) saveSelection(editor)
+    if (!getComposer(next, directory).importHandoffDrafts(composer.state)) {
+      setHandoffError("Could not save the successor draft. Keep this page open and copy your draft before navigating.")
+      return
+    }
+    transferPin(sessionID, next, directory)
+    navigate(sessionHref(next, directory))
+  }
+  createEffect(() => {
+    const edge = successor()
+    if (!wasOwner() || !edge || handingOff()) return
+    untrack(() => followSuccessor(edge.successor))
+  })
+  const handoff = async () => {
+    const lane = ownedLane()
+    const name = currentEditspace()
+    if (!lane || !name || !handoffTask().trim() || !handoffNotes().trim() || handingOff()) return
+    setHandoffError("")
+    setHandoffPending(false)
+    setHandingOff(true)
+    try {
+       const edge = await es.handoff(name, lane.lane, sessionID, handoffTask().trim(), handoffNotes().trim())
+       if (!("successor" in edge)) {
+         if (edge.status !== "pending") throw new Error("Unrecognized handoff receipt")
+         setHandoffPending(true)
+         return
+       }
+      if (edge.lane !== lane.lane || edge.predecessor !== sessionID || !/^ses_[\w-]+$/.test(edge.successor) || edge.successor === sessionID)
+        throw new Error("Unrecognized successor confirmation; refresh the lane before retrying.")
+      refetch()
+      refetchHandoffs()
+      followSuccessor(edge.successor)
+    } catch (error) {
+      setHandoffError(`Handoff not confirmed: ${String(error)}. Check lane ownership before retrying.`)
+    } finally {
+      setHandingOff(false)
+    }
+  }
   const switchSession = (back: boolean) => {
     // skip archived sessions, matching the sidebar's main list
     const list = sessions()
@@ -856,6 +935,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
         <button title="Fork this session at its tip" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
           {forking() ? "Forking…" : "Fork"}
         </button>
+        <Show when={ownedLane()}><button title="Hand off this lane to a new session" disabled={handingOff()} onClick={() => setHandoffOpen(!handoffOpen())}>Hand off</button></Show>
         <Show when={!session()?.time?.archived} fallback={<span class="archived-chip">Archived</span>}>
           <button title="Archive this session (hides it from lists)" disabled={!!nudgePhase()} onClick={archive}>Archive</button>
         </Show>
@@ -912,9 +992,30 @@ function SessionView(props: { sessionID: string; directory: string }) {
               </span>
             )}
           </Show>
+          <Show when={predecessor()}>{(edge) => <span class="handoff-crumb">predecessor ({edge().lane}): <A href={sessionHref(edge().predecessor, directory)}>{edge().predecessor}</A></span>}</Show>
+          <Show when={nextHandoff()}>{(edge) => <span class="handoff-crumb">successor ({edge().lane}): <A href={sessionHref(edge().successor, directory)}>{edge().successor}</A></span>}</Show>
         </AppHeader>
 
         <div class="session-alerts">
+          <Show when={handoffsError() && (ownedLane() || predecessor())}><div class="err" role="alert">{handoffsError()}</div></Show>
+          <Show when={handoffError()}><div class="err" role="alert">{handoffError()}</div></Show>
+          <Show when={handoffPending()}><div role="status" class="banner">Handoff is waiting for the current turn to finish. Your draft stays here until ownership transfers.</div></Show>
+          <Show when={handoffOpen() && ownedLane()}>
+            <div class="banner handoff-form">
+              <div class="banner-head">Hand off lane {ownedLane()?.lane}</div>
+              <input aria-label="Successor task" placeholder="Successor task" value={handoffTask()} onInput={(e) => setHandoffTask(e.currentTarget.value)} />
+              <textarea aria-label="Handoff notes" placeholder="Handoff context for the successor" value={handoffNotes()} onInput={(e) => setHandoffNotes(e.currentTarget.value)} />
+              <div class="banner-actions"><button disabled={handingOff() || !handoffTask().trim() || !handoffNotes().trim()} onClick={handoff}>{handingOff() ? "Handing off…" : "Create successor"}</button></div>
+            </div>
+          </Show>
+          <Show when={mail()?.error}><div class="err" role="alert">{mail()?.error}</div></Show>
+          <Show when={location()}>{(scope) => <>
+            <button class="mail-subscriptions-toggle" onClick={() => setSubscriptionsOpen(!subscriptionsOpen())}>
+              {subscriptionsOpen() ? "Hide mail subscriptions" : "Mail subscriptions"}
+            </button>
+            <Show when={subscriptionsOpen()}><MailSubscriptions editspace={scope().name}
+              recipient={scope().lane ?? scope().session ?? sessionID} /></Show>
+          </>}</Show>
           <Show when={error() || live.error()}><div class="err" role="alert">{error() || live.error()}</div></Show>
           <Show when={live.connectionError()}>
             <div class="err" role="alert">{live.connectionError()}
@@ -937,12 +1038,17 @@ function SessionView(props: { sessionID: string; directory: string }) {
         <div class="transcript" ref={transcriptEl}>
           <div ref={inner} class="transcript-inner">
             <DataProvider data={live.data} directory={directory} sessionID={sessionID} onNavigateToSession={inspectSubagent}>
-            <For each={messages()}>
-              {(m) => (
+            <For each={timeline()}>
+              {(row) => {
+                 if (row.type === "mail") return <MailRow message={row.message} ids={mailIDs()} />
+                const m = row.message
+                return (
                 <>
                   <Show when={m.role === "user"} fallback={<TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} />}>
                     <div class="msg-wrap">
-                      <TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} />
+                       <TranscriptMessage message={m} parts={live.data.part[m.id] ?? []}
+                         mailRecord={mailRecords().get(mailSourceID(m) ?? "")}
+                          mailDeliveries={mailRecords().get(mailSourceID(m) ?? "")?.deliveries} mailIDs={mailIDs()} />
                       <button
                         class="fork-here"
                         title="fork: new session with the history before this message"
@@ -965,7 +1071,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
                     )}
                   </Show>
                 </>
-              )}
+                )
+              }}
             </For>
             </DataProvider>
             <Show when={thinking()}>

@@ -1,6 +1,7 @@
 import { SessionID, MessageID } from "./schema"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { MailContext } from "@opencode-ai/core/session/mail-context"
 import {
   APIError,
   AbortedError,
@@ -196,14 +197,23 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
     if (msg.parts.length === 0) continue
 
     if (msg.info.role === "user") {
+      const mail = msg.info.source?.type === "editspace-mail" ? msg.info.source : undefined
       const userMessage: UIMessage = {
         id: msg.info.id,
         role: "user",
         parts: [],
       }
+      if (mail)
+        userMessage.parts.push({
+          type: "text",
+          text: MailContext.formatMailContext(
+            mail,
+            msg.parts.flatMap((part) => (part.type === "text" && !part.ignored && part.text !== "" ? [part.text] : [])),
+          ),
+        })
       for (const part of msg.parts) {
         // User message parts should never be empty
-        if (part.type === "text" && !part.ignored && part.text !== "")
+        if (!mail && part.type === "text" && !part.ignored && part.text !== "")
           userMessage.parts.push({
             type: "text",
             text: part.text,

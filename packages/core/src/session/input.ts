@@ -1,8 +1,8 @@
 export * as SessionInput from "./input"
 
-import { and, asc, eq, isNull, lte } from "drizzle-orm"
+import { and, asc, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm"
 import { DateTime, Effect, Schema } from "effect"
-import { Admitted, Delivery } from "@opencode-ai/schema/session-input"
+import { Admitted, Delivery, MailSource } from "@opencode-ai/schema/session-input"
 import type { Database } from "../database/database"
 import type { EventV2 } from "../event"
 import { SessionEvent } from "./event"
@@ -13,7 +13,7 @@ import { SessionInputTable, SessionMessageTable } from "./sql"
 
 type DatabaseService = Database.Interface["db"]
 
-export { Admitted, Delivery }
+export { Admitted, Delivery, MailSource }
 
 const decodePrompt = Schema.decodeUnknownSync(Prompt)
 const encodePrompt = Schema.encodeSync(Prompt)
@@ -25,8 +25,11 @@ const fromRow = (row: typeof SessionInputTable.$inferSelect): Admitted =>
     sessionID: SessionSchema.ID.make(row.session_id),
     prompt: decodePrompt(row.prompt),
     delivery: row.delivery,
+    ...(row.source ? { source: row.source } : {}),
     timeCreated: DateTime.makeUnsafe(row.time_created),
     ...(row.promoted_seq === null ? {} : { promotedSeq: row.promoted_seq }),
+    ...(row.presented_seq === null ? {} : { presentedSeq: row.presented_seq }),
+    ...(row.time_presented === null ? {} : { timePresented: DateTime.makeUnsafe(row.time_presented) }),
   })
 
 export const find = Effect.fn("SessionInput.find")(function* (db: DatabaseService, id: SessionMessage.ID) {
@@ -46,6 +49,7 @@ export const admit = Effect.fn("SessionInput.admit")(function* (
     readonly sessionID: SessionSchema.ID
     readonly prompt: Prompt
     readonly delivery: Delivery
+    readonly source?: MailSource
   },
 ) {
   const existing = yield* find(db, input.id)
@@ -58,6 +62,7 @@ export const admit = Effect.fn("SessionInput.admit")(function* (
       timestamp,
       prompt: input.prompt,
       delivery: input.delivery,
+      source: input.source,
     })
     .pipe(
       Effect.flatMap((event) =>
@@ -70,6 +75,7 @@ export const admit = Effect.fn("SessionInput.admit")(function* (
                 sessionID: input.sessionID,
                 prompt: input.prompt,
                 delivery: input.delivery,
+                source: input.source,
                 timeCreated: timestamp,
               }),
             ),
@@ -88,6 +94,7 @@ export const projectAdmitted = Effect.fn("SessionInput.projectAdmitted")(functio
     readonly sessionID: SessionSchema.ID
     readonly prompt: Prompt
     readonly delivery: Delivery
+    readonly source?: MailSource
     readonly timeCreated: DateTime.Utc
   },
 ) {
@@ -106,6 +113,7 @@ export const projectAdmitted = Effect.fn("SessionInput.projectAdmitted")(functio
       admitted_seq: input.admittedSeq,
       prompt: encodePrompt(input.prompt),
       delivery: input.delivery,
+      source: input.source,
       time_created: DateTime.toEpochMillis(input.timeCreated),
     })
     .onConflictDoNothing()
@@ -122,6 +130,7 @@ export const projectPrompted = Effect.fn("SessionInput.projectPrompted")(functio
     readonly sessionID: SessionSchema.ID
     readonly prompt: Prompt
     readonly delivery: Delivery
+    readonly source?: MailSource
     readonly timeCreated: DateTime.Utc
     readonly promotedSeq: number
   },
@@ -159,12 +168,78 @@ export const projectPrompted = Effect.fn("SessionInput.projectPrompted")(functio
       session_id: input.sessionID,
       prompt: encodePrompt(input.prompt),
       delivery: input.delivery,
+      source: input.source,
       admitted_seq: input.promotedSeq,
       promoted_seq: input.promotedSeq,
       time_created: DateTime.toEpochMillis(input.timeCreated),
     })
     .run()
     .pipe(Effect.orDie)
+})
+
+export const projectPresented = Effect.fn("SessionInput.projectPresented")(function* (
+  db: DatabaseService,
+  input: {
+    readonly id: SessionMessage.ID
+    readonly sessionID: SessionSchema.ID
+    readonly presentedSeq: number
+    readonly timePresented: DateTime.Utc
+  },
+) {
+  const updated = yield* db
+    .update(SessionInputTable)
+    .set({ presented_seq: input.presentedSeq, time_presented: DateTime.toEpochMillis(input.timePresented) })
+    .where(
+      and(
+        eq(SessionInputTable.id, input.id),
+        eq(SessionInputTable.session_id, input.sessionID),
+        isNotNull(SessionInputTable.promoted_seq),
+        isNull(SessionInputTable.presented_seq),
+      ),
+    )
+    .returning({ id: SessionInputTable.id })
+    .get()
+    .pipe(Effect.orDie)
+  if (updated) return
+  const stored = yield* find(db, input.id)
+  if (
+    stored?.sessionID === input.sessionID &&
+    stored.presentedSeq === input.presentedSeq &&
+    stored.timePresented &&
+    DateTime.toEpochMillis(stored.timePresented) === DateTime.toEpochMillis(input.timePresented)
+  )
+    return
+  return yield* Effect.die(new LifecycleConflict({ id: input.id }))
+})
+
+// Record only promoted user messages actually selected for the provider request.
+export const present = Effect.fn("SessionInput.present")(function* (
+  db: DatabaseService,
+  events: EventV2.Interface,
+  sessionID: SessionSchema.ID,
+  ids: readonly SessionMessage.ID[],
+) {
+  if (ids.length === 0) return
+  const rows = yield* db
+    .select({ id: SessionInputTable.id })
+    .from(SessionInputTable)
+    .where(
+      and(
+        eq(SessionInputTable.session_id, sessionID),
+        inArray(SessionInputTable.id, [...ids]),
+        isNotNull(SessionInputTable.promoted_seq),
+        isNull(SessionInputTable.presented_seq),
+      ),
+    )
+    .all()
+    .pipe(Effect.orDie)
+  for (const row of rows) {
+    yield* events.publish(SessionEvent.PromptPresented, {
+      sessionID,
+      messageID: row.id,
+      timestamp: yield* DateTime.now,
+    })
+  }
 })
 
 export const hasPending = Effect.fn("SessionInput.hasPending")(function* (
@@ -194,8 +269,12 @@ export const equivalent = (
     readonly sessionID: SessionSchema.ID
     readonly prompt: Prompt
     readonly delivery: Delivery
+    readonly source?: MailSource
   },
-) => input.delivery === expected.delivery && matchesPrompt(input, expected)
+) =>
+  input.delivery === expected.delivery &&
+  JSON.stringify(input.source) === JSON.stringify(expected.source) &&
+  matchesPrompt(input, expected)
 
 const matchesPrompt = (input: Admitted, expected: { readonly sessionID: SessionSchema.ID; readonly prompt: Prompt }) =>
   input.sessionID === expected.sessionID &&
@@ -207,6 +286,7 @@ const matchesProjection = (
     readonly sessionID: SessionSchema.ID
     readonly prompt: Prompt
     readonly delivery: Delivery
+    readonly source?: MailSource
     readonly timeCreated: DateTime.Utc
   },
 ) =>
@@ -228,6 +308,7 @@ const publish = Effect.fn("SessionInput.publish")(function* (
         messageID: id,
         prompt: decodePrompt(row.prompt),
         delivery: row.delivery,
+        source: row.source ?? undefined,
       })
       .pipe(
         Effect.catchDefect((defect) =>

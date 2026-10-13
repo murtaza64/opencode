@@ -160,8 +160,11 @@ export default {
           \`session_id\` text NOT NULL,
           \`prompt\` text NOT NULL,
           \`delivery\` text NOT NULL,
+          \`source\` text,
           \`admitted_seq\` integer NOT NULL,
           \`promoted_seq\` integer,
+          \`presented_seq\` integer,
+          \`time_presented\` integer,
           \`time_created\` integer NOT NULL,
           CONSTRAINT \`fk_session_input_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
         );
@@ -176,6 +179,15 @@ export default {
           \`time_updated\` integer NOT NULL,
           \`data\` text NOT NULL,
           CONSTRAINT \`fk_session_message_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`session_supersession\` (
+          \`session_id\` text PRIMARY KEY,
+          \`successor_id\` text NOT NULL,
+          \`state\` text NOT NULL,
+          \`time_committed\` integer,
+          CONSTRAINT \`fk_session_supersession_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
         );
       `)
       yield* tx.run(`

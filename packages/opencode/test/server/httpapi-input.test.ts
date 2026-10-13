@@ -223,6 +223,187 @@ it.instance("admits an invisible durable input and reconciles retries and cancel
   }),
 )
 
+it.instance(
+  "keeps mail source on pending input and rejects source changes on exact retry",
+  () =>
+    Effect.gen(function* () {
+      const instance = yield* TestInstance
+      const session = yield* Session.use.create({
+        title: "Mail input",
+        agent: "build",
+        model: { providerID: ProviderV2.ID.make("test"), id: ModelV2.ID.make("test") },
+      })
+      // An unfinished legacy turn prevents an advisory wake from promoting the queued mail.
+      yield* Session.use.updateMessage({
+        id: MessageID.ascending(),
+        sessionID: session.id,
+        role: "user",
+        agent: "build",
+        model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test") },
+        time: { created: Date.now() },
+      })
+      const url = `/session/${session.id}/input`
+      const source = { type: "editspace-mail", id: "mail-1", sender: "worker-a", recipient: "worker-b" }
+      const payload = { requestID: "mail-1", delivery: "queue", text: "Please inspect this task", source }
+      const post = (body: unknown) =>
+        requestInDirectory(url, instance.directory, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        })
+      const admitted = yield* post(payload)
+      expect(admitted.status).toBe(200)
+      const receipt = yield* admitted.json
+      expect(receipt).toMatchObject({ source, state: "pending" })
+      expect(yield* (yield* post(payload)).json).toEqual(receipt)
+      expect((yield* post({ ...payload, source: { ...source, sender: "worker-c" } })).status).toBe(409)
+      expect((yield* post({ ...payload, source: undefined })).status).toBe(409)
+      expect((yield* post({ ...payload, source: { ...source, type: "unknown" } })).status).toBe(400)
+      expect((yield* post({ ...payload, source: { ...source, recipient: 123 } })).status).toBe(400)
+      expect(yield* (yield* requestInDirectory(`${url}/mail-1`, instance.directory)).json).toEqual(receipt)
+      expect(yield* (yield* requestInDirectory(url, instance.directory)).json).toEqual({ items: [receipt], next: null })
+      const handle = (requestID: string) =>
+        requestInDirectory(`${url}/${requestID}/handle`, instance.directory, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ disposition: "acknowledged" }),
+        })
+      expect((yield* handle("mail-1")).status).toBe(409)
+      expect((yield* handle("missing")).status).toBe(404)
+    }),
+  20_000,
+)
+
+it.live(
+  "mail receipt records presentation only after the model responds, and preserves it on retry",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          const first = Promise.withResolvers<void>()
+          const second = Promise.withResolvers<void>()
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              first.resolve()
+              second.resolve()
+            }),
+          )
+          yield* llm.push(reply().text("original").wait(first.promise).stop())
+          yield* llm.push(reply().wait(second.promise).text("mail received").stop())
+          const session = yield* Session.use.create({ title: "Mail receipt", agent: "build" })
+          const url = `/session/${session.id}/input`
+          const payload = {
+            requestID: "mail-receipt",
+            delivery: "queue",
+            text: "mail message",
+            source: { type: "editspace-mail", id: "mail-2", sender: "a", recipient: "b" },
+          }
+          const post = (path: string, body: unknown) =>
+            requestInDirectory(path, dir, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(body),
+            })
+          yield* post(`/session/${session.id}/prompt_async`, {
+            agent: "build",
+            model: { providerID: "test", modelID: "test-model" },
+            parts: [{ type: "text", text: "original task" }],
+          })
+          yield* llm.wait(1)
+          expect(yield* (yield* post(url, payload)).json).toMatchObject({ state: "pending" })
+          first.resolve()
+          yield* llm.wait(2)
+          const promoted = yield* pollWithTimeout(
+            readReceipt(`${url}/mail-receipt`, dir).pipe(
+              Effect.map((receipt) => (receipt.state === "promoted" ? receipt : undefined)),
+            ),
+            "mail input was not promoted",
+            "10 seconds",
+          )
+          expect("timePresented" in promoted).toBe(false)
+          expect(yield* (yield* requestInDirectory(`${url}?state=promoted`, dir)).json).toMatchObject({
+            items: [promoted],
+          })
+          expect(yield* (yield* requestInDirectory(`${url}?state=presented`, dir)).json).toEqual({
+            items: [],
+            next: null,
+          })
+          second.resolve()
+          const presented = yield* pollWithTimeout(
+            readReceipt(`${url}/mail-receipt`, dir).pipe(
+              Effect.map((receipt) => (receipt.state === "presented" ? receipt : undefined)),
+            ),
+            "mail input was not presented",
+            "10 seconds",
+          )
+          expect(presented.messageID).toBe(promoted.messageID)
+          expect(presented.timePresented).toBeGreaterThanOrEqual(promoted.timePromoted)
+          expect(yield* (yield* post(url, payload)).json).toEqual(presented)
+          expect(yield* (yield* requestInDirectory(`${url}?state=all`, dir)).json).toMatchObject({ items: [presented] })
+          expect(yield* (yield* requestInDirectory(`${url}?state=presented`, dir)).json).toMatchObject({
+            items: [presented],
+          })
+          expect(yield* (yield* requestInDirectory(`${url}?state=promoted`, dir)).json).toEqual({
+            items: [],
+            next: null,
+          })
+          expect((yield* requestInDirectory(`${url}/mail-receipt`, dir, { method: "DELETE" })).status).toBe(409)
+          const handledResponses = yield* Effect.all(
+            Array.from({ length: 2 }, () =>
+              post(`${url}/mail-receipt/handle`, {
+                disposition: "replied",
+                replyID: "reply-1",
+              }),
+            ),
+            { concurrency: "unbounded" },
+          )
+          expect(handledResponses.map((response) => response.status)).toEqual([200, 200])
+          const handled = yield* readReceipt(`${url}/mail-receipt`, dir)
+          expect(handled.state).toBe("handled")
+          if (handled.state !== "handled") throw new Error("Expected handled mail")
+          expect(handled).toMatchObject({
+            state: "handled",
+            timePresented: presented.timePresented,
+            disposition: "replied",
+            replyID: "reply-1",
+          })
+          expect(handled.timeHandled).toBeGreaterThanOrEqual(presented.timePresented)
+          expect(
+            yield* (yield* post(`${url}/mail-receipt/handle`, {
+              disposition: "replied",
+              replyID: "reply-1",
+            })).json,
+          ).toEqual(handled)
+          expect(
+            (yield* post(`${url}/mail-receipt/handle`, {
+              disposition: "replied",
+              replyID: "reply-2",
+            })).status,
+          ).toBe(409)
+          expect((yield* post(`${url}/mail-receipt/handle`, { disposition: "acknowledged" })).status).toBe(409)
+          expect((yield* post(`${url}/mail-receipt/handle`, { disposition: "replied", extra: true })).status).toBe(400)
+          expect(yield* (yield* requestInDirectory(`${url}?state=handled`, dir)).json).toEqual({
+            items: [handled],
+            next: null,
+          })
+          expect(yield* (yield* requestInDirectory(`${url}?state=presented`, dir)).json).toEqual({
+            items: [],
+            next: null,
+          })
+          expect(yield* (yield* post(url, payload)).json).toEqual(handled)
+          const concurrent = yield* Effect.all(
+            ["acknowledged", "replied"].map((disposition) => post(`${url}/mail-receipt/handle`, { disposition })),
+            { concurrency: "unbounded" },
+          )
+          expect(concurrent.map((response) => response.status)).toEqual([409, 409])
+          const messages = yield* (yield* requestInDirectory(`/session/${session.id}/message`, dir)).json
+          expect(JSON.stringify(messages)).not.toContain("reply-1")
+        }),
+      { config: testProviderConfig },
+    ),
+  30_000,
+)
+
 it.live(
   "abort leaves pending inputs inspectable and exact retries do not resume interrupted work",
   () =>
@@ -348,12 +529,20 @@ it.live(
             "15 seconds",
           )
           expect(
-            (yield* post(`${url}/input`, { requestID: "held-queue", delivery: "queue", text: "queued next task" }))
-              .status,
+            (yield* post(`${url}/input`, {
+              requestID: "held-queue",
+              delivery: "queue",
+              text: "queued next task",
+              source: { type: "editspace-mail", id: "queue-mail", sender: "a", recipient: "b" },
+            })).status,
           ).toBe(200)
           expect(
-            (yield* post(`${url}/input`, { requestID: "held-steer", delivery: "steer", text: "steer current task" }))
-              .status,
+            (yield* post(`${url}/input`, {
+              requestID: "held-steer",
+              delivery: "steer",
+              text: "steer current task",
+              source: { type: "editspace-mail", id: "steer-mail", sender: "b", recipient: "a" },
+            })).status,
           ).toBe(200)
           const pending = yield* requestInDirectory(`${url}/input`, dir)
           expect(yield* pending.json).toMatchObject({ items: [{ state: "pending" }, { state: "pending" }] })
@@ -368,6 +557,21 @@ it.live(
           held.resolve()
           yield* llm.wait(3)
           expect(JSON.stringify((yield* llm.inputs)[2])).toContain("queued next task")
+          const messages = yield* requestInDirectory(`${url}/message`, dir)
+          const visible = (yield* messages.json) as Array<{
+            info: { source?: unknown }
+            parts: Array<{ type: string; text?: string }>
+          }>
+          expect(
+            visible.find((message) =>
+              message.parts.some((part) => part.type === "text" && part.text === "steer current task"),
+            )?.info.source,
+          ).toEqual({ type: "editspace-mail", id: "steer-mail", sender: "b", recipient: "a" })
+          expect(
+            visible.find((message) =>
+              message.parts.some((part) => part.type === "text" && part.text === "queued next task"),
+            )?.info.source,
+          ).toEqual({ type: "editspace-mail", id: "queue-mail", sender: "a", recipient: "b" })
         }),
       { config: (url) => ({ ...testProviderConfig(url), agent: { build: { steps: 2 } } }) },
     ),
@@ -482,6 +686,7 @@ it.live(
           yield* llm.wait(2)
           const receipt = yield* readReceipt(`${url}/input/after-structured`, dir)
           expect(receipt.state).toBe("promoted")
+          expect((yield* post("input/after-structured/handle", { disposition: "acknowledged" })).status).toBe(409)
           if (receipt.state !== "promoted") throw new Error("Expected promoted structured continuation")
           const message = yield* requestInDirectory(`${url}/message/${receipt.messageID}`, dir)
           expect(yield* message.json).toMatchObject({
