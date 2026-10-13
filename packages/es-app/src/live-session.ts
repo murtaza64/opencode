@@ -34,7 +34,7 @@ const isTerminal = (event: LiveEvent) =>
     event.properties?.info?.role === "assistant" &&
     !!(event.properties.info.error || event.properties.info.time?.completed))
 
-const errorText = (error: unknown): string => {
+export const errorText = (error: unknown): string => {
   if (typeof error === "string" && error) return error
   if (error && typeof error === "object") {
     if ("data" in error && error.data && typeof error.data === "object" && "message" in error.data)
@@ -86,7 +86,8 @@ export function createLiveSession(
     const message = latest()
     return (
       transientError() ||
-      (message?.role === "assistant" && message.id > clearedThrough() && message.error ? errorText(message.error) : "")
+      (message?.role === "assistant" && message.id > clearedThrough() && message.error?.name !== "MessageAbortedError" && message.error
+        ? errorText(message.error) : "")
     )
   }
   const connectionError = () => [connection.stream, connection.snapshot, connection.event].filter(Boolean).join("\n")

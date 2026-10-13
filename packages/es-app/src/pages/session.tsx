@@ -7,7 +7,7 @@ import type { MessagePartProps } from "@opencode-ai/session-ui/message-part"
 import type { ToolPart } from "@opencode-ai/sdk/v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { oc } from "../api"
-import { createLiveSession } from "../live-session"
+import { createLiveSession, errorText } from "../live-session"
 import FakeCaret from "../components/fake-caret"
 import { RelativeLines } from "../components/relative-lines"
 import SessionInfo from "../components/session-info"
@@ -232,6 +232,15 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const status = () => live.data.session_status[sessionID]?.type ??
     (!activity.error(sessionID, directory) ? activity.status(sessionID) : undefined) ?? "idle"
   const messages = createMemo(() => live.data.message[sessionID] ?? [])
+  const inlineError = () => {
+    const latest = messages().at(-1)
+    return latest?.role === "assistant" && latest.error?.name !== "MessageAbortedError" && latest.error
+      ? errorText(latest.error) : ""
+  }
+  const bannerError = () => {
+    const value = live.error()
+    return error() || (value !== inlineError() ? value : "")
+  }
   const transcriptQuestionTools = createMemo(() => new Set(messages().flatMap((message) =>
     (live.data.part[message.id] ?? []).flatMap((part) =>
       part.type === "tool" && part.tool === "question" ? [`${message.id}\u0000${part.callID}`] : [],
@@ -298,7 +307,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
       <div class="session-work-status" role="status" data-state={workState()}>
         <Show when={workState() === "working" || workState() === "retry"}><span class="session-work-spinner" aria-hidden="true" /></Show>
         <span>{workState() === "working" ? "Working" : workState() === "retry" ? "Retrying" :
-          workState() === "waiting" ? "Waiting for your reply" : workState() === "failed" ? "Session failed — see error above" : "Reconnecting — activity unavailable"}</span>
+           workState() === "waiting" ? "Waiting for your reply" : workState() === "failed" ?
+             `Session failed — see error ${inlineError() ? "in conversation" : "above"}` : "Reconnecting — activity unavailable"}</span>
       </div>
     </Show>
   )
@@ -876,7 +886,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
         </AppHeader>
 
         <div class="session-alerts">
-          <Show when={error() || live.error()}><div class="err" role="alert">{error() || live.error()}</div></Show>
+           <Show when={bannerError()}><div class="err" role="alert">{bannerError()}</div></Show>
           <Show when={live.connectionError()}>
             <div class="err" role="alert">{live.connectionError()}
               <button disabled={live.loading()} onClick={() => { void live.load().catch(() => {}) }}>reconnect</button>

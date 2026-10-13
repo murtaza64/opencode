@@ -1,7 +1,10 @@
 import { createMemo, createSignal, Show, type ComponentProps } from "solid-js"
 import { Message } from "@opencode-ai/session-ui/message-part"
+import { errorText } from "../live-session"
 
 export const TranscriptMessage = (props: ComponentProps<typeof Message>) => {
+  const messageError = createMemo(() => props.message.role === "assistant" && props.message.error?.name !== "MessageAbortedError"
+    ? props.message.error : undefined)
   const generated = createMemo(() => {
     if (props.message.role !== "user" || !props.parts.length ||
       !props.parts.every(part => part.type === "text" && part.synthetic === true)) return ""
@@ -23,7 +26,12 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message>) => {
     const result = copied || await navigator.clipboard?.writeText(generated()).then(() => true, () => false)
     setCopyState(result ? "Copied" : "Copy failed")
   }
-  return <Show when={generated()} fallback={<Message {...props} activityRows />}>
+  return <Show when={generated()} fallback={<>
+    <Message {...props} activityRows />
+    <Show when={messageError()}>{(error) =>
+      <div class="conversation-error" data-message-error-id={props.message.id} role="note" aria-label="Provider error">{errorText(error())}</div>
+    }</Show>
+  </>}>
     <details class="generated-input" data-generated-message-id={props.message.id} onToggle={event => setOpen(event.currentTarget.open)}>
       <summary class="activity-row">
         <span class="activity-kind">Generated input</span>

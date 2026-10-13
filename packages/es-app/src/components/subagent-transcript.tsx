@@ -4,7 +4,7 @@ import { DataProvider } from "@opencode-ai/session-ui/context"
 import { TranscriptMessage } from "./transcript-message"
 import { Dialog } from "@opencode-ai/ui/dialog"
 import { oc } from "../api"
-import { createLiveSession } from "../live-session"
+import { createLiveSession, errorText } from "../live-session"
 
 export const SubagentTranscript = (props: { sessionID: string; directory: string; onDispose: () => void }) => {
   const controller = new AbortController()
@@ -39,6 +39,12 @@ export const SubagentTranscript = (props: { sessionID: string; directory: string
 const Transcript = (props: { session: Session }) => {
   const live = createLiveSession(props.session.id, props.session.directory)
   const messages = () => live.data.message[props.session.id] ?? []
+  const topError = () => {
+    const value = live.error()
+    const latest = messages().at(-1)
+    return latest?.role === "assistant" && latest.error && latest.error.name !== "MessageAbortedError" &&
+      value === errorText(latest.error) ? "" : value
+  }
   const valid = () => live.data.session[0]?.id === props.session.id &&
     live.data.session[0]?.directory === props.session.directory
   onMount(() => { void live.load().catch(() => {}) })
@@ -52,7 +58,7 @@ const Transcript = (props: { session: Session }) => {
     <Show when={live.connectionError()}>{(error) => <div role="alert" class="err">
       {error()} <button disabled={live.loading()} onClick={() => void live.load().catch(() => {})}>Retry</button>
     </div>}</Show>
-    <Show when={live.error()}>{(error) => <div role="alert" class="err">{error()}</div>}</Show>
+    <Show when={topError()}>{(error) => <div role="alert" class="err">{error()}</div>}</Show>
     <Show when={!live.loading() && !live.connectionError() && !valid()}>
       <div role="alert" class="err">The transcript does not match the requested subagent.</div>
     </Show>

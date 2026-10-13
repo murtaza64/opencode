@@ -1166,6 +1166,17 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .turn-summary .agent { color: var(--text); }
 .turn-summary.interrupted .marker,
 .turn-summary.interrupted .agent { color: var(--overlay0); }
+.conversation-error {
+  margin: 8px 0 12px;
+  border-inline-start: 2px solid var(--red);
+  background: var(--surface0);
+  color: var(--text);
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 30vh;
+  overflow-y: auto;
+}
 
 /* right info panel: one recessed sidebar, sections split by headings only */
 .session-info {
