@@ -311,7 +311,7 @@ export function DashboardProvider(props: ParentProps) {
     if (s.updated && s.updated > (viewed()[s.id] ?? 0)) return "unread"
     return "idle"
   }
-  const notifications = createMemo(() => {
+  const rawNotifications = createMemo(() => {
     const requests: AttentionNotification[] = activity.requests().map((item) => {
       const parent = activity.root(item.request.sessionID)
       return {
@@ -334,6 +334,21 @@ export function DashboardProvider(props: ParentProps) {
     }).filter((item) => item.kind !== "idle" || (activity.idle(item.session) &&
       item.updated > Math.max(viewed()[item.session] ?? 0, idleSeen()[item.session] ?? 0)))
     return [...requests, ...dashboard]
+  })
+  // Stable identities across polls so the sidebar's <For> patches rows in place
+  // instead of remounting every notification on each status tick.
+  const notificationCache = new Map<string, AttentionNotification>()
+  const notifications = createMemo(() => {
+    const next = rawNotifications().map((item) => {
+      const key = `${item.kind}:${item.id}:${item.session}`
+      const previous = notificationCache.get(key)
+      if (previous && previous.title === item.title && previous.updated === item.updated && previous.directory === item.directory) return previous
+      notificationCache.set(key, item)
+      return item
+    })
+    const keep = new Set(next.map((item) => `${item.kind}:${item.id}:${item.session}`))
+    for (const key of notificationCache.keys()) if (!keep.has(key)) notificationCache.delete(key)
+    return next
   })
 
   const value: DashboardCtx = {

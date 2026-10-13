@@ -44,7 +44,9 @@ export const SessionRefs = (props: { container: () => HTMLElement | undefined })
       const id = el.dataset.session!
       const row = rows.find((row) => row.id === id)
       const kind = id === current ? "current" : row ? "resolved" : "unknown"
-      if (el.dataset[kind] === "1" && el.dataset.title === row?.title) continue
+      // Idempotent: re-decorating is itself a DOM mutation that re-triggers the
+      // shell observer, so an unstable check here becomes a rAF-rate loop.
+      if (el.dataset[kind] === "1" && el.dataset.title === (row?.title ?? "")) continue
       delete el.dataset.resolved
       delete el.dataset.current
       delete el.dataset.unknown

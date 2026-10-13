@@ -28,15 +28,28 @@ function Providers(props: ParentProps) {
   onMount(() => {
     if (!shellEl) return
     let frame: number | undefined
-    const wrap = () => {
-      if (frame !== undefined) return
+    // Only walk subtrees that actually changed; a full-shell TreeWalker per
+    // mutation burst costs ~50% of the main thread on long transcripts.
+    const dirty = new Set<HTMLElement>()
+    const wrap = (records?: MutationRecord[]) => {
+      if (!records) dirty.add(shellEl!)
+      for (const record of records ?? []) {
+        if (!record.addedNodes.length) continue
+        const target = record.target instanceof HTMLElement ? record.target : record.target.parentElement
+        // Our own decorations never need a second pass.
+        if (!target || target.closest(".session-ref, .ticket-ref, .session-chip, .session-picker")) continue
+        dirty.add(target)
+      }
+      if (frame !== undefined || !dirty.size) return
       frame = requestAnimationFrame(() => {
         frame = undefined
-        if (shellEl) {
-          wrapTicketRefs(shellEl)
-          wrapSessionRefs(shellEl)
-          shellEl.dispatchEvent(new Event("session-refs-wrapped"))
+        const roots = [...dirty].filter((el) => el.isConnected && ![...dirty].some((other) => other !== el && other.contains(el)))
+        dirty.clear()
+        for (const root of roots) {
+          wrapTicketRefs(root)
+          wrapSessionRefs(root)
         }
+        if (roots.length) shellEl?.dispatchEvent(new Event("session-refs-wrapped"))
       })
     }
     wrap()

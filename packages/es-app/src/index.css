@@ -331,6 +331,17 @@
   --syntax-warning: var(--yellow);
 }
 .transcript .shiki, .aside-answer .shiki { color: var(--text); }
+/* session-ui's TextShimmer animates background-position under background-clip:
+ * text, which Chromium cannot composite: it repainted the entire 2800x1800 root
+ * layer at display rate (~1.3 s of Paint per 4 s) whenever any step label was
+ * shimmering. A static peak-colour label reads the same without the cost. */
+[data-component="text-shimmer"] [data-slot="text-shimmer-char-shimmer"][data-run="true"] {
+  animation: none;
+  background-image: none;
+  color: var(--text-shimmer-peak-color, var(--text));
+  -webkit-text-fill-color: currentColor;
+  will-change: auto;
+}
 .transcript [data-component="text-part"]
   :is(p, ul, ol, li, blockquote, h1, h2, h3, h4, h5, h6, td, th, em, strong, span:not(.pr-badge)) {
   font-family: var(--font-serif);
@@ -628,6 +639,10 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 }
 .nav-item .nav-title { overflow: hidden; text-overflow: ellipsis; }
 .session-entry { display: flex; align-items: center; }
+/* Skip style/layout/paint for sidebar rows scrolled out of view; busy-dot
+ * animations on hidden rows then cost nothing. The intrinsic size keeps the
+ * scrollbar stable before a row is first rendered. */
+.session-entry, .nav-item.archived { content-visibility: auto; contain-intrinsic-size: auto 28px; }
 .session-entry .nav-item { flex: 1; min-width: 0; }
 .pin-action {
   flex: none;
@@ -913,23 +928,36 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 }
 .dot.pending { background: var(--peach); }
 .session-work-status { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding: 6px 0; font-size: 12px; color: var(--subtext0); }
-.session-work-spinner { width: 7px; height: 7px; background: var(--lavender); animation: session-work-pulse 1.8s ease-in-out infinite; }
+.session-work-spinner { width: 7px; height: 7px; background: var(--lavender); transform: translateZ(0); will-change: opacity; contain: strict; animation: session-work-pulse 1.8s steps(18) infinite; }
 @keyframes session-work-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .session-work-spinner { animation: none; opacity: 1; } }
 .dot.unread { background: var(--green); }
 .dot.busy { background: var(--lavender); }
+/* Animate only transform/opacity: an `inset` keyframe forces a style recalc
+ * and layout on every frame for every busy row (hundreds of sidebar rows at
+ * 120 Hz pinned the renderer at ~40% CPU while idle). The ring scales from
+ * the dot's own box on its own compositor layer instead. */
 .dot.busy::after {
   content: "";
   position: absolute;
   inset: -2px;
   border: 2px solid var(--lavender);
-  animation: dot-pulse 2s ease-out infinite;
+  border-radius: inherit;
+  transform-origin: center;
+  /* Own compositor layer: without it every animation frame repaints the
+   * whole sidebar/transcript around the dot (Paint ≈ 1 s per 4 s idle). */
+  transform: translateZ(0);
+  will-change: transform, opacity;
+  contain: strict;
+  animation: dot-pulse 2s steps(24) infinite;
 }
 @keyframes dot-pulse {
-  0% { inset: -2px; opacity: 0.8; }
-  70% { inset: -7px; opacity: 0; }
-  100% { inset: -7px; opacity: 0; }
+  0% { transform: translateZ(0) scale(1); opacity: 0.8; }
+  70% { transform: translateZ(0) scale(1.85); opacity: 0; }
+  100% { transform: translateZ(0) scale(1.85); opacity: 0; }
 }
+/* Off-screen rows (collapsed groups, scrolled-out lists) must not animate. */
+@media (prefers-reduced-motion: reduce) { .dot.busy::after { animation: none; opacity: 0; } }
 
 .digest {
   margin-top: 8px;
