@@ -303,6 +303,34 @@
   line-height: 1.65;
 }
 .transcript { --v2-text-text-base: var(--text); --text-strong: var(--text); --text-base: var(--subtext1); }
+/* session-ui code blocks read @opencode-ai/ui theme tokens whose defaults are
+ * the light palette; map them to the es-app dark palette app-wide (the
+ * subagent dialog block below repeats this so it also wins inside portals). */
+:root {
+  --color-background-stronger: var(--mantle);
+  --background-stronger: var(--mantle);
+  --v2-background-bg-layer-01: var(--base);
+  --v2-background-bg-layer-02: var(--mantle);
+  --v2-border-border-base: var(--surface0);
+  --v2-border-border-muted: var(--surface0);
+  --syntax-comment: var(--overlay1);
+  --syntax-property: var(--blue);
+  --syntax-constant: var(--peach);
+  --syntax-type: var(--yellow);
+  --syntax-primitive: var(--blue);
+  --syntax-punctuation: var(--subtext1);
+  --syntax-keyword: var(--mauve);
+  --syntax-operator: var(--sky);
+  --syntax-string: var(--green);
+  --syntax-object: var(--text);
+  --syntax-variable: var(--text);
+  --syntax-critical: var(--red);
+  --syntax-regexp: var(--pink);
+  --syntax-info: var(--blue);
+  --syntax-unknown: var(--subtext1);
+  --syntax-warning: var(--yellow);
+}
+.transcript .shiki, .aside-answer .shiki { color: var(--text); }
 .transcript [data-component="text-part"]
   :is(p, ul, ol, li, blockquote, h1, h2, h3, h4, h5, h6, td, th, em, strong, span:not(.pr-badge)) {
   font-family: var(--font-serif);
