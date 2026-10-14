@@ -651,7 +651,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const followSuccessor = async (next: string) => {
     const editor = floating() ? floatEl : promptEl
     if (editor) saveSelection(editor)
-    if (!await getComposer(next, directory).importHandoffDrafts(composer.state)) {
+    if (!await getComposer(next, directory).importHandoffDrafts(composer)) {
       setHandoffError("Could not save the successor draft. Keep this page open and copy your draft before navigating.")
       return
     }

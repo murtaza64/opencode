@@ -1004,9 +1004,14 @@ export const createComposer = (sessionID: string, directory: string, dependencie
   return {
     state,
     persistAsync,
-    importHandoffDrafts: (source: ComposerState) => {
+    // Resolves once saved image refs are restored into the in-memory drafts.
+    get hydrated() { return hydration },
+    importHandoffDrafts: async (predecessor: { state: ComposerState; hydrated: Promise<void> }) => {
       // A handoff never moves an in-flight admission or sends a prompt. Existing
       // successor edits take precedence over the predecessor's saved draft.
+      // Image-only drafts are empty until hydration, so decide only afterwards.
+      await Promise.all([hydration, predecessor.hydrated])
+      const source = predecessor.state
       const hasSuccessorDraft = !!state.task.text || !!state.task.images.length || !!state.aside.text || !!state.aside.images.length
       batch(() => {
         for (const buffer of ["task", "aside"] as const) {
