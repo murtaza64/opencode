@@ -791,10 +791,24 @@ const layer = Layer.effect(
         .all()
         .pipe(Effect.orDie)
       const sessionIDs = new Set(sessions.map((sessionInfo) => sessionInfo.id))
-      yield* Effect.forEach(
-        sessions.filter((sessionInfo) => !sessionInfo.parentID || !sessionIDs.has(sessionInfo.parentID)),
+      const roots = sessions.filter((sessionInfo) => !sessionInfo.parentID || !sessionIDs.has(sessionInfo.parentID))
+      // A fenced successor cannot go before its predecessor; removing the predecessor drops the fence.
+      const successors = yield* Effect.forEach(
+        roots,
         (sessionInfo) =>
-          session.remove(sessionInfo.id).pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.void)),
+          session.remove(sessionInfo.id).pipe(
+            Effect.as([]),
+            Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed([])),
+            Effect.catchTag("SessionSuccessorError", () => Effect.succeed([sessionInfo.id])),
+          ),
+      ).pipe(Effect.map((ids) => ids.flat()))
+      yield* Effect.forEach(
+        successors,
+        (sessionID) =>
+          session.remove(sessionID).pipe(
+            Effect.catchIf(NotFoundError.isInstance, () => Effect.void),
+            Effect.catchTag("SessionSuccessorError", () => Effect.void),
+          ),
         { discard: true },
       )
 

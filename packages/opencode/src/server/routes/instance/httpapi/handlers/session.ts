@@ -210,7 +210,12 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     const remove = Effect.fn("SessionHttpApi.remove")(function* (ctx: { params: { sessionID: SessionID } }) {
-      yield* SessionError.mapStorageNotFound(session.remove(ctx.params.sessionID))
+      yield* SessionError.mapStorageNotFound(session.remove(ctx.params.sessionID).pipe(
+        Effect.catchTag("SessionSuccessorError", (error) => new ConflictError({
+          message: `Session is the successor of ${error.predecessor} (${error.state} supersession); cancel or delete the predecessor first`,
+          resource: error.predecessor,
+        })),
+      ))
       return true
     })
 

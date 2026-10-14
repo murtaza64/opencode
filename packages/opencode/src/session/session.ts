@@ -28,7 +28,7 @@ import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
 import { or } from "drizzle-orm"
 import type { SQL } from "drizzle-orm"
-import { PartTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { PartTable, SessionSupersessionTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { MessageV2 } from "./message-v2"
 import type { InstanceContext } from "../project/instance-context"
@@ -423,6 +423,13 @@ export class CreateConflictError extends Schema.TaggedErrorClass<CreateConflictE
   sessionID: SessionID,
 }) {}
 
+/** A supersession fence names this session as successor; deleting it would strand the predecessor. */
+export class SuccessorError extends Schema.TaggedErrorClass<SuccessorError>()("SessionSuccessorError", {
+  sessionID: SessionID,
+  predecessor: SessionID,
+  state: Schema.Literals(["pending", "committed"]),
+}) {}
+
 export type NotFound = NotFoundError
 
 export interface Interface {
@@ -464,7 +471,7 @@ export interface Interface {
   readonly diff: (sessionID: SessionID) => Effect.Effect<Snapshot.FileDiff[]>
   readonly messages: (input: { sessionID: SessionID; limit?: number }) => Effect.Effect<SessionV1.WithParts[], NotFound>
   readonly children: (parentID: SessionID) => Effect.Effect<Info[]>
-  readonly remove: (sessionID: SessionID) => Effect.Effect<void, NotFound>
+  readonly remove: (sessionID: SessionID) => Effect.Effect<void, NotFound | SuccessorError>
   readonly updateMessage: <T extends SessionV1.Info>(msg: T) => Effect.Effect<T>
   readonly removeMessage: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<MessageID>
   readonly removePart: (input: { sessionID: SessionID; messageID: MessageID; partID: PartID }) => Effect.Effect<PartID>
@@ -622,6 +629,13 @@ const layer: Layer.Layer<
 
     const remove: Interface["remove"] = Effect.fnUntraced(function* (sessionID: SessionID) {
       const session = yield* get(sessionID)
+      const fence = yield* db
+        .select({ predecessor: SessionSupersessionTable.session_id, state: SessionSupersessionTable.state })
+        .from(SessionSupersessionTable)
+        .where(eq(SessionSupersessionTable.successor_id, sessionID))
+        .get()
+        .pipe(Effect.orDie)
+      if (fence) return yield* new SuccessorError({ sessionID, ...fence })
       try {
         // `remove` needs to work in all cases, such as broken sessions that
         // run cleanup without instance state.
