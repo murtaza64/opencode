@@ -55,6 +55,8 @@ it.live("a V2 drain holds the V1 pending fence until provider completion", () =>
     release.resolve()
     yield* pollWithTimeout(Effect.sync(() => SessionExecutionLocal.isActive(original.id) ? undefined : true), "V2 provider did not settle", "10 seconds")
     expect(calls).toBe(1)
-    expect((yield* run.supersede(original.id, successor.id)).state).toBe("committed")
+    // The V2 drain settlement commits the fence itself; no V1 idle path or retry is needed.
     expect((yield* supersession.get(original.id))?.state).toBe("committed")
+    expect((yield* run.supersede(original.id, successor.id)).state).toBe("committed")
+    expect(yield* Effect.flip(execution.resume(original.id))).toMatchObject({ state: "committed" })
   }), { git: true }), 60_000)

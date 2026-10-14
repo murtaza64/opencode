@@ -40,7 +40,11 @@ const layer = Layer.effect(
               : Effect.logError("Failed to drain Session", cause).pipe(Effect.annotateLogs({ sessionID })),
           ),
         )
-      }),
+      }, (drain, sessionID) =>
+        // A fence requested while this drain ran waits for provider completion; it commits
+        // here so a V2 predecessor does not depend on the V1 idle path to close.
+        Effect.ensuring(drain, SessionSupersession.commitPending(db, sessionID)),
+      ),
     })
 
     return SessionExecution.Service.of({
