@@ -283,6 +283,24 @@ test("handoff keeps an image-only successor draft that is still hydrating from s
   expect(createComposer("ses_new", directory, { storage, images }).state.task.text).toBe("")
 })
 
+test("predecessor edits after a handoff do not erase the successor's copied images", async () => {
+  const storage = new MemoryStorage()
+  const images = createImageStore()
+  const predecessor = createComposer("ses_old", directory, { storage, images })
+  predecessor.setVisibleText("carry over")
+  predecessor.setImages([image], "task")
+  await predecessor.persistAsync()
+  const successor = createComposer("ses_new", directory, { storage, images })
+  expect(await successor.importHandoffDrafts(predecessor)).toBe(true)
+  predecessor.setImages([], "task")
+  predecessor.setVisibleText("")
+  await predecessor.persistAsync()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const restored = createComposer("ses_new", directory, { storage, images })
+  await restored.persistAsync()
+  expect(restored.state.task.images).toEqual([image])
+})
+
 test("handoff waits for the predecessor's own hydration before copying its images", async () => {
   const storage = new MemoryStorage()
   const images = createImageStore()
@@ -1145,10 +1163,10 @@ test("a missing image reference blocks a restored draft with a warning", async (
   const storage = new MemoryStorage()
   const images = createImageStore()
   const { composer, dependencies } = harness(undefined, { storage, images })
-  composer.setImages([image])
+  composer.setImages([{ ...image, url: "data:image/png;base64,bWlzc2luZy1kcmFmdA==" }])
   await composer.persistAsync()
   const saved = JSON.parse([...storage.data.values()][0]!)
-  await images.remove([saved.task.images[0].ref])
+  await images.remove([saved.task.images[0].ref], [...storage.data.keys()][0]!)
   const restored = createComposer(session.id, directory, dependencies)
   await restored.persistAsync()
   expect(restored.state.task.images).toEqual([])
@@ -1166,10 +1184,10 @@ test("missing admission image is reconciled by ID but cannot be retried", async 
   await composer.loadCapabilities()
   composer.observeBusy(true)
   composer.selectMode("steer")
-  composer.setImages([image])
+  composer.setImages([{ ...image, url: "data:image/png;base64,bWlzc2luZy1hZG1pc3Npb24=" }])
   await composer.submit(session)
   const saved = JSON.parse([...storage.data.values()][0]!)
-  await images.remove([saved.admission.payload.images[0].ref])
+  await images.remove([saved.admission.payload.images[0].ref], [...storage.data.keys()][0]!)
   const restored = createComposer(session.id, directory, dependencies)
   await restored.loadCapabilities()
   await restored.retryAdmission()
@@ -1182,7 +1200,7 @@ test("Steer waits for image persistence and sends the original data URL", async 
   const store = createImageStore()
   const { composer, requests, storage } = harness(
     (request) => Response.json({ ...pending("request-1", "task", "steer"), images: (request.body as { images: unknown }).images }),
-    { images: { ...store, get volatile() { return false }, put: async (value) => { await gate.promise; return store.put(value) } } },
+    { images: { ...store, get volatile() { return false }, put: async (value, owner) => { await gate.promise; return store.put(value, owner) } } },
     imageCapabilities,
   )
   await composer.loadCapabilities()
@@ -1210,7 +1228,7 @@ test("GC removes an image when its acknowledged admission and draft are cleared"
   )
   await composer.loadCapabilities()
   composer.observeBusy(true)
-  composer.setImages([image])
+  composer.setImages([{ ...image, url: "data:image/png;base64,Z2MtYWRtaXNzaW9u" }])
   composer.selectMode("steer")
   await composer.submit(session)
   await composer.persistAsync()
@@ -1223,7 +1241,7 @@ test("GC removes an image when its acknowledged admission and draft are cleared"
 test("GC removes an image after it is removed from a saved draft", async () => {
   const images = createImageStore()
   const { composer, storage } = harness(undefined, { images })
-  composer.setImages([image])
+  composer.setImages([{ ...image, url: "data:image/png;base64,Z2MtZHJhZnQ=" }])
   await composer.persistAsync()
   const ref = JSON.parse([...((storage as MemoryStorage).data.values())][0]!).task.images[0].ref
   composer.setImages([])

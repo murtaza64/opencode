@@ -1,12 +1,16 @@
 export type StoredImage = { url: string; mime: string; filename?: string }
 export type ImageStore = {
   readonly volatile: boolean
-  put(image: StoredImage): Promise<string>
+  /** Saves the blob under its content hash and records `owner` as a draft referencing it. */
+  put(image: StoredImage, owner: string): Promise<string>
   get(key: string): Promise<StoredImage | undefined>
-  remove(keys: string[]): Promise<void>
+  /** Drops `owner`'s references; a blob is deleted only once no draft references it. */
+  remove(keys: string[], owner: string): Promise<void>
 }
 
-const memory = new Map<string, StoredImage & { at: number }>()
+type Stored = StoredImage & { at: number; owners?: string[] }
+
+const memory = new Map<string, Stored>()
 
 export const createImageStore = (): ImageStore => {
   let volatile = typeof indexedDB === "undefined"
@@ -21,24 +25,40 @@ export const createImageStore = (): ImageStore => {
     return undefined
   })
   const db = async () => database
+  const transact = async (store: IDBDatabase, keys: string[], update: (key: string, current: Stored | undefined) => Stored | undefined) =>
+    new Promise<void>((resolve, reject) => {
+      const transaction = store.transaction("blobs", "readwrite")
+      const blobs = transaction.objectStore("blobs")
+      keys.forEach((key) => {
+        const request = blobs.get(key)
+        request.onsuccess = () => {
+          const next = update(key, request.result as Stored | undefined)
+          if (next) blobs.put(next, key)
+          else blobs.delete(key)
+        }
+      })
+      transaction.oncomplete = () => resolve()
+      transaction.onerror = () => reject(transaction.error)
+      transaction.onabort = () => reject(transaction.error)
+    })
   return {
     get volatile() { return volatile },
-    async put(image) {
+    async put(image, owner) {
       const bytes = new TextEncoder().encode(image.url)
       const key = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("")
-      const value = { url: image.url, mime: image.mime, ...(image.filename === undefined ? {} : { filename: image.filename }), at: Date.now() }
+      const value = (current: Stored | undefined): Stored => ({
+        url: image.url,
+        mime: image.mime,
+        ...(image.filename === undefined ? {} : { filename: image.filename }),
+        at: Date.now(),
+        owners: [...new Set([...(current?.owners ?? []), owner])],
+      })
       const store = await db()
       if (!store) {
-        memory.set(key, value)
+        memory.set(key, value(memory.get(key)))
         return key
       }
-      await new Promise<void>((resolve, reject) => {
-        const transaction = store.transaction("blobs", "readwrite")
-        transaction.objectStore("blobs").put(value, key)
-        transaction.oncomplete = () => resolve()
-        transaction.onerror = () => reject(transaction.error)
-        transaction.onabort = () => reject(transaction.error)
-      })
+      await transact(store, [key], (_, current) => value(current))
       return key
     },
     async get(key) {
@@ -50,20 +70,24 @@ export const createImageStore = (): ImageStore => {
         request.onerror = () => reject(request.error)
       })
     },
-    async remove(keys) {
+    async remove(keys, owner) {
+      if (!keys.length) return
+      // Blobs saved before ownership tracking have no owners and keep the old delete-on-release behavior.
+      const release = (current: Stored | undefined) => {
+        if (!current?.owners) return undefined
+        const owners = current.owners.filter((item) => item !== owner)
+        return owners.length ? { ...current, owners } : undefined
+      }
       const store = await db()
       if (!store) {
-        keys.forEach((key) => memory.delete(key))
+        keys.forEach((key) => {
+          const next = release(memory.get(key))
+          if (next) memory.set(key, next)
+          else memory.delete(key)
+        })
         return
       }
-      if (!keys.length) return
-      await new Promise<void>((resolve, reject) => {
-        const transaction = store.transaction("blobs", "readwrite")
-        keys.forEach((key) => transaction.objectStore("blobs").delete(key))
-        transaction.oncomplete = () => resolve()
-        transaction.onerror = () => reject(transaction.error)
-        transaction.onabort = () => reject(transaction.error)
-      })
+      await transact(store, keys, (_, current) => release(current))
     },
   }
 }

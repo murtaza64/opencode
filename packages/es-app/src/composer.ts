@@ -295,7 +295,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       const removed = [...savedRefs].filter((ref) => !refs.has(ref))
       savedRefs = refs
       if (removed.length) void Promise.allSettled([...pendingPuts]).then(() =>
-        imageStore.remove(removed.filter((ref) => !savedRefs.has(ref))),
+        imageStore.remove(removed.filter((ref) => !savedRefs.has(ref)), key),
       ).catch((error) => setState("storageError", `Cannot remove saved images: ${message(error)}`))
       setState("storageError", imageWarning() || (imageStore.volatile && refs.size ? "Images remain in this tab only. Keep this tab open." : ""))
       return true
@@ -336,7 +336,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       try {
         await Promise.all(entries.map(async (image) => {
           if (!refs.has(image.url)) {
-            const put = imageStore.put(image)
+            const put = imageStore.put(image, key)
             pendingPuts.add(put)
             void put.then(() => pendingPuts.delete(put), () => pendingPuts.delete(put))
             refs.set(image.url, put)
