@@ -16,6 +16,7 @@ export interface Interface {
   readonly wake: (sessionID: SessionID, work: Effect.Effect<SessionV1.WithParts | undefined>) => Effect.Effect<void, SessionSupersession.Closed>
   readonly admit: <A, E, R>(sessionID: SessionID, work: Effect.Effect<A, E, R>) => Effect.Effect<A, E | SessionSupersession.Closed, R>
   readonly supersede: (sessionID: SessionID, successor: SessionID) => Effect.Effect<SessionSupersession.Receipt, SessionSupersession.Invalid | SessionSupersession.Closed>
+  readonly cancelSupersession: (sessionID: SessionID) => Effect.Effect<SessionSupersession.Receipt | undefined, SessionSupersession.Closed>
   readonly consume: (sessionID: SessionID) => Effect.Effect<void>
   readonly ensureRunning: (
     sessionID: SessionID,
@@ -135,6 +136,12 @@ const layer = Layer.effect(
       }))
     })
 
+    const cancelSupersession = Effect.fn("SessionRunState.cancelSupersession")(function* (sessionID: SessionID) {
+      // Serialized with supersede/admit so a cancel never interleaves with a fence request or an idle commit.
+      const owner = yield* runner(sessionID, Effect.succeed(undefined))
+      return yield* owner.locked(() => supersession.cancel(sessionID))
+    })
+
     const cancel = Effect.fn("SessionRunState.cancel")(function* (sessionID: SessionID) {
       yield* cancelBackgroundJobs(background, sessionID)
       const data = yield* InstanceState.get(state)
@@ -187,7 +194,7 @@ const layer = Layer.effect(
       return result === noAdvisoryWork || result === undefined ? yield* onInterrupt : result
     })
 
-    return Service.of({ assertNotBusy, cancel, ensureRunning, startShell, wake, consume, admit, supersede })
+    return Service.of({ assertNotBusy, cancel, ensureRunning, startShell, wake, consume, admit, supersede, cancelSupersession })
   }),
 )
 

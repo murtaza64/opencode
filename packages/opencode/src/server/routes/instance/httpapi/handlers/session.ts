@@ -298,6 +298,15 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       )
     })
 
+    const cancelSupersede = Effect.fn("SessionHttpApi.cancelSupersede")(function* (ctx: { params: { sessionID: SessionID } }) {
+      yield* requireSession(ctx.params.sessionID)
+      const receipt = yield* runState.cancelSupersession(ctx.params.sessionID).pipe(
+        Effect.catchTag("SessionSuperseded", SessionError.superseded),
+      )
+      if (!receipt) return yield* new ApiNotFoundError({ name: "NotFoundError", data: { message: `No pending supersession for ${ctx.params.sessionID}` } })
+      return receipt
+    })
+
     const aside = Effect.fn("SessionHttpApi.aside")(function* (ctx: {
       params: { sessionID: SessionID }
       payload: typeof SessionAside.Input.Type
@@ -569,6 +578,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handleRaw("fork", forkRaw)
       .handle("abort", abort)
       .handle("supersede", supersede)
+      .handle("cancelSupersede", cancelSupersede)
       .handle("aside", aside)
       .handle("cancelAside", cancelAside)
       .handle("init", init)

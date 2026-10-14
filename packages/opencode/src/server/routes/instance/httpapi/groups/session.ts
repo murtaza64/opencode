@@ -373,6 +373,19 @@ export const SessionApi = HttpApi.make("session")
         }).annotateMerge(
           OpenApi.annotations({ identifier: "session.supersede", summary: "Fence a legacy session at its idle boundary" }),
         ),
+        HttpApiEndpoint.delete("cancelSupersede", SessionPaths.supersede, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          success: SupersedeReceipt,
+          error: [HttpApiError.BadRequest, ApiNotFoundError, SessionSupersededError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.cancelSupersede",
+            summary: "Cancel a pending supersession fence",
+            description:
+              "Reopen a session whose handoff was abandoned before its fence committed. Returns the cancelled pending receipt; a committed fence is final and answers 409.",
+          }),
+        ),
         HttpApiEndpoint.post("init", SessionPaths.init, {
           params: { sessionID: SessionID },
           query: WorkspaceRoutingQuery,

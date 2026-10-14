@@ -60,3 +60,23 @@ it.live("a V2 drain holds the V1 pending fence until provider completion", () =>
     expect((yield* run.supersede(original.id, successor.id)).state).toBe("committed")
     expect(yield* Effect.flip(execution.resume(original.id))).toMatchObject({ state: "committed" })
   }), { git: true }), 60_000)
+
+it.live("cancelling a pending fence reopens a V2 session for new drains", () =>
+  provideTmpdirInstance(() => Effect.gen(function* () {
+    release.resolve()
+    const sessions = yield* Session.Service
+    const original = yield* sessions.create({ title: "Reopened" })
+    const successor = yield* sessions.create({ title: "Abandoned" })
+    const execution = yield* SessionExecution.Service
+    const run = yield* SessionRunState.Service
+    const supersession = yield* SessionSupersession.Service
+    expect((yield* supersession.request(original.id, successor.id)).state).toBe("pending")
+    expect(yield* Effect.flip(execution.wake(original.id))).toMatchObject({ state: "pending" })
+    expect(yield* run.cancelSupersession(original.id)).toMatchObject({ successor: successor.id, state: "pending" })
+    expect(yield* supersession.get(original.id)).toBeUndefined()
+    const before = calls
+    yield* execution.resume(original.id)
+    expect(calls).toBe(before + 1)
+    expect(yield* supersession.get(original.id)).toBeUndefined()
+    expect(yield* run.cancelSupersession(original.id)).toBeUndefined()
+  }), { git: true }), 30_000)

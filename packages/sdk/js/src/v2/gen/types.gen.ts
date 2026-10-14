@@ -10448,6 +10448,10 @@ export type SessionDeleteErrors = {
    * NotFoundError
    */
   404: NotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
 }
 
 export type SessionDeleteError = SessionDeleteErrors[keyof SessionDeleteErrors]
@@ -10973,6 +10977,48 @@ export type SessionAbortResponses = {
 }
 
 export type SessionAbortResponse = SessionAbortResponses[keyof SessionAbortResponses]
+
+export type SessionCancelSupersedeData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/supersede"
+}
+
+export type SessionCancelSupersedeErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+  /**
+   * SessionSupersededError
+   */
+  409: SessionSupersededError
+}
+
+export type SessionCancelSupersedeError = SessionCancelSupersedeErrors[keyof SessionCancelSupersedeErrors]
+
+export type SessionCancelSupersedeResponses = {
+  /**
+   * Success
+   */
+  200: {
+    sessionID: string
+    successor: string
+    state: "pending" | "committed"
+  }
+}
+
+export type SessionCancelSupersedeResponse = SessionCancelSupersedeResponses[keyof SessionCancelSupersedeResponses]
 
 export type SessionSupersedeData = {
   body?: {

@@ -27,6 +27,8 @@ export interface Interface {
   readonly get: (sessionID: SessionID) => Effect.Effect<Receipt | undefined>
   readonly request: (sessionID: SessionID, successor: SessionID) => Effect.Effect<Receipt, Invalid | Closed>
   readonly commit: (sessionID: SessionID) => Effect.Effect<Receipt | undefined>
+  /** Drops a pending fence so the predecessor reopens; a committed fence is final and fails Closed. */
+  readonly cancel: (sessionID: SessionID) => Effect.Effect<Receipt | undefined, Closed>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionSupersession") {}
@@ -89,7 +91,21 @@ const layer = Layer.effect(
         .pipe(Effect.orDie)
       return yield* get(sessionID)
     })
-    return Service.of({ get, request, commit })
+    const cancel = Effect.fn("SessionSupersession.cancel")(function* (sessionID: SessionID) {
+      const existing = yield* get(sessionID)
+      if (!existing) return undefined
+      if (existing.state === "committed") return yield* new Closed(existing)
+      yield* db
+        .delete(SessionSupersessionTable)
+        .where(and(eq(SessionSupersessionTable.session_id, sessionID), eq(SessionSupersessionTable.state, "pending")))
+        .run()
+        .pipe(Effect.orDie)
+      const current = yield* get(sessionID)
+      // A drain settling between the read and the delete may have committed it.
+      if (current) return yield* new Closed(current)
+      return existing
+    })
+    return Service.of({ get, request, commit, cancel })
   }),
 )
 

@@ -162,3 +162,80 @@ it.live("concurrent input and fence never start predecessor work after commit", 
     expect((yield* post("prompt_async", { agent: "build", model: { providerID: "test", modelID: "test-model" }, parts: [{ type: "text", text: "after commit" }] })).status).toBe(409)
     expect((yield* llm.inputs).length).toBe(calls)
   }), { config: testProviderConfig }), 25_000)
+
+it.live("a pending fence can be cancelled to reopen the predecessor, while a committed fence is final", () =>
+  provideTmpdirServer(({ dir, llm }) => Effect.gen(function* () {
+    const original = yield* Session.use.create({ title: "Abandoned handoff" })
+    const successor = yield* Session.use.create({ title: "Never started" })
+    const supersession = yield* SessionSupersession.Service
+    const run = yield* SessionRunState.Service
+    const cancel = () => requestInDirectory(`/session/${original.id}/supersede`, dir, { method: "DELETE" })
+    expect((yield* cancel()).status).toBe(404)
+    // Request directly: an idle admission would commit the fence, which is exactly what an abandoned handoff must avoid.
+    expect((yield* supersession.request(original.id, successor.id)).state).toBe("pending")
+    const cancelled = yield* cancel()
+    expect(cancelled.status).toBe(200)
+    expect(yield* cancelled.json).toEqual({ sessionID: original.id, successor: successor.id, state: "pending" })
+    expect(yield* supersession.get(original.id)).toBeUndefined()
+    expect(yield* run.admit(original.id, Effect.succeed("reopened"))).toBe("reopened")
+    expect((yield* cancel()).status).toBe(404)
+    const committed = yield* requestInDirectory(`/session/${original.id}/supersede`, dir, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ successor: successor.id }),
+    })
+    expect(yield* committed.json).toMatchObject({ state: "committed" })
+    const final = yield* cancel()
+    expect(final.status).toBe(409)
+    expect(yield* final.json).toMatchObject({ _tag: "SessionSupersededError", successor: successor.id, state: "committed" })
+    expect((yield* Effect.flip(run.admit(original.id, Effect.succeed("still closed")))).state).toBe("committed")
+    expect(yield* llm.inputs).toHaveLength(0)
+  }), { config: testProviderConfig }), 20_000)
+
+it.live("cancelling a busy pending fence lets the predecessor accept work after its turn settles", () =>
+  provideTmpdirServer(({ dir, llm }) => Effect.gen(function* () {
+    const held = Promise.withResolvers<void>()
+    yield* Effect.addFinalizer(() => Effect.sync(() => held.resolve()))
+    yield* llm.push(reply().text("first turn").wait(held.promise).stop())
+    yield* llm.text("second turn")
+    const original = yield* Session.use.create({ title: "Busy then reopened" })
+    const successor = yield* Session.use.create({ title: "Abandoned" })
+    const supersession = yield* SessionSupersession.Service
+    const post = (suffix: string, body: unknown) => requestInDirectory(`/session/${original.id}/${suffix}`, dir, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    })
+    expect((yield* post("prompt_async", { agent: "build", model: { providerID: "test", modelID: "test-model" }, parts: [{ type: "text", text: "first" }] })).status).toBe(204)
+    yield* llm.wait(1)
+    expect(yield* (yield* post("supersede", { successor: successor.id })).json).toMatchObject({ state: "pending" })
+    const cancelled = yield* requestInDirectory(`/session/${original.id}/supersede`, dir, { method: "DELETE" })
+    expect(cancelled.status).toBe(200)
+    expect(yield* cancelled.json).toMatchObject({ state: "pending" })
+    held.resolve()
+    yield* pollWithTimeout(Effect.gen(function* () {
+      const body = yield* (yield* requestInDirectory(`/session/status`, dir)).json
+      const status = body as Record<string, { type: string }>
+      return status[original.id] === undefined || status[original.id]?.type === "idle" ? true : undefined
+    }), "predecessor did not settle", "10 seconds")
+    expect(yield* supersession.get(original.id)).toBeUndefined()
+    expect((yield* post("input", { requestID: "after-cancel", delivery: "queue", text: "second" })).status).toBe(200)
+    yield* llm.wait(2)
+    expect(yield* llm.inputs).toHaveLength(2)
+  }), { config: testProviderConfig }), 30_000)
+
+it.live("deleting a fenced successor is refused until its predecessor is gone", () =>
+  provideTmpdirServer(({ dir }) => Effect.gen(function* () {
+    const original = yield* Session.use.create({ title: "Predecessor" })
+    const successor = yield* Session.use.create({ title: "Successor" })
+    const supersession = yield* SessionSupersession.Service
+    const remove = (id: string) => requestInDirectory(`/session/${id}`, dir, { method: "DELETE" })
+    expect((yield* supersession.request(original.id, successor.id)).state).toBe("pending")
+    const pending = yield* remove(successor.id)
+    expect(pending.status).toBe(409)
+    expect(yield* pending.json).toMatchObject({ _tag: "ConflictError", resource: original.id })
+    yield* supersession.commit(original.id)
+    const committed = yield* remove(successor.id)
+    expect(committed.status).toBe(409)
+    expect(yield* pending.json).toMatchObject({ _tag: "ConflictError", resource: original.id })
+    expect((yield* requestInDirectory(`/session/${successor.id}`, dir)).status).toBe(200)
+    expect((yield* remove(original.id)).status).toBe(200)
+    expect((yield* remove(successor.id)).status).toBe(200)
+    expect((yield* requestInDirectory(`/session/${successor.id}`, dir)).status).toBe(404)
+  }), { config: testProviderConfig }), 20_000)
