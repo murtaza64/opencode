@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { Message } from "@opencode-ai/sdk/v2"
-import type { MailTimeline } from "./api"
-import { mailLocation, mailRows } from "./mail-timeline"
+import type { MailMessage, MailTimeline } from "./api"
+import { mailForSession, mailLocation, mailRows } from "./mail-timeline"
 
 test("selects the matching editspace and lane from the session directory", () => {
   const roots = [
@@ -36,4 +36,25 @@ test("sorts mail alongside transcript messages and deduplicates only structured 
     ? { ...message, deliveries: [{ ...message.deliveries[0], state: "handled" }] } : message) }, rows)
   expect(updated[2]).toMatchObject({ type: "mail", message: { deliveries: [{ state: "handled" }] } })
   expect(updated[2]).not.toBe(rows[2])
+})
+
+test("scopes a shared lane feed to each session by receipt session, sender session, then ownership interval", () => {
+  const delivery = { message_id: "", recipient: "alpha", mode: "queue", state: "read", request_id: null, error: null, presented_at: null, handled_at: null }
+  const messages: MailMessage[] = [
+    { id: "old-received", ts: 1000, from: "beta", to: "alpha", direction: "received", text: "", deliveries: [{ ...delivery, message_id: "old-received", session: "ses_old" }] },
+    { id: "old-sent", ts: 1500, from: "alpha", to: "beta", direction: "sent", sender_session: "ses_old", text: "", deliveries: [] },
+    { id: "pending-before", ts: 1800, from: "beta", to: "alpha", direction: "received", text: "", deliveries: [{ ...delivery, message_id: "pending-before", session: null, state: "pending" }] },
+    { id: "new-received", ts: 1900, from: "beta", to: "alpha", direction: "received", text: "", deliveries: [
+      { ...delivery, message_id: "new-received", recipient: "gamma", session: "ses_gamma" },
+      { ...delivery, message_id: "new-received", session: "ses_new", presented_at: 2100 },
+    ] },
+    { id: "new-sent", ts: 2500, from: "alpha", to: "beta", direction: "sent", text: "", deliveries: [] },
+    { id: "late-presented", ts: 1950, from: "beta", to: "alpha", direction: "received", text: "", deliveries: [{ ...delivery, message_id: "late-presented", session: null, presented_at: 2200 }] },
+  ]
+  const old = mailForSession(messages, { sessionID: "ses_old", lane: "alpha", to: 2000 })
+  expect(old.map((message) => message.id)).toEqual(["old-received", "old-sent", "pending-before"])
+  const next = mailForSession(messages, { sessionID: "ses_new", lane: "alpha", from: 2000 })
+  expect(next.map((message) => message.id)).toEqual(["new-received", "new-sent", "late-presented"])
+  expect(mailForSession(messages, { sessionID: "ses_new" }).map((message) => message.id))
+    .toEqual(["pending-before", "new-received", "new-sent", "late-presented"])
 })

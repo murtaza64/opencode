@@ -7,12 +7,13 @@ const timestamp = (value: string | number | null) => {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
 }
 
-export const MailRow = (props: { message: MailMessage; ids: Set<string> }) => {
+export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?: string }) => {
+  const anchor = () => props.anchor ?? "mail"
   const references = () => [
     { label: "Reply to", id: props.message.in_reply_to },
     { label: "Supersedes", id: props.message.supersedes },
   ].filter((item): item is { label: string; id: string } => !!item.id)
-  return <details class="mail-activity" id={`mail-${props.message.id}`} data-mail-id={props.message.id}>
+  return <details class="mail-activity" id={`${anchor()}-${props.message.id}`} data-mail-id={props.message.id}>
     <summary class="mail-activity-summary">
        <span class="mail-activity-kind">Mail · {props.message.direction === "sent" ? "Outbound" : "Inbound"}</span>
       <span class="mail-activity-route"><bdi dir="auto">{props.message.from}</bdi> → <bdi dir="auto">{props.message.to}</bdi></span>
@@ -27,7 +28,7 @@ export const MailRow = (props: { message: MailMessage; ids: Set<string> }) => {
       <Show when={props.message.origin_run}><div>Origin run: <bdi dir="auto">{props.message.origin_run}</bdi></div></Show>
       <Show when={props.message.relationship}><div>Relationship: <bdi dir="auto">{props.message.relationship}</bdi></div></Show>
       <For each={references()}>{(ref) => <div>{ref.label}: <Show when={props.ids.has(ref.id)} fallback={<bdi dir="auto">{ref.id}</bdi>}>
-        <a href={`#mail-${ref.id}`}><bdi dir="auto">{ref.id}</bdi></a>
+        <a href={`#${anchor()}-${ref.id}`}><bdi dir="auto">{ref.id}</bdi></a>
       </Show></div>}</For>
       <div class="mail-activity-body" dir="auto">{props.message.text}</div>
        <For each={props.message.deliveries}>{(delivery) => <div class="mail-delivery">

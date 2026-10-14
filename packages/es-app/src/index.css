@@ -1853,6 +1853,8 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .issue-comment { margin: 14px 0; background: var(--mantle); padding: 10px 14px; }
 .issue-comment .comment-head { display: flex; gap: 10px; align-items: baseline; margin-bottom: 6px; font-size: 12.5px; }
 .mail-subscriptions-toggle { align-self: flex-start; }
+.lane-mail-toggle { align-self: flex-start; }
+.lane-mail { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--surface0); background: var(--mantle); max-height: 40vh; overflow: auto; }
 .mail-subscriptions { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--surface0); background: var(--mantle); }
 .mail-subscription { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .mail-subscription span { flex: 1; min-width: 170px; }

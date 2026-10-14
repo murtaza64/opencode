@@ -55,6 +55,34 @@ try {
   await expect(page.locator('[data-mail-id="mail-a"] summary')).toContainText("handled")
   await expect(page.locator('[data-mail-id="mail-a"]')).toContainText("Handled:")
   expect(fixture.calls.filter(call => call.path === "/api/mail").length).toBeGreaterThanOrEqual(2)
+  // Lineage: ses_a handed the lane to ses_b. Each transcript shows only mail delivered to or sent by
+  // that session; the lane mail view keeps the whole feed.
+  fixture.handoffs = [{ lane: "lane-alpha", predecessor: "ses_a", successor: "ses_b" }]
+  fixture.messages = []
+  fixture.mail = (es, lane) => ({ editspace: es, lane, messages: lane !== "lane-alpha" ? [] : [
+    { id: "mail-a", ts, from: "lane-beta", to: "lane-alpha", direction: "received", text: "Before handoff", deliveries: [{ ...delivery, session: "ses_a" }] },
+    { id: "mail-b", ts: "2026-10-13T12:01:00Z", from: "lane-alpha", to: "lane-beta", direction: "sent", sender_session: "ses_a", text: "Reply", deliveries: [outbound] },
+    { id: "mail-d", ts: "2026-10-13T12:05:00Z", from: "lane-beta", to: "lane-alpha", direction: "received", text: "After handoff", deliveries: [{ ...delivery, message_id: "mail-d", session: "ses_b", presented_at: "2026-10-13T12:05:30Z" }] },
+    { id: "mail-e", ts: "2026-10-13T12:06:00Z", from: "lane-alpha", to: "lane-beta", direction: "sent", sender_session: "ses_b", text: "Successor reply", deliveries: [] },
+  ] })
+  await page.goto(`${preview.origin}/session/ses_a?directory=${encodeURIComponent(directory)}`)
+  await expect(page.locator('.transcript [data-mail-id="mail-a"]')).toHaveCount(1)
+  await expect(page.locator('.transcript [data-mail-id="mail-b"]')).toHaveCount(1)
+  await expect(page.locator('.transcript [data-mail-id="mail-d"]')).toHaveCount(0)
+  await expect(page.locator('.transcript [data-mail-id="mail-e"]')).toHaveCount(0)
+  await expect(page.locator(".handoff-crumb")).toContainText(["successor (lane-alpha): ses_b"])
+  await page.getByRole("button", { name: "Lane mail (4)" }).click()
+  await expect(page.locator('.lane-mail [data-mail-id]')).toHaveCount(4)
+  await expect(page.locator('.lane-mail [id="lane-mail-mail-d"]')).toHaveCount(1)
+  await page.getByRole("button", { name: "Hide lane mail" }).click()
+  await expect(page.locator(".lane-mail")).toHaveCount(0)
+  await page.goto(`${preview.origin}/session/ses_b?directory=${encodeURIComponent(directory)}`)
+  await expect(page.locator('.transcript [data-mail-id="mail-d"]')).toHaveCount(1)
+  await expect(page.locator('.transcript [data-mail-id="mail-e"]')).toHaveCount(1)
+  await expect(page.locator('.transcript [data-mail-id="mail-a"]')).toHaveCount(0)
+  await expect(page.locator('.transcript [data-mail-id="mail-b"]')).toHaveCount(0)
+  await expect(page.locator(".handoff-crumb")).toContainText(["predecessor (lane-alpha): ses_a"])
+  fixture.handoffs = undefined
   fixture.mail = (es, recipient) => ({ editspace: es, lane: "", messages: recipient === "ses_a" ? [
     { id: "parent-mail", ts, from: "reviewer", to: "ses_a", direction: "received", text: "Review ready", deliveries: [
       { ...delivery, message_id: "parent-mail", recipient: "ses_a", session: "ses_a" },
@@ -64,7 +92,7 @@ try {
   await expect(page.locator('[data-mail-id="parent-mail"]')).toHaveCount(1)
   expect(fixture.calls.some(call => call.path === "/api/mail" && call.es === "fixture" && call.recipientSession === "ses_a")).toBe(true)
   expect(errors).toEqual([])
-  console.log("PASS mail timeline: scoped fetch, read/handled invalidation, ordered rows, safe body and links")
+  console.log("PASS mail timeline: scoped fetch, read/handled invalidation, ordered rows, safe body and links, lineage scoping with lane mail view")
 } finally {
   await browser.close()
   await preview.close()

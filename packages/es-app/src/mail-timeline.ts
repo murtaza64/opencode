@@ -29,6 +29,25 @@ export const mailSourceID = (message: Message) => {
   return source.id
 }
 
+export type MailInterval = { sessionID: string; lane?: string; from?: number; to?: number }
+
+// One lane feed serves every session in a handoff lineage. A receipt naming the
+// session that received or sent a message decides its row; otherwise the message
+// must fall inside this session's ownership interval (bounded by the handoff that
+// created it and the one that created its successor).
+export const mailForSession = (messages: MailMessage[], interval: MailInterval) =>
+  messages.filter((message) => {
+    const receipts = message.deliveries.filter((delivery) =>
+      delivery.session && (interval.lane === undefined || delivery.recipient === interval.lane))
+    if (message.direction === "received" && receipts.length)
+      return receipts.some((delivery) => delivery.session === interval.sessionID)
+    if (message.direction === "sent" && message.sender_session) return message.sender_session === interval.sessionID
+    const presented = message.deliveries.find((delivery) =>
+      delivery.presented_at != null && (interval.lane === undefined || delivery.recipient === interval.lane))?.presented_at
+    const at = presented == null ? mailTimestamp(message.ts) : mailTimestamp(presented)
+    return (interval.from === undefined || at >= interval.from) && (interval.to === undefined || at < interval.to)
+  })
+
 type TimelineRow = { type: "transcript"; message: Message; timestamp: number } | { type: "mail"; message: MailMessage; timestamp: number }
 
 export const mailRows = (messages: Message[], timeline: MailTimeline | undefined,

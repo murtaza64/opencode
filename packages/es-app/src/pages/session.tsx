@@ -31,7 +31,7 @@ import { TodoPanel, TodoPart } from "../components/todos"
 import { usePulse } from "../pulse"
 import { MailRow } from "../components/mail-row"
 import { MailSubscriptions } from "../components/mail-subscriptions"
-import { mailLocation, mailRows, mailSourceID } from "../mail-timeline"
+import { mailForSession, mailLocation, mailRows, mailSourceID } from "../mail-timeline"
 import { handoffChain, handoffNext, successorFor } from "../handoffs"
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
@@ -160,6 +160,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const [handoffError, setHandoffError] = createSignal("")
   const [handoffPending, setHandoffPending] = createSignal(false)
   const [subscriptionsOpen, setSubscriptionsOpen] = createSignal(false)
+  const [laneMailOpen, setLaneMailOpen] = createSignal(false)
   const location = () => mailLocation(directory, editspaces()?.editspaces ?? [], sessionID)
   const [mail] = createResource(
     () => {
@@ -340,7 +341,22 @@ function SessionView(props: { sessionID: string; directory: string }) {
       onDone={() => item() ? activity.refreshDirectory(item()!.directory, true) : Promise.resolve()} />
   }
   const renderTools = { question: QuestionPart, todowrite: TodoPart }
-  const timeline = createMemo<ReturnType<typeof mailRows>>((previous) => mailRows(messages(), mail(), previous))
+  // Predecessor and successor share one lane feed; each transcript shows only its own interval.
+  const sessionMail = createMemo(() => {
+    const feed = mail()
+    if (!feed) return
+    const next = nextHandoff()
+    return mailForSession(feed.messages, {
+      sessionID,
+      lane: location()?.lane,
+      from: predecessor() ? session()?.time.created : undefined,
+      to: next ? activity.session(next.successor)?.time.created : undefined,
+    })
+  })
+  const timeline = createMemo<ReturnType<typeof mailRows>>((previous) => {
+    const feed = mail()
+    return mailRows(messages(), feed && { ...feed, messages: sessionMail() ?? [] }, previous)
+  })
   const mailIDs = createMemo(() => new Set(mail()?.messages.map((message) => message.id) ?? []))
   const mailRecords = createMemo(() => new Map(mail()?.messages.map((message) => [message.id, message] as const) ?? []))
 
@@ -1110,6 +1126,18 @@ function SessionView(props: { sessionID: string; directory: string }) {
             </button>
             <Show when={subscriptionsOpen()}><MailSubscriptions editspace={scope().name}
               recipient={scope().lane ?? scope().session ?? sessionID} /></Show>
+            <Show when={scope().lane !== undefined}>
+              <button class="lane-mail-toggle" onClick={() => setLaneMailOpen(!laneMailOpen())}>
+                {laneMailOpen() ? "Hide lane mail" : `Lane mail (${mail()?.messages.length ?? 0})`}
+              </button>
+              <Show when={laneMailOpen()}>
+                <section class="lane-mail" aria-label="Lane mail">
+                  <div class="banner-head">All mail for lane {scope().lane} across handoffs</div>
+                  <Show when={!mail()?.messages.length}><div class="dim">No lane mail.</div></Show>
+                  <For each={mail()?.messages ?? []}>{(message) => <MailRow message={message} ids={mailIDs()} anchor="lane-mail" />}</For>
+                </section>
+              </Show>
+            </Show>
           </>}</Show>
           <Show when={live.connectionError()}>
             <div class="err" role="alert">{live.connectionError()}
