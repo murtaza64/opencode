@@ -1,7 +1,8 @@
 /* Right panel on the session page: identity, spend, editspace joins (lane,
  * tickets, PRs via the dashboard's thread model), tracker tickets and docs
  * this session references, and links shared in the conversation. */
-import { createEffect, createMemo, createResource, createSignal, For, Show } from "solid-js"
+import { createEffect, createMemo, createResource, createSignal, For, Show, untrack } from "solid-js"
+import { unwrap } from "solid-js/store"
 import { A } from "@solidjs/router"
 import type { Message, Part, Session } from "@opencode-ai/sdk/v2"
 import { es, type IssueRow } from "../api"
@@ -110,9 +111,20 @@ function SessionInfoBody(props: {
     (name) => es.docs(name || undefined).catch(() => undefined),
   )
 
-  const sessionParts = createMemo(() => Object.fromEntries(props.messages
+  // Transcript scans (references, links, PRs, composition) walk every part.
+  // Tracking part text re-ran them on every streamed token; they now follow
+  // boundaries (a message or part added, a message completed or failed) and
+  // read raw values.
+  const boundary = createMemo(() => props.messages
     .filter((message) => message.sessionID === props.sessionID)
-    .map((message) => [message.id, props.parts[message.id] ?? []])))
+    .map((message) => `${message.id}:${props.parts[message.id]?.length ?? 0}:${message.role === "assistant" ? `${message.time.completed ?? ""}:${message.error ? 1 : 0}` : ""}`)
+    .join(","))
+  const sessionParts = createMemo(() => {
+    boundary()
+    return untrack(() => Object.fromEntries(props.messages
+      .filter((message) => message.sessionID === props.sessionID)
+      .map((message) => [message.id, unwrap(props.parts[message.id]) ?? []])))
+  })
   const scanned = createMemo(() => transcriptStrings(sessionParts()))
 
   // tracker tickets this session references: the lane's claimed issue plus
@@ -266,7 +278,10 @@ function SessionInfoBody(props: {
   const latestTurn = createMemo(() => latestCompletedTurn(props.messages.filter((m) => m.sessionID === props.sessionID)))
   const usage = createMemo(() => contextUsage(latestTurn(), props.providers))
   const turns = createMemo(() => countCompletedTurns(props.messages.filter((m) => m.sessionID === props.sessionID)))
-  const composition = createMemo(() => estimateComposition(props.messages.filter((m) => m.sessionID === props.sessionID), props.parts))
+  const composition = createMemo(() => {
+    boundary()
+    return untrack(() => estimateComposition(unwrap(props.messages).filter((m) => m.sessionID === props.sessionID), sessionParts()))
+  })
   const slices = createMemo(() => compositionSlices(composition()))
 
   const latestAssistant = createMemo(() => props.messages.findLast((message): message is Extract<Message, { role: "assistant" }> =>

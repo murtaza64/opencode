@@ -39,6 +39,8 @@ function ThreadCard(props: {
 }) {
   const { dotFor } = useDashboard()
   const s0 = () => props.t.sessions[0]
+  // Memoized: dotFor tracks every activity snapshot, and its string rarely changes.
+  const dot = createMemo(() => s0() ? dotFor(s0()) : "idle")
   const digest = () => props.t.digest?.result
   const laneStatuses = () =>
     props.t.lanes
@@ -54,18 +56,18 @@ function ThreadCard(props: {
             <span class="title dim">{props.t.curated ? props.t.title : "no live session"}</span>
           }
         >
-          <span class={`dot ${dotFor(s0())}`} />
+          <span class={`dot ${dot()}`} />
           <A class="title" href={sessionHref(s0().id, s0().directory ?? props.directory)}>
             <SessionIcon />
             {props.t.title}
           </A>
           <span class="dim">
-            {dotFor(s0())}
+            {dot()}
             {s0().updated ? ` · ${ago(s0().updated)}` : ""}
           </span>
           <button
             onClick={() => props.onDigest(s0().id)}
-            disabled={dotFor(s0()) === "busy" || s0().digesting}
+            disabled={dot() === "busy" || s0().digesting}
           >
             {s0().digesting ? "…" : "digest"}
           </button>
@@ -360,16 +362,19 @@ function AllProjectsLanding() {
         <h2>Needs you</h2>
         <div class="session-list">
           <For each={notifications()}>
-            {(n) => (
+            {(n) => {
+              const dot = createMemo(() => dotFor({ id: n.session, updated: n.updated, pending: n.kind !== "idle" }))
+              return (
               <div class="pr">
                 <A href={sessionHref(n.session, n.directory)} onClick={() => markViewed(n.session, true)}>
-                  <span class={`dot ${dotFor({ id: n.session, updated: n.updated, pending: n.kind !== "idle" })}`} />
+                  <span class={`dot ${dot()}`} />
                   <SessionIcon />
                   {n.title}
                 </A>
                 <span class="dim">{n.editspace ? `${n.editspace} · ` : ""}{n.kind}</span>
               </div>
-            )}
+              )
+            }}
           </For>
         </div>
       </Show>
@@ -388,16 +393,19 @@ function AllProjectsLanding() {
               </h2>
               <div class="session-list">
                 <For each={rows}>
-                  {(s) => (
+                  {(s) => {
+                    const dot = createMemo(() => dotFor(s))
+                    return (
                     <div class="pr">
                       <A href={sessionHref(s.id, s.directory)} title={s.directory}>
-                        <span class={`dot ${dotFor(s)}`} />
+                        <span class={`dot ${dot()}`} />
                         <SessionIcon />
                         {s.title || s.id}
                       </A>
-                      <span class="dim">{dotFor(s)} · {ago(s.updated)}</span>
+                      <span class="dim">{dot()} · {ago(s.updated)}</span>
                     </div>
-                  )}
+                    )
+                  }}
                 </For>
               </div>
             </section>

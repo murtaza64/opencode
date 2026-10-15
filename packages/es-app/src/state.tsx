@@ -235,47 +235,44 @@ export function DashboardProvider(props: ParentProps) {
     return out
   })
 
-  // archived session ids, editspace-wide: the dashboard payload doesn't carry
-  // the flag, so ask the daemon per distinct directory. Keyed on state() so it
-  // refreshes with the dashboard's SSE ticks; the session page also refetches
-  // explicitly after archiving.
-  const [archived, { refetch: refetchProjectArchived }] = createResource(state, async (st: any) => {
-    const dirs = [
-      ...new Set<string>(
-        (st?.threads ?? [])
-          .filter((t: any) => t.kind === "session" && t.sessions[0]?.directory)
-          .map((t: any) => t.sessions[0].directory as string),
-      ),
-    ]
-    const out = new Set<string>()
-    await Promise.all(
-      dirs.map(async (d) => {
-        for (const s of await oc.sessions(d).catch(() => [])) {
-          if ((s as any).time?.archived) out.add(s.id)
-        }
-      }),
-    )
-    return out
-  })
-  const sessionRows = createMemo<SessionRow[]>(() => {
-    if (allProjects()) {
-      return (globalSessions() ?? []).filter((s) => !s.parentID).map((s) => ({
-        id: s.id,
-        title: s.title,
-        directory: s.directory,
-        updated: s.time.updated,
-        archived: s.time.archived,
-        project: resolveProjectName(s, editspaces()?.editspaces ?? []),
-      }))
-    }
-    return (state()?.threads ?? [])
-      .filter((t: any) => t.kind === "session" && t.sessions[0])
-      .map((t: any) => t.sessions[0])
-  })
-  const archivedIds = createMemo(() => allProjects()
-    ? new Set(sessionRows().filter((s) => s.archived).map((s) => s.id))
-    : archived() ?? new Set<string>(),
+  // Archived ids come from the global session index (it lists archived rows and
+  // follows session.updated events). Re-listing every thread directory on each
+  // dashboard tick cost ~140 full /session reads per 30 s with a large editspace.
+  const archived = createMemo(
+    () => new Set((globalSessions() ?? []).flatMap((session) => session.time.archived ? [session.id] : [])),
+    new Set<string>(),
+    { equals: (a, b) => a.size === b.size && [...a].every((id) => b.has(id)) },
   )
+  // Every dashboard tick and session event delivers fresh objects; reuse
+  // unchanged rows so keyed sidebar lists patch in place instead of remounting
+  // every row each tick.
+  const rowCache = new Map<string, SessionRow>()
+  const stableRow = (row: SessionRow) => {
+    const previous = rowCache.get(row.id)
+    const keys = Object.keys(row) as (keyof SessionRow)[]
+    if (previous && keys.length === Object.keys(previous).length && keys.every((key) => previous[key] === row[key])) return previous
+    rowCache.set(row.id, row)
+    return row
+  }
+  const sessionRows = createMemo<SessionRow[]>(() => {
+    const rows: SessionRow[] = allProjects()
+      ? (globalSessions() ?? []).filter((s) => !s.parentID).map((s) => ({
+          id: s.id,
+          title: s.title,
+          directory: s.directory,
+          updated: s.time.updated,
+          archived: s.time.archived,
+          project: resolveProjectName(s, editspaces()?.editspaces ?? []),
+        }))
+      : (state()?.threads ?? [])
+          .filter((t: any) => t.kind === "session" && t.sessions[0])
+          .map((t: any) => t.sessions[0])
+    const next = rows.map(stableRow)
+    const keep = new Set(next.map((row) => row.id))
+    for (const id of rowCache.keys()) if (!keep.has(id)) rowCache.delete(id)
+    return next
+  })
+  const archivedIds = archived
   const sessions = createMemo(() => sessionRows()
     .filter((s) => !archivedIds().has(s.id))
     .sort((a, b) => b.updated - a.updated),
@@ -295,10 +292,7 @@ export function DashboardProvider(props: ParentProps) {
     })
   })
   const unpinnedSessions = createMemo(() => sessions().filter((s) => !isPinned(s)))
-  const refetchArchived = () => {
-    refetchProjectArchived()
-    if (allProjects()) refetchGlobal()
-  }
+  const refetchArchived = () => { refetchGlobal() }
 
   const dotFor = (s: { id: string; live?: string; updated?: number; pending?: boolean }): DotState => {
     if (activity.pending(s.id).length) return "pending"

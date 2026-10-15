@@ -15,6 +15,12 @@ const upstream = createServer((req, res) => {
     return
   }
   res.writeHead(200, { "content-type": "text/event-stream" })
+  if (new URL(req.url, "http://localhost").searchParams.has("typed")) {
+    for (const [id, type] of [[1, "project.updated"], [2, "session.status"], [3, "message.part.delta"], [4, "todo.updated"]])
+      res.write(`id: ${id}\ndata: ${JSON.stringify({ directory: "/fixture", payload: { type, properties: {} } })}\n\n`)
+    res.write(`id: 5\ndata: untyped\n\n`)
+    return
+  }
   res.write(`id: 7\ndata: ${new URL(req.url, "http://localhost").pathname}\n\n`)
 })
 await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve))
@@ -69,7 +75,23 @@ try {
   assert.deepEqual(await notification, { id: 3, type: "message", data: "/api/notification-events", lastEventId: "7" })
   next.close()
   await new Promise((resolve) => next.once("close", resolve))
-  console.log("PASS protected event mux: scoped/global/dashboard delivery, reconnect, origin/key/host/query denial")
+
+  const filtered = connect("/oc/global/event")
+  await opened(filtered)
+  const kept = []
+  const typed = new Promise((resolve) => filtered.on("message", (data) => {
+    const packet = JSON.parse(data.toString())
+    if (packet.type !== "message") return
+    kept.push(packet)
+    if (packet.lastEventId === "5") resolve()
+  }))
+  filtered.send(JSON.stringify({ type: "subscribe", id: 4, url: "/oc/global/event?typed=1", types: ["session.", "todo."] }))
+  await typed
+  assert.deepEqual(kept.map((packet) => packet.lastEventId), ["2", "4", "5"])
+  const invalid = new Promise((resolve) => filtered.once("close", resolve))
+  filtered.send(JSON.stringify({ type: "subscribe", id: 5, url: "/oc/global/event", types: ["Bad Type"] }))
+  assert.equal(await invalid, 1008)
+  console.log("PASS protected event mux: scoped/global/dashboard delivery, type filters, reconnect, origin/key/host/query denial")
 } finally {
   await server.close()
   await new Promise((resolve) => upstream.close(resolve))

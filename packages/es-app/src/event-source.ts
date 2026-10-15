@@ -1,5 +1,8 @@
 import { eventMuxPaths, eventProtocol, eventRecord } from "../event-protocol"
 
+// Subscribers name the event type prefixes they reduce; the mux drops the rest.
+export type EventFilter = { types?: string[] }
+
 export type ServerEvents = {
   onopen: ((event: Event) => void) | null
   onerror: ((event: Event) => void) | null
@@ -8,7 +11,7 @@ export type ServerEvents = {
 }
 
 export const createEventHub = (connect: () => WebSocket, capability: Promise<boolean>, retryMs = 1000) => {
-  const sources = new Map<number, { url: string; source: ServerEvents; native?: EventSource; lastEventId?: string }>()
+  const sources = new Map<number, { url: string; types?: string[]; source: ServerEvents; native?: EventSource; lastEventId?: string }>()
   let sequence = 0
   let enabled: boolean | undefined
   let socket: WebSocket | undefined
@@ -52,7 +55,7 @@ export const createEventHub = (connect: () => WebSocket, capability: Promise<boo
       if (socket !== current) return
       clearTimeout(opening)
       opening = undefined
-      sources.forEach((entry, id) => send({ type: "subscribe", id, url: entry.url, lastEventId: entry.lastEventId }))
+      sources.forEach((entry, id) => send({ type: "subscribe", id, url: entry.url, lastEventId: entry.lastEventId, types: entry.types }))
     }
     current.onmessage = (event) => {
       if (socket !== current || typeof event.data !== "string") return
@@ -118,7 +121,7 @@ export const createEventHub = (connect: () => WebSocket, capability: Promise<boo
     },
   )
   return {
-    subscribe(url: string): ServerEvents {
+    subscribe(url: string, filter: EventFilter = {}): ServerEvents {
       const id = sequence++
       const source: ServerEvents = {
         onopen: null,
@@ -131,10 +134,10 @@ export const createEventHub = (connect: () => WebSocket, capability: Promise<boo
           if (!sources.size) stop()
         },
       }
-      const entry = { url, source }
+      const entry = { url, types: filter.types, source }
       sources.set(id, entry)
       if (enabled === false) native(entry)
-      if (socket?.readyState === 1) send({ type: "subscribe", id, url })
+      if (socket?.readyState === 1) send({ type: "subscribe", id, url, types: filter.types })
       else open()
       return source
     },
@@ -157,7 +160,7 @@ export const createEventHub = (connect: () => WebSocket, capability: Promise<boo
 const hubs = new Map<string, ReturnType<typeof createEventHub>>()
 let capability: Promise<boolean> | undefined
 
-export const createServerEvents = (url: string): ServerEvents => {
+export const createServerEvents = (url: string, filter: EventFilter = {}): ServerEvents => {
   if (typeof window === "undefined") return new EventSource(url)
   capability ??= fetch("/__es/events")
     .then(async (response) => {
@@ -177,7 +180,7 @@ export const createServerEvents = (url: string): ServerEvents => {
     hub = createEventHub(() => new WebSocket(target, eventProtocol), capability)
     hubs.set(key, hub)
   }
-  return hub.subscribe(url)
+  return hub.subscribe(url, filter)
 }
 
 if (typeof window !== "undefined") {

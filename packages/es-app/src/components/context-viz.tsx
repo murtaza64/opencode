@@ -1,6 +1,6 @@
 /* The ring length is exact provider usage / limit; its coloured segments
  * depict relative visible estimates, never shares of provider tokens. */
-import { For, Show } from "solid-js"
+import { For, Index, Show } from "solid-js"
 import { compactTokens, usageLevel } from "../context-usage"
 import type { TokenCounts } from "../context-usage"
 import { describeSlices, type CompositionSlice } from "../context-composition"
@@ -63,19 +63,19 @@ export function CompositionBar(props: { slices: CompositionSlice[]; caption?: st
   return (
     <Show when={visible().length}>
       <div class="ctx-bar" role="img" aria-label={`estimated visible content shares: ${describeSlices(props.slices)}`}>
-        <For each={visible()}>{(s) => (
-          <span class="ctx-bar-seg" style={{ "flex-grow": String(Math.max(s.share, 0.01)), background: s.color }} />
-        )}</For>
+        <Index each={visible()}>{(s) => (
+          <span class="ctx-bar-seg" style={{ "flex-grow": String(Math.max(s().share, 0.01)), background: s().color }} />
+        )}</Index>
       </div>
       <ul class="ctx-legend" aria-label="estimated visible content shares">
-        <For each={props.slices}>{(s) => (
+        <Index each={props.slices}>{(s) => (
           <li>
-            <span class="ctx-swatch" style={{ background: s.color }} aria-hidden="true" />
-            <span class="ctx-legend-label">{s.label}</span>
-            <span class="ctx-legend-num mono">{compactTokens(s.tokens)}</span>
-            <span class="ctx-legend-pct mono">{Math.round(s.share * 100)}%</span>
+            <span class="ctx-swatch" style={{ background: s().color }} aria-hidden="true" />
+            <span class="ctx-legend-label">{s().label}</span>
+            <span class="ctx-legend-num mono">{compactTokens(s().tokens)}</span>
+            <span class="ctx-legend-pct mono">{Math.round(s().share * 100)}%</span>
           </li>
-        )}</For>
+        )}</Index>
       </ul>
       <Show when={props.caption}><div class="ctx-caption">{props.caption}</div></Show>
     </Show>
@@ -85,13 +85,13 @@ export function CompositionBar(props: { slices: CompositionSlice[]; caption?: st
 export function CompositionDots(props: { slices: CompositionSlice[] }) {
   return (
     <ul class="ctx-dots" aria-label="estimated visible content shares">
-      <For each={props.slices.filter((s) => s.tokens > 0)}>{(s) => (
-        <li title={`${s.label}: ~${compactTokens(s.tokens)} tokens (${Math.round(s.share * 100)}%)`}>
-          <span class="ctx-swatch" style={{ background: s.color }} aria-hidden="true" />
-          <span>{s.short}</span>
-          <span class="mono">{Math.round(s.share * 100)}%</span>
+      <Index each={props.slices.filter((s) => s.tokens > 0)}>{(s) => (
+        <li title={`${s().label}: ~${compactTokens(s().tokens)} tokens (${Math.round(s().share * 100)}%)`}>
+          <span class="ctx-swatch" style={{ background: s().color }} aria-hidden="true" />
+          <span>{s().short}</span>
+          <span class="mono">{Math.round(s().share * 100)}%</span>
         </li>
-      )}</For>
+      )}</Index>
     </ul>
   )
 }
@@ -122,13 +122,13 @@ export function ProviderAccounting(props: { tokens: TokenCounts | null | undefin
       <Show when={props.heading !== false}><div class="ctx-subheading">provider accounting · exact latest turn</div></Show>
       <Show when={total() > 0} fallback={<div class="ctx-caption">provider usage unknown</div>}>
         <ul class="ctx-provider" aria-label="exact latest-turn provider token accounting">
-          <For each={rows().filter((row) => !props.compact || row.value > 0)}>{(row) => (
+          <Index each={rows().filter((row) => !props.compact || row.value > 0)}>{(row) => (
             <li>
-              <span>{row.label}</span>
-              <span class="mono" title={`${row.value.toLocaleString()} tokens`}>{row.value.toLocaleString()}</span>
-              <span class="mono">{Math.round((row.value / total()) * 100)}%</span>
+              <span>{row().label}</span>
+              <span class="mono" title={`${row().value.toLocaleString()} tokens`}>{row().value.toLocaleString()}</span>
+              <span class="mono">{Math.round((row().value / total()) * 100)}%</span>
             </li>
-          )}</For>
+          )}</Index>
         </ul>
         <div class="ctx-caption">cache read/write are provider accounting classes, not content sources</div>
       </Show>

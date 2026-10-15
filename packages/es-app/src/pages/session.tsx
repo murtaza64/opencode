@@ -28,6 +28,7 @@ import { SubagentTranscript } from "../components/subagent-transcript"
 import { TranscriptMessage } from "../components/transcript-message"
 import { InlineQuestion } from "../components/inline-question"
 import { TodoPanel, TodoPart } from "../components/todos"
+import { usePulse } from "../pulse"
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const [error, setError] = createSignal("")
@@ -335,18 +336,28 @@ function SessionView(props: { sessionID: string; directory: string }) {
   })
 
   const busy = () => !live.error() && !live.connectionError() && (status() === "busy" || status() === "retry")
-  const workState = () => {
+  const workState = createMemo(() => {
     if (live.error()) return "failed"
     if (live.connectionError()) return "disconnected"
     if (pending().length) return "waiting"
     if (status() === "retry") return "retry"
     if (busy() || subagentsRunning()) return "working"
     return activity.error(sessionID, directory) ? "disconnected" : "idle"
+  })
+  const WorkSpinner = () => {
+    const tick = usePulse()
+    return <span class="session-work-spinner" data-on={tick() % 2 ? "true" : undefined} aria-hidden="true" />
+  }
+  const Thinking = () => {
+    const tick = usePulse()
+    return <div class="thinking" title="agent is thinking">
+      <For each={[0, 1, 2]}>{(index) => <span data-on={tick() % 3 === index ? "true" : undefined} />}</For>
+    </div>
   }
   const WorkStatus = () => (
     <Show when={workState() !== "idle"}>
       <div class="session-work-status" role="status" data-state={workState()}>
-        <Show when={workState() === "working" || workState() === "retry"}><span class="session-work-spinner" aria-hidden="true" /></Show>
+        <Show when={workState() === "working" || workState() === "retry"}><WorkSpinner /></Show>
         <span>{workState() === "working" ? "Working" : workState() === "retry" ? "Retrying" :
            workState() === "waiting" ? "Waiting for your reply" : workState() === "failed" ?
              `Session failed — see error ${inlineError() ? "in conversation" : "above"}` : "Reconnecting — activity unavailable"}</span>
@@ -1070,11 +1081,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
               }}
             </For>
             </DataProvider>
-            <Show when={thinking()}>
-              <div class="thinking" title="agent is thinking">
-                <span /><span /><span />
-              </div>
-            </Show>
+            <Show when={thinking()}><Thinking /></Show>
           </div>
         </div>
 

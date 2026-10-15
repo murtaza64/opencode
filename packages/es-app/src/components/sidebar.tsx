@@ -2,7 +2,7 @@
  * a mini icon rail — expand toggle up top (where the switcher lives), board
  * icon, then one status dot per session, still navigable. Archived sessions
  * drop to a collapsed section at the bottom of the expanded view. */
-import { createEffect, createSignal, For, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { A } from "@solidjs/router"
 import { es, type SessionSearchResult } from "../api"
 import { sessionHref, useDashboard, type SessionRow } from "../state"
@@ -18,8 +18,16 @@ export default function Sidebar() {
     useDashboard()
   const observed = new Map<Element, string>()
   const visible = new Set<Element>()
-  const publishVisible = () => setVisibleSessions(new Set(document.visibilityState === "visible"
-    ? [...visible].map((el) => observed.get(el)!).filter(Boolean) : []))
+  let published = new Set<string>()
+  // IntersectionObserver fires on every layout shift; republish only when the
+  // visible set changes, since each new Set re-derives activity directories.
+  const publishVisible = () => {
+    const next = new Set(document.visibilityState === "visible"
+      ? [...visible].map((el) => observed.get(el)!).filter(Boolean) : [])
+    if (next.size === published.size && [...next].every((id) => published.has(id))) return
+    published = next
+    setVisibleSessions(next)
+  }
   document.addEventListener("visibilitychange", publishVisible)
   const observer = new IntersectionObserver((entries) => {
     for (const entry of entries) {
@@ -130,15 +138,20 @@ export default function Sidebar() {
     </A>
   )
 
-  const item = (s: SessionRow, cls = "") => cls === "archived" ? (
+  // dotFor reads every activity snapshot; memoize per row so unrelated status
+  // and request updates do not rewrite each row's class and title (~100
+  // same-value class writes/s across a long sidebar).
+  const item = (s: SessionRow, cls = "") => {
+    const dot = createMemo(() => dotFor(s))
+    return cls === "archived" ? (
     <A
       href={sessionHref(s.id, s.directory)}
       activeClass="active"
       class="nav-item archived"
-      title={`${s.title} (${dotFor(s)})${allProjects() ? ` · ${s.directory}` : ""}`}
+      title={`${s.title} (${dot()})${allProjects() ? ` · ${s.directory}` : ""}`}
       {...peekAttrs(s)}
     >
-      <span class={`dot ${dotFor(s)}`} />
+      <span class={`dot ${dot()}`} />
       <span class="nav-title">{s.title || s.id}</span>
       <Show when={allProjects()}><span class="session-project">{s.project}</span></Show>
     </A>
@@ -149,9 +162,9 @@ export default function Sidebar() {
         href={sessionHref(s.id, s.directory)}
         activeClass="active"
         class="nav-item"
-        title={`${s.title} (${dotFor(s)})${allProjects() ? ` · ${s.directory}` : ""}`}
+        title={`${s.title} (${dot()})${allProjects() ? ` · ${s.directory}` : ""}`}
       >
-        <span class={`dot ${dotFor(s)}`} />
+        <span class={`dot ${dot()}`} />
         <span class="nav-title">{s.title || s.id}</span>
         <Show when={allProjects()}><span class="session-project">{s.project}</span></Show>
       </A>
@@ -161,13 +174,16 @@ export default function Sidebar() {
         onClick={() => togglePin(s)}>{isPinned(s) ? "◆" : "◇"}</button>
     </div>
   )
+  }
 
-  const miniItem = (s: SessionRow) => (
+  const miniItem = (s: SessionRow) => {
+    const dot = createMemo(() => dotFor(s))
+    return (
     <div class="mini-session" {...peekAttrs(s)}>
       <A ref={(el) => observeSession(el, s.id)} href={sessionHref(s.id, s.directory)}
         activeClass="active" class="mini-item"
-        title={`${s.title} (${dotFor(s)})${allProjects() ? ` · ${s.project}` : ""}`}>
-        <span class={`dot ${dotFor(s)}`} />
+        title={`${s.title} (${dot()})${allProjects() ? ` · ${s.project}` : ""}`}>
+        <span class={`dot ${dot()}`} />
       </A>
       <button type="button" class="mini-pin" classList={{ pinned: isPinned(s) }}
         aria-label={`${isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
@@ -175,6 +191,7 @@ export default function Sidebar() {
         onClick={() => togglePin(s)}>{isPinned(s) ? "◆" : "◇"}</button>
     </div>
   )
+  }
 
   const projectControls = () => <>
     <select class="es-switcher" title="project" aria-label="Project"
@@ -240,20 +257,20 @@ export default function Sidebar() {
           <div class="notification-section">
             <div class="nav-heading">needs you</div>
             <For each={notifications()}>
-              {(notification) => (
+              {(notification) => {
+                const dot = createMemo(() => dotFor({
+                  id: notification.session,
+                  updated: notification.updated,
+                  pending: notification.kind !== "idle",
+                }))
+                return (
                 <A
                   href={sessionHref(notification.session, notification.directory)}
                   class="nav-item notification-item"
                   title={`${notification.kind} · ${notification.editspace}`}
                   onClick={() => openNotification(notification)}
                 >
-                  <span
-                    class={`dot ${dotFor({
-                      id: notification.session,
-                      updated: notification.updated,
-                      pending: notification.kind !== "idle",
-                    })}`}
-                  />
+                  <span class={`dot ${dot()}`} />
                   <span class="notification-copy">
                     <span class="nav-title">{notification.title}</span>
                     <span class="notification-meta">
@@ -261,7 +278,8 @@ export default function Sidebar() {
                     </span>
                   </span>
                 </A>
-              )}
+                )
+              }}
             </For>
           </div>
         </Show>

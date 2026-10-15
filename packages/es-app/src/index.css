@@ -196,18 +196,10 @@
 
 /* thinking pulse: busy with no visible motion (pre-first-token, reasoning) */
 .thinking { display: flex; gap: 5px; padding: 10px 2px; }
-.thinking span {
-  width: 7px;
-  height: 7px;
-  background: var(--lavender);
-  animation: thinking-pulse 1.2s ease-in-out infinite;
-}
-.thinking span:nth-child(2) { animation-delay: 0.2s; }
-.thinking span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes thinking-pulse {
-  0%, 100% { opacity: 0.25; transform: scale(0.8); }
-  40% { opacity: 1; transform: scale(1); }
-}
+/* Stepped by the shared pulse clock (pulse.ts), not a CSS animation. */
+.thinking span { width: 7px; height: 7px; background: var(--lavender); opacity: 0.35; contain: strict; will-change: opacity; }
+.thinking span[data-on] { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .thinking span { opacity: 1; } }
 
 /* ticket refs (SD-123, dotfiles#77) wrapped in the transcript: subtle
  * affordance, hover card with tracker info */
@@ -331,6 +323,10 @@
   --syntax-warning: var(--yellow);
 }
 .transcript .shiki, .aside-answer .shiki { color: var(--text); }
+/* ui's Spinner animates 12 SVG rect opacities via inline styles; SVG opacity
+ * cannot be composited, so each running tool repainted at display rate for as
+ * long as it ran (subagent tasks run for minutes). A static glyph suffices. */
+[data-component="spinner"] rect { animation: none !important; opacity: 0.8; }
 /* session-ui's TextShimmer animates background-position under background-clip:
  * text, which Chromium cannot composite: it repainted the entire 2800x1800 root
  * layer at display rate (~1.3 s of Paint per 4 s) whenever any step label was
@@ -916,7 +912,7 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 .lane-badge { background: var(--surface0); padding: 0 6px; margin-right: 5px; }
 .status-line { margin-top: 6px; font-size: 12px; color: var(--subtext0); white-space: pre-wrap; }
 
-/* session state dot: pending (needs you) > busy (animated) > unread > idle */
+/* session state dot: pending (needs you) > busy (ringed) > unread > idle */
 .dot {
   width: 8px;
   height: 8px;
@@ -928,36 +924,25 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 }
 .dot.pending { background: var(--peach); }
 .session-work-status { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding: 6px 0; font-size: 12px; color: var(--subtext0); }
-.session-work-spinner { width: 7px; height: 7px; background: var(--lavender); transform: translateZ(0); will-change: opacity; contain: strict; animation: session-work-pulse 1.8s steps(18) infinite; }
-@keyframes session-work-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .session-work-spinner { animation: none; opacity: 1; } }
+/* Stepped by the shared pulse clock (pulse.ts), not a CSS animation. */
+/* Own layer: a phase change is then a compositor property update, not a
+ * repaint of the whole root layer (~2 ms per tick otherwise). */
+.session-work-spinner { width: 7px; height: 7px; background: var(--lavender); opacity: 0.45; contain: strict; will-change: opacity; }
+.session-work-spinner[data-on] { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .session-work-spinner { opacity: 1; } }
 .dot.unread { background: var(--green); }
 .dot.busy { background: var(--lavender); }
-/* Animate only transform/opacity: an `inset` keyframe forces a style recalc
- * and layout on every frame for every busy row (hundreds of sidebar rows at
- * 120 Hz pinned the renderer at ~40% CPU while idle). The ring scales from
- * the dot's own box on its own compositor layer instead. */
+/* Static ring: any infinite animation (even transform/opacity on its own
+ * layer, even steps()) keeps the compositor drawing at display rate, so a
+ * single busy row anywhere cost ~3% GPU + ~1.5% renderer CPU while idle. */
 .dot.busy::after {
   content: "";
   position: absolute;
-  inset: -2px;
-  border: 2px solid var(--lavender);
+  inset: -3px;
+  border: 1px solid var(--lavender);
   border-radius: inherit;
-  transform-origin: center;
-  /* Own compositor layer: without it every animation frame repaints the
-   * whole sidebar/transcript around the dot (Paint ≈ 1 s per 4 s idle). */
-  transform: translateZ(0);
-  will-change: transform, opacity;
-  contain: strict;
-  animation: dot-pulse 2s steps(24) infinite;
+  opacity: 0.6;
 }
-@keyframes dot-pulse {
-  0% { transform: translateZ(0) scale(1); opacity: 0.8; }
-  70% { transform: translateZ(0) scale(1.85); opacity: 0; }
-  100% { transform: translateZ(0) scale(1.85); opacity: 0; }
-}
-/* Off-screen rows (collapsed groups, scrolled-out lists) must not animate. */
-@media (prefers-reduced-motion: reduce) { .dot.busy::after { animation: none; opacity: 0; } }
 
 .digest {
   margin-top: 8px;

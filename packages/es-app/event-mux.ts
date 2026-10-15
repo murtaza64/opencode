@@ -2,7 +2,7 @@ import { EventSource } from "eventsource"
 import { WebSocketServer, WebSocket } from "ws"
 import type { IncomingMessage } from "node:http"
 import type { Duplex } from "node:stream"
-import { eventMuxPaths, eventPaths, eventProtocol, eventRecord, type EventPacket } from "./event-protocol"
+import { eventMuxPaths, eventPaths, eventProtocol, eventRecord, eventTypes, type EventPacket } from "./event-protocol"
 
 export const eventMux = (options: {
   origin: (request: IncomingMessage) => string
@@ -63,6 +63,11 @@ export const eventMux = (options: {
           client.close(1008)
           return
         }
+        const types = eventTypes(message.types)
+        if (types === null) {
+          client.close(1008)
+          return
+        }
         let lastEventId = typeof message.lastEventId === "string" ? message.lastEventId : ""
         const requested = URL.parse(message.url, origin)
         if (!requested || requested.origin !== origin || !eventPaths.includes(requested.pathname) || !requested.pathname.startsWith(prefix + "/")) {
@@ -90,6 +95,14 @@ export const eventMux = (options: {
         source.onopen = () => send({ id, type: "open" })
         source.onmessage = (event) => {
           lastEventId = event.lastEventId
+          // Drop unsubscribed types here, before the double JSON encode, the
+          // socket, and two renderer-side parses. The first "type" key is the
+          // payload type for both instance and global envelopes; anything
+          // unrecognised is forwarded.
+          if (types) {
+            const type = /"type":"([^"]+)"/.exec(event.data)?.[1]
+            if (type && !types.some((prefix) => type.startsWith(prefix))) return
+          }
           send({ id, type: "message", data: event.data, lastEventId })
         }
         source.onerror = (event) => send({ id, type: "error", code: event.code })

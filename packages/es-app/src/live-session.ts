@@ -398,7 +398,9 @@ export function createLiveSession(
   }
   let source: ServerEvents | undefined
   try {
-    source = createServerEvents(`/oc/event?directory=${encodeURIComponent(directory)}`)
+    source = createServerEvents(`/oc/event?directory=${encodeURIComponent(directory)}`, {
+      types: ["session.", "message.", "todo.", "permission.", "question."],
+    })
     source.onopen = () => {
       if (disposed) return
       setConnection("stream", "")

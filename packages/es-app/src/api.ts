@@ -33,6 +33,7 @@ export class SessionCreateError extends Error {
   }
 }
 
+let sessionWindow = 200
 const q = (directory: string) => `directory=${encodeURIComponent(directory)}`
 
 async function json<T>(res: Response): Promise<T> {
@@ -66,16 +67,16 @@ export const oc = {
 
   allSessions: async (roots = true): Promise<GlobalSession[]> => {
     // Timestamp-only cursors can skip sessions tied at a page boundary.
-    // Grow the window until it contains every row instead.
-    for (let limit = 200; ; limit *= 2) {
+    // Grow the window until it contains every row instead, starting from the
+    // last window that sufficed (re-growing from 200 cost 4 serial reads).
+    for (let limit = sessionWindow; ; limit *= 2) {
       const res = await fetch(`/oc/experimental/session?roots=${roots}&archived=true&limit=${limit}`)
       const sessions = await json<GlobalSession[]>(res)
-      if (!res.headers.get("x-next-cursor")) return roots ? sessions.filter((s) => !s.parentID) : sessions
+      if (res.headers.get("x-next-cursor")) continue
+      sessionWindow = limit
+      return roots ? sessions.filter((s) => !s.parentID) : sessions
     }
   },
-
-  sessions: (directory: string): Promise<Session[]> =>
-    fetch(`/oc/session?${q(directory)}`).then(json<Session[]>),
 
   umbrellaSessions: (directory: string): Promise<Session[]> =>
     fetch(`/oc/umbrella/session?${q(directory)}`).then(json<Session[]>),

@@ -244,7 +244,9 @@ export const createSessionActivity = (
       void refresh(missing).finally(() => missing.forEach((directory) => initializing.delete(directory)))
     })
   })
-  const source = createServerEvents("/oc/global/event")
+  // Only status and request events matter here; deltas, project.updated and
+  // the rest of the daemon's global traffic never reach the renderer.
+  const source = createServerEvents("/oc/global/event", { types: ["session.", "permission.", "question."] })
   let opened = false
   let timer: ReturnType<typeof setTimeout> | undefined
   let lastSessionRefresh = 0
@@ -301,9 +303,14 @@ export const createSessionActivity = (
   }
   let relevantCursor = 0
   let backgroundCursor = 0
+  let ticks = 0
   const interval = setInterval(() => {
-    lastSessionRefresh = Date.now()
-    refreshSessions()
+    // Session rows follow session.* events; the full index (~1 MB with a long
+    // history) is only a safety net against missed events.
+    if (ticks++ % 4 === 0 && Date.now() - lastSessionRefresh >= 60_000) {
+      lastSessionRefresh = Date.now()
+      refreshSessions()
+    }
     const dirs = relevant()
     const background = [...new Set(sessions().map((session) => session.directory))].filter((directory) => !dirs.includes(directory))
     // The global stream and dashboard notifications handle immediate attention;

@@ -136,6 +136,8 @@ try {
   await rowB.locator(".pin-action").click()
   const pinned = page.locator(".pinned-section .session-entry[data-peek-id='ses_b']")
   await expect(pinned).toHaveCount(1)
+  // content-visibility:auto rows report their intrinsic placeholder height until first rendered
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   const before = await pinned.boundingBox()
   await pinned.hover()
   await expect(card).toHaveCount(1)
