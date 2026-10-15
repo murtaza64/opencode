@@ -1060,7 +1060,7 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .context-pct.high { color: var(--red); }
 
 /* session page: no outer scroll — transcript and info panel scroll */
-.generated-input {
+.generated-input, .todo-activity {
   min-width: 0;
   margin-block: 8px;
   border: 1px solid var(--surface0);
@@ -1088,6 +1088,48 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   .activity-detail-actions { display: flex; justify-content: flex-end; margin-block-end: 6px; }
   .generated-input-body { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; max-height: 50vh; overflow: auto; }
   :is(summary, button, [role="region"]):focus-visible { outline: 1px solid var(--lavender); outline-offset: -2px; }
+}
+.todo-activity { margin-block: 6px; .activity-kind { color: var(--yellow); } }
+.todo-count { font-family: var(--font-mono); font-size: 12px; color: var(--subtext0); }
+.todo-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  line-height: 20px;
+  li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px; color: var(--subtext0); }
+  .todo-glyph { font-family: var(--font-mono); white-space: pre; }
+  .todo-content { overflow-wrap: anywhere; user-select: text; }
+  li[data-status="in_progress"] { color: var(--yellow); }
+  li[data-status="pending"] { color: var(--subtext1); }
+  li:is([data-status="completed"], [data-status="cancelled"]) .todo-content { text-decoration: line-through; text-decoration-color: var(--surface2); }
+}
+.todo-panel {
+  flex-shrink: 0;
+  margin-block-start: 6px;
+  border: 1px solid var(--surface0);
+  background: var(--mantle);
+  font-size: 13px;
+  .todo-panel-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    width: 100%;
+    padding: 5px 10px;
+    border: 0;
+    background: transparent;
+    color: var(--subtext1);
+    text-align: start;
+    cursor: pointer;
+    &:hover { background: var(--surface0); }
+    &:focus-visible { outline: 1px solid var(--lavender); outline-offset: -2px; }
+  }
+  .activity-kind { color: var(--yellow); font-weight: 600; }
+  .todo-panel-active { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--yellow); }
+  .activity-disclosure { margin-inline-start: auto; color: var(--subtext0); font-size: 16px; line-height: 1; }
+  &:dir(rtl) .activity-disclosure { transform: rotate(180deg); }
+  &[data-open] .activity-disclosure { transform: rotate(90deg); }
+  .todo-list { max-height: 30vh; overflow-y: auto; padding: 2px 10px 8px; }
 }
 .session-page {
   display: flex;

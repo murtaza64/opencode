@@ -1,6 +1,6 @@
 /* Thin fetch layer. The daemon (:4096) is reached via the /oc proxy, the es
  * dashboard server (:7777) via /es — both same-origin through vite. */
-import type { Agent, GlobalSession, Message, Part, PermissionRequest, QuestionRequest, Session, SessionV1InputImage } from "@opencode-ai/sdk/v2"
+import type { Agent, GlobalSession, Message, Part, PermissionRequest, QuestionRequest, Session, SessionV1InputImage, Todo } from "@opencode-ai/sdk/v2"
 
 export type MessageWithParts = { info: Message; parts: Part[] }
 export type InputImage = Readonly<SessionV1InputImage>
@@ -98,6 +98,9 @@ export const oc = {
     const items = await json<MessageWithParts[]>(res)
     return { items, cursor: res.headers.get("X-Next-Cursor") ?? undefined }
   },
+
+  todos: (id: string, directory: string, signal?: AbortSignal): Promise<Todo[]> =>
+    fetch(`/oc/session/${id}/todo?${q(directory)}`, { signal }).then(json<Todo[]>),
 
   status: (directory: string, signal?: AbortSignal): Promise<Record<string, { type: string }>> =>
     fetch(`/oc/session/status?${q(directory)}`, { signal }).then(json<Record<string, { type: string }>>),

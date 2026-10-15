@@ -168,9 +168,13 @@ function DiagnosticsDisplay(props: { diagnostics: Diagnostic[] }): JSX.Element {
   )
 }
 
+// Host overrides for individual tools, keyed by tool name. An override also
+// makes an otherwise hidden tool (todowrite) or pending question renderable.
+export type ToolRenderers = Partial<Record<string, Component<MessagePartProps>>>
+
 export interface MessageProps {
   activityRows?: boolean
-  renderQuestion?: Component<MessagePartProps>
+  renderTools?: ToolRenderers
   message: MessageType
   parts: PartType[]
   actions?: UserActions
@@ -200,7 +204,7 @@ export type UserMessageComment = {
 export interface MessagePartProps {
   part: PartType
   message: MessageType
-  renderQuestion?: Component<MessagePartProps>
+  renderTools?: ToolRenderers
   hideDetails?: boolean
   defaultOpen?: boolean
   toolOpen?: boolean
@@ -716,10 +720,11 @@ function index<T extends { id: string }>(items: readonly T[]) {
   return new Map(items.map((item) => [item.id, item] as const))
 }
 
-export function renderable(part: PartType, showReasoningSummaries = true, renderQuestion = false) {
+export function renderable(part: PartType, showReasoningSummaries = true, renderTools?: ToolRenderers) {
   if (part.type === "tool") {
+    if (renderTools?.[part.tool]) return true
     if (HIDDEN_TOOLS.has(part.tool)) return false
-    if (part.tool === "question") return renderQuestion || (part.state.status !== "pending" && part.state.status !== "running")
+    if (part.tool === "question") return part.state.status !== "pending" && part.state.status !== "running"
     return true
   }
   if (part.type === "text") return !!part.text?.trim()
@@ -961,7 +966,7 @@ export function Message(props: MessageProps) {
           <AssistantMessageDisplay
             message={assistantMessage() as AssistantMessage}
             parts={props.parts}
-            renderQuestion={props.renderQuestion}
+            renderTools={props.renderTools}
             showAssistantCopyPartID={props.showAssistantCopyPartID}
             showReasoningSummaries={props.showReasoningSummaries}
             useV2Actions={props.useV2Actions}
@@ -976,7 +981,7 @@ export function Message(props: MessageProps) {
 export function AssistantMessageDisplay(props: {
   message: AssistantMessage
   parts: PartType[]
-  renderQuestion?: Component<MessagePartProps>
+  renderTools?: ToolRenderers
   showAssistantCopyPartID?: string | null
   showReasoningSummaries?: boolean
   useV2Actions?: boolean
@@ -987,7 +992,7 @@ export function AssistantMessageDisplay(props: {
     () =>
       groupParts(
         props.parts
-          .filter((part) => renderable(part, props.showReasoningSummaries ?? true, !!props.renderQuestion))
+          .filter((part) => renderable(part, props.showReasoningSummaries ?? true, props.renderTools))
           .map((part) => ({
             messageID: props.message.id,
             part,
@@ -1038,7 +1043,7 @@ export function AssistantMessageDisplay(props: {
                     <Part
                       part={item()!}
                       message={props.message}
-                      renderQuestion={props.renderQuestion}
+                      renderTools={props.renderTools}
                       showAssistantCopyPartID={props.showAssistantCopyPartID}
                       useV2Actions={props.useV2Actions}
                     />
@@ -1452,9 +1457,7 @@ function HighlightedText(props: { text: string; references: FilePart[]; agents: 
 
 export function Part(props: MessagePartProps) {
   const component = createMemo(() =>
-    props.renderQuestion && props.part.type === "tool" && props.part.tool === "question"
-      ? props.renderQuestion
-      : PART_MAPPING[props.part.type],
+    (props.part.type === "tool" ? props.renderTools?.[props.part.tool] : undefined) ?? PART_MAPPING[props.part.type],
   )
   return (
     <Show when={component()}>
@@ -1462,7 +1465,7 @@ export function Part(props: MessagePartProps) {
         component={component()}
         part={props.part}
         message={props.message}
-        renderQuestion={props.renderQuestion}
+        renderTools={props.renderTools}
         hideDetails={props.hideDetails}
         defaultOpen={props.defaultOpen}
         toolOpen={props.toolOpen}

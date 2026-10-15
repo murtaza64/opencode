@@ -339,6 +339,7 @@ export const createFixture = async () => {
           fixture.failSnapshot ? 503 : 200,
         )
       }
+      if (action === "/todo" && request.method === "GET") return json(fixture.todos?.get(id) ?? [])
       if (action === "/message") {
         const limit = url.searchParams.get("limit")
         const all = id === "ses_a"

@@ -43,6 +43,7 @@ let fetchSpy: Mock<(input: RequestInfo | URL) => Promise<Response>>
 let originalSource: PropertyDescriptor | undefined
 let snapshot: { info: unknown; parts: unknown[] }[]
 let statuses: Record<string, unknown>
+let todos: unknown[]
 
 const response = (input: string | URL | Request) => {
   const path = String(input).split("?")[0]
@@ -56,6 +57,7 @@ const response = (input: string | URL | Request) => {
     })
   }
   if (path === "/oc/session/status") return Response.json(statuses)
+  if (path === "/oc/session/ses_current/todo") return Response.json(todos)
   if (path === "/oc/session/ses_current") return Response.json({ id: "ses_current", title: "Test" })
   throw new Error(`Unexpected fetch: ${path}`)
 }
@@ -70,6 +72,7 @@ const fail = () => SessionEvents.current.send("session.error", { sessionID: "ses
 beforeEach(() => {
   snapshot = []
   statuses = {}
+  todos = []
   originalSource = Object.getOwnPropertyDescriptor(globalThis, "EventSource")
   Object.defineProperty(globalThis, "EventSource", { configurable: true, value: SessionEvents })
   fetchSpy = spyOn(globalThis, "fetch")
@@ -90,6 +93,31 @@ test("model connection failure stops thinking without waiting for an idle event"
   fail()
   expect(live.data.session_status.ses_current.type).toBe("idle")
   expect(live.error()).toBe(failure)
+  expect(live.connectionError()).toBe("")
+})
+
+test("todos load with the snapshot and follow todo.updated for this session only", async () => {
+  todos = [{ content: "first", status: "in_progress", priority: "high" }]
+  const live = start()
+  await live.load()
+  expect(live.data.todo).toEqual([{ content: "first", status: "in_progress", priority: "high" }])
+  SessionEvents.current.send("todo.updated", { sessionID: "ses_other", todos: [] })
+  expect(live.data.todo).toHaveLength(1)
+  SessionEvents.current.send("todo.updated", { sessionID: "ses_current", todos: [{ content: "first", status: "completed", priority: "high" }] })
+  expect(live.data.todo[0]?.status).toBe("completed")
+})
+
+test("a failed todo read keeps the transcript snapshot and the last list", async () => {
+  todos = [{ content: "kept", status: "pending", priority: "low" }]
+  snapshot = [{ info: user(), parts: [] }]
+  const live = start()
+  await live.load()
+  fetchSpy.mockImplementation(async (input) =>
+    String(input).includes("/todo?") ? Response.json({ error: "nope" }, { status: 500 }) : response(input))
+  snapshot = [{ info: user(), parts: [] }, { info: assistant("msg_002", undefined), parts: [] }]
+  await live.load()
+  expect(live.data.message.ses_current).toHaveLength(2)
+  expect(live.data.todo).toEqual([{ content: "kept", status: "pending", priority: "low" }])
   expect(live.connectionError()).toBe("")
 })
 
@@ -284,7 +312,7 @@ test("a transient snapshot failure recovers without a stream reconnect or page r
   })
   try {
     await recovered.promise
-    expect(fetchSpy.mock.calls).toHaveLength(6)
+    expect(fetchSpy.mock.calls).toHaveLength(8)
     expect(fetchSpy.mock.calls.every(([input]) => !String(input).includes("prompt"))).toBe(true)
   } finally {
     cleanup()
@@ -297,7 +325,7 @@ test("disposing a failed session stops its scheduled snapshot retry", async () =
   await expect(live.load()).rejects.toThrow("temporary socket failure")
   dispose()
   await Bun.sleep(1100)
-  expect(fetchSpy.mock.calls).toHaveLength(3)
+  expect(fetchSpy.mock.calls).toHaveLength(4)
 })
 
 test("disconnect stops stale busy and reconnect resnapshots missed messages and status", async () => {
@@ -499,7 +527,7 @@ test("initial SSE open recovers messages missed between the first snapshot and s
   expect(live.loading()).toBe(true)
   await live.load()
   expect(live.data.message.ses_current?.map((m) => m.id)).toEqual(["msg_001"])
-  expect(fetchSpy).toHaveBeenCalledTimes(6)
+  expect(fetchSpy).toHaveBeenCalledTimes(8)
 })
 
 test("concurrent loads share one snapshot request", async () => {
@@ -508,7 +536,7 @@ test("concurrent loads share one snapshot request", async () => {
   const second = live.load()
   expect(first).toBe(second)
   await first
-  expect(fetchSpy).toHaveBeenCalledTimes(3)
+  expect(fetchSpy).toHaveBeenCalledTimes(4)
 })
 
 test("initial stream open during a snapshot does not fetch messages again", async () => {
@@ -711,7 +739,7 @@ test("a concurrent full part provides a delta base without replaying callbacks o
   await loading
   expect(live.data.part.msg_002?.[0]).toMatchObject({ text: "abc" })
   expect(seen).toEqual(["message.part.updated", "message.part.delta", "message.part.delta"])
-  expect(fetchSpy).toHaveBeenCalledTimes(3)
+  expect(fetchSpy).toHaveBeenCalledTimes(4)
 })
 
 test("ambiguous deltas use the snapshot until idle triggers one authoritative recovery", async () => {
@@ -736,7 +764,7 @@ test("ambiguous deltas use the snapshot until idle triggers one authoritative re
   await loading
   expect(live.loading()).toBe(false)
   expect(live.data.part.msg_002?.[0]).toMatchObject({ text: "a" })
-  expect(fetchSpy).toHaveBeenCalledTimes(3)
+  expect(fetchSpy).toHaveBeenCalledTimes(4)
 
   snapshot = [{ info: assistant("msg_002", null), parts: [text("ab")] }]
   statuses = {}
@@ -745,10 +773,10 @@ test("ambiguous deltas use the snapshot until idle triggers one authoritative re
   await live.load()
   expect(live.data.part.msg_002?.[0]).toMatchObject({ text: "ab" })
   expect(live.data.session_status.ses_current.type).toBe("idle")
-  expect(fetchSpy).toHaveBeenCalledTimes(6)
+  expect(fetchSpy).toHaveBeenCalledTimes(8)
   SessionEvents.current.send("session.idle", { sessionID: "ses_current" })
   expect(live.loading()).toBe(false)
-  expect(fetchSpy).toHaveBeenCalledTimes(6)
+  expect(fetchSpy).toHaveBeenCalledTimes(8)
 })
 
 test("a full part repairs ambiguous text without another snapshot", async () => {
@@ -773,7 +801,7 @@ test("a full part repairs ambiguous text without another snapshot", async () => 
   SessionEvents.current.send("session.status", { sessionID: "ses_current", status: { type: "idle" } })
   expect(live.data.part.msg_002?.[0]).toMatchObject({ text: "ab" })
   expect(live.loading()).toBe(false)
-  expect(fetchSpy).toHaveBeenCalledTimes(3)
+  expect(fetchSpy).toHaveBeenCalledTimes(4)
 })
 
 test("SSE opening during a stale snapshot schedules recovery of the subscription gap", async () => {
@@ -797,7 +825,7 @@ test("SSE opening during a stale snapshot schedules recovery of the subscription
   expect(live.loading()).toBe(true)
   await live.load()
   expect(live.data.message.ses_current?.map((m) => m.id)).toEqual(["msg_003"])
-  expect(fetchSpy).toHaveBeenCalledTimes(6)
+  expect(fetchSpy).toHaveBeenCalledTimes(8)
 })
 
 test("terminal errors during an ambiguous load trigger repair without reviving busy status", async () => {
@@ -830,7 +858,7 @@ test("terminal errors during an ambiguous load trigger repair without reviving b
   expect(live.error()).toBe(failure)
   expect(live.data.part.msg_002?.[0]).toMatchObject({ text: "ab" })
   expect(live.data.session_status.ses_current.type).toBe("idle")
-  expect(fetchSpy).toHaveBeenCalledTimes(6)
+  expect(fetchSpy).toHaveBeenCalledTimes(8)
 })
 
 test("concurrent removals and retry metadata survive hydration", async () => {

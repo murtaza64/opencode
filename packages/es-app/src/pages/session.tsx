@@ -27,6 +27,7 @@ import { AppHeader } from "../components/native-header"
 import { SubagentTranscript } from "../components/subagent-transcript"
 import { TranscriptMessage } from "../components/transcript-message"
 import { InlineQuestion } from "../components/inline-question"
+import { TodoPanel, TodoPart } from "../components/todos"
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const [error, setError] = createSignal("")
@@ -301,6 +302,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     return <InlineQuestion part={part()} request={item()?.request} directory={item()?.directory ?? directory} owner={owner()}
       onDone={() => item() ? activity.refreshDirectory(item()!.directory, true) : Promise.resolve()} />
   }
+  const renderTools = { question: QuestionPart, todowrite: TodoPart }
 
   // viewing the session clears its unread state, including as new content
   // streams in while the page is open
@@ -1024,9 +1026,9 @@ function SessionView(props: { sessionID: string; directory: string }) {
             <For each={messages()}>
               {(m) => (
                 <>
-                  <Show when={m.role === "user"} fallback={<TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} renderQuestion={QuestionPart} />}>
+                  <Show when={m.role === "user"} fallback={<TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} renderTools={renderTools} />}>
                     <div class="msg-wrap">
-                      <TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} renderQuestion={QuestionPart} />
+                      <TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} renderTools={renderTools} />
                       <button
                         class="fork-here"
                         title="fork: new session with the history before this message"
@@ -1076,7 +1078,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
           </div>
         </div>
 
-        <Show when={!floating()}><WorkStatus /><ComposerResults composer={composer} connected={connected()} /></Show>
+        <Show when={!floating()}><TodoPanel todos={live.data.todo} /><WorkStatus /><ComposerResults composer={composer} connected={connected()} /></Show>
         <div class="prompt-box" inert={floating()}>
           <ComposerPanel />
         </div>

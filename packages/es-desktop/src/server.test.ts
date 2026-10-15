@@ -100,6 +100,10 @@ test("API surface excludes direct shell, PTY, file, and config access", () => {
   expect(apiAllowed("POST", "/es/api/current-work")).toBe(false)
   expect(apiAllowed("POST", "/es/api/session-insights")).toBe(false)
   expect(apiAllowed("POST", "/es/api/pr-detail")).toBe(false)
+  // session todos are read-only
+  expect(apiAllowed("GET", "/oc/session/ses_a/todo")).toBe(true)
+  expect(apiAllowed("POST", "/oc/session/ses_a/todo")).toBe(false)
+  expect(apiAllowed("GET", "/oc/session/ses_a/todo/x")).toBe(false)
 })
 
 test("rejects unauthenticated, cross-origin, and foreign Host requests", async () => {

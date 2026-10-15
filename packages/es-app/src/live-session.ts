@@ -4,7 +4,7 @@
  * session.status), without the Binary/reconcile machinery. */
 import { createStore, produce, reconcile } from "solid-js/store"
 import { batch, createSignal, onCleanup } from "solid-js"
-import type { Message, Part, Session, SessionStatus } from "@opencode-ai/sdk/v2"
+import type { Message, Part, Session, SessionStatus, Todo } from "@opencode-ai/sdk/v2"
 import { oc } from "./api"
 import { createServerEvents, type ServerEvents } from "./event-source"
 
@@ -53,6 +53,7 @@ export type LiveData = {
   message: Record<string, Message[]>
   part: Record<string, Part[]>
   part_text_accum_delta: Record<string, string>
+  todo: Todo[]
 }
 
 // message/part ids are time-prefixed and sort lexicographically
@@ -76,6 +77,7 @@ export function createLiveSession(
     message: {},
     part: {},
     part_text_accum_delta: {},
+    todo: [],
   })
 
   const [transientError, setTransientError] = createSignal("")
@@ -140,10 +142,12 @@ export function createLiveSession(
       }
       if (disposed) return
       snapshotStarted = true
-      const [session, page, status] = await Promise.all([
+      const [session, page, status, todos] = await Promise.all([
         oc.session(sessionID, directory, controller.signal),
         oc.messagesPage(sessionID, directory, TAIL, undefined, controller.signal),
         oc.status(directory, controller.signal),
+        // Todos are auxiliary: a failed read keeps the last list, never the transcript.
+        oc.todos(sessionID, directory, controller.signal).catch(() => undefined),
       ])
       if (disposed) return
       const events = duringLoad!
@@ -177,6 +181,7 @@ export function createLiveSession(
           ),
         )
         setOlderCursor(cursor)
+        if (todos) setData("todo", reconcile(todos))
         setData("part_text_accum_delta", reconcile({}))
         const bases = new Set<string>()
         uncertainParts.clear()
@@ -279,6 +284,11 @@ export function createLiveSession(
       }
       case "session.idle": {
         setData("session_status", props.sessionID, reconcile({ type: "idle" }))
+        break
+      }
+      case "todo.updated": {
+        if (props.sessionID !== sessionID || !Array.isArray(props.todos)) break
+        setData("todo", reconcile(props.todos))
         break
       }
       case "message.updated": {

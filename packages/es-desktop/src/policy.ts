@@ -32,7 +32,7 @@ export const apiAllowed = (method: string, pathname: string) => {
   const routes: Record<string, RegExp[]> = {
     GET: [
       /^\/oc\/(event|global\/event|experimental\/(session|capabilities)|umbrella\/session|session|session\/status|permission|question|config\/providers|agent)$/,
-      /^\/oc\/session\/[\w-]+(?:\/(message|input)(?:\/[\w-]+)?)?$/,
+      /^\/oc\/session\/[\w-]+(?:\/(message|input)(?:\/[\w-]+)?|\/todo)?$/,
       /^\/es\/api\/(editspaces|state|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work)$/,
     ],
     POST: [
