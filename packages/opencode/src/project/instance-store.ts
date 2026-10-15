@@ -63,6 +63,7 @@ const layer: Layer.Layer<
     const execution = yield* SessionExecution.Service
     const scope = yield* Scope.Scope
     const cache = new Map<string, Entry>()
+    const identities = new Map<string, { ctx: InstanceContext; resolved: number }>()
     const interval = Number(Flag.OPENCODE_INSTANCE_SWEEP_MS ?? 60_000)
     const ttl = Number(Flag.OPENCODE_INSTANCE_IDLE_TTL_MS ?? 600_000)
 
@@ -161,6 +162,7 @@ const layer: Layer.Layer<
       return Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
           const previous = cache.get(directory)
+          identities.delete(directory)
           const entry: Entry = {
             deferred: Deferred.makeUnsafe<InstanceContext>(),
             lastUsed: yield* Clock.currentTimeMillis,
@@ -237,17 +239,26 @@ const layer: Layer.Layer<
 
     // Project identity without bootstrapping: DB-only routes (session listing)
     // need only the project id and directory, never plugins, LSP or MCP.
+    // Memoized for the idle TTL: fromDirectory upserts the project and emits
+    // project.updated, so resolving per request turned dashboard polling over
+    // many idle lane directories into a continuous global event flood.
     const resolve = (input: string) =>
       Effect.gen(function* () {
         const cached = yield* peek(input)
         if (cached) return cached
         const directory = FSUtil.resolve(input)
+        const now = yield* Clock.currentTimeMillis
+        const known = identities.get(directory)
+        if (known && now - known.resolved < ttl) return known.ctx
         const result = yield* project.fromDirectory(directory)
-        return { directory, worktree: result.sandbox, project: result.project } satisfies InstanceContext
+        const ctx = { directory, worktree: result.sandbox, project: result.project } satisfies InstanceContext
+        identities.set(directory, { ctx, resolved: now })
+        return ctx
       })
 
     const sweep = Effect.fn("InstanceStore.sweep")(function* () {
       const now = yield* Clock.currentTimeMillis
+      for (const [directory, identity] of identities) if (now - identity.resolved >= ttl) identities.delete(directory)
       let evicted = 0
       for (const [directory, entry] of cache) {
         if (directory === FSUtil.resolve(process.cwd()) || now - entry.lastUsed < ttl) continue

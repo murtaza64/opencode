@@ -61,6 +61,31 @@ describe("InstanceStore", () => {
     }),
   )
 
+  it.effect("resolve memoizes project identity until the idle TTL without bootstrapping", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      let boots = 0
+      yield* setBootstrap(Effect.sync(() => { boots++ }))
+      let updates = 0
+      const onEvent = (event: { payload: { type: string } }) => {
+        if (event.payload.type === "project.updated") updates++
+      }
+      GlobalBus.on("event", onEvent)
+      yield* Effect.addFinalizer(() => Effect.sync(() => { GlobalBus.off("event", onEvent) }))
+      const first = yield* store.resolve(dir)
+      expect(yield* store.resolve(dir)).toBe(first)
+      expect(updates).toBe(1)
+      yield* TestClock.adjust("11 minutes")
+      const next = yield* store.resolve(dir)
+      expect(next).not.toBe(first)
+      expect(next.project.id).toBe(first.project.id)
+      expect(updates).toBe(2)
+      expect(boots).toBe(0)
+      expect(store.size()).toBe(0)
+    }),
+  )
+
   it.effect("sweeps idle instances and emits disposal without evicting cwd", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped({ git: true })
