@@ -888,6 +888,22 @@ function SessionView(props: { sessionID: string; directory: string }) {
 
   const [floating, setFloating] = createSignal(false)
   let floatDismissed = false
+  // "Approaching full": the inline textarea has a fixed visible height, so open once its
+  // content fills ~90% of that box, just before it starts scrolling. scrollHeight never
+  // drops below clientHeight, so collapse the box briefly to measure the content itself.
+  const nearFull = (el: HTMLTextAreaElement) => {
+    const box = el.clientHeight
+    if (el.scrollHeight > box) return true
+    const style = [el.style.height, el.style.minHeight] as const
+    const top = el.scrollTop
+    el.style.minHeight = "0"
+    el.style.height = "0"
+    const content = el.scrollHeight
+    el.style.height = style[0]
+    el.style.minHeight = style[1]
+    el.scrollTop = top
+    return content >= 0.9 * box
+  }
   createEffect(() => {
     const d = draft()
     if (!d) {
@@ -895,17 +911,21 @@ function SessionView(props: { sessionID: string; directory: string }) {
       setFloating(false)
       return
     }
-    if (!floating() && !floatDismissed && (d.length > 400 || d.split("\n").length > 5)) {
-      const selection = untrack(() => [...activeDraft().selection] as const)
-      const inputMode = untrack(vim.mode)
-      setFloating(true)
-      queueMicrotask(() => {
-        floatEl?.focus()
-        vim.setMode(inputMode)
-        floatEl?.setSelectionRange(selection[0], selection[1])
-        vim.refresh(floatEl)
-      })
-    }
+    if (floating() || floatDismissed || !promptEl || !nearFull(promptEl)) return
+    // This runs inside setDraft from onInput, before the handler saves the new selection,
+    // so the stored selection is one keystroke stale; read the live caret instead.
+    const source = document.activeElement === promptEl ? promptEl : undefined
+    const selection = source ? ([source.selectionStart, source.selectionEnd] as const) : untrack(() => [...activeDraft().selection] as const)
+    const inputMode = untrack(vim.mode)
+    setFloating(true)
+    queueMicrotask(() => {
+      if (!floatEl) return
+      floatEl.focus()
+      vim.setMode(inputMode)
+      floatEl.setSelectionRange(selection[0], selection[1])
+      saveSelection(floatEl)
+      vim.refresh(floatEl)
+    })
   })
   const closeFloat = () => {
     const inputMode = vim.mode()
