@@ -40,9 +40,21 @@ export const ripgrepLayer = Layer.effect(
         onEntry: (entry) =>
           Effect.sync(() => {
             state.files.push(entry.path)
+            // Record only the ancestors not seen yet. Ancestors are always recorded
+            // together, so the walk can stop at the first known directory; rebuilding
+            // the directory list per entry was O(files x directories) and pinned a
+            // multi-minute scan plus its ripgrep output in memory on large trees.
             const parts = entry.path.split("/")
-            parts.slice(0, -1).forEach((_, index) => directories.add(parts.slice(0, index + 1).join("/") + path.sep))
-            state.directories = Array.from(directories)
+            const missing: string[] = []
+            for (let depth = parts.length - 1; depth > 0; depth--) {
+              const dir = parts.slice(0, depth).join("/") + path.sep
+              if (directories.has(dir)) break
+              missing.push(dir)
+            }
+            for (const dir of missing.reverse()) {
+              directories.add(dir)
+              state.directories.push(dir)
+            }
           }),
       })
       .pipe(Effect.orDie, Effect.asVoid, Effect.forkIn(scope))
