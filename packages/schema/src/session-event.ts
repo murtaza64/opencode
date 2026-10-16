@@ -11,7 +11,7 @@ import { FileAttachment, Prompt } from "./prompt"
 import { SessionID } from "./session-id"
 import { Location } from "./location"
 import { SessionMessage } from "./session-message"
-import { MailSource } from "./session-mail-source"
+import { InputSource } from "./session-input-source"
 import { Revert } from "./revert"
 
 export { FileAttachment }
@@ -34,7 +34,7 @@ const PromptFields = {
   messageID: SessionMessage.ID,
   prompt: Prompt,
   delivery: Delivery,
-  source: MailSource.pipe(optional),
+  source: InputSource.pipe(optional),
 }
 
 const options = {

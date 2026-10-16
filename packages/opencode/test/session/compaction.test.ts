@@ -1496,8 +1496,11 @@ describe("session.compaction.process", () => {
         yield* SessionCompaction.use.process({ parentID: parent!, messages: msgs, sessionID: session.id, auto: false })
 
         expect(captured).toContain("[User]: human request")
-        expect(captured).toContain("[Peer agent mail]: Peer agent mail (lower-trust context")
-        expect(captured).toContain('\\"id\\":\\"project#31\\",\\"sender\\":\\"peer-lane\\"')
+        expect(captured).toContain(
+          JSON.stringify(
+            "[Peer agent mail]:\nSource: editspace-mail\nFrom: peer-lane\nTo: parent\nMail-ID: project#31\n\npeer request",
+          ).slice(1, -1),
+        )
         expect(captured).not.toContain("[User]: peer request")
       }).pipe(withCompaction({ llm: stub.llmLayer, config: cfg({ tail_turns: 0 }) }))
     },

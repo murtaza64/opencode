@@ -1,8 +1,8 @@
 export * as SessionInput from "./input"
 
-import { and, asc, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm"
+import { and, asc, eq, inArray, isNotNull, isNull, lte, ne, sql } from "drizzle-orm"
 import { DateTime, Effect, Schema } from "effect"
-import { Admitted, Delivery, MailSource } from "@opencode-ai/schema/session-input"
+import { Admitted, Delivery, InputSource, MailSource } from "@opencode-ai/schema/session-input"
 import type { Database } from "../database/database"
 import type { EventV2 } from "../event"
 import { SessionEvent } from "./event"
@@ -13,7 +13,7 @@ import { SessionInputTable, SessionMessageTable } from "./sql"
 
 type DatabaseService = Database.Interface["db"]
 
-export { Admitted, Delivery, MailSource }
+export { Admitted, Delivery, InputSource, MailSource }
 
 const decodePrompt = Schema.decodeUnknownSync(Prompt)
 const encodePrompt = Schema.encodeSync(Prompt)
@@ -49,7 +49,7 @@ export const admit = Effect.fn("SessionInput.admit")(function* (
     readonly sessionID: SessionSchema.ID
     readonly prompt: Prompt
     readonly delivery: Delivery
-    readonly source?: MailSource
+    readonly source?: InputSource
   },
 ) {
   const existing = yield* find(db, input.id)
@@ -94,7 +94,7 @@ export const projectAdmitted = Effect.fn("SessionInput.projectAdmitted")(functio
     readonly sessionID: SessionSchema.ID
     readonly prompt: Prompt
     readonly delivery: Delivery
-    readonly source?: MailSource
+    readonly source?: InputSource
     readonly timeCreated: DateTime.Utc
   },
 ) {
@@ -130,7 +130,7 @@ export const projectPrompted = Effect.fn("SessionInput.projectPrompted")(functio
     readonly sessionID: SessionSchema.ID
     readonly prompt: Prompt
     readonly delivery: Delivery
-    readonly source?: MailSource
+    readonly source?: InputSource
     readonly timeCreated: DateTime.Utc
     readonly promotedSeq: number
   },
@@ -242,6 +242,28 @@ export const present = Effect.fn("SessionInput.present")(function* (
   }
 })
 
+// Durable across compaction and handoff: once any non-human source was admitted,
+// the session keeps the system-level trust rule even after the message is summarized.
+export const hasAgentSources = Effect.fn("SessionInput.hasAgentSources")(function* (
+  db: DatabaseService,
+  sessionID: SessionSchema.ID,
+) {
+  const row = yield* db
+    .select({ id: SessionInputTable.id })
+    .from(SessionInputTable)
+    .where(
+      and(
+        eq(SessionInputTable.session_id, sessionID),
+        isNotNull(SessionInputTable.source),
+        ne(sql`json_extract(${SessionInputTable.source}, '$.type')`, "human"),
+      ),
+    )
+    .limit(1)
+    .get()
+    .pipe(Effect.orDie)
+  return row !== undefined
+})
+
 export const hasPending = Effect.fn("SessionInput.hasPending")(function* (
   db: DatabaseService,
   sessionID: SessionSchema.ID,
@@ -269,7 +291,7 @@ export const equivalent = (
     readonly sessionID: SessionSchema.ID
     readonly prompt: Prompt
     readonly delivery: Delivery
-    readonly source?: MailSource
+    readonly source?: InputSource
   },
 ) =>
   input.delivery === expected.delivery &&
@@ -286,7 +308,7 @@ const matchesProjection = (
     readonly sessionID: SessionSchema.ID
     readonly prompt: Prompt
     readonly delivery: Delivery
-    readonly source?: MailSource
+    readonly source?: InputSource
     readonly timeCreated: DateTime.Utc
   },
 ) =>

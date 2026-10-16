@@ -565,18 +565,36 @@ export type SessionsPromptOutput = {
       }>
     }
     readonly delivery: "steer" | "queue"
-    readonly source?: {
-      readonly type: "editspace-mail"
-      readonly id: string
-      readonly sender: string
-      readonly senderSession?: string
-      readonly recipient: string
-      readonly relationship?: string
-      readonly originRun?: string
-      readonly kind?: string
-      readonly in_reply_to?: string
-      readonly supersedes?: string
-    }
+    readonly source?:
+      | { readonly type: "human"; readonly via?: string }
+      | {
+          readonly type: "editspace-mail"
+          readonly id: string
+          readonly sender: string
+          readonly senderSession?: string
+          readonly recipient: string
+          readonly relationship?: string
+          readonly originRun?: string
+          readonly kind?: string
+          readonly in_reply_to?: string
+          readonly supersedes?: string
+        }
+      | {
+          readonly type: "resume"
+          readonly sender: string
+          readonly senderSession?: string
+          readonly originRun?: string
+          readonly in_reply_to?: string
+        }
+      | { readonly type: "heartbeat"; readonly sender: string; readonly schedule?: string }
+      | {
+          readonly type: "subagent-return"
+          readonly sessionID: string
+          readonly agent?: string
+          readonly callID?: string
+          readonly status?: "completed" | "failed" | "aborted"
+        }
+      | { readonly type: "handoff"; readonly predecessor: string; readonly sender?: string; readonly lane?: string }
     readonly timeCreated: number
     readonly promotedSeq?: number
     readonly presentedSeq?: number
@@ -657,18 +675,36 @@ export type SessionsContextOutput = {
           readonly source?: { readonly start: number; readonly end: number; readonly text: string }
         }>
         readonly type: "user"
-        readonly source?: {
-          readonly type: "editspace-mail"
-          readonly id: string
-          readonly sender: string
-          readonly senderSession?: string
-          readonly recipient: string
-          readonly relationship?: string
-          readonly originRun?: string
-          readonly kind?: string
-          readonly in_reply_to?: string
-          readonly supersedes?: string
-        }
+        readonly source?:
+          | { readonly type: "human"; readonly via?: string }
+          | {
+              readonly type: "editspace-mail"
+              readonly id: string
+              readonly sender: string
+              readonly senderSession?: string
+              readonly recipient: string
+              readonly relationship?: string
+              readonly originRun?: string
+              readonly kind?: string
+              readonly in_reply_to?: string
+              readonly supersedes?: string
+            }
+          | {
+              readonly type: "resume"
+              readonly sender: string
+              readonly senderSession?: string
+              readonly originRun?: string
+              readonly in_reply_to?: string
+            }
+          | { readonly type: "heartbeat"; readonly sender: string; readonly schedule?: string }
+          | {
+              readonly type: "subagent-return"
+              readonly sessionID: string
+              readonly agent?: string
+              readonly callID?: string
+              readonly status?: "completed" | "failed" | "aborted"
+            }
+          | { readonly type: "handoff"; readonly predecessor: string; readonly sender?: string; readonly lane?: string }
       }
     | {
         readonly id: string
@@ -862,18 +898,41 @@ export type SessionsHistoryOutput = {
             }>
           }
           readonly delivery: "steer" | "queue"
-          readonly source?: {
-            readonly type: "editspace-mail"
-            readonly id: string
-            readonly sender: string
-            readonly senderSession?: string
-            readonly recipient: string
-            readonly relationship?: string
-            readonly originRun?: string
-            readonly kind?: string
-            readonly in_reply_to?: string
-            readonly supersedes?: string
-          }
+          readonly source?:
+            | { readonly type: "human"; readonly via?: string }
+            | {
+                readonly type: "editspace-mail"
+                readonly id: string
+                readonly sender: string
+                readonly senderSession?: string
+                readonly recipient: string
+                readonly relationship?: string
+                readonly originRun?: string
+                readonly kind?: string
+                readonly in_reply_to?: string
+                readonly supersedes?: string
+              }
+            | {
+                readonly type: "resume"
+                readonly sender: string
+                readonly senderSession?: string
+                readonly originRun?: string
+                readonly in_reply_to?: string
+              }
+            | { readonly type: "heartbeat"; readonly sender: string; readonly schedule?: string }
+            | {
+                readonly type: "subagent-return"
+                readonly sessionID: string
+                readonly agent?: string
+                readonly callID?: string
+                readonly status?: "completed" | "failed" | "aborted"
+              }
+            | {
+                readonly type: "handoff"
+                readonly predecessor: string
+                readonly sender?: string
+                readonly lane?: string
+              }
         }
       }
     | {
@@ -901,18 +960,41 @@ export type SessionsHistoryOutput = {
             }>
           }
           readonly delivery: "steer" | "queue"
-          readonly source?: {
-            readonly type: "editspace-mail"
-            readonly id: string
-            readonly sender: string
-            readonly senderSession?: string
-            readonly recipient: string
-            readonly relationship?: string
-            readonly originRun?: string
-            readonly kind?: string
-            readonly in_reply_to?: string
-            readonly supersedes?: string
-          }
+          readonly source?:
+            | { readonly type: "human"; readonly via?: string }
+            | {
+                readonly type: "editspace-mail"
+                readonly id: string
+                readonly sender: string
+                readonly senderSession?: string
+                readonly recipient: string
+                readonly relationship?: string
+                readonly originRun?: string
+                readonly kind?: string
+                readonly in_reply_to?: string
+                readonly supersedes?: string
+              }
+            | {
+                readonly type: "resume"
+                readonly sender: string
+                readonly senderSession?: string
+                readonly originRun?: string
+                readonly in_reply_to?: string
+              }
+            | { readonly type: "heartbeat"; readonly sender: string; readonly schedule?: string }
+            | {
+                readonly type: "subagent-return"
+                readonly sessionID: string
+                readonly agent?: string
+                readonly callID?: string
+                readonly status?: "completed" | "failed" | "aborted"
+              }
+            | {
+                readonly type: "handoff"
+                readonly predecessor: string
+                readonly sender?: string
+                readonly lane?: string
+              }
         }
       }
     | {
@@ -1352,18 +1434,36 @@ export type SessionsEventsOutput =
           }>
         }
         readonly delivery: "steer" | "queue"
-        readonly source?: {
-          readonly type: "editspace-mail"
-          readonly id: string
-          readonly sender: string
-          readonly senderSession?: string
-          readonly recipient: string
-          readonly relationship?: string
-          readonly originRun?: string
-          readonly kind?: string
-          readonly in_reply_to?: string
-          readonly supersedes?: string
-        }
+        readonly source?:
+          | { readonly type: "human"; readonly via?: string }
+          | {
+              readonly type: "editspace-mail"
+              readonly id: string
+              readonly sender: string
+              readonly senderSession?: string
+              readonly recipient: string
+              readonly relationship?: string
+              readonly originRun?: string
+              readonly kind?: string
+              readonly in_reply_to?: string
+              readonly supersedes?: string
+            }
+          | {
+              readonly type: "resume"
+              readonly sender: string
+              readonly senderSession?: string
+              readonly originRun?: string
+              readonly in_reply_to?: string
+            }
+          | { readonly type: "heartbeat"; readonly sender: string; readonly schedule?: string }
+          | {
+              readonly type: "subagent-return"
+              readonly sessionID: string
+              readonly agent?: string
+              readonly callID?: string
+              readonly status?: "completed" | "failed" | "aborted"
+            }
+          | { readonly type: "handoff"; readonly predecessor: string; readonly sender?: string; readonly lane?: string }
       }
     }
   | {
@@ -1391,18 +1491,36 @@ export type SessionsEventsOutput =
           }>
         }
         readonly delivery: "steer" | "queue"
-        readonly source?: {
-          readonly type: "editspace-mail"
-          readonly id: string
-          readonly sender: string
-          readonly senderSession?: string
-          readonly recipient: string
-          readonly relationship?: string
-          readonly originRun?: string
-          readonly kind?: string
-          readonly in_reply_to?: string
-          readonly supersedes?: string
-        }
+        readonly source?:
+          | { readonly type: "human"; readonly via?: string }
+          | {
+              readonly type: "editspace-mail"
+              readonly id: string
+              readonly sender: string
+              readonly senderSession?: string
+              readonly recipient: string
+              readonly relationship?: string
+              readonly originRun?: string
+              readonly kind?: string
+              readonly in_reply_to?: string
+              readonly supersedes?: string
+            }
+          | {
+              readonly type: "resume"
+              readonly sender: string
+              readonly senderSession?: string
+              readonly originRun?: string
+              readonly in_reply_to?: string
+            }
+          | { readonly type: "heartbeat"; readonly sender: string; readonly schedule?: string }
+          | {
+              readonly type: "subagent-return"
+              readonly sessionID: string
+              readonly agent?: string
+              readonly callID?: string
+              readonly status?: "completed" | "failed" | "aborted"
+            }
+          | { readonly type: "handoff"; readonly predecessor: string; readonly sender?: string; readonly lane?: string }
       }
     }
   | {
@@ -1811,18 +1929,36 @@ export type SessionsMessageOutput = {
           readonly source?: { readonly start: number; readonly end: number; readonly text: string }
         }>
         readonly type: "user"
-        readonly source?: {
-          readonly type: "editspace-mail"
-          readonly id: string
-          readonly sender: string
-          readonly senderSession?: string
-          readonly recipient: string
-          readonly relationship?: string
-          readonly originRun?: string
-          readonly kind?: string
-          readonly in_reply_to?: string
-          readonly supersedes?: string
-        }
+        readonly source?:
+          | { readonly type: "human"; readonly via?: string }
+          | {
+              readonly type: "editspace-mail"
+              readonly id: string
+              readonly sender: string
+              readonly senderSession?: string
+              readonly recipient: string
+              readonly relationship?: string
+              readonly originRun?: string
+              readonly kind?: string
+              readonly in_reply_to?: string
+              readonly supersedes?: string
+            }
+          | {
+              readonly type: "resume"
+              readonly sender: string
+              readonly senderSession?: string
+              readonly originRun?: string
+              readonly in_reply_to?: string
+            }
+          | { readonly type: "heartbeat"; readonly sender: string; readonly schedule?: string }
+          | {
+              readonly type: "subagent-return"
+              readonly sessionID: string
+              readonly agent?: string
+              readonly callID?: string
+              readonly status?: "completed" | "failed" | "aborted"
+            }
+          | { readonly type: "handoff"; readonly predecessor: string; readonly sender?: string; readonly lane?: string }
       }
     | {
         readonly id: string
@@ -1995,18 +2131,36 @@ export type MessagesListOutput = {
           readonly source?: { readonly start: number; readonly end: number; readonly text: string }
         }>
         readonly type: "user"
-        readonly source?: {
-          readonly type: "editspace-mail"
-          readonly id: string
-          readonly sender: string
-          readonly senderSession?: string
-          readonly recipient: string
-          readonly relationship?: string
-          readonly originRun?: string
-          readonly kind?: string
-          readonly in_reply_to?: string
-          readonly supersedes?: string
-        }
+        readonly source?:
+          | { readonly type: "human"; readonly via?: string }
+          | {
+              readonly type: "editspace-mail"
+              readonly id: string
+              readonly sender: string
+              readonly senderSession?: string
+              readonly recipient: string
+              readonly relationship?: string
+              readonly originRun?: string
+              readonly kind?: string
+              readonly in_reply_to?: string
+              readonly supersedes?: string
+            }
+          | {
+              readonly type: "resume"
+              readonly sender: string
+              readonly senderSession?: string
+              readonly originRun?: string
+              readonly in_reply_to?: string
+            }
+          | { readonly type: "heartbeat"; readonly sender: string; readonly schedule?: string }
+          | {
+              readonly type: "subagent-return"
+              readonly sessionID: string
+              readonly agent?: string
+              readonly callID?: string
+              readonly status?: "completed" | "failed" | "aborted"
+            }
+          | { readonly type: "handoff"; readonly predecessor: string; readonly sender?: string; readonly lane?: string }
       }
     | {
         readonly id: string

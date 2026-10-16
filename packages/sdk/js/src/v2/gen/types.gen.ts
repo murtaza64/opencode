@@ -251,7 +251,7 @@ export type UserMessage = {
   id: string
   sessionID: string
   role: "user"
-  source?: SessionInputMailSource
+  source?: SessionInputSource
   time: {
     created: number
   }
@@ -869,7 +869,7 @@ export type GlobalEvent = {
           messageID: string
           prompt: Prompt
           delivery: "steer" | "queue"
-          source?: SessionInputMailSource
+          source?: SessionInputSource
         }
       }
     | {
@@ -881,7 +881,7 @@ export type GlobalEvent = {
           messageID: string
           prompt: Prompt
           delivery: "steer" | "queue"
-          source?: SessionInputMailSource
+          source?: SessionInputSource
         }
       }
     | {
@@ -3293,6 +3293,11 @@ export type MoveSessionDestination = {
   directory: string
 }
 
+export type SessionInputHumanSource = {
+  type: "human"
+  via?: string
+}
+
 export type SessionInputMailSource = {
   type: "editspace-mail"
   id: string
@@ -3305,6 +3310,43 @@ export type SessionInputMailSource = {
   in_reply_to?: string
   supersedes?: string
 }
+
+export type SessionInputResumeSource = {
+  type: "resume"
+  sender: string
+  senderSession?: string
+  originRun?: string
+  in_reply_to?: string
+}
+
+export type SessionInputHeartbeatSource = {
+  type: "heartbeat"
+  sender: string
+  schedule?: string
+}
+
+export type SessionInputSubagentReturnSource = {
+  type: "subagent-return"
+  sessionID: string
+  agent?: string
+  callID?: string
+  status?: "completed" | "failed" | "aborted"
+}
+
+export type SessionInputHandoffSource = {
+  type: "handoff"
+  predecessor: string
+  sender?: string
+  lane?: string
+}
+
+export type SessionInputSource =
+  | SessionInputHumanSource
+  | SessionInputMailSource
+  | SessionInputResumeSource
+  | SessionInputHeartbeatSource
+  | SessionInputSubagentReturnSource
+  | SessionInputHandoffSource
 
 export type ModelRef = {
   id: string
@@ -3403,7 +3445,7 @@ export type SessionV1InputPayload = {
   text: string
   images?: Array<SessionV1InputImage>
   agent?: string
-  source?: SessionInputMailSource
+  source?: SessionInputSource
 }
 
 export type PermissionV2Source = {
@@ -3650,7 +3692,7 @@ export type SyncEventSessionNextPrompted = {
       messageID: string
       prompt: Prompt
       delivery: "steer" | "queue"
-      source?: SessionInputMailSource
+      source?: SessionInputSource
     }
   }
 }
@@ -3669,7 +3711,7 @@ export type SyncEventSessionNextPromptAdmitted = {
       messageID: string
       prompt: Prompt
       delivery: "steer" | "queue"
-      source?: SessionInputMailSource
+      source?: SessionInputSource
     }
   }
 }
@@ -4266,7 +4308,7 @@ export type SessionV1InputReceipt =
       text: string
       images?: Array<SessionV1InputImage>
       agent: string
-      source?: SessionInputMailSource
+      source?: SessionInputSource
       sessionID: string
       admittedSeq: number
       timeCreated: number
@@ -4278,7 +4320,7 @@ export type SessionV1InputReceipt =
       text: string
       images?: Array<SessionV1InputImage>
       agent: string
-      source?: SessionInputMailSource
+      source?: SessionInputSource
       sessionID: string
       admittedSeq: number
       timeCreated: number
@@ -4292,7 +4334,7 @@ export type SessionV1InputReceipt =
       text: string
       images?: Array<SessionV1InputImage>
       agent: string
-      source?: SessionInputMailSource
+      source?: SessionInputSource
       sessionID: string
       admittedSeq: number
       timeCreated: number
@@ -4307,7 +4349,7 @@ export type SessionV1InputReceipt =
       text: string
       images?: Array<SessionV1InputImage>
       agent: string
-      source?: SessionInputMailSource
+      source?: SessionInputSource
       sessionID: string
       admittedSeq: number
       timeCreated: number
@@ -4325,7 +4367,7 @@ export type SessionV1InputReceipt =
       text: string
       images?: Array<SessionV1InputImage>
       agent: string
-      source?: SessionInputMailSource
+      source?: SessionInputSource
       sessionID: string
       admittedSeq: number
       timeCreated: number
@@ -4426,7 +4468,7 @@ export type SessionInputAdmitted2 = {
   sessionID: string
   prompt: Prompt
   delivery: "steer" | "queue"
-  source?: SessionInputMailSource
+  source?: SessionInputSource
   timeCreated: number
   promotedSeq?: number
   presentedSeq?: number
@@ -4469,7 +4511,7 @@ export type SessionMessageUser = {
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
   type: "user"
-  source?: SessionInputMailSource
+  source?: SessionInputSource
 }
 
 export type SessionMessageSynthetic = {
@@ -4728,7 +4770,7 @@ export type SessionNextPrompted = {
     messageID: string
     prompt: Prompt
     delivery: "steer" | "queue"
-    source?: SessionInputMailSource
+    source?: SessionInputSource
   }
 }
 
@@ -4750,7 +4792,7 @@ export type SessionNextPromptAdmitted = {
     messageID: string
     prompt: Prompt
     delivery: "steer" | "queue"
-    source?: SessionInputMailSource
+    source?: SessionInputSource
   }
 }
 
@@ -5815,7 +5857,7 @@ export type SessionV1InputPayload1 = {
   text: string
   images?: Array<SessionV1InputImage>
   agent?: string
-  source?: SessionInputMailSource
+  source?: SessionInputSource
 }
 
 export type SessionInputCancelled = {
@@ -6897,7 +6939,7 @@ export type EventSessionNextPrompted = {
     messageID: string
     prompt: Prompt
     delivery: "steer" | "queue"
-    source?: SessionInputMailSource
+    source?: SessionInputSource
   }
 }
 
@@ -6910,7 +6952,7 @@ export type EventSessionNextPromptAdmitted = {
     messageID: string
     prompt: Prompt
     delivery: "steer" | "queue"
-    source?: SessionInputMailSource
+    source?: SessionInputSource
   }
 }
 

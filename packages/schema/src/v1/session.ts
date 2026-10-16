@@ -9,7 +9,7 @@ import { Model } from "../model"
 import { NonNegativeInt, optional, statics } from "../schema"
 import { ascending } from "../identifier"
 import { SessionID } from "../session-id"
-import { SessionMailSource } from "../session-mail-source"
+import { SessionInputSource } from "../session-input-source"
 import { WorkspaceID } from "../workspace-id"
 import { PermissionV1 } from "./permission"
 import { InputImageValidation } from "./input-image-validation"
@@ -334,7 +334,7 @@ const messageBase = {
 export const User = Schema.Struct({
   ...messageBase,
   role: Schema.Literal("user"),
-  source: optional(SessionMailSource.MailSource),
+  source: optional(SessionInputSource.InputSource),
   time: Schema.Struct({
     created: Timestamp,
   }),
@@ -612,7 +612,7 @@ export const InputPayload = Schema.Struct({
   text: Schema.String,
   images: optional(InputImages),
   agent: optional(Schema.String.check(Schema.isMinLength(1))),
-  source: optional(SessionMailSource.MailSource),
+  source: optional(SessionInputSource.InputSource),
 }).annotate({ identifier: "SessionV1.InputPayload", parseOptions: { onExcessProperty: "error" } })
 export interface InputPayload extends Schema.Schema.Type<typeof InputPayload> {}
 

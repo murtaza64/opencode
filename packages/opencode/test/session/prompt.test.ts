@@ -40,6 +40,7 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { SessionInput } from "../../src/session/input"
+import { InputSourceContext } from "@opencode-ai/core/session/input-source"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { SessionV2 } from "@opencode-ai/core/session"
@@ -1650,6 +1651,51 @@ for (const synthetic of [false, true]) {
       }),
   )
 }
+
+it.instance(
+  "resume-sourced input renders a header block, adds the trust rule once as system context, and is presented",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const inputs = yield* SessionInput.Service
+      const run = yield* SessionRunState.Service
+      const { prompt, chat } = yield* boot()
+      yield* llm.text("resumed")
+      const source = {
+        type: "resume" as const,
+        sender: "orchestrator",
+        senderSession: "ses_orch",
+        in_reply_to: "project#9",
+      }
+      yield* inputs.admit(chat.id, {
+        requestID: "resume-1",
+        delivery: "queue",
+        text: "Continue the brief.\nSecond line",
+        source,
+      })
+      yield* prompt.wake(chat.id)
+      yield* llm.wait(1)
+      yield* pollWithTimeout(
+        run.assertNotBusy(chat.id).pipe(
+          Effect.as(true),
+          Effect.catchTag("SessionBusyError", () => Effect.succeed(undefined)),
+        ),
+        "runner did not become idle",
+      )
+      const request = (yield* llm.inputs)[0]
+      const messages = request?.messages
+      if (!Array.isArray(messages)) throw new Error("expected LLM messages")
+      const system = JSON.stringify(messages.filter((message) => message.role === "system"))
+      expect(system.split(JSON.stringify(InputSourceContext.SYSTEM_RULE).slice(1, -1))).toHaveLength(2)
+      expect(JSON.stringify(messages.filter((message) => message.role === "user"))).not.toContain("lower-trust")
+      expect(messages.at(-1)).toEqual({
+        role: "user",
+        content:
+          "Source: resume\nFrom: orchestrator\nFrom-Session: ses_orch\nIn-reply-to: project#9\n\nContinue the brief.\nSecond line",
+      })
+      expect(yield* inputs.get(chat.id, "resume-1")).toMatchObject({ state: "presented", source })
+    }),
+)
 
 noLLMServer.instance("concurrent loop callers get same result", () =>
   Effect.gen(function* () {

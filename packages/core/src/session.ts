@@ -150,7 +150,7 @@ export interface Interface {
     sessionID: SessionSchema.ID
     prompt: PromptInput.Prompt
     delivery?: SessionInput.Delivery
-    source?: SessionInput.MailSource
+    source?: SessionInput.InputSource
     resume?: boolean
   }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError | SessionSupersession.Closed>
   readonly shell: (input: {

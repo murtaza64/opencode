@@ -321,7 +321,7 @@ const make = Effect.gen(function* () {
           eq(V1InputTable.state, "promoted"),
           inArray(sql`json_extract(${V1InputTable.receipt}, '$.messageID')`, messageIDs),
           sql`json_extract(${V1InputTable.receipt}, '$.timePresented') is null`,
-          sql`json_extract(${V1InputTable.payload}, '$.source.type') = 'editspace-mail'`,
+          sql`json_extract(${V1InputTable.payload}, '$.source.type') is not null and json_extract(${V1InputTable.payload}, '$.source.type') != 'human'`,
         ),
       )
       .all()
@@ -338,7 +338,23 @@ const make = Effect.gen(function* () {
       )
     }
   })
-  return { admit, get, list, cancel, handle, promote, presented }
+  // Durable across compaction: the system trust rule stays once any non-human source was admitted.
+  const hasAgentSources = Effect.fn("SessionInput.hasAgentSources")(function* (sessionID: SessionID) {
+    const row = yield* db
+      .select({ id: V1InputTable.request_id })
+      .from(V1InputTable)
+      .where(
+        and(
+          eq(V1InputTable.session_id, sessionID),
+          sql`json_extract(${V1InputTable.payload}, '$.source.type') is not null and json_extract(${V1InputTable.payload}, '$.source.type') != 'human'`,
+        ),
+      )
+      .limit(1)
+      .get()
+      .pipe(Effect.orDie)
+    return row !== undefined
+  })
+  return { admit, get, list, cancel, handle, promote, presented, hasAgentSources }
 })
 
 export class Service extends Context.Service<Service, Effect.Success<typeof make>>()("@opencode/SessionInput") {}

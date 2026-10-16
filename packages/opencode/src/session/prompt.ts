@@ -48,6 +48,7 @@ import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
 import { SessionSupersession } from "./supersession"
 import { SessionInput } from "./input"
+import { InputSourceContext } from "@opencode-ai/core/session/input-source"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
@@ -1287,11 +1288,12 @@ const layer = Layer.effect(
             ]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
-            const mail = msgs
+            if (yield* inputs.hasAgentSources(sessionID)) system.push(InputSourceContext.SYSTEM_RULE)
+            const sourced = msgs
               .filter(
                 (m) =>
                   m.info.role === "user" &&
-                  m.info.source?.type === "editspace-mail" &&
+                  InputSourceContext.isAgentSource(m.info.source) &&
                   m.parts.some(
                     (part) => (part.type === "text" && !part.ignored && part.text !== "") || part.type === "file",
                   ),
@@ -1313,7 +1315,7 @@ const layer = Layer.effect(
                 model,
                 toolChoice: format.type === "json_schema" ? "required" : undefined,
               },
-              inputs.presented(sessionID, mail),
+              inputs.presented(sessionID, sourced),
             )
 
             if (result === "stop") return "break" as const

@@ -21,7 +21,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { buildPrompt } from "@opencode-ai/core/session/compaction"
-import { MailContext } from "@opencode-ai/core/session/mail-context"
+import { InputSourceContext } from "@opencode-ai/core/session/input-source"
 import { SessionCompactionEvent } from "@opencode-ai/schema/session-compaction-event"
 
 export const Event = SessionCompactionEvent
@@ -62,8 +62,8 @@ const serialize = (message: SessionV1.WithParts) => {
     const files = message.parts.flatMap((part) =>
       part.type === "file" ? [`[Attached ${part.mime}: ${part.filename ?? "file"}]`] : [],
     )
-    if (message.info.source?.type === "editspace-mail")
-      return `[Peer agent mail]: ${MailContext.formatMailContext(message.info.source, [text, ...files].filter(Boolean))}`
+    if (InputSourceContext.isAgentSource(message.info.source))
+      return `[${InputSourceContext.label(message.info.source)}]:\n${InputSourceContext.format(message.info.source, [text, ...files])}`
     return [...(text ? [`[User]: ${text}`] : []), ...files].join("\n")
   }
   return message.parts

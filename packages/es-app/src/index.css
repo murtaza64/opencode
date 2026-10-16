@@ -1151,6 +1151,15 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .mail-activity-body { margin-block-start: 8px; white-space: pre-wrap; user-select: text; }
 .mail-activity-attachment { margin-block-start: 6px; color: var(--subtext0); }
 .mail-activity-details a { color: var(--teal); text-decoration: underline; }
+.mail-activity[data-source-type="resume"], .mail-activity[data-source-type="handoff"], .mail-activity[data-source-type="subagent-return"] {
+  border-inline-start-color: var(--lavender);
+  .mail-activity-kind { color: var(--lavender); }
+}
+.mail-activity[data-source-category="system"] {
+  border-inline-start-color: var(--peach);
+  border-style: dashed;
+  .mail-activity-kind { color: var(--peach); }
+}
 .mail-delivery { margin-block-start: 8px; border-block-start: 1px solid var(--surface0); padding-block-start: 6px; }
 @media (max-width: 600px) {
   .mail-activity-summary { grid-template-columns: 4.5rem minmax(0, 1fr) 16px; }

@@ -323,6 +323,35 @@ describe("SessionV2.prompt", () => {
     }),
   )
 
+  it.effect("persists resume provenance and flags the session as sourced only for non-human inputs", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const { db } = yield* Database.Service
+      expect(yield* SessionInput.hasAgentSources(db, sessionID)).toBe(false)
+
+      yield* session.prompt({
+        sessionID,
+        id: SessionMessage.ID.make("msg_human_sourced"),
+        prompt: Prompt.make({ text: "Typed in es-app" }),
+        source: { type: "human", via: "es-app" },
+        resume: false,
+      })
+      expect(yield* SessionInput.hasAgentSources(db, sessionID)).toBe(false)
+
+      const source = { type: "resume" as const, sender: "orchestrator", senderSession: "ses_orch", in_reply_to: "project#9" }
+      const admitted = yield* session.prompt({
+        sessionID,
+        id: SessionMessage.ID.make("msg_resume_sourced"),
+        prompt: Prompt.make({ text: "Continue with the brief" }),
+        source,
+        resume: false,
+      })
+      expect(admitted.source).toEqual(source)
+      expect(yield* SessionInput.hasAgentSources(db, sessionID)).toBe(true)
+    }),
+  )
+
   it.effect("wakes execution when an exact prompt retry recovers a committed message", () =>
     Effect.gen(function* () {
       yield* setup

@@ -7,7 +7,7 @@ import { Model } from "./model"
 import { FileAttachment, Prompt } from "./prompt"
 import { DateTimeUtcFromMillis, RelativePath, statics } from "./schema"
 import { SessionID } from "./session-id"
-import { MailSource } from "./session-mail-source"
+import { InputSource } from "./session-input-source"
 import { ascending } from "./identifier"
 
 export const ID = Schema.String.check(Schema.isStartsWith("msg_")).pipe(
@@ -49,7 +49,7 @@ export const User = Schema.Struct({
   files: Prompt.fields.files,
   agents: Prompt.fields.agents,
   type: Schema.Literal("user"),
-  source: MailSource.pipe(optional),
+  source: InputSource.pipe(optional),
 }).annotate({ identifier: "Session.Message.User" })
 
 export interface Synthetic extends Schema.Schema.Type<typeof Synthetic> {}

@@ -7,12 +7,14 @@ import { DateTimeUtcFromMillis, NonNegativeInt } from "./schema"
 import { SessionDelivery } from "./session-delivery"
 import { SessionID } from "./session-id"
 import { SessionMessage } from "./session-message"
-import { MailSource } from "./session-mail-source"
+import { InputSource } from "./session-input-source"
 
 export const Delivery = SessionDelivery.Delivery
 export type Delivery = SessionDelivery.Delivery
 
-export { MailSource }
+export { InputSource }
+export { MailSource, isAgentSource } from "./session-input-source"
+export type { AgentSource } from "./session-input-source"
 
 export interface Admitted extends Schema.Schema.Type<typeof Admitted> {}
 export const Admitted = Schema.Struct({
@@ -21,7 +23,7 @@ export const Admitted = Schema.Struct({
   sessionID: SessionID,
   prompt: Prompt,
   delivery: Delivery,
-  source: MailSource.pipe(optional),
+  source: InputSource.pipe(optional),
   timeCreated: DateTimeUtcFromMillis,
   promotedSeq: NonNegativeInt.pipe(optional),
   presentedSeq: NonNegativeInt.pipe(optional),

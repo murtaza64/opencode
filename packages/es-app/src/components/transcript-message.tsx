@@ -2,6 +2,7 @@ import { createMemo, createSignal, For, Show, type ComponentProps } from "solid-
 import { Message } from "@opencode-ai/session-ui/message-part"
 import { errorText } from "../live-session"
 import type { MailDelivery, MailMessage } from "../api"
+import { sourcedInput, type SourcedInput } from "../input-source"
 
 type MailSource = { type: "editspace-mail"; id: string; sender: string; recipient: string }
 const mailTime = (value: string | number | null) => value == null ? "" : new Date(value).toLocaleString()
@@ -30,6 +31,7 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
   const messageError = createMemo(() => props.message.role === "assistant" && props.message.error?.name !== "MessageAbortedError"
     ? props.message.error : undefined)
   const mail = createMemo(() => mailMetadata(props.message))
+  const sourced = createMemo(() => sourcedInput(props.message))
   const mailText = createMemo(() => props.parts.flatMap(part => part.type === "text" && !part.ignored ? [part.text] : []).join("\n\n"))
   const generated = createMemo(() => {
     if (props.message.role !== "user" || !props.parts.length ||
@@ -52,7 +54,7 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
     const result = copied || await navigator.clipboard?.writeText(generated()).then(() => true, () => false)
     setCopyState(result ? "Copied" : "Copy failed")
   }
-  return <Show when={mail()} fallback={<Show when={generated()} fallback={<>
+  return <Show when={mail()} fallback={<Show when={sourced()} fallback={<Show when={generated()} fallback={<>
     <Message {...props} activityRows />
     <Show when={messageError()}>{(error) =>
       <div class="conversation-error" data-message-error-id={props.message.id} role="note" aria-label="Provider error">{errorText(error())}</div>
@@ -72,7 +74,9 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
       </Show>
     </details>
   </Show>}>
-    {(metadata) => <details class="mail-activity" id={`mail-${metadata().mail.id}`} data-mail-message-id={props.message.id}>
+    {(input) => <SourcedActivity input={input()} messageID={props.message.id} text={mailText()} parts={props.parts} />}
+  </Show>}>
+    {(metadata) => <details class="mail-activity" data-source-category="agent" data-source-type="editspace-mail" id={`mail-${metadata().mail.id}`} data-mail-message-id={props.message.id}>
       <summary class="mail-activity-summary">
          <span class="mail-activity-kind">Mail<Show when={props.mailRecord}> · {props.mailRecord?.direction === "sent" ? "Outbound" : "Inbound"}</Show></span>
         <span class="mail-activity-route"><bdi dir="auto">{metadata().mail.sender}</bdi> → <bdi dir="auto">{metadata().mail.recipient}</bdi></span>
@@ -112,3 +116,27 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
     </details>}
   </Show>
 }
+
+// Agent and system inputs share the mail block's look; the category colors the
+// rail and badge so human, agent and system turns stay distinguishable at a glance.
+const SourcedActivity = (props: {
+  input: SourcedInput
+  messageID: string
+  text: string
+  parts: ComponentProps<typeof Message>["parts"]
+}) => <details class="mail-activity" data-source-category={props.input.category} data-source-type={props.input.type}
+  data-sourced-message-id={props.messageID}>
+  <summary class="mail-activity-summary">
+    <span class="mail-activity-kind">{props.input.label}</span>
+    <span class="mail-activity-route"><bdi dir="auto">{props.input.from}</bdi> · <span dir="auto">{props.text.replace(/\s+/g, " ").trim().slice(0, 200)}</span></span>
+    <span class="mail-activity-state">{props.input.category}</span>
+    <span class="mail-activity-disclosure" aria-hidden="true">›</span>
+  </summary>
+  <div class="mail-activity-details">
+    <div><For each={props.input.headers}>{(header) => <div>{header.name}: <bdi dir="auto">{header.value}</bdi></div>}</For></div>
+    <Show when={props.text}><div class="mail-activity-body" dir="auto">{props.text}</div></Show>
+    <For each={props.parts.filter(part => part.type === "file")}>{(part) =>
+      <div class="mail-activity-attachment" dir="auto">Attachment: {part.type === "file" ? part.filename : ""}</div>
+    }</For>
+  </div>
+</details>

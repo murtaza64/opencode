@@ -260,8 +260,30 @@ it.instance(
       expect((yield* post({ ...payload, source: undefined })).status).toBe(409)
       expect((yield* post({ ...payload, source: { ...source, type: "unknown" } })).status).toBe(400)
       expect((yield* post({ ...payload, source: { ...source, recipient: 123 } })).status).toBe(400)
+      const resume = { type: "resume", sender: "orchestrator", senderSession: "ses_orch", in_reply_to: "mail-1" }
+      const resumed = yield* post({ requestID: "resume-1", delivery: "queue", text: "Continue", source: resume })
+      expect(resumed.status).toBe(200)
+      expect(yield* resumed.json).toMatchObject({ source: resume, state: "pending" })
+      expect(
+        (yield* post({ requestID: "resume-2", delivery: "queue", text: "x", source: { type: "resume" } })).status,
+      ).toBe(400)
+      expect(
+        (yield* post({
+          requestID: "hb-1",
+          delivery: "queue",
+          text: "x",
+          source: { type: "heartbeat", sender: "launchd", extra: 1 },
+        })).status,
+      ).toBe(400)
+      expect(
+        (yield* post({ requestID: "human-1", delivery: "queue", text: "x", source: { type: "human", via: "es-app" } }))
+          .status,
+      ).toBe(200)
       expect(yield* (yield* requestInDirectory(`${url}/mail-1`, instance.directory)).json).toEqual(receipt)
-      expect(yield* (yield* requestInDirectory(url, instance.directory)).json).toEqual({ items: [receipt], next: null })
+      expect(yield* (yield* requestInDirectory(url, instance.directory)).json).toMatchObject({
+        items: [receipt, {}, {}],
+        next: null,
+      })
       const handle = (requestID: string) =>
         requestInDirectory(`${url}/${requestID}/handle`, instance.directory, {
           method: "POST",

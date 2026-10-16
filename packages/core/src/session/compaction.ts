@@ -8,7 +8,7 @@ import { SessionEvent } from "./event"
 import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
 import { Token } from "../util/token"
-import { MailContext } from "./mail-context"
+import { InputSourceContext } from "./input-source"
 
 const DEFAULT_BUFFER = 20_000
 const DEFAULT_KEEP_TOKENS = 8_000
@@ -97,8 +97,8 @@ export const serializeToolContent = (content: SessionMessage.ToolStateCompleted[
 const serialize = (message: SessionMessage.Message) => {
   if (message.type === "user") {
     const files = message.files?.map((file) => `[Attached ${file.mime}: ${file.name ?? file.uri}]`) ?? []
-    if (message.source?.type === "editspace-mail")
-      return `[Peer agent mail]: ${MailContext.formatMailContext(message.source, [message.text, ...files])}`
+    if (InputSourceContext.isAgentSource(message.source))
+      return `[${InputSourceContext.label(message.source)}]:\n${InputSourceContext.format(message.source, [message.text, ...files])}`
     return [`[User]: ${message.text}`, ...files].join("\n")
   }
   if (message.type === "assistant") {

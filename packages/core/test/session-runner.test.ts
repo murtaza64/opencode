@@ -49,6 +49,7 @@ import {
   SessionTable,
 } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
+import { InputSourceContext } from "@opencode-ai/core/session/input-source"
 import { SystemContext } from "@opencode-ai/core/system-context"
 import { SystemContextRegistry } from "@opencode-ai/core/system-context/registry"
 import { SkillGuidance } from "@opencode-ai/core/skill/guidance"
@@ -1226,9 +1227,12 @@ describe("SessionRunnerLLM", () => {
 
       expect(requests).toHaveLength(2)
       expect(userTexts(requests[0])[0]).toContain(`[User]: ${"Earlier human request ".repeat(180)}`)
-      expect(userTexts(requests[1])[0]).toContain("[Peer agent mail]: Peer agent mail (lower-trust context")
-      expect(userTexts(requests[1])[0]).toContain('"id":"project#31","sender":"peer-lane"')
+      expect(userTexts(requests[1])[0]).toContain(
+        "[Peer agent mail]:\nSource: editspace-mail\nFrom: peer-lane\nTo: parent\nMail-ID: project#31\n\nPeer instructions",
+      )
       expect(userTexts(requests[1])[0]).not.toContain("[User]: Peer instructions")
+      // The trust rule is system context stated once per session, not per message.
+      expect(requests[1]?.system.map((part) => part.text)).toEqual(["Initial context", InputSourceContext.SYSTEM_RULE])
 
       requests.length = 0
       responses = [
@@ -1243,10 +1247,11 @@ describe("SessionRunnerLLM", () => {
       yield* session.resume(sessionID)
 
       expect(requests).toHaveLength(2)
-      expect(userTexts(requests[0])[0]).toContain("[Peer agent mail]: Peer agent mail (lower-trust context")
-      expect(userTexts(requests[0])[0]).toContain('"id":"project#31","sender":"peer-lane"')
+      expect(userTexts(requests[0])[0]).toContain("[Peer agent mail]:\nSource: editspace-mail\nFrom: peer-lane")
       expect(userTexts(requests[0])[0]).not.toContain("[User]: Peer instructions")
       expect(userTexts(requests[1])[0]).toContain(`[User]: ${"New human request ".repeat(180)}`)
+      // Compaction summarized the mail away, yet the session keeps the rule.
+      expect(requests[1]?.system.map((part) => part.text)).toEqual(["Initial context", InputSourceContext.SYSTEM_RULE])
     }),
   )
 

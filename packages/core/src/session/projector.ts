@@ -15,6 +15,7 @@ import { SessionInput } from "./input"
 import { WorkspaceV2 } from "../workspace"
 import { MessageTable, PartTable, SessionInputTable, SessionMessageTable, SessionTable, V1InputTable } from "./sql"
 import type { DeepMutable } from "../schema"
+import { isAgentSource } from "./input-source"
 
 type DatabaseService = Database.Interface["db"]
 
@@ -475,7 +476,7 @@ const layer = Layer.effectDiscard(
         if (
           !row ||
           row.state !== "promoted" ||
-          row.payload.source?.type !== "editspace-mail" ||
+          !isAgentSource(row.payload.source) ||
           row.receipt.state !== "promoted" ||
           row.receipt.messageID !== event.data.messageID
         )
