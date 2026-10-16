@@ -20,6 +20,8 @@ function decode(input: string): string {
   }
 }
 
+const promptAsyncPath = /^\/session\/[^/]+\/prompt_async$/
+
 function provideInstanceContext<E>(
   effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E>,
   store: InstanceStore.Interface,
@@ -34,9 +36,15 @@ function provideInstanceContext<E>(
       if (!cached) return HttpServerResponse.jsonUnsafe(pathname === "/session/status" ? {} : [])
     }
     // Listing is DB-only; resolve project identity without pinning an Instance.
-    const ctx =
-      request.method === "GET" && ["/session", "/umbrella/session"].includes(pathname)
-        ? yield* store.resolve(directory)
+    const listing = request.method === "GET" && ["/session", "/umbrella/session"].includes(pathname)
+    // Session create and prompt_async only persist durable rows, so they start the
+    // Instance boot and answer once the project identity resolves instead of waiting
+    // for bootstrap. The forked model turn behind prompt_async waits for the ready Instance.
+    const admitting = request.method === "POST" && (pathname === "/session" || promptAsyncPath.test(pathname))
+    const ctx = listing
+      ? yield* store.resolve(directory)
+      : admitting
+        ? yield* store.start({ directory })
         : yield* store.load({ directory })
     return yield* effect.pipe(
       Effect.provideService(InstanceRef, ctx),

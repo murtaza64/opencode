@@ -24,6 +24,14 @@ export interface LoadInput {
 
 export interface Interface {
   readonly load: (input: LoadInput) => Effect.Effect<InstanceContext>
+  /**
+   * Begin booting the Instance if needed and return its identity as soon as the
+   * project resolves, without waiting for bootstrap (plugins, dependency install,
+   * LSP). Routes that only persist durable rows use this so a slow
+   * `.opencode` dependency install never blocks the request; anything that runs a
+   * model turn must still `load` the ready Instance.
+   */
+  readonly start: (input: LoadInput) => Effect.Effect<InstanceContext>
   readonly peek: (directory: string) => Effect.Effect<InstanceContext | undefined>
   readonly resolve: (directory: string) => Effect.Effect<InstanceContext>
   readonly size: () => number
@@ -39,6 +47,9 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/In
 export const use = serviceUse(Service)
 
 interface Entry {
+  // Resolves once the project identity is known, before bootstrap runs.
+  readonly identity: Deferred.Deferred<InstanceContext>
+  // Resolves once bootstrap finishes; the Instance is ready for model turns.
   readonly deferred: Deferred.Deferred<InstanceContext>
   lastUsed: number
 }
@@ -67,7 +78,7 @@ const layer: Layer.Layer<
     const interval = Number(Flag.OPENCODE_INSTANCE_SWEEP_MS ?? 60_000)
     const ttl = Number(Flag.OPENCODE_INSTANCE_IDLE_TTL_MS ?? 600_000)
 
-    const boot = (input: LoadInput & { directory: string }) =>
+    const boot = (input: LoadInput & { directory: string }, entry: Entry) =>
       Effect.gen(function* () {
         const ctx: InstanceContext =
           input.project && input.worktree
@@ -83,6 +94,7 @@ const layer: Layer.Layer<
                   project: result.project,
                 })),
               )
+        yield* Deferred.succeed(entry.identity, ctx)
         yield* bootstrap.run.pipe(Effect.provideService(InstanceRef, ctx))
         return ctx
       }).pipe(Effect.withSpan("InstanceStore.boot"))
@@ -96,10 +108,23 @@ const layer: Layer.Layer<
 
     const completeLoad = (directory: string, input: LoadInput, entry: Entry) =>
       Effect.gen(function* () {
-        const exit = yield* Effect.exit(boot({ ...input, directory }))
-        if (Exit.isFailure(exit)) yield* removeEntry(directory, entry)
+        const exit = yield* Effect.exit(boot({ ...input, directory }, entry))
+        if (Exit.isFailure(exit)) {
+          yield* removeEntry(directory, entry)
+          // Identity may already be resolved when bootstrap fails; this only wakes waiters for an identity failure.
+          yield* Deferred.done(entry.identity, exit)
+        }
         yield* Deferred.done(entry.deferred, exit).pipe(Effect.asVoid)
       })
+
+    const makeEntry = Effect.map(
+      Clock.currentTimeMillis,
+      (now): Entry => ({
+        identity: Deferred.makeUnsafe<InstanceContext>(),
+        deferred: Deferred.makeUnsafe<InstanceContext>(),
+        lastUsed: now,
+      }),
+    )
 
     const emitDisposed = (input: { directory: string; project?: string }) =>
       Effect.sync(() =>
@@ -130,32 +155,37 @@ const layer: Layer.Layer<
       return true
     })
 
-    const load = (input: LoadInput): Effect.Effect<InstanceContext> => {
+    // Returns the cached entry for the directory, starting a boot for it if none is in flight.
+    const acquire = (input: LoadInput, directory: string) =>
+      Effect.gen(function* () {
+        const existing = cache.get(directory)
+        if (existing) return existing
+        const entry = yield* makeEntry
+        cache.set(directory, entry)
+        yield* Effect.gen(function* () {
+          yield* Effect.logInfo("creating instance", { directory: directory })
+          yield* completeLoad(directory, input, entry)
+        }).pipe(Effect.forkIn(scope, { startImmediately: true }))
+        return entry
+      })
+
+    const awaitPhase = (input: LoadInput, phase: (entry: Entry) => Deferred.Deferred<InstanceContext>) => {
       const directory = FSUtil.resolve(input.directory)
       return Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
-          const existing = cache.get(directory)
-          if (existing) {
-            const ctx = yield* restore(Deferred.await(existing.deferred))
-            existing.lastUsed = yield* Clock.currentTimeMillis
-            return ctx
-          }
-
-          const entry: Entry = {
-            deferred: Deferred.makeUnsafe<InstanceContext>(),
-            lastUsed: yield* Clock.currentTimeMillis,
-          }
-          cache.set(directory, entry)
-          yield* Effect.gen(function* () {
-            yield* Effect.logInfo("creating instance", { directory: directory })
-            yield* completeLoad(directory, input, entry)
-          }).pipe(Effect.forkIn(scope, { startImmediately: true }))
-          const ctx = yield* restore(Deferred.await(entry.deferred))
+          const entry = yield* acquire(input, directory)
+          const ctx = yield* restore(Deferred.await(phase(entry)))
           entry.lastUsed = yield* Clock.currentTimeMillis
           return ctx
         }),
-      ).pipe(Effect.withSpan("InstanceStore.load"))
+      )
     }
+
+    const load = (input: LoadInput): Effect.Effect<InstanceContext> =>
+      awaitPhase(input, (entry) => entry.deferred).pipe(Effect.withSpan("InstanceStore.load"))
+
+    const start = (input: LoadInput): Effect.Effect<InstanceContext> =>
+      awaitPhase(input, (entry) => entry.identity).pipe(Effect.withSpan("InstanceStore.start"))
 
     const reload = (input: LoadInput): Effect.Effect<InstanceContext> => {
       const directory = FSUtil.resolve(input.directory)
@@ -163,10 +193,7 @@ const layer: Layer.Layer<
         Effect.gen(function* () {
           const previous = cache.get(directory)
           identities.delete(directory)
-          const entry: Entry = {
-            deferred: Deferred.makeUnsafe<InstanceContext>(),
-            lastUsed: yield* Clock.currentTimeMillis,
-          }
+          const entry = yield* makeEntry
           cache.set(directory, entry)
           yield* Effect.gen(function* () {
             yield* Effect.logInfo("reloading instance", { directory: directory })
@@ -298,6 +325,7 @@ const layer: Layer.Layer<
 
     return Service.of({
       load,
+      start,
       peek,
       resolve,
       size: () => cache.size,

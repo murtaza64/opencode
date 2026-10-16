@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
-import { Deferred, Effect, Fiber, Layer } from "effect"
+import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import { GlobalBus } from "../../src/bus/global"
 import { SessionStatus } from "../../src/session/status"
@@ -170,6 +170,66 @@ describe("InstanceStore", () => {
       yield* Deferred.succeed(release, undefined)
       const ctx = yield* Fiber.join(loading)
       expect(yield* store.peek(dir)).toBe(ctx)
+    }),
+  )
+
+  it.effect("start returns the identity while bootstrap is still running and load joins the same boot", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      let boots = 0
+      yield* setBootstrap(Effect.gen(function* () {
+        boots++
+        yield* Deferred.succeed(started, undefined)
+        yield* Deferred.await(release)
+      }))
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+      const ctx = yield* store.start({ directory: dir })
+      expect(ctx.directory).toBe(dir)
+      expect(ctx.worktree).toBe(dir)
+      yield* Deferred.await(started)
+      expect(yield* store.peek(dir)).toBeUndefined()
+      expect(store.size()).toBe(1)
+      const loading = yield* store.load({ directory: dir }).pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+      expect(loading.pollUnsafe()).toBeUndefined()
+      yield* Deferred.succeed(release, undefined)
+      expect(yield* Fiber.join(loading)).toBe(ctx)
+      expect(yield* store.peek(dir)).toBe(ctx)
+      expect(boots).toBe(1)
+    }),
+  )
+
+  it.effect("start on a ready instance returns the cached context without rebooting", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      let boots = 0
+      yield* setBootstrap(Effect.sync(() => { boots++ }))
+      const ctx = yield* store.load({ directory: dir })
+      expect(yield* store.start({ directory: dir })).toBe(ctx)
+      expect(boots).toBe(1)
+    }),
+  )
+
+  it.effect("a failed bootstrap after start fails load and clears the entry", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      const release = yield* Deferred.make<void>()
+      yield* setBootstrap(Effect.gen(function* () {
+        yield* Deferred.await(release)
+        return yield* Effect.die(new Error("bootstrap exploded"))
+      }))
+      const ctx = yield* store.start({ directory: dir })
+      const loading = yield* store.load({ directory: dir }).pipe(Effect.exit, Effect.forkScoped)
+      yield* Deferred.succeed(release, undefined)
+      const exit = yield* Fiber.join(loading)
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(store.size()).toBe(0)
+      expect(ctx.directory).toBe(dir)
     }),
   )
 

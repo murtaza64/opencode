@@ -39,9 +39,13 @@ const layer = Layer.effect(
     const create = Effect.fn("SessionShare.create")(function* (input?: Session.CreateInput) {
       const result = yield* session.create(input)
       if (result.parentID) return result
-      const conf = yield* cfg.get()
-      if (!(flags.autoShare || conf.share === "auto")) return result
-      yield* share(result.id).pipe(Effect.ignore, Effect.forkIn(scope))
+      // Config may still be loading for a freshly started Instance; the create
+      // response does not carry share state, so decide auto-share in the background.
+      yield* Effect.gen(function* () {
+        const conf = yield* cfg.get()
+        if (!(flags.autoShare || conf.share === "auto")) return
+        yield* share(result.id)
+      }).pipe(Effect.ignore, Effect.forkIn(scope))
       return result
     })
 

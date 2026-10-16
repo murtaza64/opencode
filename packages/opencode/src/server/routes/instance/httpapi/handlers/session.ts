@@ -22,6 +22,7 @@ import { NamedError } from "@opencode-ai/core/util/error"
 import { Cause, Effect, Option, Schema, Scope } from "effect"
 import * as Stream from "effect/Stream"
 import { InstanceState } from "@/effect/instance-state"
+import { InstanceStore } from "@/project/instance-store"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder, HttpApiError, HttpApiSchema } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
@@ -65,6 +66,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const todoSvc = yield* Todo.Service
     const summary = yield* SessionSummary.Service
     const events = yield* EventV2Bridge.Service
+    const store = yield* InstanceStore.Service
     const scope = yield* Scope.Scope
 
     const list = Effect.fn("SessionHttpApi.list")(function* (ctx: { query: typeof ListQuery.Type }) {
@@ -404,7 +406,11 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     }) {
       yield* requireSession(ctx.params.sessionID)
       yield* runState.admit(ctx.params.sessionID, Effect.void).pipe(Effect.catchTag("SessionSuperseded", SessionError.superseded))
-      yield* promptSvc.prompt({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
+      const directory = yield* InstanceState.directory
+      // The request is admitted with only the Instance identity (see instance-context
+      // middleware); the model turn needs plugins and config, so wait for bootstrap here.
+      yield* store.load({ directory }).pipe(
+        Effect.andThen(promptSvc.prompt({ ...ctx.payload, sessionID: ctx.params.sessionID })),
         // The request may have returned 204 before the fence committed. Do not write an error event to the closed transcript.
         Effect.catchTag("SessionSuperseded", () => Effect.void),
         Effect.catchCause((cause) =>
