@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
-import { Effect, Layer, Schedule } from "effect"
+import { Deferred, Effect, Layer, Schedule } from "effect"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 // filesystem must load before filesystem/search: the two modules import each other.
 import { FileSystem } from "@opencode-ai/core/filesystem"
@@ -72,6 +72,43 @@ const findUntil = (query: string, type: "file" | "directory", count: number) =>
   }).pipe(Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 250 }))
 
 describe("FileSystemSearch ripgrep index", () => {
+  it.live("does not index a location until file search is requested", () =>
+    withTmp((cwd) => {
+      const calls: string[] = []
+      const started = Deferred.makeUnsafe<void>()
+      return Effect.gen(function* () {
+        const search = yield* FileSystemSearch.Service
+        expect(calls).toEqual([])
+        yield* search.glob({ pattern: "**/*" })
+        expect(calls).toEqual([])
+        yield* search.find({ query: "sample", type: "file" })
+        yield* search.find({ query: "sample", type: "file" })
+        yield* Deferred.await(started)
+        expect(calls).toEqual(["find"])
+      }).pipe(
+        Effect.provide(
+          FileSystemSearch.ripgrepLayer.pipe(
+            Layer.provide(
+              Layer.merge(
+                LayerNode.compile(FSUtil.node),
+                Layer.succeed(Ripgrep.Service, Ripgrep.Service.of({
+                  find: () => Effect.gen(function* () {
+                    calls.push("find")
+                    yield* Deferred.succeed(started, undefined)
+                    return []
+                  }),
+                  glob: () => Effect.succeed([]),
+                  grep: () => Effect.succeed([]),
+                })),
+              ),
+            ),
+            Layer.provide(Layer.succeed(Location.Service, Location.Service.of(location({ directory: cwd })))),
+          ),
+        ),
+      )
+    }),
+  )
+
   it.live("indexes every ancestor directory of a file exactly once", () =>
     withTmp((cwd) =>
       Effect.gen(function* () {

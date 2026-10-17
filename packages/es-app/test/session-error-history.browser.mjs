@@ -18,7 +18,7 @@ try {
   const errors = page.locator(".session-page .transcript .conversation-error")
   await expect(errors).toHaveCount(1)
   await expect(errors.first()).toHaveText("Usage limit has been reached")
-  await expect(page.locator(".session-alerts .err")).toHaveCount(0)
+  await expect(page.locator(".session-alerts")).not.toContainText("Usage limit has been reached")
 
   preview.fixture.messages.push(
     { info: { ...preview.fixture.messages[0].info, id: "msg_3", time: { created: 3 } }, parts: [] },
@@ -29,7 +29,7 @@ try {
   await expect(errors).toHaveCount(2)
   await expect(errors.nth(0)).toHaveText("Usage limit has been reached")
   await expect(errors.nth(1)).toHaveText("Token is expired")
-  await expect(page.locator(".session-alerts .err")).toHaveCount(0)
+  await expect(page.locator(".session-alerts")).not.toContainText(/Usage limit has been reached|Token is expired/)
 
   preview.fixture.messages.push(
     { info: { ...preview.fixture.messages[0].info, id: "msg_5", time: { created: 6 } }, parts: [] },
@@ -39,10 +39,10 @@ try {
   await page.reload()
   await expect(errors).toHaveCount(2)
   await expect(page.locator(".turn-summary.interrupted")).toHaveCount(1)
-  await expect(page.locator(".session-alerts .err")).toHaveCount(0)
+  await expect(page.locator(".session-alerts")).not.toContainText(/Usage limit has been reached|Token is expired/)
 
   preview.fixture.emit("session.error", { sessionID: "ses_a", error: { name: "UnknownError", data: { message: "Transient connection failure" } } })
-  await expect(page.locator(".session-alerts .err")).toContainText("Transient connection failure")
+  await expect(page.locator(".session-alerts")).toContainText("Transient connection failure")
   await expect(errors).toHaveCount(2)
   expect(writes).toEqual([])
   console.log("persistent provider errors in conversation: PASS")

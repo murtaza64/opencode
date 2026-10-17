@@ -397,7 +397,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     if (pending().length) return "waiting"
     if (status() === "retry") return "retry"
     if (busy() || subagentsRunning()) return "working"
-    return activity.error(sessionID, directory) ? "disconnected" : "idle"
+    return attentionError() ? "disconnected" : "idle"
   })
   const WorkSpinner = () => {
     const tick = usePulse()
@@ -410,14 +410,20 @@ function SessionView(props: { sessionID: string; directory: string }) {
     </div>
   }
   const WorkStatus = () => (
-    <Show when={workState() !== "idle"}>
-      <div class="session-work-status" role="status" data-state={workState()}>
+    <div class="session-work-status" role="status" data-state={workState()} title={live.connectionError() || attentionError() || undefined}>
+      <Show when={workState() !== "idle"}>
         <Show when={workState() === "working" || workState() === "retry"}><WorkSpinner /></Show>
         <span>{workState() === "working" ? "Working" : workState() === "retry" ? "Retrying" :
            workState() === "waiting" ? "Waiting for your reply" : workState() === "failed" ?
-             `Session failed — see error ${inlineError() ? "in conversation" : "above"}` : "Reconnecting — activity unavailable"}</span>
-      </div>
-    </Show>
+              `Session failed — see error ${inlineError() ? "in conversation" : "above"}` : "Reconnecting — activity unavailable"}</span>
+      </Show>
+      <Show when={live.connectionError() || attentionError()}>
+        <button disabled={live.loading()} onClick={() => {
+          void live.load().catch(() => {})
+          void activity.refreshDirectory(directory, true)
+        }}>reconnect</button>
+      </Show>
+    </div>
   )
   createEffect(() => {
     const running = busy()
@@ -1100,7 +1106,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
         </For>
       </select></label>
       <Show when={composer.state.visibleBuffer === "aside" && modelChoice()}><button onClick={() => composer.setVisibleModel(null)}>Use session model</button></Show>
-      <Show when={composer.state.visibleBuffer !== "aside" && (busy() || composer.state.modelSelection)}><span class="dim">{composer.state.modelSelection ? "Confirming model…" : "Model changes apply to future turns"}</span></Show>
+      <Show when={composer.state.visibleBuffer !== "aside" && (busy() || composer.state.busy || composer.state.modelSelection)}><span class="dim">{composer.state.modelSelection ? "Confirming model…" : "Model changes apply to future turns"}</span></Show>
       <Show when={composer.state.modelSelection?.status === "unknown"}><button onClick={() => { void composer.reconcileSessionModel() }}>Check session model</button></Show>
     </DirectComposer>
   )
@@ -1159,13 +1165,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
               </Show>
             </Show>
           </>}</Show>
-          <Show when={live.connectionError()}>
-            <div class="err" role="alert">{live.connectionError()}
-              <button disabled={live.loading()} onClick={() => { void live.load().catch(() => {}) }}>reconnect</button>
-            </div>
-          </Show>
           <Show when={live.retry()}>{(retry) => <div role="status" class="dim">Retry {retry().attempt}: {retry().message}</div>}</Show>
-          <Show when={attentionError()}><div class="err" role="alert">{attentionError()}</div></Show>
           <For each={pending().filter((item) => item.kind === "permission")}>
             {(item) => {
               const owner = () => item.request.sessionID !== sessionID

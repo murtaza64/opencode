@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, Menu, session, shell } from "electron"
 import path from "node:path"
 import { readFile, writeFile } from "node:fs/promises"
 import { serve } from "./server"
-import { externalURL, internalURL } from "./policy"
+import { externalURL, internalURL, serviceOrigins } from "./policy"
 
 app.setName("Editspace")
 app.setPath("userData", process.env.ES_DESKTOP_USER_DATA ?? path.join(app.getPath("appData"), "Editspace"))
@@ -21,11 +21,15 @@ const start = async () => {
   const portFile = path.join(app.getPath("userData"), "loopback-port")
   const saved = Number(await readFile(portFile, "utf8").catch(() => "0"))
   const port = Number.isInteger(saved) && saved >= 1024 && saved <= 65535 && ![4096, 7777].includes(saved) ? saved : 0
+  const origins = await serviceOrigins(app.getPath("userData"), {
+    OPENCODE_URL: process.env.OPENCODE_URL,
+    ES_DASHBOARD_URL: process.env.ES_DASHBOARD_URL,
+  })
   const server = await serve({
     port,
     root: path.join(app.getAppPath(), "dist/renderer"),
-    opencode: process.env.OPENCODE_URL,
-    dashboard: process.env.ES_DASHBOARD_URL,
+    opencode: origins.opencode,
+    dashboard: origins.dashboard,
     opencodeAuth: process.env.OPENCODE_SERVER_PASSWORD
       ? `Basic ${Buffer.from(`${process.env.OPENCODE_SERVER_USERNAME ?? "opencode"}:${process.env.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`
       : undefined,

@@ -26,7 +26,7 @@ export const DirectComposer = (props: {
     !props.connected
       ? "Session unavailable or another session action is running."
       : props.composer.reasonForAction(action)
-  const reasons = () => [...new Set(visibleActions().map(reason).filter(Boolean))]
+  const reasons = () => props.connected ? [...new Set(visibleActions().map(reason).filter(Boolean))] : []
   const other = () => state[state.visibleBuffer === "task" ? "aside" : "task"]
   return (
     <div class="direct-composer" data-composer-controls>
@@ -136,7 +136,7 @@ export const DirectComposer = (props: {
           {state.error}
         </div>
       </Show>
-      <Show when={!state.capabilities || state.capabilityError}>
+      <Show when={props.connected && (!state.capabilities || state.capabilityError)}>
         <button
           class="direct-feedback"
           disabled={!props.connected}

@@ -1,6 +1,6 @@
 import { createServer, request, type IncomingHttpHeaders } from "node:http"
 import { createReadStream } from "node:fs"
-import { realpath, stat } from "node:fs/promises"
+import { readFile, realpath, stat } from "node:fs/promises"
 import path from "node:path"
 import { randomBytes } from "node:crypto"
 import { apiAllowed, serviceURL } from "./policy"
@@ -9,7 +9,7 @@ import { eventProtocol, eventPaths } from "../../es-app/event-protocol"
 
 const csp =
   "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
-const offline = `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Editspace unavailable</title><style>body{font:16px system-ui;background:#171819;color:#ececec;margin:0;padding:10vh 8vw}main{max-inline-size:42rem}h1{font-size:28px}p{line-height:1.6;color:#bbb}a{color:#9ac9ff}code{direction:ltr;unicode-bidi:isolate}</style><main><h1>Services unavailable</h1><p>Editspace attaches to existing services. It does not start or stop them.</p><p>Launch with explicit <code>OPENCODE_URL</code> and <code>ES_DASHBOARD_URL</code> loopback origins. For an isolated demo, run <code>bun run preview</code> from the es-desktop package.</p><p>Once the services are available, <a href="/">retry connection</a>.</p></main></html>`
+const offline = `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Editspace unavailable</title><style>body{font:16px system-ui;background:#171819;color:#ececec;margin:0;padding:10vh 8vw}main{max-inline-size:42rem}h1{font-size:28px}p{line-height:1.6;color:#bbb}a{color:#9ac9ff}code{direction:ltr;unicode-bidi:isolate}</style><main><h1>Services unavailable</h1><p>Editspace attaches to existing services. It does not start or stop them.</p><p>Configure loopback origins in <code>service-origins.json</code> in the Editspace profile or launch with explicit <code>OPENCODE_URL</code> and <code>ES_DASHBOARD_URL</code>. For an isolated demo, run <code>bun run preview</code> from the es-desktop package.</p><p>Once the services are available, <a href="/">retry connection</a>.</p></main></html>`
 const types: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript",
@@ -66,6 +66,7 @@ export const serve = async (options: {
   const targets = { oc: serviceURL(options.opencode), es: serviceURL(options.dashboard) }
   const renderer = serviceURL(options.renderer)
   const root = await realpath(options.root)
+  const index = renderer ? undefined : await readFile(path.join(root, "index.html"))
   const key = randomBytes(32).toString("hex")
   const upstreams = new Set<ReturnType<typeof request>>()
   const allowed = (req: { headers: IncomingHttpHeaders }) =>
@@ -171,8 +172,10 @@ export const serve = async (options: {
     const asset = exists ? file : path.join(root, "index.html")
     res.setHeader("Content-Type", types[path.extname(asset)] ?? "application/octet-stream")
     if (req.method === "HEAD") return res.end()
+    if (index && asset === path.join(root, "index.html")) return res.end(index)
     const stream = createReadStream(asset)
-    stream.on("error", () => {
+    stream.on("error", (error) => {
+      console.error("Editspace renderer asset read failed", { code: "code" in error ? error.code : undefined, asset: url.pathname })
       if (!res.headersSent) finish(500, "Renderer unavailable")
       else res.destroy()
     })

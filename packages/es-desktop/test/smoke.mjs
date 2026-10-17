@@ -1,5 +1,5 @@
 import { _electron, expect } from "@playwright/test"
-import { mkdtemp, mkdir, rm } from "node:fs/promises"
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -131,6 +131,31 @@ try {
   ).toEqual([["POST", "/session/ses_a/input"]])
   expect(errors).toEqual([])
   await page.evaluate(() => localStorage.setItem("es-app-left-open", "0"))
+  const spotlightProfile = await mkdtemp(path.join(tmpdir(), "es-desktop-spotlight-"))
+  try {
+    await writeFile(path.join(spotlightProfile, "service-origins.json"), JSON.stringify({
+      opencode: fixture.url,
+      dashboard: fixture.url,
+    }), { mode: 0o600 })
+    const spotlight = await _electron.launch({
+      ...launch,
+      env: {
+        ...launch.env,
+        OPENCODE_URL: "",
+        ES_DASHBOARD_URL: "",
+        ES_DESKTOP_USER_DATA: spotlightProfile,
+      },
+    })
+    try {
+      const window = await spotlight.firstWindow()
+      await expect(window.locator("#root")).toBeVisible()
+      console.info("PASS app launch without shell service URLs uses saved loopback origins")
+    } finally {
+      await spotlight.close()
+    }
+  } finally {
+    await rm(spotlightProfile, { recursive: true, force: true })
+  }
   console.info(
     "PASS native UI, sandbox, direct Queue/API/events, protected loopback, navigation, safe links, denied permissions, WASM, RTL",
   )

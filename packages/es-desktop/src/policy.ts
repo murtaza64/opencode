@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises"
+import path from "node:path"
+
 export const serviceURL = (value: string | undefined) => {
   if (!value) return undefined
   const url = new URL(value)
@@ -13,6 +16,26 @@ export const serviceURL = (value: string | undefined) => {
   )
     throw new Error("Service targets must be explicit http://127.0.0.1:PORT origins")
   return url.origin
+}
+
+export const serviceOrigins = async (
+  directory: string,
+  env: { OPENCODE_URL?: string; ES_DASHBOARD_URL?: string },
+) => {
+  const content = await readFile(path.join(directory, "service-origins.json"), "utf8").catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return "{}"
+      throw error
+    },
+  )
+  const saved: unknown = JSON.parse(content)
+  const configured = saved && typeof saved === "object" && !Array.isArray(saved)
+    ? saved as Record<string, unknown>
+    : {}
+  return {
+    opencode: serviceURL(env.OPENCODE_URL || (typeof configured.opencode === "string" ? configured.opencode : undefined)),
+    dashboard: serviceURL(env.ES_DASHBOARD_URL || (typeof configured.dashboard === "string" ? configured.dashboard : undefined)),
+  }
 }
 
 export const externalURL = (value: string) => {
@@ -33,16 +56,18 @@ export const apiAllowed = (method: string, pathname: string) => {
     GET: [
       /^\/oc\/(event|global\/event|experimental\/(session|capabilities)|umbrella\/session|session|session\/status|permission|question|config\/providers|agent)$/,
       /^\/oc\/session\/[\w-]+(?:\/(message|input)(?:\/[\w-]+)?|\/todo)?$/,
-      /^\/es\/api\/(editspaces|state|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work)$/,
+      /^\/es\/api\/(editspaces|state|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work|mail|subscriptions|handoffs)$/,
     ],
     POST: [
       /^\/oc\/session$/,
       /^\/oc\/session\/[\w-]+\/(prompt_async|abort|fork|input|aside)$/,
       /^\/oc\/(permission|question)\/[\w-]+\/(reply|reject)$/,
       /^\/es\/api\/(refresh|frontdesk|curate|(?:digest|brief)\/[^/]+)$/,
+      /^\/es\/api\/handoffs$/,
     ],
     PATCH: [/^\/oc\/session\/[\w-]+$/],
-    DELETE: [/^\/oc\/session\/[\w-]+(?:\/(input|aside)\/[\w-]+)?$/],
+    PUT: [/^\/es\/api\/subscriptions$/],
+    DELETE: [/^\/oc\/session\/[\w-]+(?:\/(input|aside)\/[\w-]+)?$/, /^\/es\/api\/subscriptions$/],
   }
   return routes[method]?.some((route) => route.test(pathname)) ?? false
 }

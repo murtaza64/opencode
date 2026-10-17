@@ -925,7 +925,9 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
   position: relative;
 }
 .dot.pending { background: var(--peach); }
-.session-work-status { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding: 6px 0; font-size: 12px; color: var(--subtext0); }
+.session-work-status { display: flex; align-items: center; gap: 8px; flex-shrink: 0; min-block-size: 28px; padding: 6px 0; box-sizing: border-box; white-space: nowrap; font-size: 12px; color: var(--subtext0); }
+.session-work-status[data-state="idle"] { visibility: hidden; }
+.session-work-status > span:not(.session-work-spinner) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* Stepped by the shared pulse clock (pulse.ts), not a CSS animation. */
 /* Own layer: a phase change is then a compositor property update, not a
  * repaint of the whole root layer (~2 ms per tick otherwise). */

@@ -32,8 +32,8 @@ export const ripgrepLayer = Layer.effect(
       directories: [] as string[],
     }
     const directories = new Set<string>()
-    yield* ripgrep
-      .find({
+    const startIndex = yield* Effect.cached(
+      ripgrep.find({
         cwd: location.directory,
         pattern: "*",
         limit: location.vcs ? Number.MAX_SAFE_INTEGER : 100_000,
@@ -56,8 +56,8 @@ export const ripgrepLayer = Layer.effect(
               state.directories.push(dir)
             }
           }),
-      })
-      .pipe(Effect.orDie, Effect.asVoid, Effect.forkIn(scope))
+      }).pipe(Effect.orDie, Effect.asVoid, Effect.forkIn(scope)),
+    )
     return Service.of({
       glob: (input) =>
         Effect.gen(function* () {
@@ -112,6 +112,7 @@ export const ripgrepLayer = Layer.effect(
         }),
       find: (input) =>
         Effect.gen(function* () {
+          yield* startIndex
           const items =
             input.type === "file"
               ? state.files

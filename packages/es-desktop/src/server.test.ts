@@ -3,7 +3,7 @@ import { mkdtemp, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { serve } from "./server"
-import { apiAllowed, externalURL, internalURL, serviceURL } from "./policy"
+import { apiAllowed, externalURL, internalURL, serviceOrigins, serviceURL } from "./policy"
 
 const cleanup: (() => Promise<unknown>)[] = []
 afterEach(async () => {
@@ -70,6 +70,30 @@ test("requires explicit loopback service origins", () => {
     expect(() => serviceURL(value)).toThrow()
 })
 
+test("Spotlight launch reads configured service origins without shell environment", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "es-desktop-origins-"))
+  cleanup.push(() => rm(directory, { recursive: true, force: true }))
+  await Bun.write(path.join(directory, "service-origins.json"), JSON.stringify({
+    opencode: "http://127.0.0.1:4096",
+    dashboard: "http://127.0.0.1:7777",
+  }))
+  expect(await serviceOrigins(directory, {})).toEqual({
+    opencode: "http://127.0.0.1:4096",
+    dashboard: "http://127.0.0.1:7777",
+  })
+  expect(await serviceOrigins(directory, { OPENCODE_URL: "http://127.0.0.1:52961" })).toEqual({
+    opencode: "http://127.0.0.1:52961",
+    dashboard: "http://127.0.0.1:7777",
+  })
+})
+
+test("rejects non-loopback origins from the saved configuration", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "es-desktop-origins-"))
+  cleanup.push(() => rm(directory, { recursive: true, force: true }))
+  await Bun.write(path.join(directory, "service-origins.json"), JSON.stringify({ opencode: "https://example.com" }))
+  await expect(serviceOrigins(directory, {})).rejects.toThrow("Service targets must be explicit")
+})
+
 test("external links only accept credential-free HTTP(S)", () => {
   expect(externalURL("https://example.com/path?q=1")).toBe("https://example.com/path?q=1")
   for (const value of [
@@ -127,6 +151,14 @@ test("serves the built SPA and assets with restrictive CSP", async () => {
   expect((await get("/", { method: "POST" })).status).toBe(405)
 })
 
+test("serves the renderer entry from memory after the package path becomes unavailable", async () => {
+  const { root, get } = await setup()
+  await rm(path.join(root, "index.html"))
+  const response = await get("/session/ses_a")
+  expect(response.status).toBe(200)
+  expect(await response.text()).toContain("Fixture renderer")
+})
+
 test("rejects escaping symlinks and encoded path traversal", async () => {
   const { root, get } = await setup()
   const decoy = await mkdtemp(path.join(tmpdir(), "es-desktop-decoy-"))
@@ -155,6 +187,24 @@ test("proxies body, method, encoded directory, and error status without browser 
     credentialForwarded: false,
   })
   expect((await (await get("/es/api/state")).json()).path).toBe("/api/state")
+})
+
+test("proxies only the mail, subscription, and handoff methods used by Editspace", async () => {
+  const { get } = await setup()
+  for (const endpoint of ["mail", "subscriptions", "handoffs"]) {
+    const response = await get(`/es/api/${endpoint}?es=fixture`)
+    expect(await response.json()).toMatchObject({ method: "GET", path: `/api/${endpoint}` })
+  }
+  const handoff = await get("/es/api/handoffs?es=fixture", {
+    method: "POST", body: '{"lane":"example"}', headers: { "content-type": "application/json" },
+  })
+  expect(await handoff.json()).toMatchObject({ method: "POST", path: "/api/handoffs", body: '{"lane":"example"}' })
+  for (const method of ["PUT", "DELETE"]) {
+    const response = await get("/es/api/subscriptions?es=fixture", { method })
+    expect(await response.json()).toMatchObject({ method, path: "/api/subscriptions" })
+  }
+  expect((await get("/es/api/mail", { method: "POST" })).status).toBe(403)
+  expect((await get("/es/api/handoffs", { method: "DELETE" })).status).toBe(403)
 })
 
 test("proxies read-only agent choices in the caller directory", async () => {
