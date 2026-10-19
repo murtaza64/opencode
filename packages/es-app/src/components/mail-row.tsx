@@ -24,6 +24,10 @@ export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?
     </summary>
     <div class="mail-activity-details">
       <div>Mail ID: <bdi dir="auto">{props.message.id}</bdi></div>
+      <div>From: <bdi dir="auto">{props.message.from}</bdi></div>
+      <div>To: <bdi dir="auto">{props.message.to}</bdi></div>
+      <Show when={props.message.kind}><div>Kind: <bdi dir="auto">{props.message.kind}</bdi></div></Show>
+      <div>Sent: {timestamp(props.message.ts)}</div>
       <Show when={props.message.sender_session}><div>Sender session: <bdi dir="auto">{props.message.sender_session}</bdi></div></Show>
       <Show when={props.message.origin_run}><div>Origin run: <bdi dir="auto">{props.message.origin_run}</bdi></div></Show>
       <Show when={props.message.relationship}><div>Relationship: <bdi dir="auto">{props.message.relationship}</bdi></div></Show>

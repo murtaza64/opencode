@@ -1134,7 +1134,7 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 }
 .mail-activity-summary {
   display: grid;
-  grid-template-columns: 9rem minmax(0, 1fr) auto 16px;
+  grid-template-columns: 9rem minmax(0, 1fr) minmax(0, 1fr) 16px;
   gap: 10px;
   align-items: baseline;
   padding: 8px 10px;
@@ -1145,8 +1145,9 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .mail-activity-summary:hover { background: var(--surface0); }
 .mail-activity-summary:focus-visible { outline: 1px solid var(--lavender); outline-offset: -2px; }
 .mail-activity-kind { color: var(--teal); font-weight: 600; }
-.mail-activity-route { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mail-activity-state { display: flex; gap: 6px; color: var(--subtext0); }
+.mail-activity-route, .mail-activity-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-activity-state { color: var(--subtext0); }
+.mail-activity-state > span { margin-inline-start: 6px; }
 .mail-activity-disclosure { color: var(--subtext0); font-size: 16px; line-height: 1; }
 .mail-activity:dir(rtl) .mail-activity-disclosure { transform: rotate(180deg); }
 .mail-activity[open] .mail-activity-disclosure { transform: rotate(90deg); }
