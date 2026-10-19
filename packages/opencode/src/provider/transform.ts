@@ -23,7 +23,8 @@ export const OUTPUT_TOKEN_MAX = 32_000
 const INCLUDE_ENCRYPTED_REASONING = ["reasoning.encrypted_content"] as const
 
 export function sanitizeSurrogates(content: string) {
-  return content.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD")
+  // This scans every turn's history; use the native UTF-16 scan rather than a lookbehind regex.
+  return content.toWellFormed()
 }
 
 function isKimiFamily(model: Provider.Model) {

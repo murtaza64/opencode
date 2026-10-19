@@ -2319,6 +2319,19 @@ describe("ProviderTransform.message - DeepSeek reasoning content", () => {
 })
 
 describe("ProviderTransform.message - surrogate sanitization", () => {
+  test.each([
+    ["", ""],
+    ["plain ASCII", "plain ASCII"],
+    ["é漢字\uD83D\uDE80", "é漢字\uD83D\uDE80"],
+    ["\uD800", "\uFFFD"],
+    ["\uDC00", "\uFFFD"],
+    ["\uD800\uD800\uDC00\uDC00", "\uFFFD\uD800\uDC00\uFFFD"],
+    ["\uDC00\uD800", "\uFFFD\uFFFD"],
+    ["a\uD800b\uDC00c", "a\uFFFDb\uFFFDc"],
+  ])("sanitizes UTF-16 %j without changing valid pairs", (input, expected) => {
+    expect(ProviderTransform.sanitizeSurrogates(input)).toBe(expected)
+  })
+
   const model = {
     id: "test/test-model",
     providerID: "test",
