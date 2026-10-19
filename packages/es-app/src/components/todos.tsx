@@ -1,5 +1,5 @@
 /* Session todos (the todowrite tool's list): a compact inline row where each
- * todowrite call happens, and a panel above the composer for the current list.
+ * todowrite call happens, and a session sidebar panel for the current list.
  * Glyphs follow the TUI: [✓] completed, [•] in progress, [ ] pending, [-] cancelled. */
 import { createMemo, createSignal, For, Show } from "solid-js"
 import type { Todo, ToolPart } from "@opencode-ai/sdk/v2"
@@ -63,7 +63,7 @@ export function TodoPart(props: MessagePartProps) {
 const OPEN_KEY = "es-app-todo-panel-open"
 const [panelOpen, setPanelOpen] = createSignal(localStorage.getItem(OPEN_KEY) !== "false")
 
-/* Current list, pinned above the composer while any item is still open. */
+/* Current list in the session sidebar while any item is still open. */
 export function TodoPanel(props: { todos: readonly Todo[] }) {
   const summary = createMemo(() => todoSummary(props.todos))
   const toggle = () => {

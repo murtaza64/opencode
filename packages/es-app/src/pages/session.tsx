@@ -27,7 +27,7 @@ import { AppHeader } from "../components/native-header"
 import { SubagentTranscript } from "../components/subagent-transcript"
 import { TranscriptMessage } from "../components/transcript-message"
 import { InlineQuestion } from "../components/inline-question"
-import { TodoPanel, TodoPart } from "../components/todos"
+import { TodoPart } from "../components/todos"
 import { usePulse } from "../pulse"
 import { MailRow } from "../components/mail-row"
 import { MailSubscriptions } from "../components/mail-subscriptions"
@@ -1241,7 +1241,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
           </div>
         </div>
 
-        <Show when={!floating()}><TodoPanel todos={live.data.todo} /><WorkStatus /><ComposerResults composer={composer} connected={connected()} /></Show>
+        <Show when={!floating()}><WorkStatus /><ComposerResults composer={composer} connected={connected()} /></Show>
         <div class="prompt-box" inert={floating()}>
           <ComposerPanel />
         </div>
@@ -1263,7 +1263,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
       <Show when={rightOpen()}>
         <div class="drag-handle" onMouseDown={(e) => startDrag("right", e)} />
       </Show>
-      <SessionInfo sessionID={sessionID} session={session()} messages={messages()} parts={live.data.part} providers={providers()} />
+      <SessionInfo sessionID={sessionID} session={session()} messages={messages()} parts={live.data.part} providers={providers()} todos={live.data.todo} />
     </main>
   )
 }

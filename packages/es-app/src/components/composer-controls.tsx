@@ -204,7 +204,7 @@ export const ComposerControls = (props: {
 
 export const ComposerResults = (props: { composer: Composer; connected: boolean }) => {
   const state = props.composer.state
-  const pending = () => state.receipts.filter((item) => item.state === "pending")
+  const pending = () => state.receipts.filter((item) => item.state === "pending" && item.source?.type !== "editspace-mail")
   const queued = () => pending().filter((item) => item.delivery === "queue").length
   const steers = () => pending().filter((item) => item.delivery === "steer").length
   return (

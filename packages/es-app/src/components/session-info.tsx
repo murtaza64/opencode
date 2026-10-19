@@ -4,7 +4,7 @@
 import { createEffect, createMemo, createResource, createSignal, For, Show, untrack } from "solid-js"
 import { unwrap } from "solid-js/store"
 import { A } from "@solidjs/router"
-import type { Message, Part, Session } from "@opencode-ai/sdk/v2"
+import type { Message, Part, Session, Todo } from "@opencode-ai/sdk/v2"
 import { es, type IssueRow } from "../api"
 import { ago, useDashboard } from "../state"
 import { refFromHref, ticketMatchesRef, ticketUrl } from "../ticket-url"
@@ -19,6 +19,7 @@ import { compositionSlices, estimateComposition } from "../context-composition"
 import { accountingGist, CompositionBar, ProviderAccounting } from "./context-viz"
 import { prDetail, requestPrDetails } from "../pr-details"
 import { CurrentWorkView } from "../current-work"
+import { TodoPanel } from "./todos"
 
 const URL_RE = /https?:\/\/[^\s)\]}"'`>]+/g
 // #N / repo#N / owner/repo#N mentions and markdown-ish path tokens
@@ -48,6 +49,7 @@ export default function SessionInfo(props: {
   messages: Message[]
   parts: Record<string, Part[]>
   providers?: ProviderList
+  todos: readonly Todo[]
 }) {
   return (
     <Show
@@ -92,6 +94,7 @@ function SessionInfoBody(props: {
   messages: Message[]
   parts: Record<string, Part[]>
   providers?: ProviderList
+  todos: readonly Todo[]
 }) {
   const { state, editspace, allProjects } = useDashboard()
 
@@ -311,6 +314,7 @@ function SessionInfoBody(props: {
       <button class="mini-btn panel-collapse" title="collapse info panel (^l)" onClick={toggleRight}>
         ⟩
       </button>
+      <TodoPanel todos={props.todos} />
       <Show when={needsYou().length}>
         <div class="info-section">
           <div class="info-heading">needs you</div>
