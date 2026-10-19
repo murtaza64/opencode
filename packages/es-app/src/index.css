@@ -936,9 +936,7 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 @media (prefers-reduced-motion: reduce) { .session-work-spinner { opacity: 1; } }
 .dot.unread { background: var(--green); }
 .dot.busy { background: var(--lavender); }
-/* Static ring: any infinite animation (even transform/opacity on its own
- * layer, even steps()) keeps the compositor drawing at display rate, so a
- * single busy row anywhere cost ~3% GPU + ~1.5% renderer CPU while idle. */
+/* Share the low-rate pulse clock; CSS animations keep drawing at display rate. */
 .dot.busy::after {
   content: "";
   position: absolute;
@@ -947,6 +945,10 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
   border-radius: inherit;
   opacity: 0.6;
 }
+.dot.busy[data-on]::after { will-change: opacity; }
+.dot.busy[data-on="false"]::after { opacity: 0.25; }
+.dot.busy[data-on="true"]::after { opacity: 0.85; }
+@media (prefers-reduced-motion: reduce) { .dot.busy[data-on]::after { opacity: 0.6; will-change: auto; } }
 
 .digest {
   margin-top: 8px;

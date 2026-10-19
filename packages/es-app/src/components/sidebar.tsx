@@ -5,11 +5,34 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { A } from "@solidjs/router"
 import { es, type SessionSearchResult } from "../api"
-import { sessionHref, useDashboard, type SessionRow } from "../state"
+import { sessionHref, useDashboard, type DotState, type SessionRow } from "../state"
+import { usePulse } from "../pulse"
 import { leftOpen, leftWidth, toggleLeft } from "../ui"
 import { nativeHeader, NativeHeader } from "./native-header"
 import { NewSession } from "./new-session"
 import { peekAttrs, SessionPeek } from "./session-peek"
+
+const BusyDot = () => {
+  const [visible, setVisible] = createSignal(false)
+  const [foreground, setForeground] = createSignal(document.visibilityState === "visible")
+  const visibility = () => setForeground(document.visibilityState === "visible")
+  document.addEventListener("visibilitychange", visibility)
+  const observer = new IntersectionObserver((entries) => setVisible(entries.some((entry) => entry.isIntersecting && entry.intersectionRatio > 0)))
+  const enabled = () => visible() && foreground()
+  const tick = usePulse(enabled)
+  onCleanup(() => {
+    observer.disconnect()
+    document.removeEventListener("visibilitychange", visibility)
+  })
+  return <span ref={(el) => observer.observe(el)} class="dot busy"
+    data-on={enabled() ? String(!!(tick() % 2)) : undefined} />
+}
+
+const StatusDot = (props: { state: DotState }) => (
+  <Show when={props.state === "busy"} fallback={<span class={`dot ${props.state}`} />}>
+    <BusyDot />
+  </Show>
+)
 
 export default function Sidebar() {
   const { state, dotFor, editspace, setEditspace, editspaces, archivedIds, notifications, markViewed,
@@ -151,7 +174,7 @@ export default function Sidebar() {
       title={`${s.title} (${dot()})${allProjects() ? ` · ${s.directory}` : ""}`}
       {...peekAttrs(s)}
     >
-      <span class={`dot ${dot()}`} />
+      <StatusDot state={dot()} />
       <span class="nav-title">{s.title || s.id}</span>
       <Show when={allProjects()}><span class="session-project">{s.project}</span></Show>
     </A>
@@ -164,7 +187,7 @@ export default function Sidebar() {
         class="nav-item"
         title={`${s.title} (${dot()})${allProjects() ? ` · ${s.directory}` : ""}`}
       >
-        <span class={`dot ${dot()}`} />
+        <StatusDot state={dot()} />
         <span class="nav-title">{s.title || s.id}</span>
         <Show when={allProjects()}><span class="session-project">{s.project}</span></Show>
       </A>
@@ -183,7 +206,7 @@ export default function Sidebar() {
       <A ref={(el) => observeSession(el, s.id)} href={sessionHref(s.id, s.directory)}
         activeClass="active" class="mini-item"
         title={`${s.title} (${dot()})${allProjects() ? ` · ${s.project}` : ""}`}>
-        <span class={`dot ${dot()}`} />
+        <StatusDot state={dot()} />
       </A>
       <button type="button" class="mini-pin" classList={{ pinned: isPinned(s) }}
         aria-label={`${isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
@@ -270,7 +293,7 @@ export default function Sidebar() {
                   title={`${notification.kind} · ${notification.editspace}`}
                   onClick={() => openNotification(notification)}
                 >
-                  <span class={`dot ${dot()}`} />
+                  <StatusDot state={dot()} />
                   <span class="notification-copy">
                     <span class="nav-title">{notification.title}</span>
                     <span class="notification-meta">
