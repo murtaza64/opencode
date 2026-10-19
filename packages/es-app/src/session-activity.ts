@@ -374,6 +374,7 @@ export const createSessionActivity = (
     status,
     idle,
     requestState,
+    requestSettled: (kind: "permission" | "question", directory: string, id: string) => settled.has(requestKey(directory, kind, id)),
     root,
     requests,
     error,

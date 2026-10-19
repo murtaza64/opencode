@@ -42,7 +42,23 @@ export const decisionLabel = (record: AttentionRecord) => {
 
 // Own only the attention read/write interface; neither list nor act admits Session input.
 export const createAttention = (project: () => string | undefined) => {
-  const [snapshot, setSnapshot] = createSignal<{ scope: string | undefined; value: AttentionList; checked: number }>()
+  const [cache, setCache] = createSignal<Record<string, { records: AttentionRecord[]; project: AttentionList["projects"][number]; checked: number }>>({})
+  const [scopes, setScopes] = createSignal<Record<string, { checked: number; partial: boolean; truncated: boolean }>>({})
+  const snapshot = () => {
+    const scope = project()
+    const entries = scope ? cache()[scope] ? [cache()[scope]!] : [] : Object.values(cache())
+    if (!entries.length && !scopes()[scope ?? ""]) return
+    return {
+      scope,
+      checked: scopes()[scope ?? ""]?.checked ?? Math.min(...entries.map(item => item.checked)),
+      value: {
+        records: entries.flatMap(item => item.records).sort((a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id)),
+        projects: entries.map(item => item.project),
+        partial: entries.some(item => !item.project.available) || (scopes()[scope ?? ""]?.partial ?? !scope),
+        truncated: scopes()[scope ?? ""]?.truncated ?? false,
+      },
+    }
+  }
   const [error, setError] = createSignal("")
   const [loading, setLoading] = createSignal(false)
   const [operator, setOperator] = createSignal(false)
@@ -70,14 +86,20 @@ export const createAttention = (project: () => string | undefined) => {
       if (current !== version) return
       const projects = [...new Map(pages.flatMap(page => page.projects).map(item => [item.editspace, item])).values()]
       const unavailable = new Set(pages.flatMap(page => page.projects.filter(item => !item.available).map(item => item.editspace)))
-      const previous = snapshot()?.scope === scope ? snapshot()?.value.records ?? [] : []
-      const value: AttentionList = {
-        records: [...new Map([...pages.flatMap(page => page.records), ...previous.filter(record => unavailable.has(record.editspace))].map(record => [record.id, record])).values()].sort((a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id)),
-        projects: projects.map(item => unavailable.has(item.editspace) ? { ...item, available: false } : item),
-        partial: unavailable.size > 0,
-        truncated: pages.length === 50,
-      }
-      setSnapshot({ scope, value, checked: Date.now() })
+      const checked = Date.now()
+      setCache(previous => {
+        const next = { ...previous }
+        for (const item of projects) next[item.editspace] = {
+          records: unavailable.has(item.editspace) ? previous[item.editspace]?.records ?? [] : [...new Map(pages.flatMap(page => page.records).filter(record => record.editspace === item.editspace).map(record => [record.id, record])).values()],
+          project: { ...item, available: !unavailable.has(item.editspace) },
+          checked: unavailable.has(item.editspace) ? previous[item.editspace]?.checked ?? 0 : checked,
+        }
+        if (!scope) for (const name of Object.keys(previous)) {
+          if (!projects.some(item => item.editspace === name)) next[name] = { ...previous[name]!, project: { editspace: name, available: false, error: "Project no longer observed in registry" } }
+        }
+        return next
+      })
+      setScopes(previous => ({ ...previous, [scope ?? ""]: { checked, partial: unavailable.size > 0, truncated: pages.length === 50 } }))
       setError("")
     } catch (cause) {
       if (current !== version) return
@@ -104,15 +126,24 @@ export const createAttention = (project: () => string | undefined) => {
     if (!command || writing()) return false
     setWriting(true)
     try {
-      const response = await fetch(attentionPath(`/${encodeURIComponent(command.record.id)}/commands`, command.record.editspace), {
+      const send = () => fetch(attentionPath(`/${encodeURIComponent(command.record.id)}/commands`, command.record.editspace), {
         method: "POST", credentials: "include", headers: { "content-type": "application/json", "X-Attention-CSRF": "1" }, body: JSON.stringify(command.body),
       })
+      const first = await send()
+      const response = first.status === 401
+        ? await checkOperator().then(() => operator() ? send() : first)
+        : first
       if (!response.ok) {
+        if (response.status === 401) {
+          setOperator(false)
+          setNotice("Operator connection unavailable. Reconnect and retry the same action identity; no local change was assumed.")
+          return false
+        }
         if (response.status >= 500) {
           setNotice(`Server response failed (HTTP ${response.status}). Outcome unknown; retry the same action identity.`)
           return false
         }
-        if (response.status === 401 || response.status === 403) setOperator(false)
+        if (response.status === 403) setOperator(false)
         setNotice(response.status === 409 ? "This record changed. Review the current revision before choosing again." : `Action refused (HTTP ${response.status}); no local change was assumed.`)
         setPending(undefined)
         await refresh()
@@ -133,8 +164,8 @@ export const createAttention = (project: () => string | undefined) => {
     return retry()
   }
   return {
-    snapshot: () => snapshot()?.scope === project() ? snapshot() : undefined,
+    snapshot,
     error, loading, operator, pending, writing, notice, now, refresh, checkOperator, act, retry,
-    stale: () => !snapshot() || snapshot()?.scope !== project() || !!error() || now() - snapshot()!.checked > 45_000,
+    stale: () => !snapshot() || !!error() || now() - snapshot()!.checked > 45_000,
   }
 }

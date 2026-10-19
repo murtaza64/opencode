@@ -12,7 +12,9 @@ await context.addInitScript(directory => {
   localStorage.setItem("es-app-sidebar-pins", JSON.stringify([JSON.stringify([directory, "ses_a"])]))
 }, directory)
 await context.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
+let dashboardOffline = false
 await context.route("**/es/api/state?*", async route => {
+  if (dashboardOffline) return route.fulfill({ status: 503, json: { error: "source offline" } })
   const response = await route.fetch()
   const body = await response.json()
   body.prs_at = Date.now() / 1000
@@ -22,6 +24,9 @@ await context.route("**/es/api/state?*", async route => {
 const page = await context.newPage()
 const errors = []
 page.on("pageerror", error => errors.push(error.message))
+const emitSource = (type, properties) => {
+  for (const [response, stream] of preview.fixture.eventStreams) if (stream.path === "/global/event") response.write(`data: ${JSON.stringify({ directory, payload: { type, properties } })}\n\n`)
+}
 const record = () => page.locator('[data-attention-id="decision_1"]')
 const refresh = () => page.getByRole("button", { name: "Refresh", exact: true }).click()
 try {
@@ -32,6 +37,15 @@ try {
   await expect(page.getByRole("heading", { name: "Needs you 3", exact: true })).toBeVisible()
   expect(preview.fixture.calls.filter(call => call.path === "/api/mail")).toHaveLength(0)
   await page.locator(".home-activity summary").click()
+  dashboardOffline = true
+  preview.fixture.emitDashboard("state")
+  await expect(page.locator(".home-warning")).toContainText("Dashboard source unavailable")
+  await page.locator(".es-switcher").selectOption("fixture")
+  await expect(page.getByRole("heading", { name: "Pinned agents 1", exact: true })).toBeVisible()
+  await page.locator(".es-switcher").selectOption("__all__")
+  dashboardOffline = false
+  preview.fixture.emitDashboard("state")
+  await expect(page.locator(".home-warning")).toHaveCount(0)
   await expect(page.locator(".home-activity")).toContainText("Comparing the bounded attention interface")
   await expect(page.locator(".home-activity-row")).toHaveCount(3)
   await page.getByRole("group", { name: "Activity filter", exact: true }).getByRole("button", { name: "Major", exact: true }).click()
@@ -51,6 +65,8 @@ try {
     return result
   }
   await expect(page.getByRole("region", { name: "Pinned agents" })).toContainText("summary stale", { timeout: 12_000 })
+  await record().getByText("Record & history", { exact: true }).click()
+  await expect(record().locator("pre")).toContainText('"revision": 1')
   await record().getByRole("radio", { name: "Small scope", exact: true }).check()
   await record().getByRole("button", { name: "Review choice", exact: true }).click()
   // Stale modal revision cannot overwrite a newer producer update.
@@ -59,10 +75,11 @@ try {
   await expect(page.getByRole("status")).toContainText("record changed")
   await record().getByRole("radio", { name: "Small scope", exact: true }).check()
   await record().getByRole("button", { name: "Review choice", exact: true }).click()
+  preview.ledger.operator = false
   let dropResponse = true
   await context.route("**/es/api/attention/*/commands?*", async route => {
     const response = await route.fetch()
-    if (dropResponse) { dropResponse = false; await route.abort("failed"); return }
+    if (dropResponse && response.status() === 200) { dropResponse = false; await route.abort("failed"); return }
     await route.fulfill({ response })
   })
   await page.getByRole("button", { name: "Record choice only" }).click()
@@ -72,6 +89,7 @@ try {
   const posts = preview.ledger.calls.filter(call => call.path.endsWith("/commands"))
   expect(posts.at(-1).body.command_id).toBe(posts.at(-2).body.command_id)
   expect(posts.every(call => call.csrf === "1")).toBe(true)
+  expect(preview.ledger.calls.filter(call => call.path === "/session" && call.method === "POST")).toHaveLength(2)
   await page.getByRole("button", { name: "Recorded / not sent 1", exact: true }).click()
   await expect(record()).toContainText("Small scope · not sent")
   await page.reload()
@@ -81,6 +99,7 @@ try {
   await page.getByRole("button", { name: "History 1", exact: true }).click()
   await record().getByText("Record & history", { exact: true }).click()
   await expect(record().locator("pre")).toContainText('"actor": "producer"')
+  await expect(record().locator("pre")).toContainText('"revision": 4')
   await page.getByRole("button", { name: "Open 2", exact: true }).click()
   await page.locator('[data-attention-id="other_decision"]').getByRole("button", { name: "Snooze 1h" }).click()
   await page.getByRole("button", { name: "Snoozed 1", exact: true }).click()
@@ -90,19 +109,31 @@ try {
   await expect(page.locator(".home-warning")).toContainText("Some projects are unavailable")
   await expect(page.locator('[data-attention-id="other_decision"]')).toBeVisible()
   await expect(page.getByRole("button", { name: "Return to Needs you" })).toBeDisabled()
+  await page.locator(".es-switcher").selectOption("fixture")
   preview.ledger.partial = false
   preview.ledger.status = 503
+  await page.locator(".es-switcher").selectOption("__all__")
   await refresh()
   await expect(page.getByRole("alert")).toContainText("Last-known records are retained")
+  await expect(page.locator('[data-attention-id="other_decision"]')).toBeVisible()
   await expect(page.getByRole("button", { name: "Return to Needs you" })).toBeDisabled()
   preview.ledger.status = 200
   await refresh()
   await page.getByRole("button", { name: "Return to Needs you" }).click()
   await page.getByRole("button", { name: "Open 2", exact: true }).click()
+  const question = { id: "que_home", sessionID: "ses_b", questions: [{ header: "Scope", question: "A healthy source question", options: [{ label: "Continue", description: "Continue" }] }] }
+  preview.fixture.questions = [question]
+  emitSource("question.asked", question)
+  await expect(page.locator(".home-request").filter({ hasText: "que_home" })).toBeVisible()
   await context.route("**/oc/permission?*", route => route.abort("failed"))
   await refresh()
   await page.getByText("Source requests with unknown outcome (1)", { exact: true }).click()
   await expect(page.locator(".home-unknown")).toContainText("source unavailable")
+  await expect(page.locator(".home-request").filter({ hasText: "que_home" })).toBeVisible()
+  preview.fixture.questions = []
+  emitSource("question.replied", { sessionID: "ses_b", requestID: "que_home", answers: [["Continue"]] })
+  await expect(page.locator(".home-request").filter({ hasText: "que_home" })).toHaveCount(0)
+  await expect(page.locator(".home-unknown")).not.toContainText("que_home")
   await context.unroute("**/oc/permission?*")
   await refresh()
   await expect(page.locator(".home-request")).toContainText("per_home")

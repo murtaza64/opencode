@@ -10,6 +10,9 @@ export const startAttentionPreview = async () => {
   }
   const preview = await startPanelPreview([{
     name: "attention-ledger-disposable-fixture",
+    transformIndexHtml() {
+      return [{ tag: "script", children: `if (!localStorage.getItem("es-app-all-projects")) localStorage.setItem("es-app-all-projects", "true"); if (!localStorage.getItem("es-app-sidebar-pins")) localStorage.setItem("es-app-sidebar-pins", ${JSON.stringify(JSON.stringify([JSON.stringify([directory, "ses_a"]) ]))});` }]
+    },
     configureServer(server) {
       server.middlewares.use("/es/api/attention", async (req, res) => {
         const url = new URL(req.url, "http://fixture")
@@ -28,7 +31,7 @@ export const startAttentionPreview = async () => {
         if (ledger.status !== 200) return json({ error: "fixture unavailable" }, ledger.status)
         const command = /\/([^/]+)\/commands$/.exec(url.pathname)
         if (command) {
-          if (!ledger.operator) return json({ error: "read only" }, 403)
+          if (!ledger.operator) return json({ error: "operator expired" }, 401)
           if (ledger.commands.has(body.command_id)) return json(ledger.commands.get(body.command_id))
           const record = ledger.records.find(item => item.id === command[1])
           if (record.revision !== body.expected_revision) return json({ error: "revision conflict", record }, 409)
@@ -44,7 +47,7 @@ export const startAttentionPreview = async () => {
           return json(result)
         }
         const id = url.pathname.slice(1)
-        if (id) return json({ record: ledger.records.find(item => item.id === id), events: [{ action: "publish", actor: "producer", at: Date.now() }] })
+        if (id) return json({ record: ledger.records.find(item => item.id === id), events: [{ action: "publish", actor: "producer", at: Date.now(), revision: ledger.records.find(item => item.id === id).revision }] })
         const scope = url.searchParams.get("es")
         const projects = ["fixture", "other"].filter(name => !scope || name === scope).map(name => ({ editspace: name, available: name !== "other" || !ledger.partial, ...(name === "other" && ledger.partial ? { error: "store offline" } : {}) }))
         return json({ records: ledger.records.filter(record => (!scope || record.editspace === scope) && (!ledger.partial || record.editspace !== "other")), projects, partial: ledger.partial, limit: 200, offset: 0 })

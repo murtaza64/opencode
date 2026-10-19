@@ -22,7 +22,7 @@ export default function Home() {
   const attention = createAttention(project)
   const [view, setView] = createSignal("open")
   const [confirm, setConfirm] = createSignal<{ record: AttentionRecord; choice: string }>()
-  const [history, setHistory] = createSignal<Record<string, { events?: unknown[]; error?: string }>>({})
+  const [history, setHistory] = createSignal<Record<string, { revision: number; events?: unknown[]; error?: string }>>({})
   const sourcePointers = createMemo<HomeRequest[]>(() => {
     const projectFor = (directory: string) => dashboard.editspaces()?.editspaces.find(item => {
       const root = item.root.replace(/\/+$/, "").replace(/\/\.editspace$/, "")
@@ -32,7 +32,7 @@ export default function Home() {
     const hints = dashboard.notifications().filter(item => item.kind !== "idle").map(item => ({ ...item, project: item.editspace || projectFor(item.directory), kind: item.kind as "permission" | "question", id: item.id.startsWith(`${item.kind}:`) ? item.id.slice(item.kind.length + 1) : item.id }))
     return [...new Map([...hints, ...direct].map(item => [requestKey(item), item])).values()]
   })
-  const requests = createHomeRequests(sourcePointers)
+  const requests = createHomeRequests(sourcePointers, item => dashboard.activity.requestSettled(item.kind, item.directory, item.id))
   const requestRows = () => requests.rows().filter(item => !project() || !item.project || item.project === project())
   const pendingRequests = () => requestRows().filter(item => item.state === "pending")
   const uncertainRequests = () => requestRows().filter(item => item.state !== "pending")
@@ -45,8 +45,8 @@ export default function Home() {
       const response = await fetch(attentionPath(`/${encodeURIComponent(record.id)}`, record.editspace), { credentials: "include" })
       if (!response.ok) throw Error("History unavailable")
       const result = await response.json()
-      setHistory(previous => ({ ...previous, [record.id]: { events: result.events } }))
-    } catch { setHistory(previous => ({ ...previous, [record.id]: { error: "History unavailable. The record has not changed." } })) }
+      setHistory(previous => ({ ...previous, [record.id]: { revision: record.revision, events: result.events } }))
+    } catch { setHistory(previous => ({ ...previous, [record.id]: { revision: record.revision, error: "History unavailable. The record has not changed." } })) }
   }
   const Decision = (props: { record: AttentionRecord }) => {
     const [choice, setChoice] = createSignal("")
@@ -62,7 +62,7 @@ export default function Home() {
       <Show when={props.record.status === "decided"}><p class="home-recorded">Saved: <bdi dir="auto">{decisionLabel(props.record)}</bdi> · not sent</p><p class="home-muted">No agent was resumed. This is not tool permission or approval to publish.</p><div class="home-actions"><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)}>Open agent thread</A><button disabled={!canWrite(props.record)} onClick={() => attention.act(props.record, { action: "resolve", reason: "Human marked resolved" })}>Mark resolved</button></div></Show>
       <Show when={props.record.status === "snoozed"}><p class="home-muted">Snoozed until {props.record.snoozed_until ? new Date(props.record.snoozed_until).toLocaleString() : "unknown"}</p><button disabled={!canWrite(props.record)} onClick={() => attention.act(props.record, { action: "wake" })}>Return to Needs you</button></Show>
       <Show when={["resolved", "withdrawn"].includes(props.record.status)}><p class="home-muted">{props.record.status} · retained in history</p></Show>
-      <details onToggle={event => { if (event.currentTarget.open && !history()[props.record.id]) void loadHistory(props.record) }}><summary>Record &amp; history</summary><div class="home-source"><bdi dir="ltr">{props.record.id} · {props.record.gate_key}</bdi></div><Show when={history()[props.record.id]} fallback={<p>Loading history…</p>}>{item => <Show when={!item().error} fallback={<p>{item().error}</p>}><pre dir="ltr">{JSON.stringify(item().events, null, 2)}</pre></Show>}</Show></details>
+      <details onToggle={event => { if (event.currentTarget.open && history()[props.record.id]?.revision !== props.record.revision) void loadHistory(props.record) }}><summary>Record &amp; history</summary><div class="home-source"><bdi dir="ltr">{props.record.id} · {props.record.gate_key}</bdi></div><Show when={history()[props.record.id]?.revision === props.record.revision ? history()[props.record.id] : undefined} fallback={<p>Loading history…</p>}>{item => <Show when={!item().error} fallback={<p>{item().error}</p>}><pre dir="ltr">{JSON.stringify(item().events, null, 2)}</pre></Show>}</Show></details>
     </article>
   }
   return <main class="attention-home">
@@ -71,6 +71,7 @@ export default function Home() {
     <Show when={attention.snapshot()?.value.partial}><div class="home-warning">Some projects are unavailable. This is not an empty inbox.<For each={attention.snapshot()?.value.projects.filter(item => !item.available)}>{item => <div><bdi dir="auto">{item.editspace}</bdi>: {item.error || "unavailable"}</div>}</For></div></Show>
     <Show when={attention.snapshot()?.value.truncated}><div class="home-warning">History exceeds this view's limit. Counts may be incomplete; use the attention CLI to inspect further records.</div></Show>
     <Show when={dashboard.sessionsError()}><div class="home-warning">Live request sources may be incomplete. {dashboard.sessionsError()}</div></Show>
+    <Show when={dashboard.stateError()}><div class="home-warning">{dashboard.stateError()} Cached source values are not a live status.</div></Show>
     <Show when={attention.notice()}><div class="home-notice" role="status">{attention.notice()}<Show when={attention.pending()}><button disabled={attention.writing()} onClick={() => attention.retry()}>Retry same action</button></Show></div></Show>
     <section aria-label="Needs you"><div class="home-section"><h2>Needs you <span>{count("open")}</span></h2><span class="home-muted">Decisions, not completion receipts</span></div>
       <Show when={!attention.operator()}><div class="home-login home-muted">Read-only · operator connection unavailable. This UI origin must be allowed by the attention server. <button onClick={() => attention.checkOperator().catch(() => undefined)}>Reconnect operator</button></div></Show>

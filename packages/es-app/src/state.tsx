@@ -37,6 +37,7 @@ export type SessionRow = {
 
 type DashboardCtx = {
   state: Resource<any>
+  stateError: () => string
   refetch: () => void
   refresh: () => Promise<void>
   digest: (sessionID: string) => Promise<void>
@@ -89,12 +90,30 @@ export function DashboardProvider(props: ParentProps) {
     localStorage.setItem("es-app-editspace", name)
     setEditspaceRaw(name)
   }
-  const [editspaces] = createResource(es.editspaces)
+  const [stateError, setStateError] = createSignal("")
+  const [metadataError, setMetadataError] = createSignal("")
+  const [notificationError, setNotificationError] = createSignal("")
+  const [editspaces] = createResource<Awaited<ReturnType<typeof es.editspaces>>>(async (_, info) => {
+    try { const result = await es.editspaces(); setMetadataError(""); return result }
+    catch { setMetadataError("Project metadata unavailable; last-known projects retained."); return info.value ?? { editspaces: [], default: null } }
+  })
   const [mailRevision, setMailRevision] = createSignal(0)
-  const [notificationState, { refetch: refetchNotifications }] = createResource(es.notifications)
+  const [notificationState, { refetch: refetchNotifications }] = createResource<Awaited<ReturnType<typeof es.notifications>>>(async (_, info) => {
+    try { const result = await es.notifications(); setNotificationError(""); return result }
+    catch { setNotificationError("Notification source unavailable; last-known pointers retained."); return info.value ?? { notifications: [] } }
+  })
+  const stateCache = new Map<string, Awaited<ReturnType<typeof es.state>>>()
   const [state, { refetch }] = createResource(
     () => editspace() ?? "",
-    (name) => es.state(name || undefined),
+    async (name) => {
+      try {
+        const result = await es.state(name || undefined)
+        stateCache.set(typeof result.editspace === "string" ? result.editspace : name || editspaces()?.default || "", result)
+        if (!name) stateCache.set("", result)
+        setStateError("")
+        return result
+      } catch { setStateError("Dashboard source unavailable; last-known project state retained."); return stateCache.get(name || editspaces()?.default || "") ?? (!name ? stateCache.get("") : undefined) }
+    },
   )
   const [handoffsError, setHandoffsError] = createSignal("")
   const [handoffs, { refetch: refetchHandoffs }] = createResource<Handoff[], { name: string; revision: unknown }>(
@@ -433,6 +452,7 @@ export function DashboardProvider(props: ParentProps) {
 
   const value: DashboardCtx = {
     state,
+    stateError: () => [stateError(), metadataError(), notificationError()].filter(Boolean).join(" "),
     refetch: () => {
       refetch()
       if (allProjects()) refetchGlobal()
