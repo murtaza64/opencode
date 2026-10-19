@@ -17,6 +17,7 @@ import { createSessionActivity } from "./session-activity"
 import { createServerEvents } from "./event-source"
 import { resolveProjectName } from "./project-name"
 import { transferPins, type Handoff } from "./handoffs"
+import { pinSessionID } from "./session-pins"
 import type { GlobalSession } from "@opencode-ai/sdk/v2"
 import type { Event } from "@opencode-ai/sdk/v2"
 import { useLocation } from "@solidjs/router"
@@ -151,7 +152,7 @@ export function DashboardProvider(props: ParentProps) {
     const selected = /^\/session\/([^/]+)/.exec(route.pathname)?.[1]
     const ids = new Set([
       ...visibleSessions(),
-      ...pins().flatMap((key) => rows.filter((row) => pinKey(row) === key).map((row) => row.id)),
+      ...pins().flatMap((key) => pinSessionID(key) ?? []),
       ...(selected ? [selected] : []),
       ...(state()?.attention ?? []).flatMap((item: { session?: string }) => item.session ? [item.session] : []),
       ...(notificationState()?.notifications ?? []).map((item) => item.session),
@@ -310,23 +311,23 @@ export function DashboardProvider(props: ParentProps) {
     .filter((s) => !archivedIds().has(s.id))
     .sort((a, b) => b.updated - a.updated),
   )
-  const isPinned = (s: Pick<SessionRow, "id" | "directory">) => pins().includes(pinKey(s))
+  const isPinned = (s: Pick<SessionRow, "id" | "directory">) => pins().some((key) => pinSessionID(key) === s.id)
   const togglePin = (s: Pick<SessionRow, "id" | "directory">) => {
-    const key = pinKey(s)
-    const next = pins().includes(key) ? pins().filter((item) => item !== key) : [...pins(), key]
+    const next = isPinned(s) ? pins().filter((key) => pinSessionID(key) !== s.id) : [...pins(), pinKey(s)]
     localStorage.setItem(PIN_KEY, JSON.stringify(next))
     setPins(next)
   }
   const transferPin = (from: string, to: string, directory: string) => {
-    const next = transferPins(pins(), from, to, directory)
+    // Match predecessor aliases before the directory-qualified handoff transfer.
+    const next = transferPins(pins().map((key) => pinSessionID(key) === from ? pinKey({ id: from, directory }) : key), from, to, directory)
     if (next.every((key, index) => key === pins()[index])) return
     localStorage.setItem(PIN_KEY, JSON.stringify(next))
     setPins(next)
   }
   const pinnedSessions = createMemo(() => {
-    const byKey = new Map(sessions().map((s) => [pinKey(s), s]))
-    return pins().flatMap((key) => {
-      const row = byKey.get(key)
+    const byID = new Map(sessions().map((s) => [s.id, s]))
+    return [...new Set(pins().flatMap((key) => pinSessionID(key) ?? []))].flatMap((id) => {
+      const row = byID.get(id)
       return row ? [row] : []
     })
   })

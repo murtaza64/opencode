@@ -12,6 +12,7 @@
     "test:browser:vim": "node test/vim.browser.mjs",
     "test:browser:question": "node test/question-inline.browser.mjs",
     "test:browser:sidebar": "node test/sidebar-live.browser.mjs && node test/sidebar-live.browser.mjs --built",
+    "test:browser:sidebar-alias": "node test/sidebar-alias.browser.mjs && node test/sidebar-alias.browser.mjs --built",
     "test:browser:real": "node test/composer-direct.real.browser.mjs",
     "typecheck": "tsgo --noEmit"
   },

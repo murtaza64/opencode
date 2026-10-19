@@ -24,6 +24,9 @@ export const createSessionActivity = (
   options?: { directories: () => string[]; sessionEvent: (event: Event, directory: string) => boolean },
 ) => {
   const [snapshots, setSnapshots] = createSignal<Record<string, Snapshot>>({})
+  const [statuses, setStatuses] = createSignal<Record<string, { type: string }>>({})
+  let statusRevision = 0
+  const statusVersions = new Map<string, number>()
   const [connectionError, setConnectionError] = createSignal("")
   const index = createMemo(() => new Map(sessions().map((s) => [s.id, s])))
   const children = createMemo(() => {
@@ -74,14 +77,10 @@ export const createSessionActivity = (
     const ids = family(id)
     return requests().filter((item) => ids.has(item.request.sessionID))
   }
-  const running = (id: string) => {
-    const ids = family(id)
-    return Object.values(snapshots()).flatMap((snapshot) =>
-      Object.entries(snapshot.status)
-        .filter(([owner, status]) => ids.has(owner) && (status.type === "busy" || status.type === "retry"))
-        .map(([owner]) => owner),
-    )
-  }
+  const running = (id: string) => [...family(id)].filter((owner) => {
+    const type = statuses()[owner]?.type
+    return type === "busy" || type === "retry"
+  })
   const error = (id: string, directory?: string) => {
     const dirs = new Set([...family(id)].map((owner) => index().get(owner)?.directory))
     if (directory) dirs.add(directory)
@@ -171,6 +170,7 @@ export const createSessionActivity = (
     if (disposed) return Promise.resolve()
     const active = inflight.get(directory)
     if (active) return afterReply ? active.promise.then(() => refreshDirectory(directory)) : active.promise
+    const before = statusRevision
     const events: Event[] = []
     const promise = (async () => {
       const [status, permissions, questions] = await Promise.allSettled([
@@ -180,6 +180,20 @@ export const createSessionActivity = (
       ])
       if (disposed) return
       batch(() => {
+        if (status.status === "fulfilled") {
+          // Status belongs to a Session, not a directory spelling. Only its
+          // indexed directory can reconcile an absent (idle) status; events
+          // received after this fetch began must win over its response.
+          const owners = new Set([
+            ...sessions().filter((session) => session.directory === directory).map((session) => session.id),
+            ...Object.keys(status.value).filter((id) => !index().has(id)),
+          ])
+          setStatuses((previous) => ({
+            ...previous,
+            ...Object.fromEntries([...owners].filter((id) => (statusVersions.get(id) ?? 0) <= before)
+              .map((id) => [id, status.value[id] ?? { type: "idle" }])),
+          }))
+        }
         setSnapshots((previous) => ({
           ...previous,
           [directory]: {
@@ -281,6 +295,16 @@ export const createSessionActivity = (
     try {
       const { directory, payload: event } = JSON.parse(message.data) as { directory: string; payload: Event }
       if (!event?.type || !directory) return
+      const live = event.type === "session.status"
+        ? { id: event.properties.sessionID, status: event.properties.status }
+        : event.type === "session.idle" || event.type === "session.error"
+          ? { id: event.properties.sessionID, status: { type: "idle" } }
+          : event.type === "session.deleted" ? { id: event.properties.info.id, status: { type: "idle" } } : undefined
+      if (live?.id) {
+        const id = live.id
+        statusVersions.set(id, ++statusRevision)
+        setStatuses((previous) => ({ ...previous, [id]: live.status }))
+      }
       if (
         event.type.startsWith("session.") ||
         event.type.startsWith("permission.") ||
@@ -331,11 +355,11 @@ export const createSessionActivity = (
   })
   const status = (id: string) => {
     const snapshot = snapshots()[index().get(id)?.directory ?? ""]
-    return snapshot?.status[id]?.type ?? (snapshot && !snapshot.error ? "idle" : undefined)
+    return statuses()[id]?.type ?? (snapshot && !snapshot.error ? "idle" : undefined)
   }
   const idle = (id: string) => !connectionError() && [...family(id)].every((owner) => {
     const snapshot = snapshots()[index().get(owner)?.directory ?? ""]
-    return snapshot?.statusKnown && (snapshot.status[owner]?.type ?? "idle") === "idle"
+    return snapshot?.statusKnown && (statuses()[owner]?.type ?? "idle") === "idle"
   })
   const requestState = (kind: "permission" | "question", id: string, directory: string, requestID?: string) => {
     const snapshot = snapshots()[directory]

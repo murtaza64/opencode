@@ -176,6 +176,35 @@ test("an idle parent reports busy and retry descendants but excludes unrelated s
   expect(activity.running("ses_parent")).toEqual([])
 })
 
+test("directory spelling changes do not leave stale busy copies of the same Session", async () => {
+  snapshots[rootDirectory].status = { ses_parent: { type: "busy" } }
+  snapshots[childDirectory].status = { ses_parent: { type: "busy" } }
+  const { activity, setSessions } = start([session("ses_parent")])
+  await load(activity)
+  setSessions([session("ses_parent", childDirectory)])
+  ActivityEvents.current.send(childDirectory, "session.status", { sessionID: "ses_parent", status: { type: "idle" } })
+  expect(activity.running("ses_parent")).toEqual([])
+  expect(activity.status("ses_parent")).toBe("idle")
+  setSessions([session("ses_parent", rootDirectory)])
+  expect(activity.running("ses_parent")).toEqual([])
+  expect(activity.status("ses_parent")).toBe("idle")
+  ActivityEvents.current.send(rootDirectory, "session.status", { sessionID: "ses_parent", status: { type: "busy" } })
+  expect(activity.running("ses_parent")).toEqual(["ses_parent"])
+  expect(activity.status("ses_parent")).toBe("busy")
+})
+
+test("an alias status event survives an in-flight snapshot of the indexed directory", async () => {
+  snapshots[rootDirectory].status = { ses_parent: { type: "busy" } }
+  const { activity } = start([session("ses_parent")])
+  await activity.refreshDirectory(rootDirectory)
+  const held = holdSnapshot(activity, rootDirectory)
+  ActivityEvents.current.send(childDirectory, "session.status", { sessionID: "ses_parent", status: { type: "idle" } })
+  held.release()
+  await held.loading
+  expect(activity.status("ses_parent")).toBe("idle")
+  expect(activity.running("ses_parent")).toEqual([])
+})
+
 test("pending parent, child, and grandchild requests remain visible while descendants run with each owner directory", async () => {
   const parent = question("que_parent", "ses_parent")
   const child = permission("per_child")
