@@ -1,10 +1,12 @@
-import { createEffect, createSignal, For, onCleanup, Show } from "solid-js"
+import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { es, type WingmanTranscript } from "./api"
 import { cloudHref, cloudKey, cloudOwnerKnown, type CloudPin, type createCloudAgents } from "./cloud-agents"
 import type { HomeActivityRow } from "./home-activity-data"
 import { ago, useDashboard } from "./state"
 import { wingmanRunUrl, wingmanStatus, wingmanSyncedAt } from "./wingman"
 import { A } from "@solidjs/router"
+import { FindExcerpt, TranscriptFind } from "./components/transcript-find"
+import type { FindHit } from "./transcript-find"
 
 const maxScopes = 5
 
@@ -18,12 +20,42 @@ const runtimeLink = (value?: string) => {
   return url?.protocol === "https:" && !url.username && !url.password && !!url.hostname && !url.port ? url.href : undefined
 }
 
-const Transcript = (props: { pin: CloudPin; available: () => boolean }) => {
+const Transcript = (props: { pin: CloudPin; available: () => boolean; findable?: boolean }) => {
   const cloud: ReturnType<typeof createCloudAgents> = useDashboard().cloud
   const [open, setOpen] = createSignal(false)
   const [loading, setLoading] = createSignal(false)
   const [result, setResult] = createSignal<WingmanTranscript>()
   const [error, setError] = createSignal("")
+  const [finding, setFinding] = createSignal(false)
+  const [hit, setHit] = createSignal<FindHit>()
+  let container: HTMLDivElement | undefined
+  let focus: Element | null = null
+  const openFind = () => {
+    if (!result() || !open()) return
+    if (finding()) { container?.querySelector<HTMLInputElement>("[data-transcript-find] input")?.focus({ preventScroll: true }); return }
+    focus = document.activeElement
+    setFinding(true)
+  }
+  const closeFind = () => {
+    setFinding(false)
+    setHit(undefined)
+    if (focus instanceof HTMLElement && focus.isConnected) focus.focus({ preventScroll: true })
+  }
+  onMount(() => {
+    if (!props.findable) return
+    const keydown = (event: KeyboardEvent) => {
+      if (event.isComposing || !result() || !open()) return
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "f") {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        openFind()
+      }
+      if (finding() && event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); closeFind() }
+    }
+    window.addEventListener("keydown", keydown, true)
+    onCleanup(() => window.removeEventListener("keydown", keydown, true))
+  })
+  createEffect(() => { if (!result() || !open()) { setFinding(false); setHit(undefined) } })
   let controller: AbortController | undefined
   let identity = cloudKey(props.pin)
   onCleanup(() => controller?.abort())
@@ -63,13 +95,32 @@ const Transcript = (props: { pin: CloudPin; available: () => boolean }) => {
       if (!request.signal.aborted) setError(error instanceof Error && error.message === "owner-mismatch" ? "Transcript owner changed or could not be verified. Nothing was displayed." : "Transcript unavailable (owner changed, gateway or VPN). Try again later.")
     }).finally(() => { if (!request.signal.aborted) setLoading(false) })
   }
-  return <div><button onClick={toggle}>{open() ? "Close transcript" : "Load transcript"}</button>
+  return <div ref={container}><button onClick={toggle}>{open() ? "Close transcript" : "Load transcript"}</button>
+    <Show when={props.findable}><button disabled={!open() || !result()} title="Load the gateway transcript before finding text" onClick={openFind}>Find in loaded transcript</button></Show>
+    <Show when={finding() && result()}>{transcript => <TranscriptFind
+      documents={(transcript().turns ?? []).flatMap((turn, index) => [
+        { kind: "gateway prompt", text: turn.prompt }, { kind: "gateway reply", text: turn.reply },
+        { kind: "gateway error", text: typeof turn.error === "string" ? turn.error : undefined },
+      ].flatMap((part, partIndex) => part.text ? [{ messageID: `Turn ${index + 1}`, partID: `turn_${index}_${partIndex}`, role: "gateway", kind: part.kind, text: part.text }] : []))}
+      scopeLabel="Loaded gateway transcript only"
+      scopeDescription="Literal, case-insensitive gateway prompt/reply/error text. Excludes events, reasoning and internal payloads. The gateway may drop turns; earlier or unloaded turns are not searched. No local Session API is used."
+      clear={() => setHit(undefined)} close={closeFind} jump={(hit) => {
+        setHit(hit)
+        requestAnimationFrame(() => {
+          const target = [...(container?.querySelectorAll<HTMLElement>("[data-cloud-find-turn]") ?? [])]
+            .find((element) => element.dataset.cloudFindTurn === hit.messageID)
+          target?.scrollIntoView({ block: "start", inline: "nearest" })
+        })
+      }} />}</Show>
     <Show when={open()}><div class="home-source">On-demand gateway transcript · untrusted text</div>
       <Show when={loading()}><p class="home-muted">Loading transcript…</p></Show>
       <Show when={error()}><p class="home-muted" role="status">{error()}</p></Show>
       <Show when={result()}>{transcript => <div>
         <div class="home-source">Gateway status: <bdi dir="auto">{transcript().status ?? "unknown"}</bdi> · turns dropped: {transcript().turns_dropped ?? "unknown"}</div>
-        <For each={transcript().turns ?? []} fallback={<p class="home-muted">No turns returned.</p>}>{(turn, index) => <div>
+        <For each={transcript().turns ?? []} fallback={<p class="home-muted">No turns returned.</p>}>{(turn, index) => <div data-cloud-find-turn={`Turn ${index() + 1}`}>
+          <Show when={hit()?.messageID === `Turn ${index() + 1}` ? hit() : undefined}>{hit =>
+            <div class="find-jump" role="region" aria-label="Selected transcript match"><FindExcerpt hit={hit()} /></div>
+          }</Show>
           <div class="home-source">Turn {index() + 1} · <bdi dir="auto">{turn.status ?? "status unknown"}</bdi></div>
           <Show when={turn.prompt}><pre dir="auto">{turn.prompt}</pre></Show>
           <Show when={turn.reply}><pre dir="auto">{turn.reply}</pre></Show>
@@ -107,7 +158,7 @@ export const CloudAgentDetails = (props: { pin: CloudPin }) => {
         <div class="home-muted">Reported turns: <bdi dir="auto">{lane()["wingman-turns"] ?? "unknown"}</bdi> · reported cost: <bdi dir="auto">{lane()["wingman-cost"] ?? "unknown"}</bdi></div>
         <div class="home-actions"><For each={(lane()["wingman-prs"] ?? "").split(/\s+/).map(githubPr).filter((url): url is string => !!url)}>{url => <a href={url} target="_blank" rel="noopener noreferrer">PR <bdi dir="ltr">{url}</bdi></a>}</For>
           <Show when={runtimeLink(wingmanRunUrl(lane()))}>{url => <a href={url()} target="_blank" rel="noopener noreferrer">Runtime workflow</a>}</Show><Show when={lane()["wingman-ci"]}><span class="home-source">CI: {lane()["wingman-ci"]}</span></Show></div>
-        <Show when={!snapshot()?.error && inScope() && cloudOwnerKnown(props.pin.owner)}><Transcript pin={props.pin} available={() => !!record() && !snapshot()?.error && inScope()} /></Show>
+        <Show when={!snapshot()?.error && inScope() && cloudOwnerKnown(props.pin.owner)}><Transcript pin={props.pin} available={() => !!record() && !snapshot()?.error && inScope()} findable /></Show>
       </>}</Show>
     </div>
   </section>

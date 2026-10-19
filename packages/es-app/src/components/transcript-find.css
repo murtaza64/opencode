@@ -1,0 +1,14 @@
+.transcript-find { flex: none; padding: 10px 16px; border-block-end: 1px solid var(--surface0); background: var(--mantle); max-block-size: 40vh; overflow: auto; }
+.find-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.find-controls input { min-inline-size: 120px; flex: 1; }
+.find-status, .find-scope { margin-block: 6px; font-size: 12px; }
+.find-scope, .find-source { color: var(--subtext0); }
+.find-results { max-block-size: 16vh; overflow: auto; }
+.find-result { display: block; inline-size: 100%; text-align: start; padding: 6px; border: 1px solid transparent; }
+.find-result[aria-current=true] { border-color: currentColor; }
+.find-source { display: block; font-size: 11px; overflow-wrap: anywhere; }
+.find-excerpt { display: block; white-space: pre-wrap; overflow-wrap: anywhere; unicode-bidi: plaintext; }
+.find-excerpt mark { background: var(--yellow); color: var(--crust); }
+.find-jump { margin-block: 12px; padding: 12px; border: 1px solid var(--surface0); }
+[data-find-message][data-find-selected=true] { outline: 1px solid var(--yellow); outline-offset: 3px; }
+.finding-transcript .float-editor { visibility: hidden; pointer-events: none; }

@@ -36,6 +36,8 @@ import { mailForSession, mailLocation, mailRows, mailSourceID } from "../mail-ti
 import { handoffChain, handoffNext, successorFor } from "../handoffs"
 import { ComposerImages } from "../components/composer-images"
 import { ActivityBriefView } from "../components/activity-brief"
+import { FindExcerpt, TranscriptFind } from "../components/transcript-find"
+import type { FindHit } from "../transcript-find"
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const [error, setError] = createSignal("")
@@ -720,6 +722,78 @@ function SessionView(props: { sessionID: string; directory: string }) {
   let inner: HTMLDivElement | undefined
   let promptEl: HTMLTextAreaElement | undefined
   let floatEl: HTMLTextAreaElement | undefined
+  const [findOpen, setFindOpen] = createSignal(false)
+  const [findHit, setFindHit] = createSignal<FindHit>()
+  let findAnchor: HTMLDivElement | undefined
+  let findFocus: Element | null = null
+  let findSelection: [number, number, "forward" | "backward" | "none"] | undefined
+  let findMode: "normal" | "insert" = "insert"
+  let findScroll = 0
+  let findStick = false
+  let findJumped = false
+  const openFind = () => {
+    if (findOpen()) {
+      document.querySelector<HTMLInputElement>("[data-transcript-find] input")?.focus({ preventScroll: true })
+      return
+    }
+    findFocus = document.activeElement
+    lastEsc = 0
+    findScroll = transcriptEl?.scrollTop ?? 0
+    findStick = stick
+    findJumped = false
+    stick = false
+    findMode = vim.mode()
+    findSelection = (findFocus instanceof HTMLTextAreaElement || findFocus instanceof HTMLInputElement) && findFocus.selectionStart !== null
+      ? [findFocus.selectionStart ?? 0, findFocus.selectionEnd ?? 0, findFocus.selectionDirection ?? "none"] : undefined
+    setFindOpen(true)
+  }
+  const closeFind = () => {
+    lastEsc = 0
+    setFindOpen(false)
+    setFindHit(undefined)
+    if (!findJumped) {
+      stick = findStick
+      requestAnimationFrame(() => { if (!findOpen() && transcriptEl) transcriptEl.scrollTop = findScroll })
+    }
+    if (!(findFocus instanceof HTMLElement) || !findFocus.isConnected) return
+    findFocus.focus({ preventScroll: true })
+    if (findSelection && (findFocus instanceof HTMLTextAreaElement || findFocus instanceof HTMLInputElement))
+      findFocus.setSelectionRange(...findSelection)
+    vim.setMode(findMode)
+  }
+  const jumpFind = (hit: FindHit) => {
+    findJumped = true
+    stick = false
+    userScroll = false
+    setFindHit(hit)
+    requestAnimationFrame(() => {
+      if (!transcriptEl) return
+      const message = [...transcriptEl.querySelectorAll<HTMLElement>("[data-find-message]")]
+        .find((element) => element.dataset.findMessage === hit.messageID)
+      // A single exact source excerpt covers historical rows and matches hidden
+      // by Markdown or collapsed tools, without mounting all earlier messages.
+      const target = message ?? findAnchor
+      target?.scrollIntoView({ block: "start", inline: "nearest" })
+    })
+  }
+  onMount(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (event.isComposing || dialog.active) return
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "f") {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        openFind()
+        return
+      }
+      if (findOpen() && event.key === "Escape") {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        closeFind()
+      }
+    }
+    window.addEventListener("keydown", handler, true)
+    onCleanup(() => window.removeEventListener("keydown", handler, true))
+  })
 
   // --- vim-like modal input + navigation --------------------------------
 
@@ -1210,13 +1284,14 @@ function SessionView(props: { sessionID: string; directory: string }) {
   )
 
   return (
-    <main class="session-page">
+    <main class="session-page" classList={{ "finding-transcript": findOpen() }}>
       <div class="session-main">
         <AppHeader>
-          <SessionTitle sessionID={sessionID} directory={directory} session={session()} onSaved={(info) => {
+          <SessionTitle sessionID={sessionID} directory={directory} session={session()} suspendBlurSave={findOpen()} onSaved={(info) => {
             live.apply({ type: "session.updated", properties: { sessionID, info } })
             void refetch()
           }} />
+          <button onPointerDown={(event) => event.preventDefault()} onClick={openFind} title="Find in transcript (Cmd/Ctrl+F)">Find</button>
           <span class="dim">{workState() === "working" ? "busy" : workState()}</span>
           <Show when={subagentsRunning()}><span class="dim">{subagentsRunning()} subagent(s) running</span></Show>
           <Show when={(session() as any)?.parentID}>
@@ -1230,6 +1305,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
             )}
           </Show>
         </AppHeader>
+        <Show when={findOpen()}><TranscriptFind sessionID={sessionID} directory={directory} messages={messages()}
+          parts={live.data.part} jump={jumpFind} close={closeFind} clear={() => setFindHit(undefined)} /></Show>
 
         <div class="session-alerts">
           <Show when={bannerError()}><div class="err" role="alert">{bannerError()}</div></Show>
@@ -1276,6 +1353,10 @@ function SessionView(props: { sessionID: string; directory: string }) {
 
         <div class="transcript" ref={transcriptEl}>
           <div ref={inner} class="transcript-inner">
+            <Show when={findHit() && !messages().some((message) => message.id === findHit()?.messageID) ? findHit() : undefined}>{(hit) => <div class="find-jump" ref={findAnchor} role="region" aria-label="Selected transcript match">
+              <FindExcerpt hit={hit()} />
+              <span class="dim">Exact source excerpt. Earlier history is not added to the reader.</span>
+            </div>}</Show>
             <Show when={predecessor()}>{(edge) => <div class="banner handoff-history" aria-label="Previous session">
               Previous session: <A href={sessionHref(edge().predecessor, activity.session(edge().predecessor)?.directory)}><bdi dir="auto">{activity.session(edge().predecessor)?.title ?? edge().predecessor}</bdi></A>
               {" · "}<bdi dir="ltr">{edge().predecessor}</bdi>
@@ -1291,7 +1372,10 @@ function SessionView(props: { sessionID: string; directory: string }) {
                  if (row.type === "mail") return <MailRow message={row.message} ids={mailIDs()} />
                 const m = row.message
                 return (
-                <>
+                <div data-find-message={m.id} data-find-selected={findHit()?.messageID === m.id ? "true" : undefined}>
+                  <Show when={findHit()?.messageID === m.id ? findHit() : undefined}>{(hit) =>
+                    <div class="find-jump" role="region" aria-label="Selected transcript match"><FindExcerpt hit={hit()} /></div>
+                  }</Show>
                   <Show when={m.role === "user"} fallback={<TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} renderTools={renderTools} />}>
                     <div class="msg-wrap">
                       <TranscriptMessage message={m} parts={live.data.part[m.id] ?? []}
@@ -1319,7 +1403,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
                       </div>
                     )}
                   </Show>
-                </>
+                </div>
                 )
               }}
             </For>

@@ -9,6 +9,7 @@ export const SessionTitle = (props: {
   sessionID: string
   directory: string
   session: Session | undefined
+  suspendBlurSave?: boolean
   onSaved: (session: Session) => void
 }) => {
   const [state, setState] = createStore({ editing: false, draft: "", saving: false, error: "" })
@@ -17,6 +18,7 @@ export const SessionTitle = (props: {
   let button: HTMLButtonElement | undefined
   const previousTitle = document.title
   createEffect(() => { document.title = props.session?.title ?? props.sessionID })
+  createEffect(() => { if (props.suspendBlurSave) clearTimeout(blur) })
   onCleanup(() => {
     disposed = true
     clearTimeout(blur)
@@ -74,8 +76,9 @@ export const SessionTitle = (props: {
               if (event.key === "Enter" && event.isComposing) event.preventDefault()
             }}
             onBlur={() => {
+              if (props.suspendBlurSave) return
               // Let route navigation dispose the keyed session before blur saves.
-              blur = setTimeout(() => { if (!state.error) void save() }, 0)
+              blur = setTimeout(() => { if (!state.error && !props.suspendBlurSave) void save() }, 0)
             }} />
           <Show when={state.saving}><span role="status">Saving…</span></Show>
           <Show when={state.error}>
