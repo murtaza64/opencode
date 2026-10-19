@@ -6,7 +6,11 @@ import { startPanelPreview } from "./composer-panel-preview.mjs"
 import { directory, session } from "./composer-fixture.mjs"
 
 const { chromium, _electron, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
-const preview = await startPanelPreview()
+const scratch = await mkdtemp(path.join(tmpdir(), "session-title-deps-"))
+const preview = await startPanelPreview([{
+  name: "session-title:isolated-deps",
+  config: () => ({ cacheDir: path.join(scratch, "vite"), optimizeDeps: { include: ["@opencode-ai/ui > @shikijs/stream", "@opencode-ai/ui > remend"] } }),
+}])
 const fixture = preview.fixture
 const profile = process.env.ES_DESKTOP_EXECUTABLE ? await mkdtemp(path.join(tmpdir(), "session-title-")) : undefined
 const app = profile ? await _electron.launch({ executablePath: process.env.ES_DESKTOP_EXECUTABLE,
@@ -148,5 +152,6 @@ try {
   await browser?.close()
   await app?.close()
   await preview.close()
+  await rm(scratch, { recursive: true, force: true })
   if (profile) await rm(profile, { recursive: true, force: true })
 }
