@@ -116,6 +116,8 @@ function listenerLayer(opts: ListenOptions, port: number) {
 
 function startWithPortFallback(opts: ListenOptions) {
   if (opts.port !== 0) return startListener(opts, opts.port)
+  // Test homes must not shadow a live wildcard listener with a private loopback database.
+  if (process.env.OPENCODE_TEST_HOME) return startListener(opts, 0)
   // Match the legacy listener port-resolution behavior: explicit `0` prefers
   // 4096 first, then any free port.
   return startListener(opts, 4096).pipe(Effect.catch(() => startListener(opts, 0)))
