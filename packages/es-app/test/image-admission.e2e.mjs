@@ -1,9 +1,12 @@
 // Usage: bun test/image-admission.e2e.mjs (from packages/es-app).
+// IMAGE_ADMISSION_BINARY=/absolute/path verifies a compiled candidate instead of Bun source.
 // Starts an isolated backend/database, loopback fake provider and es-app. No live service is used.
 import { createRequire } from "node:module"
 import http from "node:http"
 import net from "node:net"
-import { mkdtemp, rm } from "node:fs/promises"
+import { constants } from "node:fs"
+import { access, mkdtemp, rm, stat } from "node:fs/promises"
+import path from "node:path"
 import { tmpdir } from "node:os"
 import { fileURLToPath } from "node:url"
 import { createServer } from "vite"
@@ -11,6 +14,12 @@ import { createFixture } from "./composer-fixture.mjs"
 import { imageProviderConfig, pngMetadata } from "../../opencode/test/fixture/input-image.ts"
 
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
+const binary = process.env.IMAGE_ADMISSION_BINARY
+if (binary) {
+  if (!path.isAbsolute(binary)) throw new Error("IMAGE_ADMISSION_BINARY must be an absolute executable path")
+  if (!(await stat(binary)).isFile()) throw new Error("IMAGE_ADMISSION_BINARY must be a file")
+  await access(binary, constants.X_OK)
+}
 const bounded = async (name, promise, milliseconds = 10000) => {
   const timeout = Promise.withResolvers()
   const timer = setTimeout(() => timeout.reject(new Error(`${name} timed out after ${milliseconds}ms`)), milliseconds)
@@ -68,7 +77,8 @@ await new Promise((resolve) => provider.listen(0, "127.0.0.1", resolve))
 const config = imageProviderConfig(`http://127.0.0.1:${provider.address().port}/v1`)
 // Nonzero explicit ports fail on conflict; this server deliberately treats --port 0 as "prefer 4096".
 if (!conflictCheck) await backendPort.close()
-const backend = Bun.spawn(["bun", "run", fileURLToPath(new URL("../../opencode/src/index.ts", import.meta.url)), "serve", "--hostname", "127.0.0.1", "--port", String(backendPort.port)], {
+const command = binary ? [binary] : ["bun", "run", fileURLToPath(new URL("../../opencode/src/index.ts", import.meta.url))]
+const backend = Bun.spawn([...command, "serve", "--hostname", "127.0.0.1", "--port", String(backendPort.port)], {
   cwd: home,
   env: {
     ...process.env,
@@ -112,7 +122,7 @@ const run = async () => {
     return
   }
   const base = verifyBackendURL(await bounded("backend startup", ready.promise, 30000))
-  console.log(`ISOLATION backendPID=${backend.pid} requestedPort=${backendPort.port} reportedURL=${base}`)
+  console.log(`ISOLATION backendPID=${backend.pid} requestedPort=${backendPort.port} reportedURL=${base} executable=${binary ?? "bun-source"}`)
   if (process.argv.includes("--verify-failure-cleanup")) throw new Error("Injected failure before any HTTP request")
   stage = "HTTP setup"
   const api = async (path, body) => {
