@@ -19,6 +19,13 @@ const setup = async () => {
     port: 0,
     fetch: async (request) => {
       const url = new URL(request.url)
+      if (url.pathname === "/api/attention/session") return Response.json({
+        originBound: request.headers.get("origin") === url.origin,
+        operatorCookieOnly: request.headers.get("cookie") === "es_attention_operator=synthetic",
+        csrf: request.headers.get("x-attention-csrf"),
+        keyForwarded: request.headers.has("x-editspace-key"),
+        authForwarded: request.headers.has("authorization"),
+      }, { headers: { "set-cookie": "es_attention_operator=synthetic; HttpOnly; SameSite=Strict; Path=/" } })
       if (url.searchParams.has("redirect")) return Response.redirect("http://127.0.0.1:4096", 302)
       if (url.pathname === "/event")
         return new Response(
@@ -137,6 +144,33 @@ test("rejects unauthenticated, cross-origin, and foreign Host requests", async (
   expect((await get("/oc/session", { headers: { host: "evil.test" } })).status).toBe(403)
   expect((await get("/oc/session", { headers: { "sec-fetch-site": "cross-site" } })).status).toBe(403)
   expect((await get("/oc/pty", { method: "POST" })).status).toBe(403)
+})
+
+test("attention exposes only operator bootstrap, reads and record commands", () => {
+  const id = "00000000-0000-4000-8000-000000000001"
+  expect(apiAllowed("GET", "/es/api/attention")).toBe(true)
+  expect(apiAllowed("GET", "/es/api/attention/session")).toBe(true)
+  expect(apiAllowed("GET", `/es/api/attention/${id}`)).toBe(true)
+  expect(apiAllowed("POST", "/es/api/attention/session")).toBe(true)
+  expect(apiAllowed("POST", `/es/api/attention/${id}/commands`)).toBe(true)
+  expect(apiAllowed("POST", "/es/api/attention/publish")).toBe(false)
+  expect(apiAllowed("POST", "/es/api/attention/session/commands")).toBe(false)
+  expect(apiAllowed("GET", `/es/api/attention/${id}/commands`)).toBe(false)
+  expect(apiAllowed("DELETE", `/es/api/attention/${id}`)).toBe(false)
+  expect(apiAllowed("PUT", "/es/api/attention/session")).toBe(false)
+})
+
+test("binds attention to the validated native origin and forwards only its operator cookie", async () => {
+  const { server, get } = await setup()
+  const response = await get("/es/api/attention/session", {
+    method: "POST", body: "{}", headers: { origin: server.origin, cookie: "unrelated=private; es_attention_operator=synthetic", authorization: "not-forwarded", "x-attention-csrf": "1", "content-type": "application/json" },
+  })
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({ originBound: true, operatorCookieOnly: true, csrf: "1", keyForwarded: false, authForwarded: false })
+  expect(response.headers.get("set-cookie")).toContain("es_attention_operator=")
+  expect((await get("/es/api/attention/session", { method: "POST", body: "{}" })).status).toBe(403)
+  expect((await get("/es/api/attention/session", { method: "POST", body: "{}", headers: { origin: "https://evil.test" } })).status).toBe(403)
+  expect((await fetch(`${server.origin}/es/api/attention/session`, { method: "POST", body: "{}", headers: { origin: server.origin } })).status).toBe(403)
 })
 
 test("serves the built SPA and assets with restrictive CSP", async () => {

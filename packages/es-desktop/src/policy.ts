@@ -57,6 +57,7 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/oc\/(event|global\/event|experimental\/(session|capabilities)|umbrella\/session|session|session\/status|permission|question|config\/providers|agent)$/,
       /^\/oc\/session\/[\w-]+(?:\/(message|input)(?:\/[\w-]+)?|\/todo)?$/,
       /^\/es\/api\/(editspaces|state|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work|mail|subscriptions|handoffs)$/,
+      /^\/es\/api\/attention(?:\/session|\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/,
     ],
     POST: [
       /^\/oc\/session$/,
@@ -64,6 +65,7 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/oc\/(permission|question)\/[\w-]+\/(reply|reject)$/,
       /^\/es\/api\/(refresh|frontdesk|curate|(?:digest|brief)\/[^/]+)$/,
       /^\/es\/api\/handoffs$/,
+      /^\/es\/api\/attention\/(?:session|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/commands)$/,
     ],
     PATCH: [/^\/oc\/session\/[\w-]+$/],
     PUT: [/^\/es\/api\/subscriptions$/],

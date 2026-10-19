@@ -1,10 +1,14 @@
 import { createServer } from "vite"
 import net from "node:net"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { createFixture, directory } from "./composer-fixture.mjs"
 
-export const startPanelPreview = async (plugins = []) => {
+export const startPanelPreview = async (plugins = [], portHint = 0) => {
   const fixture = await createFixture()
+  const cache = await mkdtemp(path.join(tmpdir(), "es-app-preview-vite-"))
   fixture.permissions = []
   fixture.messages = [
     {
@@ -55,11 +59,13 @@ export const startPanelPreview = async (plugins = []) => {
   process.env.OPENCODE_URL = fixture.url
   process.env.ES_DASHBOARD_URL = fixture.url
   const probe = net.createServer()
-  await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve))
+  await new Promise((resolve) => probe.listen(portHint, "127.0.0.1", resolve))
   const port = probe.address().port
   await new Promise((resolve) => probe.close(resolve))
   const vite = await createServer({
     root: fileURLToPath(new URL("..", import.meta.url)),
+    cacheDir: cache,
+    optimizeDeps: { include: ["@opencode-ai/session-ui > @shikijs/stream", "@opencode-ai/session-ui > remend", "@opencode-ai/ui > @shikijs/stream", "@opencode-ai/ui > remend"] },
     plugins,
     server: { host: "127.0.0.1", port, strictPort: true },
   })
@@ -69,7 +75,7 @@ export const startPanelPreview = async (plugins = []) => {
     fixture,
     origin,
     url: `${origin}/session/ses_a?directory=${encodeURIComponent(directory)}`,
-    close: () => Promise.all([vite.close(), fixture.close()]),
+    close: async () => { await Promise.all([vite.close(), fixture.close()]); await rm(cache, { recursive: true, force: true }) },
   }
 }
 

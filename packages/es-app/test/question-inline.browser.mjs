@@ -75,7 +75,7 @@ const errors = []
 page.on("pageerror", error => errors.push(error.message))
 
 try {
-  await page.goto(preview.url, { waitUntil: "commit" })
+  await page.goto(preview.url, { waitUntil: "domcontentloaded" })
   const parent = page.locator('[data-question-request="question-parent"]')
   const child = page.locator('[data-question-request="question-child"]')
   await expect(parent).toBeVisible()

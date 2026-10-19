@@ -1,587 +1,86 @@
-/* Home = the es dashboard: attention queue + thread cards, from :7777. */
-import { createMemo, createSignal, For, onMount, Show } from "solid-js"
-import { A, useNavigate } from "@solidjs/router"
-import { ago, linkUrl, sessionHref, useDashboard, type SessionRow } from "../state"
-import { ticketUrl } from "../ticket-url"
-import { es as esApi } from "../api"
-import { PrList } from "../components/pr"
-import BriefBox from "../components/brief"
-import { SessionIcon, TicketIcon } from "../components/icons"
+import { createMemo, createSignal, For, Show } from "solid-js"
+import { A } from "@solidjs/router"
+import { ago, sessionHref, useDashboard, type SessionRow } from "../state"
 import { AppHeader } from "../components/native-header"
+import { CurrentWorkView } from "../current-work"
+import { attentionPath, createAttention, decisionLabel, type AttentionRecord } from "../attention"
+import { createHomeRequests, requestKey, type HomeRequest } from "../home-requests"
+import "./home.css"
 
-function TicketRow(props: { tk: any }) {
-  return (
-    <div class="ticket-row">
-      <a class="key" href={linkUrl(ticketUrl(props.tk.key, props.tk.url))} target="_blank">
-        <TicketIcon />
-        {props.tk.key}
-      </a>
-      <span class="title">{props.tk.summary ?? ""}</span>
-      <Show when={props.tk.status}>
-        <span class={`chip ${props.tk.status === "In Progress" ? "inprogress" : ""}`}>{props.tk.status}</span>
-      </Show>
-      <Show when={props.tk.next_action}>
-        <span class={`chip ${props.tk.next_action}`}>{props.tk.next_action}</span>
-      </Show>
-      <Show when={(props.tk.labels ?? []).includes("parked")}>
-        <span class="chip parked">parked</span>
-      </Show>
-    </div>
-  )
-}
-
-function ThreadCard(props: {
-  t: any
-  directory: string
-  onDigest: (sid: string) => void
-  onBrief: (ticket: string) => void
-  briefing: string[]
-}) {
-  const { dotFor } = useDashboard()
-  const s0 = () => props.t.sessions[0]
-  // Memoized: dotFor tracks every activity snapshot, and its string rarely changes.
-  const dot = createMemo(() => s0() ? dotFor(s0()) : "idle")
-  const digest = () => props.t.digest?.result
-  const laneStatuses = () =>
-    props.t.lanes
-      .filter((l: any) => l.status && !/^active$/.test(l.status))
-      .map((l: any) => `${l.lane}: ${l.status}`)
-      .join("\n")
-  return (
-    <div class="card" id={`t-${props.t.key}`}>
-      <div class="head">
-        <Show
-          when={props.t.kind === "session" && s0()}
-          fallback={
-            <span class="title dim">{props.t.curated ? props.t.title : "no live session"}</span>
-          }
-        >
-          <span class={`dot ${dot()}`} />
-          <A class="title" href={sessionHref(s0().id, s0().directory ?? props.directory)}>
-            <SessionIcon />
-            {props.t.title}
-          </A>
-          <span class="dim">
-            {dot()}
-            {s0().updated ? ` · ${ago(s0().updated)}` : ""}
-          </span>
-          <button
-            onClick={() => props.onDigest(s0().id)}
-            disabled={dot() === "busy" || s0().digesting}
-          >
-            {s0().digesting ? "…" : "digest"}
-          </button>
-        </Show>
-        <Show when={props.t.curated_status}>
-          <span class={`chip ${props.t.curated_status}`}>{props.t.curated_status}</span>
-        </Show>
-      </div>
-      <Show when={props.t.description}>
-        <div class="thread-desc">{props.t.description}</div>
-      </Show>
-      {/* curated threads can hold several sessions; s0 is in the head */}
-      <Show when={props.t.sessions.length > 1}>
-        <div class="more-sessions">
-          <For each={props.t.sessions.slice(1)}>
-            {(sv: any) => (
-              <A href={sessionHref(sv.id, sv.directory ?? props.directory)}>
-                <SessionIcon />
-                {sv.title || sv.id}
-              </A>
-            )}
-          </For>
-        </div>
-      </Show>
-      <For each={props.t.tickets ?? []}>{(tk) => <TicketRow tk={tk} />}</For>
-      <Show when={props.t.lanes.length}>
-        <div class="lanes">
-          <For each={props.t.lanes}>{(l: any) => <span class="lane-badge" title={l.status}>{l.lane}</span>}</For>
-        </div>
-      </Show>
-      <Show when={laneStatuses()}>
-        <div class="status-line">{laneStatuses()}</div>
-      </Show>
-      {/* a review brief replaces the digest display; the digest stays cached
-          underneath for resume */}
-      <Show
-        when={props.t.brief}
-        fallback={
-          <Show when={digest()}>
-            <div class="digest">
-              {digest().digest}
-              <Show when={digest().true_status}>
-                {" "}
-                <span class="chip">{digest().true_status}</span>
-              </Show>
-              <Show when={digest().needs_from_human?.length}>
-                <ul class="needs">
-                  <For each={digest().needs_from_human}>{(n: string) => <li>{n}</li>}</For>
-                </ul>
-              </Show>
-              <Show when={digest().gates?.length}>
-                <ul class="gates">
-                  <For each={digest().gates}>
-                    {(g: any) => (
-                      <li>
-                        {g.kind}: {g.ref} — {g.note}
-                      </li>
-                    )}
-                  </For>
-                </ul>
-              </Show>
-              <div class="meta">
-                digested {ago(props.t.digest.generated_at * 1000)} · {props.t.digest.model}
-              </div>
-            </div>
-          </Show>
-        }
-      >
-        <BriefBox
-          brief={props.t.brief}
-          onRegen={() => props.onBrief(props.t.brief.ticket)}
-          regenerating={props.briefing.includes(props.t.brief.ticket)}
-        />
-      </Show>
-      <Show when={props.t.prs.length}>
-        <div class="prs">
-          <PrList prs={props.t.prs} />
-        </div>
-      </Show>
-    </div>
-  )
-}
-
-/* --- thread-grouped attention queue -------------------------------------- */
-
-type QueueGroup = { key: string | null; thread: any | null; items: any[]; hottest: number; activity: number }
-
-function QueueGroupHeader(props: { g: QueueGroup; directory: string }) {
-  const t = () => props.g.thread
-  const tickets = () => t()?.tickets ?? []
-  const s0 = () => t()?.sessions?.[0]
-  return (
-    <div class="queue-head">
-      <Show when={t()} fallback={<span class="dim">unassigned</span>}>
-        <For each={tickets()}>
-          {(tk: any) => (
-            <a class="key" href={linkUrl(ticketUrl(tk.key, tk.url))} target="_blank">
-              <TicketIcon />
-              {tk.key}
-            </a>
-          )}
-        </For>
-        <Show
-          when={tickets().length}
-          fallback={
-            <Show when={s0()} fallback={<span class="title">{t().title}</span>}>
-              <A class="title" href={sessionHref(s0().id, s0().directory ?? props.directory)}>
-                <SessionIcon />
-                {t().title}
-              </A>
-            </Show>
-          }
-        >
-          <span class="title">{t().curated ? t().title : (tickets()[0].summary ?? t().title)}</span>
-        </Show>
-        <a class="card-link" href={`#t-${t().key}`}>
-          card
-        </a>
-      </Show>
-    </div>
-  )
-}
-
-function QueueItem(props: {
-  item: any
-  group: QueueGroup
-  directory: string
-  briefing: string[]
-  onBrief: (ticket: string) => void
-  sessionLink: (item: any) => string | undefined
-}) {
-  const [open, setOpen] = createSignal(false)
-  // the review gate's brief, when the group's thread carries one for this ticket
-  const brief = () =>
-    props.item.type === "review" && props.item.ticket && props.group.thread?.brief?.ticket === props.item.ticket
-      ? props.group.thread.brief
-      : undefined
-  const generating = () => !!props.item.ticket && props.briefing.includes(props.item.ticket)
-  return (
-    <div class={`att r${props.item.rank}`}>
-      <div class="att-line" classList={{ expandable: !!brief() }} onClick={() => brief() && setOpen(!open())}>
-        <span class="type">{props.item.type}</span>
-        <span class="att-text">
-          <Show when={props.sessionLink(props.item)}>
-            {(href) => (
-              <A href={href()}>
-                <SessionIcon />
-                {props.group.thread?.sessions?.[0]?.title ?? "session"}{" "}
-              </A>
-            )}
-          </Show>
-          {props.item.detail}
-          <Show when={props.item.subtitle}>
-            <span class="subtitle">{props.item.subtitle}</span>
-          </Show>
-        </span>
-        <Show when={brief()}>
-          <span class="dim">{open() ? "▾" : "▸ brief"}</span>
-        </Show>
-        <Show when={!brief() && generating()}>
-          <span class="dim">brief…</span>
-        </Show>
-      </div>
-      <Show when={open() && brief()}>
-        <BriefBox brief={brief()} onRegen={() => props.onBrief(props.item.ticket)} regenerating={generating()} />
-      </Show>
-    </div>
-  )
-}
-
-function Queue(props: {
-  attention: any[]
-  threads: any[]
-  directory: string
-  briefing: string[]
-  onBrief: (ticket: string) => void
-}) {
-  const groups = createMemo<QueueGroup[]>(() => {
-    const byKey = new Map<string, any>(props.threads.map((t: any) => [t.key, t]))
-    const map = new Map<string | null, QueueGroup>()
-    for (const item of props.attention) {
-      const key = item.thread ?? null
-      let g = map.get(key)
-      if (!g) {
-        const thread = key ? byKey.get(key) : null
-        g = { key, thread, items: [], hottest: 99, activity: thread?.activity ?? 0 }
-        map.set(key, g)
-      }
-      g.items.push(item)
-      g.hottest = Math.min(g.hottest, item.rank)
-    }
-    // hottest item rank first, then thread activity
-    return [...map.values()].sort((a, b) => a.hottest - b.hottest || b.activity - a.activity)
-  })
-
-  const sessionLink = (item: any) => {
-    if (!item.session) return undefined
-    const t = props.threads.find((t: any) => t.sessions.some((s: any) => s.id === item.session))
-    const s = t?.sessions.find((s: any) => s.id === item.session)
-    return s ? sessionHref(s.id, s.directory ?? props.directory) : undefined
-  }
-
-  return (
-    <div class="attention">
-      <Show when={groups().length} fallback={<div class="dim">nothing — go touch grass</div>}>
-        <For each={groups()}>
-          {(g) => (
-            <div class="queue-group" id={g.key ? `q-${g.key}` : undefined}>
-              <QueueGroupHeader g={g} directory={props.directory} />
-              <For each={g.items}>
-                {(item) => (
-                  <QueueItem
-                    item={item}
-                    group={g}
-                    directory={props.directory}
-                    briefing={props.briefing}
-                    onBrief={props.onBrief}
-                    sessionLink={sessionLink}
-                  />
-                )}
-              </For>
-            </div>
-          )}
-        </For>
-      </Show>
-    </div>
-  )
-}
-
-function AllSessions() {
-  // the dashboard collects sessions from every anchor dir (incl. single-repo
-  // sidecars' on-disk repo) — richer than any single daemon directory query
-  const { state } = useDashboard()
-  const sessions = () => (state()?.sessions ?? []) as any[]
-  const [open, setOpen] = createSignal(false)
-  return (
-    <>
-      <h2 style="cursor:pointer" onClick={() => setOpen(!open())}>
-        All sessions {open() ? "▾" : "▸"} <span class="dim">({sessions().length})</span>
-      </h2>
-      <Show when={open()}>
-        <div class="session-list">
-          <For each={sessions()}>
-            {(s) => (
-              <div class="pr">
-                <A href={sessionHref(s.id, s.directory)}>
-                  <SessionIcon />
-                  {s.title || s.id}
-                </A>
-                <span class="dim">
-                  {s.directory?.split("/").slice(-1)[0]} · {ago(s.updated)}
-                </span>
-              </div>
-            )}
-          </For>
-        </div>
-      </Show>
-    </>
-  )
-}
-
-/* All-projects landing: the board is per project, so `/` under All lists every
- * active root session grouped by project instead of one project's board. */
-function AllProjectsLanding() {
-  const { sessions, sessionsLoading, sessionsError, notifications, dotFor, editspaces, setEditspace, markViewed } =
-    useDashboard()
-  const groups = createMemo(() => {
-    const byProject = new Map<string, SessionRow[]>()
-    for (const s of sessions()) {
-      const key = s.project || s.directory.split("/").filter(Boolean).at(-1) || s.directory
-      byProject.set(key, [...(byProject.get(key) ?? []), s])
-    }
-    // sessions() is activity-sorted, so each group's first row is its newest
-    return [...byProject].sort((a, b) => b[1][0].updated - a[1][0].updated)
-  })
-  // a group has a board when any of its sessions lives under a registered editspace
-  const boardFor = (name: string, rows: SessionRow[]) => (editspaces()?.editspaces ?? []).find((item) => {
-    const root = item.root.replace(/\/+$/, "").replace(/\/\.editspace$/, "")
-    return item.name === name || rows.some((s) => s.directory === root || s.directory.startsWith(`${root}/`))
-  })?.name
-  return (
-    <main class="all-landing">
-      <AppHeader>
-        <h1>All projects</h1>
-        <span class="dim">
-          {sessions().length} active session{sessions().length === 1 ? "" : "s"} · {groups().length} project{groups().length === 1 ? "" : "s"}
-        </span>
-        <span style="flex:1" />
-        <span class="dim">choose a project for its board</span>
-      </AppHeader>
-      <Show when={notifications().length}>
-        <h2>Needs you</h2>
-        <div class="session-list">
-          <For each={notifications()}>
-            {(n) => {
-              const dot = createMemo(() => dotFor({ id: n.session, updated: n.updated, pending: n.kind !== "idle" }))
-              return (
-              <div class="pr">
-                <A href={sessionHref(n.session, n.directory)} onClick={() => markViewed(n.session, true)}>
-                  <span class={`dot ${dot()}`} />
-                  <SessionIcon />
-                  {n.title}
-                </A>
-                <span class="dim">{n.editspace ? `${n.editspace} · ` : ""}{n.kind}</span>
-              </div>
-              )
-            }}
-          </For>
-        </div>
-      </Show>
-      <Show when={sessionsError()}><div class="err">{sessionsError()}</div></Show>
-      <Show when={groups().length} fallback={<div class="dim">{sessionsLoading() ? "loading…" : "no active sessions"}</div>}>
-        <For each={groups()}>
-          {([project, rows]) => (
-            <section class="all-landing-project" aria-label={project}>
-              <h2>
-                {project} <span class="dim">({rows.length})</span>
-                <Show when={boardFor(project, rows)}>
-                  {(name) => <button type="button" class="all-landing-board" title={`${name()} board`} onClick={() => setEditspace(name())}>
-                    {name() === project ? "board" : `${name()} board`}
-                  </button>}
-                </Show>
-              </h2>
-              <div class="session-list">
-                <For each={rows}>
-                  {(s) => {
-                    const dot = createMemo(() => dotFor(s))
-                    return (
-                    <div class="pr">
-                      <A href={sessionHref(s.id, s.directory)} title={s.directory}>
-                        <span class={`dot ${dot()}`} />
-                        <SessionIcon />
-                        {s.title || s.id}
-                      </A>
-                      <span class="dim">{dot()} · {ago(s.updated)}</span>
-                    </div>
-                    )
-                  }}
-                </For>
-              </div>
-            </section>
-          )}
-        </For>
-      </Show>
-    </main>
-  )
-}
-
-/* Front desk composer: one ask opens the concierge session (a normal session
- * view). A busy front desk absorbs the ask — we navigate to it either way. */
-function FrontDesk() {
-  const { editspace } = useDashboard()
-  const navigate = useNavigate()
-  const [q, setQ] = createSignal("")
-  const [busy, setBusy] = createSignal(false)
-  const ask = async (e: Event) => {
-    e.preventDefault()
-    const question = q().trim()
-    if (!question || busy()) return
-    setBusy(true)
-    try {
-      const res = await esApi.frontdesk(question, editspace())
-      navigate(sessionHref(res.session, res.directory))
-    } catch (err) {
-      alert(String(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <form class="frontdesk" onSubmit={ask}>
-      <input
-        value={q()}
-        onInput={(e) => setQ(e.currentTarget.value)}
-        placeholder="ask the front desk — who/what/why about anything in flight"
-      />
-      <button type="submit" disabled={busy() || !q().trim()}>
-        {busy() ? "asking…" : "ask"}
-      </button>
-    </form>
-  )
+const PinnedAgent = (props: { session: SessionRow }) => {
+  const dashboard = useDashboard()
+  return <div class="home-agent">
+    <div><A class="home-name" href={sessionHref(props.session.id, props.session.directory)}><bdi dir="auto">{props.session.title || props.session.id}</bdi></A><div class="home-muted"><bdi dir="auto">{props.session.project || dashboard.editspace() || "project"}</bdi></div><button onClick={() => dashboard.togglePin(props.session)}>Unpin</button></div>
+    <div><div class="home-source">Read-only turn telemetry · generated summary cache</div><CurrentWorkView id={props.session.id} directory={props.session.directory} compact /></div>
+  </div>
 }
 
 export default function Home() {
   const dashboard = useDashboard()
-  const state = dashboard.state
-  const [refreshing, setRefreshing] = createSignal(false)
-
-  // deep links from the session view's needs-you land on a queue group
-  onMount(() => {
-    if (location.hash) document.querySelector(location.hash)?.scrollIntoView()
+  const project = () => dashboard.allProjects() ? undefined : dashboard.editspace() ?? dashboard.editspaces()?.default ?? undefined
+  const attention = createAttention(project)
+  const [view, setView] = createSignal("open")
+  const [confirm, setConfirm] = createSignal<{ record: AttentionRecord; choice: string }>()
+  const [history, setHistory] = createSignal<Record<string, { events?: unknown[]; error?: string }>>({})
+  const sourcePointers = createMemo<HomeRequest[]>(() => {
+    const projectFor = (directory: string) => dashboard.editspaces()?.editspaces.find(item => {
+      const root = item.root.replace(/\/+$/, "").replace(/\/\.editspace$/, "")
+      return directory === root || directory.startsWith(`${root}/`)
+    })?.name
+    const direct = dashboard.activity.requests().map(item => ({ kind: item.kind, id: item.request.id, session: item.request.sessionID, directory: item.directory, project: projectFor(item.directory), title: dashboard.activity.session(item.request.sessionID)?.title ?? item.request.sessionID }))
+    const hints = dashboard.notifications().filter(item => item.kind !== "idle").map(item => ({ ...item, project: item.editspace || projectFor(item.directory), kind: item.kind as "permission" | "question", id: item.id.startsWith(`${item.kind}:`) ? item.id.slice(item.kind.length + 1) : item.id }))
+    return [...new Map([...hints, ...direct].map(item => [requestKey(item), item])).values()]
   })
-
-  const refresh = async () => {
-    setRefreshing(true)
+  const requests = createHomeRequests(sourcePointers)
+  const requestRows = () => requests.rows().filter(item => !project() || !item.project || item.project === project())
+  const pendingRequests = () => requestRows().filter(item => item.state === "pending")
+  const uncertainRequests = () => requestRows().filter(item => item.state !== "pending")
+  const records = () => attention.snapshot()?.value.records ?? []
+  const visible = () => records().filter(record => view() === "history" ? ["resolved", "withdrawn"].includes(record.status) : view() === "recorded" ? record.status === "decided" : record.status === view())
+  const count = (tab: string) => records().filter(record => tab === "history" ? ["resolved", "withdrawn"].includes(record.status) : record.status === (tab === "recorded" ? "decided" : tab)).length + (tab === "open" ? pendingRequests().length : 0)
+  const canWrite = (record: AttentionRecord) => attention.operator() && !attention.stale() && !attention.pending() && !attention.writing() && attention.snapshot()?.value.projects.find(item => item.editspace === record.editspace)?.available !== false
+  const loadHistory = async (record: AttentionRecord) => {
     try {
-      await dashboard.refresh()
-    } finally {
-      setRefreshing(false)
-    }
+      const response = await fetch(attentionPath(`/${encodeURIComponent(record.id)}`, record.editspace), { credentials: "include" })
+      if (!response.ok) throw Error("History unavailable")
+      const result = await response.json()
+      setHistory(previous => ({ ...previous, [record.id]: { events: result.events } }))
+    } catch { setHistory(previous => ({ ...previous, [record.id]: { error: "History unavailable. The record has not changed." } })) }
   }
-
-  const digest = async (sid: string) => {
-    try {
-      await dashboard.digest(sid)
-    } catch (e) {
-      alert(String(e))
-    }
-  }
-
-  const brief = async (ticket: string) => {
-    try {
-      await dashboard.brief(ticket)
-    } catch (e) {
-      alert(String(e))
-    }
-  }
-
-  const [curating, setCurating] = createSignal(false)
-  const curate = async () => {
-    setCurating(true)
-    try {
-      await dashboard.curate()
-    } catch (e) {
-      alert(String(e))
-    } finally {
-      setCurating(false)
-    }
-  }
-
-  return (
-    <Show when={!dashboard.allProjects()} fallback={<AllProjectsLanding />}>
-      <Show when={state()} fallback={<div class="dim">loading… (is es-dashboard running on :7777?)</div>}>
-        {(st) => (
-          <main>
-            <AppHeader>
-              <h1>{st().editspace}</h1>
-              <span class="dim">
-                updated {ago(st().generated_at * 1000)} · tracker {st().tracker_at ? ago(st().tracker_at * 1000) : "never"} · prs{" "}
-                {st().prs_at ? ago(st().prs_at * 1000) : "never"}
-              </span>
-              <span class="err">
-                {[st().tracker_error && `tracker: ${st().tracker_error}`, st().prs_error && `prs: ${st().prs_error}`]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-              <span style="flex:1" />
-              <Show when={st().curated_at}>
-                <span class="dim">curated {ago(st().curated_at * 1000)}</span>
-              </Show>
-              <button onClick={curate} disabled={curating() || st().curating}>
-                {curating() || st().curating ? "curating…" : "curate"}
-              </button>
-              <button onClick={refresh} disabled={refreshing()}>
-                {refreshing() ? "refreshing…" : "refresh"}
-              </button>
-            </AppHeader>
-
-            <FrontDesk />
-
-            <h2>Needs you</h2>
-            <Queue
-              attention={st().attention}
-              threads={st().threads}
-              directory={st().root}
-              briefing={st().briefing ?? []}
-              onBrief={brief}
-            />
-
-            <h2>Threads</h2>
-            <div class="grid">
-              <For each={st().threads}>
-                {(t: any) => (
-                  <ThreadCard
-                    t={t}
-                    directory={st().root}
-                    onDigest={digest}
-                    onBrief={brief}
-                    briefing={st().briefing ?? []}
-                  />
-                )}
-              </For>
-            </div>
-
-            <h2>Unattached PRs</h2>
-            <div>
-              <Show when={st().unattached_prs.length} fallback={<span class="dim">none</span>}>
-                <PrList prs={st().unattached_prs} />
-              </Show>
-            </div>
-
-            <AllSessions />
-
-            <h2>Frontier</h2>
-            <Show when={st().frontier.length} fallback={<span class="dim">empty</span>}>
-              <table>
-                <For each={st().frontier}>
-                  {(f: any) => (
-                    <tr>
-                      <td>
-                        <a href={linkUrl(ticketUrl(f.key, f.url))} target="_blank">
-                          {f.key}
-                        </a>
-                      </td>
-                      <td class="dim">{f.issue_type}</td>
-                      <td>{f.summary}</td>
-                    </tr>
-                  )}
-                </For>
-              </table>
-            </Show>
-          </main>
-        )}
+  const Decision = (props: { record: AttentionRecord }) => {
+    const [choice, setChoice] = createSignal("")
+    return <article class="home-decision" data-attention-id={props.record.id}>
+      <div class="home-eyebrow"><span>{props.record.kind}</span><bdi dir="auto">{props.record.editspace}</bdi><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><span>revision {props.record.revision}</span></div>
+      <h3><bdi dir="auto">{props.record.title}</bdi></h3><p dir="auto">{props.record.context}</p>
+      <div class="home-source">Explicit agent request · <A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)}>Open source thread</A></div>
+      <Show when={props.record.status === "open"}>
+        <Show when={props.record.recommendation}><p class="home-muted">Agent recommends: <bdi dir="auto">{props.record.options.find(option => option.id === props.record.recommendation)?.label ?? props.record.recommendation}</bdi></p></Show>
+        <fieldset disabled={!canWrite(props.record)}><legend>Your choice</legend><For each={props.record.options}>{option => <label><input type="radio" name={props.record.id} checked={choice() === option.id} onChange={() => setChoice(option.id)} /><bdi dir="auto">{option.label}</bdi></label>}</For></fieldset>
+        <div class="home-actions"><button class="home-primary" disabled={!canWrite(props.record) || !props.record.options.some(option => option.id === choice())} onClick={() => setConfirm({ record: props.record, choice: choice() })}>Review choice</button><button disabled={!canWrite(props.record)} onClick={() => attention.act(props.record, { action: "snooze", snoozed_until: Date.now() + 3600_000 })}>Snooze 1h</button><button disabled={!canWrite(props.record)} onClick={() => attention.act(props.record, { action: "resolve", reason: "Human marked no longer needed" })}>No longer needed</button></div>
       </Show>
-    </Show>
-  )
+      <Show when={props.record.status === "decided"}><p class="home-recorded">Saved: <bdi dir="auto">{decisionLabel(props.record)}</bdi> · not sent</p><p class="home-muted">No agent was resumed. This is not tool permission or approval to publish.</p><div class="home-actions"><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)}>Open agent thread</A><button disabled={!canWrite(props.record)} onClick={() => attention.act(props.record, { action: "resolve", reason: "Human marked resolved" })}>Mark resolved</button></div></Show>
+      <Show when={props.record.status === "snoozed"}><p class="home-muted">Snoozed until {props.record.snoozed_until ? new Date(props.record.snoozed_until).toLocaleString() : "unknown"}</p><button disabled={!canWrite(props.record)} onClick={() => attention.act(props.record, { action: "wake" })}>Return to Needs you</button></Show>
+      <Show when={["resolved", "withdrawn"].includes(props.record.status)}><p class="home-muted">{props.record.status} · retained in history</p></Show>
+      <details onToggle={event => { if (event.currentTarget.open && !history()[props.record.id]) void loadHistory(props.record) }}><summary>Record &amp; history</summary><div class="home-source"><bdi dir="ltr">{props.record.id} · {props.record.gate_key}</bdi></div><Show when={history()[props.record.id]} fallback={<p>Loading history…</p>}>{item => <Show when={!item().error} fallback={<p>{item().error}</p>}><pre dir="ltr">{JSON.stringify(item().events, null, 2)}</pre></Show>}</Show></details>
+    </article>
+  }
+  return <main class="attention-home">
+    <AppHeader><h1>Home</h1><span class="home-muted">{project() ?? "All projects"}</span><span class="home-header-end home-muted">{attention.snapshot() ? `Ledger checked ${Math.max(0, Math.floor((attention.now() - attention.snapshot()!.checked) / 1000))}s ago${attention.stale() ? " · stale" : ""}` : "Ledger not checked"}</span><button disabled={attention.loading()} onClick={() => { void attention.refresh(); void requests.refresh(); void attention.checkOperator().catch(() => undefined) }}>Refresh</button></AppHeader>
+    <Show when={attention.error()}><div class="home-warning" role="alert">{attention.error()} Last-known records are retained; actions are disabled.</div></Show>
+    <Show when={attention.snapshot()?.value.partial}><div class="home-warning">Some projects are unavailable. This is not an empty inbox.<For each={attention.snapshot()?.value.projects.filter(item => !item.available)}>{item => <div><bdi dir="auto">{item.editspace}</bdi>: {item.error || "unavailable"}</div>}</For></div></Show>
+    <Show when={attention.snapshot()?.value.truncated}><div class="home-warning">History exceeds this view's limit. Counts may be incomplete; use the attention CLI to inspect further records.</div></Show>
+    <Show when={dashboard.sessionsError()}><div class="home-warning">Live request sources may be incomplete. {dashboard.sessionsError()}</div></Show>
+    <Show when={attention.notice()}><div class="home-notice" role="status">{attention.notice()}<Show when={attention.pending()}><button disabled={attention.writing()} onClick={() => attention.retry()}>Retry same action</button></Show></div></Show>
+    <section aria-label="Needs you"><div class="home-section"><h2>Needs you <span>{count("open")}</span></h2><span class="home-muted">Decisions, not completion receipts</span></div>
+      <Show when={!attention.operator()}><div class="home-login home-muted">Read-only · operator connection unavailable. This UI origin must be allowed by the attention server. <button onClick={() => attention.checkOperator().catch(() => undefined)}>Reconnect operator</button></div></Show>
+      <div class="home-tabs" role="group" aria-label="Attention status"><For each={[["open", "Open"], ["recorded", "Recorded / not sent"], ["snoozed", "Snoozed"], ["history", "History"]]}>{([tab, label]) => <button aria-pressed={view() === tab} onClick={() => setView(tab)}>{label} <span>{count(tab)}</span></button>}</For></div>
+      <Show when={view() === "open"}><For each={pendingRequests()}>{item => <div class="home-request"><div><span class="home-eyebrow">{item.kind} · source request</span><h3><bdi dir="auto">{item.title}</bdi></h3><div class="home-source">Exact request <bdi dir="ltr">{item.id}</bdi> · source checked {ago(item.checked)}{requests.now() - item.checked > 45_000 ? " · stale" : ""}</div></div><A href={sessionHref(item.session, item.directory)}>Open request</A><p class="home-muted">Reply using the original session controls. No permission is granted here.</p></div>}</For></Show>
+      <For each={visible()}>{record => <Decision record={record} />}</For>
+      <Show when={!visible().length && (view() !== "open" || !pendingRequests().length)}><div class="home-empty">{attention.loading() && !attention.snapshot() ? "Checking attention ledger…" : attention.stale() || attention.snapshot()?.value.partial ? "Attention is not fully checked. Do not assume nothing is waiting." : view() === "open" ? "Nothing needs a choice." : "No records in this view."}</div></Show>
+      <Show when={uncertainRequests().length}><details class="home-unknown"><summary>Source requests with unknown outcome ({uncertainRequests().length})</summary><For each={uncertainRequests()}>{item => <div class="home-source"><bdi dir="auto">{item.title}</bdi> · {item.kind} · {item.state === "unavailable" ? "source unavailable" : "no longer pending; outcome unknown"} · <A href={sessionHref(item.session, item.directory)}>Open original thread</A></div>}</For></details></Show>
+    </section>
+    <section aria-label="Pinned agents"><div class="home-section"><h2>Pinned agents <span>{dashboard.pinnedSessions().length}</span></h2><span class="home-muted">Only agents you pin</span></div><For each={dashboard.pinnedSessions()} fallback={<p class="home-muted">Pin an agent from session navigation to keep it here.</p>}>{session => <PinnedAgent session={session} />}</For><details class="home-workers"><summary>Other sessions ({dashboard.unpinnedSessions().length})</summary><For each={dashboard.unpinnedSessions()}>{session => <div class="home-other"><A href={sessionHref(session.id, session.directory)}><bdi dir="auto">{session.title || session.id}</bdi></A><button onClick={() => dashboard.togglePin(session)}>Pin</button></div>}</For></details></section>
+    <details class="home-activity"><summary>Recent activity · routine updates</summary><For each={dashboard.sessions().slice(0, 8)}>{session => <div><A href={sessionHref(session.id, session.directory)}><bdi dir="auto">{session.title || session.id}</bdi></A><span class="home-muted"> · session updated {ago(session.updated)} · not a decision</span></div>}</For></details>
+    <Show when={confirm()}>{draft => <dialog class="home-confirm" ref={element => queueMicrotask(() => element.showModal())} onCancel={() => setConfirm(undefined)} aria-labelledby="home-choice-title"><h2 id="home-choice-title">Record this choice?</h2><p><bdi dir="auto">{draft().record.options.find(option => option.id === draft().choice)?.label}</bdi></p><p>Save only. No prompt is sent, no agent is resumed, and no tool permission is granted.</p><div class="home-actions"><button class="home-primary" disabled={!canWrite(draft().record)} onClick={async () => { const selected = draft(); setConfirm(undefined); if (await attention.act(selected.record, { action: "choose", choice_id: selected.choice })) setView("recorded") }}>Record choice only</button><button onClick={() => setConfirm(undefined)}>Cancel</button></div></dialog>}</Show>
+  </main>
 }

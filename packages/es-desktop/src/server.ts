@@ -95,6 +95,9 @@ export const serve = async (options: {
     }
     const api = /^\/(oc|es)(\/|$)/.exec(url.pathname)
     if (api && !apiAllowed(req.method ?? "", url.pathname)) return finish(403, "API route not exposed")
+    const attention = /^\/es\/api\/attention(?:\/|$)/.test(url.pathname)
+    if (attention && req.method !== "GET" && req.headers.origin !== origin)
+      return finish(403, "Attention writes require the native origin")
     const target = api ? targets[api[1] as keyof typeof targets] : renderer
     if (api && !target) return finish(503, '{"error":"Service not configured"}', "application/json")
     if (!api && !["GET", "HEAD"].includes(req.method ?? "")) return finish(405, "Method not allowed")
@@ -119,6 +122,7 @@ export const serve = async (options: {
       if (ready.some((value) => !value)) return finish(503, offline, "text/html; charset=utf-8")
     }
     if (target) {
+      const operatorCookie = attention ? req.headers.cookie?.split(";").map(value => value.trim()).find(value => value.startsWith("es_attention_operator=")) : undefined
       // Concatenate the path rather than resolving it: //host must never switch upstreams.
       const upstream = request(
         `${target}${api ? url.pathname.slice(api[1].length + 1) || "/" : url.pathname}${url.search}`,
@@ -126,6 +130,12 @@ export const serve = async (options: {
           method: req.method,
           headers: {
             ...proxyHeaders(req.headers),
+            // The keyed listener has authenticated the dynamic native origin above.
+            // Bind it to the configured dashboard origin; never wildcard local ports.
+            ...(attention ? {
+              origin: target,
+              ...(operatorCookie ? { cookie: operatorCookie } : {}),
+            } : {}),
             ...(api?.[1] === "oc" && options.opencodeAuth ? { authorization: options.opencodeAuth } : {}),
           },
         },
@@ -134,7 +144,12 @@ export const serve = async (options: {
             response.resume()
             return finish(502, '{"error":"Upstream redirect blocked"}', "application/json")
           }
-          res.writeHead(response.statusCode ?? 502, proxyHeaders(response.headers))
+          res.writeHead(response.statusCode ?? 502, {
+            ...proxyHeaders(response.headers),
+            ...(attention && response.headers["set-cookie"]?.some(value => value.startsWith("es_attention_operator="))
+              ? { "set-cookie": response.headers["set-cookie"].filter(value => value.startsWith("es_attention_operator=")) }
+              : {}),
+          })
           response.on("error", () => res.destroy())
           response.pipe(res)
         },

@@ -245,11 +245,9 @@ export default function Sidebar() {
           <Show when={!nativeHeader}><button class="mini-btn" title="expand sidebar (^h)" onClick={toggleLeft}>
             ⟩
           </button></Show>
-          <Show when={!allProjects()}>
-            <A href="/" end activeClass="active" class="mini-item" title={`board — ${current()}`}>
+            <A href="/" end activeClass="active" class="mini-item" title={`Home — ${current()}`}>
               ▦
             </A>
-          </Show>
           <NewSession compact />
           <Show when={pinnedSessions().length}>
             <div class="mini-pinned-heading" title="Pinned sessions" aria-label="Pinned sessions" />
@@ -261,13 +259,11 @@ export default function Sidebar() {
     >
       <nav class="sidebar" ref={setNavEl} style={{ width: `${leftWidth()}px` }}>
         <Show when={!nativeHeader}><div class="sidebar-top">{projectControls()}</div></Show>
-        {/* always above the fold: the board is per project (All has none until it is redesigned) */}
+        {/* Home remains reachable from sessions in both project scopes. */}
         <div class="sidebar-actions">
-          <Show when={!allProjects()}>
             <A href="/" end activeClass="active" class="nav-item board-link">
-              ▦ board
+              ▦ Home
             </A>
-          </Show>
           <NewSession />
         </div>
         <Show when={!query().trim() && pinnedSessions().length}>
