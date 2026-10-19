@@ -292,8 +292,20 @@ export type WingmanLane = {
   "wingman-prs"?: string
   "wingman-ci"?: string
   "wingman-url"?: string
+  "wingman-synced"?: string
+  "wingman-error"?: string
 }
-export type WingmanTurn = { prompt?: string; output?: string; status?: string; events?: { type?: string; text?: string }[] }
+export type WingmanTurn = {
+  turn?: number
+  prompt?: string
+  reply?: string
+  status?: string
+  cost_usd?: number | null
+  started_at?: string
+  completed_at?: string
+  error?: unknown
+  events?: { kind?: string; text?: string; tool_name?: string | null; timestamp?: string }[]
+}
 export type WingmanTranscript = { status?: string; turns?: WingmanTurn[]; turns_dropped?: number }
 
 const esQ = (es?: string) => (es ? `es=${encodeURIComponent(es)}` : "")
