@@ -1,0 +1,40 @@
+.session-title {
+  min-inline-size: 0;
+  position: relative;
+}
+.session-title h1 { margin: 0; }
+.session-title-button {
+  display: block;
+  max-inline-size: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: text;
+}
+.session-title-form { display: flex; align-items: center; gap: 8px; }
+.session-title-form input {
+  min-inline-size: 80px;
+  inline-size: 28ch;
+  max-inline-size: 40vw;
+  font: inherit;
+  text-align: start;
+  user-select: text;
+}
+.session-title-error {
+  position: absolute;
+  inset-block-start: 100%;
+  inset-inline-start: 0;
+  inline-size: max-content;
+  max-inline-size: min(480px, 70vw);
+  overflow-wrap: anywhere;
+  padding: 8px;
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  z-index: 21;
+}

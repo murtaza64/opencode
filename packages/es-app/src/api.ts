@@ -158,6 +158,13 @@ export const oc = {
       body: JSON.stringify(messageID ? { messageID } : {}),
     }).then(json<Session>),
 
+  rename: (id: string, directory: string, title: string): Promise<Session> =>
+    fetch(`/oc/session/${id}?${q(directory)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title }),
+    }).then(json<Session>),
+
   archive: (id: string, directory: string): Promise<Session> =>
     fetch(`/oc/session/${id}?${q(directory)}`, {
       method: "PATCH",

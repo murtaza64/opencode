@@ -64,6 +64,10 @@ export const createFixture = async () => {
     issue: undefined,
     archived: new Set(),
     sessionModels: new Map(),
+    sessionTitles: new Map(),
+    rejectRename: false,
+    holdRename: false,
+    renameReplies: [],
     holdModel: false,
     modelReplies: [],
     loseModel: false,
@@ -109,6 +113,7 @@ export const createFixture = async () => {
       streams.clear()
     },
   }
+  const currentSession = (id) => ({ ...session(id), ...(fixture.sessionTitles.has(id) ? { title: fixture.sessionTitles.get(id) } : {}) })
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, "http://fixture")
     const chunks = []
@@ -191,8 +196,8 @@ export const createFixture = async () => {
           .map((id) => ({
             key: id,
             kind: "session",
-            title: session(id).title,
-            sessions: [session(id)],
+            title: currentSession(id).title,
+            sessions: [currentSession(id)],
              lanes: fixture.laneOwners.filter((lane) => lane.owner === id),
             tickets: [],
             prs: [],
@@ -203,7 +208,7 @@ export const createFixture = async () => {
         attention: [],
         frontier: [],
         unattached_prs: [],
-        sessions: fixture.sessionIDs.map(session),
+        sessions: fixture.sessionIDs.map(currentSession),
       })
     if (url.pathname === "/api/notifications") return json({ notifications: fixture.notifications ?? [] })
     if (url.pathname === "/api/mail") return fixture.mail
@@ -261,7 +266,7 @@ export const createFixture = async () => {
     }
     if (["/experimental/session", "/session"].includes(url.pathname))
       return json(
-        [...fixture.sessionIDs.map(session), ...fixture.created, ...fixture.workspaceSessions]
+        [...fixture.sessionIDs.map(currentSession), ...fixture.created, ...fixture.workspaceSessions]
           .filter((value) => !fixture.deleted.has(value.id))
           .map((value) => ({
             ...(typeof value === "string" ? session(value) : value),
@@ -323,6 +328,17 @@ export const createFixture = async () => {
     const match = /^\/session\/(ses_[\w-]+)(.*)$/.exec(url.pathname)
     if (match) {
       const [, id, action] = match
+      if (!action && request.method === "PATCH" && typeof body?.title === "string") {
+        if (fixture.rejectRename) return json({ error: "rename unavailable" }, 503)
+        const complete = () => {
+          fixture.sessionTitles.set(id, body.title)
+          const updated = currentSession(id)
+          fixture.emit("session.updated", { sessionID: id, info: updated })
+          return json(updated)
+        }
+        if (fixture.holdRename) { fixture.renameReplies.push(complete); return }
+        return complete()
+      }
       const operation =
         request.method === "POST" && action === "/fork"
           ? "fork"
@@ -362,7 +378,7 @@ export const createFixture = async () => {
       if (!action) {
         const created = fixture.created.find((item) => item.id === id)
         return json(
-          { ...(created ?? session(id)), ...(fixture.sessionModels.has(id) ? { model: fixture.sessionModels.get(id), preferredModel: fixture.sessionModels.get(id) } : {}), time: { ...(created ?? session(id)).time, ...(fixture.sessionModels.has(id) ? { updated: Date.now() } : {}), ...(fixture.archived.has(id) ? { archived: 5 } : {}) } },
+          { ...(created ?? currentSession(id)), ...(fixture.sessionModels.has(id) ? { model: fixture.sessionModels.get(id), preferredModel: fixture.sessionModels.get(id) } : {}), time: { ...(created ?? session(id)).time, ...(fixture.sessionModels.has(id) ? { updated: Date.now() } : {}), ...(fixture.archived.has(id) ? { archived: 5 } : {}) } },
           fixture.failSnapshot ? 503 : 200,
         )
       }

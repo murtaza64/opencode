@@ -24,6 +24,7 @@ import { defaultImageCapability, prepareImageFile } from "../image-fit"
 import { ComposerResults } from "../components/composer-controls"
 import { DirectComposer } from "../components/direct-composer"
 import { AppHeader } from "../components/native-header"
+import { SessionTitle } from "../components/session-title"
 import { SubagentTranscript } from "../components/subagent-transcript"
 import { TranscriptMessage } from "../components/transcript-message"
 import { InlineQuestion } from "../components/inline-question"
@@ -1115,7 +1116,10 @@ function SessionView(props: { sessionID: string; directory: string }) {
     <main class="session-page">
       <div class="session-main">
         <AppHeader>
-          <h1 dir="auto" title={session()?.title ?? sessionID}>{session()?.title ?? sessionID}</h1>
+          <SessionTitle sessionID={sessionID} directory={directory} session={session()} onSaved={(info) => {
+            live.apply({ type: "session.updated", properties: { sessionID, info } })
+            void refetch()
+          }} />
           <span class="dim">{workState() === "working" ? "busy" : workState()}</span>
           <Show when={subagentsRunning()}><span class="dim">{subagentsRunning()} subagent(s) running</span></Show>
           <Show when={(session() as any)?.parentID}>
