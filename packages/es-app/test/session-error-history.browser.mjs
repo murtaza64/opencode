@@ -3,6 +3,7 @@ import { startPanelPreview } from "./composer-panel-preview.mjs"
 
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const preview = await startPanelPreview()
+preview.fixture.mail = () => ({ editspace: "fixture", lane: "", messages: [] })
 const browser = await chromium.launch({ channel: "chrome", headless: true })
 const page = await browser.newPage()
 const writes = []

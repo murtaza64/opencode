@@ -91,6 +91,7 @@ export const createFixture = async () => {
     handoffs: undefined,
     subscriptions: undefined,
     laneOwners: [],
+    superseded: new Map(),
     insightDelayMs: 0,
     createMode: "complete",
     createReplies: [],
@@ -339,6 +340,8 @@ export const createFixture = async () => {
         if (fixture.holdRename) { fixture.renameReplies.push(complete); return }
         return complete()
       }
+      if (request.method === "POST" && ["/prompt_async", "/input"].includes(action) && fixture.superseded.has(id))
+        return json({ _tag: "SessionSupersededError", sessionID: id, state: "committed", message: "Session superseded", ...fixture.superseded.get(id) }, 409)
       const operation =
         request.method === "POST" && action === "/fork"
           ? "fork"

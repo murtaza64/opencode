@@ -13,7 +13,8 @@ export const successorFor = (sessionID: string, handoffs: Handoff[], owners: Lan
     lane = edges[0]!.lane
     current = edges[0]!.successor
     visited.add(current)
-    if (owners.find((owner) => owner.lane === lane)?.owner === current)
+    const matches = owners.filter((owner) => owner.lane === lane)
+    if (matches.length === 1 && matches[0]!.owner === current && !handoffs.some((edge) => edge.predecessor === current))
       return { lane, predecessor: sessionID, successor: current }
   }
 }
@@ -28,8 +29,28 @@ export const handoffNext = (sessionID: string, handoffs: Handoff[]) => {
   return next.length === 1 ? next[0] : undefined
 }
 
-export const transferPins = (pins: string[], from: string, to: string, directory: string) => {
+export const transferPins = (pins: string[], from: string, to: string, directory: string, targetDirectory = directory) => {
   const oldKey = JSON.stringify([directory, from])
-  const newKey = JSON.stringify([directory, to])
+  const newKey = JSON.stringify([targetDirectory, to])
   return [...new Set(pins.map((key) => key === oldKey ? newKey : key))]
 }
+
+// Pins are directory/session pairs. A receipt alone cannot move a pin across
+// directories; wait for every identity in the global session index.
+export const reconcilePins = (pins: string[], handoffs: Handoff[], owners: LaneOwner[], sessions: { id: string; directory: string }[]) =>
+  [...new Set(pins.map((key) => {
+    try {
+      const identity: unknown = JSON.parse(key)
+      if (!Array.isArray(identity) || identity.length !== 2 || !identity.every((value) => typeof value === "string")) return key
+      const id = identity[1] as string
+      const edge = successorFor(id, handoffs, owners)
+      if (!edge) return key
+      const chain = [id]
+      while (chain.at(-1) !== edge.successor) chain.push(handoffNext(chain.at(-1)!, handoffs)!.successor)
+      const identities = chain.map((id) => sessions.filter((session) => session.id === id))
+      if (identities.some((matches) => matches.length !== 1)) return key
+      return JSON.stringify([identities.at(-1)![0]!.directory, edge.successor])
+    } catch {
+      return key
+    }
+  }))]

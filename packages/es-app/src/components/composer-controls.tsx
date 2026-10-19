@@ -173,7 +173,7 @@ export const ComposerControls = (props: {
           Agent list unavailable; current choice kept. <button onClick={props.retryAgents}>Retry agents</button>
         </div>
       </Show>
-      <Show when={reason()}>
+      <Show when={reason() && !state.superseded}>
         <div class="composer-help dim">{reason()}</div>
       </Show>
       <Show when={state.storageError}>
@@ -182,7 +182,7 @@ export const ComposerControls = (props: {
           <button onClick={() => props.composer.setImages([])}>Clear saved images</button>
         </div>
       </Show>
-      <Show when={state.error}>
+      <Show when={state.error && !state.superseded}>
         <div class="err" role="alert">
           {state.error}
         </div>

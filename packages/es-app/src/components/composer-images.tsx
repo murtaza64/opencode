@@ -1,7 +1,6 @@
 import { For, Show } from "solid-js"
-import type { InputImage } from "../api"
 
-export const ComposerImages = (props: { images?: readonly InputImage[] }) => (
+export const ComposerImages = (props: { images?: readonly { url: string; mime: string; filename?: string }[] }) => (
   <Show when={props.images?.length}>
     <div role="group" aria-label="Attached images">
       <div class="dim">

@@ -16,7 +16,7 @@ import { es, oc, type AttentionNotification } from "./api"
 import { createSessionActivity } from "./session-activity"
 import { createServerEvents } from "./event-source"
 import { resolveProjectName } from "./project-name"
-import { transferPins, type Handoff } from "./handoffs"
+import { reconcilePins, transferPins, type Handoff } from "./handoffs"
 import { pinSessionID } from "./session-pins"
 import type { GlobalSession } from "@opencode-ai/sdk/v2"
 import type { Event } from "@opencode-ai/sdk/v2"
@@ -53,7 +53,9 @@ type DashboardCtx = {
   handoffsError: () => string
   refetchHandoffs: () => void
   laneOwners: () => { lane: string; owner: string }[]
-  transferPin: (from: string, to: string, directory: string) => void
+  lineage: () => Handoff[]
+  lineageOwners: () => { lane: string; owner: string }[]
+  transferPin: (from: string, to: string, directory: string, targetDirectory?: string) => void
   archivedIds: () => Set<string>
   refetchArchived: () => void
   allProjects: () => boolean
@@ -317,13 +319,57 @@ export function DashboardProvider(props: ParentProps) {
     localStorage.setItem(PIN_KEY, JSON.stringify(next))
     setPins(next)
   }
-  const transferPin = (from: string, to: string, directory: string) => {
-    // Match predecessor aliases before the directory-qualified handoff transfer.
-    const next = transferPins(pins().map((key) => pinSessionID(key) === from ? pinKey({ id: from, directory }) : key), from, to, directory)
+  const transferPin = (from: string, to: string, directory: string, targetDirectory = directory) => {
+    const next = transferPins(pins().map((key) => pinSessionID(key) === from ? pinKey({ id: from, directory }) : key), from, to, directory, targetDirectory)
     if (next.every((key, index) => key === pins()[index])) return
-    localStorage.setItem(PIN_KEY, JSON.stringify(next))
     setPins(next)
+    try { localStorage.setItem(PIN_KEY, JSON.stringify(next)) } catch {
+      // A nonessential pin write must not turn a committed draft recovery into a failure.
+    }
   }
+  const currentEditspaceName = () => editspace() ?? editspaces()?.default ?? ""
+  const [otherLineages] = createResource(
+    () => ({ names: editspaces()?.editspaces.map((item) => item.name) ?? [], selected: currentEditspaceName(), revision: state() }),
+    async ({ names, selected }) => Promise.all(names.filter((name) => name !== selected).map(async (name) => {
+      try {
+        const [lineage, dashboard] = await Promise.all([es.handoffs(name), es.state(name)])
+        if (dashboard.editspace !== name) return { edges: [], owners: [] }
+        const scope = (lane: string) => JSON.stringify([name, lane])
+        return {
+          edges: lineage.handoffs.map((edge) => ({ ...edge, lane: scope(edge.lane) })),
+          owners: (dashboard.threads ?? []).flatMap((thread: { lanes?: { lane: string; owner?: string }[] }) =>
+            (thread.lanes ?? []).flatMap((lane) => lane.owner ? [{ lane: scope(lane.lane), owner: lane.owner }] : [])),
+        }
+      } catch {
+        // Missing lineage in one editspace must not guess at its pinned owners.
+        return { edges: [], owners: [] }
+      }
+    })),
+  )
+  const lineage = createMemo(() => [
+    ...(handoffs() ?? []).map((edge) => ({ ...edge, lane: JSON.stringify([currentEditspaceName(), edge.lane]) })),
+    ...(otherLineages() ?? []).flatMap((item) => item.edges),
+  ])
+  const lineageOwners = createMemo(() => [
+    ...laneOwners().map((owner: { lane: string; owner: string }) => ({ ...owner, lane: JSON.stringify([currentEditspaceName(), owner.lane]) })),
+    ...(otherLineages() ?? []).flatMap((item) => item.owners),
+  ])
+  createEffect(() => {
+    const edges = [...(handoffs() ?? []), ...(otherLineages() ?? []).flatMap((item) => item.edges)]
+    if (!edges.length || handoffs.loading || handoffsError()) return
+    // A new successor may not have reached the global index when the receipt arrives.
+    untrack(() => { void refetchGlobal() })
+  })
+  createEffect(() => {
+    if (handoffs.loading || handoffsError()) return
+    const current = pins()
+    const next = reconcilePins(current, lineage(), lineageOwners(), globalSessions() ?? [])
+    if (next.length === current.length && next.every((key, index) => key === current[index])) return
+    setPins(next)
+    try { localStorage.setItem(PIN_KEY, JSON.stringify(next)) } catch {
+      // Retain the reconciled pins in this window when browser storage is unavailable.
+    }
+  })
   const pinnedSessions = createMemo(() => {
     const byID = new Map(sessions().map((s) => [s.id, s]))
     return [...new Set(pins().flatMap((key) => pinSessionID(key) ?? []))].flatMap((id) => {
@@ -427,6 +473,8 @@ export function DashboardProvider(props: ParentProps) {
     handoffsError,
     refetchHandoffs: () => { void refetchHandoffs() },
     laneOwners,
+    lineage,
+    lineageOwners,
     transferPin,
     archivedIds,
     refetchArchived,

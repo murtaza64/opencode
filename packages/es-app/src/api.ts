@@ -1,6 +1,7 @@
 /* Thin fetch layer. The daemon (:4096) is reached via the /oc proxy, the es
  * dashboard server (:7777) via /es — both same-origin through vite. */
 import type { Agent, GlobalSession, Message, Part, PermissionRequest, QuestionRequest, Session, SessionV1InputImage, Todo } from "@opencode-ai/sdk/v2"
+import { httpError } from "./api-error"
 
 export type MessageWithParts = { info: Message; parts: Part[] }
 export type InputImage = Readonly<SessionV1InputImage>
@@ -140,7 +141,7 @@ export const oc = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     })
-    if (!res.ok) throw new Error(`prompt failed: HTTP ${res.status} ${await res.text()}`)
+    if (!res.ok) throw await httpError(res)
   },
 
   // The response waits for runner interruption and cleanup.

@@ -120,7 +120,7 @@ export const DirectComposer = (props: {
           Agent list unavailable. <button onClick={props.retryAgents}>Retry agents</button>
         </div>
       </Show>
-      <Show when={reasons().length}>
+      <Show when={reasons().length && !state.superseded}>
         <div class="direct-feedback dim">
           <For each={reasons()}>{(value) => <div>{value}</div>}</For>
         </div>
@@ -131,7 +131,7 @@ export const DirectComposer = (props: {
           <button onClick={() => props.composer.setImages([], state.visibleBuffer)}>Clear saved images</button>
         </div>
       </Show>
-      <Show when={state.error}>
+      <Show when={state.error && !state.superseded}>
         <div class="direct-feedback err" role="alert">
           {state.error}
         </div>

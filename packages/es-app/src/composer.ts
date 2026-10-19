@@ -7,6 +7,7 @@ import type {
   SessionV1InputReceipt,
 } from "@opencode-ai/sdk/v2"
 import { oc, inputImages, type InputImage } from "./api"
+import { HttpError, httpError, supersededError } from "./api-error"
 import { composerStorage } from "./composer-storage"
 import { defaultImageCapability } from "./image-fit"
 import { createImageStore, type ImageStore } from "./image-store"
@@ -51,11 +52,20 @@ export type AsideRequest = {
 }
 export type ComposerAdmission = {
   payload: InputPayload
+  draft?: ComposerDraft
   revision: number
   status: "sending" | "unknown"
   error?: string
   buffer?: ComposerBuffer
   targetRevision?: number
+}
+export type ComposerSuperseded = {
+  successor: string
+  state: "pending" | "committed"
+  draft: ComposerDraft
+  buffer: ComposerBuffer
+  mode: ComposerMode
+  complete?: boolean
 }
 export type ComposerState = {
   visibleBuffer: ComposerBuffer
@@ -78,6 +88,7 @@ export type ComposerState = {
   sending: boolean
   asideRequest: AsideRequest | null
   admission: ComposerAdmission | null
+  superseded: ComposerSuperseded | null
   receipts: InputReceipt[]
   capabilities: ComposerCapabilities | null
   capabilityError: string
@@ -133,6 +144,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     sending: false,
     asideRequest: null,
     admission: null,
+    superseded: null,
     receipts: [],
     capabilities: null,
     capabilityError: "",
@@ -145,9 +157,9 @@ export const createComposer = (sessionID: string, directory: string, dependencie
   })
   const tracked = new Set<string>()
   const cancelling = new Set<string>()
-  const [missingImages, setMissingImages] = createStore({ task: false, aside: false })
+  const [missingImages, setMissingImages] = createStore({ task: false, aside: false, superseded: false })
   const imageWarning = () =>
-    missingImages.task || missingImages.aside
+    missingImages.task || missingImages.aside || missingImages.superseded
       ? "Some saved images could not be restored. Reattach or explicitly clear images in the affected draft before sending."
       : ""
   let asideAbort: AbortController | undefined
@@ -215,8 +227,10 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       if (typeof saved.queueAgent === "string") setState("queueAgent", saved.queueAgent)
       if (record(saved.modelSelection) && isModel(saved.modelSelection.model))
         setState("modelSelection", { model: saved.modelSelection.model, status: "unknown" })
+      if (isModel(saved.sessionModel)) setState("sessionModel", saved.sessionModel)
       if (record(saved.missingImages)) {
-        setMissingImages({ task: saved.missingImages.task === true, aside: saved.missingImages.aside === true })
+        setMissingImages({ task: saved.missingImages.task === true, aside: saved.missingImages.aside === true,
+          superseded: saved.missingImages.superseded === true })
         setState("storageError", imageWarning())
       }
       if (Array.isArray(saved.tracked))
@@ -227,10 +241,23 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         setState("admission", {
           ...saved.admission,
           payload: copyPayload({ ...saved.admission.payload, ...(saved.admission.payload.images ? { images: [] } : {}) } as unknown as InputPayload),
+          draft: saved.admission.draft ? { ...saved.admission.draft, images: [] } : undefined,
           status: "unknown",
           error: "Admission needs reconciliation after reload.",
         })
         tracked.add(saved.admission.payload.requestID)
+      }
+      if (record(saved.superseded) && /^ses_[\w-]+$/.test(String(saved.superseded.successor)) &&
+        saved.superseded.successor !== sessionID && (saved.superseded.state === "pending" || saved.superseded.state === "committed") &&
+        isDraft(saved.superseded.draft) && (saved.superseded.buffer === "task" || saved.superseded.buffer === "aside") && isMode(saved.superseded.mode)) {
+        setState("superseded", {
+          successor: saved.superseded.successor as string,
+          state: saved.superseded.state as "pending" | "committed",
+          buffer: saved.superseded.buffer,
+          mode: saved.superseded.mode,
+          ...(saved.superseded.complete === false ? { complete: false } : {}),
+          draft: { ...saved.superseded.draft, images: [] },
+        })
       }
       if (
         record(saved.asideRequest) &&
@@ -270,12 +297,15 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     normalSubmission: state.normalSubmission ? { ...state.normalSubmission } : null,
     queueAgent: state.queueAgent,
     modelSelection: state.modelSelection,
+    sessionModel: state.sessionModel,
     task: copyDraft(state.task),
     aside: copyDraft(state.aside),
     asideSeeded: state.asideSeeded,
     admission: state.admission
-      ? { ...state.admission, payload: copyPayload(state.admission.payload), status: "unknown" }
+      ? { ...state.admission, payload: copyPayload(state.admission.payload),
+        ...(state.admission.draft ? { draft: copyDraft(state.admission.draft) } : {}), status: "unknown" }
       : null,
+    superseded: state.superseded ? { ...state.superseded, draft: copyDraft(state.superseded.draft) } : null,
     asideRequest:
       state.asideRequest?.status === "running" || state.asideRequest?.status === "unknown"
         ? {
@@ -287,10 +317,12 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     missingImages: { ...missingImages },
     tracked: [...tracked],
   })
-  const write = (saved: ReturnType<typeof snapshot>) => {
+  const write = (saved: ReturnType<typeof snapshot>, strict = false) => {
     if (!storage) return false
     try {
-      storage.setItem(key, JSON.stringify(saved))
+      const content = JSON.stringify(saved)
+      storage.setItem(key, content)
+      if (strict && storage.getItem(key) !== content) throw new Error("Saved source drafts could not be verified")
       const refs = recordRefs(saved)
       const removed = [...savedRefs].filter((ref) => !refs.has(ref))
       savedRefs = refs
@@ -300,6 +332,10 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       setState("storageError", imageWarning() || (imageStore.volatile && refs.size ? "Images remain in this tab only. Keep this tab open." : ""))
       return true
     } catch (error) {
+      if (strict) {
+        setState("storageError", `Cannot confirm saved source drafts: ${message(error)}. Keep this tab open.`)
+        return false
+      }
       // Drop draft copies only; uncertain requests must keep their exact submitted images.
       try {
         storage.setItem(
@@ -311,6 +347,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
             missingImages: {
               task: missingImages.task || !!state.task.images.length,
               aside: missingImages.aside || !!state.aside.images.length,
+              superseded: missingImages.superseded,
             },
           }),
         )
@@ -325,13 +362,17 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       }
     }
   }
-  const persistAsync = async (): Promise<boolean> => {
+  const persistAsync = async (strict = false): Promise<boolean> => {
     if (!storage) return false
     await hydration
     while (true) {
       const current = revision
       const saved = snapshot()
-      const entries = [...saved.task.images, ...saved.aside.images, ...(saved.admission?.payload.images ?? []), ...(saved.asideRequest?.images ?? [])]
+      const entries = [...saved.task.images, ...saved.aside.images, ...(saved.superseded?.draft.images ?? []), ...(saved.admission?.payload.images ?? []), ...(saved.admission?.draft?.images ?? []), ...(saved.asideRequest?.images ?? [])]
+      if (strict && entries.length && imageStore.volatile) {
+        setState("storageError", "Cannot confirm saved source images: image storage is tab-only. Keep this tab open.")
+        return false
+      }
       const refs = new Map<string, Promise<string>>()
       try {
         await Promise.all(entries.map(async (image) => {
@@ -347,6 +388,10 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         setState("storageError", `Images could not be saved and remain in this tab only: ${message(error)}`)
         return false
       }
+      if (strict && entries.length && imageStore.volatile) {
+        setState("storageError", "Cannot confirm saved source images: image storage is tab-only. Keep this tab open.")
+        return false
+      }
       if (current !== revision) continue
       const keys = new Map(await Promise.all([...refs].map(async ([url, promise]) => [url, await promise] as const)))
       const reference = (image: { url: string; mime: string; filename?: string; id?: string; normalized?: boolean }) => ({
@@ -354,19 +399,27 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         ...(image.id === undefined ? {} : { id: image.id }),
         ...(image.normalized === undefined ? {} : { normalized: image.normalized }),
       })
+      if (strict && entries.length && imageStore.volatile) {
+        setState("storageError", "Cannot confirm saved source images: image storage is tab-only. Keep this tab open.")
+        return false
+      }
       const result = write({
         ...saved,
         task: { ...saved.task, images: saved.task.images.map(reference) },
         aside: { ...saved.aside, images: saved.aside.images.map(reference) },
-        admission: saved.admission ? { ...saved.admission, payload: { ...saved.admission.payload, images: saved.admission.payload.images?.map(reference) } } : null,
+        superseded: saved.superseded ? { ...saved.superseded, draft: { ...saved.superseded.draft, images: saved.superseded.draft.images.map(reference) } } : null,
+        admission: saved.admission ? { ...saved.admission,
+          payload: { ...saved.admission.payload, images: saved.admission.payload.images?.map(reference) },
+          ...(saved.admission.draft ? { draft: { ...saved.admission.draft, images: saved.admission.draft.images.map(reference) } } : {}),
+        } : null,
         asideRequest: saved.asideRequest ? { ...saved.asideRequest, images: saved.asideRequest.images?.map(reference) } : null,
-      } as unknown as ReturnType<typeof snapshot>)
+      } as unknown as ReturnType<typeof snapshot>, strict)
       if (current === revision) return result
     }
   }
   const persist = () => {
     ++revision
-    if (state.hydrating || state.task.images.length || state.aside.images.length || state.admission?.payload.images?.length || state.asideRequest?.images?.length) {
+    if (state.hydrating || state.task.images.length || state.aside.images.length || state.superseded?.draft.images.length || state.admission?.payload.images?.length || state.admission?.draft?.images.length || state.asideRequest?.images?.length) {
       if (!scheduled) {
         scheduled = true
         queueMicrotask(() => {
@@ -383,13 +436,17 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     const task = saved.task as SavedDraft
     const aside = saved.aside as SavedDraft
     const admission = isAdmission(saved.admission) ? saved.admission : undefined
+    const submittedImages = admission?.draft?.images ?? []
     const requestImages = record(saved.asideRequest) && isSavedImages(saved.asideRequest.images) ? saved.asideRequest.images : []
-    const needsHydration = [...task.images, ...aside.images, ...(admission?.payload.images ?? []), ...requestImages].some((image) => "ref" in image)
+    const supersededImages = record(saved.superseded) && isDraft(saved.superseded.draft) ? saved.superseded.draft.images : []
+    const needsHydration = [...task.images, ...aside.images, ...supersededImages, ...(admission?.payload.images ?? []), ...submittedImages, ...requestImages].some((image) => "ref" in image)
     if (needsHydration) setState("hydrating", true)
     if (!needsHydration) {
       setState("task", "images", task.images as ComposerImage[])
       setState("aside", "images", aside.images as ComposerImage[])
+      if (state.superseded) setState("superseded", "draft", "images", supersededImages as ComposerImage[])
       if (admission && state.admission) setState("admission", "payload", copyPayload(admission.payload as unknown as InputPayload))
+      if (admission?.draft && state.admission) setState("admission", "draft", copyDraft(admission.draft as ComposerDraft))
       if (state.asideRequest && requestImages.length) setState("asideRequest", "images", inputImages(requestImages as unknown as InputImage[]))
       persist()
     } else hydration = (async () => {
@@ -403,16 +460,19 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         }))
         return { images: result.filter((image): image is NonNullable<typeof image> => !!image), missing: result.length !== result.filter(Boolean).length }
       }
-      const [taskImages, asideImages, admittedImages, asideImagesRequest] = await Promise.all([
-        resolveImages(task.images), resolveImages(aside.images), resolveImages(admission?.payload.images ?? []), resolveImages(requestImages),
+      const [taskImages, asideImages, failedImages, admittedImages, draftImages, asideImagesRequest] = await Promise.all([
+        resolveImages(task.images), resolveImages(aside.images), resolveImages(supersededImages), resolveImages(admission?.payload.images ?? []), resolveImages(submittedImages), resolveImages(requestImages),
       ])
       if (!imageEdits.task) setState("task", "images", taskImages.images.map((image) => ({ ...image, id: image.id ?? crypto.randomUUID() })) as ComposerImage[])
       if (!imageEdits.aside) setState("aside", "images", asideImages.images.map((image) => ({ ...image, id: image.id ?? crypto.randomUUID() })) as ComposerImage[])
+      if (state.superseded) setState("superseded", "draft", "images", failedImages.images.map((image) => ({ ...image, id: image.id ?? crypto.randomUUID() })) as ComposerImage[])
+      if (failedImages.missing) setMissingImages("superseded", true)
       if (!imageEdits.task && taskImages.missing) setMissingImages("task", true)
       if (!imageEdits.aside && asideImages.missing) setMissingImages("aside", true)
       if (admission && state.admission?.payload.requestID === admission.payload.requestID) {
         setState("admission", "payload", copyPayload({ ...admission.payload, ...(admission.payload.images ? { images: admittedImages.images.map((image) => ({ ...image, type: "file" as const })) as InputImage[] } : {}) } as InputPayload))
-        if (admittedImages.missing) {
+        if (admission.draft) setState("admission", "draft", { ...admission.draft, images: draftImages.images as ComposerImage[] })
+        if (admittedImages.missing || draftImages.missing) {
           missingAdmission = true
           setState("admission", "error", "Saved images are missing. Reconcile or cancel this input; do not retry.")
         }
@@ -541,6 +601,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
   const blockedReason = (mode: ComposerMode = state.mode, buffer: ComposerBuffer = draftKey()) => {
     if (restoreError) return restoreError
     if (state.hydrating) return "Saved images are still loading. Wait before sending."
+    if (state.superseded && mode !== "aside") return `Session superseded by ${state.superseded.successor}. Recover the draft in the successor explicitly.`
     const draft = state[buffer]
     if (missingImages[buffer])
       return "Images are missing from this restored draft. Reattach or explicitly clear images before sending."
@@ -701,11 +762,24 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       accept(receipt, admission.payload.requestID)
     } catch (error) {
       if (state.admission?.payload.requestID !== admission.payload.requestID) return
-      if (error instanceof HttpError && [400, 401, 403, 404, 413, 415, 422].includes(error.status)) {
+      const superseded = supersededError(error, sessionID)
+      if (superseded || (error instanceof HttpError && [400, 401, 403, 404, 413, 415, 422].includes(error.status))) {
         tracked.delete(admission.payload.requestID)
         setState({
           admission: null,
-          error: `Input rejected: ${message(error)}. Draft kept; correct it before sending again.`,
+          ...(superseded ? { superseded: {
+            ...superseded,
+            draft: admission.draft ? copyDraft(admission.draft) : {
+              ...emptyDraft(),
+              text: admission.payload.text,
+              images: (admission.payload.images ?? []).map((image) => ({
+                id: crypto.randomUUID(), mime: image.mime, url: image.url, filename: image.filename ?? "image",
+              })),
+            },
+            ...(admission.draft ? {} : { complete: false }),
+            buffer: admission.buffer ?? "task", mode: admission.payload.delivery,
+          } } : {}),
+          error: superseded ? `Session superseded by ${superseded.successor}. Draft kept; recover explicitly in the successor.` : `Input rejected: ${message(error)}. Draft kept; correct it before sending again.`,
         })
         return
       }
@@ -730,7 +804,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     if (state.hydrating) await hydration
     const mode = direct?.mode ?? state.mode
     const buffer = direct?.buffer ?? draftKey()
-    if (mode !== "aside" && (state.sending || state.admission || restoreError || missingImages[buffer])) {
+    if (mode !== "aside" && (state.sending || state.admission || state.superseded || restoreError || missingImages[buffer])) {
       if (!direct) setState("error", blockedReason(mode, buffer))
       return
     }
@@ -814,6 +888,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     }
     setState("sending", true)
     if (mode === "send") {
+      const submittedModel = draft.model ?? state.sessionModel ?? nextModel ?? null
       setState({
         normalExplicit: true,
         normalSubmission: {
@@ -830,8 +905,16 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         clearTask(draft.revision, buffer, direct?.targetRevision)
         setState("normalSubmission", "status", "accepted")
       } catch (error) {
-        setState("normalSubmission", "status", "unknown")
-        setState("error", `Send not confirmed: ${message(error)}. Check the conversation before sending again.`)
+        const superseded = supersededError(error, sessionID)
+        if (superseded) setState({
+          normalSubmission: null,
+          superseded: { ...superseded, draft: { ...draft, model: submittedModel }, buffer, mode },
+          error: `Session superseded by ${superseded.successor}. Draft kept; recover explicitly in the successor.`,
+        })
+        else {
+          setState("normalSubmission", "status", "unknown")
+          setState("error", `Send not confirmed: ${message(error)}. Check the conversation before sending again.`)
+        }
       } finally {
         setState("sending", false)
         persist()
@@ -847,6 +930,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         ...(mode === "queue" && state.queueAgent ? { agent: state.queueAgent } : {}),
       }),
       revision: draft.revision,
+      draft: { ...draft, model: draft.model ?? state.sessionModel ?? nextModel ?? null },
       status: "sending",
       ...(direct ? { buffer, targetRevision: direct.targetRevision } : {}),
     }
@@ -871,7 +955,8 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       setState("error", "Saved images are missing. Reconcile or cancel this input; do not retry.")
       return
     }
-    const admission = { ...state.admission, payload: copyPayload(state.admission.payload) }
+    const admission = { ...state.admission, payload: copyPayload(state.admission.payload),
+      ...(state.admission.draft ? { draft: copyDraft(state.admission.draft) } : {}) }
     const reason = capabilityReason(admission.payload.delivery)
     if (reason) {
       setState("error", reason)
@@ -1001,9 +1086,111 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     })
     persist()
   }
+  let recovering = false
+  // The caller owns the confirmation UI. Its callback receives the proposed drafts
+  // (including the rejected snapshot) before any destination draft is changed.
+  const recoverHandoffDrafts = async (
+    predecessor: { state: ComposerState; hydrated: Promise<void>; persistForRecovery: () => Promise<boolean> },
+    confirm: (drafts: { task: ComposerDraft; aside: ComposerDraft }) => boolean | Promise<boolean>,
+  ): Promise<boolean> => {
+    if (recovering) return false
+    recovering = true
+    try {
+      await Promise.all([hydration, predecessor.hydrated])
+      const source = predecessor.state
+      const safe = () => !state.hydrating && !source.hydrating && !restoreError && !!storage && !state.superseded &&
+        source.superseded?.complete !== false &&
+        !state.sending && !state.admission && !state.modelSelection && state.normalSubmission?.status !== "unknown" &&
+        state.normalSubmission?.status !== "sending" && !state.asideRequest?.status?.match(/^(running|unknown)$/) &&
+        !source.sending && !source.admission && !source.modelSelection && source.normalSubmission?.status !== "unknown" &&
+        source.normalSubmission?.status !== "sending" && !source.asideRequest?.status?.match(/^(running|unknown)$/) &&
+        !missingImages.task && !missingImages.aside && !source.storageError.includes("could not be restored")
+      if (!safe() || source === state) return false
+      const current = JSON.stringify([snapshot(), state.sessionModel, state.sending, state.busy, missingImages])
+      const sourceVersion = () => JSON.stringify([source.task, source.aside, source.mode, source.visibleBuffer,
+        source.keyboardTarget, source.queueAgent, source.asideSeeded, source.normalExplicit, source.sessionModel,
+        source.sending, source.admission, source.normalSubmission, source.modelSelection, source.asideRequest,
+        source.superseded])
+      const original = sourceVersion()
+      const drafts = {
+        task: { ...copyDraft(source.task), model: source.task.model ? { ...source.task.model } : source.sessionModel ? { ...source.sessionModel } : null },
+        aside: copyDraft(source.aside),
+      }
+      if (source.superseded) {
+        drafts[source.superseded.buffer] = copyDraft(source.superseded.draft)
+      }
+      if (!(await confirm({ task: copyDraft(drafts.task), aside: copyDraft(drafts.aside) }))) return false
+      if (!safe() || current !== JSON.stringify([snapshot(), state.sessionModel, state.sending, state.busy, missingImages]) || original !== sourceVersion()) return false
+      if (!(await predecessor.persistForRecovery())) return false
+      if (!safe() || current !== JSON.stringify([snapshot(), state.sessionModel, state.sending, state.busy, missingImages]) || original !== sourceVersion()) return false
+      if (drafts.task.images.length || drafts.aside.images.length) {
+        if (imageStore.volatile) {
+          setState("storageError", "Cannot recover images: destination image storage is tab-only. Existing drafts kept.")
+          return false
+        }
+      }
+      const saved = {
+        ...snapshot(),
+        task: drafts.task,
+        aside: drafts.aside,
+        mode: source.superseded?.mode ?? source.mode,
+        visibleBuffer: source.superseded?.buffer ?? source.visibleBuffer,
+        keyboardTarget: source.superseded
+          ? source.superseded.mode === "aside" ? "aside" : source.superseded.mode === "queue" ? "queue" : "steer"
+          : source.keyboardTarget,
+        targetRevision: state.targetRevision + 1,
+        queueAgent: source.queueAgent,
+        asideSeeded: source.asideSeeded,
+        normalExplicit: source.superseded ? source.superseded.mode === "send" : source.normalExplicit,
+      }
+      const refs: string[] = []
+      try {
+        const reference = async (image: ComposerImage) => {
+          const ref = await imageStore.put(image, key)
+          refs.push(ref)
+          return { ref, id: image.id, mime: image.mime, filename: image.filename, ...(image.normalized === undefined ? {} : { normalized: image.normalized }) }
+        }
+        const [taskImages, asideImages] = await Promise.all([
+          Promise.all(drafts.task.images.map(reference)), Promise.all(drafts.aside.images.map(reference)),
+        ])
+        if ((taskImages.length || asideImages.length) && imageStore.volatile) {
+          setState("storageError", "Cannot recover images: destination image storage is tab-only. Existing drafts kept.")
+          return false
+        }
+        if (!safe() || current !== JSON.stringify([snapshot(), state.sessionModel, state.sending, state.busy, missingImages]) || original !== sourceVersion()) return false
+        // Commit references before touching in-memory state. This path must not use write's image-dropping quota fallback.
+        const persisted = { ...saved, task: { ...saved.task, images: taskImages }, aside: { ...saved.aside, images: asideImages } }
+        const content = JSON.stringify(persisted)
+        storage!.setItem(key, content)
+        if (storage!.getItem(key) !== content) throw new Error("Recovered drafts could not be verified")
+        const previousRefs = savedRefs
+        savedRefs = recordRefs(persisted)
+        const removed = [...previousRefs].filter((ref) => !savedRefs.has(ref))
+        if (removed.length) void imageStore.remove(removed, key).catch((error) => setState("storageError", `Cannot remove saved images: ${message(error)}`))
+        ++revision
+        batch(() => {
+          setState("task", drafts.task)
+          setState("aside", drafts.aside)
+          setState({ mode: saved.mode, visibleBuffer: saved.visibleBuffer, keyboardTarget: saved.keyboardTarget,
+            targetRevision: saved.targetRevision, queueAgent: saved.queueAgent, asideSeeded: saved.asideSeeded,
+            normalExplicit: saved.normalExplicit, storageError: "" })
+        })
+        return true
+      } finally {
+        const unused = refs.filter((ref) => !savedRefs.has(ref))
+        if (unused.length) await imageStore.remove(unused, key).catch(() => {})
+      }
+    } catch (error) {
+      setState("storageError", `Cannot recover handoff drafts: ${message(error)}. Existing drafts kept.`)
+      return false
+    } finally {
+      recovering = false
+    }
+  }
   return {
     state,
     persistAsync,
+    persistForRecovery: () => persistAsync(true),
     // Resolves once saved image refs are restored into the in-memory drafts.
     get hydrated() { return hydration },
     importHandoffDrafts: async (predecessor: { state: ComposerState; hydrated: Promise<void> }) => {
@@ -1023,6 +1210,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       })
       return persistAsync()
     },
+    recoverHandoffDrafts,
     visibleDraft: () => state[state.visibleBuffer],
     selectTarget: (keyboardTarget: ComposerAction) => {
       setState({ keyboardTarget, targetRevision: state.targetRevision + 1 })
@@ -1040,7 +1228,10 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     observeSessionModel: (session: Session) => {
       if (state.modelSelection || session.time.updated < sessionModelTime) return
       sessionModelTime = session.time.updated
-      setState("sessionModel", session.preferredModel ? { providerID: session.preferredModel.providerID, modelID: session.preferredModel.id } : null)
+      const next = session.preferredModel ? { providerID: session.preferredModel.providerID, modelID: session.preferredModel.id } : null
+      if (next?.providerID === state.sessionModel?.providerID && next?.modelID === state.sessionModel?.modelID) return
+      setState("sessionModel", next)
+      persist()
     },
     setVisibleSelection: (start: number, end: number) =>
       updateDraft({ selection: [start, end] }, false, state.visibleBuffer),
@@ -1197,7 +1388,9 @@ const recordRefs = (value: unknown): Set<string> => {
   const images = [
     ...(record(value.task) && isSavedImages(value.task.images) ? value.task.images : []),
     ...(record(value.aside) && isSavedImages(value.aside.images) ? value.aside.images : []),
+    ...(record(value.superseded) && record(value.superseded.draft) && isSavedImages(value.superseded.draft.images) ? value.superseded.draft.images : []),
     ...(record(value.admission) && record(value.admission.payload) && isSavedImages(value.admission.payload.images) ? value.admission.payload.images : []),
+    ...(record(value.admission) && record(value.admission.draft) && isSavedImages(value.admission.draft.images) ? value.admission.draft.images : []),
     ...(record(value.asideRequest) && isSavedImages(value.asideRequest.images) ? value.asideRequest.images : []),
   ]
   return new Set(images.flatMap((image) => "ref" in image ? [image.ref] : []))
@@ -1233,7 +1426,7 @@ const isDraft = (value: unknown): value is SavedDraft =>
   typeof value.revision === "number" &&
   Number.isSafeInteger(value.revision) &&
   value.revision >= 0
-const isAdmission = (value: unknown): value is Omit<ComposerAdmission, "payload"> & { payload: Omit<InputPayload, "images"> & { images?: SavedImage[] } } =>
+const isAdmission = (value: unknown): value is Omit<ComposerAdmission, "payload" | "draft"> & { payload: Omit<InputPayload, "images"> & { images?: SavedImage[] }; draft?: SavedDraft } =>
   record(value) &&
   record(value.payload) &&
   typeof value.payload.requestID === "string" &&
@@ -1242,6 +1435,7 @@ const isAdmission = (value: unknown): value is Omit<ComposerAdmission, "payload"
   (value.payload.delivery === "queue" || value.payload.delivery === "steer") &&
   typeof value.payload.text === "string" &&
   (value.payload.images === undefined || isSavedImages(value.payload.images)) &&
+  (value.draft === undefined || isDraft(value.draft)) &&
   (/\S/.test(value.payload.text) || (isSavedImages(value.payload.images) && value.payload.images.length > 0)) &&
   (value.payload.agent === undefined || typeof value.payload.agent === "string") &&
   (value.buffer === undefined || value.buffer === "task" || value.buffer === "aside") &&
@@ -1249,15 +1443,7 @@ const isAdmission = (value: unknown): value is Omit<ComposerAdmission, "payload"
     (typeof value.targetRevision === "number" && Number.isSafeInteger(value.targetRevision))) &&
   typeof value.revision === "number" &&
   Number.isSafeInteger(value.revision)
-class HttpError extends Error {
-  constructor(
-    readonly status: number,
-    detail: string,
-  ) {
-    super(`HTTP ${status} ${detail}`)
-  }
-}
 const json = async <T>(response: Response): Promise<T> => {
-  if (!response.ok) throw new HttpError(response.status, await response.text())
+  if (!response.ok) throw await httpError(response)
   return response.json()
 }

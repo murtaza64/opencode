@@ -2,7 +2,8 @@ import { expect, test } from "bun:test"
 import { createComputed, createRoot } from "solid-js"
 import { unwrap } from "solid-js/store"
 import type { Session } from "@opencode-ai/sdk/v2"
-import { createImageStore } from "./image-store"
+import { createImageStore, type ImageStore } from "./image-store"
+import { oc } from "./api"
 import {
   createComposer,
   getComposer,
@@ -67,6 +68,25 @@ const deferred = <T>() => {
     reject = no
   })
   return { promise, resolve, reject }
+}
+const durableImages = (): ImageStore => {
+  const blobs = new Map<string, { image: Parameters<ImageStore["put"]>[0]; owners: Set<string> }>()
+  return {
+    volatile: false,
+    put: async (image, owner) => {
+      const ref = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(image.url))),
+        (byte) => byte.toString(16).padStart(2, "0")).join("")
+      const stored = blobs.get(ref)
+      blobs.set(ref, { image, owners: new Set([...(stored?.owners ?? []), owner]) })
+      return ref
+    },
+    get: async (ref) => blobs.get(ref)?.image,
+    remove: async (refs, owner) => refs.forEach((ref) => {
+      const stored = blobs.get(ref)
+      stored?.owners.delete(owner)
+      if (stored && !stored.owners.size) blobs.delete(ref)
+    }),
+  }
 }
 class MemoryStorage {
   data = new Map<string, string>()
@@ -312,6 +332,402 @@ test("handoff waits for the predecessor's own hydration before copying its image
   const successor = createComposer("ses_new", directory, { storage, images })
   expect(await successor.importHandoffDrafts(predecessor)).toBe(true)
   expect(successor.state.task.images).toEqual([image])
+})
+
+test("explicit recovery confirms before replacing both buffers and persists selected model without requests", async () => {
+  const storage = new MemoryStorage()
+  const images = durableImages()
+  const predecessor = createComposer("ses_old", directory, { storage, images })
+  predecessor.observeSessionModel(selectedSession)
+  predecessor.setVisibleText("source")
+  predecessor.setImages([image])
+  predecessor.setVisibleSelection(1, 3)
+  predecessor.selectMode("queue")
+  predecessor.setQueueAgent("plan")
+  predecessor.restoreDraft("aside")
+  predecessor.setVisibleText("aside source")
+  predecessor.setVisibleModel({ providerID: "aside", modelID: "other" })
+  await predecessor.persistAsync()
+  const source = createComposer("ses_old", directory, { storage, images })
+  const successor = createComposer("ses_new", directory, { storage, images, fetch: () => { throw new Error("No network") } })
+  successor.setVisibleText("successor")
+  const before = JSON.stringify(unwrap(successor.state))
+  expect(await successor.recoverHandoffDrafts(source, async () => false)).toBe(false)
+  expect(JSON.stringify(unwrap(successor.state))).toBe(before)
+  const recovered = await successor.recoverHandoffDrafts(source, async (drafts) => {
+    expect(drafts.task.text).toBe("source")
+    expect(successor.state.task.text).toBe("successor")
+    return true
+  })
+  expect(successor.state.storageError).toBe("")
+  expect(recovered).toBe(true)
+  expect(unwrap(successor.state.task)).toMatchObject({ text: "source", images: [image], selection: [1, 3], model })
+  expect(successor.state.aside).toMatchObject({ text: "aside source", model: { providerID: "aside", modelID: "other" } })
+  expect(successor.state).toMatchObject({ mode: "queue", visibleBuffer: "aside", queueAgent: "plan" })
+  const restored = createComposer("ses_new", directory, { storage, images })
+  await restored.hydrated
+  expect(unwrap(restored.state.task)).toMatchObject({ text: "source", images: [image], model })
+  expect(source.state.task.text).toBe("source")
+})
+
+test("explicit recovery aborts on uncertain source or destination, destination edits during staging, or storage failure", async () => {
+  const storage = new MemoryStorage()
+  const images = durableImages()
+  const source = createComposer("ses_old", directory, { storage, images })
+  source.setImages([image])
+  const destination = createComposer("ses_new", directory, { storage, images })
+  destination.setVisibleText("keep")
+  await destination.persistAsync()
+  const confirm = async () => true
+  const baseline = [...storage.data.values()].find((value) => JSON.parse(value).task.text === "keep")
+  const failing = createComposer("ses_new", directory, { storage: { getItem: (key) => storage.getItem(key), setItem: () => { throw new Error("quota") } }, images })
+  expect(await failing.recoverHandoffDrafts(source, confirm)).toBe(false)
+  expect(failing.state.task.text).toBe("keep")
+  expect([...storage.data.values()]).toContain(baseline!)
+  const gate = deferred<string>()
+  const started = deferred<void>()
+  const staging = createComposer("ses_new", directory, { storage, images: { ...images, put: async (value, owner) => { started.resolve(); await gate.promise; return images.put(value, owner) } } })
+  const pendingRecovery = staging.recoverHandoffDrafts(source, confirm)
+  await started.promise
+  staging.setVisibleText("edited during storage")
+  gate.resolve("go")
+  expect(await pendingRecovery).toBe(false)
+  expect(staging.state.task.text).toBe("edited during storage")
+  expect(destination.state.task.text).toBe("keep")
+})
+
+test("recovery refuses uncertain or in-flight sends on either side", async () => {
+  const source = createComposer("ses_old", directory, { storage: new MemoryStorage(), prompt: async () => { throw new Error("lost ACK") } })
+  source.setText("uncertain")
+  await source.submit({ ...session, id: "ses_old" })
+  const dest = createComposer("ses_new", directory, { storage: new MemoryStorage() })
+  expect(await dest.recoverHandoffDrafts(source, async () => true)).toBe(false)
+  expect(dest.state.task.text).toBe("")
+  source.dismissNormalSubmission()
+  const sending = deferred<void>()
+  const active = createComposer("ses_active", directory, { storage: new MemoryStorage(), prompt: () => sending.promise })
+  active.setText("in flight")
+  const pending = active.submit({ ...session, id: "ses_active" })
+  expect(await dest.recoverHandoffDrafts(active, async () => true)).toBe(false)
+  sending.resolve()
+  await pending
+  const uncertainDest = createComposer("ses_other", directory, { storage: new MemoryStorage(), prompt: async () => { throw new Error("lost ACK") } })
+  uncertainDest.setText("own uncertain draft")
+  await uncertainDest.submit({ ...session, id: "ses_other" })
+  expect(await uncertainDest.recoverHandoffDrafts(source, async () => true)).toBe(false)
+  expect(uncertainDest.state.task.text).toBe("own uncertain draft")
+})
+
+test("recovery never commits when image staging fails", async () => {
+  const storage = new MemoryStorage()
+  const source = createComposer("ses_old", directory, { storage })
+  source.setImages([image])
+  const dest = createComposer("ses_new", directory, { storage, images: {
+    volatile: false,
+    put: async () => { throw new Error("image database denied") },
+    get: async () => undefined,
+    remove: async () => {},
+  } })
+  dest.setText("keep")
+  const before = storage.getItem(`es-app:composer:1:${JSON.stringify(["ses_new", directory])}`)
+  expect(await dest.recoverHandoffDrafts(source, async () => true)).toBe(false)
+  expect(dest.state.task.text).toBe("keep")
+  expect(dest.state.task.images).toEqual([])
+  expect(storage.getItem(`es-app:composer:1:${JSON.stringify(["ses_new", directory])}`)).toBe(before)
+})
+
+test("recovery uses the exact rejected snapshot, not later source edits, and keeps both source drafts", async () => {
+  const storage = new MemoryStorage()
+  const images = durableImages()
+  const response = deferred<Response>()
+  const source = createComposer("ses_old", directory, { storage, images, fetch: async (url, init) => {
+    if (url.includes("capabilities")) return Response.json(imageCapabilities)
+    if (init?.method === "POST") return response.promise
+    throw new Error(`Unexpected ${url}`)
+  } })
+  await source.loadCapabilities()
+  source.selectMode("queue")
+  source.setQueueAgent("plan")
+  source.setText("rejected")
+  source.setImages([image])
+  source.setSelection(2, 4)
+  source.selectMode("aside")
+  source.setText("other buffer")
+  source.selectMode("queue")
+  const sending = source.submit({ ...session, id: "ses_old" })
+  await source.persistAsync()
+  source.setText("later edit")
+  source.setImages([{ ...image, id: "later", filename: "later.png" }])
+  response.resolve(Response.json({ _tag: "SessionSupersededError", sessionID: "ses_old", successor: "ses_new", state: "committed", message: "moved" }, { status: 409 }))
+  await sending
+  expect(unwrap(source.state.superseded?.draft)).toMatchObject({ text: "rejected", images: [image] })
+  const successor = createComposer("ses_new", directory, { storage, images })
+  expect(await successor.recoverHandoffDrafts(source, async (drafts) => {
+    expect(drafts.task).toMatchObject({ text: "rejected", images: [image], selection: [2, 4] })
+    expect(drafts.aside.text).toBe("other buffer")
+    return true
+  })).toBe(true)
+  expect(successor.state).toMatchObject({ mode: "queue", visibleBuffer: "task", queueAgent: "plan" })
+  expect(unwrap(successor.state.task)).toMatchObject({ text: "rejected", images: [image], selection: [2, 4] })
+  expect(source.state.task.text).toBe("later edit")
+  expect(source.state.task.images[0].filename).toBe("later.png")
+  const restoredSource = createComposer("ses_old", directory, { storage, images })
+  const restoredSuccessor = createComposer("ses_new", directory, { storage, images })
+  await Promise.all([restoredSource.hydrated, restoredSuccessor.hydrated])
+  expect(unwrap(restoredSource.state.superseded?.draft)).toMatchObject({ text: "rejected", images: [image] })
+  expect(unwrap(restoredSource.state.task)).toMatchObject({ text: "later edit", images: [{ filename: "later.png" }] })
+  expect(unwrap(restoredSuccessor.state.task)).toMatchObject({ text: "rejected", images: [image] })
+})
+
+test("failed source persistence prevents recovery even when destination can save", async () => {
+  const storage = new MemoryStorage()
+  const sourceKey = `es-app:composer:1:${JSON.stringify(["ses_old", directory])}`
+  let fail = false
+  const guarded = {
+    getItem: (key: string) => storage.getItem(key),
+    setItem: (key: string, value: string) => {
+      if (fail && key === sourceKey) throw new Error("source quota")
+      storage.setItem(key, value)
+    },
+  }
+  const source = createComposer("ses_old", directory, { storage: guarded })
+  source.setText("source")
+  const dest = createComposer("ses_new", directory, { storage: guarded })
+  dest.setText("keep")
+  const destKey = `es-app:composer:1:${JSON.stringify(["ses_new", directory])}`
+  const saved = storage.getItem(destKey)
+  fail = true
+  expect(await dest.recoverHandoffDrafts(source, async () => true)).toBe(false)
+  expect(dest.state.task.text).toBe("keep")
+  expect(storage.getItem(destKey)).toBe(saved)
+  expect(source.state.task.text).toBe("source")
+})
+
+test("volatile image stores and existing destination supersession block explicit recovery", async () => {
+  const storage = new MemoryStorage()
+  const source = createComposer("ses_old", directory, { storage, images: createImageStore() })
+  source.setImages([image])
+  const dest = createComposer("ses_new", directory, { storage, images: createImageStore() })
+  dest.setText("keep")
+  expect(await dest.recoverHandoffDrafts(source, async () => true)).toBe(false)
+  expect(dest.state.task.text).toBe("keep")
+  const durable = durableImages()
+  const durableSource = createComposer("ses_durable", directory, { storage, images: durable })
+  durableSource.setImages([image])
+  await durableSource.persistForRecovery()
+  expect(await dest.recoverHandoffDrafts(durableSource, async () => true)).toBe(false)
+  expect(dest.state.task.text).toBe("keep")
+  const textSource = createComposer("ses_text", directory, { storage, images: durable })
+  textSource.setText("safe")
+  const conflicted = createComposer("ses_conflicted", directory, { storage, images: durable, prompt: async () => {
+    throw new (await import("./api-error")).HttpError(409, {
+      _tag: "SessionSupersededError", sessionID: "ses_conflicted", successor: "ses_elsewhere", state: "pending",
+    })
+  } })
+  conflicted.setText("existing failed draft")
+  await conflicted.submit({ ...session, id: "ses_conflicted" })
+  const before = storage.getItem(`es-app:composer:1:${JSON.stringify(["ses_conflicted", directory])}`)
+  expect(await conflicted.recoverHandoffDrafts(textSource, async () => true)).toBe(false)
+  expect(storage.getItem(`es-app:composer:1:${JSON.stringify(["ses_conflicted", directory])}`)).toBe(before)
+})
+
+test("a source image store that becomes volatile during put cannot confirm recovery", async () => {
+  const storage = new MemoryStorage()
+  const durable = durableImages()
+  let volatile = false
+  const source = createComposer("ses_old", directory, { storage, images: {
+    ...durable,
+    get volatile() { return volatile },
+    put: async (value, owner) => {
+      const ref = await durable.put(value, owner)
+      volatile = true
+      return ref
+    },
+  } })
+  source.setImages([image])
+  const dest = createComposer("ses_new", directory, { storage, images: durable })
+  dest.setText("keep")
+  const key = `es-app:composer:1:${JSON.stringify(["ses_new", directory])}`
+  const before = storage.getItem(key)
+  expect(await dest.recoverHandoffDrafts(source, async () => true)).toBe(false)
+  expect(dest.state.task.text).toBe("keep")
+  expect(storage.getItem(key)).toBe(before)
+  expect(source.state.storageError).toContain("tab-only")
+})
+
+test("destination image store turning volatile during put aborts recovery without replacing its drafts", async () => {
+  const storage = new MemoryStorage()
+  const durable = durableImages()
+  const source = createComposer("ses_old", directory, { storage, images: durable })
+  source.setImages([image])
+  let volatile = false
+  const dest = createComposer("ses_new", directory, { storage, images: {
+    ...durable,
+    get volatile() { return volatile },
+    put: async (value, owner) => {
+      const ref = await durable.put(value, owner)
+      volatile = true
+      return ref
+    },
+  } })
+  dest.setText("keep")
+  const key = `es-app:composer:1:${JSON.stringify(["ses_new", directory])}`
+  const before = storage.getItem(key)
+  expect(await dest.recoverHandoffDrafts(source, async () => true)).toBe(false)
+  expect(dest.state.task.text).toBe("keep")
+  expect(storage.getItem(key)).toBe(before)
+  expect(dest.state.storageError).toContain("tab-only")
+})
+
+test("lost admission ACK retains exact draft through reload, edits, retry supersession and recovery", async () => {
+  const storage = new MemoryStorage()
+  const images = durableImages()
+  let posts = 0
+  const source = createComposer("ses_old", directory, { storage, images, fetch: async (url, init) => {
+    if (url.includes("capabilities")) return Response.json(imageCapabilities)
+    if (init?.method === "POST") {
+      if (++posts === 1) throw new Error("lost ACK")
+      return Response.json({ _tag: "SessionSupersededError", sessionID: "ses_old", successor: "ses_new", state: "committed", message: "moved" }, { status: 409 })
+    }
+    if (url.includes("/input/")) return new Response(null, { status: 404 })
+    throw new Error(`Unexpected ${url}`)
+  } })
+  await source.loadCapabilities()
+  source.observeSessionModel(selectedSession)
+  source.selectMode("queue")
+  source.setText("rejected")
+  source.setImages([image])
+  source.setSelection(2, 5)
+  await source.submit({ ...session, id: "ses_old" })
+  expect(source.state.admission?.status).toBe("unknown")
+  source.setText("later")
+  source.setImages([{ ...image, id: "later", filename: "later.png" }])
+  source.setModel({ providerID: "different", modelID: "later" })
+  source.setSelection(0, 1)
+  await source.persistAsync()
+  const restored = createComposer("ses_old", directory, { storage, images, fetch: async (url, init) => {
+    if (url.includes("capabilities")) return Response.json(imageCapabilities)
+    if (init?.method === "POST") {
+      ++posts
+      return Response.json({ _tag: "SessionSupersededError", sessionID: "ses_old", successor: "ses_new", state: "committed", message: "moved" }, { status: 409 })
+    }
+    if (url.includes("/input/")) return new Response(null, { status: 404 })
+    throw new Error(`Unexpected ${url}`)
+  } })
+  await restored.hydrated
+  expect(unwrap(restored.state.admission?.draft)).toMatchObject({ text: "rejected", images: [image], model, selection: [2, 5] })
+  await restored.loadCapabilities()
+  await restored.retryAdmission()
+  expect(posts).toBe(2)
+  expect(restored.state.admission).toBeNull()
+  expect(unwrap(restored.state.superseded?.draft)).toMatchObject({ text: "rejected", images: [image], model, selection: [2, 5] })
+  expect(unwrap(restored.state.task)).toMatchObject({ text: "later", images: [{ filename: "later.png" }], model: { providerID: "different", modelID: "later" }, selection: [0, 1] })
+  const dest = createComposer("ses_new", directory, { storage, images })
+  expect(await dest.recoverHandoffDrafts(restored, async (drafts) => {
+    expect(drafts.task).toMatchObject({ text: "rejected", images: [image], model, selection: [2, 5] })
+    return true
+  })).toBe(true)
+  expect(unwrap(dest.state.task)).toMatchObject({ text: "rejected", images: [image], model, selection: [2, 5] })
+  expect(restored.state.task.text).toBe("later")
+})
+
+test("historical unknown admission without a snapshot cannot claim exact draft recovery", async () => {
+  const storage = new MemoryStorage()
+  const sourceKey = `es-app:composer:1:${JSON.stringify(["ses_old", directory])}`
+  const source = createComposer("ses_old", directory, { storage, fetch: async (url, init) => {
+    if (url.includes("capabilities")) return Response.json(capabilities)
+    if (init?.method === "POST") throw new Error("lost ACK")
+    throw new Error(`Unexpected ${url}`)
+  } })
+  await source.loadCapabilities()
+  source.selectMode("queue")
+  source.setText("rejected")
+  await source.submit({ ...session, id: "ses_old" })
+  const saved = JSON.parse(storage.getItem(sourceKey)!)
+  delete saved.admission.draft
+  storage.setItem(sourceKey, JSON.stringify(saved))
+  const restored = createComposer("ses_old", directory, { storage, fetch: async (url, init) => {
+    if (url.includes("capabilities")) return Response.json(capabilities)
+    if (init?.method === "POST") return Response.json({ _tag: "SessionSupersededError", sessionID: "ses_old", successor: "ses_new", state: "pending", message: "moved" }, { status: 409 })
+    return new Response(null, { status: 404 })
+  } })
+  await restored.loadCapabilities()
+  await restored.retryAdmission()
+  expect(restored.state.superseded?.complete).toBe(false)
+  expect(restored.state.superseded?.draft.model).toBeNull()
+  const dest = createComposer("ses_new", directory, { storage })
+  expect(await dest.recoverHandoffDrafts(restored, async () => true)).toBe(false)
+  expect(dest.state.task.text).toBe("")
+})
+
+test("definitive supersession rejects normal Send and input admission without unknown status and survives reload", async () => {
+  const storage = new MemoryStorage()
+  const body = { _tag: "SessionSupersededError", sessionID: session.id, successor: "ses_successor", state: "pending", message: "superseded" }
+  const { composer, dependencies, requests } = harness(() => Response.json(body, { status: 409 }), { storage })
+  await composer.loadCapabilities()
+  composer.selectMode("queue")
+  composer.setText("queued draft")
+  await composer.submit(session)
+  expect(composer.state.admission).toBeNull()
+  expect(composer.state.superseded).toMatchObject({ successor: "ses_successor", state: "pending", draft: { text: "queued draft" } })
+  expect(composer.state.task.text).toBe("queued draft")
+  expect(createComposer(session.id, directory, dependencies).state.superseded?.successor).toBe("ses_successor")
+  expect(requests.filter((request) => request.method === "POST")).toHaveLength(1)
+  const normal = harness(undefined, { prompt: async () => { throw new (await import("./api-error")).HttpError(409, body) } })
+  normal.composer.setText("normal draft")
+  await normal.composer.submit(session)
+  expect(normal.composer.state.normalSubmission).toBeNull()
+  expect(normal.composer.state.superseded).toMatchObject({ draft: { text: "normal draft" }, successor: "ses_successor" })
+})
+
+test("malformed and unrelated 409 remain unknown, while prompt preserves HTTP status and body", async () => {
+  const original = globalThis.fetch
+  globalThis.fetch = Object.assign(async () => Response.json({ _tag: "SessionSupersededError", sessionID: session.id, successor: "ses_next", state: "committed", message: "moved" }, { status: 409 }), { preconnect: original.preconnect })
+  try {
+    await expect(oc.prompt(session, directory, "draft")).rejects.toMatchObject({ status: 409, body: { successor: "ses_next" } })
+  } finally {
+    globalThis.fetch = original
+  }
+  for (const body of [{ _tag: "SessionSupersededError", sessionID: "ses_other", successor: "ses_next", state: "pending" }, { detail: "conflict" }]) {
+    const { composer } = harness(() => Response.json(body, { status: 409 }))
+    await composer.loadCapabilities()
+    composer.selectMode("queue")
+    composer.setText("draft")
+    await composer.submit(session)
+    expect(composer.state.admission?.status).toBe("unknown")
+    expect(composer.state.superseded).toBeNull()
+    const normal = harness(undefined, { prompt: async () => { throw new (await import("./api-error")).HttpError(409, body) } })
+    normal.composer.setText("draft")
+    await normal.composer.submit(session)
+    expect(normal.composer.state.normalSubmission?.status).toBe("unknown")
+    expect(normal.composer.state.superseded).toBeNull()
+  }
+})
+
+test("committed supersession preserves submitted image draft despite concurrent edits and reload", async () => {
+  const storage = new MemoryStorage()
+  const images = createImageStore()
+  const ack = deferred<Response>()
+  const { composer, dependencies, requests } = harness(() => ack.promise, { storage, images }, imageCapabilities)
+  await composer.loadCapabilities()
+  composer.selectMode("queue")
+  composer.setText("original")
+  composer.setImages([image])
+  const sending = composer.submit(session)
+  await Promise.resolve()
+  await Promise.resolve()
+  composer.setText("next edit")
+  ack.resolve(Response.json({ _tag: "SessionSupersededError", sessionID: session.id, successor: "ses_next", state: "committed", message: "moved" }, { status: 409 }))
+  await sending
+  expect(requests.filter((request) => request.method === "POST")).toHaveLength(1)
+  expect(composer.state.admission).toBeNull()
+  expect(composer.state.task.text).toBe("next edit")
+  expect(unwrap(composer.state.superseded?.draft)).toMatchObject({ text: "original", images: [image] })
+  await composer.persistAsync()
+  const restored = createComposer(session.id, directory, dependencies)
+  await restored.hydrated
+  expect(unwrap(restored.state.superseded?.draft)).toMatchObject({ text: "original", images: [image] })
+  expect(restored.state.superseded?.state).toBe("committed")
 })
 
 test("cached controllers survive reactive owner disposal and are keyed by both session and directory", () => {

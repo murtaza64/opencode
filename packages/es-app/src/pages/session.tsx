@@ -34,6 +34,7 @@ import { MailRow } from "../components/mail-row"
 import { MailSubscriptions } from "../components/mail-subscriptions"
 import { mailForSession, mailLocation, mailRows, mailSourceID } from "../mail-timeline"
 import { handoffChain, handoffNext, successorFor } from "../handoffs"
+import { ComposerImages } from "../components/composer-images"
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const [error, setError] = createSignal("")
@@ -141,12 +142,18 @@ function SessionView(props: { sessionID: string; directory: string }) {
   let inspecting = false
 
   const { activity, sessionsError, editspaces, mailRevision, editspace, state, handoffs, handoffsError,
-    laneOwners, refetch, refetchHandoffs, transferPin } = useDashboard()
+    laneOwners, lineage, lineageOwners, refetch, refetchHandoffs, transferPin } = useDashboard()
   const currentEditspace = () => editspace() ?? editspaces()?.default ?? state()?.editspace
   const ownedLane = () => laneOwners().find((lane) => lane.owner === sessionID)
-  const predecessor = () => handoffChain(sessionID, handoffs() ?? [])
-  const nextHandoff = () => handoffNext(sessionID, handoffs() ?? [])
-  const successor = () => successorFor(sessionID, handoffs() ?? [], laneOwners())
+  const predecessor = () => {
+    const edge = handoffChain(sessionID, lineage())
+    return edge && activity.session(edge.predecessor) ? edge : undefined
+  }
+  const nextHandoff = () => {
+    const edge = handoffNext(sessionID, lineage())
+    return edge && activity.session(edge.successor) ? edge : undefined
+  }
+  const successor = () => successorFor(sessionID, lineage(), lineageOwners())
   const [wasOwner, setWasOwner] = createSignal(false)
   let ownershipChecked = false
   createEffect(() => {
@@ -160,6 +167,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const [handingOff, setHandingOff] = createSignal(false)
   const [handoffError, setHandoffError] = createSignal("")
   const [handoffPending, setHandoffPending] = createSignal(false)
+  const [recovering, setRecovering] = createSignal(false)
+  const [recoveryError, setRecoveryError] = createSignal("")
   const [subscriptionsOpen, setSubscriptionsOpen] = createSignal(false)
   const [laneMailOpen, setLaneMailOpen] = createSignal(false)
   const location = () => mailLocation(directory, editspaces()?.editspaces ?? [], sessionID)
@@ -617,7 +626,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
   }
   const modelChoice = () => composer.state.visibleBuffer === "aside"
     ? composer.state.aside.model
-    : composer.state.modelSelection?.model ?? composer.state.sessionModel ?? composer.state.task.model
+    : composer.state.modelSelection?.model ?? composer.state.task.model ?? composer.state.sessionModel
   const lastTurnModel = createMemo(() => {
     for (let i = messages().length - 1; i >= 0; i--) {
       const m = messages()[i] as any
@@ -655,6 +664,15 @@ function SessionView(props: { sessionID: string; directory: string }) {
     const editor = floating() ? floatEl : promptEl
     if (editor) saveSelection(editor)
     setError("")
+    if (nextHandoff()) {
+      // Self-spawn lineage can be committed before a runtime fence exists.
+      // Never send more work to a known predecessor, or turn an earlier unknown
+      // admission into a definitive rejection.
+      setRecoveryError("Message not sent: this session handed off. Open the successor to recover your draft; any earlier unknown send still needs reconciliation.")
+      stick = true
+      queueMicrotask(pin)
+      return
+    }
     // Read status again at submission; a mode switch never sends by itself.
     composer.observeBusy(busy())
     stick = true
@@ -672,18 +690,50 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const navigate = useNavigate()
   const { sessions, sessionRows, archivedIds } = useDashboard()
   const followSuccessor = async (next: string) => {
+    if (recovering()) return
     const editor = floating() ? floatEl : promptEl
     if (editor) saveSelection(editor)
-    if (!await getComposer(next, directory).importHandoffDrafts(composer)) {
-      setHandoffError("Could not save the successor draft. Keep this page open and copy your draft before navigating.")
-      return
+    setRecovering(true)
+    setRecoveryError("")
+    try {
+      // Placement comes from the successor identity, not the lane name or the
+      // predecessor's directory (an orchestrator can be anchored outside a lane).
+      const knownDirectory = activity.session(next)?.directory
+      const target = await oc.session(next, knownDirectory ?? directory)
+      if (target.id !== next || !target.directory || (knownDirectory && target.directory !== knownDirectory) || next === sessionID)
+        throw new Error("Successor session identity does not match this directory.")
+      const destination = getComposer(next, target.directory)
+      const copied = await destination.recoverHandoffDrafts(composer, () => {
+        const occupied = [destination.state.task, destination.state.aside].some((draft) =>
+          !!draft.text || !!draft.images.length || !!draft.model || draft.selection.some(Boolean))
+        return !occupied || window.confirm("The successor already has a draft. Replace its task and aside drafts with this session’s drafts? Nothing will be sent. Cancel keeps both drafts unchanged.")
+      })
+      if (!copied) {
+        setRecoveryError("Draft transfer cancelled or unavailable. Both sessions’ drafts were kept. Resolve any pending send, model selection or storage error before trying again.")
+        return
+      }
+      transferPin(sessionID, next, directory, target.directory)
+      navigate(sessionHref(next, target.directory))
+    } catch (error) {
+      setRecoveryError(`Could not open the successor: ${errorText(error)}. Both drafts were kept.`)
+    } finally {
+      setRecovering(false)
     }
-    transferPin(sessionID, next, directory)
-    navigate(sessionHref(next, directory))
   }
+  const recoveryTarget = () => {
+    const tip = successor()
+    if (tip) return tip.successor
+    // A tagged rejection can supply a missing edge, but cannot override a
+    // contradictory or incomplete dashboard chain.
+    if (lineage().some((edge) => edge.predecessor === sessionID)) return
+    return composer.state.superseded?.state === "committed" ? composer.state.superseded.successor : undefined
+  }
+  const attempted = new Set<string>()
   createEffect(() => {
     const edge = successor()
-    if (!wasOwner() || !edge || handingOff()) return
+    if (!wasOwner() || !edge || handingOff() || composer.state.sending || composer.state.superseded ||
+      composer.state.admission || composer.state.normalSubmission?.status === "unknown" || attempted.has(edge.successor)) return
+    attempted.add(edge.successor)
     untrack(() => { void followSuccessor(edge.successor) })
   })
   const handoff = async () => {
@@ -1132,8 +1182,6 @@ function SessionView(props: { sessionID: string; directory: string }) {
               </span>
             )}
           </Show>
-          <Show when={predecessor()}>{(edge) => <span class="handoff-crumb">predecessor ({edge().lane}): <A href={sessionHref(edge().predecessor, directory)}>{edge().predecessor}</A></span>}</Show>
-          <Show when={nextHandoff()}>{(edge) => <span class="handoff-crumb">successor ({edge().lane}): <A href={sessionHref(edge().successor, directory)}>{edge().successor}</A></span>}</Show>
         </AppHeader>
 
         <div class="session-alerts">
@@ -1181,6 +1229,10 @@ function SessionView(props: { sessionID: string; directory: string }) {
 
         <div class="transcript" ref={transcriptEl}>
           <div ref={inner} class="transcript-inner">
+            <Show when={predecessor()}>{(edge) => <div class="banner handoff-history" aria-label="Previous session">
+              Previous session: <A href={sessionHref(edge().predecessor, activity.session(edge().predecessor)?.directory)}><bdi dir="auto">{activity.session(edge().predecessor)?.title ?? edge().predecessor}</bdi></A>
+              {" · "}<bdi dir="ltr">{edge().predecessor}</bdi>
+            </div>}</Show>
             <Show when={live.hasOlder()}>
               <button class="transcript-older" disabled={live.loadingOlder()} onClick={loadEarlier}>
                 {live.loadingOlder() ? "Loading…" : "Load earlier messages"}
@@ -1224,6 +1276,23 @@ function SessionView(props: { sessionID: string; directory: string }) {
                 )
               }}
             </For>
+            <Show when={nextHandoff() || composer.state.superseded}>
+              <section class="banner handoff-recovery" aria-label="Session handoff" role={composer.state.superseded ? "alert" : "status"}>
+                <Show when={composer.state.superseded} fallback={<p>This session handed off to a successor.</p>}>{(failure) => <>
+                  <p>Message not sent: this session was superseded{failure().state === "pending" ? " (handoff pending)" : ""}. Your draft was kept.</p>
+                  <div class="pending-bubble" dir="auto">{failure().draft.text}</div>
+                  <ComposerImages images={failure().draft.images} />
+                </>}</Show>
+                <Show when={recoveryTarget()} fallback={<p>Waiting for a confirmed successor. No message will be resent automatically.</p>}>{(next) =>
+                  <A href={sessionHref(next(), activity.session(next())?.directory ?? directory)} aria-disabled={recovering()} onClick={(event) => {
+                    event.preventDefault()
+                    void followSuccessor(next())
+                  }}>Open successor and move drafts to its input</A>
+                }</Show>
+                <p class="dim">Nothing is sent automatically. A copy stays in this session.</p>
+                <Show when={recoveryError()}><div class="err" role="alert">{recoveryError()}</div></Show>
+              </section>
+            </Show>
             <Show when={echo() && composer.state.normalSubmission}>
               {(submission) => (
                 <div class="pending-msg" data-status={submission().status}>
