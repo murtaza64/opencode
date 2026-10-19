@@ -689,8 +689,13 @@ function SessionView(props: { sessionID: string; directory: string }) {
 
   const navigate = useNavigate()
   const { sessions, sessionRows, archivedIds } = useDashboard()
+  const autoFollowStopped = new Set<string>()
+  let following = false
   const followSuccessor = async (next: string) => {
-    if (recovering()) return
+    if (following) return
+    following = true
+    let prompted = false
+    let cancelled = false
     const editor = floating() ? floatEl : promptEl
     if (editor) saveSelection(editor)
     setRecovering(true)
@@ -706,17 +711,25 @@ function SessionView(props: { sessionID: string; directory: string }) {
       const copied = await destination.recoverHandoffDrafts(composer, () => {
         const occupied = [destination.state.task, destination.state.aside].some((draft) =>
           !!draft.text || !!draft.images.length || !!draft.model || draft.selection.some(Boolean))
-        return !occupied || window.confirm("The successor already has a draft. Replace its task and aside drafts with this session’s drafts? Nothing will be sent. Cancel keeps both drafts unchanged.")
+        if (!occupied) return true
+        prompted = true
+        cancelled = !window.confirm("The successor already has a draft. Replace its task and aside drafts with this session’s drafts? Nothing will be sent. Cancel keeps both drafts unchanged.")
+        return !cancelled
       })
       if (!copied) {
         setRecoveryError("Draft transfer cancelled or unavailable. Both sessions’ drafts were kept. Resolve any pending send, model selection or storage error before trying again.")
         return
       }
       transferPin(sessionID, next, directory, target.directory)
+      autoFollowStopped.add(next)
       navigate(sessionHref(next, target.directory))
     } catch (error) {
       setRecoveryError(`Could not open the successor: ${errorText(error)}. Both drafts were kept.`)
     } finally {
+      // A cancellation (or a failed confirmed overwrite) needs a new explicit
+      // click. A pre-confirmation network failure may retry on fresh lineage.
+      if (cancelled || prompted) autoFollowStopped.add(next)
+      following = false
       setRecovering(false)
     }
   }
@@ -728,12 +741,10 @@ function SessionView(props: { sessionID: string; directory: string }) {
     if (lineage().some((edge) => edge.predecessor === sessionID)) return
     return composer.state.superseded?.state === "committed" ? composer.state.superseded.successor : undefined
   }
-  const attempted = new Set<string>()
   createEffect(() => {
     const edge = successor()
-    if (!wasOwner() || !edge || handingOff() || composer.state.sending || composer.state.superseded ||
-      composer.state.admission || composer.state.normalSubmission?.status === "unknown" || attempted.has(edge.successor)) return
-    attempted.add(edge.successor)
+    if (!wasOwner() || !edge || handingOff() || following || composer.state.sending || composer.state.superseded ||
+      composer.state.admission || composer.state.normalSubmission?.status === "unknown" || autoFollowStopped.has(edge.successor)) return
     untrack(() => { void followSuccessor(edge.successor) })
   })
   const handoff = async () => {
@@ -1276,14 +1287,19 @@ function SessionView(props: { sessionID: string; directory: string }) {
                 )
               }}
             </For>
-            <Show when={nextHandoff() || composer.state.superseded}>
+            <Show when={nextHandoff() || composer.state.superseded || composer.state.admission?.fence}>
               <section class="banner handoff-recovery" aria-label="Session handoff" role={composer.state.superseded ? "alert" : "status"}>
                 <Show when={composer.state.superseded} fallback={<p>This session handed off to a successor.</p>}>{(failure) => <>
                   <p>Message not sent: this session was superseded{failure().state === "pending" ? " (handoff pending)" : ""}. Your draft was kept.</p>
                   <div class="pending-bubble" dir="auto">{failure().draft.text}</div>
                   <ComposerImages images={failure().draft.images} />
                 </>}</Show>
-                <Show when={recoveryTarget()} fallback={<p>Waiting for a confirmed successor. No message will be resent automatically.</p>}>{(next) =>
+                <Show when={composer.state.admission?.fence}><div class="err" role="alert">
+                  This session was superseded, but admission of this input is unknown. It may already have been accepted; the draft cannot be moved or resent until reconciled.
+                  <div dir="auto">{composer.state.admission?.payload.text}</div>
+                  <button disabled={composer.state.inputLoading || !connected()} onClick={() => composer.refreshInputs()}>Check admission</button>
+                </div></Show>
+                <Show when={!composer.state.admission?.fence && recoveryTarget()} fallback={<p>Waiting for a confirmed successor or admission outcome. No message will be resent automatically.</p>}>{(next) =>
                   <A href={sessionHref(next(), activity.session(next())?.directory ?? directory)} aria-disabled={recovering()} onClick={(event) => {
                     event.preventDefault()
                     void followSuccessor(next())

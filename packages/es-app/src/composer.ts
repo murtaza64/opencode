@@ -53,6 +53,7 @@ export type AsideRequest = {
 export type ComposerAdmission = {
   payload: InputPayload
   draft?: ComposerDraft
+  fence?: { successor: string; state: "pending" | "committed" }
   revision: number
   status: "sending" | "unknown"
   error?: string
@@ -763,23 +764,23 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     } catch (error) {
       if (state.admission?.payload.requestID !== admission.payload.requestID) return
       const superseded = supersededError(error, sessionID)
-      if (superseded || (error instanceof HttpError && [400, 401, 403, 404, 413, 415, 422].includes(error.status))) {
+      if (superseded) {
+        // /input writes its durable row before waking the runner. The wake may hit
+        // the fence after admission, so the 409 alone cannot prove rejection.
+        const receipt = await readInput(admission.payload.requestID).catch(() => null)
+        if (receipt || state.admission?.payload.requestID !== admission.payload.requestID) return
+        setState("admission", {
+          status: "unknown",
+          fence: superseded,
+          error: `Session fenced toward ${superseded.successor}. Admission is unconfirmed; reconcile this request ID before recovering the draft in another session.`,
+        })
+        return
+      }
+      if (error instanceof HttpError && [400, 401, 403, 404, 413, 415, 422].includes(error.status)) {
         tracked.delete(admission.payload.requestID)
         setState({
           admission: null,
-          ...(superseded ? { superseded: {
-            ...superseded,
-            draft: admission.draft ? copyDraft(admission.draft) : {
-              ...emptyDraft(),
-              text: admission.payload.text,
-              images: (admission.payload.images ?? []).map((image) => ({
-                id: crypto.randomUUID(), mime: image.mime, url: image.url, filename: image.filename ?? "image",
-              })),
-            },
-            ...(admission.draft ? {} : { complete: false }),
-            buffer: admission.buffer ?? "task", mode: admission.payload.delivery,
-          } } : {}),
-          error: superseded ? `Session superseded by ${superseded.successor}. Draft kept; recover explicitly in the successor.` : `Input rejected: ${message(error)}. Draft kept; correct it before sending again.`,
+          error: `Input rejected: ${message(error)}. Draft kept; correct it before sending again.`,
         })
         return
       }

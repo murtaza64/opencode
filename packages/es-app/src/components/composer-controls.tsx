@@ -232,7 +232,7 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
           </section>
         )}
       </Show>
-      <Show when={state.admission}>
+      <Show when={state.admission && !state.admission.fence ? state.admission : undefined}>
         {(admission) => (
           <section class="input-admission" aria-label="Input admission" aria-live="polite">
             <b>
