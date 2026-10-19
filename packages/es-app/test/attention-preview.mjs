@@ -5,6 +5,8 @@ import { pathToFileURL } from "node:url"
 export const startAttentionPreview = async () => {
   const ledger = {
     status: 200, partial: false, operator: false, denyOperator: false, loseResponse: false, calls: [], workCalls: [], commands: new Map(),
+    cloudStatus: 200, transcriptCalls: 0,
+    cloudLanes: [{ lane: "cloud-review", owner: "wingman:fixture-task", runtime: "wingman", activity: "Reviewing the attention module", "wingman-status": "processing", "wingman-cost": "0.42", "wingman-turns": "3", "wingman-prs": "https://github.com/example/repo/pull/9", "wingman-url": "https://temporal.example.test/workflows/fixture" }],
     records: [{ id: "decision_1", editspace: "fixture", revision: 1, status: "open", kind: "decision", title: "Choose the bounded implementation scope", context: "Keep the homepage focused on human choices. This synthetic record is not approval to publish.", options: [{ id: "small", label: "Small scope" }, { id: "defer", label: "Defer" }], recommendation: "small", producer_session: "ses_a", origin_session: "ses_a", gate_key: "issue:219:scope:v1", source_ref: { session_id: "ses_a", directory }, decision: null, delivery_state: "not-requested", created_at: Date.now() - 300_000, updated_at: Date.now() - 300_000, snoozed_until: null },
       { id: "other_decision", editspace: "other", revision: 1, status: "open", kind: "blocker", title: "Other project decision", context: "A second project may go offline independently.", options: [{ id: "yes", label: "Continue" }], producer_session: "ses_b", origin_session: "ses_b", gate_key: "other:gate:v1", source_ref: { session_id: "ses_b", directory }, decision: null, delivery_state: "not-requested", created_at: Date.now(), updated_at: Date.now() }],
   }
@@ -14,6 +16,17 @@ export const startAttentionPreview = async () => {
       return [{ tag: "script", children: `if (!localStorage.getItem("es-app-all-projects")) localStorage.setItem("es-app-all-projects", "true"); if (!localStorage.getItem("es-app-sidebar-pins")) localStorage.setItem("es-app-sidebar-pins", ${JSON.stringify(JSON.stringify([JSON.stringify([directory, "ses_a"]) ]))});` }]
     },
     configureServer(server) {
+      server.middlewares.use("/es/api/wingman", async (req, res) => {
+        const url = new URL(req.url, "http://fixture")
+        res.writeHead(ledger.cloudStatus, { "content-type": "application/json", "cache-control": "no-store" })
+        if (ledger.cloudStatus !== 200) { res.end(JSON.stringify({ error: "cloud source unavailable" })); return }
+        if (url.pathname === "/transcript") {
+          ledger.transcriptCalls++
+          res.end(JSON.stringify({ status: "processing", turns_dropped: 0, turns: [{ prompt: "Review the bounded module", output: "Synthetic cloud transcript <script>not executable</script>" }] }))
+          return
+        }
+        res.end(JSON.stringify({ lanes: ledger.cloudLanes, error: "" }))
+      })
       server.middlewares.use("/es/api/attention", async (req, res) => {
         const url = new URL(req.url, "http://fixture")
         const chunks = []

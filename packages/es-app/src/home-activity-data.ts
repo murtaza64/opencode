@@ -1,6 +1,6 @@
 import type { MailMessage } from "./api"
 
-export type HomeActivityRow = { id: string; level: "major" | "minor"; kind: "mail" | "pr"; text: string; time: number; timeLabel: string; source: string; sourceAt: number; href?: string }
+export type HomeActivityRow = { id: string; level: "major" | "minor"; kind: "mail" | "pr" | "cloud"; text: string; time: number; timeLabel: string; source: string; sourceAt: number; href?: string }
 
 export const prActivity = (value: unknown, observed: number, project: string): HomeActivityRow[] => {
   if (!value || typeof value !== "object") return []

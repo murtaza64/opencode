@@ -3,7 +3,7 @@ import { es } from "./api"
 import { ago, linkUrl, sessionHref, useDashboard } from "./state"
 import { mailActivity, prActivity, type HomeActivityRow } from "./home-activity-data"
 
-export default function HomeActivity() {
+export default function HomeActivity(props: { cloud?: HomeActivityRow[] }) {
   const dashboard = useDashboard()
   const [open, setOpen] = createSignal(false)
   const [filter, setFilter] = createSignal("all")
@@ -30,7 +30,7 @@ export default function HomeActivity() {
     const snapshot = dashboard.state() as { editspace?: string; prs_at?: number; prs_error?: string; threads?: { prs?: unknown[] }[]; unattached_prs?: unknown[] } | undefined
     return [...(snapshot?.threads ?? []).flatMap(thread => thread.prs ?? []), ...(snapshot?.unattached_prs ?? [])].flatMap(pr => prActivity(pr, (snapshot?.prs_at ?? 0) * 1000, snapshot?.editspace ?? "selected project"))
   })
-  const rows = createMemo(() => [...new Map([...prs(), ...(mail()?.rows ?? [])].map(item => [item.id, item])).values()]
+  const rows = createMemo(() => [...new Map([...prs(), ...(mail()?.rows ?? []), ...(props.cloud ?? [])].map(item => [item.id, item])).values()]
     .filter(item => filter() === "all" || (filter() === "mail" ? item.kind === "mail" : item.level === filter()))
     .sort((a, b) => (Number.isFinite(b.time) ? b.time : 0) - (Number.isFinite(a.time) ? a.time : 0)).slice(0, 30))
   return <details class="home-activity" onToggle={event => setOpen(event.currentTarget.open)}>

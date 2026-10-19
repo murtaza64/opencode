@@ -1,0 +1,47 @@
+import { createRequire } from "node:module"
+import { startAttentionPreview } from "./attention-preview.mjs"
+
+const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
+const preview = await startAttentionPreview()
+const browser = await chromium.launch({ channel: "chrome", headless: true })
+const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } })
+await page.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
+const cloud = page.getByRole("region", { name: "Cloud agents", exact: true })
+try {
+  await page.goto(preview.url)
+  await expect(cloud.getByRole("heading", { name: "Cloud agents 0", exact: true })).toBeVisible()
+  await cloud.getByText("Other cloud tasks (1)", { exact: true }).click()
+  expect(preview.ledger.transcriptCalls).toBe(0)
+  await cloud.getByRole("button", { name: "Pin", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "Pinned agents 2", exact: true })).toBeVisible()
+  await expect(cloud).toContainText("Self-reported lane record")
+  await expect(cloud).toContainText("report age unknown")
+  await expect(cloud).toContainText("0.42")
+  await cloud.getByRole("button", { name: "Load transcript", exact: true }).click()
+  await expect(cloud).toContainText("Synthetic cloud transcript <script>not executable</script>")
+  expect(await cloud.locator("script").count()).toBe(0)
+  expect(preview.ledger.transcriptCalls).toBe(1)
+  await cloud.getByRole("button", { name: "Refresh cloud lanes", exact: true }).click()
+  await expect(cloud).toContainText("Synthetic cloud transcript")
+  expect(preview.ledger.transcriptCalls).toBe(1)
+  await page.locator(".home-activity summary").click()
+  await page.getByRole("group", { name: "Activity filter" }).getByRole("button", { name: "Minor", exact: true }).click()
+  await expect(page.locator(".home-activity")).toContainText("minor · cloud")
+  await expect(page.getByRole("heading", { name: "Needs you 3", exact: true })).toBeVisible()
+  preview.ledger.cloudStatus = 503
+  await cloud.getByRole("button", { name: "Refresh cloud lanes", exact: true }).click()
+  await expect(cloud).toContainText("source unavailable; last-known snapshot")
+  await expect(cloud).toContainText("cloud-review")
+  preview.ledger.cloudStatus = 200
+  preview.ledger.cloudLanes[0].owner = "wingman:replacement-task"
+  await cloud.getByRole("button", { name: "Refresh cloud lanes", exact: true }).click()
+  await expect(cloud).toContainText("pinned owner no longer observed")
+  await expect(cloud.getByRole("button", { name: "Load transcript", exact: true })).toHaveCount(0)
+  await page.reload()
+  await expect(cloud).toContainText("pinned owner no longer observed")
+  await page.evaluate(() => { document.documentElement.dir = "rtl" })
+  await page.setViewportSize({ width: 760, height: 1000 })
+  expect(await cloud.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+  expect(preview.fixture.calls.filter(call => !["GET", "HEAD", "OPTIONS"].includes(call.method))).toEqual([])
+  console.log("PASS cloud Home: explicit pins, owner identity/reuse, source freshness/error retention, cost/PR/workflow, on-demand escaped transcript stable across refresh, minor activity only, reload/RTL, zero runtime writes")
+} finally { await browser.close(); await preview.close() }

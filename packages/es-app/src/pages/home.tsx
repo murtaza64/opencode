@@ -6,6 +6,8 @@ import { CurrentWorkView } from "../current-work"
 import { attentionPath, createAttention, decisionLabel, type AttentionRecord } from "../attention"
 import { createHomeRequests, requestKey, type HomeRequest } from "../home-requests"
 import HomeActivity from "../home-activity"
+import HomeCloudAgents from "../home-cloud-agents"
+import type { HomeActivityRow } from "../home-activity-data"
 import "./home.css"
 
 const PinnedAgent = (props: { session: SessionRow }) => {
@@ -22,6 +24,8 @@ export default function Home() {
   const attention = createAttention(project)
   const [view, setView] = createSignal("open")
   const [confirm, setConfirm] = createSignal<{ record: AttentionRecord; choice: string }>()
+  const [cloudCount, setCloudCount] = createSignal(0)
+  const [cloudActivity, setCloudActivity] = createSignal<HomeActivityRow[]>([])
   const [history, setHistory] = createSignal<Record<string, { revision: number; events?: unknown[]; error?: string }>>({})
   const sourcePointers = createMemo<HomeRequest[]>(() => {
     const projectFor = (directory: string) => dashboard.editspaces()?.editspaces.find(item => {
@@ -81,8 +85,8 @@ export default function Home() {
       <Show when={!visible().length && (view() !== "open" || !pendingRequests().length)}><div class="home-empty">{attention.loading() && !attention.snapshot() ? "Checking attention ledger…" : attention.stale() || attention.snapshot()?.value.partial ? "Attention is not fully checked. Do not assume nothing is waiting." : view() === "open" ? "Nothing needs a choice." : "No records in this view."}</div></Show>
       <Show when={uncertainRequests().length}><details class="home-unknown"><summary>Source requests with unknown outcome ({uncertainRequests().length})</summary><For each={uncertainRequests()}>{item => <div class="home-source"><bdi dir="auto">{item.title}</bdi> · {item.kind} · {item.state === "unavailable" ? "source unavailable" : "no longer pending; outcome unknown"} · <A href={sessionHref(item.session, item.directory)}>Open original thread</A></div>}</For></details></Show>
     </section>
-    <section aria-label="Pinned agents"><div class="home-section"><h2>Pinned agents <span>{dashboard.pinnedSessions().length}</span></h2><span class="home-muted">Only agents you pin</span></div><For each={dashboard.pinnedSessions()} fallback={<p class="home-muted">Pin an agent from session navigation to keep it here.</p>}>{session => <PinnedAgent session={session} />}</For><details class="home-workers"><summary>Other sessions ({dashboard.unpinnedSessions().length})</summary><For each={dashboard.unpinnedSessions()}>{session => <div class="home-other"><A href={sessionHref(session.id, session.directory)}><bdi dir="auto">{session.title || session.id}</bdi></A><button onClick={() => dashboard.togglePin(session)}>Pin</button></div>}</For></details></section>
-    <HomeActivity />
+    <section aria-label="Pinned agents"><div class="home-section"><h2>Pinned agents <span>{dashboard.pinnedSessions().length + cloudCount()}</span></h2><span class="home-muted">Only agents you pin</span></div><For each={dashboard.pinnedSessions()} fallback={<p class="home-muted">Pin an agent from session navigation to keep it here.</p>}>{session => <PinnedAgent session={session} />}</For><HomeCloudAgents project={project()} onCount={setCloudCount} onActivity={setCloudActivity} /><details class="home-workers"><summary>Other sessions ({dashboard.unpinnedSessions().length})</summary><For each={dashboard.unpinnedSessions()}>{session => <div class="home-other"><A href={sessionHref(session.id, session.directory)}><bdi dir="auto">{session.title || session.id}</bdi></A><button onClick={() => dashboard.togglePin(session)}>Pin</button></div>}</For></details></section>
+    <HomeActivity cloud={cloudActivity()} />
     <Show when={confirm()}>{draft => <dialog class="home-confirm" ref={element => queueMicrotask(() => element.showModal())} onCancel={() => setConfirm(undefined)} aria-labelledby="home-choice-title"><h2 id="home-choice-title">Record this choice?</h2><p><bdi dir="auto">{draft().record.options.find(option => option.id === draft().choice)?.label}</bdi></p><p>Save only. No prompt is sent, no agent is resumed, and no tool permission is granted.</p><div class="home-actions"><button class="home-primary" disabled={!canWrite(draft().record)} onClick={async () => { const selected = draft(); setConfirm(undefined); if (await attention.act(selected.record, { action: "choose", choice_id: selected.choice })) setView("recorded") }}>Record choice only</button><button onClick={() => setConfirm(undefined)}>Cancel</button></div></dialog>}</Show>
   </main>
 }

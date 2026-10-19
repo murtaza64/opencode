@@ -158,6 +158,10 @@ test("attention exposes only operator bootstrap, reads and record commands", () 
   expect(apiAllowed("GET", `/es/api/attention/${id}/commands`)).toBe(false)
   expect(apiAllowed("DELETE", `/es/api/attention/${id}`)).toBe(false)
   expect(apiAllowed("PUT", "/es/api/attention/session")).toBe(false)
+  expect(apiAllowed("GET", "/es/api/wingman")).toBe(true)
+  expect(apiAllowed("GET", "/es/api/wingman/transcript")).toBe(true)
+  expect(apiAllowed("POST", "/es/api/wingman")).toBe(false)
+  expect(apiAllowed("POST", "/es/api/wingman/transcript")).toBe(false)
 })
 
 test("binds attention to the validated native origin and forwards only its operator cookie", async () => {

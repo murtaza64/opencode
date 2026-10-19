@@ -72,7 +72,7 @@ try {
   // Stale modal revision cannot overwrite a newer producer update.
   preview.ledger.records[0].revision++
   await page.getByRole("button", { name: "Record choice only" }).click()
-  await expect(page.getByRole("status")).toContainText("record changed")
+  await expect(page.locator(".home-notice")).toContainText("record changed")
   await record().getByRole("radio", { name: "Small scope", exact: true }).check()
   await record().getByRole("button", { name: "Review choice", exact: true }).click()
   preview.ledger.operator = false
@@ -83,9 +83,9 @@ try {
     await route.fulfill({ response })
   })
   await page.getByRole("button", { name: "Record choice only" }).click()
-  await expect(page.getByRole("status")).toContainText("Outcome unknown")
+  await expect(page.locator(".home-notice")).toContainText("Outcome unknown")
   await page.getByRole("button", { name: "Retry same action", exact: true }).click()
-  await expect(page.getByRole("status")).toContainText("Decision saved · not sent")
+  await expect(page.locator(".home-notice")).toContainText("Decision saved · not sent")
   const posts = preview.ledger.calls.filter(call => call.path.endsWith("/commands"))
   expect(posts.at(-1).body.command_id).toBe(posts.at(-2).body.command_id)
   expect(posts.every(call => call.csrf === "1")).toBe(true)

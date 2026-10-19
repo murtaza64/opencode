@@ -45,7 +45,7 @@ try {
   await record.getByRole("radio", { name: "Dashboard SQLite", exact: true }).check()
   await record.getByRole("button", { name: "Review choice" }).click()
   await page.getByRole("button", { name: "Record choice only" }).click()
-  await expect(page.getByRole("status")).toContainText("Decision saved · not sent")
+  await expect(page.locator(".home-notice")).toContainText("Decision saved · not sent")
   await page.getByRole("button", { name: "Recorded / not sent 2", exact: true }).click()
   await expect(page.locator(".home-recorded").first()).toContainText("Dashboard SQLite · not sent")
   await page.reload()

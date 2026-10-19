@@ -15,6 +15,13 @@ let identity
 let app
 let attentionTarget
 const bridge = createServer((req, res) => {
+  if (req.url.startsWith("/api/wingman")) {
+    res.writeHead(200, { "content-type": "application/json" })
+    res.end(JSON.stringify(req.url.startsWith("/api/wingman/transcript")
+      ? { status: "processing", turns: [{ output: "Native synthetic Wingman transcript" }], turns_dropped: 0 }
+      : { lanes: [{ lane: "cloud-fixture", owner: "wingman:synthetic", "wingman-status": "processing", "wingman-cost": "0.12" }], error: "" }))
+    return
+  }
   const target = req.url.startsWith("/api/attention") ? attentionTarget : core.url
   if (!target) { res.writeHead(503); res.end(); return }
   const upstream = request(`${target}${req.url}`, { method: req.method, headers: { ...req.headers, host: new URL(target).host } }, response => {
@@ -61,7 +68,7 @@ try {
   await open.getByRole("radio", { name: "Dashboard SQLite" }).check()
   await open.getByRole("button", { name: "Review choice" }).click()
   await page.getByRole("button", { name: "Record choice only" }).click()
-  await expect(page.getByRole("status")).toContainText("Decision saved · not sent")
+  await expect(page.locator(".home-notice")).toContainText("Decision saved · not sent")
   await expect(page.locator(".home-warning")).toContainText("attention-offline")
   await page.getByRole("button", { name: "Recorded / not sent 2", exact: true }).click()
   await expect(page.locator(".home-recorded").first()).toContainText("Dashboard SQLite · not sent")
@@ -81,7 +88,12 @@ try {
     return fetch(`/es/api/attention/${row.id}/commands?es=${encodeURIComponent(row.editspace)}`, { method: "POST", headers: { "content-type": "application/json", "X-Attention-CSRF": "1" }, body: JSON.stringify({ command_id: crypto.randomUUID(), expected_revision: 1, action: "wake" }) }).then(res => res.status)
   })
   expect(conflict).toBe(409)
-  for (const route of ["/es/api/attention/publish", "/oc/pty", "/oc/session/ses_a/shell", "/es/api/run"])
+  const cloud = page.getByRole("region", { name: "Cloud agents", exact: true })
+  await cloud.getByText("Other cloud tasks (1)", { exact: true }).click()
+  await cloud.getByRole("button", { name: "Pin", exact: true }).click()
+  await cloud.getByRole("button", { name: "Load transcript", exact: true }).click()
+  await expect(cloud).toContainText("Native synthetic Wingman transcript")
+  for (const route of ["/es/api/attention/publish", "/oc/pty", "/oc/session/ses_a/shell", "/es/api/run", "/es/api/wingman", "/es/api/wingman/transcript"])
     expect(await page.evaluate(route => fetch(route, { method: "POST" }).then(res => res.status), route)).toBe(403)
   expect(core.calls.filter(call => !["GET", "HEAD", "OPTIONS"].includes(call.method))).toEqual([])
   expect(errors).toEqual([])
