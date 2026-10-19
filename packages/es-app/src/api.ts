@@ -273,6 +273,28 @@ export type MailDelivery = {
 export type MailTimeline = { editspace: string; lane: string; messages: MailMessage[] }
 export type Handoff = { lane: string; predecessor: string; successor: string }
 export type MailSubscription = { selector: string; sender: string; kind: string; mode: "actionable" | "passive" | "mute" }
+// One Wingman (cloud) lane as es-dashboard reports it: the lane record's
+// fields, all optional strings. See dotfiles docs/editspace-lanes.md.
+export type WingmanLane = {
+  lane?: string
+  owner?: string
+  issue?: string
+  status?: string
+  activity?: string
+  model?: string
+  runtime?: string
+  "wingman-status"?: string
+  "wingman-turns"?: string
+  "wingman-cost"?: string
+  "wingman-kind"?: string
+  "wingman-repos"?: string
+  "wingman-branch"?: string
+  "wingman-prs"?: string
+  "wingman-ci"?: string
+  "wingman-url"?: string
+}
+export type WingmanTurn = { prompt?: string; output?: string; status?: string; events?: { type?: string; text?: string }[] }
+export type WingmanTranscript = { status?: string; turns?: WingmanTurn[]; turns_dropped?: number }
 
 const esQ = (es?: string) => (es ? `es=${encodeURIComponent(es)}` : "")
 
@@ -384,6 +406,12 @@ export const es = {
   editspaces: (): Promise<{ editspaces: { name: string; root: string }[]; default: string | null }> =>
     fetch("/es/api/editspaces").then(json<{ editspaces: { name: string; root: string }[]; default: string | null }>),
   state: (esName?: string): Promise<any> => fetch(`/es/api/state?${esQ(esName)}`).then(json),
+  wingman: (esName?: string): Promise<{ lanes: WingmanLane[]; error: string }> =>
+    fetch(`/es/api/wingman?${esQ(esName)}`).then(statusJson<{ lanes: WingmanLane[]; error: string }>),
+  // Live fetch through the Wingman gateway; slow (seconds) and fails off VPN.
+  wingmanTranscript: (lane: string, esName?: string, signal?: AbortSignal): Promise<WingmanTranscript> =>
+    fetch(`/es/api/wingman/transcript?lane=${encodeURIComponent(lane)}&${esQ(esName)}`, { signal })
+      .then(statusJson<WingmanTranscript>),
   notifications: (): Promise<{ notifications: AttentionNotification[] }> =>
     fetch("/es/api/notifications").then(json<{ notifications: AttentionNotification[] }>),
   refresh: (esName?: string): Promise<any> =>
