@@ -6,3 +6,4 @@
 .cloud-nav-entry { min-inline-size: 0; }
 .cloud-nav .session-project { max-inline-size: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cloud-mini-entry { flex-shrink: 0; }
+.cloud-discovery-filter { display: flex; align-items: center; gap: 7px; margin: 4px 12px 8px; font-size: 11px; color: var(--subtext0); }

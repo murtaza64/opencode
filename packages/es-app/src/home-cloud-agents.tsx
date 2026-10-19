@@ -150,7 +150,8 @@ export default function HomeCloudAgents(props: { project?: string; onCount: (n: 
           <Show when={!item.snapshot?.error && cloudOwnerKnown(pin.owner)}><Transcript pin={pin} available={() => !!item.record && !item.snapshot?.error && item.inScope} /></Show>
       </>}</Show></div>
     </div>}}</For>
-    <details class="home-workers"><summary>Other cloud tasks ({other().length})</summary><div class="home-source">Selected project discovery and explicitly pinned projects only. Lane status is self-reported, not live gateway execution.</div>
+    <details class="home-workers"><summary>Other cloud tasks ({other().length})</summary><div class="home-source">{cloud.includeFinished() ? "Known tasks, including finished" : "Active tasks only"} in checked projects. Lane status is a snapshot, not live gateway execution.</div>
+       <label><input type="checkbox" checked={cloud.includeFinished()} onChange={event => cloud.setIncludeFinished(event.currentTarget.checked)} />Include finished</label>
        <For each={other()}>{item => <div class="home-other"><span><bdi dir="auto">{item.editspace} · {item.lane} · {item.owner}</bdi> · {wingmanStatus(item.record["wingman-status"]).label} <span class="home-source">({age(cloud.snapshots()[item.editspace]?.checked)} · report age unknown)</span></span><button disabled={!cloudOwnerKnown(item.owner)} onClick={() => cloud.togglePin(item)}>Pin</button></div>}</For>
     </details>
   </section>
