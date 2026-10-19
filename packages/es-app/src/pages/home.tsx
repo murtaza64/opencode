@@ -5,6 +5,7 @@ import { AppHeader } from "../components/native-header"
 import { CurrentWorkView } from "../current-work"
 import { attentionPath, createAttention, decisionLabel, type AttentionRecord } from "../attention"
 import { createHomeRequests, requestKey, type HomeRequest } from "../home-requests"
+import HomeActivity from "../home-activity"
 import "./home.css"
 
 const PinnedAgent = (props: { session: SessionRow }) => {
@@ -80,7 +81,7 @@ export default function Home() {
       <Show when={uncertainRequests().length}><details class="home-unknown"><summary>Source requests with unknown outcome ({uncertainRequests().length})</summary><For each={uncertainRequests()}>{item => <div class="home-source"><bdi dir="auto">{item.title}</bdi> · {item.kind} · {item.state === "unavailable" ? "source unavailable" : "no longer pending; outcome unknown"} · <A href={sessionHref(item.session, item.directory)}>Open original thread</A></div>}</For></details></Show>
     </section>
     <section aria-label="Pinned agents"><div class="home-section"><h2>Pinned agents <span>{dashboard.pinnedSessions().length}</span></h2><span class="home-muted">Only agents you pin</span></div><For each={dashboard.pinnedSessions()} fallback={<p class="home-muted">Pin an agent from session navigation to keep it here.</p>}>{session => <PinnedAgent session={session} />}</For><details class="home-workers"><summary>Other sessions ({dashboard.unpinnedSessions().length})</summary><For each={dashboard.unpinnedSessions()}>{session => <div class="home-other"><A href={sessionHref(session.id, session.directory)}><bdi dir="auto">{session.title || session.id}</bdi></A><button onClick={() => dashboard.togglePin(session)}>Pin</button></div>}</For></details></section>
-    <details class="home-activity"><summary>Recent activity · routine updates</summary><For each={dashboard.sessions().slice(0, 8)}>{session => <div><A href={sessionHref(session.id, session.directory)}><bdi dir="auto">{session.title || session.id}</bdi></A><span class="home-muted"> · session updated {ago(session.updated)} · not a decision</span></div>}</For></details>
+    <HomeActivity />
     <Show when={confirm()}>{draft => <dialog class="home-confirm" ref={element => queueMicrotask(() => element.showModal())} onCancel={() => setConfirm(undefined)} aria-labelledby="home-choice-title"><h2 id="home-choice-title">Record this choice?</h2><p><bdi dir="auto">{draft().record.options.find(option => option.id === draft().choice)?.label}</bdi></p><p>Save only. No prompt is sent, no agent is resumed, and no tool permission is granted.</p><div class="home-actions"><button class="home-primary" disabled={!canWrite(draft().record)} onClick={async () => { const selected = draft(); setConfirm(undefined); if (await attention.act(selected.record, { action: "choose", choice_id: selected.choice })) setView("recorded") }}>Record choice only</button><button onClick={() => setConfirm(undefined)}>Cancel</button></div></dialog>}</Show>
   </main>
 }

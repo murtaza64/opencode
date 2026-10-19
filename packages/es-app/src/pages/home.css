@@ -44,6 +44,10 @@
 .home-empty { padding: 30px 16px; color: var(--subtext0); border-block-end: 1px solid var(--surface0); }
 .home-activity, .home-workers, .home-unknown { border-block-start: 1px solid var(--surface0); margin-block-start: 22px; padding-block: 12px; }
 .home-activity > div { padding-block: 6px; }
+.home-activity-bar { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.home-activity-row { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 15px; padding-block: 10px; border-block-end: 1px solid var(--surface0); overflow-wrap: anywhere; }
+.home-activity-level { color: var(--subtext0); font-size: 11px; }
+.home-activity-level.major { color: var(--green); }
 .home-other { display: flex; align-items: center; gap: 16px; padding-block: 6px; }
 .home-notice, .home-warning { padding: 10px 13px; background: var(--surface0); margin-block-start: 13px; line-height: 1.6; border-inline-start: 2px solid var(--blue); }
 .home-warning { border-color: var(--yellow); color: var(--yellow); }

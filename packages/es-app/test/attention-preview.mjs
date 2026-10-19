@@ -52,6 +52,7 @@ export const startAttentionPreview = async () => {
     },
   }])
   preview.fixture.permissions = [{ id: "per_home", sessionID: "ses_b", permission: "bash", patterns: ["bun test"], always: [], metadata: { command: "bun test" } }]
+  preview.fixture.mail = () => ({ editspace: "fixture", lane: "fixture", messages: [{ id: "mail_preview_1", ts: Date.now() - 120_000, from: "OpenCode", to: "Reviewer", direction: "sent", deliveries: [], kind: "notice", text: "Comparing the bounded attention interface. Synthetic conversation, not a decision." }] })
   preview.fixture.currentWork = (id, dir, generate) => {
     ledger.workCalls.push({ id, directory: dir, generate })
     return { turn: { started_at: Date.now() - 100_000, elapsed_seconds: 100, status: "busy", user_messages: 1, assistant_messages: 3, tool_calls: 2, active_tools: [{ name: "read", status: "running" }], watermark: "turn-1" }, summary: { status: "ready", text: "Reviewing the attention interface", generated_at: Math.floor(Date.now() / 1000) - 20, watermark: "turn-1" } }

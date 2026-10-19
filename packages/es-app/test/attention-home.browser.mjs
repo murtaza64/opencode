@@ -4,6 +4,7 @@ import { directory } from "./composer-fixture.mjs"
 
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const preview = await startAttentionPreview()
+preview.fixture.mail = () => ({ editspace: "fixture", lane: "fixture", messages: [{ id: "mail_1", ts: Date.now(), from: "OpenCode", to: "Reviewer", direction: "sent", deliveries: [], kind: "notice", text: "Comparing the bounded attention interface." }] })
 const browser = await chromium.launch({ channel: "chrome", headless: true })
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
 await context.addInitScript(directory => {
@@ -11,6 +12,13 @@ await context.addInitScript(directory => {
   localStorage.setItem("es-app-sidebar-pins", JSON.stringify([JSON.stringify([directory, "ses_a"])]))
 }, directory)
 await context.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
+await context.route("**/es/api/state?*", async route => {
+  const response = await route.fetch()
+  const body = await response.json()
+  body.prs_at = Date.now() / 1000
+  body.unattached_prs = [{ repo: "example/repo", number: 1, url: "https://github.com/example/repo/pull/1", state: "merged", title: "Confirmed cached merge" }, { repo: "example/repo", number: 2, url: "https://github.com/example/repo/pull/2" }]
+  await route.fulfill({ response, json: body })
+})
 const page = await context.newPage()
 const errors = []
 page.on("pageerror", error => errors.push(error.message))
@@ -22,6 +30,18 @@ try {
   await expect(page.getByRole("region", { name: "Pinned agents" })).toContainText("Reviewing the attention interface")
   await expect(page.locator(".home-request")).toContainText("per_home")
   await expect(page.getByRole("heading", { name: "Needs you 3", exact: true })).toBeVisible()
+  expect(preview.fixture.calls.filter(call => call.path === "/api/mail")).toHaveLength(0)
+  await page.locator(".home-activity summary").click()
+  await expect(page.locator(".home-activity")).toContainText("Comparing the bounded attention interface")
+  await expect(page.locator(".home-activity-row")).toHaveCount(3)
+  await page.getByRole("group", { name: "Activity filter", exact: true }).getByRole("button", { name: "Major", exact: true }).click()
+  await expect(page.locator(".home-activity-row")).toHaveCount(1)
+  await expect(page.locator(".home-activity-row")).toContainText("cache observed")
+  await page.getByRole("group", { name: "Activity filter", exact: true }).getByRole("button", { name: "Mail", exact: true }).click()
+  await expect(page.locator(".home-activity-row")).toHaveCount(1)
+  await expect(page.locator(".home-activity-row")).toContainText("minor · mail")
+  await expect(page.getByRole("heading", { name: "Needs you 3", exact: true })).toBeVisible()
+  await page.locator(".home-activity summary").click()
   expect(preview.ledger.workCalls.map(call => call.id)).toEqual(["ses_a"])
   expect(preview.fixture.calls.filter(call => call.generate === "true")).toEqual([])
   const work = preview.fixture.currentWork
