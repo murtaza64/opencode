@@ -2,7 +2,9 @@ import { createMemo, createSignal, For, Show } from "solid-js"
 import { A } from "@solidjs/router"
 import { ago, sessionHref, useDashboard, type SessionRow } from "../state"
 import { AppHeader } from "../components/native-header"
-import { CurrentWorkView } from "../current-work"
+import { CurrentWorkView, type CurrentWorkSnapshot } from "../current-work"
+import { ActivityBriefView } from "../components/activity-brief"
+import type { ActivityBriefInput } from "../activity-brief"
 import { attentionPath, createAttention, decisionLabel, type AttentionRecord } from "../attention"
 import { createHomeRequests, requestKey, type HomeRequest } from "../home-requests"
 import HomeActivity from "../home-activity"
@@ -12,9 +14,23 @@ import "./home.css"
 
 const PinnedAgent = (props: { session: SessionRow }) => {
   const dashboard = useDashboard()
+  const [work, setWork] = createSignal<CurrentWorkSnapshot>({ value: null, checked: 0, error: false, loading: true })
+  const brief = (): ActivityBriefInput => {
+    const snapshot = work()
+    const status = !snapshot.value || snapshot.error || Date.now() - snapshot.checked > (snapshot.value.turn.status === "busy" ? 15_000 : 45_000) ? "unknown" : snapshot.value.turn.status
+    const lane = (dashboard.state()?.threads ?? []).flatMap((thread: { lanes?: { owner: string; activity?: string; activity_at?: string; activity_session?: string }[] }) => thread.lanes ?? [])
+      .find((lane: { owner: string }) => lane.owner === props.session.id)
+    return {
+      sessionID: props.session.id,
+      status,
+      report: lane?.activity && lane.activity_session && lane.activity_at ? { sessionID: lane.activity_session, owner: lane.owner, text: lane.activity, at: Date.parse(lane.activity_at) } : undefined,
+      // This endpoint has safe names but no tool start times or current-turn TODO provenance.
+      tools: snapshot.value?.turn.active_tools.map(tool => ({ name: tool.name, status: tool.status, sessionID: props.session.id })),
+    }
+  }
   return <div class="home-agent">
     <div><A class="home-name" href={sessionHref(props.session.id, props.session.directory)}><bdi dir="auto">{props.session.title || props.session.id}</bdi></A><div class="home-muted"><bdi dir="auto">{props.session.project || dashboard.editspace() || "project"}</bdi></div><button onClick={() => dashboard.togglePin(props.session)}>Unpin</button></div>
-    <div><div class="home-source">Read-only turn telemetry · generated summary cache</div><CurrentWorkView id={props.session.id} directory={props.session.directory} compact /></div>
+    <div><ActivityBriefView input={brief()} /><details><summary>Turn telemetry</summary><div class="home-source">Read-only turn telemetry · generated summary cache</div><CurrentWorkView id={props.session.id} directory={props.session.directory} compact onSnapshot={setWork} /></details></div>
   </div>
 }
 

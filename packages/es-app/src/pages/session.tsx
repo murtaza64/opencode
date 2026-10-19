@@ -35,6 +35,7 @@ import { MailSubscriptions } from "../components/mail-subscriptions"
 import { mailForSession, mailLocation, mailRows, mailSourceID } from "../mail-timeline"
 import { handoffChain, handoffNext, successorFor } from "../handoffs"
 import { ComposerImages } from "../components/composer-images"
+import { ActivityBriefView } from "../components/activity-brief"
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const [error, setError] = createSignal("")
@@ -183,8 +184,11 @@ function SessionView(props: { sessionID: string; directory: string }) {
        (failure: unknown) => ({ editspace: scope.name, lane: scope.lane ?? "", messages: [], error: `Unable to load mail: ${String(failure)}` }),
     ),
   )
+  const [todoUpdate, setTodoUpdate] = createSignal<{ messageID?: string; at: number }>()
   const live = createLiveSession(sessionID, directory, (event) => {
     if (event.type.startsWith("session.input.")) void composer.refreshInputs()
+    if (event.type === "todo.updated" && event.properties?.sessionID === sessionID)
+      setTodoUpdate({ messageID: live.data.message[sessionID]?.findLast((message) => message.role === "user")?.id, at: Date.now() })
   })
   const connected = () => !!session() && !live.loading() && !live.connectionError()
   createEffect(() => {
@@ -413,6 +417,36 @@ function SessionView(props: { sessionID: string; directory: string }) {
     const tick = usePulse()
     return <span class="session-work-spinner" data-on={tick() % 2 ? "true" : undefined} aria-hidden="true" />
   }
+  const briefInput = createMemo(() => {
+    const current = messages().slice(Math.max(0, messages().findLastIndex((message) => message.role === "user")))
+    const tools = current.flatMap((message) => message.role !== "assistant" ? [] :
+      (live.data.part[message.id] ?? []).flatMap((part) => part.type === "tool" ? [part] : []))
+    const todoTool = tools.findLast((part) => part.tool === "todowrite" && part.state.status === "completed")
+    // Persisted TODOs outlive prompts. Only a write in this turn makes them current.
+    const todoAt = todoUpdate()?.messageID === current[0]?.id ? todoUpdate()?.at :
+      todoTool?.state.status === "completed" ? todoTool.state.time.end : undefined
+    const lane = (state()?.threads ?? []).flatMap((thread: { lanes?: {
+      owner: string; activity?: string; activity_at?: string; activity_session?: string
+    }[] }) => thread.lanes ?? []).find((lane: { owner: string }) => lane.owner === sessionID)
+    return {
+      sessionID,
+      status: connected() ? busy() || subagentsRunning() ? "busy" as const : "idle" as const : "unknown" as const,
+      report: lane?.activity && lane.activity_session && lane.activity_at ? {
+        sessionID: lane.activity_session,
+        owner: lane.owner,
+        text: lane.activity,
+        at: Date.parse(lane.activity_at),
+      } : undefined,
+      todos: busy() && todoAt !== undefined ? live.data.todo : undefined,
+      todoAt,
+      tools: !busy() ? [] : tools.map((part) => ({
+          name: part.tool,
+          status: part.state.status,
+          sessionID: part.sessionID,
+          at: part.state.status === "running" ? part.state.time.start : undefined,
+        })),
+    }
+  })
   const Thinking = () => {
     const tick = usePulse()
     return <div class="thinking" title="agent is thinking">
@@ -421,11 +455,13 @@ function SessionView(props: { sessionID: string; directory: string }) {
   }
   const WorkStatus = () => (
     <div class="session-work-status" role="status" data-state={workState()} title={live.connectionError() || attentionError() || undefined}>
-      <Show when={workState() !== "idle"}>
+      <Show when={workState() === "working" || workState() === "idle"} fallback={<>
+        <Show when={workState() === "retry"}><WorkSpinner /></Show>
+        <span>{workState() === "retry" ? "Retrying" : workState() === "waiting" ? "Waiting for your reply" : workState() === "failed" ?
+          `Session failed — see error ${inlineError() ? "in conversation" : "above"}` : "Reconnecting — activity unavailable"}</span>
+      </>}>
         <Show when={workState() === "working" || workState() === "retry"}><WorkSpinner /></Show>
-        <span>{workState() === "working" ? "Working" : workState() === "retry" ? "Retrying" :
-           workState() === "waiting" ? "Waiting for your reply" : workState() === "failed" ?
-              `Session failed — see error ${inlineError() ? "in conversation" : "above"}` : "Reconnecting — activity unavailable"}</span>
+        <ActivityBriefView input={briefInput()} />
       </Show>
       <Show when={live.connectionError() || attentionError()}>
         <button disabled={live.loading()} onClick={() => {

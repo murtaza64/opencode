@@ -2,6 +2,7 @@ import { createEffect, createSignal, onCleanup, Show, untrack } from "solid-js"
 import { ApiStatusError, es, type CurrentWork } from "./api"
 
 type Snapshot = { value: CurrentWork | null; checked: number; error: boolean; loading: boolean }
+export type CurrentWorkSnapshot = Snapshot
 type Entry = {
   state: () => Snapshot
   set: (value: Snapshot) => void
@@ -73,9 +74,10 @@ export const currentWork = (id: string, directory: string, generate = false) => 
 const elapsed = (seconds: number) => seconds < 60 ? `${seconds}s` : seconds < 3600
   ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m`
 
-export function CurrentWorkView(props: { id: string; directory: string; compact?: boolean }) {
+export function CurrentWorkView(props: { id: string; directory: string; compact?: boolean; onSnapshot?: (value: CurrentWorkSnapshot) => void }) {
   const [now, setNow] = createSignal(Date.now())
   const [snapshot, setSnapshot] = createSignal<Snapshot>({ value: null, checked: 0, error: false, loading: true })
+  createEffect(() => props.onSnapshot?.(snapshot()))
   createEffect(() => {
     const id = props.id
     const directory = props.directory
