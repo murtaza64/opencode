@@ -68,11 +68,21 @@ const padded = (length: number) => {
 }
 
 describe("input image validation", () => {
-  test.each(["iCCP", "zTXt", "iTXt"])("rejects compressed %s metadata before a decoder can inflate it", (type) => {
+  test.each(["iCCP", "zTXt", "iTXt"])("accepts bounded opaque %s metadata for stripping before decode", (type) => {
     const content = type === "iTXt" ? "profile\0\x01\0\0\0compressed" : "profile\0\0compressed"
     const metadata = integer(content.length, 4) + type + content + "\0\0\0\0"
+    expect(check(fixtures.png, fixtures.png.data.slice(0, 33) + metadata + fixtures.png.data.slice(33))).toBeUndefined()
+  })
+  test.each([
+    ["zTXt", "profile\0\x01compressed"],
+    ["iCCP", "profile without terminator"],
+    ["iTXt", "profile\0\x02\0\0\0compressed"],
+    ["iTXt", "profile\0\x01\0no language terminator"],
+    ["iTXt", "profile\0\x01\0\0no translated terminator"],
+  ])("rejects malformed %s metadata framing", (type, content) => {
+    const metadata = integer(content.length, 4) + type + content + "\0\0\0\0"
     expect(check(fixtures.png, fixtures.png.data.slice(0, 33) + metadata + fixtures.png.data.slice(33))).toContain(
-      "Compressed PNG metadata",
+      "Invalid or truncated PNG",
     )
   })
   test("publishes the fixed admission contract", () => {

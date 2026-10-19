@@ -9,7 +9,7 @@ import { EventV2 } from "@opencode-ai/core/event"
 import { MessageID, PartID } from "@/session/schema"
 import { HistoryEvent } from "@/server/routes/instance/httpapi/groups/sync"
 import { provideTmpdirServer } from "../fixture/fixture"
-import { inputImage, imageProviderConfig } from "../fixture/input-image"
+import { inputImage, imageProviderConfig, pngMetadata } from "../fixture/input-image"
 import { reply, TestLLMServer } from "../lib/llm-server"
 import { testEffect } from "../lib/effect"
 import { httpApiLayer, requestInDirectory } from "./httpapi-layer"
@@ -22,6 +22,61 @@ const it = testEffect(
     TestLLMServer.layer,
   ),
 )
+
+for (const delivery of ["queue", "steer"] as const) {
+  it.live(
+    `admits compressed screenshot metadata through HTTP ${delivery} without changing image content`,
+    () =>
+      provideTmpdirServer(
+        ({ dir, llm }) =>
+          Effect.gen(function* () {
+            const image = yield* inputImage()
+            const held = Promise.withResolvers<void>()
+            yield* Effect.addFinalizer(() => Effect.sync(() => held.resolve()))
+            yield* llm.push(reply().text("initial").wait(held.promise).stop())
+            yield* llm.text("synthetic images received")
+            const session = yield* Session.use.create({ title: "Synthetic metadata screenshot" })
+            const post = (suffix: string, body: unknown) =>
+              requestInDirectory(`/session/${session.id}/${suffix}`, dir, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(body),
+              })
+            yield* post("prompt_async", {
+              agent: "build",
+              model: { providerID: "test", modelID: "test-model" },
+              parts: [{ type: "text", text: "unfinished disposable task" }],
+            })
+            yield* llm.wait(1)
+            const payload = {
+              requestID: `metadata-${delivery}`,
+              delivery,
+              text: "",
+              images: (["zTXt", "iTXt", "iCCP"] as const).map((type) => ({
+                ...image,
+                url: pngMetadata(image.url, type),
+              })),
+            }
+            const response = yield* post("input", payload)
+            const receipt = yield* response.json
+            expect({ status: response.status, receipt }).toMatchObject({
+              status: 200,
+              receipt: { state: "pending", images: payload.images },
+            })
+            expect(yield* (yield* post("input", payload)).json).toEqual(receipt)
+            held.resolve()
+            yield* llm.wait(2)
+            const calls = yield* llm.inputs
+            expect(JSON.stringify(calls[1]).split(image.url)).toHaveLength(4)
+            expect(JSON.stringify(calls[1])).not.toContain(payload.images[0]?.url)
+            expect(JSON.stringify(calls[1])).not.toContain(payload.images[1]?.url)
+            expect(JSON.stringify(calls[1])).not.toContain(payload.images[2]?.url)
+          }),
+        { config: imageProviderConfig },
+      ),
+    25_000,
+  )
+}
 
 it.live(
   "durably admits image-only repeated images and preserves exact retries through promotion",
@@ -285,6 +340,19 @@ it.live(
               .status,
           ).toBe(400)
           expect((yield* post(input, { ...payload, images: [{ ...image, mime: "image/jpeg" }] })).status).toBe(400)
+          const corrupted = Buffer.from(image.url.split(",")[1] ?? "", "base64")
+          corrupted[41] = 0 // Corrupt the IDAT zlib header, not the discardable metadata.
+          expect(
+            (yield* post(input, {
+              ...payload,
+              images: [
+                {
+                  ...image,
+                  url: pngMetadata(`data:image/png;base64,${corrupted.toString("base64")}`, "zTXt"),
+                },
+              ],
+            })).status,
+          ).toBe(400)
           expect(
             (yield* post(input, { ...payload, images: [{ ...image, url: "data:image/png;base64,bm90LWFuLWltYWdl" }] }))
               .status,

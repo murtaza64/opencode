@@ -7,6 +7,7 @@ import { MessageID, PartID, SessionID } from "@/session/schema"
 import path from "node:path"
 import { TestConfig } from "../fixture/config"
 import { testEffect } from "../lib/effect"
+import { inputImage, pngMetadata } from "../fixture/input-image"
 
 const it = testEffect(LayerNode.compile(Image.node, [[Config.node, TestConfig.layer()]]))
 const tiny = testEffect(
@@ -27,6 +28,29 @@ function part(mime: string, data: string) {
 }
 
 describe("Image", () => {
+  it.effect("drops opaque PNG metadata without asking the raster decoder to inflate it", () =>
+    Effect.gen(function* () {
+      const source = yield* inputImage()
+      const image = yield* Image.Service
+      const input = {
+        ...part("image/png", ""),
+        url: pngMetadata(source.url, "zTXt", Buffer.from("not a zlib stream")),
+      }
+      expect(yield* image.normalize(input)).toEqual({ ...input, url: source.url })
+    }),
+  )
+
+  it.effect("rejects a truncated PNG container before removing metadata", () =>
+    Effect.gen(function* () {
+      const source = yield* inputImage()
+      const image = yield* Image.Service
+      const data = Buffer.from(pngMetadata(source.url, "iTXt").split(",")[1] ?? "", "base64")
+      const exit = yield* image.normalize(part("image/png", data.subarray(0, -1).toString("base64"))).pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(Image.DecodeError)
+    }),
+  )
+
   it.effect("normalizes generated png and jpeg attachments", () =>
     Effect.gen(function* () {
       const photon = yield* Effect.promise(() => import("@silvia-odwyer/photon-node"))

@@ -11,7 +11,7 @@ export const Support = {
   maxHeight: 8192,
   maxPixels: 16777216,
   animated: false,
-  compressedMetadata: false,
+  compressedMetadata: false, // Admission strips compressed PNG metadata before decoding or delivery.
 } as const
 
 /** Bounds encoded bytes and decoder-visible dimensions; does not decompress pixels or verify checksums. */
@@ -76,12 +76,20 @@ const png = (data: string): string | undefined => {
     const end = start + size + 4
     if (end > data.length || !/^[A-Za-z]{4}$/.test(type)) return invalid
     if (!header && type !== "IHDR") return invalid
-    // Photon inflates metadata separately from the bounded raster dimensions.
-    if (type === "iCCP" || type === "zTXt") return "Compressed PNG metadata is not supported"
+    // Compressed ancillary payloads are opaque here and stripped before raster decoding.
+    if (type === "iCCP" || type === "zTXt") {
+      const keywordEnd = data.indexOf("\0", start)
+      if (keywordEnd <= start || keywordEnd > start + 79 || keywordEnd >= start + size - 2) return invalid
+      if (data.charCodeAt(keywordEnd + 1) !== 0) return invalid
+    }
     if (type === "iTXt") {
       const keywordEnd = data.indexOf("\0", start)
-      if (keywordEnd < start || keywordEnd >= start + size - 2) return invalid
-      if (data.charCodeAt(keywordEnd + 1) !== 0) return "Compressed PNG metadata is not supported"
+      if (keywordEnd <= start || keywordEnd > start + 79 || keywordEnd >= start + size - 4) return invalid
+      if (data.charCodeAt(keywordEnd + 1) > 1 || data.charCodeAt(keywordEnd + 2) !== 0) return invalid
+      const languageEnd = data.indexOf("\0", keywordEnd + 3)
+      if (languageEnd < 0 || languageEnd >= start + size - 1) return invalid
+      const translatedEnd = data.indexOf("\0", languageEnd + 1)
+      if (translatedEnd < 0 || translatedEnd >= start + size) return invalid
     }
     if (type === "acTL" || type === "fcTL" || type === "fdAT") return "Animated PNG images are not supported"
     if (type === "IHDR") {

@@ -83,7 +83,10 @@ const layer = Layer.effect(
       if (!input.url.startsWith("data:") || !input.url.includes(";base64,"))
         return yield* new InvalidDataUrlError({ url: input.url })
 
-      const base64 = input.url.slice(input.url.indexOf(";base64,") + ";base64,".length)
+      const url = input.mime === "image/png" ? stripPngMetadata(input.url) : input.url
+      if (!url) return yield* new DecodeError()
+
+      const base64 = url.slice(url.indexOf(";base64,") + ";base64,".length)
       const bytes = Buffer.byteLength(base64, "utf8")
 
       const photon = yield* loadPhoton
@@ -97,7 +100,7 @@ const layer = Layer.effect(
         const originalWidth = decoded.get_width()
         const originalHeight = decoded.get_height()
         if (originalWidth <= info.maxWidth && originalHeight <= info.maxHeight && bytes <= info.maxBase64Bytes)
-          return input
+          return url === input.url ? input : { ...input, url }
         if (!info.autoResize)
           return yield* new SizeError({
             bytes,
@@ -168,5 +171,24 @@ const layer = Layer.effect(
 )
 
 export const node = LayerNode.make({ service: Service, layer: layer, deps: [Config.node] })
+
+// Photon otherwise inflates metadata outside the raster budget. Preserve raster chunks without inflation.
+const stripPngMetadata = (url: string) => {
+  const data = Buffer.from(url.slice(url.indexOf(";base64,") + 8), "base64")
+  if (!data.subarray(0, 8).equals(Buffer.from("\x89PNG\r\n\x1a\n", "latin1"))) return undefined
+  const chunks = [data.subarray(0, 8)]
+  let stripped = false
+  for (let offset = 8; offset < data.length; ) {
+    if (offset + 12 > data.length) return undefined
+    const end = offset + 12 + data.readUInt32BE(offset)
+    if (end > data.length) return undefined
+    const type = data.toString("ascii", offset + 4, offset + 8)
+    const drop = type === "iCCP" || type === "zTXt" || type === "iTXt"
+    stripped ||= drop
+    if (!drop) chunks.push(data.subarray(offset, end))
+    offset = end
+  }
+  return stripped ? `data:image/png;base64,${Buffer.concat(chunks).toString("base64")}` : url
+}
 
 export * as Image from "./image"

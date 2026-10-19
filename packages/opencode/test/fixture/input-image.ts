@@ -1,4 +1,5 @@
 import { Effect } from "effect"
+import { crc32, deflateSync } from "node:zlib"
 import { testProviderConfig } from "../lib/test-provider"
 
 export const inputImage = (color = 127) =>
@@ -9,6 +10,21 @@ export const inputImage = (color = 127) =>
     image.free()
     return { type: "file" as const, mime: "image/png" as const, url, filename: "disposable.png" }
   })
+
+export const pngMetadata = (
+  url: string,
+  type: "zTXt" | "iTXt" | "iCCP",
+  compressed = deflateSync(Buffer.from("synthetic screenshot metadata")),
+) => {
+  const data = Buffer.concat([Buffer.from(type === "iTXt" ? "fixture\0\x01\0\0\0" : "fixture\0\0"), compressed])
+  const chunk = Buffer.alloc(data.length + 12)
+  chunk.writeUInt32BE(data.length)
+  chunk.write(type, 4)
+  data.copy(chunk, 8)
+  chunk.writeUInt32BE(crc32(chunk.subarray(4, -4)), chunk.length - 4)
+  const png = Buffer.from(url.slice(url.indexOf(",") + 1), "base64")
+  return `data:image/png;base64,${Buffer.concat([png.subarray(0, 33), chunk, png.subarray(33)]).toString("base64")}`
+}
 
 export const imageProviderConfig = (url: string) => {
   const config = testProviderConfig(url)
