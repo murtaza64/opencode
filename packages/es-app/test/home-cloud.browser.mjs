@@ -14,7 +14,7 @@ try {
   expect(preview.ledger.transcriptCalls).toBe(0)
   await cloud.getByRole("button", { name: "Pin", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Pinned agents 2", exact: true })).toBeVisible()
-  await expect(cloud).toContainText("Self-reported lane record")
+  await expect(cloud).toContainText("Lane record snapshot")
   await expect(cloud).toContainText("report age unknown")
   await expect(cloud).toContainText("0.42")
   await cloud.getByRole("button", { name: "Load transcript", exact: true }).click()
@@ -35,10 +35,10 @@ try {
   preview.ledger.cloudStatus = 200
   preview.ledger.cloudLanes[0].owner = "wingman:replacement-task"
   await cloud.getByRole("button", { name: "Refresh cloud lanes", exact: true }).click()
-  await expect(cloud).toContainText("pinned owner no longer observed")
+  await expect(cloud).toContainText("Pinned owner missing")
   await expect(cloud.getByRole("button", { name: "Load transcript", exact: true })).toHaveCount(0)
   await page.reload()
-  await expect(cloud).toContainText("pinned owner no longer observed")
+  await expect(cloud).toContainText("Pinned owner missing")
   await page.evaluate(() => { document.documentElement.dir = "rtl" })
   await page.setViewportSize({ width: 760, height: 1000 })
   expect(await cloud.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)

@@ -18,7 +18,7 @@ const bridge = createServer((req, res) => {
   if (req.url.startsWith("/api/wingman")) {
     res.writeHead(200, { "content-type": "application/json" })
     res.end(JSON.stringify(req.url.startsWith("/api/wingman/transcript")
-      ? { status: "processing", turns: [{ output: "Native synthetic Wingman transcript" }], turns_dropped: 0 }
+      ? { owner: "wingman:synthetic", status: "processing", turns: [{ reply: "Native synthetic Wingman transcript" }], turns_dropped: 0 }
       : { lanes: [{ lane: "cloud-fixture", owner: "wingman:synthetic", "wingman-status": "processing", "wingman-cost": "0.12" }], error: "" }))
     return
   }
@@ -91,8 +91,13 @@ try {
   const cloud = page.getByRole("region", { name: "Cloud agents", exact: true })
   await cloud.getByText("Other cloud tasks (1)", { exact: true }).click()
   await cloud.getByRole("button", { name: "Pin", exact: true }).click()
-  await cloud.getByRole("button", { name: "Load transcript", exact: true }).click()
-  await expect(cloud).toContainText("Native synthetic Wingman transcript")
+  const cloudLink = page.locator(".sidebar .pinned-section a.cloud-nav")
+  await expect(cloudLink.locator("[aria-label='Cloud agent']")).toBeVisible()
+  await cloudLink.click()
+  await expect(page.getByRole("heading", { name: "Cloud agent", exact: true })).toBeVisible()
+  const cloudDetails = page.getByRole("region", { name: "Cloud agent details", exact: true })
+  await cloudDetails.getByRole("button", { name: "Load transcript", exact: true }).click()
+  await expect(cloudDetails).toContainText("Native synthetic Wingman transcript")
   for (const route of ["/es/api/attention/publish", "/oc/pty", "/oc/session/ses_a/shell", "/es/api/run", "/es/api/wingman", "/es/api/wingman/transcript"])
     expect(await page.evaluate(route => fetch(route, { method: "POST" }).then(res => res.status), route)).toBe(403)
   expect(core.calls.filter(call => !["GET", "HEAD", "OPTIONS"].includes(call.method))).toEqual([])

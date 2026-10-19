@@ -1,8 +1,5 @@
-import { createRoot, createSignal } from "solid-js"
-
-// Cloud pins live apart from session pins: session pins are [directory, sessionID]
-// tuples keyed to the local daemon, while a cloud lane outlives any one Wingman
-// session (a respawn mints a new workflow id), so it is pinned by editspace + lane.
+// Legacy lane-only pin keys. cloud-agents owns the single live store and binds
+// these keys to an observed owner before persisting the canonical pin schema.
 export const CLOUD_PIN_STORAGE_KEY = "es-app-cloud-pins"
 
 export type CloudPin = { runtime: "wingman"; editspace: string; lane: string }
@@ -34,27 +31,3 @@ export const toggledCloudPins = (keys: string[], pin: CloudPin) => {
   const key = cloudPinKey(pin)
   return keys.includes(key) ? keys.filter((item) => item !== key) : [...keys, key]
 }
-
-const store = createRoot(() => {
-  const load = () => {
-    try {
-      return readCloudPins(localStorage.getItem(CLOUD_PIN_STORAGE_KEY))
-    } catch {
-      return []
-    }
-  }
-  const [keys, setKeys] = createSignal<string[]>(load())
-  const save = (next: string[]) => {
-    setKeys(next)
-    try {
-      localStorage.setItem(CLOUD_PIN_STORAGE_KEY, JSON.stringify(next))
-    } catch {
-      // Keep the pin for this window when browser storage is unavailable.
-    }
-  }
-  return { keys, save }
-})
-
-export const cloudPins = () => store.keys().flatMap((key) => parseCloudPin(key) ?? [])
-export const isCloudPinned = (pin: CloudPin) => store.keys().includes(cloudPinKey(pin))
-export const toggleCloudPin = (pin: CloudPin) => store.save(toggledCloudPins(store.keys(), pin))

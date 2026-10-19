@@ -36,6 +36,7 @@ try {
   const dialog = page.getByRole("dialog", { name: "New session" })
   const firstRow = page.locator(".sidebar .session-entry").first()
   await expect(firstRow).toBeVisible()
+  await page.evaluate(() => document.fonts.ready)
   const rowBefore = await firstRow.boundingBox()
   await button.click()
   await expect(dialog).toBeVisible()
@@ -63,13 +64,13 @@ try {
 
   fixture.createMode = "fail"
   await page.getByRole("button", { name: "Create session" }).click()
-  await expect(page.getByRole("alert")).toContainText("HTTP 503")
+  await expect(dialog.getByRole("alert")).toContainText("HTTP 503")
   expect(createCalls()).toHaveLength(1)
   expect(preserves(await saved(), before)).toBe(true)
 
   fixture.createMode = "lose"
   await page.getByRole("button", { name: "Create session" }).click()
-  await expect(page.getByRole("alert")).toContainText("may have been created")
+  await expect(dialog.getByRole("alert")).toContainText("may have been created")
   expect(createCalls()).toHaveLength(2)
   await page.waitForTimeout(100)
   expect(createCalls()).toHaveLength(2)

@@ -1,0 +1,8 @@
+.cloud-runtime-icon { display: inline-flex; flex-shrink: 0; inline-size: 14px; color: var(--sky); }
+.cloud-nav .nav-title { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+.cloud-discovery { margin-block: 9px; border-block: 1px solid var(--surface0); padding-block: 9px; }
+.cloud-discovery summary { padding-inline: 12px; font-size: 11px; color: var(--subtext0); cursor: pointer; }
+.cloud-sidebar-source { padding: 5px 12px; font-size: 10px; line-height: 1.6; color: var(--subtext0); overflow-wrap: anywhere; }
+.cloud-nav-entry { min-inline-size: 0; }
+.cloud-nav .session-project { max-inline-size: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cloud-mini-entry { flex-shrink: 0; }

@@ -127,8 +127,9 @@ try {
   await expect(active.locator("textarea")).toBeVisible()
   await page.screenshot({ path: path.join(artifacts, "native-rtl.png") })
   expect(
-    fixture.calls.filter((call) => !["GET", "HEAD", "OPTIONS"].includes(call.method)).map((call) => [call.method, call.path]),
+    fixture.calls.filter((call) => !["GET", "HEAD", "OPTIONS"].includes(call.method) && call.path !== "/api/attention/session").map((call) => [call.method, call.path]),
   ).toEqual([["POST", "/session/ses_a/input"]])
+  expect(fixture.calls.filter(call => call.path === "/api/attention/session" && call.method === "POST").map(call => call.body)).toEqual([{}])
   expect(errors).toEqual([])
   await page.evaluate(() => localStorage.setItem("es-app-left-open", "0"))
   const spotlightProfile = await mkdtemp(path.join(tmpdir(), "es-desktop-spotlight-"))

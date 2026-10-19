@@ -306,7 +306,7 @@ export type WingmanTurn = {
   error?: unknown
   events?: { kind?: string; text?: string; tool_name?: string | null; timestamp?: string }[]
 }
-export type WingmanTranscript = { status?: string; turns?: WingmanTurn[]; turns_dropped?: number }
+export type WingmanTranscript = { owner?: string; status?: string; turns?: WingmanTurn[]; turns_dropped?: number }
 
 const esQ = (es?: string) => (es ? `es=${encodeURIComponent(es)}` : "")
 
@@ -421,8 +421,8 @@ export const es = {
   wingman: (esName?: string): Promise<{ lanes: WingmanLane[]; error: string }> =>
     fetch(`/es/api/wingman?${esQ(esName)}`).then(statusJson<{ lanes: WingmanLane[]; error: string }>),
   // Live fetch through the Wingman gateway; slow (seconds) and fails off VPN.
-  wingmanTranscript: (lane: string, esName?: string, signal?: AbortSignal): Promise<WingmanTranscript> =>
-    fetch(`/es/api/wingman/transcript?lane=${encodeURIComponent(lane)}&${esQ(esName)}`, { signal })
+  wingmanTranscript: (lane: string, esName?: string, signal?: AbortSignal, expectedOwner?: string): Promise<WingmanTranscript> =>
+    fetch(`/es/api/wingman/transcript?lane=${encodeURIComponent(lane)}&${esQ(esName)}${expectedOwner ? `&expected_owner=${encodeURIComponent(expectedOwner)}` : ""}`, { signal })
       .then(statusJson<WingmanTranscript>),
   notifications: (): Promise<{ notifications: AttentionNotification[] }> =>
     fetch("/es/api/notifications").then(json<{ notifications: AttentionNotification[] }>),

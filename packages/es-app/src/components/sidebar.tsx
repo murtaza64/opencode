@@ -11,6 +11,7 @@ import { leftOpen, leftWidth, toggleLeft } from "../ui"
 import { nativeHeader, NativeHeader } from "./native-header"
 import { NewSession } from "./new-session"
 import { peekAttrs, SessionPeek } from "./session-peek"
+import { CloudNav, CloudDiscovery } from "./cloud-sidebar"
 
 const BusyDot = () => {
   const [visible, setVisible] = createSignal(false)
@@ -37,7 +38,7 @@ const StatusDot = (props: { state: DotState }) => (
 export default function Sidebar() {
   const { state, dotFor, editspace, setEditspace, editspaces, archivedIds, notifications, markViewed,
     allProjects, setAllProjects, sessionRows, sessions, pinnedSessions, unpinnedSessions, isPinned, togglePin,
-    sessionsLoading, sessionsError, setVisibleSessions } =
+    sessionsLoading, sessionsError, setVisibleSessions, cloud } =
     useDashboard()
   const observed = new Map<Element, string>()
   const visible = new Set<Element>()
@@ -249,9 +250,10 @@ export default function Sidebar() {
               ▦
             </A>
           <NewSession compact />
-          <Show when={pinnedSessions().length}>
+          <Show when={pinnedSessions().length || cloud.pins().length}>
             <div class="mini-pinned-heading" title="Pinned sessions" aria-label="Pinned sessions" />
             <For each={pinnedSessions()}>{miniItem}</For>
+            <For each={cloud.pins()}>{pin => <CloudNav pin={pin} mini />}</For>
           </Show>
           <For each={unpinnedSessions()}>{miniItem}</For>
         </nav>
@@ -266,12 +268,14 @@ export default function Sidebar() {
             </A>
           <NewSession />
         </div>
-        <Show when={!query().trim() && pinnedSessions().length}>
+        <Show when={!query().trim() && (pinnedSessions().length || cloud.pins().length)}>
           <section class="pinned-section" aria-label="Pinned sessions">
             <div class="nav-heading">Pinned</div>
             <For each={pinnedSessions()}>{(s) => item(s)}</For>
+            <For each={cloud.pins()}>{pin => <CloudNav pin={pin} />}</For>
           </section>
         </Show>
+        <CloudDiscovery />
         <Show when={notifications().length}>
           <div class="notification-section">
             <div class="nav-heading">needs you</div>

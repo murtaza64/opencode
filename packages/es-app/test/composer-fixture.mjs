@@ -88,6 +88,8 @@ export const createFixture = async () => {
     insights: undefined,
     prDetails: undefined,
     mail: undefined,
+    wingman: undefined,
+    wingmanTranscript: undefined,
     handoffs: undefined,
     subscriptions: undefined,
     laneOwners: [],
@@ -212,8 +214,14 @@ export const createFixture = async () => {
         sessions: fixture.sessionIDs.map(currentSession),
       })
     if (url.pathname === "/api/notifications") return json({ notifications: fixture.notifications ?? [] })
+    if (url.pathname === "/api/attention/session") return json({ operator: false })
+    if (url.pathname === "/api/attention") return json({ records: [], projects: [], partial: false })
     if (url.pathname === "/api/mail") return fixture.mail
       ? json(fixture.mail(url.searchParams.get("es"), url.searchParams.get("lane") ?? url.searchParams.get("session")))
+      : json({ detail: "Not Found" }, 404)
+    if (url.pathname === "/api/wingman") return json(fixture.wingman?.(url.searchParams.get("es")) ?? { lanes: [], error: "" })
+    if (url.pathname === "/api/wingman/transcript") return fixture.wingmanTranscript
+      ? json(fixture.wingmanTranscript(url.searchParams.get("lane"), url.searchParams.get("es")))
       : json({ detail: "Not Found" }, 404)
     if (url.pathname === "/api/handoffs" && request.method === "GET")
       return json({ handoffs: fixture.handoffs ?? [] })

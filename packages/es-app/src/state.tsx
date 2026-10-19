@@ -18,6 +18,7 @@ import { createServerEvents } from "./event-source"
 import { resolveProjectName } from "./project-name"
 import { reconcilePins, transferPins, type Handoff } from "./handoffs"
 import { pinSessionID } from "./session-pins"
+import { createCloudAgents } from "./cloud-agents"
 import type { GlobalSession } from "@opencode-ai/sdk/v2"
 import type { Event } from "@opencode-ai/sdk/v2"
 import { useLocation } from "@solidjs/router"
@@ -70,6 +71,7 @@ type DashboardCtx = {
   sessionsLoading: () => boolean
   sessionsError: () => string
   activity: ReturnType<typeof createSessionActivity>
+  cloud: ReturnType<typeof createCloudAgents>
   setVisibleSessions: (ids: Set<string>) => void
 }
 
@@ -116,6 +118,11 @@ export function DashboardProvider(props: ParentProps) {
     },
   )
   const [handoffsError, setHandoffsError] = createSignal("")
+  const cloud = createCloudAgents({
+    project: () => allProjects() ? undefined : editspace() ?? editspaces()?.default ?? undefined,
+    defaultProject: () => editspace() ?? editspaces()?.default ?? undefined,
+    targetProject: () => route.pathname === "/cloud" ? new URLSearchParams(route.search).get("es") ?? undefined : undefined,
+  })
   const [handoffs, { refetch: refetchHandoffs }] = createResource<Handoff[], { name: string; revision: unknown }>(
     () => ({ name: editspace() ?? editspaces()?.default ?? "", revision: state() }),
     async ({ name }, info) => {
@@ -509,6 +516,7 @@ export function DashboardProvider(props: ParentProps) {
     sessionsLoading: () => allProjects() && globalSessions.loading,
     sessionsError,
     activity,
+    cloud,
     setVisibleSessions,
   }
   return <Ctx.Provider value={value}>{props.children}</Ctx.Provider>
