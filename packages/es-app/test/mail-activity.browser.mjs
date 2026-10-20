@@ -15,6 +15,12 @@ fixture.messages = [
   user("msg_003", "Mail body with <img src=x onerror=alert(1)>", { source, delivery: "queue", state: "promoted" }),
   user("msg_004", "Mail without delivery metadata", { source: { ...source, id: "mail-43" } }),
 ]
+fixture.mail = (es, recipient) => ({ editspace: es, lane: "", messages: recipient === "ses_a" ? [
+  { id: "mail-42", ts: new Date(1).toISOString(), created_ms: 1, from: "lane-alpha", to: "lane-beta",
+    direction: "received", text: "Mail body with <img src=x onerror=alert(1)>", deliveries: [] },
+  { id: "mail-43", ts: new Date(1).toISOString(), created_ms: 1, from: "lane-alpha", to: "lane-beta",
+    direction: "received", text: "Mail without delivery metadata", deliveries: [] },
+] : [] })
 const browser = await chromium.launch({ channel: "chrome", headless: true })
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 await page.context().route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())

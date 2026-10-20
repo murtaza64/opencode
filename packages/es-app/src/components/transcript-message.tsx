@@ -2,6 +2,8 @@ import { createMemo, createSignal, For, Show, type ComponentProps } from "solid-
 import { Message } from "@opencode-ai/session-ui/message-part"
 import { errorText } from "../live-session"
 import type { MailDelivery, MailMessage } from "../api"
+import { mailSentAt, mailWake } from "../mail-timeline"
+import { MailWakeEvidence } from "./mail-wake-evidence"
 
 type MailSource = { type: "editspace-mail"; id: string; sender: string; recipient: string }
 const mailTime = (value: string | number | null) => value == null ? "" : new Date(value).toLocaleString()
@@ -75,18 +77,19 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
     {(metadata) => <details class="mail-activity" id={`mail-${metadata().mail.id}`} data-mail-message-id={props.message.id}>
       <summary class="mail-activity-summary">
          <span class="mail-activity-kind">Mail<Show when={props.mailRecord}> · {props.mailRecord?.direction === "sent" ? "Outbound" : "Inbound"}</Show></span>
-        <span class="mail-activity-route"><bdi dir="auto">{metadata().mail.sender}</bdi> → <bdi dir="auto">{metadata().mail.recipient}</bdi></span>
+        <span class="mail-activity-route"><bdi dir="auto">{metadata().mail.sender}</bdi> <span class="mail-activity-arrow" aria-hidden="true">→</span> <bdi dir="auto">{metadata().mail.recipient}</bdi></span>
         <span class="mail-activity-state">
+          <For each={props.mailDeliveries ?? []}>{(delivery) => <span>{mailWake(delivery)} · {delivery.state}</span>}</For>
+          <Show when={!props.mailDeliveries?.length}><span>{mailWake()}</span></Show>
           <Show when={metadata().delivery}>{(delivery) => <span>{delivery()}</span>}</Show>
           <Show when={metadata().state}>{(state) => <span>{state()}</span>}</Show>
-          <For each={props.mailDeliveries ?? []}>{(delivery) => <span>{delivery.state}</span>}</For>
         </span>
         <span class="mail-activity-disclosure" aria-hidden="true">›</span>
       </summary>
       <div class="mail-activity-details">
         <div>Mail ID: <bdi dir="auto">{metadata().mail.id}</bdi></div>
         <Show when={props.mailRecord}>{(record) => <>
-          <div>Sent: {mailTime(record().ts)}</div>
+          <div>Sent: {mailTime(mailSentAt(record()))}</div>
           <For each={[
             { label: "Reply to", id: record().in_reply_to },
             { label: "Supersedes", id: record().supersedes },
@@ -103,6 +106,7 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
         </Show>
         <For each={props.mailDeliveries ?? []}>{(delivery) => <div class="mail-delivery">
           <div>To <bdi dir="auto">{delivery.recipient}</bdi> · {delivery.mode ?? "delivery"} · {delivery.state}</div>
+          <MailWakeEvidence delivery={delivery} />
           <Show when={delivery.request_id}><div>Request: <bdi dir="auto">{delivery.request_id}</bdi></div></Show>
           <Show when={delivery.presented_at}><div>Presented: {mailTime(delivery.presented_at)}</div></Show>
           <Show when={delivery.handled_at}><div>Handled: {mailTime(delivery.handled_at)}</div></Show>

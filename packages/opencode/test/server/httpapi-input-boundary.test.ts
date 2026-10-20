@@ -109,8 +109,12 @@ for (const synthetic of [false, true]) {
           const pending2 = yield* receipt(q2.requestID)
           expect(pending1.state).toBe("pending")
           expect(pending2.state).toBe("pending")
-          expect(yield* (yield* post("input", q1)).json).toEqual(pending1)
-          expect(yield* (yield* post("input", q2)).json).toEqual(pending2)
+          expect(yield* (yield* post("input", q1)).json).toEqual({ ...pending1,
+            wakeObservations: [...(pending1.wakeObservations ?? []), { outcome: "coalesced", observedAt: expect.any(Number) }],
+          })
+          expect(yield* (yield* post("input", q2)).json).toEqual({ ...pending2,
+            wakeObservations: [...(pending2.wakeObservations ?? []), { outcome: "coalesced", observedAt: expect.any(Number) }],
+          })
           expect(yield* llm.calls).toBe(1)
           expect(original.pollUnsafe()).toBeUndefined()
 

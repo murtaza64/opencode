@@ -9,8 +9,8 @@ import { HttpServer } from "effect/unstable/http"
 const cli = process.env.ES_MAIL_TEST_CLI
 if (!cli) test.skip("actual es CLI (set ES_MAIL_TEST_CLI)", () => {})
 else {
-  // Database.node captures its filename when imported. Establish a private DB before
-  // importing the production route graph; never let this test touch the user's DB.
+  // Run this fixture in its own Bun process: Database.node captures its filename
+  // on import. Establish the private DB before importing the production graph.
   const root = await mkdtemp(path.join(tmpdir(), "opencode-mail-wake-"))
   const previousDB = process.env.OPENCODE_DB
   process.env.OPENCODE_DB = path.join(root, "runtime.sqlite3")
@@ -51,7 +51,8 @@ else {
         // layerTest may bind an unspecified interface; CLI is restricted to loopback.
         const url = `http://127.0.0.1:${server.address.port}`
         expect(new URL(url).hostname).toBe("127.0.0.1")
-        expect(process.env.OPENCODE_DB).toBe(path.join(root, "runtime.sqlite3"))
+         expect(process.env.OPENCODE_DB).toBe(path.join(root, "runtime.sqlite3"))
+         expect(Bun.file(path.join(root, "runtime.sqlite3")).size).toBeGreaterThan(0)
         const editspace = path.join(root, "editspaces", "private")
         const receiver = path.join(editspace, "lanes", "receiver")
         const home = path.join(root, "home")
@@ -79,7 +80,7 @@ else {
         const send = (requestID: string, target = url) =>
           Effect.promise(async () => {
             const child = Bun.spawn({
-              cmd: ["uv", "run", "--project", path.dirname(path.dirname(cli)), "python", cli,
+              cmd: ["uv", "run", "--no-project", "--script", "--quiet", cli,
                 "--editspace", "private", "mail", "send", "--kind", "task", "--to", "receiver",
                 "--request-id", requestID, "--json", "Private task"],
               cwd: editspace,
@@ -179,7 +180,6 @@ else {
             { requestID: recovered.requestID }] })
         expect((yield* Effect.promise(() => readFile(path.join(editspace, ".es", "mail", "receiver.jsonl"), "utf8"))).trim().split("\n"))
           .toHaveLength(3)
-        expect(Bun.file(path.join(root, "runtime.sqlite3")).size).toBeGreaterThan(0)
 
         // Model the crash window after durable admission but before wake observation.
         // A GET is evidence only of admission; it must not invent a scheduling outcome.

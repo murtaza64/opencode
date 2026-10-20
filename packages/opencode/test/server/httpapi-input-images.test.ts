@@ -6,6 +6,7 @@ import { Session } from "@/session/session"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { EventV2 } from "@opencode-ai/core/event"
+import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { MessageID, PartID } from "@/session/schema"
 import { HistoryEvent } from "@/server/routes/instance/httpapi/groups/sync"
 import { provideTmpdirServer } from "../fixture/fixture"
@@ -58,12 +59,14 @@ for (const delivery of ["queue", "steer"] as const) {
               })),
             }
             const response = yield* post("input", payload)
-            const receipt = yield* response.json
+            const receipt = yield* response.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(SessionV1.InputReceipt)))
             expect({ status: response.status, receipt }).toMatchObject({
               status: 200,
               receipt: { state: "pending", images: payload.images },
             })
-            expect(yield* (yield* post("input", payload)).json).toEqual(receipt)
+            expect(yield* (yield* post("input", payload)).json).toEqual({ ...receipt,
+              wakeObservations: [...(receipt.wakeObservations ?? []), { outcome: "coalesced", observedAt: expect.any(Number) }],
+            })
             held.resolve()
             yield* llm.wait(2)
             const calls = yield* llm.inputs
@@ -109,9 +112,11 @@ it.live(
           const payload = { requestID: "images-1", delivery: "queue", text: "", images: [image, image] }
           const admitted = yield* post(`${url}/input`, payload)
           expect(admitted.status).toBe(200)
-          const receipt = yield* admitted.json
+          const receipt = yield* admitted.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(SessionV1.InputReceipt)))
           expect(receipt).toMatchObject({ state: "pending", images: [image, image] })
-          expect(yield* (yield* post(`${url}/input`, payload)).json).toEqual(receipt)
+          expect(yield* (yield* post(`${url}/input`, payload)).json).toEqual({ ...receipt,
+            wakeObservations: [...(receipt.wakeObservations ?? []), { outcome: "coalesced", observedAt: expect.any(Number) }],
+          })
           expect((yield* post(`${url}/input`, { ...payload, images: [changed, image] })).status).toBe(409)
           const before = yield* requestInDirectory(`${url}/message`, dir)
           expect(JSON.stringify(yield* before.json)).not.toContain(image.url)

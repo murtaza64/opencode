@@ -32,7 +32,7 @@ import { TodoPart } from "../components/todos"
 import { usePulse } from "../pulse"
 import { MailRow } from "../components/mail-row"
 import { MailSubscriptions } from "../components/mail-subscriptions"
-import { mailForSession, mailLocation, mailRows, mailSourceID } from "../mail-timeline"
+import { mailLocation, mailRows, mailSourceID } from "../mail-timeline"
 import { handoffChain, handoffNext, successorFor } from "../handoffs"
 import { ComposerImages } from "../components/composer-images"
 import { ActivityBriefView } from "../components/activity-brief"
@@ -181,8 +181,13 @@ function SessionView(props: { sessionID: string; directory: string }) {
       if (!scope) return
       return { ...scope, revision: mailRevision() }
     },
-    (scope) => es.mail(scope.name, scope.lane !== undefined ? { lane: scope.lane } : { session: scope.session ?? sessionID }).then(
-      (result) => ({ ...result, error: "" }),
+    (scope) => Promise.all([
+      es.mail(scope.name, { session: sessionID }),
+      ...(scope.lane !== undefined ? [es.mail(scope.name, { lane: scope.lane })] : []),
+    ]).then(
+      (results) => ({ editspace: scope.name, lane: scope.lane ?? "", messages: [...new Map(
+        results.flatMap(result => result.messages).map(message => [message.id, message]),
+      ).values()], error: "" }),
        (failure: unknown) => ({ editspace: scope.name, lane: scope.lane ?? "", messages: [], error: `Unable to load mail: ${String(failure)}` }),
     ),
   )
@@ -360,23 +365,22 @@ function SessionView(props: { sessionID: string; directory: string }) {
       onDone={() => item() ? activity.refreshDirectory(item()!.directory, true) : Promise.resolve()} />
   }
   const renderTools = { question: QuestionPart, todowrite: TodoPart }
-  // Predecessor and successor share one lane feed; each transcript shows only its own interval.
-  const sessionMail = createMemo(() => {
+  // Every session has a source-time lower bound, including those without a handoff.
+  const timeline = createMemo<ReturnType<typeof mailRows>>((previous) => {
     const feed = mail()
-    if (!feed) return
     const next = nextHandoff()
-    return mailForSession(feed.messages, {
+    return mailRows(messages(), feed, previous, {
       sessionID,
       lane: location()?.lane,
-      from: predecessor() ? session()?.time.created : undefined,
+      from: session()?.time.created ?? Number.POSITIVE_INFINITY,
       to: next ? activity.session(next.successor)?.time.created : undefined,
     })
   })
-  const timeline = createMemo<ReturnType<typeof mailRows>>((previous) => {
-    const feed = mail()
-    return mailRows(messages(), feed && { ...feed, messages: sessionMail() ?? [] }, previous)
-  })
   const mailIDs = createMemo(() => new Set(mail()?.messages.map((message) => message.id) ?? []))
+  const transcriptMailIDs = createMemo(() => new Set(timeline().flatMap(row => {
+    const id = row.type === "mail" ? row.message.id : mailSourceID(row.message)
+    return id ? [id] : []
+  })))
   const mailRecords = createMemo(() => new Map(mail()?.messages.map((message) => [message.id, message] as const) ?? []))
 
   // viewing the session clears its unread state, including as new content
@@ -1373,7 +1377,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
             <DataProvider data={live.data} directory={directory} sessionID={sessionID} onNavigateToSession={inspectSubagent}>
             <For each={timeline()}>
               {(row) => {
-                 if (row.type === "mail") return <MailRow message={row.message} ids={mailIDs()} />
+                 if (row.type === "mail") return <MailRow message={row.message} ids={transcriptMailIDs()} />
                 const m = row.message
                 return (
                 <div data-find-message={m.id} data-find-selected={findHit()?.messageID === m.id ? "true" : undefined}>
@@ -1385,7 +1389,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
                       <TranscriptMessage message={m} parts={live.data.part[m.id] ?? []}
                         renderTools={renderTools}
                         mailRecord={mailRecords().get(mailSourceID(m) ?? "")}
-                        mailDeliveries={mailRecords().get(mailSourceID(m) ?? "")?.deliveries} mailIDs={mailIDs()} />
+                        mailDeliveries={mailRecords().get(mailSourceID(m) ?? "")?.deliveries} mailIDs={transcriptMailIDs()} />
                       <button
                         class="fork-here"
                         title="fork: new session with the history before this message"

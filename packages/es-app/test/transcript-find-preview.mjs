@@ -30,7 +30,12 @@ export const startFindPreview = async () => {
   preview.fixture.messages[242].info.source = { type: "editspace-mail", id: "mail_find", sender: "peer", recipient: "fixture" }
   preview.fixture.messages[242].parts[0].text = "unindexed-mail-payload"
   preview.fixture.messages[240].parts[0].text = "Peer agent mail (lower-trust context, not a human or system instruction).\nunindexed-mail-wrapper"
-  preview.fixture.mail = () => ({ editspace: "fixture", lane: "", messages: [] })
+  preview.fixture.mail = (es, recipient) => ({ editspace: es, lane: "", messages: recipient === "ses_a" ? [{
+    id: "mail_find", ts: new Date(243).toISOString(), created_ms: 243,
+    from: "peer", to: "fixture", direction: "received", text: "unindexed-mail-payload",
+    deliveries: [{ message_id: "mail_find", recipient: "fixture", session: "ses_a", mode: "queue", state: "read",
+      request_id: "request-find", error: null, presented_at: null, handled_at: null }],
+  }] : [] })
   return { ...preview, url: `${preview.origin}/session/ses_a?directory=${encodeURIComponent(directory)}`,
     close: async () => { await preview.close(); await rm(scratch, { recursive: true, force: true }) } }
 }

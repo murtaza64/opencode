@@ -247,9 +247,11 @@ export type DocContent = {
 export type MailMessage = {
   id: string
   ts: string | number
+  created_ms?: number
   from: string
   sender_session?: string
   origin_run?: string
+  origin_tool_call?: string
   relationship?: string
   to: string
   direction: "sent" | "received"
@@ -269,6 +271,7 @@ export type MailDelivery = {
   error: string | null
   presented_at: string | number | null
   handled_at: string | number | null
+  wake_observations?: readonly { outcome: "scheduled" | "coalesced"; observedAt: number }[]
 }
 export type MailTimeline = { editspace: string; lane: string; messages: MailMessage[] }
 export type Handoff = { lane: string; predecessor: string; successor: string }
