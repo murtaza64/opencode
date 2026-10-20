@@ -131,50 +131,111 @@ try {
       "PASS guard reproduces net::ERR_FAILED; owning-controller unroute leaves URL/storage unchanged without reload",
     )
   }
-  for (const [method, pathname, body, header = "Content-Type"] of [
-    ["GET", "/session/status", undefined],
-    ["POST", "/permission/per_fixture_missing/reply", { reply: "reject" }],
-    ["POST", "/session/ses_fixture/input", { text: "fake backend only", delivery: "queue" }, "content-type"],
-    ["POST", "/session/ses_fixture/prompt_async", { parts: [{ type: "text", text: "fake backend only" }] }],
-    ["PATCH", "/session/ses_fixture", { title: "fake backend only" }],
-  ]) {
-    const result = await page.evaluate(
-      async ({ method, pathname, body, header }) => {
+  for (const verification of process.argv.includes("--guard-lifecycle") ? ["normal", "throws"] : ["none"]) {
+    if (verification !== "none") {
+      const identity = await app.evaluate(({ BrowserWindow }) => ({
+        pid: process.pid,
+        contents: BrowserWindow.getAllWindows()[0].webContents.id,
+      }))
+      const before = await page.evaluate(() => ({
+        url: location.href,
+        local: { ...localStorage },
+        session: { ...sessionStorage },
+      }))
+      await page.route("**/*", guard)
+      const outcome = await (async () => {
         try {
-          const response = await fetch(`/oc${pathname}?directory=%2Ffixture`, {
-            method,
-            ...(body ? { headers: { [header]: "application/json" }, body: JSON.stringify(body) } : {}),
-          })
-          return { status: response.status, body: await response.json() }
-        } catch (error) {
-          return { error: String(error) }
+          expect(await page.evaluate(() => fetch("/oc/session/status").then((response) => response.status))).toBe(200)
+          expect(
+            await page.evaluate(
+              (verification) =>
+                fetch(`/oc/permission/per_blocked_${verification}/reply`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ reply: "reject" }),
+                }).then(
+                  (response) => ({ status: response.status }),
+                  (error) => ({ error: String(error) }),
+                ),
+              verification,
+            ),
+          ).toEqual({ error: "TypeError: Failed to fetch" })
+          expect(calls.some((call) => call.path === `/permission/per_blocked_${verification}/reply`)).toBe(false)
+          if (verification === "throws") throw Error("fixture verification failed")
+          return "returned"
+        } finally {
+          await page.unroute("**/*", guard)
         }
-      },
-      { method, pathname, body, header },
-    )
-    console.info(
-      method,
-      pathname,
-      JSON.stringify(result),
-      "reached core",
-      calls.some((call) => call.method === method && call.path === pathname),
-    )
-    expect(result).toEqual(
-      pathname.startsWith("/permission/")
-        ? { status: 404, body: { name: "PermissionNotFoundError" } }
-        : { status: 200, body: {} },
-    )
-    expect(calls).toContainEqual({
-      method,
-      path: pathname,
-      directory: "/fixture",
-      body: body ? JSON.stringify(body) : "",
-      contentType: body ? "application/json" : undefined,
-      capabilityLeaked: false,
-    })
+      })().then(
+        (value) => value,
+        (error) => error.message,
+      )
+      expect(outcome).toBe(verification === "throws" ? "fixture verification failed" : "returned")
+      expect(
+        await app.evaluate(({ BrowserWindow }) => ({
+          pid: process.pid,
+          contents: BrowserWindow.getAllWindows()[0].webContents.id,
+        })),
+      ).toEqual(identity)
+      expect(
+        await page.evaluate(() => ({ url: location.href, local: { ...localStorage }, session: { ...sessionStorage } })),
+      ).toEqual(before)
+      console.info(`PASS ${verification} verification finally removed guard; same native/WebContents/URL/storage`)
+    }
+    for (const [method, pathname, body, header = "Content-Type"] of [
+      ["GET", "/session/status", undefined],
+      ["POST", `/permission/per_fixture_missing_${verification}/reply`, { reply: "reject" }],
+      [
+        "POST",
+        `/session/ses_fixture_${verification}/input`,
+        { text: "fake backend only", delivery: "queue" },
+        "content-type",
+      ],
+      [
+        "POST",
+        `/session/ses_fixture_${verification}/prompt_async`,
+        { parts: [{ type: "text", text: "fake backend only" }] },
+      ],
+      ["PATCH", `/session/ses_fixture_${verification}`, { title: "fake backend only" }],
+    ]) {
+      const result = await page.evaluate(
+        async ({ method, pathname, body, header }) => {
+          try {
+            const response = await fetch(`/oc${pathname}?directory=%2Ffixture`, {
+              method,
+              ...(body ? { headers: { [header]: "application/json" }, body: JSON.stringify(body) } : {}),
+            })
+            return { status: response.status, body: await response.json() }
+          } catch (error) {
+            return { error: String(error) }
+          }
+        },
+        { method, pathname, body, header },
+      )
+      console.info(
+        method,
+        pathname,
+        JSON.stringify(result),
+        "reached core",
+        calls.some((call) => call.method === method && call.path === pathname),
+      )
+      expect(result).toEqual(
+        pathname.startsWith("/permission/")
+          ? { status: 404, body: { name: "PermissionNotFoundError" } }
+          : { status: 200, body: {} },
+      )
+      expect(calls).toContainEqual({
+        method,
+        path: pathname,
+        directory: "/fixture",
+        body: body ? JSON.stringify(body) : "",
+        contentType: body ? "application/json" : undefined,
+        capabilityLeaked: false,
+      })
+    }
+    expect((await fetch(`${origin}/oc/session`, { method: "POST", body: "{}", headers: { origin } })).status).toBe(403)
+    console.info("PASS native core GET, POST permission/input/prompt, PATCH through packaged main/key hook")
   }
-  expect((await fetch(`${origin}/oc/session`, { method: "POST", body: "{}", headers: { origin } })).status).toBe(403)
-  console.info("PASS native core GET, POST permission/input/prompt, PATCH through packaged main/key hook")
 } finally {
   await app.close()
   if (state.origin)
