@@ -249,9 +249,37 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
               <button disabled={!props.connected || state.sending} onClick={() => props.composer.retryAdmission()}>
                 Check and retry same input
               </button>
+              <button disabled={state.sending || state.hydrating} onClick={() => props.composer.setAsideAdmission()}>
+                Set aside unknown input
+              </button>
+              <p class="dim">Keeps the exact request for recovery below. Does not resend or cancel it.</p>
             </Show>
           </section>
         )}
+      </Show>
+      <Show when={state.recoveryError}>
+        <p class="err" role="alert">{state.recoveryError}</p>
+      </Show>
+      <Show when={state.recoveries.length}>
+        <details class="input-recoveries">
+          <summary>Set-aside inputs ({state.recoveries.length})</summary>
+          <For each={state.recoveries}>
+            {(entry) => (
+              <section aria-label="Set-aside input" data-recovery-id={entry.admission.payload.requestID}>
+                <b>{entry.admission.payload.delivery} · {state.receipts.find((item) => item.requestID === entry.admission.payload.requestID)?.state ?? "admission unknown"}</b>
+                <p dir="auto">{entry.admission.payload.text}</p>
+                <ComposerImages images={entry.admission.payload.images} />
+                <p class="dim">Request <bdi>{entry.admission.payload.requestID}</bdi>. Kept locally; not cancelled.</p>
+                <button disabled={!props.connected || !!state.recoveryBusy} onClick={() => props.composer.recoverAdmission(entry.admission.payload.requestID)}>
+                  Check set-aside input
+                </button>
+                <button disabled={!props.connected || !!state.recoveryBusy} onClick={() => props.composer.recoverAdmission(entry.admission.payload.requestID, true)}>
+                  Check and retry same set-aside input
+                </button>
+              </section>
+            )}
+          </For>
+        </details>
       </Show>
       <Show when={pending().length}>
         {/* every listed receipt is server-accepted and still pending delivery; the
