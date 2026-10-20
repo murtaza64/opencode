@@ -25,9 +25,10 @@ export const CloudNav = (props: { pin: CloudPin; mini?: boolean }) => {
 
 export const CloudDiscovery = () => {
   const cloud = useDashboard().cloud
-  return <details class="cloud-discovery"><summary>Cloud agents <span>({cloud.other().length})</span></summary><p class="cloud-sidebar-source">Active tasks in the selected project · cloud lane records</p>
+  return <details class="cloud-discovery"><summary>Cloud agents <span>({cloud.other().length})</span></summary><p class="cloud-sidebar-source">{cloud.includeFinished() ? "Known tasks, including finished, in the selected project" : "Active tasks only in the selected project"} · cloud lane records</p>
+    <label class="cloud-discovery-filter"><input type="checkbox" checked={cloud.includeFinished()} onChange={event => cloud.setIncludeFinished(event.currentTarget.checked)} />Include finished</label>
     <Show when={cloud.pinError()}><p class="cloud-sidebar-source">{cloud.pinError()}</p></Show>
     <Show when={cloud.scopes().some(name => cloud.snapshots()[name]?.error)}><p class="cloud-sidebar-source">Cloud source unavailable; saved pins retained.</p></Show>
-    <For each={cloud.other()} fallback={<p class="cloud-sidebar-source">{cloud.loading() ? "Checking cloud source…" : "No active unpinned tasks in checked sources."}</p>}>{item => <CloudNav pin={item} />}</For>
+    <For each={cloud.other()} fallback={<p class="cloud-sidebar-source">{cloud.loading() ? "Checking cloud source…" : cloud.includeFinished() ? "No known unpinned tasks in checked sources." : "No active unpinned tasks in checked sources. Include finished to find completed work."}</p>}>{item => <CloudNav pin={item} />}</For>
   </details>
 }

@@ -39,6 +39,7 @@ export const createCloudAgents = (options: {
   const [now, setNow] = createSignal(Date.now())
   const [inflight, setInflight] = createSignal<Record<string, number>>({})
   const [pinError, setPinError] = createSignal("")
+  const [includeFinished, setIncludeFinished] = createSignal(false)
   const discovery = createMemo(() => [...new Set([options.targetProject?.(), options.project() ?? options.defaultProject()].filter((name): name is string => !!name))])
   // Discovery gets priority; remaining slots are reserved for explicitly pinned projects.
   const scopes = createMemo(() => [...new Set([...discovery(), ...pins().map(pin => pin.editspace)])].slice(0, maxScopes))
@@ -50,7 +51,7 @@ export const createCloudAgents = (options: {
     snapshot: snapshots()[pin.editspace], inScope: scopes().includes(pin.editspace),
   })))
   const other = createMemo(() => observed().filter(item => discovery().includes(item.editspace) &&
-    (item.record["wingman-status"] === "processing" || item.record["wingman-status"] === "waiting") &&
+    (includeFinished() || item.record["wingman-status"] === "processing" || item.record["wingman-status"] === "waiting") &&
     !pins().some(pin => cloudKey(pin) === cloudKey(item))))
 
   const togglePin = (pin: CloudPin) => {
@@ -104,5 +105,5 @@ export const createCloudAgents = (options: {
   const interval = setInterval(() => { setNow(Date.now()); void refresh() }, 60_000)
   onCleanup(() => { clearInterval(interval); disposed = true })
 
-  return { pins, snapshots, now, loading: () => Object.keys(inflight()).length > 0, pinError, scopes, observed, allPinned, other, togglePin, refresh }
+  return { pins, snapshots, now, loading: () => Object.keys(inflight()).length > 0, pinError, includeFinished, setIncludeFinished, scopes, observed, allPinned, other, togglePin, refresh }
 }

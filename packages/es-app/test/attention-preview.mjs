@@ -2,7 +2,7 @@ import { startPanelPreview } from "./composer-panel-preview.mjs"
 import { directory } from "./composer-fixture.mjs"
 import { pathToFileURL } from "node:url"
 
-export const startAttentionPreview = async () => {
+export const startAttentionPreview = async (plugins = []) => {
   const ledger = {
     status: 200, partial: false, operator: false, denyOperator: false, loseResponse: false, calls: [], workCalls: [], commands: new Map(),
     cloudStatus: 200, transcriptCalls: 0,
@@ -10,7 +10,7 @@ export const startAttentionPreview = async () => {
     records: [{ id: "decision_1", editspace: "fixture", revision: 1, status: "open", kind: "decision", title: "Choose the bounded implementation scope", context: "Keep the homepage focused on human choices. This synthetic record is not approval to publish.", options: [{ id: "small", label: "Small scope" }, { id: "defer", label: "Defer" }], recommendation: "small", producer_session: "ses_a", origin_session: "ses_a", gate_key: "issue:219:scope:v1", source_ref: { session_id: "ses_a", directory }, decision: null, delivery_state: "not-requested", created_at: Date.now() - 300_000, updated_at: Date.now() - 300_000, snoozed_until: null },
       { id: "other_decision", editspace: "other", revision: 1, status: "open", kind: "blocker", title: "Other project decision", context: "A second project may go offline independently.", options: [{ id: "yes", label: "Continue" }], producer_session: "ses_b", origin_session: "ses_b", gate_key: "other:gate:v1", source_ref: { session_id: "ses_b", directory }, decision: null, delivery_state: "not-requested", created_at: Date.now(), updated_at: Date.now() }],
   }
-  const preview = await startPanelPreview([{
+  const preview = await startPanelPreview([...plugins, {
     name: "attention-ledger-disposable-fixture",
     transformIndexHtml() {
       return [{ tag: "script", children: `if (!localStorage.getItem("es-app-all-projects")) localStorage.setItem("es-app-all-projects", "true"); if (!localStorage.getItem("es-app-sidebar-pins")) localStorage.setItem("es-app-sidebar-pins", ${JSON.stringify(JSON.stringify([JSON.stringify([directory, "ses_a"]) ]))});` }]

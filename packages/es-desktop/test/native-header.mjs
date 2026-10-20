@@ -172,7 +172,7 @@ try {
     document.documentElement.lang = "en"
   })
   await page.goto(origin)
-  await expect(header.getByRole("heading")).toHaveText("fixture")
+  await expect(header.getByRole("heading")).toHaveText("Home")
   await expect(header.getByRole("button", { name: "refresh", exact: true })).toBeVisible()
   await expect(page.locator("main > header.topbar")).toHaveCount(0)
   await page.goto(`${origin}/session/ses_a?directory=${encodeURIComponent(directory)}`)
