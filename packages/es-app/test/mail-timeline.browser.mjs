@@ -76,6 +76,16 @@ try {
   fixture.emitDashboard("mail")
   await expect(page.locator('[data-mail-id="mail-a"] summary')).toContainText("handled")
   await expect(page.locator('[data-mail-id="mail-a"]')).toContainText("Handled:")
+  delivery.wake_observations = [{ outcome: "scheduled", observedAt: Date.parse(ts) + 1 }]
+  outbound.wake_observations = [{ outcome: "coalesced", observedAt: Date.parse(ts) + 2 }]
+  fixture.emitDashboard("mail")
+  await expect(page.locator('[data-mail-id="mail-a"] summary')).toContainText("Execution scheduled")
+  await expect(page.locator('[data-mail-id="mail-b"] summary')).toContainText("Coalesced · already active")
+  await page.locator('[data-mail-id="mail-a"] summary').click()
+  await expect(page.locator('[data-mail-id="mail-a"] .mail-wake-evidence time')).toHaveAttribute("datetime", "2026-10-13T12:00:00.001Z")
+  delivery.wake_observations.push({ outcome: "coalesced", observedAt: Date.parse(ts) + 2 })
+  fixture.emitDashboard("mail")
+  await expect(page.locator('[data-mail-id="mail-a"] summary')).toContainText("Execution scheduled")
   expect(fixture.calls.filter(call => call.path === "/api/mail").length).toBeGreaterThanOrEqual(2)
   // Lineage: ses_a handed the lane to ses_b. Each transcript shows only mail delivered to or sent by
   // that session; the lane mail view keeps the whole feed.
@@ -151,7 +161,7 @@ try {
   await page.goto(`${preview.origin}/session/ses_b?directory=${encodeURIComponent(directory)}`)
   await expect(page.locator('.transcript [data-mail-id]')).toHaveCount(0)
   expect(errors).toEqual([])
-  console.log("PASS mail timeline: source-time/metadata boundaries, raw history retained, lineage, independent/root-mirror sessions, durable four-send/partial-loop replay, tool error, keyboard and LTR/RTL details")
+  console.log("PASS mail timeline: source-time/metadata boundaries, raw history retained, lineage, independent/root-mirror sessions, durable loop replay, observed scheduling/coalescing versus unknown, tool error, keyboard and LTR/RTL details")
 } finally {
   await browser.close()
   await preview.close()

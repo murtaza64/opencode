@@ -3,6 +3,7 @@ import { Message } from "@opencode-ai/session-ui/message-part"
 import { errorText } from "../live-session"
 import type { MailDelivery, MailMessage } from "../api"
 import { mailSentAt, mailWake } from "../mail-timeline"
+import { MailWakeEvidence } from "./mail-wake-evidence"
 
 type MailSource = { type: "editspace-mail"; id: string; sender: string; recipient: string }
 const mailTime = (value: string | number | null) => value == null ? "" : new Date(value).toLocaleString()
@@ -105,7 +106,7 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
         </Show>
         <For each={props.mailDeliveries ?? []}>{(delivery) => <div class="mail-delivery">
           <div>To <bdi dir="auto">{delivery.recipient}</bdi> · {delivery.mode ?? "delivery"} · {delivery.state}</div>
-          <div>{mailWake(delivery)} · Receipt state does not prove execution started.</div>
+          <MailWakeEvidence delivery={delivery} />
           <Show when={delivery.request_id}><div>Request: <bdi dir="auto">{delivery.request_id}</bdi></div></Show>
           <Show when={delivery.presented_at}><div>Presented: {mailTime(delivery.presented_at)}</div></Show>
           <Show when={delivery.handled_at}><div>Handled: {mailTime(delivery.handled_at)}</div></Show>

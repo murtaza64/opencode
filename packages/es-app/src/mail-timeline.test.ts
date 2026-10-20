@@ -72,6 +72,12 @@ test("never infers execution wake from task intent, admission, presentation, han
   expect(mailWake({ ...receipt, state: "failed", error: "lost response" })).toBe("Wake/resume unknown")
   expect(mailWake({ ...receipt, mode: "passive" })).toBe("Did not wake · passive")
   expect(mailWake()).toBe("Wake/resume unknown")
+  expect(mailWake({ ...receipt, wake_observations: [{ outcome: "scheduled", observedAt: 1000 }] })).toBe("Execution scheduled")
+  expect(mailWake({ ...receipt, wake_observations: [{ outcome: "coalesced", observedAt: 2000 }] })).toBe("Coalesced · already active")
+  expect(mailWake({ ...receipt, wake_observations: [{ outcome: "scheduled", observedAt: NaN }] })).toBe("Wake/resume unknown")
+  expect(mailWake({ ...receipt, wake_observations: [{ outcome: "scheduled", observedAt: 1e308 }] })).toBe("Wake/resume unknown")
+  expect(mailWake({ ...receipt, mode: "passive", wake_observations: [{ outcome: "scheduled", observedAt: 1000 }] })).toBe("Execution scheduled")
+  expect(mailWake({ ...receipt, wake_observations: [{ outcome: "scheduled", observedAt: 2000 }, { outcome: "coalesced", observedAt: 1000 }] })).toBe("Execution scheduled")
 })
 
 test("first sessions exclude old, invalid and missing source times despite matching receipt session", () => {

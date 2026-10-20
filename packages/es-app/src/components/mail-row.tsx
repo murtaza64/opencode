@@ -1,6 +1,7 @@
 import { For, Show } from "solid-js"
 import type { MailMessage } from "../api"
 import { mailSentAt, mailWake } from "../mail-timeline"
+import { MailWakeEvidence } from "./mail-wake-evidence"
 
 const timestamp = (value: string | number | null) => {
   if (value == null) return ""
@@ -42,7 +43,7 @@ export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?
       <div class="mail-activity-body" dir="auto">{props.message.text}</div>
        <For each={props.message.deliveries}>{(delivery) => <div class="mail-delivery">
          <div>To <bdi dir="auto">{delivery.recipient}</bdi> · {delivery.mode ?? "delivery"} · {delivery.state}</div>
-         <div>{mailWake(delivery)} · Receipt state does not prove execution started.</div>
+         <MailWakeEvidence delivery={delivery} />
         <Show when={delivery.session}><div>Session: <bdi dir="auto">{delivery.session}</bdi></div></Show>
         <Show when={delivery.request_id}><div>Request: <bdi dir="auto">{delivery.request_id}</bdi></div></Show>
         <Show when={delivery.presented_at}><div>Presented: {timestamp(delivery.presented_at)}</div></Show>

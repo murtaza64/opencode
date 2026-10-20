@@ -50,8 +50,17 @@ export const mailForSession = (messages: MailMessage[], interval: MailInterval) 
     return true
   })
 
-// These receipts prove input delivery, not an idle -> scheduled execution transition.
+// Only runtime decision observations prove scheduling; admission/status cannot.
+export const mailWakeObservations = (delivery?: MailDelivery) =>
+  delivery?.wake_observations?.filter(observation =>
+    (observation?.outcome === "scheduled" || observation?.outcome === "coalesced") &&
+    Number.isSafeInteger(observation.observedAt) && observation.observedAt >= 0 &&
+    Number.isFinite(new Date(observation.observedAt).getTime())) ?? []
+
 export const mailWake = (delivery?: MailDelivery) => {
+  const observations = mailWakeObservations(delivery)
+  if (observations.some(observation => observation.outcome === "scheduled")) return "Execution scheduled"
+  if (observations.some(observation => observation.outcome === "coalesced")) return "Coalesced · already active"
   if (delivery?.mode === "passive" || delivery?.mode === "mute") return "Did not wake · passive"
   return "Wake/resume unknown"
 }

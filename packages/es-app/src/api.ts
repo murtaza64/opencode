@@ -271,6 +271,7 @@ export type MailDelivery = {
   error: string | null
   presented_at: string | number | null
   handled_at: string | number | null
+  wake_observations?: readonly { outcome: "scheduled" | "coalesced"; observedAt: number }[]
 }
 export type MailTimeline = { editspace: string; lane: string; messages: MailMessage[] }
 export type Handoff = { lane: string; predecessor: string; successor: string }
