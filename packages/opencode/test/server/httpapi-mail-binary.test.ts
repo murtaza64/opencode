@@ -83,14 +83,26 @@ else test("compiled candidate serves private mail wake receipts", async () => {
     while (true) {
       if (Date.now() > deadline) throw new Error(`candidate did not start: ${await readFile(log, "utf8")}`)
       if (child.exitCode !== null) throw new Error(`candidate exited: ${await readFile(log, "utf8")}`)
-      const ready = await fetch(`${url}/global/health`, { signal: AbortSignal.timeout(500) }).catch(() => undefined)
-      if (ready?.ok) break
+      if ((await readFile(log, "utf8")).includes(`server listening on ${url}`)) break
       await Bun.sleep(100)
     }
     expect(await readFile(log, "utf8")).toContain(`server listening on ${url}`)
     const processInfo = Bun.spawnSync(["ps", "-p", String(pid), "-o", "pid=", "-o", "command="])
     expect(processInfo.exitCode).toBe(0)
     expect(new TextDecoder().decode(processInfo.stdout)).toContain(`${pid} ${binary} serve`)
+    const listener = Bun.spawnSync([process.platform === "darwin" ? "/usr/sbin/lsof" : "lsof",
+      "-nP", "-a", "-p", String(pid), "-iTCP", "-sTCP:LISTEN", "-Fpn"])
+    expect(listener.exitCode).toBe(0)
+    const ownership = new TextDecoder().decode(listener.stdout)
+    expect(ownership).toContain(`p${pid}\n`)
+    expect(ownership).toContain(`n127.0.0.1:${port}\n`)
+    const files = Bun.spawnSync([process.platform === "darwin" ? "/usr/sbin/lsof" : "lsof",
+      "-nP", "-a", "-p", String(pid), "-Fn"])
+    expect(files.exitCode).toBe(0)
+    expect(new TextDecoder().decode(files.stdout)).toContain(`n${db}\n`)
+    const identity = new Sqlite(db, { readonly: true })
+    try { expect(identity.query("PRAGMA database_list").all()).toContainEqual(expect.objectContaining({ file: db })) }
+    finally { identity.close() }
     await writeFile(`${record}.json`, JSON.stringify({ binary, sha256, pid, url, db, log, root }) + "\n")
 
     const created = await api("/session", { method: "POST", body: JSON.stringify({
@@ -237,6 +249,11 @@ else test("compiled candidate serves private mail wake receipts", async () => {
       }
     }
     if (gate) await writeFile(gate, "released after candidate stopped\n")
+    if (selectedPort) {
+      const listener = Bun.spawnSync([process.platform === "darwin" ? "/usr/sbin/lsof" : "lsof",
+        "-nP", "-iTCP:" + selectedPort, "-sTCP:LISTEN", "-Fpn"])
+      expect(listener.exitCode).toBe(1)
+    }
     await Promise.all(sockets.map((server) => new Promise<void>((resolve) => {
       server.closeAllConnections()
       server.close(() => resolve())
