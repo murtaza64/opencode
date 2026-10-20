@@ -18,7 +18,7 @@ const run = async (viewport, label, dir = "ltr", lang = "en") => {
   const page = await context.newPage()
   page.setDefaultTimeout(15_000)
   page.on("pageerror", (error) => errors.push(`${label}: ${error.message}`))
-  await page.goto(preview.laneUrl, { waitUntil: "domcontentloaded" })
+  await page.goto(preview.laneUrl, { waitUntil: "domcontentloaded", timeout: 60_000 })
   const header = page.locator(".topbar")
   const editor = page.getByRole("textbox", { name: "Message", exact: true })
   await expect(page.locator('[data-find-message="msg_1011"]')).toBeVisible({ timeout: 30_000 })
@@ -89,6 +89,30 @@ const run = async (viewport, label, dir = "ltr", lang = "en") => {
   await expect(content).toHaveCount(0)
   await expect(menu).toHaveAttribute("aria-expanded", "false")
   await expect(menu).toBeFocused()
+  // Tab and Shift+Tab continue from the trigger and close the menu.
+  const neighbour = async (shift) => page.evaluate((shift) => {
+    const trigger = document.querySelector('[aria-label="Session mail"]')
+    const focusable = [...document.querySelectorAll("button, [href], input, textarea, select, [tabindex]:not([tabindex='-1'])")]
+      .filter((element) => !element.disabled && element.offsetParent !== null && element.tabIndex >= 0)
+    return focusable[focusable.indexOf(trigger) + (shift ? -1 : 1)]?.outerHTML.slice(0, 120)
+  }, shift)
+  for (const shift of [false, true]) {
+    await menu.press("Enter")
+    await expect(content.getByRole("menuitem").first()).toBeFocused()
+    const expected = await neighbour(shift)
+    await page.keyboard.press(shift ? "Shift+Tab" : "Tab")
+    await expect(content).toHaveCount(0)
+    await expect(menu).toHaveAttribute("aria-expanded", "false")
+    expect(await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 120))).toBe(expected)
+  }
+  // The Find shortcut moves focus out of the open menu, which closes it.
+  await menu.press("Enter")
+  await expect(content).toBeVisible()
+  await page.keyboard.press("Control+f")
+  await expect(page.getByRole("searchbox", { name: "Find in transcript" })).toBeFocused()
+  await expect(content).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("searchbox", { name: "Find in transcript" })).toHaveCount(0)
   await menu.click()
   await expect(content).toBeVisible()
   // The menu sits in the viewport and above the transcript, not behind the header.

@@ -29,7 +29,11 @@ export const HeaderMenu = (props: { id: string; label: string; title?: string; i
   }
   document.addEventListener("pointerdown", outside, true)
   onCleanup(() => document.removeEventListener("pointerdown", outside, true))
-  return <span class="header-menu">
+  return <span class="header-menu" onFocusOut={(event) => {
+    // Any focus move outside the menu root (Find shortcut, pointer elsewhere) closes it.
+    const next = event.relatedTarget
+    if (open() && !(next instanceof Node && event.currentTarget.contains(next))) close(false)
+  }}>
     <button ref={trigger} class="header-icon" aria-label={props.label} title={props.title} aria-haspopup="menu"
       aria-expanded={open()} aria-controls={open() ? props.id : undefined}
       onClick={() => open() ? close(false) : show(0)}
@@ -54,7 +58,8 @@ export const HeaderMenu = (props: { id: string; label: string; title?: string; i
             close(true)
             return
           }
-          if (event.key === "Tab") close(false)
+          // Let native Tab/Shift+Tab continue from the trigger, not from an unmounting item.
+          if (event.key === "Tab") close(true)
         }}>
         <For each={props.items}>{(item) =>
           <button role="menuitem" tabIndex={-1} onClick={() => { close(true); item.select() }}>{item.label}</button>
