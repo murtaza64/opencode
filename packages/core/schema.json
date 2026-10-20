@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "3282506d-3cbf-496e-aa00-affba4d28684",
+  "id": "d823037c-f38f-42d7-892d-7cad7b3dd6e7",
   "prevIds": [
-    "f520bc25-f273-4dfb-b940-71e21e162efa"
+    "3282506d-3cbf-496e-aa00-affba4d28684"
   ],
   "ddl": [
     {
@@ -80,6 +80,10 @@
     },
     {
       "name": "todo",
+      "entityType": "tables"
+    },
+    {
+      "name": "v1_session_input_command",
       "entityType": "tables"
     },
     {
@@ -1506,6 +1510,56 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
+      "name": "command_id",
+      "entityType": "columns",
+      "table": "v1_session_input_command"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "request_id",
+      "entityType": "columns",
+      "table": "v1_session_input_command"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "v1_session_input_command"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "command",
+      "entityType": "columns",
+      "table": "v1_session_input_command"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "receipt",
+      "entityType": "columns",
+      "table": "v1_session_input_command"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
       "name": "request_id",
       "entityType": "columns",
       "table": "v1_session_input"
@@ -1837,6 +1891,21 @@
     },
     {
       "columns": [
+        "request_id"
+      ],
+      "tableTo": "v1_session_input",
+      "columnsTo": [
+        "request_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_v1_session_input_command_request_id_v1_session_input_request_id_fk",
+      "entityType": "fks",
+      "table": "v1_session_input_command"
+    },
+    {
+      "columns": [
         "session_id"
       ],
       "tableTo": "session",
@@ -2037,6 +2106,15 @@
       "nameExplicit": false,
       "name": "session_pk",
       "table": "session",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "command_id"
+      ],
+      "nameExplicit": false,
+      "name": "v1_session_input_command_pk",
+      "table": "v1_session_input_command",
       "entityType": "pks"
     },
     {

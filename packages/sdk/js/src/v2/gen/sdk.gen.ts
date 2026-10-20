@@ -212,6 +212,8 @@ import type {
   SessionInputListErrors,
   SessionInputListResponses,
   SessionInputMailSource,
+  SessionInputUpdateErrors,
+  SessionInputUpdateResponses,
   SessionListErrors,
   SessionListResponses,
   SessionMessageErrors,
@@ -245,6 +247,7 @@ import type {
   SessionV1InputHandlePayload,
   SessionV1InputImage,
   SessionV1InputPayload,
+  SessionV1InputUpdatePayload,
   SubtaskPartInput,
   SyncHistoryListErrors,
   SyncHistoryListResponses,
@@ -3520,6 +3523,45 @@ export class Input extends HeyApiClient {
       url: "/session/{sessionID}/input/{requestID}",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Update pending human session input
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      requestID: string
+      directory?: string
+      workspace?: string
+      sessionV1InputUpdatePayload?: SessionV1InputUpdatePayload
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "requestID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "sessionV1InputUpdatePayload", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<SessionInputUpdateResponses, SessionInputUpdateErrors, ThrowOnError>({
+      url: "/session/{sessionID}/input/{requestID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

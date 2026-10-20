@@ -474,6 +474,229 @@ test("missing archived image blobs fail closed across repeated reloads without r
   expect(requests.filter((item) => item.method === "POST")).toHaveLength(1)
 })
 
+test("inline pending edit switches delivery and preserves attachments and the complete unsent composer", async () => {
+  const receipt = { ...pending("human", "original", "queue"), images: [wireImage] }
+  const { composer, requests } = harness((request) => {
+    if (request.method === "PATCH") return Response.json({ ...receipt, revision: 1, text: "edited", delivery: "steer" })
+    if (request.url.pathname.endsWith("/human")) return Response.json(receipt)
+    return Response.json({ items: [receipt], next: null })
+  }, { images: durableImages() }, { ...imageCapabilities, sessionInput: { ...imageCapabilities.sessionInput, update: true } })
+  await composer.loadCapabilities()
+  await composer.refreshInputs()
+  composer.setText("unsent main draft")
+  composer.setImages([image])
+  composer.setModel(model)
+  composer.setSelection(2, 5)
+  const draft = structuredClone(unwrap(composer.state.task))
+  const mode = composer.state.mode
+  composer.editInput("human")
+  composer.changeInputEdit("human", { text: "edited", delivery: "steer" })
+  await composer.saveInput("human")
+  expect(unwrap(composer.state.receipts[0])).toMatchObject({ requestID: "human", text: "edited", delivery: "steer", images: [wireImage], revision: 1 })
+  expect(unwrap(composer.state.task)).toEqual(draft)
+  expect(composer.state.mode).toBe(mode)
+  expect(composer.state.inputEdits.human.text).toBe("edited")
+  expect(composer.state.inputEdits.human.open).toBe(false)
+  expect(requests.filter((item) => item.method !== "GET").map((item) => item.method)).toEqual(["PATCH"])
+})
+
+test("promotion conflict retains inline text, exposes current state, and never resends", async () => {
+  const receipt = pending("human", "original", "steer")
+  let promoted = false
+  const { composer, requests } = harness((request) => {
+    if (request.method === "PATCH") { promoted = true; return Response.json({ message: "picked up" }, { status: 409 }) }
+    if (request.url.pathname.endsWith("/human")) return Response.json(promoted ? { ...receipt, state: "promoted", messageID: "msg_visible", timePromoted: 3 } : receipt)
+    return Response.json({ items: [receipt], next: null })
+  }, {}, { ...capabilities, sessionInput: { ...capabilities.sessionInput, update: true } })
+  await composer.loadCapabilities()
+  await composer.refreshInputs()
+  composer.editInput("human")
+  composer.changeInputEdit("human", { text: "keep local edit", delivery: "queue" })
+  await composer.saveInput("human")
+  expect(composer.state.inputEdits.human).toMatchObject({ text: "keep local edit", delivery: "queue", status: "conflict", open: true })
+  expect(composer.state.receipts[0].state).toBe("promoted")
+  composer.rebaseInputEdit("human")
+  await composer.saveInput("human")
+  expect(requests.filter((item) => item.method !== "GET")).toHaveLength(1)
+  composer.closeInputEdit("human")
+  expect(composer.state.inputEdits.human.text).toBe("keep local edit")
+})
+
+test("lost update acknowledgement survives reload and retries the exact PATCH command without reverting newer receipt", async () => {
+  const receipt = pending("human", "original", "queue")
+  let patches = 0
+  const { composer, requests, dependencies } = harness((request) => {
+    if (request.method === "PATCH") {
+      if (++patches === 1) throw new Error("ack lost")
+      return Response.json({ ...receipt, revision: 1, text: "edited", delivery: "steer" })
+    }
+    const current = patches ? { ...receipt, revision: 2, text: "newer remote", delivery: "queue" } : receipt
+    if (request.url.pathname.endsWith("/human")) return Response.json(current)
+    return Response.json({ items: [current], next: null })
+  }, {}, { ...capabilities, sessionInput: { ...capabilities.sessionInput, update: true } })
+  await composer.loadCapabilities()
+  await composer.refreshInputs()
+  composer.editInput("human")
+  composer.changeInputEdit("human", { text: "edited", delivery: "steer" })
+  await composer.saveInput("human")
+  expect(composer.state.inputEdits.human.status).toBe("unknown")
+  const restored = createComposer(session.id, directory, dependencies)
+  await restored.loadCapabilities()
+  await restored.refreshInputs()
+  expect(restored.state.inputEdits.human.status).toBe("unknown")
+  await restored.saveInput("human")
+  const writes = requests.filter((item) => item.method === "PATCH")
+  expect(writes).toHaveLength(2)
+  expect(writes[1].body).toEqual(writes[0].body)
+  expect(restored.state.receipts[0]).toMatchObject({ revision: 2, text: "newer remote" })
+  expect(restored.state.inputEdits.human.text).toBe("edited")
+  expect(restored.state.inputEdits.human.expectedRevision).toBe(1)
+})
+
+test("cancelled inline editing retains its draft and excludes peer mail and terminal inputs", async () => {
+  const human = pending("human", "original", "queue")
+  const peer = { ...pending("peer", "mail", "queue"), source: { type: "editspace-mail", id: "mail", sender: "a", recipient: "b" } }
+  const terminal = { ...pending("terminal"), state: "cancelled", timeCancelled: 4 }
+  const { composer, requests } = harness((request) => {
+    const item = [human, peer, terminal].find((item) => request.url.pathname.endsWith(`/${item.requestID}`))
+    return Response.json(item ?? { items: [human, peer, terminal], next: null })
+  }, {}, { ...capabilities, sessionInput: { ...capabilities.sessionInput, update: true } })
+  await composer.loadCapabilities()
+  await composer.refreshInputs()
+  composer.editInput("peer")
+  composer.editInput("terminal")
+  expect(Object.keys(composer.state.inputEdits)).toEqual([])
+  composer.editInput("human")
+  composer.changeInputEdit("human", { text: "unfinished edit" })
+  composer.closeInputEdit("human")
+  composer.editInput("human")
+  expect(composer.state.inputEdits.human.text).toBe("unfinished edit")
+  expect(requests.filter((item) => item.method !== "GET")).toHaveLength(0)
+})
+
+test("a reconciled set-aside input can be edited and reloaded while its original recovery payload stays immutable", async () => {
+  let current = { ...pending("request-1", "original", "queue"), revision: 0 }
+  const { composer, dependencies } = harness((request) => {
+    if (request.method === "POST") throw new Error("lost admission ack")
+    if (request.method === "PATCH") {
+      current = { ...current, text: "edited", delivery: "steer", revision: 1 }
+      return Response.json(current)
+    }
+    if (request.url.pathname.endsWith("/input")) return Response.json({ items: [current], next: null })
+    return Response.json(current)
+  }, {}, { ...capabilities, sessionInput: { ...capabilities.sessionInput, update: true } })
+  await composer.loadCapabilities()
+  composer.observeBusy(true)
+  composer.selectMode("queue")
+  composer.setText("original")
+  await composer.submit(session)
+  await composer.setAsideAdmission()
+  await composer.recoverAdmission("request-1")
+  expect(composer.state.recoveries[0].reconciled).toBe(true)
+  composer.setText("unsent newer draft")
+  composer.editInput("request-1")
+  composer.changeInputEdit("request-1", { text: "edited", delivery: "steer" })
+  await composer.saveInput("request-1")
+  expect(composer.state.inputEdits["request-1"].status).toBe("editing")
+  expect(composer.state.receipts[0].text).toBe("edited")
+  expect(composer.state.recoveries[0].admission.payload.text).toBe("original")
+  const restored = createComposer(session.id, directory, dependencies)
+  await restored.loadCapabilities()
+  await restored.refreshInputs()
+  expect(restored.state.receipts[0].text).toBe("edited")
+  expect(restored.state.recoveries[0].admission.payload.text).toBe("original")
+  expect(restored.state.task.text).toBe("unsent newer draft")
+})
+
+test("an uncertain edit retries its exact command after promotion without downgrading visible state", async () => {
+  const receipt = pending("human", "original", "queue")
+  let patches = 0
+  const { composer, requests } = harness((request) => {
+    if (request.method === "PATCH") {
+      if (++patches === 1) throw new Error("lost ack")
+      return Response.json({ ...receipt, text: "edited", revision: 1 })
+    }
+    const current = patches ? { ...receipt, text: "edited", revision: 1, state: "promoted", messageID: "msg_one", timePromoted: 5 } : receipt
+    if (request.url.pathname.endsWith("/input")) return Response.json({ items: patches ? [] : [receipt], next: null })
+    return Response.json(current)
+  }, {}, { ...capabilities, sessionInput: { ...capabilities.sessionInput, update: true } })
+  await composer.loadCapabilities()
+  await composer.refreshInputs()
+  composer.editInput("human")
+  composer.changeInputEdit("human", { text: "edited" })
+  await composer.saveInput("human")
+  await composer.refreshInputs()
+  expect(composer.state.receipts[0].state).toBe("promoted")
+  await composer.saveInput("human")
+  expect(composer.state.inputEdits.human.status).toBe("editing")
+  expect(composer.state.receipts[0].state).toBe("promoted")
+  const writes = requests.filter((item) => item.method !== "GET")
+  expect(writes.map((item) => item.method)).toEqual(["PATCH", "PATCH"])
+  expect(writes[1].body).toEqual(writes[0].body)
+})
+
+test("a rejected pending edit stays editable without overwriting its draft", async () => {
+  const receipt = pending("human", "original", "queue")
+  const { composer } = harness((request) => {
+    if (request.method === "PATCH") return Response.json({ message: "Input requires text or images" }, { status: 400 })
+    if (request.url.pathname.endsWith("/input")) return Response.json({ items: [receipt], next: null })
+    return Response.json(receipt)
+  }, {}, { ...capabilities, sessionInput: { ...capabilities.sessionInput, update: true } })
+  await composer.loadCapabilities()
+  await composer.refreshInputs()
+  composer.editInput("human")
+  composer.changeInputEdit("human", { text: "" })
+  await composer.saveInput("human")
+  expect(composer.state.inputEdits.human).toMatchObject({ text: "", status: "editing", open: true })
+  composer.changeInputEdit("human", { text: "corrected" })
+  expect(composer.state.inputEdits.human.text).toBe("corrected")
+  expect(composer.state.receipts[0].text).toBe("original")
+})
+
+test("editing a conflict draft survives reload even if the input has been promoted", async () => {
+  const receipt = pending("human", "original", "queue")
+  let promoted = false
+  const { composer, dependencies } = harness((request) => {
+    if (request.method === "PATCH") { promoted = true; return Response.json({ message: "promoted" }, { status: 409 }) }
+    if (request.url.pathname.endsWith("/input")) return Response.json({ items: promoted ? [] : [receipt], next: null })
+    return Response.json(promoted ? { ...receipt, state: "promoted", messageID: "msg_one", timePromoted: 5 } : receipt)
+  }, {}, { ...capabilities, sessionInput: { ...capabilities.sessionInput, update: true } })
+  await composer.loadCapabilities()
+  await composer.refreshInputs()
+  composer.editInput("human")
+  composer.changeInputEdit("human", { text: "edit that lost the race" })
+  await composer.saveInput("human")
+  composer.changeInputEdit("human", { text: "new local conflict draft", delivery: "steer" })
+  const restored = createComposer(session.id, directory, dependencies)
+  expect(restored.state.inputEdits.human).toMatchObject({ text: "new local conflict draft", delivery: "steer", status: "conflict", open: true })
+  expect(restored.state.inputEdits.human.command).toBeUndefined()
+})
+
+test("a lost validation rejection can be reconciled by exact retry and corrected locally", async () => {
+  const receipt = pending("human", "original", "queue")
+  let patches = 0
+  const { composer, requests } = harness((request) => {
+    if (request.method === "PATCH") {
+      if (++patches === 1) throw new Error("rejection response lost")
+      return Response.json({ message: "Input requires text or images" }, { status: 400 })
+    }
+    if (request.url.pathname.endsWith("/input")) return Response.json({ items: [receipt], next: null })
+    return Response.json(receipt)
+  }, {}, { ...capabilities, sessionInput: { ...capabilities.sessionInput, update: true } })
+  await composer.loadCapabilities()
+  await composer.refreshInputs()
+  composer.editInput("human")
+  composer.changeInputEdit("human", { text: "" })
+  await composer.saveInput("human")
+  expect(composer.state.inputEdits.human.status).toBe("unknown")
+  await composer.saveInput("human")
+  expect(composer.state.inputEdits.human.status).toBe("editing")
+  composer.changeInputEdit("human", { text: "corrected" })
+  expect(composer.state.inputEdits.human.text).toBe("corrected")
+  const writes = requests.filter((item) => item.method === "PATCH")
+  expect(writes[1].body).toEqual(writes[0].body)
+})
+
 test("busy model selection waits for PATCH before admitting Queue and keeps Aside separate", async () => {
   const patch = deferred<Response>()
   const { composer, requests } = harness((request) => {

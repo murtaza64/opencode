@@ -68,6 +68,11 @@ export const InputsQuery = Schema.Struct({
     Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 1000 })),
   ),
 })
+export class InputUpdateConflictError extends Schema.TaggedErrorClass<InputUpdateConflictError>()(
+  "InputUpdateConflict",
+  { message: Schema.String, current: SessionV1.InputReceipt },
+  { httpApiStatus: 409 },
+) {}
 export const UpdatePayload = Schema.Struct({
   model: Schema.optional(Schema.Struct({ providerID: ProviderV2.ID, modelID: ModelV2.ID, variant: Schema.optional(Schema.String) })),
   title: Schema.optional(Schema.String),
@@ -122,6 +127,7 @@ export const SessionPaths = {
   aside: `${root}/:sessionID/aside`,
   cancelAside: `${root}/:sessionID/aside/:requestID`,
   handleInput: `${root}/:sessionID/input/:requestID/handle`,
+  updateInput: `${root}/:sessionID/input/:requestID`,
   share: `${root}/:sessionID/share`,
   init: `${root}/:sessionID/init`,
   summarize: `${root}/:sessionID/summarize`,
@@ -165,6 +171,15 @@ export const SessionApi = HttpApi.make("session")
           error: [ApiNotFoundError, InvalidRequestError, HttpApiError.BadRequest],
         }).annotateMerge(
           OpenApi.annotations({ identifier: "session.input.get", summary: "Get session input receipt" }),
+        ),
+        HttpApiEndpoint.patch("updateInput", SessionPaths.updateInput, {
+          params: { sessionID: SessionID, requestID: Schema.String },
+          query: WorkspaceRoutingQuery,
+          payload: SessionInput.InputUpdatePayload,
+          success: SessionV1.InputReceipt,
+          error: [ApiNotFoundError, InputUpdateConflictError, InvalidRequestError, HttpApiError.BadRequest],
+        }).annotateMerge(
+          OpenApi.annotations({ identifier: "session.input.update", summary: "Update pending human session input" }),
         ),
         HttpApiEndpoint.delete("cancelInput", `${root}/:sessionID/input/:requestID`, {
           params: { sessionID: SessionID, requestID: Schema.String },

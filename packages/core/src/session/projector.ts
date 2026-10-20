@@ -13,7 +13,7 @@ import { SessionMessage } from "./message"
 import { SessionMessageUpdater } from "./message-updater"
 import { SessionInput } from "./input"
 import { WorkspaceV2 } from "../workspace"
-import { MessageTable, PartTable, SessionInputTable, SessionMessageTable, SessionTable, V1InputTable } from "./sql"
+import { MessageTable, PartTable, SessionInputTable, SessionMessageTable, SessionTable, V1InputTable, V1InputCommandTable } from "./sql"
 import type { DeepMutable } from "../schema"
 
 type DatabaseService = Database.Interface["db"]
@@ -322,6 +322,7 @@ const layer = Layer.effectDiscard(
             model: event.data.model,
             receipt: {
               ...event.data.payload,
+              revision: 0,
               sessionID: event.data.sessionID,
               agent: event.data.agent,
               admittedSeq: seq,
@@ -359,6 +360,77 @@ const layer = Layer.effectDiscard(
           .pipe(Effect.orDie)
       }),
     )
+    yield* events.project(SessionV1.Event.InputUpdated, (event) =>
+      Effect.gen(function* () {
+        const row = yield* db
+          .select()
+          .from(V1InputTable)
+          .where(
+            and(eq(V1InputTable.request_id, event.data.requestID), eq(V1InputTable.session_id, event.data.sessionID)),
+          )
+          .get()
+          .pipe(Effect.orDie)
+        const prior = yield* db
+          .select()
+          .from(V1InputCommandTable)
+          .where(eq(V1InputCommandTable.command_id, event.data.command.commandID))
+          .get()
+          .pipe(Effect.orDie)
+        if (prior) {
+          if (
+            prior.request_id === event.data.requestID &&
+            prior.session_id === event.data.sessionID &&
+            prior.command.commandID === event.data.command.commandID &&
+            prior.command.expectedRevision === event.data.command.expectedRevision &&
+            prior.command.text === event.data.command.text &&
+            prior.command.delivery === event.data.command.delivery
+          )
+            return
+          return yield* Effect.die(new InputLifecycleConflict())
+        }
+        if (
+          !row ||
+          row.state !== "pending" ||
+          row.receipt.state !== "pending" ||
+          row.payload.source !== undefined ||
+          (row.receipt.revision ?? 0) !== event.data.command.expectedRevision ||
+          (event.data.command.text === undefined && event.data.command.delivery === undefined)
+        )
+          return yield* Effect.die(new InputLifecycleConflict())
+        const next = {
+          ...row.receipt,
+          revision: (row.receipt.revision ?? 0) + 1,
+          text: event.data.command.text ?? row.receipt.text,
+          delivery: event.data.command.delivery ?? row.receipt.delivery,
+        }
+        if (!next.text.trim() && !row.images?.length) return yield* Effect.die(new InputLifecycleConflict())
+        const updated = yield* db
+          .update(V1InputTable)
+          .set({ receipt: next })
+          .where(
+            and(
+              eq(V1InputTable.request_id, row.request_id),
+              eq(V1InputTable.state, "pending"),
+              sql`coalesce(json_extract(${V1InputTable.receipt}, '$.revision'), 0) = ${event.data.command.expectedRevision}`,
+            ),
+          )
+          .returning({ requestID: V1InputTable.request_id })
+          .get()
+          .pipe(Effect.orDie)
+        if (!updated) return yield* Effect.die(new InputLifecycleConflict())
+        yield* db
+          .insert(V1InputCommandTable)
+          .values({
+            command_id: event.data.command.commandID,
+            request_id: row.request_id,
+            session_id: row.session_id,
+            command: event.data.command,
+            receipt: next,
+          })
+          .run()
+          .pipe(Effect.orDie)
+      }),
+    )
     yield* events.project(SessionV1.Event.InputPromoted, (event) =>
       Effect.gen(function* () {
         const row = yield* db
@@ -382,7 +454,10 @@ const layer = Layer.effectDiscard(
           !isDeepStrictEqual(info.model, row.model) ||
           event.data.part.sessionID !== info.sessionID ||
           event.data.part.messageID !== info.id ||
-          event.data.part.text !== row.payload.text ||
+          event.data.part.text !== row.receipt.text ||
+          ((row.receipt.revision ?? 0) > 0 && (event.data.revision === undefined || event.data.delivery === undefined)) ||
+          (event.data.revision !== undefined && event.data.revision !== (row.receipt.revision ?? 0)) ||
+          (event.data.delivery !== undefined && event.data.delivery !== row.receipt.delivery) ||
           images.some((image) => image.sessionID !== info.sessionID || image.messageID !== info.id) ||
           (images.length > 0 && !/^prt_[A-Za-z0-9]+$/.test(event.data.part.id)) ||
           images.some(

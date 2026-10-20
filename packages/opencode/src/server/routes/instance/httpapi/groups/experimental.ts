@@ -38,6 +38,7 @@ const CapabilitiesResponse = Schema.Struct({
     delivery: Schema.Array(Schema.Literals(["queue", "steer"])),
     list: Schema.Literal(true),
     cancel: Schema.Literal(true),
+    update: Schema.Literal(true),
     images: Schema.optionalKey(SessionV1.ImageCapabilities),
   }),
 }).annotate({ identifier: "ExperimentalCapabilities" })

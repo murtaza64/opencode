@@ -51,6 +51,7 @@ export type Event =
   | EventSessionNextRevertCommitted
   | EventSessionInputAdmitted
   | EventSessionInputCancelled
+  | EventSessionInputUpdated
   | EventSessionInputPromoted
   | EventSessionInputPresented
   | EventSessionInputHandled
@@ -1240,10 +1241,21 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "session.input.updated"
+        properties: {
+          sessionID: string
+          requestID: string
+          command: SessionV1InputUpdatePayload
+        }
+      }
+    | {
+        id: string
         type: "session.input.promoted"
         properties: {
           sessionID: string
           requestID: string
+          revision?: number
+          delivery?: "queue" | "steer"
           info: UserMessage
           part: TextPart
           images?: Array<{
@@ -1727,6 +1739,7 @@ export type GlobalEvent = {
     | SyncEventSessionNextRevertCommitted
     | SyncEventSessionInputAdmitted
     | SyncEventSessionInputCancelled
+    | SyncEventSessionInputUpdated
     | SyncEventSessionInputPromoted
     | SyncEventSessionInputPresented
     | SyncEventSessionInputHandled
@@ -2247,6 +2260,7 @@ export type ExperimentalCapabilities = {
     delivery: Array<"queue" | "steer">
     list: true
     cancel: true
+    update: true
     images?: {
       version: 1
       encoding: "data-url"
@@ -2697,6 +2711,12 @@ export type SessionSupersededError = {
   successor: string
   state: "pending" | "committed"
   message: string
+}
+
+export type InputUpdateConflict = {
+  _tag: "InputUpdateConflict"
+  message: string
+  current: SessionV1InputReceipt
 }
 
 export type AsideError = {
@@ -3151,6 +3171,7 @@ export type V2Event =
   | SessionNextRevertCommitted
   | SessionInputAdmitted
   | SessionInputCancelled
+  | SessionInputUpdated
   | SessionInputPromoted
   | SessionInputPresented
   | SessionInputHandled
@@ -3404,6 +3425,13 @@ export type SessionV1InputPayload = {
   images?: Array<SessionV1InputImage>
   agent?: string
   source?: SessionInputMailSource
+}
+
+export type SessionV1InputUpdatePayload = {
+  commandID: string
+  expectedRevision: number
+  text?: string
+  delivery?: "queue" | "steer"
 }
 
 export type PermissionV2Source = {
@@ -4167,6 +4195,22 @@ export type SyncEventSessionInputCancelled = {
   }
 }
 
+export type SyncEventSessionInputUpdated = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.input.updated.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      requestID: string
+      command: SessionV1InputUpdatePayload
+    }
+  }
+}
+
 export type SyncEventSessionInputPromoted = {
   type: "sync"
   id: string
@@ -4178,6 +4222,8 @@ export type SyncEventSessionInputPromoted = {
     data: {
       sessionID: string
       requestID: string
+      revision?: number
+      delivery?: "queue" | "steer"
       info: UserMessage
       part: TextPart
       images?: Array<{
@@ -4267,6 +4313,7 @@ export type SessionV1InputReceipt =
       images?: Array<SessionV1InputImage>
       agent: string
       source?: SessionInputMailSource
+      revision?: number
       sessionID: string
       admittedSeq: number
       timeCreated: number
@@ -4279,6 +4326,7 @@ export type SessionV1InputReceipt =
       images?: Array<SessionV1InputImage>
       agent: string
       source?: SessionInputMailSource
+      revision?: number
       sessionID: string
       admittedSeq: number
       timeCreated: number
@@ -4293,6 +4341,7 @@ export type SessionV1InputReceipt =
       images?: Array<SessionV1InputImage>
       agent: string
       source?: SessionInputMailSource
+      revision?: number
       sessionID: string
       admittedSeq: number
       timeCreated: number
@@ -4308,6 +4357,7 @@ export type SessionV1InputReceipt =
       images?: Array<SessionV1InputImage>
       agent: string
       source?: SessionInputMailSource
+      revision?: number
       sessionID: string
       admittedSeq: number
       timeCreated: number
@@ -4326,6 +4376,7 @@ export type SessionV1InputReceipt =
       images?: Array<SessionV1InputImage>
       agent: string
       source?: SessionInputMailSource
+      revision?: number
       sessionID: string
       admittedSeq: number
       timeCreated: number
@@ -5837,6 +5888,25 @@ export type SessionInputCancelled = {
   }
 }
 
+export type SessionInputUpdated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.input.updated"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    requestID: string
+    command: SessionV1InputUpdatePayload
+  }
+}
+
 export type SessionInputPromoted = {
   id: string
   metadata?: {
@@ -5852,6 +5922,8 @@ export type SessionInputPromoted = {
   data: {
     sessionID: string
     requestID: string
+    revision?: number
+    delivery?: "queue" | "steer"
     info: UserMessage
     part: TextPart
     images?: Array<{
@@ -7298,12 +7370,24 @@ export type EventSessionInputCancelled = {
   }
 }
 
+export type EventSessionInputUpdated = {
+  id: string
+  type: "session.input.updated"
+  properties: {
+    sessionID: string
+    requestID: string
+    command: SessionV1InputUpdatePayload
+  }
+}
+
 export type EventSessionInputPromoted = {
   id: string
   type: "session.input.promoted"
   properties: {
     sessionID: string
     requestID: string
+    revision?: number
+    delivery?: "queue" | "steer"
     info: UserMessage
     part: TextPart
     images?: Array<{
@@ -10276,6 +10360,45 @@ export type SessionInputGetResponses = {
 }
 
 export type SessionInputGetResponse = SessionInputGetResponses[keyof SessionInputGetResponses]
+
+export type SessionInputUpdateData = {
+  body?: SessionV1InputUpdatePayload
+  path: {
+    sessionID: string
+    requestID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/input/{requestID}"
+}
+
+export type SessionInputUpdateErrors = {
+  /**
+   * InvalidRequestError | BadRequest
+   */
+  400: InvalidRequestError | EffectHttpApiErrorBadRequest
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+  /**
+   * InputUpdateConflict
+   */
+  409: InputUpdateConflict
+}
+
+export type SessionInputUpdateError = SessionInputUpdateErrors[keyof SessionInputUpdateErrors]
+
+export type SessionInputUpdateResponses = {
+  /**
+   * SessionV1.InputReceipt
+   */
+  200: SessionV1InputReceipt
+}
+
+export type SessionInputUpdateResponse = SessionInputUpdateResponses[keyof SessionInputUpdateResponses]
 
 export type SessionInputHandleData = {
   body?: SessionV1InputHandlePayload
