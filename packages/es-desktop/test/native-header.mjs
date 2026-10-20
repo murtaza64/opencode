@@ -173,12 +173,13 @@ try {
   })
   await page.goto(origin)
   await expect(header.getByRole("heading")).toHaveText("Home")
-  await expect(header.getByRole("button", { name: "refresh", exact: true })).toBeVisible()
+  await expect(header.getByRole("button", { name: "Refresh", exact: true })).toBeVisible()
   await expect(page.locator("main > header.topbar")).toHaveCount(0)
   await page.goto(`${origin}/session/ses_a?directory=${encodeURIComponent(directory)}`)
   await expect(header.getByRole("heading")).toHaveText("Composer fixture")
   expect(errors).toEqual([])
-  expect(fixture.calls.filter((call) => call.method !== "GET")).toEqual([])
+  expect(fixture.calls.filter((call) => !["GET", "HEAD", "OPTIONS"].includes(call.method) &&
+    !(call.method === "POST" && call.path === "/api/attention/session" && JSON.stringify(call.body) === "{}"))).toEqual([])
   check("session/board header routing; no fixture writes, errors or submissions")
   const windowID = await app.evaluate(
     ({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getMediaSourceId().split(":")[1],

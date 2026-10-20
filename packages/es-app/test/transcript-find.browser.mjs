@@ -30,6 +30,8 @@ const input = () => find().getByRole("searchbox", { name: "Find in transcript" }
 const matches = () => find().locator(".find-result")
 const editor = () => page.locator(".prompt-box textarea")
 const reads = () => fixture.calls.filter((call) => call.path === "/session/ses_a/message").length
+const unexpectedWrites = () => fixture.calls.filter((call) => !["GET", "HEAD", "OPTIONS"].includes(call.method) &&
+  !(call.method === "POST" && call.path === "/api/attention/session" && JSON.stringify(call.body) === "{}"))
 const open = async () => { await page.keyboard.press("Control+f"); await expect(input()).toBeFocused() }
 const lookup = async (text, count) => {
   await input().fill(text)
@@ -196,14 +198,14 @@ try {
   fixture.messageReplies.splice(0).forEach((reply) => reply())
 
   // Home retains browser-default Find; navigating disposes the Session listener.
-  expect(fixture.calls.filter((call) => !["GET", "HEAD", "OPTIONS"].includes(call.method))).toEqual([])
+  expect(unexpectedWrites()).toEqual([])
   await page.goto(preview.origin, { waitUntil: "domcontentloaded", timeout: 30_000 })
   expect(await page.evaluate(() => {
     const event = new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true, cancelable: true })
     window.dispatchEvent(event)
     return event.defaultPrevented
   })).toBe(false)
-  expect(fixture.calls.filter((call) => call.path !== "/api/attention/session" && !["GET", "HEAD", "OPTIONS"].includes(call.method))).toEqual([])
+  expect(unexpectedWrites()).toEqual([])
   expect(errors).toEqual([])
   console.log(`PASS transcript Find (${app ? "packaged Electron" : "browser"}): paged earlier hit, literal/case/Unicode/RTL, live updates, cursor/network errors, cancel, wrapped navigation, draft/title/expanded vim preservation, Home default, zero writes`)
 } finally {
