@@ -15,8 +15,8 @@ page.on("pageerror", (error) => errors.push(error.message))
 await page.route("**/*", (route) => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
 try {
   await page.goto(preview.url, { waitUntil: "domcontentloaded" })
-  // The trailing completed calls start in a compact run; expand it to check each original chip.
-  await page.locator('.tool-run[data-timeline-part-ids="skill-3,skill-4,shell"] .tool-run-summary').click()
+  // The turn is still live (running and pending calls), so every call stays a visible chip.
+  await expect(page.locator(".tool-run")).toHaveCount(0)
   const labels = page.locator('.transcript [data-tool="skill"] [data-slot="basic-tool-tool-title"]')
   await expect(labels.locator('[data-slot="text-shimmer-char-base"]')).toHaveText(["Skill", "Skill", "Skill", "Skill", "Skill"])
   await expect(page.locator('.transcript [data-tool="skill"] [data-slot="basic-tool-tool-subtitle"]')).toHaveText(["grill-with-docs", "grilling", "domain-modeling", "MixedCase-Skill"])

@@ -2,7 +2,7 @@ import { pathToFileURL } from "node:url"
 import { startPanelPreview } from "./composer-panel-preview.mjs"
 import { directory } from "./composer-fixture.mjs"
 
-// Disposable fixture for tool size badges, compact tool runs and prompt
+// Disposable fixture for tool size badges, coalesced tool runs and prompt
 // navigation. Nothing here talks to a real daemon.
 export const startToolRunsPreview = async (portHint = 0, options = {}) => {
   const preview = await startPanelPreview([], portHint)
@@ -82,7 +82,7 @@ export const startToolRunsPreview = async (portHint = 0, options = {}) => {
     text: `Lane mail ${index}`, deliveries: [],
   })) })
   if (options.title) fixture.sessionTitles.set("ses_a", options.title)
-  return { ...preview, tool, assistant, laneUrl: `${preview.origin}/session/ses_a?directory=${encodeURIComponent(laneDirectory)}` }
+  return { ...preview, tool, assistant, text, laneUrl: `${preview.origin}/session/ses_a?directory=${encodeURIComponent(laneDirectory)}` }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

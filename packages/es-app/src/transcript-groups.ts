@@ -1,24 +1,66 @@
 import type { Message, Part, ToolPart } from "@opencode-ai/sdk/v2"
-import { toolMagnitude } from "./tool-magnitude"
+import { duration } from "./tool-magnitude"
 
-// A run is a display-only block of consecutive small, finished tool calls. Raw
-// history is never changed: members keep their message, part and call IDs and
-// render as their original chips when the run is expanded.
+// A run is a display-only block of adjacent tool calls in a completed agent
+// turn. Raw history is never changed: members keep their message, part and call
+// IDs and render as their original chips when the run is expanded.
 export type ToolRunMember = { messageID: string; partID: string; callID: string }
 export type ToolRunGroup = { key: string; members: ToolRunMember[] }
 export type ToolRunPlan = { runs: Map<string, ToolRunGroup>; byPart: Map<string, string> }
 export type Segment = { kind: "parts"; parts: Part[] } | { kind: "run"; key: string }
 
-export const RUN_LIMITS = { min: 3, max: 40, rank: 1 }
-// Tools whose result changes files, delegates work, asks the human or tracks
-// TODOs stay visible as their own chips even when small.
-const SIGNIFICANT_TOOLS = new Set(["task", "question", "todowrite", "todoread", "edit", "write", "patch", "apply_patch", "multiedit"])
+export const RUN_MIN = 2
 
 type Row = { type: "transcript"; message: Message } | { type: "mail" }
+
+// User message IDs whose agent turn (every assistant step answering that
+// prompt) has finished. Mirrors the engine's completedTurn (session/run-state):
+// a provider step with finish "tool-calls" or a set time.completed is only an
+// intermediate step, and a final step that still holds client-executed tool
+// calls needs continuation.
+export const completedTurns = (messages: readonly Message[], input: {
+  parts: (messageID: string) => readonly Part[]
+  // The session has stopped working (no drain, retry or pending request).
+  idle: boolean
+  // A permission or question request still references this call.
+  waiting: (messageID: string, callID: string) => boolean
+}) => {
+  const turns = new Map<string, Message[]>()
+  let latest: string | undefined
+  for (const message of messages) {
+    if (message.role !== "assistant") continue
+    const steps = turns.get(message.parentID)
+    if (steps) steps.push(message)
+    else turns.set(message.parentID, [message])
+    latest = message.parentID
+  }
+  const done = new Set<string>()
+  for (const [parent, steps] of turns) {
+    const settled = steps.every((step) => input.parts(step.id).every((part) =>
+      part.type !== "tool" || (terminal(part) && !input.waiting(step.id, part.callID))))
+    if (!settled) continue
+    const last = steps.at(-1)!
+    if (last.role !== "assistant") continue
+    // A later step answering another prompt means this turn stopped.
+    if (last.error || parent !== latest || (input.idle && last.time.completed) || finalStep(last, input.parts(last.id)))
+      done.add(parent)
+  }
+  return done
+}
+
+const finalStep = (message: Extract<Message, { role: "assistant" }>, parts: readonly Part[]) => {
+  if (message.structured !== undefined) return true
+  if (!message.finish || message.finish === "tool-calls" || message.finish === "unknown") return false
+  return !parts.some((part) => part.type === "tool" && !part.metadata?.providerExecuted)
+}
+
+const terminal = (part: ToolPart) => part.state.status === "completed" || part.state.status === "error"
 
 export const planToolRuns = (rows: readonly Row[], input: {
   parts: (messageID: string) => readonly Part[]
   visible: (part: Part) => boolean
+  // Parent (user message) IDs of completed turns; live turns never coalesce.
+  completed: ReadonlySet<string>
   // Rendered between messages (turn summaries); a run never spans it.
   breakAfter?: (message: Message) => boolean
 }): ToolRunPlan => {
@@ -26,7 +68,7 @@ export const planToolRuns = (rows: readonly Row[], input: {
   const byPart = new Map<string, string>()
   let current: ToolRunMember[] = []
   const flush = () => {
-    if (current.length >= RUN_LIMITS.min) {
+    if (current.length >= RUN_MIN) {
       const run = { key: `run:${current[0]!.messageID}:${current[0]!.partID}`, members: current }
       runs.set(run.key, run)
       current.forEach((member) => byPart.set(member.partID, run.key))
@@ -35,7 +77,7 @@ export const planToolRuns = (rows: readonly Row[], input: {
   }
   let parent: string | undefined
   for (const row of rows) {
-    if (row.type !== "transcript" || row.message.role !== "assistant" || row.message.error) {
+    if (row.type !== "transcript" || row.message.role !== "assistant" || !input.completed.has(row.message.parentID)) {
       flush()
       parent = undefined
       continue
@@ -45,31 +87,55 @@ export const planToolRuns = (rows: readonly Row[], input: {
     parent = row.message.parentID
     for (const part of input.parts(row.message.id)) {
       if (!input.visible(part)) continue
-      if (!groupable(part)) {
+      if (part.type !== "tool" || !terminal(part)) {
         flush()
         continue
       }
-      if (current.length >= RUN_LIMITS.max) flush()
       current.push({ messageID: row.message.id, partID: part.id, callID: part.callID })
     }
-    if (input.breakAfter?.(row.message)) flush()
+    // A provider error renders after its message's parts.
+    if (row.message.error || input.breakAfter?.(row.message)) flush()
   }
   flush()
   return { runs, byPart }
 }
 
-// Grouping is by measured text size only; it never claims a call was safe or cheap.
-export const groupable = (part: Part): part is ToolPart => {
-  if (part.type !== "tool" || part.state.status !== "completed" || SIGNIFICANT_TOOLS.has(part.tool) || reportedFailure(part)) return false
-  const magnitude = toolMagnitude(part)
-  return magnitude.kind === "sized" && magnitude.rank <= RUN_LIMITS.rank && !magnitude.partial && !magnitude.attachments
-}
+export type ToolOutcome = "ok" | "failed" | "interrupted" | "unfinished"
 
 // Shell calls finish as "completed" with a nonzero (or missing) exit code;
-// tools may also report an error in metadata. Both are failures, kept visible.
-const reportedFailure = (part: ToolPart) => {
-  const metadata = part.state.status === "completed" ? part.state.metadata : undefined
-  return !!metadata && (("exit" in metadata && metadata.exit !== 0) || !!metadata.error)
+// tools may also report an error in metadata. Both count as failures.
+export const toolOutcome = (part: ToolPart): ToolOutcome => {
+  const state = part.state
+  if (state.status === "pending" || state.status === "running") return "unfinished"
+  if (state.status === "error") return state.metadata?.interrupted === true ? "interrupted" : "failed"
+  const metadata = state.metadata
+  return metadata && (("exit" in metadata && metadata.exit !== 0) || metadata.error) ? "failed" : "ok"
+}
+
+// Collapsed-row facts: tool names/counts, wall-clock span and failure counts.
+export const runSummary = (parts: readonly ToolPart[]) => {
+  const counts = new Map<string, number>()
+  parts.forEach((part) => counts.set(part.tool, (counts.get(part.tool) ?? 0) + 1))
+  const outcomes = parts.map(toolOutcome)
+  const count = (outcome: string) => outcomes.filter((item) => item === outcome).length
+  // Parallel calls overlap, so the span is first start to last end, never a sum.
+  const times = parts.flatMap((part) => {
+    const state = part.state
+    return (state.status === "completed" || state.status === "error") && Number.isFinite(state.time.start) && Number.isFinite(state.time.end) &&
+      state.time.end >= state.time.start ? [state.time] : []
+  })
+  const untimed = parts.length - times.length
+  return {
+    tools: [...counts].map(([tool, total]) => total > 1 ? `${tool} ×${total}` : tool).join(" · "),
+    span: times.length ? duration(times.reduce((end, time) => Math.max(end, time.end), -Infinity) -
+      times.reduce((start, time) => Math.min(start, time.start), Infinity)) : undefined,
+    notes: [
+      count("failed") && `${count("failed")} failed`,
+      count("interrupted") && `${count("interrupted")} interrupted`,
+      count("unfinished") && `${count("unfinished")} unfinished`,
+      untimed && times.length && `${untimed} untimed`,
+    ].filter((note): note is string => !!note),
+  }
 }
 
 // A run renders where its first member was; later members render inside it.

@@ -42,7 +42,7 @@ import type { FindHit } from "../transcript-find"
 import { ToolSize } from "../components/tool-size"
 import { ToolRun } from "../components/tool-run"
 import { HeaderMenu } from "../components/header-menu"
-import { messageSegments, planToolRuns, samePlan, sameSegments } from "../transcript-groups"
+import { completedTurns, messageSegments, planToolRuns, samePlan, sameSegments } from "../transcript-groups"
 import { isUserPrompt, promptPosition, promptTarget } from "../transcript-nav"
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
@@ -571,12 +571,23 @@ function SessionView(props: { sessionID: string; directory: string }) {
   // marker for aborted turns. In-flight turns are omitted until they complete
   // or get aborted.
   type TurnSummary = { agent?: string; providerID?: string; modelID?: string; duration?: number; interrupted: boolean }
+  // Parent prompt IDs of finished agent turns (see completedTurns). Controls the
+  // footer and which tool calls may coalesce, so live turns stay fully visible.
+  const turnsDone = createMemo(() => {
+    const waiting = new Set(pending().flatMap((item) => item.request.tool
+      ? [`${item.request.tool.messageID}\u0000${item.request.tool.callID}`] : []))
+    return completedTurns(messages(), {
+      parts: (id) => live.data.part[id] ?? [],
+      idle: status() === "idle" && !pending().length && !live.connectionError(),
+      waiting: (messageID, callID) => waiting.has(`${messageID}\u0000${callID}`),
+    })
+  }, undefined, { equals: (a, b) => a.size === b.size && [...a].every((id) => b.has(id)) })
   const turnSummaries = createMemo(() => {
     const out = new Map<string, TurnSummary>()
     let turnStart: number | undefined
     let last: any | undefined
     const flush = () => {
-      if (last) {
+      if (last && turnsDone().has(last.parentID)) {
         const end = last.time?.completed
         out.set(last.id, {
           agent: last.agent ?? last.mode,
@@ -1316,16 +1327,19 @@ function SessionView(props: { sessionID: string; directory: string }) {
     </DirectComposer>
   )
 
-  // Display-only compaction of small finished tool calls; see transcript-groups.
+  // Display-only coalescing of adjacent tool calls in finished turns; see transcript-groups.
   const partVisible = (part: Part) => part.type === "text" || part.type === "reasoning"
     ? /\S/.test(part.text ?? "") : renderable(part, true, renderTools)
   const toolRuns = createMemo(() => planToolRuns(timeline(), {
     parts: (id) => live.data.part[id] ?? [],
     visible: partVisible,
+    completed: turnsDone(),
     breakAfter: (message) => turnSummaries().has(message.id),
   }), undefined, { equals: samePlan })
   // Expansion follows member parts, not run keys: prepending history or a
   // streamed call can merge runs and change the key of a run the user opened.
+  // A call the user engaged with while still standalone (live turn) opens the
+  // run it later joins, so completion never snaps it out of view.
   const [openParts, setOpenParts] = createSignal(new Set<string>())
   const runOpen = (key: string) => !!toolRuns().runs.get(key)?.members.some((member) => openParts().has(member.partID))
   const toggleRun = (key: string, open: boolean) => setOpenParts((current) => {
@@ -1437,7 +1451,15 @@ function SessionView(props: { sessionID: string; directory: string }) {
         </div>
 
         <div class="transcript" ref={transcriptEl}>
-          <div ref={inner} class="transcript-inner">
+          <div ref={inner} class="transcript-inner" onClick={(event) => {
+            const target = event.target as Element
+            if (target.closest(".tool-run")) return
+            const chip = target.closest("[data-component='tool-part-wrapper'], .tool-collapsible[data-timeline-part-ids]")
+            const ids = chip?.getAttribute("data-timeline-part-id") ?? chip?.getAttribute("data-timeline-part-ids")
+            if (!ids) return
+            const parts = ids.split(",").filter((id) => !openParts().has(id))
+            if (parts.length) setOpenParts((current) => new Set([...current, ...parts]))
+          }}>
             <Show when={findHit() && !messages().some((message) => message.id === findHit()?.messageID) ? findHit() : undefined}>{(hit) => <div class="find-jump" ref={findAnchor} role="region" aria-label="Selected transcript match">
               <FindExcerpt hit={hit()} />
               <span class="dim">Exact source excerpt. Earlier history is not added to the reader.</span>

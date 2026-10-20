@@ -24,38 +24,50 @@ const run = async (viewport, label) => {
     `[data-activity-group][data-timeline-part-ids^="${id},"]`, `[data-activity-group][data-timeline-part-ids$=",${id}"]`,
     `[data-activity-group][data-timeline-part-ids*=",${id},"]`].map((selector) => `.transcript ${selector}`).join(", "))
   const runFor = (id) => page.locator(`.tool-run[data-timeline-part-ids*="${id}"]`).first()
+  // The newest turn is still streaming; earlier finished turns coalesce meanwhile.
+  fixture.status = "busy"
   await page.goto(preview.url, { waitUntil: "domcontentloaded" })
   await expect(page.locator('[data-find-message="msg_1011"]')).toBeVisible({ timeout: 30_000 })
+  const emitPart = (messageID, part) => fixture.emit("message.part.updated", { part: { ...part, messageID, sessionID: "ses_a" } })
+  const emitMessage = (message) => {
+    fixture.emit("message.updated", { info: message.info })
+    message.parts.forEach((part) => fixture.emit("message.part.updated", { part }))
+  }
 
-  // Size badges: every activity-row chip carries one, with an honest label.
-  await expect(chip("p21_big").locator(".tool-size")).toHaveAttribute("data-size", "L")
-  await expect(chip("p21_big").locator(".tool-size")).toHaveAttribute("aria-label", /^Size L: ~12k characters \(input 20, output 12k\)/)
-  await expect(chip("p21_big").locator(".tool-size")).toHaveAttribute("title", /Not tokens or cost/)
-  await expect(chip("p22_fail").locator(".tool-size").first()).toHaveAttribute("data-size", "XS")
-  await expect(chip("p63_lc").locator(".tool-size")).toHaveAttribute("data-size", "running")
-  await expect(chip("p63_lc").locator(".tool-size")).toHaveAttribute("aria-label", "Size not known yet: tool is running")
-
-  // Runs: turn 1 spans two assistant messages; prose, the L read, the error and the turn end break it.
+  // Every adjacent block of finished calls in a finished turn is one run, whatever its tools, sizes or outcomes.
+  await expect(page.locator(".tool-run")).toHaveCount(3)
   const first = runFor("p11_read")
   await expect(first).toHaveAttribute("data-timeline-part-ids", "p11_read,p12_grep,p13_glob,p14_bash")
   await expect(first.locator(".tool-run-summary")).toHaveAttribute("aria-expanded", "false")
-  await expect(first.locator(".tool-run-kind")).toHaveText("4 short tool calls")
+  await expect(first.locator(".tool-run-kind")).toHaveText("4 tool calls")
   await expect(first.locator(".tool-run-tools")).toHaveText("read · grep · glob · bash")
-  await expect(first.locator(".tool-size")).toHaveText("XS")
-  for (const id of ["p11_read", "p12_grep", "p13_glob", "p14_bash"]) await expect(chip(id)).toHaveCount(0)
-  for (const id of ["p21_big", "p22_fail", "p23_a", "p24_b", "p61_la", "p62_lb", "p63_lc"]) await expect(chip(id)).toHaveCount(1)
-  // A short shell call that reported a nonzero exit stays its own chip between two runs.
-  await expect(page.locator(".tool-run")).toHaveCount(3)
-  await expect(runFor("p40_ta")).toHaveAttribute("data-timeline-part-ids", "p40_ta,p41_tb,p42_tc")
-  await expect(runFor("p44_sa")).toHaveAttribute("data-timeline-part-ids", "p44_sa,p45_sb,p46_sc")
-  await expect(runFor("p44_sa").locator(".tool-run-tools")).toHaveText("bash ×3")
-  await expect(chip("p43_fail")).toHaveCount(1)
+  await expect(first.locator(".tool-run-span")).toHaveText("200ms")
+  await expect(first.locator(".tool-run-notes")).toHaveCount(0)
+  await expect(first.locator(".tool-size")).toHaveCount(0)
+  const second = runFor("p21_big")
+  await expect(second).toHaveAttribute("data-timeline-part-ids", "p21_big,p22_fail,p23_a,p24_b")
+  await expect(second.locator(".tool-run-tools")).toHaveText("read ×3 · bash")
+  await expect(second.locator(".tool-run-notes")).toHaveText("1 failed")
+  // Wall clock from first start to last end, not a sum.
+  await expect(second.locator(".tool-run-span")).toHaveText("2.0s")
+  await expect(second.locator(".tool-run-summary")).toHaveAttribute("aria-label", "4 tool calls, read ×3 · bash, 2.0s wall clock, 1 failed")
+  // A shell call that reported a nonzero exit is counted, not split out.
+  const third = runFor("p40_ta")
+  await expect(third).toHaveAttribute("data-timeline-part-ids", "p40_ta,p41_tb,p42_tc,p43_fail,p44_sa,p45_sb,p46_sc")
+  await expect(third.locator(".tool-run-tools")).toHaveText("read · grep · glob · bash ×4")
+  await expect(third.locator(".tool-run-notes")).toHaveText("1 failed")
+  for (const id of ["p11_read", "p12_grep", "p13_glob", "p14_bash", "p21_big", "p22_fail", "p43_fail"]) await expect(chip(id)).toHaveCount(0)
+  // The live turn keeps every call visible, finished or not, and has no footer yet.
+  for (const id of ["p61_la", "p62_lb", "p63_lc"]) await expect(chip(id)).toHaveCount(1)
+  await expect(chip("p63_lc").locator(".tool-size")).toHaveAttribute("data-size", "running")
+  await expect(page.locator('[data-find-message="msg_1011"] .turn-summary')).toHaveCount(0)
+  await expect(page.locator('[data-find-message="msg_1003"] .turn-summary')).toHaveCount(1)
   // The run renders where its first member was: after the prose that preceded it, before the next message.
   const order = await page.evaluate(() => [...document.querySelectorAll(".transcript [data-find-message='msg_1001'] :is([data-component='text-part'], .tool-run), .transcript [data-find-message='msg_1003'] [data-component='text-part']")]
     .map((element) => element.matches(".tool-run") ? "run" : element.textContent.trim().slice(0, 12)))
   expect(order).toEqual(["Looking at t", "run", "Found the se"])
 
-  // Expansion shows the original chips with their IDs, and survives streaming updates.
+  // Expansion shows the original chips with their IDs and per-call size badges.
   await first.locator(".tool-run-summary").click()
   await expect(first.locator(".tool-run-summary")).toHaveAttribute("aria-expanded", "true")
   for (const id of ["p11_read", "p12_grep", "p13_glob", "p14_bash"]) {
@@ -64,38 +76,59 @@ const run = async (viewport, label) => {
   }
   await expect(first.locator('[data-tool-run-member="p14_bash"]')).toHaveAttribute("data-message-id", "msg_1002")
   await expect(chip("p14_bash").locator(".tool-size")).toHaveAttribute("data-size", "XS")
+  await second.locator(".tool-run-summary").focus()
+  await page.keyboard.press("Enter")
+  await expect(second.locator(".tool-run-summary")).toHaveAttribute("aria-expanded", "true")
+  await expect(chip("p21_big").locator(".tool-size")).toHaveAttribute("aria-label", /^Size L: ~12k characters \(input 20, output 12k\)/)
+  await expect(chip("p22_fail")).toHaveCount(1)
+  await page.keyboard.press("Space")
+  await expect(second.locator(".tool-run-summary")).toHaveAttribute("aria-expanded", "false")
 
-  // Streaming: the running call completes and joins a new run; a later call extends it. No duplicates.
-  const live = preview.tool("p63_lc", "bash", { command: "sleep 1" }, "done")
-  fixture.emit("message.part.updated", { part: { ...live, messageID: "msg_1011", sessionID: "ses_a" } })
+  // Desktop: the reader opens a live call; mobile: the reader leaves the live turn alone.
+  const engaged = label === "desktop"
+  if (engaged) {
+    await chip("p61_la").locator('[data-slot="collapsible-trigger"]').first().click()
+  }
+  // Streaming: the running call finishes and a provider step ends with tool calls. Still a live turn.
+  emitPart("msg_1011", preview.tool("p63_lc", "bash", { command: "sleep 1" }, "done", { metadata: { exit: 0 }, end: 900 }))
+  const step = preview.assistant("msg_1012", "msg_1010", [
+    preview.tool("p70_ma", "read", { filePath: "/workspace/m-a" }, "m a"),
+    preview.tool("p71_mb", "edit", { filePath: "/workspace/m-b" }, "edited", { end: 1_400 }),
+  ], { info: { finish: "tool-calls" } })
+  const liveInfo = fixture.messages.find((message) => message.info.id === "msg_1011").info
+  fixture.emit("message.updated", { info: { ...liveInfo, finish: "tool-calls", time: { ...liveInfo.time, completed: liveInfo.time.created + 1 } } })
+  emitMessage(step)
+  await expect(chip("p71_mb")).toHaveCount(1)
+  for (const id of ["p61_la", "p62_lb", "p63_lc", "p70_ma", "p71_mb"]) await expect(chip(id)).toHaveCount(1)
+  await expect(page.locator(".tool-run")).toHaveCount(3)
+  await expect(page.locator('[data-find-message="msg_1012"] .turn-summary')).toHaveCount(0)
+  // The final step completes the turn: its adjacent calls coalesce across both steps and the footer appears.
+  emitMessage(preview.assistant("msg_1013", "msg_1010", [preview.text("p80_done", "All checks pass.")], { info: { finish: "stop" } }))
   const tail = runFor("p61_la")
-  await expect(tail).toHaveAttribute("data-timeline-part-ids", "p61_la,p62_lb,p63_lc")
-  for (const id of ["p61_la", "p62_lb", "p63_lc"]) await expect(chip(id)).toHaveCount(0)
-  await tail.locator(".tool-run-summary").click()
-  fixture.emit("message.part.updated", { part: { ...preview.tool("p64_ld", "grep", { pattern: "d" }, "d"), messageID: "msg_1011", sessionID: "ses_a" } })
-  await expect(tail).toHaveAttribute("data-timeline-part-ids", "p61_la,p62_lb,p63_lc,p64_ld")
-  await expect(tail.locator(".tool-run-summary")).toHaveAttribute("aria-expanded", "true")
-  for (const id of ["p61_la", "p62_lb", "p63_lc", "p64_ld"]) await expect(chip(id)).toHaveCount(1)
-  await expect(first.locator(".tool-run-summary")).toHaveAttribute("aria-expanded", "true")
-  // A running call stays its own chip and breaks the run.
-  fixture.emit("message.part.updated", { part: { ...preview.tool("p65_le", "bash", { command: "make" }, "", { status: "running" }), messageID: "msg_1011", sessionID: "ses_a" } })
-  await expect(chip("p65_le")).toHaveCount(1)
-  await expect(chip("p65_le").locator(".tool-size")).toHaveAttribute("data-size", "running")
-  await expect(tail).toHaveAttribute("data-timeline-part-ids", "p61_la,p62_lb,p63_lc,p64_ld")
+  await expect(tail).toHaveAttribute("data-timeline-part-ids", "p61_la,p62_lb,p63_lc,p70_ma,p71_mb")
+  await expect(tail.locator(".tool-run-tools")).toHaveText("read ×3 · bash · edit")
+  await expect(tail.locator(".tool-run-span")).toHaveText("1.4s")
+  await expect(page.locator('[data-find-message="msg_1013"] .turn-summary')).toHaveCount(1)
+  // A call the reader opened while live keeps its run open; otherwise the run collapses.
+  await expect(tail.locator(".tool-run-summary")).toHaveAttribute("aria-expanded", engaged ? "true" : "false")
+  for (const id of ["p61_la", "p62_lb", "p63_lc", "p70_ma", "p71_mb"]) await expect(chip(id)).toHaveCount(engaged ? 1 : 0)
+  await shot(page, `${label}-completed`)
+  if (engaged) await tail.locator(".tool-run-summary").click()
   await first.locator(".tool-run-summary").click()
-  await tail.locator(".tool-run-summary").click()
   await expect(first.locator(".tool-run-summary")).toHaveAttribute("aria-expanded", "false")
+  await expect(tail.locator(".tool-run-summary")).toHaveAttribute("aria-expanded", "false")
 
-  // RTL: the badge column and disclosure follow direction; text stays isolated.
+  // RTL: the disclosure follows direction; tool names stay isolated LTR.
   for (const dir of ["ltr", "rtl"]) {
     await page.evaluate((value) => { document.documentElement.dir = value }, dir)
-    const geometry = await chip("p21_big").evaluate((element) => {
+    const geometry = await first.locator(".tool-run-summary").evaluate((element) => {
       const box = element.getBoundingClientRect()
-      const badge = element.querySelector(".tool-size").getBoundingClientRect()
-      return { start: badge.left - box.left, end: box.right - badge.right }
+      const disclosure = element.querySelector(".tool-run-disclosure").getBoundingClientRect()
+      return { start: disclosure.left - box.left, end: box.right - disclosure.right, overflow: element.scrollWidth - element.clientWidth }
     })
     if (dir === "ltr") expect(geometry.start).toBeLessThan(geometry.end)
     else expect(geometry.end).toBeLessThan(geometry.start)
+    expect(geometry.overflow).toBeLessThanOrEqual(0)
     expect(await page.locator(".tool-run-tools").first().evaluate((element) => getComputedStyle(element).direction)).toBe("ltr")
     await shot(page, `${label}-${dir}`)
   }
@@ -185,6 +218,7 @@ const run = async (viewport, label) => {
   await shot(page, `${label}-find`)
   expect(unexpectedWrites().length).toBe(writes)
   await context.close()
+  fixture.status = "idle"
 }
 
 // Prepending an earlier page regroups runs (new keys); the user's expansion follows its members.
@@ -206,19 +240,20 @@ const pagination = async () => {
   try {
     await page.goto(paged.url, { waitUntil: "domcontentloaded" })
     const runs = page.locator(".tool-run")
-    await expect(runs).toHaveCount(2, { timeout: 30_000 })
-    const last = runs.nth(1)
-    await expect(last).toHaveAttribute("data-timeline-part-ids", /^prt_msg_a0051,.*,prt_msg_a0090$/)
-    await last.locator(".tool-run-summary").click()
-    await expect(last.locator("[data-tool-run-member]")).toHaveCount(40)
+    await expect(runs).toHaveCount(1, { timeout: 30_000 })
+    const only = runs.first()
+    await expect(only).toHaveAttribute("data-timeline-part-ids", /^prt_msg_a0011,.*,prt_msg_a0090$/)
+    await only.locator(".tool-run-summary").click()
+    await expect(only.locator("[data-tool-run-member]")).toHaveCount(80)
     const writes = unexpectedWrites().length
     await page.getByRole("button", { name: "Load earlier messages" }).click()
-    await expect(runs).toHaveCount(3)
+    // The prepended calls join the same run (new key) without a size split, and it stays open.
+    await expect(page.locator(".tool-run [data-tool-run-member]")).toHaveCount(90)
     const ids = await runs.evaluateAll((elements) => elements.map((element) => [element.dataset.timelinePartIds.split(","), element.dataset.open === "true"]))
-    expect(ids.map(([members]) => members.length)).toEqual([40, 40, 10])
+    expect(ids.map(([members]) => members.length)).toEqual([90])
     expect(ids.flatMap(([members]) => members)).toEqual(Array.from({ length: 90 }, (_, index) => `prt_msg_a${String(index + 1).padStart(4, "0")}`))
-    expect(ids.map(([, open]) => open)).toEqual([false, true, true])
-    await expect(page.locator('[data-tool-run-member="prt_msg_a0090"]')).toHaveCount(1)
+    expect(ids.map(([, open]) => open)).toEqual([true])
+    await expect(runs.first().locator(".tool-run-kind")).toHaveText("90 tool calls")
     expect(unexpectedWrites().length).toBe(writes)
   } finally {
     await context.close()

@@ -1,12 +1,11 @@
 import { createMemo, For, Show, type ComponentProps, type JSX } from "solid-js"
 import type { Part, ToolPart } from "@opencode-ai/sdk/v2"
 import { Message, type ToolRenderers } from "@opencode-ai/session-ui/message-part"
-import type { ToolRunGroup } from "../transcript-groups"
-import { SIZE_LEGEND, toolMagnitude } from "../tool-magnitude"
-import { rangeView } from "./tool-size"
+import { runSummary, type ToolRunGroup } from "../transcript-groups"
 
 // Collapsed by default. Members mount only while open, as their original chips.
-// "Short" describes measured text size only, never safety or cost.
+// The summary is deterministic: tool names and counts, wall-clock span and
+// failure counts read from the calls themselves.
 export const ToolRun = (props: {
   run: ToolRunGroup
   message: (id: string) => ComponentProps<typeof Message>["message"] | undefined
@@ -22,24 +21,18 @@ export const ToolRun = (props: {
     const part = props.parts(member.messageID).find((item): item is ToolPart => item.id === member.partID && item.type === "tool")
     return message && part ? [{ member, message, part }] : []
   }))
-  const tools = createMemo(() => {
-    const counts = new Map<string, number>()
-    members().forEach((item) => counts.set(item.part.tool, (counts.get(item.part.tool) ?? 0) + 1))
-    return [...counts].map(([tool, count]) => count > 1 ? `${tool} ×${count}` : tool).join(" · ")
-  })
-  const size = createMemo(() => rangeView(members().map((item) => toolMagnitude(item.part))))
+  const summary = createMemo(() => runSummary(members().map((item) => item.part)))
+  const label = () => [`${props.run.members.length} tool calls`, summary().tools, summary().span && `${summary().span} wall clock`,
+    ...summary().notes].filter(Boolean).join(", ")
   const id = () => `tool-run-${props.run.key.replace(/[^\w-]/g, "_")}`
   return <section class="tool-run" data-tool-run={props.run.key} data-open={props.open ? "true" : undefined}
-    data-timeline-part-ids={props.run.members.map((member) => member.partID).join(",")} aria-label={`${members().length} short tool calls`}>
-    <button class="tool-run-summary" aria-expanded={props.open} aria-controls={id()} onClick={() => props.onToggle(!props.open)}>
-      <span class="tool-size" data-size={size().state} role="img" aria-label={size().label} title={`${size().label}\n${SIZE_LEGEND}`}
-        style={{ "--tool-size-rank": String(size().rank + 1) }}>
-        <span class="tool-size-text" aria-hidden="true">{size().text}</span>
-        <span class="tool-size-bar" aria-hidden="true" />
-      </span>
-      <span class="tool-run-kind"><bdi dir="auto">{members().length} short tool calls</bdi></span>
-      <span class="tool-run-tools" dir="ltr">{tools()}</span>
+    data-timeline-part-ids={props.run.members.map((member) => member.partID).join(",")} aria-label={`${props.run.members.length} tool calls`}>
+    <button class="tool-run-summary" aria-expanded={props.open} aria-controls={id()} aria-label={label()} onClick={() => props.onToggle(!props.open)}>
       <span class="tool-run-disclosure" aria-hidden="true">›</span>
+      <span class="tool-run-kind"><bdi dir="auto">{props.run.members.length} tool calls</bdi></span>
+      <span class="tool-run-tools" dir="ltr" title={summary().tools}>{summary().tools}</span>
+      <Show when={summary().notes.length}><span class="tool-run-notes">{summary().notes.join(" · ")}</span></Show>
+      <Show when={summary().span}>{(span) => <span class="tool-run-span" title="Wall clock from first call start to last call end">{span()}</span>}</Show>
     </button>
     <Show when={props.open}>
       <div class="tool-run-members" id={id()}>
