@@ -616,6 +616,14 @@ export const InputPayload = Schema.Struct({
 }).annotate({ identifier: "SessionV1.InputPayload", parseOptions: { onExcessProperty: "error" } })
 export interface InputPayload extends Schema.Schema.Type<typeof InputPayload> {}
 
+export const InputUpdatePayload = Schema.Struct({
+  commandID: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+  expectedRevision: NonNegativeInt,
+  text: optional(Schema.String),
+  delivery: optional(InputPayload.fields.delivery),
+}).annotate({ identifier: "SessionV1.InputUpdatePayload", parseOptions: { onExcessProperty: "error" } })
+export interface InputUpdatePayload extends Schema.Schema.Type<typeof InputUpdatePayload> {}
+
 export const InputHandlePayload = Schema.Struct({
   disposition: Schema.Literals(["acknowledged", "replied"]),
   replyID: optional(Schema.String.check(Schema.isMinLength(1))),
@@ -624,10 +632,21 @@ export interface InputHandlePayload extends Schema.Schema.Type<typeof InputHandl
 
 const InputBase = {
   ...InputPayload.fields,
+  revision: NonNegativeInt.pipe(Schema.optional, Schema.withDecodingDefault(Effect.succeed(0))),
   sessionID: SessionID,
   agent: Schema.String,
   admittedSeq: NonNegativeInt,
   timeCreated: NonNegativeInt,
+  // Append order is durable event order; concurrent retries can record an earlier
+  // decision later. observedAt names the decision, not its persistence time.
+  wakeObservations: optional(
+    Schema.Array(
+      Schema.Struct({
+        outcome: Schema.Literals(["scheduled", "coalesced"]),
+        observedAt: NonNegativeInt,
+      }),
+    ),
+  ),
 }
 export const InputReceipt = Schema.Union([
   Schema.Struct({ ...InputBase, state: Schema.Literal("pending") }),
@@ -676,12 +695,29 @@ const events = {
     ...options,
     schema: { sessionID: SessionID, requestID: Schema.String, time: NonNegativeInt },
   }),
+  InputUpdated: define({
+    type: "session.input.updated",
+    ...options,
+    schema: { sessionID: SessionID, requestID: Schema.String, command: InputUpdatePayload },
+  }),
+  InputWakeObserved: define({
+    type: "session.input.wake-observed",
+    ...options,
+    schema: {
+      sessionID: SessionID,
+      requestID: Schema.String,
+      outcome: Schema.Literals(["scheduled", "coalesced"]),
+      observedAt: NonNegativeInt,
+    },
+  }),
   InputPromoted: define({
     type: "session.input.promoted",
     ...options,
     schema: {
       sessionID: SessionID,
       requestID: Schema.String,
+      revision: optional(NonNegativeInt),
+      delivery: optional(InputPayload.fields.delivery),
       info: User,
       part: TextPart,
       images: optional(InputImageParts),
@@ -797,7 +833,9 @@ export const Event = {
   Error,
   InputDefinitions: inventory(
     events.InputAdmitted,
+    events.InputWakeObserved,
     events.InputCancelled,
+    events.InputUpdated,
     events.InputPromoted,
     events.InputPresented,
     events.InputHandled,

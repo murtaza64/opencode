@@ -164,10 +164,16 @@ it.instance("admits an invisible durable input and reconciles retries and cancel
       })
     const admitted = yield* post(payload)
     expect(admitted.status).toBe(200)
-    const receipt = yield* admitted.json
+    const receipt = yield* admitted.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(SessionV1.InputReceipt)))
     expect(receipt).toMatchObject({ ...payload, sessionID: session.id, agent: "build", state: "pending" })
+    expect(receipt.wakeObservations).toEqual([{ outcome: "scheduled", observedAt: expect.any(Number) }])
+    const beforeGet = yield* readReceipt(`${url}/request-1`, instance.directory)
+    expect(beforeGet.wakeObservations).toEqual(receipt.wakeObservations)
     const retry = yield* post(payload)
-    expect(yield* retry.json).toEqual(receipt)
+    const retried = yield* retry.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(SessionV1.InputReceipt)))
+    expect(retried.wakeObservations).toHaveLength(2)
+    expect(retried.wakeObservations?.[0]).toEqual(receipt.wakeObservations?.[0])
+    expect(retried.wakeObservations?.[1]).toMatchObject({ outcome: "scheduled", observedAt: expect.any(Number) })
     expect((yield* post({ ...payload, delivery: "steer" })).status).toBe(409)
     expect((yield* post({ ...payload, tools: {} })).status).toBe(400)
     const messages = yield* requestInDirectory(`/session/${session.id}/message`, instance.directory)
@@ -175,7 +181,7 @@ it.instance("admits an invisible durable input and reconciles retries and cancel
       yield* messages.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(SessionV1.WithParts)))),
     ).toHaveLength(1)
     const listed = yield* requestInDirectory(url, instance.directory)
-    expect(yield* listed.json).toEqual({ items: [receipt], next: null })
+    expect(yield* listed.json).toEqual({ items: [retried], next: null })
     const cancelled = yield* requestInDirectory(`${url}/request-1`, instance.directory, { method: "DELETE" })
     expect(cancelled.status).toBe(200)
     const terminal = yield* cancelled.json
@@ -188,11 +194,16 @@ it.instance("admits an invisible durable input and reconciles retries and cancel
     expect((yield* requestInDirectory(`${url}/missing`, instance.directory)).status).toBe(404)
     const concurrent = yield* Effect.all(
       Array.from({ length: 8 }, () =>
-        post({ ...payload, requestID: "race" }).pipe(Effect.flatMap((response) => response.json)),
+        post({ ...payload, requestID: "race" }).pipe(
+          Effect.flatMap((response) => response.json),
+          Effect.flatMap(Schema.decodeUnknownEffect(SessionV1.InputReceipt)),
+        ),
       ),
       { concurrency: "unbounded" },
     )
-    expect(concurrent).toEqual(Array(8).fill(concurrent[0]))
+    expect(concurrent.map((item) => item.wakeObservations?.length).sort((a, b) => (a ?? 0) - (b ?? 0))).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8,
+    ])
     const conflicts = yield* Effect.all(
       [
         post({ ...payload, requestID: "conflict", delivery: "queue" }),
@@ -253,15 +264,20 @@ it.instance(
         })
       const admitted = yield* post(payload)
       expect(admitted.status).toBe(200)
-      const receipt = yield* admitted.json
+      const receipt = yield* admitted.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(SessionV1.InputReceipt)))
       expect(receipt).toMatchObject({ source, state: "pending" })
-      expect(yield* (yield* post(payload)).json).toEqual(receipt)
+      expect(receipt.wakeObservations).toHaveLength(1)
+      expect(
+        (yield* (yield* post(payload)).json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(SessionV1.InputReceipt))))
+          .wakeObservations,
+      ).toHaveLength(2)
       expect((yield* post({ ...payload, source: { ...source, sender: "worker-c" } })).status).toBe(409)
       expect((yield* post({ ...payload, source: undefined })).status).toBe(409)
       expect((yield* post({ ...payload, source: { ...source, type: "unknown" } })).status).toBe(400)
       expect((yield* post({ ...payload, source: { ...source, recipient: 123 } })).status).toBe(400)
-      expect(yield* (yield* requestInDirectory(`${url}/mail-1`, instance.directory)).json).toEqual(receipt)
-      expect(yield* (yield* requestInDirectory(url, instance.directory)).json).toEqual({ items: [receipt], next: null })
+      const current = yield* readReceipt(`${url}/mail-1`, instance.directory)
+      expect(current.wakeObservations).toHaveLength(2)
+      expect(yield* (yield* requestInDirectory(url, instance.directory)).json).toEqual({ items: [current], next: null })
       const handle = (requestID: string) =>
         requestInDirectory(`${url}/${requestID}/handle`, instance.directory, {
           method: "POST",
@@ -310,7 +326,10 @@ it.live(
             parts: [{ type: "text", text: "original task" }],
           })
           yield* llm.wait(1)
-          expect(yield* (yield* post(url, payload)).json).toMatchObject({ state: "pending" })
+          expect(yield* (yield* post(url, payload)).json).toMatchObject({
+            state: "pending",
+            wakeObservations: [{ outcome: "coalesced", observedAt: expect.any(Number) }],
+          })
           first.resolve()
           yield* llm.wait(2)
           const promoted = yield* pollWithTimeout(
@@ -321,6 +340,7 @@ it.live(
             "10 seconds",
           )
           expect("timePresented" in promoted).toBe(false)
+          expect(promoted.wakeObservations).toHaveLength(1)
           expect(yield* (yield* requestInDirectory(`${url}?state=promoted`, dir)).json).toMatchObject({
             items: [promoted],
           })
@@ -337,6 +357,7 @@ it.live(
             "10 seconds",
           )
           expect(presented.messageID).toBe(promoted.messageID)
+          expect(presented.wakeObservations).toEqual(promoted.wakeObservations)
           expect(presented.timePresented).toBeGreaterThanOrEqual(promoted.timePromoted)
           expect(yield* (yield* post(url, payload)).json).toEqual(presented)
           expect(yield* (yield* requestInDirectory(`${url}?state=all`, dir)).json).toMatchObject({ items: [presented] })

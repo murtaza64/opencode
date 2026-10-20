@@ -50,7 +50,9 @@ export type Event =
   | EventSessionNextRevertCleared
   | EventSessionNextRevertCommitted
   | EventSessionInputAdmitted
+  | EventSessionInputWakeObserved
   | EventSessionInputCancelled
+  | EventSessionInputUpdated
   | EventSessionInputPromoted
   | EventSessionInputPresented
   | EventSessionInputHandled
@@ -1231,6 +1233,16 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "session.input.wake-observed"
+        properties: {
+          sessionID: string
+          requestID: string
+          outcome: "scheduled" | "coalesced"
+          observedAt: number
+        }
+      }
+    | {
+        id: string
         type: "session.input.cancelled"
         properties: {
           sessionID: string
@@ -1240,10 +1252,21 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "session.input.updated"
+        properties: {
+          sessionID: string
+          requestID: string
+          command: SessionV1InputUpdatePayload
+        }
+      }
+    | {
+        id: string
         type: "session.input.promoted"
         properties: {
           sessionID: string
           requestID: string
+          revision?: number
+          delivery?: "queue" | "steer"
           info: UserMessage
           part: TextPart
           images?: Array<{
@@ -1726,7 +1749,9 @@ export type GlobalEvent = {
     | SyncEventSessionNextRevertCleared
     | SyncEventSessionNextRevertCommitted
     | SyncEventSessionInputAdmitted
+    | SyncEventSessionInputWakeObserved
     | SyncEventSessionInputCancelled
+    | SyncEventSessionInputUpdated
     | SyncEventSessionInputPromoted
     | SyncEventSessionInputPresented
     | SyncEventSessionInputHandled
@@ -2247,6 +2272,7 @@ export type ExperimentalCapabilities = {
     delivery: Array<"queue" | "steer">
     list: true
     cancel: true
+    update: true
     images?: {
       version: 1
       encoding: "data-url"
@@ -2697,6 +2723,12 @@ export type SessionSupersededError = {
   successor: string
   state: "pending" | "committed"
   message: string
+}
+
+export type InputUpdateConflict = {
+  _tag: "InputUpdateConflict"
+  message: string
+  current: SessionV1InputReceipt
 }
 
 export type AsideError = {
@@ -3150,7 +3182,9 @@ export type V2Event =
   | SessionNextRevertCleared
   | SessionNextRevertCommitted
   | SessionInputAdmitted
+  | SessionInputWakeObserved
   | SessionInputCancelled
+  | SessionInputUpdated
   | SessionInputPromoted
   | SessionInputPresented
   | SessionInputHandled
@@ -3404,6 +3438,13 @@ export type SessionV1InputPayload = {
   images?: Array<SessionV1InputImage>
   agent?: string
   source?: SessionInputMailSource
+}
+
+export type SessionV1InputUpdatePayload = {
+  commandID: string
+  expectedRevision: number
+  text?: string
+  delivery?: "queue" | "steer"
 }
 
 export type PermissionV2Source = {
@@ -4151,6 +4192,23 @@ export type SyncEventSessionInputAdmitted = {
   }
 }
 
+export type SyncEventSessionInputWakeObserved = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.input.wake-observed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      requestID: string
+      outcome: "scheduled" | "coalesced"
+      observedAt: number
+    }
+  }
+}
+
 export type SyncEventSessionInputCancelled = {
   type: "sync"
   id: string
@@ -4167,6 +4225,22 @@ export type SyncEventSessionInputCancelled = {
   }
 }
 
+export type SyncEventSessionInputUpdated = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.input.updated.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      requestID: string
+      command: SessionV1InputUpdatePayload
+    }
+  }
+}
+
 export type SyncEventSessionInputPromoted = {
   type: "sync"
   id: string
@@ -4178,6 +4252,8 @@ export type SyncEventSessionInputPromoted = {
     data: {
       sessionID: string
       requestID: string
+      revision?: number
+      delivery?: "queue" | "steer"
       info: UserMessage
       part: TextPart
       images?: Array<{
@@ -4267,9 +4343,14 @@ export type SessionV1InputReceipt =
       images?: Array<SessionV1InputImage>
       agent: string
       source?: SessionInputMailSource
+      revision?: number
       sessionID: string
       admittedSeq: number
       timeCreated: number
+      wakeObservations?: Array<{
+        outcome: "scheduled" | "coalesced"
+        observedAt: number
+      }>
       state: "pending"
     }
   | {
@@ -4279,9 +4360,14 @@ export type SessionV1InputReceipt =
       images?: Array<SessionV1InputImage>
       agent: string
       source?: SessionInputMailSource
+      revision?: number
       sessionID: string
       admittedSeq: number
       timeCreated: number
+      wakeObservations?: Array<{
+        outcome: "scheduled" | "coalesced"
+        observedAt: number
+      }>
       state: "promoted"
       messageID: string
       timePromoted: number
@@ -4293,9 +4379,14 @@ export type SessionV1InputReceipt =
       images?: Array<SessionV1InputImage>
       agent: string
       source?: SessionInputMailSource
+      revision?: number
       sessionID: string
       admittedSeq: number
       timeCreated: number
+      wakeObservations?: Array<{
+        outcome: "scheduled" | "coalesced"
+        observedAt: number
+      }>
       state: "presented"
       messageID: string
       timePromoted: number
@@ -4308,9 +4399,14 @@ export type SessionV1InputReceipt =
       images?: Array<SessionV1InputImage>
       agent: string
       source?: SessionInputMailSource
+      revision?: number
       sessionID: string
       admittedSeq: number
       timeCreated: number
+      wakeObservations?: Array<{
+        outcome: "scheduled" | "coalesced"
+        observedAt: number
+      }>
       state: "handled"
       messageID: string
       timePromoted: number
@@ -4326,9 +4422,14 @@ export type SessionV1InputReceipt =
       images?: Array<SessionV1InputImage>
       agent: string
       source?: SessionInputMailSource
+      revision?: number
       sessionID: string
       admittedSeq: number
       timeCreated: number
+      wakeObservations?: Array<{
+        outcome: "scheduled" | "coalesced"
+        observedAt: number
+      }>
       state: "cancelled"
       timeCancelled: number
     }
@@ -5818,6 +5919,26 @@ export type SessionV1InputPayload1 = {
   source?: SessionInputMailSource
 }
 
+export type SessionInputWakeObserved = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.input.wake-observed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    requestID: string
+    outcome: "scheduled" | "coalesced"
+    observedAt: number
+  }
+}
+
 export type SessionInputCancelled = {
   id: string
   metadata?: {
@@ -5837,6 +5958,25 @@ export type SessionInputCancelled = {
   }
 }
 
+export type SessionInputUpdated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.input.updated"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    requestID: string
+    command: SessionV1InputUpdatePayload
+  }
+}
+
 export type SessionInputPromoted = {
   id: string
   metadata?: {
@@ -5852,6 +5992,8 @@ export type SessionInputPromoted = {
   data: {
     sessionID: string
     requestID: string
+    revision?: number
+    delivery?: "queue" | "steer"
     info: UserMessage
     part: TextPart
     images?: Array<{
@@ -7288,6 +7430,17 @@ export type EventSessionInputAdmitted = {
   }
 }
 
+export type EventSessionInputWakeObserved = {
+  id: string
+  type: "session.input.wake-observed"
+  properties: {
+    sessionID: string
+    requestID: string
+    outcome: "scheduled" | "coalesced"
+    observedAt: number
+  }
+}
+
 export type EventSessionInputCancelled = {
   id: string
   type: "session.input.cancelled"
@@ -7298,12 +7451,24 @@ export type EventSessionInputCancelled = {
   }
 }
 
+export type EventSessionInputUpdated = {
+  id: string
+  type: "session.input.updated"
+  properties: {
+    sessionID: string
+    requestID: string
+    command: SessionV1InputUpdatePayload
+  }
+}
+
 export type EventSessionInputPromoted = {
   id: string
   type: "session.input.promoted"
   properties: {
     sessionID: string
     requestID: string
+    revision?: number
+    delivery?: "queue" | "steer"
     info: UserMessage
     part: TextPart
     images?: Array<{
@@ -10276,6 +10441,45 @@ export type SessionInputGetResponses = {
 }
 
 export type SessionInputGetResponse = SessionInputGetResponses[keyof SessionInputGetResponses]
+
+export type SessionInputUpdateData = {
+  body?: SessionV1InputUpdatePayload
+  path: {
+    sessionID: string
+    requestID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/input/{requestID}"
+}
+
+export type SessionInputUpdateErrors = {
+  /**
+   * InvalidRequestError | BadRequest
+   */
+  400: InvalidRequestError | EffectHttpApiErrorBadRequest
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+  /**
+   * InputUpdateConflict
+   */
+  409: InputUpdateConflict
+}
+
+export type SessionInputUpdateError = SessionInputUpdateErrors[keyof SessionInputUpdateErrors]
+
+export type SessionInputUpdateResponses = {
+  /**
+   * SessionV1.InputReceipt
+   */
+  200: SessionV1InputReceipt
+}
+
+export type SessionInputUpdateResponse = SessionInputUpdateResponses[keyof SessionInputUpdateResponses]
 
 export type SessionInputHandleData = {
   body?: SessionV1InputHandlePayload

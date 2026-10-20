@@ -39,6 +39,7 @@ import {
   ShellPayload,
   SummarizePayload,
   UpdatePayload,
+  InputUpdateConflictError,
 } from "../groups/session"
 import { AsideError, PermissionNotFoundError, ApiNotFoundError, ConflictError, InvalidRequestError, SessionSupersededError } from "../errors"
 import * as SessionError from "./session-errors"
@@ -523,8 +524,14 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
               InputInvalid: (error) => new InvalidRequestError({ message: error.message }),
             }),
           )
-          if (receipt.state === "pending") yield* promptSvc.wake(ctx.params.sessionID).pipe(Effect.catchTag("SessionSuperseded", SessionError.superseded))
-          return receipt
+          if (receipt.state !== "pending") return receipt
+          const decision = yield* promptSvc.wake(ctx.params.sessionID).pipe(Effect.catchTag("SessionSuperseded", SessionError.superseded))
+          const current = decision.outcome === "ignored"
+            ? inputs.get(ctx.params.sessionID, ctx.payload.requestID)
+            : inputs.observeWake(ctx.params.sessionID, ctx.payload.requestID, decision.outcome, decision.observedAt)
+          return yield* current.pipe(
+            Effect.catchTag("InputMissing", (error) => new ApiNotFoundError({ name: "NotFoundError", data: { message: error.message } })),
+          )
         }),
       )
       .handle("listInputs", (ctx) =>
@@ -544,6 +551,20 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
                 (error) => new ApiNotFoundError({ name: "NotFoundError", data: { message: error.message } }),
               ),
             )
+        }),
+      )
+      .handle("updateInput", (ctx) =>
+        Effect.gen(function* () {
+          yield* requireSession(ctx.params.sessionID)
+          return yield* inputs.update(ctx.params.sessionID, ctx.params.requestID, ctx.payload).pipe(
+            Effect.catchTags({
+              InputUpdateConflict: (error) =>
+                new InputUpdateConflictError({ message: error.message, current: error.current }),
+              InputInvalid: (error) => new InvalidRequestError({ message: error.message }),
+              InputMissing: (error) =>
+                new ApiNotFoundError({ name: "NotFoundError", data: { message: error.message } }),
+            }),
+          )
         }),
       )
       .handle("cancelInput", (ctx) =>

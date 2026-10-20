@@ -4,8 +4,8 @@ import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { InputHandlePayload } from "@opencode-ai/schema/session-v1"
-import { V1InputTable } from "@opencode-ai/core/session/sql"
+import { InputHandlePayload, InputUpdatePayload } from "@opencode-ai/schema/session-v1"
+import { V1InputTable, V1InputCommandTable } from "@opencode-ai/core/session/sql"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Agent } from "@/agent/agent"
@@ -16,10 +16,15 @@ import { SessionRunState } from "./run-state"
 import { MessageID, PartID, SessionID } from "./schema"
 
 export class Conflict extends Schema.TaggedErrorClass<Conflict>()("InputConflict", { message: Schema.String }) {}
+export class UpdateConflict extends Schema.TaggedErrorClass<UpdateConflict>()("InputUpdateConflict", {
+  message: Schema.String,
+  current: SessionV1.InputReceipt,
+}) {}
 export class Missing extends Schema.TaggedErrorClass<Missing>()("InputMissing", { message: Schema.String }) {}
 export class Invalid extends Schema.TaggedErrorClass<Invalid>()("InputInvalid", { message: Schema.String }) {}
 
 export const InputPayload = SessionV1.InputPayload
+export { InputUpdatePayload }
 
 const make = Effect.gen(function* () {
   const database = yield* Database.Service
@@ -74,25 +79,26 @@ const make = Effect.gen(function* () {
     db.select().from(V1InputTable).where(eq(V1InputTable.request_id, requestID)).get().pipe(Effect.orDie)
 
   const receipt = (value: SessionV1.InputReceipt): SessionV1.InputReceipt => {
+    const current = { ...value, revision: value.revision ?? 0 }
     if (
-      value.state === "promoted" &&
-      "timePresented" in value &&
-      typeof value.timePresented === "number" &&
-      "timeHandled" in value &&
-      typeof value.timeHandled === "number" &&
-      "disposition" in value &&
-      (value.disposition === "acknowledged" || value.disposition === "replied")
+      current.state === "promoted" &&
+      "timePresented" in current &&
+      typeof current.timePresented === "number" &&
+      "timeHandled" in current &&
+      typeof current.timeHandled === "number" &&
+      "disposition" in current &&
+      (current.disposition === "acknowledged" || current.disposition === "replied")
     )
       return {
-        ...value,
+        ...current,
         state: "handled",
-        timePresented: value.timePresented,
-        timeHandled: value.timeHandled,
-        disposition: value.disposition,
+        timePresented: current.timePresented,
+        timeHandled: current.timeHandled,
+        disposition: current.disposition,
       }
-    if (value.state !== "promoted" || !("timePresented" in value) || typeof value.timePresented !== "number")
-      return value
-    return { ...value, state: "presented", timePresented: value.timePresented }
+    if (current.state !== "promoted" || !("timePresented" in current) || typeof current.timePresented !== "number")
+      return current
+    return { ...current, state: "presented", timePresented: current.timePresented }
   }
 
   const get = Effect.fn("SessionInput.get")(function* (sessionID: SessionID, requestID: string) {
@@ -101,7 +107,89 @@ const make = Effect.gen(function* () {
     return receipt(row.receipt)
   })
 
-  const admitInner = Effect.fn("SessionInput.admitInner")(function* (sessionID: SessionID, payload: typeof InputPayload.Type) {
+  const update = Effect.fn("SessionInput.update")(function* (
+    sessionID: SessionID,
+    requestID: string,
+    command: InputUpdatePayload,
+  ) {
+    const normalized = {
+      commandID: command.commandID,
+      expectedRevision: command.expectedRevision,
+      ...(command.text === undefined ? {} : { text: command.text }),
+      ...(command.delivery === undefined ? {} : { delivery: command.delivery }),
+    }
+    const row = yield* find(requestID)
+    if (!row || row.session_id !== sessionID) return yield* new Missing({ message: "Input not found" })
+    const previous = yield* db
+      .select()
+      .from(V1InputCommandTable)
+      .where(eq(V1InputCommandTable.command_id, command.commandID))
+      .get()
+      .pipe(Effect.orDie)
+    if (previous) {
+      if (
+        previous.session_id === sessionID &&
+        previous.request_id === requestID &&
+        isDeepStrictEqual(previous.command, normalized)
+      )
+        return receipt(previous.receipt)
+      return yield* new UpdateConflict({
+        message: "commandID already used for a different update",
+        current: receipt(row.receipt),
+      })
+    }
+    if (row.payload.source !== undefined)
+      return yield* new UpdateConflict({ message: "Only human input can be updated", current: receipt(row.receipt) })
+    if (command.text === undefined && command.delivery === undefined)
+      return yield* new Invalid({ message: "Update requires text or delivery" })
+    if (row.state !== "pending" || (row.receipt.revision ?? 0) !== command.expectedRevision)
+      return yield* new UpdateConflict({
+        message: "Input is no longer pending at the expected revision",
+        current: receipt(row.receipt),
+      })
+    if (command.text !== undefined && !command.text.trim() && !row.images?.length)
+      return yield* new Invalid({ message: "Input requires text or images" })
+    if (row.images?.length && command.text !== undefined && command.text.length > 128_000)
+      return yield* new Invalid({ message: "Image input text is too large" })
+    yield* events.publish(SessionV1.Event.InputUpdated, { sessionID, requestID, command: normalized }).pipe(
+      Effect.catchDefect((error) =>
+        error instanceof SessionProjector.InputLifecycleConflict ? Effect.void : Effect.die(error),
+      ),
+    )
+    const committed = yield* db
+      .select()
+      .from(V1InputCommandTable)
+      .where(eq(V1InputCommandTable.command_id, command.commandID))
+      .get()
+      .pipe(Effect.orDie)
+    if (
+      committed &&
+      committed.session_id === sessionID &&
+      committed.request_id === requestID &&
+      isDeepStrictEqual(committed.command, normalized)
+    )
+      return receipt(committed.receipt)
+    const current = yield* find(requestID)
+    return yield* new UpdateConflict({
+      message: "Input update conflicted",
+      current: receipt(current?.receipt ?? row.receipt),
+    })
+  })
+
+  const observeWake = Effect.fn("SessionInput.observeWake")(function* (
+    sessionID: SessionID,
+    requestID: string,
+    outcome: "scheduled" | "coalesced",
+    observedAt: number,
+  ) {
+    yield* events.publish(SessionV1.Event.InputWakeObserved, { sessionID, requestID, outcome, observedAt })
+    return yield* get(sessionID, requestID)
+  })
+
+  const admitInner = Effect.fn("SessionInput.admitInner")(function* (
+    sessionID: SessionID,
+    payload: typeof InputPayload.Type,
+  ) {
     if (!payload.text.trim() && !payload.images?.length)
       return yield* new Invalid({ message: "Input requires text or images" })
     if (payload.images?.length && payload.text.length > 128_000)
@@ -253,7 +341,7 @@ const make = Effect.gen(function* () {
       .orderBy(asc(V1InputTable.admitted_seq))
       .all()
       .pipe(Effect.orDie)
-    const selected = idle ? rows : rows.filter((row) => row.payload.delivery === "steer")
+    const selected = idle ? rows : rows.filter((row) => row.receipt.delivery === "steer")
     let promoted = false
     let promotedModel: SessionV1.User["model"] | undefined
     for (const row of selected) {
@@ -281,7 +369,7 @@ const make = Effect.gen(function* () {
         sessionID,
         messageID: info.id,
         type: "text",
-        text: row.payload.text,
+          text: row.receipt.text,
       }
       const images = (row.images ?? []).map((image) => ({
         ...image,
@@ -293,6 +381,8 @@ const make = Effect.gen(function* () {
         events.publish(SessionV1.Event.InputPromoted, {
           sessionID,
           requestID: row.request_id,
+          revision: row.receipt.revision ?? 0,
+          delivery: row.receipt.delivery,
           info,
           part,
           ...(images.length ? { images } : {}),
@@ -338,13 +428,21 @@ const make = Effect.gen(function* () {
       )
     }
   })
-  return { admit, get, list, cancel, handle, promote, presented }
+  return { admit, get, list, update, cancel, handle, promote, presented, observeWake }
 })
 
 export class Service extends Context.Service<Service, Effect.Success<typeof make>>()("@opencode/SessionInput") {}
 export const node = LayerNode.make({
   service: Service,
   layer: Layer.effect(Service, make),
-  deps: [Database.node, EventV2Bridge.node, Session.node, Agent.node, Provider.node, SessionInputMedia.node, SessionRunState.node],
+  deps: [
+    Database.node,
+    EventV2Bridge.node,
+    Session.node,
+    Agent.node,
+    Provider.node,
+    SessionInputMedia.node,
+    SessionRunState.node,
+  ],
 })
 export * as SessionInput from "./input"

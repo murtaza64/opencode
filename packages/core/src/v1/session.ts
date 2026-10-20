@@ -17,6 +17,7 @@ export {
   Format,
   Info,
   InputPayload,
+  InputUpdatePayload,
   InputImage,
   InputImages,
   ImageSupport,

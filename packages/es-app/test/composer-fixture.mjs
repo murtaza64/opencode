@@ -30,6 +30,12 @@ export const createFixture = async () => {
     sessionIDs: ["ses_a", "ses_b"],
     status: "busy",
     capabilities: true,
+    updateInput: false,
+    holdInputUpdate: false,
+    inputUpdateReplies: [],
+    loseInputUpdateAck: false,
+    promoteOnUpdate: false,
+    inputUpdateCommands: new Map(),
     images: undefined,
     rejectImages: false,
     failSnapshot: false,
@@ -182,6 +188,7 @@ export const createFixture = async () => {
                 delivery: ["queue", "steer"],
                 list: true,
                 cancel: true,
+                ...(fixture.updateInput ? { update: true } : {}),
                 images: fixture.images,
               },
             }
@@ -501,6 +508,36 @@ export const createFixture = async () => {
       if (action.startsWith("/input/")) {
         const receipt = fixture.receipts.find((item) => item.requestID === decodeURIComponent(action.slice(7)))
         if (!receipt) return json({ error: "not found" }, 404)
+        if (request.method === "PATCH") {
+          if (!fixture.updateInput) return json({ error: "update unsupported" }, 404)
+          const complete = () => {
+            if (fixture.promoteOnUpdate) {
+              Object.assign(receipt, { state: "promoted", messageID: "msg_promoted", timePromoted: Date.now() })
+              fixture.promoteOnUpdate = false
+            }
+            if (receipt.state !== "pending") return json({ error: "input no longer pending" }, 409)
+            const commands = fixture.inputUpdateCommands.get(receipt.requestID) ?? new Map()
+            const previous = commands.get(body?.commandID)
+            if (previous) {
+              if (JSON.stringify(previous.command) !== JSON.stringify(body)) return json({ error: "command changed" }, 409)
+              return json(previous.receipt)
+            }
+            if (body?.expectedRevision !== (receipt.revision ?? 0)) return json({ error: "revision conflict" }, 409)
+            if (typeof body?.text !== "string" || !["queue", "steer"].includes(body?.delivery) || !body?.commandID)
+              return json({ error: "invalid update" }, 400)
+            Object.assign(receipt, { text: body.text, delivery: body.delivery, revision: (receipt.revision ?? 0) + 1 })
+            commands.set(body.commandID, { command: body, receipt: { ...receipt } })
+            fixture.inputUpdateCommands.set(receipt.requestID, commands)
+            if (fixture.loseInputUpdateAck) {
+              fixture.loseInputUpdateAck = false
+              response.destroy()
+              return
+            }
+            return json(receipt)
+          }
+          if (fixture.holdInputUpdate) { fixture.inputUpdateReplies.push(complete); return }
+          return complete()
+        }
         if (request.method === "DELETE") {
           if (fixture.promoteOnCancel) {
             Object.assign(receipt, { state: "promoted", messageID: "msg_promoted", timePromoted: Date.now() })

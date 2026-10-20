@@ -109,6 +109,16 @@ export const V1InputTable = sqliteTable(
   (table) => [index("v1_session_input_pending_idx").on(table.session_id, table.state, table.admitted_seq)],
 )
 
+export const V1InputCommandTable = sqliteTable("v1_session_input_command", {
+  command_id: text().primaryKey(),
+  request_id: text()
+    .notNull()
+    .references(() => V1InputTable.request_id, { onDelete: "cascade" }),
+  session_id: text().$type<SessionSchema.ID>().notNull(),
+  command: text({ mode: "json" }).$type<SessionV1.InputUpdatePayload>().notNull(),
+  receipt: text({ mode: "json" }).$type<SessionV1.InputReceipt>().notNull(),
+})
+
 export const PartTable = sqliteTable(
   "part",
   {

@@ -68,7 +68,7 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/es\/api\/handoffs$/,
       /^\/es\/api\/attention\/(?:session|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/commands)$/,
     ],
-    PATCH: [/^\/oc\/session\/[\w-]+$/],
+    PATCH: [/^\/oc\/session\/[\w-]+$/, /^\/oc\/session\/[\w-]+\/input\/[\w-]+$/],
     PUT: [/^\/es\/api\/subscriptions$/],
     DELETE: [/^\/oc\/session\/[\w-]+(?:\/(input|aside)\/[\w-]+)?$/, /^\/es\/api\/subscriptions$/],
   }

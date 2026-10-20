@@ -197,6 +197,9 @@ try {
         { parts: [{ type: "text", text: "fake backend only" }] },
       ],
       ["PATCH", `/session/ses_fixture_${verification}`, { title: "fake backend only" }],
+      ["PATCH", `/session/ses_fixture_${verification}/input/input_fixture`, {
+        commandID: `edit_fixture_${verification}`, expectedRevision: 0, text: "edited fake input", delivery: "steer",
+      }],
     ]) {
       const result = await page.evaluate(
         async ({ method, pathname, body, header }) => {
@@ -234,6 +237,9 @@ try {
       })
     }
     expect((await fetch(`${origin}/oc/session`, { method: "POST", body: "{}", headers: { origin } })).status).toBe(403)
+    expect((await fetch(`${origin}/oc/session/ses_fixture_${verification}/input/input_fixture`, {
+      method: "PATCH", body: "{}", headers: { origin },
+    })).status).toBe(403)
     console.info("PASS native core GET, POST permission/input/prompt, PATCH through packaged main/key hook")
   }
 } finally {

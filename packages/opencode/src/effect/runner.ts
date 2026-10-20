@@ -1,15 +1,19 @@
-import { Cause, Deferred, Effect, Exit, Fiber, Latch, Schema, Scope, SynchronizedRef } from "effect"
+import { Cause, Clock, Deferred, Effect, Exit, Fiber, Latch, Schema, Scope, SynchronizedRef } from "effect"
 
 export interface Runner<A, E = never> {
   readonly state: State<A, E>
   readonly busy: boolean
   readonly ensureRunning: (work: Effect.Effect<A, E>, admission?: boolean) => Effect.Effect<A, E>
   readonly consume: Effect.Effect<void>
-  readonly wake: (work: Effect.Effect<A, E>) => Effect.Effect<void, E>
+  readonly wake: (work: Effect.Effect<A, E>) => Effect.Effect<WakeDecision, E>
   readonly startShell: (work: Effect.Effect<A, E>, ready?: Latch.Latch) => Effect.Effect<A, E | Busy>
   readonly cancel: Effect.Effect<void>
   readonly locked: <B, F, R>(work: (idle: boolean) => Effect.Effect<B, F, R>) => Effect.Effect<B, F, R>
 }
+
+export type WakeDecision =
+  | { readonly outcome: "scheduled" | "coalesced"; readonly observedAt: number }
+  | { readonly outcome: "ignored" }
 
 export class Cancelled extends Schema.TaggedErrorClass<Cancelled>()("RunnerCancelled", {}) {}
 export class Busy extends Schema.TaggedErrorClass<Busy>()("RunnerBusy", {}) {}
@@ -82,7 +86,7 @@ export const make = <A, E = never>(
       ref,
       Effect.fnUntraced(function* (st) {
         if (st._tag !== "Running" || st.run.id !== id) return [complete(done, exit), st] as const
-        const fenced = yield* (opts?.onSettled ?? Effect.succeed(false))
+        const fenced = yield* opts?.onSettled ?? Effect.succeed(false)
         if (fenced) {
           pending = undefined
           unconsumed = undefined
@@ -177,21 +181,26 @@ export const make = <A, E = never>(
       }),
     ).pipe(Effect.flatten)
 
-  const wake = (work: Effect.Effect<A, E>) =>
-    SynchronizedRef.updateEffect(
+  const wake = (work: Effect.Effect<A, E>): Effect.Effect<WakeDecision, E> =>
+    SynchronizedRef.modifyEffect<State<A, E>, WakeDecision, E, never>(
       ref,
       Effect.fnUntraced(function* (st) {
         yield* opts?.onAdmission?.(st._tag === "Idle") ?? Effect.void
-        if (st._tag === "Stopping") return st
+        if (st._tag === "Stopping") {
+          return [{ outcome: "ignored" }, st] as const
+        }
         if (st._tag === "Running" || st._tag === "ShellThenRun") {
           pending = work
-          return st
+          return [{ outcome: "coalesced", observedAt: yield* Clock.currentTimeMillis }, st] as const
         }
         const done = yield* Deferred.make<A, E | Cancelled>()
         if (st._tag === "Shell")
-          return { _tag: "ShellThenRun", shell: st.shell, run: { id: next(), done, work } } as const
+          return [
+            { outcome: "coalesced", observedAt: yield* Clock.currentTimeMillis },
+            { _tag: "ShellThenRun", shell: st.shell, run: { id: next(), done, work } },
+          ] as const
         const run = yield* startRun(work, done)
-        return { _tag: "Running", run } as const
+        return [{ outcome: "scheduled", observedAt: yield* Clock.currentTimeMillis }, { _tag: "Running", run }] as const
       }),
     )
 

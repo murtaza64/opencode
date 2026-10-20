@@ -5,6 +5,7 @@ import type {
   Session,
   SessionV1InputPayload,
   SessionV1InputReceipt,
+  SessionV1InputUpdatePayload,
 } from "@opencode-ai/sdk/v2"
 import { oc, inputImages, type InputImage } from "./api"
 import { HttpError, httpError, supersededError } from "./api-error"
@@ -26,7 +27,7 @@ export type ComposerDraft = {
 }
 export type ComposerCapabilities = {
   sessionAside?: { version: number; cancel: boolean; images?: ImageCapability }
-  sessionInput?: { version: number; delivery: string[]; list: boolean; cancel: boolean; images?: ImageCapability }
+  sessionInput?: { version: number; delivery: string[]; list: boolean; cancel: boolean; update?: boolean; images?: ImageCapability }
 }
 export type ImageCapability = NonNullable<ExperimentalCapabilities["sessionInput"]["images"]> & {
   compressedMetadata: false
@@ -66,6 +67,16 @@ export type ComposerRecovery = {
   model: ComposerModel | null
   agent: string | null
   missingImages?: boolean
+  reconciled?: boolean
+}
+export type ComposerInputEdit = {
+  text: string
+  delivery: "queue" | "steer"
+  expectedRevision: number
+  command?: SessionV1InputUpdatePayload
+  status: "editing" | "saving" | "unknown" | "conflict"
+  open: boolean
+  error: string
 }
 export type ComposerSuperseded = {
   successor: string
@@ -99,6 +110,7 @@ export type ComposerState = {
   recoveries: ComposerRecovery[]
   recoveryBusy: string | null
   recoveryError: string
+  inputEdits: Record<string, ComposerInputEdit>
   superseded: ComposerSuperseded | null
   receipts: InputReceipt[]
   capabilities: ComposerCapabilities | null
@@ -158,6 +170,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     recoveries: [],
     recoveryBusy: null,
     recoveryError: "",
+    inputEdits: {},
     superseded: null,
     receipts: [],
     capabilities: null,
@@ -211,6 +224,11 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           admission: { ...entry.admission, payload: { ...entry.admission.payload, images: [] },
             draft: entry.admission.draft ? { ...entry.admission.draft, images: [] } : undefined },
         })))
+      }
+      if (record(saved.inputEdits)) {
+        Object.entries(saved.inputEdits).forEach(([id, edit]) => {
+          if (isInputEdit(edit)) setState("inputEdits", id, { ...edit, status: edit.status === "saving" ? "unknown" : edit.status })
+        })
       }
       setState({ task: { ...saved.task, images: [] }, aside: { ...saved.aside, images: [] }, mode: saved.mode, asideSeeded: saved.asideSeeded === true })
       setState({
@@ -331,6 +349,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         ...(state.admission.draft ? { draft: copyDraft(state.admission.draft) } : {}), status: "unknown" }
       : null,
     recoveries: state.recoveries,
+    inputEdits: state.inputEdits,
     superseded: state.superseded ? { ...state.superseded, draft: copyDraft(state.superseded.draft) } : null,
     asideRequest:
       state.asideRequest?.status === "running" || state.asideRequest?.status === "unknown"
@@ -682,6 +701,8 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     const recovery = state.recoveries.find((entry) => entry.admission.payload.requestID === receipt.requestID)
     if (recovery && (recovery.missingImages || !matchesRecovery(receipt, recovery)))
       throw new Error("Receipt does not match the saved exact input; admission remains unknown")
+    if (recovery && !recovery.reconciled)
+      setState("recoveries", (entry) => entry.admission.payload.requestID === receipt.requestID, "reconciled", true)
     const admission = state.admission
     if (
       admission?.payload.requestID === receipt.requestID &&
@@ -693,7 +714,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       throw new Error("Input ID belongs to a different payload. The draft was not cleared.")
     batch(() => {
       const previous = state.receipts.find((item) => item.requestID === receipt.requestID)
-      if (!previous || previous.state === "pending") {
+      if (!previous || (previous.state === "pending" && (receipt.revision ?? 0) >= (previous.revision ?? 0))) {
         const receipts = [...state.receipts.filter((item) => item.requestID !== receipt.requestID), receipt].sort(
           (a, b) => a.admittedSeq - b.admittedSeq,
         )
@@ -758,6 +779,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           delivery: input.delivery,
           list: input.list,
           cancel: input.cancel,
+          update: input.update === true,
           images: imageCapability(input.images),
         }
       }
@@ -1118,6 +1140,59 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       setState("recoveryBusy", null)
     }
   }
+  const editInput = (id: string) => {
+    const receipt = state.receipts.find((item) => item.requestID === id)
+    if (!state.capabilities?.sessionInput?.update || receipt?.state !== "pending" || receipt.source) return
+    const previous = state.inputEdits[id]
+    setState("inputEdits", id, previous ? { ...previous, open: true } : {
+      text: receipt.text, delivery: receipt.delivery, expectedRevision: receipt.revision ?? 0,
+      status: "editing", open: true, error: "",
+    })
+    persist()
+  }
+  const saveInput = async (id: string) => {
+    const edit = state.inputEdits[id]
+    if (!edit || edit.status === "saving" || edit.status === "conflict" || !state.capabilities?.sessionInput?.update) return
+    const receipt = state.receipts.find((item) => item.requestID === id)
+    if ((!edit.command && receipt?.state !== "pending") || receipt?.source) {
+      setState("inputEdits", id, { status: "conflict", error: `Input is ${receipt?.state ?? "unavailable"}; your edit is kept.` })
+      return
+    }
+    // Retrying an uncertain update must reuse its exact command, never re-admit.
+    const previous = edit.command
+    const command = previous ?? {
+      commandID: requestID(), expectedRevision: edit.expectedRevision, text: edit.text, delivery: edit.delivery,
+    }
+    setState("inputEdits", id, { command, status: "saving", error: "" })
+    if (!(await persistAsync(true))) {
+      setState("inputEdits", id, { status: previous ? "unknown" : "editing", command: previous, error: "Cannot save the update identity locally. No update sent; edit kept." })
+      return
+    }
+    try {
+      const response = await request(url(`/input/${encodeURIComponent(id)}`), {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(command),
+      })
+      if (response.status === 409) {
+        // Read authoritative state, including servers which omit the conflict body.
+        await readInput(id)
+        setState("inputEdits", id, { status: "conflict", error: "Input was picked up or changed elsewhere. Your edit is kept; nothing was resent." })
+        return
+      }
+      if ([400, 422].includes(response.status) || (!previous && [401, 403, 404, 413, 415].includes(response.status))) {
+        setState("inputEdits", id, { status: "editing", command: undefined,
+          error: `Update rejected: ${message(await httpError(response))}. Edit kept.` })
+        return
+      }
+      const result = await json<InputReceipt>(response)
+      accept(result, id)
+      setState("inputEdits", id, { status: "editing", open: false, command: undefined,
+        expectedRevision: result.revision ?? command.expectedRevision + 1 })
+    } catch (error) {
+      setState("inputEdits", id, { status: "unknown", error: `Update outcome unknown: ${message(error)}. Retry the same update; your edit is kept.` })
+    } finally {
+      persist()
+    }
+  }
   const cancelInput = async (id: string) => {
     if (state.hydrating) await hydration
     if (cancelling.has(id)) return
@@ -1413,6 +1488,24 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     setAsideAdmission,
     recoverAdmission,
     cancelInput,
+    editInput,
+    saveInput,
+    changeInputEdit: (id: string, value: Partial<Pick<ComposerInputEdit, "text" | "delivery">>) => {
+      const edit = state.inputEdits[id]
+      if (!edit || edit.status === "saving" || edit.status === "unknown") return
+      setState("inputEdits", id, { ...value, ...(edit.status === "conflict" ? { command: undefined } : {}) })
+      persist()
+    },
+    closeInputEdit: (id: string) => {
+      setState("inputEdits", id, "open", false)
+      persist()
+    },
+    rebaseInputEdit: (id: string) => {
+      const receipt = state.receipts.find((item) => item.requestID === id)
+      if (!state.inputEdits[id] || receipt?.state !== "pending" || receipt.source) return
+      setState("inputEdits", id, { expectedRevision: receipt.revision ?? 0, command: undefined, status: "editing", error: "" })
+      persist()
+    },
     cancelAside,
     closeAside,
     blockedReason,
@@ -1422,6 +1515,13 @@ export const createComposer = (sessionID: string, directory: string, dependencie
 }
 
 const emptyDraft = (): ComposerDraft => ({ text: "", images: [], model: null, selection: [0, 0], revision: 0 })
+const isInputEdit = (value: unknown): value is ComposerInputEdit =>
+  record(value) && typeof value.text === "string" && (value.delivery === "queue" || value.delivery === "steer") &&
+  typeof value.expectedRevision === "number" && Number.isSafeInteger(value.expectedRevision) && value.expectedRevision >= 0 &&
+  typeof value.open === "boolean" && typeof value.error === "string" &&
+  ["editing", "saving", "unknown", "conflict"].includes(String(value.status)) &&
+  (value.command === undefined || (record(value.command) && typeof value.command.commandID === "string" &&
+    value.command.expectedRevision === value.expectedRevision && value.command.text === value.text && value.command.delivery === value.delivery))
 const copyDraft = (draft: ComposerDraft): ComposerDraft => ({
   ...draft,
   images: draft.images.map((image) => ({ ...image })),
@@ -1508,6 +1608,7 @@ type SavedRecovery = Omit<ComposerRecovery, "admission"> & {
 }
 const isRecovery = (value: unknown): value is SavedRecovery =>
   record(value) && isAdmission(value.admission) && (value.model === null || isModel(value.model)) &&
+  (value.reconciled === undefined || typeof value.reconciled === "boolean") &&
   (value.agent === null || typeof value.agent === "string")
 const isSavedImages = (value: unknown): value is SavedImage[] =>
   Array.isArray(value) && value.every((image) =>
@@ -1543,7 +1644,8 @@ const sameImages = (left: readonly InputImage[] | undefined, right: readonly Inp
       image.filename === right[index].filename,
   )
 const matchesRecovery = (receipt: InputReceipt, entry: ComposerRecovery) =>
-  receipt.text === entry.admission.payload.text && receipt.delivery === entry.admission.payload.delivery &&
+  ((entry.reconciled && (receipt.revision ?? 0) > 0) ||
+    (receipt.text === entry.admission.payload.text && receipt.delivery === entry.admission.payload.delivery)) &&
   (!(entry.agent ?? entry.admission.payload.agent) || receipt.agent === (entry.agent ?? entry.admission.payload.agent)) &&
   JSON.stringify(receipt.source) === JSON.stringify(entry.admission.payload.source) &&
   sameImages(receipt.images, entry.admission.payload.images)

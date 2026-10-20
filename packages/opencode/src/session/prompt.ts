@@ -44,6 +44,7 @@ import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util/process"
 import { Cause, Effect, Exit, Latch, Layer, Option, Context, Schema, Types } from "effect"
 import { InstanceState } from "@/effect/instance-state"
+import { Runner } from "@/effect/runner"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
 import { SessionSupersession } from "./supersession"
@@ -103,7 +104,7 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
 
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
-  readonly wake: (sessionID: SessionID) => Effect.Effect<void, SessionSupersession.Closed>
+  readonly wake: (sessionID: SessionID) => Effect.Effect<Runner.WakeDecision, SessionSupersession.Closed>
   readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error | SessionSupersession.Closed>
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts, SessionSupersession.Closed>
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError | SessionSupersession.Closed>
@@ -1381,7 +1382,7 @@ const layer = Layer.effect(
     })
 
     const wake = Effect.fn("SessionPrompt.wake")(function* (sessionID: SessionID) {
-      yield* state.wake(
+      return yield* state.wake(
         sessionID,
         Effect.gen(function* () {
           const history = yield* MessageV2.filterCompactedEffect(sessionID).pipe(

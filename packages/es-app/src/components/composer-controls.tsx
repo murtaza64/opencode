@@ -309,6 +309,10 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
                   <div class="receipt-row">
                     <span class={`receipt-kind ${item.delivery}`}>{item.delivery}</span>
                     <p class="receipt-text" dir="auto">{item.text}</p>
+                    <Show when={state.capabilities?.sessionInput?.update}>
+                      <button disabled={!props.connected} aria-label={`Edit ${item.delivery} input: ${item.text}`}
+                        onClick={() => props.composer.editInput(item.requestID)}>Edit</button>
+                    </Show>
                     <button
                       class="receipt-cancel"
                       disabled={!props.connected}
@@ -326,6 +330,45 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
           </ul>
         </details>
       </Show>
+      <For each={Object.keys(state.inputEdits).filter((id) => state.inputEdits[id].open)}>
+        {(id) => {
+          const edit = () => state.inputEdits[id]
+          const current = () => state.receipts.find((item) => item.requestID === id)
+          return (
+            <section class="input-edit" aria-label="Edit pending input" data-edit-request-id={id}>
+              <label>
+                Pending input text
+                <textarea dir="auto" aria-label="Pending input text" value={edit().text}
+                  disabled={edit().status === "saving" || edit().status === "unknown"}
+                  onInput={(event) => props.composer.changeInputEdit(id, { text: event.currentTarget.value })} />
+              </label>
+              <ComposerImages images={current()?.images} />
+              <label>
+                Delivery
+                <select aria-label="Pending input delivery" value={edit().delivery}
+                  disabled={edit().status === "saving" || edit().status === "unknown"}
+                  onChange={(event) => props.composer.changeInputEdit(id, { delivery: event.currentTarget.value === "queue" ? "queue" : "steer" })}>
+                  <option value="queue">Queue</option>
+                  <option value="steer">Steer</option>
+                </select>
+              </label>
+              <p class="dim">Only updates this pending input. Attachments, agent and model stay unchanged.</p>
+              <Show when={edit().error}><p class="err" role="alert">{edit().error}</p></Show>
+              <Show when={edit().status === "conflict"}>
+                <p dir="auto">Current: {current()?.state ?? "unavailable"} · {current()?.delivery} · {current()?.text}</p>
+                <Show when={current()?.state === "pending"}>
+                  <button onClick={() => props.composer.rebaseInputEdit(id)}>Keep edit against current revision</button>
+                </Show>
+              </Show>
+              <button disabled={!props.connected || edit().status === "saving" || edit().status === "conflict"}
+                onClick={() => props.composer.saveInput(id)}>
+                {edit().status === "unknown" ? "Retry same update" : "Save pending input"}
+              </button>
+              <button onClick={() => props.composer.closeInputEdit(id)}>Cancel edit</button>
+            </section>
+          )
+        }}
+      </For>
       <Show when={state.asideRequest}>
         {(aside) => (
           <section class="aside-result" aria-label="Aside result">

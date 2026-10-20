@@ -146,6 +146,25 @@ test("rejects unauthenticated, cross-origin, and foreign Host requests", async (
   expect((await get("/oc/pty", { method: "POST" })).status).toBe(403)
 })
 
+test("pending input PATCH is exact-route keyed and origin-bound without forwarding credentials", async () => {
+  const { server, get } = await setup()
+  const pathname = "/oc/session/ses_a/input/request-1"
+  const body = JSON.stringify({ commandID: "edit-1", expectedRevision: 0, text: "edited", delivery: "steer" })
+  expect(apiAllowed("PATCH", pathname)).toBe(true)
+  expect(apiAllowed("PATCH", "/oc/session/ses_a/input")).toBe(false)
+  expect(apiAllowed("PATCH", "/oc/session/ses_a/input/request-1/handle")).toBe(false)
+  expect(apiAllowed("PATCH", "/oc/session/ses_a/message/msg_a")).toBe(false)
+  expect(apiAllowed("PUT", pathname)).toBe(false)
+  expect((await fetch(`${server.origin}${pathname}`, { method: "PATCH", body, headers: { origin: server.origin } })).status).toBe(403)
+  expect((await get(pathname, { method: "PATCH", body, headers: { origin: "https://evil.test" } })).status).toBe(403)
+  expect((await get(pathname, { method: "PATCH", body, headers: { "sec-fetch-site": "cross-site" } })).status).toBe(403)
+  const response = await get(`${pathname}?directory=%2Ffixture&conflict=1`, {
+    method: "PATCH", body, headers: { origin: server.origin, "content-type": "application/json" },
+  })
+  expect(response.status).toBe(409)
+  expect(await response.json()).toEqual({ method: "PATCH", path: "/session/ses_a/input/request-1", directory: "/fixture", body, credentialForwarded: false })
+})
+
 test("attention exposes only operator bootstrap, reads and record commands", () => {
   const id = "00000000-0000-4000-8000-000000000001"
   expect(apiAllowed("GET", "/es/api/attention")).toBe(true)
