@@ -64,6 +64,7 @@ export const createFixture = async () => {
     issue: undefined,
     archived: new Set(),
     sessionModels: new Map(),
+    sessionTimes: new Map(),
     sessionTitles: new Map(),
     rejectRename: false,
     holdRename: false,
@@ -116,7 +117,7 @@ export const createFixture = async () => {
       streams.clear()
     },
   }
-  const currentSession = (id) => ({ ...session(id), ...(fixture.sessionTitles.has(id) ? { title: fixture.sessionTitles.get(id) } : {}) })
+  const currentSession = (id) => ({ ...session(id), time: fixture.sessionTimes.get(id) ?? session(id).time, ...(fixture.sessionTitles.has(id) ? { title: fixture.sessionTitles.get(id) } : {}) })
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, "http://fixture")
     const chunks = []
@@ -389,7 +390,7 @@ export const createFixture = async () => {
       if (!action) {
         const created = fixture.created.find((item) => item.id === id)
         return json(
-          { ...(created ?? currentSession(id)), ...(fixture.sessionModels.has(id) ? { model: fixture.sessionModels.get(id), preferredModel: fixture.sessionModels.get(id) } : {}), time: { ...(created ?? session(id)).time, ...(fixture.sessionModels.has(id) ? { updated: Date.now() } : {}), ...(fixture.archived.has(id) ? { archived: 5 } : {}) } },
+          { ...(created ?? currentSession(id)), ...(fixture.sessionModels.has(id) ? { model: fixture.sessionModels.get(id), preferredModel: fixture.sessionModels.get(id) } : {}), time: { ...(created ?? currentSession(id)).time, ...(fixture.sessionModels.has(id) ? { updated: Date.now() } : {}), ...(fixture.archived.has(id) ? { archived: 5 } : {}) } },
           fixture.failSnapshot ? 503 : 200,
         )
       }

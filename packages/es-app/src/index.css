@@ -1147,6 +1147,9 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .mail-activity-route, .mail-activity-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail-activity-state { color: var(--subtext0); }
 .mail-activity-state > span { margin-inline-start: 6px; }
+.mail-activity-state > span:first-child { margin-inline-start: 0; }
+.mail-activity-arrow { display: inline-block; }
+.mail-activity:dir(rtl) .mail-activity-arrow { transform: scaleX(-1); }
 .mail-activity-disclosure { color: var(--subtext0); font-size: 16px; line-height: 1; }
 .mail-activity:dir(rtl) .mail-activity-disclosure { transform: rotate(180deg); }
 .mail-activity[open] .mail-activity-disclosure { transform: rotate(90deg); }
