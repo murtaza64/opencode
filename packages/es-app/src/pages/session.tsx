@@ -3,8 +3,8 @@
 import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js"
 import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router"
 import { DataProvider } from "@opencode-ai/session-ui/context"
-import type { MessagePartProps } from "@opencode-ai/session-ui/message-part"
-import type { ToolPart } from "@opencode-ai/sdk/v2"
+import { renderable, ToolAdornment, type MessagePartProps } from "@opencode-ai/session-ui/message-part"
+import type { Part, ToolPart } from "@opencode-ai/sdk/v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { es, oc } from "../api"
 import { createLiveSession, errorText } from "../live-session"
@@ -38,6 +38,10 @@ import { ComposerImages } from "../components/composer-images"
 import { ActivityBriefView } from "../components/activity-brief"
 import { FindExcerpt, TranscriptFind } from "../components/transcript-find"
 import type { FindHit } from "../transcript-find"
+import { ToolSize } from "../components/tool-size"
+import { ToolRun } from "../components/tool-run"
+import { messageSegments, planToolRuns, samePlan, sameSegments } from "../transcript-groups"
+import { isUserPrompt, promptPosition, promptTarget } from "../transcript-nav"
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const [error, setError] = createSignal("")
@@ -285,6 +289,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     transcriptEl?.addEventListener(
       "scroll",
       () => {
+        schedulePromptPosition()
         if (!inspecting && atBottom()) stick = true
         if (userScroll && transcriptEl && transcriptEl.scrollTop <= 200) void loadEarlier()
         userScroll = false
@@ -305,6 +310,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     transcriptEl?.addEventListener("touchmove", () => { stick = false; userScroll = true }, { passive: true })
     const observer = new ResizeObserver(() => {
       if (stick) pin()
+      schedulePromptPosition()
     })
     if (inner) observer.observe(inner)
     onCleanup(() => observer.disconnect())
@@ -772,10 +778,15 @@ function SessionView(props: { sessionID: string; directory: string }) {
     findJumped = true
     stick = false
     userScroll = false
+    // A match inside a compact tool run opens that run so the chip stays visible.
+    const run = toolRuns().byPart.get(hit.partID)
+    if (run) toggleRun(run, true)
     setFindHit(hit)
     requestAnimationFrame(() => {
       if (!transcriptEl) return
-      const message = [...transcriptEl.querySelectorAll<HTMLElement>("[data-find-message]")]
+      const member = run ? [...transcriptEl.querySelectorAll<HTMLElement>("[data-tool-run-member]")]
+        .find((element) => element.dataset.toolRunMember === hit.partID) : undefined
+      const message = member ?? [...transcriptEl.querySelectorAll<HTMLElement>("[data-find-message]")]
         .find((element) => element.dataset.findMessage === hit.messageID)
       // A single exact source excerpt covers historical rows and matches hidden
       // by Markdown or collapsed tools, without mounting all earlier messages.
@@ -968,30 +979,38 @@ function SessionView(props: { sessionID: string; directory: string }) {
     transcriptEl.scrollBy({ top: (dir * transcriptEl.clientHeight) / 2, behavior: "instant" as ScrollBehavior })
   }
 
+  // Prompt anchors are rendered only for source-identified human prompts in the
+  // loaded transcript. Navigation only scrolls: it never loads history, writes,
+  // moves focus, or clears Find.
+  const promptTops = () => {
+    if (!transcriptEl) return []
+    const top = transcriptEl.getBoundingClientRect().top
+    return [...transcriptEl.querySelectorAll<HTMLElement>("[data-user-prompt]")].map((element) => element.getBoundingClientRect().top - top)
+  }
+  const [promptState, setPromptState] = createSignal(promptPosition([]))
+  let promptFrame = 0
+  const schedulePromptPosition = () => {
+    if (promptFrame) return
+    promptFrame = requestAnimationFrame(() => {
+      promptFrame = 0
+      setPromptState(promptPosition(promptTops()))
+    })
+  }
+  onCleanup(() => cancelAnimationFrame(promptFrame))
   const jumpUserMessage = (dir: 1 | -1) => {
     if (!transcriptEl) return
-    const nodes = [...transcriptEl.querySelectorAll('[data-component="user-message"]')] as HTMLElement[]
-    if (!nodes.length) return
-    const top = transcriptEl.scrollTop
-    const offset = (n: HTMLElement) => {
-      // offsetTop relative to the scroll container
-      let y = 0
-      let el: HTMLElement | null = n
-      while (el && el !== transcriptEl) {
-        y += el.offsetTop
-        el = el.offsetParent as HTMLElement | null
-      }
-      return y
+    const tops = promptTops()
+    const index = promptTarget(tops, dir)
+    stick = false
+    userScroll = false
+    if (index < 0) {
+      // Earlier prompts may exist in unloaded history; show the explicit loader.
+      if (dir === -1 && live.hasOlder()) transcriptEl.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior })
+      schedulePromptPosition()
+      return
     }
-    const target =
-      dir === 1
-        ? nodes.find((n) => offset(n) > top + 30)
-        : [...nodes].reverse().find((n) => offset(n) < top - 30)
-    if (target) {
-      stick = false
-      userScroll = true
-      transcriptEl.scrollTo({ top: offset(target) - 8, behavior: "instant" as ScrollBehavior })
-    }
+    transcriptEl.scrollTo({ top: transcriptEl.scrollTop + tops[index]! - 8, behavior: "instant" as ScrollBehavior })
+    schedulePromptPosition()
   }
 
   // ^u/^d page scroll, ^n/^p user-message jumps, ^e composer — both modes
@@ -1290,6 +1309,37 @@ function SessionView(props: { sessionID: string; directory: string }) {
     </DirectComposer>
   )
 
+  // Display-only compaction of small finished tool calls; see transcript-groups.
+  const partVisible = (part: Part) => part.type === "text" || part.type === "reasoning"
+    ? /\S/.test(part.text ?? "") : renderable(part, true, renderTools)
+  const toolRuns = createMemo(() => planToolRuns(timeline(), {
+    parts: (id) => live.data.part[id] ?? [],
+    visible: partVisible,
+    breakAfter: (message) => turnSummaries().has(message.id),
+  }), undefined, { equals: samePlan })
+  // Expansion follows member parts, not run keys: prepending history or a
+  // streamed call can merge runs and change the key of a run the user opened.
+  const [openParts, setOpenParts] = createSignal(new Set<string>())
+  const runOpen = (key: string) => !!toolRuns().runs.get(key)?.members.some((member) => openParts().has(member.partID))
+  const toggleRun = (key: string, open: boolean) => setOpenParts((current) => {
+    const members = toolRuns().runs.get(key)?.members ?? []
+    if (open && members.every((member) => current.has(member.partID))) return current
+    const next = new Set(current)
+    members.forEach((member) => open ? next.add(member.partID) : next.delete(member.partID))
+    return next
+  })
+  const messageByID = createMemo(() => new Map(messages().map((message) => [message.id, message] as const)))
+  const promptIDs = createMemo(() => new Set(timeline().flatMap((row) =>
+    row.type === "transcript" && isUserPrompt(row.message, live.data.part[row.message.id] ?? []) ? [row.message.id] : [])))
+  createEffect(() => { promptIDs(); schedulePromptPosition() })
+  const renderRun = (key: string) => <Show when={toolRuns().runs.get(key)}>{(run) => {
+    const hit = () => findHit() && run().members.some((member) => member.partID === findHit()!.partID) ? findHit() : undefined
+    return <ToolRun run={run()} message={(id) => messageByID().get(id)} parts={(id) => live.data.part[id] ?? []}
+      open={runOpen(key)} onToggle={(open) => toggleRun(key, open)} renderTools={renderTools}
+      selectedPart={hit()?.partID}
+      excerpt={<Show when={hit()}>{(selected) => <div class="find-jump" role="region" aria-label="Selected transcript match"><FindExcerpt hit={selected()} /></div>}</Show>} />
+  }}</Show>
+
   return (
     <main class="session-page" classList={{ "finding-transcript": findOpen() }}>
       <div class="session-main">
@@ -1299,6 +1349,15 @@ function SessionView(props: { sessionID: string; directory: string }) {
             void refetch()
           }} />
           <button onPointerDown={(event) => event.preventDefault()} onClick={openFind} title="Find in transcript (Cmd/Ctrl+F)">Find</button>
+          <div class="prompt-nav" role="group" aria-label="Your prompts">
+            <button aria-label="Previous prompt" title="Scroll to your previous prompt (Ctrl+P)" onPointerDown={(event) => event.preventDefault()}
+              disabled={!promptState().previous && !live.hasOlder()} onClick={() => jumpUserMessage(-1)}><span aria-hidden="true">↑</span> Prompt</button>
+            <button aria-label="Next prompt" title="Scroll to your next prompt (Ctrl+N)" onPointerDown={(event) => event.preventDefault()}
+              disabled={!promptState().next} onClick={() => jumpUserMessage(1)}><span aria-hidden="true">↓</span> Prompt</button>
+            <span class="dim prompt-nav-scope" aria-label={`Prompt ${Math.max(promptState().current + 1, 0)} of ${promptState().total}${live.hasOlder() ? " loaded" : ""}`} title={live.hasOlder() ? "Only loaded history is navigable. Use Load earlier messages at the top for more." : "All history is loaded."}>
+              {promptState().total ? `${Math.max(promptState().current + 1, 0)}/${promptState().total}` : "0"}{live.hasOlder() ? " loaded" : ""}
+            </span>
+          </div>
           <span class="dim">{workState() === "working" ? "busy" : workState()}</span>
           <Show when={subagentsRunning()}><span class="dim">{subagentsRunning()} subagent(s) running</span></Show>
           <Show when={(session() as any)?.parentID}>
@@ -1375,17 +1434,22 @@ function SessionView(props: { sessionID: string; directory: string }) {
               </button>
             </Show>
             <DataProvider data={live.data} directory={directory} sessionID={sessionID} onNavigateToSession={inspectSubagent}>
+            <ToolAdornment.Provider value={ToolSize}>
             <For each={timeline()}>
               {(row) => {
                  if (row.type === "mail") return <MailRow message={row.message} ids={transcriptMailIDs()} />
                 const m = row.message
+                const segments = createMemo(() => m.role === "assistant" ? messageSegments(live.data.part[m.id] ?? [], toolRuns()) : [],
+                  [], { equals: sameSegments })
+                const ownHit = () => findHit()?.messageID === m.id && !toolRuns().byPart.has(findHit()!.partID) ? findHit() : undefined
                 return (
-                <div data-find-message={m.id} data-find-selected={findHit()?.messageID === m.id ? "true" : undefined}>
-                  <Show when={findHit()?.messageID === m.id ? findHit() : undefined}>{(hit) =>
+                <div data-find-message={m.id} data-find-selected={ownHit() ? "true" : undefined}>
+                  <Show when={ownHit()}>{(hit) =>
                     <div class="find-jump" role="region" aria-label="Selected transcript match"><FindExcerpt hit={hit()} /></div>
                   }</Show>
-                  <Show when={m.role === "user"} fallback={<TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} renderTools={renderTools} />}>
-                    <div class="msg-wrap">
+                  <Show when={m.role === "user"} fallback={<TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} renderTools={renderTools}
+                    segments={segments()} renderRun={renderRun} />}>
+                    <div class="msg-wrap" id={promptIDs().has(m.id) ? `prompt-${m.id}` : undefined} data-user-prompt={promptIDs().has(m.id) ? m.id : undefined}>
                       <TranscriptMessage message={m} parts={live.data.part[m.id] ?? []}
                         renderTools={renderTools}
                         mailRecord={mailRecords().get(mailSourceID(m) ?? "")}
@@ -1415,6 +1479,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
                 )
               }}
             </For>
+            </ToolAdornment.Provider>
             <Show when={nextHandoff() || composer.state.superseded || composer.state.admission?.fence}>
               <section class="banner handoff-recovery" aria-label="Session handoff" role={composer.state.superseded ? "alert" : "status"}>
                 <Show when={composer.state.superseded} fallback={<p>This session handed off to a successor.</p>}>{(failure) => <>

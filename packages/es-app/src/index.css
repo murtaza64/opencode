@@ -1870,3 +1870,81 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .mail-subscription { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .mail-subscription span { flex: 1; min-width: 170px; }
 .mail-subscription input { min-width: 90px; flex: 1; }
+
+/* Tool size badges (tool-magnitude.ts): a leading column on activity-row chips. */
+.transcript [data-adorned="true"] {
+  display: grid;
+  grid-template-columns: 2.75rem minmax(0, 1fr);
+  align-items: start;
+  > :not(.tool-size) { grid-column: 2; min-width: 0; }
+  > .tool-size { grid-column: 1; grid-row: 1; margin-block-start: 9px; margin-inline-start: 8px; }
+}
+.tool-size {
+  --tool-size-color: var(--overlay1);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  inline-size: 2.25rem;
+  flex-shrink: 0;
+  font: 600 11px/13px var(--font-mono);
+  color: var(--tool-size-color);
+  text-align: center;
+  white-space: nowrap;
+  cursor: help;
+  &[data-size="M"] { --tool-size-color: var(--yellow); }
+  &[data-size="L"] { --tool-size-color: var(--peach); }
+  &[data-size="XL"] { --tool-size-color: var(--mauve); }
+  &:is([data-size="running"], [data-size="unknown"]) { --tool-size-color: var(--overlay0); }
+  .tool-size-bar {
+    block-size: 3px;
+    background: linear-gradient(to right, var(--tool-size-color) calc(var(--tool-size-rank, 0) * 20%), var(--surface0) 0);
+  }
+  &:dir(rtl) .tool-size-bar {
+    background: linear-gradient(to left, var(--tool-size-color) calc(var(--tool-size-rank, 0) * 20%), var(--surface0) 0);
+  }
+}
+
+/* Compact runs of small finished tool calls (transcript-groups.ts). */
+.tool-run {
+  min-width: 0;
+  margin-block: 6px;
+  border: 1px dashed var(--surface1);
+  background: var(--mantle);
+  color: var(--subtext1);
+  font: 400 13px/20px var(--font-sans);
+  .tool-run-summary {
+    display: grid;
+    grid-template-columns: 2.25rem auto minmax(0, 1fr) 16px;
+    align-items: center;
+    gap: 10px;
+    inline-size: 100%;
+    padding-block: 7px;
+    padding-inline: 8px 10px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+    &:hover { background: var(--surface0); }
+    &:focus-visible { outline: 1px solid var(--lavender); outline-offset: -2px; }
+  }
+  .tool-run-kind { color: var(--lavender); font-weight: 600; white-space: nowrap; }
+  .tool-run-tools { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; unicode-bidi: isolate; text-align: start; }
+  .tool-run-disclosure { text-align: center; color: var(--subtext0); font-size: 16px; line-height: 1; }
+  &:dir(rtl) .tool-run-disclosure { transform: rotate(180deg); }
+  &[data-open] .tool-run-disclosure { transform: rotate(90deg); }
+  .tool-run-members { border-block-start: 1px solid var(--surface0); padding: 2px 8px 4px; padding-inline-start: 16px; }
+  .tool-run-member[data-find-selected="true"] { outline: 1px solid var(--yellow); outline-offset: 2px; }
+}
+
+/* Prompt navigation in the session header. */
+.prompt-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  button { white-space: nowrap; }
+  .prompt-nav-scope { font-family: var(--font-mono); font-size: 11px; white-space: nowrap; }
+}

@@ -71,6 +71,9 @@ import { SessionProgressIndicatorV2 } from "../v2/components/session-progress-in
 
 // Opt-in semantic layout; its visual treatment belongs to the consuming app.
 const ActivityRows = createContext(false)
+// Host-rendered annotation for activity-row tool chips (for example a size
+// badge). Receives the chip's tool parts; unset hosts render nothing extra.
+export const ToolAdornment = createContext<Component<{ parts: ToolPart[] }>>()
 
 async function writeClipboard(text: string, container?: Element): Promise<boolean> {
   const body = container ?? (typeof document === "undefined" ? undefined : document.body)
@@ -1067,6 +1070,7 @@ export function ContextToolGroup(props: {
 }) {
   const i18n = useI18n()
   const activityRows = useContext(ActivityRows)
+  const adornment = useContext(ToolAdornment)
   const [localOpen, setLocalOpen] = createSignal(false)
   const open = () => props.open ?? localOpen()
   const pending = createMemo(
@@ -1088,7 +1092,11 @@ export function ContextToolGroup(props: {
       class="tool-collapsible"
       data-timeline-part-ids={props.parts.map((part) => part.id).join(",")}
       data-activity-group={activityRows ? "true" : undefined}
+      data-adorned={activityRows && adornment ? "true" : undefined}
     >
+      <Show when={activityRows && adornment}>
+        {(component) => <Dynamic component={component()} parts={props.parts} />}
+      </Show>
       <Collapsible.Trigger>
         <div data-component="context-tool-group-trigger">
           <span
@@ -1563,6 +1571,7 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
   const data = useData()
   const i18n = useI18n()
   const activityRows = useContext(ActivityRows)
+  const adornment = useContext(ToolAdornment)
   const part = () => props.part as ToolPart
   if (part().tool === "todowrite") return null
 
@@ -1601,7 +1610,11 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
   return (
     <Show when={!hideQuestion()}>
       <div data-component="tool-part-wrapper" data-timeline-part-id={part().id} data-tool={part().tool}
-        data-activity-row={activityRows ? "true" : undefined} data-status={part().state.status}>
+        data-activity-row={activityRows ? "true" : undefined} data-status={part().state.status}
+        data-adorned={activityRows && adornment ? "true" : undefined}>
+        <Show when={activityRows && adornment}>
+          {(component) => <Dynamic component={component()} parts={[part()]} />}
+        </Show>
         <Switch>
           <Match when={part().state.status === "error" && (part().state as any).error}>
             {(error) => {

@@ -1,9 +1,10 @@
-import { createMemo, createSignal, For, Show, type ComponentProps } from "solid-js"
+import { createMemo, createSignal, For, Index, Show, type ComponentProps, type JSX } from "solid-js"
 import { Message } from "@opencode-ai/session-ui/message-part"
 import { errorText } from "../live-session"
 import type { MailDelivery, MailMessage } from "../api"
 import { mailSentAt, mailWake } from "../mail-timeline"
 import { MailWakeEvidence } from "./mail-wake-evidence"
+import type { Segment } from "../transcript-groups"
 
 type MailSource = { type: "editspace-mail"; id: string; sender: string; recipient: string }
 const mailTime = (value: string | number | null) => value == null ? "" : new Date(value).toLocaleString()
@@ -28,6 +29,9 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
   mailRecord?: MailMessage
   mailDeliveries?: MailDelivery[]
   mailIDs?: Set<string>
+  // Assistant parts split around compact tool runs; a run renders at its first member.
+  segments?: Segment[]
+  renderRun?: (key: string) => JSX.Element
 }) => {
   const messageError = createMemo(() => props.message.role === "assistant" && props.message.error?.name !== "MessageAbortedError"
     ? props.message.error : undefined)
@@ -55,7 +59,13 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
     setCopyState(result ? "Copied" : "Copy failed")
   }
   return <Show when={mail()} fallback={<Show when={generated()} fallback={<>
-    <Message {...props} activityRows />
+    <Show when={props.message.role === "assistant" && props.segments} fallback={<Message {...props} activityRows />}>{(segments) =>
+      <Index each={segments()}>{(segment) => {
+        const parts = createMemo(() => { const value = segment(); return value.kind === "parts" ? value.parts : [] })
+        return <Show when={(() => { const value = segment(); return value.kind === "run" ? value.key : undefined })()} keyed
+          fallback={<Message {...props} parts={parts()} activityRows />}>{(key) => props.renderRun?.(key)}</Show>
+      }}</Index>
+    }</Show>
     <Show when={messageError()}>{(error) =>
       <div class="conversation-error" data-message-error-id={props.message.id} role="note" aria-label="Provider error">{errorText(error())}</div>
     }</Show>

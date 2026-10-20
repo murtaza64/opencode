@@ -75,6 +75,8 @@ try {
   await shot("desktop")
   const before = process.env.ACTIVITY_BEFORE === "1"
   if (!before) {
+    // Small finished calls start in a compact run; expand it to check the original chips.
+    await page.locator('.tool-run[data-timeline-part-ids="read,grep,skill"] .tool-run-summary').click()
     await expect(trigger("general")).toContainText("Agent")
     await expect(trigger("explore")).toContainText("Explore")
     await expect(page.locator('[data-tool="skill"] [data-slot="basic-tool-tool-subtitle"]')).toHaveText("grill-with-docs")
