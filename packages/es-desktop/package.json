@@ -15,6 +15,7 @@
     "test": "bun test src",
     "test:electron": "node test/smoke.mjs",
     "test:core-writes": "node test/core-writes.mjs",
+    "test:inspector-writes": "node test/inspector-core-writes.mjs",
     "test:links": "node test/external-links.mjs",
     "test:header": "node test/native-header.mjs",
     "test:draft-restart": "node test/draft-restart.mjs",

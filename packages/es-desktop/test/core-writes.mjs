@@ -42,6 +42,14 @@ const app = await _electron.launch({
   },
 })
 const state = { origin: "" }
+process.once("SIGTERM", () => {
+  void app.close().finally(async () => {
+    backend.closeAllConnections()
+    backend.close()
+    await rm(profile, { recursive: true, force: true })
+    process.exit(1)
+  })
+})
 try {
   const page = await app.firstWindow()
   await page.waitForURL("http://127.0.0.1:*/")
@@ -65,10 +73,14 @@ try {
     if (["GET", "HEAD", "OPTIONS"].includes(route.request().method())) return route.continue()
     return route.abort()
   }
-  if (process.argv.includes("--write-guard") || process.argv.includes("--recover-write-guard")) {
+  if (
+    process.argv.includes("--write-guard") ||
+    process.argv.includes("--recover-write-guard") ||
+    process.argv.includes("--inspector-write-guard")
+  ) {
     await page.route("**/*", guard)
   }
-  if (process.argv.includes("--recover-write-guard")) {
+  if (process.argv.includes("--recover-write-guard") || process.argv.includes("--inspector-write-guard")) {
     const blocked = await page.evaluate(() =>
       fetch("/oc/permission/per_fixture_blocked/reply", {
         method: "POST",
@@ -81,13 +93,37 @@ try {
     )
     expect(blocked).toEqual({ error: "TypeError: Failed to fetch" })
     expect(calls.some((call) => call.path === "/permission/per_fixture_blocked/reply")).toBe(false)
+    await page.evaluate(() =>
+      localStorage.setItem(
+        "inspector-fixture-protected",
+        JSON.stringify({
+          draft: "unsent private fixture",
+          admission: { status: "unknown", requestID: "msg_private_unconfirmed" },
+        }),
+      ),
+    )
     const before = await page.evaluate(() => ({
       url: location.href,
       local: { ...localStorage },
       session: { ...sessionStorage },
     }))
     // Remove the guard from its owning controller, without replacing the app or retrying the blocked request.
-    await page.unroute("**/*", guard)
+    const identity = await app.evaluate(({ BrowserWindow }) => ({
+      pid: process.pid,
+      contents: BrowserWindow.getAllWindows()[0].webContents.id,
+    }))
+    if (process.argv.includes("--inspector-write-guard")) {
+      process.send({ phase: "guard-ready", origin, nativePID: app.process().pid })
+      await new Promise((resolve) => process.once("message", resolve))
+    } else {
+      await page.unroute("**/*", guard)
+    }
+    expect(
+      await app.evaluate(({ BrowserWindow }) => ({
+        pid: process.pid,
+        contents: BrowserWindow.getAllWindows()[0].webContents.id,
+      })),
+    ).toEqual(identity)
     expect(
       await page.evaluate(() => ({ url: location.href, local: { ...localStorage }, session: { ...sessionStorage } })),
     ).toEqual(before)
