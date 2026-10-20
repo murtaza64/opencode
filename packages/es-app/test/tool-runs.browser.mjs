@@ -148,7 +148,7 @@ const run = async (viewport, label) => {
     element.scrollTop = Math.round(element.scrollHeight / 3)
     return element.scrollTop
   })
-  await expect(page.locator(".prompt-nav-scope")).toContainText("loaded")
+  await expect(previous).toHaveAccessibleDescription(/^prompt \d+ of \d+ · loaded history only/)
   const expected = await page.evaluate(() => {
     const container = document.querySelector(".session-page .transcript").getBoundingClientRect().top
     return [...document.querySelectorAll("[data-user-prompt]")].find((element) => element.getBoundingClientRect().top - container > 30)?.dataset.userPrompt

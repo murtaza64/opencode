@@ -6,6 +6,7 @@ import { DataProvider } from "@opencode-ai/session-ui/context"
 import { renderable, ToolAdornment, type MessagePartProps } from "@opencode-ai/session-ui/message-part"
 import type { Part, ToolPart } from "@opencode-ai/sdk/v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
+import { Icon } from "@opencode-ai/ui/icon"
 import { es, oc } from "../api"
 import { createLiveSession, errorText } from "../live-session"
 import FakeCaret from "../components/fake-caret"
@@ -40,6 +41,7 @@ import { FindExcerpt, TranscriptFind } from "../components/transcript-find"
 import type { FindHit } from "../transcript-find"
 import { ToolSize } from "../components/tool-size"
 import { ToolRun } from "../components/tool-run"
+import { HeaderMenu } from "../components/header-menu"
 import { messageSegments, planToolRuns, samePlan, sameSegments } from "../transcript-groups"
 import { isUserPrompt, promptPosition, promptTarget } from "../transcript-nav"
 
@@ -988,6 +990,11 @@ function SessionView(props: { sessionID: string; directory: string }) {
     return [...transcriptEl.querySelectorAll<HTMLElement>("[data-user-prompt]")].map((element) => element.getBoundingClientRect().top - top)
   }
   const [promptState, setPromptState] = createSignal(promptPosition([]))
+  const promptScope = () => {
+    const state = promptState()
+    const scope = live.hasOlder() ? "loaded history only; load earlier messages for more" : "all history loaded"
+    return state.total ? `prompt ${Math.max(state.current + 1, 0)} of ${state.total} · ${scope}` : `no prompts · ${scope}`
+  }
   let promptFrame = 0
   const schedulePromptPosition = () => {
     if (promptFrame) return
@@ -1348,17 +1355,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
             live.apply({ type: "session.updated", properties: { sessionID, info } })
             void refetch()
           }} />
-          <button onPointerDown={(event) => event.preventDefault()} onClick={openFind} title="Find in transcript (Cmd/Ctrl+F)">Find</button>
-          <div class="prompt-nav" role="group" aria-label="Your prompts">
-            <button aria-label="Previous prompt" title="Scroll to your previous prompt (Ctrl+P)" onPointerDown={(event) => event.preventDefault()}
-              disabled={!promptState().previous && !live.hasOlder()} onClick={() => jumpUserMessage(-1)}><span aria-hidden="true">↑</span> Prompt</button>
-            <button aria-label="Next prompt" title="Scroll to your next prompt (Ctrl+N)" onPointerDown={(event) => event.preventDefault()}
-              disabled={!promptState().next} onClick={() => jumpUserMessage(1)}><span aria-hidden="true">↓</span> Prompt</button>
-            <span class="dim prompt-nav-scope" aria-label={`Prompt ${Math.max(promptState().current + 1, 0)} of ${promptState().total}${live.hasOlder() ? " loaded" : ""}`} title={live.hasOlder() ? "Only loaded history is navigable. Use Load earlier messages at the top for more." : "All history is loaded."}>
-              {promptState().total ? `${Math.max(promptState().current + 1, 0)}/${promptState().total}` : "0"}{live.hasOlder() ? " loaded" : ""}
-            </span>
-          </div>
-          <span class="dim">{workState() === "working" ? "busy" : workState()}</span>
+          <span class="dim session-state">{workState() === "working" ? "busy" : workState()}</span>
           <Show when={subagentsRunning()}><span class="dim">{subagentsRunning()} subagent(s) running</span></Show>
           <Show when={(session() as any)?.parentID}>
             {(pid) => (
@@ -1370,6 +1367,29 @@ function SessionView(props: { sessionID: string; directory: string }) {
               </span>
             )}
           </Show>
+          {/* Icon controls keep the title primary; names, shortcuts and prompt scope stay accessible. */}
+          <div class="session-header-tools">
+            <span class="sr-only" id={`prompt-scope-${sessionID}`}>{promptScope()}</span>
+            <button class="header-icon" aria-label="Find" aria-keyshortcuts="Meta+F Control+F" title="Find in transcript (Cmd/Ctrl+F)"
+              onPointerDown={(event) => event.preventDefault()} onClick={openFind}><Icon name="magnifying-glass" size="small" /></button>
+            <button class="header-icon" aria-label="Previous prompt" aria-keyshortcuts="Control+P" aria-describedby={`prompt-scope-${sessionID}`}
+              title={`Previous prompt (Ctrl+P) · ${promptScope()}`} onPointerDown={(event) => event.preventDefault()}
+              disabled={!promptState().previous && !live.hasOlder()} onClick={() => jumpUserMessage(-1)}>
+              <span class="header-icon-up"><Icon name="chevron-down" size="small" /></span>
+            </button>
+            <button class="header-icon" aria-label="Next prompt" aria-keyshortcuts="Control+N" aria-describedby={`prompt-scope-${sessionID}`}
+              title={`Next prompt (Ctrl+N) · ${promptScope()}`} onPointerDown={(event) => event.preventDefault()}
+              disabled={!promptState().next} onClick={() => jumpUserMessage(1)}><Icon name="chevron-down" size="small" /></button>
+            <Show when={location()}>{(scope) =>
+              <HeaderMenu id={`session-mail-menu-${sessionID}`} label="Session mail" title="Mail subscriptions and lane mail"
+                icon={<Icon name="dot-grid" size="small" />} items={[
+                  { label: subscriptionsOpen() ? "Hide mail subscriptions" : "Mail subscriptions", select: () => setSubscriptionsOpen(!subscriptionsOpen()) },
+                  ...(scope().lane !== undefined ? [{
+                    label: laneMailOpen() ? "Hide lane mail" : `Lane mail (${mail()?.messages.length ?? 0})`, select: () => setLaneMailOpen(!laneMailOpen()),
+                  }] : []),
+                ]} />
+            }</Show>
+          </div>
         </AppHeader>
         <Show when={findOpen()}><TranscriptFind sessionID={sessionID} directory={directory} messages={messages()}
           parts={live.data.part} jump={jumpFind} close={closeFind} clear={() => setFindHit(undefined)}
@@ -1390,18 +1410,16 @@ function SessionView(props: { sessionID: string; directory: string }) {
           </Show>
           <Show when={mail()?.error}><div class="err" role="alert">{mail()?.error}</div></Show>
           <Show when={location()}>{(scope) => <>
-            <button class="mail-subscriptions-toggle" onClick={() => setSubscriptionsOpen(!subscriptionsOpen())}>
-              {subscriptionsOpen() ? "Hide mail subscriptions" : "Mail subscriptions"}
-            </button>
-            <Show when={subscriptionsOpen()}><MailSubscriptions editspace={scope().name}
-              recipient={scope().lane ?? scope().session ?? sessionID} /></Show>
+            {/* Opened from the header menu; each panel takes space only while open. */}
+            <Show when={subscriptionsOpen()}>
+              <div class="session-panel-close"><button onClick={() => setSubscriptionsOpen(false)}>Hide mail subscriptions</button></div>
+              <MailSubscriptions editspace={scope().name} recipient={scope().lane ?? scope().session ?? sessionID} />
+            </Show>
             <Show when={scope().lane !== undefined}>
-              <button class="lane-mail-toggle" onClick={() => setLaneMailOpen(!laneMailOpen())}>
-                {laneMailOpen() ? "Hide lane mail" : `Lane mail (${mail()?.messages.length ?? 0})`}
-              </button>
               <Show when={laneMailOpen()}>
                 <section class="lane-mail" aria-label="Lane mail">
-                  <div class="banner-head">All mail for lane {scope().lane} across handoffs</div>
+                  <div class="banner-head session-panel-head">All mail for lane {scope().lane} across handoffs
+                    <button onClick={() => setLaneMailOpen(false)}>Hide lane mail</button></div>
                   <Show when={!mail()?.messages.length}><div class="dim">No lane mail.</div></Show>
                   <For each={mail()?.messages ?? []}>{(message) => <MailRow message={message} ids={mailIDs()} anchor="lane-mail" />}</For>
                 </section>

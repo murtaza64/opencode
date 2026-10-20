@@ -1863,8 +1863,6 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 
 .issue-comment { margin: 14px 0; background: var(--mantle); padding: 10px 14px; }
 .issue-comment .comment-head { display: flex; gap: 10px; align-items: baseline; margin-bottom: 6px; font-size: 12.5px; }
-.mail-subscriptions-toggle { align-self: flex-start; }
-.lane-mail-toggle { align-self: flex-start; }
 .lane-mail { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--surface0); background: var(--mantle); max-height: 40vh; overflow: auto; }
 .mail-subscriptions { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--surface0); background: var(--mantle); }
 .mail-subscription { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
@@ -1939,12 +1937,61 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
   .tool-run-member[data-find-selected="true"] { outline: 1px solid var(--yellow); outline-offset: 2px; }
 }
 
-/* Prompt navigation in the session header. */
-.prompt-nav {
+/* Session header: title first, quiet status, small neutral icon controls at the end. */
+.session-page .topbar { flex-wrap: nowrap; align-items: center; gap: 8px; min-inline-size: 0; }
+.session-page .topbar .session-title { flex: 0 1 auto; min-inline-size: 0; }
+.session-page .topbar :is(.session-state, .fork-crumb, .dim) { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-inline-size: 0; }
+.session-page .topbar .session-state { flex-shrink: 0; }
+.session-header-tools {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
+  margin-inline-start: auto;
   flex-shrink: 0;
-  button { white-space: nowrap; }
-  .prompt-nav-scope { font-family: var(--font-mono); font-size: 11px; white-space: nowrap; }
 }
+.header-icon {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 28px;
+  block-size: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--subtext0);
+  cursor: pointer;
+  &:hover:not(:disabled) { background: var(--surface0); color: var(--text); }
+  &:focus-visible { outline: 1px solid var(--lavender); outline-offset: -1px; }
+  &:disabled { opacity: 0.35; cursor: default; }
+  &[aria-expanded="true"] { background: var(--surface0); color: var(--text); }
+  [data-component="icon"] { inline-size: 16px; block-size: 16px; }
+}
+/* Vertical flip only; prompt order does not mirror in RTL. */
+.header-icon-up { display: inline-grid; transform: scaleY(-1); }
+.header-menu { position: relative; display: inline-flex; }
+.header-menu-list {
+  position: absolute;
+  inset-block-start: calc(100% + 4px);
+  inset-inline-end: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 12rem;
+  padding: 4px;
+  border: 1px solid var(--surface1);
+  background: var(--mantle);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.45);
+  -webkit-app-region: no-drag;
+  button {
+    padding: 6px 10px;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    font: 400 13px/18px var(--font-sans);
+    text-align: start;
+    white-space: nowrap;
+    cursor: pointer;
+    &:is(:hover, :focus) { background: var(--surface0); outline: none; }
+  }
+}
+.session-panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.session-panel-close { display: flex; justify-content: flex-end; }

@@ -74,12 +74,20 @@ export const startToolRunsPreview = async (portHint = 0, options = {}) => {
       tool("p63_lc", "bash", { command: "sleep 1" }, "", { status: "running" }),
     ], { open: true }),
   ]
-  return { ...preview, tool, assistant }
+  // Lane-scoped URL: enables the header mail menu with lane mail and subscriptions.
+  const laneDirectory = `${fixture.editspaces[0].root}/lanes/transcript-scan/repos/org/repo`
+  fixture.subscriptions = new Map()
+  fixture.mail = (es, lane) => ({ editspace: es, lane, messages: lane !== "transcript-scan" ? [] : Array.from({ length: 12 }, (_, index) => ({
+    id: `lane-mail-${index}`, ts: "2001-01-01T00:00:00Z", from: "orchestrator", to: "transcript-scan", direction: "received", kind: "notice",
+    text: `Lane mail ${index}`, deliveries: [],
+  })) })
+  if (options.title) fixture.sessionTitles.set("ses_a", options.title)
+  return { ...preview, tool, assistant, laneUrl: `${preview.origin}/session/ses_a?directory=${encodeURIComponent(laneDirectory)}` }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const preview = await startToolRunsPreview(Number(process.env.PORT ?? 0), { filler: Number(process.env.FILLER ?? 60) })
-  console.log(`PREVIEW ${preview.url}\nFIXTURE ${preview.fixture.url}\nSTOP kill ${process.pid}`)
+  const preview = await startToolRunsPreview(Number(process.env.PORT ?? 0), { filler: Number(process.env.FILLER ?? 60), title: process.env.TITLE })
+  console.log(`PREVIEW ${preview.url}\nLANE ${preview.laneUrl}\nFIXTURE ${preview.fixture.url}\nSTOP kill ${process.pid}`)
   let closing = false
   const close = async () => {
     if (closing) return
