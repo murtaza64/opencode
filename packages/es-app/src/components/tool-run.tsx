@@ -1,15 +1,15 @@
-import { createMemo, For, Show, type JSX } from "solid-js"
-import type { Message as MessageInfo, Part, ToolPart } from "@opencode-ai/sdk/v2"
+import { createMemo, For, Show, type ComponentProps, type JSX } from "solid-js"
+import type { Part, ToolPart } from "@opencode-ai/sdk/v2"
 import { Message, type ToolRenderers } from "@opencode-ai/session-ui/message-part"
-import type { ToolRun as Run } from "../transcript-groups"
+import type { ToolRunGroup } from "../transcript-groups"
 import { SIZE_LEGEND, toolMagnitude } from "../tool-magnitude"
 import { rangeView } from "./tool-size"
 
 // Collapsed by default. Members mount only while open, as their original chips.
 // "Short" describes measured text size only, never safety or cost.
 export const ToolRun = (props: {
-  run: Run
-  message: (id: string) => MessageInfo | undefined
+  run: ToolRunGroup
+  message: (id: string) => ComponentProps<typeof Message>["message"] | undefined
   parts: (messageID: string) => readonly Part[]
   open: boolean
   onToggle: (open: boolean) => void

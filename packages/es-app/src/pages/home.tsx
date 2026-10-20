@@ -1,11 +1,11 @@
-import { createMemo, createSignal, For, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, Show } from "solid-js"
 import { A } from "@solidjs/router"
 import { ago, sessionHref, useDashboard, type SessionRow } from "../state"
 import { AppHeader } from "../components/native-header"
 import { CurrentWorkView, type CurrentWorkSnapshot } from "../current-work"
 import { ActivityBriefView } from "../components/activity-brief"
 import type { ActivityBriefInput } from "../activity-brief"
-import { attentionPath, createAttention, decisionLabel, type AttentionRecord } from "../attention"
+import { answerDraftKey, attentionPath, blockedReason, createAttention, decisionLabel, deliveryLabel, type AttentionRecord } from "../attention"
 import { createHomeRequests, requestKey, type HomeRequest } from "../home-requests"
 import HomeActivity from "../home-activity"
 import HomeCloudAgents from "../home-cloud-agents"
@@ -42,7 +42,7 @@ export default function Home() {
   const [confirm, setConfirm] = createSignal<{ record: AttentionRecord; choice: string }>()
   const [cloudCount, setCloudCount] = createSignal(0)
   const [cloudActivity, setCloudActivity] = createSignal<HomeActivityRow[]>([])
-  const [history, setHistory] = createSignal<Record<string, { revision: number; events?: unknown[]; error?: string }>>({})
+  const [history, setHistory] = createSignal<Record<string, { version: string; events?: unknown[]; error?: string }>>({})
   const sourcePointers = createMemo<HomeRequest[]>(() => {
     const projectFor = (directory: string) => dashboard.editspaces()?.editspaces.find(item => {
       const root = item.root.replace(/\/+$/, "").replace(/\/\.editspace$/, "")
@@ -59,30 +59,79 @@ export default function Home() {
   const records = () => attention.snapshot()?.value.records ?? []
   const visible = () => records().filter(record => view() === "history" ? ["resolved", "withdrawn"].includes(record.status) : view() === "recorded" ? record.status === "decided" : record.status === view())
   const count = (tab: string) => records().filter(record => tab === "history" ? ["resolved", "withdrawn"].includes(record.status) : record.status === (tab === "recorded" ? "decided" : tab)).length + (tab === "open" ? pendingRequests().length : 0)
+  const recordKey = (record: AttentionRecord) => `${record.editspace}\u0000${record.id}`
+  const byKey = createMemo(() => new Map(records().map(record => [recordKey(record), record])))
+  const optionLabel = (record: AttentionRecord, id?: string | null) => record.options.find(option => option.id === id)?.label
   const canWrite = (record: AttentionRecord) => attention.operator() && !attention.stale() && !attention.pending() && !attention.writing() && attention.snapshot()?.value.projects.find(item => item.editspace === record.editspace)?.available !== false
+  // Delivery events append history without a revision bump, so include delivery evidence in the cache key.
+  const historyVersion = (record: AttentionRecord) => `${record.revision}:${record.delivery_state}:${record.delivery?.updated_at ?? ""}`
+  const historyLoads = new Set<string>()
   const loadHistory = async (record: AttentionRecord) => {
+    const key = `${record.editspace}:${record.id}:${historyVersion(record)}`
+    if (historyLoads.has(key)) return
+    historyLoads.add(key)
     try {
       const response = await fetch(attentionPath(`/${encodeURIComponent(record.id)}`, record.editspace), { credentials: "include" })
       if (!response.ok) throw Error("History unavailable")
       const result = await response.json()
-      setHistory(previous => ({ ...previous, [record.id]: { revision: record.revision, events: result.events } }))
-    } catch { setHistory(previous => ({ ...previous, [record.id]: { revision: record.revision, error: "History unavailable. The record has not changed." } })) }
+      setHistory(previous => ({ ...previous, [record.id]: { version: historyVersion(record), events: result.events } }))
+    } catch { setHistory(previous => ({ ...previous, [record.id]: { version: historyVersion(record), error: "History unavailable. The record has not changed." } })) }
+    finally { historyLoads.delete(key) }
+  }
+  // Every unanswered decision accepts a written answer; an option is optional context for it.
+  const Answer = (props: { record: AttentionRecord; choice?: () => string }) => {
+    const [text, setText] = createSignal(localStorage.getItem(answerDraftKey(props.record)) ?? "")
+    const send = async () => {
+      if (!text().trim() || !canWrite(props.record)) return
+      const selected = props.choice?.()
+      const choice = props.record.options.some(option => option.id === selected) ? selected : undefined
+      // The draft is cleared only after the ledger confirms; failures keep it for an exact retry.
+      if (await attention.act(props.record, { action: "answer", text: text(), ...(choice ? { choice_id: choice } : {}) })) setView("answered")
+    }
+    const id = `answer-${props.record.id}`
+    const target = () => props.record.lane ? <>the agent that currently owns lane <bdi dir="auto">{props.record.lane}</bdi> through verified handoffs</> : <>the requesting session <bdi dir="ltr">{props.record.source_ref.session_id}</bdi></>
+    return <div class="home-answer">
+      <label for={id}>Your answer</label>
+      <textarea id={id} dir="auto" rows={3} maxLength={8000} value={text()} disabled={!canWrite(props.record)} placeholder="Write what you want the agent to do"
+        aria-describedby={`${id}-meaning`}
+        onInput={event => { setText(event.currentTarget.value); localStorage.setItem(answerDraftKey(props.record), event.currentTarget.value) }}
+        onKeyDown={event => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); void send() } }} />
+      <p id={`${id}-meaning`} class="home-muted">Sends this text{props.choice && props.record.options.length ? " and any selected option" : ""} as mail to {target()}. Saved first; unverified ownership stays blocked here and nothing is sent. Grants no tool permission.</p>
+      <div class="home-actions"><button class="home-primary" disabled={!canWrite(props.record) || !text().trim()} onClick={() => void send()}>Send answer</button><span class="home-muted">Ctrl/⌘+Enter</span></div>
+    </div>
+  }
+  const Delivery = (props: { record: AttentionRecord }) => {
+    const delivery = () => props.record.delivery
+    // Link the delivered session only with its own verified directory; the source link stays separate.
+    const target = () => delivery()?.session && delivery()?.session_directory ? { session: delivery()!.session!, directory: delivery()!.session_directory! } : undefined
+    return <div class="home-delivery" data-delivery-state={props.record.delivery_state}>
+      <p class="home-recorded">Your answer<Show when={optionLabel(props.record, props.record.answer?.choice_id)}>{label => <> · option <bdi dir="auto">{label()}</bdi></>}</Show></p>
+      <pre class="home-answer-text" dir="auto">{props.record.answer?.text}</pre>
+      <p class={props.record.delivery_state === "blocked" ? "home-blocked" : "home-muted"} role="status">{deliveryLabel(props.record)}<Show when={props.record.delivery_state === "blocked" && delivery()?.reason}> — {blockedReason(delivery()?.reason)}</Show></p>
+      <Show when={delivery()?.error && !["presented", "handled"].includes(props.record.delivery_state)}><p class="home-muted">Last attempt: <bdi dir="auto">{delivery()?.error}</bdi> · retried automatically with the same request identity</p></Show>
+      <Show when={delivery()?.copies?.length}><ul class="home-copies"><For each={delivery()?.copies}>{copy => <li><bdi dir="ltr">{copy.session}</bdi> · {copy.state}{copy.presented_at ? ` · presented ${new Date(copy.presented_at).toLocaleString()}` : ""}{copy.handled_at ? ` · acknowledged ${new Date(copy.handled_at).toLocaleString()}` : ""}</li>}</For></ul></Show>
+      <div class="home-actions"><Show when={target()} fallback={<span class="home-muted">Delivered session not yet verified</span>}>{item => <A href={sessionHref(item().session, item().directory)}>Open delivered agent thread</A>}</Show><Show when={["pending", "blocked", "queued"].includes(props.record.delivery_state)}><button disabled={!canWrite(props.record)} onClick={() => attention.retryDelivery(props.record)}>Retry delivery</button></Show><button disabled={!canWrite(props.record)} onClick={() => attention.act(props.record, { action: "resolve", reason: "Human marked resolved" })}>Mark resolved</button></div>
+    </div>
   }
   const Decision = (props: { record: AttentionRecord }) => {
     const [choice, setChoice] = createSignal("")
+    const [historyOpen, setHistoryOpen] = createSignal(false)
+    createEffect(() => { if (historyOpen() && history()[props.record.id]?.version !== historyVersion(props.record)) void loadHistory(props.record) })
     return <article class="home-decision" data-attention-id={props.record.id}>
       <div class="home-eyebrow"><span>{props.record.kind}</span><bdi dir="auto">{props.record.editspace}</bdi><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><span>revision {props.record.revision}</span></div>
       <h3><bdi dir="auto">{props.record.title}</bdi></h3><p dir="auto">{props.record.context}</p>
       <div class="home-source">Explicit agent request · <A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)}>Open source thread</A></div>
       <Show when={props.record.status === "open"}>
         <Show when={props.record.recommendation}><p class="home-muted">Agent recommends: <bdi dir="auto">{props.record.options.find(option => option.id === props.record.recommendation)?.label ?? props.record.recommendation}</bdi></p></Show>
-        <fieldset disabled={!canWrite(props.record)}><legend>Your choice</legend><For each={props.record.options}>{option => <label><input type="radio" name={props.record.id} checked={choice() === option.id} onChange={() => setChoice(option.id)} /><bdi dir="auto">{option.label}</bdi></label>}</For></fieldset>
-        <div class="home-actions"><button class="home-primary" disabled={!canWrite(props.record) || !props.record.options.some(option => option.id === choice())} onClick={() => setConfirm({ record: props.record, choice: choice() })}>Review choice</button><button disabled={!canWrite(props.record)} onClick={() => attention.act(props.record, { action: "snooze", snoozed_until: Date.now() + 3600_000 })}>Snooze 1h</button><button disabled={!canWrite(props.record)} onClick={() => attention.act(props.record, { action: "resolve", reason: "Human marked no longer needed" })}>No longer needed</button></div>
+        <Show when={props.record.options.length}><fieldset disabled={!canWrite(props.record)}><legend>Your choice</legend><For each={props.record.options}>{option => <label><input type="radio" name={props.record.id} checked={choice() === option.id} onChange={() => setChoice(option.id)} /><bdi dir="auto">{option.label}</bdi></label>}</For></fieldset></Show>
+        <Answer record={props.record} choice={choice} />
+        <div class="home-actions"><Show when={props.record.options.length}><button disabled={!canWrite(props.record) || !props.record.options.some(option => option.id === choice())} onClick={() => setConfirm({ record: props.record, choice: choice() })}>Review choice</button><span class="home-muted">record only · not sent</span></Show><button disabled={!canWrite(props.record)} onClick={() => attention.act(props.record, { action: "snooze", snoozed_until: Date.now() + 3600_000 })}>Snooze 1h</button><button disabled={!canWrite(props.record)} onClick={() => attention.act(props.record, { action: "resolve", reason: "Human marked no longer needed" })}>No longer needed</button></div>
       </Show>
-      <Show when={props.record.status === "decided"}><p class="home-recorded">Saved: <bdi dir="auto">{decisionLabel(props.record)}</bdi> · not sent</p><p class="home-muted">No agent was resumed. This is not tool permission or approval to publish.</p><div class="home-actions"><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)}>Open agent thread</A><button disabled={!canWrite(props.record)} onClick={() => attention.act(props.record, { action: "resolve", reason: "Human marked resolved" })}>Mark resolved</button></div></Show>
+      <Show when={props.record.status === "decided"}><p class="home-recorded">Saved: <bdi dir="auto">{decisionLabel(props.record)}</bdi> · not sent</p><p class="home-muted">No agent was resumed. This is not tool permission or approval to publish.</p>{/* The earlier record-only choice stays history; a written reply here carries text only. */}<Answer record={props.record} /><div class="home-actions"><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)}>Open agent thread</A><button disabled={!canWrite(props.record)} onClick={() => attention.act(props.record, { action: "resolve", reason: "Human marked resolved" })}>Mark resolved</button></div></Show>
+      <Show when={props.record.status === "answered"}><Delivery record={props.record} /></Show>
       <Show when={props.record.status === "snoozed"}><p class="home-muted">Snoozed until {props.record.snoozed_until ? new Date(props.record.snoozed_until).toLocaleString() : "unknown"}</p><button disabled={!canWrite(props.record)} onClick={() => attention.act(props.record, { action: "wake" })}>Return to Needs you</button></Show>
-      <Show when={["resolved", "withdrawn"].includes(props.record.status)}><p class="home-muted">{props.record.status} · retained in history</p></Show>
-      <details onToggle={event => { if (event.currentTarget.open && history()[props.record.id]?.revision !== props.record.revision) void loadHistory(props.record) }}><summary>Record &amp; history</summary><div class="home-source"><bdi dir="ltr">{props.record.id} · {props.record.gate_key}</bdi></div><Show when={history()[props.record.id]?.revision === props.record.revision ? history()[props.record.id] : undefined} fallback={<p>Loading history…</p>}>{item => <Show when={!item().error} fallback={<p>{item().error}</p>}><pre dir="ltr">{JSON.stringify(item().events, null, 2)}</pre></Show>}</Show></details>
+      <Show when={["resolved", "withdrawn"].includes(props.record.status)}><p class="home-muted">{props.record.status} · retained in history</p><Show when={props.record.answer}><pre class="home-answer-text" dir="auto">{props.record.answer?.text}</pre><p class="home-muted">{deliveryLabel(props.record)}</p></Show></Show>
+      <details onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>Record &amp; history</summary><div class="home-source"><bdi dir="ltr">{props.record.id} · {props.record.gate_key}</bdi></div><Show when={history()[props.record.id]?.version === historyVersion(props.record) ? history()[props.record.id] : undefined} fallback={<p>Loading history…</p>}>{item => <Show when={!item().error} fallback={<p>{item().error}</p>}><pre dir="ltr">{JSON.stringify(item().events, null, 2)}</pre></Show>}</Show></details>
     </article>
   }
   return <main class="attention-home">
@@ -92,12 +141,13 @@ export default function Home() {
     <Show when={attention.snapshot()?.value.truncated}><div class="home-warning">History exceeds this view's limit. Counts may be incomplete; use the attention CLI to inspect further records.</div></Show>
     <Show when={dashboard.sessionsError()}><div class="home-warning">Live request sources may be incomplete. {dashboard.sessionsError()}</div></Show>
     <Show when={dashboard.stateError()}><div class="home-warning">{dashboard.stateError()} Cached source values are not a live status.</div></Show>
-    <Show when={attention.notice()}><div class="home-notice" role="status">{attention.notice()}<Show when={attention.pending()}><button disabled={attention.writing()} onClick={() => attention.retry()}>Retry same action</button></Show></div></Show>
+    <Show when={attention.notice()}><div class="home-notice" role="status">{attention.notice()}<Show when={attention.pending()}><button disabled={attention.writing()} onClick={async () => { const action = attention.pending()?.body.action; if (await attention.retry() && action === "answer") setView("answered") }}>Retry same action</button></Show></div></Show>
     <section aria-label="Needs you"><div class="home-section"><h2>Needs you <span>{count("open")}</span></h2><span class="home-muted">Decisions, not completion receipts</span></div>
       <Show when={!attention.operator()}><div class="home-login home-muted">Read-only · operator connection unavailable. This UI origin must be allowed by the attention server. <button onClick={() => attention.checkOperator().catch(() => undefined)}>Reconnect operator</button></div></Show>
-      <div class="home-tabs" role="group" aria-label="Attention status"><For each={[["open", "Open"], ["recorded", "Recorded / not sent"], ["snoozed", "Snoozed"], ["history", "History"]]}>{([tab, label]) => <button aria-pressed={view() === tab} onClick={() => setView(tab)}>{label} <span>{count(tab)}</span></button>}</For></div>
+      <div class="home-tabs" role="group" aria-label="Attention status"><For each={[["open", "Open"], ["answered", "Answered"], ["recorded", "Recorded / not sent"], ["snoozed", "Snoozed"], ["history", "History"]]}>{([tab, label]) => <button aria-pressed={view() === tab} onClick={() => setView(tab)}>{label} <span>{count(tab)}</span></button>}</For></div>
       <Show when={view() === "open"}><For each={pendingRequests()}>{item => <div class="home-request"><div><span class="home-eyebrow">{item.kind} · source request</span><h3><bdi dir="auto">{item.title}</bdi></h3><div class="home-source">Exact request <bdi dir="ltr">{item.id}</bdi> · source checked {ago(item.checked)}{requests.now() - item.checked > 45_000 ? " · stale" : ""}</div></div><A href={sessionHref(item.session, item.directory)}>Open request</A><p class="home-muted">Reply using the original session controls. No permission is granted here.</p></div>}</For></Show>
-      <For each={visible()}>{record => <Decision record={record} />}</For>
+      {/* Key cards by project+record so polls update props in place and keep textarea focus, caret and draft. */}
+      <For each={visible().map(recordKey)}>{key => <Show when={byKey().get(key)}>{record => <Decision record={record()} />}</Show>}</For>
       <Show when={!visible().length && (view() !== "open" || !pendingRequests().length)}><div class="home-empty">{attention.loading() && !attention.snapshot() ? "Checking attention ledger…" : attention.stale() || attention.snapshot()?.value.partial ? "Attention is not fully checked. Do not assume nothing is waiting." : view() === "open" ? "Nothing needs a choice." : "No records in this view."}</div></Show>
       <Show when={uncertainRequests().length}><details class="home-unknown"><summary>Source requests with unknown outcome ({uncertainRequests().length})</summary><For each={uncertainRequests()}>{item => <div class="home-source"><bdi dir="auto">{item.title}</bdi> · {item.kind} · {item.state === "unavailable" ? "source unavailable" : "no longer pending; outcome unknown"} · <A href={sessionHref(item.session, item.directory)}>Open original thread</A></div>}</For></details></Show>
     </section>

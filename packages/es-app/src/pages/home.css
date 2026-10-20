@@ -55,3 +55,11 @@
 .home-confirm { position: fixed; margin: auto; inline-size: min(550px, calc(100vw - 40px)); padding: 24px; background: var(--surface0); color: var(--text); border: 1px solid var(--peach); }
 .home-confirm::backdrop { background: #000a; }
 @media (max-width: 650px) { .attention-home { padding-inline: 14px; } .home-agent, .home-request { grid-template-columns: minmax(0,1fr); gap: 9px; } .home-section { gap: 4px; } .home-tabs button { padding: 7px 8px; } .home-header-end { display: none; } }
+.home-answer { margin-block-start: 14px; display: grid; gap: 6px; max-width: 90ch; }
+.home-answer > label { font-size: 11px; color: var(--subtext0); cursor: default; }
+.home-answer textarea { inline-size: 100%; box-sizing: border-box; min-block-size: 64px; resize: vertical; padding: 8px 10px; font: inherit; line-height: 1.6; color: var(--text); background: var(--base); border: 1px solid var(--surface1); border-radius: 0; text-align: start; }
+.home-answer textarea:focus-visible { outline: 2px solid var(--lavender); outline-offset: 1px; }
+.home-answer .home-actions { margin-block: 2px 0; }
+.attention-home pre.home-answer-text { font: inherit; font-size: 13px; line-height: 1.6; padding: 8px 10px; margin-block: 6px; background: var(--base); border-inline-start: 2px solid var(--green); text-align: start; }
+.home-blocked { color: var(--yellow); }
+.home-copies { margin: 4px 0; padding-inline-start: 18px; font-size: 11px; color: var(--subtext0); }

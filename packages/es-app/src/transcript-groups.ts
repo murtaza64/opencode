@@ -5,8 +5,8 @@ import { toolMagnitude } from "./tool-magnitude"
 // history is never changed: members keep their message, part and call IDs and
 // render as their original chips when the run is expanded.
 export type ToolRunMember = { messageID: string; partID: string; callID: string }
-export type ToolRun = { key: string; members: ToolRunMember[] }
-export type ToolRunPlan = { runs: Map<string, ToolRun>; byPart: Map<string, string> }
+export type ToolRunGroup = { key: string; members: ToolRunMember[] }
+export type ToolRunPlan = { runs: Map<string, ToolRunGroup>; byPart: Map<string, string> }
 export type Segment = { kind: "parts"; parts: Part[] } | { kind: "run"; key: string }
 
 export const RUN_LIMITS = { min: 3, max: 40, rank: 1 }
@@ -22,7 +22,7 @@ export const planToolRuns = (rows: readonly Row[], input: {
   // Rendered between messages (turn summaries); a run never spans it.
   breakAfter?: (message: Message) => boolean
 }): ToolRunPlan => {
-  const runs = new Map<string, ToolRun>()
+  const runs = new Map<string, ToolRunGroup>()
   const byPart = new Map<string, string>()
   let current: ToolRunMember[] = []
   const flush = () => {

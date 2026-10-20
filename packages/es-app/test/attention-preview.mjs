@@ -42,9 +42,16 @@ export const startAttentionPreview = async (plugins = []) => {
             if (ledger.denyOperator) return json({ error: "not allowed" }, 403)
             ledger.operator = true
           }
-          return json({ operator: ledger.operator })
+          return json({ operator: ledger.operator, answer: ledger.operator })
         }
         if (ledger.status !== 200) return json({ error: "fixture unavailable" }, ledger.status)
+        const retry = /\/([^/]+)\/delivery$/.exec(url.pathname)
+        if (retry) {
+          if (!ledger.operator) return json({ error: "operator expired" }, 401)
+          const record = ledger.records.find(item => item.id === retry[1])
+          if (ledger.deliveryNext) { record.delivery = { ...record.delivery, ...ledger.deliveryNext }; record.delivery_state = record.delivery.state }
+          return json({ record: structuredClone(record), events: [] })
+        }
         const command = /\/([^/]+)\/commands$/.exec(url.pathname)
         if (command) {
           if (!ledger.operator) return json({ error: "operator expired" }, 401)
@@ -52,6 +59,13 @@ export const startAttentionPreview = async (plugins = []) => {
           const record = ledger.records.find(item => item.id === command[1])
           if (record.revision !== body.expected_revision) return json({ error: "revision conflict", record }, 409)
           if (body.action === "choose") { record.status = "decided"; record.decision = { choice_id: body.choice_id } }
+          if (body.action === "answer") {
+            if (record.status === "answered") return json({ error: "record already answered", record }, 409)
+            record.status = "answered"
+            record.answer = { id: `answer-${record.id}`, text: body.text, choice_id: body.choice_id ?? null, answered_at: Date.now() }
+            record.delivery_state = "pending"
+            record.delivery = { state: "pending", reason: null, lane: record.lane ?? null, session: null, message_id: null, error: null, updated_at: Date.now(), presented_at: null, handled_at: null, copies: [] }
+          }
           if (body.action === "snooze") { record.status = "snoozed"; record.snoozed_until = body.snoozed_until }
           if (body.action === "wake") { record.status = "open"; record.snoozed_until = null }
           if (body.action === "resolve") record.status = "resolved"
@@ -63,7 +77,7 @@ export const startAttentionPreview = async (plugins = []) => {
           return json(result)
         }
         const id = url.pathname.slice(1)
-        if (id) return json({ record: ledger.records.find(item => item.id === id), events: [{ action: "publish", actor: "producer", at: Date.now(), revision: ledger.records.find(item => item.id === id).revision }] })
+        if (id) return json({ record: ledger.records.find(item => item.id === id), events: [{ action: "publish", actor: "producer", at: Date.now(), revision: ledger.records.find(item => item.id === id).revision }, ...(ledger.records.find(item => item.id === id).delivery ? [{ action: "delivery", actor: "system", reason: ledger.records.find(item => item.id === id).delivery_state }] : [])] })
         const scope = url.searchParams.get("es")
         const projects = ["fixture", "other"].filter(name => !scope || name === scope).map(name => ({ editspace: name, available: name !== "other" || !ledger.partial, ...(name === "other" && ledger.partial ? { error: "store offline" } : {}) }))
         return json({ records: ledger.records.filter(record => (!scope || record.editspace === scope) && (!ledger.partial || record.editspace !== "other")), projects, partial: ledger.partial, limit: 200, offset: 0 })
