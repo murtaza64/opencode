@@ -628,6 +628,16 @@ const InputBase = {
   agent: Schema.String,
   admittedSeq: NonNegativeInt,
   timeCreated: NonNegativeInt,
+  // Append order is durable event order; concurrent retries can record an earlier
+  // decision later. observedAt names the decision, not its persistence time.
+  wakeObservations: optional(
+    Schema.Array(
+      Schema.Struct({
+        outcome: Schema.Literals(["scheduled", "coalesced"]),
+        observedAt: NonNegativeInt,
+      }),
+    ),
+  ),
 }
 export const InputReceipt = Schema.Union([
   Schema.Struct({ ...InputBase, state: Schema.Literal("pending") }),
@@ -675,6 +685,16 @@ const events = {
     type: "session.input.cancelled",
     ...options,
     schema: { sessionID: SessionID, requestID: Schema.String, time: NonNegativeInt },
+  }),
+  InputWakeObserved: define({
+    type: "session.input.wake-observed",
+    ...options,
+    schema: {
+      sessionID: SessionID,
+      requestID: Schema.String,
+      outcome: Schema.Literals(["scheduled", "coalesced"]),
+      observedAt: NonNegativeInt,
+    },
   }),
   InputPromoted: define({
     type: "session.input.promoted",
@@ -797,6 +817,7 @@ export const Event = {
   Error,
   InputDefinitions: inventory(
     events.InputAdmitted,
+    events.InputWakeObserved,
     events.InputCancelled,
     events.InputPromoted,
     events.InputPresented,

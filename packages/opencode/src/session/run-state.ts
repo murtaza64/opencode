@@ -13,7 +13,7 @@ import { SessionExecutionLocal } from "@opencode-ai/core/session/execution/local
 export interface Interface {
   readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
-  readonly wake: (sessionID: SessionID, work: Effect.Effect<SessionV1.WithParts | undefined>) => Effect.Effect<void, SessionSupersession.Closed>
+  readonly wake: (sessionID: SessionID, work: Effect.Effect<SessionV1.WithParts | undefined>) => Effect.Effect<Runner.WakeDecision, SessionSupersession.Closed>
   readonly admit: <A, E, R>(sessionID: SessionID, work: Effect.Effect<A, E, R>) => Effect.Effect<A, E | SessionSupersession.Closed, R>
   readonly supersede: (sessionID: SessionID, successor: SessionID) => Effect.Effect<SessionSupersession.Receipt, SessionSupersession.Invalid | SessionSupersession.Closed>
   readonly cancelSupersession: (sessionID: SessionID) => Effect.Effect<SessionSupersession.Receipt | undefined, SessionSupersession.Closed>
@@ -172,7 +172,7 @@ const layer = Layer.effect(
       work: Effect.Effect<SessionV1.WithParts | undefined>,
     ) {
       const owner = yield* runner(sessionID, Effect.succeed(undefined))
-      yield* owner.wake(work.pipe(Effect.map((result) => result ?? noAdvisoryWork)))
+      return yield* owner.wake(work.pipe(Effect.map((result) => result ?? noAdvisoryWork)))
     })
 
     const consume = Effect.fn("SessionRunState.consume")(function* (sessionID: SessionID) {

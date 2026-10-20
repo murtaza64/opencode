@@ -523,8 +523,14 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
               InputInvalid: (error) => new InvalidRequestError({ message: error.message }),
             }),
           )
-          if (receipt.state === "pending") yield* promptSvc.wake(ctx.params.sessionID).pipe(Effect.catchTag("SessionSuperseded", SessionError.superseded))
-          return receipt
+          if (receipt.state !== "pending") return receipt
+          const decision = yield* promptSvc.wake(ctx.params.sessionID).pipe(Effect.catchTag("SessionSuperseded", SessionError.superseded))
+          const current = decision.outcome === "ignored"
+            ? inputs.get(ctx.params.sessionID, ctx.payload.requestID)
+            : inputs.observeWake(ctx.params.sessionID, ctx.payload.requestID, decision.outcome, decision.observedAt)
+          return yield* current.pipe(
+            Effect.catchTag("InputMissing", (error) => new ApiNotFoundError({ name: "NotFoundError", data: { message: error.message } })),
+          )
         }),
       )
       .handle("listInputs", (ctx) =>

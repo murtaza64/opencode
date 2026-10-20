@@ -10,6 +10,53 @@ const waitForState = <A, E>(runner: Runner.Runner<A, E>, tag: Runner.State<A, E>
 
 describe("Runner", () => {
   it.live(
+    "reports the atomic idle and active wake decisions",
+    Effect.gen(function* () {
+      const scope = yield* Scope.Scope
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const runner = Runner.make<string>(scope)
+      const scheduled = yield* runner.wake(
+        Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.as("first")),
+      )
+      expect(scheduled).toEqual({ outcome: "scheduled", observedAt: expect.any(Number) })
+      yield* Deferred.await(started)
+      const coalesced = yield* runner.wake(Effect.succeed("followup"))
+      expect(coalesced).toEqual({ outcome: "coalesced", observedAt: expect.any(Number) })
+      expect(yield* runner.wake(Effect.succeed("replacement"))).toEqual({
+        outcome: "coalesced",
+        observedAt: expect.any(Number),
+      })
+      if (scheduled.outcome !== "ignored" && coalesced.outcome !== "ignored")
+        expect(coalesced.observedAt).toBeGreaterThanOrEqual(scheduled.observedAt)
+      yield* Deferred.succeed(release, undefined)
+      yield* waitForState(runner, "Idle")
+    }),
+  )
+
+  it.live(
+    "reports a shell followup as coalesced",
+    Effect.gen(function* () {
+      const scope = yield* Scope.Scope
+      const release = yield* Deferred.make<void>()
+      const runner = Runner.make<string>(scope)
+      const shell = yield* runner.startShell(Deferred.await(release).pipe(Effect.as("shell"))).pipe(Effect.forkChild)
+      yield* waitForState(runner, "Shell")
+      expect(yield* runner.wake(Effect.succeed("followup"))).toEqual({
+        outcome: "coalesced",
+        observedAt: expect.any(Number),
+      })
+      expect(yield* runner.wake(Effect.succeed("replacement"))).toEqual({
+        outcome: "coalesced",
+        observedAt: expect.any(Number),
+      })
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(shell)
+      yield* waitForState(runner, "Idle")
+    }),
+  )
+
+  it.live(
     "unconsumed admission hands off before advisory work and keeps callers waiting",
     Effect.gen(function* () {
       const scope = yield* Scope.Scope
@@ -172,10 +219,12 @@ describe("Runner", () => {
         )
         .pipe(Effect.forkChild)
       yield* waitForState(runner, "Running")
-      yield* runner.wake(Ref.update(calls, (n) => n + 1).pipe(Effect.as("unexpected")))
+      expect(yield* runner.wake(Ref.update(calls, (n) => n + 1).pipe(Effect.as("unexpected")))).toEqual({
+        outcome: "coalesced", observedAt: expect.any(Number),
+      })
       const stop = yield* runner.cancel.pipe(Effect.forkChild)
       yield* Deferred.await(cleanup)
-      yield* runner.wake(Ref.update(calls, (n) => n + 1).pipe(Effect.as("unexpected")))
+      expect(yield* runner.wake(Ref.update(calls, (n) => n + 1).pipe(Effect.as("unexpected")))).toEqual({ outcome: "ignored" })
       yield* Deferred.succeed(release, undefined)
       yield* Fiber.join(stop)
       expect(yield* Ref.get(calls)).toBe(0)

@@ -336,6 +336,33 @@ const layer = Layer.effectDiscard(
         if (!stored) return yield* Effect.die(new InputLifecycleConflict())
       }),
     )
+    yield* events.project(SessionV1.Event.InputWakeObserved, (event) =>
+      Effect.gen(function* () {
+        const row = yield* db
+          .select()
+          .from(V1InputTable)
+          .where(
+            and(eq(V1InputTable.request_id, event.data.requestID), eq(V1InputTable.session_id, event.data.sessionID)),
+          )
+          .get()
+          .pipe(Effect.orDie)
+        if (!row) return yield* Effect.die(new InputLifecycleConflict())
+        yield* db
+          .update(V1InputTable)
+          .set({
+            receipt: {
+              ...row.receipt,
+              wakeObservations: [
+                ...(row.receipt.wakeObservations ?? []),
+                { outcome: event.data.outcome, observedAt: event.data.observedAt },
+              ],
+            },
+          })
+          .where(eq(V1InputTable.request_id, row.request_id))
+          .run()
+          .pipe(Effect.orDie)
+      }),
+    )
     yield* events.project(SessionV1.Event.InputCancelled, (event) =>
       Effect.gen(function* () {
         const row = yield* db

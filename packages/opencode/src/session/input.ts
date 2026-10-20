@@ -101,7 +101,20 @@ const make = Effect.gen(function* () {
     return receipt(row.receipt)
   })
 
-  const admitInner = Effect.fn("SessionInput.admitInner")(function* (sessionID: SessionID, payload: typeof InputPayload.Type) {
+  const observeWake = Effect.fn("SessionInput.observeWake")(function* (
+    sessionID: SessionID,
+    requestID: string,
+    outcome: "scheduled" | "coalesced",
+    observedAt: number,
+  ) {
+    yield* events.publish(SessionV1.Event.InputWakeObserved, { sessionID, requestID, outcome, observedAt })
+    return yield* get(sessionID, requestID)
+  })
+
+  const admitInner = Effect.fn("SessionInput.admitInner")(function* (
+    sessionID: SessionID,
+    payload: typeof InputPayload.Type,
+  ) {
     if (!payload.text.trim() && !payload.images?.length)
       return yield* new Invalid({ message: "Input requires text or images" })
     if (payload.images?.length && payload.text.length > 128_000)
@@ -338,13 +351,21 @@ const make = Effect.gen(function* () {
       )
     }
   })
-  return { admit, get, list, cancel, handle, promote, presented }
+  return { admit, get, list, cancel, handle, promote, presented, observeWake }
 })
 
 export class Service extends Context.Service<Service, Effect.Success<typeof make>>()("@opencode/SessionInput") {}
 export const node = LayerNode.make({
   service: Service,
   layer: Layer.effect(Service, make),
-  deps: [Database.node, EventV2Bridge.node, Session.node, Agent.node, Provider.node, SessionInputMedia.node, SessionRunState.node],
+  deps: [
+    Database.node,
+    EventV2Bridge.node,
+    Session.node,
+    Agent.node,
+    Provider.node,
+    SessionInputMedia.node,
+    SessionRunState.node,
+  ],
 })
 export * as SessionInput from "./input"

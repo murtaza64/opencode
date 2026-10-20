@@ -19,7 +19,8 @@ import { SessionMessageUpdater } from "@opencode-ai/core/session/message-updater
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionInput } from "@opencode-ai/core/session/input"
-import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionInputTable, SessionMessageTable, SessionTable, V1InputTable } from "@opencode-ai/core/session/sql"
+import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { testEffect } from "./lib/effect"
 import { Snapshot } from "@opencode-ai/core/snapshot"
 import { Location } from "@opencode-ai/core/location"
@@ -45,6 +46,78 @@ const assistantRow = (
 }
 
 describe("SessionProjector", () => {
+  it.effect("replays wake observations in order across receipt state transitions", () =>
+    Effect.gen(function* () {
+      const db = (yield* Database.Service).db
+      const events = yield* EventV2.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+        .run()
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "test",
+          directory: "/project",
+          title: "test",
+          version: "test",
+        })
+        .run()
+      yield* events.publish(SessionV1.Event.InputAdmitted, {
+        sessionID,
+        payload: { requestID: "wake-replay", delivery: "queue", text: "hello" },
+        agent: "build",
+        model: { providerID: ProviderV2.ID.make("provider"), modelID: ModelV2.ID.make("model") },
+        time: 1,
+      })
+      const original = yield* db.select({ receipt: V1InputTable.receipt }).from(V1InputTable).get()
+      expect(original?.receipt.wakeObservations).toBeUndefined()
+      yield* events.publish(SessionV1.Event.InputWakeObserved, {
+        sessionID,
+        requestID: "wake-replay",
+        outcome: "scheduled",
+        observedAt: 2,
+      })
+      yield* events.publish(SessionV1.Event.InputCancelled, { sessionID, requestID: "wake-replay", time: 3 })
+      yield* events.publish(SessionV1.Event.InputWakeObserved, {
+        sessionID,
+        requestID: "wake-replay",
+        outcome: "coalesced",
+        observedAt: 4,
+      })
+      const recorded = yield* db
+        .select()
+        .from(EventTable)
+        .where(eq(EventTable.aggregate_id, sessionID))
+        .orderBy(asc(EventTable.seq))
+        .all()
+      const before = yield* db.select({ receipt: V1InputTable.receipt }).from(V1InputTable).get()
+      expect(before?.receipt).toMatchObject({
+        state: "cancelled",
+        wakeObservations: [
+          { outcome: "scheduled", observedAt: 2 },
+          { outcome: "coalesced", observedAt: 4 },
+        ],
+      })
+      yield* events.remove(sessionID)
+      yield* db.delete(V1InputTable).run()
+      yield* events.replayAll(
+        recorded.map((event) => ({
+          id: event.id,
+          aggregateID: event.aggregate_id,
+          seq: event.seq,
+          type: event.type,
+          data: event.data,
+        })),
+      )
+      expect((yield* db.select({ receipt: V1InputTable.receipt }).from(V1InputTable).get())?.receipt).toEqual(
+        before?.receipt,
+      )
+    }),
+  )
+
   it.effect("projects moved sessions without the transitional context epoch table", () =>
     Effect.gen(function* () {
       const { db } = yield* Database.Service

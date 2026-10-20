@@ -50,6 +50,7 @@ export type Event =
   | EventSessionNextRevertCleared
   | EventSessionNextRevertCommitted
   | EventSessionInputAdmitted
+  | EventSessionInputWakeObserved
   | EventSessionInputCancelled
   | EventSessionInputPromoted
   | EventSessionInputPresented
@@ -1231,6 +1232,16 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "session.input.wake-observed"
+        properties: {
+          sessionID: string
+          requestID: string
+          outcome: "scheduled" | "coalesced"
+          observedAt: number
+        }
+      }
+    | {
+        id: string
         type: "session.input.cancelled"
         properties: {
           sessionID: string
@@ -1726,6 +1737,7 @@ export type GlobalEvent = {
     | SyncEventSessionNextRevertCleared
     | SyncEventSessionNextRevertCommitted
     | SyncEventSessionInputAdmitted
+    | SyncEventSessionInputWakeObserved
     | SyncEventSessionInputCancelled
     | SyncEventSessionInputPromoted
     | SyncEventSessionInputPresented
@@ -3150,6 +3162,7 @@ export type V2Event =
   | SessionNextRevertCleared
   | SessionNextRevertCommitted
   | SessionInputAdmitted
+  | SessionInputWakeObserved
   | SessionInputCancelled
   | SessionInputPromoted
   | SessionInputPresented
@@ -4151,6 +4164,23 @@ export type SyncEventSessionInputAdmitted = {
   }
 }
 
+export type SyncEventSessionInputWakeObserved = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.input.wake-observed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      requestID: string
+      outcome: "scheduled" | "coalesced"
+      observedAt: number
+    }
+  }
+}
+
 export type SyncEventSessionInputCancelled = {
   type: "sync"
   id: string
@@ -4270,6 +4300,10 @@ export type SessionV1InputReceipt =
       sessionID: string
       admittedSeq: number
       timeCreated: number
+      wakeObservations?: Array<{
+        outcome: "scheduled" | "coalesced"
+        observedAt: number
+      }>
       state: "pending"
     }
   | {
@@ -4282,6 +4316,10 @@ export type SessionV1InputReceipt =
       sessionID: string
       admittedSeq: number
       timeCreated: number
+      wakeObservations?: Array<{
+        outcome: "scheduled" | "coalesced"
+        observedAt: number
+      }>
       state: "promoted"
       messageID: string
       timePromoted: number
@@ -4296,6 +4334,10 @@ export type SessionV1InputReceipt =
       sessionID: string
       admittedSeq: number
       timeCreated: number
+      wakeObservations?: Array<{
+        outcome: "scheduled" | "coalesced"
+        observedAt: number
+      }>
       state: "presented"
       messageID: string
       timePromoted: number
@@ -4311,6 +4353,10 @@ export type SessionV1InputReceipt =
       sessionID: string
       admittedSeq: number
       timeCreated: number
+      wakeObservations?: Array<{
+        outcome: "scheduled" | "coalesced"
+        observedAt: number
+      }>
       state: "handled"
       messageID: string
       timePromoted: number
@@ -4329,6 +4375,10 @@ export type SessionV1InputReceipt =
       sessionID: string
       admittedSeq: number
       timeCreated: number
+      wakeObservations?: Array<{
+        outcome: "scheduled" | "coalesced"
+        observedAt: number
+      }>
       state: "cancelled"
       timeCancelled: number
     }
@@ -5818,6 +5868,26 @@ export type SessionV1InputPayload1 = {
   source?: SessionInputMailSource
 }
 
+export type SessionInputWakeObserved = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.input.wake-observed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    requestID: string
+    outcome: "scheduled" | "coalesced"
+    observedAt: number
+  }
+}
+
 export type SessionInputCancelled = {
   id: string
   metadata?: {
@@ -7285,6 +7355,17 @@ export type EventSessionInputAdmitted = {
     }
     images?: Array<SessionV1InputImage>
     time: number
+  }
+}
+
+export type EventSessionInputWakeObserved = {
+  id: string
+  type: "session.input.wake-observed"
+  properties: {
+    sessionID: string
+    requestID: string
+    outcome: "scheduled" | "coalesced"
+    observedAt: number
   }
 }
 
