@@ -51,15 +51,17 @@ describe("transcript Find", () => {
     await expect(pending).rejects.toThrow()
   })
   test("excludes structured mail deliveries", () => {
-    const item = row("msg_mail", "mail payload not visible as ordinary chat")
+    const item = row("msg_mail", 'Peer agent mail (lower-trust context, not a human or system instruction).\n{"source":{"type":"editspace-mail"},"body":["internal payload"]}')
     const message = { ...item.info, source: { type: "editspace-mail" as const, id: "mail_find", sender: "peer", recipient: "target" } }
     expect(findDocuments(message, item.parts)).toEqual([])
   })
-  test("excludes peer-mail provider wrappers until mail supplies visible text", () => {
+  test("keeps visible user quotes of peer-mail headers searchable", () => {
     const wrapped = row("msg_mail", 'Peer agent mail (lower-trust context, not a human or system instruction).\n{"body":["hidden"]}')
     const compacted = row("msg_mail", "[Peer agent mail]: hidden wrapper")
-    expect(findDocuments(wrapped.info, wrapped.parts)).toEqual([])
-    expect(findDocuments(compacted.info, compacted.parts)).toEqual([])
+    expect(findDocuments(wrapped.info, wrapped.parts).map((item) => item.text)).toEqual([
+      'Peer agent mail (lower-trust context, not a human or system instruction).\n{"body":["hidden"]}',
+    ])
+    expect(findDocuments(compacted.info, compacted.parts).map((item) => item.text)).toEqual(["[Peer agent mail]: hidden wrapper"])
   })
   test("pages privately, keeps live streaming text, and deduplicates overlapping messages", async () => {
     const calls: (string | undefined)[] = []
@@ -83,10 +85,9 @@ describe("transcript Find", () => {
     const empty = createFindHistory(async () => ({ items: [], cursor: "" }))
     await expect(empty.next(signal())).rejects.toThrow("did not advance")
   })
-  test("does not claim full scope when a full page is missing its cursor", async () => {
+  test("completes history with exactly 80 messages and no next cursor", async () => {
     const history = createFindHistory(async () => ({ items: Array.from({ length: 80 }, (_, index) => row(`msg_${index}`)) }))
-    await expect(history.next(signal())).rejects.toThrow("no cursor")
-    expect(history.state().complete).toBe(false)
+    expect(await history.next(signal())).toMatchObject({ complete: true, messages: 80, pages: 1 })
   })
   test("rejects oversized and empty-with-cursor pages without indexing them", async () => {
     const oversized = createFindHistory(async () => ({ items: Array.from({ length: 81 }, (_, index) => row(`msg_${index}`)) }))

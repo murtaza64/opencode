@@ -187,8 +187,11 @@ function SessionView(props: { sessionID: string; directory: string }) {
     ),
   )
   const [todoUpdate, setTodoUpdate] = createSignal<{ messageID?: string; at: number }>()
+  const findRemovals = new Set<(messageID: string) => void>()
   const live = createLiveSession(sessionID, directory, (event) => {
     if (event.type.startsWith("session.input.")) void composer.refreshInputs()
+    if (event.type === "message.removed" && event.properties?.sessionID === sessionID && typeof event.properties.messageID === "string")
+      findRemovals.forEach((remove) => remove(event.properties!.messageID))
     if (event.type === "todo.updated" && event.properties?.sessionID === sessionID)
       setTodoUpdate({ messageID: live.data.message[sessionID]?.findLast((message) => message.role === "user")?.id, at: Date.now() })
   })
@@ -1306,7 +1309,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
           </Show>
         </AppHeader>
         <Show when={findOpen()}><TranscriptFind sessionID={sessionID} directory={directory} messages={messages()}
-          parts={live.data.part} jump={jumpFind} close={closeFind} clear={() => setFindHit(undefined)} /></Show>
+          parts={live.data.part} jump={jumpFind} close={closeFind} clear={() => setFindHit(undefined)}
+          subscribeRemoved={(remove) => { findRemovals.add(remove); return () => { findRemovals.delete(remove) } }} /></Show>
 
         <div class="session-alerts">
           <Show when={bannerError()}><div class="err" role="alert">{bannerError()}</div></Show>

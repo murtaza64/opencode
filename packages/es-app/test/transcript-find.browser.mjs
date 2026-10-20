@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { startFindPreview } from "./transcript-find-preview.mjs"
 import { directory } from "./composer-fixture.mjs"
+import { closeFindBrowser } from "./find-browser.mjs"
 
 const { chromium, _electron, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const preview = await startFindPreview()
@@ -43,7 +44,6 @@ await page.route("**/oc/session/ses_a/message?**", async (route) => {
   const response = await route.fetch()
   const headers = response.headers()
   if (failure === "repeat") headers["x-next-cursor"] = url.searchParams.get("before")
-  if (failure === "missing") delete headers["x-next-cursor"]
   return route.fulfill({ response, headers })
 })
 try {
@@ -73,7 +73,7 @@ try {
   await lookup("unindexed-input", 0)
   await lookup("unindexed-system", 0)
   await lookup("unindexed-mail-payload", 0)
-  await lookup("unindexed-mail-wrapper", 0)
+  await lookup("unindexed-mail-wrapper", 1)
   expect(reads()).toBe(originalReads)
   await input().fill("needle")
   await find().getByRole("button", { name: "Search earlier history" }).click()
@@ -165,7 +165,7 @@ try {
   await expect(matches()).toHaveCount(2)
   await input().press("Escape")
 
-  for (const mode of ["repeat", "missing", "offline"]) {
+  for (const mode of ["repeat", "offline"]) {
     failure = mode
     await open()
     await lookup("needle", 3)
@@ -213,7 +213,7 @@ try {
   await app?.close()
   // The private server owns this Chromium process tree; do not let worker or
   // routed-request shutdown stall teardown after the assertions have finished.
-  await server?.kill()
+  if (server) await closeFindBrowser(server)
   await preview.close()
   if (profile) await rm(profile, { recursive: true, force: true })
 }

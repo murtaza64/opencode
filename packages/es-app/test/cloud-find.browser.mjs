@@ -1,5 +1,6 @@
 import { createRequire } from "node:module"
 import { startFindPreview } from "./transcript-find-preview.mjs"
+import { closeFindBrowser } from "./find-browser.mjs"
 
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const preview = await startFindPreview()
@@ -69,6 +70,6 @@ try {
   console.log("PASS loaded cloud Find: explicit load only, private literal/case/RTL/long text, dropped scope, no event indexing, exact turn excerpt, zero OC/cloud writes or per-query gateway reads")
 } finally {
   await page.unrouteAll({ behavior: "ignoreErrors" })
-  await server.kill()
+  await closeFindBrowser(server)
   await preview.close()
 }

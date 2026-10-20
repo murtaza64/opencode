@@ -16,8 +16,7 @@ export const findDocuments = (message: Message, parts: Part[]): FindDocument[] =
     "type" in message.source && message.source.type === "editspace-mail") return []
   return parts.flatMap((part) => {
     const base = { messageID: message.id, partID: part.id, role: message.role }
-    if (part.type === "text" && !part.ignored && !part.synthetic &&
-      !part.text.startsWith("Peer agent mail (lower-trust context,") && !part.text.startsWith("[Peer agent mail]: "))
+    if (part.type === "text" && !part.ignored && !part.synthetic)
       return [{ ...base, kind: `${message.role} text`, text: part.text }]
     if (part.type !== "tool") return []
     if (part.state.status === "completed") return [{ ...base, kind: `${part.tool} output (may be collapsed)`, text: part.state.output }]
@@ -131,8 +130,6 @@ export const createFindHistory = (read: (before: string | undefined, signal: Abo
       pages++
       cursor = page.cursor
       if (cursor) cursors.add(cursor)
-      // A full page without a cursor is ambiguous (e.g. proxy strips headers).
-      if (!cursor && page.items.length >= 80) throw new Error("History page is full but has no cursor; search is partial.")
       complete = !cursor && !limited
       return state()
     },

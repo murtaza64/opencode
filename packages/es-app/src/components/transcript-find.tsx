@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js"
+import { batch, createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import type { Message, Part } from "@opencode-ai/sdk/v2"
 import { oc } from "../api"
 import { errorText } from "../live-session"
@@ -18,6 +18,7 @@ export const TranscriptFind = (props: {
   documents?: FindDocument[]
   scopeLabel?: string
   scopeDescription?: string
+  subscribeRemoved?: (remove: (messageID: string) => void) => () => void
   jump: (hit: FindHit) => void
   close: () => void
   clear: () => void
@@ -37,10 +38,64 @@ export const TranscriptFind = (props: {
   const [capped, setCapped] = createSignal(false)
   let input: HTMLInputElement | undefined
   let pageController: AbortController | undefined
+  let scanController: AbortController | undefined
+  let readyQuery = ""
+  let dirty = false
+  let disposed = false
   let previousIDs = new Set<string>()
   const cancel = () => { pageController?.abort(); pageController = undefined; setPaging(false) }
-  onCleanup(cancel)
-  onMount(() => input?.focus({ preventScroll: true }))
+  onCleanup(() => { disposed = true; cancel(); scanController?.abort() })
+  onMount(() => {
+    input?.focus({ preventScroll: true })
+    const unsubscribe = props.subscribeRemoved?.((id) => {
+      const paused = paging()
+      cancel()
+      scanController?.abort()
+      scanController = undefined
+      history.remove(id)
+      publish(hits().filter((hit) => hit.messageID !== id), capped())
+      setScope(history.state())
+      if (paused) setError("History search paused after a message was removed. Search earlier history to continue.")
+      setVersion((version) => version + 1)
+    })
+    if (unsubscribe) onCleanup(unsubscribe)
+  })
+  const publish = (next: FindHit[], capped: boolean) => {
+    const current = hits()[selected()]
+    const index = current ? next.findIndex((hit) => hit.messageID === current.messageID && hit.partID === current.partID &&
+      hit.start === current.start && hit.end === current.end && hit.match === current.match) : -1
+    batch(() => {
+      setHits(next)
+      setCapped(capped)
+      setSelected(index)
+      if (current && index < 0) props.clear()
+    })
+  }
+  const rescan = () => {
+    dirty = true
+    if (!readyQuery || scanController || disposed) return
+    const controller = new AbortController()
+    scanController = controller
+    const text = readyQuery
+    setScanning(true)
+    // Data updates coalesce into one pending scan, never cancel a running one.
+    // Each finite snapshot publishes even while text or earlier pages arrive.
+    void (async () => {
+      do {
+        dirty = false
+        const result = await scanDocuments(history.documents(), text, controller.signal)
+        if (controller.signal.aborted || disposed) return
+        publish(result.hits, result.capped)
+      } while (dirty)
+    })().catch((failure: unknown) => {
+      if (!controller.signal.aborted && !disposed) setError(errorText(failure))
+    }).finally(() => {
+      if (scanController !== controller || disposed) return
+      scanController = undefined
+      setScanning(false)
+      if (dirty) rescan()
+    })
+  }
   createEffect(() => {
     const ids = new Set((props.messages ?? []).map((message) => message.id))
     previousIDs.forEach((id) => { if (!ids.has(id)) history.remove(id) })
@@ -56,8 +111,10 @@ export const TranscriptFind = (props: {
   })
   createEffect(() => {
     const text = query()
-    version()
-    const controller = new AbortController()
+    scanController?.abort()
+    scanController = undefined
+    readyQuery = ""
+    dirty = false
     props.clear()
     setScanning(!!text)
     setHits([])
@@ -65,19 +122,12 @@ export const TranscriptFind = (props: {
     setCapped(false)
     const timer = setTimeout(() => {
       if (!text) { setScanning(false); return }
-      void scanDocuments(history.documents(), text, controller.signal).then((result) => {
-        if (controller.signal.aborted) return
-        setHits(result.hits)
-        setCapped(result.capped)
-        setScanning(false)
-      }, (failure: unknown) => {
-        if (controller.signal.aborted) return
-        setError(errorText(failure))
-        setScanning(false)
-      })
+      readyQuery = text
+      rescan()
     }, 250)
-    onCleanup(() => { clearTimeout(timer); controller.abort() })
+    onCleanup(() => clearTimeout(timer))
   })
+  createEffect(() => { version(); rescan() })
   const earlier = async () => {
     if (paging() || !query() || scope().complete || scope().limited) return
     const controller = new AbortController()
@@ -135,7 +185,7 @@ export const TranscriptFind = (props: {
       {paging() ? ` · Reading history (${scope().pages} pages)…` : ""}
       {scope().limited ? " · Index limit reached (20M characters / 200 pages)" : ""}
     </div>
-    <div class="find-scope">{props.scopeDescription ?? "Literal, case-insensitive user/assistant text and tool output/errors, including collapsed results. Excludes generated/system context, reasoning, tool inputs, mail deliveries/wrappers/feed, and other sessions."}</div>
+    <div class="find-scope">{props.scopeDescription ?? "Literal, case-insensitive user/assistant text and tool output/errors, including collapsed results. Excludes generated/system context, reasoning, tool inputs, structured mail deliveries and mail feed, and other sessions."}</div>
     <div class="find-controls">
       <Show when={props.sessionID && !scope().complete && !scope().limited}>
         <button disabled={!query() || paging()} onClick={() => { void earlier() }}>Search earlier history</button>
