@@ -74,3 +74,26 @@ export const apiAllowed = (method: string, pathname: string) => {
   }
   return routes[method]?.some((route) => route.test(pathname)) ?? false
 }
+
+/**
+ * Opt-in startup for launches the user did not initiate (publisher relaunch, automated checks).
+ * Unset or unknown values keep ordinary launches unchanged. On macOS the accessory policy is set
+ * before the app finishes launching and no window is shown or focused, so startup does not ask to
+ * become the active app; showing a window would, so that waits for an explicit user reopen.
+ * - background: no window or dock icon until the user relaunches/reopens the running Editspace,
+ *   then the ordinary window appears and the app becomes a regular app.
+ * - hidden: never shown, even on reopen; automated verification only.
+ */
+export type StartupMode = "normal" | "background" | "hidden"
+
+export const startupMode = (value: string | undefined): StartupMode =>
+  value === "background" || value === "hidden" ? value : "normal"
+
+export const startupPlan = (mode: StartupMode) => ({
+  // macOS activation policy applied before app ready; undefined leaves the default (regular).
+  activationPolicy: mode === "normal" ? undefined : ("accessory" as const),
+  showOnLoad: mode === "normal",
+  revealOnReopen: mode !== "hidden",
+  // A never-shown verification window must keep timers and rendering live.
+  backgroundThrottling: mode !== "hidden",
+})

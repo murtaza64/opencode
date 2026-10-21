@@ -2,20 +2,46 @@ import { app, BrowserWindow, dialog, Menu, session, shell } from "electron"
 import path from "node:path"
 import { readFile, writeFile } from "node:fs/promises"
 import { serve } from "./server"
-import { externalURL, internalURL, serviceOrigins } from "./policy"
+import { externalURL, internalURL, serviceOrigins, startupMode, startupPlan } from "./policy"
 
 app.setName("Editspace")
 app.setPath("userData", process.env.ES_DESKTOP_USER_DATA ?? path.join(app.getPath("appData"), "Editspace"))
 app.enableSandbox()
+const startup = startupPlan(startupMode(process.env.ES_DESKTOP_START))
+// Set before the app finishes launching so the opt-in start does not request activation or a dock icon.
+if (process.platform === "darwin" && startup.activationPolicy) app.setActivationPolicy(startup.activationPolicy)
+const opened = { ready: false, requested: false }
+// Reveal a background start: a second launch may arrive before load and is queued; it then becomes regular.
+const reveal = () => {
+  const window = BrowserWindow.getAllWindows()[0]
+  if (!window || !opened.ready) {
+    opened.requested = true
+    return
+  }
+  if (process.platform === "darwin") app.setActivationPolicy("regular")
+  if (window.isMinimized()) window.restore()
+  window.show()
+  window.focus()
+}
 
 const start = async () => {
   if (!app.requestSingleInstanceLock()) return app.quit()
   app.on("second-instance", () => {
+    if (startup.activationPolicy) {
+      if (startup.revealOnReopen) reveal()
+      return
+    }
     const window = BrowserWindow.getAllWindows()[0]
     if (window?.isMinimized()) window.restore()
     window?.show()
     window?.focus()
   })
+  // `activate` also fires for the initial launch, so it is ignored (never queued) until the window
+  // has loaded; only a later reopen of the running app reveals it.
+  if (startup.revealOnReopen && startup.activationPolicy)
+    app.on("activate", () => {
+      if (opened.ready) reveal()
+    })
   await app.whenReady()
   // Stable origin preserves es-app localStorage; preview/test profiles remain disposable.
   const portFile = path.join(app.getPath("userData"), "loopback-port")
@@ -68,6 +94,7 @@ const start = async () => {
         }
       : {}),
     webPreferences: {
+      backgroundThrottling: startup.backgroundThrottling,
       session: isolated,
       contextIsolation: true,
       sandbox: true,
@@ -141,7 +168,9 @@ const start = async () => {
   process.on("SIGTERM", () => app.quit())
   process.on("SIGINT", () => app.quit())
   await window.loadURL(server.origin)
-  window.show()
+  opened.ready = true
+  if (startup.showOnLoad) window.show()
+  else if (opened.requested) reveal()
   console.info(`Editspace listening at ${server.origin} (native session only)`)
 }
 
