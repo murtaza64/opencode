@@ -44,13 +44,21 @@ const run = async (viewport, label) => {
   await expect(first.locator(".tool-run-span")).toHaveText("200ms")
   await expect(first.locator(".tool-run-notes")).toHaveCount(0)
   await expect(first.locator(".tool-size")).toHaveCount(0)
+  // Per-call size classes, counted per call in canonical order.
+  await expect(first.locator(".tool-run-sizes")).toHaveText("XS×4")
+  await expect(first.locator(".tool-run-sizes")).toHaveAttribute("title", /^Size distribution of 4 calls: 4 XS\nSize = characters/)
   const second = runFor("p21_big")
   await expect(second).toHaveAttribute("data-timeline-part-ids", "p21_big,p22_fail,p23_a,p24_b")
   await expect(second.locator(".tool-run-tools")).toHaveText("read ×3 · bash")
   await expect(second.locator(".tool-run-notes")).toHaveText("1 failed")
   // Wall clock from first start to last end, not a sum.
   await expect(second.locator(".tool-run-span")).toHaveText("2.0s")
-  await expect(second.locator(".tool-run-summary")).toHaveAttribute("aria-label", "4 tool calls, read ×3 · bash, 2.0s wall clock: first call start to last call end, 1 failed")
+  await expect(second.locator(".tool-run-sizes")).toHaveText("XS×3 · L×1")
+  await expect(second.locator(".tool-run-summary")).toHaveAttribute("aria-label",
+    "4 tool calls, read ×3 · bash, Size distribution of 4 calls: 3 XS, 1 L, 2.0s wall clock: first call start to last call end, 1 failed")
+  // Failure notes are quiet text, muted like the span, not a red alert.
+  expect(await second.locator(".tool-run-notes").evaluate((element) => getComputedStyle(element).color))
+    .toBe(await second.locator(".tool-run-span").evaluate((element) => getComputedStyle(element).color))
   // A shell call that reported a nonzero exit is counted, not split out.
   const third = runFor("p40_ta")
   await expect(third).toHaveAttribute("data-timeline-part-ids", "p40_ta,p41_tb,p42_tc,p43_fail,p44_sa,p45_sb,p46_sc")
@@ -119,8 +127,10 @@ const run = async (viewport, label) => {
   for (const id of ["p61_la", "p62_lb", "p63_lc", "p70_ma", "p71_mb"]) await expect(chip(id)).toHaveCount(engaged ? 1 : 0)
   await shot(page, `${label}-completed`)
   // The collapsed summary follows member updates rather than a cached snapshot.
-  emitPart("msg_1012", { ...preview.tool("p71_mb", "edit", { filePath: "/workspace/m-b" }, "Error: stale file", { status: "error" }) })
+  await expect(tail.locator(".tool-run-sizes")).toHaveText("XS×5")
+  emitPart("msg_1012", { ...preview.tool("p71_mb", "edit", { filePath: "/workspace/m-b" }, "Error: stale file " + "e".repeat(12_000), { status: "error" }) })
   await expect(tail.locator(".tool-run-notes")).toHaveText("1 failed")
+  await expect(tail.locator(".tool-run-sizes")).toHaveText("XS×4 · L×1")
   await expect(tail.locator(".tool-run-span")).toHaveText("2.0s")
   if (engaged) await tail.locator(".tool-run-summary").click()
   await first.locator(".tool-run-summary").click()
@@ -291,6 +301,7 @@ const many = async () => {
     const runs = page.locator(".tool-run")
     await expect(runs).toHaveCount(1, { timeout: 30_000 })
     await expect(runs.first().locator(".tool-run-kind")).toHaveText("300 tool calls")
+    await expect(runs.first().locator(".tool-run-sizes")).toHaveText("XS×300")
     await expect(runs.first().locator(".tool-run-tools")).toHaveText("read ×60 · bash ×60 · edit ×60 · grep ×60 · task ×60")
     await expect(runs.first().locator(".tool-run-span")).toHaveText("499ms")
     await runs.first().locator(".tool-run-summary").click()
@@ -306,17 +317,18 @@ const many = async () => {
 // At 320px a run with every kind of status note wraps inside the viewport, LTR and RTL.
 const narrow = async () => {
   const small = await startToolRunsPreview(0)
-  const untimed = small.tool("prt_n4", "read", { filePath: "/workspace/n4" }, "n4")
+  const untimed = small.tool("prt_n4", "read", { filePath: "/workspace/n4" }, "L".repeat(15_000))
   delete untimed.state.time.end
   small.fixture.messages = [
     { info: { id: "msg_n0000", sessionID: "ses_a", role: "user", agent: "build", model: { providerID: "fixture", modelID: "test" }, time: { created: 1 } },
       parts: [{ id: "msg_n0000_text", messageID: "msg_n0000", sessionID: "ses_a", type: "text", text: "Mixed outcomes." }] },
     small.assistant("msg_n0001", "msg_n0000", [
       small.tool("prt_n1", "bash", { command: "false" }, "boom", { metadata: { exit: 1 } }),
-      small.tool("prt_n2", "apply_patch", { patchText: "x" }, "Tool execution aborted", { status: "error" }),
-      small.tool("prt_n3", "bash", { command: "sleep" }, "", { metadata: { exit: null } }),
+      small.tool("prt_n2", "apply_patch", { patchText: "x" }, "Tool execution aborted " + "s".repeat(2_000), { status: "error" }),
+      small.tool("prt_n3", "bash", { command: "sleep" }, "M".repeat(5_000), { metadata: { exit: null } }),
       untimed,
-      small.tool("prt_n5", "webfetch", { url: "https://example.com/a-very-long-url-segment" }, "page"),
+      small.tool("prt_n5", "webfetch", { url: "https://example.com/a-very-long-url-segment" }, "X".repeat(40_000)),
+      small.tool("prt_n6", "bash", { command: "yes" }, "y", { metadata: { exit: 0, truncated: true } }),
     ], { info: { finish: "tool-calls" } }),
     small.assistant("msg_n0002", "msg_n0000", [small.text("prt_n_done", "Done.")], { info: { finish: "stop" } }),
   ]
@@ -330,6 +342,8 @@ const narrow = async () => {
     const runs = page.locator(".tool-run")
     await expect(runs).toHaveCount(1, { timeout: 30_000 })
     await expect(runs.first().locator(".tool-run-notes")).toHaveText("1 failed · 1 interrupted · 1 exit unknown · 1 untimed")
+    await expect(runs.first().locator(".tool-run-sizes")).toHaveText("XS×1 · S×1 · M×1 · L×1 · XL×1 · ?×1")
+    await expect(runs.first().locator(".tool-run-sizes")).toHaveAttribute("title", /1 not sized \(lower bound only: input walk capped or output truncated ×1\)/)
     await expect(runs.first().locator(".tool-run-span")).toHaveText(/^≥/)
     for (const dir of ["ltr", "rtl"]) {
       await page.evaluate((value) => { document.documentElement.dir = value }, dir)
@@ -337,18 +351,21 @@ const narrow = async () => {
       const box = await runs.first().locator(".tool-run-summary").evaluate((element) => {
         const rect = element.getBoundingClientRect()
         const notes = element.querySelector(".tool-run-notes")
+        const sizes = element.querySelector(".tool-run-sizes")
         return { left: rect.left, right: rect.right, overflow: element.scrollWidth - element.clientWidth,
-          notesClipped: notes.scrollWidth - notes.clientWidth, width: document.documentElement.clientWidth,
+          notesClipped: notes.scrollWidth - notes.clientWidth, sizesClipped: sizes.scrollWidth - sizes.clientWidth, width: document.documentElement.clientWidth,
           children: [...element.children].map((child) => { const r = child.getBoundingClientRect(); return [r.left, r.right] }) }
       })
       expect(box.overflow).toBeLessThanOrEqual(0)
       expect(box.notesClipped).toBeLessThanOrEqual(0)
+      expect(box.sizesClipped).toBeLessThanOrEqual(0)
       expect(box.left).toBeGreaterThanOrEqual(0)
       expect(box.right).toBeLessThanOrEqual(box.width)
       for (const [left, right] of box.children) expect(left >= box.left - 1 && right <= box.right + 1).toBe(true)
       // English notes and the span keep their reading order in an RTL layout.
       expect(await runs.first().locator(".tool-run-notes").evaluate((element) => getComputedStyle(element).direction)).toBe("ltr")
       expect(await runs.first().locator(".tool-run-span").evaluate((element) => getComputedStyle(element).direction)).toBe("ltr")
+      expect(await runs.first().locator(".tool-run-sizes").evaluate((element) => getComputedStyle(element).direction)).toBe("ltr")
       await shot(page, `narrow-${dir}`)
     }
   } finally {

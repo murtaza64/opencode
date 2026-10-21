@@ -2,6 +2,7 @@ import { createMemo, For, Show, type ComponentProps, type JSX } from "solid-js"
 import type { Part } from "@opencode-ai/sdk/v2"
 import { Message, type ToolRenderers } from "@opencode-ai/session-ui/message-part"
 import { runSummary, type ToolRunGroup } from "../transcript-groups"
+import { SIZE_LEGEND, sizeDistribution, toolMagnitude } from "../tool-magnitude"
 
 // Collapsed by default. Members mount only while open, as their original chips.
 // The summary is deterministic: tool names and counts, wall-clock span and
@@ -34,7 +35,10 @@ export const ToolRun = (props: {
   })
   const byPart = createMemo(() => new Map(props.run.members.map((member) => [member.partID, member] as const)))
   const summary = createMemo(() => runSummary([...members().values()].map((item) => item.part)))
-  const label = () => [`${props.run.members.length} tool calls`, summary().tools, summary().spanLabel, ...summary().notes].filter(Boolean).join(", ")
+  // Members that have not loaded yet still count, as not sized, so bins sum to the run size.
+  const sizes = createMemo(() => sizeDistribution([...[...members().values()].map((item) => toolMagnitude(item.part)),
+    ...Array.from({ length: props.run.members.length - members().size }, () => ({ kind: "unknown" as const, reason: "call is not loaded" }))]))
+  const label = () => [`${props.run.members.length} tool calls`, summary().tools, sizes().label, summary().spanLabel, ...summary().notes].filter(Boolean).join(", ")
   const id = () => `tool-run-${props.run.key.replace(/[^\w-]/g, "_")}`
   return <section class="tool-run" data-tool-run={props.run.key} data-open={props.open ? "true" : undefined}
     data-timeline-part-ids={props.run.members.map((member) => member.partID).join(",")} aria-label={`${props.run.members.length} tool calls`}>
@@ -42,6 +46,7 @@ export const ToolRun = (props: {
       <span class="tool-run-disclosure" aria-hidden="true">›</span>
       <span class="tool-run-kind"><bdi dir="auto">{props.run.members.length} tool calls</bdi></span>
       <span class="tool-run-tools" dir="ltr" title={summary().tools}>{summary().tools}</span>
+      <span class="tool-run-sizes" dir="ltr" title={`${sizes().label}\n${SIZE_LEGEND}`}>{sizes().text}</span>
       <Show when={summary().notes.length}><span class="tool-run-notes" dir="auto">{summary().notes.join(" · ")}</span></Show>
       <Show when={summary().span}>{(span) => <span class="tool-run-span" dir="ltr" title={summary().spanLabel}>{span()}</span>}</Show>
     </button>

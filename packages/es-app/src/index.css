@@ -1931,7 +1931,8 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
   }
   .tool-run-kind { color: var(--text); font-weight: 500; white-space: nowrap; }
   .tool-run-tools { flex: 1 1 6rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; unicode-bidi: isolate; text-align: start; }
-  .tool-run-notes { min-width: 0; unicode-bidi: isolate; color: var(--red); font-size: 12px; overflow-wrap: anywhere; }
+  .tool-run-sizes { unicode-bidi: isolate; color: var(--subtext0); font: 400 12px/20px var(--font-mono); white-space: nowrap; }
+  .tool-run-notes { min-width: 0; unicode-bidi: isolate; color: var(--subtext0); font-size: 12px; overflow-wrap: anywhere; }
   .tool-run-span { unicode-bidi: isolate; color: var(--subtext0); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .tool-run-disclosure { flex: 0 0 16px; text-align: center; color: var(--subtext0); font-size: 16px; line-height: 1; }
   &:dir(rtl) .tool-run-disclosure { transform: rotate(180deg); }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { ToolPart } from "@opencode-ai/sdk/v2"
-import { magnitudeLabel, magnitudeRange, sizeClass, toolMagnitude } from "./tool-magnitude"
+import { magnitudeLabel, magnitudeRange, sizeClass, sizeDistribution, toolMagnitude } from "./tool-magnitude"
 
 let next = 0
 const completed = (input: Record<string, unknown>, output: string, extra: Partial<{ start: number; end: number; compacted: number; attachments: unknown[] }> = {}) => ({
@@ -73,5 +73,40 @@ describe("tool magnitude", () => {
     expect(magnitudeRange([completed({}, "a"), completed({}, "b".repeat(2500)), running].map(toolMagnitude)))
       .toEqual({ low: "XS", high: "S", rank: 1, chars: 2501, unknown: 1 })
     expect(magnitudeRange([running].map(toolMagnitude))).toBeUndefined()
+  })
+})
+
+describe("size distribution", () => {
+  const sized = (chars: number) => toolMagnitude(completed({}, "x".repeat(chars)))
+
+  test("counts calls per class in canonical order, showing only nonzero classes", () => {
+    const result = sizeDistribution([sized(40_000), sized(10), sized(5_000), sized(20), sized(15_000), sized(2_000), sized(30)])
+    expect(result.text).toBe("XS×3 · S×1 · M×1 · L×1 · XL×1")
+    expect(result.label).toBe("Size distribution of 7 calls: 3 XS, 1 S, 1 M, 1 L, 1 XL")
+    expect(sizeDistribution([sized(10), sized(5_000), sized(6_000)]).text).toBe("XS×1 · M×2")
+  })
+
+  test("lower-bound, compacted, unavailable and running sizes are unknown with reasons, and counts sum to the batch", () => {
+    const truncated = completed({}, "x")
+    truncated.state = { ...truncated.state, metadata: { truncated: true } } as ToolPart["state"]
+    const capped = completed(Object.fromEntries(Array.from({ length: 500 }, (_, index) => [`k${index}`, "v"])), "x")
+    const running = completed({}, "x")
+    running.state = { status: "running", input: {}, time: { start: 0 } }
+    const items = [sized(10), toolMagnitude(truncated), toolMagnitude(capped), toolMagnitude(completed({}, "x", { compacted: 5 })), toolMagnitude(running)]
+    const result = sizeDistribution(items)
+    expect(result.text).toBe("XS×1 · ?×4")
+    expect(result.bins.reduce((sum, bin) => sum + bin.count, 0) + result.unknown).toBe(items.length)
+    expect(result.label).toBe("Size distribution of 5 calls: 1 XS, 4 not sized (lower bound only: input walk capped or output truncated ×2; " +
+      "output was cleared by compaction ×1; tool is running ×1)")
+  })
+
+  test("attachments keep the text-size class and are stated as excluded", () => {
+    const result = sizeDistribution([toolMagnitude(completed({}, "ok", { attachments: [{ type: "file" }] })), sized(10)])
+    expect(result.text).toBe("XS×2")
+    expect(result.label).toBe("Size distribution of 2 calls: 2 XS; attachments in 1 call(s) not counted")
+  })
+
+  test("wall time never moves a call to another class", () => {
+    expect(sizeDistribution([toolMagnitude(completed({}, "ok", { start: 0, end: 7_200_000 })), sized(10)]).text).toBe("XS×2")
   })
 })

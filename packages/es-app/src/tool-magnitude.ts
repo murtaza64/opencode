@@ -65,6 +65,29 @@ export const magnitudeRange = (items: ToolMagnitude[]) => {
   }
 }
 
+// Batch distribution: how many CALLS fall in each class, in canonical order.
+// A lower-bound or unavailable size never claims a class; it is counted as
+// unknown with its reason, so the counts always sum to the number of calls.
+export const sizeDistribution = (items: ToolMagnitude[]) => {
+  const counts = SIZE_CLASSES.map(() => 0)
+  const reasons = new Map<string, number>()
+  let attachments = 0
+  items.forEach((item) => {
+    const reason = item.kind === "running" ? "tool is running" : item.kind === "unknown" ? item.reason
+      : item.partial ? "lower bound only: input walk capped or output truncated" : undefined
+    if (reason) reasons.set(reason, (reasons.get(reason) ?? 0) + 1)
+    if (item.kind === "sized" && !reason) counts[item.rank]! += 1
+    if (item.kind === "sized" && item.attachments) attachments += 1
+  })
+  const unknown = items.length - counts.reduce((sum, count) => sum + count, 0)
+  const bins = SIZE_CLASSES.flatMap((size, rank) => counts[rank] ? [{ size, count: counts[rank]! }] : [])
+  const text = [...bins.map((bin) => `${bin.size}×${bin.count}`), ...(unknown ? [`?×${unknown}`] : [])].join(" · ")
+  const label = `Size distribution of ${items.length} calls: ` +
+    [...bins.map((bin) => `${bin.count} ${bin.size}`), ...(unknown ? [`${unknown} not sized (${[...reasons].map(([reason, count]) => `${reason} ×${count}`).join("; ")})`] : [])].join(", ") +
+    (attachments ? `; attachments in ${attachments} call(s) not counted` : "")
+  return { bins, unknown, attachments, text, label }
+}
+
 export const chars = (value: number) => value < 1000 ? String(value) : `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}k`
 
 export const duration = (ms: number) => {
