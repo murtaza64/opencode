@@ -13,6 +13,7 @@ import { Provider } from "@/provider/provider"
 import { SessionInputMedia } from "./input-media"
 import { Session } from "./session"
 import { SessionRunState } from "./run-state"
+import { SessionSupersession } from "./supersession"
 import { MessageID, PartID, SessionID } from "./schema"
 
 export class Conflict extends Schema.TaggedErrorClass<Conflict>()("InputConflict", { message: Schema.String }) {}
@@ -34,6 +35,7 @@ const make = Effect.gen(function* () {
   const provider = yield* Provider.Service
   const media = yield* SessionInputMedia.Service
   const runState = yield* SessionRunState.Service
+  const supersession = yield* SessionSupersession.Service
   const db = database.db
   // The legacy input projector lives in Core; this V1-only extension registers
   // alongside it so durable handling events project on publish and replay.
@@ -341,10 +343,19 @@ const make = Effect.gen(function* () {
       .orderBy(asc(V1InputTable.admitted_seq))
       .all()
       .pipe(Effect.orDie)
-    const selected = idle ? rows : rows.filter((row) => row.receipt.delivery === "steer")
+    // A handoff fence hands this session's mail to the successor through es transfer;
+    // promoting it here as well would answer the same envelope twice.
+    const fenced = (yield* supersession.get(sessionID)) !== undefined
+    const eligible = fenced ? rows.filter((row) => row.payload.source?.type !== "editspace-mail") : rows
+    const selected = idle ? eligible : eligible.filter((row) => row.receipt.delivery === "steer")
     let promoted = false
     let promotedModel: SessionV1.User["model"] | undefined
+    let batch: { mail: boolean; agent: string } | undefined
     for (const row of selected) {
+      const mail = row.payload.source?.type === "editspace-mail"
+      // An idle boundary starts one turn: a human queued input runs alone, while
+      // waiting mail joins as one admitted-order batch for the same agent.
+      if (idle && batch && (!batch.mail || !mail || batch.agent !== row.receipt.agent)) break
       // Every newly promoted image must reach a turn using its admitted model.
       if (promotedModel && !isDeepStrictEqual(promotedModel, row.model)) break
       if (row.images?.length) {
@@ -396,7 +407,7 @@ const make = Effect.gen(function* () {
       for (const image of images) yield* sessions.updatePart(image)
       promoted = true
       promotedModel = row.model
-      if (idle) break
+      batch = { mail, agent: row.receipt.agent }
     }
     return promoted
   })
@@ -443,6 +454,7 @@ export const node = LayerNode.make({
     Provider.node,
     SessionInputMedia.node,
     SessionRunState.node,
+    SessionSupersession.node,
   ],
 })
 export * as SessionInput from "./input"
