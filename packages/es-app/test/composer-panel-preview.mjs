@@ -6,7 +6,8 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { createFixture, directory } from "./composer-fixture.mjs"
 
-export const startPanelPreview = async (plugins = [], portHint = 0) => {
+// `opencode` points /oc requests and event streams at another (private) runtime.
+export const startPanelPreview = async (plugins = [], portHint = 0, options = {}) => {
   const fixture = await createFixture()
   const cache = await mkdtemp(path.join(tmpdir(), "es-app-preview-vite-"))
   fixture.permissions = []
@@ -56,7 +57,7 @@ export const startPanelPreview = async (plugins = [], portHint = 0) => {
       ],
     },
   ]
-  process.env.OPENCODE_URL = fixture.url
+  process.env.OPENCODE_URL = options.opencode ?? fixture.url
   process.env.ES_DASHBOARD_URL = fixture.url
   const probe = net.createServer()
   await new Promise((resolve) => probe.listen(portHint, "127.0.0.1", resolve))

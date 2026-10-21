@@ -184,7 +184,8 @@ export const oc = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ reply }),
     })
-    if (!res.ok) throw new Error(`permission reply failed: HTTP ${res.status}`)
+    // HttpError keeps the status: 404 means the request was no longer pending.
+    if (!res.ok) throw await httpError(res)
   },
 
   questionReply: async (requestID: string, directory: string, answers: string[][]) => {

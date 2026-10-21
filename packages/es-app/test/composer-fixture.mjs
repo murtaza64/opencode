@@ -308,6 +308,9 @@ export const createFixture = async () => {
     const reply = /^\/permission\/([^/]+)\/reply$/.exec(url.pathname)
     if (reply && request.method === "POST") {
       if (fixture.failPermissionReply) return json({ error: "reply unavailable" }, 503)
+      // Opt-in real contract: an unknown or already-settled request is a 404.
+      if (fixture.strictPermissionReply && !(fixture.permissions ?? []).some((item) => item.id === reply[1]))
+        return json({ _tag: "PermissionNotFoundError", requestID: reply[1], message: `Permission request not found: ${reply[1]}` }, 404)
       const complete = () => {
         fixture.permissions = (fixture.permissions ?? []).filter((item) => item.id !== reply[1])
         fixture.permissionReplies.push({ id: reply[1], reply: body?.reply })
@@ -319,6 +322,7 @@ export const createFixture = async () => {
       }
       return complete()
     }
+    if (url.pathname === "/permission" && fixture.failPermissionList) return json({ error: "permission list unavailable" }, 503)
     if (url.pathname === "/permission")
       return json(
         fixture.permissionsByDirectory?.get(url.searchParams.get("directory")) ?? fixture.permissions ?? [

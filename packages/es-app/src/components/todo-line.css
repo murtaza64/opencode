@@ -1,0 +1,5 @@
+.home-todo { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 9px; margin-block-start: 4px; font-size: 12px; min-inline-size: 0; }
+.home-todo-label { color: var(--subtext0); font-size: 11px; }
+.home-todo[data-todo=active][data-provenance=observed] .home-todo-label { color: var(--green); }
+.home-todo-text { overflow-wrap: anywhere; min-inline-size: 0; }
+.home-todo-meta:empty { display: none; }

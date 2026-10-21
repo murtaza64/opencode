@@ -2,6 +2,7 @@ import { batch, createEffect, createMemo, createSignal, onCleanup, untrack } fro
 import type { Event, GlobalSession, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2"
 import { oc, type AttentionNotification } from "./api"
 import { createServerEvents } from "./event-source"
+import { createSessionTodos } from "./session-todos"
 
 type Snapshot = {
   status: Record<string, { type: string }>
@@ -95,6 +96,7 @@ export const createSessionActivity = (
   }
 
   let disposed = false
+  const todos = createSessionTodos()
   const settled = new Set<string>()
   const requestKey = (directory: string, kind: string, id: string) => `${directory}\u0000${kind}\u0000${id}`
   const inflight = new Map<string, { events: Event[]; promise: Promise<void> }>()
@@ -258,9 +260,9 @@ export const createSessionActivity = (
       void refresh(missing).finally(() => missing.forEach((directory) => initializing.delete(directory)))
     })
   })
-  // Only status and request events matter here; deltas, project.updated and
-  // the rest of the daemon's global traffic never reach the renderer.
-  const source = createServerEvents("/oc/global/event", { types: ["session.", "permission.", "question."] })
+  // Only status, request and todo-list events matter here; deltas, project.updated
+  // and the rest of the daemon's global traffic never reach the renderer.
+  const source = createServerEvents("/oc/global/event", { types: ["session.", "permission.", "question.", "todo."] })
   let opened = false
   let timer: ReturnType<typeof setTimeout> | undefined
   let lastSessionRefresh = 0
@@ -283,6 +285,7 @@ export const createSessionActivity = (
     lastSessionRefresh = Date.now()
     refreshSessions()
     void refresh()
+    todos.reload()
   }
   source.onerror = () => {
     if (disposed) return
@@ -295,6 +298,7 @@ export const createSessionActivity = (
     try {
       const { directory, payload: event } = JSON.parse(message.data) as { directory: string; payload: Event }
       if (!event?.type || !directory) return
+      todos.apply(directory, event)
       const live = event.type === "session.status"
         ? { id: event.properties.sessionID, status: event.properties.status }
         : event.type === "session.idle" || event.type === "session.error"
@@ -376,7 +380,10 @@ export const createSessionActivity = (
     requestState,
     requestSettled: (kind: "permission" | "question", directory: string, id: string) => settled.has(requestKey(directory, kind, id)),
     root,
+    // Direct subagents by parentID in the global session index.
+    subagents: (id: string) => children().get(id) ?? [],
     requests,
+    todos,
     error,
     refresh,
     refreshDirectory,

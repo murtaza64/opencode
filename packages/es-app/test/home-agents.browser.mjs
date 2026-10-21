@@ -1,0 +1,197 @@
+// Home permission replies and pinned-agent TODO lines against the disposable fixture daemon.
+// Run from packages/es-app: node test/home-agents.browser.mjs
+import { createRequire } from "node:module"
+import path from "node:path"
+import { tmpdir } from "node:os"
+import { startAttentionPreview } from "./attention-preview.mjs"
+import { directory } from "./composer-fixture.mjs"
+
+const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
+const artifacts = process.env.HOME_AGENTS_ARTIFACTS ?? tmpdir()
+const preview = await startAttentionPreview()
+const fixture = preview.fixture
+const permission = (id, sessionID, command, always = [`${command.split(" ")[0]} *`]) => ({ id, sessionID, permission: "bash", patterns: [command], always, metadata: { command, description: `Synthetic ${id}` } })
+fixture.strictPermissionReply = true
+fixture.permissions = [permission("per_home", "ses_b", "bun test"), permission("per_other", "ses_a", "git status")]
+fixture.todos = new Map([["ses_a", [
+  { content: "Read the Home design", status: "completed", priority: "high" },
+  { content: "Wire permission replies", status: "in_progress", priority: "high" },
+  { content: "Verify in RTL", status: "pending", priority: "medium" },
+]], ["ses_b", [{ content: "Unpinned work", status: "in_progress", priority: "low" }]]])
+
+const browser = await chromium.launch({ channel: "chrome", headless: true })
+const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } })
+await context.route("**/*", (route) => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
+const page = await context.newPage()
+const errors = []
+page.on("pageerror", (error) => errors.push(error.message))
+const replies = []
+page.on("request", (request) => {
+  const match = /\/oc\/permission\/([^/]+)\/reply\?(.*)$/.exec(request.url())
+  if (match && request.method() === "POST") replies.push({ id: match[1], directory: new URLSearchParams(match[2]).get("directory"), body: request.postDataJSON() })
+})
+const emit = (type, properties) => {
+  for (const [response, stream] of fixture.eventStreams) if (stream.path === "/global/event") response.write(`data: ${JSON.stringify({ directory, payload: { type, properties } })}\n\n`)
+}
+const card = (id) => page.locator(`.home-permission[data-request-id="${id}"]`)
+const todos = () => fixture.calls.filter((call) => /^\/session\/ses_[ab]\/todo$/.test(call.path))
+const todoLine = () => page.getByRole("region", { name: "Pinned agents" }).locator(".home-todo")
+try {
+  // The first TODO read fails transiently; explicit Home Refresh recovers it without a stream reconnect.
+  let todoFailures = 1
+  await page.route("**/oc/session/ses_a/todo?*", (route) => todoFailures-- > 0 ? route.fulfill({ status: 503, body: "down" }) : route.continue())
+  await page.goto(preview.url, { waitUntil: "domcontentloaded" })
+  // Context: tool, exact request/session identity, patterns, metadata and cascade semantics.
+  // A cold Vite dependency optimization can delay the first render.
+  await expect(card("per_home")).toBeVisible({ timeout: 90_000 })
+  await expect(card("per_home")).toContainText("permissionbash")
+  await expect(card("per_home")).toContainText("Exact request per_home · session ses_b")
+  await expect(card("per_home").locator(".home-permission-context")).toContainText("bun test")
+  await expect(card("per_home").locator(".home-permission-context")).toContainText("Synthetic per_home")
+  await expect(card("per_home")).toContainText("Always allow adds bun * for this project")
+  await expect(card("per_other")).toBeVisible()
+
+  await expect(todoLine()).toContainText("TODOs unavailable")
+  const streams = [...fixture.eventStreams.values()].filter((stream) => stream.path === "/global/event").length
+  await page.getByRole("button", { name: "Refresh", exact: true }).click()
+  await expect(todoLine()).toContainText("Wire permission replies")
+  expect([...fixture.eventStreams.values()].filter((stream) => stream.path === "/global/event").length).toBe(streams)
+  // The failed read never reached the fixture; the recovery is its single read.
+
+  // TODO: one snapshot read for the pinned session only, then events. A bare
+  // snapshot has no turn provenance, so it is not claimed as current work.
+  await expect(todoLine()).toContainText("In-progress TODO")
+  await expect(todoLine()).toContainText("Wire permission replies")
+  await expect(todoLine()).toContainText("1/3 · no update observed this turn")
+  await expect(todoLine()).not.toContainText("update observed this turn · received")
+  expect(todos().map((call) => call.path)).toEqual(["/session/ses_a/todo"])
+  emit("todo.updated", { sessionID: "ses_b", todos: [{ content: "Not pinned", status: "in_progress", priority: "low" }] })
+  emit("todo.updated", { sessionID: "ses_a", todos: [
+    { content: "Read the Home design", status: "completed", priority: "high" },
+    { content: "Wire permission replies", status: "completed", priority: "high" },
+    { content: "Verify in RTL", status: "in_progress", priority: "medium" },
+  ] })
+  await expect(todoLine()).toContainText("Verify in RTL")
+  await expect(todoLine()).toContainText("2/3 · update observed this turn · received")
+  await expect(todoLine()).toHaveAttribute("data-provenance", "observed")
+  // A session.updated during the turn re-renders the pinned row; the observation survives without a reread.
+  emit("session.updated", { sessionID: "ses_a", info: { id: "ses_a", title: "Composer fixture", directory, projectID: "fixture", slug: "a", version: "1", agent: "build", time: { created: 1, updated: Date.now() } } })
+  await page.waitForTimeout(500)
+  await expect(todoLine()).toHaveAttribute("data-provenance", "observed")
+  expect(todos().length).toBe(1)
+  await page.screenshot({ path: path.join(artifacts, "home-agents-ltr.png"), fullPage: true })
+  await page.getByRole("region", { name: "Pinned agents" }).screenshot({ path: path.join(artifacts, "home-agents-todo.png") })
+
+  // Exact single reply: only per_home, once, with its own directory.
+  await card("per_home").getByRole("button", { name: "Allow once", exact: true }).click()
+  await expect(page.locator(".home-receipts")).toContainText("Allowed once · bash")
+  expect(replies).toEqual([{ id: "per_home", directory, body: { reply: "once" } }])
+  emit("permission.replied", { sessionID: "ses_b", requestID: "per_home", reply: "once" })
+  await expect(card("per_home")).toHaveCount(0)
+  await expect(card("per_other")).toBeVisible()
+  await expect(card("per_other").getByRole("button", { name: "Allow once", exact: true })).toBeEnabled()
+
+  // Double click while the reply is in flight sends one request.
+  fixture.holdPermissionReply = true
+  await card("per_other").getByRole("button", { name: "Reject", exact: true }).dblclick()
+  await expect(card("per_other").locator(".home-permission-status")).toContainText("Sending reject")
+  await expect(card("per_other").getByRole("button", { name: "Always allow", exact: true })).toBeDisabled()
+  await page.waitForTimeout(300)
+  expect(replies.filter((reply) => reply.id === "per_other")).toEqual([{ id: "per_other", directory, body: { reply: "reject" } }])
+  fixture.holdPermissionReply = false
+  fixture.permissionReplyQueue.shift()()
+  await expect(page.locator(".home-receipts li").first()).toContainText("Rejected · bash")
+  emit("permission.replied", { sessionID: "ses_a", requestID: "per_other", reply: "reject" })
+  await expect(card("per_other")).toHaveCount(0)
+
+  // Stale: answered elsewhere without an event reaching this client -> 404, not applied.
+  fixture.permissions = [permission("per_stale", "ses_b", "rm -rf build")]
+  emit("permission.asked", fixture.permissions[0])
+  await expect(card("per_stale")).toBeVisible()
+  await expect(card("per_stale").getByRole("button", { name: "Allow once", exact: true })).toBeEnabled()
+  fixture.permissions = []
+  await card("per_stale").getByRole("button", { name: "Always allow", exact: true }).click()
+  await expect(page.locator(".home-receipts li").first()).toContainText("Not applied · bash")
+  await expect(page.locator(".home-receipts li").first()).toContainText("request was no longer pending")
+  await expect(card("per_stale")).toHaveCount(0)
+
+  // Uncertain: server/network failure is not success; reply again only after a recheck confirms pending.
+  fixture.permissions = [permission("per_flaky", "ses_b", "bun run build")]
+  emit("permission.asked", fixture.permissions[0])
+  await expect(card("per_flaky")).toBeVisible()
+  fixture.failPermissionReply = true
+  await card("per_flaky").getByRole("button", { name: "Allow once", exact: true }).click()
+  await expect(page.locator(".home-receipts li").first()).toContainText("Outcome uncertain")
+  await expect(card("per_flaky").locator(".home-permission-status")).toContainText("still pending; you can reply again")
+  fixture.failPermissionReply = false
+  await card("per_flaky").getByRole("button", { name: "Allow once", exact: true }).click()
+  await expect(page.locator(".home-receipts li").first()).toContainText("Allowed once")
+  expect(replies.filter((reply) => reply.id === "per_flaky").length).toBe(2)
+
+  // Offline source: an unverifiable request is link-only until a later check confirms it pending.
+  fixture.permissions = [permission("per_offline", "ses_b", "bun lint")]
+  emit("permission.asked", fixture.permissions[0])
+  await expect(card("per_offline")).toBeVisible()
+  fixture.failPermissionList = true
+  await page.getByRole("button", { name: "Refresh", exact: true }).click()
+  await expect(card("per_offline")).toHaveCount(0)
+  await expect(page.locator(".home-unknown")).toContainText("source unavailable")
+  await expect(page.locator(".home-unknown button")).toHaveCount(0)
+  fixture.failPermissionList = false
+  await page.getByRole("button", { name: "Refresh", exact: true }).click()
+  await expect(card("per_offline").getByRole("button", { name: "Allow once", exact: true })).toBeEnabled()
+  expect(replies.some((reply) => reply.id === "per_offline")).toBe(false)
+  fixture.permissions = []
+  emit("permission.replied", { sessionID: "ses_b", requestID: "per_offline", reply: "reject" })
+  await expect(card("per_offline")).toHaveCount(0)
+
+  // Resolved elsewhere with a live event: the card leaves without any reply from Home.
+  fixture.permissions = [permission("per_elsewhere", "ses_b", "echo hi")]
+  emit("permission.asked", fixture.permissions[0])
+  await expect(card("per_elsewhere")).toBeVisible()
+  fixture.permissions = []
+  emit("permission.replied", { sessionID: "ses_b", requestID: "per_elsewhere", reply: "once" })
+  await expect(card("per_elsewhere")).toHaveCount(0)
+  expect(replies.some((reply) => reply.id === "per_elsewhere")).toBe(false)
+
+  // A new busy turn with the earlier list is not current; idle is labelled as idle.
+  const work = fixture.currentWork
+  fixture.currentWork = (...args) => ({ ...work(...args), turn: { ...work(...args).turn, started_at: Date.now() + 1_000, watermark: "turn-2" } })
+  await expect(todoLine()).toContainText("no update observed this turn", { timeout: 15_000 })
+  await expect(todoLine()).toHaveAttribute("data-provenance", "unobserved")
+  fixture.currentWork = (...args) => ({ ...work(...args), turn: { ...work(...args).turn, status: "idle" } })
+  await expect(todoLine()).toContainText("agent idle", { timeout: 15_000 })
+  fixture.currentWork = work
+
+  // Completed and absent lists stay honest.
+  emit("todo.updated", { sessionID: "ses_a", todos: [{ content: "Verify in RTL", status: "completed", priority: "medium" }] })
+  await expect(todoLine()).toContainText("All 1/1 done")
+  emit("todo.updated", { sessionID: "ses_a", todos: [] })
+  await expect(todoLine()).toContainText("No TODO list")
+  // Event-driven updates never reread; only the two explicit Home Refresh clicks above did.
+  expect(todos().length).toBe(3)
+
+  // RTL and narrow layouts keep commands LTR and actions reachable.
+  fixture.permissions = [permission("per_rtl", "ses_b", "git push origin مرحبا")]
+  emit("permission.asked", fixture.permissions[0])
+  emit("todo.updated", { sessionID: "ses_a", todos: [{ content: "مراجعة الاتجاه RTL", status: "in_progress", priority: "high" }] })
+  await page.evaluate(() => { document.documentElement.dir = "rtl" })
+  await expect(card("per_rtl")).toBeVisible()
+  const command = card("per_rtl").locator(".home-permission-context bdi.mono").first()
+  expect(await command.evaluate((element) => element.getAttribute("dir"))).toBe("ltr")
+  expect(await card("per_rtl").evaluate((element) => getComputedStyle(element).borderInlineStartWidth)).toBe("2px")
+  expect(await card("per_rtl").evaluate((element) => getComputedStyle(element).borderRightWidth)).toBe("2px")
+  await page.screenshot({ path: path.join(artifacts, "home-agents-rtl.png"), fullPage: true })
+  await page.setViewportSize({ width: 390, height: 900 })
+  await expect(card("per_rtl").getByRole("button", { name: "Reject", exact: true })).toBeInViewport()
+  await page.screenshot({ path: path.join(artifacts, "home-agents-mobile-rtl.png"), fullPage: true })
+  expect(errors).toEqual([])
+  console.log(`PASS home permission replies + TODO lines; screenshots in ${artifacts}`)
+} catch (error) {
+  await page.screenshot({ path: path.join(artifacts, "home-agents-failure.png"), fullPage: true }).catch(() => undefined)
+  console.error(error, errors)
+  process.exitCode = 1
+} finally {
+  await browser.close()
+  await preview.close()
+}

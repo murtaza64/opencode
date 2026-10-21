@@ -9,6 +9,7 @@ import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import { File } from "@opencode-ai/session-ui/file"
 import Home from "./pages/home"
 import CloudPage from "./pages/cloud"
+import AgentMap from "./pages/map"
 import SessionPage from "./pages/session"
 import IssuePage from "./pages/issue"
 import DocPage from "./pages/doc"
@@ -91,6 +92,7 @@ render(
     <Router root={(p) => <Providers>{p.children}</Providers>}>
       <Route path="/" component={Home} />
       <Route path="/cloud" component={CloudPage} />
+      <Route path="/map" component={AgentMap} />
       <Route path="/session/:id" component={SessionPage} />
       <Route path="/issue" component={IssuePage} />
       <Route path="/doc" component={DocPage} />
