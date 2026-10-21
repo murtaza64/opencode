@@ -194,6 +194,23 @@ describe("run summary", () => {
     expect(runSummary(tools(tool("a", "1"), tool("a", "2"))).notes).toEqual([])
   })
 
+  test("a null or invalid exit code is reported as unknown, not failed", () => {
+    const summary = runSummary(tools(
+      tool("a", "1", { tool: "bash", metadata: { exit: null } }),
+      tool("a", "2", { tool: "bash", metadata: { exit: "killed" } }),
+      tool("a", "3", { tool: "bash", metadata: { exit: 0 } }),
+    ))
+    expect(summary.notes).toEqual(["2 exit unknown"])
+  })
+
+  test("partial timing makes the span a labelled lower bound", () => {
+    const untimed = { ...tool("a", "2"), state: { ...(tool("a", "2") as ToolPart).state, time: { start: 0 } } } as Part
+    const summary = runSummary(tools(tool("a", "1", { time: { start: 1_000, end: 4_000 } }), untimed))
+    expect(summary.span).toBe("≥3.0s")
+    expect(summary.spanLabel).toBe("At least 3.0s wall clock: first start to last end of 1 timed calls; 1 without timing")
+    expect(summary.notes).toEqual(["1 untimed"])
+  })
+
   test("outcome reads metadata errors as failures", () => {
     expect(toolOutcome(tool("a", "1", { metadata: { error: "denied" } }) as ToolPart)).toBe("failed")
     expect(toolOutcome(tool("a", "1", { tool: "bash", metadata: { exit: 0 } }) as ToolPart)).toBe("ok")

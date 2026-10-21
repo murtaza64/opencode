@@ -1338,7 +1338,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
   }), undefined, { equals: samePlan })
   // Expansion follows member parts, not run keys: prepending history or a
   // streamed call can merge runs and change the key of a run the user opened.
-  // A call the user engaged with while still standalone (live turn) opens the
+  // A call the user left expanded while still standalone (live turn) opens the
   // run it later joins, so completion never snaps it out of view.
   const [openParts, setOpenParts] = createSignal(new Set<string>())
   const runOpen = (key: string) => !!toolRuns().runs.get(key)?.members.some((member) => openParts().has(member.partID))
@@ -1452,13 +1452,22 @@ function SessionView(props: { sessionID: string; directory: string }) {
 
         <div class="transcript" ref={transcriptEl}>
           <div ref={inner} class="transcript-inner" onClick={(event) => {
-            const target = event.target as Element
-            if (target.closest(".tool-run")) return
-            const chip = target.closest("[data-component='tool-part-wrapper'], .tool-collapsible[data-timeline-part-ids]")
-            const ids = chip?.getAttribute("data-timeline-part-id") ?? chip?.getAttribute("data-timeline-part-ids")
-            if (!ids) return
-            const parts = ids.split(",").filter((id) => !openParts().has(id))
-            if (parts.length) setOpenParts((current) => new Set([...current, ...parts]))
+            // Only a standalone chip's own disclosure counts; action buttons inside it do not.
+            const trigger = (event.target as Element).closest("[data-slot='collapsible-trigger']")
+            if (!trigger || trigger.closest(".tool-run")) return
+            const chip = trigger.closest("[data-component='tool-part-wrapper'], .tool-collapsible[data-timeline-part-ids]")
+            if (!chip || chip.querySelector("[data-slot='collapsible-trigger']") !== trigger) return
+            const ids = (chip.getAttribute("data-timeline-part-id") ?? chip.getAttribute("data-timeline-part-ids") ?? "").split(",").filter(Boolean)
+            // Read the state after the chip's own handler has toggled it.
+            queueMicrotask(() => {
+              const open = trigger.getAttribute("aria-expanded") === "true"
+              if (ids.every((id) => openParts().has(id) === open)) return
+              setOpenParts((current) => {
+                const next = new Set(current)
+                ids.forEach((id) => open ? next.add(id) : next.delete(id))
+                return next
+              })
+            })
           }}>
             <Show when={findHit() && !messages().some((message) => message.id === findHit()?.messageID) ? findHit() : undefined}>{(hit) => <div class="find-jump" ref={findAnchor} role="region" aria-label="Selected transcript match">
               <FindExcerpt hit={hit()} />

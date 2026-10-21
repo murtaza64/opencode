@@ -1911,11 +1911,12 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
   background: var(--mantle);
   color: var(--subtext1);
   font: 400 13px/20px var(--font-sans);
+  /* Wraps on narrow widths so status notes stay fully visible instead of overflowing. */
   .tool-run-summary {
-    display: grid;
-    grid-template-columns: 16px auto minmax(0, 1fr) auto auto;
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 10px;
+    gap: 2px 10px;
     inline-size: 100%;
     padding-block: 5px;
     padding-inline: 8px 10px;
@@ -1929,10 +1930,10 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
     &:focus-visible { outline: 1px solid var(--lavender); outline-offset: -2px; }
   }
   .tool-run-kind { color: var(--text); font-weight: 500; white-space: nowrap; }
-  .tool-run-tools { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; unicode-bidi: isolate; text-align: start; }
-  .tool-run-notes { color: var(--red); font-size: 12px; white-space: nowrap; }
-  .tool-run-span { color: var(--subtext0); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .tool-run-disclosure { text-align: center; color: var(--subtext0); font-size: 16px; line-height: 1; }
+  .tool-run-tools { flex: 1 1 6rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; unicode-bidi: isolate; text-align: start; }
+  .tool-run-notes { min-width: 0; unicode-bidi: isolate; color: var(--red); font-size: 12px; overflow-wrap: anywhere; }
+  .tool-run-span { unicode-bidi: isolate; color: var(--subtext0); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .tool-run-disclosure { flex: 0 0 16px; text-align: center; color: var(--subtext0); font-size: 16px; line-height: 1; }
   &:dir(rtl) .tool-run-disclosure { transform: rotate(180deg); }
   &[data-open] .tool-run-disclosure { transform: rotate(90deg); }
   .tool-run-members { border-block-start: 1px solid var(--surface0); padding: 2px 8px 4px; padding-inline-start: 16px; }

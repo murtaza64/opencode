@@ -100,16 +100,20 @@ export const planToolRuns = (rows: readonly Row[], input: {
   return { runs, byPart }
 }
 
-export type ToolOutcome = "ok" | "failed" | "interrupted" | "unfinished"
+export type ToolOutcome = "ok" | "failed" | "interrupted" | "unfinished" | "unknown-exit"
 
-// Shell calls finish as "completed" with a nonzero (or missing) exit code;
-// tools may also report an error in metadata. Both count as failures.
+// Shell calls finish as "completed" even with a nonzero exit code, and tools
+// may report an error in metadata; both are failures. A null or non-numeric
+// exit says nothing either way, so it is reported as unknown.
 export const toolOutcome = (part: ToolPart): ToolOutcome => {
   const state = part.state
   if (state.status === "pending" || state.status === "running") return "unfinished"
   if (state.status === "error") return state.metadata?.interrupted === true ? "interrupted" : "failed"
   const metadata = state.metadata
-  return metadata && (("exit" in metadata && metadata.exit !== 0) || metadata.error) ? "failed" : "ok"
+  if (metadata?.error) return "failed"
+  if (!metadata || !("exit" in metadata)) return "ok"
+  if (typeof metadata.exit !== "number" || !Number.isFinite(metadata.exit)) return "unknown-exit"
+  return metadata.exit === 0 ? "ok" : "failed"
 }
 
 // Collapsed-row facts: tool names/counts, wall-clock span and failure counts.
@@ -125,15 +129,21 @@ export const runSummary = (parts: readonly ToolPart[]) => {
       state.time.end >= state.time.start ? [state.time] : []
   })
   const untimed = parts.length - times.length
+  const span = times.length ? duration(times.reduce((end, time) => Math.max(end, time.end), -Infinity) -
+    times.reduce((start, time) => Math.min(start, time.start), Infinity)) : undefined
   return {
     tools: [...counts].map(([tool, total]) => total > 1 ? `${tool} ×${total}` : tool).join(" · "),
-    span: times.length ? duration(times.reduce((end, time) => Math.max(end, time.end), -Infinity) -
-      times.reduce((start, time) => Math.min(start, time.start), Infinity)) : undefined,
+    // With untimed members the true span may be longer, so it is a lower bound.
+    span: span && (untimed ? `≥${span}` : span),
+    spanLabel: span && (untimed
+      ? `At least ${span} wall clock: first start to last end of ${times.length} timed calls; ${untimed} without timing`
+      : `${span} wall clock: first call start to last call end`),
     notes: [
       count("failed") && `${count("failed")} failed`,
       count("interrupted") && `${count("interrupted")} interrupted`,
       count("unfinished") && `${count("unfinished")} unfinished`,
-      untimed && times.length && `${untimed} untimed`,
+      count("unknown-exit") && `${count("unknown-exit")} exit unknown`,
+      untimed && `${untimed} untimed`,
     ].filter((note): note is string => !!note),
   }
 }

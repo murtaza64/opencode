@@ -50,7 +50,7 @@ const run = async (viewport, label) => {
   await expect(second.locator(".tool-run-notes")).toHaveText("1 failed")
   // Wall clock from first start to last end, not a sum.
   await expect(second.locator(".tool-run-span")).toHaveText("2.0s")
-  await expect(second.locator(".tool-run-summary")).toHaveAttribute("aria-label", "4 tool calls, read ×3 · bash, 2.0s wall clock, 1 failed")
+  await expect(second.locator(".tool-run-summary")).toHaveAttribute("aria-label", "4 tool calls, read ×3 · bash, 2.0s wall clock: first call start to last call end, 1 failed")
   // A shell call that reported a nonzero exit is counted, not split out.
   const third = runFor("p40_ta")
   await expect(third).toHaveAttribute("data-timeline-part-ids", "p40_ta,p41_tb,p42_tc,p43_fail,p44_sa,p45_sb,p46_sc")
@@ -84,10 +84,15 @@ const run = async (viewport, label) => {
   await page.keyboard.press("Space")
   await expect(second.locator(".tool-run-summary")).toHaveAttribute("aria-expanded", "false")
 
-  // Desktop: the reader opens a live call; mobile: the reader leaves the live turn alone.
+  // Desktop: the reader leaves a live call open. Mobile: the reader opens it, clicks inside, then closes it.
   const engaged = label === "desktop"
-  if (engaged) {
-    await chip("p61_la").locator('[data-slot="collapsible-trigger"]').first().click()
+  const liveTrigger = chip("p61_la").locator('[data-slot="collapsible-trigger"]').first()
+  await liveTrigger.click()
+  await expect(liveTrigger).toHaveAttribute("aria-expanded", "true")
+  if (!engaged) {
+    await chip("p61_la").locator('[data-component="context-tool-group-list"]').first().click()
+    await liveTrigger.click()
+    await expect(liveTrigger).toHaveAttribute("aria-expanded", "false")
   }
   // Streaming: the running call finishes and a provider step ends with tool calls. Still a live turn.
   emitPart("msg_1011", preview.tool("p63_lc", "bash", { command: "sleep 1" }, "done", { metadata: { exit: 0 }, end: 900 }))
@@ -109,10 +114,14 @@ const run = async (viewport, label) => {
   await expect(tail.locator(".tool-run-tools")).toHaveText("read ×3 · bash · edit")
   await expect(tail.locator(".tool-run-span")).toHaveText("1.4s")
   await expect(page.locator('[data-find-message="msg_1013"] .turn-summary')).toHaveCount(1)
-  // A call the reader opened while live keeps its run open; otherwise the run collapses.
+  // A call left open while live keeps its run open; a call opened then closed does not.
   await expect(tail.locator(".tool-run-summary")).toHaveAttribute("aria-expanded", engaged ? "true" : "false")
   for (const id of ["p61_la", "p62_lb", "p63_lc", "p70_ma", "p71_mb"]) await expect(chip(id)).toHaveCount(engaged ? 1 : 0)
   await shot(page, `${label}-completed`)
+  // The collapsed summary follows member updates rather than a cached snapshot.
+  emitPart("msg_1012", { ...preview.tool("p71_mb", "edit", { filePath: "/workspace/m-b" }, "Error: stale file", { status: "error" }) })
+  await expect(tail.locator(".tool-run-notes")).toHaveText("1 failed")
+  await expect(tail.locator(".tool-run-span")).toHaveText("2.0s")
   if (engaged) await tail.locator(".tool-run-summary").click()
   await first.locator(".tool-run-summary").click()
   await expect(first.locator(".tool-run-summary")).toHaveAttribute("aria-expanded", "false")
@@ -261,10 +270,99 @@ const pagination = async () => {
   }
 }
 
+// Several hundred calls in one message stay one logical run with every original ID.
+const many = async () => {
+  const big = await startToolRunsPreview(0)
+  const names = ["read", "bash", "edit", "grep", "task"]
+  const calls = Array.from({ length: 300 }, (_, index) => big.tool(`prt_m${String(index).padStart(3, "0")}`, names[index % names.length],
+    { filePath: `/workspace/${index}` }, `out ${index}`, { end: 210 + index }))
+  big.fixture.messages = [
+    { info: { id: "msg_m0000", sessionID: "ses_a", role: "user", agent: "build", model: { providerID: "fixture", modelID: "test" }, time: { created: 1 } },
+      parts: [{ id: "msg_m0000_text", messageID: "msg_m0000", sessionID: "ses_a", type: "text", text: "Do a lot." }] },
+    big.assistant("msg_m0001", "msg_m0000", calls, { info: { finish: "tool-calls" } }),
+    big.assistant("msg_m0002", "msg_m0000", [big.text("prt_m_done", "Done.")], { info: { finish: "stop" } }),
+  ]
+  const context = await browser.newContext({ viewport: { width: 1200, height: 900 } })
+  await context.route("**/*", (route) => new URL(route.request().url()).origin === big.origin ? route.continue() : route.abort())
+  const page = await context.newPage()
+  page.on("pageerror", (error) => errors.push(`many: ${error.message}`))
+  try {
+    await page.goto(big.url, { waitUntil: "domcontentloaded" })
+    const runs = page.locator(".tool-run")
+    await expect(runs).toHaveCount(1, { timeout: 30_000 })
+    await expect(runs.first().locator(".tool-run-kind")).toHaveText("300 tool calls")
+    await expect(runs.first().locator(".tool-run-tools")).toHaveText("read ×60 · bash ×60 · edit ×60 · grep ×60 · task ×60")
+    await expect(runs.first().locator(".tool-run-span")).toHaveText("499ms")
+    await runs.first().locator(".tool-run-summary").click()
+    await expect(runs.first().locator("[data-tool-run-member]")).toHaveCount(300)
+    const ids = await runs.first().locator("[data-tool-run-member]").evaluateAll((elements) => elements.map((element) => element.dataset.toolRunMember))
+    expect(ids).toEqual(calls.map((call) => call.id))
+  } finally {
+    await context.close()
+    await big.close()
+  }
+}
+
+// At 320px a run with every kind of status note wraps inside the viewport, LTR and RTL.
+const narrow = async () => {
+  const small = await startToolRunsPreview(0)
+  const untimed = small.tool("prt_n4", "read", { filePath: "/workspace/n4" }, "n4")
+  delete untimed.state.time.end
+  small.fixture.messages = [
+    { info: { id: "msg_n0000", sessionID: "ses_a", role: "user", agent: "build", model: { providerID: "fixture", modelID: "test" }, time: { created: 1 } },
+      parts: [{ id: "msg_n0000_text", messageID: "msg_n0000", sessionID: "ses_a", type: "text", text: "Mixed outcomes." }] },
+    small.assistant("msg_n0001", "msg_n0000", [
+      small.tool("prt_n1", "bash", { command: "false" }, "boom", { metadata: { exit: 1 } }),
+      small.tool("prt_n2", "apply_patch", { patchText: "x" }, "Tool execution aborted", { status: "error" }),
+      small.tool("prt_n3", "bash", { command: "sleep" }, "", { metadata: { exit: null } }),
+      untimed,
+      small.tool("prt_n5", "webfetch", { url: "https://example.com/a-very-long-url-segment" }, "page"),
+    ], { info: { finish: "tool-calls" } }),
+    small.assistant("msg_n0002", "msg_n0000", [small.text("prt_n_done", "Done.")], { info: { finish: "stop" } }),
+  ]
+  small.fixture.messages[1].parts[1].state.metadata = { interrupted: true }
+  const context = await browser.newContext({ viewport: { width: 320, height: 700 } })
+  await context.route("**/*", (route) => new URL(route.request().url()).origin === small.origin ? route.continue() : route.abort())
+  const page = await context.newPage()
+  page.on("pageerror", (error) => errors.push(`narrow: ${error.message}`))
+  try {
+    await page.goto(small.url, { waitUntil: "domcontentloaded" })
+    const runs = page.locator(".tool-run")
+    await expect(runs).toHaveCount(1, { timeout: 30_000 })
+    await expect(runs.first().locator(".tool-run-notes")).toHaveText("1 failed · 1 interrupted · 1 exit unknown · 1 untimed")
+    await expect(runs.first().locator(".tool-run-span")).toHaveText(/^≥/)
+    for (const dir of ["ltr", "rtl"]) {
+      await page.evaluate((value) => { document.documentElement.dir = value }, dir)
+      await runs.first().scrollIntoViewIfNeeded()
+      const box = await runs.first().locator(".tool-run-summary").evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        const notes = element.querySelector(".tool-run-notes")
+        return { left: rect.left, right: rect.right, overflow: element.scrollWidth - element.clientWidth,
+          notesClipped: notes.scrollWidth - notes.clientWidth, width: document.documentElement.clientWidth,
+          children: [...element.children].map((child) => { const r = child.getBoundingClientRect(); return [r.left, r.right] }) }
+      })
+      expect(box.overflow).toBeLessThanOrEqual(0)
+      expect(box.notesClipped).toBeLessThanOrEqual(0)
+      expect(box.left).toBeGreaterThanOrEqual(0)
+      expect(box.right).toBeLessThanOrEqual(box.width)
+      for (const [left, right] of box.children) expect(left >= box.left - 1 && right <= box.right + 1).toBe(true)
+      // English notes and the span keep their reading order in an RTL layout.
+      expect(await runs.first().locator(".tool-run-notes").evaluate((element) => getComputedStyle(element).direction)).toBe("ltr")
+      expect(await runs.first().locator(".tool-run-span").evaluate((element) => getComputedStyle(element).direction)).toBe("ltr")
+      await shot(page, `narrow-${dir}`)
+    }
+  } finally {
+    await context.close()
+    await small.close()
+  }
+}
+
 try {
   await run({ width: 1440, height: 1000 }, "desktop")
   await run({ width: 390, height: 844 }, "mobile")
   await pagination()
+  await many()
+  await narrow()
   expect(errors).toEqual([])
   console.log("tool runs browser checks passed")
 } finally {
