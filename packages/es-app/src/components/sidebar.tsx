@@ -15,6 +15,7 @@ import { CloudNav, CloudDiscovery } from "./cloud-sidebar"
 import { ResumeAllFailed } from "./session-failure"
 import { failureLabel } from "../session-failures"
 import { ringOnChange } from "../motion"
+import { Glyph } from "./icons"
 
 // Day separators: a quiet local-format label; rows without a usable time group as Undated.
 const dayKey = (time: number) => Number.isFinite(time) && time > 0 ? new Date(time).toDateString() : "undated"
@@ -267,8 +268,8 @@ export default function Sidebar() {
           <Show when={!nativeHeader}><button class="mini-btn" title="expand sidebar (^h)" onClick={toggleLeft}>
             ⟩
           </button></Show>
-            <A href="/" end activeClass="active" class="mini-item" title={`Home — ${current()}`}>
-              ▦
+            <A href="/" end activeClass="active" class="mini-item" title={`Home — ${current()}`} aria-label="Home">
+              <Glyph name="home" />
             </A>
           <NewSession compact />
           <Show when={pinnedSessions().length || cloud.pins().length}>
@@ -285,7 +286,7 @@ export default function Sidebar() {
         {/* Home remains reachable from sessions in both project scopes. */}
         <div class="sidebar-actions">
             <A href="/" end activeClass="active" class="nav-item board-link">
-              ▦ Home
+              <Glyph name="home" />Home
             </A>
           <NewSession />
         </div>

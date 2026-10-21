@@ -25,6 +25,7 @@ import { defaultImageCapability, prepareImageFile } from "../image-fit"
 import { ComposerResults } from "../components/composer-controls"
 import { DirectComposer } from "../components/direct-composer"
 import { flash } from "../motion"
+import { Glyph } from "../components/icons"
 import { AppHeader } from "../components/native-header"
 import { SessionTitle } from "../components/session-title"
 import { SubagentTranscript } from "../components/subagent-transcript"
@@ -1277,18 +1278,18 @@ function SessionView(props: { sessionID: string; directory: string }) {
         )}
       </Show>}
       sessionActions={<>
-        <Show when={!props.expanded}><button aria-label="Expand editor" title="Expand editor (Ctrl+E)" onClick={toggleFloat}>Expand editor</button></Show>
+        <Show when={!props.expanded}><button aria-label="Expand editor" title="Expand editor (Ctrl+E)" onClick={toggleFloat}><Glyph name="screen-full" />Expand editor</button></Show>
         <button title="Fork this session at its tip" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
-          {forking() ? "Forking…" : "Fork"}
+          <Glyph name="repo-forked" />{forking() ? "Forking…" : "Fork"}
         </button>
-        <Show when={ownedLane()}><button title="Hand off this lane to a new session" disabled={handingOff()} onClick={() => setHandoffOpen(!handoffOpen())}>Hand off</button></Show>
+        <Show when={ownedLane()}><button title="Hand off this lane to a new session" disabled={handingOff()} onClick={() => setHandoffOpen(!handoffOpen())}><Glyph name="arrow-switch" />Hand off</button></Show>
         <Show when={!session()?.time?.archived} fallback={<span class="archived-chip">Archived</span>}>
-          <button title="Archive this session (hides it from lists)" disabled={!!nudgePhase()} onClick={archive}>Archive</button>
+          <button title="Archive this session (hides it from lists)" disabled={!!nudgePhase()} onClick={archive}><Glyph name="archive" />Archive</button>
         </Show>
-        <button class="danger" title="Delete this session permanently" disabled={!!nudgePhase()} onClick={remove}>Delete</button>
+        <button class="danger" title="Delete this session permanently" disabled={!!nudgePhase()} onClick={remove}><Glyph name="trash" />Delete</button>
         <Show when={busy()} fallback={<button onClick={() => { stick = true; pin() }}>↓ Bottom</button>}>
           <button class="stop" aria-label="Stop session" title="Stop the parent session" disabled={aborting() || !!nudgePhase() || sending()} onClick={abort}>
-            <span aria-hidden="true">■</span> Stop
+            <Glyph name="square-fill" />Stop
           </button>
         </Show>
         <button
@@ -1296,7 +1297,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
           disabled={!session() || !!nudgePhase() || aborting() || sending()}
           onClick={nudge}
         >
-          {nudgePhase() === "stopping" ? "Stopping…" : nudgePhase() === "resuming" ? "Sending resume…" : "Nudge"}
+          <Glyph name="zap" />{nudgePhase() === "stopping" ? "Stopping…" : nudgePhase() === "resuming" ? "Sending resume…" : "Nudge"}
         </button>
       </>}>
       <label class="direct-setting"><select class="model-select" aria-label={composer.state.visibleBuffer === "aside" ? "Aside model" : "Session model"}
@@ -1374,7 +1375,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
             live.apply({ type: "session.updated", properties: { sessionID, info } })
             void refetch()
           }} />
-          <span class="dim session-state">{workState() === "working" ? "busy" : workState()}</span>
+          <span class="dim session-state" data-state={workState()}>{workState() === "working" ? "busy" : workState()}</span>
           <Show when={subagentsRunning()}><span class="dim">{subagentsRunning()} subagent(s) running</span></Show>
           <Show when={(session() as any)?.parentID}>
             {(pid) => (

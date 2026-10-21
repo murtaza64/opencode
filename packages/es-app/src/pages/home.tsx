@@ -14,6 +14,7 @@ import HomeCloudAgents from "../home-cloud-agents"
 import type { HomeActivityRow } from "../home-activity-data"
 import { HomePermission, type HomeReplyReceipt } from "../components/home-permission"
 import { TodoLine, turnOf } from "../components/todo-line"
+import { Glyph } from "../components/icons"
 import "./home.css"
 
 const PinnedAgent = (props: { session: SessionRow }) => {
@@ -132,7 +133,7 @@ export default function Home() {
     const [historyOpen, setHistoryOpen] = createSignal(false)
     createEffect(() => { if (historyOpen() && history()[props.record.id]?.version !== historyVersion(props.record)) void loadHistory(props.record) })
     return <article class="home-decision" data-attention-id={props.record.id}>
-      <div class="home-eyebrow"><span>{props.record.kind}</span><bdi dir="auto">{props.record.editspace}</bdi><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><span>revision {props.record.revision}</span></div>
+      <div class="home-eyebrow"><span><Glyph name={props.record.kind === "blocker" ? "question" : "comment-discussion"} />{props.record.kind}</span><bdi dir="auto">{props.record.editspace}</bdi><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><span>revision {props.record.revision}</span></div>
       <h3><bdi dir="auto">{props.record.title}</bdi></h3><p dir="auto">{props.record.context}</p>
       <div class="home-source">Explicit agent request · <A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)}>Open source thread</A></div>
       <Show when={props.record.status === "open"}>
@@ -149,7 +150,7 @@ export default function Home() {
     </article>
   }
   return <main class="attention-home">
-    <AppHeader><h1>Home</h1><span class="home-muted">{project() ?? "All projects"}</span><A class="home-map-link" href="/map">Agent map</A>{/* Freshness speaks only when it changes what you can trust; the button title always has it. */}<span class="home-header-end home-muted" classList={{ "home-blocked": attention.stale() }}>{attention.snapshot() ? (attention.stale() ? `Ledger checked ${Math.max(0, Math.floor((attention.now() - attention.snapshot()!.checked) / 1000))}s ago · stale` : "") : "Ledger not checked"}</span><button title={attention.snapshot() ? `Ledger checked ${Math.max(0, Math.floor((attention.now() - attention.snapshot()!.checked) / 1000))}s ago` : "Ledger not checked"} disabled={attention.loading()} onClick={() => { void attention.refresh(); void requests.refresh(); dashboard.activity.todos.reload(); void attention.checkOperator().catch(() => undefined) }}>Refresh</button></AppHeader>
+    <AppHeader><h1>Home</h1><span class="home-muted">{project() ?? "All projects"}</span><A class="home-map-link" href="/map"><Glyph name="graph" />Agent map</A>{/* Freshness speaks only when it changes what you can trust; the button title always has it. */}<span class="home-header-end home-muted" classList={{ "home-blocked": attention.stale() }}>{attention.snapshot() ? (attention.stale() ? `Ledger checked ${Math.max(0, Math.floor((attention.now() - attention.snapshot()!.checked) / 1000))}s ago · stale` : "") : "Ledger not checked"}</span><button title={attention.snapshot() ? `Ledger checked ${Math.max(0, Math.floor((attention.now() - attention.snapshot()!.checked) / 1000))}s ago` : "Ledger not checked"} disabled={attention.loading()} onClick={() => { void attention.refresh(); void requests.refresh(); dashboard.activity.todos.reload(); void attention.checkOperator().catch(() => undefined) }}>Refresh</button></AppHeader>
     <Show when={attention.error()}><div class="home-warning" role="alert">{attention.error()} Last-known records are retained; actions are disabled.</div></Show>
     <Show when={attention.snapshot()?.value.partial}><div class="home-warning">Some projects are unavailable. This is not an empty inbox.<For each={attention.snapshot()?.value.projects.filter(item => !item.available)}>{item => <div><bdi dir="auto">{item.editspace}</bdi>: {item.error || "unavailable"}</div>}</For></div></Show>
     <Show when={attention.snapshot()?.value.truncated}><div class="home-warning">History exceeds this view's limit. Counts may be incomplete; use the attention CLI to inspect further records.</div></Show>

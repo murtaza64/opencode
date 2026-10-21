@@ -1136,9 +1136,9 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 }
 .mail-activity-summary {
   display: grid;
-  grid-template-columns: 9rem minmax(0, 1fr) minmax(0, 1fr) 16px;
+  grid-template-columns: 16px minmax(0, 1fr) minmax(0, 1fr) 16px;
   gap: 10px;
-  align-items: baseline;
+  align-items: center;
   padding: 8px 10px;
   list-style: none;
   cursor: pointer;
@@ -1146,7 +1146,8 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .mail-activity-summary::-webkit-details-marker { display: none; }
 .mail-activity-summary:hover { background: var(--surface0); }
 .mail-activity-summary:focus-visible { outline: 1px solid var(--lavender); outline-offset: -2px; }
-.mail-activity-kind { color: var(--teal); font-weight: 600; }
+.mail-activity-kind { color: var(--teal); display: inline-flex; }
+.mail-activity-kind[data-direction=out] { color: var(--blue); }
 .mail-activity-route, .mail-activity-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail-activity-state { color: var(--subtext0); }
 .mail-activity-state > span { margin-inline-start: 6px; }
@@ -1163,7 +1164,7 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .mail-activity-details a { color: var(--teal); text-decoration: underline; }
 .mail-delivery { margin-block-start: 8px; border-block-start: 1px solid var(--surface0); padding-block-start: 6px; }
 @media (max-width: 600px) {
-  .mail-activity-summary { grid-template-columns: 4.5rem minmax(0, 1fr) 16px; }
+  .mail-activity-summary { grid-template-columns: 16px minmax(0, 1fr) 16px; }
   .mail-activity-state { grid-column: 2; grid-row: 2; }
 }
 .session-page {
@@ -2032,3 +2033,39 @@ html { -webkit-tap-highlight-color: transparent; }
 .attention-home h2, .map-cluster h2, .map-detail h2 { text-transform: none; letter-spacing: 0; }
 /* Day separators are wayfinding, not section titles: muted sentence case. */
 .nav-heading.nav-day { text-transform: none; letter-spacing: 0; font-weight: normal; color: var(--subtext0); padding-block-start: 10px; }
+
+/* Glyphs (components/icons.tsx): colour carries kind, the word carries meaning. */
+.glyph { flex: none; vertical-align: -2px; }
+button > .glyph, a > .glyph { margin-inline-end: 5px; }
+a.mini-item > .glyph { margin: 0; }
+.home-map-link { display: inline-flex; align-items: center; }
+.nav-item.board-link .glyph { color: var(--lavender); margin-inline-end: 2px; }
+.new-session-button .glyph { vertical-align: -2px; }
+.direct-session-actions button { display: inline-flex; align-items: center; }
+.direct-session-actions button .glyph { color: var(--subtext0); }
+.direct-session-actions button:not(:disabled):is(:hover, :focus-visible) .glyph { color: currentColor; }
+.direct-session-actions button[title^="Fork"] .glyph { color: var(--mauve); }
+.direct-session-actions button[title^="Hand off"] .glyph { color: var(--sapphire); }
+.direct-session-actions button[title^="Interrupt"] .glyph { color: var(--yellow); }
+.direct-session-actions button:is(.danger, .stop) .glyph { color: var(--red); }
+.direct-session-actions button:disabled .glyph { color: var(--overlay0); }
+/* Mail kinds: one colour each, the same everywhere a kind is named. */
+.mail-kind { font-weight: 600; color: var(--subtext1); }
+.mail-kind[data-kind=task] { color: var(--peach); }
+.mail-kind[data-kind=question] { color: var(--pink); }
+.mail-kind[data-kind=answer] { color: var(--green); }
+.mail-kind[data-kind=notice] { color: var(--blue); }
+.mail-kind[data-kind=learning] { color: var(--mauve); }
+/* Session state in the header uses the sidebar's status colours. */
+.session-state::before { content: ""; display: inline-block; inline-size: 7px; block-size: 7px; margin-inline-end: 6px; vertical-align: 1px; background: var(--overlay0); }
+.session-state[data-state=working]::before, .session-state[data-state=retry]::before { background: var(--lavender); }
+.session-state[data-state=working], .session-state[data-state=retry] { color: var(--lavender); }
+.session-state[data-state=waiting]::before { background: var(--peach); }
+.session-state[data-state=waiting] { color: var(--peach); }
+.session-state[data-state=failed]::before { background: var(--red); }
+.session-state[data-state=failed] { color: var(--red); }
+/* Request kinds: a permission is a tool grant (shield, pink); a decision is a human choice (yellow). */
+.home-request .home-eyebrow .glyph { color: var(--pink); }
+.home-decision .home-eyebrow .glyph { color: var(--yellow); }
+.home-eyebrow > span:first-child { display: inline-flex; align-items: center; gap: 5px; }
+.home-map-link .glyph { margin-inline-end: 5px; }

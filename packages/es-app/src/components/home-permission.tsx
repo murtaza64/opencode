@@ -6,6 +6,7 @@ import { oc } from "../api"
 import { HttpError } from "../api-error"
 import { ago, sessionHref } from "../state"
 import type { HomeRequestRow } from "../home-requests"
+import { Glyph } from "./icons"
 
 type Reply = "once" | "always" | "reject"
 type Outcome = { kind: "sending"; reply: Reply } | { kind: "missing" } | { kind: "uncertain"; at: number } | { kind: "refused"; message: string }
@@ -72,7 +73,7 @@ export const HomePermission = (props: {
   }
   return <div class="home-request home-permission" data-request-id={props.item.id}>
     <div>
-      <span class="home-eyebrow"><span>permission</span><bdi dir="ltr">{request()?.permission ?? "unknown tool"}</bdi></span>
+      <span class="home-eyebrow"><span><Glyph name="shield" />permission</span><bdi dir="ltr">{request()?.permission ?? "unknown tool"}</bdi></span>
       <h3><bdi dir="auto">{props.item.title}</bdi></h3>
       <Show when={props.owner}><div class="home-muted">Subagent of <bdi dir="auto">{props.owner}</bdi></div></Show>
       <div class="home-source">Exact request <bdi dir="ltr">{props.item.id}</bdi> · session <bdi dir="ltr">{props.item.session}</bdi> · source checked {ago(props.item.checked)}{props.stale ? " · stale" : ""}</div>

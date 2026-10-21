@@ -5,6 +5,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "so
 import { useNavigate } from "@solidjs/router"
 import { oc, SessionCreateError } from "../api"
 import { sessionHref, useDashboard } from "../state"
+import { Glyph } from "./icons"
 
 const projectDirectory = (root: string) => root.replace(/\/+$/, "").replace(/\/\.editspace$/, "")
 // "lanes/<lane>/repos/<owner>/<repo>" reads as "<lane> · <repo>"; anything else by its basename
@@ -114,7 +115,7 @@ export const NewSession = (props: { compact?: boolean }) => {
     <button ref={button} class={props.compact ? "mini-item new-session-button" : "new-session-button"}
       title="New session" aria-label="New session" aria-haspopup="dialog" aria-expanded={open()}
       onClick={() => open() ? close(false) : show()}>
-      <span aria-hidden="true">＋</span><Show when={!props.compact}><span>New session</span></Show>
+      <Glyph name="plus" /><Show when={!props.compact}><span>New session</span></Show>
     </button>
     <Show when={open()}>
       <form ref={form} class="new-session-form" role="dialog" aria-label="New session"
