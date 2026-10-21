@@ -1,6 +1,6 @@
 /* Thin fetch layer. The daemon (:4096) is reached via the /oc proxy, the es
  * dashboard server (:7777) via /es — both same-origin through vite. */
-import type { Agent, GlobalSession, Message, Part, PermissionRequest, QuestionRequest, Session, SessionV1InputImage, Todo } from "@opencode-ai/sdk/v2"
+import type { Agent, GlobalSession, Message, Part, PermissionRequest, QuestionRequest, Session, SessionFailure, SessionRetryResult, SessionV1InputImage, Todo } from "@opencode-ai/sdk/v2"
 import { httpError } from "./api-error"
 
 export type MessageWithParts = { info: Message; parts: Part[] }
@@ -148,6 +148,36 @@ export const oc = {
   abort: async (id: string, directory: string) => {
     const res = await fetch(`/oc/session/${id}/abort?${q(directory)}`, { method: "POST" })
     if (!res.ok) throw new Error(`abort failed: HTTP ${res.status} ${await res.text()}`)
+  },
+
+  // undefined = this Core predates failure tracking; the feature stays hidden.
+  failedSessions: async (): Promise<SessionFailure[] | undefined> => {
+    const res = await fetch("/oc/experimental/session/failed")
+    if (res.status === 404) return undefined
+    return json<SessionFailure[]>(res)
+  },
+
+  // "unknown": the request may have reached Core, so the outcome must be re-read, never re-assumed.
+  retrySession: async (failure: Pick<SessionFailure, "sessionID" | "directory" | "messageID">):
+    Promise<SessionRetryResult | { outcome: "unknown" | "unavailable" | "rejected"; detail: string }> => {
+    let res: Response
+    try {
+      res = await fetch(`/oc/session/${failure.sessionID}/retry?${q(failure.directory)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ messageID: failure.messageID }),
+      })
+    } catch {
+      return { outcome: "unknown", detail: "The response was lost" }
+    }
+    if (res.ok) {
+      const value = await res.json().catch(() => undefined)
+      return value && typeof value.outcome === "string" ? value as SessionRetryResult
+        : { outcome: "unknown", detail: "Unreadable response" }
+    }
+    if (res.status === 404) return { outcome: "unavailable", detail: "Session or retry support not found" }
+    if (res.status >= 500 || res.status === 408) return { outcome: "unknown", detail: `HTTP ${res.status}` }
+    return { outcome: "rejected", detail: `HTTP ${res.status}` }
   },
 
   // messageID = fork point: the new session copies history strictly before it;

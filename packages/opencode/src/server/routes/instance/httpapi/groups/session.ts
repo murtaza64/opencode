@@ -7,6 +7,7 @@ import { Session } from "@/session/session"
 import { SessionAside } from "@/session/aside"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
+import { SessionFailure } from "@/session/failure"
 import { SessionInput } from "@/session/input"
 import { SessionRevert } from "@/session/revert"
 import { SessionStatus } from "@/session/status"
@@ -123,6 +124,7 @@ export const SessionPaths = {
   update: `${root}/:sessionID`,
   fork: `${root}/:sessionID/fork`,
   abort: `${root}/:sessionID/abort`,
+  retry: `${root}/:sessionID/retry`,
   supersede: `${root}/:sessionID/supersede`,
   aside: `${root}/:sessionID/aside`,
   cancelAside: `${root}/:sessionID/aside/:requestID`,
@@ -377,6 +379,20 @@ export const SessionApi = HttpApi.make("session")
             identifier: "session.abort",
             summary: "Abort session",
             description: "Abort an active session and stop any ongoing AI processing or command execution.",
+          }),
+        ),
+        HttpApiEndpoint.post("retry", SessionPaths.retry, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: SessionFailure.RetryPayload,
+          success: described(SessionFailure.RetryResult, "Retry decision"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.retry",
+            summary: "Retry a failed turn",
+            description:
+              "Continue a root session whose newest message is the given failed assistant step, without adding a user message. Starts only while the session is idle and that step is still newest; otherwise reports why it did not start. Steps that ran tools are never retried.",
           }),
         ),
         HttpApiEndpoint.post("supersede", SessionPaths.supersede, {

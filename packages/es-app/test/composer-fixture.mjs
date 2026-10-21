@@ -179,6 +179,8 @@ export const createFixture = async () => {
       })
       return
     }
+    // Durable failed-session listing (#232); none unless a test sets fixture.failures.
+    if (url.pathname === "/experimental/session/failed") return json(fixture.failures ?? [])
     if (url.pathname === "/experimental/capabilities")
       return json(
         fixture.capabilities

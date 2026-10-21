@@ -42,6 +42,7 @@ import type { FindHit } from "../transcript-find"
 import { ToolSize } from "../components/tool-size"
 import { ToolRun } from "../components/tool-run"
 import { HeaderMenu } from "../components/header-menu"
+import { FailureRetry } from "../components/session-failure"
 import { completedTurns, messageSegments, planToolRuns, samePlan, sameSegments } from "../transcript-groups"
 import { isUserPrompt, promptPosition, promptTarget } from "../transcript-nav"
 
@@ -476,6 +477,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
         <Show when={workState() === "retry"}><WorkSpinner /></Show>
         <span>{workState() === "retry" ? "Retrying" : workState() === "waiting" ? "Waiting for your reply" : workState() === "failed" ?
           `Session failed — see error ${inlineError() ? "in conversation" : "above"}` : "Reconnecting — activity unavailable"}</span>
+        <Show when={workState() === "failed"}><FailureRetry sessionID={sessionID} /></Show>
       </>}>
         <Show when={workState() === "working" || workState() === "retry"}><WorkSpinner /></Show>
         <ActivityBriefView input={briefInput()} />

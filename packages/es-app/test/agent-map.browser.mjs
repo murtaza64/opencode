@@ -41,6 +41,8 @@ await context.route("**/es/api/state?*", async (route) => {
   body.threads.push({ key: "orchestrator", kind: "ticket", title: "orchestrator", sessions: [], lanes: [remoteLane], tickets: [], prs: [] })
   await route.fulfill({ response, json: body })
 })
+// One durable failure (session-failures #232 contract) for a standalone session: the map shares the red dot.
+await context.route("**/oc/experimental/session/failed", (route) => route.fulfill({ json: [{ sessionID: "ses_squadron", directory: "/Users/me/squadron", messageID: "msg_fail", parentID: "msg_user", time: now - 1000, error: { name: "APIError", statusCode: 403, message: "Forbidden" }, retry: "available" }] }))
 const page = await context.newPage()
 const errors = []
 page.on("pageerror", (error) => errors.push(error.message))
@@ -66,6 +68,7 @@ try {
   await expect(cluster("fixture").locator(".map-lane").filter({ hasText: "orchestrator" })).toContainText("ses_remote · not in local session index")
   await expect(cluster("fixture")).toContainText("cloudcloud-reviewprocessing")
   await expect(cluster("squadron")).toContainText("Squadron V2 design")
+  await expect(cluster("squadron").locator(".map-node").filter({ hasText: "Squadron V2 design" }).locator(".map-dot").first()).toHaveAttribute("data-status", "failed")
   await expect(cluster("squadron")).not.toContainText("Old standalone")
   await expect(cluster("squadron")).toContainText("1 more hidden by Active")
   // Handoff predecessors are not duplicated as standalone sessions.

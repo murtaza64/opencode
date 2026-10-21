@@ -8,6 +8,8 @@ import type { ActivityBriefInput } from "../activity-brief"
 import { answerDraftKey, attentionPath, blockedReason, createAttention, decisionLabel, deliveryLabel, type AttentionRecord } from "../attention"
 import { createHomeRequests, requestKey, type HomeRequest } from "../home-requests"
 import HomeActivity from "../home-activity"
+import { FailureRetry } from "../components/session-failure"
+import { failureLabel } from "../session-failures"
 import HomeCloudAgents from "../home-cloud-agents"
 import type { HomeActivityRow } from "../home-activity-data"
 import { HomePermission, type HomeReplyReceipt } from "../components/home-permission"
@@ -31,8 +33,9 @@ const PinnedAgent = (props: { session: SessionRow }) => {
       tools: snapshot.value?.turn.active_tools.map(tool => ({ name: tool.name, status: tool.status, sessionID: props.session.id })),
     }
   }
+  const failure = () => dashboard.handedOff(props.session.id) ? undefined : dashboard.failures.failure(props.session.id)
   return <div class="home-agent">
-    <div><A class="home-name" href={sessionHref(props.session.id, props.session.directory)}><bdi dir="auto">{props.session.title || props.session.id}</bdi></A><div class="home-muted"><bdi dir="auto">{props.session.project || dashboard.editspace() || "project"}</bdi></div><button onClick={() => dashboard.togglePin(props.session)}>Unpin</button></div>
+    <div><A class="home-name" href={sessionHref(props.session.id, props.session.directory)}><Show when={failure()}>{item => <span class="dot failed" role="img" aria-label={`Failed: ${failureLabel(item())}`} title={`Failed: ${failureLabel(item())}`} />}</Show><bdi dir="auto">{props.session.title || props.session.id}</bdi></A><Show when={failure()}>{item => <div class="home-failed">{failureLabel(item())} <FailureRetry sessionID={props.session.id} compact /></div>}</Show><div class="home-muted"><bdi dir="auto">{props.session.project || dashboard.editspace() || "project"}</bdi></div><button onClick={() => dashboard.togglePin(props.session)}>Unpin</button></div>
     <div><ActivityBriefView input={brief()} /><TodoLine session={props.session} turn={turnOf(work())} /><details><summary>Turn telemetry</summary><div class="home-source">Read-only turn telemetry · generated summary cache</div><CurrentWorkView id={props.session.id} directory={props.session.directory} compact onSnapshot={setWork} /></details></div>
   </div>
 }

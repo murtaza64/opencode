@@ -22,7 +22,12 @@ type Request = { directory: string } & (
 export const createSessionActivity = (
   sessions: () => GlobalSession[],
   refreshSessions: () => void,
-  options?: { directories: () => string[]; sessionEvent: (event: Event, directory: string) => boolean },
+  options?: {
+    directories: () => string[]
+    sessionEvent: (event: Event, directory: string) => boolean
+    observe?: (event: Event) => void
+    reconnected?: () => void
+  },
 ) => {
   const [snapshots, setSnapshots] = createSignal<Record<string, Snapshot>>({})
   const [statuses, setStatuses] = createSignal<Record<string, { type: string }>>({})
@@ -286,6 +291,7 @@ export const createSessionActivity = (
     refreshSessions()
     void refresh()
     todos.reload()
+    options?.reconnected?.()
   }
   source.onerror = () => {
     if (disposed) return
@@ -304,6 +310,7 @@ export const createSessionActivity = (
         : event.type === "session.idle" || event.type === "session.error"
           ? { id: event.properties.sessionID, status: { type: "idle" } }
           : event.type === "session.deleted" ? { id: event.properties.info.id, status: { type: "idle" } } : undefined
+      if (event.type.startsWith("session.")) options?.observe?.(event)
       if (live?.id) {
         const id = live.id
         statusVersions.set(id, ++statusRevision)

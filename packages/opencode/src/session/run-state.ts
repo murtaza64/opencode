@@ -24,6 +24,11 @@ export interface Interface {
     work: Effect.Effect<SessionV1.WithParts>,
     admission?: boolean,
   ) => Effect.Effect<SessionV1.WithParts, SessionSupersession.Closed>
+  readonly startIdle: <B, F, R>(
+    sessionID: SessionID,
+    work: Effect.Effect<SessionV1.WithParts>,
+    guard: Effect.Effect<B | undefined, F, R>,
+  ) => Effect.Effect<Runner.StartDecision<B>, F | SessionSupersession.Closed, R>
   readonly startShell: (
     sessionID: SessionID,
     onInterrupt: Effect.Effect<SessionV1.WithParts>,
@@ -175,6 +180,16 @@ const layer = Layer.effect(
       return yield* owner.wake(work.pipe(Effect.map((result) => result ?? noAdvisoryWork)))
     })
 
+    const startIdle = <B, F, R>(
+      sessionID: SessionID,
+      work: Effect.Effect<SessionV1.WithParts>,
+      guard: Effect.Effect<B | undefined, F, R>,
+    ) =>
+      Effect.gen(function* () {
+        const owner = yield* runner(sessionID, Effect.succeed(undefined))
+        return yield* owner.startIdle(work, guard)
+      })
+
     const consume = Effect.fn("SessionRunState.consume")(function* (sessionID: SessionID) {
       const data = yield* InstanceState.get(state)
       const owner = data.runners.get(sessionID)
@@ -194,7 +209,7 @@ const layer = Layer.effect(
       return result === noAdvisoryWork || result === undefined ? yield* onInterrupt : result
     })
 
-    return Service.of({ assertNotBusy, cancel, ensureRunning, startShell, wake, consume, admit, supersede, cancelSupersession })
+    return Service.of({ assertNotBusy, cancel, ensureRunning, startShell, startIdle, wake, consume, admit, supersede, cancelSupersession })
   }),
 )
 
