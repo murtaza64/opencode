@@ -90,11 +90,15 @@ async function code(text: string, language: string | undefined, key: string, com
 type CopyLabels = {
   copy: string
   copied: string
+  failed: string
 }
+
+// Mirrors the host's data-copied attribute: "true" after a copy, "failed" when no clipboard path accepted it.
+type CopyResult = "true" | "failed" | undefined
 
 type CopyButtonState = {
   setLabels: Setter<CopyLabels>
-  setCopied: Setter<boolean>
+  setCopied: Setter<CopyResult>
   dispose: () => void
 }
 
@@ -120,7 +124,7 @@ function createCopyButton(labels: CopyLabels) {
   const state: Partial<CopyButtonState> = {}
   const dispose = render(() => {
     const [labelState, setLabels] = createSignal(labels, { equals: false })
-    const [copied, setCopied] = createSignal(false)
+    const [copied, setCopied] = createSignal<CopyResult>()
     state.setLabels = setLabels
     state.setCopied = setCopied
     return <MarkdownCopyButton labels={labelState} copied={copied} />
@@ -130,8 +134,13 @@ function createCopyButton(labels: CopyLabels) {
   return host
 }
 
-function MarkdownCopyButton(props: { labels: Accessor<CopyLabels>; copied: Accessor<boolean> }) {
-  const label = () => (props.copied() ? props.labels().copied : props.labels().copy)
+function MarkdownCopyButton(props: { labels: Accessor<CopyLabels>; copied: Accessor<CopyResult> }) {
+  const label = () => {
+    const copied = props.copied()
+    if (copied === "true") return props.labels().copied
+    if (copied === "failed") return props.labels().failed
+    return props.labels().copy
+  }
   return (
     <TooltipV2 placement="top" value={label()}>
       <IconButtonV2
@@ -150,15 +159,45 @@ function MarkdownCopyButton(props: { labels: Accessor<CopyLabels>; copied: Acces
   )
 }
 
-function setCopyState(host: HTMLElement, labels: CopyLabels, copied: boolean) {
+function setCopyState(host: HTMLElement, labels: CopyLabels, copied: CopyResult) {
   const state = copyButtonState.get(host)
   state?.setLabels(labels)
   state?.setCopied(copied)
   if (copied) {
-    host.setAttribute("data-copied", "true")
+    host.setAttribute("data-copied", copied)
     return
   }
   host.removeAttribute("data-copied")
+}
+
+function copyResult(host: HTMLElement): CopyResult {
+  const value = host.getAttribute("data-copied")
+  if (value === "true" || value === "failed") return value
+}
+
+// The async Clipboard API is absent outside secure contexts and is denied by the Electron shell's
+// permission policy; a selection copy inside the click's user activation still reaches the clipboard.
+function copyWithSelection(text: string, host: HTMLElement) {
+  const selection = document.getSelection()
+  const ranges = Array.from({ length: selection?.rangeCount ?? 0 }, (_, index) => selection!.getRangeAt(index))
+  const input = document.createElement("textarea")
+  input.value = text
+  input.readOnly = true
+  input.tabIndex = -1
+  input.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none"
+  host.append(input)
+  try {
+    input.select()
+    return document.execCommand("copy")
+  } catch {
+    return false
+  } finally {
+    // Leave no helper behind and give the reader back the selection the copy borrowed.
+    input.remove()
+    selection?.removeAllRanges()
+    ranges.forEach((range) => selection?.addRange(range))
+    host.querySelector("button")?.focus({ preventScroll: true })
+  }
 }
 
 function disposeCopyButton(host: HTMLElement) {
@@ -289,9 +328,7 @@ function setupCodeCopy(root: HTMLDivElement, getLabels: () => CopyLabels) {
   const timeouts = new Map<HTMLElement, ReturnType<typeof setTimeout>>()
 
   const updateLabel = (button: HTMLElement) => {
-    const labels = getLabels()
-    const copied = button.getAttribute("data-copied") === "true"
-    setCopyState(button, labels, copied)
+    setCopyState(button, getLabels(), copyResult(button))
   }
 
   const handleClick = async (event: MouseEvent) => {
@@ -303,14 +340,16 @@ function setupCodeCopy(root: HTMLDivElement, getLabels: () => CopyLabels) {
     const code = button.closest('[data-component="markdown-code"]')?.querySelector("code")
     const content = code?.textContent ?? ""
     if (!content) return
-    const clipboard = navigator?.clipboard
-    if (!clipboard) return
-    await clipboard.writeText(content)
+    const copied =
+      (await navigator.clipboard?.writeText(content).then(
+        () => true,
+        () => false,
+      )) || copyWithSelection(content, button)
     const labels = getLabels()
-    setCopyState(button, labels, true)
+    setCopyState(button, labels, copied ? "true" : "failed")
     const existing = timeouts.get(button)
     if (existing) clearTimeout(existing)
-    const timeout = setTimeout(() => setCopyState(button, labels, false), 2000)
+    const timeout = setTimeout(() => setCopyState(button, labels, undefined), 2000)
     timeouts.set(button, timeout)
   }
 
@@ -508,6 +547,7 @@ export function Markdown(
     const labels = {
       copy: i18n.t("ui.message.copy"),
       copied: i18n.t("ui.message.copied"),
+      failed: i18n.t("ui.toolErrorCard.failed"),
     }
     const nextCodeKeys = new Set(content.filter((block) => block.mode === "code").map((block) => block.key))
     activeCodeKeys.forEach((key) => {
@@ -524,11 +564,12 @@ export function Markdown(
     }
     container
       .querySelectorAll<HTMLElement>('[data-slot="markdown-copy-button"]')
-      .forEach((button) => setCopyState(button, labels, button.dataset.copied === "true"))
+      .forEach((button) => setCopyState(button, labels, copyResult(button)))
     if (!copyCleanup)
       copyCleanup = setupCodeCopy(container, () => ({
         copy: i18n.t("ui.message.copy"),
         copied: i18n.t("ui.message.copied"),
+        failed: i18n.t("ui.toolErrorCard.failed"),
       }))
   })
 
