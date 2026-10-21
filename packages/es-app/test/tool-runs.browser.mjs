@@ -374,12 +374,89 @@ const narrow = async () => {
   }
 }
 
+// A 60-call batch with multi-digit counts in every bin wraps between bins at 320px.
+const narrowDistribution = async () => {
+  const wide = await startToolRunsPreview(0)
+  const outputs = [10, 2_000, 5_000, 15_000, 40_000]
+  const calls = Array.from({ length: 60 }, (_, index) => {
+    const id = `prt_w${String(index).padStart(2, "0")}`
+    const bin = index % 6
+    return bin === 5 ? wide.tool(id, "bash", { command: "yes" }, "y", { metadata: { exit: 0, truncated: true } })
+      : wide.tool(id, "read", { filePath: `/w/${index}` }, "x".repeat(outputs[bin]))
+  })
+  wide.fixture.messages = [
+    { info: { id: "msg_w0000", sessionID: "ses_a", role: "user", agent: "build", model: { providerID: "fixture", modelID: "test" }, time: { created: 1 } },
+      parts: [{ id: "msg_w0000_text", messageID: "msg_w0000", sessionID: "ses_a", type: "text", text: "Wide batch." }] },
+    wide.assistant("msg_w0001", "msg_w0000", calls, { info: { finish: "tool-calls" } }),
+    wide.assistant("msg_w0002", "msg_w0000", [wide.text("prt_w_done", "Done.")], { info: { finish: "stop" } }),
+  ]
+  const context = await browser.newContext({ viewport: { width: 320, height: 700 } })
+  await context.route("**/*", (route) => new URL(route.request().url()).origin === wide.origin ? route.continue() : route.abort())
+  const page = await context.newPage()
+  page.on("pageerror", (error) => errors.push(`narrow distribution: ${error.message}`))
+  try {
+    await page.goto(wide.url, { waitUntil: "domcontentloaded" })
+    const sizes = page.locator(".tool-run .tool-run-sizes")
+    await expect(sizes).toHaveText("XS×10 · S×10 · M×10 · L×10 · XL×10 · ?×10", { timeout: 30_000 })
+    // Second pass squeezes the row narrower than the bin string to force wrapping.
+    for (const [dir, squeeze] of [["ltr", false], ["rtl", false], ["ltr", true], ["rtl", true]]) {
+      await page.evaluate(([value, narrow]) => {
+        document.documentElement.dir = value
+        document.querySelector(".tool-run").style.maxInlineSize = narrow ? "200px" : ""
+      }, [dir, squeeze])
+      await sizes.scrollIntoViewIfNeeded()
+      const box = await page.locator(".tool-run .tool-run-summary").evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        const field = element.querySelector(".tool-run-sizes")
+        const range = document.createRange()
+        range.selectNodeContents(field)
+        // Every rendered line starts and ends on a whole bin label.
+        const lines = [...range.getClientRects()].length
+        return { left: rect.left, right: rect.right, width: document.documentElement.clientWidth, overflow: element.scrollWidth - element.clientWidth,
+          clipped: field.scrollWidth - field.clientWidth, fieldRight: field.getBoundingClientRect().right, fieldLeft: field.getBoundingClientRect().left,
+          lines, page: document.documentElement.scrollWidth - document.documentElement.clientWidth }
+      })
+      // At 320px the six bins fit on their own line; the squeezed pass must wrap.
+      if (squeeze) expect(box.lines).toBeGreaterThan(1)
+      expect(box.overflow).toBeLessThanOrEqual(0)
+      expect(box.clipped).toBeLessThanOrEqual(0)
+      expect(box.page).toBeLessThanOrEqual(0)
+      expect(box.fieldLeft).toBeGreaterThanOrEqual(box.left - 1)
+      expect(box.fieldRight).toBeLessThanOrEqual(box.right + 1)
+      expect(box.right).toBeLessThanOrEqual(box.width)
+      // No bin label is split across lines.
+      const split = await sizes.evaluate((element) => {
+        const text = element.firstChild
+        const tops = [...text.textContent].map((_, index) => {
+          const range = document.createRange()
+          range.setStart(text, index)
+          range.setEnd(text, index + 1)
+          return range.getBoundingClientRect().top
+        })
+        let offset = 0
+        return text.textContent.split(" · ").filter((label) => {
+          const first = tops[offset]
+          const last = tops[offset + label.length - 1]
+          offset += label.length + 3
+          return Math.abs(first - last) > 1
+        })
+      })
+      expect(split).toEqual([])
+      await shot(page, `narrow-distribution-${dir}${squeeze ? "-squeezed" : ""}`)
+    }
+  } finally {
+    await context.close()
+    await wide.close()
+  }
+}
+
 try {
   await run({ width: 1440, height: 1000 }, "desktop")
   await run({ width: 390, height: 844 }, "mobile")
   await pagination()
   await many()
   await narrow()
+  await narrowDistribution()
   expect(errors).toEqual([])
   console.log("tool runs browser checks passed")
 } finally {
