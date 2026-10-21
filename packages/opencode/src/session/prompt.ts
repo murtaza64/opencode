@@ -33,6 +33,8 @@ import { NamedError } from "@opencode-ai/core/util/error"
 import { SessionProcessor } from "./processor"
 import { Tool } from "@/tool/tool"
 import { Permission } from "@/permission"
+import { Question } from "@/question"
+import { SessionFailure } from "./failure"
 import { SessionStatus } from "./status"
 import { LLM } from "./llm"
 import { Shell } from "@opencode-ai/core/shell"
@@ -107,6 +109,7 @@ export interface Interface {
   readonly wake: (sessionID: SessionID) => Effect.Effect<Runner.WakeDecision, SessionSupersession.Closed>
   readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error | SessionSupersession.Closed>
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts, SessionSupersession.Closed>
+  readonly retry: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<SessionFailure.RetryResult, Session.NotFound>
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError | SessionSupersession.Closed>
   readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error | SessionSupersession.Closed>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
@@ -132,6 +135,7 @@ const layer = Layer.effect(
     const commands = yield* Command.Service
     const config = yield* Config.Service
     const permission = yield* Permission.Service
+    const questions = yield* Question.Service
     const fsys = yield* FSUtil.Service
     const mcp = yield* MCP.Service
     const lsp = yield* LSP.Service
@@ -1399,6 +1403,42 @@ const layer = Layer.effect(
       )
     })
 
+    // Continue a failed turn from its durable boundary: the runner starts only while the failed step is
+    // still the newest message, and that step stays out of model history, so nothing is fabricated or replayed.
+    const retry = Effect.fn("SessionPrompt.retry")(function* (input: { sessionID: SessionID; messageID: MessageID }) {
+      const ctx = yield* InstanceState.context
+      const session = yield* sessions.get(input.sessionID)
+      const guard = Effect.gen(function* () {
+        // Each directory owns its own runner map; only the Session's own directory serializes its runs.
+        if (session.directory !== ctx.directory) return { outcome: "mismatch" as const }
+        const fresh = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+        if (fresh.parentID) return { outcome: "child" as const }
+        if (fresh.time.archived) return { outcome: "archived" as const }
+        // A pending revert hides the newest messages; the next prompt resolves it, not a retry.
+        if (fresh.revert) return { outcome: "stale" as const }
+        const latest = (yield* sessions.messages({ sessionID: input.sessionID, limit: 1 }).pipe(Effect.orDie)).at(-1)
+        // Time order alone can be skewed; any row inserted after the failed step means a retry or prompt already ran.
+        const inserted = yield* SessionFailure.lastInserted(input.sessionID).pipe(Effect.provideService(Database.Service, database))
+        if (latest && latest.info.id !== inserted) return { outcome: "stale" as const }
+        const failed = SessionFailure.inspect(fresh, latest, Date.now())
+        if (!failed) return { outcome: latest?.info.id === input.messageID ? ("not-failed" as const) : ("stale" as const) }
+        if (failed.messageID !== input.messageID) return { outcome: "stale" as const, failed }
+        if (failed.retry !== "available") return { outcome: "unsafe" as const, failed }
+        const waiting =
+          (yield* permission.list()).some((item) => item.sessionID === input.sessionID) ||
+          (yield* questions.list()).some((item) => item.sessionID === input.sessionID)
+        if (waiting) return { outcome: "waiting" as const, failed }
+        return undefined
+      })
+      const decision = yield* state.startIdle(input.sessionID, runLoop(input.sessionID), guard).pipe(
+        Effect.catchTag("SessionSuperseded", () => Effect.succeed({ outcome: "superseded" as const })),
+      )
+      if (decision.outcome === "started") return { outcome: "accepted" as const }
+      if (decision.outcome === "busy") return { outcome: "running" as const }
+      if (decision.outcome === "superseded") return { outcome: "superseded" as const }
+      return decision.reason
+    })
+
     const shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError | SessionSupersession.Closed> = Effect.fn(
       "SessionPrompt.shell",
     )(function* (input: ShellInput) {
@@ -1538,6 +1578,7 @@ const layer = Layer.effect(
 
     return Service.of({
       wake,
+      retry,
       cancel,
       prompt,
       loop,
@@ -1666,6 +1707,7 @@ export const node = LayerNode.make({
     Command.node,
     Config.node,
     Permission.node,
+    Question.node,
     FSUtil.node,
     MCP.node,
     LSP.node,

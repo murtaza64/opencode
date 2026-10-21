@@ -11,6 +11,7 @@ import { SessionAside } from "@/session/aside"
 import { SessionCompaction } from "@/session/compaction"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
+import { SessionFailure } from "@/session/failure"
 import { SessionInput } from "@/session/input"
 import { SessionRevert } from "@/session/revert"
 import { SessionRunState } from "@/session/run-state"
@@ -288,6 +289,15 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const abort = Effect.fn("SessionHttpApi.abort")(function* (ctx: { params: { sessionID: SessionID } }) {
       yield* promptSvc.cancel(ctx.params.sessionID)
       return true
+    })
+
+    const retry = Effect.fn("SessionHttpApi.retry")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof SessionFailure.RetryPayload.Type
+    }) {
+      return yield* SessionError.mapStorageNotFound(
+        promptSvc.retry({ sessionID: ctx.params.sessionID, messageID: ctx.payload.messageID }),
+      )
     })
 
     const supersede = Effect.fn("SessionHttpApi.supersede")(function* (ctx: {
@@ -604,6 +614,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("update", update)
       .handleRaw("fork", forkRaw)
       .handle("abort", abort)
+      .handle("retry", retry)
       .handle("supersede", supersede)
       .handle("cancelSupersede", cancelSupersede)
       .handle("aside", aside)

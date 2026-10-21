@@ -7,6 +7,10 @@ export interface Runner<A, E = never> {
   readonly consume: Effect.Effect<void>
   readonly wake: (work: Effect.Effect<A, E>) => Effect.Effect<WakeDecision, E>
   readonly startShell: (work: Effect.Effect<A, E>, ready?: Latch.Latch) => Effect.Effect<A, E | Busy>
+  readonly startIdle: <B, F, R>(
+    work: Effect.Effect<A, E>,
+    guard: Effect.Effect<B | undefined, F, R>,
+  ) => Effect.Effect<StartDecision<B>, E | F, R>
   readonly cancel: Effect.Effect<void>
   readonly locked: <B, F, R>(work: (idle: boolean) => Effect.Effect<B, F, R>) => Effect.Effect<B, F, R>
 }
@@ -14,6 +18,11 @@ export interface Runner<A, E = never> {
 export type WakeDecision =
   | { readonly outcome: "scheduled" | "coalesced"; readonly observedAt: number }
   | { readonly outcome: "ignored" }
+
+export type StartDecision<B> =
+  | { readonly outcome: "started" }
+  | { readonly outcome: "busy" }
+  | { readonly outcome: "rejected"; readonly reason: B }
 
 export class Cancelled extends Schema.TaggedErrorClass<Cancelled>()("RunnerCancelled", {}) {}
 export class Busy extends Schema.TaggedErrorClass<Busy>()("RunnerBusy", {}) {}
@@ -236,6 +245,23 @@ export const make = <A, E = never>(
       }),
     ).pipe(Effect.flatten)
 
+  // The guard runs under the state lock, so its precondition still holds when the run starts.
+  const startIdle = <B, F, R>(
+    work: Effect.Effect<A, E>,
+    guard: Effect.Effect<B | undefined, F, R>,
+  ): Effect.Effect<StartDecision<B>, E | F, R> =>
+    SynchronizedRef.modifyEffect(
+      ref,
+      Effect.fnUntraced(function* (st) {
+        yield* opts?.onAdmission?.(st._tag === "Idle") ?? Effect.void
+        if (st._tag !== "Idle") return [{ outcome: "busy" } as StartDecision<B>, st] as const
+        const reason = yield* guard
+        if (reason !== undefined) return [{ outcome: "rejected", reason } as StartDecision<B>, st] as const
+        const run = yield* startRun(work, yield* Deferred.make<A, E | Cancelled>())
+        return [{ outcome: "started" } as StartDecision<B>, { _tag: "Running", run }] as const
+      }),
+    )
+
   const cancel = SynchronizedRef.modifyEffect(
     ref,
     Effect.fnUntraced(function* (st) {
@@ -279,6 +305,7 @@ export const make = <A, E = never>(
     }),
     wake,
     startShell,
+    startIdle,
     cancel,
     locked: <B, F, R>(work: (idle: boolean) => Effect.Effect<B, F, R>) =>
       SynchronizedRef.modifyEffect(

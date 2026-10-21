@@ -2410,6 +2410,21 @@ export type GlobalSession = {
   project: ProjectSummary | null
 }
 
+export type SessionFailureError = {
+  name: string
+  statusCode?: number
+}
+
+export type SessionFailure = {
+  sessionID: string
+  directory: string
+  messageID: string
+  parentID: string
+  time: number
+  error: SessionFailureError
+  retry: "available" | "unsafe" | "out-of-order"
+}
+
 export type McpResource = {
   name: string
   uri: string
@@ -2734,6 +2749,25 @@ export type InputUpdateConflict = {
 export type AsideError = {
   _tag: "AsideError"
   message: string
+}
+
+export type SessionRetryInput = {
+  messageID: string
+}
+
+export type SessionRetryResult = {
+  outcome:
+    | "accepted"
+    | "running"
+    | "stale"
+    | "not-failed"
+    | "unsafe"
+    | "waiting"
+    | "archived"
+    | "child"
+    | "superseded"
+    | "mismatch"
+  failed?: SessionFailure
 }
 
 export type TextPartInput = {
@@ -8680,6 +8714,35 @@ export type ExperimentalSessionListResponses = {
 
 export type ExperimentalSessionListResponse = ExperimentalSessionListResponses[keyof ExperimentalSessionListResponses]
 
+export type ExperimentalSessionFailedData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/session/failed"
+}
+
+export type ExperimentalSessionFailedErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ExperimentalSessionFailedError = ExperimentalSessionFailedErrors[keyof ExperimentalSessionFailedErrors]
+
+export type ExperimentalSessionFailedResponses = {
+  /**
+   * Failed sessions
+   */
+  200: Array<SessionFailure>
+}
+
+export type ExperimentalSessionFailedResponse =
+  ExperimentalSessionFailedResponses[keyof ExperimentalSessionFailedResponses]
+
 export type ExperimentalSessionBackgroundData = {
   body?: never
   path: {
@@ -11181,6 +11244,40 @@ export type SessionAbortResponses = {
 }
 
 export type SessionAbortResponse = SessionAbortResponses[keyof SessionAbortResponses]
+
+export type SessionRetryData = {
+  body?: SessionRetryInput
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/retry"
+}
+
+export type SessionRetryErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionRetryError = SessionRetryErrors[keyof SessionRetryErrors]
+
+export type SessionRetryResponses = {
+  /**
+   * Retry decision
+   */
+  200: SessionRetryResult
+}
+
+export type SessionRetryResponse = SessionRetryResponses[keyof SessionRetryResponses]
 
 export type SessionCancelSupersedeData = {
   body?: never

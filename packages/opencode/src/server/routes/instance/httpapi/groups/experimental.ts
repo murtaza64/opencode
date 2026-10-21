@@ -3,6 +3,7 @@ import { MCP } from "@/mcp"
 
 import { Session } from "@/session/session"
 import { SessionID } from "@/session/schema"
+import { SessionFailure } from "@/session/failure"
 import { Worktree } from "@/worktree"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { Schema } from "effect"
@@ -111,6 +112,7 @@ export const ExperimentalPaths = {
   worktree: "/experimental/worktree",
   worktreeReset: "/experimental/worktree/reset",
   session: "/experimental/session",
+  sessionFailed: "/experimental/session/failed",
   sessionBackground: "/experimental/session/:sessionID/background",
   resource: "/experimental/resource",
 } as const
@@ -244,6 +246,17 @@ export const ExperimentalApi = HttpApi.make("experimental")
             summary: "List sessions",
             description:
               "Get a list of all OpenCode sessions across projects, sorted by most recently updated. Archived sessions are excluded by default.",
+          }),
+        ),
+        HttpApiEndpoint.get("sessionFailed", ExperimentalPaths.sessionFailed, {
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Array(SessionFailure.Info), "Failed sessions"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.session.failed",
+            summary: "List failed sessions",
+            description:
+              "List unarchived root sessions across projects whose newest message is an assistant step that ended in a non-abort error, without a handoff fence. Returns error names and status codes only.",
           }),
         ),
         HttpApiEndpoint.post("sessionBackground", ExperimentalPaths.sessionBackground, {
