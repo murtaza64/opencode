@@ -40,17 +40,16 @@ try {
   await expect(panel).toContainText("bash (running)")
   await expect(panel.locator("[data-summary-status='ready']")).toContainText(/summary ready · \d+s old: Reviewing ses_a/)
   expect(calls().length).toBe(1) // no fleet fetch on initial render
+  // The hover card shows persisted TODOs, not the generated digest (dotfiles#240): hovering fetches no current work.
   await rowA.hover()
-  await expect(card.locator("[data-section='current-work']")).toContainText("Reviewing ses_a")
-  expect(calls().length).toBe(1) // panel and hover share the request
+  await expect(card).toHaveCount(1)
+  await expect(card).not.toContainText("Reviewing")
   await page.mouse.move(700, 600)
   await rowB.hover()
-  await expect(card).toContainText("Reviewing ses_b")
-  expect(calls().length).toBe(2)
-  await page.mouse.move(700, 600)
-  await rowB.hover()
-  await expect(card).toContainText("Reviewing ses_b")
-  expect(calls().length).toBe(2) // repeated hover cached
+  await expect(card).toHaveCount(1)
+  await expect(card).not.toContainText("Reviewing ses_b")
+  expect(calls("ses_b").length).toBe(0)
+  expect(calls().length).toBe(1)
   await page.mouse.move(700, 600)
   turn.status = "idle"
   turn.elapsed_seconds = 93
@@ -86,7 +85,7 @@ try {
     await second.close()
   }
   expect(fixture.calls.filter(call => !["GET", "HEAD", "OPTIONS"].includes(call.method))).toEqual([])
-  console.log(`PASS current work ${app ? "native" : "browser"}: on-demand/dedup, busy/idle, stale/error/unknown/missing, no fleet or mutations`)
+  console.log(`PASS current work ${app ? "native" : "browser"}: panel on demand, hover card fetches none, busy/idle, stale/error/unknown/missing, no fleet or mutations`)
 } finally {
   await app?.close()
   await browser?.close()

@@ -18,7 +18,7 @@ import SessionInfo from "../components/session-info"
 import { sessionHref, useDashboard, type SessionRow } from "../state"
 import { rightOpen, startDrag } from "../ui"
 import { createVim } from "../vim"
-import { contextUsage, latestCompletedTurn } from "../context-usage"
+import { contextUsage, latestCompletedTurn, tokenCount } from "../context-usage"
 import { getComposer, type ComposerAction } from "../composer"
 import { pendingEcho } from "../pending-echo"
 import { defaultImageCapability, prepareImageFile } from "../image-fit"
@@ -1272,8 +1272,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
         {(u) => (
           <span class="context-pct"
             classList={{ warn: (u().percent ?? 0) >= 70, high: (u().percent ?? 0) >= 90 }}
-            title="context of the last completed turn (input + output + reasoning + cache)">
-            ctx {Math.round(u().tokens / 1000)}k{u().percent != null ? ` (${u().percent}%)` : ""}
+            title="Context of the last completed turn: input, output, reasoning and cache tokens">
+            {tokenCount(u().tokens)}
           </span>
         )}
       </Show>}

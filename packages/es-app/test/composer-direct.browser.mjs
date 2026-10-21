@@ -28,7 +28,7 @@ try {
   await expect(active().locator(".direct-shortcuts")).toHaveCount(0)
   await expect(active().getByLabel("Queue agent", { exact: true })).toBeDisabled()
   await expect(active().locator(".direct-session-actions .direct-active-agent")).toContainText("build")
-  await expect(active().locator(".direct-session-actions .context-pct")).toContainText("ctx 1k")
+  await expect(active().locator(".direct-session-actions .context-pct")).toContainText("1k tokens")
   await expect(active().locator(".direct-controls .context-pct, .direct-controls .direct-active-agent")).toHaveCount(0)
   expect(
     await active()

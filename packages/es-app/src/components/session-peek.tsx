@@ -1,18 +1,26 @@
 /* Sidebar hover card: hover or focus a session row (expanded list or compact
- * rail) and a compact card opens off the row's inline-end edge with exact
- * cumulative cost, latest-turn context (ring = exact %, segments = estimated
- * composition), completed turn count and the session model (plus the latest
- * turn's model when it differs). One card per sidebar, delegated from the
- * nav so pinned/unpinned/archived rows all behave alike; it never changes
- * row layout, so pinned rows keep their position under activity. */
-import { createEffect, createMemo, createResource, createSignal, on, onCleanup, Show } from "solid-js"
+ * rail) and a compact card opens off the row's inline-end edge with the
+ * session's own persisted TODO list and one context number (tokens of the
+ * latest completed turn). The list is watched only while the card is open:
+ * one snapshot read, then the shared todo.updated stream; nothing polls.
+ * One card per sidebar, delegated from the nav so pinned/unpinned/archived
+ * rows all behave alike; it never changes row layout. Phones have no hover:
+ * the session's own Todos panel is the touch equivalent. */
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js"
 import { Portal } from "solid-js/web"
-import { useDashboard, type SessionRow } from "../state"
-import { compactTokens, contextUsage, usageLevel } from "../context-usage"
-import { compositionSlices } from "../context-composition"
-import { cancelInsights, providersFor, sessionInsights } from "../session-insights"
-import { ContextDonut, CompositionDots, ProviderAccounting } from "./context-viz"
-import { CurrentWorkView } from "../current-work"
+import type { Todo } from "@opencode-ai/sdk/v2"
+import { ago, useDashboard, type SessionRow } from "../state"
+import { contextUsage, tokenCount } from "../context-usage"
+import { cancelInsights, sessionInsights } from "../session-insights"
+
+const LIMIT = 5
+const glyph = (status: string) => status === "completed" ? "✓" : status === "in_progress" ? "•" : status === "cancelled" ? "-" : " "
+// In progress first, then pending in list order; finished items collapse to a count.
+const order = (todos: readonly Todo[]) => {
+  const open = [...todos.filter((todo) => todo.status === "in_progress"), ...todos.filter((todo) => todo.status === "pending")]
+    .filter((todo) => todo.content.trim())
+  return { shown: open.slice(0, LIMIT), more: Math.max(0, open.length - LIMIT), done: todos.filter((todo) => todo.status === "completed").length }
+}
 
 const WIDTH = 268
 const GAP = 6
@@ -25,6 +33,7 @@ export const peekAttrs = (s: SessionRow) => ({ "data-peek-id": s.id, "data-peek-
 
 export function SessionPeek(props: { container: () => HTMLElement | undefined }) {
   const { activity, sessionRows, dotFor } = useDashboard()
+  const todos = activity.todos
   const [anchor, setAnchor] = createSignal<Anchor | null>(null)
   const [tick, setTick] = createSignal(0)
   const [height, setHeight] = createSignal(150)
@@ -132,25 +141,37 @@ export function SessionPeek(props: { container: () => HTMLElement | undefined })
     if (!a) return null
     return sessionRows().find((s) => s.id === a.row.id && s.directory === a.row.directory) ?? a.row
   })
-  const global = () => {
-    const r = row()
-    return r ? activity.session(r.id) : undefined
-  }
   const insightsState = createMemo(() => {
     const r = row()
     return r ? sessionInsights(r.id, r.directory, r.updated) : null
   })
   const insights = () => insightsState()?.()
-  const [providers] = createResource(() => row()?.directory, (directory) => providersFor(directory))
-  const usage = createMemo(() => contextUsage(insights()?.value?.latest ?? null, providers()))
-  const slices = createMemo(() => compositionSlices(insights()?.value?.composition))
-  const cost = () => global()?.cost ?? insights()?.value?.cost ?? null
-  const sessionModel = () => global()?.model?.id ?? insights()?.value?.sessionModel ?? undefined
-  const latestModel = () => insights()?.value?.latest?.modelID || undefined
-  const degraded = () => {
-    const v = insights()?.value
-    return !!v && v.source !== "dashboard"
+  // One number from the cached insights read; no provider limit, no breakdown.
+  const usage = createMemo(() => contextUsage(insights()?.value?.latest ?? null, undefined))
+  // Watch the row's TODOs only while its card is open.
+  createEffect(() => {
+    const r = row()
+    if (r) onCleanup(todos.watch(r.id, r.directory))
+  })
+  const entry = () => { const r = row(); const value = r ? todos.get(r.id) : undefined; return value?.directory === r?.directory ? value : undefined }
+  const list = createMemo(() => order(entry()?.todos ?? []))
+  // State only what was observed: the agent's status and when the list was read or updated.
+  const basis = () => {
+    const r = row()
+    const status = r ? activity.status(r.id) : undefined
+    const agent = status === "busy" || status === "retry" ? "agent busy" : status === "idle" ? "agent idle" : "status unknown"
+    const value = entry()
+    const seen = value?.at ? `updated ${ago(value.at)}` : "list read on open"
+    return `${agent} · ${seen}${value?.state === "error" ? " · may be outdated" : ""}`
   }
+
+  // Screen readers announce the card for the focused or hovered row.
+  createEffect(() => {
+    const target = anchor()?.el.querySelector<HTMLElement>("a") ?? anchor()?.el
+    if (!target) return
+    target.setAttribute("aria-describedby", "session-peek")
+    onCleanup(() => target.removeAttribute("aria-describedby"))
+  })
 
   createEffect(() => {
     anchor()
@@ -186,51 +207,24 @@ export function SessionPeek(props: { container: () => HTMLElement | undefined })
           <div class="peek-title">
             <span class={`dot ${dotFor(r())}`} />
             <span class="peek-title-text">{r().title || r().id}</span>
+            <Show when={usage()}>{(u) => <span class="peek-tokens mono" title="Context of the latest completed turn">{tokenCount(u().tokens)}</span>}</Show>
           </div>
-          <div class="peek-body">
-            <ContextDonut percent={usage()?.percent ?? null} tokens={usage()?.tokens ?? null} slices={slices()} />
-            <dl class="peek-facts">
-              <dt>cost</dt>
-              <dd class="mono" data-fact="cost">{cost() != null ? `$${cost()!.toFixed(2)}` : "unknown"}</dd>
-              <dt>turns</dt>
-              <dd class="mono" data-fact="turns">{insights()?.value?.turns != null ? insights()!.value!.turns : insights()?.loading && !insights()?.value ? "…" : "unknown"}</dd>
-              <dt>model</dt>
-              <dd class="mono peek-model" data-fact="model">{sessionModel() ?? "unknown"}</dd>
-              <Show when={latestModel() && latestModel() !== sessionModel()}>
-                <dt>latest</dt>
-                <dd class="mono peek-model" data-fact="latest">{latestModel()}</dd>
+          <Show when={entry()?.state !== "loading" || entry()?.todos.length} fallback={<div class="dim peek-todo-state">Checking TODOs…</div>}>
+            <Show when={entry() && !(entry()!.state === "error" && !entry()!.todos.length)} fallback={<div class="dim peek-todo-state">TODOs unavailable</div>}>
+              <Show when={list().shown.length || list().done} fallback={<div class="dim peek-todo-state">No TODO list</div>}>
+                <ul class="peek-todos" aria-label={`TODOs, ${list().done} done`}>
+                  <For each={list().shown}>{(todo) => (
+                    <li data-status={todo.status}>
+                      <span class="peek-todo-glyph" role="img" aria-label={todo.status.replace("_", " ")}>[{glyph(todo.status)}]</span>
+                      <bdi dir="auto">{todo.content}</bdi>
+                    </li>
+                  )}</For>
+                  <Show when={list().more}><li class="dim peek-todo-more">+{list().more} more</li></Show>
+                  <Show when={list().done}><li class="dim peek-todo-done"><span class="peek-todo-glyph" aria-hidden="true">✓</span>{list().done} done</li></Show>
+                </ul>
+                <div class="peek-todo-basis">{basis()}</div>
               </Show>
-            </dl>
-          </div>
-          <CurrentWorkView id={r().id} directory={r().directory} compact />
-          <div class="peek-context" classList={{ warn: usageLevel(usage()?.percent) === "warn", high: usageLevel(usage()?.percent) === "high" }}>
-            <Show when={usage()} fallback={
-              <span class="dim">{insights()?.loading && !insights()?.value ? "loading context…" : "latest turn context unknown"}</span>
-            }>{(u) => (
-              <span>
-                <span class="mono">ctx {compactTokens(u().tokens)}</span>
-                <Show when={u().limit} fallback={<span class="dim"> · limit unknown</span>}>
-                  <span class="dim"> / {compactTokens(u().limit!)}</span>
-                </Show>
-                <span class="dim"> · exact, latest turn</span>
-              </span>
-            )}</Show>
-          </div>
-          <ProviderAccounting tokens={usage() ? insights()?.value?.latest?.tokens : null} compact />
-          <Show when={slices().length}>
-            <div class="ctx-subheading">estimated visible content</div>
-            <CompositionDots slices={slices()} />
-          </Show>
-          <div class="ctx-caption">
-            {insights()?.value?.composition
-              ? `${insights()!.value!.composition!.basis === "since_compaction" ? "since last completed compaction" : "full stored visible history (no compaction marker)"} · chars ÷ 4; shares of visible estimate only`
-              : "visible estimate unknown"}
-            {" · hidden instructions, cache and provider tokens cannot be allocated to content sources"}
-          </div>
-          <Show when={degraded() && !insights()?.loading}>
-            <div class="ctx-caption peek-degraded">
-              {insights()?.value?.source === "tail" ? "insights API offline: turns and composition unavailable" : insights()?.value?.error ?? "insights unavailable"}
-            </div>
+            </Show>
           </Show>
         </div>
       </Portal>
