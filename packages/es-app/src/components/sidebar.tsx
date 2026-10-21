@@ -12,6 +12,8 @@ import { nativeHeader, NativeHeader } from "./native-header"
 import { NewSession } from "./new-session"
 import { peekAttrs, SessionPeek } from "./session-peek"
 import { CloudNav, CloudDiscovery } from "./cloud-sidebar"
+import { ResumeAllFailed } from "./session-failure"
+import { failureLabel } from "../session-failures"
 
 const BusyDot = () => {
   const [visible, setVisible] = createSignal(false)
@@ -29,8 +31,9 @@ const BusyDot = () => {
     data-on={enabled() ? String(!!(tick() % 2)) : undefined} />
 }
 
-const StatusDot = (props: { state: DotState }) => (
-  <Show when={props.state === "busy"} fallback={<span class={`dot ${props.state}`} />}>
+const StatusDot = (props: { state: DotState; label?: string }) => (
+  <Show when={props.state === "busy"} fallback={<span class={`dot ${props.state}`}
+    {...(props.state === "failed" ? { role: "img", "aria-label": props.label ?? "Failed" } : {})} />}>
     <BusyDot />
   </Show>
 )
@@ -38,8 +41,12 @@ const StatusDot = (props: { state: DotState }) => (
 export default function Sidebar() {
   const { state, dotFor, editspace, setEditspace, editspaces, archivedIds, notifications, markViewed,
     allProjects, setAllProjects, sessionRows, sessions, pinnedSessions, unpinnedSessions, isPinned, togglePin,
-    sessionsLoading, sessionsError, setVisibleSessions, cloud } =
+    sessionsLoading, sessionsError, setVisibleSessions, cloud, failures } =
     useDashboard()
+  const dotText = (s: SessionRow, dot: DotState) => {
+    const failure = dot === "failed" ? failures.failure(s.id) : undefined
+    return failure ? `failed: ${failureLabel(failure)}` : dot
+  }
   const observed = new Map<Element, string>()
   const visible = new Set<Element>()
   let published = new Set<string>()
@@ -172,10 +179,10 @@ export default function Sidebar() {
       href={sessionHref(s.id, s.directory)}
       activeClass="active"
       class="nav-item archived"
-      title={`${s.title} (${dot()})${allProjects() ? ` · ${s.directory}` : ""}`}
+      title={`${s.title} (${dotText(s, dot())})${allProjects() ? ` · ${s.directory}` : ""}`}
       {...peekAttrs(s)}
     >
-      <StatusDot state={dot()} />
+      <StatusDot state={dot()} label={dotText(s, dot())} />
       <span class="nav-title">{s.title || s.id}</span>
       <Show when={allProjects()}><span class="session-project">{s.project}</span></Show>
     </A>
@@ -186,9 +193,9 @@ export default function Sidebar() {
         href={sessionHref(s.id, s.directory)}
         activeClass="active"
         class="nav-item"
-        title={`${s.title} (${dot()})${allProjects() ? ` · ${s.directory}` : ""}`}
+        title={`${s.title} (${dotText(s, dot())})${allProjects() ? ` · ${s.directory}` : ""}`}
       >
-        <StatusDot state={dot()} />
+        <StatusDot state={dot()} label={dotText(s, dot())} />
         <span class="nav-title">{s.title || s.id}</span>
         <Show when={allProjects()}><span class="session-project">{s.project}</span></Show>
       </A>
@@ -206,8 +213,8 @@ export default function Sidebar() {
     <div class="mini-session" {...peekAttrs(s)}>
       <A ref={(el) => observeSession(el, s.id)} href={sessionHref(s.id, s.directory)}
         activeClass="active" class="mini-item"
-        title={`${s.title} (${dot()})${allProjects() ? ` · ${s.project}` : ""}`}>
-        <StatusDot state={dot()} />
+        title={`${s.title} (${dotText(s, dot())})${allProjects() ? ` · ${s.project}` : ""}`}>
+        <StatusDot state={dot()} label={`${s.title || s.id}: ${dotText(s, dot())}`} />
       </A>
       <button type="button" class="mini-pin" classList={{ pinned: isPinned(s) }}
         aria-label={`${isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
@@ -306,6 +313,7 @@ export default function Sidebar() {
             </For>
           </div>
         </Show>
+        <ResumeAllFailed />
         <div class="search-box">
           <input
             class="search-input"

@@ -144,6 +144,41 @@ export const getComposer = (sessionID: string, directory: string): Composer => {
   return composer
 }
 
+/**
+ * Why a failed-turn Retry must wait: a human send whose admission is unresolved could
+ * still land, and retrying first would reorder or obscure it. Reads saved state for
+ * sessions whose composer is not open; unreadable saved state blocks like an unknown send.
+ */
+export const unresolvedSend = (
+  sessionID: string,
+  directory: string,
+  storage: () => Pick<Storage, "getItem"> | null = () =>
+    typeof window === "undefined" ? null : composerStorage(navigator.userAgent, window.sessionStorage, () => window.localStorage),
+) => {
+  const live = controllers.get(storageKey(sessionID, directory))
+  if (live?.restoreError()) return "Saved composer state could not be restored. Check the conversation first."
+  const saved = live ? undefined : readSubmission(storage, storageKey(sessionID, directory))
+  if (saved === "unreadable") return "Saved composer state is unreadable. Open the session and check the conversation first."
+  const submission = live ? live.state.normalSubmission : saved?.normalSubmission
+  if (live?.state.sending || submission?.status === "sending") return "A message is still being sent."
+  if (submission?.status === "unknown") return "A previous Send outcome is unknown. Check the conversation first."
+  if (live ? live.state.admission : saved?.admission) return "An input admission is unresolved. Reconcile it first."
+  return ""
+}
+
+// undefined = nothing saved for this session; "unreadable" = saved state exists or may exist but cannot be read.
+const readSubmission = (storage: () => Pick<Storage, "getItem"> | null, key: string) => {
+  try {
+    const raw = storage()?.getItem(key)
+    if (raw == null) return undefined
+    const value: unknown = JSON.parse(raw)
+    if (!value || typeof value !== "object") return "unreadable" as const
+    return value as Partial<Pick<ComposerState, "normalSubmission" | "admission">>
+  } catch {
+    return "unreadable" as const
+  }
+}
+
 export const createComposer = (sessionID: string, directory: string, dependencies: ComposerDependencies = {}) => {
   const request = dependencies.fetch ?? ((url, init) => fetch(url, init))
   const prompt = dependencies.prompt ?? oc.prompt
@@ -1389,6 +1424,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
   }
   return {
     state,
+    restoreError: () => restoreError,
     persistAsync,
     persistForRecovery: () => persistAsync(true),
     // Resolves once saved image refs are restored into the in-memory drafts.

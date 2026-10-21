@@ -2001,3 +2001,16 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 }
 .session-panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .session-panel-close { display: flex; justify-content: flex-end; }
+
+/* failed turn: red, distinct from idle grey and unknown/offline (no dot change) */
+.dot.failed { background: var(--red); }
+.failure-retry { display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.failure-retry-button { font-size: 12px; padding: 1px 8px; border: 1px solid var(--red); color: var(--red); background: transparent; cursor: pointer; }
+.failure-retry-button:disabled { opacity: 0.6; cursor: default; }
+.failure-note { font-size: 12px; color: var(--subtext0); overflow-wrap: anywhere; white-space: normal; }
+.failed-section { margin: 6px 0; padding: 6px 8px; border-inline-start: 2px solid var(--red); font-size: 12.5px; }
+.failed-heading { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.failed-report { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; position: relative; padding-inline-end: 18px; }
+.failure-dismiss { position: absolute; inset-inline-end: 0; top: 0; background: none; border: 0; color: var(--subtext0); cursor: pointer; }
+.home-name .dot.failed { margin-inline-end: 6px; }
+.home-failed { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--red); }

@@ -19,12 +19,13 @@ import { resolveProjectName } from "./project-name"
 import { reconcilePins, transferPins, type Handoff } from "./handoffs"
 import { pinSessionID } from "./session-pins"
 import { createCloudAgents } from "./cloud-agents"
-import type { GlobalSession } from "@opencode-ai/sdk/v2"
+import { createSessionFailures } from "./session-failures"
+import type { GlobalSession, SessionFailure } from "@opencode-ai/sdk/v2"
 import type { Event } from "@opencode-ai/sdk/v2"
 import { useLocation } from "@solidjs/router"
 export { linkUrl } from "./link-url"
 
-export type DotState = "pending" | "busy" | "unread" | "idle"
+export type DotState = "pending" | "busy" | "failed" | "unread" | "idle"
 
 export type SessionRow = {
   id: string
@@ -71,6 +72,10 @@ type DashboardCtx = {
   sessionsLoading: () => boolean
   sessionsError: () => string
   activity: ReturnType<typeof createSessionActivity>
+  failures: ReturnType<typeof createSessionFailures>
+  /** Failed sessions in the current sidebar scope, excluding es handoff predecessors. */
+  scopedFailures: () => SessionFailure[]
+  handedOff: (sessionID: string) => boolean
   cloud: ReturnType<typeof createCloudAgents>
   setVisibleSessions: (ids: Set<string>) => void
 }
@@ -221,9 +226,18 @@ export function DashboardProvider(props: ParentProps) {
     mutateGlobal((previous) => merge(previous ?? [], [[info.id, { session }]]))
     return true
   }
+  const failures = createSessionFailures()
+  void failures.refresh()
+  const failureInterval = setInterval(() => void failures.refresh(), 60_000)
+  onCleanup(() => {
+    clearInterval(failureInterval)
+    failures.dispose()
+  })
   const activity = createSessionActivity(() => globalSessions() ?? [], refetchGlobal, {
     directories: relevantDirectories,
     sessionEvent,
+    observe: failures.observe,
+    reconnected: () => void failures.refresh(),
   })
   createEffect(() => {
     const notifications = notificationState()?.notifications
@@ -414,9 +428,16 @@ export function DashboardProvider(props: ParentProps) {
     if (activity.running(s.id).length) return "busy"
     const status = activity.status(s.id) ?? s.live
     if (status === "busy" || status === "retry") return "busy"
+    if (failures.failure(s.id) && !handedOff(s.id)) return "failed"
     if (s.updated && s.updated > (viewed()[s.id] ?? 0)) return "unread"
     return "idle"
   }
+  // Core excludes fenced predecessors; es lane receipts can record a handoff Core never fenced.
+  const handedOff = (sessionID: string) => lineage().some((edge) => edge.predecessor === sessionID)
+  const scopedFailures = createMemo(() => {
+    const scope = new Set(sessions().map((s) => s.id))
+    return failures.items().filter((item) => scope.has(item.sessionID) && failures.failure(item.sessionID) && !handedOff(item.sessionID))
+  })
   const rawNotifications = createMemo(() => {
     const requests: AttentionNotification[] = activity.requests().map((item) => {
       const parent = activity.root(item.request.sessionID)
@@ -516,6 +537,9 @@ export function DashboardProvider(props: ParentProps) {
     sessionsLoading: () => allProjects() && globalSessions.loading,
     sessionsError,
     activity,
+    failures,
+    scopedFailures,
+    handedOff,
     cloud,
     setVisibleSessions,
   }

@@ -135,6 +135,11 @@ test("API surface excludes direct shell, PTY, file, and config access", () => {
   expect(apiAllowed("GET", "/oc/session/ses_a/todo")).toBe(true)
   expect(apiAllowed("POST", "/oc/session/ses_a/todo")).toBe(false)
   expect(apiAllowed("GET", "/oc/session/ses_a/todo/x")).toBe(false)
+  // failed-turn recovery: read the durable list, retry one exact failure
+  expect(apiAllowed("GET", "/oc/experimental/session/failed")).toBe(true)
+  expect(apiAllowed("POST", "/oc/session/ses_a/retry")).toBe(true)
+  expect(apiAllowed("GET", "/oc/session/ses_a/retry")).toBe(false)
+  expect(apiAllowed("POST", "/oc/experimental/session/failed")).toBe(false)
 })
 
 test("rejects unauthenticated, cross-origin, and foreign Host requests", async () => {
