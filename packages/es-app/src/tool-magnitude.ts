@@ -81,11 +81,12 @@ export const sizeDistribution = (items: ToolMagnitude[]) => {
   })
   const unknown = items.length - counts.reduce((sum, count) => sum + count, 0)
   const bins = SIZE_CLASSES.flatMap((size, rank) => counts[rank] ? [{ size, count: counts[rank]! }] : [])
-  const text = [...bins.map((bin) => `${bin.size}×${bin.count}`), ...(unknown ? [`?×${unknown}`] : [])].join(" · ")
+  const labels = [...bins.map((bin) => `${bin.size}×${bin.count}`), ...(unknown ? [`?×${unknown}`] : [])]
+  const text = labels.join(" · ")
   const label = `Size distribution of ${items.length} calls: ` +
     [...bins.map((bin) => `${bin.count} ${bin.size}`), ...(unknown ? [`${unknown} not sized (${[...reasons].map(([reason, count]) => `${reason} ×${count}`).join("; ")})`] : [])].join(", ") +
     (attachments ? `; attachments in ${attachments} call(s) not counted` : "")
-  return { bins, unknown, attachments, text, label }
+  return { bins, unknown, attachments, labels, text, label }
 }
 
 export const chars = (value: number) => value < 1000 ? String(value) : `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}k`

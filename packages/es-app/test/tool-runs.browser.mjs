@@ -374,12 +374,12 @@ const narrow = async () => {
   }
 }
 
-// A 60-call batch with multi-digit counts in every bin wraps between bins at 320px.
+// A 600-call batch with three-digit counts in every bin wraps between bins at 320px.
 const narrowDistribution = async () => {
   const wide = await startToolRunsPreview(0)
   const outputs = [10, 2_000, 5_000, 15_000, 40_000]
-  const calls = Array.from({ length: 60 }, (_, index) => {
-    const id = `prt_w${String(index).padStart(2, "0")}`
+  const calls = Array.from({ length: 600 }, (_, index) => {
+    const id = `prt_w${String(index).padStart(3, "0")}`
     const bin = index % 6
     return bin === 5 ? wide.tool(id, "bash", { command: "yes" }, "y", { metadata: { exit: 0, truncated: true } })
       : wide.tool(id, "read", { filePath: `/w/${index}` }, "x".repeat(outputs[bin]))
@@ -397,13 +397,9 @@ const narrowDistribution = async () => {
   try {
     await page.goto(wide.url, { waitUntil: "domcontentloaded" })
     const sizes = page.locator(".tool-run .tool-run-sizes")
-    await expect(sizes).toHaveText("XS×10 · S×10 · M×10 · L×10 · XL×10 · ?×10", { timeout: 30_000 })
-    // Second pass squeezes the row narrower than the bin string to force wrapping.
-    for (const [dir, squeeze] of [["ltr", false], ["rtl", false], ["ltr", true], ["rtl", true]]) {
-      await page.evaluate(([value, narrow]) => {
-        document.documentElement.dir = value
-        document.querySelector(".tool-run").style.maxInlineSize = narrow ? "200px" : ""
-      }, [dir, squeeze])
+    await expect(sizes).toHaveText("XS×100 · S×100 · M×100 · L×100 · XL×100 · ?×100", { timeout: 60_000 })
+    for (const dir of ["ltr", "rtl"]) {
+      await page.evaluate((value) => { document.documentElement.dir = value }, dir)
       await sizes.scrollIntoViewIfNeeded()
       const box = await page.locator(".tool-run .tool-run-summary").evaluate((element) => {
         const rect = element.getBoundingClientRect()
@@ -416,8 +412,7 @@ const narrowDistribution = async () => {
           clipped: field.scrollWidth - field.clientWidth, fieldRight: field.getBoundingClientRect().right, fieldLeft: field.getBoundingClientRect().left,
           lines, page: document.documentElement.scrollWidth - document.documentElement.clientWidth }
       })
-      // At 320px the six bins fit on their own line; the squeezed pass must wrap.
-      if (squeeze) expect(box.lines).toBeGreaterThan(1)
+      expect(box.lines).toBeGreaterThan(1)
       expect(box.overflow).toBeLessThanOrEqual(0)
       expect(box.clipped).toBeLessThanOrEqual(0)
       expect(box.page).toBeLessThanOrEqual(0)
@@ -425,24 +420,10 @@ const narrowDistribution = async () => {
       expect(box.fieldRight).toBeLessThanOrEqual(box.right + 1)
       expect(box.right).toBeLessThanOrEqual(box.width)
       // No bin label is split across lines.
-      const split = await sizes.evaluate((element) => {
-        const text = element.firstChild
-        const tops = [...text.textContent].map((_, index) => {
-          const range = document.createRange()
-          range.setStart(text, index)
-          range.setEnd(text, index + 1)
-          return range.getBoundingClientRect().top
-        })
-        let offset = 0
-        return text.textContent.split(" · ").filter((label) => {
-          const first = tops[offset]
-          const last = tops[offset + label.length - 1]
-          offset += label.length + 3
-          return Math.abs(first - last) > 1
-        })
-      })
+      const split = await sizes.evaluate((element) => [...element.querySelectorAll(".tool-run-bin")]
+        .filter((bin) => bin.getClientRects().length !== 1).map((bin) => bin.textContent))
       expect(split).toEqual([])
-      await shot(page, `narrow-distribution-${dir}${squeeze ? "-squeezed" : ""}`)
+      await shot(page, `narrow-distribution-${dir}`)
     }
   } finally {
     await context.close()

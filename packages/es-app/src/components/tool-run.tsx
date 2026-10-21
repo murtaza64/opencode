@@ -46,7 +46,10 @@ export const ToolRun = (props: {
       <span class="tool-run-disclosure" aria-hidden="true">›</span>
       <span class="tool-run-kind"><bdi dir="auto">{props.run.members.length} tool calls</bdi></span>
       <span class="tool-run-tools" dir="ltr" title={summary().tools}>{summary().tools}</span>
-      <span class="tool-run-sizes" dir="ltr" title={`${sizes().label}\n${SIZE_LEGEND}`}>{sizes().text}</span>
+      <span class="tool-run-sizes" dir="ltr" title={`${sizes().label}\n${SIZE_LEGEND}`}>
+        {/* Each bin is unbreakable, so wrapping happens only between bins. */}
+        <For each={sizes().labels}>{(bin, index) => <>{index() ? " · " : ""}<span class="tool-run-bin">{bin}</span></>}</For>
+      </span>
       <Show when={summary().notes.length}><span class="tool-run-notes" dir="auto">{summary().notes.join(" · ")}</span></Show>
       <Show when={summary().span}>{(span) => <span class="tool-run-span" dir="ltr" title={summary().spanLabel}>{span()}</span>}</Show>
     </button>
