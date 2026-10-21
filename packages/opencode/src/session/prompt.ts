@@ -35,6 +35,7 @@ import { Tool } from "@/tool/tool"
 import { Permission } from "@/permission"
 import { Question } from "@/question"
 import { SessionFailure } from "./failure"
+import { SessionRestart } from "./restart"
 import { SessionStatus } from "./status"
 import { LLM } from "./llm"
 import { Shell } from "@opencode-ai/core/shell"
@@ -110,6 +111,14 @@ export interface Interface {
   readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error | SessionSupersession.Closed>
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts, SessionSupersession.Closed>
   readonly retry: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<SessionFailure.RetryResult, Session.NotFound>
+  readonly restartContinue: (
+    input: { sessionID: SessionID } & SessionRestart.ContinuePayload,
+  ) => Effect.Effect<SessionRestart.ContinueResult, Session.NotFound>
+  readonly restartStatus: (input: {
+    sessionID: SessionID
+    restartID: string
+    anchorMessageID: MessageID
+  }) => Effect.Effect<SessionRestart.Status, Session.NotFound>
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError | SessionSupersession.Closed>
   readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error | SessionSupersession.Closed>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
@@ -1439,6 +1448,86 @@ const layer = Layer.effect(
       return decision.reason
     })
 
+    const restartAnchor = (sessionID: SessionID, messageID: MessageID) =>
+      MessageV2.get({ sessionID, messageID }).pipe(
+        Effect.provideService(Database.Service, database),
+        Effect.map((message) => (message.info.sessionID === sessionID ? message : undefined)),
+        Effect.catchTag("NotFoundError", () => Effect.succeed(undefined)),
+      )
+
+    // Continue work a controlled daemon restart interrupted, as system provenance rather than a prompt.
+    // The idempotency record is the marker on the anchor, written under the Session's runner lock
+    // together with the drain start, so a lost acknowledgment or a concurrent repeat reports
+    // `duplicate` instead of starting a second continuation.
+    const restartContinue = Effect.fn("SessionPrompt.restartContinue")(function* (
+      input: { sessionID: SessionID } & SessionRestart.ContinuePayload,
+    ) {
+      const ctx = yield* InstanceState.context
+      const session = yield* sessions.get(input.sessionID)
+      // Set by the guard only when it admits the drain, which starts in the same locked step.
+      let scheduled: SessionV1.RestartContinuation | undefined
+      const duplicate = Effect.gen(function* () {
+        const marker = (yield* restartAnchor(input.sessionID, input.anchorMessageID))?.info.restarts?.find(
+          (item) => item.restartID === input.restartID,
+        )
+        return marker ? { outcome: "duplicate" as const, marker } : undefined
+      })
+      const guard = Effect.gen(function* () {
+        if (session.directory !== ctx.directory) return { outcome: "mismatch" as const }
+        const fresh = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+        if (fresh.parentID) return { outcome: "child" as const }
+        if (fresh.time.archived) return { outcome: "archived" as const }
+        const repeated = yield* duplicate
+        if (repeated) return repeated
+        if (fresh.revert) return { outcome: "stale" as const }
+        const waiting =
+          (yield* permission.list()).some((item) => item.sessionID === input.sessionID) ||
+          (yield* questions.list()).some((item) => item.sessionID === input.sessionID)
+        if (waiting) return { outcome: "running" as const }
+        const history = yield* MessageV2.filterCompactedEffect(input.sessionID).pipe(
+          Effect.provideService(Database.Service, database),
+        )
+        const latest = MessageV2.latest(history)
+        const now = Date.now()
+        const decision = SessionRestart.decide({
+          payload: input,
+          now,
+          anchor: yield* restartAnchor(input.sessionID, input.anchorMessageID),
+          newest: {
+            byTime: (yield* sessions.messages({ sessionID: input.sessionID, limit: 1 }).pipe(Effect.orDie)).at(-1)?.info.id,
+            byInsertion: yield* SessionFailure.lastInserted(input.sessionID).pipe(Effect.provideService(Database.Service, database)),
+          },
+          turn: { user: latest.user, assistant: history.findLast((item) => item.info.id === latest.assistant?.id) },
+          pendingInput: (yield* inputs.list(input.sessionID, { state: "pending", limit: 1 })).items.length > 0,
+        })
+        if (decision.outcome !== "scheduled" && decision.outcome !== "uncertain") return { outcome: decision.outcome }
+        yield* sessions.updateMessage(SessionRestart.settle(decision, now))
+        if (decision.outcome === "uncertain") return { outcome: "uncertain" as const, marker: decision.marker }
+        scheduled = decision.marker
+        return undefined
+      })
+      const decision = yield* state.startIdle(input.sessionID, runLoop(input.sessionID), guard).pipe(
+        Effect.catchTag("SessionSuperseded", () => Effect.succeed({ outcome: "superseded" as const })),
+      )
+      if (decision.outcome === "started") return { outcome: "scheduled" as const, marker: scheduled }
+      if (decision.outcome === "busy") return (yield* duplicate) ?? { outcome: "running" as const }
+      if (decision.outcome === "superseded") return { outcome: "superseded" as const }
+      return decision.reason
+    })
+
+    const restartStatus = Effect.fn("SessionPrompt.restartStatus")(function* (input: {
+      sessionID: SessionID
+      restartID: string
+      anchorMessageID: MessageID
+    }) {
+      yield* sessions.get(input.sessionID)
+      const marker = (yield* restartAnchor(input.sessionID, input.anchorMessageID))?.info.restarts?.find(
+        (item) => item.restartID === input.restartID,
+      )
+      const inserted = yield* SessionFailure.lastInserted(input.sessionID).pipe(Effect.provideService(Database.Service, database))
+      return { ...(marker ? { marker } : {}), later: inserted !== undefined && inserted !== input.anchorMessageID }
+    })
+
     const shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError | SessionSupersession.Closed> = Effect.fn(
       "SessionPrompt.shell",
     )(function* (input: ShellInput) {
@@ -1579,6 +1668,8 @@ const layer = Layer.effect(
     return Service.of({
       wake,
       retry,
+      restartContinue,
+      restartStatus,
       cancel,
       prompt,
       loop,

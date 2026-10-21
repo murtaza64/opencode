@@ -1309,6 +1309,15 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .turn-summary .agent { color: var(--text); }
 .turn-summary.interrupted .marker,
 .turn-summary.interrupted .agent { color: var(--overlay0); }
+/* System provenance, not a message: a single dim line, never a bubble. */
+.restart-marker {
+  color: var(--overlay1);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  margin: -8px 0 14px;
+}
+.restart-marker::before { content: "↻ "; color: var(--overlay0); }
+.restart-marker[data-state="uncertain"] { color: var(--yellow); }
 .conversation-error {
   margin: 8px 0 12px;
   border-inline-start: 2px solid var(--red);

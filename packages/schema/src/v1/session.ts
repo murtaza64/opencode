@@ -326,9 +326,22 @@ export type ToolPart = Omit<Types.DeepMutable<Schema.Schema.Type<typeof ToolPart
   state: ToolState
 }
 
+// System provenance for a daemon-restart continuation, carried by the newest message the restart
+// interrupted. It is never model history and never user intent; `outcome` records only what the
+// server decided at admission, so whether the continuation produced output is read from later messages.
+export const RestartContinuation = Schema.Struct({
+  restartID: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+  outcome: Schema.Literals(["scheduled", "uncertain"]),
+  reason: Schema.optional(Schema.Literals(["interrupted-tool", "aborted", "out-of-order"])),
+  interruptedTools: NonNegativeInt,
+  time: NonNegativeInt,
+}).annotate({ identifier: "RestartContinuation" })
+export type RestartContinuation = Types.DeepMutable<Schema.Schema.Type<typeof RestartContinuation>>
+
 const messageBase = {
   id: MessageID,
   sessionID: partBase.sessionID,
+  restarts: Schema.optional(Schema.Array(RestartContinuation)),
 }
 
 export const User = Schema.Struct({

@@ -12,6 +12,7 @@ import { SessionCompaction } from "@/session/compaction"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionFailure } from "@/session/failure"
+import { SessionRestart } from "@/session/restart"
 import { SessionInput } from "@/session/input"
 import { SessionRevert } from "@/session/revert"
 import { SessionRunState } from "@/session/run-state"
@@ -297,6 +298,26 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     }) {
       return yield* SessionError.mapStorageNotFound(
         promptSvc.retry({ sessionID: ctx.params.sessionID, messageID: ctx.payload.messageID }),
+      )
+    })
+
+    const restartContinue = Effect.fn("SessionHttpApi.restartContinue")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof SessionRestart.ContinuePayload.Type
+    }) {
+      return yield* SessionError.mapStorageNotFound(promptSvc.restartContinue({ sessionID: ctx.params.sessionID, ...ctx.payload }))
+    })
+
+    const restartStatus = Effect.fn("SessionHttpApi.restartStatus")(function* (ctx: {
+      params: { sessionID: SessionID }
+      query: { restartID: string; anchorMessageID: MessageID }
+    }) {
+      return yield* SessionError.mapStorageNotFound(
+        promptSvc.restartStatus({
+          sessionID: ctx.params.sessionID,
+          restartID: ctx.query.restartID,
+          anchorMessageID: ctx.query.anchorMessageID,
+        }),
       )
     })
 
@@ -615,6 +636,8 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handleRaw("fork", forkRaw)
       .handle("abort", abort)
       .handle("retry", retry)
+      .handle("restartContinue", restartContinue)
+      .handle("restartStatus", restartStatus)
       .handle("supersede", supersede)
       .handle("cancelSupersede", cancelSupersede)
       .handle("aside", aside)

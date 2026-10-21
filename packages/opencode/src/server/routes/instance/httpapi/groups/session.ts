@@ -8,6 +8,7 @@ import { SessionAside } from "@/session/aside"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionFailure } from "@/session/failure"
+import { SessionRestart } from "@/session/restart"
 import { SessionInput } from "@/session/input"
 import { SessionRevert } from "@/session/revert"
 import { SessionStatus } from "@/session/status"
@@ -59,6 +60,11 @@ export const MessagesQuery = Schema.Struct({
   summaryPatches: Schema.optional(QueryBoolean).annotate({
     description: "Include user-summary patch text (default true).",
   }),
+})
+export const RestartStatusQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  restartID: SessionRestart.RestartID,
+  anchorMessageID: MessageID,
 })
 export const StatusMap = Schema.Record(Schema.String, SessionStatus.Info)
 export const InputsQuery = Schema.Struct({
@@ -125,6 +131,7 @@ export const SessionPaths = {
   fork: `${root}/:sessionID/fork`,
   abort: `${root}/:sessionID/abort`,
   retry: `${root}/:sessionID/retry`,
+  restart: `${root}/:sessionID/restart`,
   supersede: `${root}/:sessionID/supersede`,
   aside: `${root}/:sessionID/aside`,
   cancelAside: `${root}/:sessionID/aside/:requestID`,
@@ -393,6 +400,33 @@ export const SessionApi = HttpApi.make("session")
             summary: "Retry a failed turn",
             description:
               "Continue a root session whose newest message is the given failed assistant step, without adding a user message. Starts only while the session is idle and that step is still newest; otherwise reports why it did not start. Steps that ran tools are never retried.",
+          }),
+        ),
+        HttpApiEndpoint.post("restartContinue", SessionPaths.restart, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: SessionRestart.ContinuePayload,
+          success: described(SessionRestart.ContinueResult, "Restart continuation decision"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.restart.continue",
+            summary: "Continue work interrupted by a daemon restart",
+            description:
+              "Idempotently continue a root session whose newest message is still the anchor captured before a controlled restart, without adding a user message. Interrupted tool calls are settled as errors and never re-executed; failed turns, advanced sessions and uncertain interruptions are reported without starting. The decision is recorded as a model-hidden marker on the anchor, so repeating the same restartID reports `duplicate`.",
+          }),
+        ),
+        HttpApiEndpoint.get("restartStatus", SessionPaths.restart, {
+          params: { sessionID: SessionID },
+          query: RestartStatusQuery,
+          success: described(SessionRestart.Status, "Recorded restart continuation"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.restart.status",
+            summary: "Read a restart continuation record",
+            description:
+              "Read-only reconciliation for a restart continuation whose acknowledgment was lost: returns the marker recorded for restartID on the anchor, if any, and whether newer messages exist.",
           }),
         ),
         HttpApiEndpoint.post("supersede", SessionPaths.supersede, {

@@ -226,6 +226,11 @@ import type {
   SessionPromptAsyncResponses,
   SessionPromptErrors,
   SessionPromptResponses,
+  SessionRestartContinueErrors,
+  SessionRestartContinueInput,
+  SessionRestartContinueResponses,
+  SessionRestartStatusErrors,
+  SessionRestartStatusResponses,
   SessionRetryErrors,
   SessionRetryInput,
   SessionRetryResponses,
@@ -3644,6 +3649,91 @@ export class Input extends HeyApiClient {
   }
 }
 
+export class Restart extends HeyApiClient {
+  /**
+   * Read a restart continuation record
+   *
+   * Read-only reconciliation for a restart continuation whose acknowledgment was lost: returns the marker recorded for restartID on the anchor, if any, and whether newer messages exist.
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      restartID: string
+      anchorMessageID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "restartID" },
+            { in: "query", key: "anchorMessageID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      SessionRestartStatusResponses,
+      SessionRestartStatusErrors,
+      ThrowOnError
+    >({
+      url: "/session/{sessionID}/restart",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Continue work interrupted by a daemon restart
+   *
+   * Idempotently continue a root session whose newest message is still the anchor captured before a controlled restart, without adding a user message. Interrupted tool calls are settled as errors and never re-executed; failed turns, advanced sessions and uncertain interruptions are reported without starting. The decision is recorded as a model-hidden marker on the anchor, so repeating the same restartID reports `duplicate`.
+   */
+  public continue<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      sessionRestartContinueInput?: SessionRestartContinueInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "sessionRestartContinueInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      SessionRestartContinueResponses,
+      SessionRestartContinueErrors,
+      ThrowOnError
+    >({
+      url: "/session/{sessionID}/restart",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Session2 extends HeyApiClient {
   /**
    * List sessions
@@ -4822,6 +4912,11 @@ export class Session2 extends HeyApiClient {
   private _input?: Input
   get input(): Input {
     return (this._input ??= new Input({ client: this.client }))
+  }
+
+  private _restart?: Restart
+  get restart(): Restart {
+    return (this._restart ??= new Restart({ client: this.client }))
   }
 }
 
