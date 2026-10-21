@@ -7,7 +7,7 @@ import { ActivityBriefView } from "../components/activity-brief"
 import type { ActivityBriefInput } from "../activity-brief"
 import { createAttention, type AttentionRecord } from "../attention"
 import { AttentionDecision, type AttentionView } from "../components/attention-decision"
-import { createHomeRequests, requestKey, type HomeRequest } from "../home-requests"
+import { createHomeRequests, requestKey, requestPointers, type HomeRequest } from "../home-requests"
 import HomeActivity from "../home-activity"
 import { FailureRetry } from "../components/session-failure"
 import { failureLabel } from "../session-failures"
@@ -48,15 +48,7 @@ export default function Home() {
   const [view, setView] = createSignal<AttentionView>("open")
   const [cloudCount, setCloudCount] = createSignal(0)
   const [cloudActivity, setCloudActivity] = createSignal<HomeActivityRow[]>([])
-  const sourcePointers = createMemo<HomeRequest[]>(() => {
-    const projectFor = (directory: string) => dashboard.editspaces()?.editspaces.find(item => {
-      const root = item.root.replace(/\/+$/, "").replace(/\/\.editspace$/, "")
-      return directory === root || directory.startsWith(`${root}/`)
-    })?.name
-    const direct = dashboard.activity.requests().map(item => ({ kind: item.kind, id: item.request.id, session: item.request.sessionID, directory: item.directory, project: projectFor(item.directory), title: dashboard.activity.session(item.request.sessionID)?.title ?? item.request.sessionID }))
-    const hints = dashboard.notifications().filter(item => item.kind !== "idle").map(item => ({ ...item, project: item.editspace || projectFor(item.directory), kind: item.kind as "permission" | "question", id: item.id.startsWith(`${item.kind}:`) ? item.id.slice(item.kind.length + 1) : item.id }))
-    return [...new Map([...hints, ...direct].map(item => [requestKey(item), item])).values()]
-  })
+  const sourcePointers = createMemo<HomeRequest[]>(() => requestPointers(dashboard))
   const requests = createHomeRequests(sourcePointers, item => dashboard.activity.requestSettled(item.kind, item.directory, item.id))
   const [receipts, setReceipts] = createSignal<HomeReplyReceipt[]>([])
   const receiptText = (item: HomeReplyReceipt) => item.result === "applied" ? `${item.reply === "once" ? "Allowed once" : item.reply === "always" ? "Always allowed" : "Rejected"}` : item.result === "not-applied" ? "Not applied" : "Outcome uncertain"
@@ -75,7 +67,7 @@ export default function Home() {
   const recordKey = (record: AttentionRecord) => `${record.editspace}\u0000${record.id}`
   const byKey = createMemo(() => new Map(records().map(record => [recordKey(record), record])))
   return <main class="attention-home">
-    <AppHeader><h1>Home</h1><span class="home-muted">{project() ?? "All projects"}</span><A class="home-map-link" href="/map">Agent map</A><span class="home-header-end home-muted">{attention.snapshot() ? `Ledger checked ${Math.max(0, Math.floor((attention.now() - attention.snapshot()!.checked) / 1000))}s ago${attention.stale() ? " · stale" : ""}` : "Ledger not checked"}</span><button disabled={attention.loading()} onClick={() => { void attention.refresh(); void requests.refresh(); dashboard.activity.todos.reload(); void attention.checkOperator().catch(() => undefined) }}>Refresh</button></AppHeader>
+    <AppHeader><h1>Home</h1><span class="home-muted">{project() ?? "All projects"}</span><A class="home-map-link" href="/map">Agent map</A><A href="/desk">Front desk</A><span class="home-header-end home-muted">{attention.snapshot() ? `Ledger checked ${Math.max(0, Math.floor((attention.now() - attention.snapshot()!.checked) / 1000))}s ago${attention.stale() ? " · stale" : ""}` : "Ledger not checked"}</span><button disabled={attention.loading()} onClick={() => { void attention.refresh(); void requests.refresh(); dashboard.activity.todos.reload(); void attention.checkOperator().catch(() => undefined) }}>Refresh</button></AppHeader>
     <Show when={attention.error()}><div class="home-warning" role="alert">{attention.error()} Last-known records are retained; actions are disabled.</div></Show>
     <Show when={attention.snapshot()?.value.partial}><div class="home-warning">Some projects are unavailable. This is not an empty inbox.<For each={attention.snapshot()?.value.projects.filter(item => !item.available)}>{item => <div><bdi dir="auto">{item.editspace}</bdi>: {item.error || "unavailable"}</div>}</For></div></Show>
     <Show when={attention.snapshot()?.value.truncated}><div class="home-warning">History exceeds this view's limit. Counts may be incomplete; use the attention CLI to inspect further records.</div></Show>

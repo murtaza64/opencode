@@ -64,6 +64,8 @@ export const createSessionFailures = (deps: {
   const [items, setItems] = createSignal<SessionFailure[]>([])
   const [supported, setSupported] = createSignal<boolean>()
   const [error, setError] = createSignal("")
+  // Time of the last successful read, so consumers can disclose freshness.
+  const [checked, setChecked] = createSignal<number>()
   // sessionID -> failed messageID that newer local evidence (busy, accepted retry) supersedes
   const [hidden, setHidden] = createSignal<Record<string, string>>({})
   const [retries, setRetries] = createSignal<Record<string, RetryState>>({})
@@ -97,6 +99,7 @@ export const createSessionFailures = (deps: {
         }
         setSupported(true)
         setError("")
+        setChecked(Date.now())
         // A session with events after this read began keeps its previous entry until the next read.
         const raced = (id: string) => (versions.get(id) ?? 0) > start
         setItems((previous) => [
@@ -188,5 +191,5 @@ export const createSessionFailures = (deps: {
     disposed = true
     clearTimeout(timer)
   }
-  return { items, failure, supported, error, refresh, schedule, observe, retry, retryAll, retryState, dispose }
+  return { items, failure, supported, error, checked, refresh, schedule, observe, retry, retryAll, retryState, dispose }
 }

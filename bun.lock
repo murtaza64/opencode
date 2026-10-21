@@ -497,6 +497,7 @@
       "name": "@opencode-ai/es-app",
       "version": "0.0.0",
       "dependencies": {
+        "@opencode-ai/schema": "workspace:*",
         "@opencode-ai/sdk": "workspace:*",
         "@opencode-ai/session-ui": "workspace:*",
         "@opencode-ai/ui": "workspace:*",
