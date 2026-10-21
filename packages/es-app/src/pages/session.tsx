@@ -24,6 +24,7 @@ import { pendingEcho } from "../pending-echo"
 import { defaultImageCapability, prepareImageFile } from "../image-fit"
 import { ComposerResults } from "../components/composer-controls"
 import { DirectComposer } from "../components/direct-composer"
+import { flash } from "../motion"
 import { AppHeader } from "../components/native-header"
 import { SessionTitle } from "../components/session-title"
 import { SubagentTranscript } from "../components/subagent-transcript"
@@ -807,6 +808,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
       // by Markdown or collapsed tools, without mounting all earlier messages.
       const target = message ?? findAnchor
       target?.scrollIntoView({ block: "start", inline: "nearest" })
+      flash(target)
     })
   }
   onMount(() => {
@@ -1030,6 +1032,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
       return
     }
     transcriptEl.scrollTo({ top: transcriptEl.scrollTop + tops[index]! - 8, behavior: "instant" as ScrollBehavior })
+    flash(transcriptEl.querySelectorAll<HTMLElement>("[data-user-prompt]")[index]?.querySelector("[data-component='user-message-text'], [data-slot='user-message-text']"))
     schedulePromptPosition()
   }
 

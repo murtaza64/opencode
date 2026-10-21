@@ -14,8 +14,20 @@ import { peekAttrs, SessionPeek } from "./session-peek"
 import { CloudNav, CloudDiscovery } from "./cloud-sidebar"
 import { ResumeAllFailed } from "./session-failure"
 import { failureLabel } from "../session-failures"
+import { ringOnChange } from "../motion"
 
-const BusyDot = () => {
+// Day separators: a quiet local-format label; rows without a usable time group as Undated.
+const dayKey = (time: number) => Number.isFinite(time) && time > 0 ? new Date(time).toDateString() : "undated"
+const dayLabel = (time: number) => {
+  if (dayKey(time) === "undated") return "Undated"
+  const date = new Date(time)
+  const today = new Date()
+  if (date.toDateString() === today.toDateString()) return "Today"
+  if (date.toDateString() === new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1).toDateString()) return "Yesterday"
+  return new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short", ...(date.getFullYear() === today.getFullYear() ? {} : { year: "numeric" }) }).format(date)
+}
+
+const BusyDot = (props: { ref: (el: HTMLElement) => void }) => {
   const [visible, setVisible] = createSignal(false)
   const [foreground, setForeground] = createSignal(document.visibilityState === "visible")
   const visibility = () => setForeground(document.visibilityState === "visible")
@@ -27,16 +39,18 @@ const BusyDot = () => {
     observer.disconnect()
     document.removeEventListener("visibilitychange", visibility)
   })
-  return <span ref={(el) => observer.observe(el)} class="dot busy"
+  return <span ref={(el) => { observer.observe(el); props.ref(el) }} class="dot busy"
     data-on={enabled() ? String(!!(tick() % 2)) : undefined} />
 }
 
-const StatusDot = (props: { state: DotState; label?: string }) => (
-  <Show when={props.state === "busy"} fallback={<span class={`dot ${props.state}`}
+const StatusDot = (props: { state: DotState; label?: string }) => {
+  let el: HTMLElement | undefined
+  ringOnChange(() => el, () => props.state)
+  return <Show when={props.state === "busy"} fallback={<span ref={(node) => el = node} class={`dot ${props.state}`}
     {...(props.state === "failed" ? { role: "img", "aria-label": props.label ?? "Failed" } : {})} />}>
-    <BusyDot />
+    <BusyDot ref={(node) => el = node} />
   </Show>
-)
+}
 
 export default function Sidebar() {
   const { state, dotFor, editspace, setEditspace, editspaces, archivedIds, notifications, markViewed,
@@ -353,13 +367,11 @@ export default function Sidebar() {
           }>
             <For each={unpinnedSessions()}>
               {(s, index) => {
-                const day = () => new Date(s.updated).toDateString()
+                const day = () => dayKey(s.updated)
                 return (
                   <>
-                    <Show when={index() === 0 || day() !== new Date(unpinnedSessions()[index() - 1].updated).toDateString()}>
-                      <div class="nav-heading">
-                        {day() === new Date().toDateString() ? "Today" : day()}
-                      </div>
+                    <Show when={index() === 0 || day() !== dayKey(unpinnedSessions()[index() - 1].updated)}>
+                      <div class="nav-heading nav-day">{dayLabel(s.updated)}</div>
                     </Show>
                     {item(s)}
                   </>

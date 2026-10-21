@@ -65,6 +65,11 @@ export const HomePermission = (props: {
     return value == null || typeof value === "object" ? [] : [[name, String(value)]]
   })
   const always = () => request()?.always.filter(Boolean) ?? []
+  // Patterns that only repeat a shown metadata value (usually the command) add no information.
+  const patterns = () => {
+    const values = request()?.patterns ?? []
+    return metadata().some(([, value]) => value === values.join("\n")) ? [] : values
+  }
   return <div class="home-request home-permission" data-request-id={props.item.id}>
     <div>
       <span class="home-eyebrow"><span>permission</span><bdi dir="ltr">{request()?.permission ?? "unknown tool"}</bdi></span>
@@ -75,7 +80,7 @@ export const HomePermission = (props: {
     <A href={sessionHref(props.item.session, props.item.directory)}>Open thread</A>
     <Show when={request()} fallback={<p class="home-muted">Request details unavailable. Reply from the original session.</p>}>
       <dl class="home-permission-context">
-        <Show when={request()!.patterns.length}><dt>Patterns</dt><dd><For each={request()!.patterns}>{pattern => <bdi class="mono" dir="ltr">{pattern}</bdi>}</For></dd></Show>
+        <Show when={patterns().length}><dt>Patterns</dt><dd><For each={patterns()}>{pattern => <bdi class="mono" dir="ltr">{pattern}</bdi>}</For></dd></Show>
         <For each={metadata()}>{([name, value]) => <><dt><bdi dir="ltr">{name}</bdi></dt><dd><bdi class="mono" dir="ltr">{value}</bdi></dd></>}</For>
         <dt>Directory</dt><dd><bdi class="mono" dir="ltr">{props.item.directory}</bdi></dd>
       </dl>

@@ -219,7 +219,7 @@
   width: 380px;
   background: var(--crust);
   border: 1px solid var(--surface1);
-  border-left: 3px solid var(--sapphire);
+  border-inline-start: 3px solid var(--sapphire);
   padding: 10px 12px;
   font-size: 12px;
   display: flex;
@@ -419,7 +419,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
   width: 240px;
   flex-shrink: 0;
   background: var(--mantle);
-  border-right: 1px solid var(--crust);
+  border-inline-end: 1px solid var(--crust);
   height: 100vh;
   overflow-y: auto;
   padding: 10px 0;
@@ -432,7 +432,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 .archived-toggle {
   margin-top: auto;
   background: none;
-  text-align: left;
+  text-align: start;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -485,7 +485,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
   font-size: 13px;
 }
 .mini-item:hover { background: var(--surface0); text-decoration: none; }
-.mini-item.active { background: var(--crust); box-shadow: inset 3px 0 0 var(--lavender); }
+.mini-item.active { background: var(--crust); box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--lavender); }
 .mini-session { width: 100%; display: flex; align-items: center; }
 .mini-session .mini-item { flex: 1; min-width: 0; }
 .mini-pin {
@@ -631,7 +631,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 .nav-item.active {
   background: var(--crust);
   color: var(--text);
-  box-shadow: inset 3px 0 0 var(--lavender);
+  box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--lavender);
 }
 .nav-item .nav-title { overflow: hidden; text-overflow: ellipsis; }
 .session-entry { display: flex; align-items: center; }
@@ -824,16 +824,19 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 .msg-wrap .fork-here {
   position: absolute;
   top: 4px;
-  right: 4px;
+  inset-inline-end: 4px;
   z-index: 2;
-  display: none;
+  display: inline-block;
+  opacity: 0;
+  pointer-events: none;
   font-family: var(--font-mono);
   font-size: 11px;
   background: var(--crust);
   color: var(--mauve);
   box-shadow: inset 0 0 0 1px var(--surface1);
 }
-.msg-wrap:hover .fork-here { display: inline-block; }
+/* Hidden by opacity, not display, so keyboard focus can still reach it. */
+.msg-wrap:is(:hover, :focus-within) .fork-here { opacity: 1; pointer-events: auto; }
 .msg-wrap .fork-here:hover { box-shadow: inset 0 0 0 1px var(--mauve); }
 
 /* board: attention queue grouped by thread */
@@ -849,12 +852,12 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 }
 .queue-head .key { white-space: nowrap; flex-shrink: 0; }
 .queue-head .title { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.queue-head .card-link { font-size: 11px; color: var(--overlay1); margin-left: auto; flex-shrink: 0; }
+.queue-head .card-link { font-size: 11px; color: var(--overlay1); margin-inline-start: auto; flex-shrink: 0; }
 .att {
   display: flex;
   flex-direction: column;
   background: var(--mantle);
-  box-shadow: inset 3px 0 0 var(--yellow);
+  box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--yellow);
   padding: 5px 12px;
 }
 .att-line { display: flex; gap: 10px; align-items: baseline; }
@@ -862,10 +865,10 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 .att-line.expandable:hover .att-text { color: var(--lavender); }
 .att .att-text { flex: 1; min-width: 0; }
 .att .subtitle { display: block; color: var(--subtext0); font-size: 12px; }
-.att.r0, .att.r1 { box-shadow: inset 3px 0 0 var(--red); }
-.att.r2 { box-shadow: inset 3px 0 0 var(--yellow); }
-.att.r3 { box-shadow: inset 3px 0 0 var(--mauve); }
-.att.r4 { box-shadow: inset 3px 0 0 var(--overlay0); }
+.att.r0, .att.r1 { box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--red); }
+.att.r2 { box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--yellow); }
+.att.r3 { box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--mauve); }
+.att.r4 { box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--overlay0); }
 .att .type {
   font-size: 11px;
   text-transform: uppercase;
@@ -884,7 +887,7 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 /* kind glyphs: ticket (tag) vs session (terminal) vs PR (octicon in pr.tsx).
  * display: tailwind preflight makes svg block-level, which wraps the glyph
  * onto its own line inside anchors */
-.kind-icon { display: inline-block; vertical-align: -2px; margin-right: 4px; flex-shrink: 0; }
+.kind-icon { display: inline-block; vertical-align: -2px; margin-inline-end: 4px; flex-shrink: 0; }
 .icon-ticket { color: var(--blue); }
 .icon-session { color: var(--lavender); }
 
@@ -911,7 +914,7 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 .ticket-row { display: flex; gap: 8px; align-items: baseline; margin-top: 5px; font-size: 13px; }
 .ticket-row .title { flex: 1; }
 .lanes { margin-top: 6px; font-size: 12px; color: var(--subtext0); }
-.lane-badge { background: var(--surface0); padding: 0 6px; margin-right: 5px; }
+.lane-badge { background: var(--surface0); padding: 0 6px; margin-inline-end: 5px; }
 .status-line { margin-top: 6px; font-size: 12px; color: var(--subtext0); white-space: pre-wrap; }
 
 /* session state dot: pending (needs you) > busy (ringed) > unread > idle */
@@ -957,12 +960,12 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
   white-space: pre-wrap;
 }
 .digest .meta { color: var(--overlay0); font-size: 11px; margin-top: 5px; }
-.digest ul { margin: 4px 0; padding-left: 20px; }
+.digest ul { margin: 4px 0; padding-inline-start: 20px; }
 .gates li { color: var(--yellow); }
 .needs li { color: var(--red); }
 
 /* review brief: same visual budget as the digest box, teal accent */
-.brief { box-shadow: inset 3px 0 0 var(--teal); }
+.brief { box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--teal); }
 .brief .verify li { color: var(--teal); }
 .brief .brief-prs li { color: var(--subtext1); }
 .brief .risks li { color: var(--peach); }
@@ -1045,7 +1048,7 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .all-landing-project h2 { display: flex; gap: 8px; align-items: baseline; }
 .all-landing-board { font-size: 11px; padding: 1px 8px; color: var(--lavender); background: var(--mantle); text-transform: none; letter-spacing: normal; font-weight: normal; }
 
-.context-pct { font-size: 11px; color: var(--subtext0); font-family: var(--font-mono); text-align: right; }
+.context-pct { font-size: 11px; color: var(--subtext0); font-family: var(--font-mono); text-align: end; }
 .context-pct.warn { color: var(--yellow); }
 .context-pct.high { color: var(--red); }
 
@@ -1294,16 +1297,14 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   }
 }
 
-/* TUI-style turn footer: left-aligned (right is the user side) —
- * ▣ Agent · model · duration [· interrupted] */
+/* TUI-style turn footer on the agent (start) side: ▣ Agent · model · duration [· interrupted].
+ * Quiet metadata: no rule, so turns separate by spacing rather than chrome. */
 .turn-summary {
-  text-align: left;
+  text-align: start;
   color: var(--subtext0);
   font-size: 11px;
   font-family: var(--font-mono);
-  margin: 4px 0 14px;
-  padding-bottom: 10px;
-  border-bottom: 1px dashed var(--surface0);
+  margin: 4px 0 18px;
 }
 .turn-summary .marker { color: var(--mauve); }
 .turn-summary .agent { color: var(--text); }
@@ -1350,7 +1351,7 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 /* banners */
 .banner {
   background: var(--mantle);
-  box-shadow: inset 3px 0 0 var(--yellow);
+  box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--yellow);
   padding: 10px 14px;
   margin: 10px 0;
 }
@@ -1527,7 +1528,7 @@ button.question-option.selected { color: var(--text); background: color-mix(in s
 }
 .prompt-row { display: flex; gap: 8px; }
 .prompt-side { display: flex; flex-direction: column; gap: 6px; width: 160px; }
-.send-hint { font-size: 11px; text-align: right; }
+.send-hint { font-size: 11px; text-align: end; }
 .model-select {
   width: 100%;
   background: var(--crust);
@@ -1801,7 +1802,7 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .info-ref .ref-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .info-ref .ref-title.mono { font-size: 11.5px; }
 .issue-marker {
-  margin-left: auto;
+  margin-inline-start: auto;
   flex-shrink: 0;
   font-family: var(--font-mono);
   font-size: 9.5px;
@@ -1856,7 +1857,7 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .doc-prose :is(pre, code, kbd, samp), .doc-prose :is(pre, code) * { font-family: var(--font-mono) !important; }
 .doc-prose pre { background: var(--mantle); padding: 10px 12px; overflow-x: auto; font-size: 12px; }
 .doc-prose :not(pre) > code { background: var(--mantle); padding: 0 4px; font-size: 12px; }
-.doc-prose blockquote { border-left: 3px solid var(--surface1); margin: 8px 0; padding: 2px 12px; color: var(--subtext0); }
+.doc-prose blockquote { border-inline-start: 3px solid var(--surface1); margin: 8px 0; padding: 2px 12px; color: var(--subtext0); }
 .doc-prose table { border-collapse: collapse; margin: 10px 0; }
 .doc-prose :is(td, th) { border: 1px solid var(--surface1); padding: 3px 10px; font-size: 12.5px; }
 .doc-prose img { max-width: 100%; }
@@ -2014,3 +2015,20 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .failure-dismiss { position: absolute; inset-inline-end: 0; top: 0; background: none; border: 0; color: var(--subtext0); cursor: pointer; }
 .home-name .dot.failed { margin-inline-end: 6px; }
 .home-failed { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--red); }
+
+/* Feel (dotfiles#240): instant by default. Hover, focus, disclosure and
+ * selection apply on the frame they happen, with no transitions; motion.ts
+ * holds the only decays (status ring, jump flash). Every pointer press gets
+ * an immediate fill so input is acknowledged before any network result. */
+:root { --surface2: #4a4a54; --inline-sign: 1; }
+[dir="rtl"] { --inline-sign: -1; }
+[dir="ltr"] { --inline-sign: 1; }
+html { -webkit-tap-highlight-color: transparent; }
+:is(button, [role="button"], summary, a.nav-item, a.mini-item, [data-slot="collapsible-trigger"]):not(:disabled, [aria-disabled="true"]):active {
+  background-color: var(--surface1) !important;
+}
+.new-session-create:not(:disabled):active { background-color: var(--teal) !important; }
+/* Identifiers (projects, lanes) are shown verbatim, never uppercased. */
+.attention-home h2, .map-cluster h2, .map-detail h2 { text-transform: none; letter-spacing: 0; }
+/* Day separators are wayfinding, not section titles: muted sentence case. */
+.nav-heading.nav-day { text-transform: none; letter-spacing: 0; font-weight: normal; color: var(--subtext0); padding-block-start: 10px; }
