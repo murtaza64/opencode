@@ -127,6 +127,8 @@ test("API surface excludes direct shell, PTY, file, and config access", () => {
     expect(apiAllowed("POST", pathname)).toBe(false)
   // read-only session insight and PR detail lookups (dotfiles#139) are GET only
   expect(apiAllowed("GET", "/es/api/session-insights")).toBe(true)
+  expect(apiAllowed("GET", "/es/api/lane-provenance")).toBe(true)
+  expect(apiAllowed("POST", "/es/api/lane-provenance")).toBe(false)
   expect(apiAllowed("GET", "/es/api/pr-detail")).toBe(true)
   expect(apiAllowed("GET", "/es/api/current-work")).toBe(true)
   expect(apiAllowed("POST", "/es/api/current-work")).toBe(false)

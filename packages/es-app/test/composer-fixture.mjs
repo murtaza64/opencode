@@ -233,6 +233,8 @@ export const createFixture = async () => {
     if (url.pathname === "/api/wingman/transcript") return fixture.wingmanTranscript
       ? json(fixture.wingmanTranscript(url.searchParams.get("lane"), url.searchParams.get("es")))
       : json({ detail: "Not Found" }, 404)
+    if (url.pathname === "/api/lane-provenance" && request.method === "GET")
+      return json(fixture.laneProvenance?.(url.searchParams.get("es")) ?? { delegations: [], spawned: [] })
     if (url.pathname === "/api/handoffs" && request.method === "GET")
       return json({ handoffs: fixture.handoffs ?? [] })
     if (url.pathname === "/api/subscriptions" && fixture.subscriptions) {
