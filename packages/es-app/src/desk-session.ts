@@ -143,7 +143,7 @@ const metaOf = (session: Session): BriefMeta | undefined => {
  *   metadata.frontDesk = BriefMeta {kind:"brief", requestID, source: "attention:<editspace>:<record id>", revision, title, refs};
  * - result: the job's last completed assistant text is one JSON object matching BRIEF_SCHEMA (desk.ts),
  *   valid only while the ledger record still has that revision. */
-const briefID = async (parent: string, source: string, revision: string, attempt: number) => {
+export const briefID = async (parent: string, source: string, revision: string, attempt: number) => {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify([parent, source, revision, attempt]))))
   return `ses_fdjob_${[...digest].map(byte => byte.toString(16).padStart(2, "0")).join("").slice(0, 24)}`
 }
@@ -450,6 +450,11 @@ export const createMemory = () => {
 /** Parent for evidence briefs, shared by Home and the desk so one source revision has one check.
  * Deterministic per project root, so concurrent first use reconciles to the same session. Viewing
  * only reads; the parent is created when a brief is first requested. */
+export const briefAnchorID = async (root: string) => {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(root)))
+  return `ses_fdbrief_${[...digest].map(byte => byte.toString(16).padStart(2, "0")).join("").slice(0, 20)}`
+}
+
 export const createBriefAnchor = (directory: () => string | undefined) => {
   const [pointer, setPointer] = createSignal<DeskPointer>()
   const [error, setError] = createSignal("")
@@ -459,8 +464,7 @@ export const createBriefAnchor = (directory: () => string | undefined) => {
   createEffect(() => {
     const root = directory()
     if (!root || target()?.directory === root) return
-    void crypto.subtle.digest("SHA-256", new TextEncoder().encode(root)).then(digest => {
-      const id = `ses_fdbrief_${[...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("").slice(0, 20)}`
+    void briefAnchorID(root).then(id => {
       setTarget({ session: id, directory: root })
       return oc.session(id, root).then(existing => { setPointer({ session: id, directory: existing.directory }); setChecked(true) },
         cause => { if (String(cause).includes("HTTP 404")) setChecked(true); else setError(`Briefs are unavailable (${String(cause)}).`) })
