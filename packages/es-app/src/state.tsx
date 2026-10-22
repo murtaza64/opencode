@@ -231,7 +231,8 @@ export function DashboardProvider(props: ParentProps) {
   }
   const failures = createSessionFailures()
   void failures.refresh()
-  const failureInterval = setInterval(() => void failures.refresh(), 60_000)
+  // A full read scans every root Session in Core; failed steps also request one via session.error.
+  const failureInterval = setInterval(() => failures.schedule(), 300_000)
   onCleanup(() => {
     clearInterval(failureInterval)
     failures.dispose()
@@ -240,7 +241,7 @@ export function DashboardProvider(props: ParentProps) {
     directories: relevantDirectories,
     sessionEvent,
     observe: failures.observe,
-    reconnected: () => void failures.refresh(),
+    reconnected: failures.schedule,
   })
   createEffect(() => {
     const notifications = notificationState()?.notifications

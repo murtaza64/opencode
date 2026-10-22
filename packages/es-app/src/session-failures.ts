@@ -1,7 +1,13 @@
 /* Failed-turn tracking. Core's /experimental/session/failed is the durable source:
  * a root Session whose newest message is an assistant step that ended in a
  * non-abort error. Live status events only hide a failure while newer work runs
- * and schedule a re-read; they never invent one. */
+ * and schedule a re-read; they never invent one.
+ *
+ * Every read scans all root Sessions on Core's request thread, and a cold scan stalls the
+ * whole daemon. So event-driven reads are rate-limited to one per `gap`, and only a non-abort
+ * `session.error` (the event Core publishes for a failed step) or the settling of an
+ * already-listed failure requests one; any other idle only settles local suppression.
+ * Failures Core records without that event surface on the caller's periodic refresh. */
 import { createSignal } from "solid-js"
 import type { Event, SessionFailure } from "@opencode-ai/sdk/v2"
 import { oc } from "./api"
@@ -57,7 +63,10 @@ export const createSessionFailures = (deps: {
   list?: () => Promise<SessionFailure[] | undefined>
   send?: (failure: SessionFailure) => Promise<RetryResult>
   blocked?: (failure: SessionFailure) => string
+  // Minimum time between the starts of event-driven reads.
+  gap?: number
 } = {}) => {
+  const gap = deps.gap ?? 30_000
   const blocked = deps.blocked ?? ((failure: SessionFailure) => unresolvedSend(failure.sessionID, failure.directory))
   const list = deps.list ?? oc.failedSessions
   const send = deps.send ?? oc.retrySession
@@ -78,15 +87,21 @@ export const createSessionFailures = (deps: {
   let inflight: Promise<void> | undefined
   let again = false
   let timer: ReturnType<typeof setTimeout> | undefined
+  let started = Number.NEGATIVE_INFINITY
   let disposed = false
 
   const touch = (id: string) => versions.set(id, ++revision)
+  // Reads now; joins a read in flight and queues one rate-limited follow-up instead of a second scan.
   const refresh = (): Promise<void> => {
     if (disposed) return Promise.resolve()
     if (inflight) {
       again = true
       return inflight
     }
+    // This read covers everything a pending scheduled read was waiting for.
+    clearTimeout(timer)
+    timer = undefined
+    started = Date.now()
     const start = revision
     inflight = (async () => {
       try {
@@ -102,6 +117,8 @@ export const createSessionFailures = (deps: {
         setChecked(Date.now())
         // A session with events after this read began keeps its previous entry until the next read.
         const raced = (id: string) => (versions.get(id) ?? 0) > start
+        // A withheld entry still needs a read that began after its events.
+        if (next.some((item) => raced(item.sessionID))) again = true
         setItems((previous) => [
           ...next.filter((item) => !raced(item.sessionID)),
           ...previous.filter((item) => raced(item.sessionID)),
@@ -116,17 +133,18 @@ export const createSessionFailures = (deps: {
       inflight = undefined
       if (again) {
         again = false
-        void refresh()
+        schedule()
       }
     })
     return inflight
   }
+  // Requests a read: debounced, and never sooner than `gap` after the previous read started.
   const schedule = () => {
     if (timer || disposed) return
     timer = setTimeout(() => {
       timer = undefined
       void refresh()
-    }, 400)
+    }, Math.max(Math.min(400, gap), started + gap - Date.now()))
   }
   const observe = (event: Event) => {
     if (event.type !== "session.status" && event.type !== "session.error" && event.type !== "session.idle") return
@@ -145,8 +163,10 @@ export const createSessionFailures = (deps: {
       active.delete(id)
       touch(id)
       settled.set(id, revision)
-      schedule()
     }
+    // A listed failure that settles (a retry ended) needs a read to show whether it recovered.
+    const settledListed = event.type !== "session.error" && items().some((item) => item.sessionID === id)
+    if (settledListed || (event.type === "session.error" && event.properties.error?.name !== "MessageAbortedError")) schedule()
   }
   const failure = (id: string) => items().find((item) => item.sessionID === id && hidden()[id] !== item.messageID)
   const retry = async (target: SessionFailure): Promise<RetryResult | undefined> => {
