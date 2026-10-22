@@ -17,6 +17,7 @@ import IssuePage from "./pages/issue"
 import DocPage from "./pages/doc"
 import Sidebar from "./components/sidebar"
 import { DashboardProvider } from "./state"
+import { BriefsProvider } from "./desk-briefs"
 import { TicketTip, wrapTicketRefs } from "./ticket-refs"
 import { SessionRefs, wrapSessionRefs } from "./session-mention-dom"
 import { installSidebarKeys, leftOpen, startDrag } from "./ui"
@@ -74,6 +75,7 @@ function Providers(props: ParentProps) {
             * tool renders (edit/write/read) incl. inline image media */}
           <FileComponentProvider component={File}>
             <DashboardProvider>
+              <BriefsProvider>
               <div class="shell" ref={shellEl}>
                 <Sidebar />
                 <Show when={leftOpen()}>
@@ -83,6 +85,7 @@ function Providers(props: ParentProps) {
                 <TicketTip container={() => shellEl} />
                 <SessionRefs container={() => shellEl} />
               </div>
+              </BriefsProvider>
             </DashboardProvider>
           </FileComponentProvider>
         </MarkedProvider>

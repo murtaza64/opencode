@@ -11,7 +11,9 @@ import { AttentionDecision } from "../components/attention-decision"
 import { HomePermission, type HomeReplyReceipt } from "../components/home-permission"
 import { FailureRetry } from "../components/session-failure"
 import { briefBinding, deskItems, deskSources, type BriefResult, type DeskItem, type EvidenceRef } from "../desk"
-import { createBriefs, createDeskSession, createMemory, type BriefJob } from "../desk-session"
+import { createDeskSession, createMemory, type BriefJob } from "../desk-session"
+import { PreparedBrief } from "../components/attention-brief"
+import { useBriefs } from "../desk-briefs"
 import { oc } from "../api"
 import type { MemoryEntry, MemoryRevision } from "../desk-memory"
 import { SessionView } from "./session"
@@ -27,7 +29,9 @@ export default function Desk() {
   const requests = createHomeRequests(createMemo(() => requestPointers(dashboard)), item => dashboard.activity.requestSettled(item.kind, item.directory, item.id))
   const desk = createDeskSession()
   // Defined below; read lazily when a brief starts.
-  const briefs = createBriefs(() => desk.status() === "ready" ? desk.pointer() : undefined, key => items().find(item => item.key === key))
+  // Briefs are shared app-wide; the desk adds its other queue items for manual preparation.
+  const prepared = useBriefs()
+  const briefs = prepared.briefs
   const [selectedKey, setSelectedKey] = createSignal<string>()
   const [receipts, setReceipts] = createSignal<HomeReplyReceipt[]>([])
   const [now, setNow] = createSignal(Date.now())
@@ -49,6 +53,7 @@ export default function Desk() {
     title: id => dashboard.activity.session(id)?.title,
     project: projectFor,
   }))
+  prepared.track(items)
   const sources = createMemo(() => deskSources({
     now: now(),
     attention: {
@@ -105,7 +110,7 @@ export default function Desk() {
 
   return <main class="desk" classList={{ "desk-has-selection": !!selected() }}>
     <AppHeader><h1>Front desk</h1><span class="home-muted">{project() ?? "All connected projects"}</span><A href="/">Home</A>
-      <span class="home-header-end" /><button class="desk-button" disabled={attention.loading()} onClick={() => { void attention.refresh(); void requests.refresh(); void dashboard.failures.refresh(); void briefs.refresh(true) }}>Refresh sources</button></AppHeader>
+      <label class="desk-auto home-muted"><input type="checkbox" checked={prepared.auto()} onChange={event => prepared.setAuto(event.currentTarget.checked)} /> Prepare briefs automatically</label><span class="home-header-end" /><button class="desk-button" disabled={attention.loading()} onClick={() => { void attention.refresh(); void requests.refresh(); void dashboard.failures.refresh(); void briefs.refresh(true) }}>Refresh sources</button></AppHeader>
     <div class="desk-grid">
       <aside class="desk-queue" aria-label="Desk queue">
         <button class="desk-chat-tab" aria-pressed={!selected()} onClick={() => select()}>Front desk chat</button>
@@ -140,7 +145,7 @@ export default function Desk() {
         <Show when={!current().live}><div class="home-warning" role="status">No longer pending in its source. The outcome is not inferred here; open the source thread.</div></Show>
         <Canonical item={current().item} live={current().live} attention={attention} requests={requests} onReceipt={receipt => setReceipts(previous => [receipt, ...previous].slice(0, 5))} />
         <Show when={receipts().length}><ul class="home-receipts"><For each={receipts()}>{receipt => <li data-result={receipt.result}>{receipt.result === "applied" ? "Reply applied" : receipt.result === "not-applied" ? "Not applied" : "Outcome uncertain"} · <bdi dir="ltr">{receipt.permission}</bdi> · {ago(receipt.at)}</li>}</For></ul></Show>
-        <BriefPanel item={current().item} live={current().live} jobs={jobsFor(current().item.key)} canStart={desk.status() === "ready" && !briefs.pending() && !briefs.preparing()} confirming={desk.status() !== "ready" || briefs.jobs().some(job => job.state.state === "starting")} start={() => void briefs.start(current().item)} confirm={() => void briefs.confirm()} />
+        <PreparedBrief item={current().item} live={current().live} />
       </section>}</Show>
 
       <section class="desk-chat" aria-label="Front desk conversation">
@@ -196,44 +201,6 @@ const Canonical = (props: { item: DeskItem; live: boolean; attention: ReturnType
       <div class="home-request"><div><span class="home-eyebrow">failure · Core record</span><h3><bdi dir="auto">{props.item.title}</bdi></h3><div class="home-source">Failed message <bdi dir="ltr">{failure().messageID}</bdi> · session <bdi dir="ltr">{failure().sessionID}</bdi></div></div>
         <A href={sessionHref(failure().sessionID, failure().directory)}>Open thread</A><p class="home-muted">Retry uses Core's own eligibility check. <FailureRetry sessionID={failure().sessionID} /></p></div>}</Show>
   </div>
-}
-
-const Refs = (props: { refs: string[]; known: EvidenceRef[]; item: DeskItem }) =>
-  <For each={props.refs}>{id => {
-    const ref = () => props.known.find(candidate => candidate.id === id)
-    return <Show when={ref()?.messageID} fallback={<span class="desk-ref" title={ref()?.label}>{id}</span>}>
-      <A class="desk-ref" title={ref()?.label} href={sessionHref(props.item.source.session, props.item.source.directory)}>{id}</A>
-    </Show>
-  }}</For>
-
-const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJob[]; canStart: boolean; confirming: boolean; start: () => void; confirm: () => void }) => {
-  const current = () => props.jobs.find(job => job.meta.revision === props.item.revision)
-  const discarded = () => props.jobs.filter(job => job.meta.revision !== props.item.revision)
-  const ready = () => { const job = current(); return job?.state.state === "ready" ? { job, result: job.state.result as BriefResult, omitted: job.state.omitted } : undefined }
-  return <section class="desk-brief" aria-label="Derived evidence brief">
-    <div class="desk-brief-head"><h2>Evidence brief</h2><span class="home-source">Derived · not authoritative</span></div>
-    <Show when={current()} fallback={<Show when={props.live}>
-      <button class="desk-button" disabled={!props.canStart} onClick={props.start}>Prepare evidence brief</button>
-      <span class="home-source"> No tools; reads this request and a short excerpt of its thread.{props.canStart ? "" : " Start the desk conversation first."}</span>
-    </Show>}>{job => <>
-      <Show when={job().state.state === "starting" || job().state.state === "running"}><p class="home-muted" role="status">Checking in the background for revision {job().meta.revision}…</p></Show>
-      <Show when={job().state.state === "failed"}><p class="home-warning">Brief failed: {(job().state as { error: string }).error} It was not rerun.</p></Show>
-      <Show when={job().state.state === "unknown"}><p class="home-warning">{(job().state as { reason: string }).reason}</p></Show>
-      <Show when={job().state.state === "unconfirmed"}><p class="home-warning">Start was not confirmed. Confirming resends the identical request; Core returns the same check if it exists.</p>
-        <button class="desk-button" disabled={props.confirming} onClick={props.confirm}>Confirm start</button></Show>
-      <Show when={(job().state.state === "failed" || job().state.state === "unknown") && props.live}><button class="desk-button" disabled={!props.canStart} onClick={props.start}>Start a new check</button></Show>
-      <Show when={ready()}>{value => <div class="desk-brief-body">
-        <p dir="auto">{value().result.summary}</p>
-        <Show when={value().result.flow.length}><ol class="desk-flow" aria-label="Flow">{<For each={value().result.flow}>{step => <li><bdi dir="auto">{step}</bdi></li>}</For>}</ol></Show>
-        <Show when={value().result.facts.length}><h3>Facts</h3><ul><For each={value().result.facts}>{fact => <li><bdi dir="auto">{fact.text}</bdi> <Refs refs={fact.refs} known={value().job.meta.refs} item={props.item} /></li>}</For></ul></Show>
-        <Show when={value().result.timeline.length}><h3>Timeline</h3><ol class="desk-timeline"><For each={value().result.timeline}>{entry => <li><Show when={entry.when}><span class="home-source">{entry.when} · </span></Show><bdi dir="auto">{entry.text}</bdi> <Refs refs={entry.refs} known={value().job.meta.refs} item={props.item} /></li>}</For></ol></Show>
-        <Show when={value().result.gaps.length}><h3>Not established by the evidence</h3><ul><For each={value().result.gaps}>{gap => <li><bdi dir="auto">{gap}</bdi></li>}</For></ul></Show>
-        <Show when={value().omitted}><p class="home-source">{value().omitted} uncited statement(s) omitted.</p></Show>
-      </div>}</Show>
-      <p class="home-source">Bound to revision {job().meta.revision} · <A href={sessionHref(job().id, job().directory)}>open background pass</A></p>
-    </>}</Show>
-    <For each={discarded()}>{job => <p class="home-source">Earlier brief for revision {job.meta.revision} discarded: the source changed.</p>}</For>
-  </section>
 }
 
 const changeLabel = (revision: MemoryRevision) => {

@@ -1,6 +1,6 @@
 /* One attention record with its native ledger controls. Shared by Home and the
  * front desk so both surfaces keep identical answer, choice and delivery semantics. */
-import { createEffect, createSignal, For, Show } from "solid-js"
+import { createEffect, createSignal, For, Show, type JSX } from "solid-js"
 import { A } from "@solidjs/router"
 import { ago, sessionHref } from "../state"
 import { Glyph } from "./icons"
@@ -56,7 +56,8 @@ const Delivery = (props: { record: AttentionRecord; attention: Attention }) => {
   </div>
 }
 
-export const AttentionDecision = (props: { record: AttentionRecord; attention: Attention; onView?: (view: AttentionView) => void }) => {
+/** `brief` renders a derived explanation first; when `readable`, the producer's raw context and ID move behind a disclosure. */
+export const AttentionDecision = (props: { record: AttentionRecord; attention: Attention; onView?: (view: AttentionView) => void; brief?: JSX.Element; readable?: boolean }) => {
   const [choice, setChoice] = createSignal("")
   const [confirm, setConfirm] = createSignal<{ record: AttentionRecord; choice: string }>()
   const [historyOpen, setHistoryOpen] = createSignal(false)
@@ -78,8 +79,15 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
   createEffect(() => { if (historyOpen() && history()?.version !== historyVersion(props.record)) void loadHistory(props.record) })
   return <article class="home-decision" data-attention-id={props.record.id}>
     <div class="home-eyebrow"><span><Glyph name={props.record.kind === "blocker" ? "question" : "comment-discussion"} />{props.record.kind}</span><bdi dir="auto">{props.record.editspace}</bdi><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><span>revision {props.record.revision}</span></div>
-    <h3><bdi dir="auto">{props.record.title}</bdi></h3><p dir="auto">{props.record.context}</p>
-    <div class="home-source">Agent request · <A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Open thread</A></div>
+    <h3><bdi dir="auto">{props.record.title}</bdi></h3>
+    {props.brief}
+    <Show when={props.readable} fallback={<>
+      <p dir="auto">{props.record.context}</p>
+      <div class="home-source">Agent request · <A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Open thread</A></div>
+    </>}>
+      <details class="home-original"><summary>Original request</summary><p dir="auto">{props.record.context}</p>
+        <div class="home-source"><bdi dir="ltr">{props.record.id}</bdi> · <A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Open thread</A></div></details>
+    </Show>
     <Show when={props.record.status === "open"}>
       <Show when={props.record.recommendation}><p class="home-muted">Agent recommends: <bdi dir="auto">{props.record.options.find(option => option.id === props.record.recommendation)?.label ?? props.record.recommendation}</bdi></p></Show>
       <Show when={props.record.options.length}><fieldset disabled={!canWrite()}><legend>Your choice</legend><For each={props.record.options}>{option => <label><input type="radio" name={props.record.id} checked={choice() === option.id} onChange={() => setChoice(option.id)} /><bdi dir="auto">{option.label}</bdi></label>}</For></fieldset></Show>

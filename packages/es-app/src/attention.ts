@@ -93,7 +93,8 @@ export const decisionLabel = (record: AttentionRecord) => {
 }
 
 // Own only the attention read/write interface; neither list nor act admits Session input.
-export const createAttention = (project: () => string | undefined) => {
+/** `readOnly` observes the ledger only: no operator bootstrap and no resumed answer commands. `enabled` pauses reads. */
+export const createAttention = (project: () => string | undefined, options: { readOnly?: boolean; enabled?: () => boolean } = {}) => {
   const [cache, setCache] = createSignal<Record<string, { records: AttentionRecord[]; project: AttentionList["projects"][number]; checked: number }>>({})
   const [scopes, setScopes] = createSignal<Record<string, { checked: number; partial: boolean; truncated: boolean }>>({})
   const snapshot = () => {
@@ -121,6 +122,7 @@ export const createAttention = (project: () => string | undefined) => {
   let version = 0
   let controller: AbortController | undefined
   const refresh = async () => {
+    if (options.enabled && !options.enabled()) return
     const scope = project()
     const current = ++version
     controller?.abort()
@@ -181,13 +183,18 @@ export const createAttention = (project: () => string | undefined) => {
     setNotice("An answer sent before reload has an unknown outcome. Retrying repeats the same answer; no new answer is created.")
   }
   onMount(() => {
+    if (options.readOnly) {
+      const timer = setInterval(() => { setNow(Date.now()); void refresh() }, 30_000)
+      onCleanup(() => { clearInterval(timer); version++; controller?.abort() })
+      return
+    }
     resume()
     // Only explicitly allowlisted local UI origins can acquire the operator cookie.
     void checkOperator().catch(() => { setOperator(false) })
     const timer = setInterval(() => { setNow(Date.now()); void refresh() }, 30_000)
     onCleanup(() => { clearInterval(timer); version++; controller?.abort() })
   })
-  createEffect(() => { project(); void refresh() })
+  createEffect(() => { project(); options.enabled?.(); void refresh() })
   const retry = async () => {
     const command = pending()
     if (!command || writing()) return false

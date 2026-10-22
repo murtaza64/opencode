@@ -2,7 +2,7 @@
  * - the desk conversation (one pointer, verified against Core on load);
  * - evidence briefs as child sessions whose metadata binds them to a source revision.
  * State is always re-read from Core. Nothing is resent or rerun automatically. */
-import { createSignal, onCleanup, onMount } from "solid-js"
+import { createEffect, createSignal, on, onCleanup, onMount } from "solid-js"
 import type { Session } from "@opencode-ai/sdk/v2"
 import { descending } from "@opencode-ai/schema/identifier"
 import { oc, SessionCreateError, type ContextPart, type MessageWithParts } from "./api"
@@ -134,7 +134,17 @@ const metaOf = (session: Session): BriefMeta | undefined => {
   return value?.kind === "brief" && typeof value.requestID === "string" && typeof value.source === "string" && typeof value.revision === "string" && Array.isArray(value.refs) ? value : undefined
 }
 
-export const createBriefs = (desk: () => DeskPointer | undefined, current: (key: string) => DeskItem | undefined) => {
+/** Local read-only retrieval inside the anchor's project root. Every other tool, reads outside the
+ * root and environment files are denied, so a brief never prompts for permission, runs commands,
+ * reaches the network or writes anything. */
+export const BRIEF_PERMISSION = [
+  { permission: "*", pattern: "*", action: "deny" as const },
+  ...["read", "grep", "glob", "list"].map(permission => ({ permission, pattern: "*", action: "allow" as const })),
+  ...["*.env", "*.env.*", "**/.env", "**/.env.*"].map(pattern => ({ permission: "read", pattern, action: "deny" as const })),
+  { permission: "external_directory", pattern: "*", action: "deny" as const },
+]
+
+export const createBriefs = (desk: () => DeskPointer | undefined, current: (key: string) => DeskItem | undefined, ensure?: () => Promise<unknown>) => {
   const [jobs, setJobs] = createSignal<BriefJob[]>([])
   const [error, setError] = createSignal("")
   // A create whose response was lost. It keeps its client-chosen session ID, so confirming it
@@ -147,6 +157,8 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
   }
   const [inflight, setInflight] = createSignal<string>()
   const [preparing, setPreparing] = createSignal(false)
+  // The parent whose children were last read successfully; automatic starts wait for it.
+  const [synced, setSynced] = createSignal<string>()
   const pendingJob = (value: PendingCreate): BriefJob => ({ id: value.id, directory: value.directory, meta: value.body.metadata!.frontDesk as BriefMeta, created: value.created, state: { state: inflight() === value.id ? "starting" : "unconfirmed" } })
   let generation = 0
   // Settled briefs never change on their own, so their transcripts are read once per explicit
@@ -177,11 +189,14 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
       const found = briefs.map(({ child }) => read.find(job => job.id === child.id) ?? settled.get(child.id)!)
       if (pending() && found.some(job => job.id === pending()!.id)) savePending(undefined)
       setJobs([...found, ...local()].sort((a, b) => b.created - a.created))
+      setSynced(target.session)
       setError("")
     } catch (cause) {
       if (current === generation) setError(`Background checks could not be read (${String(cause)}). Last-known states are shown.`)
     }
   }
+  // Read as soon as the parent is known, not at the next poll.
+  createEffect(on(() => desk()?.session, (session, previous) => { if (session && session !== previous) void refresh() }, { defer: true }))
   onMount(() => {
     void refresh()
     let timer: ReturnType<typeof setTimeout>
@@ -221,13 +236,15 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
   const reusable = (item: DeskItem) => jobs().find(job => job.meta.source === item.key && job.meta.revision === item.revision && job.state.state !== "failed" && job.state.state !== "unknown")
   /** One read-only pass per exact source revision. An existing check for it is reused, not rerun. */
   const start = async (item: DeskItem) => {
-    const target = desk()
-    if (!target || pending() || preparing() || inflight()) return
+    if (pending() || preparing() || inflight()) return
     const existing = reusable(item)
     if (existing) return existing
-    // Claimed synchronously, before the first await, so near-simultaneous clicks start one check.
+    // Claimed synchronously, before the first await, so near-simultaneous starts make one check.
     setPreparing(true)
     try {
+      if (!desk() && ensure) await ensure()
+      const target = desk()
+      if (!target) return
       const tail = await oc.messagesTail(item.source.session, item.source.directory, 10).catch(() => [])
       // Re-read the canonical item: the source may have moved on while its thread was read.
       const latest = current(item.key)
@@ -246,8 +263,7 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
           parentID: target.session,
           title: `Brief: ${latest.title.slice(0, 60)}`,
           metadata: { frontDesk: meta },
-          // No tools at all: the pass reads only the packet and replies with JSON text.
-          permission: [{ permission: "*", pattern: "*", action: "deny" }],
+          permission: BRIEF_PERMISSION,
         },
       }
       // Saved before the request so a lost response survives reload with the same identity.
@@ -266,7 +282,7 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
     const value = pending()
     if (value) await admit(value)
   }
-  return { jobs, error, pending, preparing, refresh, start, confirm }
+  return { jobs, error, pending, preparing, synced, refresh, start, confirm }
 }
 
 /** Map with at most `limit` requests in flight, preserving input order. */
@@ -414,4 +430,41 @@ export const createMemory = () => {
     }
   }
   return { document, status, notice, uncertain, load, write, erase, absorb, resend }
+}
+
+/** Parent for evidence briefs, shared by Home and the desk so one source revision has one check.
+ * Deterministic per project root, so concurrent first use reconciles to the same session. Viewing
+ * only reads; the parent is created when a brief is first requested. */
+export const createBriefAnchor = (directory: () => string | undefined) => {
+  const [pointer, setPointer] = createSignal<DeskPointer>()
+  const [error, setError] = createSignal("")
+  const [target, setTarget] = createSignal<DeskPointer>()
+  // True once the lookup settled: the parent exists (pointer set) or definitely does not yet.
+  const [checked, setChecked] = createSignal(false)
+  createEffect(() => {
+    const root = directory()
+    if (!root || target()?.directory === root) return
+    void crypto.subtle.digest("SHA-256", new TextEncoder().encode(root)).then(digest => {
+      const id = `ses_fdbrief_${[...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("").slice(0, 20)}`
+      setTarget({ session: id, directory: root })
+      return oc.session(id, root).then(existing => { setPointer({ session: id, directory: existing.directory }); setChecked(true) },
+        cause => { if (String(cause).includes("HTTP 404")) setChecked(true); else setError(`Briefs are unavailable (${String(cause)}).`) })
+    })
+  })
+  const ensure = async () => {
+    const current = target()
+    if (!current) return
+    if (pointer()?.session === current.session) return pointer()
+    try {
+      const created = await oc.createSession(current.directory, { id: current.session, title: "Front desk briefs", permission: [{ permission: "*", pattern: "*", action: "deny" }] })
+      // Hidden from session lists; archived sessions and their children stay readable.
+      await oc.archive(created.id, current.directory).catch(() => undefined)
+      setPointer({ session: created.id, directory: created.directory })
+      setError("")
+      return pointer()
+    } catch (cause) {
+      setError(`Briefs are unavailable (${cause instanceof Error ? cause.message : String(cause)}).`)
+    }
+  }
+  return { pointer, error, checked, ready: () => !!target(), ensure }
 }

@@ -8,6 +8,10 @@ import { ActivityBriefView } from "../components/activity-brief"
 import type { ActivityBriefInput } from "../activity-brief"
 import { createAttention, type AttentionRecord } from "../attention"
 import { AttentionDecision, type AttentionView } from "../components/attention-decision"
+import { PreparedBrief } from "../components/attention-brief"
+import { useBriefs } from "../desk-briefs"
+import { deskItems, type DeskItem } from "../desk"
+import "./desk.css"
 import { createHomeRequests, requestKey, requestPointers, type HomeRequest } from "../home-requests"
 import HomeActivity from "../home-activity"
 import { FailureRetry } from "../components/session-failure"
@@ -67,6 +71,16 @@ export default function Home() {
   const count = (tab: string) => records().filter(record => tab === "history" ? ["resolved", "withdrawn"].includes(record.status) : record.status === (tab === "recorded" ? "decided" : tab)).length + (tab === "open" ? pendingRequests().length : 0)
   const recordKey = (record: AttentionRecord) => `${record.editspace}\u0000${record.id}`
   const byKey = createMemo(() => new Map(records().map(record => [recordKey(record), record])))
+  // Briefs are prepared app-wide (desk-briefs); Home only renders them.
+  const prepared = useBriefs()
+  const openItems = createMemo(() => deskItems({ records: records(), attentionChecked: attention.snapshot()?.checked ?? 0, requests: [], failures: [], failuresChecked: 0, title: () => undefined, project: () => undefined }))
+  prepared.track(openItems)
+  const itemFor = (record: AttentionRecord) => openItems().find(item => item.record?.id === record.id && item.record.editspace === record.editspace)
+  const readyFor = (item?: DeskItem) => !!item && prepared.jobFor(item)?.state.state === "ready"
+  const briefFor = (record: AttentionRecord) => {
+    const item = itemFor(record)
+    return item ? <PreparedBrief item={item} live /> : undefined
+  }
   return <main class="attention-home">
     <AppHeader><h1>Home</h1><span class="home-muted">{project() ?? "All projects"}</span><A class="home-map-link" href="/map"><Glyph name="graph" />Agent map</A><A href="/desk">Front desk</A>{/* Freshness speaks only when it changes what you can trust; the button title always has it. */}<span class="home-header-end home-muted" classList={{ "home-blocked": attention.stale() }}>{attention.snapshot() ? (attention.stale() ? `Ledger checked ${Math.max(0, Math.floor((attention.now() - attention.snapshot()!.checked) / 1000))}s ago · stale` : "") : "Ledger not checked"}</span><button title={attention.snapshot() ? `Ledger checked ${Math.max(0, Math.floor((attention.now() - attention.snapshot()!.checked) / 1000))}s ago` : "Ledger not checked"} disabled={attention.loading()} onClick={() => { void attention.refresh(); void requests.refresh(); dashboard.activity.todos.reload(); void attention.checkOperator().catch(() => undefined) }}>Refresh</button></AppHeader>
     <Show when={attention.error()}><div class="home-warning" role="alert">{attention.error()} Last-known records are retained; actions are disabled.</div></Show>
@@ -82,7 +96,7 @@ export default function Home() {
       {/* Key request cards by exact identity so source rechecks keep each card's in-flight and outcome state. */}
       <Show when={view() === "open"}><For each={pendingRequests().map(requestKey)}>{key => <Show when={pendingByKey().get(key)}>{row => row().kind === "permission" ? <HomePermission item={row()} live={dashboard.activity.requestState("permission", row().session, row().directory, row().id)} siblings={siblings(row())} owner={subagentOwner(row())} stale={requests.now() - row().checked > 45_000} onReceipt={receipt => setReceipts(previous => [receipt, ...previous.filter(old => old.key !== receipt.key || old.at !== receipt.at)].slice(0, 5))} onRecheck={directory => Promise.all([requests.refresh(), dashboard.activity.refreshDirectory(directory, true)]).then(() => undefined)} /> : <div class="home-request"><div><span class="home-eyebrow">{row().kind} · source request</span><h3><bdi dir="auto">{row().title}</bdi></h3><div class="home-source">Exact request <bdi dir="ltr">{row().id}</bdi> · source checked {ago(row().checked)}{requests.now() - row().checked > 45_000 ? " · stale" : ""}</div></div><A href={sessionHref(row().session, row().directory)}>Open request</A></div> }</Show>}</For></Show>
       {/* Key cards by project+record so polls update props in place and keep textarea focus, caret and draft. */}
-      <For each={visible().map(recordKey)}>{key => <Show when={byKey().get(key)}>{record => <AttentionDecision record={record()} attention={attention} onView={setView} />}</Show>}</For>
+      <For each={visible().map(recordKey)}>{key => <Show when={byKey().get(key)}>{record => <AttentionDecision record={record()} attention={attention} brief={briefFor(record())} readable={readyFor(itemFor(record()))} onView={setView} />}</Show>}</For>
       <Show when={!visible().length && (view() !== "open" || !pendingRequests().length)}><div class="home-empty">{attention.loading() && !attention.snapshot() ? "Checking attention ledger…" : attention.stale() || attention.snapshot()?.value.partial ? "Not fully checked; something may still be waiting." : view() === "open" ? "Nothing needs a choice." : "No records in this view."}</div></Show>
       <Show when={uncertainRequests().length}><details class="home-unknown"><summary>Source requests with unknown outcome ({uncertainRequests().length})</summary><For each={uncertainRequests()}>{item => <div class="home-source"><bdi dir="auto">{item.title}</bdi> · {item.kind} · {item.state === "unavailable" ? "source unavailable" : "no longer pending; outcome unknown"} · <A href={sessionHref(item.session, item.directory)}>Open thread</A></div>}</For></details></Show>
     </section>
