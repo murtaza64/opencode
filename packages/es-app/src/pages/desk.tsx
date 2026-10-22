@@ -24,7 +24,8 @@ export default function Desk() {
   const attention = createAttention(project)
   const requests = createHomeRequests(createMemo(() => requestPointers(dashboard)), item => dashboard.activity.requestSettled(item.kind, item.directory, item.id))
   const desk = createDeskSession()
-  const briefs = createBriefs(desk.pointer)
+  // Defined below; read lazily when a brief starts.
+  const briefs = createBriefs(() => desk.status() === "ready" ? desk.pointer() : undefined, key => items().find(item => item.key === key))
   const [selectedKey, setSelectedKey] = createSignal<string>()
   const [receipts, setReceipts] = createSignal<HomeReplyReceipt[]>([])
   const [now, setNow] = createSignal(Date.now())
@@ -119,7 +120,7 @@ export default function Desk() {
         <Show when={!current().live}><div class="home-warning" role="status">No longer pending in its source. The outcome is not inferred here; open the source thread.</div></Show>
         <Canonical item={current().item} live={current().live} attention={attention} requests={requests} onReceipt={receipt => setReceipts(previous => [receipt, ...previous].slice(0, 5))} />
         <Show when={receipts().length}><ul class="home-receipts"><For each={receipts()}>{receipt => <li data-result={receipt.result}>{receipt.result === "applied" ? "Reply applied" : receipt.result === "not-applied" ? "Not applied" : "Outcome uncertain"} · <bdi dir="ltr">{receipt.permission}</bdi> · {ago(receipt.at)}</li>}</For></ul></Show>
-        <BriefPanel item={current().item} live={current().live} jobs={jobsFor(current().item.key)} canStart={desk.status() === "ready" && !briefs.pending()} confirming={desk.status() !== "ready" || briefs.jobs().some(job => job.state.state === "starting")} start={() => void briefs.start(current().item)} confirm={() => void briefs.confirm()} />
+        <BriefPanel item={current().item} live={current().live} jobs={jobsFor(current().item.key)} canStart={desk.status() === "ready" && !briefs.pending() && !briefs.preparing()} confirming={desk.status() !== "ready" || briefs.jobs().some(job => job.state.state === "starting")} start={() => void briefs.start(current().item)} confirm={() => void briefs.confirm()} />
       </section>}</Show>
 
       <section class="desk-chat" aria-label="Front desk conversation">
@@ -150,6 +151,7 @@ const DeskStart = (props: { desk: ReturnType<typeof createDeskSession>; director
   <div class="desk-start">
     <Show when={props.desk.status() === "checking"}><p class="home-muted">Checking the front desk conversation…</p></Show>
     <Show when={props.desk.status() === "unavailable"}><p class="home-warning">The front desk conversation could not be checked. It is kept; nothing was recreated. <button class="desk-button" onClick={() => void props.desk.verify()}>Check again</button></p></Show>
+    <Show when={props.desk.status() === "unconfirmed"}><p class="home-warning">Starting the front desk conversation was not confirmed. Confirming resends the identical request; Core returns the same conversation if it exists. <button class="desk-button" onClick={() => void props.desk.confirm()}>Confirm start</button></p></Show>
     <Show when={props.desk.status() === "missing"}><p class="home-warning">The saved front desk conversation no longer exists in Core. <button class="desk-button" onClick={() => props.desk.forget()}>Clear pointer</button></p></Show>
     <Show when={props.desk.status() === "none" || props.desk.status() === "creating"}>
       <button class="desk-button home-primary" disabled={!props.directory || props.desk.status() === "creating"} onClick={() => props.directory && void props.desk.start(props.directory)}>

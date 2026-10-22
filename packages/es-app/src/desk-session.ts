@@ -8,7 +8,6 @@ import { descending } from "@opencode-ai/schema/identifier"
 import { oc, SessionCreateError, type ContextPart } from "./api"
 import { BRIEF_SCHEMA, BRIEF_SYSTEM, briefPacket, briefState, deskContext, type BriefMeta, type BriefState, type DeskItem } from "./desk"
 
-export type DeskPointer = { session: string; directory: string }
 const POINTER = "es-app:front-desk:1"
 const NOTE = "es-app:front-desk:context:1"
 const PENDING = "es-app:front-desk:brief-create:1"
@@ -22,47 +21,88 @@ const readJSON = <T,>(key: string, valid: (value: any) => boolean): T | undefine
   } catch { return undefined }
 }
 
+type CreateBody = Parameters<typeof oc.createSession>[1] & { id: string }
+/** `create` is kept until Core confirms the session, so a lost response is retried with the same identity. */
+export type DeskPointer = { session: string; directory: string; create?: CreateBody }
+
 export const createDeskSession = () => {
   const [pointer, setPointer] = createSignal(readJSON<DeskPointer>(POINTER, value => typeof value?.session === "string" && typeof value?.directory === "string"))
   const [session, setSession] = createSignal<Session>()
-  const [status, setStatus] = createSignal<"none" | "checking" | "ready" | "missing" | "unavailable" | "creating">(pointer() ? "checking" : "none")
+  const [status, setStatus] = createSignal<"none" | "checking" | "ready" | "missing" | "unavailable" | "creating" | "unconfirmed">(pointer() ? "checking" : "none")
   const [error, setError] = createSignal("")
+  const save = (value?: DeskPointer) => {
+    if (value) localStorage.setItem(POINTER, JSON.stringify(value))
+    else localStorage.removeItem(POINTER)
+    setPointer(value)
+  }
+  const confirmed = (created: Session) => {
+    try { save({ session: created.id, directory: created.directory }) } catch {
+      // The saved create body still names this session; the next check reconciles it.
+      setPointer({ session: created.id, directory: created.directory })
+    }
+    setSession(created)
+    setStatus("ready")
+  }
   const verify = async () => {
     const current = pointer()
     if (!current) return setStatus("none")
     setStatus("checking")
     try {
-      setSession(await oc.session(current.session, current.directory))
-      setStatus("ready")
+      confirmed(await oc.session(current.session, current.directory))
     } catch (cause) {
+      const missing = String(cause).includes("HTTP 404")
+      // An unconfirmed create may never have reached Core; only the identical request may follow.
+      if (missing && current.create) return setStatus("unconfirmed")
       // Only a definite 404 means the pointer is gone; anything else keeps it for a later check.
-      setStatus(String(cause).includes("HTTP 404") ? "missing" : "unavailable")
+      setStatus(missing ? "missing" : "unavailable")
     }
   }
   onMount(() => void verify())
-  const start = async (directory: string) => {
-    if (status() === "creating") return
+  const admit = async (value: DeskPointer & { create: CreateBody }) => {
     setStatus("creating")
     setError("")
     try {
-      const agents = await oc.agents(directory).catch(() => [])
-      const created = await oc.createSession(directory, {
+      const created = await oc.createSession(value.directory, value.create)
+      if (created.id !== value.session) throw new SessionCreateError("Core confirmed a different session than requested.", true)
+      confirmed(created)
+    } catch (cause) {
+      setError(cause instanceof SessionCreateError ? cause.message : String(cause))
+      if (cause instanceof SessionCreateError && !cause.uncertain) {
+        try { save(undefined) } catch { setPointer(undefined) }
+        return setStatus("none")
+      }
+      setStatus("unconfirmed")
+    }
+  }
+  const start = async (directory: string) => {
+    if (status() !== "none") return
+    setStatus("creating")
+    const agents = await oc.agents(directory).catch(() => [])
+    const id = `ses_${descending()}`
+    const value = {
+      session: id, directory,
+      create: {
+        id,
         title: "Front desk",
         ...(agents.some(agent => agent.name === AGENT) ? { agent: AGENT } : {}),
         // The desk answers and routes; it never edits files, whichever agent serves it.
-        permission: [{ permission: "edit", pattern: "*", action: "deny" }],
-      })
-      localStorage.setItem(POINTER, JSON.stringify({ session: created.id, directory: created.directory }))
-      setPointer({ session: created.id, directory: created.directory })
-      setSession(created)
-      setStatus("ready")
-    } catch (cause) {
-      setError(cause instanceof SessionCreateError ? cause.message : String(cause))
-      setStatus(pointer() ? "unavailable" : "none")
+        permission: [{ permission: "edit", pattern: "*", action: "deny" as const }],
+      },
     }
+    // Saved before the request: without a durable identity a lost response could orphan a conversation.
+    try { save(value) } catch {
+      setError("Could not save the front desk identity locally, so no conversation was created. Free browser storage and try again.")
+      return setStatus("none")
+    }
+    await admit(value)
+  }
+  /** Human-confirmed retry of an unconfirmed create: the identical request, never a new conversation. */
+  const confirm = async () => {
+    const current = pointer()
+    if (current?.create && status() === "unconfirmed") await admit({ ...current, create: current.create })
   }
   const forget = () => {
-    localStorage.removeItem(POINTER)
+    try { localStorage.removeItem(POINTER) } catch { /* cleared for this view regardless */ }
     setPointer(undefined)
     setSession(undefined)
     setStatus("none")
@@ -82,7 +122,7 @@ export const createDeskSession = () => {
     const key = parts.find(part => part.metadata.source === CONTEXT_SOURCE)?.metadata.key
     if (current && key && accepted) localStorage.setItem(`${NOTE}:${current.id}`, key)
   }
-  return { pointer, session, status, error, setError, verify, start, forget, context, sent }
+  return { pointer, session, status, error, setError, verify, start, confirm, forget, context, sent }
 }
 
 export type BriefJob = { id: string; directory: string; meta: BriefMeta; created: number; state: BriefState | { state: "starting" } | { state: "unconfirmed" } }
@@ -93,7 +133,7 @@ const metaOf = (session: Session): BriefMeta | undefined => {
   return value?.kind === "brief" && typeof value.requestID === "string" && typeof value.source === "string" && typeof value.revision === "string" && Array.isArray(value.refs) ? value : undefined
 }
 
-export const createBriefs = (desk: () => DeskPointer | undefined) => {
+export const createBriefs = (desk: () => DeskPointer | undefined, current: (key: string) => DeskItem | undefined) => {
   const [jobs, setJobs] = createSignal<BriefJob[]>([])
   const [error, setError] = createSignal("")
   // A create whose response was lost. It keeps its client-chosen session ID, so confirming it
@@ -105,6 +145,7 @@ export const createBriefs = (desk: () => DeskPointer | undefined) => {
     setPending(value)
   }
   const [inflight, setInflight] = createSignal<string>()
+  const [preparing, setPreparing] = createSignal(false)
   const pendingJob = (value: PendingCreate): BriefJob => ({ id: value.id, directory: value.directory, meta: value.body.metadata!.frontDesk as BriefMeta, created: value.created, state: { state: inflight() === value.id ? "starting" : "unconfirmed" } })
   let generation = 0
   const refresh = async () => {
@@ -140,8 +181,8 @@ export const createBriefs = (desk: () => DeskPointer | undefined) => {
     tick()
     onCleanup(() => { clearTimeout(timer); generation++ })
   })
-  const admit = async (value: PendingCreate) => {
-    if (inflight()) return
+  const admit = async (value: PendingCreate, claimed = false) => {
+    if ((inflight() || preparing()) && !claimed) return
     setInflight(value.id)
     setJobs(previous => [pendingJob(value), ...previous.filter(job => job.id !== value.id)])
     let child: Session
@@ -165,36 +206,53 @@ export const createBriefs = (desk: () => DeskPointer | undefined) => {
     setInflight(undefined)
     await refresh()
   }
+  const reusable = (item: DeskItem) => jobs().find(job => job.meta.source === item.key && job.meta.revision === item.revision && job.state.state !== "failed" && job.state.state !== "unknown")
   /** One read-only pass per exact source revision. An existing check for it is reused, not rerun. */
   const start = async (item: DeskItem) => {
     const target = desk()
-    if (!target || pending()) return
-    const existing = jobs().find(job => job.meta.source === item.key && job.meta.revision === item.revision && job.state.state !== "failed" && job.state.state !== "unknown")
+    if (!target || pending() || preparing() || inflight()) return
+    const existing = reusable(item)
     if (existing) return existing
-    const requestID = crypto.randomUUID()
-    const tail = await oc.messagesTail(item.source.session, item.source.directory, 10).catch(() => [])
-    const packet = briefPacket(item, tail)
-    const meta: BriefMeta = { kind: "brief", requestID, source: item.key, revision: item.revision, title: item.title, refs: packet.refs }
-    const id = `ses_${descending()}`
-    const value: PendingCreate = {
-      id, directory: target.directory, packet: packet.text, created: Date.now(),
-      body: {
-        id,
-        parentID: target.session,
-        title: `Brief: ${item.title.slice(0, 60)}`,
-        metadata: { frontDesk: meta },
-        // No tools at all: the pass reads only the packet and replies with JSON text.
-        permission: [{ permission: "*", pattern: "*", action: "deny" }],
-      },
+    // Claimed synchronously, before the first await, so near-simultaneous clicks start one check.
+    setPreparing(true)
+    try {
+      const tail = await oc.messagesTail(item.source.session, item.source.directory, 10).catch(() => [])
+      // Re-read the canonical item: the source may have moved on while its thread was read.
+      const latest = current(item.key)
+      if (!latest || latest.revision !== item.revision) {
+        setError("The source changed while the brief was being prepared. Nothing was started.")
+        return
+      }
+      if (desk()?.session !== target.session || pending() || inflight() || reusable(latest)) return
+      const packet = briefPacket(latest, tail)
+      const meta: BriefMeta = { kind: "brief", requestID: crypto.randomUUID(), source: latest.key, revision: latest.revision, title: latest.title, refs: packet.refs }
+      const id = `ses_${descending()}`
+      const value: PendingCreate = {
+        id, directory: target.directory, packet: packet.text, created: Date.now(),
+        body: {
+          id,
+          parentID: target.session,
+          title: `Brief: ${latest.title.slice(0, 60)}`,
+          metadata: { frontDesk: meta },
+          // No tools at all: the pass reads only the packet and replies with JSON text.
+          permission: [{ permission: "*", pattern: "*", action: "deny" }],
+        },
+      }
+      // Saved before the request so a lost response survives reload with the same identity.
+      try { savePending(value) } catch {
+        setError("Could not save the brief identity locally, so it was not started. Free browser storage and try again.")
+        return
+      }
+      setError("")
+      await admit(value, true)
+    } finally {
+      setPreparing(false)
     }
-    // Saved before the request so a lost response survives reload with the same identity.
-    savePending(value)
-    await admit(value)
   }
   /** Human-confirmed retry of an unconfirmed create: the identical request, never a new session. */
   const confirm = async () => {
     const value = pending()
     if (value) await admit(value)
   }
-  return { jobs, error, pending, refresh, start, confirm }
+  return { jobs, error, pending, preparing, refresh, start, confirm }
 }

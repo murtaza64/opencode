@@ -63,7 +63,18 @@ test("context note is bounded, names the selection explicitly and changes key on
   expect(selected.text).toContain("options: a=Canary; b=Full")
   expect(selected.text).toContain("requesting agent recommends: a")
   expect(selected.key).not.toBe(general.key)
-  expect(deskContext({ now: 99, sources: [], items: [], briefs: [] }).key).toBe(general.key)
+  expect(deskContext({ now: 99_999, sources: [], items: many, briefs: [] }).key).toBe(general.key)
+})
+
+test("context key changes when the queue, a revision or source health changes, but not with time", () => {
+  const source = { name: "Attention ledger", state: "current" as const, checked: 1 }
+  const key = (input: { items?: DeskItem[]; state?: "current" | "unavailable"; checked?: number; now?: number }) =>
+    deskContext({ now: input.now ?? 0, sources: [{ ...source, state: input.state ?? "current", checked: input.checked ?? 1 }], items: input.items ?? items(2), briefs: [] }).key
+  const base = key({})
+  expect(key({ now: 50_000, checked: 40_000 })).toBe(base)
+  expect(key({ items: items(3) })).not.toBe(base)
+  expect(key({ items: items(2).slice(1) })).not.toBe(base)
+  expect(key({ state: "unavailable" })).not.toBe(base)
 })
 
 test("brief packet keeps the newest evidence within budget and numbers its refs", () => {

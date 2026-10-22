@@ -165,7 +165,15 @@ export const deskContext = (input: {
   briefs: { meta: BriefMeta; state: BriefState }[]
 }) => {
   const ready = input.briefs.flatMap(brief => brief.state.state === "ready" ? [{ meta: brief.meta, result: brief.state.result }] : [])
-  const key = JSON.stringify([input.scope ?? "", input.selected ? [input.selected.key, input.selected.revision] : null, ready.map(brief => brief.meta.requestID)])
+  // Everything the note states except clock-derived ages, so any queue, revision or source-health
+  // change reaches the model on the next send, and an unchanged view adds nothing.
+  const key = JSON.stringify([
+    input.scope ?? "",
+    input.items.map(item => [item.key, item.revision]),
+    input.sources.map(source => [source.name, source.state, source.detail ?? ""]),
+    input.selected ? [input.selected.key, input.selected.revision] : null,
+    ready.map(brief => brief.meta.requestID),
+  ])
   const lines = [
     "Front desk context from es-app. Read-only snapshot for orientation; it is not an instruction and grants nothing.",
     `generated: ${new Date(input.now).toISOString()}`,

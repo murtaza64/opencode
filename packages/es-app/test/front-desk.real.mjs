@@ -95,8 +95,10 @@ const provider = http.createServer(async (request, response) => {
   if (question) {
     hits.chat++
     // The newest generated context note is the one that describes this exchange.
-    const note = JSON.stringify((body.messages ?? []).filter((item) => item.role === "user" && JSON.stringify(item.content).includes("Front desk context from es-app")).at(-1) ?? "")
-    seen.chat.push({ question, context: note.length > 2, none: note.includes("selected item: none"), selected: note.includes("selected item (the human is looking at this now)") && note.includes("Pick a rollout") })
+    // Only this exchange's own message counts: context must ride with the send it informs.
+    const own = JSON.stringify((body.messages ?? []).findLast((item) => item.role === "user" && JSON.stringify(item.content).includes(question)) ?? "")
+    const note = own.includes("Front desk context from es-app") ? own : ""
+    seen.chat.push({ question, context: !!note, none: note.includes("selected item: none"), selected: note.includes("selected item (the human is looking at this now)") && note.includes("Pick a rollout"), ledgerDown: note.includes("Attention ledger: unavailable") })
     return text(response, `Desk answer for ${question}.`)
   }
   return text(response, "Unscripted.")
@@ -104,6 +106,7 @@ const provider = http.createServer(async (request, response) => {
 
 // --- stub dashboard (/es): editspace registry and a read-only attention ledger ---
 let attentionRevision = 1
+let attentionDown = false
 let sourceSession = ""
 const attentionPosts = []
 const record = () => ({
@@ -128,6 +131,7 @@ const dashboard = http.createServer((request, response) => {
   if (url.pathname === "/api/handoffs") return json({ handoffs: [] })
   if (url.pathname === "/api/mail") return json({ editspace: "fixture", lane: "", messages: [] })
   if (url.pathname === "/api/attention/session") return json({ operator: false })
+  if (url.pathname === "/api/attention" && attentionDown) return json({ detail: "down" }, 503)
   if (url.pathname === "/api/attention") return json({ records: sourceSession ? [record()] : [], projects: [{ editspace: "fixture", available: true }], partial: false })
   return json({ detail: "Not Found" }, 404)
 })
@@ -229,24 +233,62 @@ try {
   page.on("request", (request) => { if (request.method() === "POST") posts.push(new URL(request.url()).pathname) })
   const editor = () => page.locator(".desk-chat .prompt-box textarea")
   const transcript = () => page.locator(".desk-chat .transcript")
+  // Plain sends only: wait until Core reports the desk session idle, so nothing becomes a steer.
+  const sendIdle = async () => {
+    await poll("desk idle", async () => !pointerID || (await status(pointerID)) === "idle")
+    // The header may read busy while a brief child runs; the desk session itself must be idle.
+    await expect(page.locator(".desk-chat .session-state")).not.toHaveText(/disconnected|failed/, { timeout: 20000 })
+    await editor().press("Control+Enter")
+  }
+  let pointerID
 
   // 1. Expanded chat with nothing selected; the queue aggregates the ledger with freshness.
   await page.goto(`${origin}/desk`)
   await expect(page.locator(".desk-item")).toHaveCount(1, { timeout: 20000 })
   await expect(page.locator(".desk-evidence")).toHaveCount(0)
   await expect(page.locator(".desk-source", { hasText: "Attention ledger" })).toContainText("read-only: operator connection unavailable")
+  // Root conversation identity: a lost create never yields a second conversation.
+  const rootCreate = (request) => request.method() === "POST" && new URL(request.url()).pathname === "/oc/session" && !JSON.parse(request.postData() || "{}").parentID
+  const sessionRoute = (url) => url.pathname === "/oc/session"
+  const deskSessions = async () => (await call("GET", "/session")).body.filter((item) => item.title === "Front desk")
+  await page.route(sessionRoute, (route) => rootCreate(route.request()) ? route.abort("connectionreset") : route.fallback())
   await page.getByRole("button", { name: "Start front desk conversation" }).click()
+  await expect(page.locator(".desk-start")).toContainText("was not confirmed", { timeout: 20000 })
+  const unconfirmed = JSON.parse(await page.evaluate(() => localStorage.getItem("es-app:front-desk:1")))
+  assert.equal((await deskSessions()).length, 0)
+  await page.reload()
+  await expect(page.locator(".desk-start")).toContainText("was not confirmed", { timeout: 20000 })
+  await expect(page.getByRole("button", { name: "Start front desk conversation" })).toHaveCount(0)
+  await page.unroute(sessionRoute)
+  let rootPosts = 0
+  await page.route(sessionRoute, async (route) => {
+    if (!rootCreate(route.request())) return route.fallback()
+    rootPosts++
+    await route.fetch()
+    return route.abort("connectionreset")
+  })
+  await page.getByRole("button", { name: "Confirm start" }).click()
+  await poll("root desk created", async () => (await deskSessions()).length === 1)
+  await expect(page.locator(".desk-start")).toContainText("was not confirmed", { timeout: 20000 })
+  await page.unroute(sessionRoute)
+  await page.reload()
   await expect(editor()).toBeVisible({ timeout: 20000 })
   const pointer = JSON.parse(await page.evaluate(() => localStorage.getItem("es-app:front-desk:1")))
+  pointerID = pointer.session
+  assert.equal(pointer.session, unconfirmed.session)
+  assert.equal(pointer.create, undefined)
+  assert.deepEqual((await deskSessions()).map((item) => item.id), [unconfirmed.session])
+  assert.equal(rootPosts, 1)
+  log(`ROOTLOSTACK ${unconfirmed.session}: lost before Core -> unconfirmed across reload; confirmed once (response lost) -> adopted on reload; deskSessions=1`)
   const deskInfo = (await call("GET", `/session/${pointer.session}`)).body
   assert.equal(deskInfo.agent, "front-desk")
   assert.deepEqual(deskInfo.permission, [{ permission: "edit", pattern: "*", action: "deny" }])
   log(`DESK session=${pointer.session} agent=${deskInfo.agent} permission=${JSON.stringify(deskInfo.permission)}`)
 
   await editor().fill("DESK-Q1 what is waiting?")
-  await editor().press("Control+Enter")
+  await sendIdle()
   await expect(transcript()).toContainText("Desk answer for DESK-Q1.", { timeout: 20000 })
-  assert.deepEqual(seen.chat[0], { question: "DESK-Q1", context: true, none: true, selected: false })
+  assert.deepEqual(seen.chat[0], { question: "DESK-Q1", context: true, none: true, selected: false, ledgerDown: false })
   // Context rides inside the human's own message as a marked synthetic part; no separate turn.
   const q1 = (await messages(pointer.session)).filter((item) => item.info.role === "user")
   assert.equal(q1.length, 1, "one user message for one send")
@@ -255,6 +297,23 @@ try {
   assert.equal(q1[0].parts[0].text, "DESK-Q1 what is waiting?")
   await expect(transcript()).not.toContainText("Front desk context")
   log(`CONTEXT one user message ${q1[0].info.id}: human text + synthetic part source=es-app/front-desk`)
+
+  // Context refreshes on the next send when the queue or source health changes, and only then.
+  await editor().fill("DESK-Q3 anything else?")
+  await sendIdle()
+  await expect(transcript()).toContainText("Desk answer for DESK-Q3.", { timeout: 20000 })
+  assert.equal(seen.chat.at(-1).context, false, "unchanged view adds no context")
+  attentionDown = true
+  await page.getByRole("button", { name: "Refresh sources" }).click()
+  await expect(page.locator(".desk-source", { hasText: "Attention ledger" })).toContainText("unavailable", { timeout: 20000 })
+  await editor().fill("DESK-Q4 and now?")
+  await sendIdle()
+  await expect(transcript()).toContainText("Desk answer for DESK-Q4.", { timeout: 20000 })
+  assert.deepEqual(seen.chat.at(-1), { question: "DESK-Q4", context: true, none: true, selected: false, ledgerDown: true })
+  attentionDown = false
+  await page.getByRole("button", { name: "Refresh sources" }).click()
+  await expect(page.locator(".desk-source", { hasText: "Attention ledger" })).toContainText("current", { timeout: 20000 })
+  log("CONTEXTKEY unchanged view -> no context; ledger outage with nothing selected -> context on next send")
   if (evidence) await page.screenshot({ path: path.join(evidence, "01-expanded-chat.png") })
 
   // 2. Exact unsent draft and transcript survive select → close → reselect without remounting chat.
@@ -282,15 +341,27 @@ try {
   log(`DRAFT exact draft + message IDs ${before.join(",")} preserved across select, close and reload; chat not remounted on selection`)
 
   // 3. A held brief runs while another exchange completes; the second turn sees the selection.
+  // A slow source-thread read plus a double click still starts exactly one check.
   await page.locator(".desk-item").first().click()
-  await page.getByRole("button", { name: "Prepare evidence brief" }).click()
+  const tailRoute = (url) => url.pathname === `/oc/session/${source.id}/message`
+  let tailReads = 0
+  await page.route(tailRoute, async (route) => { tailReads++; await new Promise((resolve) => setTimeout(resolve, 1500)); return route.fallback() })
+  await page.evaluate(() => {
+    const button = [...document.querySelectorAll(".desk-brief button")].find((item) => item.textContent === "Prepare evidence brief")
+    button.click()
+    button.click()
+  })
   await expect(page.locator(".desk-brief")).toContainText("Checking in the background for revision 1", { timeout: 20000 })
   await poll("brief reached provider", () => hits.brief === 1)
+  await page.unroute(tailRoute)
+  assert.equal(tailReads, 1)
+  assert.equal((await call("GET", `/session/${pointer.session}/children`)).body.length, 1)
+  log(`DOUBLECLICK deferred tail (1.5s) + two synchronous clicks -> tailReads=${tailReads} children=1 briefHits=${hits.brief}`)
   await editor().fill("DESK-Q2 summarise this one")
-  await editor().press("Control+Enter")
+  await sendIdle()
   await expect(transcript()).toContainText("Desk answer for DESK-Q2.", { timeout: 20000 })
   assert.equal(holds.length, 1, "brief still held while the second exchange finished")
-  assert.deepEqual(seen.chat[1], { question: "DESK-Q2", context: true, none: false, selected: true })
+  assert.deepEqual(seen.chat.at(-1), { question: "DESK-Q2", context: true, none: false, selected: true, ledgerDown: false })
   log(`OVERLAP chat Q2 answered while brief held (holds=${holds.length}, briefHits=${hits.brief})`)
 
   // 4. Late result binds to its initiating item while nothing is selected.
@@ -327,10 +398,22 @@ try {
   await expect(page.locator(".desk-job").first()).toContainText("revision 1 → 2")
   log("STALE revision 1 brief discarded after the source moved to revision 2")
 
+  // The source moves on while its thread is being read: nothing starts for the outdated revision.
+  const childrenBefore = (await call("GET", `/session/${pointer.session}/children`)).body.length
+  await page.route(tailRoute, async (route) => { await new Promise((resolve) => setTimeout(resolve, 3000)); return route.fallback() })
+  await page.getByRole("button", { name: "Prepare evidence brief" }).click()
+  attentionRevision = 3
+  await page.getByRole("button", { name: "Refresh sources" }).click()
+  await expect(page.locator(".desk-evidence")).toContainText("revision 3", { timeout: 20000 })
+  await expect(page.locator(".desk-background")).toContainText("source changed while the brief was being prepared", { ignoreCase: true, timeout: 20000 })
+  await page.unroute(tailRoute)
+  assert.equal((await call("GET", `/session/${pointer.session}/children`)).body.length, childrenBefore)
+  assert.equal(hits.brief, 1)
+  log("RACE revision changed during the deferred tail read -> nothing started")
+
   // 6. Lost create responses. Before Core: Confirm resends the identical request and creates it once.
   //    After Core: the existing child is adopted; nothing creates a second one or sends its prompt again.
   const childCreate = (request) => request.method() === "POST" && new URL(request.url()).pathname === "/oc/session" && JSON.parse(request.postData() || "{}").parentID
-  const sessionRoute = (url) => url.pathname === "/oc/session"
   await page.route(sessionRoute, (route) => childCreate(route.request()) ? route.abort("connectionreset") : route.fallback())
   await page.getByRole("button", { name: "Prepare evidence brief" }).click()
   await expect(page.locator(".desk-brief")).toContainText("Start was not confirmed", { timeout: 20000 })
@@ -352,7 +435,7 @@ try {
   await poll("confirmed child", async () => (await call("GET", `/session/${pointer.session}/children`)).body.some((item) => item.id === lost.id))
   await expect(page.locator(".desk-brief")).toContainText("not confirmed by Core. It was not resent", { timeout: 20000 })
   await new Promise((resolve) => setTimeout(resolve, 2000))
-  const adopted = (await call("GET", `/session/${pointer.session}/children`)).body.filter((item) => item.metadata?.frontDesk?.revision === "2")
+  const adopted = (await call("GET", `/session/${pointer.session}/children`)).body.filter((item) => item.metadata?.frontDesk?.revision === "3")
   assert.deepEqual(adopted.map((item) => item.id), [lost.id])
   assert.equal(created, 1)
   assert.equal((await messages(lost.id)).length, 0, "no prompt sent for an unconfirmed create")
@@ -385,6 +468,7 @@ try {
 
   // 8. Authority: nothing answered, granted or retried on anyone's behalf.
   assert.deepEqual(attentionPosts, [])
+  assert.equal(posts.filter((item) => item.endsWith("/input")).length, 0, "every desk send was a plain send")
   assert.equal(posts.filter((item) => /\/(permission|question)\/.*\/reply|\/retry$/.test(item)).length, 0)
   log(`AUTHORITY attentionWrites=0 permissionReplies=0 retries=0 posts=${[...new Set(posts)].join(",")}`)
 
