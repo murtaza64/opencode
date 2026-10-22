@@ -238,10 +238,10 @@ try {
   const dotfiles = process.env.FRONT_DESK_DOTFILES
   assert(dotfiles && path.isAbsolute(dotfiles), "FRONT_DESK_DOTFILES must name the dotfiles checkout with bin/es_dashboard_memory.py")
   memoryFixture = spawn("uv", ["run", "--quiet", path.join(dotfiles, "tests/frontdesk_memory_fixture.py"), "--origin", `http://127.0.0.1:${vitePort}`], {
-    env: { ...process.env, HOME: home, ES_ATTENTION_AUTH_FILE: path.join(home, "attention.key") }, stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, HOME: home, ES_ATTENTION_AUTH_FILE: path.join(home, "attention.key") }, stdio: ["ignore", "pipe", "pipe"], detached: true,
   })
   const fixtureProcess = memoryFixture
-  process.once("exit", () => { if (fixtureProcess.exitCode === null) fixtureProcess.kill("SIGKILL") })
+  process.once("exit", () => { if (fixtureProcess.exitCode === null) try { process.kill(-fixtureProcess.pid, "SIGKILL") } catch {} })
   let fixtureOut = ""
   memoryBase = await bounded("memory fixture", new Promise((resolve, reject) => {
     memoryFixture.stdout.on("data", (piece) => { fixtureOut += piece; const match = /listening on (http:\/\/\S+) file=(\S+)/.exec(fixtureOut); if (match) resolve(match[1]) })
@@ -661,7 +661,7 @@ try {
   await browser?.close().catch(() => {})
   await vite?.close().catch(() => {})
   await stopCore().catch(() => {})
-  memoryFixture?.kill("SIGTERM")
+  if (memoryFixture) try { process.kill(-memoryFixture.pid, "SIGTERM") } catch {}
   provider.closeAllConnections?.()
   await new Promise((resolve) => provider.close(resolve))
   dashboard.closeAllConnections?.()

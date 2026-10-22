@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { MessageWithParts } from "./api"
-import { appliedKeys, applyMemory, assistantOps, emptyMemory, eraseMemory, memoryLines, MEMORY_LIMITS, nextMemory, type MemoryDocument, type MemoryRevision } from "./desk-memory"
+import { appliedKeys, applyMemory, assistantOps, emptyMemory, eraseMemory, handled, memoryLines, MEMORY_LIMITS, nextMemory, type MemoryDocument, type MemoryRevision } from "./desk-memory"
 
 const revision = (n: number, entries: MemoryRevision["entries"]): MemoryRevision => ({ n, entries, change: { op: "upsert", actor: "human" }, at: n })
 const saved = (history: MemoryRevision[], text: string, id = "pref") => {
@@ -82,4 +82,19 @@ test("history stays bounded and restore reaches only retained revisions", () => 
   expect(current.history[0]!.n).toBe(6)
   expect(nextMemory(current, { op: "restore", revision: 3 }, "human", 99)).toEqual({ refused: "Revision 3 is not in history." })
   expect(doc(nextMemory(current, { op: "restore", revision: 6 }, "human", 99)).entries[0]!.text).toBe("note 5")
+})
+
+test("the desk-change cursor keeps old replies handled after the applied list has rolled over", () => {
+  let current = doc(nextMemory(emptyMemory(), { op: "upsert", id: "tz", text: "Works in UTC" }, "assistant", 1, { messageID: "msg_0001", opKey: "msg_0001:0" }))
+  current = doc(nextMemory(current, { op: "forget", id: "tz" }, "human", 2))
+  for (let i = 0; i < 205; i++) current = doc(nextMemory(current, { op: "upsert", id: "n", text: `note ${i}` }, "assistant", 3 + i, { messageID: "msg_0002", opKey: `msg_0002:${i}` }))
+  expect(current.applied).toHaveLength(200)
+  expect(current.applied.includes("msg_0001:0")).toBe(false)
+  expect(current.cursor).toEqual({ messageID: "msg_0002", index: 204 })
+  expect(handled(current, "msg_0001:0")).toBe(true)
+  expect(handled(current, "msg_0002:3")).toBe(true)
+  expect(handled(current, "msg_0002:205")).toBe(false)
+  expect(handled(current, "msg_0003:0")).toBe(false)
+  // Human edits, restores and erases keep the cursor.
+  expect(doc(nextMemory(current, { op: "restore", revision: current.history[0]!.n }, "human", 999)).cursor).toEqual(current.cursor)
 })

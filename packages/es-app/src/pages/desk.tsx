@@ -249,7 +249,7 @@ const MemoryPanel = (props: { memory: ReturnType<typeof createMemory> }) => {
   const [draft, setDraft] = createSignal("")
   const [added, setAdded] = createSignal({ id: "", text: "", kind: "preference" as MemoryEntry["kind"] })
   const [forgotten, setForgotten] = createSignal<string[]>([])
-  const busy = () => props.memory.status() === "writing"
+  const busy = () => props.memory.status() === "writing" || !!props.memory.uncertain()
   const save = async (entry: MemoryEntry) => {
     if (await props.memory.write({ op: "upsert", id: entry.id, text: draft(), kind: entry.kind, scope: entry.scope, confidence: "stated" }, "human") === "written") setEditing()
   }
@@ -257,6 +257,7 @@ const MemoryPanel = (props: { memory: ReturnType<typeof createMemory> }) => {
   return <section class="desk-memory" aria-label="Front desk memory">
     <p class="home-source">Personal notes the desk reads for orientation. Never used as permission. Stored in ~/.local/share/opencode/front-desk/memory.json.</p>
     <Show when={props.memory.notice()}><p class="home-warning" role="status">{props.memory.notice()}</p></Show>
+    <Show when={props.memory.uncertain()}><div class="desk-memory-actions"><button class="desk-button" disabled={props.memory.status() === "writing"} onClick={() => void props.memory.load()}>Reload memory</button><button class="desk-button" disabled={props.memory.status() === "writing"} onClick={() => void props.memory.resend()}>Resend identical change</button></div></Show>
     <ul class="desk-memory-list">
       <For each={props.memory.document().entries} fallback={<li class="home-muted">No notes yet.</li>}>{entry => <li data-memory-id={entry.id}>
         <Show when={editing() === entry.id} fallback={<bdi dir="auto">{entry.text}</bdi>}>

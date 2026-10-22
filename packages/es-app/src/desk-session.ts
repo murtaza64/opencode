@@ -6,7 +6,7 @@ import { createSignal, onCleanup, onMount } from "solid-js"
 import type { Session } from "@opencode-ai/sdk/v2"
 import { descending } from "@opencode-ai/schema/identifier"
 import { oc, SessionCreateError, type ContextPart, type MessageWithParts } from "./api"
-import { appliedKeys, assistantOps, emptyMemory, eraseMemory, nextMemory, type MemoryDocument, type MemoryOp } from "./desk-memory"
+import { assistantOps, handled, emptyMemory, eraseMemory, nextMemory, type MemoryDocument, type MemoryOp } from "./desk-memory"
 import { BRIEF_SCHEMA, BRIEF_SYSTEM, briefPacket, briefState, deskContext, type BriefMeta, type BriefState, type DeskItem } from "./desk"
 
 const POINTER = "es-app:front-desk:1"
@@ -283,6 +283,11 @@ const limited = async <T, R>(items: T[], limit: number, map: (item: T) => Promis
 const MEMORY_REFUSED = "es-app:front-desk:memory-refused:1"
 type Stored = { hash: string; document: MemoryDocument }
 const MEMORY_URL = "/es/api/frontdesk/memory"
+const MEMORY_UNCERTAIN = "es-app:front-desk:memory-uncertain:1"
+type PutBody = { expected_hash: string; document: MemoryDocument }
+// A change is identified by its revision and newest history item; the file holding both means it committed.
+const committed = (file: MemoryDocument, body: PutBody) =>
+  file.revision === body.document.revision && JSON.stringify(file.history.at(-1)) === JSON.stringify(body.document.history.at(-1))
 
 /** Personal memory in one file, replaced only by compare-and-set on its content hash. */
 export const createMemory = () => {
@@ -290,12 +295,38 @@ export const createMemory = () => {
   const [status, setStatus] = createSignal<"idle" | "loading" | "writing" | "unavailable">("idle")
   const [notice, setNotice] = createSignal("")
   const document = () => stored()?.document ?? emptyMemory()
+  // A save whose outcome is unknown. Its original request may still commit, so it is kept until the
+  // file shows it committed or can no longer commit, and only the identical request is resent.
+  const [uncertain, setUncertain] = createSignal(readJSON<PutBody>(MEMORY_UNCERTAIN, value => typeof value?.expected_hash === "string" && !!value?.document))
+  const keepUncertain = (body?: PutBody) => {
+    try {
+      if (body) localStorage.setItem(MEMORY_UNCERTAIN, JSON.stringify(body))
+      else localStorage.removeItem(MEMORY_UNCERTAIN)
+    } catch { /* kept in memory for this page */ }
+    setUncertain(body)
+  }
+  const reconcile = () => {
+    const body = uncertain()
+    const file = stored()
+    if (!body || !file) return
+    if (committed(file.document, body)) {
+      keepUncertain(undefined)
+      setNotice("The earlier memory change was confirmed in the file.")
+      return
+    }
+    // The file moved on without it: compare-and-set guarantees the original can no longer commit.
+    if (file.hash !== body.expected_hash) {
+      keepUncertain(undefined)
+      setNotice("The earlier memory change was not saved: memory changed before it could commit.")
+    }
+  }
   const load = async () => {
     setStatus(previous => previous === "writing" ? previous : "loading")
     try {
       const response = await fetch(MEMORY_URL, { credentials: "include" })
       if (!response.ok) throw new Error(response.status === 404 ? "the dashboard has no memory endpoint" : `HTTP ${response.status}`)
       setStored(await response.json())
+      reconcile()
       setStatus(previous => previous === "writing" ? previous : "idle")
     } catch (cause) {
       setStatus("unavailable")
@@ -303,22 +334,27 @@ export const createMemory = () => {
     }
   }
   type Outcome = "written" | "refused" | "conflict" | "unconfirmed" | "busy" | "forbidden"
-  const put = async (base: Stored, next: MemoryDocument): Promise<Outcome> => {
+  const send = async (body: PutBody): Promise<Outcome> => {
     setStatus("writing")
     try {
       const response = await fetch(MEMORY_URL, {
         method: "PUT", credentials: "include",
         headers: { "content-type": "application/json", "X-Attention-CSRF": "1" },
-        body: JSON.stringify({ expected_hash: base.hash, document: next }),
+        body: JSON.stringify(body),
       }).catch(() => undefined)
       if (response?.ok) {
         setStored(await response.json())
+        if (uncertain() && JSON.stringify(uncertain()) === JSON.stringify(body)) keepUncertain(undefined)
         return "written"
       }
+      // No response, or a server error that may have followed the commit: read the file before deciding.
+      if (!response || response.status >= 500) {
+        keepUncertain(body)
+        await load()
+        return uncertain() ? "unconfirmed" : committed(document(), body) ? "written" : "conflict"
+      }
       await load()
-      // A lost response: the file holding exactly this revision means it was written.
-      if (!response) return document().revision === next.revision && JSON.stringify(document().history.at(-1)) === JSON.stringify(next.history.at(-1)) ? "written" : "unconfirmed"
-      if (response.status === 409) return "conflict"
+      if (response.status === 409) return uncertain() ? "unconfirmed" : "conflict"
       if (response.status === 401 || response.status === 403) return "forbidden"
       setNotice(`Memory change refused: ${(await response.json().catch(() => undefined))?.error ?? `HTTP ${response.status}`}`)
       return "refused"
@@ -328,25 +364,33 @@ export const createMemory = () => {
   }
   const messages: Record<Exclude<Outcome, "written" | "refused">, string> = {
     conflict: "Memory changed elsewhere first. Your change was not saved; review the newest notes and try again.",
-    unconfirmed: "The memory change was not confirmed and is not in the file. Nothing was saved; try again.",
-    busy: "Another memory change is in progress.",
+    unconfirmed: "The memory change is not confirmed. It may still be saved; reload to check, or resend the identical change.",
+    busy: "Another memory change is in progress or unconfirmed.",
     forbidden: "Memory is read-only here: the operator connection is unavailable.",
   }
   const commit = async (next: MemoryDocument | { refused: string }, base: Stored | undefined, label: string): Promise<Outcome> => {
-    if (!base || status() === "writing") return "busy"
+    if (!base || status() === "writing" || uncertain()) return "busy"
     if ("refused" in next) {
       setNotice(`${label} not saved: ${next.refused}`)
       return "refused"
     }
-    const outcome = await put(base, next)
+    const outcome = await send({ expected_hash: base.hash, document: next })
     if (outcome !== "written" && outcome !== "refused") setNotice(messages[outcome])
     if (outcome === "written") setNotice("")
     return outcome
   }
+  /** Resend exactly the unconfirmed request; compare-and-set keeps it from applying twice. */
+  const resend = async () => {
+    const body = uncertain()
+    if (!body || status() === "writing") return
+    const outcome = await send(body)
+    if (outcome === "conflict") reconcile()
+    else setNotice(outcome === "written" ? "Memory change saved." : messages[outcome as keyof typeof messages] ?? "")
+  }
   /** One change on top of the file as last read. Desk changes carry their opKey and apply once. */
   const write = async (op: MemoryOp, actor: "human" | "assistant", source?: { messageID: string; opKey: string }) => {
     const base = stored()
-    if (base && source && appliedKeys(base.document).has(source.opKey)) return "written" as const
+    if (base && source && handled(base.document, source.opKey)) return "written" as const
     return commit(base ? nextMemory(base.document, op, actor, Date.now(), source) : { refused: "Memory has not been read yet." }, base,
       actor === "assistant" ? "The desk's memory change" : "Change")
   }
@@ -360,7 +404,7 @@ export const createMemory = () => {
   /** Apply memory changes the desk wrote in its own completed replies, oldest first, once each. */
   const absorb = async (messages: MessageWithParts[]) => {
     for (const item of assistantOps(messages)) {
-      if (appliedKeys(document()).has(item.opKey) || refused.has(item.opKey)) continue
+      if (handled(document(), item.opKey) || refused.has(item.opKey)) continue
       const outcome = await write(item.op, "assistant", item)
       if (outcome === "written") continue
       // Conflicts and unconfirmed writes retry on a later scan; only a refused change is final.
@@ -369,5 +413,5 @@ export const createMemory = () => {
       try { localStorage.setItem(MEMORY_REFUSED, JSON.stringify([...refused].slice(-200))) } catch { /* reported again after reload at worst */ }
     }
   }
-  return { document, status, notice, load, write, erase, absorb }
+  return { document, status, notice, uncertain, load, write, erase, absorb, resend }
 }

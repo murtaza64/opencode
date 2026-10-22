@@ -21,7 +21,19 @@ export type MemoryChange = { op: MemoryOp["op"] | "erase"; entryID?: string; res
 export type MemoryRevision = { n: number; entries: MemoryEntry[]; change: MemoryChange; at: number }
 /** The personal memory file. `applied` carries the desk's recent change keys forward, so erasing
  * history or restoring an earlier revision never makes an applied reply apply again. */
-export type MemoryDocument = { format: "front-desk-memory/1"; revision: number; entries: MemoryEntry[]; applied: string[]; history: MemoryRevision[] }
+/** `cursor` is the newest desk change applied. Message IDs sort by creation time, so any change at
+ * or before it is already handled, however many changes have happened since. */
+export type MemoryDocument = { format: "front-desk-memory/1"; revision: number; entries: MemoryEntry[]; applied: string[]; history: MemoryRevision[]; cursor?: { messageID: string; index: number } }
+export const opPosition = (opKey: string) => {
+  const at = opKey.lastIndexOf(":")
+  return { messageID: opKey.slice(0, at), index: Number(opKey.slice(at + 1)) }
+}
+export const handled = (document: MemoryDocument, opKey: string) => {
+  const cursor = document.cursor
+  const position = opPosition(opKey)
+  const behind = !!cursor && (position.messageID < cursor.messageID || (position.messageID === cursor.messageID && position.index <= cursor.index))
+  return behind || appliedKeys(document).has(opKey)
+}
 export const emptyMemory = (): MemoryDocument => ({ format: "front-desk-memory/1", revision: 0, entries: [], applied: [], history: [] })
 const APPLIED_LIMIT = 200
 const HISTORY_LIMIT = 50
@@ -37,6 +49,7 @@ export const nextMemory = (document: MemoryDocument, op: MemoryOp, actor: Memory
   return {
     format: "front-desk-memory/1", revision: n, entries: result.entries,
     applied: source ? [...document.applied, source.opKey].slice(-APPLIED_LIMIT) : document.applied,
+    ...(source ? { cursor: opPosition(source.opKey) } : document.cursor ? { cursor: document.cursor } : {}),
     history: [...document.history, { n, at: now, change, entries: result.entries }].slice(-HISTORY_LIMIT),
   }
 }
