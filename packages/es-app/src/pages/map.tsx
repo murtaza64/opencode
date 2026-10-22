@@ -10,6 +10,7 @@ import { AppHeader } from "../components/native-header"
 import { TodoLine, turnOf } from "../components/todo-line"
 import { currentWork } from "../current-work"
 import { ago, sessionHref, useDashboard } from "../state"
+import { ringOnChange } from "../motion"
 import "./home.css"
 import "./map.css"
 
@@ -82,7 +83,11 @@ export default function AgentMap() {
   const hidden = () => clusters().reduce((sum, cluster) => sum + cluster.hidden, 0)
   const setShow = (value: "active" | "all") => { setFilter(value); setSearch({ show: value === "all" ? "all" : undefined }, { replace: true }) }
 
-  const Dot = (props: { status: AgentStatus | string | undefined }) => <span class="map-dot" data-status={props.status ?? "unknown"} role="img" aria-label={props.status ?? "unknown"} />
+  const Dot = (props: { status: AgentStatus | string | undefined }) => {
+    let el: HTMLElement | undefined
+    ringOnChange(() => el, () => props.status ?? "unknown")
+    return <span ref={(node) => el = node} class="map-dot" data-status={props.status ?? "unknown"} role="img" aria-label={props.status ?? "unknown"} />
+  }
   const SessionButton = (props: { session: SessionRef; project: string; edge: string; children?: JSX.Element }) => {
     const key = JSON.stringify(["session", props.session.id])
     return <button class="map-session" aria-pressed={search.select === key} onClick={() => select(key)} data-edge={props.edge}>

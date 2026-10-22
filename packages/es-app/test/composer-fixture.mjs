@@ -275,7 +275,15 @@ export const createFixture = async () => {
         response.destroy()
         return
       }
-      const created = { ...session(`ses_new_${fixture.created.length + 1}`), directory: url.searchParams.get("directory") }
+      // A client-chosen id is honoured, as Core does.
+      const created = { ...session(body?.id ?? `ses_new_${fixture.created.length + 1}`), directory: url.searchParams.get("directory"), ...(body?.agent ? { agent: body.agent } : {}) }
+      // "lose-after": the session is created but the response never arrives.
+      if (fixture.createMode === "lose-after") {
+        fixture.createMode = "complete"
+        fixture.created.push(created)
+        response.destroy()
+        return
+      }
       const complete = () => { fixture.created.push(created); json(created) }
       if (fixture.createMode === "hold") {
         fixture.createReplies.push(complete)
@@ -402,6 +410,10 @@ export const createFixture = async () => {
       }
       if (!action) {
         const created = fixture.created.find((item) => item.id === id)
+        // Opt-in Core realism for draft-first create tests: unknown ids 404, chosen ids can be held.
+        if (request.method === "GET" && fixture.heldSessions?.has(id)) return
+        if (request.method === "GET" && fixture.strictSessions && !created && !fixture.sessionIDs.includes(id) && !fixture.workspaceSessions.some((item) => item.id === id))
+          return json({ error: "not found" }, 404)
         return json(
           { ...(created ?? currentSession(id)), ...(fixture.sessionModels.has(id) ? { model: fixture.sessionModels.get(id), preferredModel: fixture.sessionModels.get(id) } : {}), time: { ...(created ?? currentSession(id)).time, ...(fixture.sessionModels.has(id) ? { updated: Date.now() } : {}), ...(fixture.archived.has(id) ? { archived: 5 } : {}) } },
           fixture.failSnapshot ? 503 : 200,

@@ -12,6 +12,7 @@ import CloudPage from "./pages/cloud"
 import AgentMap from "./pages/map"
 import Desk from "./pages/desk"
 import SessionPage from "./pages/session"
+import NewSessionPage from "./pages/new-session"
 import IssuePage from "./pages/issue"
 import DocPage from "./pages/doc"
 import Sidebar from "./components/sidebar"
@@ -94,6 +95,7 @@ render(
       <Route path="/" component={Home} />
       <Route path="/cloud" component={CloudPage} />
       <Route path="/map" component={AgentMap} />
+      <Route path="/new" component={NewSessionPage} />
       <Route path="/desk" component={Desk} />
       <Route path="/session/:id" component={SessionPage} />
       <Route path="/issue" component={IssuePage} />

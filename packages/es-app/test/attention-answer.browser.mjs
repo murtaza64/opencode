@@ -43,7 +43,7 @@ try {
   await expect(answer).toHaveValue(FLEET)
   // The server committed the first attempt; reload keeps the exact pending identity for retry.
   await page.reload()
-  await expect(page.locator(".home-notice")).toContainText("unknown outcome")
+  await expect(page.locator(".home-notice")).toContainText("An answer sent before reload has an unknown outcome. Retrying repeats the same answer; no new answer is created.")
   await page.getByRole("button", { name: "Retry same action", exact: true }).click()
   await expect(page.locator(".home-notice")).toContainText("Answer saved")
   if (await page.evaluate(() => Object.keys(localStorage).some(key => key.startsWith("es-attention-pending:")))) throw Error("settled answer must clear its pending identity")
@@ -110,7 +110,7 @@ try {
   const other = page.locator('[data-attention-id="other_decision"]')
   await other.getByRole("radio", { name: "Continue", exact: true }).check()
   await other.getByRole("button", { name: "Review choice", exact: true }).click()
-  await expect(page.getByRole("dialog")).toContainText("No prompt is sent")
+  await expect(page.getByRole("dialog")).toContainText("Saved only: nothing is sent, resumed or granted.")
   await page.getByRole("button", { name: "Record choice only", exact: true }).click()
   await expect(page.locator(".home-notice")).toContainText("Decision saved · not sent")
   // A later written reply on the recorded card sends text only, not the earlier single choice.

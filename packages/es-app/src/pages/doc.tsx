@@ -66,7 +66,7 @@ export default function DocPage() {
                 <span class="dim mono">
                   {d().source} · {d().path}
                 </span>
-                <span class={`chip ${d().variant ? "parked" : "plain"}`} title="which workspace's copy this is">
+                <span class={`chip ${d().variant ? "parked" : "plain"}`}>
                   {d().variant_label}
                 </span>
                 <Show when={d().variants.length > 1}>

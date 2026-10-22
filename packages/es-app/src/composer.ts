@@ -101,7 +101,6 @@ export type ComposerState = {
     after?: string
     action?: ComposerAction
   } | null
-  queueAgent: string | null
   task: ComposerDraft
   aside: ComposerDraft
   asideSeeded: boolean
@@ -143,6 +142,31 @@ export const getComposer = (sessionID: string, directory: string): Composer => {
   const composer = createComposer(sessionID, directory)
   controllers.set(key, composer)
   return composer
+}
+
+/**
+ * First message of a session created by the draft New session page. The text is put in
+ * the session's own composer draft and submitted there, so it is persisted with the draft
+ * and the submission record before any request, and the composer's pending echo and
+ * unknown-outcome handling apply. Returns false, sending nothing, if the draft cannot be
+ * read back from storage.
+ */
+export const sendFirstMessage = async (
+  session: Session,
+  text: string,
+  storage: () => Pick<Storage, "getItem"> | null = () =>
+    typeof window === "undefined" ? null : composerStorage(navigator.userAgent, window.sessionStorage, () => window.localStorage),
+) => {
+  const composer = getComposer(session.id, session.directory)
+  if (composer.state.normalSubmission) return true
+  if (composer.state.task.text !== text) composer.setText(text)
+  try {
+    if (JSON.parse(storage()?.getItem(storageKey(session.id, session.directory)) ?? "null")?.task?.text !== text) return false
+  } catch {
+    return false
+  }
+  void composer.submitVisible("steer", session)
+  return true
 }
 
 /**
@@ -196,7 +220,6 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     busy: false,
     normalExplicit: false,
     normalSubmission: null,
-    queueAgent: null,
     task: emptyDraft(),
     aside: emptyDraft(),
     asideSeeded: false,
@@ -300,7 +323,6 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           ...(isAction(saved.normalSubmission.action) ? { action: saved.normalSubmission.action } : {}),
         })
       }
-      if (typeof saved.queueAgent === "string") setState("queueAgent", saved.queueAgent)
       if (record(saved.modelSelection) && isModel(saved.modelSelection.model))
         setState("modelSelection", { model: saved.modelSelection.model, status: "unknown" })
       if (isModel(saved.sessionModel)) setState("sessionModel", saved.sessionModel)
@@ -374,7 +396,6 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     mode: state.mode,
     normalExplicit: state.normalExplicit,
     normalSubmission: state.normalSubmission ? { ...state.normalSubmission } : null,
-    queueAgent: state.queueAgent,
     modelSelection: state.modelSelection,
     sessionModel: state.sessionModel,
     task: copyDraft(state.task),
@@ -1040,10 +1061,9 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         delivery: mode,
         text,
         ...(images ? { images } : {}),
-        ...(mode === "queue" && state.queueAgent ? { agent: state.queueAgent } : {}),
       }),
       revision: draft.revision,
-      agent: (mode === "queue" ? state.queueAgent : null) ?? session.agent,
+      agent: session.agent,
       draft: { ...draft, model: draft.model ?? state.sessionModel ?? nextModel ?? null },
       status: "sending",
       ...(direct ? { buffer, targetRevision: direct.targetRevision } : {}),
@@ -1180,6 +1200,11 @@ export const createComposer = (sessionID: string, directory: string, dependencie
   const editInput = (id: string) => {
     const receipt = state.receipts.find((item) => item.requestID === id)
     if (!state.capabilities?.sessionInput?.update || receipt?.state !== "pending" || receipt.source) return
+    // The main composer edits one pending input at a time; other edits keep their text, closed.
+    // An update in flight or with an unknown outcome stays on screen until resolved.
+    const others = Object.keys(state.inputEdits).filter((other) => other !== id && state.inputEdits[other]!.open)
+    if (others.some((other) => ["saving", "unknown"].includes(state.inputEdits[other]!.status))) return
+    others.forEach((other) => setState("inputEdits", other, "open", false))
     const previous = state.inputEdits[id]
     setState("inputEdits", id, previous ? { ...previous, open: true } : {
       text: receipt.text, delivery: receipt.delivery, expectedRevision: receipt.revision ?? 0,
@@ -1225,7 +1250,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       setState("inputEdits", id, { status: "editing", open: false, command: undefined,
         expectedRevision: result.revision ?? command.expectedRevision + 1 })
     } catch (error) {
-      setState("inputEdits", id, { status: "unknown", error: `Update outcome unknown: ${message(error)}. Retry the same update; your edit is kept.` })
+      setState("inputEdits", id, { status: "unknown", error: `Update not confirmed (${message(error)}). Retry sends the same update.` })
     } finally {
       persist()
     }
@@ -1345,7 +1370,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       if (!safe() || source === state) return false
       const current = JSON.stringify([snapshot(), state.sessionModel, state.sending, state.busy, missingImages])
       const sourceVersion = () => JSON.stringify([source.task, source.aside, source.mode, source.visibleBuffer,
-        source.keyboardTarget, source.queueAgent, source.asideSeeded, source.normalExplicit, source.sessionModel,
+        source.keyboardTarget, source.asideSeeded, source.normalExplicit, source.sessionModel,
         source.sending, source.admission, source.normalSubmission, source.modelSelection, source.asideRequest,
         source.superseded])
       const original = sourceVersion()
@@ -1376,7 +1401,6 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           ? source.superseded.mode === "aside" ? "aside" : source.superseded.mode === "queue" ? "queue" : "steer"
           : source.keyboardTarget,
         targetRevision: state.targetRevision + 1,
-        queueAgent: source.queueAgent,
         asideSeeded: source.asideSeeded,
         normalExplicit: source.superseded ? source.superseded.mode === "send" : source.normalExplicit,
       }
@@ -1409,7 +1433,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           setState("task", drafts.task)
           setState("aside", drafts.aside)
           setState({ mode: saved.mode, visibleBuffer: saved.visibleBuffer, keyboardTarget: saved.keyboardTarget,
-            targetRevision: saved.targetRevision, queueAgent: saved.queueAgent, asideSeeded: saved.asideSeeded,
+            targetRevision: saved.targetRevision, asideSeeded: saved.asideSeeded,
             normalExplicit: saved.normalExplicit, storageError: "" })
         })
         return true
@@ -1484,11 +1508,6 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         targetRevision: state.targetRevision,
       }, latestMessageID, context),
     setText: (text: string) => updateDraft({ text }),
-    setQueueAgent: (agent: string | null) => {
-      if (state.queueAgent === agent) return
-      setState("queueAgent", agent)
-      updateDraft({}, true, state.visibleBuffer)
-    },
     setImages: (images: ComposerImage[], buffer: ComposerBuffer = draftKey()) => {
       imageEdits[buffer]++
       setMissingImages(buffer, false)
@@ -1529,6 +1548,8 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     cancelInput,
     editInput,
     saveInput,
+    /** The pending input open in the main composer, if any. */
+    editingInput: () => Object.keys(state.inputEdits).find((id) => state.inputEdits[id]!.open),
     changeInputEdit: (id: string, value: Partial<Pick<ComposerInputEdit, "text" | "delivery">>) => {
       const edit = state.inputEdits[id]
       if (!edit || edit.status === "saving" || edit.status === "unknown") return

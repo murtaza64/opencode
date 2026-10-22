@@ -14,9 +14,7 @@ import { rightOpen, rightWidth, toggleRight } from "../ui"
 import { Pr } from "./pr"
 import { prFromHref } from "../pr-matching"
 import { linkUrl } from "../link-url"
-import { compactTokens, contextUsage, countCompletedTurns, latestCompletedTurn, usageLevel, type ProviderList } from "../context-usage"
-import { compositionSlices, estimateComposition } from "../context-composition"
-import { accountingGist, CompositionBar, ProviderAccounting } from "./context-viz"
+import { contextUsage, countCompletedTurns, latestCompletedTurn, tokenCount, usageLevel, type ProviderList } from "../context-usage"
 import { prDetail, requestPrDetails } from "../pr-details"
 import { CurrentWorkView } from "../current-work"
 import { TodoPanel } from "./todos"
@@ -34,14 +32,6 @@ const compact = (n?: number) => {
 }
 
 const home = (p: string) => p.replace(/^\/Users\/[^/]+/, "~")
-
-// per-client memory of the provider-accounting disclosure; collapsed unless the user opened it
-const ACCOUNTING_KEY = "es-app-ctx-accounting-open"
-const [accountingOpen, setAccountingOpenRaw] = createSignal(localStorage.getItem(ACCOUNTING_KEY) === "1")
-const setAccountingOpen = (open: boolean) => {
-  localStorage.setItem(ACCOUNTING_KEY, open ? "1" : "0")
-  setAccountingOpenRaw(open)
-}
 
 export default function SessionInfo(props: {
   sessionID: string
@@ -276,16 +266,11 @@ function SessionInfoBody(props: {
     if (missing.length) requestPrDetails(missing)
   })
 
-  // exact latest-turn usage plus the estimated composition of the context
+  // exact latest-turn usage
   // still represented (since the last compaction when one exists)
   const latestTurn = createMemo(() => latestCompletedTurn(props.messages.filter((m) => m.sessionID === props.sessionID)))
   const usage = createMemo(() => contextUsage(latestTurn(), props.providers))
   const turns = createMemo(() => countCompletedTurns(props.messages.filter((m) => m.sessionID === props.sessionID)))
-  const composition = createMemo(() => {
-    boundary()
-    return untrack(() => estimateComposition(unwrap(props.messages).filter((m) => m.sessionID === props.sessionID), sessionParts()))
-  })
-  const slices = createMemo(() => compositionSlices(composition()))
 
   const latestAssistant = createMemo(() => props.messages.findLast((message): message is Extract<Message, { role: "assistant" }> =>
     message.sessionID === props.sessionID && message.role === "assistant" &&
@@ -381,7 +366,7 @@ function SessionInfoBody(props: {
           <div class="info-heading">context</div>
           <div class="info-row">
             <span class="dim">turns</span>
-            <span title="completed assistant turns">{turns()} completed</span>
+            <span>{turns()} completed</span>
           </div>
           <Show when={latestTurn()}>{(t) => (
             <Show when={props.session && (props.session as any).model?.id && (props.session as any).model.id !== t().modelID}>
@@ -391,38 +376,11 @@ function SessionInfoBody(props: {
               </div>
             </Show>
           )}</Show>
-          <div class={`ctx-exact ${usageLevel(usage()?.percent)}`} title="context of the latest completed turn (input + output + reasoning + cache), exact provider count">
-            <Show when={usage()} fallback={<span class="dim">latest turn context unknown</span>}>{(u) => (
-              <>
-                <span class="mono">
-                  {compactTokens(u().tokens)}
-                  <Show when={u().limit} fallback={<span class="dim"> · limit unknown</span>}>
-                    {" / "}{compactTokens(u().limit!)} ({u().percent}%)
-                  </Show>
-                </span>
-                <span class="ctx-exact-meta">exact · latest turn</span>
-              </>
-            )}</Show>
+          {/* One number, no breakdown: exact provider tokens of the latest completed turn. */}
+          <div class={`info-row ctx-exact ${usageLevel(usage()?.percent)}`} title="Context of the latest completed turn: input, output, reasoning and cache tokens, as counted by the provider">
+            <span class="dim">tokens</span>
+            <Show when={usage()} fallback={<span class="dim">unknown</span>}>{(u) => <span class="mono">{tokenCount(u().tokens)}</span>}</Show>
           </div>
-           {/* exact per-class counts collapse by default: cache read is usually ~100% and the
-             * five-row table otherwise dominates the panel; the gist keeps the key numbers visible */}
-           <details class="ctx-accounting-disclosure" open={accountingOpen()}>
-             {/* drive the state ourselves so persistence is synchronous with the click/Enter, not the queued toggle event */}
-             <summary aria-label="exact latest-turn provider accounting"
-               onClick={(event) => { event.preventDefault(); setAccountingOpen(!accountingOpen()) }}>
-               <span class="ctx-subheading">provider accounting</span>
-               <span class="ctx-gist mono" dir="ltr">{usage() ? accountingGist(latestTurn()?.tokens) : "unknown"}</span>
-             </summary>
-             <ProviderAccounting tokens={usage() ? latestTurn()?.tokens : null} heading={false} />
-           </details>
-           <div class="ctx-subheading">estimated visible content</div>
-           <Show when={slices().length} fallback={<div class="ctx-caption">visible estimate unknown or empty</div>}>
-             <CompositionBar slices={slices()} />
-           </Show>
-           <div class="ctx-caption">
-             {composition().basis === "since_compaction" ? "since the last completed compaction" : "full stored visible history (no completed compaction marker)"}
-             {" · chars ÷ 4; shares of visible estimate only. System/developer instructions, hidden context, compaction, cache and provider tokenization cannot be precisely allocated from stored parts."}
-           </div>
         </div>
       </Show>
 
@@ -460,7 +418,7 @@ function SessionInfoBody(props: {
 
       <Show when={referencedTickets().length}>
         <div class="info-section">
-          <div class="info-heading">tickets referenced</div>
+          <div class="info-heading">tickets</div>
           <For each={referencedTickets()}>
             {(row) => (
               <A
@@ -484,7 +442,7 @@ function SessionInfoBody(props: {
 
       <Show when={referencedDocs().length}>
         <div class="info-section">
-          <div class="info-heading">docs referenced</div>
+          <div class="info-heading">docs</div>
           <For each={referencedDocs()}>
             {(d) => (
               <A class="info-ref" href={docHref(d.source, d.path)} title={`${d.source} · ${d.path}`}>
@@ -497,7 +455,7 @@ function SessionInfoBody(props: {
 
       <Show when={prs().length}>
         <div class="info-section" data-section="prs">
-          <div class="info-heading">PRs referenced</div>
+          <div class="info-heading">PRs</div>
           <For each={prs()}>{(pr) => (
             <Pr pr={pr.data ?? { repo: pr.ref.repo, number: pr.ref.number, url: pr.ref.url }} compact={pr.compact} mentions={pr.mentions} />
           )}</For>
@@ -513,7 +471,7 @@ function SessionInfoBody(props: {
 
       <Show when={links().length}>
         <div class="info-section">
-          <div class="info-heading">links shared</div>
+          <div class="info-heading">links</div>
           <For each={links()}>
             {(url) => (
               <div class="info-link" title={url}>

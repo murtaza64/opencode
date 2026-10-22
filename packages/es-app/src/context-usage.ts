@@ -58,3 +58,10 @@ export const compactTokens = (n: number) => {
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
   return `${(n / 1_000_000).toFixed(1)}M`
 }
+
+/** The one context number the UI shows: exact tokens of the latest completed turn, e.g. "42.3k tokens". */
+export const tokenCount = (n: number) => {
+  if (n < 1000) return `${n} tokens`
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k tokens`
+  return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M tokens`
+}

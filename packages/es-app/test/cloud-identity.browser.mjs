@@ -31,7 +31,7 @@ try {
     return route.continue()
   })
   await details.getByRole("button", { name: "Load transcript", exact: true }).click()
-  await expect(details).toContainText("Transcript unavailable (owner changed")
+  await expect(details).toContainText("Transcript unavailable. Try again later.")
   expect(preview.ledger.transcriptCalls).toBe(beforeRace)
   await expect(details).not.toContainText("not executable</script>")
   await context.unroute("**/es/api/wingman/transcript?*")

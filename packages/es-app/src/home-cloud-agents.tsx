@@ -92,7 +92,7 @@ const Transcript = (props: { pin: CloudPin; available: () => boolean; findable?:
       if (value.owner !== pin.owner) throw new Error("owner-mismatch")
       if (!request.signal.aborted) setResult(value)
     }).catch(error => {
-      if (!request.signal.aborted) setError(error instanceof Error && error.message === "owner-mismatch" ? "Transcript owner changed or could not be verified. Nothing was displayed." : "Transcript unavailable (owner changed, gateway or VPN). Try again later.")
+      if (!request.signal.aborted) setError(error instanceof Error && error.message === "owner-mismatch" ? "Transcript owner changed or could not be verified. Nothing was displayed." : "Transcript unavailable. Try again later.")
     }).finally(() => { if (!request.signal.aborted) setLoading(false) })
   }
   return <div ref={container}><button onClick={toggle}>{open() ? "Close transcript" : "Load transcript"}</button>
@@ -180,14 +180,14 @@ export default function HomeCloudAgents(props: { project?: string; onCount: (n: 
   })))
   const age = (checked?: number) => { cloud.now(); return checked ? `checked ${ago(checked)}` : "never checked" }
 
-  return <section aria-label="Cloud agents"><div class="home-section"><h2>Cloud agents <span>{visiblePins().length}</span></h2><span class="home-muted">Pinned lane owners only · read-only snapshots</span></div>
+  return <section aria-label="Cloud agents"><div class="home-section"><h2>Cloud agents <span>{visiblePins().length}</span></h2></div>
     <Show when={cloud.pinError()}><p class="home-source" role="status">{cloud.pinError()}</p></Show>
     <div class="home-actions"><button disabled={cloud.loading() || !cloud.scopes().length} onClick={() => void cloud.refresh()}>Refresh cloud lanes</button></div>
-    <Show when={cloud.loading()}><p class="home-source">Checking bounded cloud lane sources…</p></Show>
+    <Show when={cloud.loading()}><p class="home-source">Checking cloud lanes…</p></Show>
     <Show when={!cloud.scopes().length}><p class="home-muted">No selected project available for cloud discovery.</p></Show>
     <Show when={cloud.pins().some(pin => !cloud.scopes().includes(pin.editspace))}><p class="home-source">At most {maxScopes} projects are checked. Additional pinned projects remain saved but are not observed.</p></Show>
     <For each={cloud.scopes().filter(name => cloud.snapshots()[name]?.error)}>{name => <p class="home-source" role="status"><bdi dir="auto">{name}</bdi>: {cloud.snapshots()[name].error} {age(cloud.snapshots()[name].checked)}</p>}</For>
-    <For each={visiblePins()} fallback={<p class="home-muted">No cloud tasks pinned. Expand Other cloud tasks to pin an observed owner.</p>}>{pin => {
+    <For each={visiblePins()} fallback={<p class="home-muted">No cloud tasks pinned.</p>}>{pin => {
        const item = { ...pin, get record() { return cloud.allPinned().find(value => cloudKey(value.pin) === cloudKey(pin))?.record }, get snapshot() { return cloud.snapshots()[pin.editspace] }, get inScope() { return cloud.scopes().includes(pin.editspace) } }
       return <div class="home-agent">
         <div><A class="home-name" href={cloudHref(pin)}><bdi dir="auto">{item.lane}</bdi></A><div class="home-muted"><bdi dir="auto">{item.editspace} · {item.owner}</bdi></div><button onClick={() => cloud.togglePin(pin)}>Unpin</button></div>
@@ -201,7 +201,7 @@ export default function HomeCloudAgents(props: { project?: string; onCount: (n: 
           <Show when={!item.snapshot?.error && cloudOwnerKnown(pin.owner)}><Transcript pin={pin} available={() => !!item.record && !item.snapshot?.error && item.inScope} /></Show>
       </>}</Show></div>
     </div>}}</For>
-    <details class="home-workers"><summary>Other cloud tasks ({other().length})</summary><div class="home-source">{cloud.includeFinished() ? "Known tasks, including finished" : "Active tasks only"} in checked projects. Lane status is a snapshot, not live gateway execution.</div>
+    <details class="home-workers"><summary>Other cloud tasks ({other().length})</summary><div class="home-source">{cloud.includeFinished() ? "Known tasks, including finished" : "Active tasks only"} in checked projects.</div>
        <label><input type="checkbox" checked={cloud.includeFinished()} onChange={event => cloud.setIncludeFinished(event.currentTarget.checked)} />Include finished</label>
        <For each={other()}>{item => <div class="home-other"><span><bdi dir="auto">{item.editspace} · {item.lane} · {item.owner}</bdi> · {wingmanStatus(item.record["wingman-status"]).label} <span class="home-source">({age(cloud.snapshots()[item.editspace]?.checked)} · report age unknown)</span></span><button disabled={!cloudOwnerKnown(item.owner)} onClick={() => cloud.togglePin(item)}>Pin</button></div>}</For>
     </details>

@@ -34,11 +34,11 @@ export default function HomeActivity(props: { cloud?: HomeActivityRow[] }) {
     .filter(item => filter() === "all" || (filter() === "mail" ? item.kind === "mail" : item.level === filter()))
     .sort((a, b) => (Number.isFinite(b.time) ? b.time : 0) - (Number.isFinite(a.time) ? a.time : 0)).slice(0, 30))
   return <details class="home-activity" onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary>Activity · agent conversations &amp; tracked work</summary>
+    <summary>Activity</summary>
     <Show when={open()}><div class="home-activity-bar"><div class="home-tabs" role="group" aria-label="Activity filter"><For each={[["all", "All"], ["major", "Major"], ["minor", "Minor"], ["mail", "Mail"]]}>{([value, label]) => <button aria-pressed={filter() === value} onClick={() => setFilter(value)}>{label}</button>}</For></div><button disabled={mail.loading} onClick={() => refetch()}>Refresh mail</button></div>
       <p class="home-source">Up to 30 recent entries. Mail samples {targets().length} pinned agent{targets().length === 1 ? "" : "s"} (max 4); PRs use the already-loaded project cache. Activity never adds a decision.</p>
       <Show when={mail()?.errors.length}><p class="home-source">{mail()?.errors.join(" · ")}</p></Show>
-      <For each={rows()} fallback={<p class="home-muted">{mail.loading ? "Reading bounded mail logs…" : "No activity in these sources and filters."}</p>}>{item => <div class="home-activity-row"><span class={`home-activity-level ${item.level}`}>{item.level} · {item.kind}</span><div><Show when={item.href} fallback={<span dir="auto">{item.text}</span>}>{href => <a href={linkUrl(href())}><bdi dir="auto">{item.text}</bdi></a>}</Show><div class="home-source">{item.source} · {item.sourceAt ? `checked ${age(item.sourceAt)}` : "freshness unknown"} · {item.time ? `${item.timeLabel} ${age(item.time)}` : "time unknown"}</div></div></div>}</For>
+      <For each={rows()} fallback={<p class="home-muted">{mail.loading ? "Loading…" : "No activity in these sources and filters."}</p>}>{item => <div class="home-activity-row"><span class={`home-activity-level ${item.level}`}>{item.level} · {item.kind}</span><div><Show when={item.href} fallback={<span dir="auto">{item.text}</span>}>{href => <a href={linkUrl(href())}><bdi dir="auto">{item.text}</bdi></a>}</Show><div class="home-source">{item.source} · {item.sourceAt ? `checked ${age(item.sourceAt)}` : "freshness unknown"} · {item.time ? `${item.timeLabel} ${age(item.time)}` : "time unknown"}</div></div></div>}</For>
     </Show>
   </details>
 }

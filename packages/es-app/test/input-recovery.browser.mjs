@@ -14,6 +14,7 @@ try {
   await page.goto(preview.url, { waitUntil: "domcontentloaded" })
   const editor = page.getByRole("textbox", { name: "Message", exact: true })
   await editor.fill("Unknown original request")
+  await page.getByRole("button", { name: "More send options", exact: true }).click()
   await page.getByRole("button", { name: "Queue", exact: true }).click()
   await expect(page.locator(".input-admission")).toContainText("Admission unknown")
   const original = posts()[0].body
@@ -21,7 +22,9 @@ try {
   await page.getByRole("button", { name: "Set aside unknown input", exact: true }).click()
   await expect(page.locator(".input-admission")).toHaveCount(0)
   await expect(editor).toHaveValue("Keep newer draft")
+  await page.getByRole("button", { name: "More send options", exact: true }).click()
   await expect(page.getByRole("button", { name: "Queue", exact: true })).toBeEnabled()
+  await page.keyboard.press("Escape")
   await page.locator(".input-recoveries summary").click()
   await expect(page.locator(".input-recoveries")).toContainText(original.requestID)
   await expect(page.locator(".input-recoveries")).toContainText("Unknown original request")

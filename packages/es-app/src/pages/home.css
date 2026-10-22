@@ -76,3 +76,6 @@
 .home-receipts li { padding: 6px 13px; border-inline-start: 2px solid var(--green); background: var(--mantle); overflow-wrap: anywhere; }
 .home-receipts li + li { margin-block-start: 2px; }
 .home-receipts li:not([data-result=applied]) { border-inline-start-color: var(--yellow); }
+/* Empty tabs recede so the populated one leads; still reachable and labelled. */
+.home-tabs button[data-empty]:not([aria-pressed=true]) { color: var(--overlay1); }
+.home-tabs button[data-empty] span { color: var(--overlay0); }

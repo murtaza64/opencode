@@ -2,6 +2,7 @@ import { For, Show } from "solid-js"
 import type { MailMessage } from "../api"
 import { mailSentAt, mailWake } from "../mail-timeline"
 import { MailWakeEvidence } from "./mail-wake-evidence"
+import { Glyph } from "./icons"
 
 const timestamp = (value: string | number | null) => {
   if (value == null) return ""
@@ -17,12 +18,15 @@ export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?
   ].filter((item): item is { label: string; id: string } => !!item.id)
   return <details class="mail-activity" id={`${anchor()}-${props.message.id}`} data-mail-id={props.message.id}>
     <summary class="mail-activity-summary">
-       <span class="mail-activity-kind">Mail · {props.message.direction === "sent" ? "Outbound" : "Inbound"}</span>
+      {/* The glyph carries direction at a glance; the words stay for assistive technology. */}
+      <span class="mail-activity-kind" data-direction={props.message.direction === "sent" ? "out" : "in"} title={props.message.direction === "sent" ? "Outbound mail" : "Inbound mail"}>
+        <Glyph name={props.message.direction === "sent" ? "paper-airplane" : "inbox"} /><span class="sr-only">Mail · {props.message.direction === "sent" ? "Outbound" : "Inbound"}</span>
+      </span>
       <span class="mail-activity-route"><bdi dir="auto">{props.message.from}</bdi> <span class="mail-activity-arrow" aria-hidden="true">→</span> <bdi dir="auto">{props.message.to}</bdi></span>
       <span class="mail-activity-state" title={props.message.deliveries.map(delivery => `${mailWake(delivery)} · ${delivery.state}`).join("; ") || mailWake()}>
          <For each={props.message.deliveries}>{(delivery) => <span>{mailWake(delivery)} · {delivery.state}</span>}</For>
          <Show when={!props.message.deliveries.length}><span>{mailWake()}</span></Show>
-         <span> · {props.message.kind} · {timestamp(mailSentAt(props.message))}</span>
+         <span> · <span class="mail-kind" data-kind={props.message.kind}>{props.message.kind}</span> · {timestamp(mailSentAt(props.message))}</span>
       </span>
       <span class="mail-activity-disclosure" aria-hidden="true">›</span>
     </summary>

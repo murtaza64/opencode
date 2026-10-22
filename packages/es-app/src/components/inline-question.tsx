@@ -91,7 +91,6 @@ export function InlineQuestion(props: {
     }>
       <section ref={card} class="question-round" data-question-request={props.request!.id} data-timeline-part-id={props.part?.id} aria-label="Questions">
         <div class="question-round-head">
-          <span class="question-round-kicker">Question round</span>
           <Show when={props.owner}><span class="question-owner">from subagent: <bdi dir="auto">{props.owner}</bdi></span></Show>
         </div>
         <form onSubmit={(event) => { event.preventDefault(); void submit() }} onKeyDown={(event) => {
@@ -130,7 +129,7 @@ export function InlineQuestion(props: {
             )}
           </For>
           <div class="question-actions">
-            <button type="submit" class="question-submit" disabled={sending()}>Answer round</button>
+            <button type="submit" class="question-submit" disabled={sending()}>Answer</button>
             <button type="button" class="danger" disabled={sending()} onClick={() => void dismiss()}>Dismiss</button>
             <span class="question-enter">Enter accepts recommendations</span>
           </div>

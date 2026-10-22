@@ -17,7 +17,8 @@
 .map-lane-status { margin-inline-start: auto; }
 .map-owner, .map-report { font-size: 12px; display: flex; gap: 7px; align-items: baseline; padding-inline-start: 4px; flex-wrap: wrap; }
 .map-dot { inline-size: 8px; block-size: 8px; border-radius: 50%; background: var(--overlay0); flex: none; align-self: center; }
-.map-dot[data-status=busy] { background: var(--green); }
+/* Busy is lavender everywhere (sidebar .dot.busy); green means unread. */
+.map-dot[data-status=busy] { background: var(--lavender); }
 .map-dot[data-status=pending] { background: var(--peach); }
 .map-dot[data-status=idle] { background: var(--surface2); }
 .map-dot[data-status=failed] { background: var(--red); }

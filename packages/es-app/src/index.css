@@ -219,7 +219,7 @@
   width: 380px;
   background: var(--crust);
   border: 1px solid var(--surface1);
-  border-left: 3px solid var(--sapphire);
+  border-inline-start: 3px solid var(--sapphire);
   padding: 10px 12px;
   font-size: 12px;
   display: flex;
@@ -419,7 +419,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
   width: 240px;
   flex-shrink: 0;
   background: var(--mantle);
-  border-right: 1px solid var(--crust);
+  border-inline-end: 1px solid var(--crust);
   height: 100vh;
   overflow-y: auto;
   padding: 10px 0;
@@ -432,7 +432,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 .archived-toggle {
   margin-top: auto;
   background: none;
-  text-align: left;
+  text-align: start;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -485,7 +485,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
   font-size: 13px;
 }
 .mini-item:hover { background: var(--surface0); text-decoration: none; }
-.mini-item.active { background: var(--crust); box-shadow: inset 3px 0 0 var(--lavender); }
+.mini-item.active { background: var(--crust); box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--lavender); }
 .mini-session { width: 100%; display: flex; align-items: center; }
 .mini-session .mini-item { flex: 1; min-width: 0; }
 .mini-pin {
@@ -527,76 +527,19 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 .session-peek[data-side="start"] { border-inline-start-width: 1px; border-inline-end: 3px solid var(--lavender); }
 .session-peek .peek-title { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text); font-weight: 600; }
 .session-peek .peek-title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-peek .peek-body { display: flex; gap: 10px; align-items: center; }
-.peek-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 8px; margin: 0; min-width: 0; }
-.peek-facts dt { color: var(--subtext0); }
-.peek-facts dd { margin: 0; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.peek-facts .peek-model { direction: ltr; text-align: start; }
-.peek-context { font-size: 11.5px; }
-.peek-context .mono { color: var(--text); }
-.peek-context.warn .mono { color: var(--yellow); }
-.peek-context.high .mono { color: var(--red); }
-.peek-degraded { color: var(--peach); }
 .current-work { min-width: 0; overflow-wrap: anywhere; }
 .current-work.compact { padding: 7px 0; border-block: 1px solid var(--border); }
 .current-work-line, .current-work-tools { font-size: 11px; line-height: 1.5; }
 .current-work .ctx-caption { margin-top: 3px; }
 .current-work-generate { color: var(--lavender); font-size: 11px; text-align: start; padding: 2px 0; }
 
-/* context ring: exact usage arc; segments show relative visible estimates only */
-.ctx-donut { position: relative; display: inline-grid; place-items: center; flex-shrink: 0; }
-.ctx-donut svg { display: block; transform: rotate(-90deg); }
-.ctx-donut circle { fill: none; stroke-width: 7; }
-.ctx-donut .ctx-donut-track { stroke: var(--surface0); }
-.ctx-donut .ctx-donut-fill { stroke: var(--lavender); stroke-linecap: butt; }
-.ctx-donut.warn .ctx-donut-fill { stroke: var(--yellow); }
-.ctx-donut.high .ctx-donut-fill { stroke: var(--red); }
-.ctx-donut.unknown .ctx-donut-track { stroke: var(--surface1); stroke-dasharray: 3 3; }
-.ctx-donut-label {
-  position: absolute;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text);
-}
-.ctx-donut.warn .ctx-donut-label { color: var(--yellow); }
-.ctx-donut.high .ctx-donut-label { color: var(--red); }
-.ctx-donut.unknown .ctx-donut-label { color: var(--overlay1); }
 
-/* composition bar + legend (right panel) and micro legend (hover card) */
-.ctx-bar { display: flex; height: 8px; width: 100%; background: var(--surface0); overflow: hidden; margin: 4px 0 6px; }
-.ctx-bar-seg { flex-basis: 0; min-width: 2px; }
-.ctx-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
-.ctx-legend li { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto 3.2em; gap: 6px; align-items: center; font-size: 11.5px; }
-.ctx-legend .ctx-legend-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ctx-legend .ctx-legend-num, .ctx-legend .ctx-legend-pct { text-align: end; color: var(--subtext0); font-size: 11px; }
-.ctx-swatch { display: inline-block; width: 8px; height: 8px; flex-shrink: 0; }
 .ctx-caption { font-size: 10.5px; color: var(--overlay1); line-height: 1.3; }
-.ctx-dots { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 11px; color: var(--subtext1); }
-.ctx-dots li { display: inline-flex; align-items: center; gap: 4px; }
-.ctx-dots .mono { color: var(--subtext0); }
 .ctx-exact { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .ctx-exact .mono { color: var(--text); }
 .ctx-exact.warn .mono { color: var(--yellow); }
 .ctx-exact.high .mono { color: var(--red); }
-.ctx-exact .ctx-exact-meta { color: var(--subtext0); font-size: 11px; }
 .ctx-subheading { font-size: 11px; font-weight: 600; color: var(--subtext1); margin-block: 5px 2px; }
-.ctx-accounting { margin-block: 5px; }
-.ctx-accounting-disclosure { margin-block: 5px; }
-.ctx-accounting-disclosure > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; cursor: pointer; list-style: none; min-width: 0; }
-.ctx-accounting-disclosure > summary::-webkit-details-marker { display: none; }
-.ctx-accounting-disclosure > summary::before { content: "▸"; color: var(--overlay1); font-size: 10px; flex: none; }
-.ctx-accounting-disclosure[open] > summary::before { content: "▾"; }
-.ctx-accounting-disclosure > summary .ctx-subheading { margin-block: 0; flex: none; }
-.ctx-accounting-disclosure > summary:hover .ctx-subheading { color: var(--text); }
-.ctx-accounting-disclosure > summary:focus-visible { outline: 1px solid var(--lavender); outline-offset: 2px; }
-.ctx-gist { font-size: 10.5px; color: var(--subtext0); min-width: 0; overflow-wrap: anywhere; }
-.ctx-accounting-disclosure .ctx-accounting { margin-block: 3px 0; padding-inline-start: 12px; }
-.ctx-provider { list-style: none; margin: 0 0 3px; padding: 0; display: grid; gap: 1px; }
-.ctx-provider li { display: grid; grid-template-columns: minmax(0, 1fr) auto 3em; gap: 6px; font-size: 11px; align-items: baseline; }
-.ctx-provider .mono { text-align: end; font-variant-numeric: tabular-nums; }
-.ctx-provider li span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ctx-provider li span:last-child { color: var(--subtext0); }
 
 /* PR chips: mention rank badge and unresolved (no metadata yet) state */
 .pr-mentions { color: var(--overlay1); font-size: 0.85em; font-family: var(--font-mono); }
@@ -631,7 +574,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 .nav-item.active {
   background: var(--crust);
   color: var(--text);
-  box-shadow: inset 3px 0 0 var(--lavender);
+  box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--lavender);
 }
 .nav-item .nav-title { overflow: hidden; text-overflow: ellipsis; }
 .session-entry { display: flex; align-items: center; }
@@ -669,6 +612,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 .new-session { position: relative; flex-shrink: 0; margin-inline-start: auto; }
 .sidebar-mini .new-session { width: 100%; margin: 0; }
 .new-session-button {
+  text-decoration: none !important;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -680,44 +624,9 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
   box-shadow: inset 0 0 0 1px var(--surface1);
   white-space: nowrap;
 }
-.new-session-button:hover, .new-session-button[aria-expanded="true"] { background: var(--surface0); box-shadow: inset 0 0 0 1px var(--green); }
+.new-session-button:hover, .new-session-button.active { background: var(--surface0); box-shadow: inset 0 0 0 1px var(--green); }
 .new-session-button.mini-item { box-shadow: none; padding: 6px 0; }
-.new-session-button.mini-item:hover, .new-session-button.mini-item[aria-expanded="true"] { background: var(--surface0); }
-/* popover: fixed so it floats over the scrolling sidebar; placed from the button rect */
-.new-session-form {
-  position: fixed;
-  z-index: 50;
-  width: min(320px, calc(100vw - 16px));
-  padding: 10px;
-  border: 1px solid var(--surface1);
-  background: var(--crust);
-  box-shadow: 0 8px 28px #000a;
-  display: grid;
-  gap: 8px;
-  font-size: 12px;
-  .err { white-space: pre-wrap; overflow-wrap: anywhere; }
-}
-.new-session-field {
-  display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  color: var(--subtext0);
-  select { min-width: 0; width: 100%; }
-  select:disabled { color: var(--text); opacity: 1; appearance: none; }
-}
-.new-session-directory {
-  padding-inline-start: 80px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--subtext1);
-  overflow-wrap: anywhere;
-  user-select: text;
-}
-.new-session-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.new-session-create { padding: 4px 14px; background: var(--green); color: var(--crust); font-weight: bold; }
-.new-session-create:hover { background: var(--teal); }
-.new-session-create:disabled { background: var(--surface1); color: var(--overlay0); }
+.new-session-button.mini-item:hover, .new-session-button.mini-item.active { background: var(--surface0); }
 .nav-heading {
   font-size: 11px;
   text-transform: uppercase;
@@ -824,16 +733,19 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 .msg-wrap .fork-here {
   position: absolute;
   top: 4px;
-  right: 4px;
+  inset-inline-end: 4px;
   z-index: 2;
-  display: none;
+  display: inline-block;
+  opacity: 0;
+  pointer-events: none;
   font-family: var(--font-mono);
   font-size: 11px;
   background: var(--crust);
   color: var(--mauve);
   box-shadow: inset 0 0 0 1px var(--surface1);
 }
-.msg-wrap:hover .fork-here { display: inline-block; }
+/* Hidden by opacity, not display, so keyboard focus can still reach it. */
+.msg-wrap:is(:hover, :focus-within) .fork-here { opacity: 1; pointer-events: auto; }
 .msg-wrap .fork-here:hover { box-shadow: inset 0 0 0 1px var(--mauve); }
 
 /* board: attention queue grouped by thread */
@@ -849,12 +761,12 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 }
 .queue-head .key { white-space: nowrap; flex-shrink: 0; }
 .queue-head .title { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.queue-head .card-link { font-size: 11px; color: var(--overlay1); margin-left: auto; flex-shrink: 0; }
+.queue-head .card-link { font-size: 11px; color: var(--overlay1); margin-inline-start: auto; flex-shrink: 0; }
 .att {
   display: flex;
   flex-direction: column;
   background: var(--mantle);
-  box-shadow: inset 3px 0 0 var(--yellow);
+  box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--yellow);
   padding: 5px 12px;
 }
 .att-line { display: flex; gap: 10px; align-items: baseline; }
@@ -862,10 +774,10 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 .att-line.expandable:hover .att-text { color: var(--lavender); }
 .att .att-text { flex: 1; min-width: 0; }
 .att .subtitle { display: block; color: var(--subtext0); font-size: 12px; }
-.att.r0, .att.r1 { box-shadow: inset 3px 0 0 var(--red); }
-.att.r2 { box-shadow: inset 3px 0 0 var(--yellow); }
-.att.r3 { box-shadow: inset 3px 0 0 var(--mauve); }
-.att.r4 { box-shadow: inset 3px 0 0 var(--overlay0); }
+.att.r0, .att.r1 { box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--red); }
+.att.r2 { box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--yellow); }
+.att.r3 { box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--mauve); }
+.att.r4 { box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--overlay0); }
 .att .type {
   font-size: 11px;
   text-transform: uppercase;
@@ -884,7 +796,7 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 /* kind glyphs: ticket (tag) vs session (terminal) vs PR (octicon in pr.tsx).
  * display: tailwind preflight makes svg block-level, which wraps the glyph
  * onto its own line inside anchors */
-.kind-icon { display: inline-block; vertical-align: -2px; margin-right: 4px; flex-shrink: 0; }
+.kind-icon { display: inline-block; vertical-align: -2px; margin-inline-end: 4px; flex-shrink: 0; }
 .icon-ticket { color: var(--blue); }
 .icon-session { color: var(--lavender); }
 
@@ -911,7 +823,7 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 .ticket-row { display: flex; gap: 8px; align-items: baseline; margin-top: 5px; font-size: 13px; }
 .ticket-row .title { flex: 1; }
 .lanes { margin-top: 6px; font-size: 12px; color: var(--subtext0); }
-.lane-badge { background: var(--surface0); padding: 0 6px; margin-right: 5px; }
+.lane-badge { background: var(--surface0); padding: 0 6px; margin-inline-end: 5px; }
 .status-line { margin-top: 6px; font-size: 12px; color: var(--subtext0); white-space: pre-wrap; }
 
 /* session state dot: pending (needs you) > busy (ringed) > unread > idle */
@@ -957,12 +869,12 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
   white-space: pre-wrap;
 }
 .digest .meta { color: var(--overlay0); font-size: 11px; margin-top: 5px; }
-.digest ul { margin: 4px 0; padding-left: 20px; }
+.digest ul { margin: 4px 0; padding-inline-start: 20px; }
 .gates li { color: var(--yellow); }
 .needs li { color: var(--red); }
 
 /* review brief: same visual budget as the digest box, teal accent */
-.brief { box-shadow: inset 3px 0 0 var(--teal); }
+.brief { box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--teal); }
 .brief .verify li { color: var(--teal); }
 .brief .brief-prs li { color: var(--subtext1); }
 .brief .risks li { color: var(--peach); }
@@ -1045,7 +957,7 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .all-landing-project h2 { display: flex; gap: 8px; align-items: baseline; }
 .all-landing-board { font-size: 11px; padding: 1px 8px; color: var(--lavender); background: var(--mantle); text-transform: none; letter-spacing: normal; font-weight: normal; }
 
-.context-pct { font-size: 11px; color: var(--subtext0); font-family: var(--font-mono); text-align: right; }
+.context-pct { font-size: 11px; color: var(--subtext0); font-family: var(--font-mono); text-align: end; }
 .context-pct.warn { color: var(--yellow); }
 .context-pct.high { color: var(--red); }
 
@@ -1133,9 +1045,9 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 }
 .mail-activity-summary {
   display: grid;
-  grid-template-columns: 9rem minmax(0, 1fr) minmax(0, 1fr) 16px;
+  grid-template-columns: 16px minmax(0, 1fr) minmax(0, 1fr) 16px;
   gap: 10px;
-  align-items: baseline;
+  align-items: center;
   padding: 8px 10px;
   list-style: none;
   cursor: pointer;
@@ -1143,7 +1055,8 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .mail-activity-summary::-webkit-details-marker { display: none; }
 .mail-activity-summary:hover { background: var(--surface0); }
 .mail-activity-summary:focus-visible { outline: 1px solid var(--lavender); outline-offset: -2px; }
-.mail-activity-kind { color: var(--teal); font-weight: 600; }
+.mail-activity-kind { color: var(--teal); display: inline-flex; }
+.mail-activity-kind[data-direction=out] { color: var(--blue); }
 .mail-activity-route, .mail-activity-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail-activity-state { color: var(--subtext0); }
 .mail-activity-state > span { margin-inline-start: 6px; }
@@ -1171,7 +1084,7 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .mail-cause-what { min-width: 0; overflow-wrap: anywhere; }
 .mail-delivery { margin-block-start: 8px; border-block-start: 1px solid var(--surface0); padding-block-start: 6px; }
 @media (max-width: 600px) {
-  .mail-activity-summary { grid-template-columns: 4.5rem minmax(0, 1fr) 16px; }
+  .mail-activity-summary { grid-template-columns: 16px minmax(0, 1fr) 16px; }
   .mail-activity-state { grid-column: 2; grid-row: 2; }
 }
 .session-page {
@@ -1305,16 +1218,14 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   }
 }
 
-/* TUI-style turn footer: left-aligned (right is the user side) —
- * ▣ Agent · model · duration [· interrupted] */
+/* TUI-style turn footer on the agent (start) side: ▣ Agent · model · duration [· interrupted].
+ * Quiet metadata: no rule, so turns separate by spacing rather than chrome. */
 .turn-summary {
-  text-align: left;
+  text-align: start;
   color: var(--subtext0);
   font-size: 11px;
   font-family: var(--font-mono);
-  margin: 4px 0 14px;
-  padding-bottom: 10px;
-  border-bottom: 1px dashed var(--surface0);
+  margin: 4px 0 18px;
 }
 .turn-summary .marker { color: var(--mauve); }
 .turn-summary .agent { color: var(--text); }
@@ -1370,7 +1281,7 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 /* banners */
 .banner {
   background: var(--mantle);
-  box-shadow: inset 3px 0 0 var(--yellow);
+  box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--yellow);
   padding: 10px 14px;
   margin: 10px 0;
 }
@@ -1547,7 +1458,7 @@ button.question-option.selected { color: var(--text); background: color-mix(in s
 }
 .prompt-row { display: flex; gap: 8px; }
 .prompt-side { display: flex; flex-direction: column; gap: 6px; width: 160px; }
-.send-hint { font-size: 11px; text-align: right; }
+.send-hint { font-size: 11px; text-align: end; }
 .model-select {
   width: 100%;
   background: var(--crust);
@@ -1661,32 +1572,11 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .relative-lines .current { color: var(--lavender); }
 
 /* Both editor surfaces share controls; receipts and Asides stay outside history. */
-.composer-controls { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px 10px; min-width: 0; flex-shrink: 0; }
-.composer-controls > * { grid-column: 1 / -1; }
-.composer-controls > .composer-mode-row { grid-column: 1; grid-row: 1; flex-wrap: nowrap; }
-.composer-controls > .composer-settings { grid-column: 2; grid-row: 1; }
-.composer-controls > .composer-actions { grid-column: 3; grid-row: 1; }
-.composer-controls > .composer-meta { grid-row: 2; }
-.composer-settings { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; min-width: 0; }
-.composer-meta { display: flex; align-items: center; gap: 12px; border-block-start: 1px solid var(--surface0); padding-block-start: 4px; min-width: 0; }
-.composer-summary { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.composer-session-actions { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
-.composer-session-actions button { min-height: 28px; padding: 3px 10px; background: transparent; color: var(--subtext0); font-size: 11px; }
-.composer-session-actions button:hover { background: var(--surface0); color: var(--text); }
-.composer-session-actions button.danger { color: var(--red); }
-.composer-session-actions button.stop { color: var(--pink); border-inline-start: 1px solid var(--surface1); margin-inline-start: 4px; }
+.composer-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .composer-key { color: var(--subtext0); font-size: 10px; line-height: 1.2; white-space: nowrap; font-weight: 400; }
-.composer-settings .model-select { width: 110px; max-width: 100%; height: 26px; font-family: inherit; }
-.composer-settings .agent-select, .composer-agent { width: 100px; }
-.composer-agent { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.composer-settings button { padding: 3px 6px; min-height: 26px; font-size: 11px; }
-.composer-mode-row, .composer-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.composer-modes { display: flex; flex-wrap: wrap; gap: 2px; }
-.composer-modes button { min-width: 54px; min-height: 26px; padding: 3px 8px; font-size: 12px; }
-.composer-controls button:focus-visible, .composer-results button:focus-visible,
+.composer-results button:focus-visible,
 .composer-results summary:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
 .composer-help { line-height: 1.4; overflow-wrap: anywhere; }
-.composer-send { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 2px; color: var(--green); border: 1px solid var(--surface1); min-height: 36px; width: 128px; padding: 3px 8px; font-size: 12px; }
 .composer-results { flex-shrink: 0; max-height: 30dvh; overflow-y: auto; overflow-wrap: anywhere; }
 .composer-results:empty { display: none; }
 .composer-results :is(section, details) { border-block-start: 1px solid var(--surface1); padding: 8px 10px; background: var(--mantle); }
@@ -1700,10 +1590,6 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .receipts-refresh { margin-inline-start: auto; padding: 1px 8px; font-size: 13px; line-height: 1.4; }
 .input-receipts li { padding-block: 5px; }
 .receipt-row { display: flex; align-items: flex-start; gap: 8px; }
-.input-edit { border-block-start: 1px solid var(--surface0); padding-block: 8px; }
-.input-edit label { display: block; margin-block-end: 8px; }
-.input-edit textarea { display: block; inline-size: 100%; min-block-size: 6em; resize: vertical; box-sizing: border-box; }
-.input-edit p { overflow-wrap: anywhere; }
 .receipt-kind {
   flex: none;
   font-family: var(--font-mono);
@@ -1727,8 +1613,6 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .composer-results li p { max-height: 5em; overflow: auto; }
 .input-admission > p { max-height: 5em; overflow: auto; }
 .normal-submission > p { max-height: 3em; overflow: auto; }
-.composer-normal-mode { color: var(--green); font-size: 12px; white-space: nowrap; }
-.composer-settings .composer-reset { color: var(--lavender); }
 .aside-result { border-inline-start: 2px solid var(--mauve); }
 .aside-question { font-weight: 600; }
 .aside-snapshot { font-size: 11px; }
@@ -1739,7 +1623,7 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .prompt-side { flex-shrink: 0; max-width: 35%; }
 .attachment-chip { max-width: 100%; overflow-wrap: anywhere; }
 .float-editor { height: min(80dvh, 900px); max-height: 90dvh; container-type: inline-size; }
-.float-editor > :is(.composer-controls, .attachments, .dim) { padding: 8px 12px; }
+.float-editor > :is(.attachments, .dim) { padding: 8px 12px; }
 .float-editor > .ta-wrap { min-height: 80px; overflow: auto; }
 .float-editor .composer-results { max-height: 25dvh; }
 .float-head { flex-wrap: wrap; }
@@ -1748,15 +1632,6 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .session-alerts { flex-shrink: 0; max-height: 25dvh; overflow: auto; }
 .session-page .transcript { min-height: 32px; }
 .session-main { overflow-y: auto; }
-
-@container (max-width: 760px) {
-  .composer-controls { grid-template-columns: minmax(0, 1fr) auto; }
-  .composer-controls > .composer-actions { grid-column: 2; }
-  .composer-controls > .composer-settings { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; }
-  .composer-controls > .composer-meta { grid-row: 3; }
-  .composer-meta .composer-summary { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  .composer-session-actions { margin-inline-start: auto; }
-}
 
 @media (max-width: 1100px) {
   .sidebar:not(.sidebar-mini) { max-width: 200px; }
@@ -1785,23 +1660,16 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
   .session-page .topbar h1 { flex-basis: 70%; font-size: 14px; }
   .session-page .topbar button { padding: 4px 8px; }
   .prompt-box { padding-block: 6px; max-height: 50dvh; }
-  .composer-mode-row { gap: 4px; }
-  .composer-controls button, .composer-settings .model-select { min-height: 40px; }
-  .composer-controls .composer-send { width: 116px; }
-  .composer-modes button { min-width: 48px; padding-inline: 6px; }
-  .composer-session-actions { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); width: 100%; }
-  .composer-session-actions button { padding-inline: 6px; }
   .composer-results button { min-height: 36px; }
   .composer-actions { gap: 4px 8px; }
   .composer-help { font-size: 11px; }
   .float-editor { top: 2dvh; width: calc(100vw - 16px); height: 94dvh; max-height: 94dvh; }
   .float-editor textarea { font-size: 16px; }
-  .float-editor > .composer-controls { padding: 6px 8px; }
   .composer-results { max-height: 24dvh; }
 }
 
 @media (pointer: coarse) {
-  .composer-controls button, .composer-settings .model-select, .float-head button, .attachment-chip button { min-height: 44px; }
+  .float-head button, .attachment-chip button { min-height: 44px; }
 }
 
 /* --- tickets + docs browser (dotfiles#79) ---------------------------------- */
@@ -1821,7 +1689,7 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .info-ref .ref-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .info-ref .ref-title.mono { font-size: 11.5px; }
 .issue-marker {
-  margin-left: auto;
+  margin-inline-start: auto;
   flex-shrink: 0;
   font-family: var(--font-mono);
   font-size: 9.5px;
@@ -1876,7 +1744,7 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .doc-prose :is(pre, code, kbd, samp), .doc-prose :is(pre, code) * { font-family: var(--font-mono) !important; }
 .doc-prose pre { background: var(--mantle); padding: 10px 12px; overflow-x: auto; font-size: 12px; }
 .doc-prose :not(pre) > code { background: var(--mantle); padding: 0 4px; font-size: 12px; }
-.doc-prose blockquote { border-left: 3px solid var(--surface1); margin: 8px 0; padding: 2px 12px; color: var(--subtext0); }
+.doc-prose blockquote { border-inline-start: 3px solid var(--surface1); margin: 8px 0; padding: 2px 12px; color: var(--subtext0); }
 .doc-prose table { border-collapse: collapse; margin: 10px 0; }
 .doc-prose :is(td, th) { border: 1px solid var(--surface1); padding: 3px 10px; font-size: 12.5px; }
 .doc-prose img { max-width: 100%; }
@@ -2030,3 +1898,65 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .failure-note { font-size: 12px; color: var(--subtext0); overflow-wrap: anywhere; white-space: normal; }
 .home-name .dot.failed { margin-inline-end: 6px; }
 .home-failed { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--red); }
+
+/* Feel (dotfiles#240): instant by default. Hover, focus, disclosure and
+ * selection apply on the frame they happen, with no transitions; motion.ts
+ * holds the only decays (status ring, jump flash). Every pointer press gets
+ * an immediate fill so input is acknowledged before any network result. */
+:root { --surface2: #4a4a54; --inline-sign: 1; }
+[dir="rtl"] { --inline-sign: -1; }
+[dir="ltr"] { --inline-sign: 1; }
+html { -webkit-tap-highlight-color: transparent; }
+:is(button, [role="button"], summary, a.nav-item, a.mini-item, a.new-session-button, [data-slot="collapsible-trigger"]):not(:disabled, [aria-disabled="true"]):active {
+  background-color: var(--surface1) !important;
+}
+/* Identifiers (projects, lanes) are shown verbatim, never uppercased. */
+.attention-home h2, .map-cluster h2, .map-detail h2 { text-transform: none; letter-spacing: 0; }
+/* Day separators are wayfinding, not section titles: muted sentence case. */
+.nav-heading.nav-day { text-transform: none; letter-spacing: 0; font-weight: normal; color: var(--subtext0); padding-block-start: 10px; }
+
+/* Glyphs (components/icons.tsx): colour carries kind, the word carries meaning. */
+.glyph { flex: none; vertical-align: -2px; }
+button > .glyph, a > .glyph { margin-inline-end: 5px; }
+a.mini-item > .glyph { margin: 0; }
+.home-map-link { display: inline-flex; align-items: center; }
+.nav-item.board-link .glyph { color: var(--lavender); margin-inline-end: 2px; }
+.new-session-button .glyph { vertical-align: -2px; }
+.direct-session-actions button { display: inline-flex; align-items: center; }
+.direct-session-actions button .glyph { color: var(--subtext0); }
+.direct-session-actions button:not(:disabled):is(:hover, :focus-visible) .glyph { color: currentColor; }
+.direct-session-actions .act-fork .glyph { color: var(--mauve); }
+.direct-session-actions .act-handoff .glyph { color: var(--sapphire); }
+.direct-session-actions .act-nudge .glyph { color: var(--yellow); }
+.direct-session-actions button:is(.danger, .stop) .glyph { color: var(--red); }
+.direct-session-actions button:disabled .glyph { color: var(--overlay0); }
+/* Mail kinds: one colour each, the same everywhere a kind is named. */
+.mail-kind { font-weight: 600; color: var(--subtext1); }
+.mail-kind[data-kind=task] { color: var(--peach); }
+.mail-kind[data-kind=question] { color: var(--pink); }
+.mail-kind[data-kind=answer] { color: var(--green); }
+.mail-kind[data-kind=notice] { color: var(--blue); }
+.mail-kind[data-kind=learning] { color: var(--mauve); }
+/* Session state in the header uses the sidebar's status colours. */
+.session-state::before { content: ""; display: inline-block; inline-size: 7px; block-size: 7px; margin-inline-end: 6px; vertical-align: 1px; background: var(--overlay0); }
+.session-state[data-state=working]::before, .session-state[data-state=retry]::before { background: var(--lavender); }
+.session-state[data-state=working], .session-state[data-state=retry] { color: var(--lavender); }
+.session-state[data-state=waiting]::before { background: var(--peach); }
+.session-state[data-state=waiting] { color: var(--peach); }
+.session-state[data-state=failed]::before { background: var(--red); }
+.session-state[data-state=failed] { color: var(--red); }
+/* Request kinds: a permission is a tool grant (shield, pink); a decision is a human choice (yellow). */
+.home-request .home-eyebrow .glyph { color: var(--pink); }
+.home-decision .home-eyebrow .glyph { color: var(--yellow); }
+.home-eyebrow > span:first-child { display: inline-flex; align-items: center; gap: 5px; }
+.home-map-link .glyph { margin-inline-end: 5px; }
+/* Session peek: the agent's own TODOs plus one token number (dotfiles#240). */
+.session-peek .peek-tokens { margin-inline-start: auto; font-size: 11px; font-weight: normal; color: var(--subtext0); flex: none; }
+.peek-todos { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: 12px; }
+.peek-todos li { display: grid; grid-template-columns: 26px minmax(0, 1fr); color: var(--subtext1); overflow-wrap: anywhere; }
+.peek-todos li[data-status=in_progress] { color: var(--yellow); }
+.peek-todo-glyph { font-family: var(--font-mono); color: var(--subtext0); }
+.peek-todos li[data-status=in_progress] .peek-todo-glyph { color: var(--yellow); }
+.peek-todo-done .peek-todo-glyph { color: var(--green); }
+.peek-todo-basis { font-size: 11px; color: var(--subtext0); border-block-start: 1px solid var(--surface0); padding-block-start: 5px; }
+.peek-todo-state { font-size: 12px; }

@@ -18,12 +18,14 @@ import SessionInfo from "../components/session-info"
 import { sessionHref, useDashboard, type SessionRow } from "../state"
 import { rightOpen, startDrag } from "../ui"
 import { createVim } from "../vim"
-import { contextUsage, latestCompletedTurn } from "../context-usage"
+import { contextUsage, latestCompletedTurn, tokenCount } from "../context-usage"
 import { getComposer, type ComposerAction } from "../composer"
 import { pendingEcho } from "../pending-echo"
 import { defaultImageCapability, prepareImageFile } from "../image-fit"
 import { ComposerResults } from "../components/composer-controls"
 import { DirectComposer } from "../components/direct-composer"
+import { flash } from "../motion"
+import { Glyph } from "../components/icons"
 import { AppHeader } from "../components/native-header"
 import { SessionTitle } from "../components/session-title"
 import { SubagentTranscript } from "../components/subagent-transcript"
@@ -531,6 +533,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   }
 
   const [forking, setForking] = createSignal(false)
+  const [changingModel, setChangingModel] = createSignal(false)
   const fork = async (messageID?: string) => {
     if (forking()) return
     setForking(true)
@@ -686,14 +689,6 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   // panel and sidebar hover card: all token classes vs the model's limit)
   const latestUsage = createMemo(() => contextUsage(latestCompletedTurn(messages()), providers()))
 
-  const [agents, { refetch: refetchAgents }] = createResource(() => oc.agents(directory).then(
-    (items) => ({ items: items.filter((agent) => !agent.hidden && agent.mode !== "subagent"), error: "" }),
-    (error: unknown) => ({ items: [], error: String(error) }),
-  ))
-  const activeAgent = () => {
-    const previous = messages().findLast((message) => message.role === "user")
-    return session()?.agent ?? previous?.agent
-  }
   const modelChoice = () => composer.state.visibleBuffer === "aside"
     ? composer.state.aside.model
     : composer.state.modelSelection?.model ?? composer.state.task.model ?? composer.state.sessionModel
@@ -706,6 +701,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     return s?.model ? { providerID: s.model.providerID, modelID: s.model.id } : null
   })
   const nextModel = () => composer.state.sessionModel ?? lastTurnModel()
+  // The picker opens on the model in use; for an Aside, empty means "use the session model".
+  const pickerModel = () => composer.state.visibleBuffer === "aside" ? modelChoice() : modelChoice() ?? nextModel()
 
   const nudge = async () => {
     const s = session()
@@ -730,7 +727,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
 
   const send = async (action?: ComposerAction) => {
     const s = session()
-    if (!s || !connected() || nudgePhase() || aborting()) return
+    // While a pending input is open for editing, the composer saves that input and never sends.
+    if (!s || !connected() || nudgePhase() || aborting() || composer.editingInput()) return
     const editor = floating() ? floatEl : promptEl
     if (editor) saveSelection(editor)
     setError("")
@@ -753,6 +751,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     await composer.submitVisible(chosen, s, nextModel(), messages().at(-1)?.id, context)
     if (context.length) props.onSent?.(context, composer.state.normalSubmission?.status === "accepted")
   }
+
 
   let transcriptEl: HTMLDivElement | undefined
   let inner: HTMLDivElement | undefined
@@ -815,6 +814,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       // by Markdown or collapsed tools, without mounting all earlier messages.
       const target = message ?? findAnchor
       target?.scrollIntoView({ block: "start", inline: "nearest" })
+      flash(target)
     })
   }
   onMount(() => {
@@ -1038,6 +1038,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       return
     }
     transcriptEl.scrollTo({ top: transcriptEl.scrollTop + tops[index]! - 8, behavior: "instant" as ScrollBehavior })
+    flash(transcriptEl.querySelectorAll<HTMLElement>("[data-user-prompt]")[index]?.querySelector("[data-component='user-message-text'], [data-slot='user-message-text']"))
     schedulePromptPosition()
   }
 
@@ -1125,6 +1126,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   // drops below clientHeight, so collapse the box briefly to measure the content itself.
   const nearFull = (el: HTMLTextAreaElement) => {
     const box = el.clientHeight
+    // A hidden draft (a pending-input edit is open) has no box to fill.
+    if (!box) return false
     if (el.scrollHeight > box) return true
     const style = [el.style.height, el.style.minHeight] as const
     const top = el.scrollTop
@@ -1246,7 +1249,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         el.addEventListener("keydown", keyDown, true)
         onCleanup(() => el.removeEventListener("keydown", keyDown, true))
       }}
-        aria-label="Message" dir="auto" placeholder="Write a message…"
+        aria-label="Message" dir="auto"
         classList={{ "vim-normal": vim.mode() === "normal", "vim-insert": vim.mode() === "insert" }}
         value={draft()} onInput={(e) => { setDraft(e.currentTarget.value); update(e.currentTarget, e.isComposing) }}
         onPaste={pasteImages} onDrop={dropImages} onDragOver={(e) => e.preventDefault()}
@@ -1271,68 +1274,79 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const ComposerPanel = (props: { expanded?: boolean }) => (
     <DirectComposer composer={composer} connected={connected() && !nudgePhase() && !aborting()} submit={send} restoreDraft={restoreDraft}
       editor={<Editor expanded={props.expanded} />} attachments={<Attachments />}
-      activeAgent={activeAgent()} agents={agents()?.items ?? []} agentError={agents()?.error} retryAgents={() => { void refetchAgents() }}
       sessionMetadata={<Show when={latestUsage()}>
         {(u) => (
           <span class="context-pct"
             classList={{ warn: (u().percent ?? 0) >= 70, high: (u().percent ?? 0) >= 90 }}
-            title="context of the last completed turn (input + output + reasoning + cache)">
-            ctx {Math.round(u().tokens / 1000)}k{u().percent != null ? ` (${u().percent}%)` : ""}
+            title="Context of the last completed turn: input, output, reasoning and cache tokens">
+            {tokenCount(u().tokens)}
           </span>
         )}
       </Show>}
       sessionActions={<>
-        <Show when={!props.expanded}><button aria-label="Expand editor" title="Expand editor (Ctrl+E)" onClick={toggleFloat}>Expand editor</button></Show>
-        <button title="Fork this session at its tip" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
-          {forking() ? "Forking…" : "Fork"}
+        <Show when={!props.expanded}><button aria-label="Expand editor" title="Ctrl+E" onClick={toggleFloat}><Glyph name="screen-full" />Expand editor</button></Show>
+        <button class="act-fork" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
+          <Glyph name="repo-forked" />{forking() ? "Forking…" : "Fork"}
         </button>
-        <Show when={ownedLane()}><button title="Hand off this lane to a new session" disabled={handingOff()} onClick={() => setHandoffOpen(!handoffOpen())}>Hand off</button></Show>
+        <Show when={ownedLane()}><button class="act-handoff" disabled={handingOff()} onClick={() => setHandoffOpen(!handoffOpen())}><Glyph name="arrow-switch" />Hand off</button></Show>
         <Show when={!session()?.time?.archived} fallback={<span class="archived-chip">Archived</span>}>
-          <button title="Archive this session (hides it from lists)" disabled={!!nudgePhase()} onClick={archive}>Archive</button>
+          <button disabled={!!nudgePhase()} onClick={archive}><Glyph name="archive" />Archive</button>
         </Show>
-        <button class="danger" title="Delete this session permanently" disabled={!!nudgePhase()} onClick={remove}>Delete</button>
+        <button class="danger" disabled={!!nudgePhase()} onClick={remove}><Glyph name="trash" />Delete</button>
         <Show when={busy()} fallback={<button onClick={() => { stick = true; pin() }}>↓ Bottom</button>}>
-          <button class="stop" aria-label="Stop session" title="Stop the parent session" disabled={aborting() || !!nudgePhase() || sending()} onClick={abort}>
-            <span aria-hidden="true">■</span> Stop
+          <button class="stop" aria-label="Stop session" disabled={aborting() || !!nudgePhase() || sending()} onClick={abort}>
+            <Glyph name="square-fill" />Stop
           </button>
         </Show>
         <button
-          title="Interrupt this session, then send a resume message"
+          class="act-nudge" title="Interrupt, then send a resume message"
           disabled={!session() || !!nudgePhase() || aborting() || sending()}
           onClick={nudge}
         >
-          {nudgePhase() === "stopping" ? "Stopping…" : nudgePhase() === "resuming" ? "Sending resume…" : "Nudge"}
+          <Glyph name="zap" />{nudgePhase() === "stopping" ? "Stopping…" : nudgePhase() === "resuming" ? "Sending resume…" : "Nudge"}
         </button>
       </>}>
-      <label class="direct-setting"><select class="model-select" aria-label={composer.state.visibleBuffer === "aside" ? "Aside model" : "Session model"}
-        title={composer.state.visibleBuffer === "aside" ? "Model for this Aside only" : "Session model for future turns, including Steer and Queue"}
-        value={modelChoice() ? `${modelChoice()!.providerID}\u0000${modelChoice()!.modelID}` : ""}
-        onChange={(e) => {
-          const [providerID, modelID] = e.currentTarget.value.split("\u0000")
-          const model = providerID && modelID ? { providerID, modelID } : null
-          if (composer.state.visibleBuffer === "aside") composer.setVisibleModel(model)
-          else if (model) {
+      {/* Changing model mid-conversation is rare and costly, so the picker opens on request. */}
+      <Show when={changingModel()} fallback={<>
+        <span class="direct-model-name" title={composer.state.visibleBuffer === "aside" ? "Aside model" : "Session model"}>
+          {(modelChoice() ?? nextModel())?.modelID ?? "Default model"}
+        </span>
+        <button class="direct-change-model" disabled={!!composer.state.modelSelection && composer.state.modelSelection.status !== "unknown"}
+          onClick={() => setChangingModel(true)}>Change model</button>
+      </>}>
+        <select class="model-select" ref={(el) => queueMicrotask(() => el.focus())}
+          aria-label={composer.state.visibleBuffer === "aside" ? "Aside model" : "Session model"}
+          title={composer.state.visibleBuffer === "aside" ? "Model for this Aside only" : "Applies to future turns"}
+          value={pickerModel() ? `${pickerModel()!.providerID}\u0000${pickerModel()!.modelID}` : ""}
+          onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setChangingModel(false) } }}
+          onChange={(e) => {
+            const [providerID, modelID] = e.currentTarget.value.split("\u0000")
+            const model = providerID && modelID ? { providerID, modelID } : null
+            setChangingModel(false)
+            if (composer.state.visibleBuffer === "aside") return composer.setVisibleModel(model)
+            if (!model) return
             const selected = providers()?.providers.find((provider) => provider.id === providerID)?.models?.[modelID]
             if (composer.state.task.images.length && selected?.capabilities?.input?.image === false) {
               setError("Selected model does not support image input. Images and session model were not changed.")
               return
             }
             void composer.chooseSessionModel(model)
-          }
-        }}>
-        <option value="" disabled={composer.state.visibleBuffer !== "aside"} selected={!modelChoice()}>{composer.state.visibleBuffer === "aside" ? "Use session model" : "Choose session model"}</option>
-        <For each={providers()?.providers ?? []}>
-          {(prov) => (
-            <optgroup label={prov.id}>
-              <For each={Object.keys(prov.models ?? {})}>
-                {(mid) => <option value={`${prov.id}\u0000${mid}`} selected={modelChoice()?.providerID === prov.id && modelChoice()?.modelID === mid}>{mid}</option>}
-              </For>
-            </optgroup>
-          )}
-        </For>
-      </select></label>
-      <Show when={composer.state.visibleBuffer === "aside" && modelChoice()}><button onClick={() => composer.setVisibleModel(null)}>Use session model</button></Show>
-      <Show when={composer.state.visibleBuffer !== "aside" && (busy() || composer.state.busy || composer.state.modelSelection)}><span class="dim">{composer.state.modelSelection ? "Confirming model…" : "Model changes apply to future turns"}</span></Show>
+          }}>
+          <option value="" disabled={composer.state.visibleBuffer !== "aside"} selected={!pickerModel()}>{composer.state.visibleBuffer === "aside" ? "Use session model" : "Choose model"}</option>
+          <For each={providers()?.providers ?? []}>
+            {(prov) => (
+              <optgroup label={prov.id}>
+                <For each={Object.keys(prov.models ?? {})}>
+                  {(mid) => <option value={`${prov.id}\u0000${mid}`} selected={pickerModel()?.providerID === prov.id && pickerModel()?.modelID === mid}>{mid}</option>}
+                </For>
+              </optgroup>
+            )}
+          </For>
+        </select>
+        <button onClick={() => setChangingModel(false)}>Cancel</button>
+      </Show>
+      <Show when={composer.state.visibleBuffer === "aside" && composer.state.aside.model}><button onClick={() => composer.setVisibleModel(null)}>Use session model</button></Show>
+      <Show when={composer.state.modelSelection}>{(selection) => <span class="dim" role="status">{selection().status === "unknown" ? "Model change unconfirmed" : "Confirming model…"}</span>}</Show>
       <Show when={composer.state.modelSelection?.status === "unknown"}><button onClick={() => { void composer.reconcileSessionModel() }}>Check session model</button></Show>
     </DirectComposer>
   )
@@ -1379,7 +1393,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             live.apply({ type: "session.updated", properties: { sessionID, info } })
             void refetch()
           }} />
-          <span class="dim session-state">{workState() === "working" ? "busy" : workState()}</span>
+          <span class="dim session-state" data-state={workState()}>{workState() === "working" ? "busy" : workState()}</span>
           <Show when={subagentsRunning()}><span class="dim">{subagentsRunning()} subagent(s) running</span></Show>
           <Show when={(session() as any)?.parentID}>
             {(pid) => (
@@ -1423,7 +1437,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
           <Show when={bannerError()}><div class="err" role="alert">{bannerError()}</div></Show>
           <Show when={handoffsError() && (ownedLane() || predecessor())}><div class="err" role="alert">{handoffsError()}</div></Show>
           <Show when={handoffError()}><div class="err" role="alert">{handoffError()}</div></Show>
-          <Show when={handoffPending()}><div role="status" class="banner">Handoff is waiting for the current turn to finish. Your draft stays here until ownership transfers.</div></Show>
+          <Show when={handoffPending()}><div role="status" class="banner">Handoff waits for the current turn to finish.</div></Show>
           <Show when={handoffOpen() && ownedLane()}>
             <div class="banner handoff-form">
               <div class="banner-head">Hand off lane {ownedLane()?.lane}</div>
@@ -1595,7 +1609,6 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       <Show when={floating()}>
         <div class="float-editor">
           <div class="float-head">
-            <span class="dim">Expanded editor</span>
             <span style="flex:1" />
             <button onClick={closeFloat}>⤡ collapse <kbd class="composer-key">Ctrl+E</kbd></button>
           </div>

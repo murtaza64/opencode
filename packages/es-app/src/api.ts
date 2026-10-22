@@ -30,6 +30,16 @@ export type AttentionNotification = {
   updated: number
 }
 
+export type SessionCreateBody = {
+  id?: string
+  parentID?: string
+  title?: string
+  agent?: string
+  model?: { providerID: string; id: string }
+  metadata?: Record<string, unknown>
+  permission?: { permission: string; pattern: string; action: "allow" | "deny" | "ask" }[]
+}
+
 export class SessionCreateError extends Error {
   constructor(message: string, readonly uncertain: boolean) {
     super(message)
@@ -45,10 +55,8 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 export const oc = {
-  createSession: async (
-    directory: string,
-    body: { parentID?: string; title?: string; agent?: string; metadata?: Record<string, unknown>; permission?: { permission: string; pattern: string; action: "allow" | "deny" | "ask" }[] } = {},
-  ): Promise<Session> => {
+  // The body is Core's create body. A client-chosen id makes a lost response reconcilable.
+  createSession: async (directory: string, body: SessionCreateBody = {}): Promise<Session> => {
     let res: Response
     try {
       res = await fetch(`/oc/session?${q(directory)}`, {
@@ -66,7 +74,7 @@ export const oc = {
       throw new SessionCreateError(`Session creation failed: HTTP ${res.status} ${detail}`, false)
     }
     const value = await res.json()
-    if (!value || typeof value.id !== "string" || !/^ses_[\w-]+$/.test(value.id) || value.directory !== directory || (value.parentID ?? undefined) !== body.parentID)
+    if (!value || typeof value.id !== "string" || !/^ses_[\w-]+$/.test(value.id) || value.directory !== directory || (value.parentID ?? undefined) !== body.parentID || (body.id && value.id !== body.id))
       throw new SessionCreateError("The server returned an invalid confirmation. A session may have been created; check the session list before trying again.", true)
     return value as Session
   },

@@ -122,7 +122,7 @@ try {
   fixture.failPermissionReply = true
   await card("per_flaky").getByRole("button", { name: "Allow once", exact: true }).click()
   await expect(page.locator(".home-receipts li").first()).toContainText("Outcome uncertain")
-  await expect(card("per_flaky").locator(".home-permission-status")).toContainText("still pending; you can reply again")
+  await expect(card("per_flaky").locator(".home-permission-status")).toHaveText("Reply not confirmed; still pending. You can reply again.")
   fixture.failPermissionReply = false
   await card("per_flaky").getByRole("button", { name: "Allow once", exact: true }).click()
   await expect(page.locator(".home-receipts li").first()).toContainText("Allowed once")

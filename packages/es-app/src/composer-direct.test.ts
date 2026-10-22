@@ -142,7 +142,6 @@ test("idle Steer starts in chat; busy Steer captures durable safe-boundary deliv
   expect(chat).toEqual([{ text: "idle message", options: { images: [], model: undefined } }])
   expect(composer.state.receipts).toEqual([])
   composer.observeBusy(true)
-  composer.setQueueAgent("plan")
   composer.setVisibleText("busy message")
   await composer.submitVisible("steer", session)
   expect(inputs).toEqual([{ requestID: "request-1", delivery: "steer", text: "busy message" }])

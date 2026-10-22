@@ -6,6 +6,7 @@ import { oc } from "../api"
 import { HttpError } from "../api-error"
 import { ago, sessionHref } from "../state"
 import type { HomeRequestRow } from "../home-requests"
+import { Glyph } from "./icons"
 
 type Reply = "once" | "always" | "reject"
 type Outcome = { kind: "sending"; reply: Reply } | { kind: "missing" } | { kind: "uncertain"; at: number } | { kind: "refused"; message: string }
@@ -65,9 +66,14 @@ export const HomePermission = (props: {
     return value == null || typeof value === "object" ? [] : [[name, String(value)]]
   })
   const always = () => request()?.always.filter(Boolean) ?? []
+  // Patterns that only repeat a shown metadata value (usually the command) add no information.
+  const patterns = () => {
+    const values = request()?.patterns ?? []
+    return metadata().some(([, value]) => value === values.join("\n")) ? [] : values
+  }
   return <div class="home-request home-permission" data-request-id={props.item.id}>
     <div>
-      <span class="home-eyebrow"><span>permission</span><bdi dir="ltr">{request()?.permission ?? "unknown tool"}</bdi></span>
+      <span class="home-eyebrow"><span><Glyph name="shield" />permission</span><bdi dir="ltr">{request()?.permission ?? "unknown tool"}</bdi></span>
       <h3><bdi dir="auto">{props.item.title}</bdi></h3>
       <Show when={props.owner}><div class="home-muted">Subagent of <bdi dir="auto">{props.owner}</bdi></div></Show>
       <div class="home-source">Exact request <bdi dir="ltr">{props.item.id}</bdi> · session <bdi dir="ltr">{props.item.session}</bdi> · source checked {ago(props.item.checked)}{props.stale ? " · stale" : ""}</div>
@@ -75,7 +81,7 @@ export const HomePermission = (props: {
     <A href={sessionHref(props.item.session, props.item.directory)}>Open thread</A>
     <Show when={request()} fallback={<p class="home-muted">Request details unavailable. Reply from the original session.</p>}>
       <dl class="home-permission-context">
-        <Show when={request()!.patterns.length}><dt>Patterns</dt><dd><For each={request()!.patterns}>{pattern => <bdi class="mono" dir="ltr">{pattern}</bdi>}</For></dd></Show>
+        <Show when={patterns().length}><dt>Patterns</dt><dd><For each={patterns()}>{pattern => <bdi class="mono" dir="ltr">{pattern}</bdi>}</For></dd></Show>
         <For each={metadata()}>{([name, value]) => <><dt><bdi dir="ltr">{name}</bdi></dt><dd><bdi class="mono" dir="ltr">{value}</bdi></dd></>}</For>
         <dt>Directory</dt><dd><bdi class="mono" dir="ltr">{props.item.directory}</bdi></dd>
       </dl>
@@ -91,11 +97,11 @@ export const HomePermission = (props: {
     </Show>
     <p class="home-permission-status" role="status">
       <Show when={outcome()?.kind === "sending"}>Sending {labels[(outcome() as { reply: Reply }).reply].toLowerCase()}…</Show>
-      <Show when={outcome()?.kind === "missing"}>Not applied: this request is no longer pending. It was answered elsewhere, rejected with its session, or expired.</Show>
+      <Show when={outcome()?.kind === "missing"}>Not applied: no longer pending.</Show>
       <Show when={outcome()?.kind === "refused"}>Not applied: the server refused this reply ({(outcome() as { message: string }).message}).</Show>
-      <Show when={outcome()?.kind === "uncertain"}>{recovered() ? "The last reply was not confirmed. The request is still pending; you can reply again." : "Outcome uncertain: the server did not confirm the reply. Rechecking before allowing another reply."}</Show>
+      <Show when={outcome()?.kind === "uncertain"}>{recovered() ? "Reply not confirmed; still pending. You can reply again." : "Reply not confirmed; rechecking before another reply."}</Show>
       <Show when={!outcome() && props.live === "cleared"}>No longer pending. Outcome unknown here; open the thread to check.</Show>
-      <Show when={!outcome() && props.live !== "cleared" && props.item.state !== "pending"}>{props.item.state === "unavailable" ? "Source unavailable; replies are disabled until it is checked again." : "No longer pending; outcome unknown."}</Show>
+      <Show when={!outcome() && props.live !== "cleared" && props.item.state !== "pending"}>{props.item.state === "unavailable" ? "Source unavailable; replies disabled until rechecked." : "No longer pending; outcome unknown."}</Show>
     </p>
   </div>
 }

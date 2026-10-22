@@ -5,6 +5,8 @@ const { chromium, expect } = createRequire(new URL("../../app/package.json", imp
 const preview = await startPanelPreview()
 const fixture = preview.fixture
 fixture.messages[1].info.tokens = { input: 200, output: 800, reasoning: 0, cache: { read: 0, write: 0 } }
+// Context usage counts completed turns only.
+fixture.messages[1].info.time.completed = 3
 const browser = await chromium.launch({ channel: "chrome", headless: true })
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
 await context.route("**/*", (route) =>
@@ -16,33 +18,29 @@ page.on("pageerror", (error) => errors.push(error.message))
 const active = () => page.locator(".float-editor").or(page.locator(".prompt-box:not([inert])"))
 const editor = () => active().getByRole("textbox", { name: "Message", exact: true })
 const button = (name) => active().getByRole("button", { name, exact: true })
+const more = () => active().getByRole("button", { name: "More send options", exact: true })
+// Queue and Aside are secondary: open the menu before clicking one.
+const secondary = async (name) => {
+  if ((await more().getAttribute("aria-expanded")) !== "true") await more().click()
+  return button(name)
+}
 const inputs = () => fixture.calls.filter((call) => call.method === "POST" && call.path.endsWith("/input"))
 const normal = () => fixture.calls.filter((call) => call.method === "POST" && call.path.endsWith("/prompt_async"))
 const asides = () => fixture.calls.filter((call) => call.method === "POST" && call.path.endsWith("/aside"))
 await mkdir("artifacts/direct-composer", { recursive: true })
 try {
   await page.goto(preview.url, { waitUntil: "domcontentloaded" })
+  // Busy default: Steer is the one primary action; Queue and Aside wait in a closed menu.
   await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
-  await expect(button("Steer").locator("kbd")).toHaveText("⌘/Ctrl↵")
-  await expect(button("Queue").locator("kbd")).toHaveText("⌘M →")
-  await expect(active().locator(".direct-shortcuts")).toHaveCount(0)
-  await expect(active().getByLabel("Queue agent", { exact: true })).toBeDisabled()
-  await expect(active().locator(".direct-session-actions .direct-active-agent")).toContainText("build")
-  await expect(active().locator(".direct-session-actions .context-pct")).toContainText("ctx 1k")
-  await expect(active().locator(".direct-controls .context-pct, .direct-controls .direct-active-agent")).toHaveCount(0)
-  expect(
-    await active()
-      .locator(".direct-setting")
-      .evaluateAll((labels) =>
-        labels.map((label) =>
-          [...label.childNodes]
-            .filter((node) => node.nodeType === Node.TEXT_NODE)
-            .map((node) => node.textContent)
-            .join("")
-            .trim(),
-        ),
-      ),
-  ).toEqual(["", ""])
+  await expect(button("Steer").locator("kbd")).toHaveText("⌘↵")
+  await expect(more()).toHaveAttribute("aria-expanded", "false")
+  await expect(button("Queue")).toHaveCount(0)
+  await expect(button("Aside")).toHaveCount(0)
+  // No agent preset picker; the model is named once with an explicit Change model action.
+  await expect(active().getByLabel("Queue agent", { exact: true })).toHaveCount(0)
+  await expect(active().getByRole("combobox")).toHaveCount(0)
+  await expect(active().locator(".direct-model-name")).toHaveText("test")
+  await expect(active().locator(".context-pct")).toContainText("1k tokens")
   await expect(editor()).toBeFocused()
   await page.keyboard.type("current visible message")
   await editor().evaluate((el) => el.setSelectionRange(2, 7))
@@ -50,22 +48,26 @@ try {
   await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
   await editor().press("Meta+m")
   await expect(button("Queue")).toHaveAttribute("data-keyboard-target", "true")
-  await expect(button("Queue").locator("kbd")).toHaveText("⌘/Ctrl↵")
-  await expect(button("Aside").locator("kbd")).toHaveText("⌘M →")
+  await expect(button("Queue").locator("kbd")).toHaveText("⌘↵")
+  await expect(button("Aside")).toHaveCount(0)
+  await expect(await secondary("Aside")).toBeVisible()
+  await expect(button("Aside").locator("kbd")).toHaveText("⌘M")
   await editor().dispatchEvent("keydown", { code: "KeyM", key: "m", metaKey: true, repeat: true })
   await editor().dispatchEvent("keydown", { code: "KeyM", key: "m", metaKey: true, isComposing: true })
   await expect(button("Queue")).toHaveAttribute("data-keyboard-target", "true")
-  await expect(active().getByLabel("Queue agent", { exact: true })).toBeEnabled()
   await expect(editor()).toHaveValue("current visible message")
   expect(await editor().evaluate((el) => [el.selectionStart, el.selectionEnd])).toEqual([2, 7])
   expect(inputs()).toHaveLength(0)
   fixture.holdAside = true
-  await button("Aside").click()
+  await (await secondary("Aside")).click()
+  await expect(more()).toHaveAttribute("aria-expanded", "false")
   await expect(editor()).toBeFocused()
   await expect.poll(() => asides().length).toBe(1)
   expect(asides()[0].body.question).toBe("current visible message")
   await expect(button("Queue")).toHaveAttribute("data-keyboard-target", "true")
-  await expect(button("Aside")).toBeDisabled()
+  await expect(await secondary("Aside")).toBeDisabled()
+  await page.keyboard.press("Escape")
+  await expect(more()).toHaveAttribute("aria-expanded", "false")
   await editor().fill("newer visible text")
   await editor().press("Meta+m")
   fixture.holdAside = false
@@ -75,20 +77,16 @@ try {
   await expect(button("Aside")).toHaveAttribute("data-keyboard-target", "true")
   await page.getByRole("button", { name: "Close aside", exact: true }).click()
 
-  await expect(active().getByLabel("Queue agent", { exact: true })).toBeDisabled()
   await editor().press("Meta+m")
-  await expect(active().getByLabel("Queue agent", { exact: true })).toBeDisabled()
   await editor().press("Meta+m")
-  await active().getByLabel("Queue agent", { exact: true }).selectOption("plan")
   fixture.loseInput = true
   await button("Queue").click()
   await expect(page.locator(".input-admission")).toContainText("Admission unknown")
   const unknown = inputs().at(-1).body
-  expect(unknown).toMatchObject({ text: "newer visible text", delivery: "queue", agent: "plan" })
+  // Queue keeps the session agent: no agent override in the request.
+  expect(unknown).toEqual({ requestID: unknown.requestID, text: "newer visible text", delivery: "queue" })
   await editor().fill("draft after unknown")
-  await active().getByLabel("Queue agent", { exact: true }).selectOption("build")
-  await active().getByLabel("Queue agent", { exact: true }).focus()
-  await page.keyboard.press("Meta+m")
+  await editor().press("Meta+m")
   await expect(editor()).toBeFocused()
   await page.reload({ waitUntil: "domcontentloaded" })
   await expect(editor()).toHaveValue("draft after unknown")
@@ -99,7 +97,7 @@ try {
   await expect(editor()).toHaveValue("draft after unknown")
   await expect(page.locator(".input-receipts summary")).toContainText("1 queued, 0 steer")
 
-  await button("Steer").click()
+  await (await secondary("Steer")).click()
   await expect.poll(() => inputs().at(-1).body.delivery).toBe("steer")
   expect(inputs().at(-1).body.text).toBe("draft after unknown")
   expect(inputs().at(-1).body.agent).toBeUndefined()
@@ -120,12 +118,11 @@ try {
   await expect(button("Queue")).toHaveAttribute("data-keyboard-target", "true")
   fixture.setStatus("idle")
   await expect(page.locator(".topbar")).toContainText("idle")
-  await expect(active().locator(".direct-submit-actions button")).toHaveCount(1)
-  await expect(button("Send").locator("kbd")).toHaveText("⌘/Ctrl↵")
+  await expect(button("Send").locator("kbd")).toHaveText("⌘↵")
+  await expect(more()).toHaveCount(0)
   await expect(button("Steer")).toHaveCount(0)
   await expect(button("Queue")).toHaveCount(0)
   await expect(button("Aside")).toHaveCount(0)
-  await expect(active().getByLabel("Queue agent", { exact: true })).toBeDisabled()
   await editor().press("Meta+m")
   await expect(editor()).toHaveValue("idle starts in chat")
   const before = inputs().length
@@ -158,7 +155,7 @@ try {
   await expect(page.locator(".relative-lines")).toBeVisible()
   await expect(editor()).toHaveValue("new draft while chat sends")
   await editor().press("Meta+m")
-  await expect(active().locator(".direct-submit-actions button")).toHaveCount(1)
+  await expect(more()).toHaveCount(0)
   await expect(button("Send")).toBeVisible()
   await expect(editor()).toHaveValue("new draft while chat sends")
   await editor().press("Escape")
@@ -177,9 +174,14 @@ try {
   await expect(button("Send")).toBeVisible()
   fixture.setStatus("busy")
   await expect(button("Aside")).toHaveAttribute("data-keyboard-target", "true")
-  await expect(active().locator(".direct-submit-actions button")).toHaveCount(3)
+  await more().click()
+  await expect(active().locator(".direct-more-menu button")).toHaveCount(2)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  // The menu opens inside the viewport in RTL on a phone.
+  const menuBox = await active().locator(".direct-more-menu").boundingBox()
+  expect(menuBox.x >= 0 && menuBox.x + menuBox.width <= 390).toBe(true)
   await page.screenshot({ path: "artifacts/direct-composer/rtl.png", fullPage: true })
+  await page.keyboard.press("Escape")
   await page.getByRole("button", { name: /collapse/ }).click()
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.evaluate(() => {
@@ -190,7 +192,8 @@ try {
 
   await editor().evaluate((el) => {
     const data = new DataTransfer()
-    data.items.add(new File([new Uint8Array([1, 2, 3])], "saved.png", { type: "image/png" }))
+    // A real 1x1 PNG: attachments are decoded and normalized before they are kept.
+    data.items.add(new File([Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0))], "saved.png", { type: "image/png" }))
     el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true }))
   })
   await expect(button("Remove saved.png")).toBeVisible()

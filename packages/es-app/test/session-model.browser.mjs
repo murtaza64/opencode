@@ -23,34 +23,56 @@ if (app) {
 await page.context().route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
 const editor = () => page.locator(".prompt-box:not([inert]) textarea[aria-label='Message']")
 const model = () => page.getByRole("combobox", { name: "Session model" })
+const modelName = () => page.locator(".prompt-box .direct-model-name")
+// The picker is closed by default; Change model opens it and choosing closes it.
+const choose = async (value) => {
+  await page.getByRole("button", { name: "Change model", exact: true }).click()
+  await expect(model()).toBeFocused()
+  await model().selectOption(value)
+  await expect(model()).toHaveCount(0)
+}
+const queue = async () => {
+  const more = page.getByRole("button", { name: "More send options", exact: true })
+  if ((await more.getAttribute("aria-expanded")) !== "true") await more.click()
+  return page.getByRole("button", { name: "Queue", exact: true })
+}
 const patches = () => fixture.calls.filter(call => call.method === "PATCH" && call.path === "/session/ses_a" && call.body?.model)
 const inputs = () => fixture.calls.filter(call => call.method === "POST" && call.path === "/session/ses_a/input")
 const prompts = () => fixture.calls.filter(call => call.method === "POST" && call.path === "/session/ses_a/prompt_async")
 try {
   await page.goto(preview.url)
-  await expect(model()).toBeVisible()
+  await expect(modelName()).toHaveText("test")
+  await expect(model()).toHaveCount(0)
+  // Escape closes the picker without a change.
+  await page.getByRole("button", { name: "Change model", exact: true }).click()
+  await expect(model()).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(model()).toHaveCount(0)
+  expect(patches()).toHaveLength(0)
   fixture.holdModel = true
-  await model().selectOption("fixture\u0000next")
+  await choose("fixture\u0000next")
   await expect.poll(() => patches().length).toBe(1)
   expect(inputs()).toHaveLength(0)
   expect(prompts()).toHaveLength(0)
   await editor().fill("after selecting model")
-  await expect(page.getByRole("button", { name: "Queue", exact: true })).toBeDisabled()
+  await expect(page.locator(".prompt-box")).toContainText("Confirming model…")
+  await expect(page.getByRole("button", { name: "Change model", exact: true })).toBeDisabled()
+  await expect(await queue()).toBeDisabled()
   fixture.holdModel = false
   fixture.modelReplies.shift()()
-  await expect(page.getByRole("button", { name: "Queue", exact: true })).toBeEnabled()
-  await page.getByRole("button", { name: "Queue", exact: true }).click()
+  await expect(await queue()).toBeEnabled()
+  await (await queue()).click()
   await expect.poll(() => inputs().length).toBe(1)
   expect(inputs()[0].body.text).toBe("after selecting model")
   expect(prompts()).toHaveLength(0)
 
   await page.reload()
-  await expect(model()).toHaveValue("fixture\u0000next")
+  await expect(modelName()).toHaveText("next")
   await page.getByRole("button", { name: "Restore saved Aside draft" }).click().catch(() => {})
   fixture.rejectModel = true
-  await model().selectOption("fixture\u0000test")
+  await choose("fixture\u0000test")
   await expect.poll(() => patches().length).toBe(2)
-  await expect(model()).toHaveValue("fixture\u0000next")
+  await expect(modelName()).toHaveText("next")
   expect(inputs()).toHaveLength(1)
   fixture.rejectModel = false
 
@@ -60,27 +82,24 @@ try {
     id: "ses_a", title: "Composer fixture", directory, projectID: "fixture", version: "1", agent: "build",
     time: { created: 1, updated: Date.now() + 1000 }, model: updated, preferredModel: updated,
   } })
-  await expect(model()).toHaveValue("fixture\u0000test")
+  await expect(modelName()).toHaveText("test")
   expect(prompts()).toHaveLength(0)
 
   fixture.loseModel = true
-  await model().selectOption("fixture\u0000next")
+  await choose("fixture\u0000next")
   await expect.poll(() => patches().length).toBe(3)
-  await expect(model()).toHaveValue("fixture\u0000next")
+  await expect(modelName()).toHaveText("next")
   await page.reload()
-  await expect(model()).toHaveValue("fixture\u0000next")
+  await expect(modelName()).toHaveText("next")
   expect(patches()).toHaveLength(3)
   expect(inputs()).toHaveLength(1)
 
   fixture.holdModel = true
-  await model().selectOption("fixture\u0000test")
-  await model().selectOption("fixture\u0000next")
+  await choose("fixture\u0000test")
   await expect.poll(() => patches().length).toBe(4)
-  fixture.modelReplies.shift()()
-  await expect.poll(() => patches().length).toBe(5)
   fixture.holdModel = false
   fixture.modelReplies.shift()()
-  await expect(model()).toHaveValue("fixture\u0000next")
+  await expect(modelName()).toHaveText("test")
   expect(prompts()).toHaveLength(0)
   fixture.setStatus("idle")
   await editor().fill("normal send after selection")

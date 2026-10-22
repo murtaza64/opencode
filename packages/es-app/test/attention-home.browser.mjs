@@ -106,7 +106,7 @@ try {
   await expect(page.locator('[data-attention-id="other_decision"]')).toContainText("Snoozed until")
   preview.ledger.partial = true
   await refresh()
-  await expect(page.locator(".home-warning")).toContainText("Some projects are unavailable")
+  await expect(page.locator(".home-warning")).toContainText("Some projects unavailable; this list may be incomplete.")
   await expect(page.locator('[data-attention-id="other_decision"]')).toBeVisible()
   await expect(page.getByRole("button", { name: "Return to Needs you" })).toBeDisabled()
   await page.locator(".es-switcher").selectOption("fixture")
