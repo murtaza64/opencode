@@ -39,7 +39,7 @@ const select = async (id) => { await queued(id).click(); await expect(card(id)).
 const todos = () => fixture.calls.filter((call) => /^\/session\/ses_[ab]\/todo$/.test(call.path))
 const todoLine = () => page.getByRole("region", { name: "Pinned agents" }).locator(".home-todo")
 const showAgents = () => page.getByRole("complementary", { name: "Desk queue" }).getByRole("button", { name: /^Agents/ }).click()
-const refresh = () => page.getByRole("button", { name: "Refresh sources", exact: true }).click()
+const refresh = () => page.getByRole("button", { name: "Refresh", exact: true }).click()
 try {
   // The first TODO read fails transiently; explicit Refresh recovers it without a stream reconnect.
   let todoFailures = 1
@@ -80,11 +80,12 @@ try {
 
   // Context: tool, exact request/session identity, patterns, metadata and cascade semantics.
   await select("per_home")
-  await expect(card("per_home")).toContainText("permissionbash")
-  await expect(card("per_home")).toContainText("Exact request per_home · session ses_b")
+  await expect(card("per_home").locator(".home-eyebrow")).toHaveText("bash")
+  await expect(card("per_home")).toHaveAttribute("data-request-id", "per_home")
+  await expect(card("per_home").getByRole("link", { name: "Open thread" })).toHaveAttribute("href", /ses_b/)
   await expect(card("per_home").locator(".home-permission-context")).toContainText("bun test")
   await expect(card("per_home").locator(".home-permission-context")).toContainText("Synthetic per_home")
-  await expect(card("per_home")).toContainText("Always allow adds bun * for this project")
+  await expect(card("per_home")).toContainText("Always allow: bun * in this project")
 
   // Exact single reply: only per_home, once, with its own directory. The card stays put with its outcome.
   await card("per_home").getByRole("button", { name: "Allow once", exact: true }).click()
@@ -117,7 +118,7 @@ try {
   fixture.permissions = []
   await card("per_stale").getByRole("button", { name: "Always allow", exact: true }).click()
   await expect(page.locator(".home-receipts li").first()).toContainText("Not applied · bash")
-  await expect(page.locator(".home-receipts li").first()).toContainText("request was no longer pending")
+  await expect(page.locator(".home-receipts li").first()).toContainText("no longer pending")
   await expect(queued("per_stale")).toHaveCount(0)
 
   // Uncertain: server/network failure is not success; reply again only after a recheck confirms pending.

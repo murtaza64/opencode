@@ -61,7 +61,7 @@ test("context note is bounded, names the selection explicitly and changes key on
   expect(general.text.length).toBeLessThanOrEqual(10_000)
   const selected = deskContext({ now: 5, sources: [], items: many, selected: items()[0], briefs: [] })
   expect(selected.text).toContain("options: a=Canary; b=Full")
-  expect(selected.text).toContain("requesting agent recommends: a")
+  expect(selected.text).toContain("recommended option: a")
   expect(selected.key).not.toBe(general.key)
   expect(deskContext({ now: 99_999, sources: [], items: many, briefs: [] }).key).toBe(general.key)
 })
@@ -93,18 +93,24 @@ test("brief state keeps only cited facts from the JSON reply", () => {
   expect(state).toEqual({ state: "ready", omitted: 1, result: { ask: "Choose how far to roll out", whyNow: "The canary has run for a day.", ifRecommended: "", ifWait: "", summary: "Canary is staged.", facts: [{ text: "Canary exists", refs: ["E1"] }], timeline: [], flow: ["build", "canary"], gaps: ["owner unknown"] } })
 })
 
+test("brief state strips bracketed ref citations from prose; refs stay attached", () => {
+  const reply = JSON.stringify({ ask: "Ship the canary or wait (C1)?", whyNow: "The rollout is paused [E1, E2].", ifRecommended: "", ifWait: "", summary: "", facts: [{ text: "Canary is healthy (E1).", refs: ["E1"] }], timeline: [], flow: [], gaps: ["Cost (C1) unknown"] })
+  const state = briefState(meta(), [message("msg_u", "user", "packet"), message("msg_a", "assistant", reply)], "idle")
+  expect(state).toMatchObject({ state: "ready", result: { ask: "Ship the canary or wait?", whyNow: "The rollout is paused.", facts: [{ text: "Canary is healthy.", refs: ["E1"] }], gaps: ["Cost unknown"] } })
+})
+
 test("brief state reports interrupted and unconfirmed passes as unknown, never as running", () => {
-  expect(briefState(meta(), [], "idle")).toEqual({ state: "unknown", reason: "The request was not confirmed by Core. It was not resent." })
+  expect(briefState(meta(), [], "idle")).toEqual({ state: "unknown", reason: "Brief start not confirmed." })
   expect(briefState(meta(), [message("msg_u", "user", "packet")], undefined).state).toBe("unknown")
   expect(briefState(meta(), [message("msg_u", "user", "packet")], "busy").state).toBe("running")
   expect(briefState(meta(), [message("msg_u", "user", "packet"), message("msg_a", "assistant", "plain prose")], "idle"))
-    .toEqual({ state: "failed", error: "The model did not return a readable brief." })
+    .toEqual({ state: "failed", error: "no readable reply." })
   expect(briefState(meta(), [message("msg_u", "user", "packet"), message("msg_a", "assistant", "", { error: { name: "APIError" } })], "idle"))
     .toEqual({ state: "failed", error: "APIError" })
 })
 
 test("a brief binds to its initiating source revision, not to whatever is selected now", () => {
   expect(briefBinding(meta("2"), items(2)).current).toBe(true)
-  expect(briefBinding(meta("2"), items(3))).toMatchObject({ current: false, reason: "Source changed since this check (revision 2 → 3); the brief was discarded." })
+  expect(briefBinding(meta("2"), items(3))).toMatchObject({ current: false, reason: "Item changed (revision 2 → 3)." })
   expect(briefBinding({ ...meta(), source: "attention:alpha:other" }, items())).toMatchObject({ current: false, item: undefined })
 })

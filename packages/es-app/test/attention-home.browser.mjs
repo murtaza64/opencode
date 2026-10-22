@@ -28,7 +28,7 @@ const emitSource = (type, properties) => {
   for (const [response, stream] of preview.fixture.eventStreams) if (stream.path === "/global/event") response.write(`data: ${JSON.stringify({ directory, payload: { type, properties } })}\n\n`)
 }
 const record = () => page.locator('[data-attention-id="decision_1"]')
-const refresh = () => page.getByRole("button", { name: "Refresh sources", exact: true }).click()
+const refresh = () => page.getByRole("button", { name: "Refresh", exact: true }).click()
 const queue = page.getByRole("complementary", { name: "Desk queue" })
 const item = title => queue.locator(".desk-item").filter({ hasText: title })
 const history = queue.locator(".desk-history")
@@ -86,7 +86,7 @@ try {
   expect(posts.every(call => call.csrf === "1")).toBe(true)
   // The answered decision stays selected with its delivery status, and is listed under Answered.
   await expect(record().locator(".home-delivery")).toContainText("Small scope")
-  await expect(history.locator("summary")).toContainText("Answered & history 1")
+  await expect(history.locator("summary")).toContainText("History 1")
   await page.reload()
   await history.locator("summary").click()
   await history.getByRole("button", { name: "Answered 1", exact: true }).click()
@@ -116,7 +116,7 @@ try {
   await expect(queue.locator(".desk-item-kind[data-kind=question]")).toHaveCount(1)
   await context.route("**/oc/permission?*", route => route.abort("failed"))
   await refresh()
-  await queue.getByText("Requests with unknown outcome (1)", { exact: true }).click()
+  await queue.getByText("Unknown outcome (1)", { exact: true }).click()
   await expect(queue.locator(".home-unknown")).toContainText("source unavailable")
   preview.fixture.questions = []
   emitSource("question.replied", { sessionID: "ses_b", requestID: "que_home", answers: [["Continue"]] })

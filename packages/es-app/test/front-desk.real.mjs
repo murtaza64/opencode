@@ -311,13 +311,13 @@ try {
   const sessionRoute = (url) => url.pathname === "/oc/session"
   const deskSessions = async () => (await call("GET", "/session")).body.filter((item) => item.title === "Front desk")
   await page.route(sessionRoute, (route) => rootCreate(route.request()) ? route.abort("connectionreset") : route.fallback())
-  await page.getByRole("button", { name: "Start front desk conversation" }).click()
+  await page.getByRole("button", { name: "Start chat" }).click()
   await expect(page.locator(".desk-start")).toContainText("was not confirmed", { timeout: 20000 })
   const unconfirmed = JSON.parse(await page.evaluate(() => localStorage.getItem("es-app:front-desk:1")))
   assert.equal((await deskSessions()).length, 0)
   await page.reload()
   await expect(page.locator(".desk-start")).toContainText("was not confirmed", { timeout: 20000 })
-  await expect(page.getByRole("button", { name: "Start front desk conversation" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Start chat" })).toHaveCount(0)
   await page.unroute(sessionRoute)
   let rootPosts = 0
   await page.route(sessionRoute, async (route) => {
@@ -364,14 +364,14 @@ try {
   await expect(transcript()).toContainText("Desk answer for DESK-Q3.", { timeout: 20000 })
   assert.equal(seen.chat.at(-1).context, false, "unchanged view adds no context")
   attentionDown = true
-  await page.getByRole("button", { name: "Refresh sources" }).click()
+  await page.getByRole("button", { name: "Refresh", exact: true }).click()
   await expect(page.locator(".desk-source", { hasText: "Attention ledger" }).locator(".desk-source-state")).toHaveText(/^unavailable/, { timeout: 20000 })
   await editor().fill("DESK-Q4 and now?")
   await sendIdle()
   await expect(transcript()).toContainText("Desk answer for DESK-Q4.", { timeout: 20000 })
   assert.deepEqual(seen.chat.at(-1), { question: "DESK-Q4", context: true, none: true, selected: false, ledgerDown: true })
   attentionDown = false
-  await page.getByRole("button", { name: "Refresh sources" }).click()
+  await page.getByRole("button", { name: "Refresh", exact: true }).click()
   await expect(page.locator(".desk-source", { hasText: "Attention ledger" }).locator(".desk-source-state")).toHaveText(/^current/, { timeout: 20000 })
   log("CONTEXTKEY unchanged view -> no context; ledger outage with nothing selected -> context on next send")
   if (evidence) await page.screenshot({ path: path.join(evidence, "01-expanded-chat.png") })
@@ -388,7 +388,7 @@ try {
   await expect(page.locator(".desk-evidence .home-answer textarea")).toBeDisabled()
   await expect(editor()).toHaveValue(draft)
   await expect(editor()).toHaveAttribute("data-mount-probe", "kept")
-  await page.getByRole("button", { name: "Expand chat" }).click()
+  await page.getByRole("button", { name: "Close and return to chat" }).click()
   await expect(page.locator(".desk-evidence")).toHaveCount(0)
   await expect(editor()).toHaveValue(draft)
   await expect(editor()).toHaveAttribute("data-mount-probe", "kept")
@@ -411,7 +411,7 @@ try {
     button.click()
     button.click()
   })
-  await expect(page.locator(".desk-brief")).toContainText("Explaining in the background", { timeout: 20000 })
+  await expect(page.locator(".desk-brief")).toContainText("Preparing brief", { timeout: 20000 })
   await poll("brief reached provider", () => hits.brief === 1)
   await page.unroute(tailRoute)
   assert.equal(tailReads, 1)
@@ -425,8 +425,10 @@ try {
   log(`OVERLAP chat Q2 answered while brief held (holds=${holds.length}, briefHits=${hits.brief})`)
 
   // 4. Late result binds to its initiating item while nothing is selected.
-  await page.getByRole("button", { name: "Expand chat" }).click()
+  await page.getByRole("button", { name: "Close and return to chat" }).click()
   holds.shift()()
+  // Brief jobs and their bindings are listed inside the folded Sources disclosure.
+  await page.locator(".desk-sources-all > summary").click()
   const job = page.locator(".desk-job").first()
   await expect(job).toContainText("ready", { timeout: 20000 })
   await expect(job).toContainText("Pick a rollout")
@@ -434,12 +436,13 @@ try {
   await expect(page.locator(".desk-evidence")).toHaveCount(0)
   await job.getByRole("button", { name: "Show" }).click()
   const brief = page.locator(".desk-brief")
-  await expect(brief).toContainText("brief for revision 1")
+  await brief.locator(".desk-brief-detail > summary").click()
+  await expect(brief).toContainText("Brief for revision 1")
   await expect(brief.locator(".desk-flow li")).toHaveCount(3)
   await expect(brief).toContainText("1 uncited statement(s) omitted")
   await expect(brief).not.toContainText("Invented claim")
   await expect(brief.locator(".desk-ref", { hasText: "E2" }).first()).toBeVisible()
-  await expect(page.locator(".desk-evidence .home-decision")).toContainText("Agent recommends: Stay at canary")
+  await expect(page.locator(".desk-evidence .home-decision .home-options label", { hasText: "Stay at canary" })).toContainText("recommended")
   const children = (await call("GET", `/session/${briefAnchor}/children`)).body
   assert.equal(children.length, 1)
   assert.equal(children[0].metadata.frontDesk.revision, "1")
@@ -454,9 +457,9 @@ try {
 
   // 5. A new source revision discards the derived brief; the canonical card updates immediately.
   attentionRevision = 2
-  await page.getByRole("button", { name: "Refresh sources" }).click()
+  await page.getByRole("button", { name: "Refresh", exact: true }).click()
   await expect(page.locator(".desk-evidence")).toContainText("revision 2", { timeout: 20000 })
-  await expect(brief).toContainText("An earlier brief was discarded: the request changed since revision 1")
+  await expect(brief).toContainText("The request changed since the last brief")
   await expect(brief).not.toContainText("Canary rollout is staged")
   await expect(page.locator(".desk-job").first()).toContainText("revision 1 → 2")
   log("STALE revision 1 brief discarded after the source moved to revision 2")
@@ -466,7 +469,7 @@ try {
   await page.route(tailRoute, async (route) => { await new Promise((resolve) => setTimeout(resolve, 3000)); return route.fallback() })
   await page.getByRole("button", { name: "Prepare brief" }).click()
   attentionRevision = 3
-  await page.getByRole("button", { name: "Refresh sources" }).click()
+  await page.getByRole("button", { name: "Refresh", exact: true }).click()
   await expect(page.locator(".desk-evidence")).toContainText("revision 3", { timeout: 20000 })
   await expect(page.locator(".desk-background")).toContainText("source changed while the brief was being prepared", { ignoreCase: true, timeout: 20000 })
   await page.unroute(tailRoute)
@@ -496,7 +499,7 @@ try {
   })
   await page.getByRole("button", { name: "Confirm start" }).click()
   await poll("confirmed child", async () => (await call("GET", `/session/${briefAnchor}/children`)).body.some((item) => item.id === lost.id))
-  await expect(page.locator(".desk-brief")).toContainText("not confirmed by Core. It was not resent", { timeout: 20000 })
+  await expect(page.locator(".desk-brief")).toContainText("Brief start not confirmed", { timeout: 20000 })
   await new Promise((resolve) => setTimeout(resolve, 2000))
   const adopted = (await call("GET", `/session/${briefAnchor}/children`)).body.filter((item) => item.metadata?.frontDesk?.revision === "3")
   assert.deepEqual(adopted.map((item) => item.id), [lost.id])
@@ -520,7 +523,7 @@ try {
     await poll(`extra ${n} settled`, async () => (await status(extra.id)) === "idle" && (await messages(extra.id)).at(-1)?.info.time?.completed)
   }
   holdBriefs = true
-  await page.getByRole("button", { name: "Refresh sources" }).click()
+  await page.getByRole("button", { name: "Refresh", exact: true }).click()
   const childIDs = new Set((await call("GET", `/session/${briefAnchor}/children`)).body.map((item) => item.id))
   assert.equal(childIDs.size, 5)
   await expect(page.locator(".desk-job")).toHaveCount(4, { timeout: 20000 })
@@ -536,10 +539,10 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 33_000)) // two idle ticks
   assert.deepEqual(briefReads, [], "idle ticks reread no finished brief")
   await expect(page.locator(".desk-job")).toHaveCount(4)
-  await page.getByRole("button", { name: "Expand chat" }).click()
+  await page.getByRole("button", { name: "Close and return to chat" }).click()
   await page.locator(".desk-job", { hasText: "Extra" }).first().waitFor()
   await page.locator(".desk-item").first().click()
-  await page.getByRole("button", { name: "Refresh sources" }).click()
+  await page.getByRole("button", { name: "Refresh", exact: true }).click()
   await poll("explicit refresh reread", () => new Set(briefReads).size === childIDs.size)
   await new Promise((resolve) => setTimeout(resolve, 1000))
   assert.equal(briefReads.length, childIDs.size, "explicit refresh reads each brief once")
@@ -550,7 +553,7 @@ try {
   //    fenced change applies once with its source; the human edits, restores, forgets and erases;
   //    a concurrent writer is never overwritten; credentials are refused.
   operatorReal = true
-  await page.getByRole("button", { name: "Expand chat" }).click()
+  await page.getByRole("button", { name: "Close and return to chat" }).click()
   await page.reload()
   await expect(editor()).toBeVisible({ timeout: 20000 })
   const memoryFile = path.join(home, ".local/share/opencode/front-desk/memory.json")
@@ -645,7 +648,7 @@ try {
   // 10. A new desk conversation starts with the same memory in its first context.
   await page.evaluate(() => localStorage.removeItem("es-app:front-desk:1"))
   await page.reload()
-  await page.getByRole("button", { name: "Start front desk conversation" }).click()
+  await page.getByRole("button", { name: "Start chat" }).click()
   await expect(editor()).toBeVisible({ timeout: 20000 })
   pointerID = JSON.parse(await page.evaluate(() => localStorage.getItem("es-app:front-desk:1"))).session
   assert.notEqual(pointerID, pointer.session)
@@ -663,7 +666,7 @@ try {
   holdBriefs = false
   attentionRevision = 6
   await page.goto(`${origin}/desk`)
-  await page.getByLabel("Prepare briefs automatically").check()
+  await page.getByLabel("Auto briefs").check()
   const autoHits = hits.brief
   // A second client (another window or device) runs its own provider at the same moment.
   const second = await browser.newContext({ viewport: { width: 1280, height: 900 } })
@@ -673,8 +676,9 @@ try {
   const card = page.locator('.home-decision[data-attention-id="att_rollout"]')
   await expect(card).toContainText("revision 6", { timeout: 40000 })
   await expect(card.getByRole("button", { name: "Prepare brief" })).toHaveCount(0)
-  await expect(card.locator(".desk-brief-plain")).toContainText("Choose whether to stay at the canary or roll out fully", { timeout: 60000 })
+  await expect(card.locator(".desk-brief-ask")).toContainText("Choose whether to stay at the canary or roll out fully", { timeout: 60000 })
   await expect(card.locator(".desk-brief")).toContainText("Kim owns the canary")
+  await card.locator(".desk-brief-detail > summary").click()
   await expect(card.locator(".desk-brief .desk-ref", { hasText: "file:ROLLOUT.md" })).toBeVisible()
   assert.deepEqual(seen.retrieved, [true], "the job read the project file through the read tool")
   const frame = card.locator(".desk-visual iframe")
@@ -686,9 +690,9 @@ try {
   await expect(original.locator("p")).toBeHidden()
   await original.locator("summary").click()
   await expect(original).toContainText("The canary is healthy. Choose how far to roll out.")
-  await expect(card).toContainText("Agent recommends: Stay at canary")
+  await expect(card.locator(".home-options label", { hasText: "Stay at canary" })).toContainText("recommended")
   await expect(card.getByRole("radio")).toHaveCount(2)
-  await expect(secondPage.locator('.home-decision[data-attention-id="att_rollout"] .desk-brief-plain')).toContainText("You decide", { timeout: 30000 })
+  await expect(secondPage.locator('.home-decision[data-attention-id="att_rollout"] .desk-brief-ask')).toContainText("Choose whether", { timeout: 30000 })
   assert.equal(hits.brief, autoHits + 2, "one automatic job across two clients: one tool step and one reply")
   const rev6 = (await call("GET", `/session/${briefAnchor}/children`)).body.filter((item) => item.metadata?.frontDesk?.revision === "6")
   assert.equal(rev6.length, 1)
@@ -697,18 +701,18 @@ try {
   assert.deepEqual((await call("GET", "/permission")).body, [], "no permission request was created")
   if (evidence) await page.screenshot({ path: path.join(evidence, "05-home-auto-brief.png"), fullPage: true })
   await page.reload()
-  await expect(card.locator(".desk-brief-plain")).toContainText("You decide", { timeout: 20000 })
+  await expect(card.locator(".desk-brief-ask")).toContainText("Choose whether", { timeout: 20000 })
   await page.goto(`${origin}/desk`)
   await page.locator(".desk-item").first().click()
-  await expect(page.locator(".desk-brief .desk-brief-plain")).toContainText("Choose whether to stay at the canary", { timeout: 20000 })
+  await expect(page.locator(".desk-brief .desk-brief-ask")).toContainText("Choose whether to stay at the canary", { timeout: 20000 })
   await new Promise((resolve) => setTimeout(resolve, 3000))
   assert.equal(hits.brief, autoHits + 2, "reload and the desk reuse the job")
   assert.equal((await call("GET", `/session/${briefAnchor}/children`)).body.filter((item) => item.metadata?.frontDesk?.revision === "6").length, 1)
   attentionRevision = 7
   await page.goto(`${origin}/`)
   await expect(card).toContainText("revision 7", { timeout: 40000 })
-  await expect(card.locator(".desk-brief-plain")).toContainText("You decide", { timeout: 60000 })
-  await expect(card.locator(".desk-brief")).toContainText("Derived from revision 7")
+  await expect(card.locator(".desk-brief-ask")).toContainText("Choose whether", { timeout: 60000 })
+  await expect(card.locator(".desk-brief")).toContainText("Brief for revision 7")
   assert.equal((await call("GET", `/session/${briefAnchor}/children`)).body.filter((item) => item.metadata?.frontDesk?.revision === "7").length, 1)
   assert.equal(hits.brief, autoHits + 4)
   // Backlog: six more open decisions arrive at once. The newest start first, never more than two at a time.

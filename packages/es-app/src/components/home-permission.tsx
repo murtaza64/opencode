@@ -73,10 +73,10 @@ export const HomePermission = (props: {
   }
   return <div class="home-request home-permission" data-request-id={props.item.id}>
     <div>
-      <span class="home-eyebrow"><span><Glyph name="shield" />permission</span><bdi dir="ltr">{request()?.permission ?? "unknown tool"}</bdi></span>
+      <span class="home-eyebrow"><span><Glyph name="shield" /><bdi dir="ltr">{request()?.permission ?? "unknown tool"}</bdi></span></span>
       <h3><bdi dir="auto">{props.item.title}</bdi></h3>
       <Show when={props.owner}><div class="home-muted">Subagent of <bdi dir="auto">{props.owner}</bdi></div></Show>
-      <div class="home-source">Exact request <bdi dir="ltr">{props.item.id}</bdi> · session <bdi dir="ltr">{props.item.session}</bdi> · source checked {ago(props.item.checked)}{props.stale ? " · stale" : ""}</div>
+      <Show when={props.stale}><div class="home-source home-blocked">Last checked {ago(props.item.checked)}</div></Show>
     </div>
     <A href={sessionHref(props.item.session, props.item.directory)}>Open thread</A>
     <Show when={request()} fallback={<p class="home-muted">Request details unavailable. Reply from the original session.</p>}>
@@ -91,8 +91,8 @@ export const HomePermission = (props: {
         <button class="home-danger" disabled={!ready()} onClick={() => void send("reject")}>{labels.reject}</button>
       </div>
       <ul class="home-permission-effects home-muted">
-        <li>Always allow adds {always().length ? <For each={always()}>{(pattern, index) => <>{index() ? ", " : ""}<bdi class="mono" dir="ltr">{pattern}</bdi></>}</For> : "no reusable pattern"} for this project while the server keeps it loaded{props.siblings ? ` and approves this session's other pending requests those patterns cover` : ""}.</li>
-        <Show when={props.siblings}><li>Reject also rejects {props.siblings} other pending request{props.siblings === 1 ? "" : "s"} from this session.</li></Show>
+        <li>Always allow: {always().length ? <For each={always()}>{(pattern, index) => <>{index() ? ", " : ""}<bdi class="mono" dir="ltr">{pattern}</bdi></>}</For> : "nothing reusable"} in this project, not saved across restarts{props.siblings ? `, including matching requests already waiting here` : ""}.</li>
+        <Show when={props.siblings}><li>Reject also rejects {props.siblings} other waiting request{props.siblings === 1 ? "" : "s"} from this agent.</li></Show>
       </ul>
     </Show>
     <p class="home-permission-status" role="status">
@@ -100,7 +100,7 @@ export const HomePermission = (props: {
       <Show when={outcome()?.kind === "missing"}>Not applied: no longer pending.</Show>
       <Show when={outcome()?.kind === "refused"}>Not applied: the server refused this reply ({(outcome() as { message: string }).message}).</Show>
       <Show when={outcome()?.kind === "uncertain"}>{recovered() ? "Reply not confirmed; still pending. You can reply again." : "Reply not confirmed; rechecking before another reply."}</Show>
-      <Show when={!outcome() && props.live === "cleared"}>No longer pending. Outcome unknown here; open the thread to check.</Show>
+      <Show when={!outcome() && props.live === "cleared"}>No longer pending. Check the thread for the outcome.</Show>
       <Show when={!outcome() && props.live !== "cleared" && props.item.state !== "pending"}>{props.item.state === "unavailable" ? "Source unavailable; replies disabled until rechecked." : "No longer pending; outcome unknown."}</Show>
     </p>
   </div>

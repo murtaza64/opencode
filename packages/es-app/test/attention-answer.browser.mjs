@@ -31,7 +31,7 @@ try {
   await answer.fill("   ")
   await expect(record.getByRole("button", { name: "Send answer" })).toBeDisabled()
   await answer.fill(FLEET)
-  await expect(record.locator(".home-answer")).toContainText("To lane orchestrator · grants no tool permission")
+  await expect(record.locator(".home-answer")).toContainText("To orchestrator · not a tool approval")
   await expect(page.getByRole("dialog")).toHaveCount(0)
   let drop = true
   await context.route("**/es/api/attention/*/commands?*", async route => {
@@ -63,9 +63,9 @@ try {
   const fixtureRecord = preview.ledger.records[0]
   fixtureRecord.delivery_state = "blocked"
   fixtureRecord.delivery = { ...fixtureRecord.delivery, state: "blocked", reason: "owner-unverified" }
-  await page.getByRole("button", { name: "Refresh sources", exact: true }).click()
+  await page.getByRole("button", { name: "Refresh", exact: true }).click()
   await expect(record.locator(".home-blocked")).toContainText("not on this request's verified handoff chain")
-  await expect(record.getByText("Delivered session not yet verified")).toBeVisible()
+  await expect(record.getByText("Not delivered yet")).toBeVisible()
   preview.ledger.deliveryNext = { state: "admitted", reason: null, session: "ses_successor", session_directory: "/successor/dir", copies: [{ session: "ses_successor", directory: "/successor/dir", state: "admitted", error: null, presented_at: null, handled_at: null }] }
   await record.getByRole("button", { name: "Retry delivery" }).click()
   await expect(record.locator(".home-delivery")).toContainText("Delivered to the agent's input queue · not yet read")
@@ -77,7 +77,7 @@ try {
   await expect(record.locator("details pre")).toContainText('"reason": "admitted"')
   fixtureRecord.delivery_state = "presented"
   fixtureRecord.delivery = { ...fixtureRecord.delivery, state: "presented", updated_at: Date.now() + 1 }
-  await page.getByRole("button", { name: "Refresh sources", exact: true }).click()
+  await page.getByRole("button", { name: "Refresh", exact: true }).click()
   await expect(record.locator(".home-delivery")).toContainText("Presented to agent · awaiting acknowledgement")
   await expect(record.locator("details pre")).toContainText('"reason": "presented"')
 
@@ -110,7 +110,7 @@ try {
   const openEnded = page.locator('[data-attention-id="open_ended"]')
   await expect(openEnded.getByRole("radio")).toHaveCount(0)
   await expect(openEnded.getByRole("button", { name: "Review choice" })).toHaveCount(0)
-  await expect(openEnded.locator(".home-answer")).toContainText("To session ses_top")
+  await expect(openEnded.locator('.home-answer [title="ses_top"]')).toBeVisible()
   // Selecting an option is a complete answer: one answer command with the exact choice and no text.
   await select("attention:other:other_decision")
   const other = page.locator('[data-attention-id="other_decision"]')
