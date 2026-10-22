@@ -25,7 +25,6 @@ import { defaultImageCapability, prepareImageFile } from "../image-fit"
 import { ComposerResults } from "../components/composer-controls"
 import { DirectComposer } from "../components/direct-composer"
 import { flash } from "../motion"
-import { takeFirstSend } from "../first-send"
 import { Glyph } from "../components/icons"
 import { AppHeader } from "../components/native-header"
 import { SessionTitle } from "../components/session-title"
@@ -749,16 +748,6 @@ function SessionView(props: { sessionID: string; directory: string }) {
     await composer.submitVisible(action ?? (composer.state.busy ? composer.state.keyboardTarget : "steer"), s, nextModel(), messages().at(-1)?.id)
   }
 
-  // First message from the draft New session page: sent once, through this composer,
-  // so the pending echo and unknown-outcome reconciliation apply as for any Send.
-  let firstSend = takeFirstSend(sessionID)
-  createEffect(() => {
-    if (firstSend === undefined || !session() || !connected() || composer.state.hydrating) return
-    const text = firstSend
-    firstSend = undefined
-    composer.setText(text)
-    void send("steer")
-  })
 
   let transcriptEl: HTMLDivElement | undefined
   let inner: HTMLDivElement | undefined

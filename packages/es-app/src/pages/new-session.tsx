@@ -1,19 +1,26 @@
 /* Draft-first New session (dotfiles#240): the page opens ready to type with
  * remembered defaults, and nothing exists on the server until the first Send.
- * Send creates the session with the chosen agent and model, then hands the
- * text to that session's own composer, which owns sending, the pending echo
- * and unknown-outcome reconciliation. Only a confirmed create navigates. */
+ * Send saves the exact create request (with a client-chosen session id) before
+ * posting it, so a lost response survives reload and is reconciled by reading
+ * that id, never by creating another session. A confirmed session gets the
+ * text in its own durable composer draft, which submits it (recording the
+ * submission before the request) before this page lets go of it; the composer
+ * then owns the pending echo and unknown-outcome recovery. */
 import { createEffect, createMemo, createResource, createSignal, For, Show } from "solid-js"
 import { useNavigate } from "@solidjs/router"
-import { oc, SessionCreateError } from "../api"
+import { descending } from "@opencode-ai/schema/identifier"
+import { oc, SessionCreateError, type SessionCreateBody } from "../api"
+import { sendFirstMessage } from "../composer"
 import { sessionHref, useDashboard } from "../state"
 import { AppHeader } from "../components/native-header"
-import { firstSendKey } from "../first-send"
+import type { Session } from "@opencode-ai/sdk/v2"
 import "./new-session.css"
 
 const DRAFT = "es-app:new-session:draft:1"
 const LAST = "es-app:new-session:last:1"
-type Draft = { project: string; directory: string; agent: string; model: string; text: string }
+// The exact request sent; identity and settings stay bound to it until it is reconciled.
+type Attempt = { directory: string; body: SessionCreateBody & { id: string }; text: string }
+type Draft = { project: string; directory: string; agent: string; model: string; text: string; attempt?: Attempt }
 
 const projectDirectory = (root: string) => root.replace(/\/+$/, "").replace(/\/\.editspace$/, "")
 // "lanes/<lane>/repos/<owner>/<repo>" reads as "<lane> · <repo>"; anything else by its basename
@@ -41,8 +48,9 @@ export default function NewSessionPage() {
   const [text, setText] = createSignal(saved.text ?? "")
   const [pending, setPending] = createSignal(false)
   const [error, setError] = createSignal("")
-  // A lost create response may have made a session; another Send waits for an explicit recheck.
-  const [uncertain, setUncertain] = createSignal(false)
+  // An unconfirmed create: saved before posting, cleared only by reading its exact id.
+  const [attempt, setAttempt] = createSignal<Attempt | undefined>(saved.attempt)
+  const locked = () => pending() || !!attempt()
   let editor: HTMLTextAreaElement | undefined
 
   const selected = createMemo(() => projects().find((item) => item.name === project()))
@@ -75,34 +83,77 @@ export default function NewSessionPage() {
     setProject(name)
     const item = projects().find((entry) => entry.name === name)
     setDirectory(item ? projectDirectory(item.root) : "")
-    setUncertain(false)
     setError("")
   }
-  createEffect(() => sessionStorage.setItem(DRAFT, JSON.stringify({ project: project(), directory: directory(), agent: agent(), model: model(), text: text() })))
+  // Once handed to a session the draft belongs to it; nothing here may write it back.
+  let handed = false
+  const save = () => handed || sessionStorage.setItem(DRAFT, JSON.stringify({ project: project(), directory: directory(), agent: agent(), model: model(), text: text(), attempt: attempt() }))
+  createEffect(save)
   queueMicrotask(() => editor?.focus())
 
-  const send = async () => {
-    const body = text()
-    if (pending() || uncertain() || !directory() || !body.trim()) return
+  // Hands a confirmed session its first message, then lets go of the draft.
+  const open = async (session: Session, value: Attempt) => {
+    if (!(await sendFirstMessage(session, value.text))) {
+      // The attempt stays, so Send stays locked and "Check again" retries this hand-off.
+      setError("The session was created, but its draft could not be saved. Your text is kept; Check again to retry.")
+      return
+    }
+    setAttempt(undefined)
+    handed = true
+    localStorage.setItem(LAST, JSON.stringify({ project: project(), model: model(), agent: agent() }))
+    sessionStorage.setItem("es-app-focus-session", session.id)
+    sessionStorage.removeItem(DRAFT)
+    navigate(sessionHref(session.id, value.directory), { replace: true })
+  }
+  const post = async (value: Attempt) => {
     setPending(true)
     setError("")
-    const [providerID, modelID] = modelValue().split("\u0000")
     try {
-      const session = await oc.createSession(directory(), { agent: agent() || undefined, model: providerID && modelID ? { providerID, modelID } : undefined })
-      localStorage.setItem(LAST, JSON.stringify({ project: project(), model: model(), agent: agent() }))
-      // The session page sends this once, through its own composer.
-      sessionStorage.setItem(firstSendKey, JSON.stringify({ sessionID: session.id, text: body }))
-      sessionStorage.setItem("es-app-focus-session", session.id)
-      sessionStorage.removeItem(DRAFT)
-      navigate(sessionHref(session.id, directory()), { replace: true })
+      const session = await oc.createSession(value.directory, value.body)
+      await open(session, value)
     } catch (cause) {
-      const lost = !(cause instanceof SessionCreateError) || cause.uncertain
-      setUncertain(lost)
-      setError(cause instanceof SessionCreateError ? cause.message : "The server response was lost. A session may have been created; check the session list before trying again.")
+      if (cause instanceof SessionCreateError && !cause.uncertain) setAttempt(undefined)
+      setError(cause instanceof SessionCreateError ? cause.message : "The server response was lost. A session may have been created; check again before sending.")
     } finally {
       setPending(false)
+      save()
     }
   }
+  const send = async () => {
+    const body = text()
+    if (locked() || !directory() || !body.trim()) return
+    const [providerID, modelID] = modelValue().split("\u0000")
+    const value: Attempt = {
+      directory: directory(),
+      text: body,
+      body: { id: `ses_${descending()}`, ...(agent() ? { agent: agent() } : {}), ...(providerID && modelID ? { model: { providerID, id: modelID } } : {}) },
+    }
+    // Saved before the request, so a lost response keeps the same identity across reload.
+    setAttempt(value)
+    save()
+    await post(value)
+  }
+  // Reads the exact attempted id: found means created; a definite 404 means it was not.
+  const reconcile = async () => {
+    const value = attempt()
+    if (!value || pending()) return
+    setPending(true)
+    try {
+      const session = await oc.session(value.body.id, value.directory)
+      if (session.directory !== value.directory) throw Error("directory mismatch")
+      await open(session, value)
+    } catch (cause) {
+      if (String(cause).includes("HTTP 404")) {
+        setAttempt(undefined)
+        setError("No session was created. Your draft is unchanged; send again when ready.")
+      } else setError("Still unknown whether the session was created. Check again shortly.")
+    } finally {
+      setPending(false)
+      save()
+    }
+  }
+  // An unconfirmed attempt from before a reload is checked once on open.
+  if (attempt()) queueMicrotask(() => void reconcile())
 
   return <main class="session-page new-session-page">
     <div class="session-main">
@@ -110,32 +161,32 @@ export default function NewSessionPage() {
       <div class="new-session-space" />
       <form class="prompt-box new-session-draft" onSubmit={(event) => { event.preventDefault(); void send() }}>
         <div class="new-session-settings" role="group" aria-label="New session settings">
-          <select aria-label="Project" value={project()} disabled={pending()} onChange={(event) => chooseProject(event.currentTarget.value)}>
+          <select aria-label="Project" value={project()} disabled={locked()} onChange={(event) => chooseProject(event.currentTarget.value)}>
             <Show when={!project()}><option value="" disabled>Project…</option></Show>
             <For each={projects()}>{(item) => <option value={item.name} selected={item.name === project()}>{item.name}</option>}</For>
           </select>
-          <select aria-label="Workspace" value={directory()} disabled={pending() || directories().length < 2} title={directory()}
-            onChange={(event) => { setDirectory(event.currentTarget.value); setUncertain(false) }}>
+          <select aria-label="Workspace" value={directory()} disabled={locked() || directories().length < 2} title={directory()}
+            onChange={(event) => setDirectory(event.currentTarget.value)}>
             <For each={directories()}>{(value, index) => <option value={value} selected={value === directory()}>{index() === 0 ? "project root" : workspaceLabel(value)}</option>}</For>
           </select>
-          <select aria-label="Agent" value={agent()} disabled={pending()} onChange={(event) => setAgent(event.currentTarget.value)}>
+          <select aria-label="Agent" value={agent()} disabled={locked()} onChange={(event) => setAgent(event.currentTarget.value)}>
             <option value="" selected={!agent()}>default agent</option>
             <For each={primaryAgents()}>{(item) => <option value={item.name} selected={item.name === agent()}>{item.name}</option>}</For>
           </select>
-          <select aria-label="Model" value={modelValue()} disabled={pending()} onChange={(event) => setModel(event.currentTarget.value)}>
+          <select aria-label="Model" value={modelValue()} disabled={locked()} onChange={(event) => setModel(event.currentTarget.value)}>
             <option value="" selected={!modelValue()}>default model</option>
             <For each={providers()?.providers ?? []}>{(provider) => <optgroup label={provider.id}>
               <For each={Object.keys(provider.models ?? {})}>{(id) => <option value={`${provider.id}\u0000${id}`} selected={modelValue() === `${provider.id}\u0000${id}`}>{id}</option>}</For>
             </optgroup>}</For>
           </select>
         </div>
-        <textarea ref={editor} aria-label="Message" dir="auto" placeholder="What should this session do?" value={text()} disabled={pending()}
+        <textarea ref={editor} aria-label="Message" dir="auto" placeholder="What should this session do?" value={text()} readOnly={locked()}
           onInput={(event) => setText(event.currentTarget.value)}
           onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.isComposing) { event.preventDefault(); void send() } }} />
         <div class="new-session-submit">
           <Show when={error()}><span class="err" role="alert">{error()}</span></Show>
-          <Show when={uncertain()}><button type="button" onClick={() => { setUncertain(false); setError("") }}>I checked the session list</button></Show>
-          <button type="submit" class="primary" disabled={pending() || uncertain() || !directory() || !text().trim()}>
+          <Show when={attempt() && !pending()}><button type="button" onClick={() => void reconcile()}>Check again</button></Show>
+          <button type="submit" class="primary" disabled={locked() || !directory() || !text().trim()}>
             {pending() ? "Creating…" : "Send"} <kbd aria-hidden="true">⌘/Ctrl↵</kbd>
           </button>
         </div>

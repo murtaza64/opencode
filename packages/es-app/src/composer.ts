@@ -145,6 +145,31 @@ export const getComposer = (sessionID: string, directory: string): Composer => {
 }
 
 /**
+ * First message of a session created by the draft New session page. The text is put in
+ * the session's own composer draft and submitted there, so it is persisted with the draft
+ * and the submission record before any request, and the composer's pending echo and
+ * unknown-outcome handling apply. Returns false, sending nothing, if the draft cannot be
+ * read back from storage.
+ */
+export const sendFirstMessage = async (
+  session: Session,
+  text: string,
+  storage: () => Pick<Storage, "getItem"> | null = () =>
+    typeof window === "undefined" ? null : composerStorage(navigator.userAgent, window.sessionStorage, () => window.localStorage),
+) => {
+  const composer = getComposer(session.id, session.directory)
+  if (composer.state.normalSubmission) return true
+  if (composer.state.task.text !== text) composer.setText(text)
+  try {
+    if (JSON.parse(storage()?.getItem(storageKey(session.id, session.directory)) ?? "null")?.task?.text !== text) return false
+  } catch {
+    return false
+  }
+  void composer.submitVisible("steer", session)
+  return true
+}
+
+/**
  * Why a failed-turn Retry must wait: a human send whose admission is unresolved could
  * still land, and retrying first would reorder or obscure it. Reads saved state for
  * sessions whose composer is not open; unreadable saved state blocks like an unknown send.

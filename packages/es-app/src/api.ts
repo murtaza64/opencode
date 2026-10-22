@@ -28,6 +28,8 @@ export type AttentionNotification = {
   updated: number
 }
 
+export type SessionCreateBody = { id?: string; agent?: string; model?: { providerID: string; id: string } }
+
 export class SessionCreateError extends Error {
   constructor(message: string, readonly uncertain: boolean) {
     super(message)
@@ -43,17 +45,14 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 export const oc = {
-  // Agent and model are chosen before the session exists (draft-first New session).
-  createSession: async (directory: string, options: { agent?: string; model?: { providerID: string; modelID: string } } = {}): Promise<Session> => {
+  // The body is Core's create body. A client-chosen id makes a lost response reconcilable.
+  createSession: async (directory: string, body: SessionCreateBody = {}): Promise<Session> => {
     let res: Response
     try {
       res = await fetch(`/oc/session?${q(directory)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          ...(options.agent ? { agent: options.agent } : {}),
-          ...(options.model ? { model: { providerID: options.model.providerID, id: options.model.modelID } } : {}),
-        }),
+        body: JSON.stringify(body),
       })
     } catch {
       throw new SessionCreateError("The server response was lost. A session may have been created; check the session list before trying again.", true)
@@ -65,7 +64,7 @@ export const oc = {
       throw new SessionCreateError(`Session creation failed: HTTP ${res.status} ${detail}`, false)
     }
     const value = await res.json()
-    if (!value || typeof value.id !== "string" || !/^ses_[\w-]+$/.test(value.id) || value.directory !== directory || value.parentID)
+    if (!value || typeof value.id !== "string" || !/^ses_[\w-]+$/.test(value.id) || value.directory !== directory || value.parentID || (body.id && value.id !== body.id))
       throw new SessionCreateError("The server returned an invalid confirmation. A session may have been created; check the session list before trying again.", true)
     return value as Session
   },
