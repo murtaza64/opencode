@@ -12,6 +12,8 @@ export const Receipt = Schema.Struct({
   state: Schema.Literals(["pending", "committed"]),
 })
 export type Receipt = typeof Receipt.Type
+/** Where the successor may live; cross-directory is an explicit owner-handoff opt-in. */
+export type Scope = "same-directory" | "cross-directory"
 
 export class Closed extends Schema.TaggedErrorClass<Closed>()("SessionSuperseded", {
   sessionID: SessionID,
@@ -25,7 +27,7 @@ export class Invalid extends Schema.TaggedErrorClass<Invalid>()("SessionSuperses
 
 export interface Interface {
   readonly get: (sessionID: SessionID) => Effect.Effect<Receipt | undefined>
-  readonly request: (sessionID: SessionID, successor: SessionID) => Effect.Effect<Receipt, Invalid | Closed>
+  readonly request: (sessionID: SessionID, successor: SessionID, scope?: Scope) => Effect.Effect<Receipt, Invalid | Closed>
   readonly commit: (sessionID: SessionID) => Effect.Effect<Receipt | undefined>
   /** Drops a pending fence so the predecessor reopens; a committed fence is final and fails Closed. */
   readonly cancel: (sessionID: SessionID) => Effect.Effect<Receipt | undefined, Closed>
@@ -48,7 +50,11 @@ const layer = Layer.effect(
       if (!row) return undefined
       return { sessionID, successor: row.successor_id, state: row.state } satisfies Receipt
     })
-    const request = Effect.fn("SessionSupersession.request")(function* (sessionID: SessionID, successor: SessionID) {
+    const request = Effect.fn("SessionSupersession.request")(function* (
+      sessionID: SessionID,
+      successor: SessionID,
+      scope: Scope = "same-directory",
+    ) {
       const context = yield* InstanceState.context
       const existing = yield* get(sessionID)
       if (existing) {
@@ -63,13 +69,13 @@ const layer = Layer.effect(
         ],
         { concurrency: 2 },
       ).pipe(Effect.orDie)
-      if (
-        !source ||
-        !target ||
-        source.directory !== context.directory ||
-        source.project_id !== target.project_id ||
-        source.directory !== target.directory
-      )
+      // The fence only closes the routed source; it never runs, moves or rehomes anything in the target.
+      if (!source || source.directory !== context.directory)
+        return yield* new Invalid({ message: "Session must belong to the routed directory" })
+      if (scope === "cross-directory") {
+        if (!target || target.parent_id || target.time_archived)
+          return yield* new Invalid({ message: "Successor must be an existing, unarchived top-level session" })
+      } else if (!target || source.project_id !== target.project_id || source.directory !== target.directory)
         return yield* new Invalid({ message: "Successor must exist in the same project and directory" })
       yield* db
         .insert(SessionSupersessionTable)

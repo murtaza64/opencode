@@ -82,10 +82,10 @@ export const mailRows = (messages: Message[], timeline: MailTimeline | undefined
     return id ? [id] : []
   }))
   const standalone = [...records.values()].filter((message) => !promoted.has(message.id))
-  const times = new Map((timeline?.messages ?? []).map((message) => [message.id, mailSentAt(message)]))
   return [
     ...visible.map((message) => {
-      const timestamp = times.get(mailSourceID(message) ?? "") ?? message.time.created
+      // Promoted mail sits where the model received it; its send time is shown as metadata.
+      const timestamp = message.time.created
       const previous = existing.get(`transcript:${message.id}`)
       return previous?.message === message && previous.timestamp === timestamp
         ? previous : { type: "transcript" as const, message, timestamp }
@@ -97,4 +97,54 @@ export const mailRows = (messages: Message[], timeline: MailTimeline | undefined
          ? previous : { type: "mail" as const, message, timestamp: mailSentAt(message) }
      }),
   ].sort((a, b) => (a.timestamp - b.timestamp) || (a.type === b.type ? 0 : a.type === "transcript" ? -1 : 1))
+}
+
+export type MailCause = {
+  ids: string[]
+  kinds: { kind: string; human: boolean; catchUp: boolean; count: number }[]
+  senders: string[]
+  sentFrom?: number
+  sentTo?: number
+  promotedAt: number
+}
+
+const mailSource = (message: Message) => {
+  if (!mailSourceID(message) || !("source" in message)) return
+  return message.source as { id: string; sender: string; kind?: string; relationship?: string }
+}
+
+// Consecutive promoted mail that is the parent run of an assistant message was that provider
+// turn's input. Summarize it at the run's last mail, directly before the turn it caused.
+export const mailCauses = (rows: TimelineRow[], records: Map<string, MailMessage>) => {
+  const transcript = rows.flatMap((row) => row.type === "transcript" ? [row.message] : [])
+  const causes = new Map<string, MailCause>()
+  transcript.forEach((message, index) => {
+    const next = transcript[index + 1]
+    if (!mailSource(message) || next?.role !== "assistant" || next.parentID !== message.id) return
+    const run: Message[] = []
+    for (let at = index; at >= 0 && mailSource(transcript[at]!); at--) run.unshift(transcript[at]!)
+    const sent = run.flatMap((item) => {
+      const record = records.get(mailSource(item)!.id)
+      const at = record ? mailSentAt(record) : Number.NaN
+      return Number.isFinite(at) ? [at] : []
+    })
+    causes.set(message.id, {
+      ids: run.map((item) => mailSource(item)!.id),
+      kinds: run.reduce<MailCause["kinds"]>((kinds, item) => {
+        const source = mailSource(item)!
+        const record = records.get(source.id)
+        const kind = source.kind ?? record?.kind ?? "mail"
+        const human = kind === "answer" && record?.from === "human"
+        const catchUp = source.relationship === "handoff-catch-up"
+        const same = kinds.find((entry) => entry.kind === kind && entry.human === human && entry.catchUp === catchUp)
+        return same
+          ? kinds.map((entry) => entry === same ? { ...entry, count: entry.count + 1 } : entry)
+          : [...kinds, { kind, human, catchUp, count: 1 }]
+      }, []),
+      senders: [...new Set(run.map((item) => mailSource(item)!.sender))],
+      ...(sent.length ? { sentFrom: Math.min(...sent), sentTo: Math.max(...sent) } : {}),
+      promotedAt: run[0]!.time.created,
+    })
+  })
+  return causes
 }

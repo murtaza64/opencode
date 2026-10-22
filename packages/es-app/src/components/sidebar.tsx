@@ -12,7 +12,6 @@ import { nativeHeader, NativeHeader } from "./native-header"
 import { NewSession } from "./new-session"
 import { peekAttrs, SessionPeek } from "./session-peek"
 import { CloudNav, CloudDiscovery } from "./cloud-sidebar"
-import { ResumeAllFailed } from "./session-failure"
 import { failureLabel } from "../session-failures"
 import { ringOnChange } from "../motion"
 import { Glyph } from "./icons"
@@ -328,7 +327,6 @@ export default function Sidebar() {
             </For>
           </div>
         </Show>
-        <ResumeAllFailed />
         <div class="search-box">
           <input
             class="search-input"

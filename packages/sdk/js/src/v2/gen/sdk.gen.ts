@@ -226,6 +226,11 @@ import type {
   SessionPromptAsyncResponses,
   SessionPromptErrors,
   SessionPromptResponses,
+  SessionRestartContinueErrors,
+  SessionRestartContinueInput,
+  SessionRestartContinueResponses,
+  SessionRestartStatusErrors,
+  SessionRestartStatusResponses,
   SessionRetryErrors,
   SessionRetryInput,
   SessionRetryResponses,
@@ -3644,6 +3649,91 @@ export class Input extends HeyApiClient {
   }
 }
 
+export class Restart extends HeyApiClient {
+  /**
+   * Read a restart continuation record
+   *
+   * Read-only reconciliation for a restart continuation whose acknowledgment was lost: returns the marker recorded for restartID on the anchor, if any, and whether newer messages exist.
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      restartID: string
+      anchorMessageID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "restartID" },
+            { in: "query", key: "anchorMessageID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      SessionRestartStatusResponses,
+      SessionRestartStatusErrors,
+      ThrowOnError
+    >({
+      url: "/session/{sessionID}/restart",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Continue work interrupted by a daemon restart
+   *
+   * Idempotently continue a root session whose newest message is still the anchor captured before a controlled restart, without adding a user message. It resumes only when every effect on the anchor is durable. An anchor with a pending, running or cancelled tool call, an abort that predates the restart, or a future timestamp is marked `uncertain`, left otherwise untouched and not resumed. Failed turns (use retry), finished and advanced sessions are reported without starting. Each decision is recorded as a model-hidden marker on the anchor, so repeating the same restartID reports `duplicate`. Markers are never dropped: an anchor holding the maximum refuses new restart IDs with `capacity`.
+   */
+  public continue<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      sessionRestartContinueInput?: SessionRestartContinueInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "sessionRestartContinueInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      SessionRestartContinueResponses,
+      SessionRestartContinueErrors,
+      ThrowOnError
+    >({
+      url: "/session/{sessionID}/restart",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Session2 extends HeyApiClient {
   /**
    * List sessions
@@ -4402,6 +4492,7 @@ export class Session2 extends HeyApiClient {
       directory?: string
       workspace?: string
       successor?: string
+      scope?: "same-directory" | "cross-directory"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -4414,6 +4505,7 @@ export class Session2 extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "body", key: "successor" },
+            { in: "body", key: "scope" },
           ],
         },
       ],
@@ -4822,6 +4914,11 @@ export class Session2 extends HeyApiClient {
   private _input?: Input
   get input(): Input {
     return (this._input ??= new Input({ client: this.client }))
+  }
+
+  private _restart?: Restart
+  get restart(): Restart {
+    return (this._restart ??= new Restart({ client: this.client }))
   }
 }
 

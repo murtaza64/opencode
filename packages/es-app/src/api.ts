@@ -4,6 +4,8 @@ import type { Agent, GlobalSession, Message, Part, PermissionRequest, QuestionRe
 import { httpError } from "./api-error"
 
 export type MessageWithParts = { info: Message; parts: Part[] }
+/** Generated text attached to a human's own message; marked synthetic and with its producer. */
+export type ContextPart = { type: "text"; text: string; synthetic: true; metadata: { source: string; key: string } }
 export type InputImage = Readonly<SessionV1InputImage>
 export const inputImages = <Mime extends string>(
   images: readonly { mime: Mime; url: string; filename?: string }[],
@@ -28,7 +30,15 @@ export type AttentionNotification = {
   updated: number
 }
 
-export type SessionCreateBody = { id?: string; agent?: string; model?: { providerID: string; id: string } }
+export type SessionCreateBody = {
+  id?: string
+  parentID?: string
+  title?: string
+  agent?: string
+  model?: { providerID: string; id: string }
+  metadata?: Record<string, unknown>
+  permission?: { permission: string; pattern: string; action: "allow" | "deny" | "ask" }[]
+}
 
 export class SessionCreateError extends Error {
   constructor(message: string, readonly uncertain: boolean) {
@@ -64,7 +74,7 @@ export const oc = {
       throw new SessionCreateError(`Session creation failed: HTTP ${res.status} ${detail}`, false)
     }
     const value = await res.json()
-    if (!value || typeof value.id !== "string" || !/^ses_[\w-]+$/.test(value.id) || value.directory !== directory || value.parentID || (body.id && value.id !== body.id))
+    if (!value || typeof value.id !== "string" || !/^ses_[\w-]+$/.test(value.id) || value.directory !== directory || (value.parentID ?? undefined) !== body.parentID || (body.id && value.id !== body.id))
       throw new SessionCreateError("The server returned an invalid confirmation. A session may have been created; check the session list before trying again.", true)
     return value as Session
   },
@@ -104,6 +114,19 @@ export const oc = {
     return { items, cursor: res.headers.get("X-Next-Cursor") ?? undefined }
   },
 
+  children: (id: string, directory: string, signal?: AbortSignal): Promise<Session[]> =>
+    fetch(`/oc/session/${id}/children?${q(directory)}`, { signal }).then(json<Session[]>),
+
+  // Raw prompt admission for callers that own their parts (generated context, structured briefs).
+  promptBody: async (id: string, directory: string, body: Record<string, unknown>) => {
+    const res = await fetch(`/oc/session/${id}/prompt_async?${q(directory)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) throw await httpError(res)
+  },
+
   todos: (id: string, directory: string, signal?: AbortSignal): Promise<Todo[]> =>
     fetch(`/oc/session/${id}/todo?${q(directory)}`, { signal }).then(json<Todo[]>),
 
@@ -128,11 +151,13 @@ export const oc = {
     opts: {
       model?: { providerID: string; modelID: string }
       images?: readonly { mime: string; url: string; filename?: string }[]
+      context?: readonly ContextPart[]
     } = {},
   ) => {
     const parts: Record<string, unknown>[] = []
     if (text) parts.push({ type: "text", text })
     parts.push(...inputImages(opts.images ?? []))
+    parts.push(...(opts.context ?? []))
     // A selected preference is resolved server-side, including its variant.
     const body: Record<string, unknown> = { parts, agent: session.agent }
     const model =

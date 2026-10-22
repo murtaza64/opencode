@@ -32,6 +32,7 @@ export {
   Range,
   ReasoningPart,
   ResourceSource,
+  RestartContinuation,
   RetryPart,
   SessionInfo,
   SnapshotPart,

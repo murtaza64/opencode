@@ -69,6 +69,10 @@ try {
   await expect(cluster("fixture")).toContainText("cloudcloud-reviewprocessing")
   await expect(cluster("squadron")).toContainText("Squadron V2 design")
   await expect(cluster("squadron").locator(".map-node").filter({ hasText: "Squadron V2 design" }).locator(".map-dot").first()).toHaveAttribute("data-status", "failed")
+  // The sidebar marks the failed session itself and offers no bulk retry strip.
+  await expect(page.locator(".sidebar .session-entry[data-peek-id='ses_squadron'] .dot.failed")).toHaveCount(1)
+  await expect(page.locator(".sidebar")).not.toContainText(/Resume all|\d+ failed/)
+  await expect(page.getByRole("region", { name: "Failed sessions" })).toHaveCount(0)
   await expect(cluster("squadron")).not.toContainText("Old standalone")
   await expect(cluster("squadron")).toContainText("1 more hidden by Active")
   // Handoff predecessors are not duplicated as standalone sessions.

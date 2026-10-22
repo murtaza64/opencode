@@ -7,7 +7,7 @@ import { renderable, ToolAdornment, type MessagePartProps } from "@opencode-ai/s
 import type { Part, ToolPart } from "@opencode-ai/sdk/v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { Icon } from "@opencode-ai/ui/icon"
-import { es, oc } from "../api"
+import { es, oc, type ContextPart } from "../api"
 import { createLiveSession, errorText } from "../live-session"
 import FakeCaret from "../components/fake-caret"
 import { SessionChips } from "../components/session-chips"
@@ -30,12 +30,13 @@ import { AppHeader } from "../components/native-header"
 import { SessionTitle } from "../components/session-title"
 import { SubagentTranscript } from "../components/subagent-transcript"
 import { TranscriptMessage } from "../components/transcript-message"
+import { MailCauseRow } from "../components/mail-cause"
 import { InlineQuestion } from "../components/inline-question"
 import { TodoPart } from "../components/todos"
 import { usePulse } from "../pulse"
 import { MailRow } from "../components/mail-row"
 import { MailSubscriptions } from "../components/mail-subscriptions"
-import { mailLocation, mailRows, mailSourceID } from "../mail-timeline"
+import { mailCauses, mailLocation, mailRows, mailSourceID } from "../mail-timeline"
 import { handoffChain, handoffNext, successorFor } from "../handoffs"
 import { ComposerImages } from "../components/composer-images"
 import { ActivityBriefView } from "../components/activity-brief"
@@ -47,6 +48,7 @@ import { HeaderMenu } from "../components/header-menu"
 import { FailureRetry } from "../components/session-failure"
 import { completedTurns, messageSegments, planToolRuns, samePlan, sameSegments } from "../transcript-groups"
 import { isUserPrompt, promptPosition, promptTarget } from "../transcript-nav"
+import { restartMarkers } from "../restart-marker"
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const [error, setError] = createSignal("")
@@ -146,7 +148,8 @@ export default function SessionPage() {
   )
 }
 
-function SessionView(props: { sessionID: string; directory: string }) {
+/** `embedded` drops the page-level info panel. `context` may attach generated parts to an idle send; `onSent` reports whether that send was accepted. */
+export function SessionView(props: { sessionID: string; directory: string; embedded?: boolean; context?: () => ContextPart[]; onSent?: (context: ContextPart[], accepted: boolean) => void }) {
   const sessionID = props.sessionID
   const directory = props.directory
   const composer = getComposer(sessionID, directory)
@@ -393,6 +396,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
     return id ? [id] : []
   })))
   const mailRecords = createMemo(() => new Map(mail()?.messages.map((message) => [message.id, message] as const) ?? []))
+  const mailCauseRows = createMemo(() => mailCauses(timeline(), mailRecords()))
 
   // viewing the session clears its unread state, including as new content
   // streams in while the page is open
@@ -741,7 +745,11 @@ function SessionView(props: { sessionID: string; directory: string }) {
     composer.observeBusy(busy())
     stick = true
     queueMicrotask(pin)
-    await composer.submitVisible(action ?? (composer.state.busy ? composer.state.keyboardTarget : "steer"), s, nextModel(), messages().at(-1)?.id)
+    const chosen = action ?? (composer.state.busy ? composer.state.keyboardTarget : "steer")
+    // Context accompanies only a plain send to an idle session, never a steer or queued input.
+    const context = chosen === "steer" && !composer.state.busy ? props.context?.() ?? [] : []
+    await composer.submitVisible(chosen, s, nextModel(), messages().at(-1)?.id, context)
+    if (context.length) props.onSent?.(context, composer.state.normalSubmission?.status === "accepted")
   }
 
 
@@ -1528,6 +1536,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
                         fork from here
                       </button>
                     </div>
+                    <Show when={mailCauseRows().get(m.id)}>{(cause) => <MailCauseRow cause={cause()} />}</Show>
                   </Show>
                   <Show when={turnSummaries().get(m.id)}>
                     {(s) => (
@@ -1540,6 +1549,9 @@ function SessionView(props: { sessionID: string; directory: string }) {
                       </div>
                     )}
                   </Show>
+                  <For each={restartMarkers(m, messages(), status() !== "idle")}>
+                    {(marker) => <div class="restart-marker" data-state={marker.state} role="note">{marker.label}</div>}
+                  </For>
                 </div>
                 )
               }}
@@ -1606,10 +1618,12 @@ function SessionView(props: { sessionID: string; directory: string }) {
         </div>
       </Show>
 
-      <Show when={rightOpen()}>
-        <div class="drag-handle" onMouseDown={(e) => startDrag("right", e)} />
+      <Show when={!props.embedded}>
+        <Show when={rightOpen()}>
+          <div class="drag-handle" onMouseDown={(e) => startDrag("right", e)} />
+        </Show>
+        <SessionInfo sessionID={sessionID} session={session()} messages={messages()} parts={live.data.part} providers={providers()} todos={live.data.todo} />
       </Show>
-      <SessionInfo sessionID={sessionID} session={session()} messages={messages()} parts={live.data.part} providers={providers()} todos={live.data.todo} />
     </main>
   )
 }

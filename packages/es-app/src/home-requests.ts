@@ -1,10 +1,22 @@
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js"
 import type { PermissionRequest } from "@opencode-ai/sdk/v2"
 import { oc } from "./api"
+import type { useDashboard } from "./state"
 
 export type HomeRequest = { kind: "permission" | "question"; id: string; session: string; directory: string; title: string; project?: string }
 export type HomeRequestRow = HomeRequest & { state: "pending" | "unknown" | "unavailable"; checked: number; permission?: PermissionRequest }
 export const requestKey = (item: HomeRequest) => JSON.stringify([item.directory, item.kind, item.id])
+
+/** Pending-request pointers from live session activity and dashboard notification hints, deduplicated by exact identity. */
+export const requestPointers = (dashboard: ReturnType<typeof useDashboard>): HomeRequest[] => {
+  const projectFor = (directory: string) => dashboard.editspaces()?.editspaces.find(item => {
+    const root = item.root.replace(/\/+$/, "").replace(/\/\.editspace$/, "")
+    return directory === root || directory.startsWith(`${root}/`)
+  })?.name
+  const direct = dashboard.activity.requests().map(item => ({ kind: item.kind, id: item.request.id, session: item.request.sessionID, directory: item.directory, project: projectFor(item.directory), title: dashboard.activity.session(item.request.sessionID)?.title ?? item.request.sessionID }))
+  const hints = dashboard.notifications().filter(item => item.kind !== "idle").map(item => ({ ...item, project: item.editspace || projectFor(item.directory), kind: item.kind as "permission" | "question", id: item.id.startsWith(`${item.kind}:`) ? item.id.slice(item.kind.length + 1) : item.id }))
+  return [...new Map([...hints, ...direct].map(item => [requestKey(item), item])).values()]
+}
 
 // Validate exact pending pointers; a missing deferred is not an answered/granted request.
 export const createHomeRequests = (sources: () => HomeRequest[], settled: (item: HomeRequest) => boolean = () => false) => {

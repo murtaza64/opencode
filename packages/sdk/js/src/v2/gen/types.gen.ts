@@ -233,6 +233,14 @@ export type Session = {
   }
 }
 
+export type RestartContinuation = {
+  restartID: string
+  outcome: "scheduled" | "uncertain"
+  reason?: "interrupted-tool" | "aborted" | "out-of-order"
+  interruptedTools: number
+  time: number
+}
+
 export type OutputFormatText = {
   type: "text"
 }
@@ -252,6 +260,7 @@ export type OutputFormat = OutputFormatText | OutputFormatJsonSchema
 export type UserMessage = {
   id: string
   sessionID: string
+  restarts?: Array<RestartContinuation>
   role: "user"
   source?: SessionInputMailSource
   time: {
@@ -347,6 +356,7 @@ export type ApiError = {
 export type AssistantMessage = {
   id: string
   sessionID: string
+  restarts?: Array<RestartContinuation>
   role: "assistant"
   time: {
     created: number
@@ -2768,6 +2778,35 @@ export type SessionRetryResult = {
     | "superseded"
     | "mismatch"
   failed?: SessionFailure
+}
+
+export type SessionRestartContinueInput = {
+  restartID: string
+  anchorMessageID: string
+  capturedAt: number
+}
+
+export type SessionRestartContinueResult = {
+  outcome:
+    | "scheduled"
+    | "duplicate"
+    | "running"
+    | "advanced"
+    | "complete"
+    | "failed"
+    | "uncertain"
+    | "archived"
+    | "child"
+    | "superseded"
+    | "mismatch"
+    | "stale"
+    | "capacity"
+  marker?: RestartContinuation
+}
+
+export type SessionRestartStatus = {
+  marker?: RestartContinuation
+  later: boolean
 }
 
 export type TextPartInput = {
@@ -11279,6 +11318,76 @@ export type SessionRetryResponses = {
 
 export type SessionRetryResponse = SessionRetryResponses[keyof SessionRetryResponses]
 
+export type SessionRestartStatusData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query: {
+    directory?: string
+    workspace?: string
+    restartID: string
+    anchorMessageID: string
+  }
+  url: "/session/{sessionID}/restart"
+}
+
+export type SessionRestartStatusErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionRestartStatusError = SessionRestartStatusErrors[keyof SessionRestartStatusErrors]
+
+export type SessionRestartStatusResponses = {
+  /**
+   * Recorded restart continuation
+   */
+  200: SessionRestartStatus
+}
+
+export type SessionRestartStatusResponse = SessionRestartStatusResponses[keyof SessionRestartStatusResponses]
+
+export type SessionRestartContinueData = {
+  body?: SessionRestartContinueInput
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/restart"
+}
+
+export type SessionRestartContinueErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionRestartContinueError = SessionRestartContinueErrors[keyof SessionRestartContinueErrors]
+
+export type SessionRestartContinueResponses = {
+  /**
+   * Restart continuation decision
+   */
+  200: SessionRestartContinueResult
+}
+
+export type SessionRestartContinueResponse = SessionRestartContinueResponses[keyof SessionRestartContinueResponses]
+
 export type SessionCancelSupersedeData = {
   body?: never
   path: {
@@ -11324,6 +11433,7 @@ export type SessionCancelSupersedeResponse = SessionCancelSupersedeResponses[key
 export type SessionSupersedeData = {
   body?: {
     successor: string
+    scope?: "same-directory" | "cross-directory"
   }
   path: {
     sessionID: string

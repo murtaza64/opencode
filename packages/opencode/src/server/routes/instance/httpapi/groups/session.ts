@@ -8,6 +8,7 @@ import { SessionAside } from "@/session/aside"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionFailure } from "@/session/failure"
+import { SessionRestart } from "@/session/restart"
 import { SessionInput } from "@/session/input"
 import { SessionRevert } from "@/session/revert"
 import { SessionStatus } from "@/session/status"
@@ -60,6 +61,11 @@ export const MessagesQuery = Schema.Struct({
     description: "Include user-summary patch text (default true).",
   }),
 })
+export const RestartStatusQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  restartID: SessionRestart.RestartID,
+  anchorMessageID: MessageID,
+})
 export const StatusMap = Schema.Record(Schema.String, SessionStatus.Info)
 export const InputsQuery = Schema.Struct({
   ...WorkspaceRoutingQueryFields,
@@ -99,7 +105,11 @@ export const SummarizePayload = Schema.Struct({
 export const PromptPayload = Schema.Struct(Struct.omit(SessionPrompt.PromptInput.fields, ["sessionID"]))
 export const CommandPayload = Schema.Struct(Struct.omit(SessionPrompt.CommandInput.fields, ["sessionID"]))
 export const ShellPayload = Schema.Struct(Struct.omit(SessionPrompt.ShellInput.fields, ["sessionID"]))
-export const SupersedePayload = Schema.Struct({ successor: SessionID })
+export const SupersedePayload = Schema.Struct({
+  successor: SessionID,
+  // An outside-anchored owner handoff names a successor in another directory explicitly.
+  scope: Schema.optional(Schema.Literals(["same-directory", "cross-directory"])),
+})
 export const SupersedeReceipt = Schema.Struct({
   sessionID: SessionID,
   successor: SessionID,
@@ -125,6 +135,7 @@ export const SessionPaths = {
   fork: `${root}/:sessionID/fork`,
   abort: `${root}/:sessionID/abort`,
   retry: `${root}/:sessionID/retry`,
+  restart: `${root}/:sessionID/restart`,
   supersede: `${root}/:sessionID/supersede`,
   aside: `${root}/:sessionID/aside`,
   cancelAside: `${root}/:sessionID/aside/:requestID`,
@@ -393,6 +404,33 @@ export const SessionApi = HttpApi.make("session")
             summary: "Retry a failed turn",
             description:
               "Continue a root session whose newest message is the given failed assistant step, without adding a user message. Starts only while the session is idle and that step is still newest; otherwise reports why it did not start. Steps that ran tools are never retried.",
+          }),
+        ),
+        HttpApiEndpoint.post("restartContinue", SessionPaths.restart, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: SessionRestart.ContinuePayload,
+          success: described(SessionRestart.ContinueResult, "Restart continuation decision"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.restart.continue",
+            summary: "Continue work interrupted by a daemon restart",
+            description:
+              "Idempotently continue a root session whose newest message is still the anchor captured before a controlled restart, without adding a user message. It resumes only when every effect on the anchor is durable. An anchor with a pending, running or cancelled tool call, an abort that predates the restart, or a future timestamp is marked `uncertain`, left otherwise untouched and not resumed. Failed turns (use retry), finished and advanced sessions are reported without starting. Each decision is recorded as a model-hidden marker on the anchor, so repeating the same restartID reports `duplicate`. Markers are never dropped: an anchor holding the maximum refuses new restart IDs with `capacity`.",
+          }),
+        ),
+        HttpApiEndpoint.get("restartStatus", SessionPaths.restart, {
+          params: { sessionID: SessionID },
+          query: RestartStatusQuery,
+          success: described(SessionRestart.Status, "Recorded restart continuation"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.restart.status",
+            summary: "Read a restart continuation record",
+            description:
+              "Read-only reconciliation for a restart continuation whose acknowledgment was lost: returns the marker recorded for restartID on the anchor, if any, and whether newer messages exist.",
           }),
         ),
         HttpApiEndpoint.post("supersede", SessionPaths.supersede, {

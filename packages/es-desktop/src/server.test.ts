@@ -3,7 +3,8 @@ import { mkdtemp, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { serve } from "./server"
-import { apiAllowed, externalURL, internalURL, serviceOrigins, serviceURL } from "./policy"
+import { apiAllowed, externalURL, internalURL, serviceOrigins, serviceURL, startupMode, startupPlan } from "./policy"
+import { readFile } from "node:fs/promises"
 
 const cleanup: (() => Promise<unknown>)[] = []
 afterEach(async () => {
@@ -342,4 +343,30 @@ test("unconfigured launches show setup guidance without a default backend", asyn
   const response = await fetch(server.origin, { headers: { "x-editspace-key": server.key } })
   expect(response.status).toBe(503)
   expect(await response.text()).toContain("OPENCODE_URL")
+})
+
+test("ordinary launches keep showing; only explicit opt-in starts never activate", () => {
+  for (const value of [undefined, "", "normal", "Background", "hidden "]) expect(startupMode(value)).toBe("normal")
+  expect(startupPlan("normal")).toEqual({ activationPolicy: undefined, showOnLoad: true, revealOnReopen: true, backgroundThrottling: true })
+  expect(startupPlan(startupMode("background"))).toEqual({ activationPolicy: "accessory", showOnLoad: false, revealOnReopen: true, backgroundThrottling: true })
+  expect(startupPlan(startupMode("hidden"))).toEqual({ activationPolicy: "accessory", showOnLoad: false, revealOnReopen: false, backgroundThrottling: false })
+})
+
+test("main process applies the activation policy before launch and only shows windows on the allowed paths", async () => {
+  const source = await readFile(path.join(import.meta.dirname, "main.ts"), "utf8")
+  const policy = source.indexOf("app.setActivationPolicy(startup.activationPolicy)")
+  expect(policy).toBeGreaterThan(-1)
+  // Module scope, before whenReady and before any BrowserWindow exists.
+  expect(policy).toBeLessThan(source.indexOf("await app.whenReady()"))
+  expect(policy).toBeLessThan(source.indexOf("new BrowserWindow("))
+  expect(source).not.toMatch(/app\.focus\(|dock\.(bounce|show)\(|requestUserAttention|showInactive|moveTop\(|setAlwaysOnTop/)
+  // show()/focus() calls: reveal(), the unchanged ordinary second-instance handler, and the guarded load path.
+  expect([...source.matchAll(/\.show\(\)/g)].length).toBe(3)
+  expect([...source.matchAll(/\.focus\(\)/g)].length).toBe(2)
+  expect(source).toContain("if (startup.showOnLoad) window.show()")
+  expect(source).toMatch(/if \(startup\.activationPolicy\) \{\n\s+if \(startup\.revealOnReopen\) reveal\(\)\n\s+return\n\s+\}/)
+  expect(source).toContain('show: false,')
+  // The initial-launch activate is dropped, not queued for after load.
+  expect(source).toMatch(/app\.on\("activate", \(\) => \{\n\s+if \(opened\.ready\) reveal\(\)\n\s+\}\)/)
+  expect(source).not.toContain('app.on("activate", reveal)')
 })

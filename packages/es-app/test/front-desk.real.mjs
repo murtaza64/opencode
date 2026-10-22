@@ -1,0 +1,542 @@
+// Run from packages/es-app: FRONT_DESK_BINARY=/absolute/opencode node test/front-desk.real.mjs [--serve]
+// Private compiled Core (free port, private HOME/DB), loopback stub provider and stub dashboard,
+// headless Chrome. Never contacts a real model, the live daemon, or a live attention ledger.
+// Covers: expanded chat with nothing selected, exact draft + transcript across select/close/reload,
+// a held background brief overlapping another chat exchange, late result bound to its initiating
+// revision, stale-revision discard, and no automatic rerun after a Core restart.
+import assert from "node:assert/strict"
+import { execFileSync, spawn } from "node:child_process"
+import { createHash } from "node:crypto"
+import { createRequire } from "node:module"
+import http from "node:http"
+import net from "node:net"
+import { access, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises"
+import { constants } from "node:fs"
+import path from "node:path"
+import { tmpdir } from "node:os"
+import { fileURLToPath } from "node:url"
+import { createServer as createVite } from "vite"
+import { testProviderConfig } from "../../opencode/test/lib/test-provider.ts"
+
+const serve = process.argv.includes("--serve")
+const binary = process.env.FRONT_DESK_BINARY
+assert(binary && path.isAbsolute(binary), "FRONT_DESK_BINARY must name an absolute compiled executable")
+await access(binary, constants.X_OK)
+const sha256 = createHash("sha256").update(await readFile(binary)).digest("hex")
+const home = await mkdtemp(path.join(tmpdir(), "front-desk-real-"))
+const project = path.join(home, "project")
+await mkdir(project, { recursive: true })
+const db = path.join(home, "desk.sqlite")
+const evidence = process.env.FRONT_DESK_EVIDENCE
+const PROD_PORTS = [4096, 3181, 7777, 60302, 3100]
+const log = (message) => console.log(message)
+const bounded = (name, promise, ms = 20000) => {
+  const deadline = Promise.withResolvers()
+  const timer = setTimeout(() => deadline.reject(new Error(`${name} timed out in ${ms}ms`)), ms)
+  return Promise.race([promise, deadline.promise]).finally(() => clearTimeout(timer))
+}
+const poll = async (name, fn, ms = 30000) => {
+  const deadline = Date.now() + ms
+  while (Date.now() < deadline) {
+    const value = await fn()
+    if (value) return value
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  throw new Error(`${name} timed out`)
+}
+const freePort = async () => {
+  const probe = net.createServer()
+  await new Promise((resolve, reject) => probe.once("error", reject).listen(0, "127.0.0.1", resolve))
+  const port = probe.address().port
+  await new Promise((resolve) => probe.close(resolve))
+  assert(port > 1024 && !PROD_PORTS.includes(port), `refusing port ${port}`)
+  return port
+}
+const listeners = (pid) => execFileSync("uv", ["run", "--with", "psutil", "python", "-c",
+  "import psutil,sys; p=psutil.Process(int(sys.argv[1])); print(','.join(f'{c.laddr.ip}:{c.laddr.port}' for c in p.net_connections(kind='tcp') if c.status == 'LISTEN'))",
+  String(pid)], { encoding: "utf8" }).trim()
+
+// --- stub provider: OpenAI-compatible SSE ---
+const hits = { chat: 0, brief: 0, source: 0 }
+const seen = { chat: [], briefTools: [] }
+const holds = []
+let holdBriefs = true
+const chunk = (delta, finish) => `data: ${JSON.stringify({ id: "stub", object: "chat.completion.chunk", choices: [{ index: 0, delta, ...(finish ? { finish_reason: finish } : {}) }] })}\n\n`
+const text = (response, value) => {
+  response.writeHead(200, { "content-type": "text/event-stream" })
+  response.write(chunk({ role: "assistant", content: value }))
+  response.write(chunk({}, "stop"))
+  response.end("data: [DONE]\n\n")
+}
+const lastUser = (body) => {
+  const message = (body.messages ?? []).findLast((item) => item.role === "user")
+  return typeof message?.content === "string" ? message.content : (message?.content ?? []).map((part) => part.text ?? "").join("\n")
+}
+const provider = http.createServer(async (request, response) => {
+  const body = JSON.parse(Buffer.concat(await Array.fromAsync(request)).toString() || "{}")
+  const raw = JSON.stringify(body)
+  if (raw.includes("Generate a title")) return text(response, "Synthetic title")
+  const user = lastUser(body)
+  if (user.includes("Prepare an evidence brief")) {
+    hits.brief++
+    seen.briefTools.push((body.tools ?? []).map((tool) => tool.function?.name).sort())
+    const revision = /source revision: (\S+)/.exec(user)?.[1]
+    const reply = () => text(response, JSON.stringify({
+      summary: `Canary rollout is staged at 5% (brief for revision ${revision}).`,
+      facts: [{ text: "Canary serves 5% of traffic", refs: ["E2"] }, { text: "Invented claim", refs: ["E99"] }],
+      timeline: [{ when: "10:00", text: "Canary deployed", refs: ["E2"] }],
+      flow: ["build", "canary 5%", "decide"],
+      gaps: ["Who owns the full rollout is not stated"],
+    }))
+    return holdBriefs ? holds.push(reply) : reply()
+  }
+  if (user.includes("SOURCE:")) { hits.source++; return text(response, "Canary deployed to 5% at 10:00; error rate flat.") }
+  const question = /DESK-Q\d/.exec(user)?.[0]
+  if (question) {
+    hits.chat++
+    // The newest generated context note is the one that describes this exchange.
+    // Only this exchange's own message counts: context must ride with the send it informs.
+    const own = JSON.stringify((body.messages ?? []).findLast((item) => item.role === "user" && JSON.stringify(item.content).includes(question)) ?? "")
+    const note = own.includes("Front desk context from es-app") ? own : ""
+    seen.chat.push({ question, context: !!note, none: note.includes("selected item: none"), selected: note.includes("selected item (the human is looking at this now)") && note.includes("Pick a rollout"), ledgerDown: note.includes("Attention ledger: unavailable") })
+    return text(response, `Desk answer for ${question}.`)
+  }
+  return text(response, "Unscripted.")
+})
+
+// --- stub dashboard (/es): editspace registry and a read-only attention ledger ---
+let attentionRevision = 1
+let attentionDown = false
+let sourceSession = ""
+const attentionPosts = []
+const record = () => ({
+  id: "att_rollout", editspace: "fixture", revision: attentionRevision, status: "open", kind: "decision", lane: null,
+  title: "Pick a rollout", context: "The canary is healthy. Choose how far to roll out.",
+  options: [{ id: "canary", label: "Stay at canary" }, { id: "full", label: "Full rollout" }], recommendation: "canary",
+  producer_session: sourceSession, origin_session: sourceSession, gate_key: "rollout",
+  source_ref: { session_id: sourceSession, directory: project }, decision: null, delivery_state: "not-requested", answer: null, delivery: null,
+  created_at: Date.now() - 60_000, updated_at: Date.now(),
+})
+const dashboard = http.createServer((request, response) => {
+  const url = new URL(request.url, "http://stub")
+  const json = (value, status = 200) => { response.writeHead(status, { "content-type": "application/json" }); response.end(JSON.stringify(value)) }
+  if (["/api/events", "/api/notification-events"].includes(url.pathname)) {
+    response.writeHead(200, { "content-type": "text/event-stream" })
+    return response.write("data: connected\n\n")
+  }
+  if (request.method === "POST" && url.pathname.startsWith("/api/attention/") && url.pathname !== "/api/attention/session") attentionPosts.push(url.pathname)
+  if (url.pathname === "/api/editspaces") return json({ editspaces: [{ name: "fixture", root: project }], default: "fixture" })
+  if (url.pathname === "/api/state") return json({ editspace: "fixture", root: project, threads: [], attention: [], frontier: [], unattached_prs: [], sessions: [] })
+  if (url.pathname === "/api/notifications") return json({ notifications: [] })
+  if (url.pathname === "/api/handoffs") return json({ handoffs: [] })
+  if (url.pathname === "/api/mail") return json({ editspace: "fixture", lane: "", messages: [] })
+  if (url.pathname === "/api/attention/session") return json({ operator: false })
+  if (url.pathname === "/api/attention" && attentionDown) return json({ detail: "down" }, 503)
+  if (url.pathname === "/api/attention") return json({ records: sourceSession ? [record()] : [], projects: [{ editspace: "fixture", available: true }], partial: false })
+  return json({ detail: "Not Found" }, 404)
+})
+
+let child
+let output = ""
+let diagnostics = ""
+let vite
+let browser
+let page
+const corePort = await freePort()
+const base = `http://127.0.0.1:${corePort}`
+const startCore = async (label) => {
+  output = ""
+  child = spawn(binary, ["serve", "--hostname", "127.0.0.1", "--port", String(corePort)], {
+    cwd: home,
+    env: {
+      ...process.env, HOME: home, OPENCODE_TEST_HOME: home,
+      XDG_CONFIG_HOME: `${home}/config`, XDG_DATA_HOME: `${home}/data`, XDG_STATE_HOME: `${home}/state`, XDG_CACHE_HOME: `${home}/cache`,
+      OPENCODE_DB: db, OPENCODE_CONFIG: "", OPENCODE_CONFIG_DIR: `${home}/config/opencode`,
+      OPENCODE_TEST_MANAGED_CONFIG_DIR: `${home}/managed`, OPENCODE_AUTH_CONTENT: "{}",
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        ...testProviderConfig(`http://127.0.0.1:${provider.address().port}/v1`),
+        model: "test/test-model",
+        small_model: "test/test-model",
+        agent: { "front-desk": { mode: "primary", description: "Stub front desk", prompt: "You are the stub front desk." } },
+        server: { hostname: "127.0.0.1", port: corePort, mdns: false },
+      }),
+      OPENCODE_PURE: "1", OPENCODE_DISABLE_PROJECT_CONFIG: "1", OPENCODE_DISABLE_AUTOUPDATE: "1",
+      OPENCODE_DISABLE_AUTOCOMPACT: "1", OPENCODE_DISABLE_MODELS_FETCH: "1", OPENCODE_SERVER_PASSWORD: "",
+    }, stdio: ["ignore", "pipe", "pipe"],
+  })
+  const owned = child
+  // Last resort: never leave the private Core running if this script exits early.
+  process.once("exit", () => { if (owned.exitCode === null && owned.signalCode === null) owned.kill("SIGKILL") })
+  child.exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve(code ?? (signal === "SIGKILL" ? 137 : 143))))
+  const ready = Promise.withResolvers()
+  void (async () => {
+    for await (const piece of child.stdout) {
+      output += new TextDecoder().decode(piece)
+      const match = output.match(/listening on (http:\/\/[^\s]+)/)
+      if (match) ready.resolve(match[1])
+    }
+    ready.reject(new Error("Core exited before ready"))
+  })()
+  void (async () => { for await (const piece of child.stderr) diagnostics += new TextDecoder().decode(piece) })()
+  assert.equal(await bounded("Core listeningURL", ready.promise, 40000), base)
+  const sockets = listeners(child.pid)
+  assert(sockets.split(",").includes(`127.0.0.1:${corePort}`), sockets)
+  assert.equal((await stat(db)).isFile(), true)
+  log(`ISOLATION ${label} binary=${binary} sha256=${sha256} PID=${child.pid} url=${base} listen=${sockets} DB=${db} inode=${(await stat(db)).ino}`)
+}
+const stopCore = async () => {
+  if (!child) return
+  const pid = child.pid
+  child.kill("SIGTERM")
+  const exited = await bounded("Core exit", child.exited, 10000).catch(() => { child.kill("SIGKILL"); return child.exited })
+  child = undefined
+  await poll("Core listener gone", () => fetch(base).then(() => false, () => true), 10000)
+  log(`STOPPED PID=${pid} exit=${exited}`)
+}
+const call = async (method, route, body) => {
+  const response = await bounded(`${method} ${route}`, fetch(`${base}${route}${route.includes("?") ? "&" : "?"}directory=${encodeURIComponent(project)}`, {
+    method, headers: { "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  }))
+  const raw = await response.text()
+  return { status: response.status, raw, body: raw ? JSON.parse(raw) : undefined }
+}
+const messages = async (id) => (await call("GET", `/session/${id}/message`)).body
+const status = async (id) => (await call("GET", "/session/status")).body[id]?.type ?? "idle"
+
+try {
+  await bounded("provider bind", new Promise((resolve) => provider.listen(0, "127.0.0.1", resolve)))
+  await bounded("dashboard bind", new Promise((resolve) => dashboard.listen(0, "127.0.0.1", resolve)))
+  await startCore("initial")
+
+  // Source thread the attention record points at; its transcript is the brief's evidence.
+  const source = (await call("POST", "/session", { title: "Rollout agent" })).body
+  assert.equal((await call("POST", `/session/${source.id}/prompt_async`, { parts: [{ type: "text", text: "SOURCE: report the canary" }] })).status, 204)
+  await poll("source settled", async () => (await status(source.id)) === "idle" && (await messages(source.id)).at(-1)?.info.time?.completed)
+  sourceSession = source.id
+
+  const vitePort = await freePort()
+  process.env.OPENCODE_URL = base
+  process.env.ES_DASHBOARD_URL = `http://127.0.0.1:${dashboard.address().port}`
+  const cache = await mkdtemp(path.join(tmpdir(), "front-desk-vite-"))
+  vite = await createVite({
+    root: fileURLToPath(new URL("..", import.meta.url)), cacheDir: cache, logLevel: "warn",
+    optimizeDeps: { include: ["@opencode-ai/session-ui > @shikijs/stream", "@opencode-ai/session-ui > remend", "@opencode-ai/ui > @shikijs/stream", "@opencode-ai/ui > remend"] },
+    server: { host: "127.0.0.1", port: vitePort, strictPort: true },
+  })
+  await vite.listen()
+  const origin = `http://127.0.0.1:${vitePort}`
+  const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
+  browser = await chromium.launch({ channel: "chrome", headless: true })
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  page = await context.newPage()
+  const posts = []
+  page.on("request", (request) => { if (request.method() === "POST") posts.push(new URL(request.url()).pathname) })
+  const editor = () => page.locator(".desk-chat .prompt-box textarea")
+  const transcript = () => page.locator(".desk-chat .transcript")
+  // Plain sends only: wait until Core reports the desk session idle, so nothing becomes a steer.
+  const sendIdle = async () => {
+    await poll("desk idle", async () => !pointerID || (await status(pointerID)) === "idle")
+    // The header may read busy while a brief child runs; the desk session itself must be idle.
+    await expect(page.locator(".desk-chat .session-state")).not.toHaveText(/disconnected|failed/, { timeout: 20000 })
+    await editor().press("Control+Enter")
+  }
+  let pointerID
+
+  // 1. Expanded chat with nothing selected; the queue aggregates the ledger with freshness.
+  await page.goto(`${origin}/desk`)
+  await expect(page.locator(".desk-item")).toHaveCount(1, { timeout: 20000 })
+  await expect(page.locator(".desk-evidence")).toHaveCount(0)
+  await expect(page.locator(".desk-source", { hasText: "Attention ledger" })).toContainText("read-only: operator connection unavailable")
+  // Root conversation identity: a lost create never yields a second conversation.
+  const rootCreate = (request) => request.method() === "POST" && new URL(request.url()).pathname === "/oc/session" && !JSON.parse(request.postData() || "{}").parentID
+  const sessionRoute = (url) => url.pathname === "/oc/session"
+  const deskSessions = async () => (await call("GET", "/session")).body.filter((item) => item.title === "Front desk")
+  await page.route(sessionRoute, (route) => rootCreate(route.request()) ? route.abort("connectionreset") : route.fallback())
+  await page.getByRole("button", { name: "Start front desk conversation" }).click()
+  await expect(page.locator(".desk-start")).toContainText("was not confirmed", { timeout: 20000 })
+  const unconfirmed = JSON.parse(await page.evaluate(() => localStorage.getItem("es-app:front-desk:1")))
+  assert.equal((await deskSessions()).length, 0)
+  await page.reload()
+  await expect(page.locator(".desk-start")).toContainText("was not confirmed", { timeout: 20000 })
+  await expect(page.getByRole("button", { name: "Start front desk conversation" })).toHaveCount(0)
+  await page.unroute(sessionRoute)
+  let rootPosts = 0
+  await page.route(sessionRoute, async (route) => {
+    if (!rootCreate(route.request())) return route.fallback()
+    rootPosts++
+    await route.fetch()
+    return route.abort("connectionreset")
+  })
+  await page.getByRole("button", { name: "Confirm start" }).click()
+  await poll("root desk created", async () => (await deskSessions()).length === 1)
+  await expect(page.locator(".desk-start")).toContainText("was not confirmed", { timeout: 20000 })
+  await page.unroute(sessionRoute)
+  await page.reload()
+  await expect(editor()).toBeVisible({ timeout: 20000 })
+  const pointer = JSON.parse(await page.evaluate(() => localStorage.getItem("es-app:front-desk:1")))
+  pointerID = pointer.session
+  assert.equal(pointer.session, unconfirmed.session)
+  assert.equal(pointer.create, undefined)
+  assert.deepEqual((await deskSessions()).map((item) => item.id), [unconfirmed.session])
+  assert.equal(rootPosts, 1)
+  log(`ROOTLOSTACK ${unconfirmed.session}: lost before Core -> unconfirmed across reload; confirmed once (response lost) -> adopted on reload; deskSessions=1`)
+  const deskInfo = (await call("GET", `/session/${pointer.session}`)).body
+  assert.equal(deskInfo.agent, "front-desk")
+  assert.deepEqual(deskInfo.permission, [{ permission: "edit", pattern: "*", action: "deny" }])
+  log(`DESK session=${pointer.session} agent=${deskInfo.agent} permission=${JSON.stringify(deskInfo.permission)}`)
+
+  await editor().fill("DESK-Q1 what is waiting?")
+  await sendIdle()
+  await expect(transcript()).toContainText("Desk answer for DESK-Q1.", { timeout: 20000 })
+  assert.deepEqual(seen.chat[0], { question: "DESK-Q1", context: true, none: true, selected: false, ledgerDown: false })
+  // Context rides inside the human's own message as a marked synthetic part; no separate turn.
+  const q1 = (await messages(pointer.session)).filter((item) => item.info.role === "user")
+  assert.equal(q1.length, 1, "one user message for one send")
+  assert.deepEqual(q1[0].parts.map((part) => [part.type, part.synthetic ?? false, part.metadata?.source ?? null]),
+    [["text", false, null], ["text", true, "es-app/front-desk"]])
+  assert.equal(q1[0].parts[0].text, "DESK-Q1 what is waiting?")
+  await expect(transcript()).not.toContainText("Front desk context")
+  log(`CONTEXT one user message ${q1[0].info.id}: human text + synthetic part source=es-app/front-desk`)
+
+  // Context refreshes on the next send when the queue or source health changes, and only then.
+  await editor().fill("DESK-Q3 anything else?")
+  await sendIdle()
+  await expect(transcript()).toContainText("Desk answer for DESK-Q3.", { timeout: 20000 })
+  assert.equal(seen.chat.at(-1).context, false, "unchanged view adds no context")
+  attentionDown = true
+  await page.getByRole("button", { name: "Refresh sources" }).click()
+  await expect(page.locator(".desk-source", { hasText: "Attention ledger" }).locator(".desk-source-state")).toHaveText(/^unavailable/, { timeout: 20000 })
+  await editor().fill("DESK-Q4 and now?")
+  await sendIdle()
+  await expect(transcript()).toContainText("Desk answer for DESK-Q4.", { timeout: 20000 })
+  assert.deepEqual(seen.chat.at(-1), { question: "DESK-Q4", context: true, none: true, selected: false, ledgerDown: true })
+  attentionDown = false
+  await page.getByRole("button", { name: "Refresh sources" }).click()
+  await expect(page.locator(".desk-source", { hasText: "Attention ledger" }).locator(".desk-source-state")).toHaveText(/^current/, { timeout: 20000 })
+  log("CONTEXTKEY unchanged view -> no context; ledger outage with nothing selected -> context on next send")
+  if (evidence) await page.screenshot({ path: path.join(evidence, "01-expanded-chat.png") })
+
+  // 2. Exact unsent draft and transcript survive select → close → reselect without remounting chat.
+  const ids = () => page.locator(".desk-chat [data-find-message]").evaluateAll((nodes) => nodes.map((node) => node.dataset.findMessage))
+  const before = await ids()
+  assert(before.length >= 2, JSON.stringify(before))
+  const draft = "unsent ✓ draft — keep me\nsecond line"
+  await editor().fill(draft)
+  await page.evaluate(() => { document.querySelector(".desk-chat .prompt-box textarea").dataset.mountProbe = "kept" })
+  await page.locator(".desk-item").first().click()
+  await expect(page.locator(".desk-evidence")).toContainText("Pick a rollout")
+  await expect(page.locator(".desk-evidence .home-answer textarea")).toBeDisabled()
+  await expect(editor()).toHaveValue(draft)
+  await expect(editor()).toHaveAttribute("data-mount-probe", "kept")
+  await page.getByRole("button", { name: "Expand chat" }).click()
+  await expect(page.locator(".desk-evidence")).toHaveCount(0)
+  await expect(editor()).toHaveValue(draft)
+  await expect(editor()).toHaveAttribute("data-mount-probe", "kept")
+  await expect(transcript()).toContainText("Desk answer for DESK-Q1.")
+  assert.deepEqual(await ids(), before)
+  await page.reload()
+  await expect(editor()).toHaveValue(draft, { timeout: 20000 })
+  await expect(transcript()).toContainText("Desk answer for DESK-Q1.", { timeout: 20000 })
+  assert.deepEqual(await ids(), before)
+  log(`DRAFT exact draft + message IDs ${before.join(",")} preserved across select, close and reload; chat not remounted on selection`)
+
+  // 3. A held brief runs while another exchange completes; the second turn sees the selection.
+  // A slow source-thread read plus a double click still starts exactly one check.
+  await page.locator(".desk-item").first().click()
+  const tailRoute = (url) => url.pathname === `/oc/session/${source.id}/message`
+  let tailReads = 0
+  await page.route(tailRoute, async (route) => { tailReads++; await new Promise((resolve) => setTimeout(resolve, 1500)); return route.fallback() })
+  await page.evaluate(() => {
+    const button = [...document.querySelectorAll(".desk-brief button")].find((item) => item.textContent === "Prepare evidence brief")
+    button.click()
+    button.click()
+  })
+  await expect(page.locator(".desk-brief")).toContainText("Checking in the background for revision 1", { timeout: 20000 })
+  await poll("brief reached provider", () => hits.brief === 1)
+  await page.unroute(tailRoute)
+  assert.equal(tailReads, 1)
+  assert.equal((await call("GET", `/session/${pointer.session}/children`)).body.length, 1)
+  log(`DOUBLECLICK deferred tail (1.5s) + two synchronous clicks -> tailReads=${tailReads} children=1 briefHits=${hits.brief}`)
+  await editor().fill("DESK-Q2 summarise this one")
+  await sendIdle()
+  await expect(transcript()).toContainText("Desk answer for DESK-Q2.", { timeout: 20000 })
+  assert.equal(holds.length, 1, "brief still held while the second exchange finished")
+  assert.deepEqual(seen.chat.at(-1), { question: "DESK-Q2", context: true, none: false, selected: true, ledgerDown: false })
+  log(`OVERLAP chat Q2 answered while brief held (holds=${holds.length}, briefHits=${hits.brief})`)
+
+  // 4. Late result binds to its initiating item while nothing is selected.
+  await page.getByRole("button", { name: "Expand chat" }).click()
+  holds.shift()()
+  const job = page.locator(".desk-job").first()
+  await expect(job).toContainText("ready", { timeout: 20000 })
+  await expect(job).toContainText("Pick a rollout")
+  await expect(job).toContainText("rev 1")
+  await expect(page.locator(".desk-evidence")).toHaveCount(0)
+  await job.getByRole("button", { name: "Show" }).click()
+  const brief = page.locator(".desk-brief")
+  await expect(brief).toContainText("brief for revision 1")
+  await expect(brief.locator(".desk-flow li")).toHaveCount(3)
+  await expect(brief).toContainText("1 uncited statement(s) omitted")
+  await expect(brief).not.toContainText("Invented claim")
+  await expect(brief.locator(".desk-ref", { hasText: "E2" }).first()).toBeVisible()
+  await expect(page.locator(".desk-evidence .home-decision")).toContainText("Agent recommends: Stay at canary")
+  const children = (await call("GET", `/session/${pointer.session}/children`)).body
+  assert.equal(children.length, 1)
+  assert.equal(children[0].metadata.frontDesk.revision, "1")
+  assert.equal(children[0].metadata.frontDesk.source, "attention:fixture:att_rollout")
+  assert.deepEqual(children[0].permission, [{ permission: "*", pattern: "*", action: "deny" }])
+  assert.deepEqual(seen.briefTools[0], [], "the brief pass is offered no tools")
+  if (evidence) await page.screenshot({ path: path.join(evidence, "02-selected-brief.png") })
+  log(`BINDING late brief ${children[0].id} bound to ${children[0].metadata.frontDesk.source} rev 1; briefTools=${JSON.stringify(seen.briefTools[0])}`)
+
+  // 5. A new source revision discards the derived brief; the canonical card updates immediately.
+  attentionRevision = 2
+  await page.getByRole("button", { name: "Refresh sources" }).click()
+  await expect(page.locator(".desk-evidence")).toContainText("revision 2", { timeout: 20000 })
+  await expect(brief).toContainText("Earlier brief for revision 1 discarded")
+  await expect(brief).not.toContainText("Canary rollout is staged")
+  await expect(page.locator(".desk-job").first()).toContainText("revision 1 → 2")
+  log("STALE revision 1 brief discarded after the source moved to revision 2")
+
+  // The source moves on while its thread is being read: nothing starts for the outdated revision.
+  const childrenBefore = (await call("GET", `/session/${pointer.session}/children`)).body.length
+  await page.route(tailRoute, async (route) => { await new Promise((resolve) => setTimeout(resolve, 3000)); return route.fallback() })
+  await page.getByRole("button", { name: "Prepare evidence brief" }).click()
+  attentionRevision = 3
+  await page.getByRole("button", { name: "Refresh sources" }).click()
+  await expect(page.locator(".desk-evidence")).toContainText("revision 3", { timeout: 20000 })
+  await expect(page.locator(".desk-background")).toContainText("source changed while the brief was being prepared", { ignoreCase: true, timeout: 20000 })
+  await page.unroute(tailRoute)
+  assert.equal((await call("GET", `/session/${pointer.session}/children`)).body.length, childrenBefore)
+  assert.equal(hits.brief, 1)
+  log("RACE revision changed during the deferred tail read -> nothing started")
+
+  // 6. Lost create responses. Before Core: Confirm resends the identical request and creates it once.
+  //    After Core: the existing child is adopted; nothing creates a second one or sends its prompt again.
+  const childCreate = (request) => request.method() === "POST" && new URL(request.url()).pathname === "/oc/session" && JSON.parse(request.postData() || "{}").parentID
+  await page.route(sessionRoute, (route) => childCreate(route.request()) ? route.abort("connectionreset") : route.fallback())
+  await page.getByRole("button", { name: "Prepare evidence brief" }).click()
+  await expect(page.locator(".desk-brief")).toContainText("Start was not confirmed", { timeout: 20000 })
+  const lost = JSON.parse(await page.evaluate(() => localStorage.getItem("es-app:front-desk:brief-create:1")))
+  assert.equal((await call("GET", `/session/${pointer.session}/children`)).body.some((item) => item.id === lost.id), false)
+  await page.reload()
+  await page.locator(".desk-item").first().click()
+  await expect(page.locator(".desk-brief")).toContainText("Start was not confirmed", { timeout: 20000 })
+  await expect(page.getByRole("button", { name: "Prepare evidence brief" })).toHaveCount(0)
+  await page.unroute(sessionRoute)
+  let created = 0
+  await page.route(sessionRoute, async (route) => {
+    if (!childCreate(route.request())) return route.fallback()
+    created++
+    await route.fetch()
+    return route.abort("connectionreset")
+  })
+  await page.getByRole("button", { name: "Confirm start" }).click()
+  await poll("confirmed child", async () => (await call("GET", `/session/${pointer.session}/children`)).body.some((item) => item.id === lost.id))
+  await expect(page.locator(".desk-brief")).toContainText("not confirmed by Core. It was not resent", { timeout: 20000 })
+  await new Promise((resolve) => setTimeout(resolve, 2000))
+  const adopted = (await call("GET", `/session/${pointer.session}/children`)).body.filter((item) => item.metadata?.frontDesk?.revision === "3")
+  assert.deepEqual(adopted.map((item) => item.id), [lost.id])
+  assert.equal(created, 1)
+  assert.equal((await messages(lost.id)).length, 0, "no prompt sent for an unconfirmed create")
+  assert.equal(await page.evaluate(() => localStorage.getItem("es-app:front-desk:brief-create:1")), null)
+  // The identity proof: Core reconciles an identical create to the same session.
+  const again = await call("POST", "/session", lost.body)
+  assert.equal(again.status, 200, again.raw)
+  assert.equal(again.body.id, lost.id)
+  assert.equal((await call("GET", `/session/${pointer.session}/children`)).body.filter((item) => item.id === lost.id).length, 1)
+  await page.unroute(sessionRoute)
+  log(`LOSTACK create ${lost.id}: lost before Core -> confirmed once with same ID; lost after Core -> adopted, no second child, no prompt`)
+
+  // 7. Idle polling does not reread finished briefs; an explicit refresh does, with results kept.
+  holdBriefs = false
+  for (const n of [1, 2, 3]) {
+    const meta = { kind: "brief", requestID: `extra-${n}`, source: "attention:fixture:att_rollout", revision: "0", title: `Extra ${n}`, refs: [{ id: "C1", label: "canonical" }, { id: "E2", label: "evidence" }] }
+    const extra = (await call("POST", "/session", { parentID: pointer.session, title: `Brief: Extra ${n}`, metadata: { frontDesk: meta }, permission: [{ permission: "*", pattern: "*", action: "deny" }] })).body
+    await call("POST", `/session/${extra.id}/prompt_async`, { parts: [{ type: "text", text: "Prepare an evidence brief\nsource revision: 0" }] })
+    await poll(`extra ${n} settled`, async () => (await status(extra.id)) === "idle" && (await messages(extra.id)).at(-1)?.info.time?.completed)
+  }
+  holdBriefs = true
+  await page.getByRole("button", { name: "Refresh sources" }).click()
+  const childIDs = new Set((await call("GET", `/session/${pointer.session}/children`)).body.map((item) => item.id))
+  assert.equal(childIDs.size, 5)
+  await expect(page.locator(".desk-job")).toHaveCount(4, { timeout: 20000 })
+  await expect(page.locator(".desk-job", { hasText: "Extra 3" })).toContainText("not current")
+  const briefReads = []
+  page.on("request", (request) => {
+    const match = /^\/oc\/session\/([^/]+)\/message$/.exec(new URL(request.url()).pathname)
+    if (request.method() === "GET" && match && childIDs.has(match[1])) briefReads.push(match[1])
+  })
+  await new Promise((resolve) => setTimeout(resolve, 2000))
+  briefReads.splice(0)
+  const childLists = posts.length
+  await new Promise((resolve) => setTimeout(resolve, 33_000)) // two idle ticks
+  assert.deepEqual(briefReads, [], "idle ticks reread no finished brief")
+  await expect(page.locator(".desk-job")).toHaveCount(4)
+  await page.getByRole("button", { name: "Expand chat" }).click()
+  await page.locator(".desk-job", { hasText: "Extra" }).first().waitFor()
+  await page.locator(".desk-item").first().click()
+  await page.getByRole("button", { name: "Refresh sources" }).click()
+  await poll("explicit refresh reread", () => new Set(briefReads).size === childIDs.size)
+  await new Promise((resolve) => setTimeout(resolve, 1000))
+  assert.equal(briefReads.length, childIDs.size, "explicit refresh reads each brief once")
+  await expect(page.locator(".desk-job")).toHaveCount(4)
+  log(`FANOUT children=${childIDs.size}: idle 33s -> 0 transcript reads; explicit refresh -> ${briefReads.length} (one each); jobs retained; postsDuringIdle=${posts.length - childLists}`)
+
+  // 8. Interrupted pass: Core restarts mid-brief; the desk reports unknown and does not rerun it.
+  const briefBase = hits.brief
+  const metadataBefore = (await call("GET", `/session/${pointer.session}/children`)).body.map((item) => [item.id, item.metadata])
+  await page.getByRole("button", { name: "Start a new check" }).click()
+  await poll("second brief reached provider", () => hits.brief === briefBase + 1)
+  await stopCore()
+  holds.splice(0)
+  await startCore("restarted")
+  await page.reload()
+  await page.locator(".desk-item").first().click()
+  await expect(page.locator(".desk-brief")).toContainText("stopped before finishing", { timeout: 20000 })
+  const metadataAfter = new Map((await call("GET", `/session/${pointer.session}/children`)).body.map((item) => [item.id, item.metadata]))
+  for (const [id, metadata] of metadataBefore) assert.deepEqual(metadataAfter.get(id), metadata, `metadata of ${id} survives restart`)
+  await new Promise((resolve) => setTimeout(resolve, 4000))
+  assert.equal(hits.brief, briefBase + 1, "no automatic rerun after restart")
+  await expect(editor()).toHaveValue("")
+  await expect(transcript()).toContainText("Desk answer for DESK-Q2.")
+  log(`RESTART interrupted brief shown as unknown; briefHits=${hits.brief} (no rerun)`)
+
+  // 9. Authority: nothing answered, granted or retried on anyone's behalf.
+  assert.deepEqual(attentionPosts, [])
+  assert.equal(posts.filter((item) => item.endsWith("/input")).length, 0, "every desk send was a plain send")
+  assert.equal(posts.filter((item) => /\/(permission|question)\/.*\/reply|\/retry$/.test(item)).length, 0)
+  log(`AUTHORITY attentionWrites=0 permissionReplies=0 retries=0 posts=${[...new Set(posts)].join(",")}`)
+
+  // 10. Narrow width keeps both views reachable.
+  await page.setViewportSize({ width: 760, height: 900 })
+  await expect(page.locator(".desk-evidence")).toBeVisible()
+  await expect(editor()).toBeVisible()
+  if (evidence) await page.screenshot({ path: path.join(evidence, "03-narrow.png"), fullPage: true })
+  log(`PROVIDER hits=${JSON.stringify(hits)}`)
+
+  if (serve) {
+    // Reviewers get immediate briefs; a held one is only for the overlap proof.
+    holdBriefs = false
+    log(`PREVIEW ${origin}/desk\nCORE ${base} PID=${child.pid} DB=${db}\nSTOP kill ${process.pid}`)
+    await browser.close()
+    browser = undefined
+    await new Promise((resolve) => { process.on("SIGTERM", resolve); process.on("SIGINT", resolve) })
+  }
+  log("FRONT DESK REAL: PASS")
+} catch (error) {
+  if (page && evidence) await page.screenshot({ path: path.join(evidence, "failure.png") }).catch(() => {})
+  if (page) console.error(`--- desk background: ${await page.locator(".desk-background").innerText({ timeout: 1000 }).catch(() => "none")}`)
+  console.error(`FAIL ${error?.message ?? ""}\n${error?.stack ?? error}\n--- core stdout tail\n${output.slice(-2000)}\n--- core stderr tail\n${diagnostics.slice(-3000)}`)
+  process.exitCode = 1
+} finally {
+  await browser?.close().catch(() => {})
+  await vite?.close().catch(() => {})
+  await stopCore().catch(() => {})
+  provider.closeAllConnections?.()
+  await new Promise((resolve) => provider.close(resolve))
+  dashboard.closeAllConnections?.()
+  await new Promise((resolve) => dashboard.close(resolve))
+  if (!serve || process.exitCode) await rm(home, { recursive: true, force: true })
+  process.exit(process.exitCode ?? 0)
+}
