@@ -98,6 +98,7 @@ export const createFixture = async () => {
     wingman: undefined,
     wingmanTranscript: undefined,
     handoffs: undefined,
+    pendingHandoffs: [],
     subscriptions: undefined,
     laneOwners: [],
     superseded: new Map(),
@@ -236,7 +237,7 @@ export const createFixture = async () => {
     if (url.pathname === "/api/lane-provenance" && request.method === "GET")
       return json(fixture.laneProvenance?.(url.searchParams.get("es")) ?? { delegations: [], spawned: [] })
     if (url.pathname === "/api/handoffs" && request.method === "GET")
-      return json({ handoffs: fixture.handoffs ?? [] })
+      return json({ handoffs: fixture.handoffs ?? [], pending: fixture.pendingHandoffs })
     if (url.pathname === "/api/subscriptions" && fixture.subscriptions) {
       const recipient = request.method === "GET" ? url.searchParams.get("recipient") : body?.recipient
       if (request.method === "PUT") fixture.subscriptions.set(recipient, [

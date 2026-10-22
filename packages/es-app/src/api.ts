@@ -2,6 +2,7 @@
  * dashboard server (:7777) via /es — both same-origin through vite. */
 import type { Agent, GlobalSession, Message, Part, PermissionRequest, QuestionRequest, Session, SessionFailure, SessionRetryResult, SessionV1InputImage, Todo } from "@opencode-ai/sdk/v2"
 import { httpError } from "./api-error"
+import type { PendingHandoff } from "./handoffs"
 
 export type MessageWithParts = { info: Message; parts: Part[] }
 /** Generated text attached to a human's own message; marked synthetic and with its producer. */
@@ -340,7 +341,7 @@ export type MailDelivery = {
   wake_observations?: readonly { outcome: "scheduled" | "coalesced"; observedAt: number }[]
 }
 export type MailTimeline = { editspace: string; lane: string; messages: MailMessage[] }
-export type Handoff = { lane: string; predecessor: string; successor: string }
+export type Handoff = { lane: string; predecessor: string; successor: string; reason?: string; kickoff?: "skipped"; context?: string }
 export type LaneProvenance = {
   delegations: { lane: string; parent: string; session: string | null; status: string }[]
   spawned: { lane: string; by: string }[]
@@ -475,8 +476,8 @@ export const es = {
     fetch(`/es/api/lane-provenance?es=${encodeURIComponent(name)}`).then(statusJson<LaneProvenance>),
   // The dashboard must create the handoff document, spawn the successor, and
   // transfer the lane owner as one server-side operation before returning.
-  handoffs: (name: string): Promise<{ handoffs: Handoff[] }> =>
-    fetch(`/es/api/handoffs?es=${encodeURIComponent(name)}`).then(statusJson<{ handoffs: Handoff[] }>),
+  handoffs: (name: string): Promise<{ handoffs: Handoff[]; pending?: PendingHandoff[] }> =>
+    fetch(`/es/api/handoffs?es=${encodeURIComponent(name)}`).then(statusJson<{ handoffs: Handoff[]; pending?: PendingHandoff[] }>),
   handoff: (name: string, lane: string, predecessor: string, task: string, handoff: string): Promise<Handoff | { lane: string; predecessor: string; status: "pending" }> =>
     fetch(`/es/api/handoffs?es=${encodeURIComponent(name)}`, {
       method: "POST",
