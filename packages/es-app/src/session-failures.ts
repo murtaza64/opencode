@@ -37,6 +37,20 @@ export const failureLabel = (failure: Pick<SessionFailure, "error">) => {
   return "Turn failed"
 }
 
+// Ages describe the failed step itself (its time in Core's failure record), never when the list was read.
+const MINUTE = 60_000
+export const OLD_FAILURE_MS = 24 * 60 * MINUTE
+export const failureAge = (time: number, now: number) => {
+  if (!(time > 0)) return "time unavailable"
+  const elapsed = Math.max(0, now - time)
+  if (elapsed < MINUTE) return "just now"
+  if (elapsed < 60 * MINUTE) return `${Math.floor(elapsed / MINUTE)}m ago`
+  if (elapsed < OLD_FAILURE_MS) return `${Math.floor(elapsed / (60 * MINUTE))}h ago`
+  return `${Math.floor(elapsed / OLD_FAILURE_MS)}d ago`
+}
+export const failureWhen = (time: number, now: number) =>
+  time > 0 ? `${new Date(time).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })} (${failureAge(time, now)})` : "time unavailable"
+
 export const unavailableReason = (failure: Pick<SessionFailure, "retry">) =>
   failure.retry === "out-of-order" ? "the failed step is timestamped in the future" : "the failed step ran tools"
 

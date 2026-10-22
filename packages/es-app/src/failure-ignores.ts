@@ -1,0 +1,70 @@
+/* Ignored failures: the dashboard's ignored-failures file, shared by every client. An ignore hides
+ * one exact failure (session + failed message) from the Front desk queue. It is not a resolution
+ * or a retry and never touches the session; a newer failure in that session shows again. */
+import { createSignal } from "solid-js"
+import type { SessionFailure } from "@opencode-ai/sdk/v2"
+
+export type IgnoredFailure = {
+  sessionID: string
+  messageID: string
+  directory: string
+  failedAt: number | null
+  label: string
+  ignoredAt: number
+}
+
+const IGNORES_URL = "/es/api/frontdesk/ignored-failures"
+const key = (item: Pick<SessionFailure, "sessionID" | "messageID">) => `${item.sessionID}\n${item.messageID}`
+
+export const createFailureIgnores = (deps: { fetch?: typeof fetch } = {}) => {
+  const request = deps.fetch ?? ((input, init) => fetch(input, init))
+  const [entries, setEntries] = createSignal<IgnoredFailure[]>([])
+  // Until the file is read, nothing is hidden: an unreadable store must not hide failures.
+  const [loaded, setLoaded] = createSignal(false)
+  const [pending, setPending] = createSignal<Record<string, boolean>>({})
+  const [notice, setNotice] = createSignal("")
+  const accept = async (response: Response) => {
+    const body = await response.json() as { entries?: IgnoredFailure[] }
+    setEntries(Array.isArray(body.entries) ? body.entries : [])
+    setLoaded(true)
+  }
+  const load = async () => {
+    try {
+      const response = await request(IGNORES_URL, { credentials: "include" })
+      if (!response.ok) throw new Error(response.status === 404 ? "the dashboard has no ignored-failures endpoint" : `HTTP ${response.status}`)
+      await accept(response)
+    } catch (cause) {
+      setNotice(`Ignored failures could not be read (${cause instanceof Error ? cause.message : String(cause)}); all failures are shown.`)
+    }
+  }
+  const change = async (op: "ignore" | "unignore", item: Pick<SessionFailure, "sessionID" | "messageID" | "directory"> & { failedAt?: number; label?: string }) => {
+    const id = key(item)
+    if (pending()[id]) return
+    setPending(previous => ({ ...previous, [id]: true }))
+    try {
+      const response = await request(IGNORES_URL, {
+        method: "POST", credentials: "include",
+        headers: { "content-type": "application/json", "X-Attention-CSRF": "1" },
+        body: JSON.stringify({ op, sessionID: item.sessionID, messageID: item.messageID, directory: item.directory, failedAt: item.failedAt, label: item.label }),
+      }).catch(() => undefined)
+      if (response?.ok) {
+        await accept(response)
+        setNotice("")
+        return
+      }
+      // Both ops are idempotent; re-read so the list shows whatever actually committed.
+      await load()
+      const reason = !response ? "no response" : response.status === 401 || response.status === 403 ? "the operator connection is unavailable" : `HTTP ${response.status}`
+      setNotice(`${op === "ignore" ? "Ignore" : "Unignore"} not confirmed (${reason}).`)
+    } finally {
+      setPending(previous => { const next = { ...previous }; delete next[id]; return next })
+    }
+  }
+  const ignored = (item: Pick<SessionFailure, "sessionID" | "messageID">) => loaded() && entries().some(entry => key(entry) === key(item))
+  return {
+    entries, loaded, notice, load, ignored,
+    busy: (item: Pick<SessionFailure, "sessionID" | "messageID">) => !!pending()[key(item)],
+    ignore: (failure: SessionFailure, label: string) => change("ignore", { ...failure, failedAt: failure.time || undefined, label }),
+    unignore: (entry: IgnoredFailure) => change("unignore", { sessionID: entry.sessionID, messageID: entry.messageID, directory: entry.directory }),
+  }
+}

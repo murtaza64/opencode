@@ -33,7 +33,7 @@ test("queue lists only pending requests from every connected source with their o
     ["question:/beta:que_1", "question", "que_1"],
     ["failure:ses_f", "failure", "msg_f1"],
   ])
-  expect(items()[2]!.title).toBe("Provider error 403 (forbidden) · Deploy agent")
+  expect(items()[2]!.title).toBe("Deploy agent")
 })
 
 test("sources disclose partial, stale and unsupported inputs instead of reporting an empty desk", () => {

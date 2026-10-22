@@ -56,7 +56,8 @@ export const deskItems = (input: {
   ...input.failures.map(failure => ({
     key: `failure:${failure.sessionID}`,
     kind: "failure" as const,
-    title: `${failureLabel(failure)} · ${input.title(failure.sessionID) ?? failure.sessionID}`,
+    // The error label and failure age are row metadata; the title names the work.
+    title: input.title(failure.sessionID) ?? failure.sessionID,
     project: input.project(failure.directory),
     revision: failure.messageID,
     checked: input.failuresChecked,
@@ -159,7 +160,8 @@ export const canonicalLines = (item: DeskItem) => {
     if (metadata !== "{}") lines.push(`request metadata: ${clip(metadata, 800)}`)
   }
   if (item.request && !item.request.permission) lines.push(`${item.request.kind} request: ${item.request.id}`)
-  if (item.failure) lines.push(`failed message: ${item.failure.messageID}`, `error: ${failureLabel(item.failure)}`, `retry: ${item.failure.retry}`)
+  if (item.failure) lines.push(`failed message: ${item.failure.messageID}`, `error: ${failureLabel(item.failure)}`,
+    `failed at: ${item.failure.time > 0 ? new Date(item.failure.time).toISOString() : "unavailable"}`, `retry: ${item.failure.retry}`)
   return lines
 }
 
