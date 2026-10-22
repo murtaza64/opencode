@@ -1,169 +1,106 @@
+// Draft-first New session (dotfiles#240): the button opens /new ready to type
+// with defaults; nothing is created until Send; Send creates with the chosen
+// agent/model/workspace, then the new session's own composer sends the text
+// once. Failures keep the draft; a lost create response blocks another Send
+// until an explicit recheck. Run from packages/es-app: node test/new-session.browser.mjs
 import { createRequire } from "node:module"
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import path from "node:path"
 import { startPanelPreview } from "./composer-panel-preview.mjs"
-import { session } from "./composer-fixture.mjs"
 
-const { chromium, _electron, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
+const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const preview = await startPanelPreview()
 const fixture = preview.fixture
-fixture.workspaceSessions.push({ ...fixture.messages[1].info, id: "ses_workspace", title: "Workspace", directory: "/fixture with spaces/a&b?#/.editspace/lanes/feature/repos/example/app", projectID: "fixture", project: { worktree: "/fixture with spaces/a&b?#/.editspace" }, time: { created: 1, updated: 2 } })
-const profile = process.env.ES_DESKTOP_EXECUTABLE ? await mkdtemp(path.join(tmpdir(), "new-session-")) : undefined
-const app = profile ? await _electron.launch({ executablePath: process.env.ES_DESKTOP_EXECUTABLE,
-  env: { ...process.env, ELECTRON_RUN_AS_NODE: "", ES_DESKTOP_USER_DATA: profile, ES_DESKTOP_RENDERER: "", OPENCODE_URL: fixture.url, ES_DASHBOARD_URL: fixture.url, OPENCODE_SERVER_PASSWORD: "" },
-}) : undefined
-const browser = app ? undefined : await chromium.launch({ channel: "chrome", headless: true })
-const context = app ? app.context() : await browser.newContext({ viewport: { width: 1280, height: 900 } })
-const page = app ? await app.firstWindow() : await context.newPage()
-if (app) {
-  await page.waitForURL("http://127.0.0.1:*/")
-  preview.origin = new URL(page.url()).origin
-  preview.url = `${preview.origin}/session/ses_a?directory=${encodeURIComponent("/fixture with spaces/a&b?#")}`
-}
+const root = "/fixture with spaces/a&b?#"
+const lane = `${root}/.editspace/lanes/feature/repos/example/app`
+fixture.workspaceSessions.push({ ...fixture.messages[1].info, id: "ses_workspace", title: "Workspace", directory: lane, projectID: "fixture", time: { created: 1, updated: 2 } })
+const browser = await chromium.launch({ channel: "chrome", headless: true })
+const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
 await context.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
+const page = await context.newPage()
+const errors = []
+page.on("pageerror", (error) => errors.push(error.message))
 const createCalls = () => fixture.calls.filter(call => call.method === "POST" && call.path === "/session")
-const saved = () => page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith("es-app:composer:"))))
-const preserves = (actual, expected) => Object.entries(expected).every(([key, value]) => actual[key] === value)
-const shot = async (name) => { if (process.env.NEW_SESSION_SHOTS) await page.screenshot({ path: `${process.env.NEW_SESSION_SHOTS}-${name}.png` }) }
+const promptCalls = (id) => fixture.calls.filter(call => call.method === "POST" && call.path === `/session/${id}/prompt_async`)
+const editor = () => page.getByRole("textbox", { name: "Message", exact: true })
+const settings = () => page.getByRole("group", { name: "New session settings" })
+const send = () => page.getByRole("button", { name: /^(Send|Creating…)/ })
 try {
   await page.goto(preview.url, { waitUntil: "domcontentloaded" })
-  const editor = page.getByRole("textbox", { name: "Message", exact: true })
-  await editor.fill("Existing draft remains here")
-  await editor.evaluate(el => el.setSelectionRange(3, 11))
-  const button = page.getByRole("button", { name: "New session", exact: true })
-  await expect(button).toBeVisible()
-  const dialog = page.getByRole("dialog", { name: "New session" })
-  const firstRow = page.locator(".sidebar .session-entry").first()
-  await expect(firstRow).toBeVisible()
-  await page.evaluate(() => document.fonts.ready)
-  const rowBefore = await firstRow.boundingBox()
-  await button.click()
-  await expect(dialog).toBeVisible()
-  // popover: session rows stay put, focus lands inside, Escape closes and returns focus
-  expect(await firstRow.boundingBox()).toEqual(rowBefore)
-  await expect(page.getByLabel("New session project")).toBeFocused()
-  await page.keyboard.press("Escape")
-  await expect(dialog).toHaveCount(0)
-  await expect(button).toBeFocused()
-  await expect(button).toHaveAttribute("aria-expanded", "false")
-  await button.click()
-  await expect(button).toHaveAttribute("aria-expanded", "true")
-  await page.locator(".content").click({ position: { x: 5, y: 400 } })
-  await expect(dialog).toHaveCount(0)
-  await button.click()
-  await expect(page.getByLabel("New session project")).toHaveValue("fixture")
-  await expect(page.locator(".new-session-directory")).toContainText("/fixture with spaces/a&b?#")
-  await expect(page.getByLabel("New session workspace").locator("option")).toHaveCount(2)
-  await page.getByLabel("New session workspace").selectOption(fixture.workspaceSessions[0].directory)
-  await expect(page.locator(".new-session-directory")).toContainText("/lanes/feature/repos/example/app")
-  await expect(page.getByLabel("New session workspace").locator("option")).toHaveText(["project root", "feature · app"])
-  await page.getByLabel("New session workspace").selectOption("/fixture with spaces/a&b?#")
-  const before = await saved()
-  await shot("selected")
+  await expect(editor()).toBeVisible({ timeout: 90_000 })
 
+  // Opens on the same click, focused, with project defaults; nothing created yet.
+  await page.getByRole("link", { name: "New session", exact: true }).click()
+  await expect(page).toHaveURL(/\/new$/)
+  await expect(page.getByRole("heading", { name: "New session" })).toBeVisible()
+  await expect(editor()).toBeFocused()
+  await expect(settings().getByLabel("Project")).toHaveValue("fixture")
+  await expect(settings().getByLabel("Workspace")).toHaveValue(root)
+  await expect(settings().getByLabel("Agent")).toContainText("default agent")
+  await expect(send()).toBeDisabled()
+  expect(createCalls()).toHaveLength(0)
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+
+  // Customise before sending: workspace, agent, model.
+  await settings().getByLabel("Workspace").selectOption(lane)
+  await settings().getByLabel("Agent").selectOption("build")
+  await settings().getByLabel("Model").selectOption({ label: "next" })
+
+  // Known failure keeps the draft and allows another Send.
   fixture.createMode = "fail"
-  await page.getByRole("button", { name: "Create session" }).click()
-  await expect(dialog.getByRole("alert")).toContainText("HTTP 503")
-  expect(createCalls()).toHaveLength(1)
-  expect(preserves(await saved(), before)).toBe(true)
+  await editor().fill("Plan the migration")
+  await send().click()
+  await expect(page.getByRole("alert")).toContainText("Session creation failed")
+  await expect(editor()).toHaveValue("Plan the migration")
+  await expect(send()).toBeEnabled()
+  await expect(page).toHaveURL(/\/new$/)
 
+  // Lost response: possibly created, so Send waits for an explicit recheck; the draft survives reload.
   fixture.createMode = "lose"
-  await page.getByRole("button", { name: "Create session" }).click()
-  await expect(dialog.getByRole("alert")).toContainText("may have been created")
-  expect(createCalls()).toHaveLength(2)
-  await page.waitForTimeout(100)
-  expect(createCalls()).toHaveLength(2)
+  await editor().press(process.platform === "darwin" ? "Meta+Enter" : "Control+Enter")
+  await expect(page.getByRole("alert")).toContainText("may have been created")
+  await expect(send()).toBeDisabled()
+  await page.reload()
+  await expect(editor()).toHaveValue("Plan the migration")
+  await expect(settings().getByLabel("Workspace")).toHaveValue(lane)
 
+  // Pending create disables duplicate sends; confirmation navigates and the session sends once.
   fixture.createMode = "hold"
-  await page.getByRole("button", { name: "Create session" }).click()
-  const pending = page.getByRole("button", { name: "Creating…" })
-  await expect(pending).toBeDisabled()
-  await pending.click({ force: true })
-  await page.locator(".content").click({ position: { x: 5, y: 400 } })
-  await expect(dialog).toBeVisible()
-  expect(createCalls()).toHaveLength(3)
-  fixture.createMode = "complete"
+  const before = createCalls().length
+  await send().click()
+  await expect(send()).toHaveText(/Creating…/)
+  await expect(send()).toBeDisabled()
+  await editor().press(process.platform === "darwin" ? "Meta+Enter" : "Control+Enter")
+  expect(createCalls().length).toBe(before + 1)
+  const create = createCalls().at(-1)
+  expect(create.directory).toBe(lane)
+  expect(create.body).toEqual({ agent: "build", model: { providerID: "fixture", id: "next" } })
   fixture.createReplies.shift()()
-  await page.waitForURL(/\/session\/ses_new_1\?directory=/)
+  fixture.createMode = "complete"
+  const created = fixture.created.at(-1)
+  await expect(page).toHaveURL(new RegExp(`/session/${created.id}\\?directory=`))
+  await expect.poll(() => promptCalls(created.id).length).toBe(1)
+  expect(promptCalls(created.id)[0].body.parts[0].text).toBe("Plan the migration")
   await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeFocused()
-  expect(preserves(await saved(), before)).toBe(true)
-  expect(createCalls()[2].directory).toBe("/fixture with spaces/a&b?#")
+  // Back does not return to an emptied draft, and a reload never resends.
+  await page.reload()
+  await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeVisible()
+  await page.waitForTimeout(500)
+  expect(promptCalls(created.id)).toHaveLength(1)
 
-  await page.locator(".es-switcher").selectOption("__all__")
-  await button.click()
-  await expect(page.getByLabel("New session project")).toHaveValue("")
-  await expect(page.getByRole("button", { name: "Create session" })).toHaveCount(0)
-  await page.getByLabel("New session project").selectOption("other")
-  await expect(page.locator(".new-session-directory")).toContainText("/other project")
-  await shot("all-choice")
-  await page.getByRole("button", { name: "Create session" }).click()
-  await page.waitForURL(/\/session\/ses_new_2\?directory=/)
-  expect(createCalls()[3].directory).toBe("/other project")
-  await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeFocused()
+  // The next New session remembers the last project and model; the draft is fresh.
+  await page.getByRole("link", { name: "New session", exact: true }).click()
+  await expect(editor()).toHaveValue("")
+  await expect(settings().getByLabel("Model")).toHaveValue("fixture\u0000next")
 
-  await page.goto(preview.url)
-  await expect(editor).toHaveValue("Existing draft remains here")
-  expect(await editor.evaluate(el => [el.selectionStart, el.selectionEnd])).toEqual([3, 11])
-
-  await page.getByRole("button", { name: "Collapse sidebar" }).click()
-  const compact = page.locator(".sidebar-mini").getByRole("button", { name: "New session" })
-  await expect(compact).toBeVisible()
-  await compact.click()
-  await page.locator(".sidebar-mini").getByLabel("New session project").selectOption("other")
-  await expect(page.locator(".sidebar-mini .new-session-directory")).toContainText("/other project")
-  await shot("compact")
-  await page.setViewportSize({ width: 640, height: 780 })
+  // RTL and 390px: the settings row wraps and Send stays reachable.
   await page.evaluate(() => { document.documentElement.dir = "rtl" })
-  await shot("compact-rtl")
-  const size = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }))
-  expect(size.scroll).toBeLessThanOrEqual(size.client)
-  const rtlBox = await page.locator(".sidebar-mini .new-session-form").boundingBox()
-  const railBox = await page.locator(".sidebar-mini").boundingBox()
-  expect(rtlBox.x + rtlBox.width).toBeLessThanOrEqual(railBox.x + 1)
-  await page.setViewportSize({ width: 390, height: 780 })
-  await page.evaluate(() => { document.documentElement.dir = "ltr" })
-  await expect(page.locator(".sidebar-mini .new-session-form")).toBeVisible()
-  const mobileBox = await page.locator(".sidebar-mini .new-session-form").boundingBox()
-  const compactBox = await compact.boundingBox()
-  const innerWidth = await page.evaluate(() => window.innerWidth)
-  expect(mobileBox.x).toBeGreaterThanOrEqual(0)
-  expect(mobileBox.x + mobileBox.width).toBeLessThanOrEqual(innerWidth)
-  await shot("mobile")
-  // phone layout drops the popover under its button rather than beside the (now horizontal) rail;
-  // the packaged window enforces a 640px minimum, so only assert when the viewport really shrank
-  if (innerWidth <= 600) expect(mobileBox.y).toBeGreaterThanOrEqual(compactBox.y + compactBox.height)
-  await page.setViewportSize({ width: 640, height: 780 })
-  await compact.click()
-  fixture.sessionIDs = []
-  fixture.created = []
-  await page.goto(preview.origin)
-  await expect(page.locator(".sidebar-mini")).toBeVisible()
-  await expect(page.locator(".sidebar-mini").getByRole("button", { name: "New session" })).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await editor().fill("مرحبا")
+  await expect(send()).toBeInViewport()
+  expect(await page.locator(".new-session-draft").evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
 
-  // The actions row stays atop the sidebar above pinned/needs-you rows; a very short viewport keeps the form on screen.
-  for (let i = 0; i < 10; i++) fixture.workspaceSessions.push({ ...session(`ses_pin_${i}`), title: `Pinned ${i}` })
-  await page.evaluate((keys) => { localStorage.setItem("es-app-left-open", "1"); localStorage.setItem("es-app-sidebar-pins", JSON.stringify(keys)) },
-    Array.from({ length: 10 }, (_, i) => JSON.stringify(["/fixture with spaces/a&b?#", `ses_pin_${i}`])))
-  await page.setViewportSize({ width: 1280, height: 260 })
-  await page.goto(preview.origin, { waitUntil: "domcontentloaded" })
-  await expect(page.locator(".sidebar .pinned-section .nav-item")).toHaveCount(10)
-  const topButton = page.locator(".sidebar").getByRole("button", { name: "New session", exact: true })
-  const topButtonBox = await topButton.boundingBox()
-  const pinnedBox = await page.locator(".sidebar .pinned-section").boundingBox()
-  expect(topButtonBox.y + topButtonBox.height).toBeLessThanOrEqual(pinnedBox.y)
-  await topButton.click()
-  await expect(dialog).toBeVisible()
-  const shortBox = await dialog.boundingBox()
-  expect(shortBox.y).toBeGreaterThanOrEqual(0)
-  expect(shortBox.y + shortBox.height).toBeLessThanOrEqual(260 + 1)
-  await shot("short")
-  await page.keyboard.press("Escape")
-  expect(fixture.unexpected).toEqual([])
-  console.log(`PASS ${app ? "packaged native" : "browser"} new session: popover keeps rows in place, focus/Escape/outside-click, current safe directory, explicit All chooser, confirmed navigation/focus, prior draft/selection, pending duplicate guard, known/uncertain failure, compact/RTL/390px placement`)
+  expect(errors).toEqual([])
+  console.log("PASS new session (draft-first): opens focused with defaults, no create before Send, customise workspace/agent/model, known failure keeps draft, lost response blocks until recheck and survives reload, duplicate guard, create body, one first send through the composer, no resend on reload, remembered model, RTL/390px")
 } finally {
-  await app?.close()
-  await browser?.close()
+  await browser.close()
   await preview.close()
-  if (profile) await rm(profile, { recursive: true, force: true })
 }

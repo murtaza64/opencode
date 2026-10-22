@@ -1,0 +1,11 @@
+.new-session-page .session-main { display: flex; flex-direction: column; }
+.new-session-space { flex: 1; }
+.new-session-draft { display: grid; gap: 8px; padding-block: 10px; }
+.new-session-settings { display: flex; flex-wrap: wrap; gap: 6px; }
+.new-session-settings select { background: var(--crust); color: var(--subtext1); border: 1px solid var(--surface1); font: inherit; font-size: 12px; padding: 3px 6px; max-inline-size: 260px; }
+.new-session-draft textarea { min-block-size: 120px; }
+.new-session-submit { display: flex; align-items: center; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+.new-session-submit .err { margin-inline-end: auto; }
+.new-session-submit button.primary { color: var(--green); box-shadow: inset 0 0 0 1px var(--green); background: var(--crust); }
+.new-session-submit button.primary:disabled { color: var(--overlay0); box-shadow: inset 0 0 0 1px var(--surface1); }
+.new-session-submit kbd { font: 10px var(--font-mono); color: var(--overlay1); margin-inline-start: 6px; }

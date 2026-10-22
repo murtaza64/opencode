@@ -35,8 +35,9 @@ try {
   await button.hover()
   await page.mouse.down()
   const pressed = await button.evaluate((element) => getComputedStyle(element).backgroundColor)
+  // Release elsewhere so the press does not navigate.
+  await page.mouse.move(700, 600)
   await page.mouse.up()
-  await page.keyboard.press("Escape")
   expect(pressed, "pressed button fills immediately").not.toBe(rest)
   expect(pressed).toBe("rgb(58, 58, 66)")
 
@@ -75,6 +76,7 @@ try {
   // Reduced motion: no ring and no background flash; the jump keeps a static marker.
   fixture.permissions = []
   const calm = await open({ reducedMotion: "reduce" })
+  await calm.page.locator(".transcript").evaluate((element) => { element.scrollTop = element.scrollHeight })
   await calm.page.locator("textarea").first().focus()
   await calm.page.keyboard.press("Control+p")
   const calmBubble = calm.page.locator("[data-user-prompt] [data-slot='user-message-text'], [data-user-prompt] [data-component='user-message-text']")

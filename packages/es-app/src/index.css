@@ -612,6 +612,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 .new-session { position: relative; flex-shrink: 0; margin-inline-start: auto; }
 .sidebar-mini .new-session { width: 100%; margin: 0; }
 .new-session-button {
+  text-decoration: none !important;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -623,44 +624,9 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
   box-shadow: inset 0 0 0 1px var(--surface1);
   white-space: nowrap;
 }
-.new-session-button:hover, .new-session-button[aria-expanded="true"] { background: var(--surface0); box-shadow: inset 0 0 0 1px var(--green); }
+.new-session-button:hover, .new-session-button.active { background: var(--surface0); box-shadow: inset 0 0 0 1px var(--green); }
 .new-session-button.mini-item { box-shadow: none; padding: 6px 0; }
-.new-session-button.mini-item:hover, .new-session-button.mini-item[aria-expanded="true"] { background: var(--surface0); }
-/* popover: fixed so it floats over the scrolling sidebar; placed from the button rect */
-.new-session-form {
-  position: fixed;
-  z-index: 50;
-  width: min(320px, calc(100vw - 16px));
-  padding: 10px;
-  border: 1px solid var(--surface1);
-  background: var(--crust);
-  box-shadow: 0 8px 28px #000a;
-  display: grid;
-  gap: 8px;
-  font-size: 12px;
-  .err { white-space: pre-wrap; overflow-wrap: anywhere; }
-}
-.new-session-field {
-  display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  color: var(--subtext0);
-  select { min-width: 0; width: 100%; }
-  select:disabled { color: var(--text); opacity: 1; appearance: none; }
-}
-.new-session-directory {
-  padding-inline-start: 80px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--subtext1);
-  overflow-wrap: anywhere;
-  user-select: text;
-}
-.new-session-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.new-session-create { padding: 4px 14px; background: var(--green); color: var(--crust); font-weight: bold; }
-.new-session-create:hover { background: var(--teal); }
-.new-session-create:disabled { background: var(--surface1); color: var(--overlay0); }
+.new-session-button.mini-item:hover, .new-session-button.mini-item.active { background: var(--surface0); }
 .nav-heading {
   font-size: 11px;
   text-transform: uppercase;
@@ -1968,10 +1934,9 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 [dir="rtl"] { --inline-sign: -1; }
 [dir="ltr"] { --inline-sign: 1; }
 html { -webkit-tap-highlight-color: transparent; }
-:is(button, [role="button"], summary, a.nav-item, a.mini-item, [data-slot="collapsible-trigger"]):not(:disabled, [aria-disabled="true"]):active {
+:is(button, [role="button"], summary, a.nav-item, a.mini-item, a.new-session-button, [data-slot="collapsible-trigger"]):not(:disabled, [aria-disabled="true"]):active {
   background-color: var(--surface1) !important;
 }
-.new-session-create:not(:disabled):active { background-color: var(--teal) !important; }
 /* Identifiers (projects, lanes) are shown verbatim, never uppercased. */
 .attention-home h2, .map-cluster h2, .map-detail h2 { text-transform: none; letter-spacing: 0; }
 /* Day separators are wayfinding, not section titles: muted sentence case. */

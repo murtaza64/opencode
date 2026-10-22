@@ -43,13 +43,17 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 export const oc = {
-  createSession: async (directory: string): Promise<Session> => {
+  // Agent and model are chosen before the session exists (draft-first New session).
+  createSession: async (directory: string, options: { agent?: string; model?: { providerID: string; modelID: string } } = {}): Promise<Session> => {
     let res: Response
     try {
       res = await fetch(`/oc/session?${q(directory)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: "{}",
+        body: JSON.stringify({
+          ...(options.agent ? { agent: options.agent } : {}),
+          ...(options.model ? { model: { providerID: options.model.providerID, id: options.model.modelID } } : {}),
+        }),
       })
     } catch {
       throw new SessionCreateError("The server response was lost. A session may have been created; check the session list before trying again.", true)
