@@ -33,6 +33,7 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
         <button class="desk-button" disabled={props.confirming} onClick={props.confirm}>Confirm start</button></Show>
       <Show when={(job().state.state === "failed" || job().state.state === "unknown") && props.live}><button class="desk-button" disabled={!props.canStart} onClick={props.start}>Prepare again</button></Show>
       <Show when={ready()}>{value => <div class="desk-brief-body">
+        <span class="desk-brief-chip">Brief</span>
         <dl class="desk-brief-plain">
           <Show when={value().result.ask || value().result.summary}><dt>You decide</dt><dd dir="auto">{value().result.ask || value().result.summary}</dd></Show>
           <Show when={value().result.whyNow}><dt>Why now</dt><dd dir="auto">{value().result.whyNow}</dd></Show>
