@@ -1,0 +1,115 @@
+package ai.opencode.desk.net
+
+import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
+import java.util.concurrent.TimeUnit
+
+class GatewayError(val code: Int, message: String, val body: String = "") : IOException(message)
+class PairingRequired : IOException("Pairing required")
+
+val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true; explicitNulls = false }
+
+// The paired es gateway (packages/es-desktop/src/server.ts) is the only network boundary.
+// Rules it enforces that this class owns: Host must equal the gateway origin, every
+// non-GET request carries Origin = gateway origin, writes to the dashboard attention API
+// add X-Attention-CSRF, and the es_remote / es_attention_operator cookies ride along.
+class Gateway(context: Context) {
+    private val prefs = context.getSharedPreferences("gateway", Context.MODE_PRIVATE)
+    private val jar = CookieStore(prefs)
+    val client: OkHttpClient = OkHttpClient.Builder()
+        .cookieJar(jar)
+        .followRedirects(false)
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .build()
+
+    var origin: String
+        get() = prefs.getString("origin", "http://127.0.0.1:47120") ?: "http://127.0.0.1:47120"
+        set(value) { prefs.edit().putString("origin", value.trimEnd('/')).apply() }
+
+    val paired: Boolean get() = jar.has(origin, "es_remote")
+
+    fun forget() {
+        jar.clear()
+    }
+
+    private fun url(path: String, query: Map<String, String?> = emptyMap()): HttpUrl {
+        val base = origin.toHttpUrlOrNull() ?: throw IOException("Bad gateway URL")
+        val builder = base.newBuilder().encodedPath(path)
+        query.forEach { (key, value) -> if (value != null) builder.addQueryParameter(key, value) }
+        return builder.build()
+    }
+
+    private fun Request.Builder.write(path: String) = apply {
+        header("Origin", origin)
+        if (path.startsWith("/es/api/attention")) header("X-Attention-CSRF", "1")
+    }
+
+    suspend fun pair(code: String): Boolean = withContext(Dispatchers.IO) {
+        val body = "code=${java.net.URLEncoder.encode(code.trim(), "UTF-8")}"
+            .toRequestBody("application/x-www-form-urlencoded".toMediaType())
+        client.newCall(Request.Builder().url(url("/__es/pair")).post(body).build()).execute().use { response ->
+            // 303 + Set-Cookie is success; the jar captured the cookie.
+            response.code == 303 && paired
+        }
+    }
+
+    suspend fun health(): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            client.newCall(Request.Builder().url(url("/__es/health")).build()).execute().use { it.isSuccessful }
+        }.getOrDefault(false)
+    }
+
+    suspend fun get(path: String, query: Map<String, String?> = emptyMap()): String = withContext(Dispatchers.IO) {
+        execute(Request.Builder().url(url(path, query)).get().build())
+    }
+
+    suspend fun post(path: String, body: String, query: Map<String, String?> = emptyMap()): String = withContext(Dispatchers.IO) {
+        execute(Request.Builder().url(url(path, query)).write(path).post(body.toRequestBody(JSON)).build())
+    }
+
+    suspend fun delete(path: String, query: Map<String, String?> = emptyMap()): String = withContext(Dispatchers.IO) {
+        execute(Request.Builder().url(url(path, query)).write(path).delete().build())
+    }
+
+    private fun execute(request: Request): String =
+        client.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (response.code == 401 && text.contains("Pairing required")) throw PairingRequired()
+            if (!response.isSuccessful) throw GatewayError(response.code, "HTTP ${response.code} ${request.method} ${request.url.encodedPath}", text)
+            text
+        }
+
+    // Streams one server-sent-events connection; `onEvent` receives each `data:` payload.
+    // Returns when the stream ends (the caller reconnects with backoff).
+    fun stream(path: String, query: Map<String, String?> = emptyMap(), onEvent: (String) -> Unit) {
+        val request = Request.Builder().url(url(path, query)).header("Accept", "text/event-stream").get().build()
+        val call = client.newBuilder().readTimeout(0, TimeUnit.MILLISECONDS).build().newCall(request)
+        call.execute().use { response ->
+            if (response.code == 401) throw PairingRequired()
+            if (!response.isSuccessful) throw GatewayError(response.code, "SSE ${response.code}")
+            val source = response.body?.source() ?: return
+            val data = StringBuilder()
+            while (!source.exhausted()) {
+                val line = source.readUtf8Line() ?: break
+                when {
+                    line.isEmpty() -> { if (data.isNotEmpty()) onEvent(data.toString()); data.clear() }
+                    line.startsWith("data:") -> data.append(line.removePrefix("data:").trim())
+                }
+            }
+        }
+    }
+
+    companion object {
+        val JSON = "application/json".toMediaType()
+    }
+}

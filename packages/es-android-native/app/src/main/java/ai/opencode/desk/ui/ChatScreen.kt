@@ -1,0 +1,100 @@
+package ai.opencode.desk.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
+import ai.opencode.desk.DeskStore
+import ai.opencode.desk.Nav
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+// The Front Desk conversation: one thread per paired gateway, backed by a Core session with
+// the `front-desk` agent. Reads like messaging; answers arrive as the session's assistant turns.
+@Composable
+fun ChatScreen(store: DeskStore, nav: Nav) {
+    val id = store.deskID
+    val messages = store.deskMessages[id].orEmpty()
+    val pending = store.deskReceipts[id].orEmpty()
+    val list = rememberLazyListState()
+    var text by rememberSaveable { mutableStateOf("") }
+    var sending by rememberSaveable { mutableStateOf(false) }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { store.loadDesk() }
+    LaunchedEffect(store.deskBusy, pending.size) { while (store.deskBusy || pending.isNotEmpty()) { delay(4_000); store.loadDesk() } }
+    LaunchedEffect(messages.size) { if (messages.isNotEmpty()) list.animateScrollToItem(messages.size + pending.size) }
+
+    Column(Modifier.fillMaxSize().statusBarsPadding()) {
+        TopBar("Desk", onBack = { nav.pop() }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                StatusDot(if (store.deskBusy) "busy" else "idle", 8)
+                Spacer(Modifier.width(8.dp))
+                Label(if (store.deskBusy) "thinking" else if (store.deskReady) "front-desk · ${store.deskSpace}" else "new conversation")
+            }
+        }
+        LazyColumn(Modifier.weight(1f).testTag("chat"), state = list, contentPadding = PaddingValues(vertical = 8.dp)) {
+            if (messages.isEmpty() && pending.isEmpty()) item {
+                Column(Modifier.padding(20.dp)) {
+                    Text("Ask what's going on, or start work.", style = MaterialTheme.typography.bodyLarge)
+                    Text("The desk knows the open decisions and every lane's recent activity. Try: “what changed since this morning?” or “start a lane to fix the flaky composer test”.", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            items(messages, key = { it.info.id }) { Message(it, store.now) }
+            items(pending, key = { "r-" + it.requestID }) { receipt ->
+                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), horizontalAlignment = Alignment.End) {
+                    Text(receipt.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.background(Ink.Blue.copy(alpha = 0.12f), RoundedCornerShape(16.dp)).padding(horizontal = 14.dp, vertical = 10.dp))
+                    Label(if (receipt.state == "pending") "sending…" else "delivered", color = Ink.Amber)
+                }
+            }
+        }
+        error?.let { Text(it, color = Ink.Red, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 20.dp)) }
+        Row(Modifier.fillMaxWidth().background(Ink.Black).imePadding().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextField(
+                value = text, onValueChange = { text = it }, maxLines = 5,
+                placeholder = { Text("Message the desk", color = Ink.Dim) },
+                modifier = Modifier.weight(1f).testTag("chat-text"), shape = RoundedCornerShape(22.dp),
+                colors = TextFieldDefaults.colors(focusedContainerColor = Ink.Panel, unfocusedContainerColor = Ink.Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = Ink.Blue),
+            )
+            IconButton(enabled = text.isNotBlank() && !sending, modifier = Modifier.testTag("chat-send"), onClick = {
+                val message = text.trim(); sending = true; error = null
+                scope.launch {
+                    store.askDesk(message).fold({ text = "" }, { error = it.message?.take(120) })
+                    sending = false
+                }
+            }) { Icon(Icons.Filled.Send, "Send", tint = if (text.isNotBlank()) Ink.Blue else Ink.Dim) }
+        }
+    }
+}
