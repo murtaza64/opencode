@@ -18,8 +18,10 @@ import "./new-session.css"
 
 const DRAFT = "es-app:new-session:draft:1"
 const LAST = "es-app:new-session:last:1"
-// The exact request sent; identity and settings stay bound to it until it is reconciled.
-type Attempt = { directory: string; body: SessionCreateBody & { id: string }; text: string }
+// The exact request sent; identity and settings stay bound to it until it is confirmed.
+// lost: a response was lost, so a request with this id may still land at any time.
+// absent: the last read of the id found nothing yet (a late request can still create it).
+type Attempt = { directory: string; body: SessionCreateBody & { id: string }; text: string; lost?: boolean; absent?: boolean }
 type Draft = { project: string; directory: string; agent: string; model: string; text: string; attempt?: Attempt }
 
 const projectDirectory = (root: string) => root.replace(/\/+$/, "").replace(/\/\.editspace$/, "")
@@ -51,6 +53,8 @@ export default function NewSessionPage() {
   // An unconfirmed create: saved before posting, cleared only by reading its exact id.
   const [attempt, setAttempt] = createSignal<Attempt | undefined>(saved.attempt)
   const locked = () => pending() || !!attempt()
+  // A reserved attempt can only be sent again as the identical request, once its id is known absent.
+  const retryable = () => !pending() && !!attempt()?.absent
   let editor: HTMLTextAreaElement | undefined
 
   const selected = createMemo(() => projects().find((item) => item.name === project()))
@@ -112,7 +116,12 @@ export default function NewSessionPage() {
       const session = await oc.createSession(value.directory, value.body)
       await open(session, value)
     } catch (cause) {
-      if (cause instanceof SessionCreateError && !cause.uncertain) setAttempt(undefined)
+      const known = cause instanceof SessionCreateError && !cause.uncertain
+      // A definite rejection frees the draft only if no earlier request with this id was lost;
+      // otherwise the rejection may mean that request landed, so the id is read again.
+      if (known && !value.lost) setAttempt(undefined)
+      else if (known) queueMicrotask(() => void reconcile())
+      else setAttempt({ ...value, lost: true, absent: false })
       setError(cause instanceof SessionCreateError ? cause.message : "The server response was lost. A session may have been created; check again before sending.")
     } finally {
       setPending(false)
@@ -120,6 +129,9 @@ export default function NewSessionPage() {
     }
   }
   const send = async () => {
+    const reserved = attempt()
+    // Sending again after a lost response repeats the exact request, same id and settings.
+    if (reserved) return retryable() ? post({ ...reserved, absent: false }) : undefined
     const body = text()
     if (locked() || !directory() || !body.trim()) return
     const [providerID, modelID] = modelValue().split("\u0000")
@@ -133,7 +145,8 @@ export default function NewSessionPage() {
     save()
     await post(value)
   }
-  // Reads the exact attempted id: found means created; a definite 404 means it was not.
+  // Reads the exact attempted id. Found: opened. Not found: still reserved, because the lost
+  // request can land later; only the identical request may be sent again.
   const reconcile = async () => {
     const value = attempt()
     if (!value || pending()) return
@@ -144,8 +157,8 @@ export default function NewSessionPage() {
       await open(session, value)
     } catch (cause) {
       if (String(cause).includes("HTTP 404")) {
-        setAttempt(undefined)
-        setError("No session was created. Your draft is unchanged; send again when ready.")
+        setAttempt({ ...value, absent: true })
+        setError("Not created yet. Send repeats the same request, so at most one session is created.")
       } else setError("Still unknown whether the session was created. Check again shortly.")
     } finally {
       setPending(false)
@@ -186,7 +199,7 @@ export default function NewSessionPage() {
         <div class="new-session-submit">
           <Show when={error()}><span class="err" role="alert">{error()}</span></Show>
           <Show when={attempt() && !pending()}><button type="button" onClick={() => void reconcile()}>Check again</button></Show>
-          <button type="submit" class="primary" disabled={locked() || !directory() || !text().trim()}>
+          <button type="submit" class="primary" disabled={attempt() ? !retryable() : locked() || !directory() || !text().trim()}>
             {pending() ? "Creating…" : "Send"} <kbd aria-hidden="true">⌘/Ctrl↵</kbd>
           </button>
         </div>

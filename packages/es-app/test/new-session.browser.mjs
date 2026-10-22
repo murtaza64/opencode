@@ -57,28 +57,47 @@ try {
   await expect(send()).toBeEnabled()
   await expect(page).toHaveURL(/\/new$/)
 
-  // Lost response, not created: settings and text lock to the attempt; reload reconciles by id (404) with no second create.
+  // Lost response, not created: settings and text lock to the attempt. Reload reads the id (404) and keeps
+  // it reserved, since the lost request could still land; Send repeats the identical request, never a new id.
   fixture.createMode = "lose"
   await editor().press(process.platform === "darwin" ? "Meta+Enter" : "Control+Enter")
   await expect(page.getByRole("alert")).toContainText("may have been created")
   await expect(send()).toBeDisabled()
   await expect(settings().getByLabel("Workspace")).toBeDisabled()
   await expect(settings().getByLabel("Model")).toBeDisabled()
-  const lostID = createCalls().at(-1).body.id
-  expect(lostID).toMatch(/^ses_/)
+  const lost = createCalls().at(-1).body
+  expect(lost.id).toMatch(/^ses_/)
   const afterLost = createCalls().length
   await page.reload()
-  await expect(page.getByRole("alert")).toContainText("No session was created")
+  await expect(page.getByRole("alert")).toContainText("Not created yet")
   expect(createCalls().length).toBe(afterLost)
   await expect(editor()).toHaveValue("Plan the migration")
+  for (const name of ["Project", "Workspace", "Agent", "Model"]) await expect(settings().getByLabel(name)).toBeDisabled()
   await expect(settings().getByLabel("Workspace")).toHaveValue(lane)
   await expect(settings().getByLabel("Model")).toHaveValue("fixture\u0000next")
   await expect(send()).toBeEnabled()
+  // The retry is lost too: still the same id, still reserved after another reload.
+  fixture.createMode = "lose"
+  await send().click()
+  await expect(page.getByRole("alert")).toContainText("may have been created")
+  expect(createCalls().at(-1).body).toEqual(lost)
+  await page.reload()
+  await expect(page.getByRole("alert")).toContainText("Not created yet")
+  // Confirmed on the identical request: opened and sent once.
+  await send().click()
+  expect(createCalls().at(-1).body).toEqual(lost)
+  await expect(page).toHaveURL(new RegExp(`/session/${lost.id}\\?directory=`))
+  await expect.poll(() => promptCalls(lost.id).length).toBe(1)
+  expect(createCalls().filter((call) => call.body?.id !== lost.id).length).toBe(afterLost - 1)
 
   // Lost response, created: reload finds the exact id and opens it; the first message is sent once.
+  await page.getByRole("link", { name: "New session", exact: true }).click()
+  await settings().getByLabel("Workspace").selectOption(lane)
+  await editor().fill("Plan the migration")
   fixture.createMode = "lose-after"
   await send().click()
   await expect(page.getByRole("alert")).toContainText("may have been created")
+  await expect.poll(() => createCalls().at(-1).body.id).not.toBe(lost.id)
   const chosen = createCalls().at(-1)
   expect(chosen.body).toEqual({ id: expect.stringMatching(/^ses_/), agent: "build", model: { providerID: "fixture", id: "next" } })
   expect(chosen.directory).toBe(lane)
@@ -155,7 +174,7 @@ try {
   expect(await page.locator(".new-session-draft").evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
 
   expect(errors).toEqual([])
-  console.log("PASS new session (draft-first): opens focused with defaults, no create before Send, customise workspace/agent/model, known failure keeps draft, lost create locks settings and reconciles by its exact id after reload (404 -> editable, found -> opened and sent once, never a second create), duplicate guard, create body with client id/agent/model, lost first-message response stays unknown without resend, first message recorded and sent before the session view loads (a held load cannot lose it), sent once, no resend, remembered model, RTL/390px")
+  console.log("PASS new session (draft-first): opens focused with defaults, no create before Send, customise workspace/agent/model, known failure keeps draft, lost create keeps its exact id and body reserved across reload and lost retries (404 -> settings stay locked, Send repeats the identical request; found -> opened and sent once; never a second id), duplicate guard, create body with client id/agent/model, lost first-message response stays unknown without resend, first message recorded and sent before the session view loads (a held load cannot lose it), sent once, no resend, remembered model, RTL/390px")
 } finally {
   await browser.close()
   await preview.close()
