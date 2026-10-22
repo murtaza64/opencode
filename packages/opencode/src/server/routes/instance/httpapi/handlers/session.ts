@@ -323,10 +323,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
 
     const supersede = Effect.fn("SessionHttpApi.supersede")(function* (ctx: {
       params: { sessionID: SessionID }
-      payload: { successor: SessionID }
+      payload: { successor: SessionID; scope?: "same-directory" | "cross-directory" }
     }) {
       yield* requireSession(ctx.params.sessionID)
-      return yield* runState.supersede(ctx.params.sessionID, ctx.payload.successor).pipe(
+      return yield* runState.supersede(ctx.params.sessionID, ctx.payload.successor, ctx.payload.scope ?? "same-directory").pipe(
         Effect.catchTag("SessionSuperseded", SessionError.superseded),
         Effect.catchTag("SessionSupersessionInvalid", (error) => new InvalidRequestError({ message: error.message })),
       )

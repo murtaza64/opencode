@@ -11433,6 +11433,7 @@ export type SessionCancelSupersedeResponse = SessionCancelSupersedeResponses[key
 export type SessionSupersedeData = {
   body?: {
     successor: string
+    scope?: "same-directory" | "cross-directory"
   }
   path: {
     sessionID: string

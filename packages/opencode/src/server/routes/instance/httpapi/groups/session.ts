@@ -105,7 +105,11 @@ export const SummarizePayload = Schema.Struct({
 export const PromptPayload = Schema.Struct(Struct.omit(SessionPrompt.PromptInput.fields, ["sessionID"]))
 export const CommandPayload = Schema.Struct(Struct.omit(SessionPrompt.CommandInput.fields, ["sessionID"]))
 export const ShellPayload = Schema.Struct(Struct.omit(SessionPrompt.ShellInput.fields, ["sessionID"]))
-export const SupersedePayload = Schema.Struct({ successor: SessionID })
+export const SupersedePayload = Schema.Struct({
+  successor: SessionID,
+  // An outside-anchored owner handoff names a successor in another directory explicitly.
+  scope: Schema.optional(Schema.Literals(["same-directory", "cross-directory"])),
+})
 export const SupersedeReceipt = Schema.Struct({
   sessionID: SessionID,
   successor: SessionID,

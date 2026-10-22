@@ -15,7 +15,11 @@ export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly wake: (sessionID: SessionID, work: Effect.Effect<SessionV1.WithParts | undefined>) => Effect.Effect<Runner.WakeDecision, SessionSupersession.Closed>
   readonly admit: <A, E, R>(sessionID: SessionID, work: Effect.Effect<A, E, R>) => Effect.Effect<A, E | SessionSupersession.Closed, R>
-  readonly supersede: (sessionID: SessionID, successor: SessionID) => Effect.Effect<SessionSupersession.Receipt, SessionSupersession.Invalid | SessionSupersession.Closed>
+  readonly supersede: (
+    sessionID: SessionID,
+    successor: SessionID,
+    scope?: SessionSupersession.Scope,
+  ) => Effect.Effect<SessionSupersession.Receipt, SessionSupersession.Invalid | SessionSupersession.Closed>
   readonly cancelSupersession: (sessionID: SessionID) => Effect.Effect<SessionSupersession.Receipt | undefined, SessionSupersession.Closed>
   readonly consume: (sessionID: SessionID) => Effect.Effect<void>
   readonly ensureRunning: (
@@ -131,10 +135,14 @@ const layer = Layer.effect(
         return yield* owner.locked((idle) => Effect.andThen(gate(sessionID, idle), work))
       })
 
-    const supersede = Effect.fn("SessionRunState.supersede")(function* (sessionID: SessionID, successor: SessionID) {
+    const supersede = Effect.fn("SessionRunState.supersede")(function* (
+      sessionID: SessionID,
+      successor: SessionID,
+      scope: SessionSupersession.Scope = "same-directory",
+    ) {
       const owner = yield* runner(sessionID, Effect.succeed(undefined))
       return yield* owner.locked((idle) => Effect.gen(function* () {
-        const receipt = yield* supersession.request(sessionID, successor)
+        const receipt = yield* supersession.request(sessionID, successor, scope)
         if (idle && receipt.state === "pending" && !SessionExecutionLocal.isActive(sessionID))
           return (yield* supersession.commit(sessionID)) ?? receipt
         return receipt
