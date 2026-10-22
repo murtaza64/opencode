@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { Event, SessionFailure } from "@opencode-ai/sdk/v2"
 import { createRoot } from "solid-js"
-import { createSessionFailures, failureLabel, retryLabel, type RetryResult } from "./session-failures"
+import { createSessionFailures, failureAge, failureLabel, failureWhen, retryLabel, type RetryResult } from "./session-failures"
 import { unresolvedSend } from "./composer"
 
 const failure = (sessionID: string, messageID = `msg_${sessionID}`, retry: SessionFailure["retry"] = "available"): SessionFailure => ({
@@ -44,6 +44,17 @@ test("labels never include provider text", () => {
   expect(retryLabel({ outcome: "unknown", detail: "The response was lost" })).toContain("still shown as failed")
   expect(retryLabel({ outcome: "unsafe", failed: failure("a", "msg_a", "out-of-order") })).toBe("Not retried: the failed step is timestamped in the future")
   expect(retryLabel({ outcome: "unsafe", failed: failure("a", "msg_a", "unsafe") })).toBe("Not retried: the failed step ran tools")
+})
+
+test("failure age comes from the failed step's own time, not from when the list was read", () => {
+  const now = Date.UTC(2026, 9, 22, 12)
+  const failed = now - 3 * 86_400_000 - 5 * 3_600_000
+  expect(failureAge(failed, now)).toBe("3d ago")
+  expect(failureAge(now - 90 * 60_000, now)).toBe("1h ago")
+  expect(failureAge(now - 20_000, now)).toBe("just now")
+  expect(failureWhen(failed, now)).toEndWith("(3d ago)")
+  expect(failureAge(0, now)).toBe("time unavailable")
+  expect(failureWhen(0, now)).toBe("time unavailable")
 })
 
 test("an old Core without the endpoint hides the feature instead of reporting no failures", async () => {

@@ -5,7 +5,7 @@
 import { createContext, createEffect, createMemo, createSignal, onCleanup, useContext, type ParentProps } from "solid-js"
 import { createAttention } from "./attention"
 import { deskItems, type DeskItem } from "./desk"
-import { createBriefAnchor, createBriefs } from "./desk-session"
+import { createBriefAnchor, createBriefs, currentJob } from "./desk-session"
 import { useDashboard } from "./state"
 
 const waitFor = (ready: () => boolean) => new Promise<void>(resolve => {
@@ -51,7 +51,7 @@ const create = () => {
     return dashboard.editspaces()?.editspaces.find(item => item.name === name)?.root
   })
   const briefs = createBriefs(anchor.pointer, lookup, anchor.ensure)
-  const jobFor = (item: DeskItem) => briefs.jobs().find(job => job.meta.source === item.key && job.meta.revision === item.revision)
+  const jobFor = (item: DeskItem) => currentJob(briefs.jobs(), item)
   // Wait for a successful read of existing jobs so a reload never starts a second job for a revision.
   const loaded = () => anchor.checked() && (!anchor.pointer() || briefs.synced() === anchor.pointer()!.session)
   // One automatic attempt per item revision per page lifetime, whatever its outcome: no retry loops.

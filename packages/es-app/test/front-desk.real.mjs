@@ -93,22 +93,25 @@ const provider = http.createServer(async (request, response) => {
     if (Number(revision) >= 6) seen.retrieved.push(raw.includes("canary owner is Kim"))
     const reply = () => text(response, JSON.stringify({
       ask: "Choose whether to stay at the canary or roll out fully",
-      whyNow: "The canary has been healthy for a day",
-      ifRecommended: "Traffic stays at 5% while you watch errors",
+      whyYou: "Full rollout reaches every user at once", whyNow: "The canary has been healthy for a day",
+      choices: [{ id: "canary", outcome: `Traffic stays at 5% while you watch errors (rev ${revision})`, chips: ["5% traffic"], risk: "Slower" }, { id: "full", outcome: "All traffic moves now", chips: [], risk: "" }],
+      sources: [{ label: "Canary deploy note", refs: ["E2"] }],
       ifWait: "",
-      summary: `Canary rollout is staged at 5% (brief for revision ${revision}).`,
+      shape: { kind: "sequence", steps: ["build", "canary 5%", "decide"] },
+      unknown: "Who owns the full rollout is not stated", gaps: [],
       facts: [{ text: "Canary serves 5% of traffic", refs: ["E2"] }, { text: "Invented claim", refs: ["E99"] }],
       timeline: [{ when: "10:00", text: "Canary deployed", refs: ["E2"] }],
-      flow: ["build", "canary 5%", "decide"],
-      gaps: ["Who owns the full rollout is not stated"],
+      // Automatic briefs draw their own picture instead of a shape.
       ...(Number(revision) >= 6 ? {
+        shape: undefined,
         facts: [{ text: "Kim owns the canary", refs: ["file:ROLLOUT.md"] }],
         visual: { title: "Canary versus full rollout", html: '<table id="cmp"><tr><th></th><th>Stay at canary</th><th>Full rollout</th></tr><tr><td>Traffic</td><td>5%</td><td>100%</td></tr></table><img src="https://example.invalid/x.png"><script>document.body.dataset.ran="yes"</script>' },
       } : {}),
     }))
     return holdBriefs ? holds.push(reply) : reply()
   }
-  if (user.includes("SOURCE:")) { hits.source++; return text(response, "Canary deployed to 5% at 10:00; error rate flat.") }
+  // A More detail request quotes the source thread, which itself contains "SOURCE:"; the desk question wins.
+  if (user.includes("SOURCE:") && !/DESK-[QM]\d/.test(user)) { hits.source++; return text(response, "Canary deployed to 5% at 10:00; error rate flat.") }
   const question = /DESK-[QM]\d/.exec(user)?.[0]
   if (question) {
     hits.chat++
@@ -287,6 +290,8 @@ try {
   browser = await chromium.launch({ channel: "chrome", headless: true })
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   page = await context.newPage()
+  // Vite compiles on first load; a loaded machine can take well over the default 30s.
+  page.setDefaultNavigationTimeout(120_000)
   const posts = []
   page.on("request", (request) => { if (request.method() === "POST") posts.push(new URL(request.url()).pathname) })
   const editor = () => page.locator(".desk-chat .prompt-box textarea")
@@ -411,7 +416,7 @@ try {
     button.click()
     button.click()
   })
-  await expect(page.locator(".desk-brief")).toContainText("Preparing brief", { timeout: 20000 })
+  await expect(page.locator('.desk-evidence .desk-brief[data-part="lead"]')).toContainText("Preparing brief", { timeout: 20000 })
   await poll("brief reached provider", () => hits.brief === 1)
   await page.unroute(tailRoute)
   assert.equal(tailReads, 1)
@@ -435,14 +440,15 @@ try {
   await expect(job).toContainText("rev 1")
   await expect(page.locator(".desk-evidence")).toHaveCount(0)
   await job.getByRole("button", { name: "Show" }).click()
-  const brief = page.locator(".desk-brief")
+  const brief = page.locator(".desk-evidence .home-decision")
   await brief.locator(".desk-brief-detail > summary").click()
   await expect(brief).toContainText("Brief for revision 1")
+  await expect(page.locator(".desk-evidence .home-option-card", { hasText: "Stay at canary" })).toContainText("Traffic stays at 5% while you watch errors (rev 1)")
   await expect(brief.locator(".desk-flow li")).toHaveCount(3)
   await expect(brief).toContainText("1 uncited statement(s) omitted")
   await expect(brief).not.toContainText("Invented claim")
   await expect(brief.locator(".desk-ref", { hasText: "E2" }).first()).toBeVisible()
-  await expect(page.locator(".desk-evidence .home-decision .home-options label", { hasText: "Stay at canary" })).toContainText("recommended")
+  await expect(page.locator(".desk-evidence .home-decision .home-options label", { hasText: "Stay at canary" })).toContainText(/recommended/i)
   const children = (await call("GET", `/session/${briefAnchor}/children`)).body
   assert.equal(children.length, 1)
   assert.equal(children[0].metadata.frontDesk.revision, "1")
@@ -460,7 +466,7 @@ try {
   await page.getByRole("button", { name: "Refresh", exact: true }).click()
   await expect(page.locator(".desk-evidence")).toContainText("revision 2", { timeout: 20000 })
   await expect(brief).toContainText("The request changed since the last brief")
-  await expect(brief).not.toContainText("Canary rollout is staged")
+  await expect(page.locator(".desk-evidence")).not.toContainText("Traffic stays at 5% while you watch errors")
   await expect(page.locator(".desk-job").first()).toContainText("revision 1 → 2")
   log("STALE revision 1 brief discarded after the source moved to revision 2")
 
@@ -482,12 +488,12 @@ try {
   const childCreate = (request) => request.method() === "POST" && new URL(request.url()).pathname === "/oc/session" && JSON.parse(request.postData() || "{}").parentID
   await page.route(sessionRoute, (route) => childCreate(route.request()) ? route.abort("connectionreset") : route.fallback())
   await page.getByRole("button", { name: "Prepare brief" }).click()
-  await expect(page.locator(".desk-brief")).toContainText("Brief start not confirmed", { timeout: 20000 })
+  await expect(page.locator('.desk-evidence .desk-brief[data-part="lead"]')).toContainText("Brief start not confirmed", { timeout: 20000 })
   const lost = JSON.parse(await page.evaluate(() => localStorage.getItem("es-app:front-desk:brief-create:1")))
   assert.equal((await call("GET", `/session/${briefAnchor}/children`)).body.some((item) => item.id === lost.id), false)
   await page.reload()
   await page.locator(".desk-item").first().click()
-  await expect(page.locator(".desk-brief")).toContainText("Brief start not confirmed", { timeout: 20000 })
+  await expect(page.locator('.desk-evidence .desk-brief[data-part="lead"]')).toContainText("Brief start not confirmed", { timeout: 20000 })
   await expect(page.getByRole("button", { name: "Prepare brief" })).toHaveCount(0)
   await page.unroute(sessionRoute)
   let created = 0
@@ -499,7 +505,7 @@ try {
   })
   await page.getByRole("button", { name: "Confirm start" }).click()
   await poll("confirmed child", async () => (await call("GET", `/session/${briefAnchor}/children`)).body.some((item) => item.id === lost.id))
-  await expect(page.locator(".desk-brief")).toContainText("Brief start not confirmed", { timeout: 20000 })
+  await expect(page.locator('.desk-evidence .desk-brief[data-part="lead"]')).toContainText("Brief start not confirmed", { timeout: 20000 })
   await new Promise((resolve) => setTimeout(resolve, 2000))
   const adopted = (await call("GET", `/session/${briefAnchor}/children`)).body.filter((item) => item.metadata?.frontDesk?.revision === "3")
   assert.deepEqual(adopted.map((item) => item.id), [lost.id])
@@ -636,7 +642,7 @@ try {
   await startCore("restarted")
   await page.reload()
   await page.locator(".desk-item").first().click()
-  await expect(page.locator(".desk-brief")).toContainText("stopped before finishing", { timeout: 20000 })
+  await expect(page.locator('.desk-evidence .desk-brief[data-part="lead"]')).toContainText("stopped before finishing", { timeout: 20000 })
   const metadataAfter = new Map((await call("GET", `/session/${briefAnchor}/children`)).body.map((item) => [item.id, item.metadata]))
   for (const [id, metadata] of metadataBefore) assert.deepEqual(metadataAfter.get(id), metadata, `metadata of ${id} survives restart`)
   await new Promise((resolve) => setTimeout(resolve, 4000))
@@ -679,7 +685,7 @@ try {
   await expect(card).toContainText("revision 6", { timeout: 40000 })
   await expect(card.getByRole("button", { name: "Prepare brief" })).toHaveCount(0)
   await expect(card.locator(".desk-brief-ask")).toContainText("Choose whether to stay at the canary or roll out fully", { timeout: 60000 })
-  await expect(card.locator(".desk-brief")).toContainText("Kim owns the canary")
+  await expect(card).toContainText("Kim owns the canary")
   await card.locator(".desk-brief-detail > summary").click()
   await expect(card.locator(".desk-brief .desk-ref", { hasText: "file:ROLLOUT.md" })).toBeVisible()
   assert.deepEqual(seen.retrieved, [true], "the job read the project file through the read tool")
@@ -692,7 +698,7 @@ try {
   await expect(original.locator("p")).toBeHidden()
   await original.locator("summary").click()
   await expect(original).toContainText("The canary is healthy. Choose how far to roll out.")
-  await expect(card.locator(".home-options label", { hasText: "Stay at canary" })).toContainText("recommended")
+  await expect(card.locator(".home-options label", { hasText: "Stay at canary" })).toContainText(/recommended/i)
   await expect(card.getByRole("radio")).toHaveCount(2)
   await expect(secondPage.locator('.home-decision[data-attention-id="att_rollout"] .desk-brief-ask')).toContainText("Choose whether", { timeout: 30000 })
   assert.equal(hits.brief, autoHits + 2, "one automatic job across two clients: one tool step and one reply")
@@ -714,7 +720,7 @@ try {
   await page.goto(rollout)
   await expect(card).toContainText("revision 7", { timeout: 40000 })
   await expect(card.locator(".desk-brief-ask")).toContainText("Choose whether", { timeout: 60000 })
-  await expect(card.locator(".desk-brief")).toContainText("Brief for revision 7")
+  await expect(card).toContainText("Brief for revision 7")
   assert.equal((await call("GET", `/session/${briefAnchor}/children`)).body.filter((item) => item.metadata?.frontDesk?.revision === "7").length, 1)
   assert.equal(hits.brief, autoHits + 4)
   // Backlog: six more open decisions arrive at once. The newest start first, never more than two at a time.
@@ -741,6 +747,29 @@ try {
   holds.splice(0).forEach((release) => release())
   log(`BACKLOG 6 new decisions -> first two jobs = newest (extra_5, extra_6); peak running ${peak}; created newest-first ${order.join(",")}`)
   log(`AUTOBRIEF no click: rev 6 prepared with read tool (file:ROLLOUT.md cited), sandboxed visual (scripts/network blocked), original behind disclosure; reload+desk reuse one job; rev 7 -> one new job; permissions=[]`)
+
+  // 11b. More detail: an explicit question about the selected decision reaches the desk conversation with
+  //      bounded evidence and citable links, gets an answer there, and leaves the chat draft alone.
+  await page.goto(rollout)
+  await expect(card.locator(".desk-brief-ask")).toBeVisible({ timeout: 30000 })
+  await editor().fill("my unsent draft")
+  const briefsBeforeDetail = hits.brief
+  await card.getByRole("button", { name: "More detail" }).click()
+  await card.getByRole("textbox", { name: "Question for the front desk (optional)" }).fill("DESK-Q9 why the canary first?")
+  await card.getByRole("button", { name: "Ask" }).click()
+  await expect(card.locator(".desk-more")).toContainText("Asked in the chat.", { timeout: 20000 })
+  await expect(transcript()).toContainText("More detail: Pick a rollout", { timeout: 20000 })
+  await expect(transcript()).toContainText("Desk answer for DESK-Q9.", { timeout: 20000 })
+  await expect(editor()).toHaveValue("my unsent draft")
+  const deskMessages = await messages(pointerID)
+  const asked = deskMessages.findLast((message) => message.info.role === "user")
+  const detailPart = asked.parts.find((part) => part.metadata?.source === "es-app/front-desk-detail")
+  assert(detailPart?.synthetic && detailPart.text.includes("attention:fixture:att_rollout at revision 7") && detailPart.text.includes("&message="), "detail evidence bound to the revision with message links")
+  assert.equal(hits.brief, briefsBeforeDetail, "asking starts no brief job")
+  await new Promise((resolve) => setTimeout(resolve, 2000))
+  assert.equal((await messages(pointerID)).filter((message) => message.info.role === "user" && message.parts.some((part) => part.metadata?.source === "es-app/front-desk-detail")).length, 1, "one send per click")
+  await editor().fill("")
+  log(`DETAIL More detail on rev 7 -> one desk message with bound evidence + links, answered in chat; draft kept; briefs unchanged`)
 
   // 12. Authority: nothing answered, granted or retried on anyone's behalf.
   assert.deepEqual(attentionPosts, [])

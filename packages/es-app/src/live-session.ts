@@ -7,6 +7,7 @@ import { batch, createSignal, onCleanup } from "solid-js"
 import type { Message, Part, Session, SessionStatus, Todo } from "@opencode-ai/sdk/v2"
 import { oc } from "./api"
 import { createServerEvents, type ServerEvents } from "./event-source"
+import { anchorValid } from "./message-anchor"
 
 export const TAIL = 80
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
@@ -238,11 +239,19 @@ export function createLiveSession(
     return activeLoad
   }
 
-  const older = async (): Promise<void> => {
-    if (disposed || loadingOlder() || !hasOlder()) return
+  let olderLoad: Promise<void> | undefined
+  // Concurrent callers share the page in flight, so a waiter observes its result.
+  const older = (): Promise<void> => {
+    if (olderLoad) return olderLoad
+    if (disposed || !hasOlder()) return Promise.resolve()
+    olderLoad = loadOlder()
+    return olderLoad
+  }
+  const loadOlder = async (): Promise<void> => {
     setLoadingOlder(true)
     try {
-      if (activeLoad) await activeLoad
+      // Always yield first: `older` must record this load before its cleanup runs.
+      await activeLoad
       const before = olderCursor()
       if (disposed || !before) return
       const page = await oc.messagesPage(sessionID, directory, TAIL, before, controller.signal)
@@ -258,8 +267,29 @@ export function createLiveSession(
         setOlderCursor(page.cursor)
       })
     } finally {
+      // Cleared with the cursor update, so no caller sees a new cursor and a finished load in flight.
+      olderLoad = undefined
       setLoadingOlder(false)
     }
+  }
+
+  /** Loads the older pages that contain `ids`, and no further. Returns the IDs this session does not have. */
+  const reveal = async (ids: readonly string[]): Promise<string[]> => {
+    if (activeLoad) await activeLoad
+    const loaded = (id: string) => !!data.message[sessionID]?.some((message) => message.id === id)
+    const unknown = new Set<string>()
+    // Confirm each unloaded ID first, so an unknown one never pages the whole transcript.
+    for (const id of ids) {
+      if (loaded(id)) continue
+      const found = anchorValid(id) ? await oc.message(sessionID, directory, id, controller.signal) : undefined
+      if (!found || found.info.sessionID !== sessionID) unknown.add(id)
+    }
+    while (!disposed && hasOlder() && ids.some((id) => !unknown.has(id) && !loaded(id))) {
+      const cursor = olderCursor()
+      await older()
+      if (olderCursor() === cursor) break
+    }
+    return ids.filter((id) => unknown.has(id) || !loaded(id))
   }
 
   const refresh = () => {
@@ -439,5 +469,5 @@ export function createLiveSession(
     source?.close()
   })
 
-  return { data, load, older, hasOlder, loadingOlder, apply, error, connectionError, loading, retry }
+  return { data, load, older, reveal, hasOlder, loadingOlder, apply, error, connectionError, loading, retry }
 }

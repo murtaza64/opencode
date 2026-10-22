@@ -56,6 +56,11 @@ const response = (input: string | URL | Request) => {
       headers: eligible.length > items.length ? { "X-Next-Cursor": (items[0]?.info as { id: string }).id } : {},
     })
   }
+  const single = /^\/oc\/session\/ses_current\/message\/([^/]+)$/.exec(path)
+  if (single) {
+    const found = snapshot.find((message) => (message.info as { id: string }).id === single[1])
+    return found ? Response.json(found) : Response.json({ name: "NotFoundError" }, { status: 404 })
+  }
   if (path === "/oc/session/status") return Response.json(statuses)
   if (path === "/oc/session/ses_current/todo") return Response.json(todos)
   if (path === "/oc/session/ses_current") return Response.json({ id: "ses_current", title: "Test" })
@@ -148,6 +153,34 @@ test("older pages prepend in order without duplicates and stop at the first mess
   expect(live.hasOlder()).toBe(false)
   expect(live.loadingOlder()).toBe(false)
   expect(fetchSpy.mock.calls.filter(([input]) => String(input).includes("/message?"))).toHaveLength(3)
+})
+
+test("revealing an old message loads only the page that contains it", async () => {
+  snapshot = Array.from({ length: 300 }, (_, index) => ({ info: user(`msg_${String(index).padStart(3, "0")}`), parts: [] }))
+  const live = start()
+  await live.load()
+  expect(await live.reveal(["msg_150"])).toEqual([])
+  expect(live.data.message.ses_current?.[0]?.id).toBe("msg_140")
+  expect(live.hasOlder()).toBe(true)
+})
+
+test("revealing an unknown message never pages history", async () => {
+  snapshot = Array.from({ length: 300 }, (_, index) => ({ info: user(`msg_${String(index).padStart(3, "0")}`), parts: [] }))
+  const live = start()
+  await live.load()
+  expect(await live.reveal(["msg_999", "../bad"])).toEqual(["msg_999", "../bad"])
+  expect(live.data.message.ses_current).toHaveLength(80)
+  expect(fetchSpy.mock.calls.filter(([input]) => String(input).includes("/message?"))).toHaveLength(1)
+})
+
+test("a reveal joins an older page already in flight instead of skipping it", async () => {
+  snapshot = Array.from({ length: 300 }, (_, index) => ({ info: user(`msg_${String(index).padStart(3, "0")}`), parts: [] }))
+  const live = start()
+  await live.load()
+  const scrolling = live.older()
+  expect(await live.reveal(["msg_100"])).toEqual([])
+  await scrolling
+  expect(live.data.message.ses_current?.[0]?.id).toBe("msg_060")
 })
 
 test("older SSE updates do not open gaps until older history is loaded", async () => {

@@ -424,6 +424,11 @@ export const createFixture = async () => {
         )
       }
       if (action === "/todo" && request.method === "GET") return json(fixture.todos?.get(id) ?? [])
+      const single = /^\/message\/([^/]+)$/.exec(action)
+      if (single && request.method === "GET") {
+        const found = (id === "ses_a" ? fixture.messages ?? [] : fixture.messagesB).find((message) => message.info.id === single[1])
+        return found ? json(found) : json({ name: "NotFoundError", data: { message: `Message not found: ${single[1]}` } }, 404)
+      }
       if (action === "/message") {
         const limit = url.searchParams.get("limit")
         const all = id === "ses_a"

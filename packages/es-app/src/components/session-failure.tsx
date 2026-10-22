@@ -4,8 +4,9 @@ import { failureLabel, retryLabel, unavailableReason, type RetryResult } from ".
 
 const settled = (result: RetryResult | undefined) => result?.outcome === "accepted" || result?.outcome === "running"
 
-/** Per-session Retry with its inline outcome. Renders nothing unless the session is failed. */
-export const FailureRetry = (props: { sessionID: string; compact?: boolean }) => {
+/** Per-session Retry with its inline outcome. Renders nothing unless the session is failed.
+ * `card` renders an available Retry as primary and leaves an unavailable one out. */
+export const FailureRetry = (props: { sessionID: string; compact?: boolean; card?: boolean }) => {
   const { failures, handedOff } = useDashboard()
   const failure = () => (handedOff(props.sessionID) ? undefined : failures.failure(props.sessionID))
   const state = () => failures.retryState(props.sessionID)
@@ -16,14 +17,14 @@ export const FailureRetry = (props: { sessionID: string; compact?: boolean }) =>
       <span class="failure-retry" data-compact={props.compact ? "" : undefined}>
         <Show when={failure()}>
           {(item) => (
-            <Show when={item().retry === "available"} fallback={
-              <span class="failure-note" title={item().retry === "out-of-order"
+            <Show when={item().retry === "available"} fallback={props.card ? undefined
+              : <span class="failure-note" title={item().retry === "out-of-order"
                 ? "Newer steps would sort before the failed one, so a retry could not track its progress."
                 : "The failed step ran tools; retrying could repeat or hide their effects."}>
                 Retry unavailable: {unavailableReason(item())}
               </span>
             }>
-              <button type="button" class="failure-retry-button" disabled={sending()}
+              <button type="button" class={props.card ? "desk-button home-primary" : "failure-retry-button"} disabled={sending()}
                 aria-label={`Retry failed turn${props.compact ? "" : `: ${failureLabel(item())}`}`}
                 onClick={() => void failures.retry(item())}>
                 {sending() ? "Retrying…" : "Retry"}

@@ -124,6 +124,8 @@ test("agent-shared app links open in this window; other destinations stay extern
   expect(appRouteURL(`http://127.0.0.1:3181${session}`, origin)).toBe(`${origin}${session}`)
   expect(appRouteURL(`http://localhost:3100${session}#end`, origin)).toBe(`${origin}${session}#end`)
   expect(appRouteURL(`${origin}/desk`, origin)).toBe(`${origin}/desk`)
+  expect(appRouteURL(`http://127.0.0.1:3181${session}&message=msg_a&to=msg_b`, origin)).toBe(`${origin}${session}&message=msg_a&to=msg_b`)
+  expect(apiAllowed("GET", "/oc/session/ses_a/message/msg_a")).toBe(true)
   for (const value of [
     "https://github.com/owner/repo/pull/1",
     "http://127.0.0.1:64297/map",

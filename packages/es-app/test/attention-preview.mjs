@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url"
 export const startAttentionPreview = async (plugins = []) => {
   const ledger = {
     status: 200, partial: false, operator: false, denyOperator: false, loseResponse: false, calls: [], workCalls: [], commands: new Map(),
-    cloudStatus: 200, transcriptCalls: 0,
+    cloudStatus: 200, transcriptCalls: 0, ignored: [], ignoreCalls: [],
     cloudLanes: [{ lane: "cloud-review", owner: "wingman:fixture-task", runtime: "wingman", activity: "Reviewing the attention module", "wingman-status": "processing", "wingman-cost": "0.42", "wingman-turns": "3", "wingman-prs": "https://github.com/example/repo/pull/9", "wingman-url": "https://cloud.temporal.io/namespaces/fixture/workflows/fixture" }],
     records: [{ id: "decision_1", editspace: "fixture", revision: 1, status: "open", kind: "decision", title: "Choose the bounded implementation scope", context: "Keep the homepage focused on human choices. This synthetic record is not approval to publish.", options: [{ id: "small", label: "Small scope" }, { id: "defer", label: "Defer" }], recommendation: "small", producer_session: "ses_a", origin_session: "ses_a", gate_key: "issue:219:scope:v1", source_ref: { session_id: "ses_a", directory }, decision: null, delivery_state: "not-requested", created_at: Date.now() - 300_000, updated_at: Date.now() - 300_000, snoozed_until: null },
       { id: "other_decision", editspace: "other", revision: 1, status: "open", kind: "blocker", title: "Other project decision", context: "A second project may go offline independently.", options: [{ id: "yes", label: "Continue" }], producer_session: "ses_b", origin_session: "ses_b", gate_key: "other:gate:v1", source_ref: { session_id: "ses_b", directory }, decision: null, delivery_state: "not-requested", created_at: Date.now(), updated_at: Date.now() }],
@@ -29,6 +29,20 @@ export const startAttentionPreview = async (plugins = []) => {
         }
         res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" })
         res.end(JSON.stringify({ lanes: ledger.cloudLanes, error: "" }))
+      })
+      // Disposable stand-in for the dashboard's ignored-failures file: idempotent ignore/unignore.
+      server.middlewares.use("/es/api/frontdesk/ignored-failures", async (req, res) => {
+        const chunks = []
+        for await (const chunk of req) chunks.push(chunk)
+        const json = (value, status = 200) => { res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify(value)) }
+        if (req.method === "POST") {
+          const body = JSON.parse(Buffer.concat(chunks).toString())
+          ledger.ignoreCalls.push(body)
+          const same = item => item.sessionID === body.sessionID && item.messageID === body.messageID
+          if (body.op === "unignore") ledger.ignored = ledger.ignored.filter(item => !same(item))
+          if (body.op === "ignore" && !ledger.ignored.some(same)) ledger.ignored.push({ sessionID: body.sessionID, messageID: body.messageID, directory: body.directory ?? "", failedAt: body.failedAt ?? null, label: body.label ?? "", ignoredAt: Date.now() })
+        }
+        return json({ format: "front-desk-ignored-failures/1", entries: ledger.ignored })
       })
       server.middlewares.use("/es/api/attention", async (req, res) => {
         const url = new URL(req.url, "http://fixture")
