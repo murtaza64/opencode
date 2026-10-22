@@ -14,6 +14,8 @@ const waitFor = (ready: () => boolean) => new Promise<void>(resolve => {
   check()
 })
 const SETTING = "es-app:front-desk:auto-prepare"
+// The newest few open items first, then the backlog one at a time: no burst on first run.
+const FIRST = 5
 const MAX_RUNNING = 2
 
 const create = () => {
@@ -57,8 +59,9 @@ const create = () => {
   createEffect(() => {
     if (!auto() || !loaded() || anchor.error() || attention.stale() || briefs.pending() || briefs.preparing()) return
     const running = briefs.jobs().filter(job => ["starting", "running"].includes(job.state.state)).length
-    if (running >= MAX_RUNNING) return
-    const next = items().find(item => !jobFor(item) && !attempted.has(`${item.key}\u0000${item.revision}`))
+    if (running >= (attempted.size < FIRST ? MAX_RUNNING : 1)) return
+    const next = items().filter(item => !jobFor(item) && !attempted.has(`${item.key}\u0000${item.revision}`))
+      .sort((a, b) => (b.record?.created_at ?? 0) - (a.record?.created_at ?? 0))[0]
     if (!next) return
     attempted.add(`${next.key}\u0000${next.revision}`)
     void briefs.start(next)

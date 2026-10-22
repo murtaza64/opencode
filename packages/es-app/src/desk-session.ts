@@ -137,6 +137,17 @@ const metaOf = (session: Session): BriefMeta | undefined => {
 /** Local read-only retrieval inside the anchor's project root. Every other tool, reads outside the
  * root and environment files are denied, so a brief never prompts for permission, runs commands,
  * reaches the network or writes anything. */
+/* Public shape other clients (native, phone) can read without es-app code:
+ * - anchor: Core session ses_fdbrief_<sha256(editspace root)[:20 hex]> in that root (archived);
+ * - job: its child session ses_fdjob_<sha256(JSON [anchor, source, revision, attempt])[:24 hex]>,
+ *   metadata.frontDesk = BriefMeta {kind:"brief", requestID, source: "attention:<editspace>:<record id>", revision, title, refs};
+ * - result: the job's last completed assistant text is one JSON object matching BRIEF_SCHEMA (desk.ts),
+ *   valid only while the ledger record still has that revision. */
+const briefID = async (parent: string, source: string, revision: string, attempt: number) => {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify([parent, source, revision, attempt]))))
+  return `ses_fdjob_${[...digest].map(byte => byte.toString(16).padStart(2, "0")).join("").slice(0, 24)}`
+}
+
 export const BRIEF_PERMISSION = [
   { permission: "*", pattern: "*", action: "deny" as const },
   ...["read", "grep", "glob", "list"].map(permission => ({ permission, pattern: "*", action: "allow" as const })),
@@ -218,7 +229,8 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
     } catch (cause) {
       if (cause instanceof SessionCreateError && !cause.uncertain) {
         savePending(undefined)
-        setError(`Brief not started: ${cause.message}`)
+        // 409: another client (tab, native app) already created this job; adopt it, never prompt it again.
+        if (!cause.message.includes("HTTP 409")) setError(`Brief not started: ${cause.message}`)
       }
       setInflight(undefined)
       return refresh()
@@ -255,7 +267,10 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
       if (desk()?.session !== target.session || pending() || inflight() || reusable(latest)) return
       const packet = briefPacket(latest, tail)
       const meta: BriefMeta = { kind: "brief", requestID: crypto.randomUUID(), source: latest.key, revision: latest.revision, title: latest.title, refs: packet.refs }
-      const id = `ses_${descending()}`
+      // Deterministic per (parent, source, revision, attempt): every client computes the same ID, so
+      // Core's create reconciliation makes the first creator win and the rest adopt its job.
+      const attempt = jobs().filter(job => job.meta.source === latest.key && job.meta.revision === latest.revision).length
+      const id = await briefID(target.session, latest.key, latest.revision, attempt)
       const value: PendingCreate = {
         id, directory: target.directory, packet: packet.text, created: Date.now(),
         body: {

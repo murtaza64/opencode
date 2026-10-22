@@ -137,6 +137,9 @@ const record = () => ({
   source_ref: { session_id: sourceSession, directory: project }, decision: null, delivery_state: "not-requested", answer: null, delivery: null,
   created_at: Date.now() - 60_000, updated_at: Date.now(),
 })
+// Extra open decisions for the backlog proof, newest last.
+const extraRecords = []
+const extraRecord = (n) => ({ ...record(), id: `att_extra_${n}`, revision: 1, title: `Backlog decision ${n}`, gate_key: `extra-${n}`, created_at: Date.now() - 50_000 + n * 1000 })
 // Memory and, once enabled, the operator session go to the real dotfiles seam (private HOME).
 let operatorReal = false
 let memoryBase = ""
@@ -169,7 +172,7 @@ const dashboard = http.createServer((request, response) => {
   if (url.pathname === "/api/mail") return json({ editspace: "fixture", lane: "", messages: [] })
   if (url.pathname === "/api/attention/session") return json({ operator: false })
   if (url.pathname === "/api/attention" && attentionDown) return json({ detail: "down" }, 503)
-  if (url.pathname === "/api/attention") return json({ records: sourceSession ? [record()] : [], projects: [{ editspace: "fixture", available: true }], partial: false })
+  if (url.pathname === "/api/attention") return json({ records: sourceSession ? [record(), ...extraRecords] : [], projects: [{ editspace: "fixture", available: true }], partial: false })
   return json({ detail: "Not Found" }, 404)
 })
 
@@ -662,7 +665,11 @@ try {
   await page.goto(`${origin}/desk`)
   await page.getByLabel("Prepare briefs automatically").check()
   const autoHits = hits.brief
-  await page.goto(`${origin}/`)
+  // A second client (another window or device) runs its own provider at the same moment.
+  const second = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  await second.addInitScript(() => { localStorage.setItem("es-app:front-desk:auto-prepare", "on") })
+  const secondPage = await second.newPage()
+  await Promise.all([page.goto(`${origin}/`), secondPage.goto(`${origin}/`)])
   const card = page.locator('.home-decision[data-attention-id="att_rollout"]')
   await expect(card).toContainText("revision 6", { timeout: 40000 })
   await expect(card.getByRole("button", { name: "Prepare brief" })).toHaveCount(0)
@@ -681,7 +688,12 @@ try {
   await expect(original).toContainText("The canary is healthy. Choose how far to roll out.")
   await expect(card).toContainText("Agent recommends: Stay at canary")
   await expect(card.getByRole("radio")).toHaveCount(2)
-  assert.equal(hits.brief, autoHits + 2, "one automatic job: one tool step and one reply")
+  await expect(secondPage.locator('.home-decision[data-attention-id="att_rollout"] .desk-brief-plain')).toContainText("You decide", { timeout: 30000 })
+  assert.equal(hits.brief, autoHits + 2, "one automatic job across two clients: one tool step and one reply")
+  const rev6 = (await call("GET", `/session/${briefAnchor}/children`)).body.filter((item) => item.metadata?.frontDesk?.revision === "6")
+  assert.equal(rev6.length, 1)
+  assert.match(rev6[0].id, /^ses_fdjob_[0-9a-f]{24}$/)
+  await second.close()
   assert.deepEqual((await call("GET", "/permission")).body, [], "no permission request was created")
   if (evidence) await page.screenshot({ path: path.join(evidence, "05-home-auto-brief.png"), fullPage: true })
   await page.reload()
@@ -699,6 +711,29 @@ try {
   await expect(card.locator(".desk-brief")).toContainText("Derived from revision 7")
   assert.equal((await call("GET", `/session/${briefAnchor}/children`)).body.filter((item) => item.metadata?.frontDesk?.revision === "7").length, 1)
   assert.equal(hits.brief, autoHits + 4)
+  // Backlog: six more open decisions arrive at once. The newest start first, never more than two at a time.
+  holdBriefs = true
+  for (const n of [1, 2, 3, 4, 5, 6]) extraRecords.push(extraRecord(n))
+  await page.goto(`${origin}/`)
+  const extraJobs = async () => (await call("GET", `/session/${briefAnchor}/children`)).body.filter((item) => item.metadata?.frontDesk?.source?.startsWith("attention:fixture:att_extra_"))
+  await poll("first backlog jobs", async () => (await extraJobs()).length === 2)
+  await new Promise((resolve) => setTimeout(resolve, 3000))
+  const firstTwo = (await extraJobs()).map((item) => item.metadata.frontDesk.source).sort()
+  assert.deepEqual(firstTwo, ["attention:fixture:att_extra_5", "attention:fixture:att_extra_6"], "newest first, two at a time")
+  let peak = 0
+  for (let released = 0; released < 6; released++) {
+    await poll("a held backlog brief", () => holds.length > 0, 60000)
+    const statuses = (await call("GET", "/session/status")).body
+    peak = Math.max(peak, (await extraJobs()).filter((item) => ["busy", "retry"].includes(statuses[item.id]?.type)).length)
+    holds.shift()()
+  }
+  await poll("backlog done", async () => (await extraJobs()).length === 6)
+  const order = (await extraJobs()).sort((a, b) => a.time.created - b.time.created).map((item) => item.metadata.frontDesk.source.slice(-1))
+  assert.deepEqual(order, ["6", "5", "4", "3", "2", "1"])
+  assert(peak <= 2, `peak running ${peak}`)
+  holdBriefs = false
+  holds.splice(0).forEach((release) => release())
+  log(`BACKLOG 6 new decisions -> first two jobs = newest (extra_5, extra_6); peak running ${peak}; created newest-first ${order.join(",")}`)
   log(`AUTOBRIEF no click: rev 6 prepared with read tool (file:ROLLOUT.md cited), sandboxed visual (scripts/network blocked), original behind disclosure; reload+desk reuse one job; rev 7 -> one new job; permissions=[]`)
 
   // 12. Authority: nothing answered, granted or retried on anyone's behalf.
