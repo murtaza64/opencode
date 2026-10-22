@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Editspace: lanes as pills, one selected. macOS grid: 824px body, 100px margin. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#23232b"/>
+      <stop offset="1" stop-color="#0c0c0f"/>
+    </linearGradient>
+    <linearGradient id="sel" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#c3cbff"/>
+      <stop offset="1" stop-color="#a5b0f5"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+  <rect x="236" y="262" width="472" height="112" rx="56" fill="#3b3d4b"/>
+  <circle cx="292" cy="318" r="26" fill="#a6e3a1"/>
+  <rect x="236" y="456" width="552" height="112" rx="56" fill="url(#sel)"/>
+  <circle cx="292" cy="512" r="26" fill="#111113"/>
+  <rect x="236" y="650" width="392" height="112" rx="56" fill="#3b3d4b"/>
+  <circle cx="292" cy="706" r="26" fill="#fab387"/>
+</svg>
