@@ -50,6 +50,19 @@ export const internalURL = (value: string, origin: string) => {
   return !!url && url.origin === origin && !/^\/(oc|es)(\/|$)/.test(url.pathname)
 }
 
+// Published web (3181), dev (3100) and native (60302) serve the same es-app, so a link to an app route
+// on any of them opens that route in this window rather than an external browser.
+const APP_PORTS = ["3181", "3100", "60302"]
+const APP_ROUTE = /^\/(?:|cloud|map|new|desk|issue|doc|session\/[\w-]+)$/
+
+export const appRouteURL = (value: string, origin: string) => {
+  const url = URL.parse(value)
+  if (!url || url.username || url.password || !APP_ROUTE.test(url.pathname)) return undefined
+  const known = url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) && APP_PORTS.includes(url.port)
+  if (url.origin !== origin && !known) return undefined
+  return new URL(url.pathname + url.search + url.hash, origin).href
+}
+
 // Only expose the existing es-app surface, not daemon PTYs, shell, config, or file APIs.
 export const apiAllowed = (method: string, pathname: string) => {
   const routes: Record<string, RegExp[]> = {

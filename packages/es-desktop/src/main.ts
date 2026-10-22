@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, Menu, session, shell } from "electron"
 import path from "node:path"
 import { readFile, writeFile } from "node:fs/promises"
 import { serve } from "./server"
-import { externalURL, internalURL, serviceOrigins, startupMode, startupPlan } from "./policy"
+import { appRouteURL, externalURL, internalURL, serviceOrigins, startupMode, startupPlan } from "./policy"
 
 app.setName("Editspace")
 app.setPath("userData", process.env.ES_DESKTOP_USER_DATA ?? path.join(app.getPath("appData"), "Editspace"))
@@ -116,13 +116,18 @@ const start = async () => {
     await shell.openExternal(url)
   }
   window.webContents.setWindowOpenHandler(({ url }) => {
-    void openExternal(url).catch(() => console.error("External browser unavailable"))
+    // The renderer navigates plain clicks on app links itself; this covers new-window opens of app routes.
+    const route = appRouteURL(url, server.origin)
+    if (route) void window.loadURL(route)
+    else void openExternal(url).catch(() => console.error("External browser unavailable"))
     return { action: "deny" }
   })
   window.webContents.on("will-navigate", (event, url) => {
     if (internalURL(url, server.origin)) return
     event.preventDefault()
-    if (new URL(url).origin !== server.origin)
+    const route = appRouteURL(url, server.origin)
+    if (route) void window.loadURL(route)
+    else if (new URL(url).origin !== server.origin)
       void openExternal(url).catch(() => console.error("External browser unavailable"))
   })
   window.webContents.on("will-redirect", (event, url) => {

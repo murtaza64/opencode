@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { linkUrl } from "./link-url"
+import { appPath, linkUrl } from "./link-url"
 
 test.each([
   ["https://github.com/owner/repo/pull/123", "https://duo.fyi/ink/https://github.com/owner/repo/pull/123"],
@@ -46,4 +46,34 @@ test.each([
   "/session/ses_a?directory=/work",
 ])("does not route a non-PR or unsupported destination through Ink: %s", (input) => {
   expect(linkUrl(input)).toBe(input)
+})
+
+const native = "http://127.0.0.1:60302"
+const session = "/session/ses_e9bdef7e4ffeo9XgAIryoyMX2Z?directory=%2FUsers%2Fme%2Fproj"
+test.each([
+  [`http://127.0.0.1:3181${session}`, session],
+  [`http://localhost:3100${session}#bottom`, `${session}#bottom`],
+  [`${native}${session}`, session],
+  [session, session],
+  ["/desk", "/desk"],
+  ["http://127.0.0.1:3181/map?view=weave", "/map?view=weave"],
+  ["http://127.0.0.1:3181/", "/"],
+])("an es-app link opens in the clicked client: %s", (input, expected) => {
+  expect(appPath(input, native)).toBe(expected)
+})
+
+test.each([
+  "https://github.com/owner/repo/pull/1",
+  "http://127.0.0.1:64297/map",
+  "http://127.0.0.1:7777/session/ses_a",
+  "http://example.com:3181/session/ses_a",
+  "https://127.0.0.1:3181/session/ses_a",
+  "http://u:p@127.0.0.1:3181/session/ses_a",
+  "http://127.0.0.1:3181/oc/session",
+  "http://127.0.0.1:3181/es/api/state",
+  "http://127.0.0.1:3181/assets/index.js",
+  "http://127.0.0.1:3181/session/ses_a/extra",
+  "mailto:me@example.com",
+])("other destinations stay external: %s", (input) => {
+  expect(appPath(input, native)).toBeUndefined()
 })

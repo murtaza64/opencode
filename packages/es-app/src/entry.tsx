@@ -2,7 +2,7 @@ import "./index.css"
 import { render } from "solid-js/web"
 import { onCleanup, onMount, Show, type ParentProps } from "solid-js"
 import { MetaProvider } from "@solidjs/meta"
-import { Route, Router } from "@solidjs/router"
+import { Route, Router, useNavigate } from "@solidjs/router"
 import { DialogProvider } from "@opencode-ai/ui/context/dialog"
 import { FileComponentProvider } from "@opencode-ai/ui/context/file"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
@@ -20,11 +20,13 @@ import { DashboardProvider } from "./state"
 import { TicketTip, wrapTicketRefs } from "./ticket-refs"
 import { SessionRefs, wrapSessionRefs } from "./session-mention-dom"
 import { installSidebarKeys, leftOpen, startDrag } from "./ui"
-import { installInkLinks } from "./link-url"
+import { installAppLinks, installInkLinks } from "./link-url"
 
 function Providers(props: ParentProps) {
   onMount(() => onCleanup(installSidebarKeys()))
   onMount(() => onCleanup(installInkLinks()))
+  const navigate = useNavigate()
+  onMount(() => onCleanup(installAppLinks(navigate)))
   let shellEl: HTMLDivElement | undefined
   // ticket refs everywhere in the shell (transcript, sidebar, panels):
   // rAF-debounced since streaming produces mutation bursts, and the wrap

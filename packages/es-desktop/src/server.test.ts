@@ -3,7 +3,7 @@ import { mkdtemp, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { serve } from "./server"
-import { apiAllowed, externalURL, internalURL, serviceOrigins, serviceURL, startupMode, startupPlan } from "./policy"
+import { apiAllowed, appRouteURL, externalURL, internalURL, serviceOrigins, serviceURL, startupMode, startupPlan } from "./policy"
 import { readFile } from "node:fs/promises"
 
 const cleanup: (() => Promise<unknown>)[] = []
@@ -116,6 +116,24 @@ test("external links only accept credential-free HTTP(S)", () => {
   expect(internalURL("http://127.0.0.1:12345/session/ses_a", "http://127.0.0.1:12345")).toBe(true)
   expect(internalURL("http://127.0.0.1:12345/oc/session", "http://127.0.0.1:12345")).toBe(false)
   expect(internalURL("http://127.0.0.1:54321/", "http://127.0.0.1:12345")).toBe(false)
+})
+
+test("agent-shared app links open in this window; other destinations stay external", () => {
+  const origin = "http://127.0.0.1:60302"
+  const session = "/session/ses_e9bdef7e4ffeo9XgAIryoyMX2Z?directory=%2FUsers%2Fme%2Fproj"
+  expect(appRouteURL(`http://127.0.0.1:3181${session}`, origin)).toBe(`${origin}${session}`)
+  expect(appRouteURL(`http://localhost:3100${session}#end`, origin)).toBe(`${origin}${session}#end`)
+  expect(appRouteURL(`${origin}/desk`, origin)).toBe(`${origin}/desk`)
+  for (const value of [
+    "https://github.com/owner/repo/pull/1",
+    "http://127.0.0.1:64297/map",
+    "http://127.0.0.1:7777/session/ses_a",
+    "http://example.com:3181/session/ses_a",
+    "http://u:p@127.0.0.1:3181/session/ses_a",
+    "http://127.0.0.1:3181/oc/session",
+    "http://127.0.0.1:3181/es/api/state",
+  ])
+    expect(appRouteURL(value, origin)).toBeUndefined()
 })
 
 test("API surface excludes direct shell, PTY, file, and config access", () => {
