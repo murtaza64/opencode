@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { findMentions, insertMention, mentionQuery, rankSessions, tokenBefore } from "./session-mention"
+import { findMentions, insertMention, mentionQuery, mentionText, rankSessions, sessionLane, tokenBefore } from "./session-mention"
 
 const first = `ses_${"A".repeat(26)}`
 const second = `ses_${"B".repeat(26)}`
@@ -19,6 +19,39 @@ describe("mentionQuery", () => {
 
 test("insertMention replaces only the active query and positions the caret after the space", () => {
   expect(insertMention("hello @or more", 6, 9, first)).toEqual({ text: `hello @${first}  more`, caret: 6 + first.length + 2 })
+})
+
+test("insertMention writes title and lane context after the exact session ID", () => {
+  const inserted = `@${first} (session "Relay" · lane orchestrator) `
+  expect(insertMention("ask @rel now", 4, 8, first, { title: "Relay", lane: "orchestrator" })).toEqual({ text: `ask ${inserted} now`, caret: 4 + inserted.length })
+})
+
+test("mentionText omits unknown lane and title and neutralizes characters that would end the suffix", () => {
+  expect(mentionText(first, { title: "Relay" })).toBe(`@${first} (session "Relay")`)
+  expect(mentionText(first, { lane: "orchestrator" })).toBe(`@${first} (session · lane orchestrator)`)
+  expect(mentionText(first, {})).toBe(`@${first}`)
+  expect(mentionText(first, { title: "Fix (urgent)\n now" })).toBe(`@${first} (session "Fix [urgent] now")`)
+})
+
+test("findMentions treats the context suffix as part of the reference and keeps the bare ID as identity", () => {
+  const reference = `@${first} (session "Relay" · lane orchestrator)`
+  const text = `see ${reference} and @${second} (later)`
+  expect(findMentions(text)).toEqual([
+    { start: 4, end: 4 + reference.length, id: first },
+    { start: 4 + reference.length + 5, end: 4 + reference.length + 6 + second.length, id: second },
+  ])
+  expect(tokenBefore(text, 4 + reference.length)?.id).toBe(first)
+  expect(findMentions(`@${first} (session "Relay"`)).toEqual([{ start: 0, end: first.length + 1, id: first }])
+})
+
+test("sessionLane reads lane records for owners and handed-off sessions and is undefined otherwise", () => {
+  const scope = (lane: string) => JSON.stringify(["opencode", lane])
+  const handoffs = [{ lane: scope("orchestrator"), predecessor: "ses_old", successor: "ses_new" }]
+  const owners = [{ lane: scope("builder"), owner: "ses_owner" }]
+  expect(sessionLane("ses_owner", handoffs, owners)).toBe("builder")
+  expect(sessionLane("ses_old", handoffs, owners)).toBe("orchestrator")
+  expect(sessionLane("ses_new", handoffs, owners)).toBe("orchestrator")
+  expect(sessionLane("ses_other", handoffs, owners)).toBeUndefined()
 })
 
 test("findMentions finds complete tokens and tokenBefore only matches the exact end", () => {

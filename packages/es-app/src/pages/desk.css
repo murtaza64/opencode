@@ -72,3 +72,13 @@
 .desk-visual { margin: 8px 0; }
 .desk-visual iframe { inline-size: 100%; block-size: 280px; border: 1px solid var(--surface1); background: var(--mantle); }
 .desk-auto { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+/* Card type scale: title (from the card), 13px body, 11px muted meta. */
+.desk-brief-chip { display: inline-block; font-size: 11px; color: var(--blue); border: 1px solid var(--surface1); padding: 0 6px; margin-block-end: 4px; }
+.desk-brief-plain dt, .desk-brief h3, .attention-home .desk-brief h3, .desk-ref { font-size: 11px; }
+.desk-brief-plain dd, .desk-brief p:not(.home-source):not(.home-muted):not(.home-warning) { font-size: 13px; }
+.desk-brief .desk-button { border-color: transparent; padding-inline: 4px; text-decoration: underline; }
+@media (max-width: 600px) {
+  .desk-flow { flex-direction: column; gap: 6px; }
+  .desk-flow li + li::before { content: "↓"; inset-inline-start: 4px; inset-block-start: -15px; }
+  .desk-visual iframe { block-size: 220px; }
+}

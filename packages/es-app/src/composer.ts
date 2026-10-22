@@ -97,6 +97,9 @@ export type ComposerState = {
   normalSubmission: {
     text: string
     images: number
+    // Exact submitted images for the pending echo. Kept in memory only: the
+    // draft and image store own durable copies, so a reload falls back to the count.
+    previews?: readonly ComposerImage[]
     status: "sending" | "accepted" | "unknown"
     after?: string
     action?: ComposerAction
@@ -395,7 +398,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     targetRevision: state.targetRevision,
     mode: state.mode,
     normalExplicit: state.normalExplicit,
-    normalSubmission: state.normalSubmission ? { ...state.normalSubmission } : null,
+    normalSubmission: state.normalSubmission ? { ...state.normalSubmission, previews: undefined } : null,
     modelSelection: state.modelSelection,
     sessionModel: state.sessionModel,
     task: copyDraft(state.task),
@@ -1028,6 +1031,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         normalSubmission: {
           text,
           images: draft.images.length,
+          ...(draft.images.length ? { previews: draft.images } : {}),
           status: "sending",
           after: latestMessageID,
           ...(direct ? { action: direct.action } : {}),

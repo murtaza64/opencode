@@ -12,7 +12,7 @@ import { createLiveSession, errorText } from "../live-session"
 import FakeCaret from "../components/fake-caret"
 import { SessionChips } from "../components/session-chips"
 import { SessionPicker } from "../components/session-picker"
-import { insertMention, mentionQuery, rankSessions, tokenBefore } from "../session-mention"
+import { insertMention, mentionQuery, rankSessions, sessionLane, tokenBefore } from "../session-mention"
 import { RelativeLines } from "../components/relative-lines"
 import SessionInfo from "../components/session-info"
 import { sessionHref, useDashboard, type SessionRow } from "../state"
@@ -1216,7 +1216,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       const el = target()
       const active = query()
       if (!el || !active) return
-      const next = insertMention(el.value, active.start, el.selectionStart, row.id)
+      const next = insertMention(el.value, active.start, el.selectionStart, row.id, { title: row.title, lane: sessionLane(row.id, lineage(), lineageOwners()) })
       apply(el, next.text, next.caret)
     }
     const keyDown = (event: KeyboardEvent) => {
@@ -1600,7 +1600,10 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             <Show when={echo() && composer.state.normalSubmission}>
               {(submission) => (
                 <div class="pending-msg" data-status={submission().status}>
-                  <div class="pending-bubble" dir="auto">{submission().text}{submission().images ? ` · ${submission().images} image(s)` : ""}</div>
+                  <Show when={submission().text || !submission().previews?.length}>
+                    <div class="pending-bubble" dir="auto">{submission().text}{submission().images && !submission().previews?.length ? ` · ${submission().images} image(s)` : ""}</div>
+                  </Show>
+                  <ComposerImages images={submission().previews} />
                   <div class="pending-hint">{submission().status === "sending" ? "Sending…" : submission().status === "accepted" ? "Sent — waiting for the daemon…" : "Send not confirmed"}</div>
                 </div>
               )}

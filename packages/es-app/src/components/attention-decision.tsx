@@ -81,12 +81,9 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
     <div class="home-eyebrow"><span><Glyph name={props.record.kind === "blocker" ? "question" : "comment-discussion"} />{props.record.kind}</span><bdi dir="auto">{props.record.editspace}</bdi><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><span>revision {props.record.revision}</span></div>
     <h3><bdi dir="auto">{props.record.title}</bdi></h3>
     {props.brief}
-    <Show when={props.readable} fallback={<>
+    <Show when={!props.readable}>
       <p dir="auto">{props.record.context}</p>
       <div class="home-source">Agent request · <A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Open thread</A></div>
-    </>}>
-      <details class="home-original"><summary>Original request</summary><p dir="auto">{props.record.context}</p>
-        <div class="home-source"><bdi dir="ltr">{props.record.id}</bdi> · <A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Open thread</A></div></details>
     </Show>
     <Show when={props.record.status === "open"}>
       <Show when={props.record.recommendation}><p class="home-muted">Agent recommends: <bdi dir="auto">{props.record.options.find(option => option.id === props.record.recommendation)?.label ?? props.record.recommendation}</bdi></p></Show>
@@ -98,6 +95,11 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
     <Show when={props.record.status === "answered"}><Delivery record={props.record} attention={props.attention} /></Show>
     <Show when={props.record.status === "snoozed"}><p class="home-muted">Snoozed until {props.record.snoozed_until ? new Date(props.record.snoozed_until).toLocaleString() : "unknown"}</p><button disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "wake" })}>Return to Needs you</button></Show>
     <Show when={["resolved", "withdrawn"].includes(props.record.status)}><p class="home-muted">{props.record.status} · retained in history</p><Show when={props.record.answer}><pre class="home-answer-text" dir="auto">{props.record.answer?.text}</pre><p class="home-muted">{deliveryLabel(props.record)}</p></Show></Show>
+    {/* With a brief leading, the producer's exact request comes last, after the native controls. */}
+    <Show when={props.readable}>
+      <details class="home-original"><summary>Original request</summary><p dir="auto">{props.record.context}</p>
+        <div class="home-source"><bdi dir="ltr">{props.record.id}</bdi> · <A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Open thread</A></div></details>
+    </Show>
     <details onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>Record &amp; history</summary><div class="home-source"><bdi dir="ltr">{props.record.id} · {props.record.gate_key}</bdi></div><Show when={history()?.version === historyVersion(props.record) ? history() : undefined} fallback={<p>Loading history…</p>}>{item => <Show when={!item().error} fallback={<p>{item().error}</p>}><pre dir="ltr">{JSON.stringify(item().events, null, 2)}</pre></Show>}</Show></details>
     <Show when={confirm()}>{draft => <dialog class="home-confirm" ref={element => queueMicrotask(() => element.showModal())} onCancel={() => setConfirm(undefined)} aria-labelledby={`home-choice-title-${props.record.id}`}><h2 id={`home-choice-title-${props.record.id}`}>Record this choice?</h2><p><bdi dir="auto">{draft().record.options.find(option => option.id === draft().choice)?.label}</bdi></p><p>Saved only: nothing is sent, resumed or granted.</p><div class="home-actions"><button class="home-primary" disabled={!canWriteAttention(props.attention, draft().record)} onClick={async () => { const selected = draft(); setConfirm(undefined); if (await props.attention.act(selected.record, { action: "choose", choice_id: selected.choice })) props.onView?.("recorded") }}>Record choice only</button><button onClick={() => setConfirm(undefined)}>Cancel</button></div></dialog>}</Show>
   </article>
