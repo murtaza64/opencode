@@ -529,6 +529,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
   }
 
   const [forking, setForking] = createSignal(false)
+  const [changingModel, setChangingModel] = createSignal(false)
   const fork = async (messageID?: string) => {
     if (forking()) return
     setForking(true)
@@ -684,14 +685,6 @@ function SessionView(props: { sessionID: string; directory: string }) {
   // panel and sidebar hover card: all token classes vs the model's limit)
   const latestUsage = createMemo(() => contextUsage(latestCompletedTurn(messages()), providers()))
 
-  const [agents, { refetch: refetchAgents }] = createResource(() => oc.agents(directory).then(
-    (items) => ({ items: items.filter((agent) => !agent.hidden && agent.mode !== "subagent"), error: "" }),
-    (error: unknown) => ({ items: [], error: String(error) }),
-  ))
-  const activeAgent = () => {
-    const previous = messages().findLast((message) => message.role === "user")
-    return session()?.agent ?? previous?.agent
-  }
   const modelChoice = () => composer.state.visibleBuffer === "aside"
     ? composer.state.aside.model
     : composer.state.modelSelection?.model ?? composer.state.task.model ?? composer.state.sessionModel
@@ -704,6 +697,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
     return s?.model ? { providerID: s.model.providerID, modelID: s.model.id } : null
   })
   const nextModel = () => composer.state.sessionModel ?? lastTurnModel()
+  // The picker opens on the model in use; for an Aside, empty means "use the session model".
+  const pickerModel = () => composer.state.visibleBuffer === "aside" ? modelChoice() : modelChoice() ?? nextModel()
 
   const nudge = async () => {
     const s = session()
@@ -1268,7 +1263,6 @@ function SessionView(props: { sessionID: string; directory: string }) {
   const ComposerPanel = (props: { expanded?: boolean }) => (
     <DirectComposer composer={composer} connected={connected() && !nudgePhase() && !aborting()} submit={send} restoreDraft={restoreDraft}
       editor={<Editor expanded={props.expanded} />} attachments={<Attachments />}
-      activeAgent={activeAgent()} agents={agents()?.items ?? []} agentError={agents()?.error} retryAgents={() => { void refetchAgents() }}
       sessionMetadata={<Show when={latestUsage()}>
         {(u) => (
           <span class="context-pct"
@@ -1301,35 +1295,47 @@ function SessionView(props: { sessionID: string; directory: string }) {
           <Glyph name="zap" />{nudgePhase() === "stopping" ? "Stopping…" : nudgePhase() === "resuming" ? "Sending resume…" : "Nudge"}
         </button>
       </>}>
-      <label class="direct-setting"><select class="model-select" aria-label={composer.state.visibleBuffer === "aside" ? "Aside model" : "Session model"}
-        title={composer.state.visibleBuffer === "aside" ? "Model for this Aside only" : "Session model for future turns, including Steer and Queue"}
-        value={modelChoice() ? `${modelChoice()!.providerID}\u0000${modelChoice()!.modelID}` : ""}
-        onChange={(e) => {
-          const [providerID, modelID] = e.currentTarget.value.split("\u0000")
-          const model = providerID && modelID ? { providerID, modelID } : null
-          if (composer.state.visibleBuffer === "aside") composer.setVisibleModel(model)
-          else if (model) {
+      {/* Changing model mid-conversation is rare and costly, so the picker opens on request. */}
+      <Show when={changingModel()} fallback={<>
+        <span class="direct-model-name" title={composer.state.visibleBuffer === "aside" ? "Aside model" : "Session model"}>
+          {(modelChoice() ?? nextModel())?.modelID ?? "Default model"}
+        </span>
+        <button class="direct-change-model" disabled={!!composer.state.modelSelection && composer.state.modelSelection.status !== "unknown"}
+          onClick={() => setChangingModel(true)}>Change model</button>
+      </>}>
+        <select class="model-select" ref={(el) => queueMicrotask(() => el.focus())}
+          aria-label={composer.state.visibleBuffer === "aside" ? "Aside model" : "Session model"}
+          title={composer.state.visibleBuffer === "aside" ? "Model for this Aside only" : "Applies to future turns, including Steer and Queue"}
+          value={pickerModel() ? `${pickerModel()!.providerID}\u0000${pickerModel()!.modelID}` : ""}
+          onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setChangingModel(false) } }}
+          onChange={(e) => {
+            const [providerID, modelID] = e.currentTarget.value.split("\u0000")
+            const model = providerID && modelID ? { providerID, modelID } : null
+            setChangingModel(false)
+            if (composer.state.visibleBuffer === "aside") return composer.setVisibleModel(model)
+            if (!model) return
             const selected = providers()?.providers.find((provider) => provider.id === providerID)?.models?.[modelID]
             if (composer.state.task.images.length && selected?.capabilities?.input?.image === false) {
               setError("Selected model does not support image input. Images and session model were not changed.")
               return
             }
             void composer.chooseSessionModel(model)
-          }
-        }}>
-        <option value="" disabled={composer.state.visibleBuffer !== "aside"} selected={!modelChoice()}>{composer.state.visibleBuffer === "aside" ? "Use session model" : "Choose session model"}</option>
-        <For each={providers()?.providers ?? []}>
-          {(prov) => (
-            <optgroup label={prov.id}>
-              <For each={Object.keys(prov.models ?? {})}>
-                {(mid) => <option value={`${prov.id}\u0000${mid}`} selected={modelChoice()?.providerID === prov.id && modelChoice()?.modelID === mid}>{mid}</option>}
-              </For>
-            </optgroup>
-          )}
-        </For>
-      </select></label>
-      <Show when={composer.state.visibleBuffer === "aside" && modelChoice()}><button onClick={() => composer.setVisibleModel(null)}>Use session model</button></Show>
-      <Show when={composer.state.visibleBuffer !== "aside" && (busy() || composer.state.busy || composer.state.modelSelection)}><span class="dim">{composer.state.modelSelection ? "Confirming model…" : "Model changes apply to future turns"}</span></Show>
+          }}>
+          <option value="" disabled={composer.state.visibleBuffer !== "aside"} selected={!pickerModel()}>{composer.state.visibleBuffer === "aside" ? "Use session model" : "Choose model"}</option>
+          <For each={providers()?.providers ?? []}>
+            {(prov) => (
+              <optgroup label={prov.id}>
+                <For each={Object.keys(prov.models ?? {})}>
+                  {(mid) => <option value={`${prov.id}\u0000${mid}`} selected={pickerModel()?.providerID === prov.id && pickerModel()?.modelID === mid}>{mid}</option>}
+                </For>
+              </optgroup>
+            )}
+          </For>
+        </select>
+        <button onClick={() => setChangingModel(false)}>Cancel</button>
+      </Show>
+      <Show when={composer.state.visibleBuffer === "aside" && composer.state.aside.model}><button onClick={() => composer.setVisibleModel(null)}>Use session model</button></Show>
+      <Show when={composer.state.modelSelection}>{(selection) => <span class="dim" role="status">{selection().status === "unknown" ? "Model change unconfirmed" : "Confirming model…"}</span>}</Show>
       <Show when={composer.state.modelSelection?.status === "unknown"}><button onClick={() => { void composer.reconcileSessionModel() }}>Check session model</button></Show>
     </DirectComposer>
   )

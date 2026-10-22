@@ -82,6 +82,8 @@ try {
 
   // Unknown admission: a lost ack keeps the input in the fixture; "Check admission" recovers it under the same ID without resending.
   fixture.acceptedAckLost = true
+  // Queue is a secondary action behind the send menu.
+  await page.getByRole("button", { name: "More send options", exact: true }).click()
   await page.getByRole("button", { name: "Queue", exact: true }).click()
   await expect(page.locator(".input-admission")).toContainText("Admission unknown")
   const requestID = posts().at(-1).body.requestID

@@ -69,6 +69,7 @@ try {
   const unknown = await uncertain.newPage()
   await unknown.goto(href("ses_a"))
   await editor(unknown).fill("Possibly admitted input")
+  await unknown.locator(".prompt-box").getByRole("button", { name: "More send options", exact: true }).click()
   await unknown.locator(".prompt-box").getByRole("button", { name: "Queue", exact: true }).click()
   await expect(unknown.locator(".transcript .handoff-recovery")).toContainText("admission of this input is unknown")
   await expect(unknown.locator(".transcript .handoff-recovery").getByRole("link")).toHaveCount(0)

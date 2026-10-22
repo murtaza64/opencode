@@ -908,7 +908,6 @@ test("explicit recovery confirms before replacing both buffers and persists sele
   predecessor.setImages([image])
   predecessor.setVisibleSelection(1, 3)
   predecessor.selectMode("queue")
-  predecessor.setQueueAgent("plan")
   predecessor.restoreDraft("aside")
   predecessor.setVisibleText("aside source")
   predecessor.setVisibleModel({ providerID: "aside", modelID: "other" })
@@ -928,7 +927,7 @@ test("explicit recovery confirms before replacing both buffers and persists sele
   expect(recovered).toBe(true)
   expect(unwrap(successor.state.task)).toMatchObject({ text: "source", images: [image], selection: [1, 3], model })
   expect(successor.state.aside).toMatchObject({ text: "aside source", model: { providerID: "aside", modelID: "other" } })
-  expect(successor.state).toMatchObject({ mode: "queue", visibleBuffer: "aside", queueAgent: "plan" })
+  expect(successor.state).toMatchObject({ mode: "queue", visibleBuffer: "aside" })
   const restored = createComposer("ses_new", directory, { storage, images })
   await restored.hydrated
   expect(unwrap(restored.state.task)).toMatchObject({ text: "source", images: [image], model })
@@ -1006,7 +1005,6 @@ test("recovery uses the exact rejected snapshot, not later source edits, and kee
   const images = durableImages()
   const response = deferred<void>()
   const source = createComposer("ses_old", directory, { storage, images, prompt: () => response.promise })
-  source.setQueueAgent("plan")
   source.setText("rejected")
   source.setImages([image])
   source.setSelection(2, 4)
@@ -1026,7 +1024,7 @@ test("recovery uses the exact rejected snapshot, not later source edits, and kee
     expect(drafts.aside.text).toBe("other buffer")
     return true
   })).toBe(true)
-  expect(successor.state).toMatchObject({ mode: "send", visibleBuffer: "task", queueAgent: "plan" })
+  expect(successor.state).toMatchObject({ mode: "send", visibleBuffer: "task" })
   expect(unwrap(successor.state.task)).toMatchObject({ text: "rejected", images: [image], selection: [2, 4] })
   expect(source.state.task.text).toBe("later edit")
   expect(source.state.task.images[0].filename).toBe("later.png")
@@ -1408,11 +1406,9 @@ test("busy chooses Queue once and idle never reinterprets the prepared mode or s
 test("an empty idle task composer returns to normal Send without sending or dropping settings", () => {
   const { composer, requests } = harness()
   composer.observeBusy(true)
-  composer.setQueueAgent("plan")
   composer.selectMode("steer")
   composer.observeBusy(false)
   expect(composer.state.mode).toBe("send")
-  expect(composer.state.queueAgent).toBe("plan")
   expect(requests).toEqual([])
 })
 
@@ -1690,31 +1686,43 @@ test("late admission cannot clear newer typing or a different controller", async
   expect(other.state.task.text).toBe("other session")
 })
 
-test("Queue captures its selected agent across a lost ack, edited choice, reload and exact retry", async () => {
+test("Queue uses the session agent and retries the exact lost request after reload", async () => {
   let posts = 0
   const { composer, requests, dependencies } = harness((request) => {
     if (request.method === "GET") return new Response(null, { status: 404 })
     if (++posts === 1) throw new Error("lost ack")
-    return Response.json({ ...pending(), agent: "plan" })
+    return Response.json(pending())
   })
   await composer.loadCapabilities()
   composer.selectMode("queue")
   composer.setText("task")
-  composer.setQueueAgent("plan")
   await composer.submit(session)
-  expect(requests[1].body).toEqual({ requestID: "request-1", delivery: "queue", text: "task", agent: "plan" })
-  composer.setQueueAgent("build")
+  expect(requests[1].body).toEqual({ requestID: "request-1", delivery: "queue", text: "task" })
   await composer.persistAsync()
   const restored = createComposer(session.id, directory, dependencies)
-  expect(restored.state.queueAgent).toBe("build")
   await restored.loadCapabilities()
   await restored.retryAdmission()
   expect(requests.at(-1)?.body).toEqual(requests[1].body)
-  expect(restored.state.task.text).toBe("task")
-  expect(restored.state.queueAgent).toBe("build")
+  // The confirmed request matches the unchanged draft, so the draft clears.
+  expect(restored.state.task.text).toBe("")
 })
 
-test("Aside and Steer omit a saved Queue-agent override, and normal Send keeps its session settings", async () => {
+test("a Queue-agent choice saved by an older build is ignored, so Queue never switches agent", async () => {
+  const { composer, requests, dependencies } = harness(() => Response.json(pending()))
+  composer.setText("task")
+  await composer.persistAsync()
+  const key = `es-app:composer:1:${JSON.stringify([session.id, directory])}`
+  const saved = JSON.parse(dependencies.storage!.getItem(key)!)
+  dependencies.storage!.setItem(key, JSON.stringify({ ...saved, queueAgent: "plan" }))
+  const restored = createComposer(session.id, directory, dependencies)
+  await restored.hydrated
+  await restored.loadCapabilities()
+  restored.selectMode("queue")
+  await restored.submit(session)
+  expect(requests.at(-1)?.body).toEqual({ requestID: "request-1", delivery: "queue", text: "task" })
+})
+
+test("Aside and Steer send no agent, and normal Send keeps its session settings", async () => {
   const prompts: { session: Session; options: unknown }[] = []
   const { composer, requests } = harness(
     (request) =>
@@ -1728,7 +1736,6 @@ test("Aside and Steer omit a saved Queue-agent override, and normal Send keeps i
     },
   )
   await composer.loadCapabilities()
-  composer.setQueueAgent("plan")
   composer.setText("task")
   composer.selectMode("aside")
   await composer.submit(session)
@@ -1742,22 +1749,6 @@ test("Aside and Steer omit a saved Queue-agent override, and normal Send keeps i
   composer.setImages([image])
   await composer.submit(session)
   expect(prompts).toEqual([{ session: { ...session, preferredModel: { id: "model", providerID: "provider" } }, options: { model: undefined, images: [image] } }])
-  expect(composer.state.queueAgent).toBe("plan")
-})
-
-test("changing the Queue agent during admission keeps the prepared next draft", async () => {
-  const ack = deferred<Response>()
-  const { composer } = harness(() => ack.promise)
-  await composer.loadCapabilities()
-  composer.selectMode("queue")
-  composer.setText("task")
-  composer.setQueueAgent("plan")
-  const sending = composer.submit(session)
-  composer.setQueueAgent(null)
-  ack.resolve(Response.json({ ...pending(), agent: "plan" }))
-  await sending
-  expect(composer.state.task.text).toBe("task")
-  expect(composer.state.queueAgent).toBeNull()
 })
 
 test("authoritative reconciliation unlocks a stalled POST without letting its late completion unlock a newer send", async () => {

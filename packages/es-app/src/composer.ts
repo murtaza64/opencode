@@ -100,7 +100,6 @@ export type ComposerState = {
     after?: string
     action?: ComposerAction
   } | null
-  queueAgent: string | null
   task: ComposerDraft
   aside: ComposerDraft
   asideSeeded: boolean
@@ -220,7 +219,6 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     busy: false,
     normalExplicit: false,
     normalSubmission: null,
-    queueAgent: null,
     task: emptyDraft(),
     aside: emptyDraft(),
     asideSeeded: false,
@@ -324,7 +322,6 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           ...(isAction(saved.normalSubmission.action) ? { action: saved.normalSubmission.action } : {}),
         })
       }
-      if (typeof saved.queueAgent === "string") setState("queueAgent", saved.queueAgent)
       if (record(saved.modelSelection) && isModel(saved.modelSelection.model))
         setState("modelSelection", { model: saved.modelSelection.model, status: "unknown" })
       if (isModel(saved.sessionModel)) setState("sessionModel", saved.sessionModel)
@@ -398,7 +395,6 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     mode: state.mode,
     normalExplicit: state.normalExplicit,
     normalSubmission: state.normalSubmission ? { ...state.normalSubmission } : null,
-    queueAgent: state.queueAgent,
     modelSelection: state.modelSelection,
     sessionModel: state.sessionModel,
     task: copyDraft(state.task),
@@ -1063,10 +1059,9 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         delivery: mode,
         text,
         ...(images ? { images } : {}),
-        ...(mode === "queue" && state.queueAgent ? { agent: state.queueAgent } : {}),
       }),
       revision: draft.revision,
-      agent: (mode === "queue" ? state.queueAgent : null) ?? session.agent,
+      agent: session.agent,
       draft: { ...draft, model: draft.model ?? state.sessionModel ?? nextModel ?? null },
       status: "sending",
       ...(direct ? { buffer, targetRevision: direct.targetRevision } : {}),
@@ -1368,7 +1363,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       if (!safe() || source === state) return false
       const current = JSON.stringify([snapshot(), state.sessionModel, state.sending, state.busy, missingImages])
       const sourceVersion = () => JSON.stringify([source.task, source.aside, source.mode, source.visibleBuffer,
-        source.keyboardTarget, source.queueAgent, source.asideSeeded, source.normalExplicit, source.sessionModel,
+        source.keyboardTarget, source.asideSeeded, source.normalExplicit, source.sessionModel,
         source.sending, source.admission, source.normalSubmission, source.modelSelection, source.asideRequest,
         source.superseded])
       const original = sourceVersion()
@@ -1399,7 +1394,6 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           ? source.superseded.mode === "aside" ? "aside" : source.superseded.mode === "queue" ? "queue" : "steer"
           : source.keyboardTarget,
         targetRevision: state.targetRevision + 1,
-        queueAgent: source.queueAgent,
         asideSeeded: source.asideSeeded,
         normalExplicit: source.superseded ? source.superseded.mode === "send" : source.normalExplicit,
       }
@@ -1432,7 +1426,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           setState("task", drafts.task)
           setState("aside", drafts.aside)
           setState({ mode: saved.mode, visibleBuffer: saved.visibleBuffer, keyboardTarget: saved.keyboardTarget,
-            targetRevision: saved.targetRevision, queueAgent: saved.queueAgent, asideSeeded: saved.asideSeeded,
+            targetRevision: saved.targetRevision, asideSeeded: saved.asideSeeded,
             normalExplicit: saved.normalExplicit, storageError: "" })
         })
         return true
@@ -1506,11 +1500,6 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         targetRevision: state.targetRevision,
       }, latestMessageID),
     setText: (text: string) => updateDraft({ text }),
-    setQueueAgent: (agent: string | null) => {
-      if (state.queueAgent === agent) return
-      setState("queueAgent", agent)
-      updateDraft({}, true, state.visibleBuffer)
-    },
     setImages: (images: ComposerImage[], buffer: ComposerBuffer = draftKey()) => {
       imageEdits[buffer]++
       setMissingImages(buffer, false)
