@@ -23,13 +23,13 @@ const open = async (viewport) => {
 try {
   const { context, page } = await open({ width: 1440, height: 1000 })
   const record = page.locator('[data-attention-id="decision_1"]')
-  const answer = record.getByRole("textbox", { name: /Your answer/ })
+  const answer = record.getByRole("textbox", { name: /Note \(optional\)/ })
   await expect(answer).toBeEnabled()
   await expect(record.getByRole("button", { name: "Send answer" })).toBeDisabled()
   await answer.fill("   ")
   await expect(record.getByRole("button", { name: "Send answer" })).toBeDisabled()
   await answer.fill(FLEET)
-  await expect(record.locator(".home-answer")).toContainText("currently owns lane orchestrator through verified handoffs")
+  await expect(record.locator(".home-answer")).toContainText("To lane orchestrator · grants no tool permission")
   await expect(page.getByRole("dialog")).toHaveCount(0)
   let drop = true
   await context.route("**/es/api/attention/*/commands?*", async route => {
@@ -79,7 +79,7 @@ try {
   // Uncommitted first attempt: the request never reached the ledger; reload retries the same identity once.
   await page.getByRole("group", { name: "Attention status" }).getByRole("button", { name: /^Open/ }).click()
   const fresh = page.locator('[data-attention-id="uncommitted"]')
-  const freshBox = fresh.getByRole("textbox", { name: /Your answer/ })
+  const freshBox = fresh.getByRole("textbox", { name: /Note \(optional\)/ })
   await freshBox.fill("never reached the server")
   // IME composition Enter must not submit.
   await freshBox.evaluate(element => element.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, metaKey: true, isComposing: true, bubbles: true, cancelable: true })))
@@ -104,26 +104,21 @@ try {
   const openEnded = page.locator('[data-attention-id="open_ended"]')
   await expect(openEnded.getByRole("radio")).toHaveCount(0)
   await expect(openEnded.getByRole("button", { name: "Review choice" })).toHaveCount(0)
-  await expect(openEnded.locator(".home-answer")).toContainText("the requesting session ses_top")
-  // Legacy record-only choice remains separate and labeled unsent.
+  await expect(openEnded.locator(".home-answer")).toContainText("To session ses_top")
+  // Selecting an option is a complete answer: one answer command with the exact choice and no text.
   await page.getByRole("group", { name: "Attention status" }).getByRole("button", { name: /^Open/ }).click()
   const other = page.locator('[data-attention-id="other_decision"]')
+  await expect(other.getByRole("button", { name: "Review choice" })).toHaveCount(0)
+  await expect(other).not.toContainText("record only")
+  await expect(other.getByRole("button", { name: "Send answer", exact: true })).toBeDisabled()
   await other.getByRole("radio", { name: "Continue", exact: true }).check()
-  await other.getByRole("button", { name: "Review choice", exact: true }).click()
-  await expect(page.getByRole("dialog")).toContainText("Saved only: nothing is sent, resumed or granted.")
-  await page.getByRole("button", { name: "Record choice only", exact: true }).click()
-  await expect(page.locator(".home-notice")).toContainText("Decision saved · not sent")
-  // A later written reply on the recorded card sends text only, not the earlier single choice.
-  await page.getByRole("group", { name: "Attention status" }).getByRole("button", { name: /^Recorded/ }).click()
-  const recorded = page.locator('[data-attention-id="other_decision"]')
-  await expect(recorded).toContainText("Continue · not sent")
-  await recorded.getByRole("textbox", { name: /Your answer/ }).fill("Continue with A and C")
-  await recorded.getByRole("button", { name: "Send answer", exact: true }).click()
+  await expect(other.getByRole("button", { name: "Send Continue", exact: true })).toBeEnabled()
+  await other.getByRole("button", { name: "Send Continue", exact: true }).dblclick()
   await expect(page.locator(".home-notice")).toContainText("Answer saved")
-  const reply = preview.ledger.calls.filter(call => call.path === "/other_decision/commands").at(-1).body
-  if (reply.action !== "answer" || reply.text !== "Continue with A and C" || "choice_id" in reply) throw Error(`recorded-card reply ${JSON.stringify(reply)}`)
-  const keptChoice = preview.ledger.records.find(item => item.id === "other_decision")
-  if (keptChoice.decision?.choice_id !== "yes") throw Error("earlier recorded choice must remain")
+  const selections = preview.ledger.calls.filter(call => call.path === "/other_decision/commands")
+  if (selections.length !== 1) throw Error(`selection must send exactly one command, saw ${selections.length}`)
+  const selection = selections[0].body
+  if (selection.action !== "answer" || selection.choice_id !== "yes" || "text" in selection || !selection.command_id) throw Error(`selection-only answer ${JSON.stringify(selection)}`)
   await page.getByRole("group", { name: "Attention status" }).getByRole("button", { name: /^Open/ }).click()
 
   // Drafts survive reload; mixed RTL text keeps its own direction.

@@ -67,14 +67,12 @@ try {
   await expect(page.getByRole("region", { name: "Pinned agents" })).toContainText("summary stale", { timeout: 12_000 })
   await record().getByText("Record & history", { exact: true }).click()
   await expect(record().locator("pre")).toContainText('"revision": 1')
+  // Selecting an option is the answer. A stale revision cannot overwrite a newer producer update.
   await record().getByRole("radio", { name: "Small scope", exact: true }).check()
-  await record().getByRole("button", { name: "Review choice", exact: true }).click()
-  // Stale modal revision cannot overwrite a newer producer update.
   preview.ledger.records[0].revision++
-  await page.getByRole("button", { name: "Record choice only" }).click()
+  await record().getByRole("button", { name: "Send Small scope", exact: true }).click()
   await expect(page.locator(".home-notice")).toContainText("record changed")
   await record().getByRole("radio", { name: "Small scope", exact: true }).check()
-  await record().getByRole("button", { name: "Review choice", exact: true }).click()
   preview.ledger.operator = false
   let dropResponse = true
   await context.route("**/es/api/attention/*/commands?*", async route => {
@@ -82,19 +80,19 @@ try {
     if (dropResponse && response.status() === 200) { dropResponse = false; await route.abort("failed"); return }
     await route.fulfill({ response })
   })
-  await page.getByRole("button", { name: "Record choice only" }).click()
+  await record().getByRole("button", { name: "Send Small scope", exact: true }).click()
   await expect(page.locator(".home-notice")).toContainText("Outcome unknown")
   await page.getByRole("button", { name: "Retry same action", exact: true }).click()
-  await expect(page.locator(".home-notice")).toContainText("Decision saved · not sent")
+  await expect(page.locator(".home-notice")).toContainText("Answer saved")
   const posts = preview.ledger.calls.filter(call => call.path.endsWith("/commands"))
   expect(posts.at(-1).body.command_id).toBe(posts.at(-2).body.command_id)
+  expect(posts.at(-1).body).toMatchObject({ action: "answer", choice_id: "small" })
+  expect("text" in posts.at(-1).body).toBe(false)
   expect(posts.every(call => call.csrf === "1")).toBe(true)
   expect(preview.ledger.calls.filter(call => call.path === "/session" && call.method === "POST")).toHaveLength(2)
-  await page.getByRole("button", { name: "Recorded / not sent 1", exact: true }).click()
-  await expect(record()).toContainText("Small scope · not sent")
   await page.reload()
-  await page.getByRole("button", { name: "Recorded / not sent 1", exact: true }).click()
-  await expect(record()).toContainText("Saved:")
+  await page.getByRole("button", { name: "Answered 1", exact: true }).click()
+  await expect(record()).toContainText("Small scope")
   await record().getByRole("button", { name: "Mark resolved" }).click()
   await page.getByRole("button", { name: "History 1", exact: true }).click()
   await record().getByText("Record & history", { exact: true }).click()
@@ -163,7 +161,8 @@ try {
   await readOnly.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
   await readOnly.goto(preview.url)
   await expect(readOnly.locator(".home-login")).toContainText("Read-only")
-  await expect(readOnly.locator(".home-decision").getByRole("button", { name: "Review choice" })).toBeDisabled()
+  await expect(readOnly.locator(".home-decision").first().getByRole("button", { name: "Send answer" })).toBeDisabled()
+  await expect(readOnly.locator(".home-decision").first().getByRole("radio").first()).toBeDisabled()
   await readOnly.close()
   console.log("PASS attention Home: explicit choices/CAS/ambiguous retry, reload/history/snooze, partial/offline retained records, exact source disappearance, pinned-only telemetry, no generated fleet summaries, RTL/mixed text, session/draft navigation, no runtime writes")
 } finally { await browser.close(); await preview.close() }

@@ -145,7 +145,7 @@ try {
   const answerInUi = async (id, text) => {
     await page.goto(uiOrigin)
     const card = page.locator(`[data-attention-id="${id}"]`)
-    await card.getByRole("textbox", { name: /Your answer/ }).fill(text)
+    await card.getByRole("textbox", { name: /Your answer|Note/ }).fill(text)
     await card.getByRole("button", { name: "Send answer", exact: true }).click()
     await expect(page.locator(".home-notice")).toContainText("Answer saved")
   }
@@ -210,9 +210,74 @@ try {
   assert(!JSON.stringify(aInputs).includes(SUCCESSOR), "fenced predecessor must not receive the answer")
   record(`SUCCESSOR handoff ${sessionA} -> ${sessionB}; record=${late.id} presented to successor only`)
 
+  // 4. A selected option alone is the answer: one delivery carrying the exact choice and no invented text.
+  const mailFor = async (requestID) => (await readFile(path.join(root, ".es", "mail", "work.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line)).filter((item) => item.request_id === requestID)
+  const selectInUi = async (id, label, note) => {
+    await page.goto(uiOrigin)
+    const card = page.locator(`[data-attention-id="${id}"]`)
+    await card.getByRole("radio", { name: label, exact: true }).check()
+    if (note) await card.getByRole("textbox", { name: /Note/ }).fill(note)
+    await card.getByRole("button", { name: `Send ${label}`, exact: true }).click()
+  }
+  const pick = publish(sessionB, "issue:238:selection-only:v1", "Selection-only decision")
+  const pickCalls = providerCalls.length
+  await selectInUi(pick.id, "C — Time weave")
+  await expect(page.locator(".home-notice")).toContainText("Answer saved")
+  const picked = await poll("selection presentation", async () => { const value = await ledger(pick.id); return value.delivery_state === "presented" && value }, 60_000)
+  assert.equal(picked.answer.text, "")
+  assert.equal(picked.answer.choice_id, "time-weave")
+  assert.equal(picked.answer.revision, pick.revision)
+  const [pickedMail] = await mailFor(picked.delivery.request_id)
+  assert.equal((await mailFor(picked.delivery.request_id)).length, 1)
+  assert(pickedMail.text.includes("Selected option: C — Time weave (time-weave)"))
+  assert(pickedMail.text.includes("Written answer: none") && !pickedMail.text.includes("BEGIN ANSWER"), "no invented written text")
+  assert(providerCalls.slice(pickCalls).some((body) => body.includes("Selected option: C — Time weave (time-weave)")), "the agent's turn sees the exact option")
+  record(`SELECTION record=${pick.id} choice=time-weave text="" mail=1 presented to ${picked.delivery.session}`)
+
+  // 5. Option plus a written note: both arrive verbatim in one delivery.
+  const mixedRecord = publish(sessionB, "issue:238:selection-note:v1", "Selection with note")
+  const NOTE = "B, but keep the legend from A"
+  await selectInUi(mixedRecord.id, "B — Fleet orbit", NOTE)
+  await expect(page.locator(".home-notice")).toContainText("Answer saved")
+  const mixedDone = await poll("mixed presentation", async () => { const value = await ledger(mixedRecord.id); return value.delivery_state === "presented" && value }, 60_000)
+  assert.equal(mixedDone.answer.choice_id, "fleet-orbit")
+  assert.equal(mixedDone.answer.text, NOTE)
+  assert(sawInProvider(NOTE) && providerCalls.some((body) => body.includes("Selected option: B — Fleet orbit (fleet-orbit)")))
+  record(`MIXED record=${mixedRecord.id} choice=fleet-orbit + note delivered verbatim`)
+
+  // 6. Unknown response: the exact command is retried; one answer, one mail, one delivery.
+  const lost = publish(sessionB, "issue:238:lost-response:v1", "Lost-response decision")
+  let drop = true
+  await context.route("**/es/api/attention/*/commands?*", async (route) => {
+    const response = await route.fetch()
+    if (drop && response.status() === 200) { drop = false; await route.abort("failed"); return }
+    await route.fulfill({ response })
+  })
+  await selectInUi(lost.id, "A — Project map")
+  await expect(page.locator(".home-notice")).toContainText("Outcome unknown")
+  await page.getByRole("button", { name: "Retry same action", exact: true }).click()
+  await expect(page.locator(".home-notice")).toContainText("Answer saved")
+  await context.unroute("**/es/api/attention/*/commands?*")
+  const lostDone = await poll("retried presentation", async () => { const value = await ledger(lost.id); return value.delivery_state === "presented" && value }, 60_000)
+  assert.equal((await mailFor(lostDone.delivery.request_id)).length, 1)
+  const lostEvents = (await (await fetch(`${dashboard.url}/api/attention/${lost.id}?es=fleet`)).json()).events
+  assert.equal(lostEvents.filter((event) => event.action === "answer").length, 1)
+  record(`RETRY record=${lost.id} lost response -> same command retried -> answers=1 mail=1`)
+
+  // 7. RTL: the single primary action stays reachable without horizontal scroll.
+  const rtl = publish(sessionB, "issue:238:rtl:v1", "قرار تجريبي")
+  await page.goto(uiOrigin)
+  await page.evaluate(() => { document.documentElement.dir = "rtl" })
+  const rtlCard = page.locator(`[data-attention-id="${rtl.id}"]`)
+  await rtlCard.getByRole("radio", { name: "A — Project map", exact: true }).check()
+  const button = await rtlCard.getByRole("button", { name: "Send A — Project map", exact: true }).boundingBox()
+  assert(button && button.x >= 0 && button.x + button.width <= 1280, JSON.stringify(button))
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  record(`RTL primary action at x=${Math.round(button.x)} width=${Math.round(button.width)}; no horizontal scroll`)
+
   const history = (await (await fetch(`${dashboard.url}/api/attention/${fleet.id}?es=fleet`)).json()).events
   record(`HISTORY ${history.map((event) => `${event.action}:${event.actor}${event.reason ? `(${event.reason})` : ""}`).join(" ")}`)
-  record("PASS real private publish -> UI typed answer -> outbox -> mail -> runtime receipt -> provider read -> ack/resolve; idle, busy steer, verified successor")
+  record("PASS real private publish -> UI answer -> outbox -> mail -> runtime receipt -> provider read -> ack/resolve; idle, busy steer, verified successor, selection-only, option+note, lost-response retry, RTL")
 } catch (error) {
   record(`FAIL ${error.stack ?? error}`)
   process.exitCode = 1

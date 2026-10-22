@@ -62,7 +62,7 @@ export const startAttentionPreview = async (plugins = []) => {
           if (body.action === "answer") {
             if (record.status === "answered") return json({ error: "record already answered", record }, 409)
             record.status = "answered"
-            record.answer = { id: `answer-${record.id}`, text: body.text, choice_id: body.choice_id ?? null, answered_at: Date.now() }
+            record.answer = { id: `answer-${record.id}`, text: body.text ?? "", choice_id: body.choice_id ?? null, answered_at: Date.now() }
             record.delivery_state = "pending"
             record.delivery = { state: "pending", reason: null, lane: record.lane ?? null, session: null, message_id: null, error: null, updated_at: Date.now(), presented_at: null, handled_at: null, copies: [] }
           }
