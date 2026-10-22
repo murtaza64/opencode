@@ -1,4 +1,13 @@
-export type Handoff = { lane: string; predecessor: string; successor: string }
+export type Handoff = { lane: string; predecessor: string; successor: string; reason?: string; kickoff?: "skipped"; context?: string }
+export type PendingHandoff = {
+  lane: string
+  predecessor: string
+  successor?: string | null
+  status: string
+  request_id: string
+  error?: string | null
+  reason?: string
+}
 export type LaneOwner = { lane: string; owner: string }
 
 // A lane owner is the authoritative tip. Never infer succession from timestamps,
@@ -27,6 +36,11 @@ export const handoffChain = (sessionID: string, handoffs: Handoff[]) => {
 export const handoffNext = (sessionID: string, handoffs: Handoff[]) => {
   const next = handoffs.filter((edge) => edge.predecessor === sessionID)
   return next.length === 1 ? next[0] : undefined
+}
+
+export const pendingHandoffFor = (sessionID: string, pending: PendingHandoff[]) => {
+  const matches = pending.filter((item) => item.predecessor === sessionID || item.successor === sessionID)
+  return matches.length === 1 ? matches[0] : undefined
 }
 
 export const transferPins = (pins: string[], from: string, to: string, directory: string, targetDirectory = directory) => {

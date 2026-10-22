@@ -37,7 +37,7 @@ import { usePulse } from "../pulse"
 import { MailRow } from "../components/mail-row"
 import { MailSubscriptions } from "../components/mail-subscriptions"
 import { mailCauses, mailLocation, mailRows, mailSourceID } from "../mail-timeline"
-import { handoffChain, handoffNext, successorFor } from "../handoffs"
+import { handoffChain, handoffNext, pendingHandoffFor, successorFor } from "../handoffs"
 import { ComposerImages } from "../components/composer-images"
 import { ActivityBriefView } from "../components/activity-brief"
 import { FindExcerpt, TranscriptFind } from "../components/transcript-find"
@@ -157,7 +157,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   let inspecting = false
 
   const { activity, sessionsError, editspaces, mailRevision, editspace, state, handoffs, handoffsError,
-    laneOwners, lineage, lineageOwners, refetch, refetchHandoffs, transferPin } = useDashboard()
+    laneOwners, lineage, lineageOwners, pendingHandoffs, refetch, refetchHandoffs, transferPin } = useDashboard()
+  const pendingTransfer = () => pendingHandoffFor(sessionID, pendingHandoffs())
   const currentEditspace = () => editspace() ?? editspaces()?.default ?? state()?.editspace
   const ownedLane = () => laneOwners().find((lane) => lane.owner === sessionID)
   const predecessor = () => {
@@ -885,6 +886,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     }
   }
   const recoveryTarget = () => {
+    if (pendingTransfer()) return
     const tip = successor()
     if (tip) return tip.successor
     // A tagged rejection can supply a missing edge, but cannot override a
@@ -1503,6 +1505,17 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             <Show when={predecessor()}>{(edge) => <div class="banner handoff-history" aria-label="Previous session">
               Previous session: <A href={sessionHref(edge().predecessor, activity.session(edge().predecessor)?.directory)}><bdi dir="auto">{activity.session(edge().predecessor)?.title ?? edge().predecessor}</bdi></A>
               {" · "}<bdi dir="ltr">{edge().predecessor}</bdi>
+              <Show when={edge().reason}>{(reason) => <> · <bdi dir="auto">{reason()}</bdi></>}</Show>
+              <Show when={edge().kickoff === "skipped" && edge().context}>{(context) => <>
+                {" · "}Handoff brief not sent because this session was already in use: <bdi dir="ltr">{context()}</bdi>
+              </>}</Show>
+            </div>}</Show>
+            <Show when={pendingTransfer()}>{(transfer) => <div class="banner handoff-progress" role="status" aria-label="Handoff progress">
+              {transfer().error ? "Handoff paused. Your draft is saved." : transfer().successor === sessionID
+                ? "Loading handoff context. This session is not ready yet."
+                : transfer().status === "submitting" ? "Starting the next session. Your draft is saved here."
+                : "Preparing the next session. Your draft is saved here."}
+              <Show when={transfer().reason}>{(reason) => <> <bdi dir="auto">{reason()}</bdi>.</>}</Show>
             </div>}</Show>
             <Show when={live.hasOlder()}>
               <button class="transcript-older" disabled={live.loadingOlder()} onClick={loadEarlier}>
@@ -1572,7 +1585,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                   <div dir="auto">{composer.state.admission?.payload.text}</div>
                   <button disabled={composer.state.inputLoading || !connected()} onClick={() => composer.refreshInputs()}>Check admission</button>
                 </div></Show>
-                <Show when={!composer.state.admission?.fence && recoveryTarget()} fallback={<p>Waiting for a confirmed successor or admission outcome. No message will be resent automatically.</p>}>{(next) =>
+                <Show when={!composer.state.admission?.fence && recoveryTarget()} fallback={<p>{pendingTransfer()
+                  && !composer.state.admission?.fence ? "Handoff is still preparing; your message has not been sent."
+                  : "Waiting for a confirmed successor or admission outcome. No message will be resent automatically."}</p>}>{(next) =>
                   <A href={sessionHref(next(), activity.session(next())?.directory ?? directory)} aria-disabled={recovering()} onClick={(event) => {
                     event.preventDefault()
                     void followSuccessor(next())

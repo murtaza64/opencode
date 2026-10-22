@@ -16,7 +16,7 @@ import { es, oc, type AttentionNotification } from "./api"
 import { createSessionActivity } from "./session-activity"
 import { createServerEvents } from "./event-source"
 import { resolveProjectName } from "./project-name"
-import { reconcilePins, transferPins, type Handoff } from "./handoffs"
+import { reconcilePins, transferPins, type Handoff, type PendingHandoff } from "./handoffs"
 import { pinSessionID } from "./session-pins"
 import { createCloudAgents } from "./cloud-agents"
 import { createSessionFailures } from "./session-failures"
@@ -53,6 +53,7 @@ type DashboardCtx = {
   editspaces: Resource<{ editspaces: { name: string; root: string }[]; default: string | null }>
   mailRevision: () => number
   handoffs: Resource<Handoff[]>
+  pendingHandoffs: () => PendingHandoff[]
   handoffsError: () => string
   refetchHandoffs: () => void
   laneOwners: () => { lane: string; owner: string }[]
@@ -123,6 +124,7 @@ export function DashboardProvider(props: ParentProps) {
     },
   )
   const [handoffsError, setHandoffsError] = createSignal("")
+  const [pendingHandoffs, setPendingHandoffs] = createSignal<Record<string, PendingHandoff[]>>({})
   const cloud = createCloudAgents({
     project: () => allProjects() ? undefined : editspace() ?? editspaces()?.default ?? undefined,
     defaultProject: () => editspace() ?? editspaces()?.default ?? undefined,
@@ -134,6 +136,7 @@ export function DashboardProvider(props: ParentProps) {
       if (!name) return []
       try {
         const result = await es.handoffs(name)
+        setPendingHandoffs((previous) => ({ ...previous, [name]: result.pending ?? [] }))
         setHandoffsError("")
         return result.handoffs
       } catch (error) {
@@ -373,16 +376,17 @@ export function DashboardProvider(props: ParentProps) {
     async ({ names, selected }) => Promise.all(names.filter((name) => name !== selected).map(async (name) => {
       try {
         const [lineage, dashboard] = await Promise.all([es.handoffs(name), es.state(name)])
-        if (dashboard.editspace !== name) return { edges: [], owners: [] }
+        if (dashboard.editspace !== name) return { edges: [], owners: [], pending: [] }
         const scope = (lane: string) => JSON.stringify([name, lane])
         return {
           edges: lineage.handoffs.map((edge) => ({ ...edge, lane: scope(edge.lane) })),
+          pending: (lineage.pending ?? []).map((item) => ({ ...item, lane: scope(item.lane) })),
           owners: (dashboard.threads ?? []).flatMap((thread: { lanes?: { lane: string; owner?: string }[] }) =>
             (thread.lanes ?? []).flatMap((lane) => lane.owner ? [{ lane: scope(lane.lane), owner: lane.owner }] : [])),
         }
       } catch {
         // Missing lineage in one editspace must not guess at its pinned owners.
-        return { edges: [], owners: [] }
+        return { edges: [], owners: [], pending: [] }
       }
     })),
   )
@@ -518,6 +522,10 @@ export function DashboardProvider(props: ParentProps) {
     editspaces,
     mailRevision,
     handoffs,
+    pendingHandoffs: () => [
+      ...(pendingHandoffs()[currentEditspaceName()] ?? []).map((item) => ({ ...item, lane: JSON.stringify([currentEditspaceName(), item.lane]) })),
+      ...(otherLineages() ?? []).flatMap((item) => item.pending),
+    ],
     handoffsError,
     refetchHandoffs: () => { void refetchHandoffs() },
     laneOwners,
