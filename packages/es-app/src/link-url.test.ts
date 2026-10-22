@@ -54,6 +54,7 @@ test.each([
   [`http://127.0.0.1:3181${session}`, session],
   [`http://localhost:3100${session}#bottom`, `${session}#bottom`],
   [`${native}${session}`, session],
+  [`http://127.0.0.1:3181${session}&message=msg_a&to=msg_b`, `${session}&message=msg_a&to=msg_b`],
   [session, session],
   ["/desk", "/desk"],
   ["http://127.0.0.1:3181/map?view=weave", "/map?view=weave"],

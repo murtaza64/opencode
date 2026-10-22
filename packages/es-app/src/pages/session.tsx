@@ -1,6 +1,6 @@
 /* Conversation view: live transcript (session-ui renderer over an SSE-fed
  * store), prompt input, and inline permission/question replies. */
-import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js"
+import { createEffect, createMemo, createResource, createSignal, For, on, onCleanup, onMount, Show, untrack } from "solid-js"
 import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router"
 import { DataProvider } from "@opencode-ai/session-ui/context"
 import { renderable, ToolAdornment, type MessagePartProps } from "@opencode-ai/session-ui/message-part"
@@ -49,6 +49,7 @@ import { FailureRetry } from "../components/session-failure"
 import { completedTurns, messageSegments, planToolRuns, samePlan, sameSegments } from "../transcript-groups"
 import { isUserPrompt, promptPosition, promptTarget } from "../transcript-nav"
 import { restartMarkers } from "../restart-marker"
+import { anchorNote, anchorRange, parseAnchor, type MessageAnchor } from "../message-anchor"
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const [error, setError] = createSignal("")
@@ -142,14 +143,14 @@ export default function SessionPage() {
     <Show when={key()} keyed>
       {(k) => {
         const [id, dir] = k.split("\u0000")
-        return <SessionView sessionID={id!} directory={dir ?? ""} />
+        return <SessionView sessionID={id!} directory={dir ?? ""} anchor={() => parseAnchor(search)} />
       }}
     </Show>
   )
 }
 
-/** `embedded` drops the page-level info panel. `context` may attach generated parts to an idle send; `onSent` reports whether that send was accepted. */
-export function SessionView(props: { sessionID: string; directory: string; embedded?: boolean; context?: () => ContextPart[]; onSent?: (context: ContextPart[], accepted: boolean) => void }) {
+/** `embedded` drops the page-level info panel. `context` may attach generated parts to an idle send; `onSent` reports whether that send was accepted. `anchor` scrolls to and highlights a linked message or range. */
+export function SessionView(props: { sessionID: string; directory: string; embedded?: boolean; context?: () => ContextPart[]; onSent?: (context: ContextPart[], accepted: boolean) => void; anchor?: () => MessageAnchor | undefined }) {
   const sessionID = props.sessionID
   const directory = props.directory
   const composer = getComposer(sessionID, directory)
@@ -247,7 +248,10 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   // asynchronously, so content growth between a pin and its event would
   // read as "user scrolled up" and strand the view short of the bottom.
   // Unsticking happens only on explicit intent: wheel-up, touch, ^u, jumps.
-  let stick = true
+  // A linked message opens where it is, not at the bottom.
+  let stick = !untrack(() => props.anchor?.())
+  // The linked message held in view until the user scrolls or the highlight ends.
+  let anchorHold: HTMLElement | undefined
   const atBottom = () =>
     !!transcriptEl && transcriptEl.scrollHeight - transcriptEl.scrollTop - transcriptEl.clientHeight < 4
   const pin = () => {
@@ -290,10 +294,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       }} />)
   }
   onCleanup(() => { if (inspecting) dialog.close() })
+  let firstLoad: Promise<void> | undefined
   onMount(() => {
-    live
-      .load()
-      .then(() => pin())
+    firstLoad = live.load()
+    firstLoad
+      .then(() => { if (!props.anchor?.()) pin() })
       .catch(() => {}) // live.connectionError reports load failures and recovery
     transcriptEl?.addEventListener(
       "scroll",
@@ -308,6 +313,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     transcriptEl?.addEventListener(
       "wheel",
       (e) => {
+        anchorHold = undefined
         if (e.deltaY < 0) {
           stick = false
           userScroll = true
@@ -316,9 +322,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       },
       { passive: true },
     )
-    transcriptEl?.addEventListener("touchmove", () => { stick = false; userScroll = true }, { passive: true })
+    transcriptEl?.addEventListener("touchmove", () => { stick = false; userScroll = true; anchorHold = undefined }, { passive: true })
     const observer = new ResizeObserver(() => {
       if (stick) pin()
+      // Late-rendering content (Markdown, images) must not push a linked message out of view.
+      else if (anchorHold?.isConnected) anchorHold.scrollIntoView({ block: "start", inline: "nearest" })
       schedulePromptPosition()
     })
     if (inner) observer.observe(inner)
@@ -799,6 +807,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   }
   const jumpFind = (hit: FindHit) => {
     findJumped = true
+    anchorHold = undefined
     stick = false
     userScroll = false
     // A match inside a compact tool run opens that run so the chip stays visible.
@@ -818,6 +827,57 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       flash(target)
     })
   }
+
+  // Linked message anchors: load only the history window that contains the
+  // anchor, scroll to it and highlight it briefly. An unknown anchor opens the
+  // session normally with a note.
+  const [anchored, setAnchored] = createSignal<ReadonlySet<string>>(new Set())
+  const [anchorStatus, setAnchorStatus] = createSignal("")
+  let anchorRun = 0
+  let anchorTimer: ReturnType<typeof setTimeout> | undefined
+  onCleanup(() => clearTimeout(anchorTimer))
+  const anchorKey = () => {
+    const anchor = props.anchor?.()
+    return anchor ? `${anchor.message}\u0000${anchor.to ?? ""}` : ""
+  }
+  createEffect(on(anchorKey, (key) => {
+    const anchor = untrack(() => props.anchor?.())
+    if (!key || !anchor) return
+    const run = ++anchorRun
+    stick = false
+    userScroll = false
+    setAnchorStatus("")
+    const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    void (async () => {
+      const missing = await (firstLoad ?? live.load())
+        .then(() => live.reveal(anchor.to ? [anchor.message, anchor.to] : [anchor.message]))
+        .catch(() => undefined)
+      if (run !== anchorRun) return
+      const range = missing ? anchorRange(messages().map((message) => message.id), anchor, (id) => !missing.includes(id)) : []
+      setAnchorStatus(anchorNote(anchor, missing ?? [], !missing))
+      await frame()
+      await frame()
+      if (run !== anchorRun || !transcriptEl) return
+      const target = range[0] ? [...transcriptEl.querySelectorAll<HTMLElement>("[data-find-message]")]
+        .find((element) => element.dataset.findMessage === range[0]) : undefined
+      if (!target) {
+        if (range[0]) setAnchorStatus("Linked message isn't shown in this transcript. Showing the latest messages.")
+        stick = true
+        pin()
+        return
+      }
+      setAnchored(new Set(range))
+      anchorHold = target
+      target.scrollIntoView({ block: "start", inline: "nearest" })
+      schedulePromptPosition()
+      clearTimeout(anchorTimer)
+      anchorTimer = setTimeout(() => {
+        if (run !== anchorRun) return
+        anchorHold = undefined
+        setAnchored(new Set<string>())
+      }, 3000)
+    })()
+  }))
   onMount(() => {
     const handler = (event: KeyboardEvent) => {
       if (event.isComposing || dialog.active) return
@@ -999,6 +1059,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
 
   const scrollTranscript = (dir: 1 | -1) => {
     if (!transcriptEl) return
+    anchorHold = undefined
     stick = false
     userScroll = true
     transcriptEl.scrollBy({ top: (dir * transcriptEl.clientHeight) / 2, behavior: "instant" as ScrollBehavior })
@@ -1031,6 +1092,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     if (!transcriptEl) return
     const tops = promptTops()
     const index = promptTarget(tops, dir)
+    anchorHold = undefined
     stick = false
     userScroll = false
     if (index < 0) {
@@ -1440,6 +1502,10 @@ export function SessionView(props: { sessionID: string; directory: string; embed
 
         <div class="session-alerts">
           <Show when={bannerError()}><div class="err" role="alert">{bannerError()}</div></Show>
+          <Show when={anchorStatus()}>
+            <div class="anchor-note" role="status"><span>{anchorStatus()}</span>
+              <button aria-label="Dismiss linked message note" onClick={() => setAnchorStatus("")}>×</button></div>
+          </Show>
           <Show when={handoffsError() && (ownedLane() || predecessor())}><div class="err" role="alert">{handoffsError()}</div></Show>
           <Show when={handoffError()}><div class="err" role="alert">{handoffError()}</div></Show>
           <Show when={handoffPending()}><div role="status" class="banner">Handoff waits for the current turn to finish.</div></Show>
@@ -1532,7 +1598,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                   [], { equals: sameSegments })
                 const ownHit = () => findHit()?.messageID === m.id && !toolRuns().byPart.has(findHit()!.partID) ? findHit() : undefined
                 return (
-                <div data-find-message={m.id} data-find-selected={ownHit() ? "true" : undefined}>
+                <div data-find-message={m.id} data-find-selected={ownHit() ? "true" : undefined}
+                  data-anchored={anchored().has(m.id) ? "true" : undefined}>
                   <Show when={ownHit()}>{(hit) =>
                     <div class="find-jump" role="region" aria-label="Selected transcript match"><FindExcerpt hit={hit()} /></div>
                   }</Show>

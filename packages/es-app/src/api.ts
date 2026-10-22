@@ -115,6 +115,13 @@ export const oc = {
     return { items, cursor: res.headers.get("X-Next-Cursor") ?? undefined }
   },
 
+  /** Undefined when the session has no such message (404, or 400 for a malformed ID). */
+  message: async (id: string, directory: string, messageID: string, signal?: AbortSignal) => {
+    const res = await fetch(`/oc/session/${id}/message/${encodeURIComponent(messageID)}?${q(directory)}`, { signal })
+    if (res.status === 404 || res.status === 400) return undefined
+    return json<MessageWithParts>(res)
+  },
+
   children: (id: string, directory: string, signal?: AbortSignal): Promise<Session[]> =>
     fetch(`/oc/session/${id}/children?${q(directory)}`, { signal }).then(json<Session[]>),
 
