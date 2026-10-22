@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { Message } from "@opencode-ai/sdk/v2"
 import type { MailMessage, MailTimeline } from "./api"
-import { mailForSession, mailLocation, mailRows, mailWake } from "./mail-timeline"
+import { mailCauses, mailForSession, mailLocation, mailRows, mailWake } from "./mail-timeline"
 
 test("selects the matching editspace and lane from the session directory", () => {
   const roots = [
@@ -31,16 +31,16 @@ test("sorts mail alongside transcript messages and deduplicates only structured 
     ] },
   ] }
   const rows = mailRows(messages, timeline)
-  expect(rows.map((row) => row.message.id)).toEqual(["msg_1", "msg_2", "mail_3", "msg_3"])
-  expect(rows[1]).toMatchObject({ type: "transcript", timestamp: 2000 })
-  expect(rows[2]).toMatchObject({ type: "mail", message: { direction: "received", deliveries: [{ recipient: "alpha", state: "read" }] } })
+  expect(rows.map((row) => row.message.id)).toEqual(["msg_1", "mail_3", "msg_2", "msg_3"])
+  expect(rows[2]).toMatchObject({ type: "transcript", timestamp: 3000 })
+  expect(rows[1]).toMatchObject({ type: "mail", message: { direction: "received", deliveries: [{ recipient: "alpha", state: "read" }] } })
   expect(mailRows(messages, timeline, rows)[0]).toBe(rows[0])
-  expect(mailRows(messages, timeline, rows)[1]).toBe(rows[1])
-  expect(mailRows(messages, structuredClone(timeline), rows)[2]).toBe(rows[2])
+  expect(mailRows(messages, timeline, rows)[2]).toBe(rows[2])
+  expect(mailRows(messages, structuredClone(timeline), rows)[1]).toBe(rows[1])
   const updated = mailRows(messages, { ...timeline, messages: timeline.messages.map((message) => message.id === "mail_3"
     ? { ...message, deliveries: [{ ...message.deliveries[0], state: "handled" }] } : message) }, rows)
-  expect(updated[2]).toMatchObject({ type: "mail", message: { deliveries: [{ state: "handled" }] } })
-  expect(updated[2]).not.toBe(rows[2])
+  expect(updated[1]).toMatchObject({ type: "mail", message: { deliveries: [{ state: "handled" }] } })
+  expect(updated[1]).not.toBe(rows[1])
 })
 
 test("scopes a shared lane feed by original send time even with delayed receipts", () => {
@@ -129,4 +129,62 @@ test("all durable loop sends render once with provenance even alongside a failed
   expect(mailRows(messages, timeline, rows, interval)).toEqual(rows)
   expect(mailRows(messages, { ...timeline, messages: timeline.messages.slice(0, 2) }, [], interval).map(row => row.message.id)).toEqual(["assistant", "sent-1", "sent-2"])
   expect(mailRows(messages, timeline, [], { ...interval, sessionID: "ses_unrelated" }).map(row => row.message.id)).toEqual(["assistant"])
+})
+
+test("summarizes mail that was one provider turn's input, keyed before the assistant it caused", () => {
+  const mail = (id: string, created: number, sender: string, extra: object = {}) =>
+    ({ id: `msg_${id}`, role: "user", time: { created },
+      source: { type: "editspace-mail", id, sender, recipient: "orchestrator", kind: "task", ...extra } })
+  const messages = [
+    { id: "msg_human", role: "user", time: { created: 1_000 } },
+    { id: "msg_reply", role: "assistant", parentID: "msg_human", time: { created: 1_100 } },
+    mail("o#417", 9_000, "ses_front"),
+    mail("o#427", 9_001, "ux-feel"),
+    mail("o#428", 9_002, "ux-feel", { relationship: "handoff-catch-up" }),
+    { id: "msg_turn", role: "assistant", parentID: "msg_o#428", time: { created: 9_100 } },
+    mail("o#430", 12_000, "human", { kind: "answer" }),
+    { id: "msg_answer_turn", role: "assistant", parentID: "msg_o#430", time: { created: 12_100 } },
+  ] as Message[]
+  const received = (id: string, created_ms: number, from: string, kind = "task"): MailMessage =>
+    ({ id, ts: "", created_ms, from, to: "orchestrator", kind, text: id, direction: "received", deliveries: [] })
+  const records = [received("o#417", 2_000, "ses_front"), received("o#427", 5_000, "ux-feel"),
+    received("o#428", 6_000, "ux-feel"), received("o#430", 11_000, "human", "answer")]
+  const rows = mailRows(messages, { editspace: "fixture", lane: "orchestrator", messages: records })
+
+  // The mails sit at their promotion point, after the earlier human exchange.
+  expect(rows.map((row) => row.message.id)).toEqual(messages.map((message) => message.id))
+  const causes = mailCauses(rows, new Map(records.map((record) => [record.id, record])))
+  expect([...causes.keys()]).toEqual(["msg_o#428", "msg_o#430"])
+  expect(causes.get("msg_o#428")).toEqual({
+    ids: ["o#417", "o#427", "o#428"],
+    kinds: [{ kind: "task", human: false, catchUp: false, count: 2 }, { kind: "task", human: false, catchUp: true, count: 1 }],
+    senders: ["ses_front", "ux-feel"],
+    sentFrom: 2_000,
+    sentTo: 6_000,
+    promotedAt: 9_000,
+  })
+  expect(causes.get("msg_o#430")).toMatchObject({ ids: ["o#430"], kinds: [{ kind: "answer", human: true, count: 1 }] })
+})
+
+test("no turn boundary, no cause: pending mail and mail followed by a human prompt are not summarized", () => {
+  const mail = (id: string, created: number) => ({ id: `msg_${id}`, role: "user", time: { created },
+    source: { type: "editspace-mail", id, sender: "peer", recipient: "lane" } })
+  const messages = [
+    mail("a", 1_000),
+    { id: "msg_human", role: "user", time: { created: 1_001 } },
+    { id: "msg_turn", role: "assistant", parentID: "msg_human", time: { created: 1_100 } },
+    mail("b", 2_000),
+  ] as Message[]
+  const rows = mailRows(messages, undefined)
+  expect(rows.map((row) => row.message.id)).toEqual(["msg_a", "msg_human", "msg_turn", "msg_b"])
+  expect(mailCauses(rows, new Map()).size).toBe(0)
+})
+
+test("a mail run without its source record reports no send time rather than inventing one", () => {
+  const messages = [
+    { id: "msg_m", role: "user", time: { created: 5_000 }, source: { type: "editspace-mail", id: "gone", sender: "peer", recipient: "lane" } },
+    { id: "msg_t", role: "assistant", parentID: "msg_m", time: { created: 5_100 } },
+  ] as Message[]
+  expect(mailCauses(mailRows(messages, undefined), new Map()).get("msg_m")).toEqual({
+    ids: ["gone"], kinds: [{ kind: "mail", human: false, catchUp: false, count: 1 }], senders: ["peer"], promotedAt: 5_000 })
 })

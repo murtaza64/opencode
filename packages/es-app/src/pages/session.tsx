@@ -28,12 +28,13 @@ import { AppHeader } from "../components/native-header"
 import { SessionTitle } from "../components/session-title"
 import { SubagentTranscript } from "../components/subagent-transcript"
 import { TranscriptMessage } from "../components/transcript-message"
+import { MailCauseRow } from "../components/mail-cause"
 import { InlineQuestion } from "../components/inline-question"
 import { TodoPart } from "../components/todos"
 import { usePulse } from "../pulse"
 import { MailRow } from "../components/mail-row"
 import { MailSubscriptions } from "../components/mail-subscriptions"
-import { mailLocation, mailRows, mailSourceID } from "../mail-timeline"
+import { mailCauses, mailLocation, mailRows, mailSourceID } from "../mail-timeline"
 import { handoffChain, handoffNext, successorFor } from "../handoffs"
 import { ComposerImages } from "../components/composer-images"
 import { ActivityBriefView } from "../components/activity-brief"
@@ -393,6 +394,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     return id ? [id] : []
   })))
   const mailRecords = createMemo(() => new Map(mail()?.messages.map((message) => [message.id, message] as const) ?? []))
+  const mailCauseRows = createMemo(() => mailCauses(timeline(), mailRecords()))
 
   // viewing the session clears its unread state, including as new content
   // streams in while the page is open
@@ -1520,6 +1522,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                         fork from here
                       </button>
                     </div>
+                    <Show when={mailCauseRows().get(m.id)}>{(cause) => <MailCauseRow cause={cause()} />}</Show>
                   </Show>
                   <Show when={turnSummaries().get(m.id)}>
                     {(s) => (
