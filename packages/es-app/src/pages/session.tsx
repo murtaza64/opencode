@@ -548,11 +548,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
 
   // archive is a soft flag (time.archived); the live store doesn't reduce
   // session.updated events, so reload it to reflect the new state
-  const archive = async () => {
+  const setArchived = async (archived: boolean) => {
     try {
-      await oc.archive(sessionID, directory)
+      await (archived ? oc.archive(sessionID, directory) : oc.unarchive(sessionID, directory))
       await live.load()
-      refetchArchived() // moves it to the sidebar's archived section immediately
+      refetchArchived() // moves it between the sidebar's sections immediately
     } catch (e) {
       setError(String(e))
     }
@@ -1289,8 +1289,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
           <Glyph name="repo-forked" />{forking() ? "Forking…" : "Fork"}
         </button>
         <Show when={ownedLane()}><button class="act-handoff" disabled={handingOff()} onClick={() => setHandoffOpen(!handoffOpen())}><Glyph name="arrow-switch" />Hand off</button></Show>
-        <Show when={!session()?.time?.archived} fallback={<span class="archived-chip">Archived</span>}>
-          <button disabled={!!nudgePhase()} onClick={archive}><Glyph name="archive" />Archive</button>
+        <Show when={!session()?.time?.archived} fallback={<>
+          <span class="archived-chip">Archived</span>
+          <button onClick={() => setArchived(false)}>Restore</button>
+        </>}>
+          <button disabled={!!nudgePhase()} onClick={() => setArchived(true)}><Glyph name="archive" />Archive</button>
         </Show>
         <button class="danger" disabled={!!nudgePhase()} onClick={remove}><Glyph name="trash" />Delete</button>
         <Show when={busy()} fallback={<button onClick={() => { stick = true; pin() }}>↓ Bottom</button>}>

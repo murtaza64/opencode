@@ -231,6 +231,13 @@ export const oc = {
       body: JSON.stringify({ time: { archived: Date.now() } }),
     }).then(json<Session>),
 
+  unarchive: (id: string, directory: string): Promise<Session> =>
+    fetch(`/oc/session/${id}?${q(directory)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ time: { archived: null } }),
+    }).then(json<Session>),
+
   remove: async (id: string, directory: string) => {
     const res = await fetch(`/oc/session/${id}?${q(directory)}`, { method: "DELETE" })
     if (!res.ok) throw new Error(`delete failed: HTTP ${res.status} ${await res.text()}`)
