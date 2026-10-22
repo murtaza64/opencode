@@ -7,7 +7,8 @@ const refs: EvidenceRef[] = [{ id: "C1", label: "canonical" }, { id: "E1", label
 
 test("a cited thread source targets the cited message range of the source thread", () => {
   expect(sourceTarget({ label: "Latency report", refs: ["E2", "E1"] }, refs)).toEqual({ kind: "thread", message: "msg_4", to: "msg_1" })
-  expect(sourceTarget({ label: "Request", refs: ["C1"] }, refs)).toEqual({ kind: "thread" })
+  // The request alone opens the thread the card already links.
+  expect(sourceTarget({ label: "Request", refs: ["C1"] }, refs)).toBeUndefined()
 })
 
 test("a file source resolves only to a markdown doc; anything else has no destination", () => {

@@ -110,7 +110,8 @@ try {
     await expect(card.locator(".desk-brief-unknown")).toHaveText("Unknown Whether the build node can read the stage bucket.")
     // Sources open real destinations; one with no resolvable ref is dropped.
     const sources = card.locator(".desk-brief-sources a")
-    await expect(sources).toHaveCount(2)
+    // The request's own thread is already "Open thread"; the unresolvable one is dropped too.
+    await expect(sources).toHaveCount(1)
     assert.match(await sources.first().getAttribute("href"), /^\/session\/ses_a\?directory=.*&message=msg_e1$/)
     await expect(sources.first()).toHaveText("↗ Thread · Harness readiness report")
     // Evidence, claims and the request's own text are one click away.
@@ -122,6 +123,7 @@ try {
     await probe.check()
     const send = card.getByRole("button", { name: `Send ${record.options[0].label}`, exact: true })
     await expect(send).toBeVisible()
+    await expect(send).toHaveText("Send")
     // First viewport at 1440x1000 holds the decision through Send, in a short card.
     const box = await send.boundingBox()
     const words = await card.evaluate(element => {
@@ -136,7 +138,7 @@ try {
     assert(box && box.y + box.height <= 1000, `Send at ${JSON.stringify(box)}`)
     // The producer's three long option labels (and the Send label repeating one) are about 50 of these words.
     assert(words <= 190, `words above Details ${words}`)
-    console.log(`VISUAL probe: why line, 3 outcome cards, scope, unknown, 2 sources; Send bottom ${Math.round(box.y + box.height)}px; ${words} words above Details`)
+    console.log(`VISUAL probe: why line, 3 outcome cards, scope, unknown, 1 source; Send bottom ${Math.round(box.y + box.height)}px; ${words} words above Details`)
 
     // More detail: an explicit question goes to the desk chat bound to this item and revision, with
     // citable links; the chat draft and the selection stay as they were.

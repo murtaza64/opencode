@@ -21,7 +21,7 @@ const Refs = (props: { refs: string[]; known: EvidenceRef[]; item: DeskItem }) =
 const sourceLink = (source: BriefSource, refs: EvidenceRef[], item: DeskItem) => {
   const target = sourceTarget(source, refs)
   if (target?.kind === "doc") return { kind: "Doc", href: docHref("editspace", target.path) }
-  if (target) return { kind: "Thread", href: `${sessionHref(item.source.session, item.source.directory)}${target.message ? `&message=${encodeURIComponent(target.message)}` : ""}${target.to ? `&to=${encodeURIComponent(target.to)}` : ""}` }
+  if (target) return { kind: "Thread", href: `${sessionHref(item.source.session, item.source.directory)}&message=${encodeURIComponent(target.message)}${target.to ? `&to=${encodeURIComponent(target.to)}` : ""}` }
 }
 
 type Part = "lead" | "after" | "details"

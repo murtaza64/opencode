@@ -67,8 +67,10 @@ const Answer = (props: { record: AttentionRecord; attention: Attention; options:
     <textarea id={id} dir="auto" rows={props.options ? 1 : 2} maxLength={8000} value={text()} disabled={!canWrite()}
       onInput={event => { setText(event.currentTarget.value); localStorage.setItem(answerDraftKey(props.record), event.currentTarget.value) }} />
     <div class="home-actions">
-      <button class="home-primary" dir="auto" disabled={!ready()} aria-keyshortcuts="Meta+Enter Control+Enter" onClick={() => void send()}>
-        <Show when={selected()} fallback="Send answer">{option => <>Send <bdi dir="auto">{option().label}</bdi></>}</Show>
+      {/* On cards the selected card already shows the choice, so the button stays short; its name still says what is sent. */}
+      <button class="home-primary" dir="auto" disabled={!ready()} aria-keyshortcuts="Meta+Enter Control+Enter" onClick={() => void send()}
+        aria-label={props.prepared && selected() ? `Send ${selected()!.label}` : undefined}>
+        <Show when={selected()} fallback="Send answer">{option => <Show when={!props.prepared} fallback="Send">Send <bdi dir="auto">{option().label}</bdi></Show>}</Show>
       </button>
       {props.extra}
       <span class="home-muted">To {target()} · not a tool approval</span>
