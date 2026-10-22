@@ -839,7 +839,9 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 }
 .dot.pending { background: var(--peach); }
 .session-work-status { display: flex; align-items: center; gap: 8px; flex-shrink: 0; min-block-size: 28px; padding: 6px 0; box-sizing: border-box; white-space: nowrap; font-size: 12px; color: var(--subtext0); }
-.session-work-status > span:not(.session-work-spinner) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.session-work-status > span:not(.session-work-spinner) { min-width: 0; overflow: hidden; text-overflow: ellipsis; line-height: 16px; }
+/* The reconnect action must fit the slot so a connection change never resizes it. */
+.session-work-status > button { box-sizing: border-box; padding-block: 0; min-block-size: 0; block-size: 16px; line-height: 14px; }
 /* Stepped by the shared pulse clock (pulse.ts), not a CSS animation. */
 /* Own layer: a phase change is then a compositor property update, not a
  * repaint of the whole root layer (~2 ms per tick otherwise). */
@@ -1641,6 +1643,11 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .session-page .topbar h1 { min-width: 0; overflow-wrap: anywhere; }
 .session-alerts { flex-shrink: 0; max-height: 25dvh; overflow: auto; }
 .session-page .transcript { min-height: 32px; }
+/* Fixed placeholder for a never-loaded transcript; cached sessions skip it. */
+.transcript-skeleton { display: grid; gap: 12px; padding: 16px 0; }
+.transcript-skeleton-line { block-size: 14px; border-radius: 4px; background: var(--surface0); opacity: 0.6; }
+.transcript-skeleton-line:nth-child(odd) { inline-size: 70%; }
+.transcript-skeleton-line:nth-child(even) { inline-size: 45%; }
 .session-main { overflow-y: auto; }
 
 @media (max-width: 1100px) {

@@ -8,7 +8,8 @@ import type { Part, ToolPart } from "@opencode-ai/sdk/v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { Icon } from "@opencode-ai/ui/icon"
 import { es, oc, type ContextPart } from "../api"
-import { createLiveSession, errorText } from "../live-session"
+import { errorText } from "../live-session"
+import { useLiveSession } from "../live-session-cache"
 import FakeCaret from "../components/fake-caret"
 import { SessionChips } from "../components/session-chips"
 import { SessionPicker } from "../components/session-picker"
@@ -50,6 +51,9 @@ import { completedTurns, messageSegments, planToolRuns, samePlan, sameSegments }
 import { isUserPrompt, promptPosition, promptTarget } from "../transcript-nav"
 import { restartMarkers } from "../restart-marker"
 import { anchorNote, anchorRange, parseAnchor, type MessageAnchor } from "../message-anchor"
+
+// How long backend trouble must persist before the status slot reports it.
+export const STATUS_DELAY_MS = 2000
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const [error, setError] = createSignal("")
@@ -189,7 +193,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const [subscriptionsOpen, setSubscriptionsOpen] = createSignal(false)
   const [laneMailOpen, setLaneMailOpen] = createSignal(false)
   const location = () => mailLocation(directory, editspaces()?.editspaces ?? [], sessionID)
-  const [mail] = createResource(
+  const [mail, { refetch: refetchMail }] = createResource(
     () => {
       const scope = location()
       if (!scope) return
@@ -205,9 +209,15 @@ export function SessionView(props: { sessionID: string; directory: string; embed
        (failure: unknown) => ({ editspace: scope.name, lane: scope.lane ?? "", messages: [], error: `Unable to load mail: ${String(failure)}` }),
     ),
   )
+  // A failed mail read retries on its own; otherwise one outage would stick until the next mail revision.
+  createEffect(() => {
+    if (!mail()?.error) return
+    const timer = setTimeout(() => void refetchMail(), 5000)
+    onCleanup(() => clearTimeout(timer))
+  })
   const [todoUpdate, setTodoUpdate] = createSignal<{ messageID?: string; at: number }>()
   const findRemovals = new Set<(messageID: string) => void>()
-  const live = createLiveSession(sessionID, directory, (event) => {
+  const live = useLiveSession(sessionID, directory, (event) => {
     if (event.type.startsWith("session.input.")) void composer.refreshInputs()
     if (event.type === "message.removed" && event.properties?.sessionID === sessionID && typeof event.properties.messageID === "string")
       findRemovals.forEach((remove) => remove(event.properties!.messageID))
@@ -438,13 +448,33 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   })
 
   const busy = () => !live.error() && !live.connectionError() && (status() === "busy" || status() === "retry")
+  // Daemon trouble shares one status slot, shown only once it persists: brief
+  // stalls change nothing visible and cannot stack banners. Auxiliary dashboard
+  // reads (mail, handoffs) report inside their own panels instead.
+  const backendError = () => [live.connectionError(), attentionError()].filter(Boolean).join("\n")
+  let wasDisconnected = false
+  createEffect(() => {
+    const down = !!live.connectionError()
+    // Activity otherwise waits for its next poll and would keep the slot red after recovery.
+    if (wasDisconnected && !down) void activity.refreshDirectory(directory, true)
+    wasDisconnected = down
+  })
+  const trouble = createMemo(() => backendError() ? "disconnected" : live.loading() ? "waiting-daemon" : "")
+  const [shownTrouble, setShownTrouble] = createSignal("")
+  createEffect(() => {
+    const kind = trouble()
+    if (!kind) return setShownTrouble("")
+    const timer = setTimeout(() => setShownTrouble(kind), STATUS_DELAY_MS)
+    onCleanup(() => clearTimeout(timer))
+  })
   const workState = createMemo(() => {
     if (live.error()) return "failed"
-    if (live.connectionError()) return "disconnected"
+    if (shownTrouble() === "disconnected" && trouble() === "disconnected") return "disconnected"
     if (pending().length) return "waiting"
     if (status() === "retry") return "retry"
     if (busy() || subagentsRunning()) return "working"
-    return attentionError() ? "disconnected" : "idle"
+    if (shownTrouble() && trouble()) return "stale"
+    return "idle"
   })
   const WorkSpinner = () => {
     const tick = usePulse()
@@ -487,17 +517,19 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     </div>
   }
   const WorkStatus = () => (
-    <div class="session-work-status" role="status" data-state={workState()} title={live.connectionError() || attentionError() || undefined}>
+    <div class="session-work-status" role="status" data-state={workState()} title={backendError() || undefined}>
       <Show when={workState() === "working" || workState() === "idle"} fallback={<>
         <Show when={workState() === "retry"}><WorkSpinner /></Show>
         <span>{workState() === "retry" ? "Retrying" : workState() === "waiting" ? "Waiting for your reply" : workState() === "failed" ?
-          `Session failed — see error ${inlineError() ? "in conversation" : "above"}` : "Reconnecting — activity unavailable"}</span>
+          `Session failed — see error ${inlineError() ? "in conversation" : "above"}` : workState() === "stale"
+          ? live.loaded() ? "Waiting for daemon — showing saved transcript" : "Waiting for daemon"
+          : live.loaded() ? "Reconnecting — showing saved transcript" : "Reconnecting — activity unavailable"}</span>
         <Show when={workState() === "failed"}><FailureRetry sessionID={sessionID} /></Show>
       </>}>
         <Show when={workState() === "working" || workState() === "retry"}><WorkSpinner /></Show>
         <ActivityBriefView input={briefInput()} />
       </Show>
-      <Show when={live.connectionError() || attentionError()}>
+      <Show when={workState() === "disconnected"}>
         <button disabled={live.loading()} onClick={() => {
           void live.load().catch(() => {})
           void activity.refreshDirectory(directory, true)
@@ -1506,18 +1538,17 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             <div class="anchor-note" role="status"><span>{anchorStatus()}</span>
               <button aria-label="Dismiss linked message note" onClick={() => setAnchorStatus("")}>×</button></div>
           </Show>
-          <Show when={handoffsError() && (ownedLane() || predecessor())}><div class="err" role="alert">{handoffsError()}</div></Show>
           <Show when={handoffError()}><div class="err" role="alert">{handoffError()}</div></Show>
           <Show when={handoffPending()}><div role="status" class="banner">Handoff waits for the current turn to finish.</div></Show>
           <Show when={handoffOpen() && ownedLane()}>
             <div class="banner handoff-form">
               <div class="banner-head">Hand off lane {ownedLane()?.lane}</div>
+              <Show when={handoffsError()}><div class="dim" role="status">{handoffsError()}</div></Show>
               <input aria-label="Successor task" placeholder="Successor task" value={handoffTask()} onInput={(e) => setHandoffTask(e.currentTarget.value)} />
               <textarea aria-label="Handoff notes" placeholder="Handoff context for the successor" value={handoffNotes()} onInput={(e) => setHandoffNotes(e.currentTarget.value)} />
               <div class="banner-actions"><button disabled={handingOff() || !handoffTask().trim() || !handoffNotes().trim()} onClick={handoff}>{handingOff() ? "Handing off…" : "Create successor"}</button></div>
             </div>
           </Show>
-          <Show when={mail()?.error}><div class="err" role="alert">{mail()?.error}</div></Show>
           <Show when={location()}>{(scope) => <>
             {/* Opened from the header menu; each panel takes space only while open. */}
             <Show when={subscriptionsOpen()}>
@@ -1529,7 +1560,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                 <section class="lane-mail" aria-label="Lane mail">
                   <div class="banner-head session-panel-head">All mail for lane {scope().lane} across handoffs
                     <button onClick={() => setLaneMailOpen(false)}>Hide lane mail</button></div>
-                  <Show when={!mail()?.messages.length}><div class="dim">No lane mail.</div></Show>
+                  <Show when={mail()?.error} fallback={<Show when={!mail()?.messages.length}><div class="dim">No lane mail.</div></Show>}>
+                    <div class="dim" role="status">{mail()?.error}</div>
+                  </Show>
                   <For each={mail()?.messages ?? []}>{(message) => <MailRow message={message} ids={mailIDs()} anchor="lane-mail" />}</For>
                 </section>
               </Show>
@@ -1583,6 +1616,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                 : "Preparing the next session. Your draft is saved here."}
               <Show when={transfer().reason}>{(reason) => <> <bdi dir="auto">{reason()}</bdi>.</>}</Show>
             </div>}</Show>
+            <Show when={!live.loaded() && !messages().length}>
+              <div class="transcript-skeleton" aria-busy="true" aria-label="Loading transcript">
+                <For each={[0, 1, 2, 3]}>{() => <div class="transcript-skeleton-line" />}</For>
+              </div>
+            </Show>
             <Show when={live.hasOlder()}>
               <button class="transcript-older" disabled={live.loadingOlder()} onClick={loadEarlier}>
                 {live.loadingOlder() ? "Loading…" : "Load earlier messages"}
