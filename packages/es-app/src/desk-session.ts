@@ -148,22 +148,32 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
   const [preparing, setPreparing] = createSignal(false)
   const pendingJob = (value: PendingCreate): BriefJob => ({ id: value.id, directory: value.directory, meta: value.body.metadata!.frontDesk as BriefMeta, created: value.created, state: { state: inflight() === value.id ? "starting" : "unconfirmed" } })
   let generation = 0
-  const refresh = async () => {
+  // Settled briefs never change on their own, so their transcripts are read once per explicit
+  // refresh, not on every tick: N finished briefs must not mean N reads per poll.
+  const settled = new Map<string, BriefJob>()
+  const isSettled = (job: BriefJob) => ["ready", "failed", "unknown"].includes(job.state.state)
+  const refresh = async (explicit = false) => {
     const target = desk()
     const local = () => pending() ? [pendingJob(pending()!)] : []
     if (!target) return setJobs(local())
     const current = ++generation
     try {
       const [children, status] = await Promise.all([oc.children(target.session, target.directory), oc.status(target.directory)])
-      const found = await Promise.all(children.flatMap(child => {
-        const meta = metaOf(child)
-        if (!meta) return []
-        return [oc.messagesTail(child.id, child.directory, 4).then(messages => ({
-          id: child.id, directory: child.directory, meta, created: child.time.created,
-          state: briefState(meta, messages, status[child.id]?.type),
-        }))]
-      }))
+      const briefs = children.flatMap(child => { const meta = metaOf(child); return meta ? [{ child, meta }] : [] })
+      const live = (id: string) => ["busy", "retry"].includes(status[id]?.type ?? "")
+      const stale = briefs.filter(({ child }) => explicit || !settled.has(child.id) || live(child.id) || child.id === inflight())
+      const read = await limited(stale, 4, ({ child, meta }) => oc.messagesTail(child.id, child.directory, 4).then((messages): BriefJob => ({
+        id: child.id, directory: child.directory, meta, created: child.time.created,
+        state: briefState(meta, messages, status[child.id]?.type),
+      })))
       if (current !== generation) return
+      for (const job of read) {
+        if (isSettled(job) && job.id !== inflight()) settled.set(job.id, job)
+        else settled.delete(job.id)
+      }
+      const known = new Set(briefs.map(({ child }) => child.id))
+      for (const id of settled.keys()) if (!known.has(id)) settled.delete(id)
+      const found = briefs.map(({ child }) => read.find(job => job.id === child.id) ?? settled.get(child.id)!)
       if (pending() && found.some(job => job.id === pending()!.id)) savePending(undefined)
       setJobs([...found, ...local()].sort((a, b) => b.created - a.created))
       setError("")
@@ -204,6 +214,7 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
       parts: [{ type: "text", text: value.packet }],
     }).catch(() => undefined) // The durable session shows whether the prompt was admitted.
     setInflight(undefined)
+    settled.delete(child.id)
     await refresh()
   }
   const reusable = (item: DeskItem) => jobs().find(job => job.meta.source === item.key && job.meta.revision === item.revision && job.state.state !== "failed" && job.state.state !== "unknown")
@@ -255,4 +266,15 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
     if (value) await admit(value)
   }
   return { jobs, error, pending, preparing, refresh, start, confirm }
+}
+
+/** Map with at most `limit` requests in flight, preserving input order. */
+const limited = async <T, R>(items: T[], limit: number, map: (item: T) => Promise<R>) => {
+  const results: R[] = new Array(items.length)
+  let next = 0
+  const worker = async () => {
+    for (let index = next++; index < items.length; index = next++) results[index] = await map(items[index]!)
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return results
 }

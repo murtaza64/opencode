@@ -1,7 +1,7 @@
 /* Front desk: one conversation across connected projects, a read-only queue of
  * existing requests, and an evidence canvas only while an item is selected.
  * The chat is the ordinary session view; selection changes never remount it. */
-import { createMemo, createSignal, For, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js"
 import { A } from "@solidjs/router"
 import { ago, sessionHref, useDashboard } from "../state"
 import { AppHeader } from "../components/native-header"
@@ -74,6 +74,9 @@ export default function Desk() {
     const name = dashboard.editspace() ?? dashboard.editspaces()?.default
     return dashboard.editspaces()?.editspaces.find(item => item.name === name)?.root
   }
+  // Shared session events end an active brief sooner than its poll would.
+  createEffect(on(() => briefs.jobs().filter(job => job.state.state === "running").map(job => `${job.id}:${dashboard.activity.status(job.id) ?? ""}`).join(","),
+    (now, before) => { if (before !== undefined && now !== before) void briefs.refresh() }))
   const jobsFor = (key: string) => briefs.jobs().filter(job => job.meta.source === key)
   const context = () => desk.context({
     now: Date.now(),
@@ -87,7 +90,7 @@ export default function Desk() {
 
   return <main class="desk" classList={{ "desk-has-selection": !!selected() }}>
     <AppHeader><h1>Front desk</h1><span class="home-muted">{project() ?? "All connected projects"}</span><A href="/">Home</A>
-      <span class="home-header-end" /><button class="desk-button" disabled={attention.loading()} onClick={() => { void attention.refresh(); void requests.refresh(); void dashboard.failures.refresh(); void briefs.refresh() }}>Refresh sources</button></AppHeader>
+      <span class="home-header-end" /><button class="desk-button" disabled={attention.loading()} onClick={() => { void attention.refresh(); void requests.refresh(); void dashboard.failures.refresh(); void briefs.refresh(true) }}>Refresh sources</button></AppHeader>
     <div class="desk-grid">
       <aside class="desk-queue" aria-label="Desk queue">
         <button class="desk-chat-tab" aria-pressed={!selected()} onClick={() => select()}>Front desk chat</button>

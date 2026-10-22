@@ -305,14 +305,14 @@ try {
   assert.equal(seen.chat.at(-1).context, false, "unchanged view adds no context")
   attentionDown = true
   await page.getByRole("button", { name: "Refresh sources" }).click()
-  await expect(page.locator(".desk-source", { hasText: "Attention ledger" })).toContainText("unavailable", { timeout: 20000 })
+  await expect(page.locator(".desk-source", { hasText: "Attention ledger" }).locator(".desk-source-state")).toHaveText(/^unavailable/, { timeout: 20000 })
   await editor().fill("DESK-Q4 and now?")
   await sendIdle()
   await expect(transcript()).toContainText("Desk answer for DESK-Q4.", { timeout: 20000 })
   assert.deepEqual(seen.chat.at(-1), { question: "DESK-Q4", context: true, none: true, selected: false, ledgerDown: true })
   attentionDown = false
   await page.getByRole("button", { name: "Refresh sources" }).click()
-  await expect(page.locator(".desk-source", { hasText: "Attention ledger" })).toContainText("current", { timeout: 20000 })
+  await expect(page.locator(".desk-source", { hasText: "Attention ledger" }).locator(".desk-source-state")).toHaveText(/^current/, { timeout: 20000 })
   log("CONTEXTKEY unchanged view -> no context; ledger outage with nothing selected -> context on next send")
   if (evidence) await page.screenshot({ path: path.join(evidence, "01-expanded-chat.png") })
 
@@ -448,10 +448,46 @@ try {
   await page.unroute(sessionRoute)
   log(`LOSTACK create ${lost.id}: lost before Core -> confirmed once with same ID; lost after Core -> adopted, no second child, no prompt`)
 
-  // 7. Interrupted pass: Core restarts mid-brief; the desk reports unknown and does not rerun it.
+  // 7. Idle polling does not reread finished briefs; an explicit refresh does, with results kept.
+  holdBriefs = false
+  for (const n of [1, 2, 3]) {
+    const meta = { kind: "brief", requestID: `extra-${n}`, source: "attention:fixture:att_rollout", revision: "0", title: `Extra ${n}`, refs: [{ id: "C1", label: "canonical" }, { id: "E2", label: "evidence" }] }
+    const extra = (await call("POST", "/session", { parentID: pointer.session, title: `Brief: Extra ${n}`, metadata: { frontDesk: meta }, permission: [{ permission: "*", pattern: "*", action: "deny" }] })).body
+    await call("POST", `/session/${extra.id}/prompt_async`, { parts: [{ type: "text", text: "Prepare an evidence brief\nsource revision: 0" }] })
+    await poll(`extra ${n} settled`, async () => (await status(extra.id)) === "idle" && (await messages(extra.id)).at(-1)?.info.time?.completed)
+  }
+  holdBriefs = true
+  await page.getByRole("button", { name: "Refresh sources" }).click()
+  const childIDs = new Set((await call("GET", `/session/${pointer.session}/children`)).body.map((item) => item.id))
+  assert.equal(childIDs.size, 5)
+  await expect(page.locator(".desk-job")).toHaveCount(4, { timeout: 20000 })
+  await expect(page.locator(".desk-job", { hasText: "Extra 3" })).toContainText("not current")
+  const briefReads = []
+  page.on("request", (request) => {
+    const match = /^\/oc\/session\/([^/]+)\/message$/.exec(new URL(request.url()).pathname)
+    if (request.method() === "GET" && match && childIDs.has(match[1])) briefReads.push(match[1])
+  })
+  await new Promise((resolve) => setTimeout(resolve, 2000))
+  briefReads.splice(0)
+  const childLists = posts.length
+  await new Promise((resolve) => setTimeout(resolve, 33_000)) // two idle ticks
+  assert.deepEqual(briefReads, [], "idle ticks reread no finished brief")
+  await expect(page.locator(".desk-job")).toHaveCount(4)
+  await page.getByRole("button", { name: "Expand chat" }).click()
+  await page.locator(".desk-job", { hasText: "Extra" }).first().waitFor()
+  await page.locator(".desk-item").first().click()
+  await page.getByRole("button", { name: "Refresh sources" }).click()
+  await poll("explicit refresh reread", () => new Set(briefReads).size === childIDs.size)
+  await new Promise((resolve) => setTimeout(resolve, 1000))
+  assert.equal(briefReads.length, childIDs.size, "explicit refresh reads each brief once")
+  await expect(page.locator(".desk-job")).toHaveCount(4)
+  log(`FANOUT children=${childIDs.size}: idle 33s -> 0 transcript reads; explicit refresh -> ${briefReads.length} (one each); jobs retained; postsDuringIdle=${posts.length - childLists}`)
+
+  // 8. Interrupted pass: Core restarts mid-brief; the desk reports unknown and does not rerun it.
+  const briefBase = hits.brief
   const metadataBefore = (await call("GET", `/session/${pointer.session}/children`)).body.map((item) => [item.id, item.metadata])
   await page.getByRole("button", { name: "Start a new check" }).click()
-  await poll("second brief reached provider", () => hits.brief === 2)
+  await poll("second brief reached provider", () => hits.brief === briefBase + 1)
   await stopCore()
   holds.splice(0)
   await startCore("restarted")
@@ -461,18 +497,18 @@ try {
   const metadataAfter = new Map((await call("GET", `/session/${pointer.session}/children`)).body.map((item) => [item.id, item.metadata]))
   for (const [id, metadata] of metadataBefore) assert.deepEqual(metadataAfter.get(id), metadata, `metadata of ${id} survives restart`)
   await new Promise((resolve) => setTimeout(resolve, 4000))
-  assert.equal(hits.brief, 2, "no automatic rerun after restart")
+  assert.equal(hits.brief, briefBase + 1, "no automatic rerun after restart")
   await expect(editor()).toHaveValue("")
   await expect(transcript()).toContainText("Desk answer for DESK-Q2.")
   log(`RESTART interrupted brief shown as unknown; briefHits=${hits.brief} (no rerun)`)
 
-  // 8. Authority: nothing answered, granted or retried on anyone's behalf.
+  // 9. Authority: nothing answered, granted or retried on anyone's behalf.
   assert.deepEqual(attentionPosts, [])
   assert.equal(posts.filter((item) => item.endsWith("/input")).length, 0, "every desk send was a plain send")
   assert.equal(posts.filter((item) => /\/(permission|question)\/.*\/reply|\/retry$/.test(item)).length, 0)
   log(`AUTHORITY attentionWrites=0 permissionReplies=0 retries=0 posts=${[...new Set(posts)].join(",")}`)
 
-  // 9. Narrow width keeps both views reachable.
+  // 10. Narrow width keeps both views reachable.
   await page.setViewportSize({ width: 760, height: 900 })
   await expect(page.locator(".desk-evidence")).toBeVisible()
   await expect(editor()).toBeVisible()
