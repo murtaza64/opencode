@@ -1,4 +1,4 @@
-.desk { display: flex; flex-direction: column; height: 100vh; max-width: none; margin: 0; padding: 0 0 0 20px; box-sizing: border-box; font-size: 13px; }
+.desk { display: flex; flex-direction: column; height: 100%; max-width: none; margin: 0; padding: 0 0 0 20px; box-sizing: border-box; font-size: 13px; }
 .content:has(.desk) { overflow: hidden; }
 .desk h1 { font-size: 17px; }
 .desk h2 { font-size: 13px; margin: 18px 0 8px; font-weight: 600; color: var(--text); }
