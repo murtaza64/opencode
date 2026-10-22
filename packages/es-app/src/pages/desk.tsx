@@ -11,9 +11,9 @@ import { AttentionDecision, type AttentionView } from "../components/attention-d
 import { DeskAgents } from "../components/desk-agents"
 import { HomePermission, type HomeReplyReceipt } from "../components/home-permission"
 import { FailureRetry } from "../components/session-failure"
-import { briefBinding, deskItems, deskSources, type DeskItem, type DeskSource } from "../desk"
+import { briefBinding, briefPacket, deskItems, deskSources, detailRequest, type DeskItem, type DeskSource } from "../desk"
 import { createDeskSession, createMemory, type BriefJob } from "../desk-session"
-import { PreparedBrief } from "../components/attention-brief"
+import { MoreDetail, PreparedBrief, useCompleteBrief } from "../components/attention-brief"
 import { useBriefs } from "../desk-briefs"
 import { oc } from "../api"
 import type { MemoryEntry, MemoryRevision } from "../desk-memory"
@@ -134,6 +134,18 @@ export default function Desk() {
     memory: memory.document(),
   })
 
+  // "More detail" on a selected item: fresh bounded evidence from its source thread, sent to the desk chat.
+  const askDetail = async (item: DeskItem, question: string) => {
+    const tail = await oc.messagesTail(item.source.session, item.source.directory, 10).catch(() => [])
+    const thread = sessionHref(item.source.session, item.source.directory)
+    const request = detailRequest(item, question, briefPacket(item, tail), ref => ref.messageID ? `${thread}&message=${encodeURIComponent(ref.messageID)}` : thread)
+    const note = context()
+    const error = await desk.detail(request.text, [...note, request.context], deskDirectory())
+    if (error) return error
+    if (note.length) desk.sent(note, true)
+    document.querySelector(".desk-chat")?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+  }
+
   return <main class="desk" classList={{ "desk-has-selection": !!selected() }}>
     <AppHeader><h1>Front desk</h1><span class="home-muted">{project() ?? "All projects"}</span>
       <span class="home-header-end" /><label class="desk-auto home-muted" title="Prepare a brief for each new item in the background"><input type="checkbox" checked={prepared.auto()} onChange={event => prepared.setAuto(event.currentTarget.checked)} /> Auto briefs</label><button class="desk-button" disabled={attention.loading()} onClick={() => { void attention.refresh(); void requests.refresh(); void dashboard.failures.refresh(); void briefs.refresh(true); dashboard.activity.todos.reload(); void attention.checkOperator().catch(() => undefined) }}>Refresh</button></AppHeader>
@@ -198,9 +210,9 @@ export default function Desk() {
         <Show when={"record" in current() ? current() as { record: AttentionRecord } : undefined}>{entry => <AttentionDecision record={entry().record} attention={attention} onView={view => view !== "open" && setHistoryView(view)} />}</Show>
         <Show when={selectedItem()}>{entry => <>
           <Show when={!entry().live}><div class="home-warning" role="status">No longer pending. Check the <A href={sessionHref(entry().item.source.session, entry().item.source.directory)}>thread</A> for the outcome.</div></Show>
-          <Canonical item={entry().item} live={entry().live} attention={attention} requests={requests} onReceipt={receipt => setReceipts(previous => [receipt, ...previous.filter(old => old.key !== receipt.key || old.at !== receipt.at)].slice(0, 5))} />
+          <Canonical item={entry().item} live={entry().live} attention={attention} requests={requests} detail={question => askDetail(entry().item, question)} onReceipt={receipt => setReceipts(previous => [receipt, ...previous.filter(old => old.key !== receipt.key || old.at !== receipt.at)].slice(0, 5))} />
           <Show when={receipts().length}><ul class="home-receipts" aria-label="Replies from the Front desk"><For each={receipts()}>{receipt => <li data-result={receipt.result}><b>{receiptText(receipt)}</b> · <bdi dir="ltr">{receipt.permission}</bdi> · <bdi dir="auto">{receipt.title}</bdi> · {ago(receipt.at)}{receipt.result === "uncertain" ? " · not confirmed" : receipt.result === "not-applied" ? " · no longer pending" : ""} · <A href={sessionHref(receipt.session, receipt.directory)}>Open thread</A></li>}</For></ul></Show>
-          <Show when={!entry().item.record}><PreparedBrief item={entry().item} live={entry().live} /></Show>
+          <Show when={!entry().item.record}><PreparedBrief item={entry().item} live={entry().live} /><MoreDetail ask={question => askDetail(entry().item, question)} /></Show>
         </>}</Show>
       </section>}</Show>}</Show>
 
@@ -234,13 +246,14 @@ const DeskStart = (props: { desk: ReturnType<typeof createDeskSession>; director
     </Show>
   </div>
 
-const Canonical = (props: { item: DeskItem; live: boolean; attention: ReturnType<typeof createAttention>; requests: ReturnType<typeof createHomeRequests>; onReceipt: (receipt: HomeReplyReceipt) => void }) => {
+const Canonical = (props: { item: DeskItem; live: boolean; detail: (question: string) => Promise<string | undefined>; attention: ReturnType<typeof createAttention>; requests: ReturnType<typeof createHomeRequests>; onReceipt: (receipt: HomeReplyReceipt) => void }) => {
   const dashboard = useDashboard()
-  const prepared = useBriefs()
-  // With a ready brief for this exact revision, the brief leads and the producer's text folds away.
-  const briefReady = () => prepared.briefs.jobs().some(job => job.meta.source === props.item.key && job.meta.revision === props.item.revision && job.state.state === "ready")
+  // With a complete brief for this exact revision, the brief leads and the producer's text folds away.
+  const brief = useCompleteBrief(() => props.item)
   return <div class="desk-canonical">
-    <Show when={props.item.record}>{record => <AttentionDecision record={record()} attention={props.attention} readable={briefReady()} brief={<PreparedBrief item={props.item} live={props.live} />} />}</Show>
+    <Show when={props.item.record}>{record => <AttentionDecision record={record()} attention={props.attention} prepared={brief()}
+      brief={<PreparedBrief item={props.item} live={props.live} part="lead" />} briefAfter={<PreparedBrief item={props.item} live={props.live} part="after" />}
+      briefDetails={<PreparedBrief item={props.item} live={props.live} part="details" />} more={<MoreDetail ask={props.detail} />} />}</Show>
     <Show when={props.item.request?.kind === "permission" ? props.item.request : undefined}>{request =>
       <HomePermission item={request()} live={props.live ? dashboard.activity.requestState("permission", request().session, request().directory, request().id) : "cleared"}
         siblings={dashboard.activity.requests().filter(other => other.kind === "permission" && other.directory === request().directory && other.request.sessionID === request().session && other.request.id !== request().id).length}

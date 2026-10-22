@@ -87,16 +87,36 @@ test("brief packet keeps the newest evidence within budget and numbers its refs"
   expect(packet.text).toContain("[C1] Canonical request")
 })
 
-test("brief state keeps only cited facts from the JSON reply", () => {
-  const reply = JSON.stringify({ ask: "Choose how far to roll out", whyNow: "  The canary has run for a day.  ", ifRecommended: "", summary: "Canary is staged.", facts: [{ text: "Canary exists", refs: ["E1"] }, { text: "Invented", refs: ["E9"] }], timeline: [], flow: ["build", "canary"], gaps: ["owner unknown"] })
+test("brief state keeps only cited facts and resolvable sources from the JSON reply", () => {
+  const reply = JSON.stringify({ ask: "", whyYou: "  It reads production storage  ", whyNow: "Latency rose Tuesday",
+    choices: [{ id: "a", outcome: "Canary keeps 5%", chips: ["read-only", "~90 min", "extra"], risk: "Slower" }], ifWait: "", unknown: "Owner unknown",
+    sources: [{ label: "Latency report", refs: ["E1"] }, { label: "Invented", refs: ["E9"] }, { label: "Plan", refs: ["file:docs/plan.md"] }],
+    facts: [{ text: "Canary exists", refs: ["E1"] }, { text: "Invented", refs: ["E9"] }], timeline: [], gaps: ["Cost"] })
   const state = briefState(meta(), [message("msg_u", "user", "packet"), message("msg_a", "assistant", "```json\n" + reply + "\n```")], "idle")
-  expect(state).toEqual({ state: "ready", omitted: 1, result: { ask: "Choose how far to roll out", whyNow: "The canary has run for a day.", ifRecommended: "", ifWait: "", summary: "Canary is staged.", facts: [{ text: "Canary exists", refs: ["E1"] }], timeline: [], flow: ["build", "canary"], gaps: ["owner unknown"] } })
+  expect(state).toEqual({ state: "ready", omitted: 1, result: { ask: "", whyYou: "It reads production storage", whyNow: "Latency rose Tuesday",
+    choices: [{ id: "a", outcome: "Canary keeps 5%", chips: ["read-only", "~90 min"], risk: "Slower" }], ifWait: "", unknown: "Owner unknown", gaps: ["Cost"],
+    sources: [{ label: "Latency report", refs: ["E1"] }, { label: "Plan", refs: ["file:docs/plan.md"] }],
+    facts: [{ text: "Canary exists", refs: ["E1"] }], timeline: [] } })
+})
+
+test("brief state keeps one well-formed shape and drops malformed ones", () => {
+  const ready = (shape: unknown) => {
+    const reply = JSON.stringify({ ask: "Approve the probe?", choices: [], ifWait: "", unknown: "", sources: [], facts: [], shape })
+    const state = briefState(meta(), [message("msg_u", "user", "packet"), message("msg_a", "assistant", reply)], "idle")
+    return state.state === "ready" ? state.result.shape : "not ready"
+  }
+  expect(ready({ kind: "scope", included: ["Read-only S3 reads", 7], excluded: ["Deploys"] })).toEqual({ kind: "scope", included: ["Read-only S3 reads"], excluded: ["Deploys"] })
+  expect(ready({ kind: "sequence", steps: ["Preflight", "Six runs", "Compare", "Report", "Decide", "Ship"] })).toEqual({ kind: "sequence", steps: ["Preflight", "Six runs", "Compare", "Report", "Decide"] })
+  expect(ready({ kind: "impact", rows: [{ area: "CPU", change: "" }, { area: "Prod", change: "Untouched" }] })).toEqual({ kind: "impact", rows: [{ area: "Prod", change: "Untouched" }] })
+  expect(ready({ kind: "sequence", steps: ["Only one"] })).toBeUndefined()
+  expect(ready({ kind: "chart", data: [] })).toBeUndefined()
 })
 
 test("brief state strips bracketed ref citations from prose; refs stay attached", () => {
-  const reply = JSON.stringify({ ask: "Ship the canary or wait (C1)?", whyNow: "The rollout is paused [E1, E2].", ifRecommended: "", ifWait: "", summary: "", facts: [{ text: "Canary is healthy (E1).", refs: ["E1"] }], timeline: [], flow: [], gaps: ["Cost (C1) unknown"] })
+  const reply = JSON.stringify({ ask: "Ship the canary or wait (C1)?", choices: [{ id: "a", outcome: "Canary stays [E1, E2]", chips: [], risk: "" }], ifWait: "", unknown: "Cost (C1) unknown", sources: [],
+    facts: [{ text: "Canary is healthy (E1).", refs: ["E1"] }], timeline: [] })
   const state = briefState(meta(), [message("msg_u", "user", "packet"), message("msg_a", "assistant", reply)], "idle")
-  expect(state).toMatchObject({ state: "ready", result: { ask: "Ship the canary or wait?", whyNow: "The rollout is paused.", facts: [{ text: "Canary is healthy.", refs: ["E1"] }], gaps: ["Cost unknown"] } })
+  expect(state).toMatchObject({ state: "ready", result: { ask: "Ship the canary or wait?", choices: [{ outcome: "Canary stays" }], facts: [{ text: "Canary is healthy.", refs: ["E1"] }], unknown: "Cost unknown" } })
 })
 
 test("brief state reports interrupted and unconfirmed passes as unknown, never as running", () => {

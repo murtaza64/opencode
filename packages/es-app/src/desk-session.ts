@@ -7,7 +7,7 @@ import type { Session } from "@opencode-ai/sdk/v2"
 import { descending } from "@opencode-ai/schema/identifier"
 import { oc, SessionCreateError, type ContextPart, type MessageWithParts } from "./api"
 import { assistantOps, handled, emptyMemory, eraseMemory, nextMemory, type MemoryDocument, type MemoryOp } from "./desk-memory"
-import { BRIEF_SCHEMA, BRIEF_SYSTEM, briefPacket, briefState, deskContext, type BriefMeta, type BriefState, type DeskItem } from "./desk"
+import { BRIEF_CONTRACT, BRIEF_SCHEMA, BRIEF_SYSTEM, briefPacket, briefState, deskContext, type BriefMeta, type BriefState, type DeskItem } from "./desk"
 
 const POINTER = "es-app:front-desk:1"
 const NOTE = "es-app:front-desk:context:1"
@@ -123,11 +123,32 @@ export const createDeskSession = () => {
     const key = parts.find(part => part.metadata.source === CONTEXT_SOURCE)?.metadata.key
     if (current && key && accepted) localStorage.setItem(`${NOTE}:${current.id}`, key)
   }
-  return { pointer, session, status, error, setError, verify, start, confirm, forget, context, sent }
+  /** An explicit request from a decision card, sent as an ordinary desk message beside the composer:
+   * the composer's draft is untouched. Starts the conversation first if there is none yet. */
+  const detail = async (text: string, parts: ContextPart[], directory?: string) => {
+    if (status() === "none" && directory) await start(directory)
+    const current = session()
+    if (!current) return "The front desk chat is not available yet."
+    // Same agent and model as the human's last message, so the answer comes from the desk they use.
+    const last = (await oc.messagesTail(current.id, current.directory, 6).catch(() => [])).findLast(message => message.info.role === "user")?.info
+    try {
+      await oc.promptBody(current.id, current.directory, {
+        ...(last?.role === "user" ? { agent: last.agent, model: last.model } : {}),
+        parts: [{ type: "text", text }, ...parts],
+      })
+    } catch (cause) {
+      return `Not sent: ${cause instanceof Error ? cause.message : String(cause)}`
+    }
+  }
+  return { pointer, session, status, error, setError, verify, start, confirm, forget, context, sent, detail }
 }
 
 export type BriefJob = { id: string; directory: string; meta: BriefMeta; created: number; state: BriefState | { state: "starting" } | { state: "unconfirmed" } }
 type PendingCreate = { id: string; directory: string; body: Parameters<typeof oc.createSession>[1] & { id: string }; packet: string; created: number }
+
+/** A brief made under the current contract for exactly this item revision. */
+export const currentJob = (jobs: BriefJob[], item: DeskItem) =>
+  jobs.find(job => job.meta.source === item.key && job.meta.revision === item.revision && (job.meta.contract ?? 1) === BRIEF_CONTRACT)
 
 const metaOf = (session: Session): BriefMeta | undefined => {
   const value = (session.metadata as Record<string, unknown> | undefined)?.frontDesk as BriefMeta | undefined
@@ -140,7 +161,8 @@ const metaOf = (session: Session): BriefMeta | undefined => {
 /* Public shape other clients (native, phone) can read without es-app code:
  * - anchor: Core session ses_fdbrief_<sha256(editspace root)[:20 hex]> in that root (archived);
  * - job: its child session ses_fdjob_<sha256(JSON [anchor, source, revision, attempt])[:24 hex]>,
- *   metadata.frontDesk = BriefMeta {kind:"brief", requestID, source: "attention:<editspace>:<record id>", revision, title, refs};
+ *   attempt = how many jobs already exist for that source and revision (any contract),
+ *   metadata.frontDesk = BriefMeta {kind:"brief", requestID, source: "attention:<editspace>:<record id>", revision, title, refs, contract};
  * - result: the job's last completed assistant text is one JSON object matching BRIEF_SCHEMA (desk.ts),
  *   valid only while the ledger record still has that revision. */
 export const briefID = async (parent: string, source: string, revision: string, attempt: number) => {
@@ -245,7 +267,8 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
     settled.delete(child.id)
     await refresh()
   }
-  const reusable = (item: DeskItem) => jobs().find(job => job.meta.source === item.key && job.meta.revision === item.revision && job.state.state !== "failed" && job.state.state !== "unknown")
+  // A job under an older brief contract is not reused: the next start makes a current one (a new attempt).
+  const reusable = (item: DeskItem) => jobs().find(job => job.meta.source === item.key && job.meta.revision === item.revision && (job.meta.contract ?? 1) === BRIEF_CONTRACT && job.state.state !== "failed" && job.state.state !== "unknown")
   /** One read-only pass per exact source revision. An existing check for it is reused, not rerun. */
   const start = async (item: DeskItem) => {
     if (pending() || preparing() || inflight()) return
@@ -266,7 +289,7 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
       }
       if (desk()?.session !== target.session || pending() || inflight() || reusable(latest)) return
       const packet = briefPacket(latest, tail)
-      const meta: BriefMeta = { kind: "brief", requestID: crypto.randomUUID(), source: latest.key, revision: latest.revision, title: latest.title, refs: packet.refs }
+      const meta: BriefMeta = { kind: "brief", requestID: crypto.randomUUID(), source: latest.key, revision: latest.revision, title: latest.title, refs: packet.refs, contract: BRIEF_CONTRACT }
       // Deterministic per (parent, source, revision, attempt): every client computes the same ID, so
       // Core's create reconciliation makes the first creator win and the rest adopt its job.
       const attempt = jobs().filter(job => job.meta.source === latest.key && job.meta.revision === latest.revision).length
