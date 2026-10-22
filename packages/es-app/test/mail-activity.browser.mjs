@@ -14,6 +14,7 @@ fixture.messages = [
   user("msg_002", "Synthetic notice is not mail", { source: { type: "other", id: "mail-42", sender: "fake", recipient: "fake" } }),
   user("msg_003", "Mail body with <img src=x onerror=alert(1)>", { source, delivery: "queue", state: "promoted" }),
   user("msg_004", "Mail without delivery metadata", { source: { ...source, id: "mail-43" } }),
+  user("msg_005", "Joiner finished the report", { source: { ...source, id: "es-resume-1", kind: "resume", senderSession: "ses_orch" } }),
 ]
 fixture.mail = (es, recipient) => ({ editspace: es, lane: "", messages: recipient === "ses_a" ? [
   { id: "mail-42", ts: new Date(1).toISOString(), created_ms: 1, from: "lane-alpha", to: "lane-beta",
@@ -21,7 +22,8 @@ fixture.mail = (es, recipient) => ({ editspace: es, lane: "", messages: recipien
   { id: "mail-43", ts: new Date(1).toISOString(), created_ms: 1, from: "lane-alpha", to: "lane-beta",
     direction: "received", text: "Mail without delivery metadata", deliveries: [] },
 ] : [] })
-const browser = await chromium.launch({ channel: "chrome", headless: true })
+const browser = await chromium.launch({ headless: true,
+  ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : { channel: "chrome" }) })
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 await page.context().route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
 const errors = []
@@ -29,7 +31,11 @@ page.on("pageerror", error => errors.push(error.message))
 try {
   await page.goto(preview.url)
   const mail = page.locator('[data-mail-message-id="msg_003"]')
-  await expect(page.locator(".mail-activity")).toHaveCount(2)
+  await expect(page.locator(".mail-activity")).toHaveCount(3)
+  // An agent's resume is agent-originated activity, never a human turn.
+  await expect(page.locator('[data-mail-message-id="msg_005"] summary')).toContainText("Agent resume")
+  await expect(page.locator('[data-mail-message-id="msg_005"] summary')).toContainText("lane-alpha → lane-beta")
+  await expect(mail.locator("summary")).toContainText("Mail")
   await expect(page.locator('.transcript [data-component="user-message"]:not(.mail-activity [data-component="user-message"])')).toHaveCount(2)
   await expect(mail.locator("summary")).toContainText("lane-alpha → lane-beta")
   await expect(mail.locator("summary")).toContainText("queue")
@@ -45,7 +51,7 @@ try {
   await expect(page.locator('.transcript [data-component="user-message"]:not(.mail-activity [data-component="user-message"])')).toContainText(["Human: mail-42", "Synthetic notice is not mail"])
   expect(errors).toEqual([])
   expect(fixture.calls.filter(call => !["GET", "HEAD", "OPTIONS"].includes(call.method))).toEqual([])
-  console.log("PASS mail activity: structured source only, delivery/state, expandable original, safe text, no mutations")
+  console.log("PASS mail activity: structured source only, agent resume labelled, delivery/state, expandable original, safe text, no mutations")
 } finally {
   await browser.close()
   await preview.close()

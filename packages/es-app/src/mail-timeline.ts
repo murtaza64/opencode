@@ -32,6 +32,16 @@ export const mailSourceID = (message: Message) => {
   return source.id
 }
 
+// es admits an agent's `resume` or spawn kickoff text as sourced input so it
+// is never mistaken for the human; name it by what the agent did.
+export const mailActivityLabel = (kind: unknown) =>
+  kind === "resume" ? "Agent resume" : kind === "spawn" ? "Agent kickoff" : "Mail"
+
+// These inputs have no mail record, so they are transcript content in their own right.
+const agentInput = (message: Message) => !!mailSourceID(message) && "source" in message &&
+  typeof message.source === "object" && message.source !== null && "kind" in message.source &&
+  mailActivityLabel(message.source.kind) !== "Mail"
+
 export type MailInterval = { sessionID: string; lane?: string; from?: number; to?: number }
 
 // Receipt/admission times never move historical source content into a new session.
@@ -74,7 +84,7 @@ export const mailRows = (messages: Message[], timeline: MailTimeline | undefined
   // Keep raw history intact. Mail with unavailable/old source time is not transcript content.
   const visible = interval ? messages.filter(message => {
     const id = mailSourceID(message)
-    return !id || records.has(id)
+    return !id || records.has(id) || agentInput(message)
   }) : messages
   const existing = new Map(previous.map((row) => [`${row.type}:${row.message.id}`, row]))
   const promoted = new Set(visible.flatMap((message) => {

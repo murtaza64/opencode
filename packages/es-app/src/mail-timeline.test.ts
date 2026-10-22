@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { Message } from "@opencode-ai/sdk/v2"
 import type { MailMessage, MailTimeline } from "./api"
-import { mailCauses, mailForSession, mailLocation, mailRows, mailWake } from "./mail-timeline"
+import { mailActivityLabel, mailCauses, mailForSession, mailLocation, mailRows, mailWake } from "./mail-timeline"
 
 test("selects the matching editspace and lane from the session directory", () => {
   const roots = [
@@ -187,4 +187,20 @@ test("a mail run without its source record reports no send time rather than inve
   ] as Message[]
   expect(mailCauses(mailRows(messages, undefined), new Map()).get("msg_m")).toEqual({
     ids: ["gone"], kinds: [{ kind: "mail", human: false, catchUp: false, count: 1 }], senders: ["peer"], promotedAt: 5_000 })
+})
+
+test("labels agent-originated resume and kickoff inputs by what the agent did", () => {
+  expect(mailActivityLabel("resume")).toBe("Agent resume")
+  expect(mailActivityLabel("spawn")).toBe("Agent kickoff")
+  expect(mailActivityLabel("task")).toBe("Mail")
+  expect(mailActivityLabel(undefined)).toBe("Mail")
+})
+
+test("keeps an agent resume in the session transcript although no mail record exists", () => {
+  const source = { type: "editspace-mail", id: "es-resume-1", sender: "orchestrator", recipient: "work", kind: "resume" }
+  const resume = { id: "msg_resume", sessionID: "ses_first", role: "user", time: { created: 3000 }, source } as unknown as Message
+  const stale = { id: "msg_mail", sessionID: "ses_first", role: "user", time: { created: 3000 },
+    source: { ...source, id: "gone", kind: "task" } } as unknown as Message
+  expect(mailRows([resume, stale], undefined, [], { sessionID: "ses_first", from: 2000 }).map(row => row.message.id))
+    .toEqual(["msg_resume"])
 })
