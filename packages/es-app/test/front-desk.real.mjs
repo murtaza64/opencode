@@ -302,7 +302,7 @@ try {
   let pointerID
 
   // 1. Expanded chat with nothing selected; the queue aggregates the ledger with freshness.
-  await page.goto(`${origin}/desk`)
+  await page.goto(`${origin}/`)
   await expect(page.locator(".desk-item")).toHaveCount(1, { timeout: 20000 })
   await expect(page.locator(".desk-evidence")).toHaveCount(0)
   await expect(page.locator(".desk-source", { hasText: "Attention ledger" })).toContainText("read-only: operator connection unavailable")
@@ -312,11 +312,11 @@ try {
   const deskSessions = async () => (await call("GET", "/session")).body.filter((item) => item.title === "Front desk")
   await page.route(sessionRoute, (route) => rootCreate(route.request()) ? route.abort("connectionreset") : route.fallback())
   await page.getByRole("button", { name: "Start chat" }).click()
-  await expect(page.locator(".desk-start")).toContainText("was not confirmed", { timeout: 20000 })
+  await expect(page.locator(".desk-start")).toContainText("start not confirmed", { timeout: 20000 })
   const unconfirmed = JSON.parse(await page.evaluate(() => localStorage.getItem("es-app:front-desk:1")))
   assert.equal((await deskSessions()).length, 0)
   await page.reload()
-  await expect(page.locator(".desk-start")).toContainText("was not confirmed", { timeout: 20000 })
+  await expect(page.locator(".desk-start")).toContainText("start not confirmed", { timeout: 20000 })
   await expect(page.getByRole("button", { name: "Start chat" })).toHaveCount(0)
   await page.unroute(sessionRoute)
   let rootPosts = 0
@@ -328,7 +328,7 @@ try {
   })
   await page.getByRole("button", { name: "Confirm start" }).click()
   await poll("root desk created", async () => (await deskSessions()).length === 1)
-  await expect(page.locator(".desk-start")).toContainText("was not confirmed", { timeout: 20000 })
+  await expect(page.locator(".desk-start")).toContainText("start not confirmed", { timeout: 20000 })
   await page.unroute(sessionRoute)
   await page.reload()
   await expect(editor()).toBeVisible({ timeout: 20000 })
@@ -482,12 +482,12 @@ try {
   const childCreate = (request) => request.method() === "POST" && new URL(request.url()).pathname === "/oc/session" && JSON.parse(request.postData() || "{}").parentID
   await page.route(sessionRoute, (route) => childCreate(route.request()) ? route.abort("connectionreset") : route.fallback())
   await page.getByRole("button", { name: "Prepare brief" }).click()
-  await expect(page.locator(".desk-brief")).toContainText("Start was not confirmed", { timeout: 20000 })
+  await expect(page.locator(".desk-brief")).toContainText("Brief start not confirmed", { timeout: 20000 })
   const lost = JSON.parse(await page.evaluate(() => localStorage.getItem("es-app:front-desk:brief-create:1")))
   assert.equal((await call("GET", `/session/${briefAnchor}/children`)).body.some((item) => item.id === lost.id), false)
   await page.reload()
   await page.locator(".desk-item").first().click()
-  await expect(page.locator(".desk-brief")).toContainText("Start was not confirmed", { timeout: 20000 })
+  await expect(page.locator(".desk-brief")).toContainText("Brief start not confirmed", { timeout: 20000 })
   await expect(page.getByRole("button", { name: "Prepare brief" })).toHaveCount(0)
   await page.unroute(sessionRoute)
   let created = 0
@@ -526,7 +526,7 @@ try {
   await page.getByRole("button", { name: "Refresh", exact: true }).click()
   const childIDs = new Set((await call("GET", `/session/${briefAnchor}/children`)).body.map((item) => item.id))
   assert.equal(childIDs.size, 5)
-  await expect(page.locator(".desk-job")).toHaveCount(4, { timeout: 20000 })
+  await expect(page.locator(".desk-job")).toHaveCount(5, { timeout: 20000 })
   await expect(page.locator(".desk-job", { hasText: "Extra 3" })).toContainText("not current")
   const briefReads = []
   page.on("request", (request) => {
@@ -538,16 +538,16 @@ try {
   const childLists = posts.length
   await new Promise((resolve) => setTimeout(resolve, 33_000)) // two idle ticks
   assert.deepEqual(briefReads, [], "idle ticks reread no finished brief")
-  await expect(page.locator(".desk-job")).toHaveCount(4)
+  await expect(page.locator(".desk-job")).toHaveCount(5)
   await page.getByRole("button", { name: "Close and return to chat" }).click()
-  await page.locator(".desk-job", { hasText: "Extra" }).first().waitFor()
+  await page.locator(".desk-job", { hasText: "Extra" }).first().waitFor({ state: "attached" })
   await page.locator(".desk-item").first().click()
   await page.getByRole("button", { name: "Refresh", exact: true }).click()
   await poll("explicit refresh reread", () => new Set(briefReads).size === childIDs.size)
   await new Promise((resolve) => setTimeout(resolve, 1000))
   assert.equal(briefReads.length, childIDs.size, "explicit refresh reads each brief once")
-  await expect(page.locator(".desk-job")).toHaveCount(4)
-  log(`FANOUT children=${childIDs.size}: idle 33s -> 0 transcript reads; explicit refresh -> ${briefReads.length} (one each); jobs retained; postsDuringIdle=${posts.length - childLists}`)
+  await expect(page.locator(".desk-job")).toHaveCount(5)
+  log(`FANOUT children=${childIDs.size}: idle 33s -> 0 transcript reads; explicit refresh -> ${briefReads.length} (one each); all 5 jobs listed; postsDuringIdle=${posts.length - childLists}`)
 
   // 8. Memory: one personal file behind the real dashboard seam (private HOME). The desk's own
   //    fenced change applies once with its source; the human edits, restores, forgets and erases;
@@ -660,19 +660,21 @@ try {
 
   // 11. Automatic preparation: with the setting on, a new or changed decision is prepared without
   //     any click. The job retrieves local context read-only, returns a sandboxed bespoke visual, and
-  //     Home shows it leading the card with the original request behind a disclosure. One job per
+  //     the desk shows it leading the card with the original request behind a disclosure. One job per
   //     revision: reload and the desk reuse it; a new revision gets a new job; nothing prompts.
   await writeFile(path.join(project, "ROLLOUT.md"), "The canary owner is Kim.\n")
   holdBriefs = false
   attentionRevision = 6
-  await page.goto(`${origin}/desk`)
+  await page.goto(`${origin}/`)
   await page.getByLabel("Auto briefs").check()
   const autoHits = hits.brief
   // A second client (another window or device) runs its own provider at the same moment.
   const second = await browser.newContext({ viewport: { width: 1280, height: 900 } })
   await second.addInitScript(() => { localStorage.setItem("es-app:front-desk:auto-prepare", "on") })
   const secondPage = await second.newPage()
-  await Promise.all([page.goto(`${origin}/`), secondPage.goto(`${origin}/`)])
+  // The Front Desk at "/" opens the decision by key; the brief leads its card.
+  const rollout = `${origin}/?item=${encodeURIComponent("attention:fixture:att_rollout")}`
+  await Promise.all([page.goto(rollout), secondPage.goto(rollout)])
   const card = page.locator('.home-decision[data-attention-id="att_rollout"]')
   await expect(card).toContainText("revision 6", { timeout: 40000 })
   await expect(card.getByRole("button", { name: "Prepare brief" })).toHaveCount(0)
@@ -702,14 +704,14 @@ try {
   if (evidence) await page.screenshot({ path: path.join(evidence, "05-home-auto-brief.png"), fullPage: true })
   await page.reload()
   await expect(card.locator(".desk-brief-ask")).toContainText("Choose whether", { timeout: 20000 })
-  await page.goto(`${origin}/desk`)
+  await page.goto(`${origin}/`)
   await page.locator(".desk-item").first().click()
   await expect(page.locator(".desk-brief .desk-brief-ask")).toContainText("Choose whether to stay at the canary", { timeout: 20000 })
   await new Promise((resolve) => setTimeout(resolve, 3000))
   assert.equal(hits.brief, autoHits + 2, "reload and the desk reuse the job")
   assert.equal((await call("GET", `/session/${briefAnchor}/children`)).body.filter((item) => item.metadata?.frontDesk?.revision === "6").length, 1)
   attentionRevision = 7
-  await page.goto(`${origin}/`)
+  await page.goto(rollout)
   await expect(card).toContainText("revision 7", { timeout: 40000 })
   await expect(card.locator(".desk-brief-ask")).toContainText("Choose whether", { timeout: 60000 })
   await expect(card.locator(".desk-brief")).toContainText("Brief for revision 7")
@@ -747,7 +749,7 @@ try {
   log(`AUTHORITY attentionWrites=0 permissionReplies=0 retries=0 posts=${[...new Set(posts)].join(",")}`)
 
   // 13. Narrow width keeps both views reachable.
-  await page.goto(`${origin}/desk`)
+  await page.goto(`${origin}/`)
   await page.locator(".desk-item").first().click()
   await page.setViewportSize({ width: 760, height: 900 })
   await expect(page.locator(".desk-evidence")).toBeVisible()
@@ -758,7 +760,7 @@ try {
   if (serve) {
     // Reviewers get immediate briefs; a held one is only for the overlap proof.
     holdBriefs = false
-    log(`PREVIEW ${origin}/desk\nCORE ${base} PID=${child.pid} DB=${db}\nSTOP kill ${process.pid}`)
+    log(`PREVIEW ${origin}/\nCORE ${base} PID=${child.pid} DB=${db}\nSTOP kill ${process.pid}`)
     await browser.close()
     browser = undefined
     await new Promise((resolve) => { process.on("SIGTERM", resolve); process.on("SIGINT", resolve) })

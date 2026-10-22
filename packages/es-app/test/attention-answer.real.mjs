@@ -142,8 +142,10 @@ try {
   await context.addInitScript(() => localStorage.setItem("es-app-all-projects", "true"))
   await context.route("**/*", (route) => new URL(route.request().url()).origin === uiOrigin ? route.continue() : route.abort())
   const page = await context.newPage()
+  // The Front Desk at "/" opens one queue item by key; the decision card renders in its evidence pane.
+  const openItem = (id) => page.goto(`${uiOrigin}/?item=${encodeURIComponent(`attention:fleet:${id}`)}`)
   const answerInUi = async (id, text) => {
-    await page.goto(uiOrigin)
+    await openItem(id)
     const card = page.locator(`[data-attention-id="${id}"]`)
     await card.getByRole("textbox", { name: /Your answer|Note/ }).fill(text)
     await card.getByRole("button", { name: "Send answer", exact: true }).click()
@@ -213,7 +215,7 @@ try {
   // 4. A selected option alone is the answer: one delivery carrying the exact choice and no invented text.
   const mailFor = async (requestID) => (await readFile(path.join(root, ".es", "mail", "work.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line)).filter((item) => item.request_id === requestID)
   const selectInUi = async (id, label, note) => {
-    await page.goto(uiOrigin)
+    await openItem(id)
     const card = page.locator(`[data-attention-id="${id}"]`)
     await card.getByRole("radio", { name: label, exact: true }).check()
     if (note) await card.getByRole("textbox", { name: /Note/ }).fill(note)
@@ -266,7 +268,7 @@ try {
 
   // 7. RTL: the single primary action stays reachable without horizontal scroll.
   const rtl = publish(sessionB, "issue:238:rtl:v1", "قرار تجريبي")
-  await page.goto(uiOrigin)
+  await openItem(rtl.id)
   await page.evaluate(() => { document.documentElement.dir = "rtl" })
   const rtlCard = page.locator(`[data-attention-id="${rtl.id}"]`)
   await rtlCard.getByRole("radio", { name: "A — Project map", exact: true }).check()
