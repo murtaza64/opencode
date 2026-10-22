@@ -36,6 +36,13 @@ test("native durable snapshot takes precedence over stale tab data", () => {
   expect(composerStorage("Chrome/130 Electron/42.3.3", tab, () => durable).getItem(key)).toBe("durable unknown request")
 })
 
+test("Android shell drafts survive page recreation like the desktop shell", () => {
+  const durable = new MemoryStorage()
+  const userAgent = "Mozilla/5.0 (Linux; Android 15; wv) Chrome/130 Mobile Safari/537.36 EditspaceAndroid/0.1"
+  composerStorage(userAgent, new MemoryStorage(), () => durable).setItem(key, "draft before process death")
+  expect(composerStorage(userAgent, new MemoryStorage(), () => durable).getItem(key)).toBe("draft before process death")
+})
+
 test("native migration retains tab data until validated state is durably saved", async () => {
   const tab = new MemoryStorage()
   const durable = new MemoryStorage()
