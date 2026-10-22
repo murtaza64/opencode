@@ -21,7 +21,7 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
   const discarded = () => props.jobs.filter(job => job.meta.revision !== props.item.revision)
   const ready = () => { const job = current(); return job?.state.state === "ready" ? { job, result: job.state.result as BriefResult, omitted: job.state.omitted } : undefined }
   const recommended = () => props.item.record?.options.find(option => option.id === props.item.record?.recommendation)?.label
-  return <section class="desk-brief" aria-label="Brief">
+  return <section class="desk-brief" aria-label="Brief" tabIndex={-1}>
     <Show when={current()} fallback={<Show when={props.live}>
       <Show when={props.auto && !props.unavailable} fallback={<>
         <button class="desk-button" disabled={!props.canStart} onClick={props.start}>Prepare brief</button>

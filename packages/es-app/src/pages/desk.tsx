@@ -16,6 +16,7 @@ import { createDeskSession, createMemory, type BriefJob } from "../desk-session"
 import { PreparedBrief } from "../components/attention-brief"
 import { useBriefs } from "../desk-briefs"
 import { oc } from "../api"
+import { flash } from "../motion"
 import type { MemoryEntry, MemoryRevision } from "../desk-memory"
 import { SessionView } from "./session"
 import "./home.css"
@@ -103,6 +104,19 @@ export default function Desk() {
   })
   const selectedItem = () => { const current = selected(); return current && "item" in current ? current : undefined }
   const select = (key?: string) => setSelectedKey(key)
+  const [evidence, setEvidence] = createSignal<HTMLElement>()
+  // A brief sits below its request and may be off screen, already selected or stacked below the
+  // queue on narrow windows; selection alone can look like nothing happened, so bring it into view.
+  const showBrief = (key: string) => {
+    select(key)
+    requestAnimationFrame(() => {
+      const brief = evidence()?.querySelector<HTMLElement>(".desk-brief")
+      if (!brief) return
+      brief.scrollIntoView({ block: "start" })
+      brief.focus({ preventScroll: true })
+      flash(brief)
+    })
+  }
   const deskDirectory = () => {
     const name = dashboard.editspace() ?? dashboard.editspaces()?.default
     return dashboard.editspaces()?.editspaces.find(item => item.name === name)?.root
@@ -179,7 +193,7 @@ export default function Desk() {
                 return <div class="desk-job home-source" data-state={job.state.state} data-current={binding().current ? "true" : "false"}>
                   <span>Brief · <bdi dir="auto">{job.meta.title}</bdi> · rev {job.meta.revision} · {binding().current ? stateLabel(job) : "not current"}</span>
                   <Show when={binding().current} fallback={<span>{binding().reason}</span>}>
-                    <button class="desk-button" onClick={() => select(job.meta.source)}>Show</button>
+                    <button class="desk-button" aria-label={`Show brief: ${job.meta.title}`} onClick={() => showBrief(job.meta.source)}>Show</button>
                   </Show>
                 </div>
               }}</For>
@@ -189,7 +203,7 @@ export default function Desk() {
       </aside>
 
       {/* Remount per selection so one item's reply outcome or draft never carries into the next. */}
-      <Show when={selected() ? selectedKey() : undefined} keyed>{_key => <Show when={selected()}>{current => <section class="desk-evidence attention-home" aria-label={"agents" in current() ? "Agents" : "Selected item"}>
+      <Show when={selected() ? selectedKey() : undefined} keyed>{_key => <Show when={selected()}>{current => <section ref={setEvidence} class="desk-evidence attention-home" aria-label={"agents" in current() ? "Agents" : "Selected item"}>
         <div class="desk-evidence-head">
           <Show when={"agents" in current()}><h2>Agents</h2></Show>
           <button class="desk-button" aria-label="Close and return to chat" onClick={() => select()}>Close</button>

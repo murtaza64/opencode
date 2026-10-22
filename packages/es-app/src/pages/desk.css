@@ -113,3 +113,5 @@
 .desk-visual iframe { block-size: 220px; resize: vertical; overflow: auto; }
 /* Until a brief is ready, its slot is a status line or one button, not an empty panel. */
 .desk-brief:not(:has(.desk-brief-body)) { padding: 0; background: none; border: 0; margin-block-start: 10px; }
+.desk-brief:focus { outline: none; }
+.desk-brief:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
