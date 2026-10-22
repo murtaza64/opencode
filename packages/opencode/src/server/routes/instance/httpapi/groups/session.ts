@@ -87,7 +87,8 @@ export const UpdatePayload = Schema.Struct({
   permission: Schema.optional(PermissionV1.Ruleset),
   time: Schema.optional(
     Schema.Struct({
-      archived: Schema.optional(Session.ArchivedTimestamp),
+      // null restores an archived Session.
+      archived: Schema.optional(Schema.NullOr(Session.ArchivedTimestamp)),
     }),
   ),
 })

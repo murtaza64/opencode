@@ -377,7 +377,8 @@ export const createFixture = async () => {
       if (operation) {
         if (fixture.failAction === operation) return json({ error: `${operation} unavailable` }, 503)
         const complete = () => {
-          if (operation === "archive") fixture.archived.add(id)
+          if (operation === "archive" && body?.time?.archived === null) fixture.archived.delete(id)
+          else if (operation === "archive") fixture.archived.add(id)
           if (operation === "delete") fixture.deleted.add(id)
           if (operation === "abort") fixture.setStatus("idle")
           return json(operation === "fork" ? session("ses_b") : session(id))
