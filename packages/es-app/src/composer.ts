@@ -10,6 +10,7 @@ import type {
 import { oc, inputImages, type InputImage } from "./api"
 import { HttpError, httpError, supersededError } from "./api-error"
 import { composerStorage } from "./composer-storage"
+import type { ContextPart } from "./api"
 import { defaultImageCapability } from "./image-fit"
 import { createImageStore, type ImageStore } from "./image-store"
 
@@ -911,6 +912,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     nextModel?: ComposerModel | null,
     direct?: { mode: ComposerMode; buffer: ComposerBuffer; targetRevision: number; action: ComposerAction },
     latestMessageID?: string,
+    context?: readonly ContextPart[],
   ) => {
     if (state.hydrating) await hydration
     const mode = direct?.mode ?? state.mode
@@ -1012,7 +1014,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       })
       persist()
       try {
-        await prompt(state.sessionModel ? { ...session, preferredModel: { id: state.sessionModel.modelID, providerID: state.sessionModel.providerID } } : session, directory, text, { images: draft.images, model: state.sessionModel ? undefined : draft.model ?? nextModel ?? undefined })
+        await prompt(state.sessionModel ? { ...session, preferredModel: { id: state.sessionModel.modelID, providerID: state.sessionModel.providerID } } : session, directory, text, { images: draft.images, model: state.sessionModel ? undefined : draft.model ?? nextModel ?? undefined, ...(context?.length ? { context } : {}) })
         clearTask(draft.revision, buffer, direct?.targetRevision)
         setState("normalSubmission", "status", "accepted")
       } catch (error) {
@@ -1473,13 +1475,14 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       updateDraft({ selection: [start, end] }, false, state.visibleBuffer),
     reasonForAction: (action: ComposerAction) =>
       blockedReason(action === "steer" && !state.busy ? "send" : action, state.visibleBuffer),
-    submitVisible: (action: ComposerAction, session: Session, nextModel?: ComposerModel | null, latestMessageID?: string) =>
+    // `context` rides only on a plain send, inside the same message as the human's text.
+    submitVisible: (action: ComposerAction, session: Session, nextModel?: ComposerModel | null, latestMessageID?: string, context?: readonly ContextPart[]) =>
       submit(session, nextModel, {
         action,
         mode: action === "steer" && !state.busy ? "send" : action,
         buffer: state.visibleBuffer,
         targetRevision: state.targetRevision,
-      }, latestMessageID),
+      }, latestMessageID, context),
     setText: (text: string) => updateDraft({ text }),
     setQueueAgent: (agent: string | null) => {
       if (state.queueAgent === agent) return
