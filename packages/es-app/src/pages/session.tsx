@@ -1585,7 +1585,10 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             <Show when={echo() && composer.state.normalSubmission}>
               {(submission) => (
                 <div class="pending-msg" data-status={submission().status}>
-                  <div class="pending-bubble" dir="auto">{submission().text}{submission().images ? ` · ${submission().images} image(s)` : ""}</div>
+                  <Show when={submission().text || !submission().previews?.length}>
+                    <div class="pending-bubble" dir="auto">{submission().text}{submission().images && !submission().previews?.length ? ` · ${submission().images} image(s)` : ""}</div>
+                  </Show>
+                  <ComposerImages images={submission().previews} />
                   <div class="pending-hint">{submission().status === "sending" ? "Sending…" : submission().status === "accepted" ? "Sent — waiting for the daemon…" : "Send not confirmed"}</div>
                 </div>
               )}

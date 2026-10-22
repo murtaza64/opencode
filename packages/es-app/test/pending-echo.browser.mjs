@@ -1,12 +1,13 @@
 import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
 import { createServer } from "vite"
-import { createFixture, directory } from "./composer-fixture.mjs"
+import { createFixture, directory, imageCapability } from "./composer-fixture.mjs"
 
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const fixture = await createFixture()
 fixture.status = "idle"
 fixture.holdNormal = true
+fixture.images = imageCapability
 fixture.messages = Array.from({ length: 30 }, (_, index) => ({
   info: {
     id: `msg_${String(index).padStart(3, "0")}`,
@@ -56,12 +57,63 @@ try {
     await expect(bubble).toHaveCount(0)
     await expect(page.locator('[data-component="user-message"]').filter({ hasText: "pending echo fixture text" })).toHaveCount(1)
     await expect(page.locator(".normal-submission")).toHaveCount(0)
-    expect(fixture.unexpected).toEqual([])
-    expect(errors).toEqual([])
-    console.log("PASS pending echo browser: immediate pending, pinned transcript, accepted, SSE echo replacement")
   } finally {
     clearTimeout(release)
   }
+
+  // Image-only send with two images: the held echo shows both thumbnails.
+  const source = await browser.newPage()
+  await source.setContent('<div style="width:48px;height:32px;background:#123456">A</div>')
+  const first = (await source.locator("div").screenshot()).toString("base64")
+  await source.setContent('<div style="width:48px;height:32px;background:#abcdef">B</div>')
+  const second = (await source.locator("div").screenshot()).toString("base64")
+  await source.close()
+  const paste = (images) => editor.evaluate((el, images) => {
+    const data = new DataTransfer()
+    for (const [name, base64] of images) data.items.add(new File([Uint8Array.from(atob(base64), (char) => char.charCodeAt(0))], name, { type: "image/png" }))
+    el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true }))
+  }, images)
+  const removes = page.locator('.prompt-box button[aria-label^="Remove "]')
+  const echoImages = page.locator(".pending-msg img")
+  await editor.press("i")
+  await paste([["a.png", first], ["b.png", second]])
+  await expect(removes).toHaveCount(2)
+  await editor.press("Escape")
+  await editor.press("Enter")
+  await expect(echoImages).toHaveCount(2)
+  await expect(bubble).toHaveCount(0)
+  expect(await echoImages.evaluateAll((images) => images.map((image) => image.getAttribute("src")))).toEqual([`data:image/png;base64,${first}`, `data:image/png;base64,${second}`])
+  await expect.poll(() => fixture.calls.filter((call) => call.path === "/session/ses_a/prompt_async" && call.method === "POST").length).toBe(2)
+  const imagePost = fixture.calls.filter((call) => call.path === "/session/ses_a/prompt_async").at(-1)
+  expect(imagePost.body.parts.filter((part) => part.type === "file").map((part) => part.url)).toEqual([`data:image/png;base64,${first}`, `data:image/png;base64,${second}`])
+  fixture.normalReplies.shift()()
+  await expect(page.locator(".pending-hint")).toHaveText("Sent — waiting for the daemon…")
+  await expect(echoImages).toHaveCount(2)
+  await expect(removes).toHaveCount(0)
+  const imageInfo = { id: "msg_zzz_images", sessionID: "ses_a", role: "user", agent: "build", model: { providerID: "fixture", modelID: "test" }, time: { created: Date.now() } }
+  fixture.emit("message.updated", { info: imageInfo })
+  for (const [index, base64] of [first, second].entries())
+    fixture.emit("message.part.updated", { part: { id: `part_image_${index}`, sessionID: "ses_a", messageID: imageInfo.id, type: "file", mime: "image/png", filename: `${index}.png`, url: `data:image/png;base64,${base64}` } })
+  await expect(page.locator(".pending-msg")).toHaveCount(0)
+  expect(fixture.calls.filter((call) => call.path === "/session/ses_a/prompt_async" && call.method === "POST")).toHaveLength(2)
+
+  // Lost acknowledgement: the echo and the draft both keep the exact image.
+  fixture.holdNormal = false
+  fixture.loseNormal = true
+  await editor.press("i")
+  await editor.fill("lost with image")
+  await paste([["c.png", first]])
+  await expect(removes).toHaveCount(1)
+  await editor.press("Escape")
+  await editor.press("Enter")
+  await expect(page.locator(".pending-hint")).toHaveText("Send not confirmed")
+  await expect(bubble).toHaveText("lost with image")
+  await expect(echoImages).toHaveCount(1)
+  await expect(removes).toHaveCount(1)
+  expect(fixture.calls.filter((call) => call.path === "/session/ses_a/prompt_async" && call.method === "POST")).toHaveLength(3)
+  expect(fixture.unexpected).toEqual([])
+  expect(errors).toEqual([])
+  console.log("PASS pending echo browser: immediate pending, pinned transcript, accepted, SSE echo replacement, image-only and multi-image thumbnails, lost-ack image retention")
 } finally {
   await browser.close()
   await vite.close()

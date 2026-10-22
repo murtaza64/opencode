@@ -1497,6 +1497,45 @@ test("normal Send has immediate scoped sending feedback and a late ACK cannot cl
   expect(composer.state.receipts).toEqual([])
 })
 
+test("normal Send echo carries its exact images in memory and persists only the count", async () => {
+  const ack = deferred<void>()
+  const second = { ...image, id: "image-2", filename: "second.png" }
+  const submitted: unknown[] = []
+  const storage = new MemoryStorage()
+  const { composer, dependencies } = harness(undefined, {
+    storage,
+    prompt: (_session, _directory, _text, options) => {
+      submitted.push(options?.images)
+      return ack.promise
+    },
+  })
+  composer.setImages([image, second])
+  const sending = composer.submit(session)
+  expect(composer.state.normalSubmission?.text).toBe("")
+  expect(composer.state.normalSubmission?.images).toBe(2)
+  expect(unwrap(composer.state.normalSubmission?.previews)).toEqual([image, second])
+  expect([...storage.data.values()].join("")).not.toContain("data:image")
+  ack.resolve()
+  await sending
+  expect(composer.state.normalSubmission?.status).toBe("accepted")
+  expect(unwrap(composer.state.normalSubmission?.previews)).toEqual([image, second])
+  expect(composer.state.task.images).toEqual([])
+  expect(submitted).toHaveLength(1)
+  const restored = createComposer(session.id, directory, dependencies)
+  expect(restored.state.normalSubmission?.images).toBe(2)
+  expect(restored.state.normalSubmission?.previews).toBeUndefined()
+})
+
+test("unknown normal Send keeps its image echo and the draft's recoverable images", async () => {
+  const { composer } = harness(undefined, { prompt: async () => { throw new Error("lost ack") } })
+  composer.setText("with image")
+  composer.setImages([image])
+  await composer.submit(session)
+  expect(composer.state.normalSubmission?.status).toBe("unknown")
+  expect(unwrap(composer.state.normalSubmission?.previews)).toEqual([image])
+  expect(unwrap(composer.state.task.images)).toEqual([image])
+})
+
 test("reload preserves explicit Send and shows unknown legacy outcome without retrying", async () => {
   const ack = deferred<void>()
   let calls = 0
