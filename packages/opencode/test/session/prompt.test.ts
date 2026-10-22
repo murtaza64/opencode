@@ -1651,6 +1651,206 @@ for (const synthetic of [false, true]) {
   )
 }
 
+// Agent mail batching (dotfiles#241)
+
+const mail = (id: string, text: string) => ({
+  requestID: `mail-${id}`,
+  delivery: "queue" as const,
+  text,
+  source: { type: "editspace-mail" as const, id, sender: "peer", recipient: "lane", kind: "task" },
+})
+// Mail bodies in provider-input order, read from the formatted peer-mail context.
+const mailBodies = (request: { messages?: readonly unknown[] } | undefined): string[] =>
+  (request?.messages ?? []).flatMap((message) => {
+    const content = (message as { content?: unknown }).content
+    const texts = typeof content === "string"
+      ? [content]
+      : Array.isArray(content)
+        ? content.flatMap((part) => (typeof part?.text === "string" ? [part.text as string] : []))
+        : []
+    return texts.flatMap((text) =>
+      text.startsWith("Peer agent mail") ? (JSON.parse(text.slice(text.indexOf("\n") + 1)).body as string[]) : [],
+    )
+  })
+
+it.instance("waiting mail is promoted together into one provider turn with per-mail receipts", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const inputs = yield* SessionInput.Service
+    const chat = yield* sessions.create({ title: "Pinned" })
+    yield* llm.text("first answer")
+    yield* llm.text("batch answer")
+    yield* llm.text("late answer")
+    yield* prompt.prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "hello" }] })
+
+    yield* inputs.admit(chat.id, mail("lane#1", "first mail"))
+    yield* inputs.admit(chat.id, mail("lane#2", "second mail"))
+    yield* inputs.admit(chat.id, mail("lane#3", "third mail"))
+    yield* prompt.wake(chat.id)
+    yield* pollWithTimeout(llm.calls.pipe(Effect.map((calls) => (calls === 2 ? true : undefined))), "batch turn did not run")
+    yield* pollWithTimeout(
+      inputs.get(chat.id, "mail-lane#3").pipe(Effect.map((receipt) => (receipt.state === "presented" ? true : undefined))),
+      "batch was not presented",
+    )
+
+    const receipts = yield* Effect.forEach(["mail-lane#1", "mail-lane#2", "mail-lane#3"], (id) => inputs.get(chat.id, id))
+    expect(receipts.map((receipt) => receipt.state)).toEqual(["presented", "presented", "presented"])
+    const ids = receipts.map((receipt) => (receipt.state === "presented" ? receipt.messageID : undefined))
+    expect(new Set(ids).size).toBe(3)
+    expect(ids).toEqual([...ids].sort())
+    expect(mailBodies((yield* llm.inputs)[1])).toEqual(["first mail", "second mail", "third mail"])
+
+    // A later arrival is retained for the next boundary, never folded into a finished turn or dropped.
+    yield* inputs.admit(chat.id, mail("lane#4", "late mail"))
+    yield* prompt.wake(chat.id)
+    yield* pollWithTimeout(llm.calls.pipe(Effect.map((calls) => (calls === 3 ? true : undefined))), "late turn did not run")
+    expect(mailBodies((yield* llm.inputs)[2]).slice(3)).toEqual(["late mail"])
+    const users = (yield* sessions.messages({ sessionID: chat.id })).filter((message) => message.info.role === "user")
+    expect(users.map((message) => message.info.role === "user" ? message.info.source?.id : undefined)).toEqual([
+      undefined,
+      "lane#1",
+      "lane#2",
+      "lane#3",
+      "lane#4",
+    ])
+
+    // An exact retry of an already-promoted mail returns its receipt and promotes nothing again.
+    expect((yield* inputs.admit(chat.id, mail("lane#2", "second mail"))).state).toBe("presented")
+    expect(yield* inputs.promote(chat.id, true)).toBe(false)
+  }),
+)
+
+it.instance("a human queued input still runs alone and bounds a waiting-mail batch", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const inputs = yield* SessionInput.Service
+    const chat = yield* sessions.create({ title: "Pinned" })
+    for (const answer of ["first", "mail a", "human", "mail b"]) yield* llm.text(answer)
+    yield* prompt.prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "hello" }] })
+
+    yield* inputs.admit(chat.id, mail("lane#a", "mail a"))
+    yield* inputs.admit(chat.id, { requestID: "human-queue", delivery: "queue", text: "human queued" })
+    yield* inputs.admit(chat.id, mail("lane#b", "mail b"))
+    yield* inputs.admit(chat.id, mail("lane#c", "mail c"))
+    yield* prompt.wake(chat.id)
+    yield* pollWithTimeout(llm.calls.pipe(Effect.map((calls) => (calls === 4 ? true : undefined))), "turns did not run")
+    const requests = yield* llm.inputs
+    expect(mailBodies(requests[1])).toEqual(["mail a"])
+    expect(requests[1]?.messages).not.toContainEqual({ role: "user", content: "human queued" })
+    expect(requests[2]?.messages).toContainEqual({ role: "user", content: "human queued" })
+    expect(mailBodies(requests[2])).toEqual(["mail a"])
+    expect(mailBodies(requests[3])).toEqual(["mail a", "mail b", "mail c"])
+  }),
+)
+
+it.instance("a superseded session leaves admitted mail for its successor but still promotes human input", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const inputs = yield* SessionInput.Service
+    const run = yield* SessionRunState.Service
+    const chat = yield* sessions.create({ title: "Pinned" })
+    const successor = yield* sessions.create({ title: "Successor" })
+    yield* llm.text("first")
+    yield* prompt.prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "hello" }] })
+
+    yield* inputs.admit(chat.id, mail("lane#x", "zombie mail"))
+    yield* inputs.admit(chat.id, { requestID: "human-before-fence", delivery: "queue", text: "human before fence" })
+    expect((yield* run.supersede(chat.id, successor.id)).state).toBe("committed")
+
+    expect(yield* inputs.promote(chat.id, true)).toBe(true)
+    expect((yield* inputs.get(chat.id, "human-before-fence")).state).toBe("promoted")
+    expect(yield* inputs.promote(chat.id, true)).toBe(false)
+    expect((yield* inputs.get(chat.id, "mail-lane#x")).state).toBe("pending")
+    expect(yield* llm.calls).toBe(1)
+  }),
+)
+
+it.instance("waiting mail for a different agent starts its own turn", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const inputs = yield* SessionInput.Service
+    const chat = yield* sessions.create({ title: "Pinned" })
+    for (const answer of ["first", "build mail", "plan mail"]) yield* llm.text(answer)
+    yield* prompt.prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "hello" }] })
+
+    yield* inputs.admit(chat.id, mail("lane#build", "for build"))
+    yield* inputs.admit(chat.id, { ...mail("lane#plan", "for plan"), agent: "plan" })
+    yield* prompt.wake(chat.id)
+    yield* pollWithTimeout(llm.calls.pipe(Effect.map((calls) => (calls === 3 ? true : undefined))), "turns did not run")
+    const requests = yield* llm.inputs
+    expect(mailBodies(requests[1])).toEqual(["for build"])
+    expect(mailBodies(requests[2]).slice(0, 2)).toEqual(["for build", "for plan"])
+  }),
+)
+
+it.instance("a cancelled pending handoff fence restores mail promotion", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const inputs = yield* SessionInput.Service
+    const run = yield* SessionRunState.Service
+    const chat = yield* sessions.create({ title: "Pinned" })
+    const successor = yield* sessions.create({ title: "Successor" })
+    const gate = yield* Deferred.make<void>()
+    yield* llm.hold("in flight", deferredAsPromise(gate))
+    yield* llm.text("mail answer")
+    const turn = yield* prompt
+      .prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "work" }] })
+      .pipe(Effect.forkChild)
+    yield* llm.wait(1)
+    yield* inputs.admit(chat.id, mail("lane#kept", "still mine"))
+    expect((yield* run.supersede(chat.id, successor.id)).state).toBe("pending")
+    expect(yield* run.cancelSupersession(chat.id)).toMatchObject({ state: "pending" })
+
+    yield* Deferred.succeed(gate, undefined)
+    yield* Fiber.join(turn)
+    yield* pollWithTimeout(
+      inputs.get(chat.id, "mail-lane#kept").pipe(Effect.map((receipt) => (receipt.state === "presented" ? true : undefined))),
+      "mail was not promoted after the fence was cancelled",
+    )
+    expect(mailBodies((yield* llm.inputs)[1])).toEqual(["still mine"])
+  }),
+)
+
+it.instance("mail waiting when a handoff fence is requested mid-turn is not answered at the predecessor's final boundary", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const inputs = yield* SessionInput.Service
+    const run = yield* SessionRunState.Service
+    const chat = yield* sessions.create({ title: "Pinned" })
+    const successor = yield* sessions.create({ title: "Successor" })
+    const gate = yield* Deferred.make<void>()
+    yield* llm.hold("in flight", deferredAsPromise(gate))
+    yield* llm.text("must not run")
+    const turn = yield* prompt
+      .prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "work" }] })
+      .pipe(Effect.forkChild)
+    yield* llm.wait(1)
+    yield* inputs.admit(chat.id, mail("lane#race", "arrived during the turn"))
+    expect((yield* run.supersede(chat.id, successor.id)).state).toBe("pending")
+
+    yield* Deferred.succeed(gate, undefined)
+    yield* Fiber.join(turn)
+    expect(yield* llm.calls).toBe(1)
+    expect((yield* inputs.get(chat.id, "mail-lane#race")).state).toBe("pending")
+    yield* pollWithTimeout(
+      run.supersede(chat.id, successor.id).pipe(Effect.map((receipt) => (receipt.state === "committed" ? true : undefined))),
+      "fence did not commit after the drain settled",
+    )
+  }),
+)
+
 noLLMServer.instance("concurrent loop callers get same result", () =>
   Effect.gen(function* () {
     const { prompt, run, chat } = yield* boot()
