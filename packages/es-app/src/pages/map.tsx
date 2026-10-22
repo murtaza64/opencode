@@ -5,7 +5,7 @@ import { createEffect, createMemo, createResource, createSignal, For, onCleanup,
 import { A, useSearchParams } from "@solidjs/router"
 import { es } from "../api"
 import {
-  buildAgentMap, flattenAgents, layoutMap, linkOrigins, mailEdges, mailParty, NODE, stateEvents,
+  buildAgentMap, flattenAgents, layoutMap, linkOrigins, mailEdges, mailParty, stateEvents,
   type AgentStatus, type ClusterBox, type MapAgent, type MapCluster, type MapMail, type ProvenanceRecord, type SessionRef,
 } from "../agent-map"
 import { cloudHref } from "../cloud-agents"
@@ -30,9 +30,6 @@ export default function AgentMap() {
   const [layer, setLayer] = createSignal("all")
   // Topology is the map; mail is an opt-in overlay for the selected agent.
   const [showMail, setShowMail] = createSignal(false)
-  const [paused, setPaused] = createSignal(false)
-  const [reduced, setReduced] = createSignal(false)
-  const [systemReduced, setSystemReduced] = createSignal(false)
   const [zoom, setZoom] = createSignal<number | "fit">("fit")
   const [canvasWidth, setCanvasWidth] = createSignal(0)
   // Graph geometry stays LTR; node contents follow the document direction, as in the prototype.
@@ -101,13 +98,13 @@ export default function AgentMap() {
   const layout = createMemo(() => layoutMap(visible(), canvasWidth() ? canvasWidth() - 2 : undefined))
   const events = createMemo(() => stateEvents(visible()).filter((event) => layer() === "all" || event.level === layer()))
   const hidden = () => clusters().reduce((sum, cluster) => sum + cluster.hidden, 0)
-  const still = () => paused() || reduced() || systemReduced()
-  // Fit: the map shrinks to the panel width (never enlarges).
+  // Fit (the default): the map shrinks to the panel width so every region is
+  // visible, never enlarges; zoom in for detail.
   const scale = () => {
     const value = zoom()
     if (value !== "fit") return value
     if (!canvasWidth()) return 1
-    return Math.min(1, Math.max(0.6, (canvasWidth() - 2) / layout().width))
+    return Math.min(1, Math.max(0.3, (canvasWidth() - 2) / layout().width))
   }
 
   // Index every selectable identity: map nodes, handoff predecessors (history),
@@ -158,27 +155,40 @@ export default function AgentMap() {
 
   let panel: HTMLElement | undefined
   onMount(() => {
-    const media = matchMedia("(prefers-reduced-motion: reduce)")
-    setSystemReduced(media.matches)
-    const motion = () => setSystemReduced(media.matches)
-    media.addEventListener("change", motion)
     const observer = new ResizeObserver(() => setCanvasWidth(panel?.clientWidth ?? 0))
     if (panel) observer.observe(panel)
     const readDirection = () => setDirection(getComputedStyle(document.documentElement).direction === "rtl" ? "rtl" : "ltr")
     readDirection()
     const dirObserver = new MutationObserver(readDirection)
     dirObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["dir"] })
-    onCleanup(() => { media.removeEventListener("change", motion); observer.disconnect(); dirObserver.disconnect() })
+    onCleanup(() => { observer.disconnect(); dirObserver.disconnect() })
   })
 
+  // With a selection, everything outside its lineage, origin, children and
+  // drawn mail fades back; nothing moves on its own.
+  const related = createMemo(() => {
+    const key = selected()?.key
+    if (!key) return undefined
+    const keys = new Set([key])
+    const parents = new Map(layout().agents.flatMap((agent) => agent.parent ? [[agent.key, agent.parent] as const] : []))
+    for (let current = parents.get(key); current && !keys.has(current); current = parents.get(current)) keys.add(current)
+    const grow = (from: string) => layout().agents.filter((agent) => agent.parent === from).forEach((agent) => { keys.add(agent.key); grow(agent.key) })
+    grow(key)
+    for (const edge of [...layout().hierarchy, ...edges()]) if (edge.from === key || edge.to === key) { keys.add(edge.from); keys.add(edge.to) }
+    return keys
+  })
+  const faded = (...keys: string[]) => { const set = related(); return set && !keys.every((key) => set.has(key)) ? "true" : undefined }
   const Node = (props: { agent: MapAgent }) => {
     let dot: HTMLElement | undefined
     // Ring a node's dot when it newly needs input or fails, like the sidebar.
     ringOnChange(() => dot, () => props.agent.tone === "input" ? "pending" : props.agent.tone)
-    return <button class="map-node-box" data-kind={props.agent.kind} data-tone={props.agent.tone} aria-pressed={selected()?.key === props.agent.key} onClick={() => select(props.agent.key)}>
-    <span class="map-node-name"><bdi dir="auto">{props.agent.name}</bdi><span class="map-runtime" title={props.agent.runtime === "cloud" ? "Wingman cloud" : "Local"}>{props.agent.runtime === "cloud" ? "W" : "L"}</span></span>
-    <span class="map-node-state"><i ref={(node) => dot = node} />{props.agent.state}<Show when={props.agent.laneNode?.predecessors.length}>{(count) => <span class="map-handoffs" title={`${count()} past owner${count() === 1 ? "" : "s"} (handoff history)`}>↺{count()}</span>}</Show></span>
-  </button>
+    return <button class="map-node-box" data-kind={props.agent.kind} data-tone={props.agent.tone} aria-pressed={selected()?.key === props.agent.key} onClick={() => select(props.agent.key)}
+      title={`${props.agent.name} · ${props.agent.state} · ${props.agent.runtime === "cloud" ? "Wingman cloud" : "local"}`}>
+      <i class="map-node-dot" ref={(node) => dot = node} role="img" aria-label={props.agent.state} />
+      <bdi dir="auto" class="map-node-name">{props.agent.name}</bdi>
+      <Show when={props.agent.laneNode?.predecessors.length}>{(count) => <span class="map-handoffs" title={`${count()} past owner${count() === 1 ? "" : "s"} (handoff history)`}>↺{count()}</span>}</Show>
+      <span class="map-runtime">{props.agent.runtime === "cloud" ? "W" : "L"}</span>
+    </button>
   }
   const Route = (props: { message: MapMail }) => <span class="map-route">
     <Party editspace={props.message.editspace} name={props.message.from} /><span class="map-arrow" aria-label="to">→</span><Party editspace={props.message.editspace} name={props.message.to} />
@@ -188,29 +198,23 @@ export default function AgentMap() {
   const time = (at: number) => Number.isFinite(at) ? new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "?"
   const title = (cluster: ClusterBox) => `${cluster.project.toUpperCase()}${cluster.cloud ? " · CLOUD" : ""} · ${cluster.count} AGENT${cluster.count === 1 ? "" : "S"}`
 
-  return <main class="attention-home agent-map-page" data-still={still() ? "true" : "false"}>
+  return <main class="attention-home agent-map-page">
     <AppHeader><h1>Agent map</h1><span class="home-muted">{project() ?? "All projects"}</span></AppHeader>
     <Show when={dashboard.stateError()}><div class="home-warning">{dashboard.stateError()} Lanes may be incomplete.</div></Show>
     <Show when={dashboard.handoffsError()}><div class="home-warning">{dashboard.handoffsError()} Handoff chains may be incomplete.</div></Show>
     <Show when={dashboard.sessionsError()}><div class="home-warning">{dashboard.sessionsError()}</div></Show>
     <Show when={provenance()?.failed.length}><div class="home-warning">Lane provenance unavailable for {provenance()!.failed.join(", ")}; delegation and spawn edges may be missing.</div></Show>
-    <p class="map-summary"><bdi dir="auto">{visible().length} of {agents().length} agents · local + Wingman cloud{hidden() ? ` · ${hidden()} hidden (idle over 24h, unpinned)` : ""}</bdi></p>
+    <Show when={visible().length < agents().length || hidden()}><p class="map-summary"><bdi dir="auto">{visible().length} of {agents().length + hidden()} agents{hidden() ? ` · ${hidden()} hidden by Active (idle over 24h, unpinned)` : ""}</bdi></p></Show>
     <div class="map-toolbar">
       <label>Project<select aria-label="Project" value={projectFilter()} onChange={(event) => setProjectFilter(event.currentTarget.value)}><option value="all">{project() ? "This project" : "All projects"}</option><For each={clusters().map((cluster) => cluster.project)}>{(value) => <option value={value}>{value}</option>}</For></select></label>
       <label>Runtime<select aria-label="Runtime" value={runtime()} onChange={(event) => setRuntime(event.currentTarget.value)}><option value="all">Local + Wingman</option><option value="local">Local</option><option value="cloud">Wingman cloud</option></select></label>
       <label>Agents<select aria-label="Agents" value={scope()} onChange={(event) => setSearch({ agents: event.currentTarget.value === "all" ? "all" : undefined, show: undefined }, { replace: true })}><option value="active">Active</option><option value="all">All</option></select></label>
       <label>Events<select aria-label="Events" value={layer()} onChange={(event) => setLayer(event.currentTarget.value)}><For each={LAYERS}>{([value, label]) => <option value={value}>{label}</option>}</For></select></label>
       <label class="map-mail-toggle"><input type="checkbox" checked={showMail()} onChange={(event) => setShowMail(event.currentTarget.checked)} />Mail for selected agent</label>
-      <div class="map-motion">
-        <button onClick={() => setPaused(!paused())}>{paused() ? "Resume motion" : "Pause motion"}</button>
-        <label><input type="checkbox" checked={reduced()} onChange={(event) => setReduced(event.currentTarget.checked)} />Reduce motion</label>
-        <Show when={still()}><span>{systemReduced() ? "OS reduced motion · static" : "Static"}</span></Show>
-      </div>
     </div>
     <div class="map-body">
       <section class="map-main" ref={panel} aria-label="Project map">
         <div class="map-view-heading">
-          <h2>Project map</h2>
           <div class="map-view-controls">
             <div class="map-zoom">
               <button aria-label="Zoom out" onClick={() => setZoom(Math.max(0.4, Math.round((scale() - 0.25) * 4) / 4))}>−</button>
@@ -225,24 +229,30 @@ export default function AgentMap() {
               <svg viewBox={`0 0 ${layout().width} ${layout().height}`} width={layout().width * scale()} height={layout().height * scale()} role="group" aria-label="Agent network">
                 <defs><marker id="map-org-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8a90a4" /></marker><marker id="map-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke" /></marker></defs>
                 <For each={layout().clusters}>{(cluster) => <>
-                  <rect class="map-cluster-box" x={cluster.x} y={cluster.y} width={cluster.width} height={cluster.height} rx="26" />
-                  <Show when={cluster.divider}>{(y) => <text class="map-divider-title" x={cluster.x + 22} y={y() + 4}>not owning a lane</text>}</Show>
+                  <rect class="map-cluster-box" data-cloud={cluster.cloud ? "true" : undefined} x={cluster.x} y={cluster.y} width={cluster.width} height={cluster.height} rx="18" />
+                  <Show when={cluster.divider}>{(y) => <>
+                    <path class="map-divider" d={`M ${cluster.x + 18} ${y()} H ${cluster.x + cluster.width - 18}`} />
+                    <text class="map-divider-title" x={cluster.x + 22} y={y() - 6}>not owning a lane</text>
+                  </>}</Show>
                 </>}</For>
-                <For each={layout().hierarchy}>{(edge) => <path class="map-hierarchy" data-kind={edge.kind} data-cross={edge.cross ? "true" : undefined} data-earlier={edge.earlier ? "true" : undefined} d={edge.path} marker-end={edge.kind === "subagent" ? undefined : "url(#map-org-arrow)"} />}</For>
-                <For each={edges()}>{(edge, position) => <g class="map-mail-edge" classList={{ emphasized: edge.messages.some((message) => mailKey(message) === selectedMail()) }} data-from={edge.from} data-to={edge.to}>
+                <For each={layout().hierarchy}>{(edge) => <path class="map-hierarchy" data-faded={faded(edge.from, edge.to)} data-kind={edge.kind} data-cross={edge.cross ? "true" : undefined} data-earlier={edge.earlier ? "true" : undefined} d={edge.path} marker-end={edge.kind === "subagent" ? undefined : "url(#map-org-arrow)"} />}</For>
+                <For each={edges()}>{(edge) => <g class="map-mail-edge" classList={{ emphasized: edge.messages.some((message) => mailKey(message) === selectedMail()) }} data-from={edge.from} data-to={edge.to}>
                   <path d={edge.path} marker-end="url(#map-arrow)" />
                   <path class="map-edge-hit" d={edge.path} onClick={() => setSelectedMail(mailKey(edge.messages.at(-1)!))}><title>{edge.messages.length} observed message{edge.messages.length === 1 ? "" : "s"}: {name(edge.messages[0]!.editspace, edge.messages[0]!.from)} → {name(edge.messages[0]!.editspace, edge.messages[0]!.to)}</title></path>
-                  <circle r="2.5" class="map-packet" style={{ "offset-path": `path('${edge.path}')`, "animation-delay": `${position() * -1.3}s` }} />
                 </g>}</For>
                 <For each={layout().clusters}>{(cluster) => <g role="region" aria-label={`Project ${cluster.project}${cluster.cloud ? " cloud" : ""}`}>
-                  <text class="map-cluster-title" x={cluster.x + 20} y={cluster.y + cluster.height + 22}>{title(cluster)}</text>
+                  <text class="map-cluster-title" x={cluster.x + 18} y={cluster.y + 24}>{title(cluster)}</text>
                   <For each={layout().agents.filter((agent) => agent.project === cluster.project && (agent.runtime === "cloud") === cluster.cloud)}>{(agent) =>
-                    <foreignObject x={agent.x} y={agent.y} width={NODE.width} height={NODE.height}><div class="map-node-host" dir={direction()}><Node agent={agent} /></div></foreignObject>}</For>
+                    // A 4px margin keeps the selection ring and focus ring inside the foreignObject.
+                    <foreignObject x={agent.x - 4} y={agent.y - 4} width={agent.width + 8} height={agent.height + 8} data-faded={faded(agent.key)}><div class="map-node-host" dir={direction()}><Node agent={agent} /></div></foreignObject>}</For>
                 </g>}</For>
               </svg>
             </Show>
         </div>
-        <div class="map-legend"><span><i data-tone="working" />working</span><span><i data-tone="input" />needs input</span><span><i data-tone="failed" />failed</span><span><i data-tone="quiet" />idle / unknown</span><span>L local · W Wingman</span><span>solid → = delegated / spawned lane (long dash: by a past owner) · dashed = subagent · ↺ handoff history · faint → = mail (selected agent)</span></div>
+        <div class="map-legend"><span><i data-tone="working" />working</span><span><i data-tone="input" />needs input</span><span><i data-tone="failed" />failed</span><span><i data-tone="quiet" />idle / unknown</span><span>L local · W Wingman</span>
+          <For each={[["delegated", "delegated / spawned"], ["earlier", "by a past owner"], ["subagent", "subagent"], ["mail", "mail"]] as const}>{([kind, label]) =>
+            <span><svg class="map-legend-line" data-kind={kind} width="26" height="8" aria-hidden="true"><path d="M 1 4 H 25" /></svg>{label}</span>}</For>
+          <span>↺ handoff history</span></div>
         <section class="map-events" aria-label="State boundaries">
           <h3>State boundaries</h3>
           <Show when={events().length} fallback={<p class="map-empty">No state events in this filter. Agent states remain visible.</p>}>
@@ -264,10 +274,9 @@ export default function AgentMap() {
         </Show>
       </section>
       <aside class="map-detail" aria-label="Selected agent">
-        <div class="map-eyebrow">SELECTED AGENT</div>
         {/* Remount per selected identity so TODO reads never carry over to another agent. */}
-        <Show when={selectedKey()} keyed fallback={<p class="home-muted">Select an agent to see its relations.</p>}>{(key) => <Show when={index().get(key)} fallback={<p class="home-muted">The selected agent is not in this scope or filter.</p>}>{(agent) =>
-          <Detail agent={agent()} select={select} lookup={(key) => index().get(key)} hidden={!visible().some((item) => item.key === agent().key)} mailOn={showMail()} mail={mailLoads()[agent().key]} />}</Show>}</Show>
+        <Show when={selectedKey()} keyed>{(key) => <><div class="map-eyebrow">SELECTED AGENT</div> <Show when={index().get(key)} fallback={<p class="home-muted">The selected agent is not in this scope or filter.</p>}>{(agent) =>
+          <Detail agent={agent()} select={select} lookup={(key) => index().get(key)} hidden={!visible().some((item) => item.key === agent().key)} mailOn={showMail()} mail={mailLoads()[agent().key]} />}</Show></>}</Show>
         <Show when={showMail()}>
           <h3>Selected mail</h3>
           <Show when={chosenMail()} fallback={<p class="home-muted">Select a mail edge or row.</p>}>{(message) => <>

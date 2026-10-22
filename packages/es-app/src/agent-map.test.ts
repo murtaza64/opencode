@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { buildAgentMap, flattenAgents, layoutMap, linkOrigins, mailEdges, mailParty, NODE, stateEvents, type AgentStatus, type MapInput, type MapMail, type MapSession } from "./agent-map"
+import { buildAgentMap, flattenAgents, layoutMap, linkOrigins, mailEdges, mailParty, NODE, stateEvents, SUBAGENT, type AgentStatus, type MapInput, type MapMail, type MapSession } from "./agent-map"
 
 const now = 10 * 86_400_000
 const sessions: MapSession[] = [
@@ -117,18 +117,20 @@ test("network nodes are real agents with subagents under their parent, never syn
   expect(agents[1]!.parent).toBe(agents[0]!.key)
 })
 
-test("each project is a boxed region: lane owners on top with spawned subagents beneath, unattached sessions below a divider", () => {
+test("each project is a region: lane owners on top with smaller subagent pills centred beneath", () => {
   const layout = layoutMap(flattenAgents(buildAgentMap(input())))
   expect(layout.clusters.map((cluster) => [cluster.project, cluster.cloud, cluster.count])).toEqual([["opencode", false, 2], ["squadron", false, 2]])
   for (const agent of layout.agents) {
     const box = layout.clusters.find((cluster) => cluster.project === agent.project)!
     expect(agent.x).toBeGreaterThanOrEqual(box.x)
-    expect(agent.x + NODE.width).toBeLessThanOrEqual(box.x + box.width)
-    expect(agent.y + NODE.height).toBeLessThanOrEqual(box.y + box.height)
+    expect(agent.x + agent.width).toBeLessThanOrEqual(box.x + box.width)
+    expect(agent.y + agent.height).toBeLessThanOrEqual(box.y + box.height)
   }
   const [lane, child] = layout.agents
   expect(child!.y).toBeGreaterThan(lane!.y)
-  expect(child!.x).toBe(lane!.x)
+  expect([lane!.width, lane!.height, child!.width, child!.height]).toEqual([NODE.width, NODE.height, SUBAGENT.width, SUBAGENT.height])
+  expect(child!.x + child!.width / 2).toBe(lane!.x + lane!.width / 2)
+  expect(layout.hierarchy[0]!.path).toContain(" C ")
   expect(layout.hierarchy).toHaveLength(1)
   // No lane owners in squadron: a single unattached row, so no divider.
   expect(layout.clusters[1]!.divider).toBeUndefined()
@@ -139,7 +141,7 @@ test("unattached sessions sit below the lane owner row and its subagent trees", 
   const opencode = layout.clusters.find((cluster) => cluster.project === "opencode")!
   const child = layout.agents.find((agent) => agent.name === "explore subagent")!
   const loose = layout.agents.find((agent) => agent.name === "Squadron V2 design")!
-  expect(opencode.divider).toBeGreaterThan(child.y + NODE.height)
+  expect(opencode.divider).toBeGreaterThan(child.y + child.height)
   expect(loose.y).toBeGreaterThan(opencode.divider!)
 })
 

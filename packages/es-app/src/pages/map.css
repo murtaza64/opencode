@@ -12,57 +12,59 @@
 .map-toolbar > label { display: grid; gap: 4px; font-size: 10px; color: var(--subtext0); }
 .map-toolbar > .map-mail-toggle { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--subtext1); padding-block-end: 8px; }
 .map-toolbar input { accent-color: var(--blue); }
-.map-motion { margin-inline-start: auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 11px; }
-.map-motion label { display: flex; align-items: center; gap: 6px; }
-.map-motion > span { color: var(--overlay1); font-size: 10px; }
-.map-body { display: grid; grid-template-columns: minmax(0, 1fr) 280px; border: 1px solid var(--map-line); }
+.map-body { display: grid; grid-template-columns: minmax(0, 1fr) 280px; }
+.map-canvas { overflow: auto; background: #0e0f12; min-height: 320px; }
+/* Soft hulls carry the grouping: one step above the canvas, no ruled frame. */
+.map-cluster-box { fill: #131519; stroke: #3a3a42; stroke-opacity: .4; }
+.map-cluster-box[data-cloud=true] { stroke-dasharray: 4 4; stroke-opacity: .8; }
+.map-cluster-title { fill: var(--overlay1); font: 10px var(--font-mono); letter-spacing: 1px; }
+.map-divider { stroke: #2a2c33; stroke-width: 1; }
+.map-divider-title { fill: var(--overlay0); font: 10px var(--font-sans); }
+/* Topology outranks mail: spawn and delegation are the strongest lines. */
+.map-hierarchy { stroke: #4a5263; stroke-width: 1; stroke-dasharray: 3 5; fill: none; }
+.map-hierarchy:is([data-kind=delegated], [data-kind=spawned]) { stroke: #6c7a93; stroke-width: 1.25; stroke-dasharray: none; }
+.map-hierarchy[data-earlier=true] { stroke-dasharray: 9 5; }
+.map-mail-edge { opacity: .5; }
+.map-mail-edge > path:first-child { stroke: #6f8fc4; stroke-width: 1; fill: none; }
+.map-mail-edge.emphasized { opacity: .9; }
+/* Selection fades everything unrelated; it never moves anything. */
+.map-canvas :is(foreignObject, .map-hierarchy) { transition: opacity 120ms ease-out; }
+.map-canvas [data-faded=true] { opacity: .45; }
+@media (prefers-reduced-motion: reduce) { .map-canvas :is(foreignObject, .map-hierarchy) { transition: none; } }
+.map-node-host { width: 100%; height: 100%; padding: 4px; box-sizing: border-box; }
+/* Agents are pills. The app squares every corner (index.css); the map opts out
+   at Murtaza's request for a less boxy map. */
+.attention-home .map-node-box { display: flex; align-items: center; gap: 8px; width: 100%; height: 100%; padding: 0 12px; background: #1c1e24; text-align: start; border: 1px solid #2c2f38; color: var(--text); overflow: hidden; border-radius: 999px !important; }
+.attention-home .map-node-box:hover { background: #22252c; }
+.attention-home .map-node-box[aria-pressed=true] { background: #222a38; border-color: transparent; box-shadow: 0 0 0 2px var(--blue); }
+.attention-home .map-node-box:focus-visible { outline-offset: 1px; }
+.attention-home .map-node-box[data-kind=subagent] { gap: 6px; padding: 0 10px; background: #18191e; }
+.map-node-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+[data-kind=subagent] > .map-node-name { font-size: 12px; font-weight: 400; color: var(--subtext1); }
+.map-runtime { color: var(--overlay0); font: 9px var(--font-mono); flex: none; }
+.map-handoffs { color: var(--overlay1); font: 10px var(--font-mono); flex: none; }
+.map-node-dot, .map-legend i { width: 8px; height: 8px; background: #717888; display: inline-block; flex: none; border-radius: 50% !important; }
+.map-legend i { width: 6px; height: 6px; }
+/* Working is lavender everywhere (sidebar .dot.busy); green means unread. */
+:is([data-tone=working]) > .map-node-dot, .map-legend i[data-tone=working] { background: var(--lavender); }
+:is([data-tone=input]) > .map-node-dot, .map-legend i[data-tone=input] { background: var(--peach); }
+:is([data-tone=failed]) > .map-node-dot, .map-legend i[data-tone=failed] { background: var(--red); }
+[data-tone=unknown] > .map-node-dot { background: transparent; box-shadow: inset 0 0 0 1px var(--overlay1); }
+.map-legend { display: flex; gap: 16px; flex-wrap: wrap; padding: 12px 16px; border-block-end: 1px solid var(--map-line); color: var(--overlay1); font-size: 10px; }
 .map-main { min-width: 0; }
-.map-view-heading { padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.map-view-heading { padding: 14px 16px; display: flex; justify-content: flex-end; align-items: center; gap: 16px; flex-wrap: wrap; }
 .map-view-heading h2 { font-size: 16px !important; font-weight: 500 !important; margin: 0 0 3px !important; }
 .map-view-controls { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 .map-zoom { display: flex; align-items: center; gap: 8px; flex-shrink: 0; font-size: 11px; }
 .attention-home .map-zoom button { padding: 3px 7px; border-color: var(--map-line); }
 .map-zoom output { min-width: 35px; text-align: center; }
-.map-canvas { overflow: auto; background: #0e0f12; min-height: 320px; border-block-start: 1px solid var(--map-line); }
 .map-canvas svg { display: block; }
-/* Soft project grouping: a rounded tint, no ruled frame. */
-.map-cluster-box { fill: #15171d; stroke: #3a3a42; stroke-opacity: .55; }
-.map-divider-title { fill: var(--overlay0); font: italic 10px var(--font-sans); }
-.map-cluster-title { fill: var(--overlay1); font: 10px var(--font-mono); letter-spacing: 1px; }
-/* Topology outranks mail: spawn edges are the strongest line; mail is a quiet overlay. */
-.map-hierarchy { stroke: #6c7086; stroke-width: 1.3; stroke-dasharray: 4 6; fill: none; }
-.map-hierarchy:is([data-kind=delegated], [data-kind=spawned]) { stroke: #8a90a4; stroke-width: 1.4; stroke-dasharray: none; }
-.map-hierarchy[data-cross=true] { stroke-width: 1.2; opacity: .8; }
-.map-hierarchy[data-earlier=true] { stroke-dasharray: 10 5; }
-.map-mail-edge > path:first-child { stroke: #3d4656; stroke-width: 1; fill: none; }
-.map-mail-edge.emphasized > path:first-child { stroke: #6f8fc4; stroke-width: 1.2; }
 .map-edge-hit { stroke: transparent; stroke-width: 20; fill: none; cursor: pointer; }
-.map-packet { fill: #8c95a6; offset-distance: 0%; animation: map-travel 7s linear infinite; pointer-events: none; }
-@keyframes map-travel { 0% { offset-distance: 0%; opacity: 0; } 8% { opacity: .85; } 85% { opacity: .85; } 100% { offset-distance: 100%; opacity: 0; } }
-.agent-map-page[data-still=true] .map-packet { animation-play-state: paused; opacity: 0; }
-@media (prefers-reduced-motion: reduce) { .map-packet { animation: none; display: none; } }
-.map-node-host { width: 100%; height: 100%; }
-.attention-home .map-node-box { display: grid; align-content: start; width: 100%; height: 100%; padding: 8px 12px; background: #1c1e24; text-align: start; border: 1px solid #2f323b; color: var(--text); overflow: hidden; }
-/* The app squares every corner (index.css); the map is deliberately softer at
-   Murtaza's request, so its nodes and state dots opt out. */
-.agent-map-page .map-node-box { border-radius: 14px !important; }
-.agent-map-page :is(.map-node-state, .map-legend) i { border-radius: 50% !important; }
-.attention-home .map-node-box:hover { background: #22252c; }
-.attention-home .map-node-box[aria-pressed=true] { border-color: var(--blue); background: #202733; }
-.attention-home .map-node-box[data-kind=subagent] { background: #18191e; border-style: dashed; }
-.map-node-name { font-size: 14px; font-weight: 500; display: flex; justify-content: space-between; gap: 6px; white-space: nowrap; min-width: 0; }
-.map-node-name bdi { overflow: hidden; text-overflow: ellipsis; }
-.map-runtime { color: var(--overlay1); font: 10px var(--font-mono); flex: none; }
-.map-node-state { display: flex; gap: 6px; align-items: center; color: var(--subtext0); font-size: 12px; margin-block-start: 5px; white-space: nowrap; }
-.map-handoffs { margin-inline-start: auto; color: var(--overlay1); font: 10px var(--font-mono); }
-.map-node-state i, .map-legend i { width: 6px; height: 6px; background: #717888; display: inline-block; flex: none; }
-/* Working is lavender everywhere (sidebar .dot.busy); green means unread. */
-:is([data-tone=working]) > .map-node-state i, .map-legend i[data-tone=working] { background: var(--lavender); }
-:is([data-tone=input]) > .map-node-state i, .map-legend i[data-tone=input] { background: var(--peach); }
-:is([data-tone=failed]) > .map-node-state i, .map-legend i[data-tone=failed] { background: var(--red); }
-[data-tone=unknown] > .map-node-state i { background: transparent; outline: 1px dashed var(--overlay1); outline-offset: -1px; }
-.map-legend { display: flex; gap: 16px; flex-wrap: wrap; padding: 12px 16px; border-block: 1px solid var(--map-line); color: var(--overlay1); font-size: 10px; }
 .map-legend span { display: flex; align-items: center; gap: 6px; }
+.map-legend-line path { fill: none; stroke: #6c7a93; stroke-width: 1.25; }
+.map-legend-line[data-kind=earlier] path { stroke-dasharray: 9 5; }
+.map-legend-line[data-kind=subagent] path { stroke: #4a5263; stroke-width: 1; stroke-dasharray: 3 5; }
+.map-legend-line[data-kind=mail] path { stroke: #6f8fc4; stroke-width: 1; opacity: .5; }
 .map-events, .map-mail-list { padding: 16px; border-block-end: 1px solid var(--map-line); }
 .map-event { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding-block: 7px; font-size: 11px; }
 .map-event time { color: var(--overlay1); font-family: var(--font-mono); }
@@ -102,7 +104,7 @@
 .map-roster span { color: var(--overlay1); white-space: nowrap; }
 .attention-home .map-roster[aria-pressed=true] { color: var(--blue); }
 .home-map-link { margin-inline-start: 12px; font-size: 12px; }
-@media (max-width: 1100px) { .map-body { grid-template-columns: minmax(0, 1fr) 240px; } .map-motion { margin-inline-start: 0; } .map-mail-row { grid-template-columns: 52px 1fr 60px; } .map-mail-row > bdi:last-child { grid-column: 2 / -1; } }
+@media (max-width: 1100px) { .map-body { grid-template-columns: minmax(0, 1fr) 240px; } .map-mail-row { grid-template-columns: 52px 1fr 60px; } .map-mail-row > bdi:last-child { grid-column: 2 / -1; } }
 @media (max-width: 760px) {
   .attention-home.agent-map-page { padding-inline: 12px; }
   .map-body { grid-template-columns: minmax(0, 1fr); }

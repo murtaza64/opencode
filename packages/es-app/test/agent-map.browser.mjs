@@ -56,7 +56,7 @@ page.on("pageerror", (error) => errors.push(error.message))
 const writes = []
 page.on("request", (request) => { if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/oc/")) writes.push(`${request.method()} ${request.url()}`) })
 const region = (name) => page.getByRole("region", { name: `Project ${name}`, exact: true })
-const node = (name) => page.locator(".map-node-box").filter({ has: page.locator(".map-node-name bdi", { hasText: new RegExp(`^${name}$`) }) })
+const node = (name) => page.locator(".map-node-box").filter({ has: page.locator(".map-node-name", { hasText: new RegExp(`^${name}$`) }) })
 const detail = () => page.getByRole("complementary", { name: "Selected agent" })
 const mailCalls = () => fixture.calls.filter((call) => call.path === "/api/mail")
 const edge = (from, to) => page.locator(`.map-mail-edge[data-from='${JSON.stringify(["lane", "fixture", from])}'][data-to='${JSON.stringify(["lane", "fixture", to])}']`)
@@ -68,7 +68,13 @@ try {
   await expect(page.getByRole("heading", { name: "Agent map", exact: true })).toBeVisible()
 
   // A · Project map: an SVG network with boxed project regions and agent nodes.
-  await expect(page.getByRole("heading", { name: "Project map", exact: true })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Project map" })).toBeVisible()
+  // No duplicate panel heading and no cross-link back to Home (the sidebar owns navigation).
+  await expect(page.getByRole("heading", { name: "Project map" })).toHaveCount(0)
+  await expect(page.locator(".agent-map-page header").getByRole("link", { name: "Home" })).toHaveCount(0)
+  // Before any selection the rail is just the roster.
+  await expect(detail()).not.toContainText("SELECTED AGENT")
+  await expect(detail().locator(".map-roster").first()).toBeVisible()
   await expect(page.locator(".map-canvas svg[aria-label='Agent network']")).toBeVisible()
   await expect(page.locator(".map-cluster-box")).toHaveCount(3)
   await expect(region("fixture").locator(".map-cluster-title")).toHaveText("FIXTURE · 4 AGENTS")
@@ -77,11 +83,14 @@ try {
   await expect(region("fixture cloud").locator(".map-node-box")).toHaveCount(1)
   const lane = node("home-agents")
   await expect(lane).toHaveAttribute("data-tone", "working")
-  await expect(lane).toContainText("working")
+  await expect(lane).toHaveAttribute("title", "home-agents · working · local")
+  // Agents are pills; subagents are a step smaller.
+  expect((await lane.boundingBox()).height).toBeGreaterThan((await node("explore subagent").boundingBox()).height)
   await expect(lane.locator(".map-runtime")).toHaveText("L")
   await expect(lane.locator(".map-handoffs")).toHaveText("↺1")
   await expect(node("orchestrator")).toHaveAttribute("data-tone", "unknown")
-  await expect(node("cloud-review")).toContainText("processing")
+  await expect(node("cloud-review")).toHaveAttribute("title", "cloud-review · processing · Wingman cloud")
+  await expect(page.locator(".map-cluster-box[data-cloud=true]")).toHaveCount(1)
   await expect(node("cloud-review").locator(".map-runtime")).toHaveText("W")
   await expect(region("squadron").locator(".map-node-box")).toHaveCount(1)
   await expect(node("Squadron V2 design")).toHaveAttribute("data-tone", "failed")
@@ -97,20 +106,25 @@ try {
   expect(fixture.calls.filter((call) => call.path === "/api/lane-provenance").map((call) => call.es)).toContain("fixture")
   // Handoff predecessors are not duplicated as map nodes.
   await expect(node("Other session")).toHaveCount(0)
-  await expect(page.locator(".map-summary")).toContainText("1 hidden (idle over 24h, unpinned)")
+  await expect(page.locator(".map-summary")).toContainText("1 hidden by Active (idle over 24h, unpinned)")
   await expect(node("Old standalone")).toHaveCount(0)
   await page.getByRole("combobox", { name: "Agents" }).selectOption("all")
   await expect(node("Old standalone")).toBeVisible()
   await expect(page).toHaveURL(/agents=all/)
   await page.getByRole("combobox", { name: "Agents" }).selectOption("active")
   await expect(node("Old standalone")).toHaveCount(0)
-  await expect(page.locator(".map-legend")).toContainText("solid → = delegated / spawned lane (long dash: by a past owner) · dashed = subagent")
+  await expect(page.locator(".map-legend-line")).toHaveCount(4)
+  await expect(page.locator(".map-legend")).toContainText("delegated / spawned")
   await expect(page.getByRole("region", { name: "State boundaries" })).toContainText("Turn failed")
   await expect(page.getByRole("region", { name: "State boundaries" })).toContainText("Wiring the agent map")
 
   // Topology is the default: selecting reads no mail and draws no mail edges.
   await lane.click()
   await expect(lane).toHaveAttribute("aria-pressed", "true")
+  // Selection fades unrelated agents and keeps the lane's lineage and children.
+  const host = (name) => page.locator("foreignObject").filter({ has: node(name) })
+  await expect(host("Squadron V2 design")).toHaveAttribute("data-faded", "true")
+  for (const name of ["home-agents", "orchestrator", "explore subagent", "nested reviewer"]) await expect(host(name)).not.toHaveAttribute("data-faded", "true")
   await expect(detail()).toContainText("ses_a · from lane record")
   await expect(page.locator(".map-mail-edge")).toHaveCount(0)
   await expect(page.getByRole("region", { name: "Directed mail" })).toHaveCount(0)
@@ -120,7 +134,6 @@ try {
   await expect(edge("orchestrator", "home-agents")).toHaveCount(1)
   await expect(edge("home-agents", "orchestrator")).toHaveCount(1)
   expect(await edge("home-agents", "orchestrator").locator("path").first().getAttribute("marker-end")).toBe("url(#map-arrow)")
-  await expect(edge("home-agents", "orchestrator").locator(".map-packet")).toHaveCount(1)
   // An off-map counterpart is listed but not drawn on the map.
   await expect(page.locator(".map-mail-edge")).toHaveCount(2)
   expect(mailCalls().map((call) => call.es)).toEqual(["fixture"])
@@ -156,20 +169,14 @@ try {
   await page.getByRole("button", { name: "Fit", exact: true }).click()
   expect(await width()).toBe(fitted)
 
-  // Motion: pause and manual reduce keep the network static.
-  await expect(page.locator(".agent-map-page")).toHaveAttribute("data-still", "false")
-  await page.getByRole("button", { name: "Pause motion", exact: true }).click()
-  await expect(page.locator(".agent-map-page")).toHaveAttribute("data-still", "true")
-  expect(await page.locator(".map-packet").first().evaluate((element) => getComputedStyle(element).animationPlayState)).toBe("paused")
-  await page.getByRole("button", { name: "Resume motion", exact: true }).click()
-  await page.getByRole("checkbox", { name: "Reduce motion" }).check()
-  await expect(page.locator(".agent-map-page")).toHaveAttribute("data-still", "true")
-  await page.getByRole("checkbox", { name: "Reduce motion" }).uncheck()
+  // No ambient motion: nothing loops, even with mail drawn.
+  expect(await page.evaluate(() => document.getAnimations().filter((animation) => animation.effect?.getTiming().iterations === Infinity).length)).toBe(0)
+  await expect(page.getByRole("button", { name: /Pause/ })).toHaveCount(0)
 
   // The Time weave is gone; an old ?view=weave link resolves to the Project map.
   await expect(page.getByRole("button", { name: "Time weave" })).toHaveCount(0)
   await page.goto(`${preview.url}/map?view=weave&select=${encodeURIComponent(JSON.stringify(["lane", "fixture", "home-agents"]))}`, { waitUntil: "domcontentloaded", timeout: 90_000 })
-  await expect(page.getByRole("heading", { name: "Project map", exact: true })).toBeVisible({ timeout: 90_000 })
+  await expect(page.getByRole("region", { name: "Project map" })).toBeVisible({ timeout: 90_000 })
   await expect(page.locator(".map-time-agents, .map-time-network")).toHaveCount(0)
   await page.getByRole("checkbox", { name: "Mail for selected agent" }).check()
   await expect(edge("home-agents", "orchestrator")).toHaveCount(1)
@@ -247,21 +254,26 @@ try {
   await page.screenshot({ path: path.join(artifacts, "agent-map-rtl.png"), fullPage: true })
   await page.setViewportSize({ width: 390, height: 900 })
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+  // Fit is the default, so on a phone the whole map fits the panel without horizontal scroll.
+  await page.getByRole("button", { name: "Fit", exact: true }).click()
+  await expect.poll(() => page.locator(".map-canvas").evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1)
   expect((await detail().boundingBox()).width).toBeLessThanOrEqual(390)
   await page.screenshot({ path: path.join(artifacts, "agent-map-mobile-rtl.png"), fullPage: true })
 
-  // OS reduced motion keeps the replay static without a manual toggle.
+  // OS reduced motion: the selection fade applies without a transition.
   const reduced = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" })
   await reduced.route("**/*", (route) => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
   const still = await reduced.newPage()
-  await still.goto(`${preview.url}/map`, { waitUntil: "domcontentloaded", timeout: 90_000 })
-  await expect(still.locator(".agent-map-page")).toHaveAttribute("data-still", "true", { timeout: 90_000 })
-  await expect(still.locator(".map-motion")).toContainText("OS reduced motion · static")
+  await still.goto(`${preview.url}/map?select=${encodeURIComponent(JSON.stringify(["lane", "fixture", "home-agents"]))}`, { waitUntil: "domcontentloaded", timeout: 90_000 })
+  await expect(still.locator("foreignObject[data-faded=true]").first()).toBeAttached({ timeout: 90_000 })
+  // Changing the selection fades without running any transition.
+  await still.locator(".map-node-box").filter({ has: still.locator(".map-node-name", { hasText: /^Squadron V2 design$/ }) }).click()
+  expect(await still.evaluate(() => document.getAnimations().filter((animation) => animation instanceof CSSTransition).length)).toBe(0)
   await reduced.close()
 
   expect(writes).toEqual([])
   expect(errors).toEqual([])
-  console.log(`PASS agent map: A network (project/cloud regions, delegated lane under delegator, spawned subagents, opt-in selected-agent mail edges/packets, zoom), filters, motion/OS reduced, selection/navigation/TODO lifecycle, scope, RTL/mobile, no writes; screenshots in ${artifacts}`)
+  console.log(`PASS agent map: A network (project/cloud regions, delegated lane under delegator, spawned subagents, opt-in selected-agent mail edges, selection fade, zoom), filters, no ambient motion/OS reduced, selection/navigation/TODO lifecycle, scope, RTL/mobile, no writes; screenshots in ${artifacts}`)
 } catch (error) {
   await page.screenshot({ path: path.join(artifacts, "agent-map-failure.png"), fullPage: true }).catch(() => undefined)
   console.error(error, errors)

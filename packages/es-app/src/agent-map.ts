@@ -174,18 +174,22 @@ export type ProvenanceRecord = { editspace: string; lane: string; kind: "delegat
 export type TreeEdgeKind = "subagent" | "delegated" | "spawned"
 export type MapMail = { id: string; editspace: string; from: string; to: string; at: number; kind?: string; text: string }
 export type MailEdge = { key: string; from: string; to: string; messages: MapMail[]; path: string }
-export type PlacedAgent = MapAgent & { x: number; y: number }
+export type PlacedAgent = MapAgent & { x: number; y: number; width: number; height: number }
 export type ClusterBox = { project: string; cloud: boolean; x: number; y: number; width: number; height: number; count: number; divider?: number }
-export type TreeEdge = { key: string; kind: TreeEdgeKind; path: string; cross?: boolean; earlier?: boolean }
+export type TreeEdge = { key: string; from: string; to: string; kind: TreeEdgeKind; path: string; cross?: boolean; earlier?: boolean }
 export type MapLayout = { width: number; height: number; agents: PlacedAgent[]; clusters: ClusterBox[]; hierarchy: TreeEdge[] }
 
-export const NODE = { width: 180, height: 62 }
-const SIBLING_GAP = 24
-const LEVEL_GAP = 72
-const ROW_GAP = 56
+// Agents are pills; subagents are a step smaller so hierarchy reads by scale.
+export const NODE = { width: 176, height: 34 }
+export const SUBAGENT = { width: 156, height: 28 }
+export const nodeSize = (agent: Pick<MapAgent, "kind">) => agent.kind === "subagent" ? SUBAGENT : NODE
+const SIBLING_GAP = 20
+const LEVEL_GAP = 56
+const ROW_GAP = 48
 const PAD = 22
-const TITLE = 34
-const CLUSTER_GAP = 16
+// Room for the region caption inside the hull, above the first row.
+const CAPTION = 26
+const CLUSTER_GAP = 20
 const MAX_ROW = 4 * NODE.width + 3 * SIBLING_GAP
 
 const tone = (status: AgentStatus): MapTone => status === "busy" ? "working" : status === "pending" ? "input" : status === "failed" ? "failed" : status === "idle" ? "quiet" : "unknown"
@@ -298,17 +302,17 @@ export const layoutMap = (agents: readonly MapAgent[], maxWidth = 1500): MapLayo
     const rows = [...orgRows, ...unattached]
     const rowHeights = rows.map((row) => Math.max(...row.map((tree) => tree.height)))
     const boxWidth = PAD * 2 + Math.max(...rows.map(rowWidth))
-    const boxHeight = PAD * 2 + rowHeights.reduce((sum, value) => sum + value, 0) + (rows.length - 1) * ROW_GAP
+    const boxHeight = CAPTION + PAD * 2 + rowHeights.reduce((sum, value) => sum + value, 0) + (rows.length - 1) * ROW_GAP
     if (x > 10 && x + boxWidth > maxWidth) {
       x = 10
       y += lineHeight + CLUSTER_GAP
       lineHeight = 0
     }
     const divider = orgRows.length && unattached.length
-      ? y + PAD + rowHeights.slice(0, orgRows.length).reduce((sum, value) => sum + value + ROW_GAP, 0) - ROW_GAP / 2
+      ? y + CAPTION + PAD + rowHeights.slice(0, orgRows.length).reduce((sum, value) => sum + value + ROW_GAP, 0) - ROW_GAP / 2
       : undefined
     clusters.push({ project, cloud, x, y, width: boxWidth, height: boxHeight, count: members.length, divider })
-    let rowY = y + PAD
+    let rowY = y + CAPTION + PAD
     rows.forEach((row, index) => {
       let treeX = x + PAD
       for (const tree of row) {
@@ -318,14 +322,14 @@ export const layoutMap = (agents: readonly MapAgent[], maxWidth = 1500): MapLayo
       rowY += rowHeights[index]! + ROW_GAP
     })
     x += boxWidth + CLUSTER_GAP
-    lineHeight = Math.max(lineHeight, boxHeight + TITLE)
+    lineHeight = Math.max(lineHeight, boxHeight)
     width = Math.max(width, x)
   }
   // Origins that could not nest (another region, or a cycle) cross regions as curves.
   const byKey = new Map(placed.map((agent) => [agent.key, agent]))
   for (const agent of placed) {
     const from = agent.origin?.from ? byKey.get(agent.origin.from) : undefined
-    if (from && agent.parent !== from.key) hierarchy.push({ key: `${from.key}>${agent.key}`, kind: agent.origin!.kind, earlier: agent.origin!.earlier, path: curve(from, agent), cross: true })
+    if (from && agent.parent !== from.key) hierarchy.push({ key: `${from.key}>${agent.key}`, from: from.key, to: agent.key, kind: agent.origin!.kind, earlier: agent.origin!.earlier, path: curve(from, agent), cross: true })
   }
   return { width: Math.max(width, 400), height: y + lineHeight + 10, agents: placed, clusters, hierarchy }
 }
@@ -333,7 +337,7 @@ export const layoutMap = (agents: readonly MapAgent[], maxWidth = 1500): MapLayo
 // Parents may follow children in member order (a lane nested under a lane
 // listed later), so build every tree before attaching.
 const forest = (members: readonly MapAgent[]) => {
-  const trees = new Map(members.map((agent) => [agent.key, { agent, children: [], width: NODE.width, height: NODE.height } as Tree]))
+  const trees = new Map(members.map((agent) => [agent.key, { agent, children: [], ...nodeSize(agent) } as Tree]))
   const roots = [...trees.values()].filter((tree) => {
     const parent = tree.agent.parent ? trees.get(tree.agent.parent) : undefined
     parent?.children.push(tree)
@@ -342,8 +346,8 @@ const forest = (members: readonly MapAgent[]) => {
   const measure = (tree: Tree) => {
     tree.children.forEach(measure)
     if (!tree.children.length) return
-    tree.width = Math.max(NODE.width, tree.children.reduce((sum, child) => sum + child.width, 0) + (tree.children.length - 1) * SIBLING_GAP)
-    tree.height = NODE.height + LEVEL_GAP + Math.max(...tree.children.map((child) => child.height))
+    tree.width = Math.max(nodeSize(tree.agent).width, tree.children.reduce((sum, child) => sum + child.width, 0) + (tree.children.length - 1) * SIBLING_GAP)
+    tree.height = nodeSize(tree.agent).height + LEVEL_GAP + Math.max(...tree.children.map((child) => child.height))
   }
   roots.forEach(measure)
   return roots
@@ -356,14 +360,22 @@ const elbow = (x1: number, y1: number, x2: number, y2: number) => {
 }
 
 const place = (tree: Tree, x: number, y: number, placed: PlacedAgent[], hierarchy: TreeEdge[]) => {
-  const nodeX = x + (tree.width - NODE.width) / 2
-  placed.push({ ...tree.agent, x: nodeX, y })
+  const size = nodeSize(tree.agent)
+  const nodeX = x + (tree.width - size.width) / 2
+  placed.push({ ...tree.agent, x: nodeX, y, ...size })
   const span = tree.children.reduce((sum, child) => sum + child.width, 0) + (tree.children.length - 1) * SIBLING_GAP
   let childX = x + (tree.width - span) / 2
   for (const child of tree.children) {
-    const childY = y + NODE.height + LEVEL_GAP
-    const childNodeX = childX + (child.width - NODE.width) / 2
-    hierarchy.push({ key: `${tree.agent.key}>${child.agent.key}`, kind: child.agent.kind === "subagent" ? "subagent" : child.agent.origin?.kind ?? "subagent", earlier: child.agent.origin?.earlier, path: elbow(nodeX + NODE.width / 2, y + NODE.height, childNodeX + NODE.width / 2, childY) })
+    const childY = y + size.height + LEVEL_GAP
+    const childNodeX = childX + (child.width - nodeSize(child.agent).width) / 2
+    hierarchy.push({
+      key: `${tree.agent.key}>${child.agent.key}`,
+      from: tree.agent.key,
+      to: child.agent.key,
+      kind: child.agent.kind === "subagent" ? "subagent" : child.agent.origin?.kind ?? "subagent",
+      earlier: child.agent.origin?.earlier,
+      path: elbow(nodeX + size.width / 2, y + size.height, childNodeX + nodeSize(child.agent).width / 2, childY),
+    })
     place(child, childX, childY, placed, hierarchy)
     childX += child.width + SIBLING_GAP
   }
@@ -390,25 +402,26 @@ export const mailEdges = (layout: MapLayout, mail: readonly MapMail[]): MailEdge
   return [...edges.values()].map((edge) => ({ ...edge, messages: edge.messages.toSorted((a, b) => a.at - b.at) }))
 }
 
-const curve = (a: { x: number; y: number }, b: { x: number; y: number }) => {
-  const start = { x: a.x + NODE.width / 2, y: a.y + NODE.height / 2 }
-  const end = { x: b.x + NODE.width / 2, y: b.y + NODE.height / 2 }
+type Box = { x: number; y: number; width: number; height: number }
+const curve = (a: Box, b: Box) => {
+  const start = { x: a.x + a.width / 2, y: a.y + a.height / 2 }
+  const end = { x: b.x + b.width / 2, y: b.y + b.height / 2 }
   const dx = end.x - start.x
   const dy = end.y - start.y
   const length = Math.hypot(dx, dy) || 1
   // Bow to the right of travel so A->B and B->A never overlap.
   const bow = Math.min(90, 24 + length * 0.18)
   const control = { x: (start.x + end.x) / 2 - (dy / length) * bow, y: (start.y + end.y) / 2 + (dx / length) * bow }
-  const p0 = boundary(start, control)
-  const p1 = boundary(end, control)
+  const p0 = boundary(start, control, a)
+  const p1 = boundary(end, control, b)
   return `M ${round(p0.x)} ${round(p0.y)} Q ${round(control.x)} ${round(control.y)} ${round(p1.x)} ${round(p1.y)}`
 }
 
-// Where the ray from a node centre toward `toward` leaves the node box.
-const boundary = (center: { x: number; y: number }, toward: { x: number; y: number }) => {
+// Where the ray from a node centre toward `toward` leaves the node's bounds.
+const boundary = (center: { x: number; y: number }, toward: { x: number; y: number }, box: Box) => {
   const dx = toward.x - center.x
   const dy = toward.y - center.y
-  const scale = 1 / Math.max(Math.abs(dx) / (NODE.width / 2 + 3), Math.abs(dy) / (NODE.height / 2 + 3), 1e-9)
+  const scale = 1 / Math.max(Math.abs(dx) / (box.width / 2 + 3), Math.abs(dy) / (box.height / 2 + 3), 1e-9)
   return { x: center.x + dx * Math.min(1, scale), y: center.y + dy * Math.min(1, scale) }
 }
 const round = (value: number) => Math.round(value * 10) / 10
