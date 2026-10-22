@@ -239,7 +239,7 @@ try {
   assert.equal((await call("POST", `/session/${byName.unsafe.sessionID}/retry`, { messageID: byName.unsafe.messageID })).body.outcome, "unsafe")
   assert.equal(hits.unsafe, 1)
 
-  // 5. Browser: red status, scoped Resume all, failed-again stays red, per-session Retry, reload persistence, RTL, outage.
+  // 5. Browser: red status, no bulk strip, per-session Retry (incl. failed-again), reload persistence, RTL, outage.
   const vitePort = await freePort()
   process.env.OPENCODE_URL = base
   process.env.ES_DASHBOARD_URL = `http://127.0.0.1:${dashboard.address().port}`
@@ -268,14 +268,18 @@ try {
   await page.reload()
   await expect(row("plain403").locator(".dot.failed")).toHaveCount(1)
   assert.deepEqual(posts.filter((item) => item.endsWith("/retry")), [], "page load must not retry")
-  const section = page.locator(".failed-section")
-  await expect(section).toContainText("4 failed")
-  const resume = section.getByRole("button", { name: "Resume all failed (3)" })
+  // The sidebar offers no bulk retry; each failure is retried from its own session.
+  await expect(page.locator(".sidebar")).not.toContainText(/Resume all|\d+ failed/)
+  await expect(page.getByRole("button", { name: /Resume all/ })).toHaveCount(0)
+  await expect(page.getByRole("region", { name: "Failed sessions" })).toHaveCount(0)
   if (evidence) await page.screenshot({ path: path.join(evidence, "01-failed-sidebar.png") })
-  await resume.click()
-  await expect(section.locator(".failed-report")).toContainText("3 of 3 resumed")
-  await poll("bulk provider calls", () => hits.tool403 === 3 && hits.plain403 === 2 && hits.again === 2)
-  for (const name of ["tool403", "plain403", "again"]) await settle(sessions[name].id, `${name} bulk`)
+  const retryFrom = async (name) => {
+    await row(name).click()
+    await page.locator(".session-work-status").getByRole("button", { name: /Retry failed turn/ }).click()
+  }
+  for (const name of ["tool403", "plain403", "again"]) await retryFrom(name)
+  await poll("per-session provider calls", () => hits.tool403 === 3 && hits.plain403 === 2 && hits.again === 2)
+  for (const name of ["tool403", "plain403", "again"]) await settle(sessions[name].id, `${name} retry`)
   await expect(row("tool403").locator(".dot.failed")).toHaveCount(0, { timeout: 20000 })
   await expect(row("plain403").locator(".dot.failed")).toHaveCount(0)
   await expect(row("again").locator(".dot.failed")).toHaveAttribute("aria-label", "failed: Provider error 401 (unauthorized)", { timeout: 20000 })
@@ -284,8 +288,8 @@ try {
   assert.deepEqual(await runs(), ["tool403"], "completed tools must not rerun")
   const recovered = await messages(sessions.tool403.id)
   assert.equal(recovered.filter((message) => message.info.role === "user").length, 1, "no fabricated prompt")
-  if (evidence) await page.screenshot({ path: path.join(evidence, "02-after-resume-all.png") })
-  log(`BULK posts=3 hits=${JSON.stringify(hits)} toolRuns=${(await runs()).join(",")} users(tool403)=1 again=red(401)`)
+  if (evidence) await page.screenshot({ path: path.join(evidence, "02-after-retries.png") })
+  log(`RETRIES posts=3 hits=${JSON.stringify(hits)} toolRuns=${(await runs()).join(",")} users(tool403)=1 again=red(401)`)
 
   await row("again").click()
   const retry = page.locator(".session-work-status").getByRole("button", { name: /Retry failed turn/ })
@@ -307,10 +311,8 @@ try {
   await page.evaluate(() => document.documentElement.setAttribute("dir", "rtl"))
   await page.goto(`${origin}/`)
   await page.evaluate(() => document.documentElement.setAttribute("dir", "rtl"))
-  await expect(section).toContainText("1 failed")
-  const box = await section.boundingBox()
-  const nav = await page.locator(".sidebar").boundingBox()
-  assert(box && nav && box.x >= nav.x - 1 && box.x + box.width <= nav.x + nav.width + 1, "failed section overflows sidebar in RTL")
+  await expect(row("unsafe").locator(".dot.failed")).toHaveCount(1)
+  await expect(page.getByRole("button", { name: /Resume all/ })).toHaveCount(0)
   if (evidence) await page.screenshot({ path: path.join(evidence, "04-rtl-unsafe-only.png") })
   await page.evaluate(() => document.documentElement.setAttribute("dir", "ltr"))
 
@@ -318,11 +320,12 @@ try {
   const outage = await context.newPage()
   await outage.route("**/oc/experimental/session/failed", (route) => route.fulfill({ status: 503, body: "unavailable" }))
   await outage.goto(`${origin}/`)
-  await expect(outage.locator(".failed-section")).toContainText("Failed-session status unavailable.")
+  // With the strip gone an outage adds no sidebar chrome; no row is marked failed on a guess.
   await expect(outage.locator(".sidebar .dot.failed")).toHaveCount(0)
+  await expect(outage.getByRole("button", { name: /Resume all/ })).toHaveCount(0)
   if (evidence) await outage.screenshot({ path: path.join(evidence, "05-status-unavailable.png") })
   await outage.close()
-  log(`BROWSER PASS dots/reload/no-auto-retry/bulk/failed-again/single-dblclick/unsafe/RTL/outage posts=${posts.filter((item) => item.endsWith("/retry")).length}`)
+  log(`BROWSER PASS dots/reload/no-auto-retry/no-bulk/per-session/failed-again/single-dblclick/unsafe/RTL/outage posts=${posts.filter((item) => item.endsWith("/retry")).length}`)
   log(`PROVIDER hits=${JSON.stringify(hits)} toolRuns=${(await runs()).join(",")}`)
 
   if (serve) {
