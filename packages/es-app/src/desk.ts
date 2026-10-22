@@ -116,11 +116,18 @@ export const deskSources = (input: {
 export type EvidenceRef = { id: string; label: string; messageID?: string }
 export type BriefMeta = { kind: "brief"; requestID: string; source: string; revision: string; title: string; refs: EvidenceRef[] }
 export type BriefResult = {
+  /** Plain-language framing for the human; empty when the evidence does not support it. */
+  ask: string
+  whyNow: string
+  ifRecommended: string
+  ifWait: string
   summary: string
   facts: { text: string; refs: string[] }[]
   timeline: { when?: string; text: string; refs: string[] }[]
   flow: string[]
   gaps: string[]
+  /** Model-authored HTML/SVG made for this decision; rendered only in a script-less, network-less sandbox. */
+  visual?: { title: string; html: string }
 }
 export type BriefState =
   | { state: "running" }
@@ -198,9 +205,14 @@ export const deskContext = (input: {
 }
 
 export const BRIEF_SYSTEM = [
-  "You turn a canonical request plus evidence excerpts into a compact visual decision brief for a human.",
+  "You turn a canonical request plus evidence excerpts into a compact, plain-language decision brief for a busy human.",
+  "ask: the decision they must make, one short sentence without jargon or IDs. whyNow: why it needs them now.",
+  "ifRecommended: what follows if they take the requesting agent's recommendation in C1. ifWait: what happens if they do nothing.",
+  "Leave any of those four empty when the evidence does not say; never guess.",
+  "You may use read, grep, glob and list (at most 6 calls) to read relevant local files for context; cite a file you relied on as file:<relative path>.",
+  "visual: when a picture helps, a small self-contained HTML or inline SVG made for this specific decision (comparison table, flow, timeline, diagram); no scripts, no external URLs, dark background friendly, under 12 KB. Omit it otherwise.",
   "Use only the supplied evidence. Every fact and timeline entry cites one or more supplied ref IDs (C1, E1, …).",
-  "Do not make or recommend the decision, do not restate options as chosen, and do not claim anything was approved, sent or retried.",
+  "Do not make the decision, do not restate options as chosen, and do not claim anything was approved, sent or retried.",
   "Put anything the evidence cannot establish in gaps. Keep every string short.",
   "Reply with exactly one JSON object and nothing else, matching this JSON Schema:",
 ].join(" ")
@@ -208,8 +220,12 @@ export const BRIEF_SYSTEM = [
 export const BRIEF_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "facts", "timeline", "flow", "gaps"],
+  required: ["ask", "whyNow", "ifRecommended", "ifWait", "summary", "facts", "timeline", "flow", "gaps"],
   properties: {
+    ask: { type: "string", maxLength: 200 },
+    whyNow: { type: "string", maxLength: 240 },
+    ifRecommended: { type: "string", maxLength: 240 },
+    ifWait: { type: "string", maxLength: 240 },
     summary: { type: "string", maxLength: 400 },
     facts: { type: "array", maxItems: 8, items: { type: "object", additionalProperties: false, required: ["text", "refs"],
       properties: { text: { type: "string", maxLength: 300 }, refs: { type: "array", minItems: 1, items: { type: "string" } } } } },
@@ -217,6 +233,8 @@ export const BRIEF_SCHEMA = {
       properties: { when: { type: "string", maxLength: 40 }, text: { type: "string", maxLength: 200 }, refs: { type: "array", minItems: 1, items: { type: "string" } } } } },
     flow: { type: "array", maxItems: 6, items: { type: "string", maxLength: 80 } },
     gaps: { type: "array", maxItems: 5, items: { type: "string", maxLength: 200 } },
+    visual: { type: "object", additionalProperties: false, required: ["title", "html"],
+      properties: { title: { type: "string", maxLength: 80 }, html: { type: "string", maxLength: 20000 } } },
   },
 }
 
@@ -258,8 +276,17 @@ export const briefPacket = (item: DeskItem, tail: MessageWithParts[]) => {
   return { text, refs }
 }
 
+const text = (value: unknown, max: number) => typeof value === "string" ? value.trim().slice(0, max) : ""
+const plain = (value: Record<string, unknown>) =>
+  ({ ask: text(value.ask, 200), whyNow: text(value.whyNow, 240), ifRecommended: text(value.ifRecommended, 240), ifWait: text(value.ifWait, 240) })
+const visualOf = (value: unknown) => {
+  if (!value || typeof value !== "object") return {}
+  const visual = value as Record<string, unknown>
+  return typeof visual.html === "string" && visual.html.trim() && visual.html.length <= 20000
+    ? { visual: { title: text(visual.title, 80), html: visual.html } } : {}
+}
 const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
-const cited = (value: unknown, known: Set<string>) => {
+const cited = (value: unknown, known: { has: (ref: string) => boolean }) => {
   if (!Array.isArray(value)) return { kept: [], omitted: 0 }
   const rows = value.filter((row): row is Record<string, unknown> => !!row && typeof row === "object" && typeof (row as Record<string, unknown>).text === "string")
   const kept = rows.flatMap(row => {
@@ -285,13 +312,13 @@ export const briefState = (meta: BriefMeta, messages: MessageWithParts[], status
   const assistant = last?.info
   const value = assistant?.role === "assistant" && assistant.time.completed && !assistant.error ? parseBrief(last) : undefined
   if (value) {
-    const known = new Set(meta.refs.map(ref => ref.id))
+    const known = { has: (ref: string) => meta.refs.some(item => item.id === ref) || /^file:[^\s]{1,200}$/.test(ref) }
     const facts = cited(value.facts, known)
     const timeline = cited(value.timeline, known)
     return {
       state: "ready",
       omitted: facts.omitted + timeline.omitted,
-      result: { summary: typeof value.summary === "string" ? value.summary : "", facts: facts.kept, timeline: timeline.kept, flow: strings(value.flow), gaps: strings(value.gaps) },
+      result: { ...plain(value), ...visualOf(value.visual), summary: typeof value.summary === "string" ? value.summary : "", facts: facts.kept, timeline: timeline.kept, flow: strings(value.flow), gaps: strings(value.gaps) },
     }
   }
   if (status === "busy" || status === "retry") return { state: "running" }

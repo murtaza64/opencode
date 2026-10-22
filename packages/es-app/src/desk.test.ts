@@ -88,9 +88,9 @@ test("brief packet keeps the newest evidence within budget and numbers its refs"
 })
 
 test("brief state keeps only cited facts from the JSON reply", () => {
-  const reply = JSON.stringify({ summary: "Canary is staged.", facts: [{ text: "Canary exists", refs: ["E1"] }, { text: "Invented", refs: ["E9"] }], timeline: [], flow: ["build", "canary"], gaps: ["owner unknown"] })
+  const reply = JSON.stringify({ ask: "Choose how far to roll out", whyNow: "  The canary has run for a day.  ", ifRecommended: "", summary: "Canary is staged.", facts: [{ text: "Canary exists", refs: ["E1"] }, { text: "Invented", refs: ["E9"] }], timeline: [], flow: ["build", "canary"], gaps: ["owner unknown"] })
   const state = briefState(meta(), [message("msg_u", "user", "packet"), message("msg_a", "assistant", "```json\n" + reply + "\n```")], "idle")
-  expect(state).toEqual({ state: "ready", omitted: 1, result: { summary: "Canary is staged.", facts: [{ text: "Canary exists", refs: ["E1"] }], timeline: [], flow: ["build", "canary"], gaps: ["owner unknown"] } })
+  expect(state).toEqual({ state: "ready", omitted: 1, result: { ask: "Choose how far to roll out", whyNow: "The canary has run for a day.", ifRecommended: "", ifWait: "", summary: "Canary is staged.", facts: [{ text: "Canary exists", refs: ["E1"] }], timeline: [], flow: ["build", "canary"], gaps: ["owner unknown"] } })
 })
 
 test("brief state reports interrupted and unconfirmed passes as unknown, never as running", () => {
