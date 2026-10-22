@@ -189,7 +189,7 @@ export default function AgentMap() {
   const title = (cluster: ClusterBox) => `${cluster.project.toUpperCase()}${cluster.cloud ? " · CLOUD" : ""} · ${cluster.count} AGENT${cluster.count === 1 ? "" : "S"}`
 
   return <main class="attention-home agent-map-page" data-still={still() ? "true" : "false"}>
-    <AppHeader><h1>Agent map</h1><span class="home-muted">{project() ?? "All projects"}</span><A class="home-header-end" href="/">Home</A></AppHeader>
+    <AppHeader><h1>Agent map</h1><span class="home-muted">{project() ?? "All projects"}</span></AppHeader>
     <Show when={dashboard.stateError()}><div class="home-warning">{dashboard.stateError()} Lanes may be incomplete.</div></Show>
     <Show when={dashboard.handoffsError()}><div class="home-warning">{dashboard.handoffsError()} Handoff chains may be incomplete.</div></Show>
     <Show when={dashboard.sessionsError()}><div class="home-warning">{dashboard.sessionsError()}</div></Show>

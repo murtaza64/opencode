@@ -267,8 +267,11 @@ export default function Sidebar() {
           <Show when={!nativeHeader}><button class="mini-btn" title="expand sidebar (^h)" onClick={toggleLeft}>
             ⟩
           </button></Show>
-            <A href="/" end activeClass="active" class="mini-item" title={`Home — ${current()}`} aria-label="Home">
+            <A href="/" end activeClass="active" class="mini-item" title="Front desk" aria-label="Front desk">
               <Glyph name="home" />
+            </A>
+            <A href="/map" activeClass="active" class="mini-item" title="Agent map" aria-label="Agent map">
+              <Glyph name="graph" />
             </A>
           <NewSession compact />
           <Show when={pinnedSessions().length || cloud.pins().length}>
@@ -282,13 +285,16 @@ export default function Sidebar() {
     >
       <nav class="sidebar" ref={setNavEl} style={{ width: `${leftWidth()}px` }}>
         <Show when={!nativeHeader}><div class="sidebar-top">{projectControls()}</div></Show>
-        {/* Home remains reachable from sessions in both project scopes. */}
-        <div class="sidebar-actions">
-            <A href="/" end activeClass="active" class="nav-item board-link">
-              <Glyph name="home" />Home
-            </A>
+        {/* The app's only page navigation: Front desk is home, the map is its one sibling. */}
+        <nav class="sidebar-actions" aria-label="Pages">
+          <A href="/" end activeClass="active" class="nav-item board-link">
+            <Glyph name="home" />Front desk
+          </A>
           <NewSession />
-        </div>
+          <A href="/map" activeClass="active" class="nav-item board-link sidebar-map-link">
+            <Glyph name="graph" />Agent map
+          </A>
+        </nav>
         <Show when={!query().trim() && (pinnedSessions().length || cloud.pins().length)}>
           <section class="pinned-section" aria-label="Pinned sessions">
             <div class="nav-heading">Pinned</div>

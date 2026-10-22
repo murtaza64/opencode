@@ -2,12 +2,11 @@ import "./index.css"
 import { render } from "solid-js/web"
 import { onCleanup, onMount, Show, type ParentProps } from "solid-js"
 import { MetaProvider } from "@solidjs/meta"
-import { Route, Router, useNavigate } from "@solidjs/router"
+import { Navigate, Route, Router, useLocation, useNavigate } from "@solidjs/router"
 import { DialogProvider } from "@opencode-ai/ui/context/dialog"
 import { FileComponentProvider } from "@opencode-ai/ui/context/file"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import { File } from "@opencode-ai/session-ui/file"
-import Home from "./pages/home"
 import CloudPage from "./pages/cloud"
 import AgentMap from "./pages/map"
 import Desk from "./pages/desk"
@@ -94,14 +93,20 @@ function Providers(props: ParentProps) {
   )
 }
 
+const DeskRedirect = () => {
+  const location = useLocation()
+  return <Navigate href={`/${location.search}${location.hash}`} />
+}
+
 render(
   () => (
     <Router root={(p) => <Providers>{p.children}</Providers>}>
-      <Route path="/" component={Home} />
+      <Route path="/" component={Desk} />
       <Route path="/cloud" component={CloudPage} />
       <Route path="/map" component={AgentMap} />
       <Route path="/new" component={NewSessionPage} />
-      <Route path="/desk" component={Desk} />
+      {/* Front desk replaced the old Home at "/"; keep old /desk links working. */}
+      <Route path="/desk" component={DeskRedirect} />
       <Route path="/session/:id" component={SessionPage} />
       <Route path="/issue" component={IssuePage} />
       <Route path="/doc" component={DocPage} />

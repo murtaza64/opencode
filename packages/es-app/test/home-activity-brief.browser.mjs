@@ -20,7 +20,7 @@ await page.route("**/*", route => new URL(route.request().url()).origin === prev
 const pinned = page.getByRole("region", { name: "Pinned agents", exact: true })
 const brief = pinned.locator(".activity-brief").first()
 try {
-  await page.goto(preview.url)
+  await page.goto(`${preview.url}/?view=agents`)
   await expect(brief).toContainText("Reviewing the bounded attention adapter")
   await expect(brief).toHaveAttribute("data-source", "reported")
   expect(preview.ledger.workCalls.map(call => call.id)).toEqual(["ses_a"])

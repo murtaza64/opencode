@@ -12,7 +12,8 @@ const internal = [
   { label: "Published web session", href: `http://127.0.0.1:3181${target}` },
   { label: "Relative session", href: target },
   { label: "Native port session", href: `http://127.0.0.1:60302${target}` },
-  { label: "Dev desk", href: "http://localhost:3100/desk", path: "/desk" },
+  // Old /desk links redirect in place to the Front desk at "/".
+  { label: "Dev desk", href: "http://localhost:3100/desk", path: "/" },
 ]
 const external = [
   { label: "External site", href: "https://example.com/session/ses_b" },

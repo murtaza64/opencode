@@ -1,4 +1,4 @@
-// Written answers on Home against the disposable attention fixture: keyboard send, lost response,
+// Written answers on the Front desk against the disposable attention fixture: keyboard send, lost response,
 // legacy record-only choice, delivery evidence/recovery, drafts, mobile and RTL. No runtime writes.
 import { createRequire } from "node:module"
 import { startAttentionPreview } from "./attention-preview.mjs"
@@ -11,13 +11,15 @@ preview.ledger.records.push({ ...preview.ledger.records[1], id: "uncommitted", e
 preview.ledger.records.push({ ...preview.ledger.records[1], id: "open_ended", editspace: "fixture", title: "What should the release note say?", options: [], recommendation: null, gate_key: "fixture:note:v1", lane: null, source_ref: { ...preview.ledger.records[1].source_ref, session_id: "ses_top" } })
 const browser = await chromium.launch({ channel: "chrome", headless: true })
 const errors = []
-const open = async (viewport) => {
+// Front desk shows one item at a time; `?item=` opens it, the queue and history select others.
+const itemURL = (key) => `${preview.url}/?item=${encodeURIComponent(key)}`
+const open = async (viewport, key = "attention:fixture:decision_1") => {
   const context = await browser.newContext({ viewport })
   await context.addInitScript(() => localStorage.setItem("es-app-all-projects", "true"))
   await context.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
   const page = await context.newPage()
   page.on("pageerror", error => errors.push(error.message))
-  await page.goto(preview.url)
+  await page.goto(itemURL(key))
   return { context, page }
 }
 try {
@@ -50,15 +52,18 @@ try {
   const posts = preview.ledger.calls.filter(call => call.path.endsWith("/commands"))
   if (posts.length !== 2 || posts[0].body.command_id !== posts[1].body.command_id) throw Error("lost response must retry the same command identity")
   if (JSON.stringify(posts[1].body) !== JSON.stringify({ action: "answer", text: FLEET, expected_revision: 1, command_id: posts[0].body.command_id })) throw Error(`unexpected answer body ${JSON.stringify(posts[1].body)}`)
-  await expect(page.getByRole("button", { name: "Answered 1", exact: true })).toHaveAttribute("aria-pressed", "true")
+  // The answered decision stays open with its delivery status and is filed under Answered.
+  await page.locator(".desk-history summary").click()
+  await expect(page.locator(".desk-history").getByRole("button", { name: "Answered 1", exact: true })).toHaveAttribute("aria-pressed", "true")
   await expect(record.locator("pre.home-answer-text")).toHaveText(FLEET)
   await expect(record.locator(".home-delivery")).toContainText("Saved · delivery not yet attempted")
   await expect(page.getByRole("heading", { name: "Needs you 4", exact: true })).toBeVisible()
+  const select = (key) => page.locator(`.desk-item[data-desk-item="${key}"]`).click()
 
   const fixtureRecord = preview.ledger.records[0]
   fixtureRecord.delivery_state = "blocked"
   fixtureRecord.delivery = { ...fixtureRecord.delivery, state: "blocked", reason: "owner-unverified" }
-  await page.getByRole("button", { name: "Refresh", exact: true }).click()
+  await page.getByRole("button", { name: "Refresh sources", exact: true }).click()
   await expect(record.locator(".home-blocked")).toContainText("not on this request's verified handoff chain")
   await expect(record.getByText("Delivered session not yet verified")).toBeVisible()
   preview.ledger.deliveryNext = { state: "admitted", reason: null, session: "ses_successor", session_directory: "/successor/dir", copies: [{ session: "ses_successor", directory: "/successor/dir", state: "admitted", error: null, presented_at: null, handled_at: null }] }
@@ -72,12 +77,12 @@ try {
   await expect(record.locator("details pre")).toContainText('"reason": "admitted"')
   fixtureRecord.delivery_state = "presented"
   fixtureRecord.delivery = { ...fixtureRecord.delivery, state: "presented", updated_at: Date.now() + 1 }
-  await page.getByRole("button", { name: "Refresh", exact: true }).click()
+  await page.getByRole("button", { name: "Refresh sources", exact: true }).click()
   await expect(record.locator(".home-delivery")).toContainText("Presented to agent · awaiting acknowledgement")
   await expect(record.locator("details pre")).toContainText('"reason": "presented"')
 
   // Uncommitted first attempt: the request never reached the ledger; reload retries the same identity once.
-  await page.getByRole("group", { name: "Attention status" }).getByRole("button", { name: /^Open/ }).click()
+  await select("attention:fixture:uncommitted")
   const fresh = page.locator('[data-attention-id="uncommitted"]')
   const freshBox = fresh.getByRole("textbox", { name: /Note \(optional\)/ })
   await freshBox.fill("never reached the server")
@@ -94,19 +99,20 @@ try {
   await expect(page.locator(".home-notice")).toContainText("Answer saved")
   const committed = preview.ledger.calls.filter(call => call.path === "/uncommitted/commands")
   if (committed.length !== 1 || committed[0].body.command_id !== firstID || committed[0].body.text !== "never reached the server") throw Error(`uncommitted retry ${JSON.stringify(committed)}`)
+  await page.goto(itemURL("attention:fixture:decision_1"))
   await expect(record.locator(".home-copies")).toContainText("ses_successor · admitted")
   await expect(record.getByRole("button", { name: "Retry delivery" })).toHaveCount(0)
   const retries = preview.ledger.calls.filter(call => call.path.endsWith("/delivery"))
   if (retries.length !== 1 || retries[0].csrf !== "1" || JSON.stringify(retries[0].body) !== "{}") throw Error("delivery retry must be one CSRF POST with an empty body")
 
   // Open-ended asks have no options, only the written answer.
-  await page.getByRole("group", { name: "Attention status" }).getByRole("button", { name: /^Open/ }).click()
+  await select("attention:fixture:open_ended")
   const openEnded = page.locator('[data-attention-id="open_ended"]')
   await expect(openEnded.getByRole("radio")).toHaveCount(0)
   await expect(openEnded.getByRole("button", { name: "Review choice" })).toHaveCount(0)
   await expect(openEnded.locator(".home-answer")).toContainText("To session ses_top")
   // Selecting an option is a complete answer: one answer command with the exact choice and no text.
-  await page.getByRole("group", { name: "Attention status" }).getByRole("button", { name: /^Open/ }).click()
+  await select("attention:other:other_decision")
   const other = page.locator('[data-attention-id="other_decision"]')
   await expect(other.getByRole("button", { name: "Review choice" })).toHaveCount(0)
   await expect(other).not.toContainText("record only")
@@ -119,7 +125,7 @@ try {
   if (selections.length !== 1) throw Error(`selection must send exactly one command, saw ${selections.length}`)
   const selection = selections[0].body
   if (selection.action !== "answer" || selection.choice_id !== "yes" || "text" in selection || !selection.command_id) throw Error(`selection-only answer ${JSON.stringify(selection)}`)
-  await page.getByRole("group", { name: "Attention status" }).getByRole("button", { name: /^Open/ }).click()
+  await page.goto(itemURL("attention:fixture:open_ended"))
 
   // Drafts survive reload; mixed RTL text keeps its own direction.
   const mixed = "أفضّل A و C — keep `fleet-orbit` as a prototype"
@@ -139,7 +145,7 @@ try {
   await context.close()
 
   // Mobile: the answer field and send control fit without horizontal scrolling.
-  const mobile = await open({ width: 390, height: 844 })
+  const mobile = await open({ width: 390, height: 844 }, "attention:fixture:open_ended")
   const field = mobile.page.locator('[data-attention-id="open_ended"]').getByRole("textbox", { name: /Your answer/ })
   await field.fill(mixed)
   const fit = await mobile.page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, width: window.innerWidth,
@@ -156,7 +162,7 @@ try {
   await held.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
   const typing = await held.newPage()
   await typing.clock.install()
-  await typing.goto(preview.url)
+  await typing.goto(itemURL("attention:fixture:open_ended"))
   const heldBox = typing.locator('[data-attention-id="open_ended"]').getByRole("textbox", { name: /Your answer/ })
   await heldBox.fill("abcd")
   await heldBox.evaluate(element => { element.setSelectionRange(1, 3); window.__answerNode = element })

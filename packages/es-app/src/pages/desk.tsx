@@ -2,12 +2,13 @@
  * existing requests, and an evidence canvas only while an item is selected.
  * The chat is the ordinary session view; selection changes never remount it. */
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
-import { A } from "@solidjs/router"
+import { A, useSearchParams } from "@solidjs/router"
 import { ago, sessionHref, useDashboard } from "../state"
 import { AppHeader } from "../components/native-header"
-import { createAttention } from "../attention"
+import { createAttention, type AttentionRecord } from "../attention"
 import { createHomeRequests, requestPointers } from "../home-requests"
-import { AttentionDecision } from "../components/attention-decision"
+import { AttentionDecision, type AttentionView } from "../components/attention-decision"
+import { DeskAgents } from "../components/desk-agents"
 import { HomePermission, type HomeReplyReceipt } from "../components/home-permission"
 import { FailureRetry } from "../components/session-failure"
 import { briefBinding, deskItems, deskSources, type BriefResult, type DeskItem, type EvidenceRef } from "../desk"
@@ -20,6 +21,8 @@ import { SessionView } from "./session"
 import "./home.css"
 import "./desk.css"
 
+const AGENTS = "agents"
+const receiptText = (item: HomeReplyReceipt) => item.result === "applied" ? (item.reply === "once" ? "Allowed once" : item.reply === "always" ? "Always allowed" : "Rejected") : item.result === "not-applied" ? "Not applied" : "Outcome uncertain"
 const stateLabel = (job: BriefJob) => ({ starting: "starting", unconfirmed: "start unconfirmed", running: "checking", ready: "ready", failed: "failed", unknown: "outcome unknown" })[job.state.state]
 
 export default function Desk() {
@@ -32,7 +35,9 @@ export default function Desk() {
   // Briefs are shared app-wide; the desk adds its other queue items for manual preparation.
   const prepared = useBriefs()
   const briefs = prepared.briefs
-  const [selectedKey, setSelectedKey] = createSignal<string>()
+  // `/?view=agents` opens the Agents pane directly (what the old Home page showed); `/?item=<key>` opens one item.
+  const [params] = useSearchParams()
+  const [selectedKey, setSelectedKey] = createSignal<string | undefined>(params.view === "agents" ? AGENTS : typeof params.item === "string" ? params.item : undefined)
   const [receipts, setReceipts] = createSignal<HomeReplyReceipt[]>([])
   const [now, setNow] = createSignal(Date.now())
   const clock = setInterval(() => setNow(Date.now()), 5000)
@@ -67,15 +72,32 @@ export default function Desk() {
     failures: { supported: dashboard.failures.supported(), error: dashboard.failures.error(), checked: dashboard.failures.checked() },
     dashboard: { stateError: dashboard.stateError() },
   }))
+  const records = () => attention.snapshot()?.value.records ?? []
+  const recordKey = (record: AttentionRecord) => `attention:${record.editspace}:${record.id}`
+  const [historyView, setHistoryView] = createSignal<Exclude<AttentionView, "open">>("answered")
+  const inView = (record: AttentionRecord, view: AttentionView) => view === "history" ? ["resolved", "withdrawn"].includes(record.status) : view === "recorded" ? record.status === "decided" : record.status === view
+  const historyCount = (view: AttentionView) => records().filter(record => inView(record, view)).length
+  const blockedDeliveries = () => records().filter(record => record.status === "answered" && record.delivery_state === "blocked").length
+  // Unsent or blocked answers open the history once; the reader closes it, nothing auto-closes it.
+  const [historyOpen, setHistoryOpen] = createSignal(false)
+  createEffect(on(() => historyCount("recorded") + blockedDeliveries() > 0, unsent => { if (unsent) setHistoryOpen(true) }))
+  const uncertainRequests = () => requests.rows().filter(item => item.state !== "pending" && (!project() || !item.project || item.project === project()))
   // Keep the last-seen item so an answered request does not vanish from under the reader.
+  // An answered decision keeps its key and stays selected with its delivery status.
   const lastSeen = new Map<string, DeskItem>()
-  const selected = createMemo(() => {
+  const selected = createMemo((): { agents: true } | { item: DeskItem; live: boolean } | { record: AttentionRecord } | undefined => {
     const key = selectedKey()
     if (!key) return
+    if (key === AGENTS) return { agents: true }
     const live = items().find(item => item.key === key)
     if (live) lastSeen.set(key, live)
-    return { item: live ?? lastSeen.get(key)!, live: !!live }
+    if (live) return { item: live, live: true }
+    const record = records().find(candidate => recordKey(candidate) === key)
+    if (record) return { record }
+    const seen = lastSeen.get(key)
+    return seen ? { item: seen, live: false } : undefined
   })
+  const selectedItem = () => { const current = selected(); return current && "item" in current ? current : undefined }
   const select = (key?: string) => setSelectedKey(key)
   const deskDirectory = () => {
     const name = dashboard.editspace() ?? dashboard.editspaces()?.default
@@ -102,18 +124,20 @@ export default function Desk() {
     scope: project(),
     sources: sources(),
     items: items(),
-    selected: selected()?.live ? selected()!.item : undefined,
+    selected: selectedItem()?.live ? selectedItem()!.item : undefined,
     briefs: briefs.jobs().filter(job => briefBinding(job.meta, items()).current)
       .flatMap(job => job.state.state === "starting" || job.state.state === "unconfirmed" ? [] : [{ meta: job.meta, state: job.state }]),
     memory: memory.document(),
   })
 
   return <main class="desk" classList={{ "desk-has-selection": !!selected() }}>
-    <AppHeader><h1>Front desk</h1><span class="home-muted">{project() ?? "All connected projects"}</span><A href="/">Home</A>
-      <label class="desk-auto home-muted"><input type="checkbox" checked={prepared.auto()} onChange={event => prepared.setAuto(event.currentTarget.checked)} /> Prepare briefs automatically</label><span class="home-header-end" /><button class="desk-button" disabled={attention.loading()} onClick={() => { void attention.refresh(); void requests.refresh(); void dashboard.failures.refresh(); void briefs.refresh(true) }}>Refresh sources</button></AppHeader>
+    <AppHeader><h1>Front desk</h1><span class="home-muted">{project() ?? "All connected projects"}</span>
+      <label class="desk-auto home-muted"><input type="checkbox" checked={prepared.auto()} onChange={event => prepared.setAuto(event.currentTarget.checked)} /> Prepare briefs automatically</label><span class="home-header-end" /><button class="desk-button" disabled={attention.loading()} onClick={() => { void attention.refresh(); void requests.refresh(); void dashboard.failures.refresh(); void briefs.refresh(true); dashboard.activity.todos.reload(); void attention.checkOperator().catch(() => undefined) }}>Refresh sources</button></AppHeader>
     <div class="desk-grid">
       <aside class="desk-queue" aria-label="Desk queue">
         <button class="desk-chat-tab" aria-pressed={!selected()} onClick={() => select()}>Front desk chat</button>
+        <Show when={!attention.operator()}><div class="home-login home-muted">Read-only <button class="desk-button" title="Operator connection unavailable: this UI origin must be allowed by the attention server" onClick={() => attention.checkOperator().catch(() => undefined)}>Reconnect operator</button></div></Show>
+        <Show when={attention.notice()}><div class="home-notice" role="status">{attention.notice()}<Show when={attention.pending()}><button class="desk-button" disabled={attention.writing()} onClick={() => void attention.retry()}>Retry same action</button></Show></div></Show>
         <h2>Needs you <span>{items().length}</span></h2>
         <ul class="desk-items">
           <For each={items()} fallback={<li class="home-muted desk-empty">{sources().some(source => source.state !== "current") ? "Nothing listed, but some sources are not current. Do not assume nothing is waiting." : "Nothing is waiting in connected sources."}</li>}>{item => {
@@ -125,6 +149,18 @@ export default function Desk() {
             </button></li>
           }}</For>
         </ul>
+        <Show when={uncertainRequests().length}><details class="home-unknown"><summary>Requests with unknown outcome ({uncertainRequests().length})</summary><For each={uncertainRequests()}>{item => <div class="home-source"><bdi dir="auto">{item.title}</bdi> · {item.kind} · {item.state === "unavailable" ? "source unavailable" : "no longer pending; outcome unknown"} · <A href={sessionHref(item.session, item.directory)}>Open thread</A></div>}</For></details></Show>
+        <button class="desk-chat-tab" aria-pressed={selectedKey() === AGENTS} onClick={() => select(AGENTS)}>Agents <span class="home-muted">{dashboard.pinnedSessions().length} pinned</span></button>
+        <details class="desk-history" open={historyOpen()} onToggle={event => setHistoryOpen(event.currentTarget.open)}>
+          <summary>Answered &amp; history <span class="home-muted">{historyCount("answered")}</span><Show when={historyCount("recorded")}> <span class="home-blocked">· {historyCount("recorded")} not sent</span></Show><Show when={blockedDeliveries()}> <span class="home-blocked">· {blockedDeliveries()} blocked</span></Show></summary>
+          <div class="home-tabs" role="group" aria-label="Attention status"><For each={[["answered", "Answered"], ["recorded", "Not sent"], ["snoozed", "Snoozed"], ["history", "Resolved"]] as const}>{([view, label]) => <button aria-pressed={historyView() === view} data-empty={historyCount(view) === 0 ? "" : undefined} onClick={() => setHistoryView(view)}>{label} <span>{historyCount(view)}</span></button>}</For></div>
+          <ul class="desk-items"><For each={records().filter(record => inView(record, historyView()))} fallback={<li class="home-muted desk-empty">No records in this view.</li>}>{record =>
+            <li><button class="desk-item" aria-pressed={selectedKey() === recordKey(record)} onClick={() => select(recordKey(record))}>
+              <span class="desk-item-kind" data-kind={record.kind}>{record.kind}</span>
+              <bdi dir="auto" class="desk-item-title">{record.title}</bdi>
+              <span class="home-source"><bdi dir="auto">{record.editspace}</bdi><Show when={record.status === "answered"}> · <span classList={{ "home-blocked": record.delivery_state === "blocked" }}>{record.delivery_state}</span></Show></span>
+            </button></li>}</For></ul>
+        </details>
         <button class="desk-chat-tab" aria-expanded={memoryOpen()} onClick={() => setMemoryOpen(!memoryOpen())}>Memory <span class="home-muted">{memory.document().entries.length} notes · r{memory.document().revision}</span></button>
         <Show when={memoryOpen()}><MemoryPanel memory={memory} /></Show>
         <section class="desk-sources" aria-label="Connected sources">
@@ -137,16 +173,21 @@ export default function Desk() {
         </section>
       </aside>
 
-      <Show when={selected()}>{current => <section class="desk-evidence attention-home" aria-label="Evidence">
+      {/* Remount per selection so one item's reply outcome or draft never carries into the next. */}
+      <Show when={selected() ? selectedKey() : undefined} keyed>{_key => <Show when={selected()}>{current => <section class="desk-evidence attention-home" aria-label={"agents" in current() ? "Agents" : "Evidence"}>
         <div class="desk-evidence-head">
-          <h2>Evidence</h2>
+          <h2>{"agents" in current() ? "Agents" : "Evidence"}</h2>
           <button class="desk-button" onClick={() => select()}>Expand chat</button>
         </div>
-        <Show when={!current().live}><div class="home-warning" role="status">No longer pending in its source. The outcome is not inferred here; open the source thread.</div></Show>
-        <Canonical item={current().item} live={current().live} attention={attention} requests={requests} onReceipt={receipt => setReceipts(previous => [receipt, ...previous].slice(0, 5))} />
-        <Show when={receipts().length}><ul class="home-receipts"><For each={receipts()}>{receipt => <li data-result={receipt.result}>{receipt.result === "applied" ? "Reply applied" : receipt.result === "not-applied" ? "Not applied" : "Outcome uncertain"} · <bdi dir="ltr">{receipt.permission}</bdi> · {ago(receipt.at)}</li>}</For></ul></Show>
-        <PreparedBrief item={current().item} live={current().live} />
-      </section>}</Show>
+        <Show when={"agents" in current()}><DeskAgents project={project()} /></Show>
+        <Show when={"record" in current() ? current() as { record: AttentionRecord } : undefined}>{entry => <AttentionDecision record={entry().record} attention={attention} onView={view => view !== "open" && setHistoryView(view)} />}</Show>
+        <Show when={selectedItem()}>{entry => <>
+          <Show when={!entry().live}><div class="home-warning" role="status">No longer pending in its source. The outcome is not inferred here; open the source thread.</div></Show>
+          <Canonical item={entry().item} live={entry().live} attention={attention} requests={requests} onReceipt={receipt => setReceipts(previous => [receipt, ...previous.filter(old => old.key !== receipt.key || old.at !== receipt.at)].slice(0, 5))} />
+          <Show when={receipts().length}><ul class="home-receipts" aria-label="Replies from the Front desk"><For each={receipts()}>{receipt => <li data-result={receipt.result}><b>{receiptText(receipt)}</b> · <bdi dir="ltr">{receipt.permission}</bdi> · <bdi dir="auto">{receipt.title}</bdi> · {ago(receipt.at)}{receipt.result === "uncertain" ? " · the server did not confirm; check the thread" : receipt.result === "not-applied" ? " · request was no longer pending" : ""} · <A href={sessionHref(receipt.session, receipt.directory)}>Open thread</A></li>}</For></ul></Show>
+          <PreparedBrief item={entry().item} live={entry().live} />
+        </>}</Show>
+      </section>}</Show>}</Show>
 
       <section class="desk-chat" aria-label="Front desk conversation">
         <Show when={briefs.jobs().length || briefs.error()}>
@@ -192,6 +233,7 @@ const Canonical = (props: { item: DeskItem; live: boolean; attention: ReturnType
     <Show when={props.item.request?.kind === "permission" ? props.item.request : undefined}>{request =>
       <HomePermission item={request()} live={props.live ? dashboard.activity.requestState("permission", request().session, request().directory, request().id) : "cleared"}
         siblings={dashboard.activity.requests().filter(other => other.kind === "permission" && other.directory === request().directory && other.request.sessionID === request().session && other.request.id !== request().id).length}
+        owner={(() => { const root = dashboard.activity.root(request().session); return root && root.id !== request().session ? root.title || root.id : undefined })()}
         stale={props.requests.now() - request().checked > 45_000} onReceipt={props.onReceipt}
         onRecheck={directory => Promise.all([props.requests.refresh(), dashboard.activity.refreshDirectory(directory, true)]).then(() => undefined)} />}</Show>
     <Show when={props.item.request?.kind === "question" ? props.item.request : undefined}>{request =>

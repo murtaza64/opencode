@@ -8,7 +8,7 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } })
 await page.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
 const cloud = page.getByRole("region", { name: "Cloud agents", exact: true })
 try {
-  await page.goto(preview.url)
+  await page.goto(`${preview.url}/?view=agents`)
   await expect(cloud.getByRole("heading", { name: "Cloud agents 0", exact: true })).toBeVisible()
   await cloud.getByText("Other cloud tasks (1)", { exact: true }).click()
   expect(preview.ledger.transcriptCalls).toBe(0)
