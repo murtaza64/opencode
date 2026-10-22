@@ -2,7 +2,7 @@ import { createMemo, createSignal, For, Index, Show, type ComponentProps, type J
 import { Message } from "@opencode-ai/session-ui/message-part"
 import { errorText } from "../live-session"
 import type { MailDelivery, MailMessage } from "../api"
-import { mailSentAt, mailWake } from "../mail-timeline"
+import { mailActivityLabel, mailSentAt, mailWake } from "../mail-timeline"
 import { MailWakeEvidence } from "./mail-wake-evidence"
 import type { Segment } from "../transcript-groups"
 
@@ -19,10 +19,11 @@ const mailMetadata = (message: ComponentProps<typeof Message>["message"]) => {
     !("sender" in source) || typeof source.sender !== "string" ||
     !("recipient" in source) || typeof source.recipient !== "string") return
   const mail: MailSource = { type: "editspace-mail", id: source.id, sender: source.sender, recipient: source.recipient }
+  const label = mailActivityLabel("kind" in source ? source.kind : undefined)
   const delivery = "delivery" in message && (message.delivery === "queue" || message.delivery === "steer") ? message.delivery : undefined
   const state = "state" in message &&
     (message.state === "pending" || message.state === "promoted" || message.state === "cancelled") ? message.state : undefined
-  return { mail, delivery, state }
+  return { mail, delivery, state, label }
 }
 
 export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
@@ -86,7 +87,7 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
   </Show>}>
     {(metadata) => <details class="mail-activity" id={`mail-${metadata().mail.id}`} data-mail-message-id={props.message.id}>
       <summary class="mail-activity-summary">
-         <span class="mail-activity-kind">Mail<Show when={props.mailRecord}> · {props.mailRecord?.direction === "sent" ? "Outbound" : "Inbound"}</Show></span>
+         <span class="mail-activity-kind">{metadata().label}<Show when={props.mailRecord}> · {props.mailRecord?.direction === "sent" ? "Outbound" : "Inbound"}</Show></span>
         <span class="mail-activity-route"><bdi dir="auto">{metadata().mail.sender}</bdi> <span class="mail-activity-arrow" aria-hidden="true">→</span> <bdi dir="auto">{metadata().mail.recipient}</bdi></span>
         <span class="mail-activity-state">
           <For each={props.mailDeliveries ?? []}>{(delivery) => <span>{mailWake(delivery)} · {delivery.state}</span>}</For>
