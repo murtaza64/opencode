@@ -57,7 +57,7 @@
 @media (max-width: 650px) { .attention-home { padding-inline: 14px; } .home-agent, .home-request { grid-template-columns: minmax(0,1fr); gap: 9px; } .home-section { gap: 4px; } .home-tabs button { padding: 7px 8px; } .home-header-end { display: none; } }
 .home-answer { margin-block-start: 14px; display: grid; gap: 6px; max-width: 90ch; }
 .home-answer > label { font-size: 11px; color: var(--subtext0); cursor: default; }
-.home-answer textarea { inline-size: 100%; box-sizing: border-box; min-block-size: 64px; resize: vertical; padding: 8px 10px; font: inherit; line-height: 1.6; color: var(--text); background: var(--base); border: 1px solid var(--surface1); border-radius: 0; text-align: start; }
+.home-answer textarea { inline-size: 100%; box-sizing: border-box; min-block-size: 48px; resize: vertical; padding: 8px 10px; font: inherit; line-height: 1.6; color: var(--text); background: var(--base); border: 1px solid var(--surface1); border-radius: 0; text-align: start; }
 .home-answer textarea:focus-visible { outline: 2px solid var(--lavender); outline-offset: 1px; }
 .home-answer .home-actions { margin-block: 2px 0; }
 .attention-home pre.home-answer-text { font: inherit; font-size: 13px; line-height: 1.6; padding: 8px 10px; margin-block: 6px; background: var(--base); border-inline-start: 2px solid var(--green); text-align: start; }
@@ -79,3 +79,8 @@
 /* Empty tabs recede so the populated one leads; still reachable and labelled. */
 .home-tabs button[data-empty]:not([aria-pressed=true]) { color: var(--overlay1); }
 .home-tabs button[data-empty] span { color: var(--overlay0); }
+.home-answer textarea[rows="1"] { min-block-size: 34px; }
+.home-answer .home-options { margin: 4px 0 6px; }
+.attention-home button.home-quiet { border-color: transparent; color: var(--subtext0); padding-inline: 6px; }
+.home-answer .home-actions .home-muted { margin-inline-start: auto; }
+@media (max-width: 650px) { .home-answer .home-actions .home-muted { margin-inline-start: 0; flex-basis: 100%; } }
