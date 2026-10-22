@@ -163,7 +163,7 @@ export function toRow(info: Info) {
     time_created: info.time.created,
     time_updated: info.time.updated,
     time_compacting: info.time.compacting,
-    time_archived: info.time.archived,
+    time_archived: info.time.archived ?? null,
   }
 }
 
@@ -826,8 +826,10 @@ const layer: Layer.Layer<
       yield* patch(input.sessionID, { title: input.title }).pipe(Effect.orDie)
     })
 
+    // Restoring is user activity: it restarts the idle clock so retention does not archive the Session again at once.
     const setArchived = Effect.fn("Session.setArchived")(function* (input: { sessionID: SessionID; time?: number }) {
-      yield* patch(input.sessionID, { time: { archived: input.time } }).pipe(Effect.orDie)
+      const time = input.time === undefined ? { archived: undefined, updated: Date.now() } : { archived: input.time }
+      yield* patch(input.sessionID, { time }).pipe(Effect.orDie)
     })
 
     const setMetadata = Effect.fn("Session.setMetadata")(function* (input: typeof SetMetadataInput.Type) {

@@ -42,6 +42,28 @@ export interface Interface {
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionRunState") {}
+
+// Process-global view of V1 ownership. A call counts from before its admission and guard reads until it
+// returns, and a runner counts while it is not Idle, so a reader that sees neither can rely on any later start
+// performing its guard reads after the reader's own database critical section.
+const entering = new Map<SessionID, number>()
+const owners = new Map<SessionID, Set<{ readonly busy: boolean }>>()
+
+/** Whether this process has V1 work for the Session starting, running, retrying, or settling. */
+export const isActive = (sessionID: SessionID) =>
+  entering.has(sessionID) || [...(owners.get(sessionID) ?? [])].some((owner) => owner.busy)
+
+const hold = <A, E, R>(sessionID: SessionID, effect: Effect.Effect<A, E, R>) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => entering.set(sessionID, (entering.get(sessionID) ?? 0) + 1)),
+    () => effect,
+    () =>
+      Effect.sync(() => {
+        const count = entering.get(sessionID) ?? 0
+        if (count <= 1) entering.delete(sessionID)
+        else entering.set(sessionID, count - 1)
+      }),
+  )
 const noAdvisoryWork = Symbol("noAdvisoryWork")
 
 export const completedTurn = (
@@ -79,6 +101,7 @@ const layer = Layer.effect(
               concurrency: "unbounded",
               discard: true,
             })
+            for (const [sessionID, owner] of runners) owners.get(sessionID)?.delete(owner)
             runners.clear()
           }),
         )
@@ -120,6 +143,7 @@ const layer = Layer.effect(
           (result?.info.role === "assistant" && completedTurn({ id: result.info.parentID }, result.info, result.parts)),
       })
       data.runners.set(sessionID, next)
+      owners.set(sessionID, (owners.get(sessionID) ?? new Set()).add(next))
       return next
     })
 
@@ -217,7 +241,19 @@ const layer = Layer.effect(
       return result === noAdvisoryWork || result === undefined ? yield* onInterrupt : result
     })
 
-    return Service.of({ assertNotBusy, cancel, ensureRunning, startShell, startIdle, wake, consume, admit, supersede, cancelSupersession })
+    return Service.of({
+      assertNotBusy,
+      cancel,
+      ensureRunning: (sessionID, onInterrupt, work, admission) =>
+        hold(sessionID, ensureRunning(sessionID, onInterrupt, work, admission)),
+      startShell: (sessionID, onInterrupt, work, ready) => hold(sessionID, startShell(sessionID, onInterrupt, work, ready)),
+      startIdle: (sessionID, work, guard) => hold(sessionID, startIdle(sessionID, work, guard)),
+      wake: (sessionID, work) => hold(sessionID, wake(sessionID, work)),
+      consume,
+      admit: (sessionID, work) => hold(sessionID, admit(sessionID, work)),
+      supersede,
+      cancelSupersession,
+    })
   }),
 )
 

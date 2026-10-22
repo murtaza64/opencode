@@ -545,11 +545,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
 
   // archive is a soft flag (time.archived); the live store doesn't reduce
   // session.updated events, so reload it to reflect the new state
-  const archive = async () => {
+  const setArchived = async (archived: boolean) => {
     try {
-      await oc.archive(sessionID, directory)
+      await (archived ? oc.archive(sessionID, directory) : oc.unarchive(sessionID, directory))
       await live.load()
-      refetchArchived() // moves it to the sidebar's archived section immediately
+      refetchArchived() // moves it between the sidebar's sections immediately
     } catch (e) {
       setError(String(e))
     }
@@ -1287,8 +1287,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
           {forking() ? "Forking…" : "Fork"}
         </button>
         <Show when={ownedLane()}><button title="Hand off this lane to a new session" disabled={handingOff()} onClick={() => setHandoffOpen(!handoffOpen())}>Hand off</button></Show>
-        <Show when={!session()?.time?.archived} fallback={<span class="archived-chip">Archived</span>}>
-          <button title="Archive this session (hides it from lists)" disabled={!!nudgePhase()} onClick={archive}>Archive</button>
+        <Show when={!session()?.time?.archived} fallback={<>
+          <span class="archived-chip">Archived</span>
+          <button title="Restore this session to lists" onClick={() => setArchived(false)}>Restore</button>
+        </>}>
+          <button title="Archive this session (hides it from lists)" disabled={!!nudgePhase()} onClick={() => setArchived(true)}>Archive</button>
         </Show>
         <button class="danger" title="Delete this session permanently" disabled={!!nudgePhase()} onClick={remove}>Delete</button>
         <Show when={busy()} fallback={<button onClick={() => { stick = true; pin() }}>↓ Bottom</button>}>

@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test"
-import { Clock, Duration, Effect, Layer } from "effect"
+import { Clock, Deferred, Duration, Effect, Fiber, Layer } from "effect"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
@@ -12,13 +12,15 @@ import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionSupersessionTable } from "@opencode-ai/core/session/sql"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { SessionStatusEvent } from "@opencode-ai/schema/session-status-event"
+import { EventTable } from "@opencode-ai/core/event/sql"
+import { eq } from "drizzle-orm"
 import { GlobalBus } from "@/bus/global"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { InstanceStore } from "@/project/instance-store"
 import { SessionRetention } from "@/session/retention"
+import { SessionRunState } from "@/session/run-state"
 import { Session } from "@/session/session"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import * as TestClock from "effect/testing/TestClock"
@@ -33,6 +35,7 @@ const services = LayerNode.group([
   SessionProjector.node,
   CrossSpawnSpawner.node,
   InstanceStore.node,
+  SessionRunState.node,
   SessionRetention.node,
 ])
 const replacements: LayerNode.Replacements = [
@@ -78,13 +81,18 @@ const userMessage = (sessionID: SessionID, created: number) =>
 const exchange = (
   sessionID: SessionID,
   created: number,
-  reply: { completed?: boolean; error?: SessionV1.Assistant["error"] } = {},
+  reply: {
+    completed?: boolean
+    error?: SessionV1.Assistant["error"]
+    finish?: string
+    tool?: "pending" | "running" | "completed"
+  } = {},
 ) =>
   Effect.gen(function* () {
     const sessions = yield* Session.Service
     const session = yield* sessions.get(sessionID)
     const user = yield* userMessage(sessionID, created)
-    yield* sessions.updateMessage({
+    const assistant = yield* sessions.updateMessage({
       id: MessageID.ascending(),
       sessionID,
       role: "assistant",
@@ -97,8 +105,34 @@ const exchange = (
       path: { cwd: session.directory, root: session.directory },
       cost: 0,
       tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-      ...(reply.error ? { error: reply.error } : reply.completed === false ? {} : { finish: "stop" }),
+      ...(reply.error
+        ? { error: reply.error }
+        : reply.completed === false
+          ? {}
+          : { finish: reply.finish ?? "stop" }),
     } satisfies SessionV1.Assistant)
+    if (reply.tool)
+      yield* sessions.updatePart({
+        id: PartID.ascending(),
+        sessionID,
+        messageID: assistant.id,
+        type: "tool",
+        callID: "call_1",
+        tool: "bash",
+        state:
+          reply.tool === "pending"
+            ? { status: "pending", input: {}, raw: "" }
+            : reply.tool === "running"
+              ? { status: "running", input: { command: "sleep 9" }, time: { start: created } }
+              : {
+                  status: "completed",
+                  input: { command: "true" },
+                  output: "",
+                  title: "bash",
+                  metadata: {},
+                  time: { start: created, end: created },
+                },
+      })
   })
 
 /** A root Session whose newest durable activity is a finished exchange at a known time. */
@@ -225,17 +259,46 @@ describe("session retention gates", () => {
     }),
   )
 
-  it.instance("skips a root whose newest step failed and awaits retry", () =>
+  it.instance("archives a root whose failed step settled, since retry stays available after archive", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({})
+      const activity = session.time.updated + 1_000
+      yield* exchange(session.id, activity, {
+        error: new SessionV1.APIError({ message: "forbidden", statusCode: 403, isRetryable: false }).toObject(),
+        tool: "completed",
+      })
+
+      expect(yield* sweepAt(activity + WEEK - 1)).not.toContain(session.id)
+      expect(yield* sweepAt(activity + WEEK)).toContain(session.id)
+    }),
+  )
+
+  it.instance("skips a root whose failed step left a tool call running", () =>
     Effect.gen(function* () {
       const retention = yield* SessionRetention.Service
       const sessions = yield* Session.Service
       const session = yield* sessions.create({})
       const activity = session.time.updated + 1_000
       yield* exchange(session.id, activity, {
-        error: new SessionV1.AuthError({ providerID: "test", message: "expired" }).toObject(),
+        error: new SessionV1.APIError({ message: "reset", isRetryable: true }).toObject(),
+        tool: "running",
       })
 
-      expect((yield* retention.inspect(session.id, activity + 2 * WEEK)).type).toBe("blocked")
+      expect(yield* retention.inspect(session.id, activity + 2 * WEEK)).toMatchObject({ blocker: "tool" })
+      expect(yield* sweepAt(activity + 2 * WEEK)).not.toContain(session.id)
+    }),
+  )
+
+  it.instance("skips a root whose completed step still asked for tool results", () =>
+    Effect.gen(function* () {
+      const retention = yield* SessionRetention.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({})
+      const activity = session.time.updated + 1_000
+      yield* exchange(session.id, activity, { finish: "tool-calls", tool: "completed" })
+
+      expect(yield* retention.inspect(session.id, activity + 2 * WEEK)).toMatchObject({ blocker: "turn" })
     }),
   )
 
@@ -280,28 +343,24 @@ describe("session retention gates", () => {
     }),
   )
 
-  it.instance("skips a busy or retrying root reported by this process", () =>
+  it.instance("skips a root while this process holds V1 work for it, from admission until the call returns", () =>
     Effect.gen(function* () {
       const retention = yield* SessionRetention.Service
-      const events = yield* EventV2.Service
+      const run = yield* SessionRunState.Service
       const { session, activity } = yield* idleRoot
       const later = activity + 2 * WEEK
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const work = yield* run
+        .admit(session.id, Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))))
+        .pipe(Effect.forkChild)
+      yield* Deferred.await(entered)
 
-      yield* events.publish(SessionStatusEvent.Status, {
-        sessionID: session.id,
-        status: { type: "retry", attempt: 1, message: "rate limited", next: later },
-      })
-      yield* pollWithTimeout(
-        retention.inspect(session.id, later).pipe(Effect.map((verdict) => (verdict.type === "blocked" ? verdict : undefined))),
-        "retrying session was not observed",
-      ).pipe(Effect.map((verdict) => expect(verdict.blocker).toBe("running")))
+      expect(yield* retention.inspect(session.id, later)).toMatchObject({ blocker: "running" })
       expect(yield* sweepAt(later)).not.toContain(session.id)
 
-      yield* events.publish(SessionStatusEvent.Status, { sessionID: session.id, status: { type: "idle" } })
-      yield* pollWithTimeout(
-        retention.inspect(session.id, later).pipe(Effect.map((verdict) => (verdict.type === "eligible" ? verdict : undefined))),
-        "idle session was not observed",
-      )
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(work)
       expect(yield* sweepAt(later)).toContain(session.id)
     }),
   )
@@ -449,11 +508,9 @@ describe("session retention writes", () => {
   it.instance("counts downtime after a restart but still holds turns a dead process left unfinished", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
-      const events = yield* EventV2.Service
       const idle = yield* idleRoot
       const interrupted = yield* sessions.create({})
       yield* exchange(interrupted.id, idle.activity, { completed: false })
-      yield* events.publish(SessionStatusEvent.Status, { sessionID: interrupted.id, status: { type: "busy" } })
 
       // A fresh process: new services over the same database, with no in-memory status.
       const restarted = yield* sweepAt(idle.activity + 3 * WEEK).pipe(
@@ -463,6 +520,65 @@ describe("session retention writes", () => {
       expect(restarted).toContain(idle.session.id)
       expect(restarted).not.toContain(interrupted.id)
       expect(yield* archivedAt(interrupted.id)).toBeUndefined()
+    }),
+  )
+
+  it.instance("a rejected archive rolls back without a durable event or any announcement", () =>
+    Effect.gen(function* () {
+      const retention = yield* SessionRetention.Service
+      const events = yield* EventV2Bridge.Service
+      const { db } = yield* Database.Service
+      const { session, activity } = yield* idleRoot
+      yield* events.publish(SessionV1.Event.InputAdmitted, {
+        sessionID: session.id,
+        payload: { requestID: "req_blocking", delivery: "queue", text: "still waiting" },
+        agent: "build",
+        model,
+        time: activity,
+      })
+      const durable = () =>
+        db.select({ id: EventTable.id }).from(EventTable).where(eq(EventTable.aggregate_id, session.id)).all().pipe(Effect.orDie)
+      const before = (yield* durable()).length
+      const announced: string[] = []
+      const listener = (event: { payload: { type?: string; properties?: unknown } }) => {
+        if (event.payload.type === SessionV1.Event.Updated.type) announced.push(JSON.stringify(event.payload.properties))
+      }
+      GlobalBus.on("event", listener)
+      yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", listener)))
+      const unsubscribe = yield* events.listen((event) =>
+        Effect.sync(() => {
+          if (event.type === SessionV1.Event.Updated.type) announced.push(event.id)
+        }),
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+
+      // archive() skips the cheap pre-check, so only the in-transaction commit hook stands between it and the write.
+      expect(yield* retention.archive(session.id, activity + 2 * WEEK)).toBe(false)
+
+      expect(announced).toEqual([])
+      expect((yield* durable()).length).toBe(before)
+      expect(yield* archivedAt(session.id)).toBeUndefined()
+    }),
+  )
+
+  it.instance("restoring clears the archive and restarts the idle clock", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({})
+      yield* exchange(session.id, session.time.updated - 3 * WEEK)
+      expect(yield* sweepAt(session.time.updated + WEEK)).toContain(session.id)
+      yield* Effect.sleep("5 millis")
+
+      yield* sessions.setArchived({ sessionID: session.id })
+      const restored = yield* sessions.get(session.id)
+      expect(restored.time.archived).toBeUndefined()
+      expect(restored.time.updated).toBeGreaterThan(session.time.updated)
+      expect((yield* sessions.messages({ sessionID: session.id })).length).toBe(2)
+
+      // Still idle by its old activity, but the restore itself is the newest activity.
+      expect(yield* sweepAt(session.time.updated + WEEK)).not.toContain(session.id)
+      expect(yield* sweepAt(restored.time.updated + WEEK - 1)).not.toContain(session.id)
+      expect(yield* sweepAt(restored.time.updated + WEEK)).toContain(session.id)
     }),
   )
 
@@ -483,6 +599,34 @@ describe("session retention writes", () => {
 
       expect(seen).toEqual([{ directory: session.directory, archived: activity + WEEK }])
     }),
+  )
+})
+
+describe("session retention load", () => {
+  it.instance(
+    "a large first backlog is swept in short pages that yield to other timers",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const count = 1_000
+        const roots = yield* Effect.forEach(Array.from({ length: count }), () => sessions.create({}))
+        const now = Math.max(...roots.map((root) => root.time.updated)) + WEEK
+        const ticks: number[] = []
+        const timer = setInterval(() => ticks.push(performance.now()), 1)
+        const start = performance.now()
+        const archived = yield* sweepAt(now).pipe(Effect.ensuring(Effect.sync(() => clearInterval(timer))))
+        const elapsed = performance.now() - start
+        const gaps = ticks.slice(1).map((tick, index) => tick - ticks[index])
+        const pages = Math.ceil(count / SessionRetention.PAGE)
+        console.log(
+          JSON.stringify({ count, pages, elapsedMs: Math.round(elapsed), ticks: ticks.length, maxGapMs: Math.round(Math.max(...gaps)) }),
+        )
+
+        expect(new Set(archived)).toEqual(new Set(roots.map((root) => root.id)))
+        // Every pause between pages lets a pending timer run.
+        expect(ticks.length).toBeGreaterThanOrEqual(pages - 1)
+      }),
+    120_000,
   )
 })
 
