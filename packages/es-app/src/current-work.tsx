@@ -99,7 +99,7 @@ export function CurrentWorkView(props: { id: string; directory: string; compact?
   const age = () => summary()?.generated_at != null ? elapsed(Math.max(0, Math.floor(now() / 1000) - summary()!.generated_at!)) : null
   return <section class={props.compact ? "current-work compact" : "current-work"} data-section="current-work">
     <div class={props.compact ? "ctx-subheading" : "info-heading"}>current turn</div>
-    <Show when={value()} fallback={<div class="ctx-caption">{snapshot().loading ? "checking current turn…" : snapshot().error ? "current turn unavailable" : "current turn unknown"}</div>}>
+    <Show when={value()} fallback={<div class="ctx-caption">{snapshot().loading ? "checking…" : snapshot().error ? "unavailable" : "unknown"}</div>}>
       {(work) => <>
         <div class="current-work-line">{work().turn.status}{work().turn.elapsed_seconds != null ? ` · ${elapsed(work().turn.elapsed_seconds!)} elapsed` : " · elapsed unknown"}{snapshot().error ? " · refresh failed" : ""}</div>
         <Show when={work().turn.started_at != null}>
@@ -115,7 +115,7 @@ export function CurrentWorkView(props: { id: string; directory: string; compact?
           <button type="button" class="current-work-generate" onClick={() => currentWork(props.id, props.directory, true)}>Generate summary</button>
         </Show>
         <Show when={snapshot().error || now() - snapshot().checked > (work().turn.status === "busy" ? 15_000 : 45_000)}>
-          <div class="ctx-caption">telemetry last checked {elapsed(Math.max(0, Math.floor((now() - snapshot().checked) / 1000)))} ago</div>
+          <div class="ctx-caption">checked {elapsed(Math.max(0, Math.floor((now() - snapshot().checked) / 1000)))} ago</div>
         </Show>
       </>}
     </Show>

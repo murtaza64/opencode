@@ -15,7 +15,7 @@ export const CloudNav = (props: { pin: CloudPin; mini?: boolean }) => {
   const active = () => location.pathname === "/cloud" && new URLSearchParams(location.search).get("es") === props.pin.editspace && new URLSearchParams(location.search).get("lane") === props.pin.lane && new URLSearchParams(location.search).get("owner") === props.pin.owner
   const status = () => snapshot()?.error ? "source unavailable" : !record() ? "owner not observed" : wingmanStatus(record()?.["wingman-status"]).label
   return <div class={props.mini ? "cloud-mini-entry" : "session-entry cloud-nav-entry"} data-cloud-owner={props.pin.owner}>
-    <A href={cloudHref(props.pin)} activeClass="" class={props.mini ? "mini-item" : "nav-item cloud-nav"} classList={{ active: active() }} title={`Cloud · ${props.pin.lane} · ${props.pin.editspace} · ${status()} (lane report, not live execution)`}>
+    <A href={cloudHref(props.pin)} activeClass="" class={props.mini ? "mini-item" : "nav-item cloud-nav"} classList={{ active: active() }} title={`Cloud · ${props.pin.lane} · ${props.pin.editspace} · ${status()}`}>
       <span class="cloud-runtime-icon" aria-label="Cloud agent"><Icon name="cloud-upload" size="small" /></span>
       <Show when={!props.mini}><span class="nav-title"><bdi dir="auto">{props.pin.lane}</bdi></span><span class="session-project">{props.pin.editspace} · {status()}</span></Show>
     </A>
@@ -25,10 +25,10 @@ export const CloudNav = (props: { pin: CloudPin; mini?: boolean }) => {
 
 export const CloudDiscovery = () => {
   const cloud = useDashboard().cloud
-  return <details class="cloud-discovery"><summary>Cloud agents <span>({cloud.other().length})</span></summary><p class="cloud-sidebar-source">{cloud.includeFinished() ? "Known tasks, including finished, in the selected project" : "Active tasks only in the selected project"} · cloud lane records</p>
+  return <details class="cloud-discovery"><summary>Cloud agents <span>({cloud.other().length})</span></summary>
     <label class="cloud-discovery-filter"><input type="checkbox" checked={cloud.includeFinished()} onChange={event => cloud.setIncludeFinished(event.currentTarget.checked)} />Include finished</label>
     <Show when={cloud.pinError()}><p class="cloud-sidebar-source">{cloud.pinError()}</p></Show>
     <Show when={cloud.scopes().some(name => cloud.snapshots()[name]?.error)}><p class="cloud-sidebar-source">Cloud source unavailable; saved pins retained.</p></Show>
-    <For each={cloud.other()} fallback={<p class="cloud-sidebar-source">{cloud.loading() ? "Checking cloud source…" : cloud.includeFinished() ? "No known unpinned tasks in checked sources." : "No active unpinned tasks in checked sources. Include finished to find completed work."}</p>}>{item => <CloudNav pin={item} />}</For>
+    <For each={cloud.other()} fallback={<p class="cloud-sidebar-source">{cloud.loading() ? "Checking cloud source…" : cloud.includeFinished() ? "No known unpinned tasks in checked sources." : "No active tasks."}</p>}>{item => <CloudNav pin={item} />}</For>
   </details>
 }

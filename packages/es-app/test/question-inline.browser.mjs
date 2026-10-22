@@ -90,7 +90,7 @@ try {
   await parent.getByRole("button", { name: /Keyboard/ }).click()
   await parent.getByRole("button", { name: /Subagents/ }).click()
   await parent.getByRole("textbox", { name: "Coverage note" }).fill("Include both directions.")
-  await parent.getByRole("button", { name: "Answer round" }).focus()
+  await parent.getByRole("button", { name: "Answer", exact: true }).focus()
   await page.keyboard.press("Enter")
   await expect(parent).toHaveCount(0)
   expect(preview.fixture.questionReplies).toEqual([{

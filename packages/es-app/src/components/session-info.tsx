@@ -366,7 +366,7 @@ function SessionInfoBody(props: {
           <div class="info-heading">context</div>
           <div class="info-row">
             <span class="dim">turns</span>
-            <span title="completed assistant turns">{turns()} completed</span>
+            <span>{turns()} completed</span>
           </div>
           <Show when={latestTurn()}>{(t) => (
             <Show when={props.session && (props.session as any).model?.id && (props.session as any).model.id !== t().modelID}>
@@ -418,7 +418,7 @@ function SessionInfoBody(props: {
 
       <Show when={referencedTickets().length}>
         <div class="info-section">
-          <div class="info-heading">tickets referenced</div>
+          <div class="info-heading">tickets</div>
           <For each={referencedTickets()}>
             {(row) => (
               <A
@@ -442,7 +442,7 @@ function SessionInfoBody(props: {
 
       <Show when={referencedDocs().length}>
         <div class="info-section">
-          <div class="info-heading">docs referenced</div>
+          <div class="info-heading">docs</div>
           <For each={referencedDocs()}>
             {(d) => (
               <A class="info-ref" href={docHref(d.source, d.path)} title={`${d.source} · ${d.path}`}>
@@ -455,7 +455,7 @@ function SessionInfoBody(props: {
 
       <Show when={prs().length}>
         <div class="info-section" data-section="prs">
-          <div class="info-heading">PRs referenced</div>
+          <div class="info-heading">PRs</div>
           <For each={prs()}>{(pr) => (
             <Pr pr={pr.data ?? { repo: pr.ref.repo, number: pr.ref.number, url: pr.ref.url }} compact={pr.compact} mentions={pr.mentions} />
           )}</For>
@@ -471,7 +471,7 @@ function SessionInfoBody(props: {
 
       <Show when={links().length}>
         <div class="info-section">
-          <div class="info-heading">links shared</div>
+          <div class="info-heading">links</div>
           <For each={links()}>
             {(url) => (
               <div class="info-link" title={url}>

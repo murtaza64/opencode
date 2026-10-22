@@ -53,7 +53,7 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
               <button disabled={state.sending || state.hydrating} onClick={() => props.composer.setAsideAdmission()}>
                 Set aside unknown input
               </button>
-              <p class="dim">Keeps the exact request for recovery below. Does not resend or cancel it.</p>
+              <p class="dim">Does not resend or cancel it.</p>
             </Show>
           </section>
         )}
@@ -123,7 +123,6 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
                       class="receipt-cancel"
                       disabled={!props.connected}
                       aria-label={`Cancel ${item.delivery} input: ${item.text}`}
-                      title="Cancel this input"
                       onClick={() => props.composer.cancelInput(item.requestID)}
                     >
                       Cancel

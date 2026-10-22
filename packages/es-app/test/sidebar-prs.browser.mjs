@@ -41,7 +41,7 @@ const chips = page.locator(".session-info .pr-title-row")
 try {
   await page.goto(preview.url)
   await expect(chips).toHaveCount(32)
-  await expect(page.locator(".info-heading", { hasText: "PRs referenced" })).toHaveCount(1)
+  await expect(page.locator(".info-heading", { hasText: "PRs" })).toHaveCount(1)
   await expect(chips.nth(0)).toHaveAttribute("href", "https://duo.fyi/ink/https://github.com/example/repo/pull/1")
   await expect(chips.nth(0).locator(".icon-merged")).toHaveCount(1)
   await expect(chips.nth(1).locator(".icon-closed")).toHaveCount(1)

@@ -123,6 +123,7 @@ try {
   await edit("lost-ack").getByRole("textbox", { name: "Pending input text" }).fill("Update with lost ACK")
   fixture.loseInputUpdateAck = true
   await save("lost-ack")
+  await expect(edit("lost-ack")).toContainText(/Update not confirmed \(.+\)\. Retry sends the same update\./)
   await expect(edit("lost-ack").getByRole("button", { name: "Retry same update" })).toBeVisible()
   // An unknown update survives reload in the composer, locked, next to the untouched draft.
   await page.reload()

@@ -178,7 +178,7 @@ export const createAttention = (project: () => string | undefined) => {
     const stored = storedPending()[0]
     if (!stored || pending()) return
     setPending(stored)
-    setNotice("An answer sent before reload has an unknown outcome. Retry the same action identity; no new answer is created.")
+    setNotice("An answer sent before reload has an unknown outcome. Retrying repeats the same answer; no new answer is created.")
   }
   onMount(() => {
     resume()
@@ -203,11 +203,11 @@ export const createAttention = (project: () => string | undefined) => {
       if (!response.ok) {
         if (response.status === 401) {
           setOperator(false)
-          setNotice("Operator connection unavailable. Reconnect and retry the same action identity; no local change was assumed.")
+          setNotice("Operator connection unavailable. Reconnect and retry the same answer; no local change was assumed.")
           return false
         }
         if (response.status >= 500) {
-          setNotice(`Server response failed (HTTP ${response.status}). Outcome unknown; retry the same action identity.`)
+          setNotice(`Server response failed (HTTP ${response.status}). Outcome unknown; retry the same answer.`)
           return false
         }
         if (response.status === 403) setOperator(false)
@@ -220,14 +220,14 @@ export const createAttention = (project: () => string | undefined) => {
       settle(command)
       // Keep any newer draft typed while this older submission was in flight.
       if (command.body.action === "answer" && localStorage.getItem(answerDraftKey(command.record)) === command.body.text) localStorage.removeItem(answerDraftKey(command.record))
-      setNotice(command.body.action === "choose" ? "Decision saved · not sent. No agent was resumed and no tool was approved."
+      setNotice(command.body.action === "choose" ? "Decision saved · not sent."
         : command.body.action === "answer" ? "Answer saved. It is delivered only to the verified current owner of this request; evidence appears under Answered."
         : "Saved to the attention ledger.")
       await refresh()
       resume()
       return true
     } catch {
-      setNotice("Response lost. Outcome unknown; retry the same action identity or refresh before proceeding.")
+      setNotice("Response lost. Outcome unknown; retry the same answer or refresh before proceeding.")
       return false
     } finally { setWriting(false) }
   }

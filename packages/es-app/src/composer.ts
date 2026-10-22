@@ -1248,7 +1248,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       setState("inputEdits", id, { status: "editing", open: false, command: undefined,
         expectedRevision: result.revision ?? command.expectedRevision + 1 })
     } catch (error) {
-      setState("inputEdits", id, { status: "unknown", error: `Update outcome unknown: ${message(error)}. Retry the same update; your edit is kept.` })
+      setState("inputEdits", id, { status: "unknown", error: `Update not confirmed (${message(error)}). Retry sends the same update.` })
     } finally {
       persist()
     }

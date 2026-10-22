@@ -1241,7 +1241,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
         el.addEventListener("keydown", keyDown, true)
         onCleanup(() => el.removeEventListener("keydown", keyDown, true))
       }}
-        aria-label="Message" dir="auto" placeholder="Write a message…"
+        aria-label="Message" dir="auto"
         classList={{ "vim-normal": vim.mode() === "normal", "vim-insert": vim.mode() === "insert" }}
         value={draft()} onInput={(e) => { setDraft(e.currentTarget.value); update(e.currentTarget, e.isComposing) }}
         onPaste={pasteImages} onDrop={dropImages} onDragOver={(e) => e.preventDefault()}
@@ -1276,22 +1276,22 @@ function SessionView(props: { sessionID: string; directory: string }) {
         )}
       </Show>}
       sessionActions={<>
-        <Show when={!props.expanded}><button aria-label="Expand editor" title="Expand editor (Ctrl+E)" onClick={toggleFloat}><Glyph name="screen-full" />Expand editor</button></Show>
-        <button title="Fork this session at its tip" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
+        <Show when={!props.expanded}><button aria-label="Expand editor" title="Ctrl+E" onClick={toggleFloat}><Glyph name="screen-full" />Expand editor</button></Show>
+        <button class="act-fork" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
           <Glyph name="repo-forked" />{forking() ? "Forking…" : "Fork"}
         </button>
-        <Show when={ownedLane()}><button title="Hand off this lane to a new session" disabled={handingOff()} onClick={() => setHandoffOpen(!handoffOpen())}><Glyph name="arrow-switch" />Hand off</button></Show>
+        <Show when={ownedLane()}><button class="act-handoff" disabled={handingOff()} onClick={() => setHandoffOpen(!handoffOpen())}><Glyph name="arrow-switch" />Hand off</button></Show>
         <Show when={!session()?.time?.archived} fallback={<span class="archived-chip">Archived</span>}>
-          <button title="Archive this session (hides it from lists)" disabled={!!nudgePhase()} onClick={archive}><Glyph name="archive" />Archive</button>
+          <button disabled={!!nudgePhase()} onClick={archive}><Glyph name="archive" />Archive</button>
         </Show>
-        <button class="danger" title="Delete this session permanently" disabled={!!nudgePhase()} onClick={remove}><Glyph name="trash" />Delete</button>
+        <button class="danger" disabled={!!nudgePhase()} onClick={remove}><Glyph name="trash" />Delete</button>
         <Show when={busy()} fallback={<button onClick={() => { stick = true; pin() }}>↓ Bottom</button>}>
-          <button class="stop" aria-label="Stop session" title="Stop the parent session" disabled={aborting() || !!nudgePhase() || sending()} onClick={abort}>
+          <button class="stop" aria-label="Stop session" disabled={aborting() || !!nudgePhase() || sending()} onClick={abort}>
             <Glyph name="square-fill" />Stop
           </button>
         </Show>
         <button
-          title="Interrupt this session, then send a resume message"
+          class="act-nudge" title="Interrupt, then send a resume message"
           disabled={!session() || !!nudgePhase() || aborting() || sending()}
           onClick={nudge}
         >
@@ -1308,7 +1308,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
       </>}>
         <select class="model-select" ref={(el) => queueMicrotask(() => el.focus())}
           aria-label={composer.state.visibleBuffer === "aside" ? "Aside model" : "Session model"}
-          title={composer.state.visibleBuffer === "aside" ? "Model for this Aside only" : "Applies to future turns, including Steer and Queue"}
+          title={composer.state.visibleBuffer === "aside" ? "Model for this Aside only" : "Applies to future turns"}
           value={pickerModel() ? `${pickerModel()!.providerID}\u0000${pickerModel()!.modelID}` : ""}
           onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setChangingModel(false) } }}
           onChange={(e) => {
@@ -1429,7 +1429,7 @@ function SessionView(props: { sessionID: string; directory: string }) {
           <Show when={bannerError()}><div class="err" role="alert">{bannerError()}</div></Show>
           <Show when={handoffsError() && (ownedLane() || predecessor())}><div class="err" role="alert">{handoffsError()}</div></Show>
           <Show when={handoffError()}><div class="err" role="alert">{handoffError()}</div></Show>
-          <Show when={handoffPending()}><div role="status" class="banner">Handoff is waiting for the current turn to finish. Your draft stays here until ownership transfers.</div></Show>
+          <Show when={handoffPending()}><div role="status" class="banner">Handoff waits for the current turn to finish.</div></Show>
           <Show when={handoffOpen() && ownedLane()}>
             <div class="banner handoff-form">
               <div class="banner-head">Hand off lane {ownedLane()?.lane}</div>
@@ -1597,7 +1597,6 @@ function SessionView(props: { sessionID: string; directory: string }) {
       <Show when={floating()}>
         <div class="float-editor">
           <div class="float-head">
-            <span class="dim">Expanded editor</span>
             <span style="flex:1" />
             <button onClick={closeFloat}>⤡ collapse <kbd class="composer-key">Ctrl+E</kbd></button>
           </div>

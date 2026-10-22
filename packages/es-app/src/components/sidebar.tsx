@@ -240,7 +240,7 @@ export default function Sidebar() {
   }
 
   const projectControls = () => <>
-    <select class="es-switcher" title="project" aria-label="Project"
+    <select class="es-switcher" aria-label="Project"
       ref={(select) => createEffect(() => {
         editspaces()
         select.value = allProjects() ? "__all__" : current()

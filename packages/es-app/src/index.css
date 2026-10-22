@@ -1909,9 +1909,9 @@ a.mini-item > .glyph { margin: 0; }
 .direct-session-actions button { display: inline-flex; align-items: center; }
 .direct-session-actions button .glyph { color: var(--subtext0); }
 .direct-session-actions button:not(:disabled):is(:hover, :focus-visible) .glyph { color: currentColor; }
-.direct-session-actions button[title^="Fork"] .glyph { color: var(--mauve); }
-.direct-session-actions button[title^="Hand off"] .glyph { color: var(--sapphire); }
-.direct-session-actions button[title^="Interrupt"] .glyph { color: var(--yellow); }
+.direct-session-actions .act-fork .glyph { color: var(--mauve); }
+.direct-session-actions .act-handoff .glyph { color: var(--sapphire); }
+.direct-session-actions .act-nudge .glyph { color: var(--yellow); }
 .direct-session-actions button:is(.danger, .stop) .glyph { color: var(--red); }
 .direct-session-actions button:disabled .glyph { color: var(--overlay0); }
 /* Mail kinds: one colour each, the same everywhere a kind is named. */

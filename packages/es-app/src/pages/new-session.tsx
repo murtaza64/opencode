@@ -193,7 +193,7 @@ export default function NewSessionPage() {
             </optgroup>}</For>
           </select>
         </div>
-        <textarea ref={editor} aria-label="Message" dir="auto" placeholder="What should this session do?" value={text()} readOnly={locked()}
+        <textarea ref={editor} aria-label="Message" dir="auto" value={text()} readOnly={locked()}
           onInput={(event) => setText(event.currentTarget.value)}
           onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.isComposing) { event.preventDefault(); void send() } }} />
         <div class="new-session-submit">

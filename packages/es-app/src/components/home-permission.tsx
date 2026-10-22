@@ -97,11 +97,11 @@ export const HomePermission = (props: {
     </Show>
     <p class="home-permission-status" role="status">
       <Show when={outcome()?.kind === "sending"}>Sending {labels[(outcome() as { reply: Reply }).reply].toLowerCase()}…</Show>
-      <Show when={outcome()?.kind === "missing"}>Not applied: this request is no longer pending. It was answered elsewhere, rejected with its session, or expired.</Show>
+      <Show when={outcome()?.kind === "missing"}>Not applied: no longer pending.</Show>
       <Show when={outcome()?.kind === "refused"}>Not applied: the server refused this reply ({(outcome() as { message: string }).message}).</Show>
-      <Show when={outcome()?.kind === "uncertain"}>{recovered() ? "The last reply was not confirmed. The request is still pending; you can reply again." : "Outcome uncertain: the server did not confirm the reply. Rechecking before allowing another reply."}</Show>
+      <Show when={outcome()?.kind === "uncertain"}>{recovered() ? "Reply not confirmed; still pending. You can reply again." : "Reply not confirmed; rechecking before another reply."}</Show>
       <Show when={!outcome() && props.live === "cleared"}>No longer pending. Outcome unknown here; open the thread to check.</Show>
-      <Show when={!outcome() && props.live !== "cleared" && props.item.state !== "pending"}>{props.item.state === "unavailable" ? "Source unavailable; replies are disabled until it is checked again." : "No longer pending; outcome unknown."}</Show>
+      <Show when={!outcome() && props.live !== "cleared" && props.item.state !== "pending"}>{props.item.state === "unavailable" ? "Source unavailable; replies disabled until rechecked." : "No longer pending; outcome unknown."}</Show>
     </p>
   </div>
 }
