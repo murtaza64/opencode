@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { appPath, linkUrl } from "./link-url"
+import { appPath, linkSegments, linkUrl } from "./link-url"
 
 test.each([
   ["https://github.com/owner/repo/pull/123", "https://duo.fyi/ink/https://github.com/owner/repo/pull/123"],
@@ -77,4 +77,31 @@ test.each([
   "mailto:me@example.com",
 ])("other destinations stay external: %s", (input) => {
   expect(appPath(input, native)).toBeUndefined()
+})
+
+test("links a plain loopback URL in prose and leaves sentence punctuation as text", () => {
+  expect(linkSegments("Workspace is up at http://127.0.0.1:5191/w/abc?tab=1. Review it.")).toEqual([
+    { text: "Workspace is up at " },
+    { text: "http://127.0.0.1:5191/w/abc?tab=1", href: "http://127.0.0.1:5191/w/abc?tab=1" },
+    { text: ". Review it." },
+  ])
+})
+
+test("keeps an exact session link with its directory and message anchor", () => {
+  const url = "http://127.0.0.1:3181/session/ses_abc?directory=%2Ftmp%2Fx&message=msg_1"
+  expect(linkSegments(`see (${url})`)).toEqual([{ text: "see (" }, { text: url, href: url }, { text: ")" }])
+  expect(appPath(url, "http://127.0.0.1:60302")).toBe("/session/ses_abc?directory=%2Ftmp%2Fx&message=msg_1")
+})
+
+test("keeps a balanced parenthesis inside a URL and routes GitHub PRs through Ink", () => {
+  expect(linkSegments("https://en.wikipedia.org/wiki/Foo_(bar), and https://github.com/o/r/pull/7")).toEqual([
+    { text: "https://en.wikipedia.org/wiki/Foo_(bar)", href: "https://en.wikipedia.org/wiki/Foo_(bar)" },
+    { text: ", and " },
+    { text: "https://github.com/o/r/pull/7", href: "https://duo.fyi/ink/https://github.com/o/r/pull/7" },
+  ])
+})
+
+test("text without URLs stays one plain segment", () => {
+  expect(linkSegments("no links here; ftp://x is not linked")).toEqual([{ text: "no links here; ftp://x is not linked" }])
+  expect(linkSegments("")).toEqual([])
 })

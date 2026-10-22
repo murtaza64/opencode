@@ -4,6 +4,7 @@ import { createEffect, createSignal, For, Show, type JSX } from "solid-js"
 import { A } from "@solidjs/router"
 import { ago, sessionHref, useDashboard } from "../state"
 import { Glyph } from "./icons"
+import { LinkedText } from "./linked-text"
 import type { BriefResult } from "../desk"
 import { answerDraftKey, attentionPath, blockedReason, decisionLabel, deliveryLabel, type createAttention, type AttentionRecord } from "../attention"
 
@@ -85,7 +86,7 @@ const Delivery = (props: { record: AttentionRecord; attention: Attention }) => {
   const target = () => delivery()?.session && delivery()?.session_directory ? { session: delivery()!.session!, directory: delivery()!.session_directory! } : undefined
   return <div class="home-delivery" data-delivery-state={props.record.delivery_state}>
     <p class="home-recorded">Your answer<Show when={optionLabel(props.record, props.record.answer?.choice_id)}>{label => <> · option <bdi dir="auto">{label()}</bdi></>}</Show></p>
-    <Show when={props.record.answer?.text}><pre class="home-answer-text" dir="auto">{props.record.answer?.text}</pre></Show>
+    <Show when={props.record.answer?.text}><pre class="home-answer-text" dir="auto"><LinkedText text={props.record.answer?.text ?? ""} /></pre></Show>
     <p class={props.record.delivery_state === "blocked" ? "home-blocked" : "home-muted"} role="status">{deliveryLabel(props.record)}<Show when={props.record.delivery_state === "blocked" && delivery()?.reason}> — {blockedReason(delivery()?.reason)}</Show></p>
     <Show when={delivery()?.error && !["presented", "handled"].includes(props.record.delivery_state)}><p class="home-muted">Last attempt failed: <bdi dir="auto">{delivery()?.error}</bdi> · retrying</p></Show>
     <Show when={delivery()?.copies?.length}><ul class="home-copies"><For each={delivery()?.copies}>{copy => <li><bdi dir="ltr">{copy.session}</bdi> · {copy.state}{copy.presented_at ? ` · presented ${new Date(copy.presented_at).toLocaleString()}` : ""}{copy.handled_at ? ` · acknowledged ${new Date(copy.handled_at).toLocaleString()}` : ""}</li>}</For></ul></Show>
@@ -118,23 +119,23 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
   return <article class="home-decision" data-attention-id={props.record.id}>
     <div class="home-eyebrow"><span><Glyph name={props.record.kind === "blocker" ? "question" : "comment-discussion"} /><bdi dir="auto">{props.record.editspace}</bdi></span><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Open thread</A></div>
     <h3><bdi dir="auto">{props.record.title}</bdi></h3>
-    <Show when={!props.prepared}><p dir="auto">{props.record.context}</p></Show>
+    <Show when={!props.prepared}><p dir="auto"><LinkedText text={props.record.context} /></p></Show>
     {props.brief}
     <Show when={props.record.status === "open"}>
       {/* A recommendation that names an option is tagged on that option; free text stays visible. */}
-      <Show when={props.record.recommendation && !props.record.options.some(option => option.id === props.record.recommendation)}><p class="home-muted">Recommended: <bdi dir="auto">{props.record.recommendation}</bdi></p></Show>
+      <Show when={props.record.recommendation && !props.record.options.some(option => option.id === props.record.recommendation)}><p class="home-muted">Recommended: <bdi dir="auto"><LinkedText text={props.record.recommendation ?? ""} /></bdi></p></Show>
       <Answer record={props.record} attention={props.attention} options={props.record.options.length > 0} onView={props.onView} prepared={props.prepared} afterChoices={props.briefAfter}
         extra={<><button class="home-quiet" disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "snooze", snoozed_until: Date.now() + 3600_000 })}>Snooze 1h</button><button class="home-quiet" disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "resolve", reason: "Human marked no longer needed" })}>No longer needed</button></>} />
     </Show>
     <Show when={props.record.status === "decided"}><p class="home-recorded">Saved: <bdi dir="auto">{decisionLabel(props.record)}</bdi> · not sent</p><Answer record={props.record} attention={props.attention} options={props.record.options.length > 0} onView={props.onView} /><div class="home-actions"><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open agent thread">Open thread</A><button disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "resolve", reason: "Human marked resolved" })}>Mark resolved</button></div></Show>
     <Show when={props.record.status === "answered"}><Delivery record={props.record} attention={props.attention} /></Show>
     <Show when={props.record.status === "snoozed"}><p class="home-muted">Snoozed until {props.record.snoozed_until ? new Date(props.record.snoozed_until).toLocaleString() : "unknown"}</p><button disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "wake" })}>Return to Needs you</button></Show>
-    <Show when={["resolved", "withdrawn"].includes(props.record.status)}><p class="home-muted">{props.record.status === "resolved" ? "Resolved" : "Withdrawn"}</p><Show when={props.record.answer}><Show when={props.record.answer?.text}><pre class="home-answer-text" dir="auto">{props.record.answer?.text}</pre></Show><Show when={optionLabel(props.record, props.record.answer?.choice_id)}>{label => <p class="home-muted">Option <bdi dir="auto">{label()}</bdi></p>}</Show><p class="home-muted">{deliveryLabel(props.record)}</p></Show></Show>
+    <Show when={["resolved", "withdrawn"].includes(props.record.status)}><p class="home-muted">{props.record.status === "resolved" ? "Resolved" : "Withdrawn"}</p><Show when={props.record.answer}><Show when={props.record.answer?.text}><pre class="home-answer-text" dir="auto"><LinkedText text={props.record.answer?.text ?? ""} /></pre></Show><Show when={optionLabel(props.record, props.record.answer?.choice_id)}>{label => <p class="home-muted">Option <bdi dir="auto">{label()}</bdi></p>}</Show><p class="home-muted">{deliveryLabel(props.record)}</p></Show></Show>
     {props.more}
     {props.briefDetails}
     {/* With a brief leading, the producer's exact request comes last, after the native controls. */}
     <Show when={props.prepared}>
-      <details class="home-original"><summary>Original request</summary><p dir="auto">{props.record.context}</p></details>
+      <details class="home-original"><summary>Original request</summary><p dir="auto"><LinkedText text={props.record.context} /></p></details>
     </Show>
     <details onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>Record &amp; history</summary><div class="home-source"><bdi dir="ltr">{props.record.id} · {props.record.gate_key} · revision {props.record.revision}</bdi></div><Show when={history()?.version === historyVersion(props.record) ? history() : undefined} fallback={<p>Loading history…</p>}>{item => <Show when={!item().error} fallback={<p>{item().error}</p>}><pre dir="ltr">{JSON.stringify(item().events, null, 2)}</pre></Show>}</Show></details>
   </article>

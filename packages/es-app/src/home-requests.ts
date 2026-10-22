@@ -53,3 +53,48 @@ export const createHomeRequests = (sources: () => HomeRequest[], settled: (item:
   })
   return { rows, now, refresh }
 }
+
+/** Verified state of a request the desk shows. Leaving the queue alone never means answered or granted:
+ * only a checked source (the request list or a settled event) says it is no longer waiting. */
+export const requestLive = (queued: boolean, item: HomeRequest, rows: HomeRequestRow[], activity: "pending" | "cleared" | "unknown") => {
+  if (activity === "cleared") return "cleared" as const
+  if (queued) return "pending" as const
+  const row = rows.find(candidate => requestKey(candidate) === requestKey(item))
+  if (row?.state === "unavailable") return "unavailable" as const
+  if (row?.state === "unknown") return "cleared" as const
+  return "unknown" as const
+}
+
+export type EditFile = { path: string; full?: string; type?: string; movePath?: string; patch: string; additions: number; deletions: number }
+
+/** Files an edit permission would change, from the edit/write (`filepath` + `diff`) or apply_patch (`files`) metadata. */
+export const editFiles = (request?: PermissionRequest): EditFile[] => {
+  if (request?.permission !== "edit") return []
+  const metadata = request.metadata ?? {}
+  if (Array.isArray(metadata.files) && metadata.files.length) return metadata.files.flatMap((file: unknown) => {
+    if (!file || typeof file !== "object") return []
+    const value = file as Record<string, unknown>
+    const patch = typeof value.patch === "string" ? value.patch : ""
+    const path = typeof value.relativePath === "string" ? value.relativePath : typeof value.filePath === "string" ? value.filePath : ""
+    if (!path) return []
+    const counted = changes(patch)
+    return [{
+      path, patch,
+      full: typeof value.filePath === "string" ? value.filePath : undefined,
+      type: typeof value.type === "string" ? value.type : undefined,
+      movePath: typeof value.movePath === "string" ? value.movePath : undefined,
+      additions: typeof value.additions === "number" ? value.additions : counted.additions,
+      deletions: typeof value.deletions === "number" ? value.deletions : counted.deletions,
+    }]
+  })
+  if (typeof metadata.diff !== "string") return []
+  const full = typeof metadata.filepath === "string" ? metadata.filepath : undefined
+  const path = request.patterns.find(Boolean) ?? full
+  if (!path) return []
+  return [{ path, full, patch: metadata.diff, ...changes(metadata.diff) }]
+}
+
+const changes = (patch: string) => patch.split("\n").reduce((total, line) => ({
+  additions: total.additions + (line.startsWith("+") && !line.startsWith("+++") ? 1 : 0),
+  deletions: total.deletions + (line.startsWith("-") && !line.startsWith("---") ? 1 : 0),
+}), { additions: 0, deletions: 0 })

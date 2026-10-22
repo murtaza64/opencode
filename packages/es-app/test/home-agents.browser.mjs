@@ -93,7 +93,9 @@ try {
   expect(replies).toEqual([{ id: "per_home", directory, body: { reply: "once" } }])
   emit("permission.replied", { sessionID: "ses_b", requestID: "per_home", reply: "once" })
   await expect(queued("per_home")).toHaveCount(0)
-  await expect(card("per_home").getByRole("button", { name: "Allow once", exact: true })).toBeDisabled()
+  // A settled request keeps its card with what was sent, and no reply controls.
+  await expect(card("per_home").locator(".home-permission-status")).toHaveText("Allowed once from here.")
+  await expect(card("per_home").locator(".home-actions button")).toHaveCount(0)
   await select("per_other")
   await expect(card("per_other").getByRole("button", { name: "Allow once", exact: true })).toBeEnabled()
 
@@ -141,7 +143,8 @@ try {
   fixture.failPermissionList = true
   await refresh()
   await expect(queued("per_offline")).toHaveCount(0)
-  await expect(card("per_offline").getByRole("button", { name: "Allow once", exact: true })).toBeDisabled()
+  await expect(card("per_offline").locator(".home-actions button")).toHaveCount(0)
+  await expect(card("per_offline").locator(".home-permission-state")).toContainText("Can't reach this project.")
   await expect(page.locator(".home-unknown")).toContainText("source unavailable")
   await expect(page.locator(".home-unknown button")).toHaveCount(0)
   fixture.failPermissionList = false
