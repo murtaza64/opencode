@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, Menu, session, shell } from "electron"
 import path from "node:path"
 import { readFile, writeFile } from "node:fs/promises"
 import { serve } from "./server"
-import { appRouteURL, externalURL, internalURL, serviceOrigins, startupMode, startupPlan } from "./policy"
+import { appRouteURL, externalURL, internalURL, serviceOrigins, startupMode, startupPlan, surfaceFrameURL } from "./policy"
 
 app.setName("Editspace")
 app.setPath("userData", process.env.ES_DESKTOP_USER_DATA ?? path.join(app.getPath("appData"), "Editspace"))
@@ -134,7 +134,8 @@ const start = async () => {
     if (!internalURL(url, server.origin)) event.preventDefault()
   })
   window.webContents.on("will-frame-navigate", (event) => {
-    if (!event.isMainFrame) event.preventDefault()
+    // Subframes may only show Front Desk surfaces, which the server sandboxes.
+    if (!event.isMainFrame && !surfaceFrameURL(event.url, server.origin)) event.preventDefault()
   })
   window.webContents.on("will-attach-webview", (event) => event.preventDefault())
   Menu.setApplicationMenu(

@@ -3,7 +3,7 @@ import { mkdtemp, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { serve } from "./server"
-import { apiAllowed, appRouteURL, externalURL, internalURL, serviceOrigins, serviceURL, startupMode, startupPlan } from "./policy"
+import { apiAllowed, appRouteURL, externalURL, internalURL, serviceOrigins, serviceURL, startupMode, startupPlan, surfaceFrameURL } from "./policy"
 import { readFile } from "node:fs/promises"
 
 const cleanup: (() => Promise<unknown>)[] = []
@@ -426,4 +426,34 @@ test("main process applies the activation policy before launch and only shows wi
   // The initial-launch activate is dropped, not queued for after load.
   expect(source).toMatch(/app\.on\("activate", \(\) => \{\n\s+if \(opened\.ready\) reveal\(\)\n\s+\}\)/)
   expect(source).not.toContain('app.on("activate", reveal)')
+})
+
+test("hosts Front Desk surfaces: keyed address, capability-only frame requests, no app credentials upstream", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "es-desktop-surface-"))
+  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  await Bun.write(path.join(root, "index.html"), "<title>Fixture renderer</title>")
+  const surface = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: request => Response.json({ path: new URL(request.url).pathname, key: request.headers.has("x-editspace-key") }) })
+  cleanup.push(async () => { await surface.stop(true) })
+  const dashboard = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => Response.json({ surfaces: [{ id: "board", upstream: `${surface.url.origin}/` }] }) })
+  cleanup.push(async () => { await dashboard.stop(true) })
+  const server = await serve({ root, dashboard: dashboard.url.origin })
+  cleanup.push(server.close)
+
+  expect((await fetch(`${server.origin}/__es/surface/board`)).status).toBe(403)
+  const { src } = await fetch(`${server.origin}/__es/surface/board`, { headers: { "x-editspace-key": server.key } }).then(response => response.json())
+  // The sandboxed frame is opaque-origin and cross-site to the app; Electron still injects the key.
+  const framed = await fetch(`${server.origin}${src}api`, { headers: { origin: "null", "sec-fetch-site": "cross-site", "x-editspace-key": server.key } })
+  expect(await framed.json()).toEqual({ path: "/api", key: false })
+  expect(framed.headers.get("content-security-policy")).toStartWith("sandbox allow-scripts")
+  expect((await fetch(`${server.origin}/__surface/board/${"0".repeat(32)}/`)).status).toBe(404)
+  // The frame's prefix never reaches the app's own APIs.
+  expect((await fetch(`${server.origin}/oc/session`, { headers: { origin: "null", "sec-fetch-site": "cross-site", "x-editspace-key": server.key } })).status).toBe(403)
+  const page = await fetch(server.origin, { headers: { "x-editspace-key": server.key } })
+  expect(page.headers.get("content-security-policy")).toContain("frame-src 'self'")
+})
+
+test("only surface paths on the app origin may load in a subframe", () => {
+  expect(surfaceFrameURL("http://127.0.0.1:60302/__surface/board/abc/", "http://127.0.0.1:60302")).toBe(true)
+  expect(surfaceFrameURL("http://127.0.0.1:60302/oc/session", "http://127.0.0.1:60302")).toBe(false)
+  expect(surfaceFrameURL("http://127.0.0.1:64878/__surface/board/abc/", "http://127.0.0.1:60302")).toBe(false)
 })

@@ -1,0 +1,15 @@
+.desk-surfaces h2 { margin-block-start: 12px; }
+.desk-surface-row[data-unavailable] { color: var(--overlay1); }
+.desk-surfaces-offline { margin-block: 12px 0; }
+.desk-surfaces-offline > summary { cursor: pointer; padding-block: 4px; font-weight: 600; color: var(--subtext1); }
+.desk-evidence.desk-surface { display: flex; flex-direction: column; min-height: 0; padding: 0 0 0 18px; border-inline-end: 1px solid var(--surface0); }
+.desk-surface .desk-evidence-head { flex-wrap: wrap; padding-inline-end: 12px; }
+.desk-surface .desk-evidence-head h2 { font-size: 14px; font-weight: 600; text-transform: none; letter-spacing: normal; }
+.desk-surface-actions { display: flex; gap: 6px; margin-inline-start: auto; }
+.desk-surface-open { display: inline-flex; align-items: center; }
+.desk-surface-state { padding: 16px 12px 16px 0; color: var(--subtext1); line-height: 1.6; }
+.desk-surface-frame { flex: 1; min-height: 320px; inline-size: 100%; border: 0; border-block-start: 1px solid var(--surface0); background: var(--mantle); }
+@media (max-width: 900px) {
+  .desk-evidence.desk-surface { padding-inline: 0; border: 0; }
+  .desk-surface-frame { min-height: 70vh; }
+}

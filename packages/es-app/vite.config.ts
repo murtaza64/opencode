@@ -1,8 +1,9 @@
 import tailwindcss from "@tailwindcss/vite"
-import { defineConfig, type Plugin } from "vite"
+import { defineConfig, type Plugin, type PreviewServer, type ViteDevServer } from "vite"
 import solid from "vite-plugin-solid"
 import { apiProxy } from "./api-proxy"
 import { eventProxy } from "./event-proxy"
+import { isSurfacePath, surfaceProxy } from "./surface-proxy"
 
 const targets = {
   opencode: process.env.OPENCODE_URL ?? "http://127.0.0.1:4096",
@@ -26,8 +27,23 @@ const workerNo304: Plugin = {
   },
 }
 
+// Agent-owned Front Desk surfaces, same routes as the native server.
+const surfaces = (): Plugin => {
+  const proxy = surfaceProxy({ dashboard: targets.dashboard })
+  // Registered before Vite's own middlewares, so the page fallback never answers these paths.
+  const use = (server: ViteDevServer | PreviewServer) => {
+    server.middlewares.use((req, res, next) => {
+      const pathname = (req.url ?? "").split("?")[0]
+      if (!isSurfacePath(pathname)) return next()
+      if (pathname.startsWith("/__es/surface/")) return proxy.address(req, res)
+      void proxy.serve(req, res)
+    })
+  }
+  return { name: "es-app:surfaces", configureServer: use, configurePreviewServer: use }
+}
+
 export default defineConfig({
-  plugins: [solid(), tailwindcss(), workerNo304, eventProxy(targets)],
+  plugins: [solid(), tailwindcss(), workerNo304, eventProxy(targets), surfaces()],
   worker: {
     format: "es",
   },

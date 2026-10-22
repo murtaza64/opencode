@@ -134,3 +134,11 @@ test("a brief binds to its initiating source revision, not to whatever is select
   expect(briefBinding(meta("2"), items(3))).toMatchObject({ current: false, reason: "Item changed (revision 2 → 3)." })
   expect(briefBinding({ ...meta(), source: "attention:alpha:other" }, items())).toMatchObject({ current: false, item: undefined })
 })
+
+test("an open surface is named in the context by its owner and changes the key; its content is never included", () => {
+  const plain = deskContext({ now: 0, sources: [], items: items(), briefs: [] })
+  const open = deskContext({ now: 0, sources: [], items: items(), briefs: [], surface: { id: "relay-board", title: "Relay board", owner: "Relay" } })
+  expect(open.key).not.toBe(plain.key)
+  expect(open.text).toContain('open surface: "Relay board" (id relay-board), maintained by Relay.')
+  expect(plain.text).not.toContain("open surface")
+})

@@ -7,9 +7,10 @@ import { apiAllowed, serviceURL } from "./policy"
 import { cookieName, cookieValid, issueCookie, loopbackHost, pairingCsp, pairingMatches, pairingPage, remoteListenHost } from "./pairing"
 import { eventMux } from "../../es-app/event-mux"
 import { eventProtocol, eventPaths } from "../../es-app/event-protocol"
+import { surfaceProxy } from "../../es-app/surface-proxy"
 
 const csp =
-  "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+  "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 const offline = `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="refresh" content="5"><title>Editspace unavailable</title><style>body{font:16px system-ui;background:#171819;color:#ececec;margin:0;padding:10vh 8vw}main{max-inline-size:42rem}h1{font-size:28px}p{line-height:1.6;color:#bbb}a{color:#9ac9ff}code{direction:ltr;unicode-bidi:isolate}</style><main><h1>Services unavailable</h1><p>Editspace attaches to existing services. It does not start or stop them.</p><p>Configure loopback origins in <code>service-origins.json</code> in the Editspace profile or launch with explicit <code>OPENCODE_URL</code> and <code>ES_DASHBOARD_URL</code>. For an isolated demo, run <code>bun run preview</code> from the es-desktop package.</p><p>Retrying every 5 seconds. <a href="/">Retry now</a>.</p></main></html>`
 const types: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -79,6 +80,7 @@ export const serve = async (options: {
   const index = renderer ? undefined : await readFile(path.join(root, "index.html"))
   const key = randomBytes(32).toString("hex")
   const upstreams = new Set<ReturnType<typeof request>>()
+  const surfaces = surfaceProxy({ dashboard: targets.es })
   const sameHost = (req: { headers: IncomingHttpHeaders }) => req.headers.host === new URL(origin).host
   const allowed = (req: { headers: IncomingHttpHeaders; method?: string }) =>
     sameHost(req) &&
@@ -142,6 +144,13 @@ export const serve = async (options: {
       res.writeHead(status, { "content-type": type })
       res.end(body)
     }
+    // Surface frames are opaque-origin sandboxes without the app's cookie or key; their
+    // per-surface capability path is the only credential they carry.
+    if (sameHost(req) && req.url?.startsWith("/__surface/")) {
+      if (!targets.es) return finish(503, "Service not configured")
+      res.removeHeader("Content-Security-Policy")
+      return void surfaces.serve(req, res)
+    }
     if (pairing && sameHost(req) && (!allowed(req) || /^\/__es\/(pair|health)(\?|$)/.test(req.url ?? "")))
       return pair(req, res, finish)
     if (!allowed(req)) {
@@ -154,6 +163,7 @@ export const serve = async (options: {
       if (req.method !== "GET" || url.search) return finish(403, "Forbidden")
       return finish(200, JSON.stringify({ protocol: eventProtocol }), "application/json")
     }
+    if (url.pathname.startsWith("/__es/surface/")) return surfaces.address(req, res)
     const api = /^\/(oc|es)(\/|$)/.exec(url.pathname)
     if (api && !apiAllowed(req.method ?? "", url.pathname)) return finish(403, "API route not exposed")
     const attention = /^\/es\/api\/attention(?:\/|$)/.test(url.pathname)

@@ -21,6 +21,8 @@ import { useBriefs } from "../desk-briefs"
 import { oc } from "../api"
 import type { MemoryEntry, MemoryRevision } from "../desk-memory"
 import { SessionView } from "./session"
+import { SurfaceList, SurfaceView } from "../components/desk-surfaces"
+import { createSurfaces, surfaceFromKey, surfaceKey } from "../surfaces"
 import "./home.css"
 import "./desk.css"
 
@@ -42,8 +44,10 @@ export default function Desk() {
   const prepared = useBriefs()
   const briefs = prepared.briefs
   // `/?view=agents` opens the Agents pane directly (what the old Home page showed); `/?item=<key>` opens one item.
-  const [params] = useSearchParams()
-  const [selectedKey, setSelectedKey] = createSignal<string | undefined>(params.view === "agents" ? AGENTS : typeof params.item === "string" ? params.item : undefined)
+  // `/?surface=<id>` opens one agent-owned surface.
+  const [params, setParams] = useSearchParams()
+  const [selectedKey, setSelectedKey] = createSignal<string | undefined>(params.view === "agents" ? AGENTS : typeof params.surface === "string" ? surfaceKey(params.surface) : typeof params.item === "string" ? params.item : undefined)
+  const surfaces = createSurfaces()
   const [receipts, setReceipts] = createSignal<HomeReplyReceipt[]>([])
   const [now, setNow] = createSignal(Date.now())
   const clock = setInterval(() => setNow(Date.now()), 5000)
@@ -101,10 +105,12 @@ export default function Desk() {
   // Keep the last-seen item so an answered request does not vanish from under the reader.
   // An answered decision keeps its key and stays selected with its delivery status.
   const lastSeen = new Map<string, DeskItem>()
-  const selected = createMemo((): { agents: true } | { item: DeskItem; live: boolean } | { record: AttentionRecord } | undefined => {
+  const selected = createMemo((): { agents: true } | { surface: string } | { item: DeskItem; live: boolean } | { record: AttentionRecord } | undefined => {
     const key = selectedKey()
     if (!key) return
     if (key === AGENTS) return { agents: true }
+    const surface = surfaceFromKey(key)
+    if (surface) return { surface }
     const live = items().find(item => item.key === key)
     if (live) lastSeen.set(key, live)
     if (live) return { item: live, live: true }
@@ -114,7 +120,12 @@ export default function Desk() {
     return seen ? { item: seen, live: false } : undefined
   })
   const selectedItem = () => { const current = selected(); return current && "item" in current ? current : undefined }
-  const select = (key?: string) => setSelectedKey(key)
+  const selectedSurface = () => { const current = selected(); return current && "surface" in current ? current.surface : undefined }
+  const select = (key?: string) => {
+    setSelectedKey(key)
+    const surface = surfaceFromKey(key)
+    if (surface !== params.surface) setParams({ surface }, { replace: true })
+  }
   const deskDirectory = () => {
     const name = dashboard.editspace() ?? dashboard.editspaces()?.default
     return dashboard.editspaces()?.editspaces.find(item => item.name === name)?.root
@@ -144,6 +155,7 @@ export default function Desk() {
     briefs: briefs.jobs().filter(job => briefBinding(job.meta, items()).current)
       .flatMap(job => job.state.state === "starting" || job.state.state === "unconfirmed" ? [] : [{ meta: job.meta, state: job.state }]),
     memory: memory.document(),
+    surface: (() => { const id = selectedSurface(); const surface = surfaces.list().find(item => item.id === id); return surface && { id: surface.id, title: surface.title, owner: surface.owner } })(),
   })
 
   // "More detail" on a selected item: fresh bounded evidence from its source thread, sent to the desk chat.
@@ -167,6 +179,7 @@ export default function Desk() {
         <Show when={attention.notice()}><div class="home-notice" role="status">{attention.notice()}<Show when={attention.pending()}><button class="desk-button" disabled={attention.writing()} onClick={() => void attention.retry()}>Retry same action</button></Show></div></Show>
         <Show when={briefs.error()}><div class="home-warning desk-background" role="status">{briefs.error()}</div></Show>
         <Show when={ignores.notice()}><div class="home-warning desk-background" role="status">{ignores.notice()}</div></Show>
+        <SurfaceList surfaces={surfaces} selected={selectedKey()} onSelect={select} />
         <h2>Needs you <span>{items().length}</span></h2>
         <ul class="desk-items">
           <For each={items()} fallback={<li class="home-muted desk-empty">{problems().length ? "Nothing listed, but some sources could not be checked." : "Nothing needs you."}</li>}>{item => {
@@ -222,7 +235,8 @@ export default function Desk() {
       </aside>
 
       {/* Remount per selection so one item's reply outcome or draft never carries into the next. */}
-      <Show when={selected() ? selectedKey() : undefined} keyed>{_key => <Show when={selected()}>{current => <section class="desk-evidence attention-home" aria-label={"agents" in current() ? "Agents" : "Selected item"}>
+      <Show when={selectedSurface()} keyed>{id => <SurfaceView id={id} surface={surfaces.list().find(item => item.id === id)} checked={surfaces.checked()} onRetry={() => void surfaces.refresh()} onClose={() => select()} />}</Show>
+      <Show when={selected() && !selectedSurface() ? selectedKey() : undefined} keyed>{_key => <Show when={selected()}>{current => <section class="desk-evidence attention-home" aria-label={"agents" in current() ? "Agents" : "Selected item"}>
         <div class="desk-evidence-head">
           <Show when={"agents" in current()}><h2>Agents</h2></Show>
           <button class="desk-button" aria-label="Close and return to chat" onClick={() => select()}>Close</button>

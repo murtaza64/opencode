@@ -45,6 +45,11 @@ export const externalURL = (value: string) => {
   return url.href
 }
 
+export const surfaceFrameURL = (value: string, origin: string) => {
+  const url = URL.parse(value)
+  return !!url && url.origin === origin && url.pathname.startsWith("/__surface/")
+}
+
 export const internalURL = (value: string, origin: string) => {
   const url = URL.parse(value)
   return !!url && url.origin === origin && !/^\/(oc|es)(\/|$)/.test(url.pathname)
@@ -69,7 +74,7 @@ export const apiAllowed = (method: string, pathname: string) => {
     GET: [
       /^\/oc\/(event|global\/event|experimental\/(session|session\/failed|capabilities)|umbrella\/session|session|session\/status|permission|question|config\/providers|agent)$/,
       /^\/oc\/session\/[\w-]+(?:\/(message|input)(?:\/[\w-]+)?|\/todo|\/children)?$/,
-      /^\/es\/api\/(editspaces|state|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work|mail|subscriptions|handoffs|lane-provenance|frontdesk\/memory)$/,
+      /^\/es\/api\/(editspaces|state|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work|mail|subscriptions|handoffs|lane-provenance|frontdesk\/memory|surfaces)$/,
       /^\/es\/api\/attention(?:\/session|\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/,
       /^\/es\/api\/wingman(?:\/transcript)?$/,
     ],
