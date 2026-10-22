@@ -58,7 +58,7 @@ const listeners = (pid) => execFileSync("uv", ["run", "--with", "psutil", "pytho
 
 // --- stub provider: OpenAI-compatible SSE ---
 const hits = { chat: 0, brief: 0, source: 0 }
-const seen = { chat: [], briefTools: [] }
+const seen = { chat: [], briefTools: [], memory: {} }
 const holds = []
 let holdBriefs = true
 const chunk = (delta, finish) => `data: ${JSON.stringify({ id: "stub", object: "chat.completion.chunk", choices: [{ index: 0, delta, ...(finish ? { finish_reason: finish } : {}) }] })}\n\n`
@@ -91,7 +91,7 @@ const provider = http.createServer(async (request, response) => {
     return holdBriefs ? holds.push(reply) : reply()
   }
   if (user.includes("SOURCE:")) { hits.source++; return text(response, "Canary deployed to 5% at 10:00; error rate flat.") }
-  const question = /DESK-Q\d/.exec(user)?.[0]
+  const question = /DESK-[QM]\d/.exec(user)?.[0]
   if (question) {
     hits.chat++
     // The newest generated context note is the one that describes this exchange.
@@ -99,6 +99,8 @@ const provider = http.createServer(async (request, response) => {
     const own = JSON.stringify((body.messages ?? []).findLast((item) => item.role === "user" && JSON.stringify(item.content).includes(question)) ?? "")
     const note = own.includes("Front desk context from es-app") ? own : ""
     seen.chat.push({ question, context: !!note, none: note.includes("selected item: none"), selected: note.includes("selected item (the human is looking at this now)") && note.includes("Pick a rollout"), ledgerDown: note.includes("Attention ledger: unavailable") })
+    seen.memory[question] = [/memory \(revision (\d+)/.exec(own)?.[1], own.includes("Works in UTC") ? "tz" : own.includes("Reviews in the morning") ? "morning" : undefined]
+    if (question === "DESK-M1") return text(response, 'Noted.\n```front-desk-memory\n{"op":"upsert","id":"tz","text":"Works in UTC","kind":"preference"}\n{"op":"upsert","id":"key","text":"api_key = sk-test-abcdef1234567890"}\n```')
     return text(response, `Desk answer for ${question}.`)
   }
   return text(response, "Unscripted.")
@@ -117,8 +119,25 @@ const record = () => ({
   source_ref: { session_id: sourceSession, directory: project }, decision: null, delivery_state: "not-requested", answer: null, delivery: null,
   created_at: Date.now() - 60_000, updated_at: Date.now(),
 })
+// Memory and, once enabled, the operator session go to the real dotfiles seam (private HOME).
+let operatorReal = false
+let memoryBase = ""
+let operatorToken = ""
+const forward = async (request, response, url) => {
+  const target = new URL(url.pathname + url.search, memoryBase)
+  const headers = Object.fromEntries(["cookie", "content-type", "x-attention-csrf", "origin", "authorization", "sec-fetch-site"].flatMap((name) => request.headers[name] ? [[name, request.headers[name]]] : []))
+  const body = ["GET", "HEAD"].includes(request.method) ? undefined : Buffer.concat(await Array.fromAsync(request))
+  const result = await fetch(target, { method: request.method, headers, body })
+  const out = { "content-type": result.headers.get("content-type") ?? "application/json" }
+  const cookie = result.headers.get("set-cookie")
+  if (cookie) out["set-cookie"] = cookie
+  response.writeHead(result.status, out)
+  response.end(Buffer.from(await result.arrayBuffer()))
+}
 const dashboard = http.createServer((request, response) => {
   const url = new URL(request.url, "http://stub")
+  if (url.pathname === "/api/frontdesk/memory" || (operatorReal && url.pathname === "/api/attention/session"))
+    return void forward(request, response, url).catch(() => { response.writeHead(502); response.end() })
   const json = (value, status = 200) => { response.writeHead(status, { "content-type": "application/json" }); response.end(JSON.stringify(value)) }
   if (["/api/events", "/api/notification-events"].includes(url.pathname)) {
     response.writeHead(200, { "content-type": "text/event-stream" })
@@ -140,6 +159,7 @@ let child
 let output = ""
 let diagnostics = ""
 let vite
+let memoryFixture
 let browser
 let page
 const corePort = await freePort()
@@ -215,6 +235,23 @@ try {
   sourceSession = source.id
 
   const vitePort = await freePort()
+  const dotfiles = process.env.FRONT_DESK_DOTFILES
+  assert(dotfiles && path.isAbsolute(dotfiles), "FRONT_DESK_DOTFILES must name the dotfiles checkout with bin/es_dashboard_memory.py")
+  memoryFixture = spawn("uv", ["run", "--quiet", path.join(dotfiles, "tests/frontdesk_memory_fixture.py"), "--origin", `http://127.0.0.1:${vitePort}`], {
+    env: { ...process.env, HOME: home, ES_ATTENTION_AUTH_FILE: path.join(home, "attention.key") }, stdio: ["ignore", "pipe", "pipe"],
+  })
+  const fixtureProcess = memoryFixture
+  process.once("exit", () => { if (fixtureProcess.exitCode === null) fixtureProcess.kill("SIGKILL") })
+  let fixtureOut = ""
+  memoryBase = await bounded("memory fixture", new Promise((resolve, reject) => {
+    memoryFixture.stdout.on("data", (piece) => { fixtureOut += piece; const match = /listening on (http:\/\/\S+) file=(\S+)/.exec(fixtureOut); if (match) resolve(match[1]) })
+    memoryFixture.stderr.on("data", (piece) => { fixtureOut += piece })
+    memoryFixture.once("exit", (code) => reject(new Error(`memory fixture exited ${code}: ${fixtureOut}`)))
+  }), 60000)
+  assert(fixtureOut.includes(`file=${path.join(home, ".local/share/opencode/front-desk/memory.json")}`), fixtureOut)
+  operatorToken = execFileSync("uv", ["run", "--quiet", "python", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import es_attention_auth as a; print(a.mint({'role':'operator','purpose':'api','es':'*','channel':'ui'}))", path.join(dotfiles, "bin")],
+    { env: { ...process.env, HOME: home, ES_ATTENTION_AUTH_FILE: path.join(home, "attention.key") }, encoding: "utf8" }).trim()
+  log(`MEMORYSEAM real dotfiles fixture ${memoryBase} HOME=${home} PID=${memoryFixture.pid}`)
   process.env.OPENCODE_URL = base
   process.env.ES_DASHBOARD_URL = `http://127.0.0.1:${dashboard.address().port}`
   const cache = await mkdtemp(path.join(tmpdir(), "front-desk-vite-"))
@@ -483,9 +520,86 @@ try {
   await expect(page.locator(".desk-job")).toHaveCount(4)
   log(`FANOUT children=${childIDs.size}: idle 33s -> 0 transcript reads; explicit refresh -> ${briefReads.length} (one each); jobs retained; postsDuringIdle=${posts.length - childLists}`)
 
-  // 8. Interrupted pass: Core restarts mid-brief; the desk reports unknown and does not rerun it.
+  // 8. Memory: one personal file behind the real dashboard seam (private HOME). The desk's own
+  //    fenced change applies once with its source; the human edits, restores, forgets and erases;
+  //    a concurrent writer is never overwritten; credentials are refused.
+  operatorReal = true
+  await page.getByRole("button", { name: "Expand chat" }).click()
+  await page.reload()
+  await expect(editor()).toBeVisible({ timeout: 20000 })
+  const memoryFile = path.join(home, ".local/share/opencode/front-desk/memory.json")
+  const memoryDoc = async () => JSON.parse(await readFile(memoryFile, "utf8"))
+  await editor().fill("DESK-M1 remember I work in UTC")
+  await sendIdle()
+  await expect(transcript()).toContainText("Noted.", { timeout: 20000 })
+  await poll("assistant memory revision", async () => (await memoryDoc().catch(() => ({ revision: 0 }))).revision === 1)
+  const m1 = (await messages(pointer.session)).findLast((item) => item.info.role === "assistant").info.id
+  let file = await memoryDoc()
+  assert.deepEqual(file.history.map((item) => [item.n, item.change.actor, item.change.messageID, item.change.opKey]), [[1, "assistant", m1, `${m1}:0`]])
+  assert.deepEqual(file.entries.map((item) => [item.id, item.text, item.confidence, item.source.messageID]), [["tz", "Works in UTC", "tentative", m1]])
+  assert.equal(JSON.stringify(file).includes("sk-test"), false, "credential never stored")
+  assert.equal((await stat(memoryFile)).mode & 0o777, 0o600)
+  await page.getByRole("button", { name: /^Memory/ }).click()
+  await expect(page.locator(".desk-memory")).toContainText("Works in UTC")
+  await expect(page.locator(".desk-memory")).toContainText("looks like a credential")
+  await page.reload()
+  await page.getByRole("button", { name: /^Memory/ }).click()
+  await expect(page.locator(".desk-memory")).toContainText("Works in UTC", { timeout: 20000 })
+  await new Promise((resolve) => setTimeout(resolve, 2000))
+  assert.equal((await memoryDoc()).revision, 1, "reload does not reapply the same change")
+  await editor().fill("DESK-M2 what do you remember?")
+  await sendIdle()
+  await expect(transcript()).toContainText("Desk answer for DESK-M2.", { timeout: 20000 })
+  assert.deepEqual(seen.memory["DESK-M2"], ["1", "tz"])
+  const row = page.locator('.desk-memory [data-memory-id="tz"]')
+  await row.getByRole("button", { name: "Edit" }).click()
+  await row.getByRole("textbox").fill("Works in UTC, reviews in the morning")
+  await row.getByRole("button", { name: "Save" }).click()
+  await expect(row).toContainText("from you", { timeout: 20000 })
+  await page.locator(".desk-memory-history summary").click()
+  await page.locator('.desk-memory [data-memory-revision="1"]').getByRole("button", { name: "Restore" }).click()
+  await expect(row).toContainText("Works in UTC", { timeout: 20000 })
+  await expect(row).not.toContainText("morning")
+  await row.getByRole("button", { name: "Forget" }).click()
+  await expect(page.locator('.desk-memory [data-memory-id="tz"]')).toHaveCount(0, { timeout: 20000 })
+  file = await memoryDoc()
+  assert.deepEqual(file.history.map((item) => [item.n, item.change.actor, item.change.op, item.entries.length]), [[1, "assistant", "upsert", 1], [2, "human", "upsert", 1], [3, "human", "restore", 1], [4, "human", "forget", 0]])
+  assert.equal("messageID" in file.history[1].change, false, "human edits carry no desk message")
+  await page.getByRole("button", { name: "Erase from history" }).click()
+  await expect(page.locator(".desk-memory")).toContainText('Erased "tz" from history', { timeout: 20000 })
+  file = await memoryDoc()
+  assert.equal(file.revision, 5)
+  assert.equal(JSON.stringify(file).includes("Works in UTC"), false)
+  assert.deepEqual(file.applied, [`${m1}:0`], "the applied desk change stays consumed")
+  await new Promise((resolve) => setTimeout(resolve, 2000))
+  assert.equal((await memoryDoc()).revision, 5, "erasing history does not bring the note back")
+  // Another writer (a second tab) saves first; this page's stale write is refused, not merged.
+  const fixtureCall = (method, body) => fetch(`${memoryBase}/api/frontdesk/memory`, { method, headers: { "content-type": "application/json", "X-Attention-CSRF": "1", authorization: `Bearer ${operatorToken}` }, ...(body ? { body: JSON.stringify(body) } : {}) })
+  const fresh = await (await fixtureCall("GET")).json()
+  const otherEntry = { id: "other", text: "Written in another tab", kind: "fact", scope: "global", confidence: "stated", source: { actor: "human" }, created: 1, updated: 1 }
+  const other = { ...fresh.document, revision: 6, entries: [otherEntry], history: [...fresh.document.history, { n: 6, at: 1, change: { op: "upsert", entryID: "other", actor: "human" }, entries: [otherEntry] }] }
+  assert.equal((await fixtureCall("PUT", { expected_hash: fresh.hash, document: other })).status, 200)
+  const clash = await fixtureCall("PUT", { expected_hash: fresh.hash, document: { ...other, entries: [], history: [...fresh.document.history, { n: 6, at: 1, change: { op: "upsert", actor: "human" }, entries: [] }] } })
+  assert.equal(clash.status, 409)
+  await page.getByLabel("Note ID").fill("morning")
+  await page.getByLabel("Note text").fill("Reviews in the morning")
+  await page.getByRole("button", { name: "Add note" }).click()
+  await expect(page.locator(".desk-memory")).toContainText("Memory changed elsewhere first", { timeout: 20000 })
+  await expect(page.locator(".desk-memory")).toContainText("Written in another tab")
+  assert.deepEqual((await memoryDoc()).entries.map((item) => item.id), ["other"])
+  await page.getByRole("button", { name: "Add note" }).click()
+  await expect(page.locator('.desk-memory [data-memory-id="morning"]')).toHaveCount(1, { timeout: 20000 })
+  await new Promise((resolve) => setTimeout(resolve, 2000))
+  file = await memoryDoc()
+  assert.equal(file.revision, 7)
+  assert.deepEqual(file.entries.map((item) => item.id), ["other", "morning"])
+  if (evidence) await page.screenshot({ path: path.join(evidence, "04-memory.png") })
+  log(`MEMORY file=${memoryFile} mode=600; desk r1 from ${m1} (secret refused); reload no reapply; context rev1; edit/restore/forget r2-r4; erase r5 scrubs history, note not reapplied; concurrent writer -> 409 for stale tab, retry r7`)
+
+  // 9. Interrupted pass: Core restarts mid-brief; the desk reports unknown and does not rerun it.
   const briefBase = hits.brief
   const metadataBefore = (await call("GET", `/session/${pointer.session}/children`)).body.map((item) => [item.id, item.metadata])
+  await page.locator(".desk-item").first().click()
   await page.getByRole("button", { name: "Start a new check" }).click()
   await poll("second brief reached provider", () => hits.brief === briefBase + 1)
   await stopCore()
@@ -502,13 +616,27 @@ try {
   await expect(transcript()).toContainText("Desk answer for DESK-Q2.")
   log(`RESTART interrupted brief shown as unknown; briefHits=${hits.brief} (no rerun)`)
 
-  // 9. Authority: nothing answered, granted or retried on anyone's behalf.
+  // 10. A new desk conversation starts with the same memory in its first context.
+  await page.evaluate(() => localStorage.removeItem("es-app:front-desk:1"))
+  await page.reload()
+  await page.getByRole("button", { name: "Start front desk conversation" }).click()
+  await expect(editor()).toBeVisible({ timeout: 20000 })
+  pointerID = JSON.parse(await page.evaluate(() => localStorage.getItem("es-app:front-desk:1"))).session
+  assert.notEqual(pointerID, pointer.session)
+  await editor().fill("DESK-M3 hello again")
+  await sendIdle()
+  await expect(transcript()).toContainText("Desk answer for DESK-M3.", { timeout: 20000 })
+  assert.deepEqual(seen.memory["DESK-M3"], ["7", "morning"])
+  log(`MEMORY new desk session ${pointerID} received memory r7 in its first context`)
+
+  // 11. Authority: nothing answered, granted or retried on anyone's behalf.
   assert.deepEqual(attentionPosts, [])
   assert.equal(posts.filter((item) => item.endsWith("/input")).length, 0, "every desk send was a plain send")
   assert.equal(posts.filter((item) => /\/(permission|question)\/.*\/reply|\/retry$/.test(item)).length, 0)
   log(`AUTHORITY attentionWrites=0 permissionReplies=0 retries=0 posts=${[...new Set(posts)].join(",")}`)
 
-  // 10. Narrow width keeps both views reachable.
+  // 12. Narrow width keeps both views reachable.
+  await page.locator(".desk-item").first().click()
   await page.setViewportSize({ width: 760, height: 900 })
   await expect(page.locator(".desk-evidence")).toBeVisible()
   await expect(editor()).toBeVisible()
@@ -533,6 +661,7 @@ try {
   await browser?.close().catch(() => {})
   await vite?.close().catch(() => {})
   await stopCore().catch(() => {})
+  memoryFixture?.kill("SIGTERM")
   provider.closeAllConnections?.()
   await new Promise((resolve) => provider.close(resolve))
   dashboard.closeAllConnections?.()

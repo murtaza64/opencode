@@ -1,7 +1,7 @@
 /* Front desk: one conversation across connected projects, a read-only queue of
  * existing requests, and an evidence canvas only while an item is selected.
  * The chat is the ordinary session view; selection changes never remount it. */
-import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
 import { A } from "@solidjs/router"
 import { ago, sessionHref, useDashboard } from "../state"
 import { AppHeader } from "../components/native-header"
@@ -11,7 +11,9 @@ import { AttentionDecision } from "../components/attention-decision"
 import { HomePermission, type HomeReplyReceipt } from "../components/home-permission"
 import { FailureRetry } from "../components/session-failure"
 import { briefBinding, deskItems, deskSources, type BriefResult, type DeskItem, type EvidenceRef } from "../desk"
-import { createBriefs, createDeskSession, type BriefJob } from "../desk-session"
+import { createBriefs, createDeskSession, createMemory, type BriefJob } from "../desk-session"
+import { oc } from "../api"
+import type { MemoryEntry, MemoryRevision } from "../desk-memory"
 import { SessionView } from "./session"
 import "./home.css"
 import "./desk.css"
@@ -77,6 +79,18 @@ export default function Desk() {
   // Shared session events end an active brief sooner than its poll would.
   createEffect(on(() => briefs.jobs().filter(job => job.state.state === "running").map(job => `${job.id}:${dashboard.activity.status(job.id) ?? ""}`).join(","),
     (now, before) => { if (before !== undefined && now !== before) void briefs.refresh() }))
+  const memory = createMemory()
+  const [memoryOpen, setMemoryOpen] = createSignal(false)
+  // Read memory once the desk is known, then pick up changes the desk wrote whenever its turn ends.
+  onMount(() => void memory.load())
+  createEffect(on(() => {
+    const target = desk.status() === "ready" ? desk.pointer() : undefined
+    return target ? `${target.session}:${dashboard.activity.status(target.session) ?? ""}` : ""
+  }, key => {
+    const target = desk.pointer()
+    if (!key || !target || ["busy", "retry"].includes(dashboard.activity.status(target.session) ?? "")) return
+    void oc.messagesTail(target.session, target.directory, 20).then(messages => memory.absorb(messages)).catch(() => undefined)
+  }))
   const jobsFor = (key: string) => briefs.jobs().filter(job => job.meta.source === key)
   const context = () => desk.context({
     now: Date.now(),
@@ -86,6 +100,7 @@ export default function Desk() {
     selected: selected()?.live ? selected()!.item : undefined,
     briefs: briefs.jobs().filter(job => briefBinding(job.meta, items()).current)
       .flatMap(job => job.state.state === "starting" || job.state.state === "unconfirmed" ? [] : [{ meta: job.meta, state: job.state }]),
+    memory: memory.document(),
   })
 
   return <main class="desk" classList={{ "desk-has-selection": !!selected() }}>
@@ -105,6 +120,8 @@ export default function Desk() {
             </button></li>
           }}</For>
         </ul>
+        <button class="desk-chat-tab" aria-expanded={memoryOpen()} onClick={() => setMemoryOpen(!memoryOpen())}>Memory <span class="home-muted">{memory.document().entries.length} notes · r{memory.document().revision}</span></button>
+        <Show when={memoryOpen()}><MemoryPanel memory={memory} /></Show>
         <section class="desk-sources" aria-label="Connected sources">
           <h2>Sources</h2>
           <For each={sources()}>{source => <div class="desk-source" data-state={source.state}>
@@ -216,5 +233,64 @@ const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJob[]; ca
       <p class="home-source">Bound to revision {job().meta.revision} · <A href={sessionHref(job().id, job().directory)}>open background pass</A></p>
     </>}</Show>
     <For each={discarded()}>{job => <p class="home-source">Earlier brief for revision {job.meta.revision} discarded: the source changed.</p>}</For>
+  </section>
+}
+
+const changeLabel = (revision: MemoryRevision) => {
+  const change = revision.change
+  const who = change.actor === "assistant" ? "desk" : "you"
+  if (change.op === "restore") return `${who} restored r${change.restored}`
+  if (change.op === "erase") return `${who} erased ${change.entryID} from history`
+  return `${who} ${change.op === "forget" ? "forgot" : "saved"} ${change.entryID}`
+}
+
+const MemoryPanel = (props: { memory: ReturnType<typeof createMemory> }) => {
+  const [editing, setEditing] = createSignal<string>()
+  const [draft, setDraft] = createSignal("")
+  const [added, setAdded] = createSignal({ id: "", text: "", kind: "preference" as MemoryEntry["kind"] })
+  const [forgotten, setForgotten] = createSignal<string[]>([])
+  const busy = () => props.memory.status() === "writing"
+  const save = async (entry: MemoryEntry) => {
+    if (await props.memory.write({ op: "upsert", id: entry.id, text: draft(), kind: entry.kind, scope: entry.scope, confidence: "stated" }, "human") === "written") setEditing()
+  }
+  const forget = async (id: string) => { if (await props.memory.write({ op: "forget", id }, "human") === "written") setForgotten(previous => [...previous, id]) }
+  return <section class="desk-memory" aria-label="Front desk memory">
+    <p class="home-source">Personal notes the desk reads for orientation. Never used as permission. Stored in ~/.local/share/opencode/front-desk/memory.json.</p>
+    <Show when={props.memory.notice()}><p class="home-warning" role="status">{props.memory.notice()}</p></Show>
+    <ul class="desk-memory-list">
+      <For each={props.memory.document().entries} fallback={<li class="home-muted">No notes yet.</li>}>{entry => <li data-memory-id={entry.id}>
+        <Show when={editing() === entry.id} fallback={<bdi dir="auto">{entry.text}</bdi>}>
+          <textarea aria-label={`Edit note ${entry.id}`} dir="auto" rows={2} value={draft()} onInput={event => setDraft(event.currentTarget.value)} />
+        </Show>
+        <div class="home-source">{entry.id} · {entry.kind} · {entry.scope} · {entry.confidence} · {entry.source.actor === "assistant" ? "from desk" : "from you"} · updated {ago(entry.updated)}</div>
+        <div class="desk-memory-actions">
+          <Show when={editing() === entry.id} fallback={<button class="desk-button" disabled={busy()} onClick={() => { setDraft(entry.text); setEditing(entry.id) }}>Edit</button>}>
+            <button class="desk-button home-primary" disabled={busy()} onClick={() => void save(entry)}>Save</button><button class="desk-button" onClick={() => setEditing()}>Cancel</button>
+          </Show>
+          <button class="desk-button" disabled={busy()} onClick={() => void forget(entry.id)}>Forget</button>
+        </div>
+      </li>}</For>
+    </ul>
+    <For each={forgotten().filter(id => !props.memory.document().entries.some(entry => entry.id === id) && props.memory.document().history.some(revision => revision.entries.some(entry => entry.id === id)))}>{id =>
+      <p class="home-source">"{id}" is forgotten but kept in history. <button class="desk-button" disabled={busy()} onClick={() => void props.memory.erase(id)}>Erase from history</button></p>}</For>
+    <form class="desk-memory-add" onSubmit={async event => {
+      event.preventDefault()
+      const value = added()
+      if (await props.memory.write({ op: "upsert", id: value.id.trim(), text: value.text, kind: value.kind, confidence: "stated" }, "human") === "written") setAdded({ id: "", text: "", kind: value.kind })
+    }}>
+      <input aria-label="Note ID" placeholder="id" value={added().id} onInput={event => setAdded({ ...added(), id: event.currentTarget.value })} />
+      <select aria-label="Note kind" value={added().kind} onChange={event => setAdded({ ...added(), kind: event.currentTarget.value as MemoryEntry["kind"] })}><option value="preference">preference</option><option value="fact">fact</option><option value="lesson">lesson</option></select>
+      <textarea aria-label="Note text" dir="auto" rows={2} placeholder="Add a note" value={added().text} onInput={event => setAdded({ ...added(), text: event.currentTarget.value })} />
+      <button class="desk-button" type="submit" disabled={busy() || !added().id.trim() || !added().text.trim()}>Add note</button>
+    </form>
+    <details class="desk-memory-history"><summary>History ({props.memory.document().history.length})</summary>
+      <ol reversed>
+        <For each={props.memory.document().history.toReversed()}>{revision => <li data-memory-revision={revision.n}>
+          r{revision.n} · {changeLabel(revision)} · {ago(revision.at)} · {revision.entries.length} notes
+          <Show when={revision.change.messageID}> · <span class="home-source">msg {revision.change.messageID}</span></Show>
+          <Show when={revision.n !== props.memory.document().revision}> <button class="desk-button" disabled={busy()} onClick={() => void props.memory.write({ op: "restore", revision: revision.n }, "human")}>Restore</button></Show>
+        </li>}</For>
+      </ol>
+    </details>
   </section>
 }

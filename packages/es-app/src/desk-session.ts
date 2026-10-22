@@ -5,7 +5,8 @@
 import { createSignal, onCleanup, onMount } from "solid-js"
 import type { Session } from "@opencode-ai/sdk/v2"
 import { descending } from "@opencode-ai/schema/identifier"
-import { oc, SessionCreateError, type ContextPart } from "./api"
+import { oc, SessionCreateError, type ContextPart, type MessageWithParts } from "./api"
+import { appliedKeys, assistantOps, emptyMemory, eraseMemory, nextMemory, type MemoryDocument, type MemoryOp } from "./desk-memory"
 import { BRIEF_SCHEMA, BRIEF_SYSTEM, briefPacket, briefState, deskContext, type BriefMeta, type BriefState, type DeskItem } from "./desk"
 
 const POINTER = "es-app:front-desk:1"
@@ -277,4 +278,96 @@ const limited = async <T, R>(items: T[], limit: number, map: (item: T) => Promis
   }
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
   return results
+}
+
+const MEMORY_REFUSED = "es-app:front-desk:memory-refused:1"
+type Stored = { hash: string; document: MemoryDocument }
+const MEMORY_URL = "/es/api/frontdesk/memory"
+
+/** Personal memory in one file, replaced only by compare-and-set on its content hash. */
+export const createMemory = () => {
+  const [stored, setStored] = createSignal<Stored>()
+  const [status, setStatus] = createSignal<"idle" | "loading" | "writing" | "unavailable">("idle")
+  const [notice, setNotice] = createSignal("")
+  const document = () => stored()?.document ?? emptyMemory()
+  const load = async () => {
+    setStatus(previous => previous === "writing" ? previous : "loading")
+    try {
+      const response = await fetch(MEMORY_URL, { credentials: "include" })
+      if (!response.ok) throw new Error(response.status === 404 ? "the dashboard has no memory endpoint" : `HTTP ${response.status}`)
+      setStored(await response.json())
+      setStatus(previous => previous === "writing" ? previous : "idle")
+    } catch (cause) {
+      setStatus("unavailable")
+      setNotice(`Memory could not be read (${cause instanceof Error ? cause.message : String(cause)}). Last-known notes are shown; nothing was changed.`)
+    }
+  }
+  type Outcome = "written" | "refused" | "conflict" | "unconfirmed" | "busy" | "forbidden"
+  const put = async (base: Stored, next: MemoryDocument): Promise<Outcome> => {
+    setStatus("writing")
+    try {
+      const response = await fetch(MEMORY_URL, {
+        method: "PUT", credentials: "include",
+        headers: { "content-type": "application/json", "X-Attention-CSRF": "1" },
+        body: JSON.stringify({ expected_hash: base.hash, document: next }),
+      }).catch(() => undefined)
+      if (response?.ok) {
+        setStored(await response.json())
+        return "written"
+      }
+      await load()
+      // A lost response: the file holding exactly this revision means it was written.
+      if (!response) return document().revision === next.revision && JSON.stringify(document().history.at(-1)) === JSON.stringify(next.history.at(-1)) ? "written" : "unconfirmed"
+      if (response.status === 409) return "conflict"
+      if (response.status === 401 || response.status === 403) return "forbidden"
+      setNotice(`Memory change refused: ${(await response.json().catch(() => undefined))?.error ?? `HTTP ${response.status}`}`)
+      return "refused"
+    } finally {
+      setStatus(previous => previous === "writing" ? "idle" : previous)
+    }
+  }
+  const messages: Record<Exclude<Outcome, "written" | "refused">, string> = {
+    conflict: "Memory changed elsewhere first. Your change was not saved; review the newest notes and try again.",
+    unconfirmed: "The memory change was not confirmed and is not in the file. Nothing was saved; try again.",
+    busy: "Another memory change is in progress.",
+    forbidden: "Memory is read-only here: the operator connection is unavailable.",
+  }
+  const commit = async (next: MemoryDocument | { refused: string }, base: Stored | undefined, label: string): Promise<Outcome> => {
+    if (!base || status() === "writing") return "busy"
+    if ("refused" in next) {
+      setNotice(`${label} not saved: ${next.refused}`)
+      return "refused"
+    }
+    const outcome = await put(base, next)
+    if (outcome !== "written" && outcome !== "refused") setNotice(messages[outcome])
+    if (outcome === "written") setNotice("")
+    return outcome
+  }
+  /** One change on top of the file as last read. Desk changes carry their opKey and apply once. */
+  const write = async (op: MemoryOp, actor: "human" | "assistant", source?: { messageID: string; opKey: string }) => {
+    const base = stored()
+    if (base && source && appliedKeys(base.document).has(source.opKey)) return "written" as const
+    return commit(base ? nextMemory(base.document, op, actor, Date.now(), source) : { refused: "Memory has not been read yet." }, base,
+      actor === "assistant" ? "The desk's memory change" : "Change")
+  }
+  const erase = async (entryID: string) => {
+    const base = stored()
+    if (await commit(base ? eraseMemory(base.document, entryID, Date.now()) : { refused: "Memory has not been read yet." }, base, "Erase") === "written")
+      setNotice(`Erased "${entryID}" from history.`)
+  }
+  // Refused desk changes are reported once, not on every later scan of the same reply.
+  const refused = new Set(readJSON<string[]>(MEMORY_REFUSED, Array.isArray) ?? [])
+  /** Apply memory changes the desk wrote in its own completed replies, oldest first, once each. */
+  const absorb = async (messages: MessageWithParts[]) => {
+    for (const item of assistantOps(messages)) {
+      if (appliedKeys(document()).has(item.opKey) || refused.has(item.opKey)) continue
+      const outcome = await write(item.op, "assistant", item)
+      if (outcome === "written") continue
+      // Conflicts and unconfirmed writes retry on a later scan; only a refused change is final.
+      if (outcome !== "refused") return
+      refused.add(item.opKey)
+      try { localStorage.setItem(MEMORY_REFUSED, JSON.stringify([...refused].slice(-200))) } catch { /* reported again after reload at worst */ }
+    }
+  }
+  return { document, status, notice, load, write, erase, absorb }
 }

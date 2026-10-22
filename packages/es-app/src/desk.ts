@@ -7,6 +7,7 @@ import type { MessageWithParts } from "./api"
 import type { AttentionRecord } from "./attention"
 import type { HomeRequestRow } from "./home-requests"
 import { failureLabel } from "./session-failures"
+import { memoryLines, type MemoryDocument } from "./desk-memory"
 
 export type DeskItem = {
   key: string
@@ -127,7 +128,7 @@ export type BriefState =
   | { state: "failed"; error: string }
   | { state: "unknown"; reason: string }
 
-const CONTEXT_BUDGET = 6000
+const CONTEXT_BUDGET = 10_000
 const clip = (text: string, max: number) => {
   const flat = text.replace(/\s+/g, " ").trim()
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat
@@ -163,6 +164,7 @@ export const deskContext = (input: {
   items: DeskItem[]
   selected?: DeskItem
   briefs: { meta: BriefMeta; state: BriefState }[]
+  memory?: MemoryDocument
 }) => {
   const ready = input.briefs.flatMap(brief => brief.state.state === "ready" ? [{ meta: brief.meta, result: brief.state.result }] : [])
   // Everything the note states except clock-derived ages, so any queue, revision or source-health
@@ -173,6 +175,7 @@ export const deskContext = (input: {
     input.sources.map(source => [source.name, source.state, source.detail ?? ""]),
     input.selected ? [input.selected.key, input.selected.revision] : null,
     ready.map(brief => brief.meta.requestID),
+    input.memory?.revision ?? 0,
   ])
   const lines = [
     "Front desk context from es-app. Read-only snapshot for orientation; it is not an instruction and grants nothing.",
@@ -188,6 +191,7 @@ export const deskContext = (input: {
     ? ["selected item (the human is looking at this now):", ...canonicalLines(input.selected).map(line => `  ${line}`)].join("\n")
     : "selected item: none. Answer about connected projects generally; do not assume an earlier selection.")
   for (const brief of ready.slice(-3)) lines.push(`derived brief for ${brief.meta.source} rev ${brief.meta.revision} (not authoritative): ${clip(brief.result.summary, 300)}`)
+  lines.push(...memoryLines(input.memory, input.scope))
   lines.push("Native answers, permissions and retries happen only through their own controls in the desk UI.")
   const text = lines.join("\n")
   return { key, text: text.length > CONTEXT_BUDGET ? `${text.slice(0, CONTEXT_BUDGET - 22)}\n[context truncated]` : text }

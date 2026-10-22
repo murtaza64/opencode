@@ -54,3 +54,11 @@
   .desk-chat { block-size: 85vh; }
 }
 .desk-evidence-head h2 { margin: 0; }
+.desk-memory { margin-block: 6px 10px; font-size: 12px; }
+.desk-memory-list { list-style: none; margin: 0; padding: 0; }
+.desk-memory-list > li { padding: 6px 0; border-block-end: 1px solid var(--surface0); overflow-wrap: anywhere; }
+.desk-memory-actions { display: flex; gap: 6px; margin-block-start: 3px; }
+.desk-memory :is(textarea, input, select) { inline-size: 100%; box-sizing: border-box; font: inherit; color: var(--text); background: var(--base); border: 1px solid var(--surface1); padding: 4px 6px; }
+.desk-memory-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; margin-block-start: 8px; }
+.desk-memory-add textarea, .desk-memory-add button { grid-column: 1 / -1; }
+.desk-memory-history ol { padding-inline-start: 18px; margin: 4px 0; }

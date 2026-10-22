@@ -58,7 +58,7 @@ test("context note is bounded, names the selection explicitly and changes key on
   const general = deskContext({ now: 0, sources: [], items: many, briefs: [] })
   expect(general.text).toContain("selected item: none")
   expect(general.text).toContain("… 18 more not listed")
-  expect(general.text.length).toBeLessThanOrEqual(6000)
+  expect(general.text.length).toBeLessThanOrEqual(10_000)
   const selected = deskContext({ now: 5, sources: [], items: many, selected: items()[0], briefs: [] })
   expect(selected.text).toContain("options: a=Canary; b=Full")
   expect(selected.text).toContain("requesting agent recommends: a")
