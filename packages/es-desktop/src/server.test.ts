@@ -343,9 +343,34 @@ test("shows an offline document and API failure when attached services stop", as
   await upstream.stop(true)
   const page = await get("/")
   expect(page.status).toBe(503)
-  expect(await page.text()).toContain("Services unavailable")
+  const text = await page.text()
+  expect(text).toContain("Services unavailable")
+  // The page reloads itself, so a brief outage at launch does not strand the window.
+  expect(text).toContain('<meta http-equiv="refresh" content="5">')
   expect((await get("/oc/session")).status).toBe(502)
 })
+
+test("a slow but answering service still loads the app instead of the offline page", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "es-desktop-test-"))
+  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  await Bun.write(path.join(root, "index.html"), "<title>Fixture renderer</title>")
+  const upstream = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: async (request) => {
+      if (new URL(request.url).pathname === "/experimental/capabilities") await Bun.sleep(2500)
+      return Response.json({})
+    },
+  })
+  cleanup.push(async () => {
+    await upstream.stop(true)
+  })
+  const server = await serve({ root, opencode: upstream.url.origin, dashboard: upstream.url.origin })
+  cleanup.push(server.close)
+  const page = await fetch(`${server.origin}/`, { headers: { "x-editspace-key": server.key } })
+  expect(page.status).toBe(200)
+  expect(await page.text()).toContain("Fixture renderer")
+}, 15_000)
 
 test("shutdown releases the listener without stopping attached services", async () => {
   const { server, upstream } = await setup()
