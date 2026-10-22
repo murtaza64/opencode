@@ -45,6 +45,7 @@ import { HeaderMenu } from "../components/header-menu"
 import { FailureRetry } from "../components/session-failure"
 import { completedTurns, messageSegments, planToolRuns, samePlan, sameSegments } from "../transcript-groups"
 import { isUserPrompt, promptPosition, promptTarget } from "../transcript-nav"
+import { restartMarkers } from "../restart-marker"
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const [error, setError] = createSignal("")
@@ -1526,6 +1527,9 @@ function SessionView(props: { sessionID: string; directory: string }) {
                       </div>
                     )}
                   </Show>
+                  <For each={restartMarkers(m, messages(), status() !== "idle")}>
+                    {(marker) => <div class="restart-marker" data-state={marker.state} role="note">{marker.label}</div>}
+                  </For>
                 </div>
                 )
               }}

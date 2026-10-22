@@ -264,6 +264,14 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
       ) {
         continue
       }
+      // A restart-interrupted step without tool calls holds only partial prose; replaying it would
+      // prefill the continuation, so the continuation regenerates it while the transcript keeps it.
+      if (
+        AbortedError.isInstance(msg.info.error) &&
+        msg.info.restarts?.some((marker) => marker.outcome === "scheduled") &&
+        !msg.parts.some((part) => part.type === "tool")
+      )
+        continue
       const assistantMessage: UIMessage = {
         id: msg.info.id,
         role: "assistant",
