@@ -2800,6 +2800,7 @@ export type SessionRestartContinueResult = {
     | "superseded"
     | "mismatch"
     | "stale"
+    | "capacity"
   marker?: RestartContinuation
 }
 

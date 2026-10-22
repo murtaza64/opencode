@@ -244,6 +244,23 @@ it.live(
           expect(yield* toolRuns(dir)).toBe("x")
           expect(yield* llm.calls).toBe(0)
 
+          // An abort stamped inside the restart window does not make a running tool's effect known.
+          const windowed = yield* Session.use.create({ title: "Windowed abort" })
+          const live = yield* seedInterrupted(windowed, dir, {
+            error: new SessionV1.AbortedError({ message: "Aborted" }).toObject(),
+            completedAt: Date.now(),
+          })
+          const windowedBefore = yield* messages(dir, windowed.id)
+          expect(yield* resume(dir, windowed.id, { anchorMessageID: live.assistant.id, capturedAt })).toMatchObject({
+            outcome: "uncertain",
+            marker: { reason: "interrupted-tool", interruptedTools: 1 },
+          })
+          const strip = (history: typeof windowedBefore) =>
+            history.map((message) => ({ ...message, info: { ...message.info, restarts: undefined } }))
+          expect(strip(yield* messages(dir, windowed.id))).toEqual(strip(windowedBefore))
+          expect(yield* toolRuns(dir)).toBe("x")
+          expect(yield* llm.calls).toBe(0)
+
           // A graceful shutdown inside the restart window that cancelled a tool is just as unknown.
           const cancelled = yield* Session.use.create({ title: "Cancelled" })
           const cut = yield* seedInterrupted(cancelled, dir, {
@@ -343,7 +360,7 @@ it.live(
           const aborted = new SessionV1.AbortedError({ message: "Aborted" }).toObject()
 
           const stopped = yield* Session.use.create({ title: "Stopped" })
-          const human = yield* seedInterrupted(stopped, dir, { error: aborted, completedAt: capturedAt - 5_000 })
+          const human = yield* seedInterrupted(stopped, dir, { tools: false, error: aborted, completedAt: capturedAt - 5_000 })
           const first = yield* resume(dir, stopped.id, { anchorMessageID: human.assistant.id, capturedAt })
           expect(first).toMatchObject({ outcome: "uncertain", marker: { outcome: "uncertain", reason: "aborted" } })
           expect(yield* resume(dir, stopped.id, { anchorMessageID: human.assistant.id, capturedAt })).toEqual({
@@ -389,6 +406,37 @@ it.live(
           const request = JSON.stringify((yield* llm.inputs)[0])
           expect(request).toContain("do the work")
           expect(request).not.toContain("half-written sent")
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+it.live(
+  "an anchor that absorbed the maximum restarts refuses a new restart ID and still recognizes every old one",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          const capturedAt = Date.now()
+          const session = yield* Session.use.create({ title: "Capacity" })
+          const seeded = yield* seedInterrupted(session, dir)
+          const ids = Array.from({ length: SessionRestart.MAX_MARKERS }, (_, index) => `${RESTART}-${index}`)
+          const markers = yield* Effect.forEach(ids, (restartID) =>
+            resume(dir, session.id, { restartID, anchorMessageID: seeded.assistant.id, capturedAt }),
+          )
+          expect(markers.map((result) => result.outcome)).toEqual(ids.map(() => "uncertain"))
+          expect(yield* resume(dir, session.id, { restartID: `${RESTART}-new`, anchorMessageID: seeded.assistant.id, capturedAt })).toEqual({
+            outcome: "capacity",
+          })
+          for (const [index, restartID] of ids.entries())
+            expect(yield* resume(dir, session.id, { restartID, anchorMessageID: seeded.assistant.id, capturedAt })).toEqual({
+              outcome: "duplicate",
+              marker: markers[index]!.marker,
+            })
+          const anchor = (yield* messages(dir, session.id)).find((message) => message.info.id === seeded.assistant.id)
+          expect(anchor?.info.restarts?.map((marker) => marker.restartID)).toEqual(ids)
+          expect(yield* llm.calls).toBe(0)
         }),
       { config: testProviderConfig },
     ),

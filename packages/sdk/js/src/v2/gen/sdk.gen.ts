@@ -3693,7 +3693,7 @@ export class Restart extends HeyApiClient {
   /**
    * Continue work interrupted by a daemon restart
    *
-   * Idempotently continue a root session whose newest message is still the anchor captured before a controlled restart, without adding a user message. Interrupted tool calls are settled as errors and never re-executed; failed turns, advanced sessions and uncertain interruptions are reported without starting. The decision is recorded as a model-hidden marker on the anchor, so repeating the same restartID reports `duplicate`.
+   * Idempotently continue a root session whose newest message is still the anchor captured before a controlled restart, without adding a user message. It resumes only when every effect on the anchor is durable. An anchor with a pending, running or cancelled tool call, an abort that predates the restart, or a future timestamp is marked `uncertain`, left otherwise untouched and not resumed. Failed turns (use retry), finished and advanced sessions are reported without starting. Each decision is recorded as a model-hidden marker on the anchor, so repeating the same restartID reports `duplicate`. Markers are never dropped: an anchor holding the maximum refuses new restart IDs with `capacity`.
    */
   public continue<ThrowOnError extends boolean = false>(
     parameters: {
