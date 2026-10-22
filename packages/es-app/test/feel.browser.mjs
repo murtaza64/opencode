@@ -16,7 +16,7 @@ const open = async (options = {}) => {
   await context.route("**/*", (route) => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
   const page = await context.newPage()
   page.on("pageerror", (error) => errors.push(error.message))
-  await page.goto(preview.url)
+  await page.goto(`${preview.url}/agents`)
   await expect(page.locator("textarea").first()).toBeVisible({ timeout: 90_000 })
   await expect.poll(() => [...fixture.eventStreams.values()].some((stream) => stream.path === "/global/event")).toBe(true)
   return { context, page }

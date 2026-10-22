@@ -92,6 +92,8 @@ try {
   await expectRevealed()
 
   // Same item, scrolled away: Show brings the brief back instead of doing nothing.
+  // A shorter window guarantees the decision card is taller than its pane.
+  await page.setViewportSize({ width: 1280, height: 420 })
   await page.locator(".desk-evidence").evaluate((el) => { el.scrollTop = el.scrollHeight })
   await queue.evaluate((el) => el.focus?.())
   await expect(brief).not.toBeFocused()

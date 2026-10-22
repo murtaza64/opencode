@@ -1983,3 +1983,18 @@ a.mini-item > .glyph { margin: 0; }
 .peek-todo-done .peek-todo-glyph { color: var(--green); }
 .peek-todo-basis { font-size: 11px; color: var(--subtext0); border-block-start: 1px solid var(--surface0); padding-block-start: 5px; }
 .peek-todo-state { font-size: 12px; }
+
+.sr-only { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* Mode switch: Front desk | Agents, at the top of both modes' sidebars. */
+.mode-switch { display: flex; gap: 2px; padding: 0 10px 8px; }
+.mode-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 4px; white-space: nowrap; color: var(--subtext0); text-decoration: none; font-weight: 600; border-block-end: 2px solid var(--surface0); }
+.mode-tab:hover { color: var(--text); background: var(--surface0); }
+.mode-tab[aria-current=page] { color: var(--text); border-block-end-color: var(--peach); }
+.mode-tab .glyph { color: var(--lavender); }
+.mode-count { inline-size: 7px; block-size: 7px; background: var(--peach); border-radius: 50%; }
+.mode-switch.compact { flex-direction: column; padding: 0; inline-size: 100%; }
+.mode-switch.compact .mode-tab { position: relative; padding: 6px 0; border-block-end: 0; border-inline-start: 2px solid transparent; }
+.mode-switch.compact .mode-tab[aria-current=page] { border-inline-start-color: var(--peach); }
+.mode-switch.compact .mode-count { position: absolute; inset-block-start: 3px; inset-inline-end: 5px; }
+@media (max-width: 600px) { .shell > .sidebar-mini .mode-switch.compact { flex-direction: row; inline-size: auto; } }

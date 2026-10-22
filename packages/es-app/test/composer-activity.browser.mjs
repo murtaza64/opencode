@@ -14,7 +14,7 @@ const sidebar = page.locator(".session-info:not(.sidebar-mini)")
 const todos = sidebar.getByRole("region", { name: "Todos", exact: true })
 const writes = () => fixture.calls.filter(call => !["GET", "HEAD", "OPTIONS"].includes(call.method))
 try {
-  await page.goto(preview.url)
+  await page.goto(`${preview.url}/agents`)
   await expect(receipts.locator("li[data-request-id]")).toHaveCount(2)
   await expect(receipts.locator("summary")).toContainText("1 queued, 1 steer")
   await expect(receipts.locator('[data-request-id="human-queue"] img')).toHaveAttribute("src", fixture.receipts[0].images[0].url)

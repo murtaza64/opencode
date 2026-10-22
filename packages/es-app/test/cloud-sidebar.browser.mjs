@@ -11,7 +11,7 @@ page.on("pageerror", error => errors.push(error.message))
 const sidebar = page.locator(".sidebar")
 const pinned = () => sidebar.locator(".pinned-section")
 try {
-  await page.goto(preview.url)
+  await page.goto(`${preview.url}/agents`)
   await sidebar.locator(".cloud-discovery summary").click()
   await expect(sidebar.locator(".cloud-discovery")).toContainText("cloud-review")
   await sidebar.getByRole("button", { name: "Pin cloud agent cloud-review", exact: true }).click()

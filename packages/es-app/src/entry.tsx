@@ -21,12 +21,17 @@ import { TicketTip, wrapTicketRefs } from "./ticket-refs"
 import { SessionRefs, wrapSessionRefs } from "./session-mention-dom"
 import { installSidebarKeys, leftOpen, startDrag } from "./ui"
 import { installAppLinks, installInkLinks } from "./link-url"
+import { modeOf, trackModes } from "./components/mode-switch"
 
 function Providers(props: ParentProps) {
   onMount(() => onCleanup(installSidebarKeys()))
   onMount(() => onCleanup(installInkLinks()))
   const navigate = useNavigate()
   onMount(() => onCleanup(installAppLinks(navigate)))
+  const location = useLocation()
+  trackModes()
+  // Front desk brings its own sidebar (the queue); Agents mode keeps the session sidebar.
+  const agents = () => modeOf(location.pathname) === "agents"
   let shellEl: HTMLDivElement | undefined
   // ticket refs everywhere in the shell (transcript, sidebar, panels):
   // rAF-debounced since streaming produces mutation bursts, and the wrap
@@ -76,8 +81,8 @@ function Providers(props: ParentProps) {
             <DashboardProvider>
               <BriefsProvider>
               <div class="shell" ref={shellEl}>
-                <Sidebar />
-                <Show when={leftOpen()}>
+                <Show when={agents()}><Sidebar /></Show>
+                <Show when={agents() && leftOpen()}>
                   <div class="drag-handle" onMouseDown={(e) => startDrag("left", e)} />
                 </Show>
                 <div class="content">{props.children}</div>
@@ -97,13 +102,19 @@ const DeskRedirect = () => {
   const location = useLocation()
   return <Navigate href={`/${location.search}${location.hash}`} />
 }
+const MapRedirect = () => {
+  const location = useLocation()
+  return <Navigate href={`/agents${location.search}${location.hash}`} />
+}
 
 render(
   () => (
     <Router root={(p) => <Providers>{p.children}</Providers>}>
       <Route path="/" component={Desk} />
       <Route path="/cloud" component={CloudPage} />
-      <Route path="/map" component={AgentMap} />
+      <Route path="/agents" component={AgentMap} />
+      {/* The map became Agents mode's default page; keep old /map links working. */}
+      <Route path="/map" component={MapRedirect} />
       <Route path="/new" component={NewSessionPage} />
       {/* Front desk replaced the old Home at "/"; keep old /desk links working. */}
       <Route path="/desk" component={DeskRedirect} />

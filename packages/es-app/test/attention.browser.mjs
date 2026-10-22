@@ -47,6 +47,10 @@ const server = createHttpServer(async (req, res) => {
   if (path === `/session/${root.id}/input`) return json({ items: [], next: null })
   if (path === "/api/issues") return json({ backend: "gh", repo: "fixture/repo", issues: [] })
   if (path === "/api/docs") return json({ sources: [], roots: [] })
+  if (path === "/experimental/session/failed") return json([])
+  if (path === "/api/mail") return json({ messages: [] })
+  // Agents mode opens on the map, which tolerates these optional sources being absent.
+  if (["/api/lane-provenance", "/api/wingman", "/api/handoffs"].includes(path)) return json({}, 404)
   failures.push(`Unexpected read ${path}`); return json({}, 404)
 })
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
@@ -78,7 +82,7 @@ const emit = (directory, event) => {
   }
 }
 try {
-  await page.goto(origin)
+  await page.goto(`${origin}/agents`)
   const rootLink = page.getByRole("link", { name: /Attention root/ }).first()
   await expect(rootLink.locator(".dot")).toHaveClass(/busy/)
   await expect(page.locator(".notification-item")).toHaveCount(0)

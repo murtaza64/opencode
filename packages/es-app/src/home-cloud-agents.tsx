@@ -1,14 +1,10 @@
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { es, type WingmanTranscript } from "./api"
-import { cloudHref, cloudKey, cloudOwnerKnown, type CloudPin, type createCloudAgents } from "./cloud-agents"
-import type { HomeActivityRow } from "./home-activity-data"
+import { cloudKey, cloudOwnerKnown, type CloudPin, type createCloudAgents } from "./cloud-agents"
 import { ago, useDashboard } from "./state"
 import { wingmanRunUrl, wingmanStatus, wingmanSyncedAt } from "./wingman"
-import { A } from "@solidjs/router"
 import { FindExcerpt, TranscriptFind } from "./components/transcript-find"
 import type { FindHit } from "./transcript-find"
-
-const maxScopes = 5
 
 const githubPr = (value: string) => {
   const url = URL.parse(value)
@@ -161,49 +157,5 @@ export const CloudAgentDetails = (props: { pin: CloudPin }) => {
         <Show when={!snapshot()?.error && inScope() && cloudOwnerKnown(props.pin.owner)}><Transcript pin={props.pin} available={() => !!record() && !snapshot()?.error && inScope()} findable /></Show>
       </>}</Show>
     </div>
-  </section>
-}
-
-export default function HomeCloudAgents(props: { project?: string; onCount: (n: number) => void; onActivity: (rows: HomeActivityRow[]) => void }) {
-  const dashboard = useDashboard()
-  const cloud: ReturnType<typeof createCloudAgents> = dashboard.cloud
-  const visiblePins = () => cloud.pins().filter(pin => !props.project || pin.editspace === props.project)
-  const pinned = () => cloud.allPinned().filter(item => !props.project || item.pin.editspace === props.project)
-  const other = () => cloud.other().filter(item => !props.project || item.editspace === props.project)
-  createEffect(() => props.onCount(visiblePins().length))
-  createEffect(() => props.onActivity(pinned().flatMap(item => {
-    if (!item.record || !item.snapshot?.checked) return []
-    return [{ id: `cloud:${cloudKey(item.pin)}`, level: "minor" as const, kind: "cloud" as const,
-      text: `${item.pin.editspace} · ${item.pin.lane} · ${wingmanStatus(item.record["wingman-status"]).label} (lane record snapshot)`,
-      time: item.snapshot.checked, timeLabel: "snapshot observed", source: `${item.pin.editspace} · cloud lane record${item.snapshot.error ? " · source unavailable" : ""}`,
-      sourceAt: item.snapshot.checked }]
-  })))
-  const age = (checked?: number) => { cloud.now(); return checked ? `checked ${ago(checked)}` : "never checked" }
-
-  return <section aria-label="Cloud agents"><div class="home-section"><h2>Cloud agents <span>{visiblePins().length}</span></h2></div>
-    <Show when={cloud.pinError()}><p class="home-source" role="status">{cloud.pinError()}</p></Show>
-    <div class="home-actions"><button disabled={cloud.loading() || !cloud.scopes().length} onClick={() => void cloud.refresh()}>Refresh cloud lanes</button></div>
-    <Show when={cloud.loading()}><p class="home-source">Checking cloud lanes…</p></Show>
-    <Show when={!cloud.scopes().length}><p class="home-muted">No selected project available for cloud discovery.</p></Show>
-    <Show when={cloud.pins().some(pin => !cloud.scopes().includes(pin.editspace))}><p class="home-source">At most {maxScopes} projects are checked. Additional pinned projects remain saved but are not observed.</p></Show>
-    <For each={cloud.scopes().filter(name => cloud.snapshots()[name]?.error)}>{name => <p class="home-source" role="status"><bdi dir="auto">{name}</bdi>: {cloud.snapshots()[name].error} {age(cloud.snapshots()[name].checked)}</p>}</For>
-    <For each={visiblePins()} fallback={<p class="home-muted">No cloud tasks pinned.</p>}>{pin => {
-       const item = { ...pin, get record() { return cloud.allPinned().find(value => cloudKey(value.pin) === cloudKey(pin))?.record }, get snapshot() { return cloud.snapshots()[pin.editspace] }, get inScope() { return cloud.scopes().includes(pin.editspace) } }
-      return <div class="home-agent">
-        <div><A class="home-name" href={cloudHref(pin)}><bdi dir="auto">{item.lane}</bdi></A><div class="home-muted"><bdi dir="auto">{item.editspace} · {item.owner}</bdi></div><button onClick={() => cloud.togglePin(pin)}>Unpin</button></div>
-       <div><Show when={item.record} fallback={<p class="home-muted">{item.inScope && !item.snapshot?.error && item.snapshot?.checked ? "Pinned owner missing from latest cloud lane snapshot" : "Cloud lane source unknown; pinned owner cannot be verified"}. {age(item.snapshot?.checked)} · report age unknown</p>}>{lane => <>
-        <div><span class={`chip ${wingmanStatus(lane()["wingman-status"]).chip}`}>{wingmanStatus(lane()["wingman-status"]).label}</span> <bdi dir="auto">{lane().activity || lane().issue || "Activity not reported"}</bdi></div>
-        <div class="home-source">Lane record snapshot · {age(item.snapshot?.checked)} · {wingmanSyncedAt(lane()) ? `Wingman synced ${ago(wingmanSyncedAt(lane()))}` : "not synced yet; report age unknown"}{item.snapshot?.error ? " · source unavailable; last-known snapshot" : ""}</div>
-        <Show when={lane()["wingman-error"]}><p class="home-warning"><bdi dir="auto">{lane()["wingman-error"]}</bdi></p></Show>
-        <div class="home-muted">Reported turns: <bdi dir="auto">{lane()["wingman-turns"] ?? "unknown"}</bdi> · reported cost: <bdi dir="auto">{lane()["wingman-cost"] ?? "unknown"}</bdi></div>
-        <div class="home-actions"><For each={(lane()["wingman-prs"] ?? "").split(/\s+/).map(githubPr).filter((url): url is string => !!url)}>{url => <a href={url} target="_blank" rel="noopener noreferrer">PR <bdi dir="ltr">{url}</bdi></a>}</For>
-          <Show when={runtimeLink(wingmanRunUrl(lane()))}>{url => <a href={url()} target="_blank" rel="noopener noreferrer">Runtime workflow</a>}</Show><Show when={lane()["wingman-ci"]}><span class="home-source">CI: {lane()["wingman-ci"]}</span></Show></div>
-          <Show when={!item.snapshot?.error && cloudOwnerKnown(pin.owner)}><Transcript pin={pin} available={() => !!item.record && !item.snapshot?.error && item.inScope} /></Show>
-      </>}</Show></div>
-    </div>}}</For>
-    <details class="home-workers"><summary>Other cloud tasks ({other().length})</summary><div class="home-source">{cloud.includeFinished() ? "Known tasks, including finished" : "Active tasks only"} in checked projects.</div>
-       <label><input type="checkbox" checked={cloud.includeFinished()} onChange={event => cloud.setIncludeFinished(event.currentTarget.checked)} />Include finished</label>
-       <For each={other()}>{item => <div class="home-other"><span><bdi dir="auto">{item.editspace} · {item.lane} · {item.owner}</bdi> · {wingmanStatus(item.record["wingman-status"]).label} <span class="home-source">({age(cloud.snapshots()[item.editspace]?.checked)} · report age unknown)</span></span><button disabled={!cloudOwnerKnown(item.owner)} onClick={() => cloud.togglePin(item)}>Pin</button></div>}</For>
-    </details>
   </section>
 }
