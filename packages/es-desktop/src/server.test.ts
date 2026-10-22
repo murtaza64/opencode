@@ -142,6 +142,12 @@ test("API surface excludes direct shell, PTY, file, and config access", () => {
   expect(apiAllowed("GET", "/oc/session/ses_a/children")).toBe(true)
   expect(apiAllowed("POST", "/oc/session/ses_a/children")).toBe(false)
   expect(apiAllowed("GET", "/oc/session/ses_a/children/x")).toBe(false)
+  // Front desk memory: read and whole-document CAS write only
+  expect(apiAllowed("GET", "/es/api/frontdesk/memory")).toBe(true)
+  expect(apiAllowed("PUT", "/es/api/frontdesk/memory")).toBe(true)
+  expect(apiAllowed("POST", "/es/api/frontdesk/memory")).toBe(false)
+  expect(apiAllowed("DELETE", "/es/api/frontdesk/memory")).toBe(false)
+  expect(apiAllowed("GET", "/es/api/frontdesk/memory/x")).toBe(false)
   // failed-turn recovery: read the durable list, retry one exact failure
   expect(apiAllowed("GET", "/oc/experimental/session/failed")).toBe(true)
   expect(apiAllowed("POST", "/oc/session/ses_a/retry")).toBe(true)
