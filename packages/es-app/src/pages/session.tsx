@@ -12,7 +12,7 @@ import { createLiveSession, errorText } from "../live-session"
 import FakeCaret from "../components/fake-caret"
 import { SessionChips } from "../components/session-chips"
 import { SessionPicker } from "../components/session-picker"
-import { insertMention, mentionQuery, rankSessions, tokenBefore } from "../session-mention"
+import { insertMention, mentionQuery, rankSessions, sessionLane, tokenBefore } from "../session-mention"
 import { RelativeLines } from "../components/relative-lines"
 import SessionInfo from "../components/session-info"
 import { sessionHref, useDashboard, type SessionRow } from "../state"
@@ -1214,7 +1214,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       const el = target()
       const active = query()
       if (!el || !active) return
-      const next = insertMention(el.value, active.start, el.selectionStart, row.id)
+      const next = insertMention(el.value, active.start, el.selectionStart, row.id, { title: row.title, lane: sessionLane(row.id, lineage(), lineageOwners()) })
       apply(el, next.text, next.caret)
     }
     const keyDown = (event: KeyboardEvent) => {

@@ -1,10 +1,10 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
-import { findMentions } from "../session-mention"
+import { findMentions, sessionLane } from "../session-mention"
 import { useDashboard } from "../state"
 import { invalidateTextareaLayout, textareaLayout } from "../textarea-layout"
 
 export const SessionChips = (props: { target: HTMLTextAreaElement | undefined; text: string; selection: readonly [number, number] }) => {
-  const { sessionRows } = useDashboard()
+  const { sessionRows, lineage, lineageOwners } = useDashboard()
   const [version, setVersion] = createSignal(0)
   createEffect(() => {
     const target = props.target
@@ -51,7 +51,7 @@ export const SessionChips = (props: { target: HTMLTextAreaElement | undefined; t
     <span class="session-chip-pill">
       <span class="session-chip-dot" data-live={chip.row?.live ? "1" : undefined} />
       <span class="session-chip-title">{chip.row?.title || chip.mention.id}</span>
-      <Show when={chip.row}>{(row) => <span class="session-chip-meta">{row().project || row().directory.split("/").filter(Boolean).at(-1) || row().directory}</span>}</Show>
+      <Show when={chip.row}>{(row) => <span class="session-chip-meta">{sessionLane(row().id, lineage(), lineageOwners()) ?? (row().project || row().directory.split("/").filter(Boolean).at(-1) || row().directory)}</span>}</Show>
     </span>
   </span>}</For>
 }

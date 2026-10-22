@@ -14,6 +14,9 @@ fixture.workspaceSessions = [
   { id: sameA, title: "Same title", directory: "/project/alpha", projectID: "", time: { created: 1, updated: Date.now() - 100 } },
   { id: sameB, title: "Same title", directory: "/project/beta", projectID: "", time: { created: 1, updated: Date.now() - 200 } },
 ]
+// The mentioned session's lane comes from an es handoff record, never its title.
+fixture.handoffs = [{ lane: "orchestrator", predecessor: `ses_${"P".repeat(26)}`, successor: mentioned }]
+const reference = `@${mentioned} (session "Orchestrator main" · lane orchestrator)`
 process.env.OPENCODE_URL = fixture.url
 process.env.ES_DASHBOARD_URL = fixture.url
 const vite = await createServer({ root: fileURLToPath(new URL("..", import.meta.url)), server: { host: "127.0.0.1", port: 0 } })
@@ -32,13 +35,18 @@ try {
   await expect(page.locator('.sidebar a[href*="/session/ses_a"]').first()).toBeVisible()
   await expect.poll(() => fixture.calls.filter((call) => call.path === "/session/ses_a/message").length).toBeGreaterThan(0)
   const baselineGets = fixture.calls.filter((call) => call.method === "GET" && (call.path.endsWith("/message") || call.path === `/session/${mentioned}`)).length
-  await editor().pressSequentially("@orch")
+  await editor().pressSequentially("ask @orch")
   await expect(picker().getByRole("option", { name: /Orchestrator main/ })).toBeVisible()
   expect(await picker().getByRole("option").allTextContents()).not.toContain("Composer fixture")
   await editor().press("Enter")
-  await expect(editor()).toHaveValue(`@${mentioned} `)
+  await expect(editor()).toHaveValue(`ask ${reference} `)
+  expect(await editor().evaluate((el) => [el.selectionStart, el.selectionEnd])).toEqual([`ask ${reference} `.length, `ask ${reference} `.length])
+  await editor().pressSequentially("now")
+  await expect(editor()).toHaveValue(`ask ${reference} now`)
+  for (let i = 0; i < 3; i++) await editor().press("Backspace")
   const chip = page.locator(".prompt-box .session-chip")
   await expect(chip).toContainText("Orchestrator main")
+  await expect(chip).toContainText("orchestrator")
   expect(await chip.evaluate((node) => {
     const rect = node.getBoundingClientRect()
     const box = node.parentElement.querySelector("textarea").getBoundingClientRect()
@@ -52,7 +60,7 @@ try {
   await expect(chip).toHaveCount(1)
   await editor().press("ArrowLeft")
   await editor().press("Backspace")
-  await expect(editor()).toHaveValue(" ")
+  await expect(editor()).toHaveValue("ask  ")
   await editor().fill("@same")
   const same = picker().getByRole("option")
   await expect(same).toHaveCount(2)
@@ -63,7 +71,7 @@ try {
   await editor().press("Control+p")
   await expect(same.nth(0)).toHaveAttribute("aria-selected", "true")
   await same.nth(1).dispatchEvent("mousedown", { button: 0 })
-  await expect(editor()).toHaveValue(`@${sameB} `)
+  await expect(editor()).toHaveValue(`@${sameB} (session "Same title") `)
   await editor().fill("@same")
   await editor().press("Escape")
   await expect(picker()).toHaveCount(0)
@@ -75,10 +83,10 @@ try {
   await expect(picker()).toHaveCount(0)
   expect(fixture.calls.filter((call) => call.method === "GET" && (call.path.endsWith("/message") || call.path === `/session/${mentioned}`))).toHaveLength(baselineGets)
   await editor().press("i")
-  await editor().fill(`@${mentioned} `)
+  await editor().fill(`ask ${reference} now`)
   await editor().press("Control+Enter")
   await expect.poll(() => fixture.calls.filter((call) => call.path === "/session/ses_a/input" && call.method === "POST").length).toBe(1)
-  expect(fixture.calls.find((call) => call.path === "/session/ses_a/input" && call.method === "POST").body.text).toContain(`@${mentioned}`)
+  expect(fixture.calls.find((call) => call.path === "/session/ses_a/input" && call.method === "POST").body.text).toBe(`ask ${reference} now`)
 
   const info = { id: "msg_zmention", sessionID: "ses_a", role: "assistant", agent: "build", parentID: "msg_user", providerID: "fixture", modelID: "test", path: { cwd: directory, root: directory }, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: Date.now() } }
   fixture.emit("message.updated", { info })
