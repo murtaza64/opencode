@@ -30,7 +30,11 @@ export const startGateway = async (options: {
 export const pairingCode = async (file: string) => {
   const saved = await readFile(file, "utf8").catch(() => "")
   if (normalizePairingCode(saved).length >= 16) return saved.trim()
-  const code = createPairingCode()
+  return storePairingCode(file, createPairingCode())
+}
+
+// The code is a credential: it lives only in an owner-only file and is never logged.
+export const storePairingCode = async (file: string, code: string) => {
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 })
   await writeFile(file, `${code}\n`, { mode: 0o600 })
   await chmod(file, 0o600)
@@ -49,6 +53,7 @@ if (import.meta.main) {
       root: { type: "string", default: path.resolve(import.meta.dir, "../dist/renderer") },
     },
   })
+  const fromEnvironment = !!process.env.ES_REMOTE_PAIRING_CODE
   const code = process.env.ES_REMOTE_PAIRING_CODE || (await pairingCode(args.values["code-file"]))
   const gateway = await startGateway({
     host: args.values.host,
@@ -64,7 +69,11 @@ if (import.meta.main) {
   })
   const port = new URL(gateway.origin).port
   console.info(`Editspace gateway ${gateway.origin}`)
-  console.info(`Pairing code ${code}`)
+  console.info(
+    fromEnvironment
+      ? "Pairing code: from ES_REMOTE_PAIRING_CODE"
+      : `Pairing code: read it from ${args.values["code-file"]} (owner-only); delete that file to revoke paired devices`,
+  )
   console.info(`USB/emulator: adb reverse tcp:${port} tcp:${port}, then connect the app to http://127.0.0.1:${port}`)
   const stop = () => void gateway.close().finally(() => process.exit(0))
   process.on("SIGINT", stop)

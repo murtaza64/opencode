@@ -9,7 +9,7 @@
     "build:apk": "sh scripts/build-apk.sh",
     "gateway": "bun src/gateway.ts",
     "preview": "bun scripts/preview.ts",
-    "test": "node test/mobile.browser.mjs",
+    "test": "bun test src && node test/mobile.browser.mjs",
     "typecheck": "tsgo --noEmit",
     "test:emulator": "node test/emulator.mjs"
   },

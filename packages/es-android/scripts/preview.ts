@@ -2,12 +2,13 @@ import { existsSync } from "node:fs"
 import path from "node:path"
 import { parseArgs } from "node:util"
 import { createPairingCode } from "../../es-desktop/src/pairing"
-import { startGateway } from "../src/gateway"
+import { startGateway, storePairingCode } from "../src/gateway"
 // @ts-expect-error untyped fixture module shared with es-app browser tests
 import { createFixture, directory, session } from "../../es-app/test/composer-fixture.mjs"
 
 // Fixture-only gateway: no model provider, daemon, or production service is contacted.
 const args = parseArgs({ options: { port: { type: "string", default: "0" }, code: { type: "string" } } })
+// Never echo --code; it is accepted only so tests can pin a known fixture credential.
 const root = path.resolve(import.meta.dir, "../dist/renderer")
 if (!existsSync(path.join(root, "index.html"))) throw new Error("Run `bun run build:web` first")
 
@@ -55,7 +56,9 @@ fixture.calls.push = (...calls: { method: string; path: string; body: { parts?: 
   return push(...calls)
 }
 
-const code = args.values.code ?? createPairingCode()
+// Fresh per run so a stale preview code never pairs; kept beside the build output, owner-only.
+const codeFile = path.resolve(import.meta.dir, "../build/preview-pairing-code")
+const code = await storePairingCode(codeFile, args.values.code ?? createPairingCode())
 const gateway = await startGateway({
   host: "127.0.0.1",
   port: Number(args.values.port),
@@ -65,8 +68,8 @@ const gateway = await startGateway({
   dashboard: fixture.url,
 })
 console.info(`Preview ${gateway.origin}`)
-console.info(`Pairing code ${code}`)
-console.info(`Fixture ${fixture.url} (PID ${process.pid}); stop with kill ${process.pid}`)
+console.info(`Pairing code: read it from ${codeFile} (owner-only)`)
+console.info(`Fixture ${fixture.url}; stop with kill ${process.pid}`)
 const stop = () =>
   void Promise.all([gateway.close(), fixture.close()]).finally(() => process.exit(0))
 process.on("SIGINT", stop)

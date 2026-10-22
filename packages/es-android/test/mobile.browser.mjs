@@ -42,6 +42,7 @@ fixture.messages = [
 ]
 
 let gateway
+const gatewayOutput = []
 const startGateway = async () => {
   gateway = spawn("bun", ["src/gateway.ts", "--port", String(port)], {
     cwd: root,
@@ -50,7 +51,10 @@ const startGateway = async () => {
   })
   await new Promise((resolve, reject) => {
     gateway.once("exit", (status) => reject(new Error(`Gateway exited ${status}`)))
-    gateway.stdout.on("data", (chunk) => String(chunk).includes("Editspace gateway") && resolve())
+    gateway.stdout.on("data", (chunk) => {
+      gatewayOutput.push(String(chunk))
+      if (String(chunk).includes("Editspace gateway")) resolve()
+    })
   })
 }
 const stopGateway = async () => {
@@ -142,6 +146,8 @@ try {
   await page.screenshot({ path: path.join(artifacts, "mobile-sent.png") })
   pass("send reaches the host through the gateway and clears the draft")
   expect(fixture.unexpected).toEqual([])
+  expect(gatewayOutput.join("")).not.toContain(code)
+  pass("gateway output never contains the pairing code")
 } finally {
   await browser.close()
   await stopGateway().catch(() => undefined)

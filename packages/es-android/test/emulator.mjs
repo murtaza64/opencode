@@ -56,6 +56,7 @@ fixture.messages = [
 ]
 
 let gateway
+const gatewayOutput = []
 const startGateway = async () => {
   gateway = spawn("bun", ["src/gateway.ts", "--port", String(port)], {
     cwd: root,
@@ -64,7 +65,10 @@ const startGateway = async () => {
   })
   await new Promise((resolve, reject) => {
     gateway.once("exit", (status) => reject(new Error(`Gateway exited ${status}`)))
-    gateway.stdout.on("data", (chunk) => String(chunk).includes("Editspace gateway") && resolve())
+    gateway.stdout.on("data", (chunk) => {
+      gatewayOutput.push(String(chunk))
+      if (String(chunk).includes("Editspace gateway")) resolve()
+    })
   })
 }
 const stopGateway = async () => {
@@ -266,6 +270,8 @@ try {
   await waitFor(text("Forget this gateway"), "connect screen from back")
   pass("back at the WebView root returns to the gateway screen")
   expect(fixture.unexpected).toEqual([])
+  expect(gatewayOutput.join("")).not.toContain(code)
+  pass("gateway output never contains the pairing code")
 } finally {
   await stopGateway().catch(() => undefined)
   await fixture.close()
