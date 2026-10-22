@@ -1,6 +1,5 @@
 .direct-composer { display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; }
-.direct-composer > .ta-wrap { flex: 1; min-height: 110px; }
-.direct-composer textarea { min-height: 110px; }
+.direct-composer textarea { min-height: clamp(72px, 16dvh, 160px); }
 .direct-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; padding-block-start: 4px; border-block-start: 1px solid var(--surface0); }
 .direct-session-actions { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; min-width: 0; }
 .direct-session-actions button, .direct-recover { font-size: 11px; padding: 4px 8px; min-height: 28px; background: transparent; }
@@ -29,7 +28,7 @@
 .direct-feedback { font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
 .direct-composer button:focus-visible, .direct-composer select:focus-visible { outline: 2px solid var(--lavender); outline-offset: 1px; }
 .float-editor > .direct-composer { flex: 1; min-height: 0; padding: 8px 12px; overflow-y: auto; }
-.float-editor .direct-composer > .ta-wrap { min-height: 160px; }
+.float-editor .direct-composer :is(.direct-draft, .direct-edit) > .ta-wrap { min-height: 160px; }
 @media (max-width: 600px) {
   .direct-session-actions button { padding: 4px 6px; }
   .direct-send { flex-wrap: wrap; justify-content: flex-end; }
@@ -38,3 +37,16 @@
 @media (pointer: coarse) {
   .direct-composer button, .direct-model select { min-height: 44px; }
 }
+.direct-draft { display: flex; flex-direction: column; gap: 6px; flex: 1; min-height: 0; }
+.direct-draft[hidden], .direct-send[hidden] { display: none; }
+.direct-draft > .ta-wrap { flex: 1; min-height: clamp(72px, 16dvh, 160px); }
+.direct-edit { display: flex; flex-direction: column; gap: 6px; flex: 1; min-height: 0; }
+.direct-edit-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--yellow); }
+.direct-edit-head select { height: 26px; border: 1px solid var(--surface1); background: var(--mantle); color: var(--text); font: 11px var(--font-sans); padding: 2px 4px; }
+.direct-edit .ta-wrap { flex: 1; min-height: clamp(72px, 16dvh, 160px); }
+.direct-composer .direct-edit textarea, .direct-composer .direct-edit textarea:focus { border-color: var(--yellow); }
+.direct-edit-current { margin: 0; font-size: 11px; color: var(--subtext0); overflow-wrap: anywhere; }
+.direct-edit .err { margin: 0; font-size: 11px; overflow-wrap: anywhere; }
+.direct-edit-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; flex-wrap: wrap; }
+.direct-edit-actions > button:not(.direct-primary) { font-size: 11px; padding: 4px 8px; min-height: 28px; background: transparent; color: var(--subtext1); }
+.direct-edit-actions > button:not(.direct-primary):hover { background: var(--surface0); }

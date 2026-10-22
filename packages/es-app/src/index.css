@@ -1570,10 +1570,6 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .receipts-refresh { margin-inline-start: auto; padding: 1px 8px; font-size: 13px; line-height: 1.4; }
 .input-receipts li { padding-block: 5px; }
 .receipt-row { display: flex; align-items: flex-start; gap: 8px; }
-.input-edit { border-block-start: 1px solid var(--surface0); padding-block: 8px; }
-.input-edit label { display: block; margin-block-end: 8px; }
-.input-edit textarea { display: block; inline-size: 100%; min-block-size: 6em; resize: vertical; box-sizing: border-box; }
-.input-edit p { overflow-wrap: anywhere; }
 .receipt-kind {
   flex: none;
   font-family: var(--font-mono);

@@ -553,6 +553,28 @@ test("lost update acknowledgement survives reload and retries the exact PATCH co
   expect(restored.state.inputEdits.human.expectedRevision).toBe(1)
 })
 
+test("the composer edits one pending input at a time, and an unknown update is never swapped out", async () => {
+  const first = pending("first", "one", "queue")
+  const second = pending("second", "two", "queue")
+  const { composer } = harness((request) => {
+    if (request.method === "PATCH") throw new Error("ack lost")
+    const item = [first, second].find((item) => request.url.pathname.endsWith(`/${item.requestID}`))
+    return Response.json(item ?? { items: [first, second], next: null })
+  }, {}, { ...capabilities, sessionInput: { ...capabilities.sessionInput, update: true } })
+  await composer.loadCapabilities()
+  await composer.refreshInputs()
+  composer.editInput("first")
+  composer.changeInputEdit("first", { text: "first edit" })
+  composer.editInput("second")
+  expect(composer.editingInput()).toBe("second")
+  expect(composer.state.inputEdits.first).toMatchObject({ text: "first edit", open: false })
+  await composer.saveInput("second")
+  expect(composer.state.inputEdits.second.status).toBe("unknown")
+  composer.editInput("first")
+  expect(composer.editingInput()).toBe("second")
+  expect(composer.state.inputEdits.first.open).toBe(false)
+})
+
 test("cancelled inline editing retains its draft and excludes peer mail and terminal inputs", async () => {
   const human = pending("human", "original", "queue")
   const peer = { ...pending("peer", "mail", "queue"), source: { type: "editspace-mail", id: "mail", sender: "a", recipient: "b" } }

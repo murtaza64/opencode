@@ -723,7 +723,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
 
   const send = async (action?: ComposerAction) => {
     const s = session()
-    if (!s || !connected() || nudgePhase() || aborting()) return
+    // While a pending input is open for editing, the composer saves that input and never sends.
+    if (!s || !connected() || nudgePhase() || aborting() || composer.editingInput()) return
     const editor = floating() ? floatEl : promptEl
     if (editor) saveSelection(editor)
     setError("")
@@ -1117,6 +1118,8 @@ function SessionView(props: { sessionID: string; directory: string }) {
   // drops below clientHeight, so collapse the box briefly to measure the content itself.
   const nearFull = (el: HTMLTextAreaElement) => {
     const box = el.clientHeight
+    // A hidden draft (a pending-input edit is open) has no box to fill.
+    if (!box) return false
     if (el.scrollHeight > box) return true
     const style = [el.style.height, el.style.minHeight] as const
     const top = el.scrollTop

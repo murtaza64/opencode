@@ -1198,6 +1198,11 @@ export const createComposer = (sessionID: string, directory: string, dependencie
   const editInput = (id: string) => {
     const receipt = state.receipts.find((item) => item.requestID === id)
     if (!state.capabilities?.sessionInput?.update || receipt?.state !== "pending" || receipt.source) return
+    // The main composer edits one pending input at a time; other edits keep their text, closed.
+    // An update in flight or with an unknown outcome stays on screen until resolved.
+    const others = Object.keys(state.inputEdits).filter((other) => other !== id && state.inputEdits[other]!.open)
+    if (others.some((other) => ["saving", "unknown"].includes(state.inputEdits[other]!.status))) return
+    others.forEach((other) => setState("inputEdits", other, "open", false))
     const previous = state.inputEdits[id]
     setState("inputEdits", id, previous ? { ...previous, open: true } : {
       text: receipt.text, delivery: receipt.delivery, expectedRevision: receipt.revision ?? 0,
@@ -1540,6 +1545,8 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     cancelInput,
     editInput,
     saveInput,
+    /** The pending input open in the main composer, if any. */
+    editingInput: () => Object.keys(state.inputEdits).find((id) => state.inputEdits[id]!.open),
     changeInputEdit: (id: string, value: Partial<Pick<ComposerInputEdit, "text" | "delivery">>) => {
       const edit = state.inputEdits[id]
       if (!edit || edit.status === "saving" || edit.status === "unknown") return

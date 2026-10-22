@@ -26,7 +26,9 @@ const patches = (id) => fixture.calls.filter((call) => call.method === "PATCH" &
 const posts = () => fixture.calls.filter((call) => call.method === "POST" && call.path === "/session/ses_a/input")
 const open = async (id) => row(id).getByRole("button", { name: /^Edit / }).click()
 const save = async (id) => edit(id).getByRole("button", { name: "Save pending input" }).click()
-const editor = page.getByRole("textbox", { name: "Message", exact: true })
+// The ordinary draft stays mounted (hidden) while an edit occupies the composer.
+const editor = page.locator(".prompt-box textarea[aria-label='Message']")
+const primary = page.locator(".prompt-box .direct-send .direct-primary")
 try {
   await page.goto(preview.url)
   await expect(row("human-queue")).toBeVisible()
@@ -42,16 +44,23 @@ try {
     transfer.items.add(new File([Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0))], "draft.png", { type: "image/png" }))
     el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: transfer, bubbles: true }))
   })
-  await expect(page.locator(".prompt-box .attachment-chip")).toHaveCount(1)
+  await expect(page.locator(".prompt-box .direct-draft .attachment-chip")).toHaveCount(1)
   const unchanged = async () => {
     await expect(editor).toHaveValue("Main unsent text")
-    await expect(page.locator(".prompt-box .attachment-chip")).toHaveCount(1)
+    await expect(page.locator(".prompt-box .direct-draft .attachment-chip")).toHaveCount(1)
     await expect(page.locator(".prompt-box .direct-model-name")).toHaveText("next")
-    await expect(page.getByRole("button", { name: "Steer", exact: true })).toHaveAttribute("data-keyboard-target", "true")
+    await expect(primary).toHaveAttribute("aria-label", "Steer")
     expect(await editor.evaluate((el) => [el.selectionStart, el.selectionEnd])).toEqual([2, 7])
   }
 
   await open("human-queue")
+  // The edit takes over the composer: the draft and send controls are hidden, the edit text is focused.
+  await expect(page.locator(".prompt-box").getByRole("textbox", { name: "Message", exact: true })).toHaveCount(0)
+  await expect(page.locator(".prompt-box").getByRole("button", { name: "Steer", exact: true })).toHaveCount(0)
+  await expect(page.locator(".prompt-box").getByRole("button", { name: "More send options", exact: true })).toHaveCount(0)
+  await expect(edit("human-queue").getByRole("textbox", { name: "Pending input text" })).toBeFocused()
+  await expect(edit("human-queue").getByRole("textbox", { name: "Pending input text" })).toHaveValue("Original queue")
+  await expect(row("human-steer").getByRole("button", { name: /^Edit / })).toBeDisabled()
   await edit("human-queue").getByRole("textbox", { name: "Pending input text" }).fill("Changed to steer")
   await edit("human-queue").getByRole("combobox", { name: "Pending input delivery" }).selectOption("steer")
   fixture.holdInputUpdate = true
@@ -70,15 +79,18 @@ try {
   await open("human-steer")
   await edit("human-steer").getByRole("textbox", { name: "Pending input text" }).fill("Changed to queue")
   await edit("human-steer").getByRole("combobox", { name: "Pending input delivery" }).selectOption("queue")
-  await save("human-steer")
+  // Cmd/Ctrl+Enter saves the edit; it never sends a new message.
+  await edit("human-steer").getByRole("textbox", { name: "Pending input text" }).press("Control+Enter")
   await expect(row("human-steer").locator(".receipt-kind")).toHaveText("queue")
   expect(patches("human-steer")[0].body).toMatchObject({ expectedRevision: 0, text: "Changed to queue", delivery: "queue" })
   await unchanged()
 
   await open("human-queue")
   await edit("human-queue").getByRole("textbox", { name: "Pending input text" }).fill("Draft after cancel")
-  await edit("human-queue").getByRole("button", { name: "Cancel edit" }).click()
+  // Escape cancels; the ordinary draft comes back unchanged.
+  await edit("human-queue").getByRole("textbox", { name: "Pending input text" }).press("Escape")
   await expect(edit("human-queue")).toHaveCount(0)
+  await expect(page.locator(".prompt-box").getByRole("textbox", { name: "Message", exact: true })).toHaveValue("Main unsent text")
   await open("human-queue")
   await expect(edit("human-queue").getByRole("textbox", { name: "Pending input text" })).toHaveValue("Draft after cancel")
   await edit("human-queue").getByRole("button", { name: "Cancel edit" }).click()
@@ -93,6 +105,8 @@ try {
   await expect(edit("promoted")).toContainText("promoted")
   await expect(edit("promoted").getByRole("button", { name: "Keep edit against current revision" })).toHaveCount(0)
   await unchanged()
+  // One edit at a time: close the conflicted edit before editing another input.
+  await edit("promoted").getByRole("button", { name: "Cancel edit" }).click()
 
   await open("concurrent")
   await edit("concurrent").getByRole("textbox", { name: "Pending input text" }).fill("My concurrent draft")
@@ -110,6 +124,13 @@ try {
   fixture.loseInputUpdateAck = true
   await save("lost-ack")
   await expect(edit("lost-ack").getByRole("button", { name: "Retry same update" })).toBeVisible()
+  // An unknown update survives reload in the composer, locked, next to the untouched draft.
+  await page.reload()
+  await expect(edit("lost-ack").getByRole("button", { name: "Retry same update" })).toBeVisible()
+  await expect(edit("lost-ack").getByRole("textbox", { name: "Pending input text" })).toBeDisabled()
+  await expect(edit("lost-ack").getByRole("textbox", { name: "Pending input text" })).toHaveValue("Update with lost ACK")
+  await expect(editor).toHaveValue("Main unsent text")
+  expect(patches("lost-ack")).toHaveLength(1)
   await edit("lost-ack").getByRole("button", { name: "Retry same update" }).click()
   await expect(edit("lost-ack")).toHaveCount(0)
   expect(patches("lost-ack")).toHaveLength(2)

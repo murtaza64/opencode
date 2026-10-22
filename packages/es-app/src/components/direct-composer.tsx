@@ -1,5 +1,6 @@
 import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js"
 import type { Composer, ComposerAction } from "../composer"
+import { ComposerImages } from "./composer-images"
 import "./direct-composer.css"
 
 // One primary action (Send when idle, Steer while busy); Queue and Aside sit in
@@ -81,20 +82,26 @@ export const DirectComposer = (props: {
       </kbd>
     </button>
   )
+  // Editing a pending input replaces the writing area in place. The ordinary
+  // draft stays mounted but hidden, so its text, images and selection are untouched.
+  const editing = () => props.composer.editingInput()
   return (
-    <div class="direct-composer" data-composer-controls>
-      {props.attachments}
-      {props.editor}
-      <Show when={other().text || other().images.length}>
-        <button class="direct-recover" onClick={props.restoreDraft}>
-          Restore saved {state.visibleBuffer === "task" ? "Aside" : "task"} draft
-        </button>
-      </Show>
+    <div class="direct-composer" classList={{ editing: !!editing() }} data-composer-controls>
+      <div class="direct-draft" hidden={!!editing()}>
+        {props.attachments}
+        {props.editor}
+        <Show when={other().text || other().images.length}>
+          <button class="direct-recover" onClick={props.restoreDraft}>
+            Restore saved {state.visibleBuffer === "task" ? "Aside" : "task"} draft
+          </button>
+        </Show>
+      </div>
+      <Show when={editing()}>{(id) => <PendingEdit composer={props.composer} connected={props.connected} id={id()} />}</Show>
       <div class="direct-bar">
         <div class="direct-session-actions" role="group" aria-label="Session actions">
           {props.sessionActions}
         </div>
-        <div class="direct-send" role="group" aria-label="Send">
+        <div class="direct-send" role="group" aria-label="Send" hidden={!!editing()}>
           <span class="direct-session-metadata">{props.sessionMetadata}</span>
           <div class="direct-model" role="group" aria-label="Model">
             {props.children}
@@ -153,5 +160,66 @@ export const DirectComposer = (props: {
         </button>
       </Show>
     </div>
+  )
+}
+
+const PendingEdit = (props: { composer: Composer; connected: boolean; id: string }) => {
+  const state = props.composer.state
+  const edit = () => state.inputEdits[props.id]!
+  const current = () => state.receipts.find((item) => item.requestID === props.id)
+  const locked = () => edit().status === "saving" || edit().status === "unknown"
+  const save = () => {
+    if (props.connected && edit().status !== "saving" && edit().status !== "conflict") void props.composer.saveInput(props.id)
+  }
+  const close = () => {
+    if (edit().status !== "saving") props.composer.closeInputEdit(props.id)
+  }
+  return (
+    <section class="direct-edit" aria-label="Edit pending input" data-edit-request-id={props.id}>
+      <div class="direct-edit-head">
+        <b>Editing pending message</b>
+        <select aria-label="Pending input delivery" value={edit().delivery} disabled={locked()}
+          onChange={(event) => props.composer.changeInputEdit(props.id, { delivery: event.currentTarget.value === "queue" ? "queue" : "steer" })}>
+          <option value="steer">Steer</option>
+          <option value="queue">Queue</option>
+        </select>
+        <Show when={edit().status === "saving"}><span class="dim" role="status">Saving…</span></Show>
+      </div>
+      <Show when={edit().status === "conflict" && current()}>
+        {(receipt) => <p class="direct-edit-current" dir="auto">Now {receipt().state}: {receipt().text}</p>}
+      </Show>
+      <div class="ta-wrap">
+        <textarea dir="auto" aria-label="Pending input text" value={edit().text} disabled={locked()}
+          ref={(el) => queueMicrotask(() => { if (!el.disabled) el.focus() })}
+          onInput={(event) => props.composer.changeInputEdit(props.id, { text: event.currentTarget.value })}
+          onKeyDown={(event) => {
+            if (event.isComposing) return
+            // Keep composer shortcuts (send, Cmd+M target cycling) away from an edit.
+            if ((event.metaKey || event.ctrlKey) && event.code === "KeyM") event.preventDefault()
+            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+              event.preventDefault()
+              save()
+            }
+            if (event.key === "Escape") {
+              event.preventDefault()
+              event.stopPropagation()
+              close()
+            }
+          }} />
+      </div>
+      <ComposerImages images={current()?.images} />
+      <Show when={edit().error}><p class="err" role="alert">{edit().error}</p></Show>
+      <div class="direct-edit-actions">
+        <Show when={edit().status === "conflict" && current()?.state === "pending"}>
+          <button onClick={() => props.composer.rebaseInputEdit(props.id)}>Keep edit against current revision</button>
+        </Show>
+        <button aria-label="Cancel edit" disabled={edit().status === "saving"} onClick={close}>Cancel</button>
+        <button class="direct-primary" aria-label={edit().status === "unknown" ? "Retry same update" : "Save pending input"}
+          disabled={!props.connected || edit().status === "saving" || edit().status === "conflict"} onClick={save}>
+          <span>{edit().status === "unknown" ? "Retry update" : "Save"}</span>
+          <kbd class="direct-button-hint" aria-hidden="true">⌘↵</kbd>
+        </button>
+      </div>
+    </section>
   )
 }

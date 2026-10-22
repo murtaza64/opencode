@@ -15,15 +15,17 @@ try {
     // The model action and the primary send button keep their place when the session turns busy.
     const geometry = () => page.locator(".prompt-box .direct-send").evaluate((el) => [".direct-change-model", ".direct-primary", ".direct-more"]
       .map((selector) => { const r = el.querySelector(selector).getBoundingClientRect(); return [r.x, r.y, r.width, r.height] }))
+    // Measure once loading feedback below the bar has cleared.
+    await expect(page.locator(".prompt-box .direct-feedback")).toHaveCount(0)
     const idle = await geometry()
     await expect(page.getByRole("button", { name: "More send options", exact: true })).toHaveCount(0)
     preview.fixture.setStatus("busy")
     await expect(page.getByRole("button", { name: "Steer", exact: true })).toBeVisible()
     await expect(page.getByRole("button", { name: "More send options", exact: true })).toBeVisible()
-    expect(await geometry()).toEqual(idle)
+    await expect.poll(geometry).toEqual(idle)
     preview.fixture.setStatus("idle")
     await expect(page.getByRole("button", { name: "Send", exact: true })).toBeVisible()
-    expect(await geometry()).toEqual(idle)
+    await expect.poll(geometry).toEqual(idle)
     await context.close()
   }
   expect(preview.fixture.calls.filter((call) => call.method !== "GET")).toEqual([])
