@@ -7,13 +7,13 @@ import { SessionPrompt } from "@/session/prompt"
 import { SessionRunState } from "@/session/run-state"
 import { SessionSupersession } from "@/session/supersession"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
-import { provideTmpdirServer } from "../fixture/fixture"
+import { provideInstance, provideTmpdirServer, testInstanceStoreLayer, tmpdirScoped } from "../fixture/fixture"
 import { pollWithTimeout, testEffect } from "../lib/effect"
 import { reply, TestLLMServer } from "../lib/llm-server"
 import { testProviderConfig } from "../lib/test-provider"
 import { httpApiLayer, requestInDirectory } from "./httpapi-layer"
 
-const it = testEffect(Layer.mergeAll(httpApiLayer, AppNodeBuilder.build(LayerNode.group([Session.node, SessionPrompt.node, SessionRunState.node, SessionSupersession.node])), AppNodeBuilder.build(CrossSpawnSpawner.node), TestLLMServer.layer))
+const it = testEffect(Layer.mergeAll(httpApiLayer, AppNodeBuilder.build(LayerNode.group([Session.node, SessionPrompt.node, SessionRunState.node, SessionSupersession.node])), AppNodeBuilder.build(CrossSpawnSpawner.node), TestLLMServer.layer, testInstanceStoreLayer))
 
 it.live("idle supersession is durable, idempotent and rejects every legacy writer while preserving reads", () =>
   provideTmpdirServer(({ dir, llm }) => Effect.gen(function* () {
@@ -239,3 +239,57 @@ it.live("deleting a fenced successor is refused until its predecessor is gone", 
     expect((yield* remove(successor.id)).status).toBe(200)
     expect((yield* requestInDirectory(`/session/${successor.id}`, dir)).status).toBe(404)
   }), { config: testProviderConfig }), 20_000)
+
+it.live("an outside-anchored owner handoff fences across directories only when the caller opts in", () =>
+  provideTmpdirServer(({ dir }) => Effect.gen(function* () {
+    const original = yield* Session.use.create({ title: "Coordinator" })
+    const lane = yield* tmpdirScoped({ git: true })
+    const [successor, child, archived] = yield* provideInstance(lane)(Effect.gen(function* () {
+      const successor = yield* Session.use.create({ title: "Lane successor" })
+      const child = yield* Session.use.create({ title: "Child", parentID: successor.id })
+      const archived = yield* Session.use.create({ title: "Archived" })
+      yield* Session.use.setArchived({ sessionID: archived.id, time: Date.now() })
+      return [successor, child, archived] as const
+    }))
+    expect(successor.directory).toBe(lane)
+    const fence = (body: unknown) => requestInDirectory(`/session/${original.id}/supersede`, dir, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    })
+    // Default scope keeps the same-directory boundary.
+    expect((yield* fence({ successor: successor.id })).status).toBe(400)
+    expect((yield* fence({ successor: successor.id, scope: "same-directory" })).status).toBe(400)
+    // HTTP routes a session to its own directory; the service still refuses a source outside its Instance.
+    const supersession = yield* SessionSupersession.Service
+    expect(yield* provideInstance(lane)(supersession.request(original.id, successor.id, "cross-directory").pipe(
+      Effect.match({ onFailure: (error) => error._tag, onSuccess: () => "accepted" }),
+    ))).toBe("SessionSupersessionInvalid")
+    // A cross-directory target must be an existing, unarchived top-level session.
+    for (const target of [child.id, archived.id, "ses_doesnotexist000000000000"]) {
+      expect((yield* fence({ successor: target, scope: "cross-directory" })).status).toBe(400)
+    }
+    expect(yield* supersession.get(original.id)).toBeUndefined()
+    const post = (suffix: string, body: unknown) => requestInDirectory(`/session/${original.id}/${suffix}`, dir, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    })
+
+    const committed = yield* fence({ successor: successor.id, scope: "cross-directory" })
+    expect(committed.status).toBe(200)
+    expect(yield* committed.json).toEqual({ sessionID: original.id, successor: successor.id, state: "committed" })
+    // A lost ACK retry is idempotent under either scope; a different successor stays refused.
+    expect(yield* (yield* fence({ successor: successor.id, scope: "cross-directory" })).json).toMatchObject({ state: "committed" })
+    expect(yield* (yield* fence({ successor: successor.id })).json).toMatchObject({ state: "committed" })
+    expect(yield* (yield* fence({ successor: child.id, scope: "cross-directory" })).json)
+      .toMatchObject({ _tag: "SessionSupersededError", successor: successor.id })
+    // Only the source closes; nothing runs or moves in the destination.
+    const closed = yield* post("input", { requestID: "after-fence", delivery: "queue", text: "closed" })
+    expect(closed.status).toBe(409)
+    expect(yield* closed.json).toMatchObject({ _tag: "SessionSupersededError", successor: successor.id, state: "committed" })
+    expect((yield* requestInDirectory(`/session/${original.id}`, dir)).status).toBe(200)
+    expect(yield* supersession.get(successor.id)).toBeUndefined()
+    const lanePrompt = yield* requestInDirectory(`/session/${successor.id}/input`, lane, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestID: "successor-kickoff", delivery: "queue", text: "kickoff" }),
+    })
+    expect(lanePrompt.status).toBe(200)
+    expect((yield* requestInDirectory(`/session/${successor.id}`, lane)).status).toBe(200)
+  }), { config: testProviderConfig }), 30_000)
