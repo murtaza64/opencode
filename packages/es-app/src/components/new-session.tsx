@@ -141,7 +141,6 @@ export const NewSession = (props: { compact?: boolean }) => {
             <button type="submit" class="new-session-create" aria-label={pending() ? "Creating…" : "Create session"} disabled={pending() || !directory()}>
               {pending() ? "Creating…" : "Create"}
             </button>
-            <span class="dim">esc closes</span>
           </div>
         </Show>
         <Show when={error()}><div class="err" role="alert">{error()}</div></Show>

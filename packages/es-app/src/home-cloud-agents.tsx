@@ -180,7 +180,7 @@ export default function HomeCloudAgents(props: { project?: string; onCount: (n: 
   })))
   const age = (checked?: number) => { cloud.now(); return checked ? `checked ${ago(checked)}` : "never checked" }
 
-  return <section aria-label="Cloud agents"><div class="home-section"><h2>Cloud agents <span>{visiblePins().length}</span></h2><span class="home-muted">Pinned lane owners only · read-only snapshots</span></div>
+  return <section aria-label="Cloud agents"><div class="home-section"><h2>Cloud agents <span>{visiblePins().length}</span></h2></div>
     <Show when={cloud.pinError()}><p class="home-source" role="status">{cloud.pinError()}</p></Show>
     <div class="home-actions"><button disabled={cloud.loading() || !cloud.scopes().length} onClick={() => void cloud.refresh()}>Refresh cloud lanes</button></div>
     <Show when={cloud.loading()}><p class="home-source">Checking bounded cloud lane sources…</p></Show>

@@ -36,7 +36,6 @@ export const DirectComposer = (props: {
         <div class="direct-session-actions" role="group" aria-label="Session actions">
           {props.sessionActions}
           <span class="direct-session-metadata">
-            <span class="direct-active-agent">Active agent: {props.activeAgent ?? "session default"}</span>
             {props.sessionMetadata}
           </span>
         </div>
