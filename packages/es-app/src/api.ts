@@ -341,6 +341,10 @@ export type MailDelivery = {
 }
 export type MailTimeline = { editspace: string; lane: string; messages: MailMessage[] }
 export type Handoff = { lane: string; predecessor: string; successor: string }
+export type LaneProvenance = {
+  delegations: { lane: string; parent: string; session: string | null; status: string }[]
+  spawned: { lane: string; by: string }[]
+}
 export type MailSubscription = { selector: string; sender: string; kind: string; mode: "actionable" | "passive" | "mute" }
 // One Wingman (cloud) lane as es-dashboard reports it: the lane record's
 // fields, all optional strings. See dotfiles docs/editspace-lanes.md.
@@ -466,6 +470,9 @@ export const es = {
       method: "DELETE", headers: { "content-type": "application/json" },
       body: JSON.stringify({ recipient, selector: subscription.selector, sender: subscription.sender, kind: subscription.kind }),
     }).then(statusJson<unknown>),
+  // Explicit lane provenance: delegation parents and first spawners (see es-dashboard).
+  laneProvenance: (name: string): Promise<LaneProvenance> =>
+    fetch(`/es/api/lane-provenance?es=${encodeURIComponent(name)}`).then(statusJson<LaneProvenance>),
   // The dashboard must create the handoff document, spawn the successor, and
   // transfer the lane owner as one server-side operation before returning.
   handoffs: (name: string): Promise<{ handoffs: Handoff[] }> =>

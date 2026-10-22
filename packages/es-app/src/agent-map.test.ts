@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { buildAgentMap, type AgentStatus, type MapInput, type MapSession } from "./agent-map"
+import { buildAgentMap, flattenAgents, layoutMap, linkOrigins, mailEdges, mailParty, NODE, stateEvents, type AgentStatus, type MapInput, type MapMail, type MapSession } from "./agent-map"
 
 const now = 10 * 86_400_000
 const sessions: MapSession[] = [
@@ -101,4 +101,132 @@ test("cloud owners render as cloud nodes, never as local sessions", () => {
 test("active filter keeps failed and attention-needing agents however old", () => {
   const squadron = buildAgentMap(input({ filter: "active", status: (id) => (id === "ses_stale" ? "failed" : "idle") })).find((cluster) => cluster.project === "squadron")!
   expect(squadron.standalone.map((node) => node.session.id)).toEqual(["ses_squadron", "ses_stale"])
+})
+
+const mail = (id: string, from: string, to: string, at: number): MapMail => ({ id, editspace: "opencode", from, to, at, kind: "notice", text: id })
+
+test("network nodes are real agents with subagents under their parent, never synthetic coordinators", () => {
+  const agents = flattenAgents(buildAgentMap(input()))
+  expect(agents.map((agent) => [agent.kind, agent.name, agent.depth])).toEqual([
+    ["lane", "home-agents", 0],
+    ["subagent", "explore subagent", 1],
+    ["session", "Squadron V2 design", 0],
+    ["session", "Old standalone", 0],
+  ])
+  expect(agents[0]).toMatchObject({ state: "working", tone: "working", runtime: "local" })
+  expect(agents[1]!.parent).toBe(agents[0]!.key)
+})
+
+test("each project is a boxed region: lane owners on top with spawned subagents beneath, unattached sessions below a divider", () => {
+  const layout = layoutMap(flattenAgents(buildAgentMap(input())))
+  expect(layout.clusters.map((cluster) => [cluster.project, cluster.cloud, cluster.count])).toEqual([["opencode", false, 2], ["squadron", false, 2]])
+  for (const agent of layout.agents) {
+    const box = layout.clusters.find((cluster) => cluster.project === agent.project)!
+    expect(agent.x).toBeGreaterThanOrEqual(box.x)
+    expect(agent.x + NODE.width).toBeLessThanOrEqual(box.x + box.width)
+    expect(agent.y + NODE.height).toBeLessThanOrEqual(box.y + box.height)
+  }
+  const [lane, child] = layout.agents
+  expect(child!.y).toBeGreaterThan(lane!.y)
+  expect(child!.x).toBe(lane!.x)
+  expect(layout.hierarchy).toHaveLength(1)
+  // No lane owners in squadron: a single unattached row, so no divider.
+  expect(layout.clusters[1]!.divider).toBeUndefined()
+})
+
+test("unattached sessions sit below the lane owner row and its subagent trees", () => {
+  const layout = layoutMap(flattenAgents(buildAgentMap(input({ roots: [...input().roots, { ...sessions[4]!, project: "opencode" }] }))))
+  const opencode = layout.clusters.find((cluster) => cluster.project === "opencode")!
+  const child = layout.agents.find((agent) => agent.name === "explore subagent")!
+  const loose = layout.agents.find((agent) => agent.name === "Squadron V2 design")!
+  expect(opencode.divider).toBeGreaterThan(child.y + NODE.height)
+  expect(loose.y).toBeGreaterThan(opencode.divider!)
+})
+
+test("cloud agents get their own region", () => {
+  const layout = layoutMap(flattenAgents(buildAgentMap(input({ cloud: [{ editspace: "opencode", lane: "review", owner: "wingman:x", status: "processing" }] }))))
+  expect(layout.clusters.map((cluster) => [cluster.project, cluster.cloud, cluster.count])).toEqual([["opencode", false, 2], ["opencode", true, 1], ["squadron", false, 2]])
+})
+
+test("observed mail becomes one directed edge per ordered pair; off-map counterparts are not drawn", () => {
+  const agents = flattenAgents(buildAgentMap(input({ lanes: [...input().lanes, { editspace: "opencode", lane: "orchestrator", owner: "ses_squadron" }] })))
+  const messages = [mail("m1", "orchestrator", "home-agents", 1), mail("m2", "home-agents", "orchestrator", 2), mail("m3", "orchestrator", "home-agents", 3), mail("m4", "home-agents", "project", 4)]
+  expect(mailParty(agents, "opencode", "project")).toBeUndefined()
+  const edges = mailEdges(layoutMap(agents), messages)
+  expect(edges.map((edge) => [JSON.parse(edge.from)[2], JSON.parse(edge.to)[2], edge.messages.map((message) => message.id)])).toEqual([
+    ["orchestrator", "home-agents", ["m1", "m3"]],
+    ["home-agents", "orchestrator", ["m2"]],
+  ])
+  // Opposite directions bow to opposite sides instead of overlapping.
+  expect(edges[0]!.path).not.toBe(edges[1]!.path)
+})
+
+test("mail parties resolve only to lanes in the same project", () => {
+  const agents = flattenAgents(buildAgentMap(input()))
+  expect(mailParty(agents, "other", "home-agents")).toBeUndefined()
+  expect(mailParty(agents, "opencode", "home-agents")).toBe(agents[0]!.key)
+})
+
+test("state boundaries come from agent state and lane reports, major first", () => {
+  const agents = flattenAgents(buildAgentMap(input({ status: (id) => id === "ses_owner" ? "pending" : id === "ses_squadron" ? "failed" : "idle" })))
+  expect(stateEvents(agents).map((event) => [event.level, event.text])).toEqual([
+    ["major", "Needs input"],
+    ["major", "Turn failed"],
+    ["minor", "wiring Home"],
+  ])
+})
+
+const org = () => input({
+  roots: [...input().roots, { id: "ses_lead", title: "orchestrator session", directory: "/es/lanes/orch", updated: now - 100, project: "opencode" }],
+  session: (id) => id === "ses_lead" ? { id, title: "orchestrator session", directory: "/es/lanes/orch", updated: now - 100 } : sessions.find((session) => session.id === id),
+  lanes: [
+    ...input().lanes,
+    { editspace: "opencode", lane: "orchestrator", owner: "ses_lead" },
+    { editspace: "opencode", lane: "worker", owner: "ses_squadron" },
+  ],
+})
+
+test("a delegation nests the lane under its current delegator; delegation wins over a spawn record", () => {
+  const agents = linkOrigins(flattenAgents(buildAgentMap(org())), [
+    { editspace: "opencode", lane: "home-agents", kind: "spawned", by: "ses_somebody" },
+    { editspace: "opencode", lane: "home-agents", kind: "delegated", by: "ses_lead", status: "submitted" },
+  ])
+  const lane = agents.find((agent) => agent.lane === "home-agents")!
+  const lead = agents.find((agent) => agent.lane === "orchestrator")!
+  expect(lane.origin).toEqual({ kind: "delegated", by: "ses_lead", status: "submitted", from: lead.key, earlier: false })
+  expect(lane.parent).toBe(lead.key)
+  const layout = layoutMap(agents)
+  const placedLane = layout.agents.find((agent) => agent.key === lane.key)!
+  const placedLead = layout.agents.find((agent) => agent.key === lead.key)!
+  expect(placedLane.y).toBeGreaterThan(placedLead.y)
+  expect(layout.hierarchy.find((edge) => edge.key === `${lead.key}>${lane.key}`)).toMatchObject({ kind: "delegated" })
+})
+
+test("a spawner that has since handed off resolves to its lane as an earlier owner", () => {
+  const agents = linkOrigins(flattenAgents(buildAgentMap(org())), [{ editspace: "opencode", lane: "worker", kind: "spawned", by: "ses_old1" }])
+  const worker = agents.find((agent) => agent.lane === "worker")!
+  expect(worker.origin).toMatchObject({ kind: "spawned", from: JSON.stringify(["lane", "opencode", "home-agents"]), earlier: true })
+})
+
+test("a human or unloaded spawner is kept as provenance without an edge", () => {
+  const agents = linkOrigins(flattenAgents(buildAgentMap(org())), [{ editspace: "opencode", lane: "worker", kind: "spawned", by: "me@laptop" }])
+  const worker = agents.find((agent) => agent.lane === "worker")!
+  expect(worker.origin).toEqual({ kind: "spawned", by: "me@laptop", status: undefined, from: undefined, earlier: undefined })
+  expect(worker.parent).toBeUndefined()
+  expect(layoutMap(agents).hierarchy.filter((edge) => edge.kind !== "subagent")).toEqual([])
+})
+
+test("cyclic provenance never nests; the closing edge crosses instead", () => {
+  const agents = linkOrigins(flattenAgents(buildAgentMap(org())), [
+    { editspace: "opencode", lane: "worker", kind: "spawned", by: "ses_lead" },
+    { editspace: "opencode", lane: "orchestrator", kind: "spawned", by: "ses_squadron" },
+  ])
+  const layout = layoutMap(agents)
+  expect(layout.agents).toHaveLength(agents.length)
+  expect(layout.hierarchy.filter((edge) => edge.kind === "spawned").map((edge) => !!edge.cross).toSorted()).toEqual([false, true])
+})
+
+test("provenance for another project's lane name does not attach", () => {
+  const agents = linkOrigins(flattenAgents(buildAgentMap(org())), [{ editspace: "squadron", lane: "worker", kind: "spawned", by: "ses_lead" }])
+  expect(agents.some((agent) => agent.origin)).toBe(false)
 })
