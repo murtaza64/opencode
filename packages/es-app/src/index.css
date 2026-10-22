@@ -1059,6 +1059,9 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .mail-activity-kind { color: var(--teal); display: inline-flex; }
 .mail-activity-kind[data-direction=out] { color: var(--blue); }
 .mail-activity-route, .mail-activity-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Each party truncates on its own, so a long agent title never hides the other end. */
+.mail-activity-route .mail-party { display: inline-block; max-width: 45%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.mail-party[data-named] { color: var(--text); }
 .mail-activity-state { color: var(--subtext0); }
 .mail-activity-state > span { margin-inline-start: 6px; }
 .mail-activity-state > span:first-child { margin-inline-start: 0; }

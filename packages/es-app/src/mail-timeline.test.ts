@@ -159,6 +159,7 @@ test("summarizes mail that was one provider turn's input, keyed before the assis
     ids: ["o#417", "o#427", "o#428"],
     kinds: [{ kind: "task", human: false, catchUp: false, count: 2 }, { kind: "task", human: false, catchUp: true, count: 1 }],
     senders: ["ses_front", "ux-feel"],
+    senderSessions: {},
     sentFrom: 2_000,
     sentTo: 6_000,
     promotedAt: 9_000,
@@ -186,7 +187,7 @@ test("a mail run without its source record reports no send time rather than inve
     { id: "msg_t", role: "assistant", parentID: "msg_m", time: { created: 5_100 } },
   ] as Message[]
   expect(mailCauses(mailRows(messages, undefined), new Map()).get("msg_m")).toEqual({
-    ids: ["gone"], kinds: [{ kind: "mail", human: false, catchUp: false, count: 1 }], senders: ["peer"], promotedAt: 5_000 })
+    ids: ["gone"], kinds: [{ kind: "mail", human: false, catchUp: false, count: 1 }], senders: ["peer"], senderSessions: {}, promotedAt: 5_000 })
 })
 
 test("labels agent-originated resume and kickoff inputs by what the agent did", () => {
@@ -203,4 +204,16 @@ test("keeps an agent resume in the session transcript although no mail record ex
     source: { ...source, id: "gone", kind: "task" } } as unknown as Message
   expect(mailRows([resume, stale], undefined, [], { sessionID: "ses_first", from: 2000 }).map(row => row.message.id))
     .toEqual(["msg_resume"])
+})
+
+test("a mail cause keeps each sender's recorded session only when its records agree", () => {
+  const mail = (id: string, created: number, sender: string) => ({ id: `msg_${id}`, role: "user", time: { created },
+    source: { type: "editspace-mail", id, sender, recipient: "lane" } })
+  const messages = [mail("a", 1_000, "orchestrator"), mail("b", 1_001, "squadron-v2"), mail("c", 1_002, "squadron-v2"),
+    { id: "msg_t", role: "assistant", parentID: "msg_c", time: { created: 1_100 } }] as Message[]
+  const record = (id: string, from: string, sender_session: string): MailMessage =>
+    ({ id, ts: "", created_ms: 900, from, to: "lane", text: id, direction: "received", deliveries: [], sender_session })
+  const records = new Map([record("a", "orchestrator", "ses_relay"), record("b", "squadron-v2", "ses_one"), record("c", "squadron-v2", "ses_two")]
+    .map((item) => [item.id, item]))
+  expect(mailCauses(mailRows(messages, undefined), records).get("msg_c")?.senderSessions).toEqual({ orchestrator: "ses_relay" })
 })

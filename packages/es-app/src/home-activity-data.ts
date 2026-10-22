@@ -1,4 +1,5 @@
 import type { MailMessage } from "./api"
+import { recipientSession, type MailNamer } from "./mail-names"
 
 export type HomeActivityRow = { id: string; level: "major" | "minor"; kind: "mail" | "pr" | "cloud"; text: string; time: number; timeLabel: string; source: string; sourceAt: number; href?: string }
 
@@ -15,9 +16,9 @@ export const prActivity = (value: unknown, observed: number, project: string): H
     timeLabel: Number.isFinite(event) ? merged ? "merged" : "PR updated" : "cache observed", source: `${project} · cached PR metadata`, sourceAt: observed, href: pr.url }]
 }
 
-export const mailActivity = (message: MailMessage, project: string, checked: number): HomeActivityRow => ({
+export const mailActivity = (message: MailMessage, project: string, checked: number, name?: MailNamer): HomeActivityRow => ({
   id: `mail:${project}:${message.id}`, level: "minor", kind: "mail",
-  text: `${message.from} → ${message.to} · ${message.kind || "mail"} · ${message.text.replace(/\s+/g, " ").slice(0, 180)}`,
+  text: `${name?.(message.from, message.sender_session).label ?? message.from} → ${name?.(message.to, recipientSession(message.deliveries, message.to)).label ?? message.to} · ${message.kind || "mail"} · ${message.text.replace(/\s+/g, " ").slice(0, 180)}`,
   time: typeof message.ts === "number" ? message.ts < 1e12 ? message.ts * 1000 : message.ts : Date.parse(message.ts), timeLabel: "sent",
   source: `${project} · mail log`, sourceAt: checked,
 })

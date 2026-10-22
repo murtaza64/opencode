@@ -35,6 +35,7 @@ import { InlineQuestion } from "../components/inline-question"
 import { TodoPart } from "../components/todos"
 import { usePulse } from "../pulse"
 import { MailRow } from "../components/mail-row"
+import { useMailNamer } from "../components/mail-party"
 import { MailSubscriptions } from "../components/mail-subscriptions"
 import { mailCauses, mailLocation, mailRows, mailSourceID } from "../mail-timeline"
 import { handoffChain, handoffNext, pendingHandoffFor, successorFor } from "../handoffs"
@@ -188,6 +189,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const [subscriptionsOpen, setSubscriptionsOpen] = createSignal(false)
   const [laneMailOpen, setLaneMailOpen] = createSignal(false)
   const location = () => mailLocation(directory, editspaces()?.editspaces ?? [], sessionID)
+  const mailName = useMailNamer(() => location()?.name)
   const [mail] = createResource(
     () => {
       const scope = location()
@@ -1464,7 +1466,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                   <div class="banner-head session-panel-head">All mail for lane {scope().lane} across handoffs
                     <button onClick={() => setLaneMailOpen(false)}>Hide lane mail</button></div>
                   <Show when={!mail()?.messages.length}><div class="dim">No lane mail.</div></Show>
-                  <For each={mail()?.messages ?? []}>{(message) => <MailRow message={message} ids={mailIDs()} anchor="lane-mail" />}</For>
+                  <For each={mail()?.messages ?? []}>{(message) => <MailRow message={message} ids={mailIDs()} anchor="lane-mail" name={mailName} />}</For>
                 </section>
               </Show>
             </Show>
@@ -1526,7 +1528,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             <ToolAdornment.Provider value={ToolSize}>
             <For each={timeline()}>
               {(row) => {
-                 if (row.type === "mail") return <MailRow message={row.message} ids={transcriptMailIDs()} />
+                 if (row.type === "mail") return <MailRow message={row.message} ids={transcriptMailIDs()} name={mailName} />
                 const m = row.message
                 const segments = createMemo(() => m.role === "assistant" ? messageSegments(live.data.part[m.id] ?? [], toolRuns()) : [],
                   [], { equals: sameSegments })
@@ -1542,7 +1544,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                       <TranscriptMessage message={m} parts={live.data.part[m.id] ?? []}
                         renderTools={renderTools}
                         mailRecord={mailRecords().get(mailSourceID(m) ?? "")}
-                        mailDeliveries={mailRecords().get(mailSourceID(m) ?? "")?.deliveries} mailIDs={transcriptMailIDs()} />
+                        mailDeliveries={mailRecords().get(mailSourceID(m) ?? "")?.deliveries} mailIDs={transcriptMailIDs()} mailName={mailName} />
                       <button
                         class="fork-here"
                         title="fork: new session with the history before this message"
@@ -1552,7 +1554,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                         fork from here
                       </button>
                     </div>
-                    <Show when={mailCauseRows().get(m.id)}>{(cause) => <MailCauseRow cause={cause()} />}</Show>
+                    <Show when={mailCauseRows().get(m.id)}>{(cause) => <MailCauseRow cause={cause()} name={mailName} />}</Show>
                   </Show>
                   <Show when={turnSummaries().get(m.id)}>
                     {(s) => (

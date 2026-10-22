@@ -113,6 +113,8 @@ export type MailCause = {
   ids: string[]
   kinds: { kind: string; human: boolean; catchUp: boolean; count: number }[]
   senders: string[]
+  /** Per sender, the one recorded sending session, when every record agrees. */
+  senderSessions: Record<string, string>
   sentFrom?: number
   sentTo?: number
   promotedAt: number
@@ -152,6 +154,12 @@ export const mailCauses = (rows: TimelineRow[], records: Map<string, MailMessage
           : [...kinds, { kind, human, catchUp, count: 1 }]
       }, []),
       senders: [...new Set(run.map((item) => mailSource(item)!.sender))],
+      senderSessions: Object.fromEntries([...new Set(run.map((item) => mailSource(item)!.sender))].flatMap((sender) => {
+        const sessions = new Set(run.filter((item) => mailSource(item)!.sender === sender)
+          .map((item) => records.get(mailSource(item)!.id)?.sender_session))
+        const [session] = sessions
+        return sessions.size === 1 && session ? [[sender, session]] : []
+      })),
       ...(sent.length ? { sentFrom: Math.min(...sent), sentTo: Math.max(...sent) } : {}),
       promotedAt: run[0]!.time.created,
     })

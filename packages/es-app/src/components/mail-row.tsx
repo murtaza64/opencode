@@ -3,6 +3,8 @@ import type { MailMessage } from "../api"
 import { mailSentAt, mailWake } from "../mail-timeline"
 import { MailWakeEvidence } from "./mail-wake-evidence"
 import { Glyph } from "./icons"
+import { MailParty } from "./mail-party"
+import { recipientSession, type MailNamer } from "../mail-names"
 
 const timestamp = (value: string | number | null) => {
   if (value == null) return ""
@@ -10,8 +12,10 @@ const timestamp = (value: string | number | null) => {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
 }
 
-export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?: string }) => {
+export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?: string; name?: MailNamer }) => {
   const anchor = () => props.anchor ?? "mail"
+  const from = (detail?: boolean) => <MailParty party={props.message.from} evidence={props.message.sender_session} name={props.name} detail={detail} />
+  const to = (detail?: boolean) => <MailParty party={props.message.to} evidence={recipientSession(props.message.deliveries, props.message.to)} name={props.name} detail={detail} />
   const references = () => [
     { label: "Reply to", id: props.message.in_reply_to },
     { label: "Supersedes", id: props.message.supersedes },
@@ -22,7 +26,7 @@ export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?
       <span class="mail-activity-kind" data-direction={props.message.direction === "sent" ? "out" : "in"} title={props.message.direction === "sent" ? "Outbound mail" : "Inbound mail"}>
         <Glyph name={props.message.direction === "sent" ? "paper-airplane" : "inbox"} /><span class="sr-only">Mail · {props.message.direction === "sent" ? "Outbound" : "Inbound"}</span>
       </span>
-      <span class="mail-activity-route"><bdi dir="auto">{props.message.from}</bdi> <span class="mail-activity-arrow" aria-hidden="true">→</span> <bdi dir="auto">{props.message.to}</bdi></span>
+      <span class="mail-activity-route">{from()} <span class="mail-activity-arrow" aria-hidden="true">→</span> {to()}</span>
       <span class="mail-activity-state" title={props.message.deliveries.map(delivery => `${mailWake(delivery)} · ${delivery.state}`).join("; ") || mailWake()}>
          <For each={props.message.deliveries}>{(delivery) => <span>{mailWake(delivery)} · {delivery.state}</span>}</For>
          <Show when={!props.message.deliveries.length}><span>{mailWake()}</span></Show>
@@ -32,8 +36,8 @@ export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?
     </summary>
     <div class="mail-activity-details">
       <div>Mail ID: <bdi dir="auto">{props.message.id}</bdi></div>
-      <div>From: <bdi dir="auto">{props.message.from}</bdi></div>
-      <div>To: <bdi dir="auto">{props.message.to}</bdi></div>
+      <div>From: {from(true)}</div>
+      <div>To: {to(true)}</div>
       <Show when={props.message.kind}><div>Kind: <bdi dir="auto">{props.message.kind}</bdi></div></Show>
       <div>Sent: {timestamp(mailSentAt(props.message))}</div>
       <Show when={props.message.created_ms === undefined}><div>Source timestamp precision: legacy (may be whole seconds).</div></Show>
