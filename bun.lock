@@ -493,6 +493,17 @@
         "vite": "catalog:",
       },
     },
+    "packages/es-android": {
+      "name": "@opencode-ai/es-android",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@playwright/test": "catalog:",
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "vite": "catalog:",
+      },
+    },
     "packages/es-app": {
       "name": "@opencode-ai/es-app",
       "version": "0.0.0",
@@ -2016,6 +2027,8 @@
     "@opencode-ai/effect-sqlite-node": ["@opencode-ai/effect-sqlite-node@workspace:packages/effect-sqlite-node"],
 
     "@opencode-ai/enterprise": ["@opencode-ai/enterprise@workspace:packages/enterprise"],
+
+    "@opencode-ai/es-android": ["@opencode-ai/es-android@workspace:packages/es-android"],
 
     "@opencode-ai/es-app": ["@opencode-ai/es-app@workspace:packages/es-app"],
 

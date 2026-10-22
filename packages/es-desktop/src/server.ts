@@ -1,9 +1,10 @@
-import { createServer, request, type IncomingHttpHeaders } from "node:http"
+import { createServer, request, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http"
 import { createReadStream } from "node:fs"
 import { readFile, realpath, stat } from "node:fs/promises"
 import path from "node:path"
 import { randomBytes } from "node:crypto"
 import { apiAllowed, serviceURL } from "./policy"
+import { cookieName, cookieValid, issueCookie, loopbackHost, pairingCsp, pairingMatches, pairingPage, remoteListenHost } from "./pairing"
 import { eventMux } from "../../es-app/event-mux"
 import { eventProtocol, eventPaths } from "../../es-app/event-protocol"
 
@@ -62,18 +63,76 @@ export const serve = async (options: {
   renderer?: string
   opencodeAuth?: string
   port?: number
+  // Remote (Android) mode: listen on an explicit loopback/tailnet host and
+  // authenticate with a pairing cookie instead of the native capability header.
+  host?: string
+  pairing?: { code: string; maxAgeSeconds?: number }
 }) => {
+  const host = options.host ? remoteListenHost(options.host) : "127.0.0.1"
+  if (!host) throw new Error("Remote listeners must bind loopback or a tailnet address")
+  if (!loopbackHost(host) && !options.pairing) throw new Error("Non-loopback listeners require pairing")
+  const pairing = options.pairing
+  const failures = { count: 0, since: 0 }
   const targets = { oc: serviceURL(options.opencode), es: serviceURL(options.dashboard) }
   const renderer = serviceURL(options.renderer)
   const root = await realpath(options.root)
   const index = renderer ? undefined : await readFile(path.join(root, "index.html"))
   const key = randomBytes(32).toString("hex")
   const upstreams = new Set<ReturnType<typeof request>>()
-  const allowed = (req: { headers: IncomingHttpHeaders }) =>
-    req.headers.host === new URL(origin).host &&
-    req.headers["x-editspace-key"] === key &&
+  const sameHost = (req: { headers: IncomingHttpHeaders }) => req.headers.host === new URL(origin).host
+  const allowed = (req: { headers: IncomingHttpHeaders; method?: string }) =>
+    sameHost(req) &&
+    (pairing
+      ? cookieValid(pairing.code, req.headers) &&
+        // SameSite ignores ports, so other local origins also carry the cookie:
+        // require same-origin fetch metadata, and the page origin for writes.
+        [undefined, "same-origin", "none"].includes(req.headers["sec-fetch-site"] as string | undefined) &&
+        (["GET", "HEAD"].includes(req.method ?? "") || req.headers.origin === origin)
+      : req.headers["x-editspace-key"] === key) &&
     (!req.headers.origin || req.headers.origin === origin) &&
     req.headers["sec-fetch-site"] !== "cross-site"
+  // Unpaired same-host requests: health probe, pairing form, or a 401 the shell can act on.
+  const pair = async (
+    req: IncomingMessage,
+    res: ServerResponse,
+    finish: (status: number, body: string, type?: string) => void,
+  ) => {
+    if (!pairing) return finish(403, "Forbidden")
+    const url = new URL(req.url ?? "/", origin)
+    if (url.pathname === "/__es/health" && req.method === "GET")
+      return finish(200, JSON.stringify({ service: "editspace", pairing: true }), "application/json")
+    const page = (status: number, error?: string) => {
+      res.setHeader("Content-Security-Policy", pairingCsp)
+      finish(status, pairingPage(error), "text/html; charset=utf-8")
+    }
+    if (url.pathname !== "/__es/pair" || req.method !== "POST") {
+      if (req.method === "GET" && (req.headers["sec-fetch-dest"] === "document" || req.headers.accept?.includes("text/html")))
+        return page(401)
+      return finish(401, JSON.stringify({ error: "Pairing required" }), "application/json")
+    }
+    if (req.headers["sec-fetch-site"] === "cross-site" || ![undefined, "null", origin].includes(req.headers.origin))
+      return finish(403, "Forbidden")
+    const now = Date.now()
+    if (now - failures.since > 60_000) Object.assign(failures, { count: 0, since: now })
+    if (failures.count >= 10) return page(429, "Too many attempts. Wait a minute and try again.")
+    const chunks: Buffer[] = []
+    let size = 0
+    for await (const chunk of req) {
+      size += chunk.length
+      if (size > 1024) return finish(413, "Payload too large")
+      chunks.push(chunk)
+    }
+    const code = new URLSearchParams(Buffer.concat(chunks).toString()).get("code") ?? ""
+    if (!pairingMatches(pairing.code, code)) {
+      failures.count++
+      return page(401, "That code does not match. Check the gateway output and try again.")
+    }
+    res.writeHead(303, {
+      location: "/",
+      "set-cookie": `${cookieName}=${issueCookie(pairing.code)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${pairing.maxAgeSeconds ?? 30 * 86400}`,
+    })
+    res.end()
+  }
   const server = createServer(async (req, res) => {
     res.setHeader("Content-Security-Policy", csp)
     res.setHeader("X-Content-Type-Options", "nosniff")
@@ -83,6 +142,8 @@ export const serve = async (options: {
       res.writeHead(status, { "content-type": type })
       res.end(body)
     }
+    if (pairing && sameHost(req) && (!allowed(req) || /^\/__es\/(pair|health)(\?|$)/.test(req.url ?? "")))
+      return pair(req, res, finish)
     if (!allowed(req)) {
       finish(403, "Forbidden")
       return
@@ -217,11 +278,11 @@ export const serve = async (options: {
   server.on("upgrade", mux.upgrade)
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject)
-    server.listen(options.port ?? 0, "127.0.0.1", resolve)
+    server.listen(options.port ?? 0, host, resolve)
   })
   const address = server.address()
-  if (!address || typeof address === "string") throw new Error("Missing loopback address")
-  const origin = `http://127.0.0.1:${address.port}`
+  if (!address || typeof address === "string") throw new Error("Missing listener address")
+  const origin = `http://${host.includes(":") ? `[${host}]` : host}:${address.port}`
   return {
     origin,
     key,

@@ -1,0 +1,23 @@
+{
+  "name": "@opencode-ai/es-android",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Android thin-client shell and paired host gateway for es-app",
+  "scripts": {
+    "build:web": "bun scripts/build-web.ts",
+    "build:apk": "sh scripts/build-apk.sh",
+    "gateway": "bun src/gateway.ts",
+    "preview": "bun scripts/preview.ts",
+    "test": "bun test src && node test/mobile.browser.mjs",
+    "typecheck": "tsgo --noEmit",
+    "test:emulator": "node test/emulator.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "catalog:",
+    "@types/bun": "catalog:",
+    "@types/node": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "vite": "catalog:"
+  }
+}
