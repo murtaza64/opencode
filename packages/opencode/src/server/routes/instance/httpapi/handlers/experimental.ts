@@ -9,6 +9,7 @@ import { Project } from "@/project/project"
 import { Session } from "@/session/session"
 import { SessionFailure } from "@/session/failure"
 import { Database } from "@opencode-ai/core/database/database"
+import { DatabaseReader } from "@opencode-ai/core/database/reader"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import type { SessionID } from "@/session/schema"
 import { ToolJsonSchema } from "@/tool/json-schema"
@@ -38,7 +39,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const sessions = yield* Session.Service
     const background = yield* BackgroundJob.Service
     const flags = yield* RuntimeFlags.Service
-    const database = yield* Database.Service
+    const reader = yield* DatabaseReader.Service
 
     const capabilities = Effect.fn("ExperimentalHttpApi.capabilities")(function* () {
       return {
@@ -172,7 +173,8 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     })
 
     const sessionFailed = Effect.fn("ExperimentalHttpApi.sessionFailed")(function* () {
-      return yield* SessionFailure.list().pipe(Effect.provideService(Database.Service, database))
+      // A fleet-wide scan: run it on a reader worker so cold page reads cannot stall other requests.
+      return yield* SessionFailure.list().pipe(Effect.provideService(Database.Service, reader))
     })
 
     const sessionBackground = Effect.fn("ExperimentalHttpApi.sessionBackground")(function* (ctx: {

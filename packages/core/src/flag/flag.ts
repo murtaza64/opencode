@@ -85,4 +85,7 @@ export const Flag = {
   get OPENCODE_INSTANCE_IDLE_TTL_MS() {
     return process.env["OPENCODE_INSTANCE_IDLE_TTL_MS"]
   },
+  get OPENCODE_DB_READER_WORKERS() {
+    return process.env["OPENCODE_DB_READER_WORKERS"]
+  },
 }
