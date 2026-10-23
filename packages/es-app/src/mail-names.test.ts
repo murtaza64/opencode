@@ -61,3 +61,11 @@ test("the recipient session is evidence only when exactly one is recorded for th
   expect(recipientSession([{ recipient: "other", session: "ses_x" }], "orchestrator")).toBeUndefined()
   expect(recipientSession([{ recipient: "orchestrator", session: "ses_a" }, { recipient: "orchestrator", session: "ses_b" }], "orchestrator")).toBeUndefined()
 })
+
+test("a cross-editspace party resolves through its home editspace's lane owner and lineage", () => {
+  const owners = [...sources().owners, { lane: JSON.stringify(["home", "squadron-v2"]), owner: "ses_tether" }]
+  expect(mailName(sources({ owners }), "home/squadron-v2", "ses_tether")).toEqual({
+    label: "Tether", title: "Lane home/squadron-v2 · session ses_tether", named: true })
+  expect(mailName(sources({ owners }), "home/squadron-v2", "ses_other").label).toBe("home/squadron-v2")
+  expect(mailName(sources(), "home/squadron-v2", "ses_tether").label).toBe("home/squadron-v2")
+})

@@ -31,7 +31,9 @@ export const mailName = (sources: MailNameSources, party: string, evidence?: str
     return title ? { label: title, title: `Session ${party}`, named: true } : { label: party, title: `Session ${party}`, named: false }
   }
   const fallback = { label: party, title: evidence ? `Lane ${party} · session ${evidence}` : `Lane ${party}`, named: false }
-  const key = JSON.stringify([sources.editspace, party])
+  // A lane of another editspace is addressed `<editspace>/<lane>` (es cross-editspace mail).
+  const remote = /^([^/]+)\/([^/]+)$/.exec(party)
+  const key = JSON.stringify(remote ? [remote[1], remote[2]] : [sources.editspace, party])
   const owners = sources.owners.filter((owner) => owner.lane === key)
   if (owners.length !== 1 || !evidence) return fallback
   const owner = owners[0]!.owner
