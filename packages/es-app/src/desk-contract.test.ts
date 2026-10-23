@@ -3,7 +3,7 @@ import { createHash } from "node:crypto"
 import type { MessageWithParts } from "./api"
 import type { AttentionRecord } from "./attention"
 import { BRIEF_SCHEMA, BRIEF_SYSTEM, briefPacket, deskItems } from "./desk"
-import { BRIEF_PERMISSION, briefAnchorID, briefID } from "./desk-session"
+import { BRIEF_PERMISSION, DESK_MODEL, briefAnchorID, briefID } from "./desk-session"
 
 // The es-dashboard starts the same brief jobs when no client is open
 // (murtaza64/dotfiles bin/es_dashboard_frontdesk.py, tests/test_es_dashboard_frontdesk.py).
@@ -14,6 +14,10 @@ const sha = (text: string) => createHash("sha256").update(text).digest("hex")
 test("brief prompt contract matches the dashboard copy", () => {
   expect(sha(JSON.stringify([`${BRIEF_SYSTEM}\n${JSON.stringify(BRIEF_SCHEMA)}`, BRIEF_PERMISSION])))
     .toBe("b0aba57266e6e1d61a2999db2b9d341510f5392876616d593154cbad8d4bde4d")
+})
+
+test("briefs run on the same explicit model as the dashboard's", () => {
+  expect(DESK_MODEL).toEqual({ providerID: "duolingo-openai", modelID: "gpt-6.1-sol" })
 })
 
 test("brief anchor and job IDs match the dashboard's", async () => {

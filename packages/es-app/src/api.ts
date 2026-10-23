@@ -233,6 +233,14 @@ export const oc = {
       body: JSON.stringify({ title }),
     }).then(json<Session>),
 
+  // Sets the session's model preference, used from its next turn; the running turn and history are unchanged.
+  preferModel: (id: string, directory: string, model: { providerID: string; modelID: string }): Promise<Session> =>
+    fetch(`/oc/session/${id}?${q(directory)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model }),
+    }).then(json<Session>),
+
   archive: (id: string, directory: string): Promise<Session> =>
     fetch(`/oc/session/${id}?${q(directory)}`, {
       method: "PATCH",

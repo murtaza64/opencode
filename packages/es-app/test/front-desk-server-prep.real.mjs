@@ -55,12 +55,14 @@ const freePort = async () => {
 // Fake provider: a brief job (its system prompt asks for a decision brief) gets a brief; anything else an ack.
 const ASK = "Choose whether to stay at the canary or roll out fully."
 const briefCalls = []
+const briefModels = []
 const provider = http.createServer(async (request, response) => {
   const chunks = []
   for await (const chunk of request) chunks.push(chunk)
   const body = Buffer.concat(chunks).toString()
   const brief = body.includes("visual decision aid")
   if (brief) briefCalls.push(body)
+  if (brief) briefModels.push(JSON.parse(body).model)
   const content = brief
     ? JSON.stringify({ ask: ASK, whyYou: "", whyNow: "", choices: [{ id: "canary", outcome: "The canary keeps 5% of traffic", chips: [], risk: "" },
       { id: "full", outcome: "Every user gets the release now", chips: [], risk: "" }], ifWait: "", unknown: "", sources: [], gaps: [],
@@ -80,9 +82,11 @@ for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => { childre
 try {
   const port = await freePort()
   const base = `http://127.0.0.1:${port}`
-  const config = { formatter: false, lsp: false, server: { hostname: "127.0.0.1", port, mdns: false }, provider: { test: { name: "Test", id: "test", env: [], npm: "@ai-sdk/openai-compatible",
-    models: { "test-model": { id: "test-model", name: "Test Model", attachment: false, reasoning: false, temperature: false, tool_call: true, release_date: "2025-01-01", limit: { context: 100_000, output: 10_000 }, cost: { input: 0, output: 0 }, options: {} } },
-    options: { apiKey: "test-key", baseURL: `http://127.0.0.1:${provider.address().port}/v1` } } } }
+  // The real brief model name served by the fake endpoint, so the model the dashboard picks is observable.
+  const model = (id) => ({ [id]: { id, name: id, attachment: false, reasoning: false, temperature: false, tool_call: true, release_date: "2025-01-01", limit: { context: 100_000, output: 10_000 }, cost: { input: 0, output: 0 }, options: {} } })
+  const fake = (id, models) => ({ name: id, id, env: [], npm: "@ai-sdk/openai-compatible", models, options: { apiKey: "test-key", baseURL: `http://127.0.0.1:${provider.address().port}/v1` } })
+  const config = { formatter: false, lsp: false, server: { hostname: "127.0.0.1", port, mdns: false },
+    provider: { test: fake("test", model("test-model")), "duolingo-openai": fake("duolingo-openai", model("gpt-6.1-sol")) } }
   const runtime = spawn(binary, ["serve", "--hostname", "127.0.0.1", "--port", String(port)], { cwd: home, detached: true, stdio: ["ignore", "pipe", "pipe"], env: {
     ...process.env, HOME: home, OPENCODE_TEST_HOME: home, XDG_CONFIG_HOME: `${home}/config`, XDG_DATA_HOME: `${home}/data`,
     XDG_STATE_HOME: `${home}/state`, XDG_CACHE_HOME: `${home}/cache`, OPENCODE_DB: path.join(home, "opencode.sqlite"), OPENCODE_CONFIG: "",
@@ -136,6 +140,7 @@ try {
   assert.equal(job.metadata.frontDesk.revision, "1")
   await poll("brief reply", async () => (await api("GET", `/session/${job.id}/message`, undefined, anchorRoot)).body.some((message) => message.info.role === "assistant" && message.info.time.completed))
   assert.equal(briefCalls.length, 1)
+  assert.deepEqual(briefModels, ["gpt-6.1-sol"], "the dashboard's brief runs on the desk model")
   assert(briefCalls[0].includes("Pick a rollout") && briefCalls[0].includes("recommended option: canary"))
   record(`SERVER no client open: dashboard started ${job.id} under ${anchorID} for ${source} rev 1; provider brief calls=${briefCalls.length}`)
 
