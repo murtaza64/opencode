@@ -1992,9 +1992,11 @@ a.mini-item > .glyph { margin: 0; }
 .mode-tab:hover { color: var(--text); background: var(--surface0); }
 .mode-tab[aria-current=page] { color: var(--text); border-block-end-color: var(--peach); }
 .mode-tab .glyph { color: var(--lavender); }
-.mode-count { inline-size: 7px; block-size: 7px; background: var(--peach); border-radius: 50%; }
+/* Unread-style count; positioned out of flow so it never moves the tab label. */
+.mode-label { position: relative; display: inline-flex; align-items: center; }
+.mode-count { position: absolute; inset-block-start: -7px; inset-inline-start: calc(100% + 2px); min-inline-size: 16px; block-size: 16px; padding-inline: 4px; box-sizing: border-box; border-radius: 8px !important; background: var(--peach); color: var(--crust); font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
 .mode-switch.compact { flex-direction: column; padding: 0; inline-size: 100%; }
 .mode-switch.compact .mode-tab { position: relative; padding: 6px 0; border-block-end: 0; border-inline-start: 2px solid transparent; }
 .mode-switch.compact .mode-tab[aria-current=page] { border-inline-start-color: var(--peach); }
-.mode-switch.compact .mode-count { position: absolute; inset-block-start: 3px; inset-inline-end: 5px; }
+.mode-switch.compact .mode-count { inset-block-start: -6px; inset-inline-start: calc(100% - 7px); min-inline-size: 14px; block-size: 14px; padding-inline: 3px; font-size: 9px; line-height: 14px; }
 @media (max-width: 600px) { .shell > .sidebar-mini .mode-switch.compact { flex-direction: row; inline-size: auto; } }

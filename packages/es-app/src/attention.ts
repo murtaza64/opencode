@@ -94,7 +94,8 @@ export const decisionLabel = (record: AttentionRecord) => {
 
 // Own only the attention read/write interface; neither list nor act admits Session input.
 /** `readOnly` observes the ledger only: no operator bootstrap and no resumed answer commands. `enabled` pauses reads. */
-export const createAttention = (project: () => string | undefined, options: { readOnly?: boolean; enabled?: () => boolean } = {}) => {
+/** `deferOperator` leaves operator setup to `activate()`, so a shared reader does no setup writes until a page that answers needs them. */
+export const createAttention = (project: () => string | undefined, options: { readOnly?: boolean; enabled?: () => boolean; deferOperator?: boolean } = {}) => {
   const [cache, setCache] = createSignal<Record<string, { records: AttentionRecord[]; project: AttentionList["projects"][number]; checked: number }>>({})
   const [scopes, setScopes] = createSignal<Record<string, { checked: number; partial: boolean; truncated: boolean }>>({})
   const snapshot = () => {
@@ -182,15 +183,18 @@ export const createAttention = (project: () => string | undefined, options: { re
     setPending(stored)
     setNotice("An answer sent before reload has an unknown outcome. Retrying repeats the same answer; no new answer is created.")
   }
+  const activate = () => {
+    resume()
+    // Only explicitly allowlisted local UI origins can acquire the operator cookie.
+    void checkOperator().catch(() => { setOperator(false) })
+  }
   onMount(() => {
     if (options.readOnly) {
       const timer = setInterval(() => { setNow(Date.now()); void refresh() }, 30_000)
       onCleanup(() => { clearInterval(timer); version++; controller?.abort() })
       return
     }
-    resume()
-    // Only explicitly allowlisted local UI origins can acquire the operator cookie.
-    void checkOperator().catch(() => { setOperator(false) })
+    if (!options.deferOperator) activate()
     const timer = setInterval(() => { setNow(Date.now()); void refresh() }, 30_000)
     onCleanup(() => { clearInterval(timer); version++; controller?.abort() })
   })
@@ -270,7 +274,7 @@ export const createAttention = (project: () => string | undefined, options: { re
   return {
     retryDelivery,
     snapshot,
-    error, loading, operator, pending, writing, notice, now, refresh, checkOperator, act, retry,
+    error, loading, operator, pending, writing, notice, now, refresh, checkOperator, activate, act, retry,
     stale: () => !snapshot() || !!error() || now() - snapshot()!.checked > 45_000,
   }
 }

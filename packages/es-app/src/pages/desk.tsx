@@ -7,15 +7,16 @@ import { ago, sessionHref, useDashboard } from "../state"
 import { nativeHeader, NativeHeader } from "../components/native-header"
 import { ModeSwitch } from "../components/mode-switch"
 import { ProjectSelect } from "../components/sidebar"
-import { createAttention, type AttentionRecord } from "../attention"
-import { createHomeRequests, requestLive, requestPointers } from "../home-requests"
+import type { createAttention, AttentionRecord } from "../attention"
+import { requestLive, type createHomeRequests } from "../home-requests"
 import { AttentionDecision, useRequestAgent, type AttentionView } from "../components/attention-decision"
 import { HomePermission, type HomeReplyReceipt } from "../components/home-permission"
 import { FailureRetry } from "../components/session-failure"
-import { createFailureIgnores, type IgnoredFailure } from "../failure-ignores"
+import type { IgnoredFailure } from "../failure-ignores"
+import { useDeskQueue } from "../desk-queue"
 import { failureAge, failureLabel, failureWhen, OLD_FAILURE_MS } from "../session-failures"
 import type { SessionFailure } from "@opencode-ai/sdk/v2"
-import { briefBinding, briefPacket, deskItems, deskSources, detailRequest, type DeskItem, type DeskSource } from "../desk"
+import { briefBinding, briefPacket, deskSources, detailRequest, type DeskItem, type DeskSource } from "../desk"
 import { createDeskSession, createMemory, type BriefJob } from "../desk-session"
 import { MoreDetail, PreparedBrief, useCompleteBrief } from "../components/attention-brief"
 import { useBriefs } from "../desk-briefs"
@@ -37,9 +38,12 @@ const STALE_MS = 45_000
 
 export default function Desk() {
   const dashboard = useDashboard()
-  const project = () => dashboard.allProjects() ? undefined : dashboard.editspace() ?? dashboard.editspaces()?.default ?? undefined
-  const attention = createAttention(project)
-  const requests = createHomeRequests(createMemo(() => requestPointers(dashboard)), item => dashboard.activity.requestSettled(item.kind, item.directory, item.id))
+  // The queue is app-wide state, so the Agents mode badge counts the same items this page lists.
+  const queue = useDeskQueue()
+  const project = queue.project
+  const attention = queue.attention
+  const requests = queue.requests
+  onMount(() => attention.activate())
   const desk = createDeskSession()
   // Defined below; read lazily when a brief starts.
   // Briefs are shared app-wide; the desk adds its other queue items for manual preparation.
@@ -55,30 +59,14 @@ export default function Desk() {
   const clock = setInterval(() => setNow(Date.now()), 5000)
   onCleanup(() => clearInterval(clock))
 
-  const projectFor = (directory: string) => dashboard.editspaces()?.editspaces.find(item => {
-    const root = item.root.replace(/\/+$/, "").replace(/\/\.editspace$/, "")
-    return directory === root || directory.startsWith(`${root}/`)
-  })?.name
-  const briefSessions = createMemo(() => new Set(briefs.jobs().map(job => job.id).filter(Boolean)))
-  // Ignored failures live in the dashboard's file so they stay hidden on every client and reload.
-  const ignores = createFailureIgnores()
-  onMount(() => void ignores.load())
-  const failures = createMemo(() => dashboard.scopedFailures().filter(failure => !briefSessions().has(failure.sessionID)))
+  const ignores = queue.ignores
+  const failures = queue.failures
   const ignoredFailures = createMemo(() => failures().filter(failure => ignores.ignored(failure)))
   const unignore = (failure: SessionFailure) => {
     const entry = ignores.entries().find((item: IgnoredFailure) => item.sessionID === failure.sessionID && item.messageID === failure.messageID)
     if (entry) return ignores.unignore(entry)
   }
-  const items = createMemo(() => deskItems({
-    records: attention.snapshot()?.value.records ?? [],
-    attentionChecked: attention.snapshot()?.checked ?? 0,
-    requests: requests.rows().filter(item => !project() || !item.project || item.project === project()),
-    // The desk's own brief passes are not work waiting on the human.
-    failures: failures().filter(failure => !ignores.ignored(failure)),
-    failuresChecked: dashboard.failures.checked() ?? 0,
-    title: id => dashboard.activity.session(id)?.title,
-    project: projectFor,
-  }))
+  const items = queue.items
   prepared.track(items)
   const sources = createMemo(() => deskSources({
     now: now(),

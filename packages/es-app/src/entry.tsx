@@ -17,6 +17,7 @@ import DocPage from "./pages/doc"
 import Sidebar from "./components/sidebar"
 import { DashboardProvider } from "./state"
 import { BriefsProvider } from "./desk-briefs"
+import { DeskQueueProvider } from "./desk-queue"
 import { TicketTip, wrapTicketRefs } from "./ticket-refs"
 import { SessionRefs, wrapSessionRefs } from "./session-mention-dom"
 import { installSidebarKeys, leftOpen, startDrag } from "./ui"
@@ -80,6 +81,7 @@ function Providers(props: ParentProps) {
           <FileComponentProvider component={File}>
             <DashboardProvider>
               <BriefsProvider>
+              <DeskQueueProvider>
               <div class="shell" ref={shellEl}>
                 <Show when={agents()}><Sidebar /></Show>
                 <Show when={agents() && leftOpen()}>
@@ -89,6 +91,7 @@ function Providers(props: ParentProps) {
                 <TicketTip container={() => shellEl} />
                 <SessionRefs container={() => shellEl} />
               </div>
+              </DeskQueueProvider>
               </BriefsProvider>
             </DashboardProvider>
           </FileComponentProvider>

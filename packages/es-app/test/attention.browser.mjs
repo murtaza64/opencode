@@ -50,7 +50,8 @@ const server = createHttpServer(async (req, res) => {
   if (path === "/experimental/session/failed") return json([])
   if (path === "/api/mail") return json({ messages: [] })
   // Agents mode opens on the map, which tolerates these optional sources being absent.
-  if (["/api/lane-provenance", "/api/wingman", "/api/handoffs"].includes(path)) return json({}, 404)
+  // The shared Front desk queue reads the ledger and ignored failures app-wide for the mode tab count.
+  if (["/api/lane-provenance", "/api/wingman", "/api/handoffs", "/api/attention", "/api/frontdesk/ignored-failures"].includes(path)) return json({}, 404)
   failures.push(`Unexpected read ${path}`); return json({}, 404)
 })
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))

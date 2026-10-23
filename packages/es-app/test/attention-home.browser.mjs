@@ -130,7 +130,7 @@ try {
   await expect(page).toHaveURL(`${preview.url}/agents`)
   await page.locator(".sidebar .pinned-section").getByRole("link", { name: /^Composer fixture/ }).first().click()
   await page.getByRole("textbox", { name: "Message", exact: true }).fill("Draft survives mode switches; do not send")
-  await page.getByRole("navigation", { name: "Mode" }).first().getByRole("link", { name: "Front desk", exact: true }).click()
+  await page.getByRole("navigation", { name: "Mode" }).first().getByRole("link", { name: /^Front desk/ }).click()
   await expect(page).toHaveURL(deskURL)
   await expect(page.getByRole("heading", { name: "Front desk", exact: true })).toBeAttached()
   await expect(page.locator(".desk-evidence")).toContainText("قرار التنفيذ")
