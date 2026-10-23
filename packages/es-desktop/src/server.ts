@@ -174,7 +174,7 @@ export const serve = async (options: {
     const api = /^\/(oc|es)(\/|$)/.exec(url.pathname)
     if (api && !apiAllowed(req.method ?? "", url.pathname)) return finish(403, "API route not exposed")
     // Routes the dashboard authorizes with the operator cookie: attention and the Front desk's own files.
-    const attention = /^\/es\/api\/(?:attention(?:\/|$)|frontdesk\/(?:memory|ignored-failures)$)/.test(url.pathname)
+    const attention = /^\/es\/api\/(?:attention(?:\/|$)|frontdesk\/(?:memory|ignored-failures|deliverables\/seen)$)/.test(url.pathname)
     if (attention && req.method !== "GET" && req.headers.origin !== origin)
       return finish(403, "Attention writes require the native origin")
     const target = api ? targets[api[1] as keyof typeof targets] : renderer

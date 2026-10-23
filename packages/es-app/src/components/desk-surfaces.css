@@ -13,3 +13,8 @@
   .desk-evidence.desk-surface { padding-inline: 0; border: 0; }
   .desk-surface-frame { min-height: 70vh; }
 }
+.desk-deliverables h2 { margin-block-start: 12px; }
+.desk-deliverable[data-new] .desk-item-title { font-weight: 600; color: var(--text); }
+.desk-deliverable[data-new] { border-inline-start-color: var(--blue); }
+.desk-deliverable-preview { font-size: 12px; color: var(--subtext0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-deliverables-earlier > summary { cursor: pointer; padding: 4px 10px; font-size: 12px; color: var(--subtext1); }

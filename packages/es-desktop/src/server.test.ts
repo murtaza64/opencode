@@ -263,6 +263,17 @@ test("Front desk ignored failures and memory reach the dashboard with only the o
   expect((await get("/es/api/frontdesk/ignored-failures", { method: "POST", body: "{}", headers: { origin: "https://evil.test" } })).status).toBe(403)
 })
 
+test("marking a requested deliverable seen reaches the dashboard with only the operator cookie", async () => {
+  const { server, get } = await setup()
+  const cookie = "unrelated=private; es_attention_operator=synthetic"
+  const seen = await get("/es/api/frontdesk/deliverables/seen", {
+    method: "POST", body: "{}", headers: { origin: server.origin, cookie, "x-attention-csrf": "1", "content-type": "application/json" },
+  })
+  expect(await seen.json()).toMatchObject({ method: "POST", path: "/api/frontdesk/deliverables/seen", originBound: true, operatorCookieOnly: true })
+  expect((await get("/es/api/frontdesk/deliverables/seen", { method: "POST", body: "{}" })).status).toBe(403)
+  expect(apiAllowed("GET", "/es/api/frontdesk/deliverables/seen")).toBe(false)
+})
+
 test("serves the built SPA and assets with restrictive CSP", async () => {
   const { get } = await setup()
   const page = await get("/session/ses_a")

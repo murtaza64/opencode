@@ -31,8 +31,8 @@ import { Glyph } from "../components/icons"
 import { getComposer } from "../composer"
 import { dictation } from "../dictation"
 import type { ContextPart } from "../api"
-import { SurfaceList, SurfaceView } from "../components/desk-surfaces"
-import { createSurfaces, surfaceFromKey, surfaceKey } from "../surfaces"
+import { DeliverableList, SurfaceList, SurfaceView } from "../components/desk-surfaces"
+import { surfaceFromKey, surfaceKey } from "../surfaces"
 import { leftWidth } from "../ui"
 import "./home.css"
 import "./desk.css"
@@ -60,7 +60,7 @@ export default function Desk() {
   // predates the Agents mode and redirects there.
   const [params, setParams] = useSearchParams()
   const [selectedKey, setSelectedKey] = createSignal<string | undefined>(typeof params.surface === "string" ? surfaceKey(params.surface) : typeof params.item === "string" ? params.item : undefined)
-  const surfaces = createSurfaces()
+  const surfaces = queue.surfaces
   const [receipts, setReceipts] = createSignal<HomeReplyReceipt[]>([])
   const [now, setNow] = createSignal(Date.now())
   const clock = setInterval(() => setNow(Date.now()), 5000)
@@ -197,6 +197,7 @@ export default function Desk() {
         <Show when={briefs.error()}><div class="home-muted desk-background" role="status" title={briefs.detail()}>{briefs.error()}</div></Show>
         <Show when={ignores.notice()}><div class={ignores.quiet() ? "home-muted desk-background" : "home-warning desk-background"} role="status" title={ignores.quiet()}>{ignores.notice()}</div></Show>
         <SurfaceList surfaces={surfaces} selected={selectedKey()} onSelect={select} />
+        <DeliverableList surfaces={surfaces} selected={selectedKey()} onSelect={select} />
         <h2>Needs you <span>{items().length}</span></h2>
         <ul class="desk-items">
           <For each={items()} fallback={<li class="home-muted desk-empty">{problems().length ? "Nothing listed, but some sources could not be checked." : "Nothing needs you."}</li>}>{item => {
@@ -256,7 +257,7 @@ export default function Desk() {
       </aside>
 
       {/* Remount per selection so one item's reply outcome or draft never carries into the next. */}
-      <Show when={selectedSurface()} keyed>{id => <SurfaceView id={id} surface={surfaces.list().find(item => item.id === id)} checked={surfaces.checked()} onRetry={() => void surfaces.refresh()} onClose={() => select()} />}</Show>
+      <Show when={selectedSurface()} keyed>{id => <SurfaceView id={id} surface={surfaces.list().find(item => item.id === id)} checked={surfaces.checked()} onOpen={surface => void surfaces.markSeen(surface)} onRetry={() => void surfaces.refresh()} onClose={() => select()} />}</Show>
       <Show when={selected() && !selectedSurface() ? selectedKey() : undefined} keyed>{_key => <Show when={selected()}>{current => <section ref={setEvidence} class="desk-evidence attention-home" aria-label="Selected item">
         <div class="desk-evidence-head">
           <button class="desk-button" aria-label="Close and return to chat" onClick={() => select()}>Close</button>

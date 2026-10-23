@@ -8,6 +8,7 @@ import { createHomeRequests, requestPointers } from "./home-requests"
 import { createFailureIgnores } from "./failure-ignores"
 import { deskItems } from "./desk"
 import { useBriefs } from "./desk-briefs"
+import { createSurfaces } from "./surfaces"
 
 const create = () => {
   const dashboard = useDashboard()
@@ -35,7 +36,9 @@ const create = () => {
     title: id => dashboard.activity.session(id)?.title,
     project: projectFor,
   }))
-  return { project, attention, requests, ignores, failures, items }
+  // Surfaces and requested deliverables; new deliverables also feed the mode badge.
+  const surfaces = createSurfaces()
+  return { project, attention, requests, ignores, failures, items, surfaces }
 }
 
 const Context = createContext<ReturnType<typeof create>>()
