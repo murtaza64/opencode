@@ -13,6 +13,9 @@ const POINTER = "es-app:front-desk:1"
 const NOTE = "es-app:front-desk:context:1"
 const PENDING = "es-app:front-desk:brief-create:1"
 const AGENT = "front-desk"
+/** The model the Front Desk chat and its brief jobs run on, set explicitly so nothing inherits another
+ * default. The dashboard's server-side preparation uses the same value (es_dashboard_frontdesk.py). */
+export const DESK_MODEL = { providerID: "duolingo-openai", modelID: "gpt-6.1-sol" } as const
 const CONTEXT_SOURCE = "es-app/front-desk"
 
 const readJSON = <T,>(key: string, valid: (value: any) => boolean): T | undefined => {
@@ -43,6 +46,14 @@ export const createDeskSession = () => {
     }
     setSession(created)
     setStatus("ready")
+    void preferDeskModel(created)
+  }
+  // A conversation that inherited another model (e.g. from its agent's default) switches to the desk
+  // model through the session's own preference, which applies from its next turn: a running turn and
+  // the transcript are untouched. A preference someone chose explicitly is left alone.
+  const preferDeskModel = async (current: Session) => {
+    if (current.preferredModel || (current.model?.providerID === DESK_MODEL.providerID && current.model.id === DESK_MODEL.modelID)) return
+    await oc.preferModel(current.id, current.directory, DESK_MODEL).then(setSession, () => undefined)
   }
   const verify = async () => {
     const current = pointer()
@@ -86,6 +97,7 @@ export const createDeskSession = () => {
         id,
         title: "Front desk",
         ...(agents.some(agent => agent.name === AGENT) ? { agent: AGENT } : {}),
+        model: { providerID: DESK_MODEL.providerID, id: DESK_MODEL.modelID },
         // The desk answers and routes; it never edits files, whichever agent serves it.
         permission: [{ permission: "edit", pattern: "*", action: "deny" as const }],
       },
@@ -129,11 +141,12 @@ export const createDeskSession = () => {
     if (status() === "none" && directory) await start(directory)
     const current = session()
     if (!current) return "The front desk chat is not available yet."
-    // Same agent and model as the human's last message, so the answer comes from the desk they use.
-    const last = (await oc.messagesTail(current.id, current.directory, 6).catch(() => [])).findLast(message => message.info.role === "user")?.info
+    // The conversation's own agent and model preference; without a preference, the desk model.
+    const fresh = await oc.session(current.id, current.directory).catch(() => current)
     try {
       await oc.promptBody(current.id, current.directory, {
-        ...(last?.role === "user" ? { agent: last.agent, model: last.model } : {}),
+        ...(fresh.agent ? { agent: fresh.agent } : {}),
+        ...(fresh.preferredModel ? {} : { model: DESK_MODEL }),
         parts: [{ type: "text", text }, ...parts],
       })
     } catch (cause) {
@@ -259,6 +272,7 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
     }
     savePending(undefined)
     await oc.promptBody(child.id, child.directory, {
+      model: DESK_MODEL,
       // Plain-text JSON: Core's message listing cannot yet encode stored json_schema formats.
       system: `${BRIEF_SYSTEM}\n${JSON.stringify(BRIEF_SCHEMA)}`,
       parts: [{ type: "text", text: value.packet }],
@@ -300,6 +314,7 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
           id,
           parentID: target.session,
           title: `Brief: ${latest.title.slice(0, 60)}`,
+          model: { providerID: DESK_MODEL.providerID, id: DESK_MODEL.modelID },
           metadata: { frontDesk: meta },
           permission: BRIEF_PERMISSION,
         },

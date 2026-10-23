@@ -58,7 +58,7 @@ const listeners = (pid) => execFileSync("uv", ["run", "--with", "psutil", "pytho
 
 // --- stub provider: OpenAI-compatible SSE ---
 const hits = { chat: 0, brief: 0, source: 0 }
-const seen = { chat: [], briefTools: [], memory: {}, retrieved: [] }
+const seen = { chat: [], briefTools: [], memory: {}, retrieved: [], models: { chat: [], brief: [] } }
 const holds = []
 let holdBriefs = true
 const chunk = (delta, finish) => `data: ${JSON.stringify({ id: "stub", object: "chat.completion.chunk", choices: [{ index: 0, delta, ...(finish ? { finish_reason: finish } : {}) }] })}\n\n`
@@ -86,6 +86,8 @@ const provider = http.createServer(async (request, response) => {
   const user = lastUser(body)
   if (user.includes("Prepare an evidence brief")) {
     hits.brief++
+    // Jobs the test itself posts directly (revision 0) are not the app's.
+    if (!user.includes("source revision: 0")) seen.models.brief.push(body.model)
     seen.briefTools.push((body.tools ?? []).map((tool) => tool.function?.name).sort())
     const revision = /source revision: (\S+)/.exec(user)?.[1]
     // Automatic briefs (revision 6+) first retrieve local context with a read-only tool.
@@ -115,6 +117,7 @@ const provider = http.createServer(async (request, response) => {
   const question = /DESK-[QM]\d/.exec(user)?.[0]
   if (question) {
     hits.chat++
+    seen.models.chat.push([question, body.model])
     // The newest generated context note is the one that describes this exchange.
     // Only this exchange's own message counts: context must ride with the send it informs.
     const own = JSON.stringify((body.messages ?? []).findLast((item) => item.role === "user" && JSON.stringify(item.content).includes(question)) ?? "")
@@ -188,6 +191,12 @@ let browser
 let page
 const corePort = await freePort()
 const base = `http://127.0.0.1:${corePort}`
+// The real provider and model names, served by the same fake endpoint, so model selection is observable.
+const deskProviders = (url) => {
+  const config = testProviderConfig(url)
+  const named = (id, model) => ({ ...config.provider.test, id, name: id, models: { [model]: { ...config.provider.test.models["test-model"], id: model, name: model } } })
+  return { ...config, provider: { ...config.provider, "duolingo-openai": named("duolingo-openai", "gpt-6.1-sol"), "duolingo-anthropic": named("duolingo-anthropic", "claude-fable-5") } }
+}
 const startCore = async (label) => {
   output = ""
   child = spawn(binary, ["serve", "--hostname", "127.0.0.1", "--port", String(corePort)], {
@@ -198,10 +207,11 @@ const startCore = async (label) => {
       OPENCODE_DB: db, OPENCODE_CONFIG: "", OPENCODE_CONFIG_DIR: `${home}/config/opencode`,
       OPENCODE_TEST_MANAGED_CONFIG_DIR: `${home}/managed`, OPENCODE_AUTH_CONTENT: "{}",
       OPENCODE_CONFIG_CONTENT: JSON.stringify({
-        ...testProviderConfig(`http://127.0.0.1:${provider.address().port}/v1`),
+        ...deskProviders(`http://127.0.0.1:${provider.address().port}/v1`),
         model: "test/test-model",
         small_model: "test/test-model",
-        agent: { "front-desk": { mode: "primary", description: "Stub front desk", prompt: "You are the stub front desk." } },
+        // Like the real agent before the fix: its own default is another model.
+        agent: { "front-desk": { mode: "primary", description: "Stub front desk", prompt: "You are the stub front desk.", model: "duolingo-anthropic/claude-fable-5" } },
         server: { hostname: "127.0.0.1", port: corePort, mdns: false },
       }),
       OPENCODE_PURE: "1", OPENCODE_DISABLE_PROJECT_CONFIG: "1", OPENCODE_DISABLE_AUTOUPDATE: "1",
@@ -347,6 +357,8 @@ try {
   const briefAnchor = `ses_fdbrief_${createHash("sha256").update(project).digest("hex").slice(0, 20)}`
   const deskInfo = (await call("GET", `/session/${pointer.session}`)).body
   assert.equal(deskInfo.agent, "front-desk")
+  // Created on the desk model explicitly, not the agent's own default.
+  assert.deepEqual([deskInfo.model?.providerID, deskInfo.model?.id], ["duolingo-openai", "gpt-6.1-sol"])
   assert.deepEqual(deskInfo.permission, [{ permission: "edit", pattern: "*", action: "deny" }])
   log(`DESK session=${pointer.session} agent=${deskInfo.agent} permission=${JSON.stringify(deskInfo.permission)}`)
 
@@ -477,7 +489,7 @@ try {
   attentionRevision = 3
   await page.getByRole("button", { name: "Refresh", exact: true }).click()
   await expect(page.locator(".desk-evidence")).toContainText("revision 3", { timeout: 20000 })
-  await expect(page.locator(".desk-background")).toContainText("source changed while the brief was being prepared", { ignoreCase: true, timeout: 20000 })
+  await expect(page.locator(".desk-background", { hasText: "source changed" })).toContainText("source changed while the brief was being prepared", { ignoreCase: true, timeout: 20000 })
   await page.unroute(tailRoute)
   assert.equal((await call("GET", `/session/${briefAnchor}/children`)).body.length, childrenBefore)
   assert.equal(hits.brief, 1)
@@ -771,6 +783,27 @@ try {
   await editor().fill("")
   log(`DETAIL More detail on rev 7 -> one desk message with bound evidence + links, answered in chat; draft kept; briefs unchanged`)
 
+  // 11c. Model: every desk turn and brief ran on the desk model. A conversation that had inherited
+  //      another model switches through its model preference at its next turn, keeping its history.
+  assert(seen.models.chat.length && seen.models.chat.every(([, model]) => model === "gpt-6.1-sol"), JSON.stringify(seen.models.chat))
+  assert(seen.models.brief.length && seen.models.brief.every((model) => model === "gpt-6.1-sol"), JSON.stringify(seen.models.brief))
+  const inherited = (await call("POST", "/session", { title: "Front desk", agent: "front-desk", permission: [{ permission: "edit", pattern: "*", action: "deny" }] })).body
+  const oldTurn = await call("POST", `/session/${inherited.id}/message`, { agent: "front-desk", parts: [{ type: "text", text: "DESK-Q7 earlier question" }] })
+  assert.equal(oldTurn.status, 200, oldTurn.raw)
+  // Fixture: the old conversation ran on the agent's default.
+  assert.deepEqual(seen.models.chat.at(-1), ["DESK-Q7", "claude-fable-5"])
+  await page.evaluate(([session, directory]) => localStorage.setItem("es-app:front-desk:1", JSON.stringify({ session, directory })), [inherited.id, inherited.directory])
+  pointerID = inherited.id
+  await page.goto(`${origin}/`)
+  await poll("model preference", async () => (await call("GET", `/session/${inherited.id}`)).body.preferredModel?.id === "gpt-6.1-sol")
+  await expect(transcript()).toContainText("Desk answer for DESK-Q7.", { timeout: 20000 })
+  await editor().fill("DESK-Q8 after the switch")
+  await sendIdle()
+  await expect(transcript()).toContainText("Desk answer for DESK-Q8.", { timeout: 20000 })
+  assert.deepEqual(seen.models.chat.at(-1), ["DESK-Q8", "gpt-6.1-sol"])
+  assert.equal((await messages(inherited.id)).filter((message) => message.info.role === "user").length, 2, "history kept")
+  log(`MODEL desk turns ${seen.models.chat.length} + briefs ${seen.models.brief.length} on gpt-6.1-sol; inherited Fable conversation switched at its next turn (preference set, history kept)`)
+
   // 12. Authority: nothing answered, granted or retried on anyone's behalf.
   assert.deepEqual(attentionPosts, [])
   assert.equal(posts.filter((item) => item.endsWith("/input")).length, 0, "every desk send was a plain send")
@@ -797,7 +830,7 @@ try {
   log("FRONT DESK REAL: PASS")
 } catch (error) {
   if (page && evidence) await page.screenshot({ path: path.join(evidence, "failure.png") }).catch(() => {})
-  if (page) console.error(`--- desk background: ${await page.locator(".desk-background").innerText({ timeout: 1000 }).catch(() => "none")}`)
+  if (page) console.error(`--- desk background: ${await page.locator(".desk-background").allInnerTexts().then(texts => texts.join(" | ")).catch(() => "none")}`)
   console.error(`FAIL ${error?.message ?? ""}\n${error?.stack ?? error}\n--- core stdout tail\n${output.slice(-2000)}\n--- core stderr tail\n${diagnostics.slice(-3000)}`)
   process.exitCode = 1
 } finally {
