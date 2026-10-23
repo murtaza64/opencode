@@ -2,6 +2,9 @@ import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { EventV2 } from "@opencode-ai/core/event"
 import { EventManifest } from "@/event-manifest"
 import { InstanceDisposed } from "@/server/event"
+import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { Question } from "@/question"
+import { SessionStatus } from "@/session/status"
 import "@opencode-ai/core/account"
 import "@/server/event"
 import { Schema } from "effect"
@@ -48,6 +51,21 @@ const GlobalEventSchema = Schema.Struct({
   ]),
 }).annotate({ identifier: "GlobalEvent" })
 
+const GlobalRuntime = Schema.Struct({
+  instances: Schema.Array(
+    Schema.Union([
+      Schema.Struct({
+        directory: Schema.String,
+        ready: Schema.Literal(true),
+        status: Schema.Record(Schema.String, SessionStatus.Info),
+        permissions: Schema.Array(PermissionV1.Request),
+        questions: Schema.Array(Question.Request),
+      }),
+      Schema.Struct({ directory: Schema.String, ready: Schema.Literal(false) }),
+    ]),
+  ),
+}).annotate({ identifier: "GlobalRuntime" })
+
 export const GlobalUpgradeInput = Schema.Struct({
   target: Schema.String.check(
     Schema.makeFilter((value) => (semver.valid(value) === null ? "Expected a semantic version" : undefined)),
@@ -68,6 +86,7 @@ const GlobalUpgradeResult = Schema.Union([
 export const GlobalPaths = {
   health: "/global/health",
   event: "/global/event",
+  runtime: "/global/runtime",
   config: "/global/config",
   dispose: "/global/dispose",
   upgrade: "/global/upgrade",
@@ -92,6 +111,16 @@ export const GlobalApi = HttpApi.make("global").add(
           identifier: "global.event",
           summary: "Get global events",
           description: "Subscribe to global events from the OpenCode system using server-sent events.",
+        }),
+      ),
+      HttpApiEndpoint.get("runtime", GlobalPaths.runtime, {
+        success: described(GlobalRuntime, "Runtime state of every loaded instance"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.runtime",
+          summary: "Get runtime state",
+          description:
+            "Busy session statuses and pending permissions and questions for every loaded instance, read from memory. Never loads an instance: a directory without one has no running sessions and no pending requests.",
         }),
       ),
       HttpApiEndpoint.get("configGet", GlobalPaths.config, {

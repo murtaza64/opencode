@@ -254,6 +254,11 @@ describe("session HttpApi", () => {
       expect(listed.status).toBe(200)
       expect(yield* responseJson(listed)).toEqual([])
       expect(store.size()).toBe(0)
+      const global = yield* request(`/experimental/session?roots=true`, { headers })
+      expect(global.status).toBe(200)
+      expect(store.size()).toBe(0)
+      expect(yield* requestJson<{ instances: unknown[] }>(`/global/runtime`, { headers })).toEqual({ instances: [] })
+      expect(store.size()).toBe(0)
       const created = yield* requestJson<Session.Info>(`/session?directory=${encodeURIComponent(dir)}`, {
         method: "POST", headers,
       })
@@ -268,6 +273,9 @@ describe("session HttpApi", () => {
       const status = yield* SessionStatus.Service
       yield* status.set(created.id, { type: "busy" }).pipe(Effect.provideService(InstanceRef, ctx))
       expect(yield* requestJson<Record<string, unknown>>(`/session/status?directory=${encodeURIComponent(dir)}`, { headers })).toMatchObject({ [created.id]: { type: "busy" } })
+      expect(yield* requestJson<{ instances: unknown[] }>(`/global/runtime`, { headers })).toEqual({
+        instances: [{ directory: ctx.directory, ready: true, status: { [created.id]: { type: "busy" } }, permissions: [], questions: [] }],
+      })
     }),
   )
   it.effect("maps busy sessions to public session busy errors", () =>

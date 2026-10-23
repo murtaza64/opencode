@@ -88,6 +88,8 @@ import type {
   GlobalEventResponses,
   GlobalHealthErrors,
   GlobalHealthResponses,
+  GlobalRuntimeErrors,
+  GlobalRuntimeResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
   InstanceDisposeErrors,
@@ -1407,6 +1409,18 @@ export class Global extends HeyApiClient {
   public event<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
     return (options?.client ?? this.client).sse.get<GlobalEventResponses, GlobalEventErrors, ThrowOnError>({
       url: "/global/event",
+      ...options,
+    })
+  }
+
+  /**
+   * Get runtime state
+   *
+   * Busy session statuses and pending permissions and questions for every loaded instance, read from memory. Never loads an instance: a directory without one has no running sessions and no pending requests.
+   */
+  public runtime<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalRuntimeResponses, GlobalRuntimeErrors, ThrowOnError>({
+      url: "/global/runtime",
       ...options,
     })
   }
