@@ -1,6 +1,6 @@
 /* Conversation view: live transcript (session-ui renderer over an SSE-fed
  * store), prompt input, and inline permission/question replies. */
-import { createEffect, createMemo, createResource, createSignal, For, on, onCleanup, onMount, Show, untrack } from "solid-js"
+import { createEffect, createMemo, createResource, createSignal, For, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js"
 import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router"
 import { DataProvider } from "@opencode-ai/session-ui/context"
 import { renderable, ToolAdornment, type MessagePartProps } from "@opencode-ai/session-ui/message-part"
@@ -155,8 +155,8 @@ export default function SessionPage() {
   )
 }
 
-/** `embedded` drops the page-level info panel. `context` may attach generated parts to an idle send; `onSent` reports whether that send was accepted. `anchor` scrolls to and highlights a linked message or range. */
-export function SessionView(props: { sessionID: string; directory: string; embedded?: boolean; context?: () => ContextPart[]; onSent?: (context: ContextPart[], accepted: boolean) => void; anchor?: () => MessageAnchor | undefined }) {
+/** `embedded` drops the page-level info panel. `headerStart` leads the header, for a host's own pane control. `context` may attach generated parts to an idle send; `onSent` reports whether that send was accepted. `anchor` scrolls to and highlights a linked message or range. */
+export function SessionView(props: { sessionID: string; directory: string; embedded?: boolean; context?: () => ContextPart[]; onSent?: (context: ContextPart[], accepted: boolean) => void; anchor?: () => MessageAnchor | undefined; headerStart?: JSX.Element }) {
   const sessionID = props.sessionID
   const directory = props.directory
   const composer = getComposer(sessionID, directory)
@@ -1495,6 +1495,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       <div class="session-main">
         {/* Embedded beside the desk queue, the chat's title and tools belong to its own pane. */}
         <AppHeader inline={props.embedded}>
+          {props.headerStart}
           <SessionTitle sessionID={sessionID} directory={directory} session={session()} suspendBlurSave={findOpen()} onSaved={(info) => {
             live.apply({ type: "session.updated", properties: { sessionID, info } })
             void refetch()

@@ -7,7 +7,10 @@ import { successorFor, type Handoff, type LaneOwner } from "./handoffs"
 
 export type MailName = { label: string; title: string; named: boolean }
 /** Resolve a mail party (lane, `human`, or session ID) given the session that sent or received the mail, if recorded. */
-export type MailNamer = (party: string, evidence?: string | null) => MailName
+export type MailNamer = ((party: string, evidence?: string | null) => MailName) & {
+  /** Whether `party` is a lane this client knows (for origin labels). */
+  local?: (party: string) => boolean
+}
 
 export type MailNameSources = {
   editspace: string
@@ -43,10 +46,18 @@ export const mailName = (sources: MailNameSources, party: string, evidence?: str
   return { label: title, title: `Lane ${party} · session ${evidence === owner ? owner : `${evidence} → ${owner}`}`, named: true }
 }
 
-export const mailNamer = (sources: () => MailNameSources | undefined): MailNamer => (party, evidence) => {
-  const current = sources()
-  return current ? mailName(current, party, evidence) : { label: party, title: party, named: false }
-}
+export const mailNamer = (sources: () => MailNameSources | undefined): MailNamer => Object.assign(
+  (party: string, evidence?: string | null) => {
+    const current = sources()
+    return current ? mailName(current, party, evidence) : { label: party, title: party, named: false }
+  },
+  {
+    local: (party: string) => {
+      const current = sources()
+      return !!current && current.owners.some((owner) => owner.lane === JSON.stringify([current.editspace, party]))
+    },
+  },
+)
 
 /** The session recorded as receiving `message` for `recipient`, when exactly one is recorded. */
 export const recipientSession = (deliveries: readonly { recipient: string; session: string | null }[], recipient: string) => {

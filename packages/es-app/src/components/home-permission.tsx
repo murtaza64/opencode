@@ -1,6 +1,6 @@
 /* Exact permission reply from Home: the same POST /permission/:id/reply contract
  * and once/always/reject choices as the session's permission rail. */
-import { createSignal, For, Show } from "solid-js"
+import { createSignal, For, onCleanup, Show } from "solid-js"
 import { Dynamic } from "solid-js/web"
 import { A } from "@solidjs/router"
 import { useFileComponent } from "@opencode-ai/ui/context/file"
@@ -181,11 +181,19 @@ const EditDiff = (props: { file: EditFile; open: boolean }) => {
       return
     }
   }
-  return <details class="home-edit-diff" open={props.open} dir="ltr">
+  // Side by side once the pane has room (the desk's landscape width); unified below it.
+  const [split, setSplit] = createSignal(false)
+  const measure = (el: HTMLElement) => {
+    const observer = new ResizeObserver(() => setSplit(el.getBoundingClientRect().width >= 1060))
+    observer.observe(el)
+    onCleanup(() => observer.disconnect())
+  }
+  return <details ref={measure} class="home-edit-diff" open={props.open} dir="ltr">
     <summary><EditPath path={props.file.path} full={props.file.full} /> <span class="home-edit-counts"><span class="home-edit-add">+{props.file.additions}</span> <span class="home-edit-del">−{props.file.deletions}</span></span></summary>
     <Show when={props.file.additions || props.file.deletions} fallback={<p class="home-muted">No line changes{props.file.type === "add" ? " (empty new file)" : ""}.</p>}>
       <Show when={diff()} fallback={<pre class="home-edit-raw">{props.file.patch}</pre>}>{value =>
-        <Dynamic component={fileComponent} mode="diff" fileDiff={value()} hunkSeparators={value().isPartial ? "simple" : "line-info-basic"} />}</Show>
+        <Show when={split() ? "split" : "unified"} keyed>{style =>
+          <Dynamic component={fileComponent} mode="diff" diffStyle={style} fileDiff={value()} hunkSeparators={value().isPartial ? "simple" : "line-info-basic"} />}</Show>}</Show>
     </Show>
   </details>
 }

@@ -152,11 +152,15 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
     finally { if (loading === version) loading = "" }
   }
   createEffect(() => { if (historyOpen() && history()?.version !== historyVersion(props.record)) void loadHistory(props.record) })
+  // Grouped so a wide pane can set the explanation beside the answer; narrow panes stack the groups in this order.
   return <article class="home-decision" data-attention-id={props.record.id}>
-    <div class="home-eyebrow"><Requester record={props.record} /><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Open thread</A></div>
-    <h3><bdi dir="auto">{props.record.title}</bdi></h3>
-    <Show when={!props.prepared}><p dir="auto"><LinkedText text={props.record.context} /></p></Show>
-    {props.brief}
+    <header class="home-decision-head"><div class="home-eyebrow"><Requester record={props.record} /><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Open thread</A></div>
+    <h3><bdi dir="auto">{props.record.title}</bdi></h3></header>
+    <div class="home-decision-explain">
+      <Show when={!props.prepared}><p dir="auto"><LinkedText text={props.record.context} /></p></Show>
+      {props.brief}
+    </div>
+    <div class="home-decision-act">
     <Show when={props.record.status === "open"}>
       {/* A recommendation that names an option is tagged on that option; free text stays visible. */}
       <Show when={props.record.recommendation && !props.record.options.some(option => option.id === props.record.recommendation)}><p class="home-muted">Recommended: <bdi dir="auto"><LinkedText text={props.record.recommendation ?? ""} /></bdi></p></Show>
@@ -167,6 +171,8 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
     <Show when={props.record.status === "answered"}><Delivery record={props.record} attention={props.attention} /></Show>
     <Show when={props.record.status === "snoozed"}><p class="home-muted">Snoozed until {props.record.snoozed_until ? new Date(props.record.snoozed_until).toLocaleString() : "unknown"}</p><button disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "wake" })}>Return to Needs you</button></Show>
     <Show when={["resolved", "withdrawn"].includes(props.record.status)}><p class="home-muted">{props.record.status === "resolved" ? "Resolved" : "Withdrawn"}</p><Show when={props.record.answer}><Show when={props.record.answer?.text}><pre class="home-answer-text" dir="auto"><LinkedText text={props.record.answer?.text ?? ""} /></pre></Show><Show when={optionLabel(props.record, props.record.answer?.choice_id)}>{label => <p class="home-muted">Option <bdi dir="auto">{label()}</bdi></p>}</Show><p class="home-muted">{deliveryLabel(props.record)}</p></Show></Show>
+    </div>
+    <div class="home-decision-more">
     {props.more}
     {props.briefDetails}
     {/* With a brief leading, the producer's exact request comes last, after the native controls. */}
@@ -174,5 +180,6 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
       <details class="home-original"><summary>Original request</summary><p dir="auto"><LinkedText text={props.record.context} /></p></details>
     </Show>
     <details onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>Record &amp; history</summary><div class="home-source"><bdi dir="ltr">{props.record.id} · {props.record.gate_key} · revision {props.record.revision}</bdi></div><Show when={history()?.version === historyVersion(props.record) ? history() : undefined} fallback={<p>Loading history…</p>}>{item => <Show when={!item().error} fallback={<p>{item().error}</p>}><pre dir="ltr">{JSON.stringify(item().events, null, 2)}</pre></Show>}</Show></details>
+    </div>
   </article>
 }

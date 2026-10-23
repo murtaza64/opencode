@@ -29,7 +29,8 @@ fixture.mail = (es, lane) => {
     { id: "invalid-time", ts: "invalid", from: "lane-beta", to: "lane-alpha", direction: "received", text: "INVALID_TIME_SENTINEL", deliveries: [delivery] },
   ] }
 }
-const browser = await chromium.launch({ channel: "chrome", headless: true })
+const browser = await chromium.launch({ headless: true,
+  ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : { channel: "chrome" }) })
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 await page.context().route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
 const errors = []

@@ -1037,6 +1037,7 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   .todo-list { padding: 2px 10px 8px; }
 }
 .mail-activity {
+  container-type: inline-size;
   scroll-margin-block-start: 12px;
   min-width: 0;
   margin-block: 8px;
@@ -1048,26 +1049,37 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 }
 .mail-activity-summary {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) minmax(0, 1fr) 16px;
+  grid-template-columns: 16px minmax(0, 3fr) minmax(0, 2fr) 16px;
   gap: 10px;
   align-items: center;
-  padding: 8px 10px;
+  min-block-size: 36px;
+  box-sizing: border-box;
+  padding: 7px 10px;
   list-style: none;
   cursor: pointer;
 }
 .mail-activity-summary::-webkit-details-marker { display: none; }
 .mail-activity-summary:hover { background: var(--surface0); }
 .mail-activity-summary:focus-visible { outline: 1px solid var(--lavender); outline-offset: -2px; }
-.mail-activity-kind { color: var(--teal); display: inline-flex; }
+.mail-activity-kind { color: var(--teal); display: inline-flex; inline-size: 16px; justify-content: center; }
 .mail-activity-kind[data-direction=out] { color: var(--blue); }
-.mail-activity-route, .mail-activity-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Each party truncates on its own, so a long agent title never hides the other end. */
-.mail-activity-route .mail-party { display: inline-block; max-width: 45%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
-.mail-party[data-named] { color: var(--text); }
-.mail-activity-state { color: var(--subtext0); }
-.mail-activity-state > span { margin-inline-start: 6px; }
-.mail-activity-state > span:first-child { margin-inline-start: 0; }
-.mail-activity-arrow { display: inline-block; }
+/* One truncation policy: every piece keeps its line; only names and state shrink. */
+.mail-activity-line, .mail-route { display: flex; align-items: baseline; gap: 6px; min-width: 0; white-space: nowrap; }
+.mail-route { flex: 1 1 auto; gap: 0; }
+.mail-route > * { flex: none; }
+.mail-route .mail-party { flex: 0 1 auto; min-width: 3ch; overflow: hidden; text-overflow: ellipsis; }
+/* The recipient keeps at least a readable share; a long sender yields first. */
+.mail-route > .mail-party:last-child { flex-shrink: 0.25; max-inline-size: 45%; }
+.mail-activity-line { overflow: hidden; }
+.mail-route .mail-origin { margin-inline-end: 6px; }
+.mail-activity-arrow { display: inline-block; padding-inline: 5px; }
+.mail-tag, .mail-origin { flex: none; font-size: 11px; line-height: 16px; padding-inline: 5px; border-radius: 3px; border: 1px solid var(--surface1); color: var(--subtext0); }
+.mail-tag { color: var(--teal); }
+.mail-origin[data-origin=squadron] { color: var(--peach); border-color: color-mix(in srgb, var(--peach) 45%, transparent); }
+.mail-party[data-named], .mail-party[data-external] { color: var(--text); }
+.mail-activity-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--subtext0); }
+.mail-state-text > span { margin-inline-start: 6px; }
+.mail-state-text > span:first-child { margin-inline-start: 0; }
 .mail-activity:dir(rtl) .mail-activity-arrow { transform: scaleX(-1); }
 .mail-activity-disclosure { color: var(--subtext0); font-size: 16px; line-height: 1; }
 .mail-activity:dir(rtl) .mail-activity-disclosure { transform: rotate(180deg); }
@@ -1078,20 +1090,32 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .mail-activity-attachment { margin-block-start: 6px; color: var(--subtext0); }
 .mail-activity-details a { color: var(--teal); text-decoration: underline; }
 .mail-cause {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 16px auto minmax(0, 1fr) auto;
   gap: 4px 10px;
   align-items: baseline;
   margin-block: 2px 12px;
+  padding-inline: 11px 10px;
   color: var(--subtext0);
   font: 12px/1.4 var(--font-sans);
 }
-.mail-cause-kind { color: var(--teal); font-weight: 600; }
+.mail-cause-kind { color: var(--teal); font-weight: 600; white-space: nowrap; }
 .mail-cause-what { min-width: 0; overflow-wrap: anywhere; }
+.mail-cause .mail-origin { margin-inline-end: 4px; }
 .mail-delivery { margin-block-start: 8px; border-block-start: 1px solid var(--surface0); padding-block-start: 6px; }
-@media (max-width: 600px) {
+.mail-origin-short { display: none; }
+@container (max-width: 420px) {
+  .mail-origin-full { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .mail-origin-short { display: inline; }
+}
+/* A narrow row gives the route the whole line and moves state beneath it. */
+@container (max-width: 640px) {
   .mail-activity-summary { grid-template-columns: 16px minmax(0, 1fr) 16px; }
   .mail-activity-state { grid-column: 2; grid-row: 2; }
+}
+@media (max-width: 600px) {
+  .mail-cause { grid-template-columns: 16px minmax(0, 1fr); }
+  .mail-cause > :nth-child(n+3) { grid-column: 2; }
 }
 .session-page {
   display: flex;

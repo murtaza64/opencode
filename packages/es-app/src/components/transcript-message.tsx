@@ -6,7 +6,7 @@ import { mailActivityLabel, mailSentAt, mailWake } from "../mail-timeline"
 import { MailWakeEvidence } from "./mail-wake-evidence"
 import type { Segment } from "../transcript-groups"
 import type { MailNamer } from "../mail-names"
-import { MailParty } from "./mail-party"
+import { MailOriginDetail, MailRoute, MailSummary, originOf } from "./mail-summary"
 
 type MailSource = { type: "editspace-mail"; id: string; sender: string; recipient: string; senderSession?: string }
 const mailTime = (value: string | number | null) => value == null ? "" : new Date(value).toLocaleString()
@@ -41,6 +41,8 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
   const messageError = createMemo(() => props.message.role === "assistant" && props.message.error?.name !== "MessageAbortedError"
     ? props.message.error : undefined)
   const mail = createMemo(() => mailMetadata(props.message))
+  // The record carries the bridge's structured Squadron metadata; the input source alone names only the sender.
+  const origin = () => { const value = mail(); return value ? originOf(value.mail.sender, props.mailRecord?.squadron, props.mailName) : undefined }
   const mailText = createMemo(() => props.parts.flatMap(part => part.type === "text" && !part.ignored ? [part.text] : []).join("\n\n"))
   const generated = createMemo(() => {
     if (props.message.role !== "user" || !props.parts.length ||
@@ -90,24 +92,20 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
     </details>
   </Show>}>
     {(metadata) => <details class="mail-activity" id={`mail-${metadata().mail.id}`} data-mail-message-id={props.message.id}>
-      <summary class="mail-activity-summary">
-         <span class="mail-activity-kind">{metadata().label}<Show when={props.mailRecord}> · {props.mailRecord?.direction === "sent" ? "Outbound" : "Inbound"}</Show></span>
-        <span class="mail-activity-route">
-          <MailParty party={metadata().mail.sender} evidence={props.mailRecord?.sender_session ?? metadata().mail.senderSession} name={props.mailName} />
-          {" "}<span class="mail-activity-arrow" aria-hidden="true">→</span>{" "}
-          {/* This transcript's session received the mail. */}
-          <MailParty party={metadata().mail.recipient} evidence={props.message.sessionID} name={props.mailName} />
-        </span>
-        <span class="mail-activity-state">
+      <MailSummary direction={props.mailRecord?.direction === "sent" ? "out" : "in"}
+        tag={metadata().label === "Mail" ? undefined : metadata().label}
+        route={<MailRoute from={metadata().mail.sender} fromEvidence={props.mailRecord?.sender_session ?? metadata().mail.senderSession}
+          // This transcript's session received the mail.
+          to={metadata().mail.recipient} toEvidence={props.message.sessionID} name={props.mailName} origin={origin()} />}
+        state={<span class="mail-state-text">
           <For each={props.mailDeliveries ?? []}>{(delivery) => <span>{mailWake(delivery)} · {delivery.state}</span>}</For>
           <Show when={!props.mailDeliveries?.length}><span>{mailWake()}</span></Show>
           <Show when={metadata().delivery}>{(delivery) => <span>{delivery()}</span>}</Show>
           <Show when={metadata().state}>{(state) => <span>{state()}</span>}</Show>
-        </span>
-        <span class="mail-activity-disclosure" aria-hidden="true">›</span>
-      </summary>
+        </span>} />
       <div class="mail-activity-details">
         <div>Mail ID: <bdi dir="auto">{metadata().mail.id}</bdi></div>
+        <MailOriginDetail origin={origin()} id={metadata().mail.id} />
         <Show when={props.mailRecord}>{(record) => <>
           <div>Sent: {mailTime(mailSentAt(record()))}</div>
           <For each={[
