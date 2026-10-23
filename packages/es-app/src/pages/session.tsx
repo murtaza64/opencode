@@ -25,6 +25,7 @@ import { pendingEcho } from "../pending-echo"
 import { defaultImageCapability, prepareImageFile } from "../image-fit"
 import { ComposerResults } from "../components/composer-controls"
 import { DirectComposer } from "../components/direct-composer"
+import { DictationButton, DictationFeedback } from "../components/dictation"
 import { flash } from "../motion"
 import { Glyph } from "../components/icons"
 import { AppHeader } from "../components/native-header"
@@ -1372,6 +1373,10 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const ComposerPanel = (props: { expanded?: boolean }) => (
     <DirectComposer composer={composer} connected={connected() && !nudgePhase() && !aborting()} submit={send} restoreDraft={restoreDraft}
       editor={<Editor expanded={props.expanded} />} attachments={<Attachments />}
+      dictation={<DictationButton composer={composer} sessionID={sessionID} directory={directory}
+        editor={() => floating() ? floatEl : promptEl} normalMode={() => vim.mode() === "normal"}
+        checkpoint={(el) => activeVim().checkpoint(el)} refresh={(el) => vim.refresh(el)} />}
+      dictationFeedback={<DictationFeedback sessionID={sessionID} directory={directory} />}
       sessionMetadata={<Show when={latestUsage()}>
         {(u) => (
           <span class="context-pct"

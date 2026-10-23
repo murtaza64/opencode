@@ -8,6 +8,7 @@ import { cookieName, cookieValid, issueCookie, loopbackHost, pairingCsp, pairing
 import { eventMux } from "../../es-app/event-mux"
 import { eventProtocol, eventPaths } from "../../es-app/event-protocol"
 import { surfaceProxy } from "../../es-app/surface-proxy"
+import type { Voice } from "./voice"
 
 const csp =
   "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
@@ -68,6 +69,8 @@ export const serve = async (options: {
   // authenticate with a pairing cookie instead of the native capability header.
   host?: string
   pairing?: { code: string; maxAgeSeconds?: number }
+  // Native-only operator dictation; paired remote clients never reach this host's microphone.
+  voice?: Voice
 }) => {
   const host = options.host ? remoteListenHost(options.host) : "127.0.0.1"
   if (!host) throw new Error("Remote listeners must bind loopback or a tailnet address")
@@ -164,6 +167,10 @@ export const serve = async (options: {
       return finish(200, JSON.stringify({ protocol: eventProtocol }), "application/json")
     }
     if (url.pathname.startsWith("/__es/surface/")) return surfaces.address(req, res)
+    if (/^\/__es\/voice(\/|$)/.test(url.pathname)) {
+      if (!options.voice || pairing || url.search) return finish(404, "Not found")
+      return voiceRoute(options.voice, req, url.pathname, origin, finish)
+    }
     const api = /^\/(oc|es)(\/|$)/.exec(url.pathname)
     if (api && !apiAllowed(req.method ?? "", url.pathname)) return finish(403, "API route not exposed")
     const attention = /^\/es\/api\/attention(?:\/|$)/.test(url.pathname)
@@ -307,4 +314,47 @@ export const serve = async (options: {
       })
     },
   }
+}
+
+const voiceID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+const voiceRoute = async (
+  voice: Voice,
+  req: IncomingMessage,
+  pathname: string,
+  origin: string,
+  finish: (status: number, body: string, type?: string) => void,
+) => {
+  const json = (status: number, value: unknown) => finish(status, JSON.stringify(value), "application/json")
+  if (pathname === "/__es/voice" && req.method === "GET") return json(200, await voice.status())
+  const action = /^\/__es\/voice\/(start|stop|cancel|settings)$/.exec(pathname)?.[1]
+  if (!action || req.method !== "POST") return finish(404, "Not found")
+  if (req.headers.origin !== origin || !req.headers["content-type"]?.startsWith("application/json"))
+    return finish(403, "Dictation requires the native origin")
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const chunk of req) {
+    size += chunk.length
+    if (size > 256) return finish(413, "Payload too large")
+    chunks.push(chunk)
+  }
+  const body: unknown = (() => {
+    try {
+      return JSON.parse(Buffer.concat(chunks).toString())
+    } catch {
+      return undefined
+    }
+  })()
+  if (action === "settings") return (await voice.settings()) ? json(200, { ok: true }) : finish(404, "Not found")
+  const id = body && typeof body === "object" && "id" in body && typeof body.id === "string" ? body.id : ""
+  if (!voiceID.test(id)) return json(400, { ok: false, code: "invalid", message: "Invalid dictation id" })
+  if (action === "cancel") {
+    await voice.cancel(id)
+    return json(200, { ok: true })
+  }
+  const result = action === "start" ? await voice.start(id) : await voice.stop(id)
+  const status = result.ok
+    ? 200
+    : ({ busy: 409, inactive: 409, cancelled: 409, unavailable: 503, permission: 403, empty: 422, failed: 500 } as const)[result.code]
+  return json(status, result)
 }

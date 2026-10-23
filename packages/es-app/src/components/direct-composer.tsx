@@ -15,6 +15,8 @@ export const DirectComposer = (props: {
   attachments: JSX.Element
   sessionActions: JSX.Element
   sessionMetadata?: JSX.Element
+  dictation?: JSX.Element
+  dictationFeedback?: JSX.Element
   children: JSX.Element
 }) => {
   const state = props.composer.state
@@ -102,6 +104,7 @@ export const DirectComposer = (props: {
           {props.sessionActions}
         </div>
         <div class="direct-send" role="group" aria-label="Send" hidden={!!editing()}>
+          {props.dictation}
           <span class="direct-session-metadata">{props.sessionMetadata}</span>
           <div class="direct-model" role="group" aria-label="Model">
             {props.children}
@@ -136,6 +139,7 @@ export const DirectComposer = (props: {
           <For each={reasons()}>{(value) => <div>{value}</div>}</For>
         </div>
       </Show>
+      {props.dictationFeedback}
       <Show when={state.storageError}>
         <div class="direct-feedback err" role="alert">
           {state.storageError}
