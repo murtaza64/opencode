@@ -2,8 +2,8 @@ import { For, Show } from "solid-js"
 import type { MailMessage } from "../api"
 import { mailSentAt, mailWake } from "../mail-timeline"
 import { MailWakeEvidence } from "./mail-wake-evidence"
-import { Glyph } from "./icons"
 import { MailParty } from "./mail-party"
+import { MailOriginDetail, MailRoute, MailSummary, originOf } from "./mail-summary"
 import { recipientSession, type MailNamer } from "../mail-names"
 
 const timestamp = (value: string | number | null) => {
@@ -14,6 +14,7 @@ const timestamp = (value: string | number | null) => {
 
 export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?: string; name?: MailNamer }) => {
   const anchor = () => props.anchor ?? "mail"
+  const origin = () => originOf(props.message.from, props.message.squadron, props.name)
   const from = (detail?: boolean) => <MailParty party={props.message.from} evidence={props.message.sender_session} name={props.name} detail={detail} />
   const to = (detail?: boolean) => <MailParty party={props.message.to} evidence={recipientSession(props.message.deliveries, props.message.to)} name={props.name} detail={detail} />
   const references = () => [
@@ -21,23 +22,19 @@ export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?
     { label: "Supersedes", id: props.message.supersedes },
   ].filter((item): item is { label: string; id: string } => !!item.id)
   return <details class="mail-activity" id={`${anchor()}-${props.message.id}`} data-mail-id={props.message.id}>
-    <summary class="mail-activity-summary">
-      {/* The glyph carries direction at a glance; the words stay for assistive technology. */}
-      <span class="mail-activity-kind" data-direction={props.message.direction === "sent" ? "out" : "in"} title={props.message.direction === "sent" ? "Outbound mail" : "Inbound mail"}>
-        <Glyph name={props.message.direction === "sent" ? "paper-airplane" : "inbox"} /><span class="sr-only">Mail · {props.message.direction === "sent" ? "Outbound" : "Inbound"}</span>
-      </span>
-      <span class="mail-activity-route">{from()} <span class="mail-activity-arrow" aria-hidden="true">→</span> {to()}</span>
-      <span class="mail-activity-state" title={props.message.deliveries.map(delivery => `${mailWake(delivery)} · ${delivery.state}`).join("; ") || mailWake()}>
-         <For each={props.message.deliveries}>{(delivery) => <span>{mailWake(delivery)} · {delivery.state}</span>}</For>
-         <Show when={!props.message.deliveries.length}><span>{mailWake()}</span></Show>
-         <span> · <span class="mail-kind" data-kind={props.message.kind}>{props.message.kind}</span> · {timestamp(mailSentAt(props.message))}</span>
-      </span>
-      <span class="mail-activity-disclosure" aria-hidden="true">›</span>
-    </summary>
+    <MailSummary direction={props.message.direction === "sent" ? "out" : "in"}
+      route={<MailRoute from={props.message.from} fromEvidence={props.message.sender_session} to={props.message.to}
+        toEvidence={recipientSession(props.message.deliveries, props.message.to)} name={props.name} origin={origin()} />}
+      state={<span class="mail-state-text" title={props.message.deliveries.map(delivery => `${mailWake(delivery)} · ${delivery.state}`).join("; ") || mailWake()}>
+        <For each={props.message.deliveries}>{(delivery) => <span>{mailWake(delivery)} · {delivery.state}</span>}</For>
+        <Show when={!props.message.deliveries.length}><span>{mailWake()}</span></Show>
+        <span> · <span class="mail-kind" data-kind={props.message.kind}>{props.message.kind}</span> · {timestamp(mailSentAt(props.message))}</span>
+      </span>} />
     <div class="mail-activity-details">
       <div>Mail ID: <bdi dir="auto">{props.message.id}</bdi></div>
       <div>From: {from(true)}</div>
       <div>To: {to(true)}</div>
+      <MailOriginDetail origin={origin()} id={props.message.id} />
       <Show when={props.message.kind}><div>Kind: <bdi dir="auto">{props.message.kind}</bdi></div></Show>
       <div>Sent: {timestamp(mailSentAt(props.message))}</div>
       <Show when={props.message.created_ms === undefined}><div>Source timestamp precision: legacy (may be whole seconds).</div></Show>

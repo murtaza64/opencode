@@ -3,6 +3,7 @@
 import type { Agent, GlobalSession, Message, Part, PermissionRequest, QuestionRequest, Session, SessionFailure, SessionRetryResult, SessionV1InputImage, Todo } from "@opencode-ai/sdk/v2"
 import { httpError } from "./api-error"
 import type { PendingHandoff } from "./handoffs"
+import type { SquadronMeta } from "./mail-origin"
 
 export type MessageWithParts = { info: Message; parts: Part[] }
 /** Generated text attached to a human's own message; marked synthetic and with its producer. */
@@ -319,6 +320,8 @@ export type DocContent = {
 }
 
 export type MailMessage = {
+  /** Present on mail the Squadron bridge wrote (`from: integration:squadron`). */
+  squadron?: SquadronMeta
   id: string
   ts: string | number
   created_ms?: number

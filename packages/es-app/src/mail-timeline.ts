@@ -1,5 +1,6 @@
 import type { Message } from "@opencode-ai/sdk/v2"
 import type { MailDelivery, MailMessage, MailTimeline } from "./api"
+import type { SquadronMeta } from "./mail-origin"
 
 export const mailLocation = (directory: string, editspaces: { name: string; root: string }[], sessionID?: string):
   { name: string; lane: string; session?: never } | { name: string; session: string; lane?: never } | undefined => {
@@ -131,6 +132,8 @@ export type MailCause = {
   senders: string[]
   /** Per sender, the one recorded sending session, when every record agrees. */
   senderSessions: Record<string, string>
+  /** Squadron metadata per bridge sender, from the newest record in the run. */
+  squadron?: Record<string, SquadronMeta>
   sentFrom?: number
   sentTo?: number
   promotedAt: number
@@ -176,6 +179,10 @@ export const mailCauses = (rows: TimelineRow[], records: Map<string, MailMessage
         const [session] = sessions
         return sessions.size === 1 && session ? [[sender, session]] : []
       })),
+      ...(() => {
+        const bridged = run.flatMap((item) => { const record = records.get(mailSourceID(item)!); return record?.squadron ? [[record.from, record.squadron] as const] : [] })
+        return bridged.length ? { squadron: Object.fromEntries(bridged) } : {}
+      })(),
       ...(sent.length ? { sentFrom: Math.min(...sent), sentTo: Math.max(...sent) } : {}),
       promotedAt: run[0]!.time.created,
     })
