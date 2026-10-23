@@ -118,3 +118,35 @@ describe("restart continuation eligibility", () => {
     ])
   })
 })
+
+describe("empty steps opened after the anchor", () => {
+  const header = (extra: Partial<SessionV1.Assistant> = {}, parts: SessionV1.Part[] = []) => {
+    const id = MessageID.make("msg_zheader")
+    return { info: { ...assistant({ finish: undefined }), id, time: { created: 200 }, ...extra }, parts: [
+      { id: PartID.ascending(), sessionID, messageID: id, type: "step-start" } as SessionV1.Part, ...parts] }
+  }
+  const anchorStep = { info: assistant({ finish: "tool-calls", time: { created: 100, completed: 120 } }), parts: [done] }
+  const run = (later: SessionV1.WithParts[], newest = later.at(-1)!.info.id) => SessionRestart.decide({
+    payload, now: 250, anchor: anchorStep, newest: { byTime: newest, byInsertion: newest },
+    turn: { user, assistant: later.at(-1) ?? anchorStep }, pendingInput: true, later,
+  })
+
+  test("only a producing-nothing step is skipped, and it is closed when the turn resumes", () => {
+    const empty = header()
+    const decision = run([empty])
+    if (decision.outcome !== "scheduled") throw new Error(decision.outcome)
+    expect(decision.trailing.map((message) => message.info.id)).toEqual([empty.info.id])
+    expect(SessionRestart.closeTrailing(decision, 250)).toMatchObject([{ id: empty.info.id, error: { name: "MessageAbortedError" }, time: { completed: 250 } }])
+  })
+
+  test("output, a tool, an error, or a finish is progress", () => {
+    const text = { id: PartID.ascending(), sessionID, messageID: MessageID.make("msg_zheader"), type: "text", text: "hi" } as SessionV1.Part
+    for (const step of [header({}, [text]), header({}, [{ ...running, messageID: MessageID.make("msg_zheader") }]),
+      header({ error: aborted, time: { created: 200, completed: 210 } }), header({ finish: "stop", time: { created: 200, completed: 210 } })])
+      expect(run([step]).outcome).toBe("advanced")
+  })
+
+  test("a newest row outside the anchor and its empty steps is progress", () => {
+    expect(run([header()], MessageID.make("msg_zz_other")).outcome).toBe("advanced")
+  })
+})

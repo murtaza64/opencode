@@ -49,7 +49,29 @@ export type Reason = NonNullable<SessionV1.RestartContinuation["reason"]>
 
 export type Decision =
   | { readonly outcome: "advanced" | "complete" | "failed" | "stale" | "capacity" }
-  | { readonly outcome: "scheduled" | "uncertain"; readonly marker: SessionV1.RestartContinuation; readonly anchor: SessionV1.WithParts }
+  | {
+      readonly outcome: "scheduled" | "uncertain"
+      readonly marker: SessionV1.RestartContinuation
+      readonly anchor: SessionV1.WithParts
+      /** Empty assistant steps opened after the anchor was captured (see `emptyStep`). */
+      readonly trailing: readonly SessionV1.WithParts[]
+    }
+
+/**
+ * An assistant step the runner opened but that produced nothing: no finish, no error, no completion
+ * time, no structured result, and no parts beyond a step marker or blank text. A shutdown can land
+ * between creating this header and the first provider output; it is not progress, so it never turns
+ * a restart into "advanced". A step with any tool call, output, error or finish is not empty.
+ */
+export function emptyStep(message: SessionV1.WithParts) {
+  const info = message.info
+  if (info.role !== "assistant" || info.error || info.finish || info.time.completed || info.structured !== undefined)
+    return false
+  return message.parts.every(
+    (part) =>
+      part.type === "step-start" || ((part.type === "text" || part.type === "reasoning") && !part.text.trim()),
+  )
+}
 
 /**
  * Decide what one controlled restart may do for one Session, from durable evidence only.
@@ -72,14 +94,23 @@ export function decide(input: {
   newest: { byTime: MessageID | undefined; byInsertion: MessageID | undefined }
   turn: { user: SessionV1.User | undefined; assistant: SessionV1.WithParts | undefined }
   pendingInput: boolean
+  /** Every message newer than the anchor, oldest first. */
+  later?: readonly SessionV1.WithParts[]
 }): Decision {
   const anchor = input.anchor
   if (!anchor) return { outcome: "stale" }
-  if (input.newest.byTime !== anchor.info.id || input.newest.byInsertion !== anchor.info.id) return { outcome: "advanced" }
+  const later = input.later ?? []
+  // Only empty steps opened during shutdown may follow the anchor; any other row is real progress.
+  const trailing = later.length && later.every(emptyStep) ? later : []
+  const tips = new Set([anchor.info.id, ...trailing.map((message) => message.info.id)])
+  const tip = trailing.at(-1)?.info.id ?? anchor.info.id
+  if (input.newest.byTime !== tip || !input.newest.byInsertion || !tips.has(input.newest.byInsertion))
+    return { outcome: "advanced" }
   if ((anchor.info.restarts?.length ?? 0) >= MAX_MARKERS) return { outcome: "capacity" }
   const result = (outcome: "scheduled" | "uncertain", interruptedTools: number, reason?: Reason): Decision => ({
     outcome,
     anchor,
+    trailing,
     marker: {
       restartID: input.payload.restartID,
       outcome,
@@ -129,6 +160,20 @@ export function settle(decision: Extract<Decision, { outcome: "scheduled" | "unc
     error: info.error ?? new SessionV1.AbortedError({ message: "Interrupted by an OpenCode daemon restart" }).toObject(),
     time: { ...info.time, completed: now },
   }
+}
+
+/**
+ * The empty steps opened after the anchor, closed exactly as a graceful abort leaves an unfinished
+ * step, so the resumed turn regenerates that step instead of leaving an open header behind it.
+ * Uncertain decisions leave them untouched for a human.
+ */
+export function closeTrailing(decision: Extract<Decision, { outcome: "scheduled" | "uncertain" }>, now: number): SessionV1.Info[] {
+  if (decision.outcome !== "scheduled") return []
+  return decision.trailing.map((message) => ({
+    ...(message.info as SessionV1.Assistant),
+    error: new SessionV1.AbortedError({ message: "Interrupted by an OpenCode daemon restart" }).toObject(),
+    time: { ...message.info.time, completed: now },
+  }))
 }
 
 export * as SessionRestart from "./restart"

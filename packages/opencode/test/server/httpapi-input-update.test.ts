@@ -63,3 +63,37 @@ it.instance("PATCH validates commands and returns a 409 with the current receipt
     expect((yield* patch({ commandID: "invalid-revision", expectedRevision: -1, text: "bad" })).status).toBe(400)
   }),
 )
+
+it.instance("PATCH re-delivers pending mail as steer, records the wake, and still refuses mail text", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    const sessions = yield* Session.Service
+    const events = yield* EventV2.Service
+    const session = yield* sessions.create({ title: "HTTP mail steer" })
+    yield* events.publish(SessionV1.Event.InputAdmitted, {
+      sessionID: session.id,
+      payload: { requestID: "http-mail", delivery: "queue", text: "old mail",
+        source: { type: "editspace-mail", id: "lane#1", sender: "peer", recipient: "lane" } },
+      agent: "build",
+      model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test") },
+      time: 10,
+    })
+    const url = `/session/${session.id}/input/http-mail`
+    const patch = (body: unknown) =>
+      requestInDirectory(url, test.directory, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      })
+    const refused = yield* patch({ commandID: "mail-text", expectedRevision: 0, text: "rewritten" })
+    expect(refused.status).toBe(409)
+    expect(yield* refused.json).toMatchObject({ current: { text: "old mail", revision: 0, delivery: "queue" } })
+    const steered = yield* patch({ commandID: "mail-steer", expectedRevision: 0, delivery: "steer" })
+    expect(steered.status).toBe(200)
+    const receipt = (yield* steered.json) as { delivery: string; revision: number; requestID: string; wakeObservations?: unknown[] }
+    expect(receipt).toMatchObject({ delivery: "steer", revision: 1, requestID: "http-mail" })
+    const retried = yield* patch({ commandID: "mail-steer", expectedRevision: 0, delivery: "steer" })
+    expect(retried.status).toBe(200)
+    expect(yield* retried.json).toMatchObject({ delivery: "steer", revision: 1, requestID: "http-mail" })
+  }),
+)

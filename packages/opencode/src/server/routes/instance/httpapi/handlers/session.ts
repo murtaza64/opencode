@@ -590,7 +590,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("updateInput", (ctx) =>
         Effect.gen(function* () {
           yield* requireSession(ctx.params.sessionID)
-          return yield* inputs.update(ctx.params.sessionID, ctx.params.requestID, ctx.payload).pipe(
+          const receipt = yield* inputs.update(ctx.params.sessionID, ctx.params.requestID, ctx.payload).pipe(
             Effect.catchTags({
               InputUpdateConflict: (error) =>
                 new InputUpdateConflictError({ message: error.message, current: error.current }),
@@ -598,6 +598,19 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
               InputMissing: (error) =>
                 new ApiNotFoundError({ name: "NotFoundError", data: { message: error.message } }),
             }),
+          )
+          // Mail switched to steer is offered at the next safe boundary, as at admission.
+          if (receipt.state !== "pending" || receipt.source?.type !== "editspace-mail" || receipt.delivery !== "steer")
+            return receipt
+          // The wake is advisory: a session fenced meanwhile keeps the committed update.
+          const decision = yield* promptSvc.wake(ctx.params.sessionID).pipe(
+            Effect.map(Option.some),
+            Effect.catchTag("SessionSuperseded", () => Effect.succeed(Option.none())),
+          )
+          if (Option.isNone(decision) || decision.value.outcome === "ignored") return receipt
+          const current = inputs.observeWake(ctx.params.sessionID, ctx.params.requestID, decision.value.outcome, decision.value.observedAt)
+          return yield* current.pipe(
+            Effect.catchTag("InputMissing", (error) => new ApiNotFoundError({ name: "NotFoundError", data: { message: error.message } })),
           )
         }),
       )
