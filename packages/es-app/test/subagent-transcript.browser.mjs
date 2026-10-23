@@ -59,9 +59,9 @@ try {
   const editor = page.getByRole("textbox", { name: "Message", exact: true })
   await editor.fill("Parent draft stays exactly here")
   await expect(page.getByRole("button", { name: "Steer", exact: true })).toBeEnabled()
+  // Cmd+M moves the keyboard target to Queue; the dialog must leave it and the draft untouched.
   await editor.press("Meta+m")
-  await page.getByLabel("Queue agent", { exact: true }).selectOption("plan")
-  await page.getByLabel("Model override", { exact: true }).selectOption("fixture\u0000test")
+  await expect(page.locator(".direct-primary")).toHaveAccessibleName("Queue")
   await editor.evaluate(el => el.setSelectionRange(2, 8))
   await trigger.scrollIntoViewIfNeeded()
   await trigger.focus()

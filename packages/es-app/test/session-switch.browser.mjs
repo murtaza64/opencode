@@ -55,7 +55,8 @@ try {
   await expect(editor()).toHaveClass(/vim-insert/)
   await tab()
   await at("ses_b")
-  const expanded = "bravo expanded draft ".repeat(24)
+  // One line per repeat overflows the inline box (up to 160px tall), which auto-opens the expanded editor.
+  const expanded = "bravo expanded draft\n".repeat(24)
   await editor().fill(expanded)
   await expect(page.locator(".float-editor textarea")).toBeFocused()
   await editor().evaluate(el => el.setSelectionRange(10, 20))
@@ -96,10 +97,12 @@ try {
   await at("ses_a")
 
   // Tab remains focus navigation outside the composer, including the inspection dialog.
-  await page.getByLabel("Model override", { exact: true }).focus()
+  const control = page.locator(".prompt-box .direct-change-model")
+  await control.focus()
+  await expect(control).toBeFocused()
   await tab()
   expect(new URL(page.url()).pathname).toBe("/session/ses_a")
-  await expect(page.getByLabel("Model override", { exact: true })).not.toBeFocused()
+  await expect(control).not.toBeFocused()
   await expect(page.locator(".topbar")).toContainText("Composer fixture")
   await page.locator('[data-tool="task"]').getByRole("button", { name: /Inspect child/ }).click()
   const dialog = page.getByRole("dialog")
