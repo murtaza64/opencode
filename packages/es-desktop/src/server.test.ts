@@ -20,7 +20,7 @@ const setup = async () => {
     port: 0,
     fetch: async (request) => {
       const url = new URL(request.url)
-      if (url.pathname === "/api/attention/session") return Response.json({
+      if (url.pathname === "/api/attention/session" || url.pathname === "/api/frontdesk/memory") return Response.json({
         originBound: request.headers.get("origin") === url.origin,
         operatorCookieOnly: request.headers.get("cookie") === "es_attention_operator=synthetic",
         csrf: request.headers.get("x-attention-csrf"),
@@ -232,6 +232,18 @@ test("binds attention to the validated native origin and forwards only its opera
   expect((await get("/es/api/attention/session", { method: "POST", body: "{}" })).status).toBe(403)
   expect((await get("/es/api/attention/session", { method: "POST", body: "{}", headers: { origin: "https://evil.test" } })).status).toBe(403)
   expect((await fetch(`${server.origin}/es/api/attention/session`, { method: "POST", body: "{}", headers: { origin: server.origin } })).status).toBe(403)
+})
+
+test("Front Desk memory writes carry the operator capability like attention", async () => {
+  const { server, get } = await setup()
+  const response = await get("/es/api/frontdesk/memory", {
+    method: "PUT", body: "{}", headers: { origin: server.origin, cookie: "unrelated=private; es_attention_operator=synthetic", authorization: "not-forwarded", "x-attention-csrf": "1", "content-type": "application/json" },
+  })
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({ originBound: true, operatorCookieOnly: true, csrf: "1", keyForwarded: false, authForwarded: false })
+  expect((await get("/es/api/frontdesk/memory", { method: "PUT", body: "{}" })).status).toBe(403)
+  expect((await get("/es/api/frontdesk/memory", { method: "PUT", body: "{}", headers: { origin: "https://evil.test" } })).status).toBe(403)
+  expect((await get("/es/api/frontdesk/memory/x")).status).toBe(403)
 })
 
 test("serves the built SPA and assets with restrictive CSP", async () => {
