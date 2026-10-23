@@ -1080,7 +1080,21 @@ const layer = Layer.effect(
     const prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error | SessionSupersession.Closed> = Effect.fn(
       "SessionPrompt.prompt",
     )(function* (input: PromptInput) {
+      // A client that lost the answer to a send may repeat it with the same message ID. Under the
+      // Session's admission lock, an existing user message with that ID means the first send landed:
+      // return it and start no turn, so a retry never repeats provider or tool work.
+      let repeated = false
       const message = yield* state.admit(input.sessionID, Effect.gen(function* () {
+        if (input.messageID) {
+          const existing = yield* MessageV2.get({ sessionID: input.sessionID, messageID: input.messageID }).pipe(
+            Effect.provideService(Database.Service, database),
+            Effect.catchTag("NotFoundError", () => Effect.succeed(undefined)),
+          )
+          if (existing?.info.role === "user") {
+            repeated = true
+            return existing
+          }
+        }
         const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
         yield* revert.cleanup(session)
         const created = yield* createUserMessage(input)
@@ -1096,7 +1110,7 @@ const layer = Layer.effect(
         return created
       }))
 
-      if (input.noReply === true) return message
+      if (input.noReply === true || repeated) return message
       return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID), true)
     })
 
