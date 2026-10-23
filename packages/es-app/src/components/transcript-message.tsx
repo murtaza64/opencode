@@ -5,8 +5,10 @@ import type { MailDelivery, MailMessage } from "../api"
 import { mailActivityLabel, mailSentAt, mailWake } from "../mail-timeline"
 import { MailWakeEvidence } from "./mail-wake-evidence"
 import type { Segment } from "../transcript-groups"
+import type { MailNamer } from "../mail-names"
+import { MailParty } from "./mail-party"
 
-type MailSource = { type: "editspace-mail"; id: string; sender: string; recipient: string }
+type MailSource = { type: "editspace-mail"; id: string; sender: string; recipient: string; senderSession?: string }
 const mailTime = (value: string | number | null) => value == null ? "" : new Date(value).toLocaleString()
 
 // The legacy SDK message type has no source field yet. Only structured wire
@@ -18,7 +20,8 @@ const mailMetadata = (message: ComponentProps<typeof Message>["message"]) => {
     !("id" in source) || typeof source.id !== "string" ||
     !("sender" in source) || typeof source.sender !== "string" ||
     !("recipient" in source) || typeof source.recipient !== "string") return
-  const mail: MailSource = { type: "editspace-mail", id: source.id, sender: source.sender, recipient: source.recipient }
+  const mail: MailSource = { type: "editspace-mail", id: source.id, sender: source.sender, recipient: source.recipient,
+    ...("senderSession" in source && typeof source.senderSession === "string" ? { senderSession: source.senderSession } : {}) }
   const label = mailActivityLabel("kind" in source ? source.kind : undefined)
   const delivery = "delivery" in message && (message.delivery === "queue" || message.delivery === "steer") ? message.delivery : undefined
   const state = "state" in message &&
@@ -30,6 +33,7 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
   mailRecord?: MailMessage
   mailDeliveries?: MailDelivery[]
   mailIDs?: Set<string>
+  mailName?: MailNamer
   // Assistant parts split around compact tool runs; a run renders at its first member.
   segments?: Segment[]
   renderRun?: (key: string) => JSX.Element
@@ -88,7 +92,12 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
     {(metadata) => <details class="mail-activity" id={`mail-${metadata().mail.id}`} data-mail-message-id={props.message.id}>
       <summary class="mail-activity-summary">
          <span class="mail-activity-kind">{metadata().label}<Show when={props.mailRecord}> · {props.mailRecord?.direction === "sent" ? "Outbound" : "Inbound"}</Show></span>
-        <span class="mail-activity-route"><bdi dir="auto">{metadata().mail.sender}</bdi> <span class="mail-activity-arrow" aria-hidden="true">→</span> <bdi dir="auto">{metadata().mail.recipient}</bdi></span>
+        <span class="mail-activity-route">
+          <MailParty party={metadata().mail.sender} evidence={props.mailRecord?.sender_session ?? metadata().mail.senderSession} name={props.mailName} />
+          {" "}<span class="mail-activity-arrow" aria-hidden="true">→</span>{" "}
+          {/* This transcript's session received the mail. */}
+          <MailParty party={metadata().mail.recipient} evidence={props.message.sessionID} name={props.mailName} />
+        </span>
         <span class="mail-activity-state">
           <For each={props.mailDeliveries ?? []}>{(delivery) => <span>{mailWake(delivery)} · {delivery.state}</span>}</For>
           <Show when={!props.mailDeliveries?.length}><span>{mailWake()}</span></Show>

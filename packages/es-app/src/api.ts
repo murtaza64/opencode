@@ -334,6 +334,11 @@ export type MailMessage = {
   in_reply_to?: string | null
   supersedes?: string | null
   text: string
+  via?: string
+  /** A cross-editspace projection: the canonical record lives in another editspace. */
+  canonical?: { editspace: string; id: string; kind?: string; in_reply_to?: string }
+  /** Set by canonicalMail: this editspace's id of the projection. */
+  projection?: string
 }
 export type MailDelivery = {
   message_id: string

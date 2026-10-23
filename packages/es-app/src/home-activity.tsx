@@ -2,6 +2,7 @@ import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show
 import { es } from "./api"
 import { ago, linkUrl, sessionHref, useDashboard } from "./state"
 import { mailActivity, prActivity, type HomeActivityRow } from "./home-activity-data"
+import { mailNamer } from "./mail-names"
 
 export default function HomeActivity(props: { cloud?: HomeActivityRow[] }) {
   const dashboard = useDashboard()
@@ -17,11 +18,13 @@ export default function HomeActivity(props: { cloud?: HomeActivityRow[] }) {
     })?.name
     return project ? [{ project, session: session.id, directory: session.directory }] : []
   }))
+  const names = (project: string) => mailNamer(() => ({ editspace: project, owners: dashboard.lineageOwners(), handoffs: dashboard.lineage(),
+    title: (id) => dashboard.activity.session(id)?.title }))
   const [mail, { refetch }] = createResource(() => open() ? { targets: targets(), revision: dashboard.mailRevision() } : false, async source => {
     const result = await Promise.all(source.targets.map(async target => {
       try {
         const result = await es.mail(target.project, { session: target.session })
-        return { messages: result.messages.slice(-40).map(message => ({ ...mailActivity(message, target.project, Date.now()), href: sessionHref(target.session, target.directory) })), error: "" }
+        return { messages: result.messages.slice(-40).map(message => ({ ...mailActivity(message, target.project, Date.now(), names(target.project)), href: sessionHref(target.session, target.directory) })), error: "" }
       } catch { return { messages: [] as HomeActivityRow[], error: `${target.project}: mail unavailable` } }
     }))
     return { rows: [...new Map(result.flatMap(item => item.messages).map(item => [item.id, item])).values()], errors: [...new Set(result.map(item => item.error).filter(Boolean))] }

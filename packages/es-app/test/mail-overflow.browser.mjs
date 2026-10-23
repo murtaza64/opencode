@@ -3,7 +3,8 @@ import { body, longID, longName, startMailOverflowPreview } from "./mail-overflo
 
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const preview = await startMailOverflowPreview()
-const browser = await chromium.launch({ channel: "chrome", headless: true })
+const browser = await chromium.launch({ headless: true,
+  ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : { channel: "chrome" }) })
 const page = await browser.newPage()
 await page.context().route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
 const errors = []
@@ -33,7 +34,8 @@ try {
         const summary = row.locator("summary")
         await expect(summary).toContainText("queued")
         await expect(summary).toContainText("handled")
-        for (const selector of [".mail-activity-route", ".mail-activity-state"]) {
+        // Each route party truncates on its own, so both ends stay visible.
+        for (const selector of [".mail-activity-route .mail-party >> nth=0", ".mail-activity-route .mail-party >> nth=1", ".mail-activity-state"]) {
           const size = await row.locator(selector).evaluate(el => ({
             client: el.clientWidth, scroll: el.scrollWidth,
             ellipsis: getComputedStyle(el).textOverflow, overflow: getComputedStyle(el).overflowX,

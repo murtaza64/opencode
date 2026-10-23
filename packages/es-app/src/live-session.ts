@@ -85,6 +85,8 @@ export function createLiveSession(
   const [clearedThrough, setClearedThrough] = createSignal("")
   const [connection, setConnection] = createStore({ stream: "", snapshot: "", event: "" })
   const [loading, setLoading] = createSignal(false)
+  // True once any snapshot has landed; cached stores keep showing it while later loads run.
+  const [loaded, setLoaded] = createSignal(false)
   const [loadingOlder, setLoadingOlder] = createSignal(false)
   const [olderCursor, setOlderCursor] = createSignal<string | undefined>()
   const hasOlder = () => olderCursor() !== undefined
@@ -123,10 +125,18 @@ export function createLiveSession(
   let retryDelay = 1000
   const uncertainParts = new Set<string>()
 
+  // A hidden cached store stops snapshot work: its in-flight read is aborted
+  // quietly and reconnects/retries wait until a view loads it again.
+  let suspended = false
+  let loadAbort: AbortController | undefined
   const load = (): Promise<void> => {
     if (disposed) return Promise.resolve()
+    suspended = false
     if (activeLoad) return activeLoad
     setLoading(true)
+    const abort = new AbortController()
+    loadAbort = abort
+    const signal = AbortSignal.any([controller.signal, abort.signal])
     duringLoad = []
     activeLoad = (async () => {
       if (!snapshotStarted && !streamOpened && source) {
@@ -144,11 +154,11 @@ export function createLiveSession(
       if (disposed) return
       snapshotStarted = true
       const [session, page, status, todos] = await Promise.all([
-        oc.session(sessionID, directory, controller.signal),
-        oc.messagesPage(sessionID, directory, TAIL, undefined, controller.signal),
-        oc.status(directory, controller.signal),
+        oc.session(sessionID, directory, signal),
+        oc.messagesPage(sessionID, directory, TAIL, undefined, signal),
+        oc.status(directory, signal),
         // Todos are auxiliary: a failed read keeps the last list, never the transcript.
-        oc.todos(sessionID, directory, controller.signal).catch(() => undefined),
+        oc.todos(sessionID, directory, signal).catch(() => undefined),
       ])
       if (disposed) return
       const events = duringLoad!
@@ -206,6 +216,7 @@ export function createLiveSession(
         }
         if (uncertainParts.size && events.some(isTerminal)) refreshAfterLoad = true
         setConnection("snapshot", "")
+        setLoaded(true)
         stopOnFailure()
       })
       clearTimeout(retryTimer)
@@ -216,7 +227,7 @@ export function createLiveSession(
       duringLoad = undefined
       if (disposed) return
       setLoading(false)
-      if (refreshAfterLoad) {
+      if (refreshAfterLoad && !suspended) {
         refreshAfterLoad = false
         queueMicrotask(() => void load())
       }
@@ -224,12 +235,12 @@ export function createLiveSession(
     // Explicit callers still receive a rejection; automatic reconnect loads
     // also report it even when nobody awaits them.
     void activeLoad.catch((failure) => {
-      if (disposed) return
+      if (disposed || abort.signal.aborted) return
       batch(() => {
         setConnection("snapshot", `Unable to load session: ${errorText(failure)}`)
         stopOnFailure()
       })
-      if (retryTimer) return
+      if (retryTimer || suspended) return
       retryTimer = setTimeout(() => {
         retryTimer = undefined
         if (!disposed) void load()
@@ -292,7 +303,15 @@ export function createLiveSession(
     return ids.filter((id) => unknown.has(id) || !loaded(id))
   }
 
+  const suspend = () => {
+    suspended = true
+    loadAbort?.abort()
+    clearTimeout(retryTimer)
+    retryTimer = undefined
+  }
+
   const refresh = () => {
+    if (suspended) return
     if (activeLoad || duringLoad) {
       refreshAfterLoad = true
       return
@@ -469,5 +488,5 @@ export function createLiveSession(
     source?.close()
   })
 
-  return { data, load, older, reveal, hasOlder, loadingOlder, apply, error, connectionError, loading, retry }
+  return { data, load, suspend, older, reveal, hasOlder, loadingOlder, apply, error, connectionError, loading, loaded, retry }
 }

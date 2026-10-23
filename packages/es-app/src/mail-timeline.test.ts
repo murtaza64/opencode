@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { Message } from "@opencode-ai/sdk/v2"
 import type { MailMessage, MailTimeline } from "./api"
-import { mailActivityLabel, mailCauses, mailForSession, mailLocation, mailRows, mailWake } from "./mail-timeline"
+import { canonicalMail, mailActivityLabel, mailCauses, mailForSession, mailLocation, mailRows, mailSourceID, mailWake } from "./mail-timeline"
 
 test("selects the matching editspace and lane from the session directory", () => {
   const roots = [
@@ -159,6 +159,7 @@ test("summarizes mail that was one provider turn's input, keyed before the assis
     ids: ["o#417", "o#427", "o#428"],
     kinds: [{ kind: "task", human: false, catchUp: false, count: 2 }, { kind: "task", human: false, catchUp: true, count: 1 }],
     senders: ["ses_front", "ux-feel"],
+    senderSessions: {},
     sentFrom: 2_000,
     sentTo: 6_000,
     promotedAt: 9_000,
@@ -186,7 +187,7 @@ test("a mail run without its source record reports no send time rather than inve
     { id: "msg_t", role: "assistant", parentID: "msg_m", time: { created: 5_100 } },
   ] as Message[]
   expect(mailCauses(mailRows(messages, undefined), new Map()).get("msg_m")).toEqual({
-    ids: ["gone"], kinds: [{ kind: "mail", human: false, catchUp: false, count: 1 }], senders: ["peer"], promotedAt: 5_000 })
+    ids: ["gone"], kinds: [{ kind: "mail", human: false, catchUp: false, count: 1 }], senders: ["peer"], senderSessions: {}, promotedAt: 5_000 })
 })
 
 test("labels agent-originated resume and kickoff inputs by what the agent did", () => {
@@ -203,4 +204,44 @@ test("keeps an agent resume in the session transcript although no mail record ex
     source: { ...source, id: "gone", kind: "task" } } as unknown as Message
   expect(mailRows([resume, stale], undefined, [], { sessionID: "ses_first", from: 2000 }).map(row => row.message.id))
     .toEqual(["msg_resume"])
+})
+
+test("a mail cause keeps each sender's recorded session only when its records agree", () => {
+  const mail = (id: string, created: number, sender: string) => ({ id: `msg_${id}`, role: "user", time: { created },
+    source: { type: "editspace-mail", id, sender, recipient: "lane" } })
+  const messages = [mail("a", 1_000, "orchestrator"), mail("b", 1_001, "squadron-v2"), mail("c", 1_002, "squadron-v2"),
+    { id: "msg_t", role: "assistant", parentID: "msg_c", time: { created: 1_100 } }] as Message[]
+  const record = (id: string, from: string, sender_session: string): MailMessage =>
+    ({ id, ts: "", created_ms: 900, from, to: "lane", text: id, direction: "received", deliveries: [], sender_session })
+  const records = new Map([record("a", "orchestrator", "ses_relay"), record("b", "squadron-v2", "ses_one"), record("c", "squadron-v2", "ses_two")]
+    .map((item) => [item.id, item]))
+  expect(mailCauses(mailRows(messages, undefined), records).get("msg_c")?.senderSessions).toEqual({ orchestrator: "ses_relay" })
+})
+
+test("a cross-editspace reply in the transcript matches its home-editspace projection, not a same-numbered local record", () => {
+  const projection: MailMessage = { id: "squadron-v2#1", ts: "", created_ms: 2_000, from: "dest/batch-orchestrator", to: "squadron-v2",
+    kind: "notice", via: "cross-editspace", direction: "received", deliveries: [], text: "Use squadron-vision",
+    canonical: { editspace: "dest", id: "batch-orchestrator#2", kind: "answer", in_reply_to: "batch-orchestrator#1" } }
+  // A local record that happens to share the canonical's local id must not be matched.
+  const local: MailMessage = { id: "batch-orchestrator#2", ts: "", created_ms: 1_000, from: "batch-orchestrator", to: "squadron-v2",
+    kind: "notice", direction: "received", deliveries: [], text: "unrelated local mail" }
+  const canonical = canonicalMail(projection)
+  expect(canonical).toMatchObject({ id: "dest/batch-orchestrator#2", kind: "answer", in_reply_to: "dest/batch-orchestrator#1",
+    projection: "squadron-v2#1" })
+  expect(canonicalMail(local)).toBe(local)
+  const input = { id: "msg_reply", role: "user", time: { created: 3_000 }, source: { type: "editspace-mail",
+    id: "batch-orchestrator#2", sender: "dest/batch-orchestrator", recipient: "home/squadron-v2", kind: "answer" } } as Message
+  const turn = { id: "msg_turn", role: "assistant", parentID: "msg_reply", time: { created: 3_100 } } as Message
+  expect(mailSourceID(input)).toBe("dest/batch-orchestrator#2")
+  const records = [canonical, local]
+  const rows = mailRows([input, turn], { editspace: "home", lane: "squadron-v2", messages: records })
+  expect(rows.map((row) => `${row.type}:${row.message.id}`)).toEqual(["mail:batch-orchestrator#2", "transcript:msg_reply", "transcript:msg_turn"])
+  expect(mailCauses(rows, new Map(records.map((record) => [record.id, record]))).get("msg_reply")).toMatchObject({
+    ids: ["dest/batch-orchestrator#2"], kinds: [{ kind: "answer", count: 1 }], sentFrom: 2_000 })
+})
+
+test("mail sent to a lane here from another editspace keeps its local id", () => {
+  const input = { id: "msg_task", role: "user", time: { created: 1 }, source: { type: "editspace-mail",
+    id: "batch-orchestrator#1", sender: "home/squadron-v2", recipient: "batch-orchestrator" } } as Message
+  expect(mailSourceID(input)).toBe("batch-orchestrator#1")
 })
