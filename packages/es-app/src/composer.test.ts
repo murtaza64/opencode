@@ -1002,6 +1002,7 @@ test("recovery refuses uncertain or in-flight sends on either side", async () =>
   uncertainDest.setText("own uncertain draft")
   await uncertainDest.submit({ ...session, id: "ses_other" })
   expect(await uncertainDest.recoverHandoffDrafts(source, async () => true)).toBe(false)
+  expect(uncertainDest.state.normalSubmission?.status).toBe("unknown")
   expect(uncertainDest.state.task.text).toBe("own uncertain draft")
 })
 
@@ -1527,14 +1528,50 @@ test("normal Send echo carries its exact images in memory and persists only the 
   expect(restored.state.normalSubmission?.previews).toBeUndefined()
 })
 
-test("unknown normal Send keeps its image echo and the draft's recoverable images", async () => {
+test("an in-flight Send clears the editor and a reload while sending restores its draft and images", async () => {
+  const ack = deferred<void>()
+  const { composer, dependencies } = harness(undefined, { prompt: () => ack.promise, images: durableImages() })
+  composer.setText("in flight")
+  composer.setImages([image])
+  const sending = composer.submit(session)
+  await Promise.resolve()
+  await composer.persistAsync()
+  expect(composer.state.task.text).toBe("")
+  expect(composer.state.normalSubmission?.draft?.text).toBe("in flight")
+  const restored = createComposer(session.id, directory, dependencies)
+  await restored.persistAsync()
+  expect(restored.state.task.text).toBe("in flight")
+  expect(unwrap(restored.state.task.images)).toEqual([image])
+  ack.resolve()
+  await sending
+})
+
+test("an unconfirmed Send never overwrites what was typed while it was in flight", async () => {
+  const ack = deferred<void>()
+  const { composer } = harness(undefined, { prompt: () => ack.promise })
+  composer.setText("original")
+  const sending = composer.submit(session)
+  await Promise.resolve()
+  composer.setText("newer")
+  ack.reject(new Error("lost ack"))
+  await sending
+  expect(composer.state.normalSubmission?.status).toBe("unknown")
+  expect(composer.editNormalSubmission()).toBe(false)
+  expect(composer.state.task.text).toBe("newer")
+  expect(composer.state.normalSubmission?.draft?.text).toBe("original")
+})
+
+test("unknown normal Send keeps its image echo and puts the draft back in the editor", async () => {
   const { composer } = harness(undefined, { prompt: async () => { throw new Error("lost ack") } })
   composer.setText("with image")
   composer.setImages([image])
   await composer.submit(session)
   expect(composer.state.normalSubmission?.status).toBe("unknown")
   expect(unwrap(composer.state.normalSubmission?.previews)).toEqual([image])
+  expect(composer.state.task.text).toBe("with image")
   expect(unwrap(composer.state.task.images)).toEqual([image])
+  expect(composer.state.normalSubmission?.revision).toBe(composer.state.task.revision)
+  expect(composer.editNormalSubmission()).toBe(false)
 })
 
 test("reload preserves explicit Send and shows unknown legacy outcome without retrying", async () => {
@@ -1706,7 +1743,10 @@ test("normal send failures keep the draft and never retry automatically", async 
   await composer.submit(session)
   expect(calls).toBe(1)
   expect(composer.state.normalSubmission?.status).toBe("unknown")
+  expect(composer.state.normalSubmission?.error).toBe("offline")
+  expect(composer.state.error).toBe("")
   expect(composer.state.task.text).toBe("task")
+  expect(composer.state.normalSubmission?.draft).toBeUndefined()
 })
 
 test("a different session cannot submit through this controller", async () => {
@@ -1941,7 +1981,7 @@ test("failed reconciliation does not POST and duplicate retries share the sendin
   await retry
   expect(requests.slice(1).map((request) => request.method)).toEqual(["POST", "GET"])
   expect(composer.state.admission?.error).toContain("no retry was sent")
-  expect(composer.state.task.text).toBe("task")
+  expect(composer.state.admission?.draft?.text).toBe("task")
 })
 
 test("a receipt with a reused ID and different payload cannot acknowledge the draft", async () => {
@@ -1950,7 +1990,7 @@ test("a receipt with a reused ID and different payload cannot acknowledge the dr
   composer.selectMode("queue")
   composer.setText("task")
   await composer.submit(session)
-  expect(composer.state.task.text).toBe("task")
+  expect(composer.state.admission?.draft?.text).toBe("task")
   expect(composer.state.admission?.status).toBe("unknown")
   expect(composer.state.receipts).toEqual([])
 })
@@ -2210,7 +2250,8 @@ test("uncertain admission and draft buffers restore with the same ID and indepen
   await composer.persistAsync()
   const restored = createComposer(session.id, directory, dependencies)
   expect(restored.state.mode).toBe("aside")
-  expect(restored.state.task.selection).toEqual([1, 3])
+  expect(restored.state.task.text).toBe("")
+  expect(restored.state.admission?.draft?.selection).toEqual([1, 3])
   await restored.persistAsync()
   expect(unwrap(restored.state.aside)).toMatchObject({ text: "question", selection: [2, 5], images: [image] })
   expect(restored.state.admission).toMatchObject({
@@ -2560,8 +2601,8 @@ test.each([
   expect(composer.state.admission?.status).toBe("unknown")
   await composer.retryAdmission()
   expect(composer.state.admission?.error).toContain("different payload")
-  expect(composer.state.task.images).toHaveLength(2)
-  expect(composer.state.task.text).toBe("task")
+  expect(composer.state.admission?.draft?.images).toHaveLength(2)
+  expect(composer.state.admission?.draft?.text).toBe("task")
   expect(composer.state.receipts).toEqual([])
   expect(requests.filter((request) => request.method === "POST")).toHaveLength(1)
 })
@@ -2604,10 +2645,13 @@ test.each([400, 413, 415, 422, 500])("HTTP %i image rejection retains task and A
   composer.setImages([image])
   composer.selectMode("queue")
   await composer.submit(session)
-  expect(composer.state.task.text).toBe("task")
-  expect(composer.state.task.images).toEqual([image])
+  // A definitive rejection puts the draft back in the editor; an unknown outcome keeps it with the input.
+  const kept = status < 500 ? composer.state.task : composer.state.admission!.draft!
+  expect(kept.text).toBe("task")
+  expect(unwrap(kept.images)).toEqual([image])
   expect(composer.state.admission?.status ?? null).toBe(status < 500 ? null : "unknown")
   composer.selectMode("aside")
+  if (status >= 500) { composer.setText("task"); composer.setImages([image]) }
   await composer.submit(session)
   expect(composer.state.aside.text).toBe("task")
   expect(composer.state.aside.images).toEqual([image])
@@ -2744,7 +2788,8 @@ test("a Steer with no answer before the deadline is set aside with its request I
   expect(composer.state.sending).toBe(false)
   expect(composer.state.admission).toBeNull()
   expect(composer.state.recoveries.map((entry) => entry.admission.payload.text)).toEqual(["steer during stall"])
-  expect(composer.state.task.text).toBe("steer during stall")
+  // The set-aside bubble holds it, so the editor stays free for the next message.
+  expect(composer.state.task.text).toBe("")
   expect(composer.reasonForAction("steer")).toBe("")
   held = false
 })

@@ -81,7 +81,8 @@ try {
   await edit("human-steer").getByRole("combobox", { name: "Pending input delivery" }).selectOption("queue")
   // Cmd/Ctrl+Enter saves the edit; it never sends a new message.
   await edit("human-steer").getByRole("textbox", { name: "Pending input text" }).press("Control+Enter")
-  await expect(row("human-steer").locator(".receipt-kind")).toHaveText("queue")
+  await expect(row("human-steer")).toHaveAttribute("data-delivery", "queue")
+  await expect(row("human-steer").locator(".outgoing-cue")).toContainText("Queued · after this task")
   expect(patches("human-steer")[0].body).toMatchObject({ expectedRevision: 0, text: "Changed to queue", delivery: "queue" })
   await unchanged()
 

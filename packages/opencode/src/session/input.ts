@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util"
 import { and, asc, eq, gt, inArray, sql } from "drizzle-orm"
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
+import { MessageV2 } from "./message-v2"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
@@ -216,8 +217,8 @@ const make = Effect.gen(function* () {
       return receipt(existing.receipt)
     }
     const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
-    const previous = yield* sessions.findMessage(sessionID, (m) => m.info.role === "user").pipe(Effect.orDie)
-    const user = Option.isSome(previous) && previous.value.info.role === "user" ? previous.value.info : undefined
+    const latest = yield* MessageV2.latestInfo({ sessionID, role: "user" }).pipe(Effect.provideService(Database.Service, database))
+    const user = latest?.role === "user" ? latest : undefined
     const name = payload.agent ?? session.agent ?? user?.agent
     const agent = name ? yield* agents.get(name) : yield* agents.defaultInfo()
     if (!agent) return yield* new Invalid({ message: `Unknown agent: ${name}` })

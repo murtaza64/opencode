@@ -155,7 +155,7 @@ try {
   await expect.poll(() => createCalls().length).toBe(beforeThird + 1)
   const lostSend = createCalls().at(-1).body.id
   await expect(page).toHaveURL(new RegExp(`/session/${lostSend}\\?directory=`))
-  await expect(page.getByText(/Send not confirmed/).first()).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText(/^Not confirmed/).first()).toBeVisible({ timeout: 15_000 })
   await page.reload()
   await page.waitForTimeout(800)
   expect(promptCalls(lostSend)).toHaveLength(1)

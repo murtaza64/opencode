@@ -42,10 +42,18 @@ try {
   try {
     await expect(bubble).toHaveText("pending echo fixture text", { timeout: 300 })
     await expect(page.locator(".pending-hint")).toHaveText("Sending…", { timeout: 300 })
+    // Layout stability: the bubble and the composer keep their geometry from Sending to Sent.
+    const geometry = () => page.evaluate(() => {
+      const box = (selector) => { const r = document.querySelector(selector)?.getBoundingClientRect(); return r && [Math.round(r.left), Math.round(r.width), Math.round(r.height)] }
+      return { bubble: box(".pending-bubble"), composer: box(".prompt-box"), results: document.querySelector(".composer-results")?.getBoundingClientRect().height ?? 0 }
+    })
+    const sending = await geometry()
+    expect(sending.results).toBe(0)
     await expect.poll(() => page.locator(".transcript").evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), { timeout: 1000 }).toBeLessThan(4)
     await expect.poll(() => fixture.calls.filter((call) => call.path === "/session/ses_a/prompt_async" && call.method === "POST").length).toBe(1)
     expect(fixture.calls.find((call) => call.path === "/session/ses_a/prompt_async").body.parts[0].text).toBe("pending echo fixture text")
-    await expect(page.locator(".pending-hint")).toHaveText("Sent — waiting for the daemon…")
+    await expect(page.locator(".pending-hint")).toHaveText("Sent")
+    expect(await geometry()).toEqual(sending)
     const info = {
       id: "msg_zzz", sessionID: "ses_a", role: "user", agent: "build",
       model: { providerID: "fixture", modelID: "test" }, time: { created: Date.now() },
@@ -56,7 +64,8 @@ try {
     } })
     await expect(bubble).toHaveCount(0)
     await expect(page.locator('[data-component="user-message"]').filter({ hasText: "pending echo fixture text" })).toHaveCount(1)
-    await expect(page.locator(".normal-submission")).toHaveCount(0)
+    await expect(page.locator(".outgoing-item")).toHaveCount(0)
+    expect((await geometry()).composer).toEqual(sending.composer)
   } finally {
     clearTimeout(release)
   }
@@ -87,7 +96,7 @@ try {
   const imagePost = fixture.calls.filter((call) => call.path === "/session/ses_a/prompt_async").at(-1)
   expect(imagePost.body.parts.filter((part) => part.type === "file").map((part) => part.url)).toEqual([`data:image/png;base64,${first}`, `data:image/png;base64,${second}`])
   fixture.normalReplies.shift()()
-  await expect(page.locator(".pending-hint")).toHaveText("Sent — waiting for the daemon…")
+  await expect(page.locator(".pending-hint")).toHaveText("Sent")
   await expect(echoImages).toHaveCount(2)
   await expect(removes).toHaveCount(0)
   const imageInfo = { id: "msg_zzz_images", sessionID: "ses_a", role: "user", agent: "build", model: { providerID: "fixture", modelID: "test" }, time: { created: Date.now() } }
@@ -106,14 +115,22 @@ try {
   await expect(removes).toHaveCount(1)
   await editor.press("Escape")
   await editor.press("Enter")
-  await expect(page.locator(".pending-hint")).toHaveText("Send not confirmed")
+  // An unknown outcome stays on the bubble with an inline Dismiss; nothing appears above the composer.
+  await expect(page.locator(".pending-hint")).toContainText("Not confirmed")
+  await expect(page.locator(".pending-msg").getByRole("button", { name: "Dismiss send status" })).toBeVisible()
+  await expect(page.locator(".composer-results [role=alert], .direct-feedback.err")).toHaveCount(0)
   await expect(bubble).toHaveText("lost with image")
   await expect(echoImages).toHaveCount(1)
+  // Not confirmed: text and image are back in the editor, unlocked; the bubble keeps the cue.
+  await expect(editor).toHaveValue("lost with image")
   await expect(removes).toHaveCount(1)
+  await expect(page.locator(".pending-msg").getByRole("button", { name: "Edit unconfirmed message" })).toHaveCount(0)
+  await page.locator(".pending-msg").getByRole("button", { name: "Dismiss send status" }).click()
+  await expect(page.locator(".pending-msg")).toHaveCount(0)
   expect(fixture.calls.filter((call) => call.path === "/session/ses_a/prompt_async" && call.method === "POST")).toHaveLength(3)
   expect(fixture.unexpected).toEqual([])
   expect(errors).toEqual([])
-  console.log("PASS pending echo browser: immediate pending, pinned transcript, accepted, SSE echo replacement, image-only and multi-image thumbnails, lost-ack image retention")
+  console.log("PASS pending echo browser: immediate pending, pinned transcript, accepted, SSE echo replacement, image-only and multi-image thumbnails, lost-ack draft and image back in the editor, stable bubble/composer geometry, inline unknown cue")
 } finally {
   await browser.close()
   await vite.close()

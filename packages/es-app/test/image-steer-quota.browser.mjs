@@ -51,7 +51,7 @@ try {
   await expect(page.getByText(/could not be saved|Cannot save/i)).toHaveCount(0)
   await page.reload()
   await expect(page.getByText(/images are missing|could not be restored/i)).toHaveCount(0)
-  await expect(page.getByText("Pending inputs")).toBeVisible()
+  await expect(page.getByRole("list", { name: "Pending inputs" })).toBeVisible()
   await expect(page.getByText(/1 image/).first()).toBeVisible()
   expect(fixture.unexpected).toEqual([])
   expect(errors).toEqual([])

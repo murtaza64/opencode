@@ -55,6 +55,7 @@ import { SessionInput } from "./input"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
+import { DatabaseReader } from "@opencode-ai/core/database/reader"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { eq } from "drizzle-orm"
@@ -165,6 +166,10 @@ const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
+    // Runner history reloads page a whole session (back to the last compaction) every step. Run them on
+    // reader workers so a cold history read cannot block every other request. Writes stay on the
+    // writer and commit synchronously before the reload is posted, so the reload sees them.
+    const reader = yield* DatabaseReader.Service
     const { db } = database
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
@@ -1080,7 +1085,21 @@ const layer = Layer.effect(
     const prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error | SessionSupersession.Closed> = Effect.fn(
       "SessionPrompt.prompt",
     )(function* (input: PromptInput) {
+      // A client that lost the answer to a send may repeat it with the same message ID. Under the
+      // Session's admission lock, an existing user message with that ID means the first send landed:
+      // return it and start no turn, so a retry never repeats provider or tool work.
+      let repeated = false
       const message = yield* state.admit(input.sessionID, Effect.gen(function* () {
+        if (input.messageID) {
+          const existing = yield* MessageV2.get({ sessionID: input.sessionID, messageID: input.messageID }).pipe(
+            Effect.provideService(Database.Service, database),
+            Effect.catchTag("NotFoundError", () => Effect.succeed(undefined)),
+          )
+          if (existing?.info.role === "user") {
+            repeated = true
+            return existing
+          }
+        }
         const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
         yield* revert.cleanup(session)
         const created = yield* createUserMessage(input)
@@ -1096,7 +1115,7 @@ const layer = Layer.effect(
         return created
       }))
 
-      if (input.noReply === true) return message
+      if (input.noReply === true || repeated) return message
       return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID), true)
     })
 
@@ -1123,7 +1142,7 @@ const layer = Layer.effect(
 
           yield* state.consume(sessionID)
           let msgs = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
-            Effect.provideService(Database.Service, database),
+            Effect.provideService(Database.Service, reader),
           )
 
           const { user: lastUser, assistant: lastAssistant, finished: lastFinished, tasks } = MessageV2.latest(msgs)
@@ -1402,7 +1421,7 @@ const layer = Layer.effect(
         sessionID,
         Effect.gen(function* () {
           const history = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
-            Effect.provideService(Database.Service, database),
+            Effect.provideService(Database.Service, reader),
           )
           const latest = MessageV2.latest(history)
           const assistant = history.findLast((m) => m.info.id === latest.assistant?.id)
@@ -1488,7 +1507,7 @@ const layer = Layer.effect(
           (yield* questions.list()).some((item) => item.sessionID === input.sessionID)
         if (waiting) return { outcome: "running" as const }
         const history = yield* MessageV2.filterCompactedEffect(input.sessionID).pipe(
-          Effect.provideService(Database.Service, database),
+          Effect.provideService(Database.Service, reader),
         )
         const latest = MessageV2.latest(history)
         const now = Date.now()
@@ -1903,6 +1922,7 @@ export const node = LayerNode.make({
     EventV2Bridge.node,
     RuntimeFlags.node,
     Database.node,
+    DatabaseReader.node,
   ],
 })
 

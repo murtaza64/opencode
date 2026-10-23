@@ -81,7 +81,7 @@ try {
   await editor().press("Meta+m")
   fixture.loseInput = true
   await button("Queue").click()
-  await expect(page.locator(".input-admission")).toContainText("Admission unknown")
+  await expect(page.locator(".input-admission")).toContainText("Not confirmed · queued")
   const unknown = inputs().at(-1).body
   // Queue keeps the session agent: no agent override in the request.
   expect(unknown).toEqual({ requestID: unknown.requestID, text: "newer visible text", delivery: "queue" })
@@ -90,12 +90,14 @@ try {
   await expect(editor()).toBeFocused()
   await page.reload({ waitUntil: "domcontentloaded" })
   await expect(editor()).toHaveValue("draft after unknown")
-  await expect(button("Aside")).toHaveAttribute("data-keyboard-target", "true")
+  // Sending cleared the editor and reset the target to Steer, so one Cmd+M chose Queue.
+  await expect(button("Queue")).toHaveAttribute("data-keyboard-target", "true")
   await page.getByRole("button", { name: "Check and retry same input", exact: true }).click()
   await expect(page.locator(".input-admission")).toHaveCount(0)
   expect(inputs().at(-1).body).toEqual(unknown)
   await expect(editor()).toHaveValue("draft after unknown")
-  await expect(page.locator(".input-receipts summary")).toContainText("1 queued, 0 steer")
+  await expect(page.locator('.input-receipts li[data-delivery="queue"]')).toHaveCount(1)
+  await expect(page.locator(".input-receipts li")).toHaveCount(1)
 
   await (await secondary("Steer")).click()
   await expect.poll(() => inputs().at(-1).body.delivery).toBe("steer")
@@ -103,7 +105,9 @@ try {
   expect(inputs().at(-1).body.agent).toBeUndefined()
   await expect(editor()).toHaveValue("")
   await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
-  await expect(page.locator(".input-receipts summary")).toContainText("1 queued, 1 steer")
+  // The editor clears as soon as the bubble holds the steer; wait for its acknowledgement.
+  await expect(page.locator('.input-receipts li[data-delivery="steer"][data-status="pending"]')).toHaveCount(1)
+  await expect(page.locator(".input-receipts li")).toHaveCount(2)
   await editor().fill("keyboard uses current target")
   await editor().press("Meta+m")
   await editor().press("Control+Enter")
@@ -128,23 +132,24 @@ try {
   const before = inputs().length
   fixture.holdNormal = true
   await button("Send").click()
-  await expect(page.locator(".pending-hint")).toHaveText("Sending…")
-  await expect(page.getByRole("region", { name: "Message status", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("region", { name: "Message status", exact: true }).locator(".outgoing-cue")).toHaveText("Sending…")
   await expect.poll(() => normal().length).toBe(1)
   expect(inputs()).toHaveLength(before)
   await editor().press("Control+Enter")
   expect(normal()).toHaveLength(1)
   fixture.setStatus("busy")
-  await expect(button("Queue")).toHaveAttribute("data-keyboard-target", "true")
+  // The Send cleared the editor and reset the target to Steer.
+  await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
   await editor().fill("new draft while chat sends")
   await editor().press("Meta+m")
   fixture.holdNormal = false
   fixture.normalReplies.shift()()
-  await expect(page.getByRole("region", { name: "Message status", exact: true })).toHaveCount(0)
+  // Accepted: the outgoing bubble reads Sent until the transcript shows the message; no actions.
+  await expect(page.getByRole("region", { name: "Message status", exact: true }).locator(".outgoing-cue")).toHaveText("Sent")
   await expect(page.getByRole("button", { name: "Dismiss send status", exact: true })).toHaveCount(0)
   await expect(active()).not.toContainText("A task message is being sent")
   await expect(editor()).toHaveValue("new draft while chat sends")
-  await expect(button("Aside")).toHaveAttribute("data-keyboard-target", "true")
+  await expect(button("Queue")).toHaveAttribute("data-keyboard-target", "true")
   expect(inputs()).toHaveLength(before)
   fixture.setStatus("idle")
   await expect(button("Send")).toBeVisible()
@@ -174,7 +179,7 @@ try {
   })
   await expect(button("Send")).toBeVisible()
   fixture.setStatus("busy")
-  await expect(button("Aside")).toHaveAttribute("data-keyboard-target", "true")
+  await expect(active().locator(".direct-primary")).toHaveAttribute("data-keyboard-target", "true")
   await more().click()
   await expect(active().locator(".direct-more-menu button")).toHaveCount(2)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
@@ -219,15 +224,17 @@ try {
   expect(normal().at(-1).body.parts[0].text).toBe(draftBefore)
   expect(inputs()).toHaveLength(before)
   expect(asides()).toHaveLength(1)
-  await expect(page.getByRole("region", { name: "Message status", exact: true })).toHaveCount(0)
+  // Accepted and not yet in the transcript: one quiet "Sent" bubble, replaced by the next send.
+  await expect(page.getByRole("region", { name: "Message status", exact: true }).locator(".outgoing-cue")).toHaveText("Sent")
   await editor().fill("uncertain normal message")
   fixture.loseNormal = true
   await button("Send").click()
-  await expect(page.getByRole("region", { name: "Message status", exact: true })).toContainText("Not confirmed")
+  await expect(page.getByRole("region", { name: "Message status", exact: true })).toHaveAttribute("data-status", "unknown")
   await expect(page.getByRole("button", { name: "Dismiss send status", exact: true })).toBeVisible()
+  // Not confirmed: the draft is back in the editor, unlocked, and survives a reload.
   await expect(editor()).toHaveValue("uncertain normal message")
   await page.reload({ waitUntil: "domcontentloaded" })
-  await expect(page.getByRole("region", { name: "Message status", exact: true })).toContainText("Not confirmed")
+  await expect(page.getByRole("region", { name: "Message status", exact: true })).toHaveAttribute("data-status", "unknown")
   await expect(page.getByRole("button", { name: "Dismiss send status", exact: true })).toBeVisible()
   await expect(editor()).toHaveValue("uncertain normal message")
   expect(normal()).toHaveLength(4)
