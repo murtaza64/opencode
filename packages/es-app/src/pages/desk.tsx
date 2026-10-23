@@ -24,6 +24,11 @@ import { oc } from "../api"
 import { flash } from "../motion"
 import type { MemoryEntry, MemoryRevision } from "../desk-memory"
 import { SessionView } from "./session"
+import { Icon } from "@opencode-ai/ui/icon"
+import { Glyph } from "../components/icons"
+import { getComposer } from "../composer"
+import { dictation } from "../dictation"
+import type { ContextPart } from "../api"
 import { SurfaceList, SurfaceView } from "../components/desk-surfaces"
 import { createSurfaces, surfaceFromKey, surfaceKey } from "../surfaces"
 import { leftWidth } from "../ui"
@@ -263,12 +268,7 @@ export default function Desk() {
         </>}</Show>
       </section>}</Show>}</Show>
 
-      <section class="desk-chat" aria-label="Front desk conversation">
-        <Show when={desk.error()}><div class="home-warning" role="alert">{desk.error()}</div></Show>
-        <Show when={desk.status() === "ready" ? desk.pointer() : undefined} keyed fallback={<DeskStart desk={desk} directory={deskDirectory()} />}>
-          {target => <SessionView sessionID={target.session} directory={target.directory} embedded context={context} onSent={desk.sent} />}
-        </Show>
-      </section>
+      <DeskChat desk={desk} directory={deskDirectory()} context={context} beside={!!selected()} />
     </div>
   </main>
 }
@@ -298,6 +298,73 @@ const RowAgent = (props: { record: AttentionRecord }) => {
   const agentFor = useRequestAgent()
   const agent = () => agentFor(props.record)
   return <bdi dir="auto" class="desk-item-agent" data-named={agent().named ? "true" : undefined} title={agent().session}>{agent().label}</bdi>
+}
+
+const CHAT_HIDDEN = "es-app:front-desk:chat-hidden"
+const NARROW = "(max-width: 900px)"
+
+/** The desk conversation. Beside a selected item or surface it can fold to a rail (a bottom bar on
+ * narrow windows, which opens it as a sheet). It stays mounted while folded, so the draft, caret,
+ * scroll position, pending sends and a dictation target all survive. */
+const DeskChat = (props: { desk: ReturnType<typeof createDeskSession>; directory?: string; context: () => ContextPart[]; beside: boolean }) => {
+  const dashboard = useDashboard()
+  const [hidden, setHidden] = createSignal(localStorage.getItem(CHAT_HIDDEN) === "1")
+  const [sheet, setSheet] = createSignal(false)
+  const [width, setWidth] = createSignal(0)
+  const [replied, setReplied] = createSignal(false)
+  // With nothing selected the chat is the page, so the fold applies only beside a selection.
+  const folded = () => hidden() && props.beside
+  const target = () => props.desk.status() === "ready" ? props.desk.pointer() : undefined
+  const status = () => { const current = target(); return current ? dashboard.activity.status(current.session) ?? "" : "" }
+  const working = () => ["busy", "retry"].includes(status())
+  const draft = () => { const current = target(); if (!current) return false; const task = getComposer(current.session, current.directory).state.task; return !!task.text.trim() || task.images.length > 0 }
+  const recording = () => { const current = target(); return !!current && dictation.state.phase !== "idle" && dictation.state.target?.sessionID === current.session && dictation.state.target?.directory === current.directory }
+  // A turn that ends while folded is a reply the reader has not seen.
+  createEffect(on(working, (now, before) => { if (before && !now && folded()) setReplied(true) }))
+  createEffect(on(() => props.beside, beside => { if (!beside) setSheet(false) }))
+  let section: HTMLElement | undefined
+  let rail: HTMLButtonElement | undefined
+  createEffect(() => { if (section) section.inert = folded() && !sheet() })
+  const store = (value: boolean) => { setHidden(value); try { localStorage.setItem(CHAT_HIDDEN, value ? "1" : "0") } catch { /* stays for this page */ } }
+  const hide = () => {
+    if (sheet()) return setSheet(false)
+    const focused = !!section?.contains(document.activeElement)
+    // Keep the folded chat at its laid-out width so its text does not rewrap and move the scroll anchor.
+    setWidth(section?.getBoundingClientRect().width ?? 0)
+    setReplied(false)
+    store(true)
+    if (focused) queueMicrotask(() => rail?.focus())
+  }
+  const show = () => {
+    const fromRail = document.activeElement === rail
+    if (matchMedia(NARROW).matches) setSheet(true)
+    else store(false)
+    setReplied(false)
+    if (fromRail) requestAnimationFrame(() => section?.querySelector<HTMLTextAreaElement>(".desk-chat textarea")?.focus())
+  }
+  return <>
+    <section ref={section} class="desk-chat" classList={{ "desk-chat-folded": folded() && !sheet(), "desk-chat-sheet": sheet() }}
+      style={folded() && width() ? { "--chat-width": `${width()}px` } : undefined} aria-label="Front desk conversation">
+      <Show when={props.desk.error()}><div class="home-warning" role="alert">{props.desk.error()}</div></Show>
+      <Show when={target()} keyed fallback={<DeskStart desk={props.desk} directory={props.directory} />}>
+        {current => <SessionView sessionID={current.session} directory={current.directory} embedded context={props.context} onSent={props.desk.sent}
+          headerStart={<Show when={props.beside}><button class="header-icon desk-chat-hide" aria-label={sheet() ? "Close chat" : "Hide chat"} title={sheet() ? "Close chat" : "Hide chat"}
+            onClick={hide}><Icon name="chevron-down" size="small" /></button></Show>} />}
+      </Show>
+    </section>
+    <Show when={folded() && !sheet()}>
+      {/* The whole rail expands the chat; the dots say only what is true right now. */}
+      <div class="desk-chat-rail" onClick={show}>
+        <button ref={rail} class="desk-chat-show" aria-label="Show chat" title="Front desk chat" onClick={event => { event.stopPropagation(); show() }}>
+          <Glyph name="comment-discussion" /><span class="desk-chat-rail-label">Chat</span>
+        </button>
+        <Show when={working()}><span class="desk-chat-dot" data-dot="working" role="img" aria-label="Chat agent working" /></Show>
+        <Show when={replied()}><span class="desk-chat-dot" data-dot="reply" role="img" aria-label="New reply" /></Show>
+        <Show when={draft()}><span class="desk-chat-dot" data-dot="draft" role="img" aria-label="Unsent draft" /></Show>
+        <Show when={recording()}><span class="desk-chat-dot" data-dot="recording" role="img" aria-label="Dictating into this chat" /></Show>
+      </div>
+    </Show>
+  </>
 }
 
 const Canonical = (props: { item: DeskItem; live: boolean; detail: (question: string) => Promise<string | undefined>; attention: ReturnType<typeof createAttention>; requests: ReturnType<typeof createHomeRequests>; now: number; ignoring: boolean; onIgnore: (failure: SessionFailure) => void; onReceipt: (receipt: HomeReplyReceipt) => void }) => {

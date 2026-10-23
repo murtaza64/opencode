@@ -161,3 +161,44 @@
 .attention-agent { font-weight: 600; color: var(--text); }
 .attention-project { color: var(--overlay1); }
 .attention-routing { flex-basis: 100%; }
+
+/* Folding chat (orchestrator#83): beside a selection the chat can fold to a 36px rail at the
+ * inline-end edge. The folded chat stays laid out at its last width, hidden and inert. */
+.desk-grid { position: relative; }
+.desk-has-selection .desk-grid:has(> .desk-chat-rail) { grid-template-columns: var(--queue-width, 240px) minmax(0, 1fr) 36px; }
+.desk-chat-folded { position: absolute; inset-block: 0; inset-inline-end: 0; inline-size: var(--chat-width, 400px); visibility: hidden; pointer-events: none; }
+.desk-chat-hide .icon, .desk-chat-hide svg { transform: rotate(-90deg); }
+.desk-chat-hide:dir(rtl) .icon, .desk-chat-hide:dir(rtl) svg { transform: rotate(90deg); }
+.desk-chat-rail { display: flex; flex-direction: column; align-items: center; gap: 10px; padding-block: 10px; background: var(--mantle); border-inline-start: 1px solid var(--surface0); cursor: pointer; }
+.desk-chat-show { display: inline-flex; align-items: center; justify-content: center; inline-size: 28px; block-size: 28px; padding: 0; color: var(--subtext1); background: transparent; border: 0; cursor: pointer; }
+.desk-chat-show:hover { color: var(--text); background: var(--surface0); }
+.desk-chat-rail-label { display: none; }
+.desk-chat-dot { inline-size: 8px; block-size: 8px; border-radius: 50% !important; background: var(--peach); }
+.desk-chat-dot[data-dot=working] { background: var(--lavender); }
+.desk-chat-dot[data-dot=draft] { background: transparent; border: 2px solid var(--subtext0); box-sizing: border-box; }
+.desk-chat-dot[data-dot=recording] { background: var(--red); }
+@media (max-width: 900px) {
+  /* Narrow: a bottom bar that opens the chat as a full-height sheet over the content. */
+  .desk-chat-folded { inline-size: 100%; }
+  .desk-chat-rail { position: sticky; inset-block-end: 0; z-index: 2; flex-direction: row; block-size: 44px; padding: 0 12px; border-inline-start: 0; border-block-start: 1px solid var(--surface0); }
+  .desk-chat-show { inline-size: auto; gap: 6px; padding-inline: 6px; }
+  .desk-chat-rail-label { display: inline; }
+  .desk-chat-sheet { position: fixed; inset: var(--native-header-height, 0px) 0 0; z-index: 30; block-size: auto !important; background: var(--base); }
+  .desk-chat-sheet .desk-chat-hide .icon, .desk-chat-sheet .desk-chat-hide svg { transform: none; }
+}
+
+/* Selected content reflows across the width it is given (container, not viewport). */
+.desk-evidence { container: desk-content / inline-size; }
+@container desk-content (min-width: 720px) {
+  .attention-home fieldset.home-option-cards { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .desk-evidence .home-answer .home-actions { justify-content: flex-end; }
+  .desk-evidence :is(p, li, dd, .desk-brief-why) { max-inline-size: 68ch; }
+}
+@container desk-content (min-width: 1100px) {
+  /* Explanation at inline-start; the question, options and Send stay on screen at inline-end. */
+  .desk-evidence .home-decision { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); grid-template-rows: auto auto 1fr; column-gap: 28px; }
+  .home-decision-head { grid-column: 1 / -1; }
+  .home-decision-explain { grid-column: 1; grid-row: 2; }
+  .home-decision-more { grid-column: 1; grid-row: 3; align-self: start; }
+  .home-decision-act { grid-column: 2; grid-row: 2 / 4; align-self: start; position: sticky; inset-block-start: 50px; }
+}
