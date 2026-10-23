@@ -21,7 +21,7 @@ const Refs = (props: { refs: string[]; known: EvidenceRef[]; item: DeskItem }) =
 const sourceLink = (source: BriefSource, refs: EvidenceRef[], item: DeskItem) => {
   const target = sourceTarget(source, refs)
   if (target?.kind === "doc") return { kind: "Doc", href: docHref("editspace", target.path) }
-  if (target) return { kind: "Thread", href: `${sessionHref(item.source.session, item.source.directory)}${target.message ? `&message=${encodeURIComponent(target.message)}` : ""}${target.to ? `&to=${encodeURIComponent(target.to)}` : ""}` }
+  if (target) return { kind: "Thread", href: `${sessionHref(item.source.session, item.source.directory)}&message=${encodeURIComponent(target.message)}${target.to ? `&to=${encodeURIComponent(target.to)}` : ""}` }
 }
 
 type Part = "lead" | "after" | "details"
@@ -32,7 +32,7 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
   const ready = () => { const job = current(); return job?.state.state === "ready" ? { job, result: job.state.result as BriefResult, omitted: job.state.omitted } : undefined }
   const complete = () => { const value = ready(); return !!value && briefComplete(value.result, props.item) }
   const shows = (part: Part) => !props.part || props.part === part
-  return <section class="desk-brief" aria-label="Brief" data-part={props.part}>
+  return <section class="desk-brief" aria-label="Brief" data-part={props.part} tabIndex={!props.part || props.part === "lead" ? -1 : undefined}>
     <Show when={shows("lead")}>
       <Show when={current()} fallback={<Show when={props.live}>
         <Show when={props.auto && !props.unavailable} fallback={<>

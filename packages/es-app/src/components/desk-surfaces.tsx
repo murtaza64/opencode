@@ -21,7 +21,7 @@ export const SurfaceList = (props: { surfaces: ReturnType<typeof createSurfaces>
   return <Show when={list().length || props.surfaces.error()}>
     <section class="desk-surfaces" aria-label="Surfaces">
       {/* When nothing can be shown the group folds to one line, still openable. */}
-      <Show when={allOffline()} fallback={<><h2>Surfaces</h2>{rows()}</>}>
+      <Show when={allOffline()} fallback={<><h2>Surfaces</h2><Show when={list().length}>{rows()}</Show></>}>
         <details class="desk-surfaces-offline" open={list().some(surface => props.selected === surfaceKey(surface.id))}>
           <summary>Surfaces <span class="home-muted">· {list().length} offline</span></summary>
           {rows()}

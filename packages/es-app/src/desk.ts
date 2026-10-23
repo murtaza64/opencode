@@ -425,13 +425,13 @@ export const briefComplete = (result: BriefResult, item: DeskItem) => {
 }
 
 /** Where a cited source can be opened: the source thread at its cited messages, or a markdown file.
- * Undefined when nothing resolves, so the source is dropped rather than shown as a bare label. */
+ * Undefined when nothing new resolves, so the source is dropped rather than shown as a bare label. */
 export const sourceTarget = (source: BriefSource, refs: EvidenceRef[]) => {
   const messages = source.refs.flatMap(id => refs.find(ref => ref.id === id)?.messageID ?? [])
   if (messages.length) return { kind: "thread" as const, message: messages[0], to: messages.length > 1 ? messages.at(-1) : undefined }
   const doc = source.refs.find(ref => /^file:[^\s]+\.md$/.test(ref))
+  // The request alone (C1) opens the same thread as the card's own "Open thread", so it adds nothing.
   if (doc) return { kind: "doc" as const, path: doc.slice(5) }
-  if (source.refs.includes("C1")) return { kind: "thread" as const }
 }
 
 /** A derived brief is shown only beside the exact source revision that started it. */

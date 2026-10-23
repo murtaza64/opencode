@@ -1,4 +1,4 @@
-.desk { display: flex; flex-direction: column; height: 100vh; max-width: none; margin: 0; padding: 0 0 0 20px; box-sizing: border-box; font-size: 13px; }
+.desk { display: flex; flex-direction: column; height: 100%; max-width: none; margin: 0; padding: 0 0 0 20px; box-sizing: border-box; font-size: 13px; }
 .content:has(.desk) { overflow: hidden; }
 .desk h1 { font-size: 17px; }
 .desk h2 { font-size: 13px; margin: 18px 0 8px; font-weight: 600; color: var(--text); }
@@ -147,3 +147,5 @@
 .desk-more-form { display: flex; gap: 6px; flex: 1 1 260px; }
 .desk-more-form input { flex: 1; min-inline-size: 0; font: inherit; color: var(--text); background: var(--base); border: 1px solid var(--surface1); padding: 5px 8px; }
 .desk-more > [role=status] { font-size: 11px; }
+.desk-brief:focus { outline: none; }
+.desk-brief:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
