@@ -420,7 +420,10 @@ const layer = Layer.effectDiscard(
           !row ||
           row.state !== "pending" ||
           row.receipt.state !== "pending" ||
-          row.payload.source !== undefined ||
+          (row.payload.source !== undefined &&
+            (row.payload.source.type !== "editspace-mail" ||
+              event.data.command.text !== undefined ||
+              event.data.command.delivery === undefined)) ||
           (row.receipt.revision ?? 0) !== event.data.command.expectedRevision ||
           (event.data.command.text === undefined && event.data.command.delivery === undefined)
         )

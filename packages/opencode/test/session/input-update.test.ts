@@ -14,12 +14,14 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { SessionInput } from "@/session/input"
 import { Session } from "@/session/session"
+import { SessionSupersession } from "@/session/supersession"
+import type { SessionID } from "@/session/schema"
 import { inputImage } from "../fixture/input-image"
 import { testEffect } from "../lib/effect"
 
 const it = testEffect(
   AppNodeBuilder.build(
-    LayerNode.group([Session.node, SessionInput.node, SessionProjector.node, EventV2.node, Database.node]),
+    LayerNode.group([Session.node, SessionInput.node, SessionSupersession.node, SessionProjector.node, EventV2.node, Database.node]),
     [[InstanceBootstrap.node, Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void }))]],
   ),
 )
@@ -408,5 +410,137 @@ it.instance("edits image-only text without changing normalized attachments or ad
     })
     expect((yield* db.select().from(V1InputTable).where(eq(V1InputTable.request_id, payload.requestID)).get())?.model)
       .toEqual(model)
+  }),
+)
+
+const mailInput = (requestID: string, delivery: "queue" | "steer" = "queue") => ({
+  requestID,
+  delivery,
+  text: `mail ${requestID}`,
+  source: { type: "editspace-mail" as const, id: `lane#${requestID}`, sender: "peer", recipient: "lane" },
+})
+
+const admitMail = (sessionID: SessionID, requestID: string, delivery: "queue" | "steer" = "queue") =>
+  Effect.gen(function* () {
+    const events = yield* EventV2.Service
+    yield* events.publish(SessionV1.Event.InputAdmitted, {
+      sessionID,
+      payload: mailInput(requestID, delivery),
+      agent: "build",
+      model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test") },
+      time: 10,
+    })
+  })
+
+it.instance("pending mail accepts a delivery-only update, keeps its admitted identity and steers at the next busy boundary", () =>
+  Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const inputs = yield* SessionInput.Service
+    const session = yield* sessions.create({ title: "Busy lead" })
+    yield* admitMail(session.id, "old-a")
+    yield* admitMail(session.id, "old-b")
+    const before = yield* inputs.get(session.id, "old-a")
+    expect(yield* inputs.promote(session.id, false)).toBe(false)
+    const command = { commandID: "steer-old-a", expectedRevision: 0, delivery: "steer" } as const
+    const flipped = yield* inputs.update(session.id, "old-a", command)
+    expect(flipped).toMatchObject({
+      state: "pending", delivery: "steer", revision: 1, text: "mail old-a",
+      requestID: "old-a", admittedSeq: before.admittedSeq, source: mailInput("old-a").source,
+    })
+    // A lost acknowledgment is recovered by repeating the exact command.
+    expect(yield* inputs.update(session.id, "old-a", command)).toEqual(flipped)
+    expect(yield* inputs.promote(session.id, false)).toBe(true)
+    expect(yield* inputs.get(session.id, "old-a")).toMatchObject({ state: "promoted", delivery: "steer", revision: 1 })
+    expect(yield* inputs.get(session.id, "old-b")).toMatchObject({ state: "pending", delivery: "queue" })
+    // The exact retry after promotion still answers with the committed receipt, never a new change.
+    expect(yield* inputs.update(session.id, "old-a", command)).toEqual(flipped)
+    const visible = (yield* sessions.messages({ sessionID: session.id })).filter((message) => message.info.role === "user")
+    expect(visible).toHaveLength(1)
+    expect(visible[0]).toMatchObject({ info: { source: mailInput("old-a").source }, parts: [{ text: "mail old-a" }] })
+  }),
+)
+
+it.instance("mail text, combined text and delivery, and stale revisions are refused without changing the receipt", () =>
+  Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const inputs = yield* SessionInput.Service
+    const session = yield* sessions.create({ title: "Mail edits" })
+    yield* admitMail(session.id, "fixed")
+    for (const command of [
+      { commandID: "mail-text", expectedRevision: 0, text: "rewritten" },
+      { commandID: "mail-both", expectedRevision: 0, text: "rewritten", delivery: "steer" as const },
+      { commandID: "mail-stale", expectedRevision: 3, delivery: "steer" as const },
+    ])
+      expect(yield* inputs.update(session.id, "fixed", command).pipe(Effect.flip)).toMatchObject({
+        _tag: "InputUpdateConflict", current: { text: "mail fixed", delivery: "queue", revision: 0 },
+      })
+  }),
+)
+
+it.instance("a delivery update racing promotion or cancellation has exactly one outcome", () =>
+  Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const inputs = yield* SessionInput.Service
+    const session = yield* sessions.create({ title: "Races" })
+    yield* admitMail(session.id, "promoted-first")
+    expect(yield* inputs.promote(session.id, true)).toBe(true)
+    expect(
+      yield* inputs
+        .update(session.id, "promoted-first", { commandID: "late-flip", expectedRevision: 0, delivery: "steer" })
+        .pipe(Effect.flip),
+    ).toMatchObject({ _tag: "InputUpdateConflict", current: { state: "promoted", delivery: "queue" } })
+
+    yield* admitMail(session.id, "raced")
+    const [flip, cancel] = yield* Effect.all(
+      [
+        inputs.update(session.id, "raced", { commandID: "race-flip", expectedRevision: 0, delivery: "steer" }).pipe(Effect.exit),
+        inputs.cancel(session.id, "raced").pipe(Effect.exit),
+      ],
+      { concurrency: "unbounded" },
+    )
+    expect(Exit.isSuccess(cancel)).toBe(true)
+    const final = yield* inputs.get(session.id, "raced")
+    expect(final.state).toBe("cancelled")
+    // Whichever committed first, a cancelled mail input is never promoted.
+    if (Exit.isSuccess(flip)) expect(flip.value).toMatchObject({ delivery: "steer", revision: 1 })
+    expect(yield* inputs.promote(session.id, false)).toBe(false)
+    expect(yield* inputs.promote(session.id, true)).toBe(false)
+  }),
+)
+
+it.instance("mail of a fenced session cannot be re-delivered there", () =>
+  Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const inputs = yield* SessionInput.Service
+    const supersession = yield* SessionSupersession.Service
+    const session = yield* sessions.create({ title: "Predecessor" })
+    const successor = yield* sessions.create({ title: "Successor" })
+    yield* admitMail(session.id, "fenced")
+    yield* supersession.request(session.id, successor.id)
+    expect(
+      yield* inputs
+        .update(session.id, "fenced", { commandID: "fenced-flip", expectedRevision: 0, delivery: "steer" })
+        .pipe(Effect.flip),
+    ).toMatchObject({ _tag: "InputUpdateConflict", current: { state: "pending", delivery: "queue" } })
+    expect(yield* inputs.promote(session.id, false)).toBe(false)
+  }),
+)
+
+it.instance("replay reproduces a mail delivery update", () =>
+  Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const inputs = yield* SessionInput.Service
+    const events = yield* EventV2.Service
+    const db = (yield* Database.Service).db
+    const session = yield* sessions.create({ title: "Replay" })
+    yield* admitMail(session.id, "replayed")
+    const flipped = yield* inputs.update(session.id, "replayed", { commandID: "replay-flip", expectedRevision: 0, delivery: "steer" })
+    const stored = yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, session.id)).orderBy(asc(EventTable.seq)).all()
+    yield* events.remove(session.id)
+    yield* db.delete(SessionTable).where(eq(SessionTable.id, session.id)).run()
+    yield* events.replayAll(stored.map((event) => ({
+      id: event.id, aggregateID: event.aggregate_id, seq: event.seq, type: event.type, data: event.data,
+    })))
+    expect(yield* inputs.get(session.id, "replayed")).toEqual(flipped)
   }),
 )

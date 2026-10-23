@@ -27,6 +27,10 @@ export class Invalid extends Schema.TaggedErrorClass<Invalid>()("InputInvalid", 
 export const InputPayload = SessionV1.InputPayload
 export { InputUpdatePayload }
 
+/** Editspace mail keeps its admitted text, media, agent and model; only its delivery may change. */
+const mailDeliveryOnly = (source: { type: string }, command: InputUpdatePayload) =>
+  source.type === "editspace-mail" && command.text === undefined && command.delivery !== undefined
+
 const make = Effect.gen(function* () {
   const database = yield* Database.Service
   const events = yield* EventV2Bridge.Service
@@ -140,8 +144,17 @@ const make = Effect.gen(function* () {
         current: receipt(row.receipt),
       })
     }
-    if (row.payload.source !== undefined)
-      return yield* new UpdateConflict({ message: "Only human input can be updated", current: receipt(row.receipt) })
+    if (row.payload.source !== undefined && !mailDeliveryOnly(row.payload.source, command))
+      return yield* new UpdateConflict({
+        message: "Only human input can be updated; editspace mail accepts a delivery-only update",
+        current: receipt(row.receipt),
+      })
+    // A fenced session's mail belongs to its successor through es transfer; it is never promoted here.
+    if (row.payload.source !== undefined && (yield* supersession.get(sessionID)) !== undefined)
+      return yield* new UpdateConflict({
+        message: "Mail in a superseded session belongs to its successor",
+        current: receipt(row.receipt),
+      })
     if (command.text === undefined && command.delivery === undefined)
       return yield* new Invalid({ message: "Update requires text or delivery" })
     if (row.state !== "pending" || (row.receipt.revision ?? 0) !== command.expectedRevision)
