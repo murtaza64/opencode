@@ -1,4 +1,5 @@
 import { batch } from "solid-js"
+import { ascending } from "@opencode-ai/schema/identifier"
 import { createStore, reconcile } from "solid-js/store"
 import type {
   ExperimentalCapabilities,
@@ -103,6 +104,14 @@ export type ComposerState = {
     status: "sending" | "accepted" | "unknown"
     after?: string
     action?: ComposerAction
+    /** Client-chosen user message ID; the only way to find an unconfirmed send again. */
+    messageID?: string
+    /** Draft revision the send was made from, so a confirmation clears only that draft. */
+    revision?: number
+    buffer?: ComposerBuffer
+    /** Core is reachable and has no message with this ID: "Send again" is offered. */
+    absent?: boolean
+    checking?: boolean
   } | null
   task: ComposerDraft
   aside: ComposerDraft
@@ -128,6 +137,8 @@ export type ComposerState = {
 export type ComposerDependencies = {
   fetch?: (url: string, init?: RequestInit) => Promise<Response>
   prompt?: typeof oc.prompt
+  /** Test seam for SEND_DEADLINE_MS. */
+  sendDeadlineMs?: number
   storage?: Pick<Storage, "getItem" | "setItem"> | null
   images?: ImageStore
   requestID?: () => string
@@ -206,6 +217,9 @@ const readSubmission = (storage: () => Pick<Storage, "getItem"> | null, key: str
     return "unreadable" as const
   }
 }
+
+/** A send with no answer by then is shown as not confirmed and stops blocking the composer. */
+export const SEND_DEADLINE_MS = 25_000
 
 export const createComposer = (sessionID: string, directory: string, dependencies: ComposerDependencies = {}) => {
   const request = dependencies.fetch ?? ((url, init) => fetch(url, init))
@@ -324,6 +338,9 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           status: saved.normalSubmission.status === "accepted" ? "accepted" : "unknown",
           ...(typeof saved.normalSubmission.after === "string" ? { after: saved.normalSubmission.after } : {}),
           ...(isAction(saved.normalSubmission.action) ? { action: saved.normalSubmission.action } : {}),
+          ...(typeof saved.normalSubmission.messageID === "string" ? { messageID: saved.normalSubmission.messageID } : {}),
+          ...(typeof saved.normalSubmission.revision === "number" ? { revision: saved.normalSubmission.revision } : {}),
+          ...(saved.normalSubmission.buffer === "task" || saved.normalSubmission.buffer === "aside" ? { buffer: saved.normalSubmission.buffer } : {}),
         })
       }
       if (record(saved.modelSelection) && isModel(saved.modelSelection.model))
@@ -746,11 +763,11 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     }
     if (state.sending) return "A task message is being sent."
     if (state.recoveryBusy) return "Input recovery is in progress. Wait before sending another task message."
-    if (state.admission) return "Reconcile or retry the existing input before sending another task message."
+    // An unconfirmed input is set aside (kept, same request ID) when the next message is sent.
+    if (state.admission && (state.admission.status !== "unknown" || state.admission.fence))
+      return "Reconcile or retry the existing input before sending another task message."
     if (state.modelSelection) return "Model selection is pending. Task messages wait for confirmation."
     if (mode === "send") {
-      if (state.normalSubmission?.status === "unknown")
-        return "Previous normal Send outcome is unknown. Check the conversation, then dismiss its status before sending again."
       return state.busy ? "Task busy. Normal Send is unavailable; choose Aside, Queue or Steer." : ""
     }
     return ""
@@ -849,8 +866,61 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         setState("capabilityError", `Cannot load server capabilities: ${message(error)}`)
     }
   }
+  /** Look up an unconfirmed Send by its own message ID. Found: it was sent. 404 from a
+   * reachable session: it never landed, and only then is "Send again" offered. */
+  const checkSubmission = async () => {
+    const submission = state.normalSubmission
+    if (submission?.status !== "unknown" || !submission.messageID || submission.checking) return
+    const id = submission.messageID
+    setState("normalSubmission", "checking", true)
+    try {
+      const response = await request(url(`/message/${encodeURIComponent(id)}`))
+      if (state.normalSubmission?.messageID !== id) return
+      if (response.ok) {
+        if (submission.revision !== undefined) clearTask(submission.revision, submission.buffer ?? "task")
+        setState("normalSubmission", { status: "accepted", absent: false })
+        return
+      }
+      if (response.status === 404 && (await request(url(""))).ok) setState("normalSubmission", "absent", true)
+    } catch {
+      // Still unreachable: stays unconfirmed and is checked again on the next refresh.
+    } finally {
+      if (state.normalSubmission?.messageID === id) setState("normalSubmission", "checking", false)
+      persist()
+    }
+  }
+  /** Explicit only: resend the same text under the same message ID after a fresh "not found". */
+  const sendAgain = async (session: Session) => {
+    const submission = state.normalSubmission
+    if (submission?.status !== "unknown" || !submission.absent || !submission.messageID || state.sending) return
+    const buffer = submission.buffer ?? "task"
+    const draft = state[buffer]
+    if (submission.images && (submission.revision !== draft.revision || draft.images.length !== submission.images)) {
+      setState("error", "The draft changed since this message, so its images cannot be matched. Send the draft as a new message instead.")
+      return
+    }
+    setState("normalSubmission", "absent", false)
+    await checkSubmission()
+    if (!state.normalSubmission?.absent || state.normalSubmission.messageID !== submission.messageID) return
+    setState("sending", true)
+    setState("normalSubmission", { status: "sending", absent: false })
+    persist()
+    try {
+      await prompt(session, directory, submission.text, {
+        images: submission.images ? draft.images : [], messageID: submission.messageID, signal: AbortSignal.timeout(dependencies.sendDeadlineMs ?? SEND_DEADLINE_MS),
+      })
+      if (submission.revision !== undefined) clearTask(submission.revision, buffer)
+      setState("normalSubmission", "status", "accepted")
+    } catch {
+      setState("normalSubmission", "status", "unknown")
+    } finally {
+      setState("sending", false)
+      persist()
+    }
+  }
   const refreshInputs = async () => {
     if (state.hydrating) await hydration
+    void checkSubmission()
     if (state.inputLoading) return
     const input = state.capabilities?.sessionInput
     if (input?.version !== 1 || !input.list) return
@@ -885,6 +955,8 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       persist()
     }
   }
+  // Inputs whose POST got no answer before the deadline (a stalled server, not a refusal).
+  const timedOut = new Set<string>()
   const admit = async (admission: ComposerAdmission) => {
     activeInput = admission.payload.requestID
     try {
@@ -893,6 +965,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(admission.payload),
+          signal: AbortSignal.timeout(dependencies.sendDeadlineMs ?? SEND_DEADLINE_MS),
         }),
       )
       accept(receipt, admission.payload.requestID)
@@ -919,6 +992,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         })
         return
       }
+      if (error instanceof DOMException && error.name === "TimeoutError") timedOut.add(admission.payload.requestID)
       setState("admission", {
         status: "unknown",
         error: `Admission not confirmed: ${message(error)}. Reconcile before retrying.`,
@@ -941,11 +1015,10 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     if (state.hydrating) await hydration
     const mode = direct?.mode ?? state.mode
     const buffer = direct?.buffer ?? draftKey()
+    // An earlier input whose outcome is unknown (including one restored after reload) never
+    // blocks a new message: it moves to the set-aside list with its request ID, retry explicit only.
+    if (mode !== "aside" && state.admission?.status === "unknown" && !state.admission.fence && !state.sending) await setAsideAdmission()
     if (mode !== "aside" && (state.sending || state.recoveryBusy || state.admission || state.superseded || restoreError || missingImages[buffer])) {
-      if (!direct) setState("error", blockedReason(mode, buffer))
-      return
-    }
-    if (mode === "send" && state.normalSubmission?.status === "unknown") {
       if (!direct) setState("error", blockedReason(mode, buffer))
       return
     }
@@ -979,7 +1052,10 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         ? inputImages(draft.images.map((image) => ({ ...image, mime: requireImageMime(image.mime) })))
         : undefined
     setState("error", "")
-    if (state.normalSubmission?.status === "accepted") setState("normalSubmission", null)
+    // A new message replaces an earlier submission's row: an unconfirmed one stays findable
+    // in the conversation by its ID, and is never resent implicitly.
+    if (state.normalSubmission?.status === "accepted" || (mode === "send" && state.normalSubmission?.status === "unknown"))
+      setState("normalSubmission", null)
     if (mode === "aside") {
       const id = requestID()
       const abort = new AbortController()
@@ -1026,6 +1102,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     setState("sending", true)
     if (mode === "send") {
       const submittedModel = draft.model ?? state.sessionModel ?? nextModel ?? null
+      const messageID = `msg_${ascending()}`
       setState({
         normalExplicit: true,
         normalSubmission: {
@@ -1035,11 +1112,17 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           status: "sending",
           after: latestMessageID,
           ...(direct ? { action: direct.action } : {}),
+          messageID,
+          revision: draft.revision,
+          buffer,
         },
       })
       persist()
       try {
-        await prompt(state.sessionModel ? { ...session, preferredModel: { id: state.sessionModel.modelID, providerID: state.sessionModel.providerID } } : session, directory, text, { images: draft.images, model: state.sessionModel ? undefined : draft.model ?? nextModel ?? undefined, ...(context?.length ? { context } : {}) })
+        await prompt(state.sessionModel ? { ...session, preferredModel: { id: state.sessionModel.modelID, providerID: state.sessionModel.providerID } } : session, directory, text, {
+          images: draft.images, model: state.sessionModel ? undefined : draft.model ?? nextModel ?? undefined, ...(context?.length ? { context } : {}),
+          messageID, signal: AbortSignal.timeout(dependencies.sendDeadlineMs ?? SEND_DEADLINE_MS),
+        })
         clearTask(draft.revision, buffer, direct?.targetRevision)
         setState("normalSubmission", "status", "accepted")
       } catch (error) {
@@ -1050,8 +1133,9 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           error: `Session superseded by ${superseded.successor}. Draft kept; recover explicitly in the successor.`,
         })
         else {
+          // Not failed: it may still land. The draft stays, the composer unlocks, and the
+          // send is looked up by its ID whenever the session is reachable.
           setState("normalSubmission", "status", "unknown")
-          setState("error", `Send not confirmed: ${message(error)}. Check the conversation before sending again.`)
         }
       } finally {
         setState("sending", false)
@@ -1085,6 +1169,11 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       return
     }
     await admit(admission)
+    // An unanswered input moves to the set-aside list (same request ID, checked on every refresh),
+    // so it never blocks the next message.
+    if (timedOut.has(admission.payload.requestID) && state.admission?.payload.requestID === admission.payload.requestID &&
+      state.admission.status === "unknown" && !state.admission.fence)
+      await setAsideAdmission()
   }
   const retryAdmission = async () => {
     if (state.hydrating) await hydration
@@ -1554,6 +1643,8 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     },
     loadCapabilities,
     refreshInputs,
+    checkSubmission,
+    sendAgain,
     submit,
     retryAdmission,
     setAsideAdmission,

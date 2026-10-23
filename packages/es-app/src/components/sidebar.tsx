@@ -367,9 +367,9 @@ export default function Sidebar() {
             </>
           }
         >
-          <Show when={sessionsError()}><div class="err nav-empty">{sessionsError()}</div></Show>
+          {/* Cached rows stay; load trouble is the header's shared status, not a list banner. */}
           <Show when={unpinnedSessions().length} fallback={
-            <Show when={!sessionsError()}><div class="dim nav-empty">{sessionsLoading() ? "loading..." : pinnedSessions().length ? "All active sessions pinned" : "none"}</div></Show>
+            <div class="dim nav-empty">{sessionsError() ? "Sessions unavailable — retrying" : sessionsLoading() ? "loading..." : pinnedSessions().length ? "All active sessions pinned" : "none"}</div>
           }>
             <For each={unpinnedSessions()}>
               {(s, index) => {

@@ -6,6 +6,7 @@ import { createEffect, createSignal, on, onCleanup, onMount } from "solid-js"
 import type { Session } from "@opencode-ai/sdk/v2"
 import { descending } from "@opencode-ai/schema/identifier"
 import { oc, SessionCreateError, type ContextPart, type MessageWithParts } from "./api"
+import { clearBackend, describeFailure, isTransient, reportBackend } from "./backend-status"
 import { assistantOps, handled, emptyMemory, eraseMemory, nextMemory, type MemoryDocument, type MemoryOp } from "./desk-memory"
 import type { AttentionRecord } from "./attention"
 import { BRIEF_CONTRACT, BRIEF_SCHEMA, BRIEF_SYSTEM, type ConversationThread, briefPacket, briefState, deskContext, type BriefMeta, type BriefState, type DeskItem } from "./desk"
@@ -240,8 +241,10 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
       setJobs([...found, ...local()].sort((a, b) => b.created - a.created))
       setSynced(target.session)
       setError("")
+      clearBackend("Brief checks")
     } catch (cause) {
-      if (current === generation) { setError("Briefs could not be refreshed; showing the last known."); setDetail(String(cause)) }
+      // Last-known brief states stay; a persisting failure also reaches the shared status.
+      if (current === generation) { setError("Briefs could not be refreshed; showing the last known."); setDetail(String(cause)); reportBackend("Brief checks", cause) }
     }
   }
   // Read as soon as the parent is known, not at the next poll.
@@ -268,7 +271,9 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
       if (cause instanceof SessionCreateError && !cause.uncertain) {
         savePending(undefined)
         // 409: another client (tab, native app) already created this job; adopt it, never prompt it again.
-        if (!cause.message.includes("HTTP 409")) setError(`Brief not started: ${cause.message}`)
+        if (cause.message.includes("HTTP 409")) { /* adopted above */ }
+        else if (isTransient(cause)) reportBackend("Brief start", cause)
+        else setError(`Brief not started (${describeFailure(cause)}).`)
       }
       setInflight(undefined)
       return refresh()
@@ -379,6 +384,9 @@ const committed = (file: MemoryDocument, body: PutBody) =>
   file.revision === body.document.revision && JSON.stringify(file.history.at(-1)) === JSON.stringify(body.document.history.at(-1))
 
 /** Personal memory in one file, replaced only by compare-and-set on its content hash. */
+const MEMORY_RETRY_MS = 15_000
+const absent = (cause: unknown) => /the dashboard has no memory endpoint|HTTP 501/.test(String(cause instanceof Error ? cause.message : cause))
+
 export const createMemory = () => {
   const [stored, setStored] = createSignal<Stored>()
   const [status, setStatus] = createSignal<"idle" | "loading" | "writing" | "unavailable">("idle")
@@ -417,11 +425,19 @@ export const createMemory = () => {
       setStored(await response.json())
       reconcile()
       setStatus(previous => previous === "writing" ? previous : "idle")
+      clearBackend("Front desk memory")
     } catch (cause) {
       setStatus("unavailable")
-      setNotice(`Memory could not be read (${cause instanceof Error ? cause.message : String(cause)}). Last-known notes are shown; nothing was changed.`)
+      setNotice(`Memory could not be read (${describeFailure(cause)}). Last-known notes are shown; nothing was changed.`)
+      // A dashboard without memory is a fact shown in the panel; load trouble is shared status and retries.
+      if (absent(cause)) return
+      reportBackend("Front desk memory", cause)
+      clearTimeout(retry)
+      retry = setTimeout(() => void load(), MEMORY_RETRY_MS)
     }
   }
+  let retry: ReturnType<typeof setTimeout> | undefined
+  onCleanup(() => clearTimeout(retry))
   type Outcome = "written" | "refused" | "conflict" | "unconfirmed" | "busy" | "forbidden"
   const send = async (body: PutBody): Promise<Outcome> => {
     setStatus("writing")
@@ -526,7 +542,7 @@ export const createBriefAnchor = (directory: () => string | undefined) => {
     void briefAnchorID(root).then(id => {
       setTarget({ session: id, directory: root })
       return oc.session(id, root).then(existing => { setPointer({ session: id, directory: existing.directory }); setChecked(true) },
-        cause => { if (String(cause).includes("HTTP 404")) setChecked(true); else { setError("Briefs unavailable."); setDetail(String(cause)) } })
+        cause => { if (String(cause).includes("HTTP 404")) setChecked(true); else { setError("Briefs unavailable."); setDetail(String(cause)); reportBackend("Briefs", cause) } })
     })
   })
   const ensure = async () => {

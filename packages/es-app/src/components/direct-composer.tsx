@@ -33,8 +33,10 @@ export const DirectComposer = (props: {
       ? "Session unavailable or another session action is running."
       : props.composer.reasonForAction(action)
   const empty = () => !props.composer.visibleDraft().text.trim() && !props.composer.visibleDraft().images.length
+  // An in-flight send reports in the work-status slot; listing it here too would add and
+  // remove a row under the controls on every send (es-app#186). Buttons keep it as a title.
   const reasons = () =>
-    props.connected ? [...new Set([primary(), ...(menu() ? secondary() : [])].map(reason).filter(Boolean))] : []
+    props.connected && !state.sending ? [...new Set([primary(), ...(menu() ? secondary() : [])].map(reason).filter(Boolean))] : []
   const other = () => state[state.visibleBuffer === "task" ? "aside" : "task"]
   // Keep textarea focus (and its selection) when a submit button is pressed.
   const keepFocus = (e: PointerEvent) => {

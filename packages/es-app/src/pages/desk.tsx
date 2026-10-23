@@ -229,9 +229,10 @@ export default function Desk() {
         </details>
         <button class="desk-chat-tab" aria-expanded={memoryOpen()} title="Personal notes the desk reads; never used as permission. ~/.local/share/opencode/front-desk/memory.json" onClick={() => setMemoryOpen(!memoryOpen())}>Memory <span class="home-muted" title="Notes">{memory.document().entries.length}</span></button>
         <Show when={memoryOpen()}><MemoryPanel memory={memory} /></Show>
-        {/* Healthy sources stay folded; one that is not current is listed in the open. */}
+        {/* A source that is not current shows as one compact row (name and state); its error
+            detail is the row's tooltip and the shared status's diagnostics, never stacked text. */}
         <section class="desk-sources" aria-label="Connected sources">
-          <For each={problems()}>{source => <Source source={source} />}</For>
+          <For each={problems()}>{source => <Source source={source} compact />}</For>
           <div class="desk-sources-bar">
             <details class="desk-sources-all"><summary>{problems().length ? "All sources" : "Sources up to date"}</summary>
             <For each={sources().filter(source => source.state === "current")}>{source => <Source source={source} />}</For>
@@ -276,10 +277,10 @@ export default function Desk() {
   </main>
 }
 
-const Source = (props: { source: DeskSource }) =>
-  <div class="desk-source" data-state={props.source.state}>
+const Source = (props: { source: DeskSource; compact?: boolean }) =>
+  <div class="desk-source" data-state={props.source.state} title={props.compact ? props.source.detail : undefined}>
     <span>{props.source.name}</span><span class="desk-source-state">{props.source.state}{props.source.checked ? ` · ${ago(props.source.checked)}` : ""}</span>
-    <Show when={props.source.detail}><div class="home-source"><bdi dir="auto">{props.source.detail}</bdi></div></Show>
+    <Show when={!props.compact && props.source.detail}><div class="home-source"><bdi dir="auto">{props.source.detail}</bdi></div></Show>
   </div>
 
 const DeskStart = (props: { desk: ReturnType<typeof createDeskSession>; directory?: string }) =>

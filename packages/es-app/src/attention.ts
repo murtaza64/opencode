@@ -1,4 +1,5 @@
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js"
+import { clearBackend, describeFailure, reportBackend } from "./backend-status"
 
 export type AttentionRecord = {
   id: string
@@ -156,9 +157,12 @@ export const createAttention = (project: () => string | undefined, options: { re
       })
       setScopes(previous => ({ ...previous, [scope ?? ""]: { checked, partial: unavailable.size > 0, truncated: pages.length === 50 } }))
       setError("")
+      clearBackend("Attention ledger")
     } catch (cause) {
       if (current !== version) return
-      setError(cause instanceof Error ? cause.message : "Attention ledger unavailable.")
+      // Source state keeps "unavailable"; its detail stays short and the header carries the status.
+      setError(`Attention ledger unavailable (${describeFailure(cause)}).`)
+      reportBackend("Attention ledger", cause)
     } finally {
       if (current === version) setLoading(false)
     }

@@ -36,6 +36,17 @@ test("queue lists only pending requests from every connected source with their o
   expect(items()[2]!.title).toBe("Deploy agent")
 })
 
+test("an unreadable request that was pending at its last check stays counted; one never confirmed does not", () => {
+  const keys = deskItems({
+    records: [], attentionChecked: 0, failures: [], failuresChecked: 0, title: () => undefined, project: () => undefined,
+    requests: [
+      { kind: "permission", id: "per_known", session: "ses_p", directory: "/beta", title: "Edit", state: "unavailable", checked: 50, lastPending: true },
+      { kind: "permission", id: "per_unseen", session: "ses_p", directory: "/beta", title: "Edit", state: "unavailable", checked: 0 },
+    ],
+  }).map((item) => [item.key, item.checked])
+  expect(keys).toEqual([["permission:/beta:per_known", 50]])
+})
+
 test("sources disclose partial, stale and unsupported inputs instead of reporting an empty desk", () => {
   const sources = deskSources({
     now: 100_000,

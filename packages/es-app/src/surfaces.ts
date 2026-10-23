@@ -1,6 +1,7 @@
 /* Front Desk surfaces: views a granted agent publishes (dashboard /api/surfaces) and the desk
  * embeds through the app's surface proxy (surface-proxy.ts). The list is display data; the
  * frame address comes from the app server, which owns the capability. */
+import { clearBackend, reportBackend } from "./backend-status"
 import { createSignal, onCleanup } from "solid-js"
 
 export type SurfaceHealth = {
@@ -46,10 +47,17 @@ export const createSurfaces = () => {
   const [error, setError] = createSignal<string>()
   const [checked, setChecked] = createSignal<number>()
   const refresh = async () => {
-    const result = await fetch("/es/api/surfaces", { cache: "no-store" })
-      .then(async response => response.ok ? { surfaces: (await response.json()).surfaces as Surface[] } : { error: response.status === 404 ? "this dashboard does not serve surfaces" : `surfaces HTTP ${response.status}` })
-      .catch(() => ({ error: "dashboard unreachable" }))
-    if ("error" in result) return setError(result.error)
+    type Read = { surfaces: Surface[] } | { status: number } | { cause: unknown }
+    const result: Read = await fetch("/es/api/surfaces", { cache: "no-store" })
+      .then(async (response): Promise<Read> => response.ok ? { surfaces: (await response.json()).surfaces as Surface[] } : { status: response.status })
+      .catch((cause): Read => ({ cause }))
+    if (!("surfaces" in result)) {
+      // Load trouble keeps the last list and goes to the shared header status; a dashboard
+      // without surfaces is a plain fact shown in place.
+      if ("status" in result && (result.status === 404 || result.status === 501)) return setError("this dashboard does not serve surfaces")
+      return reportBackend("Surfaces", "status" in result ? result : result.cause)
+    }
+    clearBackend("Surfaces")
     setList(result.surfaces)
     setError()
     setChecked(Date.now())

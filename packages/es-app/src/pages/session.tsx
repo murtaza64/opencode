@@ -473,6 +473,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const workState = createMemo(() => {
     if (live.error()) return "failed"
     if (shownTrouble() === "disconnected" && trouble() === "disconnected") return "disconnected"
+    if ((composer.state.admission?.status === "sending" && !composer.state.admission.fence) || composer.state.normalSubmission?.status === "sending") return "admitting"
     if (pending().length) return "waiting"
     if (status() === "retry") return "retry"
     if (busy() || subagentsRunning()) return "working"
@@ -522,8 +523,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const WorkStatus = () => (
     <div class="session-work-status" role="status" data-state={workState()} title={backendError() || undefined}>
       <Show when={workState() === "working" || workState() === "idle"} fallback={<>
-        <Show when={workState() === "retry"}><WorkSpinner /></Show>
-        <span>{workState() === "retry" ? "Retrying" : workState() === "waiting" ? "Waiting for your reply" : workState() === "failed" ?
+        <Show when={workState() === "retry" || workState() === "admitting"}><WorkSpinner /></Show>
+        <span>{workState() === "admitting" ? `${composer.state.admission?.payload.delivery === "queue" && !composer.state.normalSubmission ? "Queueing" : "Sending"} your message…`
+          : workState() === "retry" ? "Retrying" : workState() === "waiting" ? "Waiting for your reply" : workState() === "failed" ?
           `Session failed — see error ${inlineError() ? "in conversation" : "above"}` : workState() === "stale"
           ? live.loaded() ? "Waiting for daemon — showing saved transcript" : "Waiting for daemon"
           : live.loaded() ? "Reconnecting — showing saved transcript" : "Reconnecting — activity unavailable"}</span>
@@ -1734,7 +1736,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
           </div>
         </div>
 
-        <Show when={!floating()}><WorkStatus /><ComposerResults composer={composer} connected={connected()} /></Show>
+        <Show when={!floating()}><WorkStatus /><ComposerResults composer={composer} connected={connected()} session={session()} /></Show>
         <div class="prompt-box" inert={floating()}>
           <ComposerPanel />
         </div>
@@ -1747,7 +1749,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             <button onClick={closeFloat}>⤡ collapse <kbd class="composer-key">Ctrl+E</kbd></button>
           </div>
           <WorkStatus />
-          <ComposerResults composer={composer} connected={connected()} />
+          <ComposerResults composer={composer} connected={connected()} session={session()} />
           <ComposerPanel expanded />
         </div>
       </Show>

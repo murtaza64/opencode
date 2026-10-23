@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import type { SessionFailure } from "@opencode-ai/sdk/v2"
 import { createRoot } from "solid-js"
 import { createFailureIgnores, type IgnoredFailure } from "./failure-ignores"
+import { backendIssues, resetBackend } from "./backend-status"
 
 const failure = (sessionID: string, messageID: string): SessionFailure => ({
   sessionID, directory: "/repo", messageID, parentID: "msg_user", time: 1_700_000_000_000, error: { name: "APIError", statusCode: 529 }, retry: "available",
@@ -62,14 +63,33 @@ test("unignore shows the failure again everywhere", async () => {
   expect(reloaded.ignored(failure("ses_a", "msg_a1"))).toBe(false)
 })
 
-test("an unreadable store hides nothing and says so", async () => {
+test("an unreadable store that was never confirmed hides nothing and reports to the shared status", async () => {
+  resetBackend()
   const server = dashboard()
   server.file.entries = [{ sessionID: "ses_a", messageID: "msg_a1", directory: "/repo", failedAt: null, label: "", ignoredAt: 1 }]
   server.file.status = 503
   const ignores = store(server.fetch)
   await ignores.load()
   expect(ignores.ignored(failure("ses_a", "msg_a1"))).toBe(false)
-  expect(ignores.notice()).toContain("all failures are shown")
+  expect(backendIssues().map(issue => [issue.source, issue.detail, issue.transient])).toEqual([["Ignored failures", "service unavailable (HTTP 503)", true]])
+})
+
+test("a refused read keeps the last confirmed ignores, also across reloads, and reports a real problem", async () => {
+  resetBackend()
+  const server = dashboard()
+  server.file.entries = [{ sessionID: "ses_a", messageID: "msg_a1", directory: "/repo", failedAt: null, label: "", ignoredAt: 1 }]
+  const data = new Map<string, string>()
+  const storage = { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => void data.set(key, value) }
+  const first = createRoot(() => createFailureIgnores({ fetch: server.fetch, storage: () => storage }))
+  await first.load()
+  server.file.status = 403
+  await first.load()
+  expect(first.ignored(failure("ses_a", "msg_a1"))).toBe(true)
+  const reloaded = createRoot(() => createFailureIgnores({ fetch: server.fetch, storage: () => storage }))
+  await reloaded.load()
+  expect(reloaded.ignored(failure("ses_a", "msg_a1"))).toBe(true)
+  expect(reloaded.ignored(failure("ses_a", "msg_a2"))).toBe(false)
+  expect(backendIssues().map(issue => [issue.source, issue.detail, issue.transient])).toEqual([["Ignored failures", "not authorized (HTTP 403)", false]])
 })
 
 test("a lost response re-reads the file and reflects what committed", async () => {
@@ -93,6 +113,7 @@ test("a reload whose read fails keeps the last confirmed ignores instead of un-i
   await reloaded.load()
   expect(reloaded.ignored(failure("ses_a", "msg_a1"))).toBe(true)
   expect(reloaded.notice()).toContain("last confirmed list still applies")
+  expect(backendIssues().find(issue => issue.source === "Ignored failures")?.transient).toBe(false)
 })
 
 test("a failed refresh after a good read keeps the list it read", async () => {

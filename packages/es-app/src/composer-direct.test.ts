@@ -139,7 +139,7 @@ test("idle Steer starts in chat; busy Steer captures durable safe-boundary deliv
   composer.setVisibleText("idle message")
   composer.selectTarget("aside")
   await composer.submitVisible("steer", session)
-  expect(chat).toEqual([{ text: "idle message", options: { images: [], model: undefined } }])
+  expect(chat).toEqual([{ text: "idle message", options: { images: [], model: undefined, messageID: expect.stringMatching(/^msg_/), signal: expect.any(AbortSignal) } }])
   expect(composer.state.receipts).toEqual([])
   composer.observeBusy(true)
   composer.setVisibleText("busy message")

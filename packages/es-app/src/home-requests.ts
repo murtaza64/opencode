@@ -4,7 +4,9 @@ import { oc } from "./api"
 import type { useDashboard } from "./state"
 
 export type HomeRequest = { kind: "permission" | "question"; id: string; session: string; directory: string; title: string; project?: string }
-export type HomeRequestRow = HomeRequest & { state: "pending" | "unknown" | "unavailable"; checked: number; permission?: PermissionRequest }
+/** `lastPending`: an unreadable row whose last successful check found it pending. It stays counted
+ * so a failing source never makes the queue look healthier than it was. */
+export type HomeRequestRow = HomeRequest & { state: "pending" | "unknown" | "unavailable"; checked: number; permission?: PermissionRequest; lastPending?: boolean }
 export const requestKey = (item: HomeRequest) => JSON.stringify([item.directory, item.kind, item.id])
 
 /** Pending-request pointers from live session activity and dashboard notification hints, deduplicated by exact identity. */
@@ -36,7 +38,11 @@ export const createHomeRequests = (sources: () => HomeRequest[], settled: (item:
           return { ...item, state: request ? "pending" as const : "unknown" as const, checked: Date.now(), ...(request && kind === "permission" ? { permission: request as PermissionRequest } : {}) }
         })
       } catch {
-        return pointers.filter(item => item.directory === directory && item.kind === kind).map(item => ({ ...item, state: "unavailable" as const, checked: rows().find(old => requestKey(old) === requestKey(item))?.checked ?? 0 }))
+        return pointers.filter(item => item.directory === directory && item.kind === kind).map(item => {
+          const old = rows().find(row => requestKey(row) === requestKey(item))
+          return { ...item, state: "unavailable" as const, checked: old?.checked ?? 0,
+            ...(old?.permission ? { permission: old.permission } : {}), lastPending: old?.state === "pending" || !!old?.lastPending }
+        })
       }
     })))
     if (generation !== current) return

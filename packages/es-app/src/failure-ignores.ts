@@ -1,8 +1,9 @@
 /* Ignored failures: the dashboard's ignored-failures file, shared by every client. An ignore hides
  * one exact failure (session + failed message) from the Front desk queue. It is not a resolution
  * or a retry and never touches the session; a newer failure in that session shows again. */
-import { createSignal } from "solid-js"
+import { createSignal, onCleanup } from "solid-js"
 import type { SessionFailure } from "@opencode-ai/sdk/v2"
+import { clearBackend, describeFailure, reportBackend } from "./backend-status"
 
 export type IgnoredFailure = {
   sessionID: string
@@ -45,17 +46,25 @@ export const createFailureIgnores = (deps: { fetch?: typeof fetch; storage?: () 
     setLoaded(true)
     try { storage()?.setItem(CACHE_KEY, JSON.stringify(next)) } catch { /* the in-page list still applies */ }
   }
+  let retry: ReturnType<typeof setTimeout> | undefined
+  onCleanup(() => clearTimeout(retry))
   const load = async () => {
+    clearTimeout(retry)
     try {
       const response = await request(IGNORES_URL, { credentials: "include" })
       if (!response.ok) throw new Error(response.status === 404 ? "the dashboard has no ignored-failures endpoint" : `HTTP ${response.status}`)
       await accept(response)
       setNotice("")
       setQuiet()
+      clearBackend("Ignored failures")
     } catch (cause) {
       const reason = cause instanceof Error ? cause.message : String(cause)
       setNotice(loaded() ? "Ignored failures could not be refreshed; the last confirmed list still applies." : "Ignored failures unavailable; all failures are shown.")
       setQuiet(reason)
+      // Reported, never masked: a refused read (e.g. 403) is a problem in the shared status.
+      reportBackend("Ignored failures", cause)
+      clearTimeout(retry)
+      retry = setTimeout(() => void load(), 15_000)
     }
   }
   const change = async (op: "ignore" | "unignore", item: Pick<SessionFailure, "sessionID" | "messageID" | "directory"> & { failedAt?: number; label?: string }) => {
@@ -76,7 +85,7 @@ export const createFailureIgnores = (deps: { fetch?: typeof fetch; storage?: () 
       }
       // Both ops are idempotent; re-read so the list shows whatever actually committed.
       await load()
-      const reason = !response ? "no response" : response.status === 401 || response.status === 403 ? "the operator connection is unavailable" : `HTTP ${response.status}`
+      const reason = !response ? "no response" : response.status === 401 || response.status === 403 ? "the operator connection is unavailable" : describeFailure({ status: response.status })
       setNotice(`${op === "ignore" ? "Ignore" : "Unignore"} not confirmed (${reason}).`)
       setQuiet()
     } finally {

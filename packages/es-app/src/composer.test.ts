@@ -6,6 +6,7 @@ import { createImageStore, type ImageStore } from "./image-store"
 import { oc } from "./api"
 import {
   createComposer,
+  SEND_DEADLINE_MS,
   getComposer,
   type ComposerDependencies,
   type ImageCapability,
@@ -1571,24 +1572,24 @@ test("normal Send retains its transcript boundary through acknowledgement and re
   expect(restored.state.normalSubmission?.status).toBe("accepted")
 })
 
-test("unknown normal outcome remains visible until explicitly dismissed before another normal Send", async () => {
-  let calls = 0
+test("an unconfirmed normal Send never blocks the next message and is never resent implicitly", async () => {
+  const sent: { text: string; messageID?: string }[] = []
   const { composer } = harness(undefined, {
-    prompt: async () => {
-      if (++calls === 1) throw new Error("lost ack")
+    prompt: async (_session, _directory, text, options) => {
+      sent.push({ text, messageID: options?.messageID })
+      if (sent.length === 1) throw new Error("lost ack")
     },
   })
   composer.setText("original")
   await composer.submit(session)
+  expect(composer.state.normalSubmission?.status).toBe("unknown")
+  expect(composer.state.sending).toBe(false)
+  expect(composer.state.task.text).toBe("original")
   composer.setText("different draft")
   await composer.submit(session)
-  expect(calls).toBe(1)
-  expect(composer.state.normalSubmission?.text).toBe("original")
-  expect(composer.state.normalSubmission?.status).toBe("unknown")
-  expect(composer.state.task.text).toBe("different draft")
-  composer.dismissNormalSubmission()
-  await composer.submit(session)
-  expect(calls).toBe(2)
+  expect(sent.map((item) => item.text)).toEqual(["original", "different draft"])
+  expect(sent[0]!.messageID).toMatch(/^msg_/)
+  expect(sent[1]!.messageID).not.toBe(sent[0]!.messageID)
   expect(composer.state.normalSubmission?.text).toBe("different draft")
   expect(composer.state.normalSubmission?.status).toBe("accepted")
 })
@@ -1673,7 +1674,7 @@ test("normal send captures model, images and revision, prevents double submit, a
   composer.setText("third")
   ack.resolve()
   await sending
-  expect(sent).toEqual([[session, directory, "first", { model, images: [image] }]])
+  expect(sent).toEqual([[session, directory, "first", { model, images: [image], messageID: expect.stringMatching(/^msg_/), signal: expect.any(AbortSignal) }]])
   expect(composer.state.task.text).toBe("third")
   expect(composer.state.task.images).toEqual([image])
   expect(composer.state.sending).toBe(false)
@@ -1704,7 +1705,7 @@ test("normal send failures keep the draft and never retry automatically", async 
   composer.setText("task")
   await composer.submit(session)
   expect(calls).toBe(1)
-  expect(composer.state.error).toContain("Check the conversation")
+  expect(composer.state.normalSubmission?.status).toBe("unknown")
   expect(composer.state.task.text).toBe("task")
 })
 
@@ -1809,7 +1810,7 @@ test("Aside and Steer send no agent, and normal Send keeps its session settings"
   await composer.chooseSessionModel(model)
   composer.setImages([image])
   await composer.submit(session)
-  expect(prompts).toEqual([{ session: { ...session, preferredModel: { id: "model", providerID: "provider" } }, options: { model: undefined, images: [image] } }])
+  expect(prompts).toEqual([{ session: { ...session, preferredModel: { id: "model", providerID: "provider" } }, options: { model: undefined, images: [image], messageID: expect.stringMatching(/^msg_/), signal: expect.any(AbortSignal) } }])
 })
 
 test("authoritative reconciliation unlocks a stalled POST without letting its late completion unlock a newer send", async () => {
@@ -1878,28 +1879,35 @@ test("refresh preserves receipt identity and stops polling terminal inputs", asy
   expect(composer.state.receipts[0].state).toBe("cancelled")
 })
 
-test("unknown admission retains immutable payload and an explicit retry reads before posting the same ID", async () => {
+test("a new message sets aside an unknown input with its exact payload; its recovery reads by the same ID before any retry", async () => {
   let posts = 0
   const { composer, requests } = harness((request) => {
+    if (request.method === "GET" && request.url.pathname.endsWith(`/oc/session/${session.id}`)) return Response.json({ ...session, model: { providerID: "provider", id: "model" } })
     if (request.method === "GET") return new Response(null, { status: 404 })
     if (++posts === 1) throw new Error("lost ack")
-    return Response.json(pending())
+    const body = request.body as { requestID: string; text: string; delivery: string }
+    return Response.json({ ...pending(), requestID: body.requestID, text: body.text, delivery: body.delivery })
   })
   await composer.loadCapabilities()
   composer.selectMode("queue")
   composer.setText("task")
   await composer.submit(session)
   expect(composer.state.admission?.status).toBe("unknown")
+  const first = requests[1]!.body as { requestID: string }
   composer.setText("newer text")
   composer.selectMode("steer")
-  composer.setModel(model)
   await composer.submit(session)
-  expect(posts).toBe(1)
-  await composer.retryAdmission()
-  expect(requests.slice(1).map((request) => request.method)).toEqual(["POST", "GET", "POST"])
-  expect(requests[3].body).toEqual(requests[1].body)
-  expect(composer.state.task.text).toBe("newer text")
-  expect(composer.state.admission).toBeNull()
+  expect(posts).toBe(2)
+  expect((requests.findLast((request) => request.method === "POST")!.body as { text: string }).text).toBe("newer text")
+  expect(composer.state.recoveries.map((entry) => entry.admission.payload)).toEqual([requests[1]!.body as never])
+  const before = requests.length
+  await composer.recoverAdmission(first.requestID, true)
+  const recovery = requests.slice(before)
+  expect(recovery[0]!.method).toBe("GET")
+  expect(recovery[0]!.url.pathname).toBe(`/oc/session/${session.id}/input/${first.requestID}`)
+  // Retry stays explicit and checked: here the original model is unknown, so nothing is posted.
+  expect(recovery.filter((request) => request.method === "POST")).toEqual([])
+  expect(composer.state.recoveryError).toContain("no automatic retry")
 })
 
 test("reconciliation finds an acknowledged input without retrying POST", async () => {
@@ -2700,4 +2708,116 @@ test("admission and draft images persist as references with separate identities"
   expect(restored.state.admission).toBeNull()
   expect(restored.blockedReason()).toBe("")
   expect(restored.state.storageError).toBe("")
+})
+
+test("a Send with no answer before the deadline unlocks as not confirmed and keeps the draft", async () => {
+  const { composer } = harness(undefined, {
+    sendDeadlineMs: 20,
+    prompt: (_session, _directory, _text, options) =>
+      new Promise((_, reject) => options!.signal!.addEventListener("abort", () => reject(options!.signal!.reason))),
+  })
+  composer.setText("stuck send")
+  composer.setImages([image])
+  const sending = composer.submit(session)
+  expect(composer.state.sending).toBe(true)
+  await sending
+  expect(composer.state.sending).toBe(false)
+  expect(composer.state.normalSubmission).toMatchObject({ status: "unknown", text: "stuck send", images: 1 })
+  expect(composer.state.task.text).toBe("stuck send")
+  expect(composer.state.task.images).toHaveLength(1)
+  expect(composer.reasonForAction("steer")).not.toContain("being sent")
+  expect(SEND_DEADLINE_MS).toBe(25_000)
+})
+
+test("a Steer with no answer before the deadline is set aside with its request ID and stops blocking", async () => {
+  let held = true
+  const { composer } = harness((request) => {
+    if (request.method === "POST" && held) return new Promise<Response>((_, reject) => request.signal!.addEventListener("abort", () => reject(request.signal!.reason)))
+    if (request.method === "GET" && request.url.pathname.includes("/input/")) return new Response("{}", { status: 404 })
+    throw new Error(`Unexpected request: ${request.method} ${request.url}`)
+  }, { sendDeadlineMs: 20 })
+  await composer.loadCapabilities()
+  composer.observeBusy(true)
+  composer.selectMode("steer")
+  composer.setText("steer during stall")
+  await composer.submit(session)
+  expect(composer.state.sending).toBe(false)
+  expect(composer.state.admission).toBeNull()
+  expect(composer.state.recoveries.map((entry) => entry.admission.payload.text)).toEqual(["steer during stall"])
+  expect(composer.state.task.text).toBe("steer during stall")
+  expect(composer.reasonForAction("steer")).toBe("")
+  held = false
+})
+
+test("an unconfirmed Send found by its ID is shown as sent and clears its draft, with no second send", async () => {
+  let messageID = ""
+  let prompts = 0
+  const { composer, requests } = harness((request) => {
+    if (request.url.pathname === `/oc/session/${session.id}/message/${messageID}`) return Response.json({ info: { id: messageID } })
+    throw new Error(`Unexpected request: ${request.method} ${request.url}`)
+  }, {
+    prompt: async (_session, _directory, _text, options) => {
+      prompts++
+      messageID = options!.messageID!
+      throw new Error("lost ack")
+    },
+  })
+  composer.setText("landed late")
+  await composer.submit(session)
+  expect(composer.state.normalSubmission?.status).toBe("unknown")
+  await composer.checkSubmission()
+  expect(composer.state.normalSubmission?.status).toBe("accepted")
+  expect(composer.state.task.text).toBe("")
+  expect(prompts).toBe(1)
+  expect(requests.filter((request) => request.method !== "GET")).toEqual([])
+})
+
+test("an absent Send is offered again only explicitly, with the same ID, text and images", async () => {
+  const sent: { text: string; messageID?: string; images: number }[] = []
+  let landed = false
+  const { composer } = harness((request) => {
+    if (request.url.pathname.startsWith(`/oc/session/${session.id}/message/`)) return landed ? Response.json({}) : new Response("{}", { status: 404 })
+    if (request.url.pathname === `/oc/session/${session.id}`) return Response.json(session)
+    throw new Error(`Unexpected request: ${request.method} ${request.url}`)
+  }, {
+    prompt: async (_session, _directory, text, options) => {
+      sent.push({ text, messageID: options?.messageID, images: options?.images?.length ?? 0 })
+      if (sent.length === 1) throw new Error("server stalled")
+      landed = true
+    },
+  })
+  composer.setText("never landed")
+  composer.setImages([image])
+  await composer.submit(session)
+  await composer.checkSubmission()
+  expect(composer.state.normalSubmission?.absent).toBe(true)
+  expect(sent).toHaveLength(1)
+  await composer.sendAgain(session)
+  expect(sent).toHaveLength(2)
+  expect(sent[1]).toEqual({ text: "never landed", messageID: sent[0]!.messageID, images: 1 })
+  expect(composer.state.normalSubmission?.status).toBe("accepted")
+  expect(composer.state.task.images).toEqual([])
+})
+
+test("an unconfirmed Send survives reload with its ID and is checked, not resent", async () => {
+  let messageID = ""
+  const storage = new MemoryStorage()
+  const { composer } = harness(undefined, {
+    storage,
+    prompt: async (_session, _directory, _text, options) => {
+      messageID = options!.messageID!
+      throw new Error("lost ack")
+    },
+  })
+  composer.setText("before reload")
+  await composer.submit(session)
+  const reloaded = harness(() => new Response("{}", { status: 503 }), {
+    storage,
+    prompt: async () => { throw new Error("must not resend") },
+  }).composer
+  expect(reloaded.state.normalSubmission).toMatchObject({ status: "unknown", messageID, text: "before reload" })
+  await reloaded.checkSubmission()
+  expect(reloaded.state.normalSubmission).toMatchObject({ status: "unknown" })
+  expect(reloaded.state.normalSubmission?.absent).toBeFalsy()
+  expect(reloaded.state.task.text).toBe("before reload")
 })

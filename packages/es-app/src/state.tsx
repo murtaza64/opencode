@@ -20,6 +20,7 @@ import { reconcilePins, transferPins, type Handoff, type PendingHandoff } from "
 import { pinSessionID } from "./session-pins"
 import { createCloudAgents } from "./cloud-agents"
 import { createSessionFailures } from "./session-failures"
+import { clearBackend, describeFailure, reportBackend } from "./backend-status"
 import type { GlobalSession, SessionFailure } from "@opencode-ai/sdk/v2"
 import type { Event } from "@opencode-ai/sdk/v2"
 import { useLocation } from "@solidjs/router"
@@ -101,14 +102,14 @@ export function DashboardProvider(props: ParentProps) {
   const [stateError, setStateError] = createSignal("")
   const [metadataError, setMetadataError] = createSignal("")
   const [notificationError, setNotificationError] = createSignal("")
-  const [editspaces] = createResource<Awaited<ReturnType<typeof es.editspaces>>>(async (_, info) => {
-    try { const result = await es.editspaces(); setMetadataError(""); return result }
-    catch { setMetadataError("Project metadata unavailable; last-known projects retained."); return info.value ?? { editspaces: [], default: null } }
+  const [editspaces, { refetch: refetchEditspaces }] = createResource<Awaited<ReturnType<typeof es.editspaces>>>(async (_, info) => {
+    try { const result = await es.editspaces(); setMetadataError(""); clearBackend("Projects"); return result }
+    catch (cause) { setMetadataError("Project metadata unavailable; last-known projects retained."); reportBackend("Projects", cause); setTimeout(() => void refetchEditspaces(), 15_000); return info.value ?? { editspaces: [], default: null } }
   })
   const [mailRevision, setMailRevision] = createSignal(0)
   const [notificationState, { refetch: refetchNotifications }] = createResource<Awaited<ReturnType<typeof es.notifications>>>(async (_, info) => {
-    try { const result = await es.notifications(); setNotificationError(""); return result }
-    catch { setNotificationError("Notification source unavailable; last-known pointers retained."); return info.value ?? { notifications: [] } }
+    try { const result = await es.notifications(); setNotificationError(""); clearBackend("Notifications"); return result }
+    catch (cause) { setNotificationError("Notification source unavailable; last-known pointers retained."); reportBackend("Notifications", cause); return info.value ?? { notifications: [] } }
   })
   const stateCache = new Map<string, Awaited<ReturnType<typeof es.state>>>()
   const [state, { refetch }] = createResource(
@@ -119,8 +120,9 @@ export function DashboardProvider(props: ParentProps) {
         stateCache.set(typeof result.editspace === "string" ? result.editspace : name || editspaces()?.default || "", result)
         if (!name) stateCache.set("", result)
         setStateError("")
+        clearBackend("Dashboard state")
         return result
-      } catch { setStateError("Dashboard source unavailable; last-known project state retained."); return stateCache.get(name || editspaces()?.default || "") ?? (!name ? stateCache.get("") : undefined) }
+      } catch (cause) { setStateError("Dashboard source unavailable; last-known project state retained."); reportBackend("Dashboard state", cause); return stateCache.get(name || editspaces()?.default || "") ?? (!name ? stateCache.get("") : undefined) }
     },
   )
   const [handoffsError, setHandoffsError] = createSignal("")
@@ -138,9 +140,11 @@ export function DashboardProvider(props: ParentProps) {
         const result = await es.handoffs(name)
         setPendingHandoffs((previous) => ({ ...previous, [name]: result.pending ?? [] }))
         setHandoffsError("")
+        clearBackend("Handoffs")
         return result.handoffs
       } catch (error) {
-        setHandoffsError(`Handoff lineage unavailable: ${String(error)}`)
+        setHandoffsError(`Handoff lineage unavailable: ${describeFailure(error)}`)
+        reportBackend("Handoffs", error)
         return info.value ?? []
       }
     },
@@ -165,9 +169,11 @@ export function DashboardProvider(props: ParentProps) {
       const sessions = await oc.allSessions(false)
       const updates = [...changed].filter(([, item]) => item.revision > before)
       for (const [id, item] of changed) if (item.revision <= before) changed.delete(id)
+      clearBackend("Sessions")
       return merge(sessions, updates)
-    } catch {
+    } catch (cause) {
       setSessionsError("Could not load session relationships. Subagent activity and requests may be incomplete. Retrying automatically.")
+      reportBackend("Sessions", cause)
       return merge(info.value ?? [], changed)
     }
   })

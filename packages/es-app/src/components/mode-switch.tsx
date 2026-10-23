@@ -6,6 +6,7 @@ import { createEffect, Show } from "solid-js"
 import { A, useLocation } from "@solidjs/router"
 import { Glyph } from "./icons"
 import { useDeskQueue } from "../desk-queue"
+import { BackendStatus } from "./backend-status"
 
 export type Mode = "desk" | "agents"
 export const modeOf = (pathname: string): Mode => pathname === "/" ? "desk" : "agents"
@@ -39,5 +40,7 @@ export const ModeSwitch = (props: { compact?: boolean }) => {
     <A href={href("agents")} class="mode-tab" aria-current={current() === "agents" ? "page" : undefined} title="Agents" aria-label={props.compact ? "Agents" : undefined}>
       <Show when={props.compact} fallback="Agents"><Glyph name="graph" /></Show>
     </A>
+    {/* The mode switch is on every page, so it carries the one app-wide background-read status. */}
+    <BackendStatus />
   </nav>
 }

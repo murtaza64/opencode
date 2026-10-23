@@ -128,7 +128,8 @@ try {
   const before = inputs().length
   fixture.holdNormal = true
   await button("Send").click()
-  await expect(page.getByRole("region", { name: "Message status", exact: true })).toContainText("Sending")
+  await expect(page.locator(".pending-hint")).toHaveText("Sending…")
+  await expect(page.getByRole("region", { name: "Message status", exact: true })).toHaveCount(0)
   await expect.poll(() => normal().length).toBe(1)
   expect(inputs()).toHaveLength(before)
   await editor().press("Control+Enter")
@@ -222,11 +223,11 @@ try {
   await editor().fill("uncertain normal message")
   fixture.loseNormal = true
   await button("Send").click()
-  await expect(page.getByRole("region", { name: "Message status", exact: true })).toContainText("Outcome unknown")
+  await expect(page.getByRole("region", { name: "Message status", exact: true })).toContainText("Not confirmed")
   await expect(page.getByRole("button", { name: "Dismiss send status", exact: true })).toBeVisible()
   await expect(editor()).toHaveValue("uncertain normal message")
   await page.reload({ waitUntil: "domcontentloaded" })
-  await expect(page.getByRole("region", { name: "Message status", exact: true })).toContainText("Outcome unknown")
+  await expect(page.getByRole("region", { name: "Message status", exact: true })).toContainText("Not confirmed")
   await expect(page.getByRole("button", { name: "Dismiss send status", exact: true })).toBeVisible()
   await expect(editor()).toHaveValue("uncertain normal message")
   expect(normal()).toHaveLength(4)

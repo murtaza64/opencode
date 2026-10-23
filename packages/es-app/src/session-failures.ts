@@ -11,6 +11,7 @@
 import { createSignal } from "solid-js"
 import type { Event, SessionFailure } from "@opencode-ai/sdk/v2"
 import { oc } from "./api"
+import { clearBackend, reportBackend } from "./backend-status"
 import { unresolvedSend } from "./composer"
 
 export type RetryResult = Awaited<ReturnType<typeof oc.retrySession>> | { outcome: "blocked"; detail: string }
@@ -128,6 +129,7 @@ export const createSessionFailures = (deps: {
         }
         setSupported(true)
         setError("")
+        clearBackend("Failed sessions")
         setChecked(Date.now())
         // A session with events after this read began keeps its previous entry until the next read.
         const raced = (id: string) => (versions.get(id) ?? 0) > start
@@ -139,9 +141,12 @@ export const createSessionFailures = (deps: {
         ])
         setHidden((previous) => Object.fromEntries(Object.entries(previous).filter(([id, messageID]) =>
           raced(id) || (active.has(id) && next.some((item) => item.sessionID === id && item.messageID === messageID)))))
-      } catch {
-        if (!disposed)
-          setError(`Failed-session status unavailable${items().length ? "; last-known failures retained" : ""}.`)
+      } catch (cause) {
+        if (disposed) return
+        setError(`Failed-session status unavailable${items().length ? "; last-known failures retained" : ""}.`)
+        reportBackend("Failed sessions", cause)
+        // The regular full read is minutes apart; recover sooner once the daemon answers again.
+        setTimeout(() => { if (!disposed) schedule() }, 30_000)
       }
     })().finally(() => {
       inflight = undefined

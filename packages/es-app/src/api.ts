@@ -161,6 +161,9 @@ export const oc = {
       model?: { providerID: string; modelID: string }
       images?: readonly { mime: string; url: string; filename?: string }[]
       context?: readonly ContextPart[]
+      /** Client-chosen user message ID, so an unconfirmed send can be found later by GET /message/:id. */
+      messageID?: string
+      signal?: AbortSignal
     } = {},
   ) => {
     const parts: Record<string, unknown>[] = []
@@ -168,7 +171,7 @@ export const oc = {
     parts.push(...inputImages(opts.images ?? []))
     parts.push(...(opts.context ?? []))
     // A selected preference is resolved server-side, including its variant.
-    const body: Record<string, unknown> = { parts, agent: session.agent }
+    const body: Record<string, unknown> = { parts, agent: session.agent, ...(opts.messageID ? { messageID: opts.messageID } : {}) }
     const model =
       opts.model ??
       (session.preferredModel ? undefined : session.model ? { providerID: session.model.providerID, modelID: session.model.id } : undefined)
@@ -177,6 +180,7 @@ export const oc = {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
+      signal: opts.signal,
     })
     if (!res.ok) throw await httpError(res)
   },

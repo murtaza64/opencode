@@ -42,7 +42,8 @@ export const deskItems = (input: {
     source: { session: record.source_ref.session_id, directory: record.source_ref.directory },
     record,
   })),
-  ...input.requests.filter(request => request.state === "pending").map(request => ({
+  // A request whose source is briefly unreadable keeps its row at its last confirmed time.
+  ...input.requests.filter(request => request.state === "pending" || (request.state === "unavailable" && request.lastPending)).map(request => ({
     key: `${request.kind}:${request.directory}:${request.id}`,
     kind: request.kind,
     title: request.kind === "permission" && request.permission ? `${request.permission.permission} · ${request.title}` : request.title,

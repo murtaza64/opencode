@@ -1,30 +1,36 @@
 import { For, Show } from "solid-js"
 import { Markdown } from "@opencode-ai/session-ui/markdown"
 import type { Composer } from "../composer"
+import type { Session } from "@opencode-ai/sdk/v2"
 import { ComposerImages } from "./composer-images"
 
-export const ComposerResults = (props: { composer: Composer; connected: boolean }) => {
+export const ComposerResults = (props: { composer: Composer; connected: boolean; session?: Session }) => {
   const state = props.composer.state
   const pending = () => state.receipts.filter((item) => item.state === "pending" && item.source?.type !== "editspace-mail")
   const queued = () => pending().filter((item) => item.delivery === "queue").length
   const steers = () => pending().filter((item) => item.delivery === "steer").length
   return (
     <div class="composer-results" data-composer-controls>
-      <Show when={state.normalSubmission?.status !== "accepted" && state.normalSubmission}>
+      {/* In-flight sends show only in the transcript echo; this row appears for an outcome that
+          needs the human (unknown), so a routine send never inserts and removes a row here. */}
+      <Show when={state.normalSubmission?.status === "unknown" && state.normalSubmission}>
         {(submission) => (
           <section class="normal-submission" aria-label="Message status">
             <div class="composer-actions">
               <span role="status">
-                <b>{submission().action === "steer" ? "Send" : "Previous message"}</b> ·{" "}
-                {submission().status === "sending"
-                  ? "Sending…"
-                  : "Outcome unknown — check the conversation before resending"}
+                <b>Not confirmed</b> · {submission().checking ? "checking…"
+                  : submission().absent ? "the server has no record of it"
+                  : submission().messageID ? "will check again when the server answers" : "check the conversation"}
               </span>
-              <Show when={submission().status !== "sending"}>
-                <button aria-label="Dismiss send status" onClick={() => props.composer.dismissNormalSubmission()}>
-                  Dismiss
-                </button>
+              <Show when={submission().messageID && !submission().absent}>
+                <button disabled={submission().checking || !props.connected} onClick={() => void props.composer.checkSubmission()}>Check</button>
               </Show>
+              <Show when={submission().absent && props.session}>
+                {(session) => <button disabled={state.sending || !props.connected} onClick={() => void props.composer.sendAgain(session())}>Send again</button>}
+              </Show>
+              <button aria-label="Dismiss send status" onClick={() => props.composer.dismissNormalSubmission()}>
+                Dismiss
+              </button>
             </div>
             <p dir="auto">
               {submission().text}
@@ -33,7 +39,8 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
           </section>
         )}
       </Show>
-      <Show when={state.admission && !state.admission.fence ? state.admission : undefined}>
+      {/* A routine admission reports in the work-status slot; this row is for an unknown outcome. */}
+      <Show when={state.admission && !state.admission.fence && state.admission.status !== "sending" ? state.admission : undefined}>
         {(admission) => (
           <section class="input-admission" aria-label="Input admission" aria-live="polite">
             <b>
@@ -63,11 +70,11 @@ export const ComposerResults = (props: { composer: Composer; connected: boolean 
       </Show>
       <Show when={state.recoveries.length}>
         <details class="input-recoveries">
-          <summary>Set-aside inputs ({state.recoveries.length})</summary>
+          <summary>Not confirmed ({state.recoveries.length})</summary>
           <For each={state.recoveries}>
             {(entry) => (
               <section aria-label="Set-aside input" data-recovery-id={entry.admission.payload.requestID}>
-                <b>{entry.admission.payload.delivery} · {state.receipts.find((item) => item.requestID === entry.admission.payload.requestID)?.state ?? "admission unknown"}</b>
+                <b>{entry.admission.payload.delivery} · {state.receipts.find((item) => item.requestID === entry.admission.payload.requestID)?.state ?? "not confirmed"}</b>
                 <p dir="auto">{entry.admission.payload.text}</p>
                 <ComposerImages images={entry.admission.payload.images} />
                 <p class="dim">Request <bdi>{entry.admission.payload.requestID}</bdi>. Kept locally; not cancelled.</p>
