@@ -442,3 +442,72 @@ it.live(
     ),
   90_000,
 )
+
+// An empty assistant header opened after the restart anchor was captured: the daemon died between
+// creating the step and the first provider output (a crash during the model step).
+const seedEmptyHeader = Effect.fn("test.seedEmptyHeader")(function* (session: Session.Info, dir: string, parentID: MessageID, extra: Partial<SessionV1.Assistant> = {}) {
+  const sessions = yield* Session.Service
+  const info: SessionV1.Assistant = {
+    id: MessageID.ascending(), sessionID: session.id, role: "assistant", parentID, agent: "build", mode: "build",
+    modelID: model.modelID, providerID: model.providerID, time: { created: Date.now() }, path: { cwd: dir, root: dir },
+    cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, ...extra,
+  }
+  yield* sessions.updateMessage(info)
+  yield* sessions.updatePart({ id: PartID.ascending(), sessionID: session.id, messageID: info.id, type: "step-start" })
+  return info
+})
+
+it.live(
+  "an empty step opened after the anchor during shutdown is not progress: the turn resumes once and the step is closed",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.text("resumed past the empty step")
+          const session = yield* Session.use.create({ title: "Empty header" })
+          const seeded = yield* seedInterrupted(session, dir, { tools: "completed", finish: "tool-calls", completedAt: Date.now() })
+          const capturedAt = Date.now()
+          // Captured anchor: the finished tool step. The runner then opened the next step and the daemon died.
+          const header = yield* seedEmptyHeader(session, dir, seeded.user.id)
+
+          const result = yield* resume(dir, session.id, { anchorMessageID: seeded.assistant.id, capturedAt })
+          expect(result.outcome).toBe("scheduled")
+          const history = yield* idleWithReply(dir, session.id, "resumed past the empty step")
+          const closed = history.find((message) => message.info.id === header.id)!
+          expect(closed.info.role === "assistant" && closed.info.error?.name).toBe("MessageAbortedError")
+          expect(closed.info.role === "assistant" && closed.info.time.completed).toBeGreaterThan(0)
+          expect(history.filter((message) => message.info.role === "user")).toHaveLength(1)
+          expect(yield* toolRuns(dir)).toBe("x")
+          expect(yield* llm.inputs).toHaveLength(1)
+          expect(yield* resume(dir, session.id, { anchorMessageID: seeded.assistant.id, capturedAt })).toEqual({ outcome: "duplicate", marker: result.marker })
+          expect(yield* llm.inputs).toHaveLength(1)
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+it.live(
+  "a step with output, a tool, or a deliberate abort after the anchor still means the session advanced",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.text("must not be requested")
+          for (const extra of [
+            { text: "partial answer" },
+            { error: new SessionV1.AbortedError({ message: "Aborted" }).toObject() },
+          ]) {
+            const session = yield* Session.use.create({ title: "Advanced" })
+            const seeded = yield* seedInterrupted(session, dir, { tools: "completed", finish: "tool-calls", completedAt: Date.now() })
+            const header = yield* seedEmptyHeader(session, dir, seeded.user.id, "error" in extra ? { error: extra.error, time: { created: Date.now(), completed: Date.now() } } : {})
+            if ("text" in extra)
+              yield* Session.Service.use((sessions) => sessions.updatePart({ id: PartID.ascending(), sessionID: session.id, messageID: header.id, type: "text", text: extra.text ?? "" }))
+            expect((yield* resume(dir, session.id, { anchorMessageID: seeded.assistant.id, capturedAt: Date.now() })).outcome).toBe("advanced")
+          }
+          expect(yield* llm.calls).toBe(0)
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)

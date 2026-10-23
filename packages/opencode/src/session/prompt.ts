@@ -1499,9 +1499,11 @@ const layer = Layer.effect(
           },
           turn: { user: latest.user, assistant: history.findLast((item) => item.info.id === latest.assistant?.id) },
           pendingInput: (yield* inputs.list(input.sessionID, { state: "pending", limit: 1 })).items.length > 0,
+          later: history.filter((item) => item.info.id > input.anchorMessageID),
         })
         if (decision.outcome !== "scheduled" && decision.outcome !== "uncertain") return { outcome: decision.outcome }
         yield* sessions.updateMessage(SessionRestart.settle(decision, now))
+        for (const info of SessionRestart.closeTrailing(decision, now)) yield* sessions.updateMessage(info)
         if (decision.outcome === "uncertain") return { outcome: "uncertain" as const, marker: decision.marker }
         scheduled = decision.marker
         return undefined
