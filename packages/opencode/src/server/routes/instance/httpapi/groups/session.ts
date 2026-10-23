@@ -137,6 +137,7 @@ export const SessionPaths = {
   abort: `${root}/:sessionID/abort`,
   retry: `${root}/:sessionID/retry`,
   restart: `${root}/:sessionID/restart`,
+  recover: `${root}/:sessionID/recover`,
   supersede: `${root}/:sessionID/supersede`,
   aside: `${root}/:sessionID/aside`,
   cancelAside: `${root}/:sessionID/aside/:requestID`,
@@ -432,6 +433,20 @@ export const SessionApi = HttpApi.make("session")
             summary: "Read a restart continuation record",
             description:
               "Read-only reconciliation for a restart continuation whose acknowledgment was lost: returns the marker recorded for restartID on the anchor, if any, and whether newer messages exist.",
+          }),
+        ),
+        HttpApiEndpoint.post("recover", SessionPaths.recover, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: SessionRestart.RecoverPayload,
+          success: described(SessionRestart.RecoverResult, "Operator recovery decision"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.recover",
+            summary: "Recover a step left with unknown tool effects",
+            description:
+              "Operator-reviewed recovery of a root session whose newest message is still the given unfinished or aborted assistant step (empty steps opened during shutdown aside). Pending or running tool calls on that step are recorded as abandoned errors stating their effect is unknown and was not repeated; the step is closed as aborted; the typed `text` is admitted as sourced input (kind `recovery`) and the session runs. Nothing is replayed and no output is fabricated. Idempotent per recoveryID via a model-hidden marker on the anchor (`duplicate`). Advanced, finished, failed (use retry) and non-interrupted sessions are reported without writing.",
           }),
         ),
         HttpApiEndpoint.post("supersede", SessionPaths.supersede, {

@@ -236,7 +236,7 @@ export type Session = {
 export type RestartContinuation = {
   restartID: string
   outcome: "scheduled" | "uncertain"
-  reason?: "interrupted-tool" | "aborted" | "out-of-order"
+  reason?: "interrupted-tool" | "aborted" | "out-of-order" | "operator-recovery"
   interruptedTools: number
   time: number
 }
@@ -2825,6 +2825,33 @@ export type SessionRestartContinueResult = {
 export type SessionRestartStatus = {
   marker?: RestartContinuation
   later: boolean
+}
+
+export type SessionRecoverInput = {
+  recoveryID: string
+  anchorMessageID: string
+  text: string
+  reason: string
+  sender: string
+}
+
+export type SessionRecoverResult = {
+  outcome:
+    | "scheduled"
+    | "duplicate"
+    | "running"
+    | "advanced"
+    | "complete"
+    | "failed"
+    | "not-interrupted"
+    | "archived"
+    | "child"
+    | "superseded"
+    | "mismatch"
+    | "stale"
+    | "capacity"
+  marker?: RestartContinuation
+  abandonedTools?: number
 }
 
 export type TextPartInput = {
@@ -11430,6 +11457,40 @@ export type SessionRestartContinueResponses = {
 }
 
 export type SessionRestartContinueResponse = SessionRestartContinueResponses[keyof SessionRestartContinueResponses]
+
+export type SessionRecoverData = {
+  body?: SessionRecoverInput
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/recover"
+}
+
+export type SessionRecoverErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionRecoverError = SessionRecoverErrors[keyof SessionRecoverErrors]
+
+export type SessionRecoverResponses = {
+  /**
+   * Operator recovery decision
+   */
+  200: SessionRecoverResult
+}
+
+export type SessionRecoverResponse = SessionRecoverResponses[keyof SessionRecoverResponses]
 
 export type SessionCancelSupersedeData = {
   body?: never

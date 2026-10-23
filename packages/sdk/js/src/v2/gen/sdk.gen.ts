@@ -228,6 +228,9 @@ import type {
   SessionPromptAsyncResponses,
   SessionPromptErrors,
   SessionPromptResponses,
+  SessionRecoverErrors,
+  SessionRecoverInput,
+  SessionRecoverResponses,
   SessionRestartContinueErrors,
   SessionRestartContinueInput,
   SessionRestartContinueResponses,
@@ -4451,6 +4454,45 @@ export class Session2 extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<SessionRetryResponses, SessionRetryErrors, ThrowOnError>({
       url: "/session/{sessionID}/retry",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Recover a step left with unknown tool effects
+   *
+   * Operator-reviewed recovery of a root session whose newest message is still the given unfinished or aborted assistant step (empty steps opened during shutdown aside). Pending or running tool calls on that step are recorded as abandoned errors stating their effect is unknown and was not repeated; the step is closed as aborted; the typed `text` is admitted as sourced input (kind `recovery`) and the session runs. Nothing is replayed and no output is fabricated. Idempotent per recoveryID via a model-hidden marker on the anchor (`duplicate`). Advanced, finished, failed (use retry) and non-interrupted sessions are reported without writing.
+   */
+  public recover<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      sessionRecoverInput?: SessionRecoverInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "sessionRecoverInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionRecoverResponses, SessionRecoverErrors, ThrowOnError>({
+      url: "/session/{sessionID}/recover",
       ...options,
       ...params,
       headers: {

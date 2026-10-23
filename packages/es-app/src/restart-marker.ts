@@ -20,10 +20,19 @@ const REASONS: Record<NonNullable<RestartContinuation["reason"]>, string> = {
   "interrupted-tool": "a tool may have partly run",
   aborted: "stopped before the restart",
   "out-of-order": "message clock out of order",
+  "operator-recovery": "recovered by an operator",
 }
 
 function view(marker: RestartContinuation, anchor: Message, messages: readonly Message[], busy: boolean) {
-  const tools = marker.interruptedTools ? ` · ${marker.interruptedTools} tool${marker.interruptedTools === 1 ? "" : "s"} to check` : ""
+  const recovery = marker.reason === "operator-recovery"
+  const tools = marker.interruptedTools
+    ? ` · ${marker.interruptedTools} tool${marker.interruptedTools === 1 ? "" : "s"} ${recovery ? "recorded as abandoned (effect unknown, not repeated)" : "to check"}`
+    : ""
+  if (recovery) {
+    const moved = messages.some((message) => message.role === "assistant" && message.id > anchor.id && message.time.created >= marker.time)
+    return moved ? { state: "resumed" as const, label: `Operator recovery after daemon restart${tools}` }
+      : { state: busy ? "resuming" as const : "uncertain" as const, label: `Operator recovery ${busy ? "running" : "scheduled, no progress observed"}${tools}` }
+  }
   if (marker.outcome === "uncertain")
     return { state: "uncertain" as const, label: `Daemon restart · not resumed: ${REASONS[marker.reason ?? "interrupted-tool"]}${tools}` }
   const resumed = messages.some(

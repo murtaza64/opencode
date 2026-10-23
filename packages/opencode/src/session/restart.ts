@@ -176,4 +176,131 @@ export function closeTrailing(decision: Extract<Decision, { outcome: "scheduled"
   }))
 }
 
+export const RecoverPayload = Schema.Struct({
+  recoveryID: RestartID,
+  anchorMessageID: MessageID,
+  text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(8000)),
+  reason: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
+  sender: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+}).annotate({ identifier: "SessionRecoverInput" })
+export type RecoverPayload = typeof RecoverPayload.Type
+
+export const RecoverOutcome = Schema.Literals([
+  "scheduled",
+  "duplicate",
+  "running",
+  "advanced",
+  "complete",
+  "failed",
+  "not-interrupted",
+  "archived",
+  "child",
+  "superseded",
+  "mismatch",
+  "stale",
+  "capacity",
+])
+export const RecoverResult = Schema.Struct({
+  outcome: RecoverOutcome,
+  marker: Schema.optional(SessionV1.RestartContinuation),
+  abandonedTools: Schema.optional(NonNegativeInt),
+}).annotate({ identifier: "SessionRecoverResult" })
+export type RecoverResult = typeof RecoverResult.Type
+
+export type RecoverDecision =
+  | { readonly outcome: "advanced" | "complete" | "failed" | "not-interrupted" | "stale" | "capacity" }
+  | {
+      readonly outcome: "scheduled"
+      readonly marker: SessionV1.RestartContinuation
+      readonly anchor: SessionV1.WithParts
+      readonly trailing: readonly SessionV1.WithParts[]
+      readonly abandoned: readonly SessionV1.ToolPart[]
+    }
+
+const unknownEffect = (part: SessionV1.Part): part is SessionV1.ToolPart =>
+  part.type === "tool" && (part.state.status === "pending" || part.state.status === "running")
+
+/**
+ * Decide an operator recovery of a step a restart left unfinished, from durable evidence only.
+ *
+ * Restart continuation never resumes a step whose tool calls have an unknown effect. After a human or
+ * an authorized operator has inspected those effects, recovery records them honestly as abandoned
+ * (an error result saying the effect is unknown; never a fabricated output) and starts a turn whose
+ * input is the operator's typed recovery intent, so the model is told what happened instead of
+ * guessing. The anchor must still be the newest durable row (empty steps opened during shutdown
+ * aside); anything newer means the session moved on and nothing is written.
+ */
+export function decideRecovery(input: {
+  payload: RecoverPayload
+  now: number
+  anchor: SessionV1.WithParts | undefined
+  newest: { byTime: MessageID | undefined; byInsertion: MessageID | undefined }
+  later?: readonly SessionV1.WithParts[]
+}): RecoverDecision {
+  const anchor = input.anchor
+  if (!anchor) return { outcome: "stale" }
+  const later = input.later ?? []
+  const trailing = later.length && later.every(emptyStep) ? later : []
+  const tips = new Set([anchor.info.id, ...trailing.map((message) => message.info.id)])
+  const tip = trailing.at(-1)?.info.id ?? anchor.info.id
+  if (input.newest.byTime !== tip || !input.newest.byInsertion || !tips.has(input.newest.byInsertion))
+    return { outcome: "advanced" }
+  if ((anchor.info.restarts?.length ?? 0) >= MAX_MARKERS) return { outcome: "capacity" }
+  if (anchor.info.role !== "assistant") return { outcome: "not-interrupted" }
+  if (anchor.info.error && anchor.info.error.name !== "MessageAbortedError") return { outcome: "failed" }
+  const abandoned = anchor.parts.filter(unknownEffect)
+  const interrupted = anchor.parts.some(
+    (part) => part.type === "tool" && part.state.status === "error" && part.state.metadata?.interrupted === true,
+  )
+  // A finished step with nothing left unknown is not this operation's concern.
+  if (!abandoned.length && !interrupted && anchor.info.time.completed && !anchor.info.error)
+    return { outcome: anchor.info.finish && anchor.info.finish !== "tool-calls" ? "complete" : "not-interrupted" }
+  if (!abandoned.length && !interrupted && !anchor.info.error && !anchor.info.time.completed) return { outcome: "not-interrupted" }
+  return {
+    outcome: "scheduled",
+    anchor,
+    trailing,
+    abandoned,
+    marker: {
+      restartID: input.payload.recoveryID,
+      outcome: "scheduled",
+      reason: "operator-recovery",
+      interruptedTools: abandoned.length,
+      time: input.now,
+    },
+  }
+}
+
+/** The rows a scheduled recovery writes: abandoned tool results, the closed step with its marker, closed empty steps. */
+export function settleRecovery(decision: Extract<RecoverDecision, { outcome: "scheduled" }>, payload: RecoverPayload, now: number) {
+  const info = decision.anchor.info as SessionV1.Assistant
+  const parts = decision.abandoned.map((part): SessionV1.ToolPart => ({
+    ...part,
+    state: {
+      status: "error",
+      input: part.state.input,
+      error: `Abandoned after a daemon restart; its effect is unknown and was not repeated. Operator recovery ${payload.recoveryID}: ${payload.reason}`,
+      metadata: {
+        ...(part.state.status === "running" ? part.state.metadata : {}),
+        interrupted: true,
+        abandoned: true,
+        recoveryID: payload.recoveryID,
+      },
+      time: { start: part.state.status === "running" ? part.state.time.start : info.time.created, end: now },
+    },
+  }))
+  const anchor: SessionV1.Assistant = {
+    ...info,
+    restarts: [...(info.restarts ?? []), decision.marker],
+    error: info.error ?? new SessionV1.AbortedError({ message: "Interrupted by an OpenCode daemon restart" }).toObject(),
+    time: { ...info.time, completed: info.time.completed ?? now },
+  }
+  const trailing = decision.trailing.map((message) => ({
+    ...(message.info as SessionV1.Assistant),
+    error: new SessionV1.AbortedError({ message: "Interrupted by an OpenCode daemon restart" }).toObject(),
+    time: { ...message.info.time, completed: now },
+  }))
+  return { anchor, parts, trailing }
+}
+
 export * as SessionRestart from "./restart"
