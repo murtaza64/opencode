@@ -18,13 +18,13 @@ const briefs = [
     refs: [{ id: "r1", label: "decision_1 context", messageID: "msg_a1" }, { id: "r2", label: "recommendation", messageID: "msg_a1" }],
     // Written to the BRIEF_SYSTEM contract: word-limited fields, no IDs, no process narration.
     result: {
-      ask: "",
-      whyYou: "It changes what you see first every day.", whyNow: "The homepage change is paused until you pick a scope.",
-      choices: [{ id: "small", outcome: "Homepage lists only what needs you", chips: ["one screen"], risk: "Agents move a click away" },
-        { id: "defer", outcome: "Today's mixed layout stays", chips: [], risk: "Clutter remains" }],
+      question: "Should the homepage show only what needs you?",
+      context: "It changes what you see first every day.",
+      choices: [{ id: "small", outcome: "Homepage lists only what needs you", note: "Agents move a click away" },
+        { id: "defer", outcome: "Today's mixed layout stays" }],
       ifWait: "",
-      visual: { title: "Homepage after each option", html: visual },
-      unknown: "No date for the follow-up pass.", gaps: [], sources: [{ label: "The request", refs: ["r1"] }],
+      visual: { title: "Homepage after each option", html: visual, height: 140 },
+      gaps: ["No date for the follow-up pass."], sources: [{ label: "The request", refs: ["r1"] }],
       facts: [{ text: "The request asks to keep the homepage focused on what needs you.", refs: ["r1"] }, { text: "Small scope is the recommended option.", refs: ["r2"] }],
       timeline: [],
     },
@@ -40,7 +40,7 @@ const briefPlugin = {
       const url = new URL(req.url, "http://preview")
       const [, id, tail] = url.pathname.split("/")
       if (id?.startsWith("ses_fdbrief_") && !tail) return send(res, session(id, { title: "Front desk briefs", time: { created: now - 120_000, updated: now, archived: now } }))
-      if (id?.startsWith("ses_fdbrief_") && tail === "children") return send(res, briefs.map(brief => session(brief.id, { parentID: id, title: `Brief: ${brief.title}`, metadata: { frontDesk: { kind: "brief", requestID: brief.id, source: brief.source, revision: brief.revision, title: brief.title, refs: brief.refs, contract: 2 } } })))
+      if (id?.startsWith("ses_fdbrief_") && tail === "children") return send(res, briefs.map(brief => session(brief.id, { parentID: id, title: `Brief: ${brief.title}`, metadata: { frontDesk: { kind: "brief", requestID: brief.id, source: brief.source, revision: brief.revision, title: brief.title, refs: brief.refs, contract: 3 } } })))
       const brief = briefs.find(item => item.id === id)
       if (brief && tail === "message") return send(res, brief.state === "ready"
         ? [message("msg_brief_user", brief.id, "user", "Explain this request."), message("msg_brief_reply", brief.id, "assistant", JSON.stringify(brief.result))]

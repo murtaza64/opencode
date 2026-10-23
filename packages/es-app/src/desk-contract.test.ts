@@ -13,7 +13,7 @@ const sha = (text: string) => createHash("sha256").update(text).digest("hex")
 
 test("brief prompt contract matches the dashboard copy", () => {
   expect(sha(JSON.stringify([`${BRIEF_SYSTEM}\n${JSON.stringify(BRIEF_SCHEMA)}`, BRIEF_PERMISSION])))
-    .toBe("b0aba57266e6e1d61a2999db2b9d341510f5392876616d593154cbad8d4bde4d")
+    .toBe("29e0e501ac23978929f0de22c26fc70490d9eceff53ad1a0aef9872c3f60207d")
 })
 
 test("brief anchor and job IDs match the dashboard's", async () => {
@@ -34,6 +34,9 @@ test("brief packet for an attention record matches the dashboard's", () => {
     { info: { id: "msg_2", role: "assistant" }, parts: [{ type: "tool", tool: "bash", state: { status: "completed" } }, { type: "text", text: `Canary is healthy. ${"y".repeat(600)}` }] },
     { info: { id: "msg_3", role: "assistant" }, parts: [{ type: "reasoning", text: "skip" }] },
   ] as unknown as MessageWithParts[]
-  const packet = briefPacket(item, tail)
-  expect(sha(JSON.stringify([packet.text, packet.refs]))).toBe("7eaaa8c43b01d6f1e8cc949645a69950670f2fa91b2cd6d741f9f9595509cbf1")
+  const thread = { kind: "github-review" as const, repo: "o/r", number: 7, path: "w.yaml", line: 38, url: "https://github.com/o/r/pull/7#discussion_r1",
+    comments: [{ author: "codex[bot]", bot: true, when: "2026-10-19T18:36:06Z", body: "Forward the password", url: "https://github.com/o/r/pull/7#discussion_r1" },
+      { author: "jzink-duo", bot: false, when: "2026-10-22T17:41:16Z", body: "seems legit enough; check if true and fix", url: "https://github.com/o/r/pull/7#discussion_r2" }] }
+  const packet = briefPacket(item, tail, [thread])
+  expect(sha(JSON.stringify([packet.text, packet.refs]))).toBe("c2cc6c23d832e3ee2b171976ab0b3cfb2109d44f9e63c1c5d6f1cbb7f3de50eb")
 })
