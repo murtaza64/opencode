@@ -29,7 +29,23 @@ export const mailSourceID = (message: Message) => {
     !("id" in source) || typeof source.id !== "string" ||
     !("sender" in source) || typeof source.sender !== "string" ||
     !("recipient" in source) || typeof source.recipient !== "string") return
-  return source.id
+  // A reply to a lane of another editspace (`H/<lane>`) has its canonical record
+  // in the sender's editspace, named in the sender (`D/<lane>`).
+  const home = source.recipient.includes("/") ? /^([^/]+)\//.exec(source.sender)?.[1] : undefined
+  return home ? `${home}/${source.id}` : source.id
+}
+
+/** A cross-editspace projection takes its canonical record's identity, so transcript inputs and replies match it. */
+export const canonicalMail = (message: MailMessage): MailMessage => {
+  const canonical = message.canonical
+  if (!canonical || typeof canonical.editspace !== "string" || typeof canonical.id !== "string") return message
+  return {
+    ...message,
+    id: `${canonical.editspace}/${canonical.id}`,
+    kind: canonical.kind ?? message.kind,
+    in_reply_to: canonical.in_reply_to ? `${canonical.editspace}/${canonical.in_reply_to}` : undefined,
+    projection: message.id,
+  }
 }
 
 // es admits an agent's `resume` or spawn kickoff text as sourced input so it
@@ -136,15 +152,15 @@ export const mailCauses = (rows: TimelineRow[], records: Map<string, MailMessage
     const run: Message[] = []
     for (let at = index; at >= 0 && mailSource(transcript[at]!); at--) run.unshift(transcript[at]!)
     const sent = run.flatMap((item) => {
-      const record = records.get(mailSource(item)!.id)
+      const record = records.get(mailSourceID(item)!)
       const at = record ? mailSentAt(record) : Number.NaN
       return Number.isFinite(at) ? [at] : []
     })
     causes.set(message.id, {
-      ids: run.map((item) => mailSource(item)!.id),
+      ids: run.map((item) => mailSourceID(item)!),
       kinds: run.reduce<MailCause["kinds"]>((kinds, item) => {
         const source = mailSource(item)!
-        const record = records.get(source.id)
+        const record = records.get(mailSourceID(item)!)
         const kind = source.kind ?? record?.kind ?? "mail"
         const human = kind === "answer" && record?.from === "human"
         const catchUp = source.relationship === "handoff-catch-up"
@@ -156,7 +172,7 @@ export const mailCauses = (rows: TimelineRow[], records: Map<string, MailMessage
       senders: [...new Set(run.map((item) => mailSource(item)!.sender))],
       senderSessions: Object.fromEntries([...new Set(run.map((item) => mailSource(item)!.sender))].flatMap((sender) => {
         const sessions = new Set(run.filter((item) => mailSource(item)!.sender === sender)
-          .map((item) => records.get(mailSource(item)!.id)?.sender_session))
+          .map((item) => records.get(mailSourceID(item)!)?.sender_session))
         const [session] = sessions
         return sessions.size === 1 && session ? [[sender, session]] : []
       })),

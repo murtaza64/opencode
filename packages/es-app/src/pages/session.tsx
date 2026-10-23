@@ -37,7 +37,7 @@ import { usePulse } from "../pulse"
 import { MailRow } from "../components/mail-row"
 import { useMailNamer } from "../components/mail-party"
 import { MailSubscriptions } from "../components/mail-subscriptions"
-import { mailCauses, mailLocation, mailRows, mailSourceID } from "../mail-timeline"
+import { canonicalMail, mailCauses, mailLocation, mailRows, mailSourceID } from "../mail-timeline"
 import { handoffChain, handoffNext, pendingHandoffFor, successorFor } from "../handoffs"
 import { ComposerImages } from "../components/composer-images"
 import { ActivityBriefView } from "../components/activity-brief"
@@ -201,7 +201,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       ...(scope.lane !== undefined ? [es.mail(scope.name, { lane: scope.lane })] : []),
     ]).then(
       (results) => ({ editspace: scope.name, lane: scope.lane ?? "", messages: [...new Map(
-        results.flatMap(result => result.messages).map(message => [message.id, message]),
+        results.flatMap(result => result.messages).map(canonicalMail).map(message => [message.id, message]),
       ).values()], error: "" }),
        (failure: unknown) => ({ editspace: scope.name, lane: scope.lane ?? "", messages: [], error: `Unable to load mail: ${String(failure)}` }),
     ),
