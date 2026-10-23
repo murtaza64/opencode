@@ -106,7 +106,9 @@ export const DictationButton = (props: Props) => {
   }
   return (
     <Show when={state.availability === "ready" || state.availability === "setup"}>
-      <span class="dictation" ref={root} role="group" aria-label="Dictation" data-phase={phase()}>
+      {/* Capture stays visible from every composer, not only the one that started it. */}
+      <span class="dictation" ref={root} role="group" aria-label="Dictation" data-phase={phase()}
+        data-elsewhere={elsewhere() ? state.phase : undefined}>
         <button
           class="dictation-toggle"
           aria-label={phase() === "recording" ? "Stop dictation and transcribe" : phase() === "idle" ? "Dictate" : "Transcribing dictation"}
@@ -134,7 +136,8 @@ export const DictationButton = (props: Props) => {
         </button>
         {/* One reserved slot, so the bar does not shift between idle, 0:07 and Transcribing. */}
         <span class="dictation-status" aria-live="polite">
-          {phase() === "recording" ? elapsed() : phase() === "transcribing" ? "Transcribing…" : phase() === "starting" ? "Starting…" : ""}
+          {state.phase === "recording" && state.availability === "ready" ? (mine() ? elapsed() : `Recording elsewhere ${elapsed()}`)
+            : phase() === "transcribing" ? "Transcribing…" : phase() === "starting" ? "Starting…" : ""}
         </span>
         <button
           class="dictation-cancel"
