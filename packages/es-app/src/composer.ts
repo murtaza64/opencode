@@ -101,6 +101,11 @@ export type ComposerState = {
     // Exact submitted images for the pending echo. Kept in memory only: the
     // draft and image store own durable copies, so a reload falls back to the count.
     previews?: readonly ComposerImage[]
+    // The submitted draft, held in memory once the editor is cleared. While its buffer is
+    // empty, saved snapshots write it there, so a reload still restores it (images included).
+    draft?: ComposerDraft
+    // Why the outcome is unknown; shown on the outgoing message rather than as a composer error.
+    error?: string
     status: "sending" | "accepted" | "unknown"
     after?: string
     action?: ComposerAction
@@ -258,6 +263,19 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     inputLoading: false,
     hydrating: false,
   })
+  const blank = (draft: ComposerDraft) => !draft.text && !draft.images.length
+  const heldDraft = (buffer: ComposerBuffer) => {
+    const held = state.normalSubmission
+    return held?.draft && held.buffer === buffer && blank(state[buffer]) ? held.draft : state[buffer]
+  }
+  // Puts an in-flight message's draft back in an editor the user has not typed into since.
+  const restoreSubmitted = (buffer: ComposerBuffer, draft: ComposerDraft) => {
+    if (!blank(state[buffer])) return false
+    // Setting the textarea value puts the caret at the end, so the saved selection does too.
+    setState(buffer, { ...copyDraft(draft), selection: [draft.text.length, draft.text.length], revision: state[buffer].revision + 1 })
+    return true
+  }
+
   const tracked = new Set<string>()
   const cancelling = new Set<string>()
   const [missingImages, setMissingImages] = createStore({ task: false, aside: false, superseded: false })
@@ -415,11 +433,11 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     targetRevision: state.targetRevision,
     mode: state.mode,
     normalExplicit: state.normalExplicit,
-    normalSubmission: state.normalSubmission ? { ...state.normalSubmission, previews: undefined } : null,
+    normalSubmission: state.normalSubmission ? { ...state.normalSubmission, previews: undefined, draft: undefined, checking: undefined } : null,
     modelSelection: state.modelSelection,
     sessionModel: state.sessionModel,
-    task: copyDraft(state.task),
-    aside: copyDraft(state.aside),
+    task: copyDraft(heldDraft("task")),
+    aside: copyDraft(heldDraft("aside")),
     asideSeeded: state.asideSeeded,
     admission: state.admission
       ? { ...state.admission, payload: copyPayload(state.admission.payload),
@@ -546,7 +564,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
   }
   const persist = () => {
     ++revision
-    if (state.hydrating || state.task.images.length || state.aside.images.length || state.superseded?.draft.images.length || state.admission?.payload.images?.length || state.admission?.draft?.images.length || state.asideRequest?.images?.length || state.recoveries.some((entry) => entry.admission.payload.images?.length || entry.admission.draft?.images.length)) {
+    if (state.hydrating || heldDraft("task").images.length || heldDraft("aside").images.length || state.superseded?.draft.images.length || state.admission?.payload.images?.length || state.admission?.draft?.images.length || state.asideRequest?.images?.length || state.recoveries.some((entry) => entry.admission.payload.images?.length || entry.admission.draft?.images.length)) {
       if (!scheduled) {
         scheduled = true
         queueMicrotask(() => {
@@ -761,15 +779,21 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       if (draft.text.length > 32_000) return "Aside questions are limited to 32,000 characters."
       return ""
     }
-    if (state.sending) return "A task message is being sent."
+    const outgoing = outgoingReason(mode)
+    if (outgoing) return outgoing
     if (state.recoveryBusy) return "Input recovery is in progress. Wait before sending another task message."
-    // An unconfirmed input is set aside (kept, same request ID) when the next message is sent.
+    if (state.modelSelection) return "Model selection is pending. Task messages wait for confirmation."
+    if (mode === "send") return state.busy ? "Task busy. Normal Send is unavailable; choose Aside, Queue or Steer." : ""
+    return ""
+  }
+  // A block caused by an input the transcript already shows as an outgoing bubble with its own cue.
+  const outgoingReason = (mode: ComposerMode) => {
+    if (mode === "aside") return ""
+    if (state.sending) return "A task message is being sent."
+    // An unconfirmed input is set aside (kept, same request ID) when the next message is sent,
+    // and an unconfirmed Send never blocks the next one.
     if (state.admission && (state.admission.status !== "unknown" || state.admission.fence))
       return "Reconcile or retry the existing input before sending another task message."
-    if (state.modelSelection) return "Model selection is pending. Task messages wait for confirmation."
-    if (mode === "send") {
-      return state.busy ? "Task busy. Normal Send is unavailable; choose Aside, Queue or Steer." : ""
-    }
     return ""
   }
   const accept = (receipt: InputReceipt, expectedID = receipt.requestID) => {
@@ -977,6 +1001,8 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         // the fence after admission, so the 409 alone cannot prove rejection.
         const receipt = await readInput(admission.payload.requestID).catch(() => null)
         if (receipt || state.admission?.payload.requestID !== admission.payload.requestID) return
+        // Successor recovery moves the visible draft, so put the fenced input's draft back there.
+        if (admission.draft) restoreSubmitted(admission.buffer ?? "task", admission.draft)
         setState("admission", {
           status: "unknown",
           fence: superseded,
@@ -986,6 +1012,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       }
       if (error instanceof HttpError && [400, 401, 403, 404, 413, 415, 422].includes(error.status)) {
         tracked.delete(admission.payload.requestID)
+        if (admission.draft) restoreSubmitted(admission.buffer ?? "task", admission.draft)
         setState({
           admission: null,
           error: `Input rejected: ${message(error)}. Draft kept; correct it before sending again.`,
@@ -1109,33 +1136,42 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           text,
           images: draft.images.length,
           ...(draft.images.length ? { previews: draft.images } : {}),
+          draft: { ...draft, model: submittedModel },
+          buffer,
           status: "sending",
           after: latestMessageID,
           ...(direct ? { action: direct.action } : {}),
           messageID,
           revision: draft.revision,
-          buffer,
         },
       })
-      persist()
+      // The outgoing bubble now shows the message, so the editor is cleared rather than showing it twice.
+      if (draft.images.length) await persistAsync()
+      else persist()
+      clearTask(draft.revision, buffer, direct?.targetRevision)
       try {
         await prompt(state.sessionModel ? { ...session, preferredModel: { id: state.sessionModel.modelID, providerID: state.sessionModel.providerID } } : session, directory, text, {
           images: draft.images, model: state.sessionModel ? undefined : draft.model ?? nextModel ?? undefined, ...(context?.length ? { context } : {}),
           messageID, signal: AbortSignal.timeout(dependencies.sendDeadlineMs ?? SEND_DEADLINE_MS),
         })
-        clearTask(draft.revision, buffer, direct?.targetRevision)
-        setState("normalSubmission", "status", "accepted")
+        setState("normalSubmission", { status: "accepted", draft: undefined })
       } catch (error) {
         const superseded = supersededError(error, sessionID)
+        if (superseded) restoreSubmitted(buffer, { ...draft, model: submittedModel })
         if (superseded) setState({
           normalSubmission: null,
           superseded: { ...superseded, draft: { ...draft, model: submittedModel }, buffer, mode },
           error: `Session superseded by ${superseded.successor}. Draft kept; recover explicitly in the successor.`,
         })
         else {
-          // Not failed: it may still land. The draft stays, the composer unlocks, and the
-          // send is looked up by its ID whenever the session is reachable.
-          setState("normalSubmission", "status", "unknown")
+          // Not failed: it may still land. The draft goes back in the editor, the composer
+          // unlocks, and the send is looked up by its ID whenever the session is reachable.
+          // A confirmation clears the editor only if it still holds that restored draft.
+          const restored = restoreSubmitted(buffer, { ...draft, model: submittedModel })
+          setState("normalSubmission", {
+            status: "unknown", error: message(error),
+            ...(restored ? { draft: undefined, revision: state[buffer].revision } : {}),
+          })
         }
       } finally {
         setState("sending", false)
@@ -1168,6 +1204,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       })
       return
     }
+    clearTask(admission.revision, buffer, direct?.targetRevision)
     await admit(admission)
     // An unanswered input moves to the set-aside list (same request ID, checked on every refresh),
     // so it never blocks the next message.
@@ -1592,6 +1629,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       updateDraft({ selection: [start, end] }, false, state.visibleBuffer),
     reasonForAction: (action: ComposerAction) =>
       blockedReason(action === "steer" && !state.busy ? "send" : action, state.visibleBuffer),
+    outgoingReason: (action: ComposerAction) => outgoingReason(action === "steer" && !state.busy ? "send" : action),
     // `context` rides only on a plain send, inside the same message as the human's text.
     submitVisible: (action: ComposerAction, session: Session, nextModel?: ComposerModel | null, latestMessageID?: string, context?: readonly ContextPart[]) =>
       submit(session, nextModel, {
@@ -1619,6 +1657,14 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     setModel: (model: ComposerModel | null) => updateDraft({ model: model ? { ...model } : null }),
     setSelection: (start: number, end: number) => updateDraft({ selection: [start, end] }, false),
     selectMode,
+    // Puts a not-confirmed Send back in the editor to edit or resend; refuses to overwrite newer typing.
+    editNormalSubmission: () => {
+      const held = state.normalSubmission
+      if (held?.status !== "unknown" || !held.draft || !restoreSubmitted(held.buffer ?? "task", held.draft)) return false
+      setState("normalSubmission", null)
+      persist()
+      return true
+    },
     dismissNormalSubmission: () => {
       if (state.normalSubmission?.status === "sending") return
       setState("normalSubmission", null)

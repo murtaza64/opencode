@@ -1,7 +1,16 @@
+// The message is shown to people, so proxy error pages (HTML) collapse to the status and long
+// bodies are cut; the raw body stays on `body` for callers and diagnostics.
 export class HttpError extends Error {
   constructor(readonly status: number, readonly body: unknown) {
-    super(`HTTP ${status} ${typeof body === "string" ? body : JSON.stringify(body)}`)
+    super(`HTTP ${status}${summary(body)}`)
   }
+}
+
+const summary = (body: unknown) => {
+  if (body === "" || body === undefined || body === null) return ""
+  if (typeof body === "string" && /^\s*</.test(body)) return ""
+  const text = (typeof body === "string" ? body : JSON.stringify(body)).replace(/\s+/g, " ").trim()
+  return text.length > 160 ? ` ${text.slice(0, 160)}…` : ` ${text}`
 }
 
 export const httpError = async (response: Response) => {

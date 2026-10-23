@@ -26,6 +26,10 @@
 .direct-action-hint { color: var(--subtext0); font-size: 11px; }
 .direct-button-hint { color: var(--subtext0); font-size: 10px; line-height: 1.2; white-space: nowrap; }
 .direct-feedback { font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+.direct-status { display: inline-flex; align-items: baseline; gap: 6px; flex: 0 1 auto; min-width: 0; max-width: min(42ch, 40vw); overflow-wrap: normal; }
+.direct-status-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.direct-status.err { color: var(--red); }
+.direct-status > button { flex: none; white-space: nowrap; }
 .direct-composer button:focus-visible, .direct-composer select:focus-visible { outline: 2px solid var(--lavender); outline-offset: 1px; }
 .float-editor > .direct-composer { flex: 1; min-height: 0; padding: 8px 12px; overflow-y: auto; }
 .float-editor .direct-composer :is(.direct-draft, .direct-edit) > .ta-wrap { min-height: 160px; }

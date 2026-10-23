@@ -1,6 +1,6 @@
 // es-app#186: a routine send/steer/queue never inserts and removes a status row below the
 // composer controls. The transcript and composer keep their bounds from send to settle; the
-// in-flight state shows in the existing work-status slot.
+// in-flight state shows on the outgoing bubble in the transcript.
 // Run from packages/es-app: node test/composer-status-stable.browser.mjs
 import { createRequire } from "node:module"
 import { startPanelPreview } from "./composer-panel-preview.mjs"
@@ -26,18 +26,17 @@ try {
   fixture.holdInput = true
   await editor.fill("steer while the daemon is slow")
   await page.getByRole("button", { name: "Steer", exact: true }).click()
-  await expect(status).toHaveAttribute("data-state", "admitting")
-  await expect(status).toContainText("Sending your message")
-  await expect(page.locator(".input-admission")).toHaveCount(0)
+  await expect(page.locator(".outgoing .input-admission .outgoing-cue")).toContainText("sending…")
+  await expect(status).toHaveAttribute("data-state", "working")
   expect({ transcript: await box(".session-main .transcript"), prompt: await box(".prompt-box"), status: await box(".session-work-status") }).toEqual(before)
   fixture.holdInput = false
   fixture.inputReplies.splice(0).forEach((reply) => reply())
-  await expect(status).not.toHaveAttribute("data-state", "admitting")
+  await expect(page.locator(".outgoing .input-admission")).toHaveCount(0)
   // Once admitted, the input is real pending work and is listed (editable/cancellable) until it
   // is promoted; no transient send/admission row remains.
   await expect(page.locator(".normal-submission, .input-admission")).toHaveCount(0)
-  await expect(page.locator(".composer-results")).toContainText("steer while the daemon is slow")
-  console.info("PASS held steer: in-flight state only in the work-status slot (transcript, status and composer bounds unchanged); admitted input then listed as pending work")
+  await expect(page.locator(".outgoing")).toContainText("steer while the daemon is slow")
+  console.info("PASS held steer: in-flight state only on the outgoing bubble (transcript, status and composer bounds unchanged); admitted input then listed as pending work")
   expect(errors).toEqual([])
 } finally {
   await browser.close()

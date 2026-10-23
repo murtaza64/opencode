@@ -307,7 +307,8 @@ test("image retry after reload preserves captured buffer, payload and later targ
   composer.selectTarget("aside")
   await composer.persistAsync()
   const saved = JSON.parse([...records.values()][0]!)
-  expect(saved).toMatchObject({ directView: 1, visibleBuffer: "aside", keyboardTarget: "aside", targetRevision: 3 })
+  // Submitting clears the editor and resets the target (revision 3); choosing Aside again is revision 4.
+  expect(saved).toMatchObject({ directView: 1, visibleBuffer: "aside", keyboardTarget: "aside", targetRevision: 4 })
   expect(saved.admission).toMatchObject({ buffer: "aside", targetRevision: 2, payload: { images: [{ ref: expect.any(String) }, { ref: expect.any(String) }] } })
   expect([...records.values()][0]).not.toContain(wireImage.url)
   const restored = createComposer(session.id, directory, dependencies)

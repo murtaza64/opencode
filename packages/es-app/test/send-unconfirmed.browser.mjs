@@ -28,7 +28,7 @@ try {
   fixture.holdNormal = true
   await editor.fill("held send")
   await page.getByRole("button", { name: "Send", exact: true }).click()
-  await expect(page.locator(".session-work-status:visible")).toContainText("Sending your message")
+  await expect(row.locator(".outgoing-cue")).toHaveText("Sending…")
   await expect(row).toContainText("Not confirmed", { timeout: 40_000 })
   await expect(editor).toHaveValue("held send")
   await expect(editor).toBeEditable()
@@ -42,7 +42,7 @@ try {
   // The held POST actually landed: a check by its ID shows it as sent, with no second POST.
   echo(held)
   await row.getByRole("button", { name: "Check", exact: true }).click()
-  await expect(row).toHaveCount(0)
+  await expect(row.locator(".outgoing-cue")).toHaveText("Sent")
   await expect(editor).toHaveValue("")
   expect(posts()).toHaveLength(1)
   console.info("PASS lost answer with the message present: reconciled by ID, no duplicate")
@@ -55,7 +55,7 @@ try {
   await page.waitForTimeout(6000)
   expect(posts()).toHaveLength(2)
   await row.getByRole("button", { name: "Send again", exact: true }).click()
-  await expect(row).toHaveCount(0)
+  await expect(row.locator(".outgoing-cue")).toHaveText("Sent")
   expect(posts()).toHaveLength(3)
   expect(posts()[2].body.messageID).toBe(posts()[1].body.messageID)
   expect(posts()[2].body.parts[0].text).toBe("never landed")

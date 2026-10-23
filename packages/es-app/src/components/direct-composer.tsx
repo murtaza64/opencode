@@ -33,10 +33,23 @@ export const DirectComposer = (props: {
       ? "Session unavailable or another session action is running."
       : props.composer.reasonForAction(action)
   const empty = () => !props.composer.visibleDraft().text.trim() && !props.composer.visibleDraft().images.length
-  // An in-flight send reports in the work-status slot; listing it here too would add and
-  // remove a row under the controls on every send (es-app#186). Buttons keep it as a title.
+  // Blocks from an input already shown as an outgoing bubble (or in flight) are explained there
+  // and in the button title; repeating them here would add a line that shifts the composer.
   const reasons = () =>
-    props.connected && !state.sending ? [...new Set([primary(), ...(menu() ? secondary() : [])].map(reason).filter(Boolean))] : []
+    props.connected && !state.sending ? [...new Set([primary(), ...(menu() ? secondary() : [])]
+      .filter((action) => reason(action) !== props.composer.outgoingReason(action)).map(reason).filter(Boolean))] : []
+  const notice = () => {
+    if (state.storageError) return { text: state.storageError, error: true,
+      action: { label: "Clear saved images", run: () => props.composer.setImages([], state.visibleBuffer) } }
+    if (state.error && !state.superseded) return { text: state.error, error: true }
+    if (props.connected && (!state.capabilities || state.capabilityError)) return {
+      text: state.capabilityError || "Send options unavailable.", error: false,
+      action: { label: "Refresh availability", run: async () => {
+        await props.composer.loadCapabilities()
+        await props.composer.refreshInputs()
+      } } }
+    if (reasons().length && !state.superseded) return { text: reasons().join(" "), error: false }
+  }
   const other = () => state[state.visibleBuffer === "task" ? "aside" : "task"]
   // Keep textarea focus (and its selection) when a submit button is pressed.
   const keepFocus = (e: PointerEvent) => {
@@ -105,6 +118,17 @@ export const DirectComposer = (props: {
           {props.sessionActions}
         </div>
         <div class="direct-send" role="group" aria-label="Send" hidden={!!editing()}>
+          {/* One line inside the existing bar, never a new row: the most important
+              notice, ellipsized, with the full text as its title and at most one action. */}
+          <Show when={notice()}>{(current) => (
+            <span class="direct-feedback direct-status" classList={{ err: current().error, dim: !current().error }}
+              role={current().error ? "alert" : "status"} title={current().text} dir="auto">
+              <span class="direct-status-text">{current().text}</span>
+              <Show when={current().action}>{(action) => (
+                <button class="outgoing-action" disabled={!props.connected && action().label === "Refresh availability"} onClick={action().run}>{action().label}</button>
+              )}</Show>
+            </span>
+          )}</Show>
           {props.dictation}
           <span class="direct-session-metadata">{props.sessionMetadata}</span>
           <div class="direct-model" role="group" aria-label="Model">
@@ -135,34 +159,6 @@ export const DirectComposer = (props: {
           </div>
         </div>
       </div>
-      <Show when={reasons().length && !state.superseded}>
-        <div class="direct-feedback dim">
-          <For each={reasons()}>{(value) => <div>{value}</div>}</For>
-        </div>
-      </Show>
-      <Show when={state.storageError}>
-        <div class="direct-feedback err" role="alert">
-          {state.storageError}
-          <button onClick={() => props.composer.setImages([], state.visibleBuffer)}>Clear saved images</button>
-        </div>
-      </Show>
-      <Show when={state.error && !state.superseded}>
-        <div class="direct-feedback err" role="alert">
-          {state.error}
-        </div>
-      </Show>
-      <Show when={props.connected && (!state.capabilities || state.capabilityError)}>
-        <button
-          class="direct-feedback"
-          disabled={!props.connected}
-          onClick={async () => {
-            await props.composer.loadCapabilities()
-            await props.composer.refreshInputs()
-          }}
-        >
-          Refresh availability
-        </button>
-      </Show>
     </div>
   )
 }

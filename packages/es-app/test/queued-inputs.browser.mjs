@@ -41,42 +41,29 @@ const shot = async (name) => { if (process.env.QUEUED_INPUTS_SHOTS) await page.s
 try {
   await page.goto(preview.url, { waitUntil: "domcontentloaded" })
   const editor = page.getByRole("textbox", { name: "Message", exact: true })
+  // Pending inputs are outgoing bubbles in the transcript tail, each with a one-line cue.
   await expect(receipts).toBeVisible()
-  await expect(summary).toContainText("Pending inputs")
-  await expect(summary).toContainText("1 queued, 1 steer")
+  await expect(receipts).toHaveAttribute("aria-label", "Pending inputs")
+  await expect(page.locator(".composer-results")).toBeHidden()
   await expect(receipts).not.toContainText("Added to conversation")
-  await expect(receipts).not.toContainText("pending")
-  await expect(row("q1").locator(".receipt-kind")).toHaveText("queue")
+  await expect(row("q1")).toHaveAttribute("data-delivery", "queue")
+  await expect(row("q1").locator(".outgoing-cue")).toContainText("Queued · after this task")
   await expect(row("q1").locator(".receipt-text")).toContainText("run the full suite")
   await expect(row("q1").locator("img")).toHaveCount(1)
-  await expect(row("s1").locator(".receipt-kind")).toHaveText("steer")
+  await expect(row("s1")).toHaveAttribute("data-delivery", "steer")
+  await expect(row("s1").locator(".outgoing-cue")).toContainText("Steer · at the next safe point")
   await expect(row("s1").locator("img")).toHaveCount(0)
   await expect(receipts.getByRole("button", { name: "Cancel queue input: Queued: run the full suite after the refactor lands and summarise failures" })).toBeVisible()
   await shot("busy")
 
-  // Refresh lives in the header, fetches the list once and never toggles the disclosure.
-  const reads = listReads().length
-  await summary.getByRole("button", { name: "Refresh inputs" }).click()
-  await expect.poll(() => listReads().length).toBe(reads + 1)
-  await expect(receipts).toHaveAttribute("open", "")
-  await summary.getByRole("button", { name: "Refresh inputs" }).focus()
-  await page.keyboard.press("Enter")
-  await expect.poll(() => listReads().length).toBe(reads + 2)
-  await expect(receipts).toHaveAttribute("open", "")
-
-  // Keyboard collapse/expand on the summary itself still works.
-  await summary.focus()
-  await page.keyboard.press("Space")
-  await expect(receipts).not.toHaveAttribute("open")
-  await page.keyboard.press("Space")
-  await expect(receipts).toHaveAttribute("open", "")
+  // Inputs refresh on events and a timer; there is no manual refresh control.
+  await expect(page.getByRole("button", { name: "Refresh inputs" })).toHaveCount(0)
 
   // Cancel sends exactly one DELETE for that ID; the other receipt and the draft are untouched.
   await editor.fill("draft kept while cancelling")
   await receipts.getByRole("button", { name: /^Cancel steer input: Steer: prefer bun APIs$/ }).click()
   await expect(row("s1")).toHaveCount(0)
   await expect(row("q1")).toBeVisible()
-  await expect(summary).toContainText("1 queued, 0 steer")
   expect(cancels().map((call) => decodeURIComponent(call.path.split("/").at(-1)))).toEqual(["s1"])
   await expect(editor).toHaveValue("draft kept while cancelling")
 
@@ -85,14 +72,24 @@ try {
   // Queue is a secondary action behind the send menu.
   await page.getByRole("button", { name: "More send options", exact: true }).click()
   await page.getByRole("button", { name: "Queue", exact: true }).click()
-  await expect(page.locator(".input-admission")).toContainText("Admission unknown")
+  // The unknown input is an outgoing bubble with an inline cue, not a popup above the composer.
+  await expect(page.locator(".input-admission")).toContainText("Not confirmed · queued")
+  await expect(page.locator(".composer-results")).toBeHidden()
   const requestID = posts().at(-1).body.requestID
   expect(fixture.receipts.some((item) => item.requestID === requestID && item.state === "pending")).toBe(true)
+  const bubble = await row(requestID).elementHandle()
+  const before = await row(requestID).boundingBox()
   await page.getByRole("button", { name: "Check admission", exact: true }).click()
   await expect(page.locator(".input-admission")).toHaveCount(0)
   await expect(row(requestID)).toBeVisible()
+  await expect(row(requestID).locator(".outgoing-cue")).toContainText("Queued · after this task")
   await expect(row(requestID).locator(".receipt-text")).toHaveText("draft kept while cancelling")
-  await expect(summary).toContainText("2 queued, 0 steer")
+  // Reconciling keeps the same bubble element in place: only the cue changes.
+  expect(await bubble.evaluate((node) => node.isConnected)).toBe(true)
+  const after = await row(requestID).boundingBox()
+  expect(Math.round(after.y)).toBe(Math.round(before.y))
+  expect(Math.round(after.height)).toBe(Math.round(before.height))
+  await expect(receipts.locator("li")).toHaveCount(2)
   expect(posts()).toHaveLength(1)
   await shot("recovered")
 
@@ -100,7 +97,7 @@ try {
   fixture.setStatus("idle")
   await expect(page.getByRole("button", { name: "Send", exact: true })).toBeVisible()
   await expect(row("q1")).toBeVisible()
-  await expect(summary).toContainText("2 queued, 0 steer")
+  await expect(receipts.locator("li")).toHaveCount(2)
   expect(posts()).toHaveLength(1)
 
   // Mobile + RTL: rows stay single-column with reachable Cancel, no horizontal overflow.
@@ -115,7 +112,7 @@ try {
 
   expect(otherWrites()).toEqual([])
   expect(fixture.unexpected).toEqual([])
-  console.log(`PASS ${app ? "packaged native" : "browser"} queued inputs: compact header/counts, no hint paragraph or per-row status, header refresh without toggle, keyboard collapse, single cancel, image preview, unknown admission recovery with stable ID, idle variant, mobile RTL, no other writes`)
+  console.log(`PASS ${app ? "packaged native" : "browser"} queued inputs: outgoing bubbles with inline cues, no results panel, no manual refresh, single cancel, image preview, unknown admission recovery with stable ID and stable bubble element/geometry, idle variant, mobile RTL, no other writes`)
 } finally {
   await app?.close()
   await browser?.close()
