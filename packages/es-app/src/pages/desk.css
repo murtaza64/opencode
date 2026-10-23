@@ -95,7 +95,7 @@
 .desk-queue > .desk-background { margin-block: 8px 0; }
 .attention-home legend.sr-only { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .home-options label .home-source { margin-inline-start: 2px; color: var(--green); }
-.home-decision .home-eyebrow a { margin-inline-start: auto; font-size: 11px; }
+.home-decision .home-eyebrow > a { margin-inline-start: auto; font-size: 11px; }
 .desk-brief-ask { color: var(--text); margin-block: 0 6px !important; }
 .home-decision .desk-brief { margin-block: 12px 4px; padding-block: 2px; padding-inline: 12px 0; background: none; }
 .attention-home details.desk-brief-detail { font-size: 13px; }
@@ -149,3 +149,10 @@
 .desk-more > [role=status] { font-size: 11px; }
 .desk-brief:focus { outline: none; }
 .desk-brief:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
+
+/* Decision rows and headers lead with the requesting agent; the project is secondary. */
+.desk-item-agent[data-named] { color: var(--text); }
+.attention-requester { display: inline-flex; align-items: center; gap: 5px; min-inline-size: 0; }
+.attention-agent { font-weight: 600; color: var(--text); }
+.attention-project { color: var(--overlay1); }
+.attention-routing { flex-basis: 100%; }

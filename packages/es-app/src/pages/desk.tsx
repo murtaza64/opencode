@@ -7,7 +7,7 @@ import { ago, sessionHref, useDashboard } from "../state"
 import { AppHeader } from "../components/native-header"
 import { createAttention, type AttentionRecord } from "../attention"
 import { createHomeRequests, requestPointers } from "../home-requests"
-import { AttentionDecision, type AttentionView } from "../components/attention-decision"
+import { AttentionDecision, useRequestAgent, type AttentionView } from "../components/attention-decision"
 import { DeskAgents } from "../components/desk-agents"
 import { HomePermission, type HomeReplyReceipt } from "../components/home-permission"
 import { FailureRetry } from "../components/session-failure"
@@ -201,7 +201,7 @@ export default function Desk() {
             return <li><button class="desk-item" aria-pressed={selectedKey() === item.key} data-desk-item={item.key} onClick={() => select(item.key)}>
               <bdi dir="auto" class="desk-item-title">{item.title}</bdi>
               <span class="home-source" classList={{ "desk-item-old": !!item.failure && !(now() - item.failure.time < OLD_FAILURE_MS) }}><span class="desk-item-kind" data-kind={item.kind}>{item.kind}</span>
-                <Show when={item.failure} fallback={<><Show when={item.project}> · <bdi dir="auto">{item.project}</bdi></Show>
+                <Show when={item.failure} fallback={<><Show when={item.record}>{record => <> · <RowAgent record={record()} /></>}</Show><Show when={item.project}> · <bdi dir="auto">{item.project}</bdi></Show>
                   <Show when={now() - item.checked > STALE_MS}> · <span class="home-blocked">checked {ago(item.checked) || "never"}</span></Show></>}>
                   {failure => <> · {failureLabel(failure())} · <span data-failure-age>{failureAge(failure().time, now())}</span></>}</Show>
                 <Show when={rowBrief(job())}>{label => <> · {label()}</>}</Show></span>
@@ -222,7 +222,7 @@ export default function Desk() {
           <Show when={historyView() !== "ignored" ? historyView() as AttentionView : undefined}>{view => <ul class="desk-items"><For each={records().filter(record => inView(record, view()))} fallback={<li class="home-muted desk-empty">None.</li>}>{record =>
             <li><button class="desk-item" aria-pressed={selectedKey() === recordKey(record)} onClick={() => select(recordKey(record))}>
               <bdi dir="auto" class="desk-item-title">{record.title}</bdi>
-              <span class="home-source"><span class="desk-item-kind" data-kind={record.kind}>{record.kind}</span> · <bdi dir="auto">{record.editspace}</bdi><Show when={record.status === "answered"}> · <span classList={{ "home-blocked": record.delivery_state === "blocked" }}>{record.delivery_state}</span></Show></span>
+              <span class="home-source"><span class="desk-item-kind" data-kind={record.kind}>{record.kind}</span> · <RowAgent record={record} /> · <bdi dir="auto">{record.editspace}</bdi><Show when={record.status === "answered"}> · <span classList={{ "home-blocked": record.delivery_state === "blocked" }}>{record.delivery_state}</span></Show></span>
             </button></li>}</For></ul>}</Show>
         </details>
         <button class="desk-chat-tab" aria-expanded={memoryOpen()} title="Personal notes the desk reads; never used as permission. ~/.local/share/opencode/front-desk/memory.json" onClick={() => setMemoryOpen(!memoryOpen())}>Memory <span class="home-muted" title="Notes">{memory.document().entries.length}</span></button>
@@ -295,6 +295,13 @@ const DeskStart = (props: { desk: ReturnType<typeof createDeskSession>; director
       <p class="home-source">Read-only, in <bdi dir="ltr">{props.directory ?? "unknown"}</bdi></p>
     </Show>
   </div>
+
+// Rows are buttons, so the agent is named without a link; the selected header links it.
+const RowAgent = (props: { record: AttentionRecord }) => {
+  const agentFor = useRequestAgent()
+  const agent = () => agentFor(props.record)
+  return <bdi dir="auto" class="desk-item-agent" data-named={agent().named ? "true" : undefined} title={agent().session}>{agent().label}</bdi>
+}
 
 const Canonical = (props: { item: DeskItem; live: boolean; detail: (question: string) => Promise<string | undefined>; attention: ReturnType<typeof createAttention>; requests: ReturnType<typeof createHomeRequests>; now: number; ignoring: boolean; onIgnore: (failure: SessionFailure) => void; onReceipt: (receipt: HomeReplyReceipt) => void }) => {
   const dashboard = useDashboard()
