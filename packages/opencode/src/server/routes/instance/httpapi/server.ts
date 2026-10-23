@@ -54,6 +54,7 @@ import { Worktree } from "@/worktree"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { MoveSession } from "@opencode-ai/core/control-plane/move-session"
 import { Database } from "@opencode-ai/core/database/database"
+import { DatabaseReader } from "@opencode-ai/core/database/reader"
 import { AppNodeBuilderV1 } from "@/effect/app-node-builder-v1"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
@@ -219,6 +220,7 @@ const app = LayerNode.group([
   Npm.node,
   FSUtil.node,
   Database.node,
+  DatabaseReader.node,
   Auth.node,
   Account.node,
   Config.node,

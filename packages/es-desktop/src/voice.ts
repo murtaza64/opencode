@@ -184,7 +184,10 @@ export const voiceTools = async (input: {
   home: string
   env: Record<string, string | undefined>
   config: string
+  // Package-manager bin directories searched after overrides and ~/whisper.cpp.
+  system?: string[]
 }): Promise<VoiceTools | VoiceMissing> => {
+  const system = input.system ?? ["/opt/homebrew/bin", "/usr/local/bin"]
   const saved = await readFile(input.config, "utf8")
     .then((value): unknown => JSON.parse(value))
     .catch(() => undefined)
@@ -192,7 +195,7 @@ export const voiceTools = async (input: {
   const configured = (key: string) => (typeof config[key] === "string" ? (config[key] as string) : undefined)
   const models = path.join(input.home, "whisper.cpp/models")
   const recorder = await first(
-    [input.env.ES_VOICE_RECORDER, configured("recorder"), "/opt/homebrew/bin/sox", "/usr/local/bin/sox"],
+    [input.env.ES_VOICE_RECORDER, configured("recorder"), ...system.map((dir) => path.join(dir, "sox"))],
     executable,
   )
   if (!recorder) return { missing: "recorder", message: "SoX is not installed. Install it with: brew install sox" }
@@ -201,8 +204,7 @@ export const voiceTools = async (input: {
       input.env.ES_VOICE_TRANSCRIBER,
       configured("transcriber"),
       path.join(input.home, "whisper.cpp/build/bin/whisper-cli"),
-      "/opt/homebrew/bin/whisper-cli",
-      "/usr/local/bin/whisper-cli",
+      ...system.map((dir) => path.join(dir, "whisper-cli")),
     ],
     executable,
   )

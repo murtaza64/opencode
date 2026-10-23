@@ -22,6 +22,8 @@ import { Todo } from "@/session/todo"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Cause, Effect, Option, Schema, Scope } from "effect"
+import { Database } from "@opencode-ai/core/database/database"
+import { DatabaseReader } from "@opencode-ai/core/database/reader"
 import * as Stream from "effect/Stream"
 import { InstanceState } from "@/effect/instance-state"
 import { InstanceStore } from "@/project/instance-store"
@@ -55,6 +57,7 @@ const tryParseJson = (text: string) =>
 export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", (handlers) =>
   Effect.gen(function* () {
     const session = yield* Session.Service
+    const reader = yield* DatabaseReader.Service
     const provider = yield* Provider.Service
     const asideSvc = yield* SessionAside.Service
     const shareSvc = yield* SessionShare.Service
@@ -156,7 +159,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
           sessionID: ctx.params.sessionID,
           limit: ctx.query.limit,
           before: ctx.query.before,
-        }),
+        }).pipe(Effect.provideService(Database.Service, reader)),
       )
       if (!page.cursor) return project(page.items)
 

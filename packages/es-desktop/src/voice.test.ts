@@ -170,22 +170,22 @@ test("finds the bin/transcribe whisper.cpp checkout and prefers its model", asyn
   await writeFile(recorder, "#!/bin/sh\n")
   await chmod(recorder, 0o755)
   await writeFile(config, JSON.stringify({ recorder }))
-  expect(await voiceTools({ home, env: {}, config })).toMatchObject({ missing: "transcriber" })
+  expect(await voiceTools({ home, env: {}, config, system: [] })).toMatchObject({ missing: "transcriber" })
   await mkdir(path.join(home, "whisper.cpp/build/bin"), { recursive: true })
   await mkdir(path.join(home, "whisper.cpp/models"), { recursive: true })
   const cli = path.join(home, "whisper.cpp/build/bin/whisper-cli")
   await writeFile(cli, "#!/bin/sh\n")
   await chmod(cli, 0o755)
-  expect(await voiceTools({ home, env: {}, config })).toMatchObject({ missing: "model" })
+  expect(await voiceTools({ home, env: {}, config, system: [] })).toMatchObject({ missing: "model" })
   await writeFile(path.join(home, "whisper.cpp/models/ggml-base.en.bin"), "")
   await writeFile(path.join(home, "whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin"), "")
-  expect(await voiceTools({ home, env: {}, config })).toEqual({
+  expect(await voiceTools({ home, env: {}, config, system: [] })).toEqual({
     recorder,
     transcriber: cli,
     model: path.join(home, "whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin"),
   })
   // Relative overrides are ignored rather than resolved against the app's working directory.
-  expect(await voiceTools({ home, env: { ES_VOICE_RECORDER: "sox" }, config: path.join(home, "none.json") })).toMatchObject({
+  expect(await voiceTools({ home, env: { ES_VOICE_RECORDER: "sox" }, config: path.join(home, "none.json"), system: [] })).toMatchObject({
     missing: "recorder",
   })
 })
@@ -246,7 +246,14 @@ test.skipIf("missing" in real || process.platform !== "darwin")("transcribes a p
   const voice = createVoice({ resolve: async () => ({ ...real, recorder }), permission: async () => true, temp })
   const run = id()
   await voice.start(run)
+  // Stop only once the fixture clip is fully "recorded", as a person stops after speaking.
+  const size = Bun.file(clip).size
+  for (let i = 0; i < 200; i++) {
+    const [dir] = await readdir(temp)
+    if (dir && Bun.file(path.join(temp, dir, "clip.wav")).size === size) break
+    await Bun.sleep(10)
+  }
   const result = await voice.stop(run)
-  expect(result.ok).toBe(true)
+  expect(result).toMatchObject({ ok: true })
   if (result.ok) expect(result.text.toLowerCase()).toContain("composer")
 }, 180_000)
