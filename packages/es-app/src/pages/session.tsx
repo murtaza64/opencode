@@ -1494,7 +1494,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   return (
     <main class="session-page" classList={{ "finding-transcript": findOpen() }}>
       <div class="session-main">
-        <AppHeader>
+        {/* Embedded beside the desk queue, the chat's title and tools belong to its own pane. */}
+        <AppHeader inline={props.embedded}>
           <SessionTitle sessionID={sessionID} directory={directory} session={session()} suspendBlurSave={findOpen()} onSaved={(info) => {
             live.apply({ type: "session.updated", properties: { sessionID, info } })
             void refetch()
