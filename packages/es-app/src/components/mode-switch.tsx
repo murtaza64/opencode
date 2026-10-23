@@ -28,11 +28,15 @@ export const ModeSwitch = (props: { compact?: boolean }) => {
     location.pathname
     return current() === mode ? HOME[mode] : sessionStorage.getItem(KEY[mode]) ?? HOME[mode]
   }
-  // Unread-style: exactly the desk's Needs-you count, shown away from the desk where the queue is out of view.
-  const waiting = () => current() === "desk" ? 0 : queue.items().length
+  // Unread-style: the desk's Needs-you count plus new requested deliverables, shown away from the desk
+  // where the queue is out of view.
+  const delivered = () => current() === "desk" ? 0 : queue.surfaces.deliverables().fresh.length
+  const waiting = () => current() === "desk" ? 0 : queue.items().length + delivered()
+  const label = () => [queue.items().length && current() !== "desk" ? `${queue.items().length} need${queue.items().length === 1 ? "s" : ""} you` : "",
+    delivered() ? `${delivered()} new deliverable${delivered() === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ")
   return <nav class="mode-switch" classList={{ compact: props.compact }} aria-label="Mode">
     <A href={href("desk")} class="mode-tab" aria-current={current() === "desk" ? "page" : undefined} title="Front desk"
-      aria-label={waiting() ? `Front desk, ${waiting()} need${waiting() === 1 ? "s" : ""} you` : props.compact ? "Front desk" : undefined}>
+      aria-label={waiting() ? `Front desk, ${label()}` : props.compact ? "Front desk" : undefined}>
       {/* The count hangs off the label's end so the label stays centred when it appears. */}
       <span class="mode-label"><Show when={props.compact} fallback="Front desk"><Glyph name="home" /></Show>
         <Show when={waiting()}><span class="mode-count" aria-hidden="true">{waiting() > 99 ? "99+" : waiting()}</span></Show></span>

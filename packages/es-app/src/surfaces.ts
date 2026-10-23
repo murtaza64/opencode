@@ -23,6 +23,12 @@ export type Surface = {
   updated_at: number
   revision: number
   health: SurfaceHealth
+  /** A board is standing; a deliverable is something the human asked for. */
+  purpose?: "board" | "deliverable"
+  created_at?: number
+  requested_in?: { session: string; directory: string; title?: string }
+  /** Deliverables only: the operator opened the current revision. */
+  seen?: boolean
 }
 
 const PREFIX = "surface:"
@@ -39,6 +45,16 @@ export const surfaceProblem = (health: SurfaceHealth) => {
 }
 
 export const surfaceUnavailable = (surface: Surface) => surface.health.state === "unreachable"
+
+export const isDeliverable = (surface: Surface) => surface.purpose === "deliverable"
+const seenKey = (surface: Surface) => `${surface.id}:${surface.revision}`
+
+/** New deliverables first (newest first), then earlier ones; `opened` covers marks still in flight. */
+export const deliverables = (list: Surface[], opened: ReadonlySet<string>) => {
+  const all = list.filter(isDeliverable).toSorted((a, b) => (b.created_at ?? b.updated_at) - (a.created_at ?? a.updated_at))
+  const fresh = (surface: Surface) => !surface.seen && !opened.has(seenKey(surface))
+  return { fresh: all.filter(fresh), earlier: all.filter(surface => !fresh(surface)) }
+}
 
 const POLL_MS = 15_000
 
@@ -62,10 +78,30 @@ export const createSurfaces = () => {
     setError()
     setChecked(Date.now())
   }
+  // Opened revisions this page marked; kept even when the write fails so an opened item stops nagging here.
+  const [opened, setOpened] = createSignal<ReadonlySet<string>>(new Set())
+  const [seenError, setSeenError] = createSignal<string>()
+  const markSeen = async (surface: Surface) => {
+    if (!isDeliverable(surface) || surface.seen || opened().has(seenKey(surface))) return
+    setOpened(new Set([...opened(), seenKey(surface)]))
+    const response = await fetch("/es/api/frontdesk/deliverables/seen", {
+      method: "POST",
+      headers: { "content-type": "application/json", "X-Attention-CSRF": "1" },
+      body: JSON.stringify({ id: surface.id, revision: surface.revision }),
+    }).catch(() => undefined)
+    if (response?.ok) {
+      setSeenError()
+      return void refresh()
+    }
+    setSeenError(response && (response.status === 401 || response.status === 403)
+      ? "Seen state is not saved: the operator connection is unavailable."
+      : "Seen state is not saved: the dashboard did not confirm it.")
+  }
+  const split = () => deliverables(list(), opened())
   void refresh()
   const timer = setInterval(() => void refresh(), POLL_MS)
   onCleanup(() => clearInterval(timer))
-  return { list, error, checked, refresh }
+  return { list, boards: () => list().filter(surface => !isDeliverable(surface)), deliverables: split, markSeen, seenError, error, checked, refresh }
 }
 
 /** The sandboxed frame address for one surface, minted by the app server. */

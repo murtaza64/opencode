@@ -85,6 +85,7 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/es\/api\/(refresh|frontdesk|curate|(?:digest|brief)\/[^/]+)$/,
       /^\/es\/api\/handoffs$/,
       /^\/es\/api\/frontdesk\/ignored-failures$/,
+      /^\/es\/api\/frontdesk\/deliverables\/seen$/,
       /^\/es\/api\/attention\/(?:session|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/commands)$/,
     ],
     PATCH: [/^\/oc\/session\/[\w-]+$/, /^\/oc\/session\/[\w-]+\/input\/[\w-]+$/],
