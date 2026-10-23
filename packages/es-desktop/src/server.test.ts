@@ -27,6 +27,13 @@ const setup = async () => {
         keyForwarded: request.headers.has("x-editspace-key"),
         authForwarded: request.headers.has("authorization"),
       }, { headers: { "set-cookie": "es_attention_operator=synthetic; HttpOnly; SameSite=Strict; Path=/" } })
+      if (url.pathname.startsWith("/api/frontdesk/")) return Response.json({
+        method: request.method,
+        path: url.pathname,
+        originBound: request.headers.get("origin") === url.origin,
+        operatorCookieOnly: request.headers.get("cookie") === "es_attention_operator=synthetic",
+        keyForwarded: request.headers.has("x-editspace-key"),
+      })
       if (url.searchParams.has("redirect")) return Response.redirect("http://127.0.0.1:4096", 302)
       if (url.pathname === "/event")
         return new Response(
@@ -168,6 +175,12 @@ test("API surface excludes direct shell, PTY, file, and config access", () => {
   expect(apiAllowed("POST", "/es/api/frontdesk/memory")).toBe(false)
   expect(apiAllowed("DELETE", "/es/api/frontdesk/memory")).toBe(false)
   expect(apiAllowed("GET", "/es/api/frontdesk/memory/x")).toBe(false)
+  // Front desk ignored failures: read, and idempotent ignore/unignore posts
+  expect(apiAllowed("GET", "/es/api/frontdesk/ignored-failures")).toBe(true)
+  expect(apiAllowed("POST", "/es/api/frontdesk/ignored-failures")).toBe(true)
+  expect(apiAllowed("PUT", "/es/api/frontdesk/ignored-failures")).toBe(false)
+  expect(apiAllowed("DELETE", "/es/api/frontdesk/ignored-failures")).toBe(false)
+  expect(apiAllowed("GET", "/es/api/frontdesk/ignored-failures/x")).toBe(false)
   // failed-turn recovery: read the durable list, retry one exact failure
   expect(apiAllowed("GET", "/oc/experimental/session/failed")).toBe(true)
   expect(apiAllowed("POST", "/oc/session/ses_a/retry")).toBe(true)
@@ -232,6 +245,22 @@ test("binds attention to the validated native origin and forwards only its opera
   expect((await get("/es/api/attention/session", { method: "POST", body: "{}" })).status).toBe(403)
   expect((await get("/es/api/attention/session", { method: "POST", body: "{}", headers: { origin: "https://evil.test" } })).status).toBe(403)
   expect((await fetch(`${server.origin}/es/api/attention/session`, { method: "POST", body: "{}", headers: { origin: server.origin } })).status).toBe(403)
+})
+
+test("Front desk ignored failures and memory reach the dashboard with only the operator cookie", async () => {
+  const { server, get } = await setup()
+  const cookie = "unrelated=private; es_attention_operator=synthetic"
+  const read = await get("/es/api/frontdesk/ignored-failures", { headers: { cookie } })
+  expect(read.status).toBe(200)
+  expect(await read.json()).toEqual({ method: "GET", path: "/api/frontdesk/ignored-failures", originBound: true, operatorCookieOnly: true, keyForwarded: false })
+  const write = await get("/es/api/frontdesk/ignored-failures", {
+    method: "POST", body: "{}", headers: { origin: server.origin, cookie, "x-attention-csrf": "1", "content-type": "application/json" },
+  })
+  expect(await write.json()).toMatchObject({ method: "POST", originBound: true, operatorCookieOnly: true })
+  const memory = await get("/es/api/frontdesk/memory", { method: "PUT", body: "{}", headers: { origin: server.origin, cookie, "content-type": "application/json" } })
+  expect(await memory.json()).toMatchObject({ method: "PUT", operatorCookieOnly: true })
+  expect((await get("/es/api/frontdesk/ignored-failures", { method: "POST", body: "{}" })).status).toBe(403)
+  expect((await get("/es/api/frontdesk/ignored-failures", { method: "POST", body: "{}", headers: { origin: "https://evil.test" } })).status).toBe(403)
 })
 
 test("serves the built SPA and assets with restrictive CSP", async () => {

@@ -24,7 +24,12 @@ const dashboard = () => {
   }) as typeof fetch
   return { file, fetch: request }
 }
-const store = (fetch: typeof globalThis.fetch) => createRoot(() => createFailureIgnores({ fetch }))
+// One browser profile's localStorage; a fresh one per test.
+const profile = () => {
+  const items = new Map<string, string>()
+  return () => ({ getItem: (key: string) => items.get(key) ?? null, setItem: (key: string, value: string) => void items.set(key, value) })
+}
+const store = (fetch: typeof globalThis.fetch, storage = profile()) => createRoot(() => createFailureIgnores({ fetch, storage }))
 
 test("an ignore hides that exact failure for a later client and keeps its failure time", async () => {
   const server = dashboard()
@@ -75,4 +80,27 @@ test("a lost response re-reads the file and reflects what committed", async () =
   await ignores.ignore(failure("ses_a", "msg_a1"), "x")
   expect(ignores.ignored(failure("ses_a", "msg_a1"))).toBe(true)
   expect(ignores.notice()).toContain("not confirmed")
+})
+
+test("a reload whose read fails keeps the last confirmed ignores instead of un-ignoring", async () => {
+  const server = dashboard()
+  const storage = profile()
+  const first = store(server.fetch, storage)
+  await first.load()
+  await first.ignore(failure("ses_a", "msg_a1"), "x")
+  server.file.status = 403
+  const reloaded = store(server.fetch, storage)
+  await reloaded.load()
+  expect(reloaded.ignored(failure("ses_a", "msg_a1"))).toBe(true)
+  expect(reloaded.notice()).toContain("last confirmed list still applies")
+})
+
+test("a failed refresh after a good read keeps the list it read", async () => {
+  const server = dashboard()
+  server.file.entries = [{ sessionID: "ses_a", messageID: "msg_a1", directory: "/repo", failedAt: null, label: "", ignoredAt: 1 }]
+  const ignores = store(server.fetch)
+  await ignores.load()
+  server.file.status = 503
+  await ignores.load()
+  expect(ignores.ignored(failure("ses_a", "msg_a1"))).toBe(true)
 })

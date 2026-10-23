@@ -14,27 +14,45 @@ export type IgnoredFailure = {
 }
 
 const IGNORES_URL = "/es/api/frontdesk/ignored-failures"
+// The last list the dashboard confirmed. A failed read keeps using it, so an outage never un-ignores.
+const CACHE_KEY = "es-app:failure-ignores:confirmed:1"
+const cached = (storage: () => Pick<Storage, "getItem" | "setItem"> | undefined) => {
+  try {
+    const value: unknown = JSON.parse(storage()?.getItem(CACHE_KEY) ?? "null")
+    return Array.isArray(value) ? value as IgnoredFailure[] : undefined
+  } catch {
+    return undefined
+  }
+}
 const key = (item: Pick<SessionFailure, "sessionID" | "messageID">) => `${item.sessionID}\n${item.messageID}`
 
-export const createFailureIgnores = (deps: { fetch?: typeof fetch } = {}) => {
+export const createFailureIgnores = (deps: { fetch?: typeof fetch; storage?: () => Pick<Storage, "getItem" | "setItem"> | undefined } = {}) => {
   const request = deps.fetch ?? ((input, init) => fetch(input, init))
-  const [entries, setEntries] = createSignal<IgnoredFailure[]>([])
-  // Until the file is read, nothing is hidden: an unreadable store must not hide failures.
-  const [loaded, setLoaded] = createSignal(false)
+  const storage = deps.storage ?? (() => { try { return localStorage } catch { return undefined } })
+  const initial = cached(storage)
+  const [entries, setEntries] = createSignal<IgnoredFailure[]>(initial ?? [])
+  // Nothing is hidden until a list is known: confirmed on an earlier read, or read now.
+  const [loaded, setLoaded] = createSignal(initial !== undefined)
   const [pending, setPending] = createSignal<Record<string, boolean>>({})
   const [notice, setNotice] = createSignal("")
   const accept = async (response: Response) => {
     const body = await response.json() as { entries?: IgnoredFailure[] }
-    setEntries(Array.isArray(body.entries) ? body.entries : [])
+    const next = Array.isArray(body.entries) ? body.entries : []
+    setEntries(next)
     setLoaded(true)
+    try { storage()?.setItem(CACHE_KEY, JSON.stringify(next)) } catch { /* the in-page list still applies */ }
   }
   const load = async () => {
     try {
       const response = await request(IGNORES_URL, { credentials: "include" })
       if (!response.ok) throw new Error(response.status === 404 ? "the dashboard has no ignored-failures endpoint" : `HTTP ${response.status}`)
       await accept(response)
+      setNotice("")
     } catch (cause) {
-      setNotice(`Ignored failures could not be read (${cause instanceof Error ? cause.message : String(cause)}); all failures are shown.`)
+      const reason = cause instanceof Error ? cause.message : String(cause)
+      setNotice(loaded()
+        ? `Ignored failures could not be refreshed (${reason}); the last confirmed list still applies.`
+        : `Ignored failures could not be read (${reason}); all failures are shown.`)
     }
   }
   const change = async (op: "ignore" | "unignore", item: Pick<SessionFailure, "sessionID" | "messageID" | "directory"> & { failedAt?: number; label?: string }) => {
