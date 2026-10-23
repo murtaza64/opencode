@@ -114,10 +114,11 @@ export const deskSources = (input: {
   ]
 }
 
-export type EvidenceRef = { id: string; label: string; messageID?: string }
+/** `url` marks evidence fetched read-only from an external conversation (e.g. a GitHub review thread). */
+export type EvidenceRef = { id: string; label: string; messageID?: string; url?: string }
 /** `contract` names the brief format; a job made under an older one is kept but not shown or reused. */
 export type BriefMeta = { kind: "brief"; requestID: string; source: string; revision: string; title: string; refs: EvidenceRef[]; contract?: number }
-export const BRIEF_CONTRACT = 2
+export const BRIEF_CONTRACT = 3
 export type BriefShape =
   | { kind: "sequence"; steps: string[] }
   | { kind: "scope"; included: string[]; excluded: string[] }
@@ -125,24 +126,25 @@ export type BriefShape =
 /** A link the brief cites, resolved by the app from evidence refs; never a model-written URL it did not see. */
 export type BriefSource = { label: string; refs: string[] }
 export type BriefResult = {
-  /** The decision, only when the title does not already name it. */
-  ask: string
-  /** Why this needs the human's judgment or authority, and why the situation exists now; empty when unsupported. */
-  whyYou: string
-  whyNow: string
-  /** Per canonical option ID: what choosing it leads to. Labels and IDs stay the producer's. */
-  choices: { id: string; outcome: string; chips: string[]; risk: string }[]
+  /** The decision as a plain question for someone with only a high-level view of the work. */
+  question: string
+  /** Only the background that person needs to answer, in a sentence or two; empty when none is needed. */
+  context: string
+  /** Per canonical option ID: the consequence they would notice, an optional short note (a material risk
+   * or fact), and optionally a small picture of what choosing it looks like. Labels and IDs stay the producer's. */
+  choices: { id: string; label: string; outcome: string; note: string; sketch?: string }[]
   /** What not answering leads to, only when no option already means that. */
   ifWait: string
-  /** One picture the app draws in its own styles, only when it adds to the choices. */
+  /** For a decision to publish something: the exact text it would send, quoted from the request. */
+  sends: string
+  /** At most one picture: a shape the app draws, or the model's own visual. */
   shape?: BriefShape
-  unknown: string
   sources: BriefSource[]
   facts: { text: string; refs: string[] }[]
   timeline: { when?: string; text: string; refs: string[] }[]
   gaps: string[]
-  /** Model-authored HTML/SVG, shown in Details; rendered in a script-less, network-less sandbox. */
-  visual?: { title: string; html: string }
+  /** Model-authored HTML/SVG explaining the decision, rendered in a script-less, network-less sandbox. */
+  visual?: { title: string; html: string; height: number }
 }
 export type BriefState =
   | { state: "running" }
@@ -217,7 +219,7 @@ export const deskContext = (input: {
     ? ["selected item (the human is looking at this now):", ...canonicalLines(input.selected).map(line => `  ${line}`)].join("\n")
     : "selected item: none. Answer about connected projects generally; do not assume an earlier selection.")
   if (input.surface) lines.push(`open surface: "${clip(input.surface.title, 80)}" (id ${input.surface.id}), maintained by ${input.surface.owner}. You cannot see its content; ask its owner for details.`)
-  for (const brief of ready.slice(-3)) lines.push(`derived brief for ${brief.meta.source} rev ${brief.meta.revision} (not authoritative): ${clip(brief.result.ask, 300)}`)
+  for (const brief of ready.slice(-3)) lines.push(`derived brief for ${brief.meta.source} rev ${brief.meta.revision} (not authoritative): ${clip(brief.result.question, 300)}`)
   lines.push(...memoryLines(input.memory, input.scope))
   lines.push("Native answers, permissions and retries happen only through their own controls in the desk UI.")
   const text = lines.join("\n")
@@ -228,20 +230,22 @@ export const deskContext = (input: {
 // then decide. Prose, internal vocabulary and process narration all cost attention, so the contract
 // asks for word-limited fields and a structured picture the app draws, not paragraphs.
 export const BRIEF_SYSTEM = [
-  "You turn one request into a visual decision aid for the person who owns this project. They should be able to decide in ten seconds without reading the request.",
-  "Use the fewest words that stay accurate. Plain words addressed to them as you; name things by what they are (the feature, file, test, job, release).",
-  "Never write ref or record IDs (C1, E1, ses_..., msg_...), revisions, gates, ledgers, sessions, lanes, Core, the harness, the front desk or 'the requesting agent' in any text. No hedges or disclaimers.",
-  "ask: the decision in at most 90 characters, only when the title does not already name it; otherwise empty.",
-  "whyYou: why this needs their judgment or authority (the tradeoff, risk or permission at stake), at most 90 characters. whyNow: why the situation exists (cause, history, what is blocked), at most 90 characters. Each only when the evidence says so; otherwise empty.",
-  "choices: one entry per option listed in C1, using its exact id. outcome: what concretely happens if they choose it, at most 60 characters; the outcome is the upside. chips: at most 2 short facts about that option stated in the evidence (e.g. read-only, ~60-90 min), never computed or estimated by you. risk: its single main downside, at most 50 characters, or empty.",
-  "ifWait: what happens if they do not answer, at most 60 characters, only when no option already means not acting; otherwise empty.",
-  "shape: at most one picture, only when it adds information the choices do not, and never about the review or approval process itself. sequence: at most 5 steps of at most 24 characters. scope: what approving includes and explicitly excludes, at most 4 items each of at most 30 characters. impact: at most 4 rows of area (20 characters) and change (40 characters). Otherwise omit.",
-  "unknown: the one uncertainty that matters most for this decision, at most 90 characters, or empty. gaps: other things the evidence cannot establish, at most 3.",
-  "sources: at most 3 places the human can open to check the essentials, each with a meaningful label of at most 48 characters (what it shows, not where it is) and the supplied ref IDs or file:<relative path> it points to.",
-  "facts: at most 4 supporting facts, shown only on request; each cites supplied ref IDs (C1, E1, ...) in refs, never in its text. Claims stay claims: say who measured or said what. timeline: only when order matters, same rule.",
+  "You help a busy person decide one request from an agent. Assume they know the project only at a high level: they have not read the agent's thread and do not know its internal names.",
+  "Use judgment: show what they need to decide well and nothing else. Every field except question is optional; leave a field empty unless it clearly helps with this decision.",
+  "question: the decision as one plain question they can answer, in their terms (what they would see, get or risk), not the agent's task name. Example: 'What should someone see first when opening a workspace?'",
+  "context: only if needed, one or two short sentences of background in plain words: what this is about, and why it needs them (who asked, what it would publish or change) when that is not obvious. Mention an uncertainty only if it changes this choice.",
+  "choices: for each option listed in C1, by its exact id. label: only if the option's own label uses internal names or configuration (identifiers, tokens, file names), a plain label of a few words in their terms; otherwise empty. outcome: the consequence people would notice if it is chosen, one short complete phrase. note: optionally one short material risk or fact for that option. sketch: optionally, when the options differ in what someone would see, a small self-contained HTML or inline SVG mockup of that option's result, drawn at 16:10 for about 300 by 188 px with text at 11 px or larger (no scripts, no external URLs, dark background, under 6 KB).",
+  "ifWait: what happens if they do not answer, only when no option already means not acting.",
+  "sends: if choosing an option publishes or sends text (a reply, comment, message, post), that exact text copied verbatim from C1; otherwise empty.",
+  "visual: the main explanation whenever a picture communicates faster than text, which is most of the time: a bespoke self-contained HTML or inline SVG made for this decision, like one slide: annotated screen mockups, before and after, a flow or causal chain, a scope map of what is touched and what is not, a timeline, or a comparison. Short labels and callouts only; mark claims that are observed but not measured as such; never chart numbers the evidence does not establish. No scripts, no external URLs, no forms; dark background (#181825), light text; drawn at a fixed width of at most 640 px (set that width on the svg, not 100%), text between 11 and 13 px so it never outsizes the question; under 16 KB. height: the pixel height it needs (120 to 560).",
+  "shape: instead of a visual, only for a simple case, the app can draw a sequence of steps, a scope of included versus excluded items, or impact rows of area and change.",
+  "The source thread may discuss other work: use only what is about this request.",
+  "Put identifiers, commands, file paths, document IDs and other implementation detail only in facts, never in question, context or choices. Never write ref IDs (C1, E1, X1), revisions, gates, ledgers, sessions, lanes, Core or 'the requesting agent' in any text.",
+  "Write complete phrases; never stop mid-word. Keep every field short.",
+  "sources: at most 3 places worth opening, each with a label saying what it shows and the supplied ref IDs or file:<relative path> it points to. Prefer an original human conversation (X refs) when one is supplied.",
+  "facts: up to 4 supporting details shown only on request, each citing supplied ref IDs in refs. Claims stay claims: say who said or measured what. timeline: only when order matters, same rule. gaps: other things the evidence cannot establish.",
   "You may use read, grep, glob and list (at most 6 calls) to read relevant local files; cite a file you relied on as file:<relative path> in refs.",
-  "visual: optional, a small self-contained HTML or inline SVG of the subject itself, shown only on request; no scripts, no external URLs, dark background, under 12 KB.",
-  "Use only the supplied evidence and files you read. Leave a field empty rather than guess. Do not make the decision, do not present an option as chosen, and do not claim anything was approved, sent or retried.",
+  "Use only the supplied evidence and files you read. Do not make the decision, do not present an option as chosen, and do not claim anything was approved, sent or retried.",
   "Reply with exactly one JSON object and nothing else, matching this JSON Schema:",
 ].join(" ")
 
@@ -252,27 +256,26 @@ const cited = (maxItems: number, extra: Record<string, unknown> = {}) => ({ type
 export const BRIEF_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["ask", "whyYou", "whyNow", "choices", "ifWait", "unknown", "sources", "facts"],
+  required: ["question", "choices"],
   properties: {
-    ask: words(90),
-    whyYou: words(90),
-    whyNow: words(90),
-    choices: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "outcome", "chips", "risk"],
-      properties: { id: { type: "string" }, outcome: words(60), chips: list(2, 20), risk: words(50) } } },
-    ifWait: words(60),
+    question: words(160),
+    context: words(320),
+    choices: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "outcome"],
+      properties: { id: { type: "string" }, label: words(60), outcome: words(140), note: words(120), sketch: { type: "string", maxLength: 8000 } } } },
+    ifWait: words(140),
+    sends: words(2000),
     shape: { oneOf: [
-      { type: "object", additionalProperties: false, required: ["kind", "steps"], properties: { kind: { const: "sequence" }, steps: list(5, 24) } },
-      { type: "object", additionalProperties: false, required: ["kind", "included", "excluded"], properties: { kind: { const: "scope" }, included: list(4, 30), excluded: list(4, 30) } },
-      { type: "object", additionalProperties: false, required: ["kind", "rows"], properties: { kind: { const: "impact" }, rows: { type: "array", maxItems: 4, items: {
-        type: "object", additionalProperties: false, required: ["area", "change"], properties: { area: words(20), change: words(40) } } } } },
+      { type: "object", additionalProperties: false, required: ["kind", "steps"], properties: { kind: { const: "sequence" }, steps: list(6, 48) } },
+      { type: "object", additionalProperties: false, required: ["kind", "included", "excluded"], properties: { kind: { const: "scope" }, included: list(5, 60), excluded: list(5, 60) } },
+      { type: "object", additionalProperties: false, required: ["kind", "rows"], properties: { kind: { const: "impact" }, rows: { type: "array", maxItems: 5, items: {
+        type: "object", additionalProperties: false, required: ["area", "change"], properties: { area: words(40), change: words(80) } } } } },
     ] },
-    unknown: words(90),
-    gaps: list(3, 120),
+    gaps: list(3, 160),
     sources: { type: "array", maxItems: 3, items: { type: "object", additionalProperties: false, required: ["label", "refs"],
-      properties: { label: words(48), refs: { type: "array", minItems: 1, items: { type: "string" } } } } },
+      properties: { label: words(80), refs: { type: "array", minItems: 1, items: { type: "string" } } } } },
     facts: cited(4),
     timeline: cited(6, { when: words(40) }),
-    visual: { type: "object", additionalProperties: false, required: ["title", "html"], properties: { title: words(80), html: { type: "string", maxLength: 20000 } } },
+    visual: { type: "object", additionalProperties: false, required: ["title", "html", "height"], properties: { title: words(80), html: { type: "string", maxLength: 20000 }, height: { type: "integer", minimum: 120, maximum: 560 } } },
   },
 }
 
@@ -281,7 +284,13 @@ const EVIDENCE_BUDGET = 5000
 /** Producer snippet: canonical fields plus a bounded tail of the source session's visible text.
  * Tool inputs and outputs are never included, only tool names and states, so preparing a brief
  * reads nothing beyond what the source thread already shows the operator. */
-export const briefPacket = (item: DeskItem, tail: MessageWithParts[]) => {
+/** The original human conversation behind a request, fetched read-only by the dashboard (GitHub review threads). */
+export type ConversationThread = { kind: "github-review"; repo: string; number: number; path?: string | null; line?: number | null; url: string
+  comments: { author: string; bot: boolean; when: string; body: string; url: string }[] }
+export const threadWhere = (thread: ConversationThread) =>
+  `GitHub review ${thread.repo}#${thread.number}${thread.path ? ` ${thread.path}:${thread.line}` : ""}`
+
+export const briefPacket = (item: DeskItem, tail: MessageWithParts[], threads: ConversationThread[] = []) => {
   const excerpts = tail.flatMap(message => {
     const text = message.parts.flatMap(part => {
       if (part.type === "text" && !part.synthetic && !part.ignored && part.text.trim()) return [clip(part.text, 500)]
@@ -302,6 +311,8 @@ export const briefPacket = (item: DeskItem, tail: MessageWithParts[]) => {
     { id: "C1", label: `canonical ${item.kind} ${item.key} rev ${item.revision}` },
     ...kept.map((excerpt, index) => ({ id: `E${index + 1}`, label: `${excerpt.role} message in source session`, messageID: excerpt.messageID })),
   ]
+  const comments = threads.flatMap(thread => thread.comments.map(comment => ({ thread, comment })))
+  refs.push(...comments.map(({ thread, comment }, index) => ({ id: `X${index + 1}`, label: `${comment.author}${comment.bot ? " (bot)" : ""} on ${threadWhere(thread)}`, url: comment.url })))
   const text = [
     "Prepare an evidence brief for the request below.",
     "",
@@ -310,37 +321,50 @@ export const briefPacket = (item: DeskItem, tail: MessageWithParts[]) => {
     "",
     kept.length ? `Evidence excerpts from the source session, oldest first (${excerpts.length - kept.length} older excerpt(s) omitted):` : "No source-session excerpts were available.",
     ...kept.map((excerpt, index) => `[E${index + 1}] ${excerpt.role} ${excerpt.messageID}: ${excerpt.text}`),
+    ...(comments.length ? ["", "Original conversation, read-only:"] : []),
+    ...comments.map(({ thread, comment }, index) => `[X${index + 1}] ${threadWhere(thread)}, ${comment.author}${comment.bot ? " (bot)" : ""} ${comment.when.slice(0, 10)}: ${comment.body}`),
   ].join("\n")
   return { text, refs }
 }
 
 // Citations belong in refs; a bracketed "(C1, E2)" left in prose is stripped so it never reaches the human.
-const uncite = (value: string) => value.replace(/\s*[[(](?:[CE]\d+(?:\s*[,;]\s*)?)+[\])]/g, "").trim()
-const text = (value: unknown, max: number) => typeof value === "string" ? uncite(value).slice(0, max) : ""
+const uncite = (value: string) => value.replace(/\s*[[(](?:[CEX]\d+(?:\s*[,;]\s*)?)+[\])]/g, "").trim()
+// Lengths are guidance for the model, not a cut: an overlong field is kept whole up to a generous
+// bound and then ends at a word, so critical meaning is never clipped mid-word.
+const text = (value: unknown, max: number) => {
+  if (typeof value !== "string") return ""
+  const clean = uncite(value)
+  if (clean.length <= max * 3) return clean
+  const cut = clean.slice(0, max * 3)
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), max)).trimEnd()}…`
+}
 const strings = (value: unknown, max: number, limit: number) =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && !!item.trim()).slice(0, limit).map(item => text(item, max)) : []
 const objects = (value: unknown) => Array.isArray(value) ? value.filter((row): row is Record<string, unknown> => !!row && typeof row === "object") : []
-const choicesOf = (value: unknown) => objects(value).flatMap(row => typeof row.id === "string" && text(row.outcome, 60)
-  ? [{ id: row.id, outcome: text(row.outcome, 60), chips: strings(row.chips, 20, 2), risk: text(row.risk, 50) }] : [])
+const sketchOf = (value: unknown) => typeof value === "string" && value.trim() && value.length <= 8000 ? { sketch: value } : {}
+const choicesOf = (value: unknown) => objects(value).flatMap(row => typeof row.id === "string" && text(row.outcome, 140)
+  ? [{ id: row.id, label: text(row.label, 60), outcome: text(row.outcome, 140), note: text(row.note, 120), ...sketchOf(row.sketch) }] : [])
 const shapeOf = (value: unknown): { shape?: BriefShape } => {
   const shape = (value && typeof value === "object" ? value : {}) as Record<string, unknown>
-  if (shape.kind === "sequence") { const steps = strings(shape.steps, 24, 5); return steps.length > 1 ? { shape: { kind: "sequence", steps } } : {} }
+  if (shape.kind === "sequence") { const steps = strings(shape.steps, 48, 6); return steps.length > 1 ? { shape: { kind: "sequence", steps } } : {} }
   if (shape.kind === "scope") {
-    const included = strings(shape.included, 30, 4)
-    const excluded = strings(shape.excluded, 30, 4)
+    const included = strings(shape.included, 60, 5)
+    const excluded = strings(shape.excluded, 60, 5)
     return included.length || excluded.length ? { shape: { kind: "scope", included, excluded } } : {}
   }
   if (shape.kind === "impact") {
-    const rows = objects(shape.rows).slice(0, 4).flatMap(row => text(row.area, 20) && text(row.change, 40) ? [{ area: text(row.area, 20), change: text(row.change, 40) }] : [])
+    const rows = objects(shape.rows).slice(0, 5).flatMap(row => text(row.area, 40) && text(row.change, 80) ? [{ area: text(row.area, 40), change: text(row.change, 80) }] : [])
     return rows.length ? { shape: { kind: "impact", rows } } : {}
   }
   return {}
 }
+// The sandboxed frame cannot size itself (no scripts), so the model states the height it drew for.
+const visualHeight = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? Math.min(560, Math.max(120, Math.round(value))) : 280
 const visualOf = (value: unknown) => {
   if (!value || typeof value !== "object") return {}
   const visual = value as Record<string, unknown>
   return typeof visual.html === "string" && visual.html.trim() && visual.html.length <= 20000
-    ? { visual: { title: text(visual.title, 80), html: visual.html } } : {}
+    ? { visual: { title: text(visual.title, 80), html: visual.html, height: visualHeight(visual.height) } } : {}
 }
 const citedOf = (value: unknown, known: { has: (ref: string) => boolean }) => {
   const rows = objects(value).filter(row => typeof row.text === "string")
@@ -374,8 +398,8 @@ export const briefState = (meta: BriefMeta, messages: MessageWithParts[], status
       state: "ready",
       omitted: facts.omitted + timeline.omitted,
       result: {
-        ask: text(value.ask, 90), whyYou: text(value.whyYou, 90), whyNow: text(value.whyNow, 90), choices: choicesOf(value.choices),
-        ifWait: text(value.ifWait, 60), ...shapeOf(value.shape), unknown: text(value.unknown, 90), gaps: strings(value.gaps, 120, 3),
+        question: text(value.question, 160), context: text(value.context, 320), choices: choicesOf(value.choices),
+        ifWait: text(value.ifWait, 140), sends: typeof value.sends === "string" ? value.sends.trim() : "", ...shapeOf(value.shape), gaps: strings(value.gaps, 160, 3),
         // A source survives only with at least one ref the app can resolve; the label alone is never shown.
         sources: objects(value.sources).slice(0, 3).flatMap(row => {
           const refs = Array.isArray(row.refs) ? row.refs.filter((ref): ref is string => typeof ref === "string" && known.has(ref)) : []
@@ -416,17 +440,24 @@ export const detailRequest = (item: DeskItem, question: string, packet: { text: 
   }
 }
 
-/** A brief replaces reading only when it shows something to decide with: every option's outcome, or,
- * without options, a picture or a why line. Anything less leaves the request as written. */
+/** A brief replaces reading only when it states the question and, with options, every option's outcome.
+ * Anything less leaves the request as written. */
 export const briefComplete = (result: BriefResult, item: DeskItem) => {
   const options = item.record?.options ?? []
-  if (options.length) return options.every(option => result.choices.some(choice => choice.id === option.id))
-  return !!(result.shape || result.whyYou || result.whyNow || result.ask)
+  if (!result.question) return false
+  return options.every(option => result.choices.some(choice => choice.id === option.id))
 }
+
+/** The text a decision would publish, shown only when it is quoted verbatim from the request itself. */
+export const briefSends = (result: BriefResult, item: DeskItem) =>
+  result.sends && item.record?.context.includes(result.sends) ? result.sends : ""
 
 /** Where a cited source can be opened: the source thread at its cited messages, or a markdown file.
  * Undefined when nothing new resolves, so the source is dropped rather than shown as a bare label. */
 export const sourceTarget = (source: BriefSource, refs: EvidenceRef[]) => {
+  // An original conversation fetched read-only (GitHub review comment) opens at its own URL.
+  const external = source.refs.flatMap(id => refs.find(ref => ref.id === id)?.url ?? [])[0]
+  if (external) return { kind: "url" as const, url: external, where: new URL(external).hostname === "github.com" ? "GitHub" : new URL(external).hostname }
   const messages = source.refs.flatMap(id => refs.find(ref => ref.id === id)?.messageID ?? [])
   if (messages.length) return { kind: "thread" as const, message: messages[0], to: messages.length > 1 ? messages.at(-1) : undefined }
   const doc = source.refs.find(ref => /^file:[^\s]+\.md$/.test(ref))

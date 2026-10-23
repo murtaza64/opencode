@@ -35,6 +35,9 @@ export const createFailureIgnores = (deps: { fetch?: typeof fetch; storage?: () 
   const [loaded, setLoaded] = createSignal(initial !== undefined)
   const [pending, setPending] = createSignal<Record<string, boolean>>({})
   const [notice, setNotice] = createSignal("")
+  // A failed read changes nothing the person must act on (all failures stay listed): shown quietly,
+  // with the cause kept for diagnostics. Failed writes stay ordinary notices.
+  const [quiet, setQuiet] = createSignal<string>()
   const accept = async (response: Response) => {
     const body = await response.json() as { entries?: IgnoredFailure[] }
     const next = Array.isArray(body.entries) ? body.entries : []
@@ -48,11 +51,11 @@ export const createFailureIgnores = (deps: { fetch?: typeof fetch; storage?: () 
       if (!response.ok) throw new Error(response.status === 404 ? "the dashboard has no ignored-failures endpoint" : `HTTP ${response.status}`)
       await accept(response)
       setNotice("")
+      setQuiet()
     } catch (cause) {
       const reason = cause instanceof Error ? cause.message : String(cause)
-      setNotice(loaded()
-        ? `Ignored failures could not be refreshed (${reason}); the last confirmed list still applies.`
-        : `Ignored failures could not be read (${reason}); all failures are shown.`)
+      setNotice(loaded() ? "Ignored failures could not be refreshed; the last confirmed list still applies." : "Ignored failures unavailable; all failures are shown.")
+      setQuiet(reason)
     }
   }
   const change = async (op: "ignore" | "unignore", item: Pick<SessionFailure, "sessionID" | "messageID" | "directory"> & { failedAt?: number; label?: string }) => {
@@ -68,19 +71,21 @@ export const createFailureIgnores = (deps: { fetch?: typeof fetch; storage?: () 
       if (response?.ok) {
         await accept(response)
         setNotice("")
+        setQuiet()
         return
       }
       // Both ops are idempotent; re-read so the list shows whatever actually committed.
       await load()
       const reason = !response ? "no response" : response.status === 401 || response.status === 403 ? "the operator connection is unavailable" : `HTTP ${response.status}`
       setNotice(`${op === "ignore" ? "Ignore" : "Unignore"} not confirmed (${reason}).`)
+      setQuiet()
     } finally {
       setPending(previous => { const next = { ...previous }; delete next[id]; return next })
     }
   }
   const ignored = (item: Pick<SessionFailure, "sessionID" | "messageID">) => loaded() && entries().some(entry => key(entry) === key(item))
   return {
-    entries, loaded, notice, load, ignored,
+    entries, loaded, notice, quiet, load, ignored,
     busy: (item: Pick<SessionFailure, "sessionID" | "messageID">) => !!pending()[key(item)],
     ignore: (failure: SessionFailure, label: string) => change("ignore", { ...failure, failedAt: failure.time || undefined, label }),
     unignore: (entry: IgnoredFailure) => change("unignore", { sessionID: entry.sessionID, messageID: entry.messageID, directory: entry.directory }),

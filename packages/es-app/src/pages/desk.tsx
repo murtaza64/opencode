@@ -16,9 +16,11 @@ import type { IgnoredFailure } from "../failure-ignores"
 import { useDeskQueue } from "../desk-queue"
 import { failureAge, failureLabel, failureWhen, OLD_FAILURE_MS } from "../session-failures"
 import type { SessionFailure } from "@opencode-ai/sdk/v2"
-import { briefBinding, briefPacket, deskSources, detailRequest, type DeskItem, type DeskSource } from "../desk"
-import { createDeskSession, createMemory, type BriefJob } from "../desk-session"
+import { briefBinding, briefPacket, briefSends, deskSources, detailRequest, type DeskItem, type DeskSource } from "../desk"
+import { createDeskSession, createMemory, readConversation, type BriefJob } from "../desk-session"
+import { anchorHref } from "../message-anchor"
 import { MoreDetail, PreparedBrief, useCompleteBrief } from "../components/attention-brief"
+import { RecordConversation } from "../components/desk-conversation"
 import { useBriefs } from "../desk-briefs"
 import { oc } from "../api"
 import { flash } from "../motion"
@@ -168,9 +170,10 @@ export default function Desk() {
 
   // "More detail" on a selected item: fresh bounded evidence from its source thread, sent to the desk chat.
   const askDetail = async (item: DeskItem, question: string) => {
-    const tail = await oc.messagesTail(item.source.session, item.source.directory, 10).catch(() => [])
+    const [tail, conversation] = await Promise.all([oc.messagesTail(item.source.session, item.source.directory, 10).catch(() => []), item.record ? readConversation(item.record) : undefined])
     const thread = sessionHref(item.source.session, item.source.directory)
-    const request = detailRequest(item, question, briefPacket(item, tail), ref => ref.messageID ? `${thread}&message=${encodeURIComponent(ref.messageID)}` : thread)
+    const request = detailRequest(item, question, briefPacket(item, tail, conversation?.threads ?? []),
+      ref => ref.url ?? (ref.messageID ? anchorHref(item.source.session, item.source.directory, ref.messageID) : thread))
     const note = context()
     const error = await desk.detail(request.text, [...note, request.context], deskDirectory())
     if (error) return error
@@ -191,8 +194,8 @@ export default function Desk() {
         <ModeSwitch />
         <Show when={!attention.operator()}><div class="home-login home-muted">Read-only: answers are off <button class="desk-button" title="This UI origin must be allowed by the attention server" onClick={() => attention.checkOperator().catch(() => undefined)}>Reconnect</button></div></Show>
         <Show when={attention.notice()}><div class="home-notice" role="status">{attention.notice()}<Show when={attention.pending()}><button class="desk-button" disabled={attention.writing()} onClick={() => void attention.retry()}>Retry same action</button></Show></div></Show>
-        <Show when={briefs.error()}><div class="home-warning desk-background" role="status">{briefs.error()}</div></Show>
-        <Show when={ignores.notice()}><div class="home-warning desk-background" role="status">{ignores.notice()}</div></Show>
+        <Show when={briefs.error()}><div class="home-muted desk-background" role="status" title={briefs.detail()}>{briefs.error()}</div></Show>
+        <Show when={ignores.notice()}><div class={ignores.quiet() ? "home-muted desk-background" : "home-warning desk-background"} role="status" title={ignores.quiet()}>{ignores.notice()}</div></Show>
         <SurfaceList surfaces={surfaces} selected={selectedKey()} onSelect={select} />
         <h2>Needs you <span>{items().length}</span></h2>
         <ul class="desk-items">
@@ -373,7 +376,8 @@ const Canonical = (props: { item: DeskItem; live: boolean; detail: (question: st
   const brief = useCompleteBrief(() => props.item)
   return <div class="desk-canonical">
     <Show when={props.item.record}>{record => <AttentionDecision record={record()} attention={props.attention} prepared={brief()}
-      brief={<PreparedBrief item={props.item} live={props.live} part="lead" />} briefAfter={<PreparedBrief item={props.item} live={props.live} part="after" />}
+      sends={brief() ? briefSends(brief()!, props.item) : ""} conversation={<RecordConversation record={record()} />}
+      brief={<PreparedBrief item={props.item} live={props.live} part="lead" />} briefVisual={<PreparedBrief item={props.item} live={props.live} part="visual" />} briefAfter={<PreparedBrief item={props.item} live={props.live} part="after" />}
       briefDetails={<PreparedBrief item={props.item} live={props.live} part="details" />} more={<MoreDetail ask={props.detail} />} />}</Show>
     <Show when={props.item.request?.kind === "permission" ? props.item.request : undefined}>{request =>
       <HomePermission item={request()} live={requestLive(props.live, request(), props.requests.rows(), dashboard.activity.requestState("permission", request().session, request().directory, request().id))}

@@ -6,6 +6,7 @@ import { ago, sessionHref, useDashboard } from "../state"
 import { Glyph } from "./icons"
 import { LinkedText } from "./linked-text"
 import type { BriefResult } from "../desk"
+import { Visual } from "./attention-brief"
 import { answerDraftKey, attentionPath, blockedReason, decisionLabel, deliveryLabel, type createAttention, type AttentionRecord } from "../attention"
 import { requestAgent, type AgentRef, type RequestAgent } from "../attention-agent"
 
@@ -57,9 +58,10 @@ const historyVersion = (record: AttentionRecord) => `${record.revision}:${record
 
 // One answer: a selected option, a written note, or both. Either alone is a complete answer;
 // nothing is written on the human's behalf. Secondary actions sit beside the single primary one.
-const Answer = (props: { record: AttentionRecord; attention: Attention; options: boolean; onView?: (view: AttentionView) => void; extra?: JSX.Element; prepared?: BriefResult; afterChoices?: JSX.Element }) => {
+const Answer = (props: { record: AttentionRecord; attention: Attention; options: boolean; onView?: (view: AttentionView) => void; extra?: JSX.Element; prepared?: BriefResult; afterChoices?: JSX.Element; sends?: string }) => {
   const [text, setText] = createSignal(localStorage.getItem(answerDraftKey(props.record)) ?? "")
   const [choice, setChoice] = createSignal("")
+  const [noteOpen, setNoteOpen] = createSignal(!!text())
   const canWrite = () => canWriteAttention(props.attention, props.record)
   const selected = () => props.options ? props.record.options.find(option => option.id === choice()) : undefined
   const ready = () => canWrite() && (!!selected() || !!text().trim())
@@ -84,14 +86,14 @@ const Answer = (props: { record: AttentionRecord; attention: Attention; options:
         const recommended = () => props.record.recommendation === option.id
         return <label classList={{ "home-option-card": !!props.prepared }} data-recommended={recommended() ? "" : undefined}>
           <input type="radio" name={id} aria-label={option.label} aria-describedby={[recommended() ? `${id}-recommended` : "", outcome() ? `${id}-${option.id}-outcome` : ""].filter(Boolean).join(" ") || undefined} checked={choice() === option.id} onChange={() => setChoice(option.id)} />
-          <span class="home-option-body"><bdi dir="auto" class="home-option-label">{option.label}</bdi>
+          <span class="home-option-body">
+            <Show when={outcome()?.sketch}>{sketch => <Visual class="home-option-sketch" title={`What ${option.label} looks like`} html={sketch()} height={180} />}</Show>
+            {/* A plain display label when the brief gives one; the producer's exact label stays the radio's name. */}
+            <bdi dir="auto" class="home-option-label" title={outcome()?.label ? option.label : undefined}>{outcome()?.label || option.label}</bdi>
             <Show when={outcome()} fallback={<Show when={recommended()}><span class="home-source" id={`${id}-recommended`}>recommended</span></Show>}>{value => <>
               <span class="home-option-outcome" id={`${id}-${option.id}-outcome`} dir="auto">{value().outcome}</span>
-              <Show when={recommended() || value().chips.length}><span class="home-option-chips">
-                <Show when={recommended()}><span data-recommended id={`${id}-recommended`}>Recommended</span></Show>
-                <For each={value().chips}>{chip => <span dir="auto">{chip}</span>}</For>
-              </span></Show>
-              <Show when={value().risk}><span class="home-option-risk" dir="auto">− {value().risk}</span></Show>
+              <Show when={value().note}><span class="home-option-note" dir="auto">{value().note}</span></Show>
+              <Show when={recommended()}><span class="home-option-chips"><span data-recommended id={`${id}-recommended`}>Recommended</span></span></Show>
             </>}</Show>
           </span>
         </label>
@@ -100,9 +102,14 @@ const Answer = (props: { record: AttentionRecord; attention: Attention; options:
       <Show when={props.prepared?.ifWait}><div class="home-option-card home-option-wait" aria-hidden="true"><span class="home-option-body"><span class="home-option-label">No answer</span><span class="home-option-outcome" dir="auto">{props.prepared!.ifWait}</span></span></div></Show>
     </fieldset></Show>
     {props.afterChoices}
-    <label for={id}>{props.options ? "Note (optional)" : "Your answer"}</label>
-    <textarea id={id} dir="auto" rows={props.options ? 1 : 2} maxLength={8000} value={text()} disabled={!canWrite()}
-      onInput={event => { setText(event.currentTarget.value); localStorage.setItem(answerDraftKey(props.record), event.currentTarget.value) }} />
+    {/* With options, a note is optional and stays folded until asked for (or a saved draft exists). */}
+    <Show when={!props.options || noteOpen()} fallback={<button type="button" class="home-note-toggle" disabled={!canWrite()} onClick={() => setNoteOpen(true)}>Add note</button>}>
+      <label for={id}>{props.options ? "Note (optional)" : "Your answer"}</label>
+      <textarea id={id} dir="auto" rows={props.options ? 1 : 2} maxLength={8000} value={text()} disabled={!canWrite()} ref={element => { if (props.options && !text()) queueMicrotask(() => element.focus()) }}
+        onInput={event => { setText(event.currentTarget.value); localStorage.setItem(answerDraftKey(props.record), event.currentTarget.value) }} />
+    </Show>
+    {/* What a publish decision would send, verbatim from the request, right above the action that approves it. */}
+    <Show when={props.sends}><figure class="home-sends"><figcaption class="home-source">Would post</figcaption><blockquote dir="auto"><LinkedText text={props.sends!} /></blockquote></figure></Show>
     <div class="home-actions">
       {/* On cards the selected card already shows the choice, so the button stays short; its name still says what is sent. */}
       <button class="home-primary" dir="auto" disabled={!ready()} aria-keyshortcuts="Meta+Enter Control+Enter" onClick={() => void send()}
@@ -110,7 +117,7 @@ const Answer = (props: { record: AttentionRecord; attention: Attention; options:
         <Show when={selected()} fallback="Send answer">{option => <Show when={!props.prepared} fallback="Send">Send <bdi dir="auto">{option().label}</bdi></Show>}</Show>
       </button>
       {props.extra}
-      <span class="home-muted">To {target()} · not a tool approval</span>
+      <span class="home-muted"><bdi>To</bdi> {target()}</span>
     </div>
   </div>
 }
@@ -134,7 +141,7 @@ const Delivery = (props: { record: AttentionRecord; attention: Attention }) => {
  * choices (picture, unknown, sources) and `briefDetails` before the original request. With a complete
  * `prepared` brief the producer's raw context moves behind a disclosure and each option becomes a card
  * saying what choosing it leads to. */
-export const AttentionDecision = (props: { record: AttentionRecord; attention: Attention; onView?: (view: AttentionView) => void; brief?: JSX.Element; briefAfter?: JSX.Element; briefDetails?: JSX.Element; prepared?: BriefResult; more?: JSX.Element }) => {
+export const AttentionDecision = (props: { record: AttentionRecord; attention: Attention; onView?: (view: AttentionView) => void; brief?: JSX.Element; briefVisual?: JSX.Element; briefAfter?: JSX.Element; briefDetails?: JSX.Element; prepared?: BriefResult; sends?: string; conversation?: JSX.Element; more?: JSX.Element }) => {
   const [historyOpen, setHistoryOpen] = createSignal(false)
   const [history, setHistory] = createSignal<{ version: string; events?: unknown[]; error?: string }>()
   const canWrite = () => canWriteAttention(props.attention, props.record)
@@ -154,17 +161,25 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
   createEffect(() => { if (historyOpen() && history()?.version !== historyVersion(props.record)) void loadHistory(props.record) })
   // Grouped so a wide pane can set the explanation beside the answer; narrow panes stack the groups in this order.
   return <article class="home-decision" data-attention-id={props.record.id}>
-    <header class="home-decision-head"><div class="home-eyebrow"><Requester record={props.record} /><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Open thread</A></div>
-    <h3><bdi dir="auto">{props.record.title}</bdi></h3></header>
-    <div class="home-decision-explain">
-      <Show when={!props.prepared}><p dir="auto"><LinkedText text={props.record.context} /></p></Show>
+    <header class="home-decision-head"><div class="home-eyebrow"><Requester record={props.record} /><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Agent thread</A></div>
+      <Show when={!props.prepared}><h3><bdi dir="auto">{props.record.title}</bdi></h3></Show></header>
+    {/* A prepared brief leads with the human-level question; the producer's own title stays one line below.
+      * Wide layouts place it above the options, beside the picture. */}
+    <Show when={props.prepared}>{prepared => <div class="home-decision-question">
+      <h3 class="home-question"><bdi dir="auto">{prepared().question}</bdi></h3>
+      <p class="home-request-line"><bdi>Request:</bdi> <bdi dir="auto">{props.record.title}</bdi></p>
       {props.brief}
+    </div>}</Show>
+    <div class="home-decision-explain">
+      {props.conversation}
+      <Show when={!props.prepared}><p dir="auto"><LinkedText text={props.record.context} /></p>{props.brief}</Show>
+      {props.briefVisual}
     </div>
     <div class="home-decision-act">
     <Show when={props.record.status === "open"}>
       {/* A recommendation that names an option is tagged on that option; free text stays visible. */}
       <Show when={props.record.recommendation && !props.record.options.some(option => option.id === props.record.recommendation)}><p class="home-muted">Recommended: <bdi dir="auto"><LinkedText text={props.record.recommendation ?? ""} /></bdi></p></Show>
-      <Answer record={props.record} attention={props.attention} options={props.record.options.length > 0} onView={props.onView} prepared={props.prepared} afterChoices={props.briefAfter}
+      <Answer record={props.record} attention={props.attention} options={props.record.options.length > 0} onView={props.onView} prepared={props.prepared} afterChoices={props.briefAfter} sends={props.sends}
         extra={<><button class="home-quiet" disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "snooze", snoozed_until: Date.now() + 3600_000 })}>Snooze 1h</button><button class="home-quiet" disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "resolve", reason: "Human marked no longer needed" })}>No longer needed</button></>} />
     </Show>
     <Show when={props.record.status === "decided"}><p class="home-recorded">Saved: <bdi dir="auto">{decisionLabel(props.record)}</bdi> · not sent</p><Answer record={props.record} attention={props.attention} options={props.record.options.length > 0} onView={props.onView} /><div class="home-actions"><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open agent thread">Open thread</A><button disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "resolve", reason: "Human marked resolved" })}>Mark resolved</button></div></Show>

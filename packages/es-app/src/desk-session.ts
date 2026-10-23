@@ -7,7 +7,8 @@ import type { Session } from "@opencode-ai/sdk/v2"
 import { descending } from "@opencode-ai/schema/identifier"
 import { oc, SessionCreateError, type ContextPart, type MessageWithParts } from "./api"
 import { assistantOps, handled, emptyMemory, eraseMemory, nextMemory, type MemoryDocument, type MemoryOp } from "./desk-memory"
-import { BRIEF_CONTRACT, BRIEF_SCHEMA, BRIEF_SYSTEM, briefPacket, briefState, deskContext, type BriefMeta, type BriefState, type DeskItem } from "./desk"
+import type { AttentionRecord } from "./attention"
+import { BRIEF_CONTRACT, BRIEF_SCHEMA, BRIEF_SYSTEM, type ConversationThread, briefPacket, briefState, deskContext, type BriefMeta, type BriefState, type DeskItem } from "./desk"
 
 const POINTER = "es-app:front-desk:1"
 const NOTE = "es-app:front-desk:context:1"
@@ -193,6 +194,8 @@ export const BRIEF_PERMISSION = [
 export const createBriefs = (desk: () => DeskPointer | undefined, current: (key: string) => DeskItem | undefined, ensure?: () => Promise<unknown>) => {
   const [jobs, setJobs] = createSignal<BriefJob[]>([])
   const [error, setError] = createSignal("")
+  // The underlying cause of a non-actionable read error: kept for diagnostics, not shown as a banner.
+  const [detail, setDetail] = createSignal("")
   // A create whose response was lost. It keeps its client-chosen session ID, so confirming it
   // re-sends the identical request and Core returns the same session instead of a second one.
   const [pending, setPending] = createSignal(readJSON<PendingCreate>(PENDING, value => typeof value?.id === "string" && typeof value?.body?.id === "string"))
@@ -238,7 +241,7 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
       setSynced(target.session)
       setError("")
     } catch (cause) {
-      if (current === generation) setError(`Background checks could not be read (${String(cause)}). Last-known states are shown.`)
+      if (current === generation) { setError("Briefs could not be refreshed; showing the last known."); setDetail(String(cause)) }
     }
   }
   // Read as soon as the parent is known, not at the next poll.
@@ -294,7 +297,7 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
       if (!desk() && ensure) await ensure()
       const target = desk()
       if (!target) return
-      const tail = await oc.messagesTail(item.source.session, item.source.directory, 10).catch(() => [])
+      const [tail, conversation] = await Promise.all([oc.messagesTail(item.source.session, item.source.directory, 10).catch(() => []), item.record ? readConversation(item.record) : undefined])
       // Re-read the canonical item: the source may have moved on while its thread was read.
       const latest = current(item.key)
       if (!latest || latest.revision !== item.revision) {
@@ -302,7 +305,7 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
         return
       }
       if (desk()?.session !== target.session || pending() || inflight() || reusable(latest)) return
-      const packet = briefPacket(latest, tail)
+      const packet = briefPacket(latest, tail, conversation?.threads ?? [])
       const meta: BriefMeta = { kind: "brief", requestID: crypto.randomUUID(), source: latest.key, revision: latest.revision, title: latest.title, refs: packet.refs, contract: BRIEF_CONTRACT }
       // Deterministic per (parent, source, revision, attempt): every client computes the same ID, so
       // Core's create reconciliation makes the first creator win and the rest adopt its job.
@@ -335,7 +338,24 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
     const value = pending()
     if (value) await admit(value)
   }
-  return { jobs, error, pending, preparing, synced, refresh, start, confirm }
+  return { jobs, error, detail, pending, preparing, synced, refresh, start, confirm }
+}
+
+/** The original human conversation behind a record, read-only via the dashboard. Shared per record
+ * revision so the card and its brief read it once; failure is a quiet empty result. */
+const conversations = new Map<string, Promise<{ threads: ConversationThread[]; error?: string }>>()
+export const readConversation = (record: AttentionRecord) => {
+  const key = `${record.editspace}\u0000${record.id}\u0000${record.revision}`
+  const known = conversations.get(key)
+  if (known) return known
+  const read = fetch(`/es/api/frontdesk/conversation?es=${encodeURIComponent(record.editspace)}&record=${encodeURIComponent(record.id)}`, { credentials: "include" })
+    .then(response => response.ok ? response.json() : { threads: [], error: "Conversation unavailable." })
+    .then(value => ({ threads: Array.isArray(value?.threads) ? value.threads as ConversationThread[] : [], ...(value?.error ? { error: String(value.error) } : {}) }))
+    .catch(() => ({ threads: [], error: "Conversation unavailable." }))
+    // A failed read may be retried after a minute; a found conversation is kept for the revision.
+    .then(value => { if (value.error) setTimeout(() => conversations.delete(key), 60_000); return value })
+  conversations.set(key, read)
+  return read
 }
 
 /** Map with at most `limit` requests in flight, preserving input order. */
@@ -496,6 +516,7 @@ export const briefAnchorID = async (root: string) => {
 export const createBriefAnchor = (directory: () => string | undefined) => {
   const [pointer, setPointer] = createSignal<DeskPointer>()
   const [error, setError] = createSignal("")
+  const [detail, setDetail] = createSignal("")
   const [target, setTarget] = createSignal<DeskPointer>()
   // True once the lookup settled: the parent exists (pointer set) or definitely does not yet.
   const [checked, setChecked] = createSignal(false)
@@ -505,7 +526,7 @@ export const createBriefAnchor = (directory: () => string | undefined) => {
     void briefAnchorID(root).then(id => {
       setTarget({ session: id, directory: root })
       return oc.session(id, root).then(existing => { setPointer({ session: id, directory: existing.directory }); setChecked(true) },
-        cause => { if (String(cause).includes("HTTP 404")) setChecked(true); else setError(`Briefs are unavailable (${String(cause)}).`) })
+        cause => { if (String(cause).includes("HTTP 404")) setChecked(true); else { setError("Briefs unavailable."); setDetail(String(cause)) } })
     })
   })
   const ensure = async () => {
@@ -520,8 +541,9 @@ export const createBriefAnchor = (directory: () => string | undefined) => {
       setError("")
       return pointer()
     } catch (cause) {
-      setError(`Briefs are unavailable (${cause instanceof Error ? cause.message : String(cause)}).`)
+      setError("Briefs unavailable.")
+      setDetail(cause instanceof Error ? cause.message : String(cause))
     }
   }
-  return { pointer, error, checked, ready: () => !!target(), ensure }
+  return { pointer, error, detail, checked, ready: () => !!target(), ensure }
 }

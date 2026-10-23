@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { briefComplete, detailRequest, sourceTarget, type BriefResult, type DeskItem, type EvidenceRef } from "./desk"
+import { briefComplete, briefSends, detailRequest, sourceTarget, type BriefResult, type DeskItem, type EvidenceRef } from "./desk"
 
 const item = { key: "attention:alpha:att_1", kind: "decision", title: "Pick", revision: "2", checked: 1, source: { session: "ses_src", directory: "/alpha" },
   record: { options: [{ id: "a", label: "A" }, { id: "b", label: "B" }] } } as unknown as DeskItem
@@ -16,10 +16,24 @@ test("a file source resolves only to a markdown doc; anything else has no destin
   expect(sourceTarget({ label: "Code", refs: ["file:src/a.ts"] }, refs)).toBeUndefined()
 })
 
-test("a brief stands in for the request only when every option has an outcome", () => {
-  const result: BriefResult = { ask: "", whyYou: "", whyNow: "", choices: [{ id: "a", outcome: "Ships", chips: [], risk: "" }], ifWait: "", unknown: "", sources: [], facts: [], timeline: [], gaps: [] }
+test("a brief stands in for the request only with a question and every option's outcome", () => {
+  const result: BriefResult = { question: "Pick A or B?", context: "", choices: [{ id: "a", label: "", outcome: "Ships", note: "" }], ifWait: "", sends: "", sources: [], facts: [], timeline: [], gaps: [] }
   expect(briefComplete(result, item)).toBe(false)
-  expect(briefComplete({ ...result, choices: [...result.choices, { id: "b", outcome: "Waits", chips: [], risk: "" }] }, item)).toBe(true)
+  const both = { ...result, choices: [...result.choices, { id: "b", label: "", outcome: "Waits", note: "" }] }
+  expect(briefComplete(both, item)).toBe(true)
+  expect(briefComplete({ ...both, question: "" }, item)).toBe(false)
+})
+
+test("text a decision would publish is shown only when quoted verbatim from the request", () => {
+  const record = { ...item, record: { options: [], context: "Draft reply: 'Checked: not needed.' Rule: ask first." } } as unknown as DeskItem
+  const result: BriefResult = { question: "Post it?", context: "", choices: [], ifWait: "", sends: "Checked: not needed.", sources: [], facts: [], timeline: [], gaps: [] }
+  expect(briefSends(result, record)).toBe("Checked: not needed.")
+  expect(briefSends({ ...result, sends: "Checked: definitely not needed." }, record)).toBe("")
+})
+
+test("a source from the original conversation opens that conversation", () => {
+  const external: EvidenceRef[] = [...refs, { id: "X1", label: "jzink-duo on GitHub review", url: "https://github.com/o/r/pull/1#discussion_r2" }]
+  expect(sourceTarget({ label: "Jordan's reply", refs: ["X1", "E1"] }, external)).toEqual({ kind: "url", url: "https://github.com/o/r/pull/1#discussion_r2", where: "GitHub" })
 })
 
 test("a detail request carries the question visibly and binds the evidence to the item's exact revision", () => {

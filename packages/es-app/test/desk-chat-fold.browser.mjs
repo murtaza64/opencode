@@ -64,13 +64,16 @@ try {
   expect(await chat.evaluate((el) => Math.round(el.getBoundingClientRect().width))).toBe(Math.round(before.width))
   await shot(page, "1440-folded")
 
-  // Wide pane: two columns, the answer beside the explanation and Send on screen.
+  // Wide pane: two columns, the answer beside the explanation and Send on screen. With a prepared
+  // brief the inline-end column opens with its question above the options.
   const act = page.locator(".home-decision-act")
   const explain = page.locator(".home-decision-explain")
+  const question = page.locator(".home-decision-question")
   const actBox = await act.boundingBox()
   const explainBox = await explain.boundingBox()
+  const endTop = (await question.count()) ? (await question.boundingBox()).y : actBox.y
   expect(actBox.x, "answer column sits at inline-end").toBeGreaterThan(explainBox.x + explainBox.width - 1)
-  expect(Math.abs(actBox.y - explainBox.y), "columns share a top").toBeLessThan(2)
+  expect(Math.abs(endTop - explainBox.y), "columns share a top").toBeLessThan(2)
   const send = page.getByRole("button", { name: /^Send/ }).first()
   const sendBox = await send.boundingBox()
   expect(sendBox.y + sendBox.height, "Send fits the window").toBeLessThanOrEqual(1000)

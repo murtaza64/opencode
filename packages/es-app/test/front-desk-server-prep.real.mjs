@@ -60,12 +60,12 @@ const provider = http.createServer(async (request, response) => {
   const chunks = []
   for await (const chunk of request) chunks.push(chunk)
   const body = Buffer.concat(chunks).toString()
-  const brief = body.includes("visual decision aid")
+  const brief = body.includes("You help a busy person decide one request")
   if (brief) briefCalls.push(body)
   if (brief) briefModels.push(JSON.parse(body).model)
   const content = brief
-    ? JSON.stringify({ ask: ASK, whyYou: "", whyNow: "", choices: [{ id: "canary", outcome: "The canary keeps 5% of traffic", chips: [], risk: "" },
-      { id: "full", outcome: "Every user gets the release now", chips: [], risk: "" }], ifWait: "", unknown: "", sources: [], gaps: [],
+    ? JSON.stringify({ question: ASK, choices: [{ id: "canary", outcome: "The canary keeps 5% of traffic" },
+      { id: "full", outcome: "Every user gets the release now" }], sources: [], gaps: [],
       facts: [{ text: "The canary is healthy.", refs: ["C1"] }], timeline: [] })
     : "synthetic ack"
   response.writeHead(200, { "content-type": "text/event-stream" })
@@ -157,7 +157,7 @@ try {
   const page = await context.newPage()
   await page.goto(`${uiOrigin}/?item=${encodeURIComponent(source)}`)
   const card = page.locator(`[data-attention-id="${published.id}"]`)
-  await expect(card.locator(".desk-brief-ask")).toContainText(ASK, { timeout: 60_000 })
+  await expect(card.locator("h3.home-question")).toContainText(ASK, { timeout: 60_000 })
   await expect(card.locator(".home-option-card", { hasText: "Full rollout" })).toContainText("Every user gets the release now")
   await expect(card.locator(".home-original summary")).toHaveText("Original request")
   await sleep(5000)

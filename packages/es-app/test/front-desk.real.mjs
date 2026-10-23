@@ -94,20 +94,20 @@ const provider = http.createServer(async (request, response) => {
     if (Number(revision) >= 6 && !raw.includes('"role":"tool"')) return tool(response, "read", { filePath: path.join(project, "ROLLOUT.md") })
     if (Number(revision) >= 6) seen.retrieved.push(raw.includes("canary owner is Kim"))
     const reply = () => text(response, JSON.stringify({
-      ask: "Choose whether to stay at the canary or roll out fully",
-      whyYou: "Full rollout reaches every user at once", whyNow: "The canary has been healthy for a day",
-      choices: [{ id: "canary", outcome: `Traffic stays at 5% while you watch errors (rev ${revision})`, chips: ["5% traffic"], risk: "Slower" }, { id: "full", outcome: "All traffic moves now", chips: [], risk: "" }],
+      question: "Choose whether to stay at the canary or roll out fully",
+      context: "The canary has been healthy for a day; full rollout reaches every user at once.",
+      choices: [{ id: "canary", outcome: `Traffic stays at 5% while you watch errors (rev ${revision})`, note: "Slower" }, { id: "full", outcome: "All traffic moves now" }],
       sources: [{ label: "Canary deploy note", refs: ["E2"] }],
       ifWait: "",
       shape: { kind: "sequence", steps: ["build", "canary 5%", "decide"] },
-      unknown: "Who owns the full rollout is not stated", gaps: [],
+      gaps: ["Who owns the full rollout is not stated"],
       facts: [{ text: "Canary serves 5% of traffic", refs: ["E2"] }, { text: "Invented claim", refs: ["E99"] }],
       timeline: [{ when: "10:00", text: "Canary deployed", refs: ["E2"] }],
       // Automatic briefs draw their own picture instead of a shape.
       ...(Number(revision) >= 6 ? {
         shape: undefined,
         facts: [{ text: "Kim owns the canary", refs: ["file:ROLLOUT.md"] }],
-        visual: { title: "Canary versus full rollout", html: '<table id="cmp"><tr><th></th><th>Stay at canary</th><th>Full rollout</th></tr><tr><td>Traffic</td><td>5%</td><td>100%</td></tr></table><img src="https://example.invalid/x.png"><script>document.body.dataset.ran="yes"</script>' },
+        visual: { title: "Canary versus full rollout", height: 160, html: '<table id="cmp"><tr><th></th><th>Stay at canary</th><th>Full rollout</th></tr><tr><td>Traffic</td><td>5%</td><td>100%</td></tr></table><img src="https://example.invalid/x.png"><script>document.body.dataset.ran="yes"</script>' },
       } : {}),
     }))
     return holdBriefs ? holds.push(reply) : reply()
@@ -402,7 +402,8 @@ try {
   await page.evaluate(() => { document.querySelector(".desk-chat .prompt-box textarea").dataset.mountProbe = "kept" })
   await page.locator(".desk-item").first().click()
   await expect(page.locator(".desk-evidence")).toContainText("Pick a rollout")
-  await expect(page.locator(".desk-evidence .home-answer textarea")).toBeDisabled()
+  // Read-only operator: the answer controls (here the folded note) are disabled.
+  await expect(page.locator(".desk-evidence .home-answer").getByRole("button", { name: "Add note" })).toBeDisabled()
   await expect(editor()).toHaveValue(draft)
   await expect(editor()).toHaveAttribute("data-mount-probe", "kept")
   await page.getByRole("button", { name: "Close and return to chat" }).click()
@@ -696,7 +697,7 @@ try {
   const card = page.locator('.home-decision[data-attention-id="att_rollout"]')
   await expect(card).toContainText("revision 6", { timeout: 40000 })
   await expect(card.getByRole("button", { name: "Prepare brief" })).toHaveCount(0)
-  await expect(card.locator(".desk-brief-ask")).toContainText("Choose whether to stay at the canary or roll out fully", { timeout: 60000 })
+  await expect(card.locator("h3.home-question")).toContainText("Choose whether to stay at the canary or roll out fully", { timeout: 60000 })
   await expect(card).toContainText("Kim owns the canary")
   await card.locator(".desk-brief-detail > summary").click()
   await expect(card.locator(".desk-brief .desk-ref", { hasText: "file:ROLLOUT.md" })).toBeVisible()
@@ -712,7 +713,8 @@ try {
   await expect(original).toContainText("The canary is healthy. Choose how far to roll out.")
   await expect(card.locator(".home-options label", { hasText: "Stay at canary" })).toContainText(/recommended/i)
   await expect(card.getByRole("radio")).toHaveCount(2)
-  await expect(secondPage.locator('.home-decision[data-attention-id="att_rollout"] .desk-brief-ask')).toContainText("Choose whether", { timeout: 30000 })
+  await expect(secondPage.locator('.home-decision[data-attention-id="att_rollout"] h3.home-question')).toContainText("Choose whether", { timeout: 60000 })
+    .catch(async (error) => { console.error(`--- second client: ${(await secondPage.locator("main").innerText().catch(() => "none")).slice(0, 1500)}`); throw error })
   assert.equal(hits.brief, autoHits + 2, "one automatic job across two clients: one tool step and one reply")
   const rev6 = (await call("GET", `/session/${briefAnchor}/children`)).body.filter((item) => item.metadata?.frontDesk?.revision === "6")
   assert.equal(rev6.length, 1)
@@ -721,17 +723,17 @@ try {
   assert.deepEqual((await call("GET", "/permission")).body, [], "no permission request was created")
   if (evidence) await page.screenshot({ path: path.join(evidence, "05-home-auto-brief.png"), fullPage: true })
   await page.reload()
-  await expect(card.locator(".desk-brief-ask")).toContainText("Choose whether", { timeout: 20000 })
+  await expect(card.locator("h3.home-question")).toContainText("Choose whether", { timeout: 20000 })
   await page.goto(`${origin}/`)
   await page.locator(".desk-item").first().click()
-  await expect(page.locator(".desk-brief .desk-brief-ask")).toContainText("Choose whether to stay at the canary", { timeout: 20000 })
+  await expect(page.locator(".desk-evidence h3.home-question")).toContainText("Choose whether to stay at the canary", { timeout: 20000 })
   await new Promise((resolve) => setTimeout(resolve, 3000))
   assert.equal(hits.brief, autoHits + 2, "reload and the desk reuse the job")
   assert.equal((await call("GET", `/session/${briefAnchor}/children`)).body.filter((item) => item.metadata?.frontDesk?.revision === "6").length, 1)
   attentionRevision = 7
   await page.goto(rollout)
   await expect(card).toContainText("revision 7", { timeout: 40000 })
-  await expect(card.locator(".desk-brief-ask")).toContainText("Choose whether", { timeout: 60000 })
+  await expect(card.locator("h3.home-question")).toContainText("Choose whether", { timeout: 60000 })
   await expect(card).toContainText("Brief for revision 7")
   assert.equal((await call("GET", `/session/${briefAnchor}/children`)).body.filter((item) => item.metadata?.frontDesk?.revision === "7").length, 1)
   assert.equal(hits.brief, autoHits + 4)
@@ -763,7 +765,7 @@ try {
   // 11b. More detail: an explicit question about the selected decision reaches the desk conversation with
   //      bounded evidence and citable links, gets an answer there, and leaves the chat draft alone.
   await page.goto(rollout)
-  await expect(card.locator(".desk-brief-ask")).toBeVisible({ timeout: 30000 })
+  await expect(card.locator("h3.home-question")).toBeVisible({ timeout: 30000 })
   await editor().fill("my unsent draft")
   const briefsBeforeDetail = hits.brief
   await card.getByRole("button", { name: "More detail" }).click()

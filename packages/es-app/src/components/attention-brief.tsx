@@ -6,6 +6,7 @@ import { useBriefs } from "../desk-briefs"
 import { A } from "@solidjs/router"
 import { sessionHref } from "../state"
 import { docHref } from "../pages/doc"
+import { anchorHref } from "../message-anchor"
 import { briefComplete, sourceTarget, type BriefResult, type BriefShape, type BriefSource, type DeskItem, type EvidenceRef } from "../desk"
 import { currentJob, type BriefJob } from "../desk-session"
 import { LinkedText } from "./linked-text"
@@ -22,12 +23,13 @@ const Refs = (props: { refs: string[]; known: EvidenceRef[]; item: DeskItem }) =
 const sourceLink = (source: BriefSource, refs: EvidenceRef[], item: DeskItem) => {
   const target = sourceTarget(source, refs)
   if (target?.kind === "doc") return { kind: "Doc", href: docHref("editspace", target.path) }
-  if (target) return { kind: "Thread", href: `${sessionHref(item.source.session, item.source.directory)}&message=${encodeURIComponent(target.message)}${target.to ? `&to=${encodeURIComponent(target.to)}` : ""}` }
+  if (target?.kind === "url") return { kind: target.where, href: target.url }
+  if (target) return { kind: "Agent thread", href: anchorHref(item.source.session, item.source.directory, target.message, target.to) }
 }
 
-type Part = "lead" | "after" | "details"
+type Part = "lead" | "visual" | "after" | "details"
 /** `part` renders one slot of a brief inside a decision card; without it the whole brief renders in one place. */
-export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJob[]; canStart: boolean; confirming: boolean; start: () => void; confirm: () => void; unavailable?: string; auto?: boolean; part?: Part }) => {
+export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJob[]; canStart: boolean; confirming: boolean; start: () => void; confirm: () => void; unavailable?: string; unavailableDetail?: string; auto?: boolean; part?: Part }) => {
   const current = () => currentJob(props.jobs, props.item)
   const discarded = () => props.jobs.filter(job => job.meta.revision !== props.item.revision)
   const ready = () => { const job = current(); return job?.state.state === "ready" ? { job, result: job.state.result as BriefResult, omitted: job.state.omitted } : undefined }
@@ -38,30 +40,29 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
       <Show when={current()} fallback={<Show when={props.live}>
         <Show when={props.auto && !props.unavailable} fallback={<>
           <button class="desk-button" disabled={!props.canStart} onClick={props.start}>Prepare brief</button>
-          <Show when={props.unavailable}><span class="home-source"> {props.unavailable}</span></Show>
+          <Show when={props.unavailable}><span class="home-source" title={props.unavailableDetail}> {props.unavailable}</span></Show>
         </>}><p class="home-muted" role="status">Preparing brief…</p></Show>
       </Show>}>{job => <>
         <Show when={job().state.state === "starting" || job().state.state === "running"}><p class="home-muted" role="status">Preparing brief…</p></Show>
-        <Show when={job().state.state === "failed"}><p class="home-warning">Brief failed: {(job().state as { error: string }).error}</p></Show>
-        <Show when={job().state.state === "unknown"}><p class="home-warning">{(job().state as { reason: string }).reason}</p></Show>
+        {/* A brief that did not finish is one quiet line: the request below stays readable as written. */}
+        <Show when={job().state.state === "failed"}><p class="home-muted" title={(job().state as { error: string }).error}>Brief failed.</p></Show>
+        <Show when={job().state.state === "unknown"}><p class="home-muted">{(job().state as { reason: string }).reason}</p></Show>
         {/* Confirm resends the identical request; Core returns the same brief if the first start landed. */}
         <Show when={job().state.state === "unconfirmed"}><p class="home-warning">Brief start not confirmed.</p>
           <button class="desk-button" disabled={props.confirming} onClick={props.confirm}>Confirm start</button></Show>
         <Show when={(job().state.state === "failed" || job().state.state === "unknown") && props.live}><button class="desk-button" disabled={!props.canStart} onClick={props.start}>Prepare again</button></Show>
       </>}</Show>
       <Show when={!current() && discarded().length}><p class="home-source">The request changed since the last brief.</p></Show>
+      {/* The question itself is the card's heading; the lead adds only context and the picture. */}
       <Show when={complete() && ready()}>{value => <div class="desk-brief-body">
-        <Show when={value().result.ask}><p class="desk-brief-ask" dir="auto"><LinkedText text={value().result.ask} /></p></Show>
-        <Show when={value().result.whyYou || value().result.whyNow}><p class="desk-brief-why" dir="auto">
-          <Show when={value().result.whyYou}><b>Why you:</b> <LinkedText text={value().result.whyYou} /> </Show>
-          <Show when={value().result.whyNow}><b>Why now:</b> <LinkedText text={value().result.whyNow} /></Show>
-        </p></Show>
+        <Show when={!props.item.record}><p class="desk-brief-question" dir="auto">{value().result.question}</p></Show>
+        <Show when={value().result.context}><p class="desk-brief-context" dir="auto"><LinkedText text={value().result.context} /></p></Show>
+        <Show when={!props.item.record?.options.length && value().result.ifWait}><p class="home-muted" dir="auto">If you wait: <LinkedText text={value().result.ifWait} /></p></Show>
       </div>}</Show>
     </Show>
+    <Show when={shows("visual") && complete() && ready()}>{value =>
+      <Show when={value().result.visual} fallback={<Show when={value().result.shape}>{shape => <Shape shape={shape()} />}</Show>}>{visual => <Visual title={visual().title} html={visual().html} height={visual().height} />}</Show>}</Show>
     <Show when={shows("after") && complete() && ready()}>{value => <div class="desk-brief-after">
-      <Show when={!props.item.record?.options.length && value().result.ifWait}><p class="home-muted" dir="auto">If you wait: <LinkedText text={value().result.ifWait} /></p></Show>
-      <Show when={value().result.shape}>{shape => <Shape shape={shape()} />}</Show>
-      <Show when={value().result.unknown}><p class="desk-brief-unknown" dir="auto"><span>Unknown</span> <LinkedText text={value().result.unknown} /></p></Show>
       <SourceLinks sources={value().result.sources} refs={value().job.meta.refs} item={props.item} />
     </div>}</Show>
     {/* Cited evidence and provenance stay one click away, not in the reading path. */}
@@ -69,7 +70,6 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
       <Show when={value().result.facts.length}><ul><For each={value().result.facts}>{fact => <li><bdi dir="auto"><LinkedText text={fact.text} /></bdi> <Refs refs={fact.refs} known={value().job.meta.refs} item={props.item} /></li>}</For></ul></Show>
       <Show when={value().result.timeline.length}><ol class="desk-timeline"><For each={value().result.timeline}>{entry => <li><Show when={entry.when}><span class="home-source">{entry.when} · </span></Show><bdi dir="auto"><LinkedText text={entry.text} /></bdi> <Refs refs={entry.refs} known={value().job.meta.refs} item={props.item} /></li>}</For></ol></Show>
       <Show when={value().result.gaps.length}><ul class="home-muted"><For each={value().result.gaps}>{gap => <li dir="auto">{gap}</li>}</For></ul></Show>
-      <Show when={value().result.visual}>{visual => <Visual title={visual().title} html={visual().html} />}</Show>
       {/* An incomplete brief still offers what it found, without standing in for the request. */}
       <Show when={!complete()}><SourceLinks sources={value().result.sources} refs={value().job.meta.refs} item={props.item} /></Show>
       <p class="home-source">Brief for revision {value().job.meta.revision}<Show when={value().omitted}> · {value().omitted} uncited statement(s) omitted</Show> · <A href={sessionHref(value().job.id, value().job.directory)}>Brief thread</A></p>
@@ -99,11 +99,14 @@ const Shape = (props: { shape: BriefShape }) =>
 
 // No scripts, forms, navigation or same-origin access, and CSP blocks every network request.
 const CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:"
-const Visual = (props: { title: string; html: string }) =>
-  <figure class="desk-visual">
-    <iframe title={props.title || "Brief visual"} sandbox="" referrerpolicy="no-referrer" loading="lazy"
-      srcdoc={`<!doctype html><meta http-equiv="Content-Security-Policy" content="${CSP}"><style>html{color-scheme:dark;color:#cdd6f4;background:#181825;font:13px system-ui,sans-serif}body{margin:10px}</style>${props.html}`} />
-    <Show when={props.title}><figcaption class="home-source">{props.title}</figcaption></Show>
+// A drawing is shown at most at the width it was made for, so a wider column never enlarges its text past
+// the card's; taller content scrolls inside the frame rather than being cut off.
+const FRAME_MARGIN = 8
+const FRAME_STYLE = "html{color-scheme:dark;color:#cdd6f4;background:#181825;font:13px system-ui,sans-serif}body{margin:8px}svg{display:block;max-inline-size:min(100%,640px);block-size:auto}"
+export const Visual = (props: { title: string; html: string; height: number; class?: string }) =>
+  <figure class={props.class ?? "desk-visual"}>
+    <iframe title={props.title || "Brief visual"} sandbox="" referrerpolicy="no-referrer" loading="lazy" style={{ "block-size": `${props.height + FRAME_MARGIN * 2}px` }}
+      srcdoc={`<!doctype html><meta http-equiv="Content-Security-Policy" content="${CSP}"><style>${FRAME_STYLE}</style>${props.html}`} />
   </figure>
 
 /** Asks the desk conversation to explain this item further, with an optional question. Only an explicit
@@ -149,7 +152,7 @@ export const PreparedBrief = (props: { item: DeskItem; live: boolean; part?: Par
   const briefs = prepared.briefs
   return <BriefPanel item={props.item} live={props.live} auto={prepared.auto()} part={props.part}
     jobs={briefs.jobs().filter(job => job.meta.source === props.item.key)}
-    canStart={(!prepared.auto() || prepared.anchor.ready()) && !briefs.pending() && !briefs.preparing()} unavailable={prepared.anchor.error() || undefined}
+    canStart={(!prepared.auto() || prepared.anchor.ready()) && !briefs.pending() && !briefs.preparing()} unavailable={prepared.anchor.error() || undefined} unavailableDetail={prepared.anchor.detail()}
     confirming={briefs.jobs().some(job => job.state.state === "starting")}
     start={() => void briefs.start(props.item)} confirm={() => void briefs.confirm()} />
 }
