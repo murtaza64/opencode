@@ -1,4 +1,4 @@
-.desk { display: flex; flex-direction: column; height: 100%; max-width: none; margin: 0; padding: 0 0 0 20px; box-sizing: border-box; font-size: 13px; }
+.desk { display: flex; flex-direction: column; height: 100%; max-width: none; margin: 0; padding: 0; box-sizing: border-box; font-size: 13px; }
 .content:has(.desk) { overflow: hidden; }
 .desk h1 { font-size: 17px; }
 .desk h2 { font-size: 13px; margin: 18px 0 8px; font-weight: 600; color: var(--text); }
@@ -8,9 +8,15 @@
 .desk-button:disabled { opacity: .45; cursor: default; }
 .desk-button.home-primary { border-color: var(--peach); color: var(--peach); }
 .desk :is(button, a):focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
-.desk-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 0; }
-.desk-has-selection .desk-grid { grid-template-columns: minmax(220px, 280px) minmax(0, 1.25fr) minmax(360px, 1fr); }
-.desk-queue { overflow-y: auto; padding-inline-end: 14px; border-inline-end: 1px solid var(--surface0); }
+.desk-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--queue-width, 240px) minmax(0, 1fr); gap: 0; }
+.desk-has-selection .desk-grid { grid-template-columns: var(--queue-width, 240px) minmax(0, 1.25fr) minmax(360px, 1fr); }
+/* The queue is Front desk mode's sidebar: same surface and top controls as the Agents sidebar. */
+.desk-queue { display: flex; flex-direction: column; overflow-y: auto; padding: 10px 10px 0; background: var(--mantle); border-inline-end: 1px solid var(--crust); }
+.desk-queue > * { flex-shrink: 0; }
+.desk-queue > :is(.sidebar-top, .mode-switch) { padding-inline: 0; }
+.desk-queue > .desk-sources { margin-block: auto 0; padding-block: 8px 12px; border-block-start: 1px solid var(--surface0); }
+.desk-sources-bar { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.desk-sources-bar .desk-button { padding: 1px 7px; font-size: 11px; }
 .desk-chat-tab { inline-size: 100%; margin-block-start: 12px; text-align: start; padding: 8px 10px; font: inherit; color: var(--subtext1); background: transparent; border: 1px solid var(--surface1); cursor: pointer; }
 .desk-chat-tab[aria-pressed=true] { color: var(--text); border-color: var(--peach); }
 .desk-items { list-style: none; margin: 0; padding: 0; }
@@ -48,10 +54,9 @@
 .desk-job[data-state=ready][data-current=true] > span:first-child { color: var(--green); }
 .desk-start { padding: 30px 20px; max-width: 70ch; line-height: 1.6; }
 @media (max-width: 900px) {
-  .desk { padding-inline-start: 10px; }
   .desk-grid, .desk-has-selection .desk-grid { display: block; overflow-y: auto; }
-  .desk-queue { border: 0; overflow: visible; padding-inline-end: 10px; }
-  .desk-evidence.attention-home { overflow: visible; border: 0; padding-inline: 0; }
+  .desk-queue { border: 0; overflow: visible; }
+  .desk-evidence.attention-home { overflow: visible; border: 0; padding-inline: 10px; }
   .desk-chat { block-size: 85vh; }
 }
 .desk-evidence-head h2 { margin: 0; }

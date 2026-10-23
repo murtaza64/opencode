@@ -1,4 +1,4 @@
-// Front desk permission replies and pinned-agent TODO lines against the disposable fixture daemon.
+// Front desk permission replies against the disposable fixture daemon.
 // Run from packages/es-app: node test/home-agents.browser.mjs
 import { createRequire } from "node:module"
 import path from "node:path"
@@ -36,47 +36,13 @@ const emit = (type, properties) => {
 const card = (id) => page.locator(`.home-permission[data-request-id="${id}"]`)
 const queued = (id) => page.locator(`.desk-item[data-desk-item="permission:${directory}:${id}"]`)
 const select = async (id) => { await queued(id).click(); await expect(card(id)).toBeVisible() }
-const todos = () => fixture.calls.filter((call) => /^\/session\/ses_[ab]\/todo$/.test(call.path))
-const todoLine = () => page.getByRole("region", { name: "Pinned agents" }).locator(".home-todo")
-const showAgents = () => page.getByRole("complementary", { name: "Desk queue" }).getByRole("button", { name: /^Agents/ }).click()
 const refresh = () => page.getByRole("button", { name: "Refresh", exact: true }).click()
 try {
-  // The first TODO read fails transiently; explicit Refresh recovers it without a stream reconnect.
-  let todoFailures = 1
-  await page.route("**/oc/session/ses_a/todo?*", (route) => todoFailures-- > 0 ? route.fulfill({ status: 503, body: "down" }) : route.continue())
   await page.goto(preview.url, { waitUntil: "domcontentloaded" })
   // A cold Vite dependency optimization can delay the first render.
   await expect(queued("per_home")).toBeVisible({ timeout: 90_000 })
   await expect(queued("per_other")).toBeVisible()
-  await showAgents()
-  await expect(todoLine()).toContainText("TODOs unavailable")
-  const streams = [...fixture.eventStreams.values()].filter((stream) => stream.path === "/global/event").length
-  await refresh()
-  await expect(todoLine()).toContainText("Wire permission replies")
-  expect([...fixture.eventStreams.values()].filter((stream) => stream.path === "/global/event").length).toBe(streams)
-
-  // TODO: one snapshot read for the pinned session only, then events. A bare
-  // snapshot has no turn provenance, so it is not claimed as current work.
-  await expect(todoLine()).toContainText("In-progress TODO")
-  await expect(todoLine()).toContainText("1/3 · no update observed this turn")
-  await expect(todoLine()).not.toContainText("update observed this turn · received")
-  expect(todos().map((call) => call.path)).toEqual(["/session/ses_a/todo"])
-  emit("todo.updated", { sessionID: "ses_b", todos: [{ content: "Not pinned", status: "in_progress", priority: "low" }] })
-  emit("todo.updated", { sessionID: "ses_a", todos: [
-    { content: "Read the Home design", status: "completed", priority: "high" },
-    { content: "Wire permission replies", status: "completed", priority: "high" },
-    { content: "Verify in RTL", status: "in_progress", priority: "medium" },
-  ] })
-  await expect(todoLine()).toContainText("Verify in RTL")
-  await expect(todoLine()).toContainText("2/3 · update observed this turn · received")
-  await expect(todoLine()).toHaveAttribute("data-provenance", "observed")
-  // A session.updated during the turn re-renders the pinned row; the observation survives without a reread.
-  emit("session.updated", { sessionID: "ses_a", info: { id: "ses_a", title: "Composer fixture", directory, projectID: "fixture", slug: "a", version: "1", agent: "build", time: { created: 1, updated: Date.now() } } })
-  await page.waitForTimeout(500)
-  await expect(todoLine()).toHaveAttribute("data-provenance", "observed")
-  expect(todos().length).toBe(1)
   await page.screenshot({ path: path.join(artifacts, "home-agents-ltr.png"), fullPage: true })
-  await page.getByRole("region", { name: "Pinned agents" }).screenshot({ path: path.join(artifacts, "home-agents-todo.png") })
 
   // Context: tool, exact request/session identity, patterns, metadata and cascade semantics.
   await select("per_home")
@@ -164,24 +130,6 @@ try {
   await expect(queued("per_elsewhere")).toHaveCount(0)
   expect(replies.some((reply) => reply.id === "per_elsewhere")).toBe(false)
 
-  // A new busy turn with the earlier list is not current; idle is labelled as idle.
-  await showAgents()
-  const work = fixture.currentWork
-  fixture.currentWork = (...args) => ({ ...work(...args), turn: { ...work(...args).turn, started_at: Date.now() + 1_000, watermark: "turn-2" } })
-  await expect(todoLine()).toContainText("no update observed this turn", { timeout: 15_000 })
-  await expect(todoLine()).toHaveAttribute("data-provenance", "unobserved")
-  fixture.currentWork = (...args) => ({ ...work(...args), turn: { ...work(...args).turn, status: "idle" } })
-  await expect(todoLine()).toContainText("agent idle", { timeout: 15_000 })
-  fixture.currentWork = work
-
-  // Completed and absent lists stay honest, and event-driven updates never reread.
-  const reads = todos().length
-  emit("todo.updated", { sessionID: "ses_a", todos: [{ content: "Verify in RTL", status: "completed", priority: "medium" }] })
-  await expect(todoLine()).toContainText("All 1/1 done")
-  emit("todo.updated", { sessionID: "ses_a", todos: [] })
-  await expect(todoLine()).toContainText("No TODO list")
-  expect(todos().length).toBe(reads)
-
   // RTL and narrow layouts keep commands LTR and actions reachable.
   fixture.permissions = [permission("per_rtl", "ses_b", "git push origin مرحبا")]
   emit("permission.asked", fixture.permissions[0])
@@ -197,7 +145,7 @@ try {
   await expect(card("per_rtl").getByRole("button", { name: "Reject", exact: true })).toBeInViewport()
   await page.screenshot({ path: path.join(artifacts, "home-agents-mobile-rtl.png"), fullPage: true })
   expect(errors).toEqual([])
-  console.log(`PASS front desk permission replies + TODO lines; screenshots in ${artifacts}`)
+  console.log(`PASS front desk permission replies; screenshots in ${artifacts}`)
 } catch (error) {
   await page.screenshot({ path: path.join(artifacts, "home-agents-failure.png"), fullPage: true }).catch(() => undefined)
   console.error(error, errors)

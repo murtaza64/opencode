@@ -40,8 +40,12 @@ try {
   fixture.emit("message.updated", { info: assistant })
   fixture.emit("message.part.updated", { part: { id: "part_tool", messageID: assistant.id, sessionID: "ses_a", type: "tool", callID: "call_fixture", tool: "bash", state: { status: "running", input: { command: "fixture-only" }, time: { start: 1 } } } })
   await expect(bar()).toHaveAttribute("data-state", "working")
+  // Cmd+M cycles the keyboard target shown on the primary button (steer -> queue -> aside -> steer).
+  const editor = page.locator(".prompt-box:not([inert]) textarea")
+  await editor.focus()
   for (const mode of ["Queue", "Aside", "Steer"]) {
-    await page.getByRole("radio", { name: mode, exact: true }).click()
+    await editor.press("Meta+m")
+    await expect(page.locator(".prompt-box .direct-primary")).toHaveAccessibleName(mode)
     await expect(bar()).toHaveAttribute("data-state", "working")
   }
   console.log("PASS tool execution and composer modes never hide busy feedback")
@@ -57,13 +61,18 @@ try {
   await expect(bar()).toHaveAttribute("data-state", "working")
   fixture.setStatus("idle")
   await page.clock.fastForward(30_000)
-  await expect(bar()).toHaveCount(0)
+  // The status slot stays mounted and settles to idle without a spinner.
+  await expect(bar()).toHaveAttribute("data-state", "idle")
+  await expect(bar().locator(".session-work-spinner")).toHaveCount(0)
   childBusy = true
   await page.reload()
   await expect(bar()).toHaveAttribute("data-state", "working")
   childBusy = false
   statusFailed = true
   await page.clock.fastForward(30_000)
+  // The failed poll is detected now; the slot shows it after its STATUS_DELAY_MS (2s) debounce.
+  await expect(bar()).toHaveAttribute("title", /Unable to refresh activity/)
+  await page.clock.fastForward(2_500)
   await expect(bar()).toHaveAttribute("data-state", "disconnected")
   await expect(bar().locator(".session-work-spinner")).toHaveCount(0)
   console.log("PASS stale descendant activity becomes unavailable rather than false busy")

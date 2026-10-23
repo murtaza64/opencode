@@ -167,7 +167,12 @@ try {
     )
     expect(result.user_nodes).toBe(40)
     await expect(page.locator('[data-timeline-part-id="prt_msg_000399_1"]')).toBeInViewport()
-    await expect(page.locator('[data-component="tool-part-wrapper"][data-tool="bash"]')).toHaveCount(160)
+    // 160 calls across 40 turns: each finished turn coalesces its 4 calls into one collapsed
+    // run (#230); only the latest turn's calls render as standalone parts.
+    await expect(page.locator(".tool-run")).toHaveCount(39)
+    await expect(page.locator(".tool-run-kind").filter({ hasText: /^4 tool calls$/ })).toHaveCount(39)
+    await expect(page.locator('[data-component="tool-part-wrapper"][data-tool="bash"]')).toHaveCount(4)
+    await expect(page.locator('[data-timeline-part-id^="prt_msg_000399_tool_"]')).toHaveCount(4)
     await expect(page.locator('[data-component="reasoning-part"]')).toHaveCount(120)
     await expect(page.locator('[data-timeline-part-id="prt_msg_000320"]')).toContainText("Synthetic request 160")
     if (profiler) {
@@ -190,16 +195,25 @@ try {
       const trigger = tool.locator("button[aria-expanded]")
       await trigger.click()
       await expect(trigger).toHaveAttribute("aria-expanded", "true")
+      // Hold the event streams down (the fixture rejects reopen attempts) so the manual
+      // reconnect is exercised; otherwise the stream reopens and refreshes on its own
+      // before the debounced status slot is usable.
+      fixture.eventAuthorization = "Basic held"
       fixture.disconnect()
-      await expect(page.getByRole("alert").filter({ hasText: "Session connection lost" })).toBeVisible()
+      // Connection loss surfaces in the single status slot after its short debounce.
+      const slot = page.locator('.session-work-status[data-state="disconnected"]')
+      await expect(slot).toBeVisible()
+      await expect(slot).toHaveAttribute("title", /Session connection lost/)
+      await expect(slot).toContainText("Reconnecting — showing saved transcript")
       fixture.messages.at(-1).parts.at(-1).text += "\n\nREFRESH-SENTINEL"
       fixture.messages.splice(0, 2)
-      await page.getByRole("button", { name: "reconnect", exact: true }).click()
+      await slot.getByRole("button", { name: "reconnect", exact: true }).click()
       await expect(page.locator('[data-timeline-part-id="prt_msg_000399_1"]')).toContainText("REFRESH-SENTINEL")
       expect(await retained.evaluate((node) => node.isConnected)).toBe(true)
       await expect(trigger).toHaveAttribute("aria-expanded", "true")
       await expect(page.locator('[data-component="user-message"]')).toHaveCount(40)
       await expect(page.locator('[data-timeline-part-id="prt_msg_000320"]')).toContainText("Synthetic request 160")
+      delete fixture.eventAuthorization
       await page.setViewportSize({ width: 390, height: 844 })
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       await page.setViewportSize({ width: 1440, height: 1000 })

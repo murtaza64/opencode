@@ -1983,3 +1983,20 @@ a.mini-item > .glyph { margin: 0; }
 .peek-todo-done .peek-todo-glyph { color: var(--green); }
 .peek-todo-basis { font-size: 11px; color: var(--subtext0); border-block-start: 1px solid var(--surface0); padding-block-start: 5px; }
 .peek-todo-state { font-size: 12px; }
+
+.sr-only { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* Mode switch: Front desk | Agents, at the top of both modes' sidebars. */
+.mode-switch { display: flex; gap: 2px; padding: 0 10px 8px; }
+.mode-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 4px; white-space: nowrap; color: var(--subtext0); text-decoration: none; font-weight: 600; border-block-end: 2px solid var(--surface0); }
+.mode-tab:hover { color: var(--text); background: var(--surface0); }
+.mode-tab[aria-current=page] { color: var(--text); border-block-end-color: var(--peach); }
+.mode-tab .glyph { color: var(--lavender); }
+/* Unread-style count; positioned out of flow so it never moves the tab label. */
+.mode-label { position: relative; display: inline-flex; align-items: center; }
+.mode-count { position: absolute; inset-block-start: -7px; inset-inline-start: calc(100% + 2px); min-inline-size: 16px; block-size: 16px; padding-inline: 4px; box-sizing: border-box; border-radius: 8px !important; background: var(--peach); color: var(--crust); font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+.mode-switch.compact { flex-direction: column; padding: 0; inline-size: 100%; }
+.mode-switch.compact .mode-tab { position: relative; padding: 6px 0; border-block-end: 0; border-inline-start: 2px solid transparent; }
+.mode-switch.compact .mode-tab[aria-current=page] { border-inline-start-color: var(--peach); }
+.mode-switch.compact .mode-count { inset-block-start: -6px; inset-inline-start: calc(100% - 7px); min-inline-size: 14px; block-size: 14px; padding-inline: 3px; font-size: 9px; line-height: 14px; }
+@media (max-width: 600px) { .shell > .sidebar-mini .mode-switch.compact { flex-direction: row; inline-size: auto; } }

@@ -1,4 +1,4 @@
-/* Left nav: the project board plus every active session. Collapsed, it becomes
+/* Agents mode sidebar: the mode switch, the agent map, and every active session. Collapsed, it becomes
  * a mini icon rail — expand toggle up top (where the switcher lives), board
  * icon, then one status dot per session, still navigable. Archived sessions
  * drop to a collapsed section at the bottom of the expanded view. */
@@ -15,6 +15,26 @@ import { CloudNav, CloudDiscovery } from "./cloud-sidebar"
 import { failureLabel } from "../session-failures"
 import { ringOnChange } from "../motion"
 import { Glyph } from "./icons"
+import { ModeSwitch } from "./mode-switch"
+
+/** Project scope, shared by both modes' sidebars. */
+export const ProjectSelect = (props: { onChange?: () => void }) => {
+  const { state, editspace, setEditspace, editspaces, allProjects, setAllProjects } = useDashboard()
+  const current = () => editspace() ?? editspaces()?.default ?? state()?.editspace ?? ""
+  return <select class="es-switcher" aria-label="Project"
+    ref={(select) => createEffect(() => {
+      editspaces()
+      select.value = allProjects() ? "__all__" : current()
+    })}
+    onChange={(e) => {
+      props.onChange?.()
+      if (e.currentTarget.value === "__all__") setAllProjects(true)
+      else setEditspace(e.currentTarget.value)
+    }}>
+    <option value="__all__">All</option>
+    <For each={editspaces()?.editspaces ?? []}>{(item) => <option value={item.name}>{item.name}</option>}</For>
+  </select>
+}
 
 // Day separators: a quiet local-format label; rows without a usable time group as Undated.
 const dayKey = (time: number) => Number.isFinite(time) && time > 0 ? new Date(time).toDateString() : "undated"
@@ -54,7 +74,7 @@ const StatusDot = (props: { state: DotState; label?: string }) => {
 
 export default function Sidebar() {
   const { state, dotFor, editspace, setEditspace, editspaces, archivedIds, notifications, markViewed,
-    allProjects, setAllProjects, sessionRows, sessions, pinnedSessions, unpinnedSessions, isPinned, togglePin,
+    allProjects, sessionRows, sessions, pinnedSessions, unpinnedSessions, isPinned, togglePin,
     sessionsLoading, sessionsError, setVisibleSessions, cloud, failures } =
     useDashboard()
   const dotText = (s: SessionRow, dot: DotState) => {
@@ -239,19 +259,7 @@ export default function Sidebar() {
   }
 
   const projectControls = () => <>
-    <select class="es-switcher" aria-label="Project"
-      ref={(select) => createEffect(() => {
-        editspaces()
-        select.value = allProjects() ? "__all__" : current()
-      })}
-      onChange={(e) => {
-        clearSearch()
-        if (e.currentTarget.value === "__all__") setAllProjects(true)
-        else setEditspace(e.currentTarget.value)
-      }}>
-      <option value="__all__">All</option>
-      <For each={editspaces()?.editspaces ?? []}>{(item) => <option value={item.name}>{item.name}</option>}</For>
-    </select>
+    <ProjectSelect onChange={clearSearch} />
     <button class="mini-btn" title={leftOpen() ? "collapse sidebar (^h)" : "expand sidebar (^h)"}
       aria-label={leftOpen() ? "Collapse sidebar" : "Expand sidebar"} onClick={toggleLeft}>
       {leftOpen() ? "⟨" : "⟩"}
@@ -267,12 +275,7 @@ export default function Sidebar() {
           <Show when={!nativeHeader}><button class="mini-btn" title="expand sidebar (^h)" onClick={toggleLeft}>
             ⟩
           </button></Show>
-            <A href="/" end activeClass="active" class="mini-item" title="Front desk" aria-label="Front desk">
-              <Glyph name="home" />
-            </A>
-            <A href="/map" activeClass="active" class="mini-item" title="Agent map" aria-label="Agent map">
-              <Glyph name="graph" />
-            </A>
+          <ModeSwitch compact />
           <NewSession compact />
           <Show when={pinnedSessions().length || cloud.pins().length}>
             <div class="mini-pinned-heading" title="Pinned sessions" aria-label="Pinned sessions" />
@@ -285,15 +288,13 @@ export default function Sidebar() {
     >
       <nav class="sidebar" ref={setNavEl} style={{ width: `${leftWidth()}px` }}>
         <Show when={!nativeHeader}><div class="sidebar-top">{projectControls()}</div></Show>
-        {/* The app's only page navigation: Front desk is home, the map is its one sibling. */}
-        <nav class="sidebar-actions" aria-label="Pages">
-          <A href="/" end activeClass="active" class="nav-item board-link">
-            <Glyph name="home" />Front desk
-          </A>
-          <NewSession />
-          <A href="/map" activeClass="active" class="nav-item board-link sidebar-map-link">
+        <ModeSwitch />
+        {/* The map is Agents mode's default page; sessions open beneath it. */}
+        <nav class="sidebar-actions" aria-label="Agents">
+          <A href="/agents" end activeClass="active" class="nav-item board-link">
             <Glyph name="graph" />Agent map
           </A>
+          <NewSession />
         </nav>
         <Show when={!query().trim() && (pinnedSessions().length || cloud.pins().length)}>
           <section class="pinned-section" aria-label="Pinned sessions">

@@ -2,19 +2,21 @@
  * existing requests, and an evidence canvas only while an item is selected.
  * The chat is the ordinary session view; selection changes never remount it. */
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
-import { A, useSearchParams } from "@solidjs/router"
+import { A, Navigate, useSearchParams } from "@solidjs/router"
 import { ago, sessionHref, useDashboard } from "../state"
-import { AppHeader } from "../components/native-header"
-import { createAttention, type AttentionRecord } from "../attention"
-import { createHomeRequests, requestLive, requestPointers } from "../home-requests"
+import { nativeHeader, NativeHeader } from "../components/native-header"
+import { ModeSwitch } from "../components/mode-switch"
+import { ProjectSelect } from "../components/sidebar"
+import type { createAttention, AttentionRecord } from "../attention"
+import { requestLive, type createHomeRequests } from "../home-requests"
 import { AttentionDecision, useRequestAgent, type AttentionView } from "../components/attention-decision"
-import { DeskAgents } from "../components/desk-agents"
 import { HomePermission, type HomeReplyReceipt } from "../components/home-permission"
 import { FailureRetry } from "../components/session-failure"
-import { createFailureIgnores, type IgnoredFailure } from "../failure-ignores"
+import type { IgnoredFailure } from "../failure-ignores"
+import { useDeskQueue } from "../desk-queue"
 import { failureAge, failureLabel, failureWhen, OLD_FAILURE_MS } from "../session-failures"
 import type { SessionFailure } from "@opencode-ai/sdk/v2"
-import { briefBinding, briefPacket, deskItems, deskSources, detailRequest, type DeskItem, type DeskSource } from "../desk"
+import { briefBinding, briefPacket, deskSources, detailRequest, type DeskItem, type DeskSource } from "../desk"
 import { createDeskSession, createMemory, type BriefJob } from "../desk-session"
 import { MoreDetail, PreparedBrief, useCompleteBrief } from "../components/attention-brief"
 import { useBriefs } from "../desk-briefs"
@@ -24,10 +26,10 @@ import type { MemoryEntry, MemoryRevision } from "../desk-memory"
 import { SessionView } from "./session"
 import { SurfaceList, SurfaceView } from "../components/desk-surfaces"
 import { createSurfaces, surfaceFromKey, surfaceKey } from "../surfaces"
+import { leftWidth } from "../ui"
 import "./home.css"
 import "./desk.css"
 
-const AGENTS = "agents"
 const receiptText = (item: HomeReplyReceipt) => item.result === "applied" ? (item.reply === "once" ? "Allowed once" : item.reply === "always" ? "Always allowed" : "Rejected") : item.result === "not-applied" ? "Not applied" : "Outcome uncertain"
 const stateLabel = (job: BriefJob) => ({ starting: "starting", unconfirmed: "start unconfirmed", running: "preparing", ready: "ready", failed: "failed", unknown: "stopped" })[job.state.state]
 // Queue rows show a brief only while it is in progress or needs a retry; a ready brief is visible on selection.
@@ -36,48 +38,35 @@ const STALE_MS = 45_000
 
 export default function Desk() {
   const dashboard = useDashboard()
-  const project = () => dashboard.allProjects() ? undefined : dashboard.editspace() ?? dashboard.editspaces()?.default ?? undefined
-  const attention = createAttention(project)
-  const requests = createHomeRequests(createMemo(() => requestPointers(dashboard)), item => dashboard.activity.requestSettled(item.kind, item.directory, item.id))
+  // The queue is app-wide state, so the Agents mode badge counts the same items this page lists.
+  const queue = useDeskQueue()
+  const project = queue.project
+  const attention = queue.attention
+  const requests = queue.requests
+  onMount(() => attention.activate())
   const desk = createDeskSession()
   // Defined below; read lazily when a brief starts.
   // Briefs are shared app-wide; the desk adds its other queue items for manual preparation.
   const prepared = useBriefs()
   const briefs = prepared.briefs
-  // `/?view=agents` opens the Agents pane directly (what the old Home page showed); `/?item=<key>` opens one item.
-  // `/?surface=<id>` opens one agent-owned surface.
+  // `/?item=<key>` opens one item and `/?surface=<id>` one agent-owned surface. `/?view=agents`
+  // predates the Agents mode and redirects there.
   const [params, setParams] = useSearchParams()
-  const [selectedKey, setSelectedKey] = createSignal<string | undefined>(params.view === "agents" ? AGENTS : typeof params.surface === "string" ? surfaceKey(params.surface) : typeof params.item === "string" ? params.item : undefined)
+  const [selectedKey, setSelectedKey] = createSignal<string | undefined>(typeof params.surface === "string" ? surfaceKey(params.surface) : typeof params.item === "string" ? params.item : undefined)
   const surfaces = createSurfaces()
   const [receipts, setReceipts] = createSignal<HomeReplyReceipt[]>([])
   const [now, setNow] = createSignal(Date.now())
   const clock = setInterval(() => setNow(Date.now()), 5000)
   onCleanup(() => clearInterval(clock))
 
-  const projectFor = (directory: string) => dashboard.editspaces()?.editspaces.find(item => {
-    const root = item.root.replace(/\/+$/, "").replace(/\/\.editspace$/, "")
-    return directory === root || directory.startsWith(`${root}/`)
-  })?.name
-  const briefSessions = createMemo(() => new Set(briefs.jobs().map(job => job.id).filter(Boolean)))
-  // Ignored failures live in the dashboard's file so they stay hidden on every client and reload.
-  const ignores = createFailureIgnores()
-  onMount(() => void ignores.load())
-  const failures = createMemo(() => dashboard.scopedFailures().filter(failure => !briefSessions().has(failure.sessionID)))
+  const ignores = queue.ignores
+  const failures = queue.failures
   const ignoredFailures = createMemo(() => failures().filter(failure => ignores.ignored(failure)))
   const unignore = (failure: SessionFailure) => {
     const entry = ignores.entries().find((item: IgnoredFailure) => item.sessionID === failure.sessionID && item.messageID === failure.messageID)
     if (entry) return ignores.unignore(entry)
   }
-  const items = createMemo(() => deskItems({
-    records: attention.snapshot()?.value.records ?? [],
-    attentionChecked: attention.snapshot()?.checked ?? 0,
-    requests: requests.rows().filter(item => !project() || !item.project || item.project === project()),
-    // The desk's own brief passes are not work waiting on the human.
-    failures: failures().filter(failure => !ignores.ignored(failure)),
-    failuresChecked: dashboard.failures.checked() ?? 0,
-    title: id => dashboard.activity.session(id)?.title,
-    project: projectFor,
-  }))
+  const items = queue.items
   prepared.track(items)
   const sources = createMemo(() => deskSources({
     now: now(),
@@ -106,10 +95,9 @@ export default function Desk() {
   // Keep the last-seen item so an answered request does not vanish from under the reader.
   // An answered decision keeps its key and stays selected with its delivery status.
   const lastSeen = new Map<string, DeskItem>()
-  const selected = createMemo((): { agents: true } | { surface: string } | { item: DeskItem; live: boolean } | { record: AttentionRecord } | undefined => {
+  const selected = createMemo((): { surface: string } | { item: DeskItem; live: boolean } | { record: AttentionRecord } | undefined => {
     const key = selectedKey()
     if (!key) return
-    if (key === AGENTS) return { agents: true }
     const surface = surfaceFromKey(key)
     if (surface) return { surface }
     const live = items().find(item => item.key === key)
@@ -122,10 +110,11 @@ export default function Desk() {
   })
   const selectedItem = () => { const current = selected(); return current && "item" in current ? current : undefined }
   const selectedSurface = () => { const current = selected(); return current && "surface" in current ? current.surface : undefined }
+  // The selection lives in the URL, so switching modes and coming back reopens the same item.
   const select = (key?: string) => {
     setSelectedKey(key)
     const surface = surfaceFromKey(key)
-    if (surface !== params.surface) setParams({ surface }, { replace: true })
+    setParams({ surface, item: surface ? undefined : key }, { replace: true })
   }
   const [evidence, setEvidence] = createSignal<HTMLElement>()
   // A brief sits below its request and may be off screen, already selected or stacked below the
@@ -184,11 +173,17 @@ export default function Desk() {
     document.querySelector(".desk-chat")?.scrollIntoView({ block: "nearest", behavior: "smooth" })
   }
 
+  if (params.view === "agents") return <Navigate href="/agents" />
+  const refresh = () => { void attention.refresh(); void requests.refresh(); void dashboard.failures.refresh(); void briefs.refresh(true); dashboard.activity.todos.reload(); void attention.checkOperator().catch(() => undefined) }
+  // No page header: the queue is this mode's sidebar, and the chat or selected item fills the rest.
   return <main class="desk" classList={{ "desk-has-selection": !!selected() }}>
-    <AppHeader><h1>Front desk</h1><span class="home-muted">{project() ?? "All projects"}</span>
-      <span class="home-header-end" /><label class="desk-auto home-muted" title="Prepare a brief for each new item in the background"><input type="checkbox" checked={prepared.auto()} onChange={event => prepared.setAuto(event.currentTarget.checked)} /> Auto briefs</label><button class="desk-button" disabled={attention.loading()} onClick={() => { void attention.refresh(); void requests.refresh(); void dashboard.failures.refresh(); void briefs.refresh(true); dashboard.activity.todos.reload(); void attention.checkOperator().catch(() => undefined) }}>Refresh</button></AppHeader>
-    <div class="desk-grid">
+    <Show when={nativeHeader}><NativeHeader><ProjectSelect /></NativeHeader></Show>
+    {/* Same width as the Agents sidebar, so the mode switch stays put across modes. */}
+    <div class="desk-grid" style={{ "--queue-width": `${leftWidth()}px` }}>
       <aside class="desk-queue" aria-label="Desk queue">
+        <h1 class="sr-only">Front desk</h1>
+        <Show when={!nativeHeader}><div class="sidebar-top"><ProjectSelect /></div></Show>
+        <ModeSwitch />
         <Show when={!attention.operator()}><div class="home-login home-muted">Read-only: answers are off <button class="desk-button" title="This UI origin must be allowed by the attention server" onClick={() => attention.checkOperator().catch(() => undefined)}>Reconnect</button></div></Show>
         <Show when={attention.notice()}><div class="home-notice" role="status">{attention.notice()}<Show when={attention.pending()}><button class="desk-button" disabled={attention.writing()} onClick={() => void attention.retry()}>Retry same action</button></Show></div></Show>
         <Show when={briefs.error()}><div class="home-warning desk-background" role="status">{briefs.error()}</div></Show>
@@ -209,7 +204,6 @@ export default function Desk() {
           }}</For>
         </ul>
         <Show when={uncertainRequests().length}><details class="home-unknown"><summary>Unknown outcome ({uncertainRequests().length})</summary><For each={uncertainRequests()}>{item => <div class="home-source"><bdi dir="auto">{item.title}</bdi> · {item.state === "unavailable" ? "source unavailable" : "no longer pending; outcome unknown"} · <A href={sessionHref(item.session, item.directory)}>Open thread</A></div>}</For></details></Show>
-        <button class="desk-chat-tab" aria-pressed={selectedKey() === AGENTS} onClick={() => select(AGENTS)}>Agents <span class="home-muted" title="Pinned agents">{dashboard.pinnedSessions().length}</span></button>
         <details class="desk-history" open={historyOpen()} onToggle={event => setHistoryOpen(event.currentTarget.open)}>
           <summary>History <span class="home-muted">{historyCount("answered")}</span><Show when={historyCount("recorded")}> <span class="home-blocked">· {historyCount("recorded")} not sent</span></Show><Show when={blockedDeliveries()}> <span class="home-blocked">· {blockedDeliveries()} blocked</span></Show><Show when={historyCount("ignored")}> <span class="home-muted">· Ignored {historyCount("ignored")}</span></Show></summary>
           <div class="home-tabs" role="group" aria-label="Attention status"><For each={[["answered", "Answered"], ["recorded", "Not sent"], ["snoozed", "Snoozed"], ["history", "Resolved"], ["ignored", "Ignored"]] as const}>{([view, label]) => <button aria-pressed={historyView() === view} data-empty={historyCount(view) === 0 ? "" : undefined} onClick={() => setHistoryView(view)}>{label} <span>{historyCount(view)}</span></button>}</For></div>
@@ -230,7 +224,8 @@ export default function Desk() {
         {/* Healthy sources stay folded; one that is not current is listed in the open. */}
         <section class="desk-sources" aria-label="Connected sources">
           <For each={problems()}>{source => <Source source={source} />}</For>
-          <details class="desk-sources-all"><summary>{problems().length ? "All sources" : "Sources up to date"}</summary>
+          <div class="desk-sources-bar">
+            <details class="desk-sources-all"><summary>{problems().length ? "All sources" : "Sources up to date"}</summary>
             <For each={sources().filter(source => source.state === "current")}>{source => <Source source={source} />}</For>
             <p class="home-source">Not included: cloud agents, mail.</p>
             <Show when={briefs.jobs().length}><div class="desk-jobs" aria-label="Briefs">
@@ -244,18 +239,19 @@ export default function Desk() {
                 </div>
               }}</For>
             </div></Show>
-          </details>
+            </details>
+            <button class="desk-button" disabled={attention.loading()} onClick={refresh}>Refresh</button>
+          </div>
+          <label class="desk-auto home-muted" title="Prepare a brief for each new item in the background"><input type="checkbox" checked={prepared.auto()} onChange={event => prepared.setAuto(event.currentTarget.checked)} /> Auto briefs</label>
         </section>
       </aside>
 
       {/* Remount per selection so one item's reply outcome or draft never carries into the next. */}
       <Show when={selectedSurface()} keyed>{id => <SurfaceView id={id} surface={surfaces.list().find(item => item.id === id)} checked={surfaces.checked()} onRetry={() => void surfaces.refresh()} onClose={() => select()} />}</Show>
-      <Show when={selected() && !selectedSurface() ? selectedKey() : undefined} keyed>{_key => <Show when={selected()}>{current => <section ref={setEvidence} class="desk-evidence attention-home" aria-label={"agents" in current() ? "Agents" : "Selected item"}>
+      <Show when={selected() && !selectedSurface() ? selectedKey() : undefined} keyed>{_key => <Show when={selected()}>{current => <section ref={setEvidence} class="desk-evidence attention-home" aria-label="Selected item">
         <div class="desk-evidence-head">
-          <Show when={"agents" in current()}><h2>Agents</h2></Show>
           <button class="desk-button" aria-label="Close and return to chat" onClick={() => select()}>Close</button>
         </div>
-        <Show when={"agents" in current()}><DeskAgents project={project()} /></Show>
         <Show when={"record" in current() ? current() as { record: AttentionRecord } : undefined}>{entry => <AttentionDecision record={entry().record} attention={attention} onView={view => view !== "open" && setHistoryView(view)} />}</Show>
         <Show when={selectedItem()}>{entry => <>
           {/* Permission cards state their own verified status; other items only know they left the queue. */}

@@ -62,9 +62,11 @@ const mailCalls = () => fixture.calls.filter((call) => call.path === "/api/mail"
 const edge = (from, to) => page.locator(`.map-mail-edge[data-from='${JSON.stringify(["lane", "fixture", from])}'][data-to='${JSON.stringify(["lane", "fixture", to])}']`)
 try {
   await page.goto(preview.url, { waitUntil: "domcontentloaded", timeout: 90_000 })
-  await expect(page.getByRole("link", { name: "Agent map", exact: true })).toBeVisible({ timeout: 90_000 })
-  await page.getByRole("link", { name: "Agent map", exact: true }).click()
-  await expect(page).toHaveURL(/\/map$/)
+  // The map is Agents mode's default page.
+  const agentsTab = page.getByRole("navigation", { name: "Mode" }).getByRole("link", { name: "Agents", exact: true })
+  await expect(agentsTab).toBeVisible({ timeout: 90_000 })
+  await agentsTab.click()
+  await expect(page).toHaveURL(/\/agents$/)
   await expect(page.getByRole("heading", { name: "Agent map", exact: true })).toBeVisible()
 
   // A · Project map: an SVG network with boxed project regions and agent nodes.

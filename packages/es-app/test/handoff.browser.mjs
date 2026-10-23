@@ -47,7 +47,7 @@ const handOff = async (task, notes) => {
   await page.getByRole("button", { name: "Create successor" }).click()
 }
 try {
-  await page.goto(preview.url)
+  await page.goto(`${preview.url}/agents`)
   await expect(page.getByRole("button", { name: "Hand off" })).toBeVisible()
   await page.getByRole("button", { name: "Pin Composer fixture" }).click()
   await page.getByRole("textbox", { name: "Message" }).fill("unsent work")
