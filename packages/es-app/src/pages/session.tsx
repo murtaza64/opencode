@@ -25,7 +25,7 @@ import { pendingEcho } from "../pending-echo"
 import { defaultImageCapability, prepareImageFile } from "../image-fit"
 import { ComposerResults } from "../components/composer-controls"
 import { DirectComposer } from "../components/direct-composer"
-import { DictationButton, DictationFeedback } from "../components/dictation"
+import { DictationButton } from "../components/dictation"
 import { flash } from "../motion"
 import { Glyph } from "../components/icons"
 import { AppHeader } from "../components/native-header"
@@ -1376,7 +1376,6 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       dictation={<DictationButton composer={composer} sessionID={sessionID} directory={directory}
         editor={() => floating() ? floatEl : promptEl} normalMode={() => vim.mode() === "normal"}
         checkpoint={(el) => activeVim().checkpoint(el)} refresh={(el) => vim.refresh(el)} />}
-      dictationFeedback={<DictationFeedback sessionID={sessionID} directory={directory} />}
       sessionMetadata={<Show when={latestUsage()}>
         {(u) => (
           <span class="context-pct"
@@ -1494,7 +1493,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   return (
     <main class="session-page" classList={{ "finding-transcript": findOpen() }}>
       <div class="session-main">
-        <AppHeader>
+        {/* Embedded beside the desk queue, the chat's title and tools belong to its own pane. */}
+        <AppHeader inline={props.embedded}>
           <SessionTitle sessionID={sessionID} directory={directory} session={session()} suspendBlurSave={findOpen()} onSaved={(info) => {
             live.apply({ type: "session.updated", properties: { sessionID, info } })
             void refetch()

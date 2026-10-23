@@ -29,8 +29,9 @@ export const NativeHeader = (props: ParentProps) => {
   )
 }
 
-export const AppHeader = (props: ParentProps) => (
-  <Show when={nativeHeader} fallback={<header class="topbar">{props.children}</header>}>
+/** `inline` keeps the header in its own pane instead of the native titlebar, for a page embedded beside others. */
+export const AppHeader = (props: ParentProps<{ inline?: boolean }>) => (
+  <Show when={nativeHeader && !props.inline} fallback={<header class="topbar">{props.children}</header>}>
     <Show when={headerTarget()}>
       {(mount) => (
         <Portal mount={mount()}>

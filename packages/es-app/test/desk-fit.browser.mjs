@@ -19,7 +19,7 @@ const openDesk = async ({ width, height, userAgent, rtl = false }) => {
   const page = await context.newPage()
   const errors = []
   page.on("pageerror", (error) => errors.push(error.message))
-  await page.goto(preview.url, { waitUntil: "domcontentloaded" })
+  await page.goto(preview.url, { waitUntil: "domcontentloaded", timeout: 90_000 })
   // A cold Vite dependency optimization can delay the first render.
   await page.locator('.desk-item[data-desk-item="attention:fixture:decision_1"]').click({ timeout: 90_000 })
   await expect(page.locator(".desk-chat textarea")).toBeVisible()

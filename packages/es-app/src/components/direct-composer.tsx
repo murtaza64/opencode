@@ -16,7 +16,6 @@ export const DirectComposer = (props: {
   sessionActions: JSX.Element
   sessionMetadata?: JSX.Element
   dictation?: JSX.Element
-  dictationFeedback?: JSX.Element
   children: JSX.Element
 }) => {
   const state = props.composer.state
@@ -139,7 +138,6 @@ export const DirectComposer = (props: {
           <For each={reasons()}>{(value) => <div>{value}</div>}</For>
         </div>
       </Show>
-      {props.dictationFeedback}
       <Show when={state.storageError}>
         <div class="direct-feedback err" role="alert">
           {state.storageError}

@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, onMount, Show } from "solid-js"
+import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { dictationInsert, type Composer } from "../composer"
 import { dictation, dictationTarget, type Dictation } from "../dictation"
 import { Glyph } from "./icons"
@@ -33,6 +33,11 @@ export const DictationButton = (props: Props) => {
   const mine = () => voice.owns(state.target, draft)
   const elsewhere = () => state.phase !== "idle" && !mine()
   const phase = () => (mine() ? state.phase : "idle")
+  // This composer's last failure, shown in the pill until the next attempt or Esc.
+  const failure = () => {
+    const value = state.error
+    return value && voice.owns(value.target, draft) && state.phase === "idle" ? value : undefined
+  }
   const [now, setNow] = createSignal(Date.now())
   // Where text goes: the editor's caret/selection, with a Vim block collapsed to the caret.
   const range = (el: HTMLTextAreaElement): [number, number] =>
@@ -62,10 +67,11 @@ export const DictationButton = (props: Props) => {
       const inView = !!root?.closest(".session-page")?.contains(document.activeElement)
       // Esc first cancels this composer's dictation, before Vim or the float editor see it.
       if (event.key === "Escape" && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
-        if (phase() === "idle" || (!inView && document.activeElement !== document.body)) return
+        if ((phase() === "idle" && !failure()) || (!inView && document.activeElement !== document.body)) return
         event.preventDefault()
         event.stopImmediatePropagation()
-        void voice.cancel()
+        if (phase() === "idle") voice.dismiss()
+        else void voice.cancel()
         return
       }
       // Mod+Shift+Space while focus is in this session view; never a global hotkey.
@@ -104,87 +110,94 @@ export const DictationButton = (props: Props) => {
     const seconds = Math.max(0, Math.floor((now() - state.startedAt) / 1000))
     return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
   }
+  // The pill overlays the free space of the control row, so nothing else moves when it grows.
+  const open = () => phase() !== "idle" || !!failure() || (elsewhere() && state.phase === "recording")
+  // Grow toward whichever side of the mic has more free room in the control row, never over Send;
+  // a wrapped narrow row (390px, RTL) often has room on only one side.
+  const [fit, setFit] = createSignal<{ side: "start" | "end"; room: number }>({ side: "start", room: 9999 })
+  const measure = () => {
+    const bar = root?.closest(".direct-bar")?.getBoundingClientRect()
+    const send = root?.closest(".direct-send")?.querySelector(".direct-split")?.getBoundingClientRect()
+    const mic = root?.getBoundingClientRect()
+    if (!root || !bar || !send || !mic) return
+    const rtl = getComputedStyle(root).direction === "rtl"
+    const start = rtl ? bar.right - mic.left : mic.right - bar.left
+    const end = rtl ? mic.right - send.right : send.left - mic.left
+    setFit(start >= end ? { side: "start", room: Math.floor(start) } : { side: "end", room: Math.floor(end) })
+  }
+  createEffect(() => {
+    if (open()) {
+      failure()
+      requestAnimationFrame(measure)
+    }
+  })
+  onMount(() => {
+    window.addEventListener("resize", measure)
+    onCleanup(() => window.removeEventListener("resize", measure))
+  })
   return (
     <Show when={state.availability === "ready" || state.availability === "setup"}>
-      {/* Capture stays visible from every composer, not only the one that started it. */}
-      <span class="dictation" ref={root} role="group" aria-label="Dictation" data-phase={phase()}
-        data-elsewhere={elsewhere() ? state.phase : undefined}>
-        <button
-          class="dictation-toggle"
-          aria-label={phase() === "recording" ? "Stop dictation and transcribe" : phase() === "idle" ? "Dictate" : "Transcribing dictation"}
-          aria-keyshortcuts="Meta+Shift+Space Control+Shift+Space"
-          title={
-            state.availability === "setup"
-              ? `Dictation unavailable: ${state.setup}`
-              : elsewhere()
-                ? "Dictating in another conversation"
-                : phase() === "recording"
-                  ? "Stop and transcribe (⌘⇧Space) · Esc cancels"
-                  : "Dictate (⌘⇧Space)"
-          }
-          disabled={state.availability !== "ready" || elsewhere() || phase() === "starting" || phase() === "transcribing"}
-          onPointerDown={keepFocus}
-          onClick={toggle}
-        >
-          <Show when={phase() === "recording"} fallback={
-            <Show when={phase() === "idle"} fallback={<span class="dictation-spinner" aria-hidden="true" />}>
-              <svg class="glyph" width={14} height={14} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d={MIC} /></svg>
+      <span class="dictation" ref={root} role="group" aria-label="Dictation">
+        <span class="dictation-pill" data-phase={failure() ? "error" : phase()}
+          data-elsewhere={elsewhere() ? state.phase : undefined} data-side={fit().side} classList={{ open: open() }}
+          style={{ "max-inline-size": `${fit().room}px` }}>
+          <button
+            class="dictation-toggle"
+            aria-label={phase() === "recording" ? "Stop dictation and transcribe" : phase() === "idle" ? "Dictate" : "Transcribing dictation"}
+            aria-keyshortcuts="Meta+Shift+Space Control+Shift+Space"
+            title={
+              state.availability === "setup"
+                ? `Dictation unavailable: ${state.setup}`
+                : elsewhere()
+                  ? "Dictating in another conversation"
+                  : phase() === "recording"
+                    ? "Stop and transcribe (⌘⇧Space) · Esc cancels"
+                    : "Dictate (⌘⇧Space)"
+            }
+            disabled={state.availability !== "ready" || elsewhere() || phase() === "starting" || phase() === "transcribing"}
+            onPointerDown={keepFocus}
+            onClick={toggle}
+          >
+            <Show when={phase() === "recording"} fallback={
+              <Show when={phase() === "idle"} fallback={<span class="dictation-spinner" aria-hidden="true" />}>
+                <svg class="glyph" width={14} height={14} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d={MIC} /></svg>
+              </Show>
+            }>
+              <Glyph name="square-fill" />
             </Show>
-          }>
-            <Glyph name="square-fill" />
+          </button>
+          <span class="dictation-status" dir="auto" aria-live="polite" role={failure() ? "alert" : undefined}
+            title={failure() ? [failure()!.message, failure()!.detail].filter(Boolean).join("\n\n") : undefined}>
+            {failure() ? shortMessage(failure()!.message)
+              : state.phase === "recording" && state.availability === "ready" ? (mine() ? elapsed() : `Recording elsewhere ${elapsed()}`)
+              : phase() === "transcribing" ? "Transcribing" : phase() === "starting" ? "Starting" : ""}
+          </span>
+          <Show when={failure()?.action === "retry"}>
+            {/* The original target: if the draft changed since, text goes in at the current caret. */}
+            <button class="dictation-action" onPointerDown={keepFocus} onClick={() => void voice.start(failure()!.target)}>Try again</button>
           </Show>
-        </button>
-        {/* One reserved slot, so the bar does not shift between idle, 0:07 and Transcribing. */}
-        <span class="dictation-status" aria-live="polite">
-          {state.phase === "recording" && state.availability === "ready" ? (mine() ? elapsed() : `Recording elsewhere ${elapsed()}`)
-            : phase() === "transcribing" ? "Transcribing…" : phase() === "starting" ? "Starting…" : ""}
+          <Show when={failure()?.action === "settings"}>
+            <button class="dictation-action" onPointerDown={keepFocus} onClick={() => void voice.settings()}>Open settings</button>
+          </Show>
+          <Show when={phase() !== "idle" || failure()}>
+            <button
+              class="dictation-cancel"
+              aria-label={failure() ? "Dismiss dictation error" : "Cancel dictation"}
+              title={failure() ? "Dismiss (Esc)" : "Cancel (Esc); the draft is unchanged"}
+              onPointerDown={keepFocus}
+              onClick={() => (failure() ? voice.dismiss() : void voice.cancel())}
+            >
+              ×
+            </button>
+          </Show>
         </span>
-        <button
-          class="dictation-cancel"
-          classList={{ idle: phase() === "idle" }}
-          aria-label="Cancel dictation"
-          title="Cancel (Esc); the draft is unchanged"
-          aria-hidden={phase() === "idle"}
-          tabIndex={phase() === "idle" ? -1 : 0}
-          disabled={phase() === "idle"}
-          onPointerDown={keepFocus}
-          onClick={() => void voice.cancel()}
-        >
-          ×
-        </button>
       </span>
     </Show>
   )
 }
 
-/** The failure line for dictation that targeted this composer; cleared by the next attempt. */
-export const DictationFeedback = (props: Pick<Props, "sessionID" | "directory" | "dictation">) => {
-  const voice = props.dictation ?? dictation
-  const error = () => {
-    const value = voice.state.error
-    return value && voice.owns(value.target, props) ? value : undefined
-  }
-  return (
-    <Show when={error()}>
-      {(value) => (
-        <div class="direct-feedback dictation-feedback" role="alert">
-          <span class="dictation-error">{value().message}</span>
-          <Show when={value().detail}>
-            <details class="dictation-details">
-              <summary>Details</summary>
-              <pre dir="auto">{value().detail}</pre>
-            </details>
-          </Show>
-          <Show when={value().action === "retry"}>
-            {/* The original target: if the draft changed since, text goes in at the current caret. */}
-            <button onClick={() => void voice.start(value().target)}>Try again</button>
-          </Show>
-          <Show when={value().action === "settings"}>
-            <button onClick={() => void voice.settings()}>Open settings</button>
-          </Show>
-          <button aria-label="Dismiss dictation error" onClick={() => voice.dismiss()}>Dismiss</button>
-        </div>
-      )}
-    </Show>
-  )
+// "Couldn't record: microphone access denied" → "Couldn't record"; the full text is in the tooltip.
+const shortMessage = (message: string) => {
+  const head = message.split(":")[0]!.replace(/\.$/, "")
+  return head.startsWith("Couldn't ") ? head.split(" ").slice(0, 2).join(" ") : head
 }

@@ -50,24 +50,25 @@
 .direct-edit-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; flex-wrap: wrap; }
 .direct-edit-actions > button:not(.direct-primary) { font-size: 11px; padding: 4px 8px; min-height: 28px; background: transparent; color: var(--subtext1); }
 .direct-edit-actions > button:not(.direct-primary):hover { background: var(--surface0); }
-.dictation { display: inline-flex; align-items: center; gap: 2px; }
-.dictation-toggle { display: inline-grid; place-items: center; inline-size: 28px; block-size: 28px; padding: 0; background: transparent; color: var(--subtext1); }
+/* The control row reserves only the 28px mic. Active states open a pill anchored at the mic's
+ * inline-end that grows toward inline-start over the row's free gap, so no other control moves. */
+.dictation { position: relative; display: inline-block; inline-size: 28px; block-size: 28px; flex: none; }
+.dictation-pill { position: absolute; inset-block: 0; inset-inline-end: 0; z-index: 3; display: flex; align-items: center; gap: 2px; white-space: nowrap; }
+.dictation-pill[data-side="end"] { inset-inline-end: auto; inset-inline-start: 0; }
+.dictation-pill.open { padding-inline-end: 2px; background: var(--mantle); box-shadow: 0 0 0 1px var(--surface1); }
+.dictation-toggle { display: inline-grid; place-items: center; flex: none; inline-size: 28px; block-size: 28px; padding: 0; background: transparent; color: var(--subtext1); }
 .dictation-toggle:hover:not(:disabled) { background: var(--surface0); color: var(--text); }
 .dictation-toggle:disabled, .dictation-toggle:disabled:hover { color: var(--overlay0); background: transparent; }
-.dictation[data-phase="recording"] .dictation-toggle { color: var(--crust); background: var(--red); }
-/* Wide enough for "Transcribing…" so the bar keeps its layout across states. */
-.dictation-status { min-inline-size: 7.5em; max-inline-size: 14em; overflow: hidden; text-overflow: ellipsis; font-size: 11px; color: var(--subtext0); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.dictation[data-phase="recording"] .dictation-status, .dictation[data-elsewhere="recording"] .dictation-status { color: var(--red); }
-.dictation[data-elsewhere="recording"] .dictation-toggle:disabled { color: var(--red); }
+.dictation-pill[data-phase="recording"] .dictation-toggle { color: var(--crust); background: var(--red); }
+.dictation-pill[data-phase="error"] .dictation-toggle { color: var(--peach); }
+.dictation-pill[data-elsewhere="recording"] .dictation-toggle:disabled { color: var(--red); }
+.dictation-status { flex: 0 1 auto; min-inline-size: 0; max-inline-size: 16em; overflow: hidden; text-overflow: ellipsis; font-size: 11px; color: var(--subtext0); font-variant-numeric: tabular-nums; }
+.dictation-status:empty { display: none; }
+.dictation-pill:is([data-phase="recording"], [data-elsewhere="recording"]) .dictation-status { color: var(--red); }
+.dictation-pill[data-phase="error"] .dictation-status { color: var(--peach); cursor: help; }
 .dictation-spinner { inline-size: 12px; block-size: 12px; border: 2px solid var(--surface2); border-block-start-color: var(--subtext1); border-radius: 50% !important; animation: dictation-spin 0.8s linear infinite; }
-.dictation-cancel { min-height: 28px; padding: 4px 6px; font-size: 13px; line-height: 1; background: transparent; color: var(--subtext0); }
-.dictation-cancel:hover:not(:disabled) { background: var(--surface0); color: var(--text); }
-.dictation-cancel.idle { visibility: hidden; }
-.dictation-feedback { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
-.dictation-error { color: var(--peach); }
-.dictation-feedback button, .dictation-details summary { font-size: 11px; padding: 2px 6px; background: transparent; color: var(--subtext1); cursor: pointer; }
-.dictation-feedback button:hover, .dictation-details summary:hover { background: var(--surface0); }
-.dictation-details[open] { flex-basis: 100%; order: 1; }
-.dictation-details pre { margin: 4px 0 0; padding: 6px 8px; max-block-size: 8em; overflow: auto; white-space: pre-wrap; font: 11px var(--font-mono, monospace); color: var(--subtext0); background: var(--mantle); }
+.dictation-cancel, .dictation-action { flex: none; min-height: 24px; padding: 2px 6px; font-size: 11px; line-height: 1; background: transparent; color: var(--subtext1); }
+.dictation-cancel { font-size: 13px; color: var(--subtext0); }
+.dictation-cancel:hover, .dictation-action:hover { background: var(--surface0); color: var(--text); }
 @keyframes dictation-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .dictation-spinner { animation: none; border-color: var(--subtext1); } }
