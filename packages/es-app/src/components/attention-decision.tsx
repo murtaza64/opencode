@@ -6,8 +6,44 @@ import { ago, sessionHref, useDashboard } from "../state"
 import { Glyph } from "./icons"
 import type { BriefResult } from "../desk"
 import { answerDraftKey, attentionPath, blockedReason, decisionLabel, deliveryLabel, type createAttention, type AttentionRecord } from "../attention"
+import { requestAgent, type AgentRef, type RequestAgent } from "../attention-agent"
 
 type Attention = ReturnType<typeof createAttention>
+
+/** Resolves a record's requesting agent from the dashboard's loaded session index and lineage; no fetches. */
+export const useRequestAgent = () => {
+  const dashboard = useDashboard()
+  return (record: AttentionRecord): RequestAgent => requestAgent(record, {
+    session: id => dashboard.activity.session(id),
+    handoffs: dashboard.lineage(),
+    owners: dashboard.lineageOwners(),
+  })
+}
+
+/** The agent's name, linked to its conversation when its directory is known; the session ID stays in the tooltip. */
+export const AgentName = (props: { agent: AgentRef; class?: string }) => {
+  const title = () => props.agent.named ? props.agent.session : `${props.agent.session} · no session title`
+  return <Show when={props.agent.directory} fallback={<bdi dir="auto" class={props.class} title={title()} data-agent-session={props.agent.session}>{props.agent.label}</bdi>}>
+    {directory => <A class={props.class} href={sessionHref(props.agent.session, directory())} title={title()} data-agent-session={props.agent.session}><bdi dir="auto">{props.agent.label}</bdi></A>}
+  </Show>
+}
+
+// Requester first, project second. Who updated it and where answers go now are listed only when they differ.
+const Requester = (props: { record: AttentionRecord }) => {
+  const agentFor = useRequestAgent()
+  const agent = () => agentFor(props.record)
+  return <>
+    <span class="attention-requester"><Glyph name={props.record.kind === "blocker" ? "question" : "comment-discussion"} />
+      <AgentName agent={agent()} class="attention-agent" /><span class="attention-project"> · <bdi dir="auto">{props.record.editspace}</bdi></span></span>
+    <Show when={agent().author || agent().destination}>
+      <span class="attention-routing home-source">
+        <Show when={agent().author}>{author => <>Updated by <AgentName agent={author()} /></>}</Show>
+        <Show when={agent().author && agent().destination}> · </Show>
+        <Show when={agent().destination}>{destination => <>Handed off · answers go to <AgentName agent={destination()} /></>}</Show>
+      </span>
+    </Show>
+  </>
+}
 export type AttentionView = "open" | "answered" | "recorded" | "snoozed" | "history"
 
 export const canWriteAttention = (attention: Attention, record: AttentionRecord) =>
@@ -116,7 +152,7 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
   }
   createEffect(() => { if (historyOpen() && history()?.version !== historyVersion(props.record)) void loadHistory(props.record) })
   return <article class="home-decision" data-attention-id={props.record.id}>
-    <div class="home-eyebrow"><span><Glyph name={props.record.kind === "blocker" ? "question" : "comment-discussion"} /><bdi dir="auto">{props.record.editspace}</bdi></span><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Open thread</A></div>
+    <div class="home-eyebrow"><Requester record={props.record} /><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Open thread</A></div>
     <h3><bdi dir="auto">{props.record.title}</bdi></h3>
     <Show when={!props.prepared}><p dir="auto">{props.record.context}</p></Show>
     {props.brief}
