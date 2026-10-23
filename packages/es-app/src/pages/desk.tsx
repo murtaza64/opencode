@@ -6,7 +6,7 @@ import { A, useSearchParams } from "@solidjs/router"
 import { ago, sessionHref, useDashboard } from "../state"
 import { AppHeader } from "../components/native-header"
 import { createAttention, type AttentionRecord } from "../attention"
-import { createHomeRequests, requestPointers } from "../home-requests"
+import { createHomeRequests, requestLive, requestPointers } from "../home-requests"
 import { AttentionDecision, useRequestAgent, type AttentionView } from "../components/attention-decision"
 import { DeskAgents } from "../components/desk-agents"
 import { HomePermission, type HomeReplyReceipt } from "../components/home-permission"
@@ -258,7 +258,8 @@ export default function Desk() {
         <Show when={"agents" in current()}><DeskAgents project={project()} /></Show>
         <Show when={"record" in current() ? current() as { record: AttentionRecord } : undefined}>{entry => <AttentionDecision record={entry().record} attention={attention} onView={view => view !== "open" && setHistoryView(view)} />}</Show>
         <Show when={selectedItem()}>{entry => <>
-          <Show when={!entry().live}><div class="home-warning" role="status">No longer pending. Check the <A href={sessionHref(entry().item.source.session, entry().item.source.directory)}>thread</A> for the outcome.</div></Show>
+          {/* Permission cards state their own verified status; other items only know they left the queue. */}
+          <Show when={!entry().live && entry().item.request?.kind !== "permission"}><div class="home-warning" role="status">No longer waiting for you. <A href={sessionHref(entry().item.source.session, entry().item.source.directory)}>Open the thread</A> to see what happened.</div></Show>
           <Canonical item={entry().item} live={entry().live} attention={attention} requests={requests} now={now()} ignoring={!!entry().item.failure && ignores.busy(entry().item.failure!)} detail={question => askDetail(entry().item, question)}
             onIgnore={failure => void ignores.ignore(failure, failureLabel(failure)).then(() => { if (ignores.ignored(failure)) select() })} onReceipt={receipt => setReceipts(previous => [receipt, ...previous.filter(old => old.key !== receipt.key || old.at !== receipt.at)].slice(0, 5))} />
           <Show when={receipts().length}><ul class="home-receipts" aria-label="Replies from the Front desk"><For each={receipts()}>{receipt => <li data-result={receipt.result}><b>{receiptText(receipt)}</b> · <bdi dir="ltr">{receipt.permission}</bdi> · <bdi dir="auto">{receipt.title}</bdi> · {ago(receipt.at)}{receipt.result === "uncertain" ? " · not confirmed" : receipt.result === "not-applied" ? " · no longer pending" : ""} · <A href={sessionHref(receipt.session, receipt.directory)}>Open thread</A></li>}</For></ul></Show>
@@ -312,7 +313,7 @@ const Canonical = (props: { item: DeskItem; live: boolean; detail: (question: st
       brief={<PreparedBrief item={props.item} live={props.live} part="lead" />} briefAfter={<PreparedBrief item={props.item} live={props.live} part="after" />}
       briefDetails={<PreparedBrief item={props.item} live={props.live} part="details" />} more={<MoreDetail ask={props.detail} />} />}</Show>
     <Show when={props.item.request?.kind === "permission" ? props.item.request : undefined}>{request =>
-      <HomePermission item={request()} live={props.live ? dashboard.activity.requestState("permission", request().session, request().directory, request().id) : "cleared"}
+      <HomePermission item={request()} live={requestLive(props.live, request(), props.requests.rows(), dashboard.activity.requestState("permission", request().session, request().directory, request().id))}
         siblings={dashboard.activity.requests().filter(other => other.kind === "permission" && other.directory === request().directory && other.request.sessionID === request().session && other.request.id !== request().id).length}
         owner={(() => { const root = dashboard.activity.root(request().session); return root && root.id !== request().session ? root.title || root.id : undefined })()}
         stale={props.requests.now() - request().checked > 45_000} onReceipt={props.onReceipt}

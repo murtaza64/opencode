@@ -78,6 +78,13 @@ const scenarios: Scenario[] = [
         }),
       "status",
     ),
+  http.protected
+    .get("/global/runtime", "global.runtime")
+    .global()
+    .json(200, (body) => {
+      object(body)
+      check(Array.isArray(body.instances), "global runtime should list loaded instances")
+    }),
   http.protected.get("/global/config", "global.config.get").global().json(),
   http.protected
     .patch("/global/config", "global.config.update")

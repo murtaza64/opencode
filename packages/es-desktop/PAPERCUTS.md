@@ -5,3 +5,4 @@
 - 2026-09-16: Repeated foreground Electron installs still left a partial extraction; running the same installer in a dedicated tmux session completed it.
 - 2026-09-16: Vite 7 treats `port: 0` as its default port, then searches for a free port. The desktop gateway and fixture use actual OS-assigned ports.
 - 2026-09-16: electron-builder falls back to collecting root workspace dependencies when the shell has no runtime dependencies. Explicitly exclude `node_modules` from the packaged app.
+- 2026-10-22: `install.js` exited 0 after extracting only LICENSES.chromium.html (twice, incl. tmux). Extracting the cached zip with `ditto -x -k ~/Library/Caches/electron/*/electron-v42.3.3-darwin-arm64.zip node_modules/electron/dist` and writing `path.txt` (`Electron.app/Contents/MacOS/Electron`) worked.

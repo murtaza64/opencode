@@ -65,3 +65,25 @@ export const installInkLinks = () => {
     document.removeEventListener("click", rewrite, true)
   }
 }
+
+/** Split plain text into prose and its http(s) URLs, each URL with the href the app opens. */
+const URL_RE = /https?:\/\/[^\s<>"'`]+/g
+// Sentence punctuation and unmatched closing brackets after a URL belong to the prose.
+const TRAILING = /[.,;:!?'")\]}>]+$/
+
+export const linkSegments = (text: string) => {
+  const segments: ({ text: string } | { text: string; href: string })[] = []
+  let last = 0
+  for (const match of text.matchAll(URL_RE)) {
+    const trailing = TRAILING.exec(match[0])?.[0] ?? ""
+    // Keep a closing parenthesis that balances one inside the URL, e.g. wiki links.
+    const kept = trailing.startsWith(")") && match[0].slice(0, -trailing.length).includes("(") ? trailing.slice(1) : trailing
+    const url = kept ? match[0].slice(0, -kept.length) : match[0]
+    if (!URL.canParse(url)) continue
+    if (match.index > last) segments.push({ text: text.slice(last, match.index) })
+    segments.push({ text: url, href: linkUrl(url) })
+    last = match.index + url.length
+  }
+  if (last < text.length) segments.push({ text: text.slice(last) })
+  return segments
+}

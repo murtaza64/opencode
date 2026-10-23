@@ -63,7 +63,27 @@
 .attention-home pre.home-answer-text { font: inherit; font-size: 13px; line-height: 1.6; padding: 8px 10px; margin-block: 6px; background: var(--base); border-inline-start: 2px solid var(--green); text-align: start; }
 .home-blocked { color: var(--yellow); }
 .home-copies { margin: 4px 0; padding-inline-start: 18px; font-size: 11px; color: var(--subtext0); }
-.home-permission > :is(dl, .home-actions, ul, .home-permission-status) { grid-column: 1 / -1; }
+.home-permission > :is(dl, .home-actions, ul, .home-permission-status, .home-permission-state, .home-edit-diffs, details) { grid-column: 1 / -1; }
+.home-permission-state { padding: 8px 12px; background: var(--surface0); border-inline-start: 2px solid var(--yellow); line-height: 1.6; font-size: 12px; }
+.home-permission-state b { color: var(--yellow); font-weight: 600; }
+.home-permission-state button { margin-inline-start: 6px; }
+.home-edit-files { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 2px; font-size: 13px; }
+.home-edit-files li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-inline-size: 0; }
+.home-edit-path { font-family: var(--font-mono, ui-monospace, monospace); overflow-wrap: anywhere; min-inline-size: 0; }
+.home-edit-path b { color: var(--text); font-weight: 600; }
+.home-edit-dir { color: var(--subtext0); }
+.home-edit-counts { font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; direction: ltr; unicode-bidi: isolate; }
+.home-edit-add { color: var(--green); }
+.home-edit-del { color: var(--red); }
+.home-edit-type { font-size: 11px; color: var(--peach); }
+.home-edit-diffs { display: grid; gap: 8px; margin-block-start: 10px; min-inline-size: 0; }
+.home-edit-diff { border: 1px solid var(--surface0); min-inline-size: 0; }
+.home-edit-diff > summary { display: flex; gap: 10px; align-items: baseline; padding: 5px 10px; font-size: 12px; background: var(--mantle); cursor: pointer; }
+.home-edit-diff > :not(summary) { overflow-x: auto; }
+.home-edit-diff > p { margin: 0; padding: 8px 10px; font-size: 12px; }
+.home-edit-raw { margin: 0; padding: 8px 10px; font: 11px/1.5 var(--font-mono, ui-monospace, monospace); white-space: pre; text-align: start; }
+.home-permission-more { margin-block-start: 8px; font-size: 12px; }
+.home-permission-more > summary { color: var(--subtext0); cursor: pointer; }
 .home-permission-context { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 14px; margin: 10px 0 0; font-size: 11px; }
 .home-permission-context dt { color: var(--subtext0); }
 .home-permission-context dd { margin: 0; display: flex; flex-direction: column; align-items: flex-start; overflow-wrap: anywhere; min-inline-size: 0; }

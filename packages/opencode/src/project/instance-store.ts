@@ -9,12 +9,28 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { Permission } from "@/permission"
+import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Question } from "@/question"
 import { SessionStatus } from "@/session/status"
 import { Clock, Context, Deferred, Duration, Effect, Exit, Layer, Scope } from "effect"
 import { type InstanceContext } from "./instance-context"
 import { InstanceBootstrap } from "./bootstrap-service"
 import * as Project from "./project"
+
+/**
+ * Live runtime state of one Instance. A directory with no entry has no Instance, so none of its
+ * Sessions is running and it has no pending requests. `ready: false` is an Instance still booting,
+ * whose state is not readable yet.
+ */
+export type Runtime =
+  | {
+      directory: string
+      ready: true
+      status: Record<string, SessionStatus.Info>
+      permissions: ReadonlyArray<PermissionV1.Request>
+      questions: ReadonlyArray<Question.Request>
+    }
+  | { directory: string; ready: false }
 
 export interface LoadInput {
   directory: string
@@ -35,6 +51,8 @@ export interface Interface {
   readonly peek: (directory: string) => Effect.Effect<InstanceContext | undefined>
   readonly resolve: (directory: string) => Effect.Effect<InstanceContext>
   readonly size: () => number
+  /** Runtime state of every cached Instance. Reads memory only and never boots an Instance. */
+  readonly runtime: () => Effect.Effect<Runtime[]>
   readonly reload: (input: LoadInput) => Effect.Effect<InstanceContext>
   readonly dispose: (ctx: InstanceContext) => Effect.Effect<void>
   readonly disposeDirectory: (directory: string) => Effect.Effect<void>
@@ -283,6 +301,26 @@ const layer: Layer.Layer<
         return ctx
       })
 
+    const runtime = Effect.fn("InstanceStore.runtime")(function* () {
+      return yield* Effect.forEach([...cache.entries()], ([directory, entry]) =>
+        Effect.gen(function* () {
+          if (!(yield* Deferred.isDone(entry.deferred))) return { directory, ready: false as const }
+          const exit = yield* Effect.exit(Deferred.await(entry.deferred))
+          // A failed boot is removed from the cache; until then it holds no runtime state.
+          if (Exit.isFailure(exit)) return
+          return yield* Effect.gen(function* () {
+            return {
+              directory,
+              ready: true as const,
+              status: Object.fromEntries(yield* status.list()),
+              permissions: yield* permission.list(),
+              questions: yield* question.list(),
+            }
+          }).pipe(Effect.provideService(InstanceRef, exit.value))
+        }),
+      ).pipe(Effect.map((items) => items.filter((item) => item !== undefined)))
+    })
+
     const sweep = Effect.fn("InstanceStore.sweep")(function* () {
       const now = yield* Clock.currentTimeMillis
       for (const [directory, identity] of identities) if (now - identity.resolved >= ttl) identities.delete(directory)
@@ -329,6 +367,7 @@ const layer: Layer.Layer<
       peek,
       resolve,
       size: () => cache.size,
+      runtime,
       reload,
       dispose,
       disposeDirectory,

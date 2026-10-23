@@ -1,7 +1,8 @@
-import { app, BrowserWindow, dialog, Menu, session, shell } from "electron"
+import { app, BrowserWindow, dialog, Menu, session, shell, systemPreferences } from "electron"
 import path from "node:path"
 import { readFile, writeFile } from "node:fs/promises"
 import { serve } from "./server"
+import { createVoice, voiceTools } from "./voice"
 import { appRouteURL, externalURL, internalURL, serviceOrigins, startupMode, startupPlan, surfaceFrameURL } from "./policy"
 
 app.setName("Editspace")
@@ -51,6 +52,26 @@ const start = async () => {
     OPENCODE_URL: process.env.OPENCODE_URL,
     ES_DASHBOARD_URL: process.env.ES_DASHBOARD_URL,
   })
+  const voice = createVoice({
+    resolve: () =>
+      voiceTools({ home: app.getPath("home"), env: process.env, config: path.join(app.getPath("userData"), "voice.json") }),
+    // Capture runs in a SoX child; macOS attributes it to Editspace, so ask through the app first.
+    permission: async () => {
+      if (process.platform !== "darwin") return true
+      const access = systemPreferences.getMediaAccessStatus("microphone")
+      if (access === "granted") return true
+      if (access !== "not-determined") return false
+      // Hidden starts are automated verification: never raise the system prompt there. The OS
+      // still gates a real recorder; fixture recorders need no microphone.
+      if (startupMode(process.env.ES_DESKTOP_START) === "hidden") return true
+      return systemPreferences.askForMediaAccess("microphone")
+    },
+    temp: app.getPath("temp"),
+    openSettings:
+      process.platform === "darwin"
+        ? () => shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        : undefined,
+  })
   const server = await serve({
     port,
     root: path.join(app.getAppPath(), "dist/renderer"),
@@ -60,6 +81,7 @@ const start = async () => {
       ? `Basic ${Buffer.from(`${process.env.OPENCODE_SERVER_USERNAME ?? "opencode"}:${process.env.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`
       : undefined,
     renderer: app.isPackaged ? undefined : process.env.ES_DESKTOP_RENDERER,
+    voice,
   })
   await writeFile(portFile, new URL(server.origin).port, { mode: 0o600 })
   const isolated = session.fromPartition("persist:editspace")
@@ -168,7 +190,7 @@ const start = async () => {
     event.preventDefault()
     state.closing = true
     isolated.flushStorageData()
-    void server.close().finally(() => app.quit())
+    void voice.close().finally(() => server.close()).finally(() => app.quit())
   })
   app.on("window-all-closed", () => app.quit())
   process.on("SIGTERM", () => app.quit())

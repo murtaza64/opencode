@@ -567,5 +567,6 @@ export function createVim(opts: {
     }
   }
 
-  return { mode, setMode, handleKeyDown, refresh, enterInsertAt: enterInsert }
+  // `checkpoint` records the current text so an external edit (dictation) is one `u` step.
+  return { mode, setMode, handleKeyDown, refresh, enterInsertAt: enterInsert, checkpoint: snapshot }
 }

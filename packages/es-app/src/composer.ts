@@ -1512,6 +1512,15 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         targetRevision: state.targetRevision,
       }, latestMessageID, context),
     setText: (text: string) => updateDraft({ text }),
+    /**
+     * Inserts dictated text into the draft that was visible when dictation started, without
+     * touching images or model. Returns the caret after the insertion.
+     */
+    insertDictation: (buffer: ComposerBuffer, captured: Pick<ComposerDraft, "revision" | "selection">, text: string) => {
+      const next = dictationInsert(state[buffer], captured, text)
+      updateDraft({ text: next.text, selection: [next.caret, next.caret] }, true, buffer)
+      return next.caret
+    },
     setImages: (images: ComposerImage[], buffer: ComposerBuffer = draftKey()) => {
       imageEdits[buffer]++
       setMissingImages(buffer, false)
@@ -1576,6 +1585,30 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     capabilityReason: () => capabilityReason(state.mode) || imageCapabilityReason(state.mode, state[draftKey()].images),
     actionLabel: () => ({ send: "Send", aside: "Ask aside", queue: "Queue message", steer: "Steer task" })[state.mode],
   }
+}
+
+/**
+ * Untouched since capture: dictation replaces the selection it started with, like typing would.
+ * Edited meanwhile: it goes in at the current caret and never replaces the newer text.
+ * Selections are caret ranges; callers collapse a Vim normal-mode block to its start.
+ */
+export const dictationInsert = (
+  draft: Pick<ComposerDraft, "text" | "revision" | "selection">,
+  captured: Pick<ComposerDraft, "revision" | "selection">,
+  dictated: string,
+) => {
+  const clamp = (value: number) => Math.max(0, Math.min(draft.text.length, value))
+  const [start, end] =
+    draft.revision === captured.revision
+      ? [clamp(Math.min(...captured.selection)), clamp(Math.max(...captured.selection))]
+      : [clamp(Math.min(...draft.selection)), clamp(Math.min(...draft.selection))]
+  const before = draft.text.slice(0, start)
+  const after = draft.text.slice(end)
+  const body = dictated.trim()
+  const lead = before && !/\s$/.test(before) ? " " : ""
+  const trail = after && !/^[\s.,;:!?)\]}]/.test(after) ? " " : ""
+  const inserted = `${lead}${body}${trail}`
+  return { start, end, inserted, text: before + inserted + after, caret: start + lead.length + body.length }
 }
 
 const emptyDraft = (): ComposerDraft => ({ text: "", images: [], model: null, selection: [0, 0], revision: 0 })

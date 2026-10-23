@@ -8,6 +8,7 @@ import { sessionHref } from "../state"
 import { docHref } from "../pages/doc"
 import { briefComplete, sourceTarget, type BriefResult, type BriefShape, type BriefSource, type DeskItem, type EvidenceRef } from "../desk"
 import { currentJob, type BriefJob } from "../desk-session"
+import { LinkedText } from "./linked-text"
 
 const Refs = (props: { refs: string[]; known: EvidenceRef[]; item: DeskItem }) =>
   <For each={props.refs}>{id => {
@@ -50,23 +51,23 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
       </>}</Show>
       <Show when={!current() && discarded().length}><p class="home-source">The request changed since the last brief.</p></Show>
       <Show when={complete() && ready()}>{value => <div class="desk-brief-body">
-        <Show when={value().result.ask}><p class="desk-brief-ask" dir="auto">{value().result.ask}</p></Show>
+        <Show when={value().result.ask}><p class="desk-brief-ask" dir="auto"><LinkedText text={value().result.ask} /></p></Show>
         <Show when={value().result.whyYou || value().result.whyNow}><p class="desk-brief-why" dir="auto">
-          <Show when={value().result.whyYou}><b>Why you:</b> {value().result.whyYou} </Show>
-          <Show when={value().result.whyNow}><b>Why now:</b> {value().result.whyNow}</Show>
+          <Show when={value().result.whyYou}><b>Why you:</b> <LinkedText text={value().result.whyYou} /> </Show>
+          <Show when={value().result.whyNow}><b>Why now:</b> <LinkedText text={value().result.whyNow} /></Show>
         </p></Show>
       </div>}</Show>
     </Show>
     <Show when={shows("after") && complete() && ready()}>{value => <div class="desk-brief-after">
-      <Show when={!props.item.record?.options.length && value().result.ifWait}><p class="home-muted" dir="auto">If you wait: {value().result.ifWait}</p></Show>
+      <Show when={!props.item.record?.options.length && value().result.ifWait}><p class="home-muted" dir="auto">If you wait: <LinkedText text={value().result.ifWait} /></p></Show>
       <Show when={value().result.shape}>{shape => <Shape shape={shape()} />}</Show>
-      <Show when={value().result.unknown}><p class="desk-brief-unknown" dir="auto"><span>Unknown</span> {value().result.unknown}</p></Show>
+      <Show when={value().result.unknown}><p class="desk-brief-unknown" dir="auto"><span>Unknown</span> <LinkedText text={value().result.unknown} /></p></Show>
       <SourceLinks sources={value().result.sources} refs={value().job.meta.refs} item={props.item} />
     </div>}</Show>
     {/* Cited evidence and provenance stay one click away, not in the reading path. */}
     <Show when={shows("details") && ready()}>{value => <details class="desk-brief-detail"><summary>Details</summary>
-      <Show when={value().result.facts.length}><ul><For each={value().result.facts}>{fact => <li><bdi dir="auto">{fact.text}</bdi> <Refs refs={fact.refs} known={value().job.meta.refs} item={props.item} /></li>}</For></ul></Show>
-      <Show when={value().result.timeline.length}><ol class="desk-timeline"><For each={value().result.timeline}>{entry => <li><Show when={entry.when}><span class="home-source">{entry.when} · </span></Show><bdi dir="auto">{entry.text}</bdi> <Refs refs={entry.refs} known={value().job.meta.refs} item={props.item} /></li>}</For></ol></Show>
+      <Show when={value().result.facts.length}><ul><For each={value().result.facts}>{fact => <li><bdi dir="auto"><LinkedText text={fact.text} /></bdi> <Refs refs={fact.refs} known={value().job.meta.refs} item={props.item} /></li>}</For></ul></Show>
+      <Show when={value().result.timeline.length}><ol class="desk-timeline"><For each={value().result.timeline}>{entry => <li><Show when={entry.when}><span class="home-source">{entry.when} · </span></Show><bdi dir="auto"><LinkedText text={entry.text} /></bdi> <Refs refs={entry.refs} known={value().job.meta.refs} item={props.item} /></li>}</For></ol></Show>
       <Show when={value().result.gaps.length}><ul class="home-muted"><For each={value().result.gaps}>{gap => <li dir="auto">{gap}</li>}</For></ul></Show>
       <Show when={value().result.visual}>{visual => <Visual title={visual().title} html={visual().html} />}</Show>
       {/* An incomplete brief still offers what it found, without standing in for the request. */}

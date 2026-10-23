@@ -19,6 +19,7 @@
     "test:links": "node test/external-links.mjs",
     "test:header": "node test/native-header.mjs",
     "test:draft-restart": "node test/draft-restart.mjs",
+    "test:voice": "node test/voice.mjs",
     "typecheck": "tsgo --noEmit"
   },
   "devDependencies": {
@@ -51,6 +52,9 @@
     "npmRebuild": false,
     "mac": {
       "identity": null,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Editspace records only while you dictate into a message, and transcribes on this Mac."
+      },
       "category": "public.app-category.developer-tools"
     }
   }

@@ -173,6 +173,68 @@ describe("InstanceStore", () => {
     }),
   )
 
+  it.live("runtime reports busy sessions and pending requests of loaded instances without loading others", () =>
+    Effect.gen(function* () {
+      const busyDir = yield* tmpdirScoped({ git: true })
+      const unloaded = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      const status = yield* SessionStatus.Service
+      const permission = yield* Permission.Service
+      const question = yield* Question.Service
+      let boots = 0
+      yield* setBootstrap(Effect.sync(() => { boots++ }))
+      const ctx = yield* store.load({ directory: busyDir })
+      const busy = SessionID.descending()
+      const idle = SessionID.descending()
+      yield* status.set(busy, { type: "busy" }).pipe(Effect.provideService(InstanceRef, ctx))
+      yield* status.set(idle, { type: "busy" }).pipe(Effect.provideService(InstanceRef, ctx))
+      yield* status.set(idle, { type: "idle" }).pipe(Effect.provideService(InstanceRef, ctx))
+      const ask = yield* permission.ask({ sessionID: busy, permission: "read", patterns: ["*"], always: [], metadata: {}, ruleset: [] }).pipe(
+        Effect.provideService(InstanceRef, ctx), Effect.forkScoped,
+      )
+      const asked = yield* question.ask({ sessionID: busy, questions: [] }).pipe(Effect.provideService(InstanceRef, ctx), Effect.forkScoped)
+      yield* Effect.yieldNow
+      yield* store.resolve(unloaded)
+
+      const runtime = yield* store.runtime()
+
+      expect(boots).toBe(1)
+      expect(runtime).toHaveLength(1)
+      const entry = runtime[0]!
+      expect(entry.directory).toBe(ctx.directory)
+      if (!entry.ready) throw new Error("expected a ready instance")
+      expect(entry.status).toEqual({ [busy]: { type: "busy" } })
+      expect(entry.permissions.map((item) => item.sessionID)).toEqual([busy])
+      expect(entry.questions.map((item) => item.sessionID)).toEqual([busy])
+      expect(yield* store.peek(unloaded)).toBeUndefined()
+      yield* Fiber.interrupt(ask)
+      yield* Fiber.interrupt(asked)
+    }),
+  )
+
+  it.live("runtime marks a booting instance as not ready instead of waiting for it", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      yield* setBootstrap(Effect.gen(function* () {
+        yield* Deferred.succeed(started, undefined)
+        yield* Deferred.await(release)
+      }))
+      const loading = yield* store.load({ directory: dir }).pipe(Effect.forkScoped)
+      yield* Deferred.await(started)
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+
+      const runtime = yield* store.runtime()
+
+      expect(runtime).toHaveLength(1)
+      expect(runtime[0]!.ready).toBe(false)
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(loading)
+    }),
+  )
+
   it.effect("start returns the identity while bootstrap is still running and load joins the same boot", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped({ git: true })

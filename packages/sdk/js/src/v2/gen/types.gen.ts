@@ -1767,6 +1767,49 @@ export type GlobalEvent = {
     | SyncEventSessionInputHandled
 }
 
+export type PermissionRequest = {
+  id: string
+  sessionID: string
+  permission: string
+  patterns: Array<string>
+  metadata: {
+    [key: string]: unknown
+  }
+  always: Array<string>
+  tool?: {
+    messageID: string
+    callID: string
+  }
+}
+
+export type QuestionRequest = {
+  id: string
+  sessionID: string
+  /**
+   * Questions to ask
+   */
+  questions: Array<QuestionInfo>
+  tool?: QuestionTool
+}
+
+export type GlobalRuntime = {
+  instances: Array<
+    | {
+        directory: string
+        ready: true
+        status: {
+          [key: string]: SessionStatus
+        }
+        permissions: Array<PermissionRequest>
+        questions: Array<QuestionRequest>
+      }
+    | {
+        directory: string
+        ready: false
+      }
+  >
+}
+
 /**
  * Log level
  */
@@ -2638,35 +2681,10 @@ export type PtyForbiddenError = {
   message: string
 }
 
-export type QuestionRequest = {
-  id: string
-  sessionID: string
-  /**
-   * Questions to ask
-   */
-  questions: Array<QuestionInfo>
-  tool?: QuestionTool
-}
-
 export type QuestionNotFoundError = {
   _tag: "QuestionNotFoundError"
   requestID: string
   message: string
-}
-
-export type PermissionRequest = {
-  id: string
-  sessionID: string
-  permission: string
-  patterns: Array<string>
-  metadata: {
-    [key: string]: unknown
-  }
-  always: Array<string>
-  tool?: {
-    messageID: string
-    callID: string
-  }
 }
 
 export type PermissionNotFoundError = {
@@ -8202,6 +8220,31 @@ export type GlobalEventResponses = {
 }
 
 export type GlobalEventResponse = GlobalEventResponses[keyof GlobalEventResponses]
+
+export type GlobalRuntimeData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/runtime"
+}
+
+export type GlobalRuntimeErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalRuntimeError = GlobalRuntimeErrors[keyof GlobalRuntimeErrors]
+
+export type GlobalRuntimeResponses = {
+  /**
+   * Runtime state of every loaded instance
+   */
+  200: GlobalRuntime
+}
+
+export type GlobalRuntimeResponse = GlobalRuntimeResponses[keyof GlobalRuntimeResponses]
 
 export type GlobalConfigGetData = {
   body?: never
