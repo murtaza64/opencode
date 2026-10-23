@@ -117,7 +117,7 @@ const Answer = (props: { record: AttentionRecord; attention: Attention; options:
         <Show when={selected()} fallback="Send answer">{option => <Show when={!props.prepared} fallback="Send">Send <bdi dir="auto">{option().label}</bdi></Show>}</Show>
       </button>
       {props.extra}
-      <span class="home-muted">To {target()}</span>
+      <span class="home-muted"><bdi>To</bdi> {target()}</span>
     </div>
   </div>
 }
@@ -167,7 +167,7 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
       * Wide layouts place it above the options, beside the picture. */}
     <Show when={props.prepared}>{prepared => <div class="home-decision-question">
       <h3 class="home-question"><bdi dir="auto">{prepared().question}</bdi></h3>
-      <p class="home-request-line">Request: <bdi dir="auto">{props.record.title}</bdi></p>
+      <p class="home-request-line"><bdi>Request:</bdi> <bdi dir="auto">{props.record.title}</bdi></p>
       {props.brief}
     </div>}</Show>
     <div class="home-decision-explain">
