@@ -402,8 +402,7 @@ try {
   await page.evaluate(() => { document.querySelector(".desk-chat .prompt-box textarea").dataset.mountProbe = "kept" })
   await page.locator(".desk-item").first().click()
   await expect(page.locator(".desk-evidence")).toContainText("Pick a rollout")
-  // Read-only operator: the answer controls (here the folded note) are disabled.
-  await expect(page.locator(".desk-evidence .home-answer").getByRole("button", { name: "Add note" })).toBeDisabled()
+  await expect(page.locator(".desk-evidence .home-answer textarea")).toBeDisabled()
   await expect(editor()).toHaveValue(draft)
   await expect(editor()).toHaveAttribute("data-mount-probe", "kept")
   await page.getByRole("button", { name: "Close and return to chat" }).click()

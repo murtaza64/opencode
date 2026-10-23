@@ -210,6 +210,11 @@
     z-index: 1;
   }
 
+  [data-component="markdown-quote"] {
+    position: relative;
+  }
+
+  [data-component="markdown-quote"]:hover [data-slot="markdown-copy-button"],
   [data-component="markdown-code"]:hover [data-slot="markdown-copy-button"],
   [data-slot="markdown-copy-button"]:focus-within {
     opacity: 1;

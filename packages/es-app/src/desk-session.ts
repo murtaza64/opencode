@@ -9,7 +9,7 @@ import { oc, SessionCreateError, type ContextPart, type MessageWithParts } from 
 import { clearBackend, describeFailure, isTransient, reportBackend } from "./backend-status"
 import { assistantOps, handled, emptyMemory, eraseMemory, nextMemory, type MemoryDocument, type MemoryOp } from "./desk-memory"
 import type { AttentionRecord } from "./attention"
-import { BRIEF_CONTRACT, BRIEF_SCHEMA, BRIEF_SYSTEM, type ConversationThread, briefPacket, briefState, deskContext, type BriefMeta, type BriefState, type DeskItem } from "./desk"
+import { BRIEF_CONTRACT, BRIEF_SCHEMA, BRIEF_SYSTEM, type ConversationDocument, type ConversationThread, briefPacket, briefState, deskContext, type BriefMeta, type BriefState, type DeskItem, SOURCE_TAIL } from "./desk"
 
 const POINTER = "es-app:front-desk:1"
 const NOTE = "es-app:front-desk:context:1"
@@ -161,9 +161,31 @@ export const createDeskSession = () => {
 export type BriefJob = { id: string; directory: string; meta: BriefMeta; created: number; state: BriefState | { state: "starting" } | { state: "unconfirmed" } }
 type PendingCreate = { id: string; directory: string; body: Parameters<typeof oc.createSession>[1] & { id: string }; packet: string; created: number }
 
-/** A brief made under the current contract for exactly this item revision. */
-export const currentJob = (jobs: BriefJob[], item: DeskItem) =>
-  jobs.find(job => job.meta.source === item.key && job.meta.revision === item.revision && (job.meta.contract ?? 1) === BRIEF_CONTRACT)
+/** A brief made under the current contract for exactly this item revision: the newest attempt, except that
+ * a ready one stays shown while a newer (regenerated) attempt is still being prepared. */
+export const currentJob = (jobs: BriefJob[], item: DeskItem, pinned?: string) => {
+  if (pinned) return jobs.find(job => job.id === pinned && job.meta.source === item.key)
+  const attempts = jobs.filter(job => job.meta.source === item.key && job.meta.revision === item.revision && (job.meta.contract ?? 1) === BRIEF_CONTRACT)
+    .toSorted((a, b) => b.created - a.created)
+  const newest = attempts[0]
+  if (!newest || newest.state.state === "ready" || newest.state.state === "failed") return newest
+  return attempts.find(job => job.state.state === "ready") ?? newest
+}
+/** A newer attempt than the brief shown is still being prepared (after Regenerate). */
+export const regeneratingJob = (jobs: BriefJob[], item: DeskItem) => {
+  const shown = currentJob(jobs, item)
+  return jobs.some(job => job !== shown && job.meta.source === item.key && job.meta.revision === item.revision && (job.meta.contract ?? 1) === BRIEF_CONTRACT
+    && shown && job.created > shown.created && (job.state.state === "running" || job.state.state === "starting"))
+}
+
+/** The brief the human saw when answering: the job recorded on the answer, else (older answers) the
+ * newest ready brief made for the content they answered (`item.revision`). Never a brief for later content. */
+export const answeredJob = (jobs: BriefJob[], item: DeskItem, answer?: { revision?: number; brief?: { job: string } | null } | null) => {
+  if (answer?.brief?.job) return jobs.find(job => job.id === answer.brief!.job && job.meta.source === item.key)
+  if (!answer) return
+  return jobs.filter(job => job.meta.source === item.key && job.meta.revision === item.revision && job.state.state === "ready")
+    .sort((a, b) => b.created - a.created)[0]
+}
 
 const metaOf = (session: Session): BriefMeta | undefined => {
   const value = (session.metadata as Record<string, unknown> | undefined)?.frontDesk as BriefMeta | undefined
@@ -302,7 +324,7 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
       if (!desk() && ensure) await ensure()
       const target = desk()
       if (!target) return
-      const [tail, conversation] = await Promise.all([oc.messagesTail(item.source.session, item.source.directory, 10).catch(() => []), item.record ? readConversation(item.record) : undefined])
+      const [tail, conversation] = await Promise.all([oc.messagesTail(item.source.session, item.source.directory, SOURCE_TAIL).catch(() => []), item.record ? readConversation(item.record) : undefined])
       // Re-read the canonical item: the source may have moved on while its thread was read.
       const latest = current(item.key)
       if (!latest || latest.revision !== item.revision) {
@@ -310,7 +332,7 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
         return
       }
       if (desk()?.session !== target.session || pending() || inflight() || reusable(latest)) return
-      const packet = briefPacket(latest, tail, conversation?.threads ?? [])
+      const packet = briefPacket(latest, tail, conversation?.threads ?? [], conversation?.documents ?? [])
       const meta: BriefMeta = { kind: "brief", requestID: crypto.randomUUID(), source: latest.key, revision: latest.revision, title: latest.title, refs: packet.refs, contract: BRIEF_CONTRACT }
       // Deterministic per (parent, source, revision, attempt): every client computes the same ID, so
       // Core's create reconciliation makes the first creator win and the rest adopt its job.
@@ -343,20 +365,41 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
     const value = pending()
     if (value) await admit(value)
   }
-  return { jobs, error, detail, pending, preparing, synced, refresh, start, confirm }
+  /** A fresh brief for an attention request's current content, made by the host that owns it (the same route
+   * the phone uses). The previous brief stays shown until the new one is ready. */
+  const [regenerating, setRegenerating] = createSignal(false)
+  const regenerate = async (item: DeskItem) => {
+    if (!item.record || regenerating()) return
+    setRegenerating(true)
+    try {
+      const response = await fetch(`/es/api/frontdesk/briefs/${encodeURIComponent(item.record.id)}/regenerate?es=${encodeURIComponent(item.record.editspace)}`, {
+        method: "POST", credentials: "include", headers: { "content-type": "application/json", "X-Attention-CSRF": "1" }, body: "{}",
+      })
+      const body = await response.json().catch(() => ({})) as { error?: string }
+      setError(response.ok ? "" : `Brief not regenerated: ${body.error ?? `HTTP ${response.status}`}.`)
+    } catch {
+      setError("Brief not regenerated: the dashboard is unreachable.")
+    } finally {
+      setRegenerating(false)
+    }
+    await refresh()
+  }
+  return { jobs, error, detail, pending, preparing, synced, refresh, start, confirm, regenerate, regenerating }
 }
 
 /** The original human conversation behind a record, read-only via the dashboard. Shared per record
  * revision so the card and its brief read it once; failure is a quiet empty result. */
-const conversations = new Map<string, Promise<{ threads: ConversationThread[]; error?: string }>>()
+type Conversation = { threads: ConversationThread[]; documents: ConversationDocument[]; error?: string }
+const conversations = new Map<string, Promise<Conversation>>()
 export const readConversation = (record: AttentionRecord) => {
   const key = `${record.editspace}\u0000${record.id}\u0000${record.revision}`
   const known = conversations.get(key)
   if (known) return known
   const read = fetch(`/es/api/frontdesk/conversation?es=${encodeURIComponent(record.editspace)}&record=${encodeURIComponent(record.id)}`, { credentials: "include" })
-    .then(response => response.ok ? response.json() : { threads: [], error: "Conversation unavailable." })
-    .then(value => ({ threads: Array.isArray(value?.threads) ? value.threads as ConversationThread[] : [], ...(value?.error ? { error: String(value.error) } : {}) }))
-    .catch(() => ({ threads: [], error: "Conversation unavailable." }))
+    .then(response => response.ok ? response.json() : { error: "Conversation unavailable." })
+    .then((value): Conversation => ({ threads: Array.isArray(value?.threads) ? value.threads as ConversationThread[] : [],
+      documents: Array.isArray(value?.documents) ? value.documents as ConversationDocument[] : [], ...(value?.error ? { error: String(value.error) } : {}) }))
+    .catch((): Conversation => ({ threads: [], documents: [], error: "Conversation unavailable." }))
     // A failed read may be retried after a minute; a found conversation is kept for the revision.
     .then(value => { if (value.error) setTimeout(() => conversations.delete(key), 60_000); return value })
   conversations.set(key, read)

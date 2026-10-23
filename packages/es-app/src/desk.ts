@@ -4,7 +4,8 @@
  * requests keep their own native controls. */
 import type { SessionFailure } from "@opencode-ai/sdk/v2"
 import type { MessageWithParts } from "./api"
-import type { AttentionRecord } from "./attention"
+import { contentRevision, type AttentionRecord } from "./attention"
+import contract from "./brief-contract.json"
 import type { HomeRequestRow } from "./home-requests"
 import { failureLabel } from "./session-failures"
 import { memoryLines, type MemoryDocument } from "./desk-memory"
@@ -23,6 +24,18 @@ export type DeskItem = {
   failure?: SessionFailure
 }
 
+/** The desk item for one attention record at a given content revision (default: its current one). */
+export const attentionItem = (record: AttentionRecord, checked: number, revision = String(contentRevision(record))): DeskItem => ({
+  key: `attention:${record.editspace}:${record.id}`,
+  kind: record.kind,
+  title: record.title,
+  project: record.editspace,
+  revision,
+  checked,
+  source: { session: record.source_ref.session_id, directory: record.source_ref.directory },
+  record,
+})
+
 export const deskItems = (input: {
   records: AttentionRecord[]
   attentionChecked: number
@@ -32,16 +45,7 @@ export const deskItems = (input: {
   title: (sessionID: string) => string | undefined
   project: (directory: string) => string | undefined
 }): DeskItem[] => [
-  ...input.records.filter(record => record.status === "open").map(record => ({
-    key: `attention:${record.editspace}:${record.id}`,
-    kind: record.kind,
-    title: record.title,
-    project: record.editspace,
-    revision: String(record.revision),
-    checked: input.attentionChecked,
-    source: { session: record.source_ref.session_id, directory: record.source_ref.directory },
-    record,
-  })),
+  ...input.records.filter(record => record.status === "open").map(record => attentionItem(record, input.attentionChecked)),
   // A request whose source is briefly unreadable keeps its row at its last confirmed time.
   ...input.requests.filter(request => request.state === "pending" || (request.state === "unavailable" && request.lastPending)).map(request => ({
     key: `${request.kind}:${request.directory}:${request.id}`,
@@ -119,11 +123,16 @@ export const deskSources = (input: {
 export type EvidenceRef = { id: string; label: string; messageID?: string; url?: string }
 /** `contract` names the brief format; a job made under an older one is kept but not shown or reused. */
 export type BriefMeta = { kind: "brief"; requestID: string; source: string; revision: string; title: string; refs: EvidenceRef[]; contract?: number }
-export const BRIEF_CONTRACT = 3
+export const BRIEF_CONTRACT = contract.contract
 export type BriefShape =
-  | { kind: "sequence"; steps: string[] }
+  /** Options side by side: `columns` are canonical option ids (unknown ones are dropped), one cell per column. */
+  | { kind: "compare"; columns: string[]; rows: { label: string; cells: string[] }[] }
+  /** `approved`: how many leading steps choosing the recommended option covers; later steps need their own decision. */
+  | { kind: "sequence"; steps: string[]; approved?: number }
   | { kind: "scope"; included: string[]; excluded: string[] }
   | { kind: "impact"; rows: { area: string; change: string }[] }
+  /** What a choice changes and what it keeps: a row whose now and after are equal stays as it is. */
+  | { kind: "change"; rows: { item: string; now: string; after: string }[] }
 /** A link the brief cites, resolved by the app from evidence refs; never a model-written URL it did not see. */
 export type BriefSource = { label: string; refs: string[] }
 export type BriefResult = {
@@ -131,6 +140,8 @@ export type BriefResult = {
   question: string
   /** Only the background that person needs to answer, in a sentence or two; empty when none is needed. */
   context: string
+  /** Every concrete thing the decision acts on (services, pull requests, documents), each with its links. */
+  subjects: { name: string; detail: string; refs: string[] }[]
   /** Per canonical option ID: the consequence they would notice, an optional short note (a material risk
    * or fact), and optionally a small picture of what choosing it looks like. Labels and IDs stay the producer's. */
   choices: { id: string; label: string; outcome: string; note: string; sketch?: string }[]
@@ -138,14 +149,17 @@ export type BriefResult = {
   ifWait: string
   /** For a decision to publish something: the exact text it would send, quoted from the request. */
   sends: string
+  /** Where `sends` goes and who is in that conversation; who it is posted as. Both as the evidence states. */
+  sendsTo: string
+  sendsAs: string
   /** At most one picture: a shape the app draws, or the model's own visual. */
   shape?: BriefShape
   sources: BriefSource[]
   facts: { text: string; refs: string[] }[]
   timeline: { when?: string; text: string; refs: string[] }[]
   gaps: string[]
-  /** Model-authored HTML/SVG explaining the decision, rendered in a script-less, network-less sandbox. */
-  visual?: { title: string; html: string; height: number }
+  /** The model's own drawing: mobile-first SVG (contract 4) sized by its viewBox, or legacy HTML with a height. */
+  visual?: { title: string; alt: string; svg?: string; aspect?: number; html?: string; height?: number }
 }
 export type BriefState =
   | { state: "running" }
@@ -160,13 +174,20 @@ const clip = (text: string, max: number) => {
 }
 const ago = (now: number, at?: number) => at ? `${Math.max(0, Math.round((now - at) / 1000))}s ago` : "never"
 
+// Long enough for a request that lists every pull request it covers; still bounded.
+const CONTEXT_CLIP = 6000
+/** Links the request itself gives, in order of first appearance: what U refs point at. */
+export const requestLinks = (item: DeskItem) =>
+  [...new Set(((item.record?.context ?? "").slice(0, CONTEXT_CLIP).match(/https?:\/\/[^\s<>"'`)\]]+/g) ?? []).map(url => url.replace(/[.,;:!?]+$/, "")))]
 /** Canonical fields only; derived briefs and agent recommendations stay labelled as such. */
 export const canonicalLines = (item: DeskItem) => {
   const lines = [`kind: ${item.kind}`, `title: ${item.title}`, `project: ${item.project ?? "unknown"}`, `source revision: ${item.revision}`,
     `source session: ${item.source.session} (${item.source.directory})`]
   if (item.record) {
-    lines.push(`attention record: ${item.record.id} (gate ${item.record.gate_key})`, `context: ${clip(item.record.context, 2000)}`)
+    lines.push(`attention record: ${item.record.id} (gate ${item.record.gate_key})`, `context: ${clip(item.record.context, CONTEXT_CLIP)}`)
     if (item.record.options.length) lines.push(`options: ${item.record.options.map(option => `${option.id}=${option.label}`).join("; ")}`)
+    for (const option of item.record.options.filter(option => option.input))
+      lines.push(`option ${option.id} ${option.input!.required ? "requires" : "accepts"} input: ${option.input!.label} (${option.input!.kind}${option.input!.choices?.length ? `: ${option.input!.choices.map(choice => choice.label).join(", ")}` : ""})`)
     if (item.record.recommendation) lines.push(`recommended option: ${item.record.recommendation}`)
   }
   if (item.request?.permission) {
@@ -230,72 +251,32 @@ export const deskContext = (input: {
 // The brief replaces reading: the human should see the choice, its consequences and one picture,
 // then decide. Prose, internal vocabulary and process narration all cost attention, so the contract
 // asks for word-limited fields and a structured picture the app draws, not paragraphs.
-export const BRIEF_SYSTEM = [
-  "You help a busy person decide one request from an agent. Assume they know the project only at a high level: they have not read the agent's thread and do not know its internal names.",
-  "Use judgment: show what they need to decide well and nothing else. Every field except question is optional; leave a field empty unless it clearly helps with this decision.",
-  "question: the decision as one plain question they can answer, in their terms (what they would see, get or risk), not the agent's task name. Example: 'What should someone see first when opening a workspace?'",
-  "context: only if needed, one or two short sentences of background in plain words: what this is about, and why it needs them (who asked, what it would publish or change) when that is not obvious. Mention an uncertainty only if it changes this choice.",
-  "choices: for each option listed in C1, by its exact id. label: only if the option's own label uses internal names or configuration (identifiers, tokens, file names), a plain label of a few words in their terms; otherwise empty. outcome: the consequence people would notice if it is chosen, one short complete phrase. note: optionally one short material risk or fact for that option. sketch: optionally, when the options differ in what someone would see, a small self-contained HTML or inline SVG mockup of that option's result, drawn at 16:10 for about 300 by 188 px with text at 11 px or larger (no scripts, no external URLs, dark background, under 6 KB).",
-  "ifWait: what happens if they do not answer, only when no option already means not acting.",
-  "sends: if choosing an option publishes or sends text (a reply, comment, message, post), that exact text copied verbatim from C1; otherwise empty.",
-  "visual: the main explanation whenever a picture communicates faster than text, which is most of the time: a bespoke self-contained HTML or inline SVG made for this decision, like one slide: annotated screen mockups, before and after, a flow or causal chain, a scope map of what is touched and what is not, a timeline, or a comparison. Short labels and callouts only; mark claims that are observed but not measured as such; never chart numbers the evidence does not establish. No scripts, no external URLs, no forms; dark background (#181825), light text; drawn at a fixed width of at most 640 px (set that width on the svg, not 100%), text between 11 and 13 px so it never outsizes the question; under 16 KB. height: the pixel height it needs (120 to 560).",
-  "shape: instead of a visual, only for a simple case, the app can draw a sequence of steps, a scope of included versus excluded items, or impact rows of area and change.",
-  "The source thread may discuss other work: use only what is about this request.",
-  "Put identifiers, commands, file paths, document IDs and other implementation detail only in facts, never in question, context or choices. Never write ref IDs (C1, E1, X1), revisions, gates, ledgers, sessions, lanes, Core or 'the requesting agent' in any text.",
-  "Write complete phrases; never stop mid-word. Keep every field short.",
-  "sources: at most 3 places worth opening, each with a label saying what it shows and the supplied ref IDs or file:<relative path> it points to. Prefer an original human conversation (X refs) when one is supplied.",
-  "facts: up to 4 supporting details shown only on request, each citing supplied ref IDs in refs. Claims stay claims: say who said or measured what. timeline: only when order matters, same rule. gaps: other things the evidence cannot establish.",
-  "You may use read, grep, glob and list (at most 6 calls) to read relevant local files; cite a file you relied on as file:<relative path> in refs.",
-  "Use only the supplied evidence and files you read. Do not make the decision, do not present an option as chosen, and do not claim anything was approved, sent or retried.",
-  "Reply with exactly one JSON object and nothing else, matching this JSON Schema:",
-].join(" ")
-
-const words = (maxLength: number) => ({ type: "string", maxLength })
-const list = (maxItems: number, maxLength: number) => ({ type: "array", maxItems, items: words(maxLength) })
-const cited = (maxItems: number, extra: Record<string, unknown> = {}) => ({ type: "array", maxItems, items: { type: "object", additionalProperties: false, required: ["text", "refs"],
-  properties: { ...extra, text: words(200), refs: { type: "array", minItems: 1, items: { type: "string" } } } } })
-export const BRIEF_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["question", "choices"],
-  properties: {
-    question: words(160),
-    context: words(320),
-    choices: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "outcome"],
-      properties: { id: { type: "string" }, label: words(60), outcome: words(140), note: words(120), sketch: { type: "string", maxLength: 8000 } } } },
-    ifWait: words(140),
-    sends: words(2000),
-    shape: { oneOf: [
-      { type: "object", additionalProperties: false, required: ["kind", "steps"], properties: { kind: { const: "sequence" }, steps: list(6, 48) } },
-      { type: "object", additionalProperties: false, required: ["kind", "included", "excluded"], properties: { kind: { const: "scope" }, included: list(5, 60), excluded: list(5, 60) } },
-      { type: "object", additionalProperties: false, required: ["kind", "rows"], properties: { kind: { const: "impact" }, rows: { type: "array", maxItems: 5, items: {
-        type: "object", additionalProperties: false, required: ["area", "change"], properties: { area: words(40), change: words(80) } } } } },
-    ] },
-    gaps: list(3, 160),
-    sources: { type: "array", maxItems: 3, items: { type: "object", additionalProperties: false, required: ["label", "refs"],
-      properties: { label: words(80), refs: { type: "array", minItems: 1, items: { type: "string" } } } } },
-    facts: cited(4),
-    timeline: cited(6, { when: words(40) }),
-    visual: { type: "object", additionalProperties: false, required: ["title", "html", "height"], properties: { title: words(80), html: { type: "string", maxLength: 20000 }, height: { type: "integer", minimum: 120, maximum: 560 } } },
-  },
-}
+/** The prompt and schema live in brief-contract.json, shared with the dashboard's copy and the Android app. */
+export const BRIEF_SYSTEM = contract.system.join(" ")
+export const BRIEF_SCHEMA = contract.schema
 
 const EVIDENCE_BUDGET = 5000
+/** Source messages read per brief: enough to reach the agent's own explanation past its tool steps. */
+export const SOURCE_TAIL = 30
 
 /** Producer snippet: canonical fields plus a bounded tail of the source session's visible text.
  * Tool inputs and outputs are never included, only tool names and states, so preparing a brief
  * reads nothing beyond what the source thread already shows the operator. */
 /** The original human conversation behind a request, fetched read-only by the dashboard (GitHub review threads). */
-export type ConversationThread = { kind: "github-review"; repo: string; number: number; path?: string | null; line?: number | null; url: string
-  comments: { author: string; bot: boolean; when: string; body: string; url: string }[] }
-export const threadWhere = (thread: ConversationThread) =>
-  `GitHub review ${thread.repo}#${thread.number}${thread.path ? ` ${thread.path}:${thread.line}` : ""}`
+type ThreadComment = { author: string; bot: boolean; when: string; body: string; url: string }
+export type ConversationThread =
+  | { kind: "github-review"; repo: string; number: number; path?: string | null; line?: number | null; url: string; comments: ThreadComment[] }
+  | { kind: "slack-thread"; channel: string; url: string; comments: ThreadComment[] }
+/** A text file the request names in its agent's own folder (e.g. the exact draft it wants to send). */
+export type ConversationDocument = { name: string; text: string }
+export const threadWhere = (thread: ConversationThread) => thread.kind === "slack-thread" ? "Slack thread"
+  : `GitHub review ${thread.repo}#${thread.number}${thread.path ? ` ${thread.path}:${thread.line}` : ""}`
 
-export const briefPacket = (item: DeskItem, tail: MessageWithParts[], threads: ConversationThread[] = []) => {
+export const briefPacket = (item: DeskItem, tail: MessageWithParts[], threads: ConversationThread[] = [], documents: ConversationDocument[] = []) => {
   const excerpts = tail.flatMap(message => {
     const text = message.parts.flatMap(part => {
+      // Only what the thread says; tool calls carry no readable evidence for the human.
       if (part.type === "text" && !part.synthetic && !part.ignored && part.text.trim()) return [clip(part.text, 500)]
-      if (part.type === "tool") return [`(tool ${part.tool}: ${part.state.status})`]
       return []
     }).join(" ")
     return text ? [{ messageID: message.info.id, role: message.info.role, text }] : []
@@ -310,26 +291,31 @@ export const briefPacket = (item: DeskItem, tail: MessageWithParts[], threads: C
   }
   const refs: EvidenceRef[] = [
     { id: "C1", label: `canonical ${item.kind} ${item.key} rev ${item.revision}` },
+    ...requestLinks(item).map((url, index) => ({ id: `U${index + 1}`, label: `link in the request`, url })),
     ...kept.map((excerpt, index) => ({ id: `E${index + 1}`, label: `${excerpt.role} message in source session`, messageID: excerpt.messageID })),
   ]
   const comments = threads.flatMap(thread => thread.comments.map(comment => ({ thread, comment })))
   refs.push(...comments.map(({ thread, comment }, index) => ({ id: `X${index + 1}`, label: `${comment.author}${comment.bot ? " (bot)" : ""} on ${threadWhere(thread)}`, url: comment.url })))
+  refs.push(...documents.map((document, index) => ({ id: `D${index + 1}`, label: `document ${document.name}` })))
   const text = [
     "Prepare an evidence brief for the request below.",
     "",
     "[C1] Canonical request (authoritative, unchanged by this brief):",
     ...canonicalLines(item),
+    ...(requestLinks(item).length ? ["Links in the request:", ...requestLinks(item).map((url, index) => `[U${index + 1}] ${url}`)] : []),
     "",
     kept.length ? `Evidence excerpts from the source session, oldest first (${excerpts.length - kept.length} older excerpt(s) omitted):` : "No source-session excerpts were available.",
     ...kept.map((excerpt, index) => `[E${index + 1}] ${excerpt.role} ${excerpt.messageID}: ${excerpt.text}`),
     ...(comments.length ? ["", "Original conversation, read-only:"] : []),
     ...comments.map(({ thread, comment }, index) => `[X${index + 1}] ${threadWhere(thread)}, ${comment.author}${comment.bot ? " (bot)" : ""} ${comment.when.slice(0, 10)}: ${comment.body}`),
+    ...(documents.length ? ["", "Documents the request names, from the requesting agent's folder:"] : []),
+    ...documents.map((document, index) => `[D${index + 1}] ${document.name}:\n${document.text}`),
   ].join("\n")
   return { text, refs }
 }
 
 // Citations belong in refs; a bracketed "(C1, E2)" left in prose is stripped so it never reaches the human.
-const uncite = (value: string) => value.replace(/\s*[[(](?:[CEX]\d+(?:\s*[,;]\s*)?)+[\])]/g, "").trim()
+const uncite = (value: string) => value.replace(/\s*[[(](?:[CEXDU]\d+(?:\s*[,;]\s*)?)+[\])]/g, "").trim()
 // Lengths are guidance for the model, not a cut: an overlong field is kept whole up to a generous
 // bound and then ends at a word, so critical meaning is never clipped mid-word.
 const text = (value: unknown, max: number) => {
@@ -342,12 +328,42 @@ const text = (value: unknown, max: number) => {
 const strings = (value: unknown, max: number, limit: number) =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && !!item.trim()).slice(0, limit).map(item => text(item, max)) : []
 const objects = (value: unknown) => Array.isArray(value) ? value.filter((row): row is Record<string, unknown> => !!row && typeof row === "object") : []
-const sketchOf = (value: unknown) => typeof value === "string" && value.trim() && value.length <= 8000 ? { sketch: value } : {}
-const choicesOf = (value: unknown) => objects(value).flatMap(row => typeof row.id === "string" && text(row.outcome, 140)
-  ? [{ id: row.id, label: text(row.label, 60), outcome: text(row.outcome, 140), note: text(row.note, 120), ...sketchOf(row.sketch) }] : [])
+/** A drawing within the contract's SVG rules (brief-contract.json `visual`): one script-less, link-less
+ * <svg> sized only by its viewBox at the given width. Returns its height-to-width ratio, or undefined. */
+export const safeSvg = (value: unknown, width: number, maxHeight: number, maxBytes: number) => {
+  if (typeof value !== "string") return
+  const svg = value.trim()
+  if (!svg.startsWith("<svg") || !svg.endsWith("</svg>") || svg.length > maxBytes || svg.split("<svg").length !== 2) return
+  const root = svg.slice(0, svg.indexOf(">") + 1)
+  const box = /\sviewBox\s*=\s*["']\s*0[\s,]+0[\s,]+(\d+(?:\.\d+)?)[\s,]+(\d+(?:\.\d+)?)\s*["']/.exec(root)
+  if (!box || Number(box[1]) !== width || !(Number(box[2]) > 0 && Number(box[2]) <= maxHeight)) return
+  if (/\s(?:width|height)\s*=/.test(root)) return
+  if (/<\s*\/?\s*(?:script|foreignObject|image|iframe|object|embed|a|use)\b/i.test(svg) || /\son[a-z]+\s*=/i.test(svg)) return
+  if (/(?:xlink:)?href\s*=\s*["'](?!#)/i.test(svg) || /url\(\s*["']?(?!#)/i.test(svg) || /@import|position\s*:\s*fixed|\d(?:vw|vh|vmin|vmax)\b/i.test(svg)) return
+  return Number(box[2]) / width
+}
+const sketchOf = (value: unknown, legacy: boolean) => legacy
+  ? typeof value === "string" && value.trim() && value.length <= 8000 ? { sketch: value } : {}
+  : safeSvg(value, contract.visual.sketch.width, contract.visual.sketch.height, contract.visual.sketch.maxBytes) ? { sketch: (value as string).trim() } : {}
+const choicesOf = (value: unknown, legacy: boolean) => objects(value).flatMap(row => typeof row.id === "string" && text(row.outcome, 140)
+  ? [{ id: row.id, label: text(row.label, 60), outcome: text(row.outcome, 140), note: text(row.note, 120), ...sketchOf(row.sketch, legacy) }] : [])
 const shapeOf = (value: unknown): { shape?: BriefShape } => {
   const shape = (value && typeof value === "object" ? value : {}) as Record<string, unknown>
-  if (shape.kind === "sequence") { const steps = strings(shape.steps, 48, 6); return steps.length > 1 ? { shape: { kind: "sequence", steps } } : {} }
+  if (shape.kind === "compare") {
+    const columns = strings(shape.columns, 100, 3)
+    const rows = objects(shape.rows).slice(0, 4).flatMap(row => text(row.label, 40) && Array.isArray(row.cells)
+      ? [{ label: text(row.label, 40), cells: columns.map((_, index) => text((row.cells as unknown[])[index], 40)) }] : [])
+    return columns.length > 1 && rows.length ? { shape: { kind: "compare", columns, rows } } : {}
+  }
+  if (shape.kind === "sequence") {
+    const steps = strings(shape.steps, 48, 6)
+    const approved = typeof shape.approved === "number" && shape.approved >= 1 && shape.approved < steps.length ? Math.floor(shape.approved) : undefined
+    return steps.length > 1 ? { shape: { kind: "sequence", steps, ...(approved ? { approved } : {}) } } : {}
+  }
+  if (shape.kind === "change") {
+    const rows = objects(shape.rows).slice(0, 6).flatMap(row => text(row.item, 40) && text(row.now, 60) && text(row.after, 60) ? [{ item: text(row.item, 40), now: text(row.now, 60), after: text(row.after, 60) }] : [])
+    return rows.length ? { shape: { kind: "change", rows } } : {}
+  }
   if (shape.kind === "scope") {
     const included = strings(shape.included, 60, 5)
     const excluded = strings(shape.excluded, 60, 5)
@@ -361,12 +377,20 @@ const shapeOf = (value: unknown): { shape?: BriefShape } => {
 }
 // The sandboxed frame cannot size itself (no scripts), so the model states the height it drew for.
 const visualHeight = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? Math.min(560, Math.max(120, Math.round(value))) : 280
-const visualOf = (value: unknown) => {
+// Contract 4 draws SVG with a required description; older briefs keep their HTML so they still render on desktop.
+const visualOf = (value: unknown, legacy: boolean) => {
   if (!value || typeof value !== "object") return {}
   const visual = value as Record<string, unknown>
-  return typeof visual.html === "string" && visual.html.trim() && visual.html.length <= 20000
-    ? { visual: { title: text(visual.title, 80), html: visual.html, height: visualHeight(visual.height) } } : {}
+  if (legacy) return typeof visual.html === "string" && visual.html.trim() && visual.html.length <= 20000
+    ? { visual: { title: text(visual.title, 80), alt: "", html: visual.html, height: visualHeight(visual.height) } } : {}
+  const aspect = safeSvg(visual.svg, contract.visual.width, contract.visual.maxHeight, contract.visual.maxBytes)
+  const alt = text(visual.alt, 200)
+  return aspect && alt ? { visual: { title: text(visual.title, 80), alt, svg: (visual.svg as string).trim(), aspect } } : {}
 }
+const subjectsOf = (value: unknown, known: { has: (ref: string) => boolean }) => objects(value).slice(0, 20).flatMap(row => {
+  const refs = Array.isArray(row.refs) ? row.refs.filter((ref): ref is string => typeof ref === "string" && known.has(ref)) : []
+  return text(row.name, 60) && refs.length ? [{ name: text(row.name, 60), detail: text(row.detail, 80), refs }] : []
+})
 const citedOf = (value: unknown, known: { has: (ref: string) => boolean }) => {
   const rows = objects(value).filter(row => typeof row.text === "string")
   const kept = rows.flatMap(row => {
@@ -395,18 +419,20 @@ export const briefState = (meta: BriefMeta, messages: MessageWithParts[], status
     const known = { has: (ref: string) => meta.refs.some(item => item.id === ref) || /^file:[^\s]{1,200}$/.test(ref) }
     const facts = citedOf(value.facts, known)
     const timeline = citedOf(value.timeline, known)
+    const legacy = (meta.contract ?? 1) < 4
     return {
       state: "ready",
       omitted: facts.omitted + timeline.omitted,
       result: {
-        question: text(value.question, 160), context: text(value.context, 320), choices: choicesOf(value.choices),
-        ifWait: text(value.ifWait, 140), sends: typeof value.sends === "string" ? value.sends.trim() : "", ...shapeOf(value.shape), gaps: strings(value.gaps, 160, 3),
+        question: text(value.question, 160), context: text(value.context, 320), subjects: subjectsOf(value.subjects, known), choices: choicesOf(value.choices, legacy),
+        ifWait: text(value.ifWait, 140), sends: typeof value.sends === "string" ? value.sends.trim() : "", sendsTo: text(value.sendsTo, 160), sendsAs: text(value.sendsAs, 60),
+        ...shapeOf(value.shape), gaps: strings(value.gaps, 160, 3),
         // A source survives only with at least one ref the app can resolve; the label alone is never shown.
         sources: objects(value.sources).slice(0, 3).flatMap(row => {
           const refs = Array.isArray(row.refs) ? row.refs.filter((ref): ref is string => typeof ref === "string" && known.has(ref)) : []
           return text(row.label, 48) && refs.length ? [{ label: text(row.label, 48), refs }] : []
         }),
-        facts: facts.kept, timeline: timeline.kept, ...visualOf(value.visual),
+        facts: facts.kept, timeline: timeline.kept, ...visualOf(value.visual, legacy),
       },
     }
   }
@@ -441,24 +467,27 @@ export const detailRequest = (item: DeskItem, question: string, packet: { text: 
   }
 }
 
-/** A brief replaces reading only when it states the question and, with options, every option's outcome.
- * Anything less leaves the request as written. */
+/** A brief replaces reading only when it states the question, with options every option's outcome, and
+ * carries every link the request gives (in subjects or sources), so the things being decided cannot be
+ * summarised away. Anything less leaves the request as written. */
 export const briefComplete = (result: BriefResult, item: DeskItem) => {
   const options = item.record?.options ?? []
   if (!result.question) return false
-  return options.every(option => result.choices.some(choice => choice.id === option.id))
+  if (!options.every(option => result.choices.some(choice => choice.id === option.id))) return false
+  const cited = new Set([...result.subjects, ...result.sources].flatMap(row => row.refs))
+  return requestLinks(item).every((_, index) => cited.has(`U${index + 1}`))
 }
 
 /** The text a decision would publish, shown only when it is quoted verbatim from the request itself. */
-export const briefSends = (result: BriefResult, item: DeskItem) =>
-  result.sends && item.record?.context.includes(result.sends) ? result.sends : ""
+export const briefSends = (result: BriefResult, item: DeskItem, documents: ConversationDocument[] = []) =>
+  result.sends && [item.record?.context ?? "", ...documents.map(document => document.text)].some(source => source.includes(result.sends)) ? result.sends : ""
 
 /** Where a cited source can be opened: the source thread at its cited messages, or a markdown file.
  * Undefined when nothing new resolves, so the source is dropped rather than shown as a bare label. */
 export const sourceTarget = (source: BriefSource, refs: EvidenceRef[]) => {
   // An original conversation fetched read-only (GitHub review comment) opens at its own URL.
   const external = source.refs.flatMap(id => refs.find(ref => ref.id === id)?.url ?? [])[0]
-  if (external) return { kind: "url" as const, url: external, where: new URL(external).hostname === "github.com" ? "GitHub" : new URL(external).hostname }
+  if (external) { const host = new URL(external).hostname; return { kind: "url" as const, url: external, where: host === "github.com" ? "GitHub" : host.endsWith(".slack.com") ? "Slack" : host } }
   const messages = source.refs.flatMap(id => refs.find(ref => ref.id === id)?.messageID ?? [])
   if (messages.length) return { kind: "thread" as const, message: messages[0], to: messages.length > 1 ? messages.at(-1) : undefined }
   const doc = source.refs.find(ref => /^file:[^\s]+\.md$/.test(ref))

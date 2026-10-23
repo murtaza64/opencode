@@ -45,7 +45,6 @@ try {
     await expect(card.getByRole("button", { name: "Send Name reviewers" })).toBeDisabled()
     await expect(card.locator(".home-input-problem")).toHaveText("Add reviewers to send")
     // A note is not the required input.
-    await card.getByRole("button", { name: "Add note" }).click()
     await card.getByRole("textbox", { name: /Note \(optional\)/ }).fill("alice and bob")
     await expect(card.getByRole("button", { name: "Send Name reviewers" })).toBeDisabled()
     await card.getByRole("textbox", { name: /Note \(optional\)/ }).fill("")
@@ -63,6 +62,9 @@ try {
     await expect(page.locator(".home-notice")).toContainText("Answer saved")
     const [sent, ...extra] = posts("cleanup")
     if (extra.length || sent.body.choice_id !== "name-reviewers" || sent.body.input_value !== MAPPING || "text" in sent.body) throw Error(`cleanup answer ${JSON.stringify(posts("cleanup"))}`)
+    // The answered request is filed in History, where it shows what was provided.
+    await page.reload()
+    await page.locator(".desk-history summary").click()
     await expect(card.locator(".home-input-value")).toContainText("Reviewers")
     await expect(card.locator(".home-input-value bdi")).toHaveText(MAPPING)
     await context.close()
@@ -82,6 +84,9 @@ try {
     await expect(page.locator(".home-notice")).toContainText("Answer saved")
     const [sent] = posts("pool")
     if (JSON.stringify(sent.body.input_value) !== JSON.stringify(["carol", "alice"])) throw Error(`pool answer ${JSON.stringify(sent.body)}`)
+    // The answered request is filed in History, where it shows what was provided.
+    await page.reload()
+    await page.locator(".desk-history summary").click()
     await expect(card.locator(".home-input-value bdi")).toHaveText("Carol T., Alice R.")
     await context.close()
   }

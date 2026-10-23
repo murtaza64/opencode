@@ -1,7 +1,7 @@
 /* Front desk: one conversation across connected projects, a read-only queue of
  * existing requests, and an evidence canvas only while an item is selected.
  * The chat is the ordinary session view; selection changes never remount it. */
-import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
+import { createEffect, createMemo, createResource, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
 import { A, Navigate, useSearchParams } from "@solidjs/router"
 import { ago, sessionHref, useDashboard } from "../state"
 import { nativeHeader, NativeHeader } from "../components/native-header"
@@ -16,10 +16,10 @@ import type { IgnoredFailure } from "../failure-ignores"
 import { useDeskQueue } from "../desk-queue"
 import { failureAge, failureLabel, failureWhen, OLD_FAILURE_MS } from "../session-failures"
 import type { SessionFailure } from "@opencode-ai/sdk/v2"
-import { briefBinding, briefPacket, briefSends, deskSources, detailRequest, type DeskItem, type DeskSource } from "../desk"
-import { createDeskSession, createMemory, readConversation, type BriefJob } from "../desk-session"
+import { attentionItem, briefBinding, briefPacket, briefSends, deskSources, detailRequest, type DeskItem, type DeskSource, SOURCE_TAIL } from "../desk"
+import { answeredJob, createDeskSession, createMemory, readConversation, type BriefJob } from "../desk-session"
 import { anchorHref } from "../message-anchor"
-import { MoreDetail, PreparedBrief, useCompleteBrief } from "../components/attention-brief"
+import { MoreDetail, PreparedBrief, useCompleteBrief, useCompleteJob } from "../components/attention-brief"
 import { RecordConversation } from "../components/desk-conversation"
 import { useBriefs } from "../desk-briefs"
 import { oc } from "../api"
@@ -170,9 +170,9 @@ export default function Desk() {
 
   // "More detail" on a selected item: fresh bounded evidence from its source thread, sent to the desk chat.
   const askDetail = async (item: DeskItem, question: string) => {
-    const [tail, conversation] = await Promise.all([oc.messagesTail(item.source.session, item.source.directory, 10).catch(() => []), item.record ? readConversation(item.record) : undefined])
+    const [tail, conversation] = await Promise.all([oc.messagesTail(item.source.session, item.source.directory, SOURCE_TAIL).catch(() => []), item.record ? readConversation(item.record) : undefined])
     const thread = sessionHref(item.source.session, item.source.directory)
-    const request = detailRequest(item, question, briefPacket(item, tail, conversation?.threads ?? []),
+    const request = detailRequest(item, question, briefPacket(item, tail, conversation?.threads ?? [], conversation?.documents ?? []),
       ref => ref.url ?? (ref.messageID ? anchorHref(item.source.session, item.source.directory, ref.messageID) : thread))
     const note = context()
     const error = await desk.detail(request.text, [...note, request.context], deskDirectory())
@@ -225,6 +225,8 @@ export default function Desk() {
           <Show when={historyView() !== "ignored" ? historyView() as AttentionView : undefined}>{view => <ul class="desk-items"><For each={records().filter(record => inView(record, view()))} fallback={<li class="home-muted desk-empty">None.</li>}>{record =>
             <li><button class="desk-item" aria-pressed={selectedKey() === recordKey(record)} onClick={() => select(recordKey(record))}>
               <bdi dir="auto" class="desk-item-title">{record.title}</bdi>
+              {/* What was decided and when, before where it came from: History is scanned by outcome. */}
+              <Show when={record.answer}>{answer => <span class="desk-item-answer"><bdi dir="auto">{record.options.find(option => option.id === answer().choice_id)?.label ?? (answer().text ? `“${answer().text.length > 60 ? `${answer().text.slice(0, 60).replace(/\s+\S*$/, "")}…` : answer().text}”` : "Answered")}</bdi> · {ago(answer().answered_at)}</span>}</Show>
               <span class="home-source"><span class="desk-item-kind" data-kind={record.kind}>{record.kind}</span> · <RowAgent record={record} /> · <bdi dir="auto">{record.editspace}</bdi><Show when={record.status === "answered"}> · <span classList={{ "home-blocked": record.delivery_state === "blocked" }}>{record.delivery_state}</span></Show></span>
             </button></li>}</For></ul>}</Show>
         </details>
@@ -262,7 +264,7 @@ export default function Desk() {
         <div class="desk-evidence-head">
           <button class="desk-button" aria-label="Close and return to chat" onClick={() => select()}>Close</button>
         </div>
-        <Show when={"record" in current() ? current() as { record: AttentionRecord } : undefined}>{entry => <AttentionDecision record={entry().record} attention={attention} onView={view => view !== "open" && setHistoryView(view)} />}</Show>
+        <Show when={"record" in current() ? current() as { record: AttentionRecord } : undefined}>{entry => <Answered record={entry().record} attention={attention} onView={view => view !== "open" && setHistoryView(view)} />}</Show>
         <Show when={selectedItem()}>{entry => <>
           {/* Permission cards state their own verified status; other items only know they left the queue. */}
           <Show when={!entry().live && entry().item.request?.kind !== "permission"}><div class="home-warning" role="status">No longer waiting for you. <A href={sessionHref(entry().item.source.session, entry().item.source.directory)}>Open the thread</A> to see what happened.</div></Show>
@@ -372,13 +374,33 @@ const DeskChat = (props: { desk: ReturnType<typeof createDeskSession>; directory
   </>
 }
 
+/** A decision no longer waiting: the same explainer the human saw when answering (the brief recorded on the
+ * answer, bound to the revision they answered, never a newer one), with their answer and its follow-through. */
+const Answered = (props: { record: AttentionRecord; attention: ReturnType<typeof createAttention>; onView: (view: AttentionView) => void }) => {
+  const prepared = useBriefs()
+  // Reading briefs is otherwise driven by a visible brief; here the answered one is not known until they are read.
+  prepared.view()
+  // Content cannot change once answered, so the content revision is the one answered (older records: the answered revision).
+  const item = () => attentionItem(props.record, 0, String(props.record.content_revision ?? props.record.answer?.revision ?? props.record.revision))
+  const pinned = () => answeredJob(prepared.briefs.jobs(), item(), props.record.answer)?.id
+  const brief = useCompleteBrief(item, pinned)
+  return <Show when={pinned()} keyed fallback={<AttentionDecision record={props.record} attention={props.attention} onView={props.onView} conversation={<RecordConversation record={props.record} />} />}>{job =>
+    <AttentionDecision record={props.record} attention={props.attention} onView={props.onView} prepared={brief()} conversation={<RecordConversation record={props.record} />}
+      brief={<PreparedBrief item={item()} live={false} part="lead" pinned={job} />} briefVisual={<PreparedBrief item={item()} live={false} part="visual" pinned={job} />}
+      briefAfter={<PreparedBrief item={item()} live={false} part="after" pinned={job} />} briefDetails={<PreparedBrief item={item()} live={false} part="details" pinned={job} />} />}</Show>
+}
+
 const Canonical = (props: { item: DeskItem; live: boolean; detail: (question: string) => Promise<string | undefined>; attention: ReturnType<typeof createAttention>; requests: ReturnType<typeof createHomeRequests>; now: number; ignoring: boolean; onIgnore: (failure: SessionFailure) => void; onReceipt: (receipt: HomeReplyReceipt) => void }) => {
   const dashboard = useDashboard()
   // With a complete brief for this exact revision, the brief leads and the producer's text folds away.
   const brief = useCompleteBrief(() => props.item)
+  const job = useCompleteJob(() => props.item)
+  // Documents the request names (a draft to send) let the exact text it would publish be shown verbatim.
+  const [found] = createResource(() => props.item.record, readConversation)
   return <div class="desk-canonical">
     <Show when={props.item.record}>{record => <AttentionDecision record={record()} attention={props.attention} prepared={brief()}
-      sends={brief() ? briefSends(brief()!, props.item) : ""} conversation={<RecordConversation record={record()} />}
+      briefJob={job() ? { job: job()!.id, revision: job()!.meta.revision } : undefined}
+      sends={brief() ? { text: briefSends(brief()!, props.item, found()?.documents), to: brief()!.sendsTo, as: brief()!.sendsAs } : undefined} conversation={<RecordConversation record={record()} />}
       brief={<PreparedBrief item={props.item} live={props.live} part="lead" />} briefVisual={<PreparedBrief item={props.item} live={props.live} part="visual" />} briefAfter={<PreparedBrief item={props.item} live={props.live} part="after" />}
       briefDetails={<PreparedBrief item={props.item} live={props.live} part="details" />} more={<MoreDetail ask={props.detail} />} />}</Show>
     <Show when={props.item.request?.kind === "permission" ? props.item.request : undefined}>{request =>

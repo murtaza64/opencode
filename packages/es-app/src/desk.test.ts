@@ -105,7 +105,7 @@ test("brief state keeps only cited facts and resolvable sources from the JSON re
     facts: [{ text: "Canary exists", refs: ["E1"] }, { text: "Invented", refs: ["E9"] }], timeline: [], gaps: ["Cost"] })
   const state = briefState(meta(), [message("msg_u", "user", "packet"), message("msg_a", "assistant", "```json\n" + reply + "\n```")], "idle")
   expect(state).toEqual({ state: "ready", omitted: 1, result: { question: "Roll out to everyone now?", context: "The canary has been healthy for a day.",
-    choices: [{ id: "a", label: "", outcome: "Canary keeps 5%", note: "Slower" }], ifWait: "", sends: "", gaps: ["Cost"],
+    subjects: [], choices: [{ id: "a", label: "", outcome: "Canary keeps 5%", note: "Slower" }], ifWait: "", sends: "", sendsTo: "", sendsAs: "", gaps: ["Cost"],
     sources: [{ label: "Latency report", refs: ["E1"] }, { label: "Plan", refs: ["file:docs/plan.md"] }],
     facts: [{ text: "Canary exists", refs: ["E1"] }], timeline: [] } })
 })
@@ -132,6 +132,11 @@ test("brief state keeps one well-formed shape and drops malformed ones", () => {
   expect(ready({ kind: "scope", included: ["Read-only S3 reads", 7], excluded: ["Deploys"] })).toEqual({ kind: "scope", included: ["Read-only S3 reads"], excluded: ["Deploys"] })
   expect(ready({ kind: "impact", rows: [{ area: "CPU", change: "" }, { area: "Prod", change: "Untouched" }] })).toEqual({ kind: "impact", rows: [{ area: "Prod", change: "Untouched" }] })
   expect(ready({ kind: "sequence", steps: ["Only one"] })).toBeUndefined()
+  // Approval scope: how far the recommended option goes; out-of-range counts are dropped, not guessed.
+  expect(ready({ kind: "sequence", steps: ["Prepare", "Build + test", "Report", "Rollout"], approved: 3 })).toEqual({ kind: "sequence", steps: ["Prepare", "Build + test", "Report", "Rollout"], approved: 3 })
+  expect(ready({ kind: "sequence", steps: ["Prepare", "Rollout"], approved: 2 })).toEqual({ kind: "sequence", steps: ["Prepare", "Rollout"] })
+  expect(ready({ kind: "change", rows: [{ item: "Python", now: "3.12.14", after: "3.12.14" }, { item: "OS", now: "Debian 12", after: "Debian 13" }, { item: "Bad", now: "" }] }))
+    .toEqual({ kind: "change", rows: [{ item: "Python", now: "3.12.14", after: "3.12.14" }, { item: "OS", now: "Debian 12", after: "Debian 13" }] })
   expect(ready({ kind: "chart", data: [] })).toBeUndefined()
 })
 

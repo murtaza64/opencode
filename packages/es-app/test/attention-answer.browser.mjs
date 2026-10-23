@@ -26,10 +26,6 @@ try {
   const { context, page } = await open({ width: 1440, height: 1000 })
   const record = page.locator('[data-attention-id="decision_1"]')
   const answer = record.getByRole("textbox", { name: /Note \(optional\)/ })
-  // With options, the note stays folded until asked for.
-  await expect(answer).toHaveCount(0)
-  await record.getByRole("button", { name: "Add note" }).click()
-  await expect(answer).toBeFocused()
   await expect(answer).toBeEnabled()
   await expect(record.getByRole("button", { name: "Send answer" })).toBeDisabled()
   await answer.fill("   ")
@@ -89,7 +85,6 @@ try {
   // Uncommitted first attempt: the request never reached the ledger; reload retries the same identity once.
   await select("attention:fixture:uncommitted")
   const fresh = page.locator('[data-attention-id="uncommitted"]')
-  await fresh.getByRole("button", { name: "Add note" }).click()
   const freshBox = fresh.getByRole("textbox", { name: /Note \(optional\)/ })
   await freshBox.fill("never reached the server")
   // IME composition Enter must not submit.

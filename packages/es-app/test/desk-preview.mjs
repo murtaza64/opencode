@@ -9,9 +9,10 @@ const message = (id, sessionID, role, text, extra = {}) => ({
   info: { id, sessionID, role, time: { created: now - 60_000, ...(role === "assistant" ? { completed: now - 30_000 } : {}) }, ...(role === "assistant" ? { modelID: "fixture", providerID: "fixture", mode: "build", path: { cwd: directory, root: directory }, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, parentID: "msg_brief_user" } : { agent: "build", model: { providerID: "fixture", modelID: "fixture" } }), ...extra },
   parts: [{ id: `${id}_part`, sessionID, messageID: id, type: "text", text }],
 })
-const visual = `<style>.r{display:flex;gap:10px}.o{flex:1;padding:8px 10px;border-radius:8px;background:#232634}.o.rec{outline:1px solid #a6d189}.k{font-size:11px;color:#949cbb}.t{margin-top:4px}</style>
-<div class="r"><div class="o rec"><div class="k">Small scope</div><div class="t">Home lists decisions only. Pinned agents and activity move off the first screen.</div></div>
-<div class="o"><div class="k">Defer</div><div class="t">Home keeps today's mixed layout until a later pass.</div></div></div>`
+// Contract 4 drawing: mobile-first SVG at viewBox width 360, colours from the contract's tokens.
+const visual = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 150" font-family="system-ui,sans-serif" font-size="13">
+<rect x="1" y="1" width="358" height="66" rx="8" style="fill:var(--surface);stroke:var(--ok)"/><text x="12" y="22" style="fill:var(--muted)">Small scope</text><text x="12" y="44" style="fill:var(--fg)">Home lists decisions only.</text>
+<rect x="1" y="80" width="358" height="66" rx="8" style="fill:var(--surface);stroke:var(--line)"/><text x="12" y="101" style="fill:var(--muted)">Defer</text><text x="12" y="123" style="fill:var(--fg)">Home keeps today's mixed layout.</text></svg>`
 const briefs = [
   {
     id: "ses_brief_scope", source: "attention:fixture:decision_1", revision: "1", title: "Choose the bounded implementation scope", state: "ready",
@@ -23,7 +24,7 @@ const briefs = [
       choices: [{ id: "small", outcome: "Homepage lists only what needs you", note: "Agents move a click away" },
         { id: "defer", outcome: "Today's mixed layout stays" }],
       ifWait: "",
-      visual: { title: "Homepage after each option", html: visual, height: 140 },
+      visual: { title: "Homepage after each option", svg: visual, alt: "Small scope lists only decisions on Home; deferring keeps today's mixed layout." },
       gaps: ["No date for the follow-up pass."], sources: [{ label: "The request", refs: ["r1"] }],
       facts: [{ text: "The request asks to keep the homepage focused on what needs you.", refs: ["r1"] }, { text: "Small scope is the recommended option.", refs: ["r2"] }],
       timeline: [],
@@ -40,7 +41,7 @@ const briefPlugin = {
       const url = new URL(req.url, "http://preview")
       const [, id, tail] = url.pathname.split("/")
       if (id?.startsWith("ses_fdbrief_") && !tail) return send(res, session(id, { title: "Front desk briefs", time: { created: now - 120_000, updated: now, archived: now } }))
-      if (id?.startsWith("ses_fdbrief_") && tail === "children") return send(res, briefs.map(brief => session(brief.id, { parentID: id, title: `Brief: ${brief.title}`, metadata: { frontDesk: { kind: "brief", requestID: brief.id, source: brief.source, revision: brief.revision, title: brief.title, refs: brief.refs, contract: 3 } } })))
+      if (id?.startsWith("ses_fdbrief_") && tail === "children") return send(res, briefs.map(brief => session(brief.id, { parentID: id, title: `Brief: ${brief.title}`, metadata: { frontDesk: { kind: "brief", requestID: brief.id, source: brief.source, revision: brief.revision, title: brief.title, refs: brief.refs, contract: 4 } } })))
       const brief = briefs.find(item => item.id === id)
       if (brief && tail === "message") return send(res, brief.state === "ready"
         ? [message("msg_brief_user", brief.id, "user", "Explain this request."), message("msg_brief_reply", brief.id, "assistant", JSON.stringify(brief.result))]
