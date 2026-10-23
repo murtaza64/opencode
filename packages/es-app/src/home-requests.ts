@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, onMount } from "solid-js"
+import { createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js"
 import type { PermissionRequest } from "@opencode-ai/sdk/v2"
 import { oc } from "./api"
 import type { useDashboard } from "./state"
@@ -52,7 +52,11 @@ export const createHomeRequests = (sources: () => HomeRequest[], settled: (item:
       return [...next, ...previous.filter(old => !next.some(item => requestKey(item) === requestKey(old))).map(old => ({ ...old, state: "unknown" as const }))].filter(item => !settled(item))
     })
   }
-  createEffect(() => { sources(); void refresh() })
+  // Re-validate only when the set of pending pointers changes. Pointers carry display fields
+  // (titles) that change on every session.updated; refetching on those sent two Core requests
+  // per directory per event and re-rendered the desk queue.
+  const keys = createMemo(() => sources().map(requestKey).sort().join("\n"))
+  createEffect(on(keys, () => void refresh()))
   onMount(() => {
     const interval = setInterval(() => { setNow(Date.now()); void refresh() }, 30_000)
     onCleanup(() => { clearInterval(interval); generation++ })
