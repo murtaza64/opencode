@@ -28,6 +28,7 @@ import { eq } from "drizzle-orm"
 import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
 import { or } from "drizzle-orm"
+import { sql } from "drizzle-orm"
 import { MessageTable, PartTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { ProviderError } from "@/provider/error"
 import { iife } from "@/util/iife"
@@ -439,6 +440,27 @@ export function toModelMessages(
 ): Promise<ModelMessage[]> {
   return Effect.runPromise(toModelMessagesEffect(input, model, options))
 }
+
+/**
+ * Newest message with the given role, info only. Same newest-first order as `page`, but reads message rows
+ * alone: callers that only need the latest user's agent/model must not hydrate the parts of the newest
+ * page, which in busy tool-heavy sessions is megabytes of part data.
+ */
+export const latestInfo = Effect.fn("MessageV2.latestInfo")(function* (input: {
+  sessionID: SessionID
+  role: Info["role"]
+}) {
+  const { db } = yield* Database.Service
+  const row = yield* db
+    .select()
+    .from(MessageTable)
+    .where(and(eq(MessageTable.session_id, input.sessionID), sql`json_extract(${MessageTable.data}, '$.role') = ${input.role}`))
+    .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+    .limit(1)
+    .get()
+    .pipe(Effect.orDie)
+  return row ? info(row) : undefined
+})
 
 export const page = Effect.fn("MessageV2.page")(function* (input: {
   sessionID: SessionID

@@ -293,15 +293,19 @@ const layer = Layer.effectDiscard(
           event.data.images?.some((image, index) => image.filename !== event.data.payload.images?.[index]?.filename)
         )
           return yield* Effect.die(new InputLifecycleConflict())
-        const pending = yield* db
-          .select({
-            count: sql<number>`coalesce(sum(case when ${V1InputTable.state} = 'pending' then 1 else 0 end), 0)`,
-            bytes: sql<number>`coalesce(sum(length(cast(${V1InputTable.payload} as blob)) + coalesce(length(cast(${V1InputTable.images} as blob)), 0) + length(cast(${V1InputTable.receipt} as blob))), 0)`,
-          })
-          .from(V1InputTable)
-          .where(eq(V1InputTable.session_id, event.data.sessionID))
-          .get()
-          .pipe(Effect.orDie)
+        // The capacity limit applies to image inputs only, so only they pay for the per-session scan
+        // (it reads every input row's payload, images and receipt).
+        const pending = event.data.images?.length
+          ? yield* db
+              .select({
+                count: sql<number>`coalesce(sum(case when ${V1InputTable.state} = 'pending' then 1 else 0 end), 0)`,
+                bytes: sql<number>`coalesce(sum(length(cast(${V1InputTable.payload} as blob)) + coalesce(length(cast(${V1InputTable.images} as blob)), 0) + length(cast(${V1InputTable.receipt} as blob))), 0)`,
+              })
+              .from(V1InputTable)
+              .where(eq(V1InputTable.session_id, event.data.sessionID))
+              .get()
+              .pipe(Effect.orDie)
+          : undefined
         const incoming =
           Buffer.byteLength(JSON.stringify(event.data.payload)) * 2 +
           Buffer.byteLength(JSON.stringify(event.data.images ?? [])) +
