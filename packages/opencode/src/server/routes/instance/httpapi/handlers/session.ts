@@ -311,6 +311,13 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return yield* SessionError.mapStorageNotFound(promptSvc.restartContinue({ sessionID: ctx.params.sessionID, ...ctx.payload }))
     })
 
+    const recover = Effect.fn("SessionHttpApi.recover")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof SessionRestart.RecoverPayload.Type
+    }) {
+      return yield* SessionError.mapStorageNotFound(promptSvc.recover({ sessionID: ctx.params.sessionID, ...ctx.payload }))
+    })
+
     const restartStatus = Effect.fn("SessionHttpApi.restartStatus")(function* (ctx: {
       params: { sessionID: SessionID }
       query: { restartID: string; anchorMessageID: MessageID }
@@ -640,6 +647,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("abort", abort)
       .handle("retry", retry)
       .handle("restartContinue", restartContinue)
+      .handle("recover", recover)
       .handle("restartStatus", restartStatus)
       .handle("supersede", supersede)
       .handle("cancelSupersede", cancelSupersede)

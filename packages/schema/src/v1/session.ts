@@ -332,7 +332,7 @@ export type ToolPart = Omit<Types.DeepMutable<Schema.Schema.Type<typeof ToolPart
 export const RestartContinuation = Schema.Struct({
   restartID: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
   outcome: Schema.Literals(["scheduled", "uncertain"]),
-  reason: Schema.optional(Schema.Literals(["interrupted-tool", "aborted", "out-of-order"])),
+  reason: Schema.optional(Schema.Literals(["interrupted-tool", "aborted", "out-of-order", "operator-recovery"])),
   interruptedTools: NonNegativeInt,
   time: NonNegativeInt,
 }).annotate({ identifier: "RestartContinuation" })

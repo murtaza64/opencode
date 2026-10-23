@@ -114,6 +114,9 @@ export interface Interface {
   readonly restartContinue: (
     input: { sessionID: SessionID } & SessionRestart.ContinuePayload,
   ) => Effect.Effect<SessionRestart.ContinueResult, Session.NotFound>
+  readonly recover: (
+    input: { sessionID: SessionID } & SessionRestart.RecoverPayload,
+  ) => Effect.Effect<SessionRestart.RecoverResult, Session.NotFound>
   readonly restartStatus: (input: {
     sessionID: SessionID
     restartID: string
@@ -1517,6 +1520,87 @@ const layer = Layer.effect(
       return decision.reason
     })
 
+    // An operator's reviewed recovery of a step a restart left with unknown tool effects. Same lock,
+    // idempotency marker and freshness rules as restart continuation; see SessionRestart.decideRecovery.
+    const recover = Effect.fn("SessionPrompt.recover")(function* (
+      input: { sessionID: SessionID } & SessionRestart.RecoverPayload,
+    ) {
+      const ctx = yield* InstanceState.context
+      const session = yield* sessions.get(input.sessionID)
+      let scheduled: { marker: SessionV1.RestartContinuation; abandoned: number } | undefined
+      const duplicate = Effect.gen(function* () {
+        const marker = (yield* restartAnchor(input.sessionID, input.anchorMessageID))?.info.restarts?.find(
+          (item) => item.restartID === input.recoveryID,
+        )
+        return marker ? { outcome: "duplicate" as const, marker } : undefined
+      })
+      const evaluate = Effect.gen(function* () {
+        if (session.directory !== ctx.directory) return { outcome: "mismatch" as const }
+        const fresh = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+        if (fresh.parentID) return { outcome: "child" as const }
+        if (fresh.time.archived) return { outcome: "archived" as const }
+        const repeated = yield* duplicate
+        if (repeated) return repeated
+        if (fresh.revert) return { outcome: "stale" as const }
+        const waiting =
+          (yield* permission.list()).some((item) => item.sessionID === input.sessionID) ||
+          (yield* questions.list()).some((item) => item.sessionID === input.sessionID)
+        if (waiting) return { outcome: "running" as const }
+        const history = yield* MessageV2.filterCompactedEffect(input.sessionID).pipe(
+          Effect.provideService(Database.Service, database),
+        )
+        const now = Date.now()
+        const decision = SessionRestart.decideRecovery({
+          payload: input,
+          now,
+          anchor: yield* restartAnchor(input.sessionID, input.anchorMessageID),
+          newest: {
+            byTime: (yield* sessions.messages({ sessionID: input.sessionID, limit: 1 }).pipe(Effect.orDie)).at(-1)?.info.id,
+            byInsertion: yield* SessionFailure.lastInserted(input.sessionID).pipe(Effect.provideService(Database.Service, database)),
+          },
+          later: history.filter((item) => item.info.id > input.anchorMessageID),
+        })
+        if (decision.outcome !== "scheduled") return { stop: { outcome: decision.outcome } as SessionRestart.RecoverResult }
+        return { go: { decision, now } }
+      }).pipe(Effect.map((value): { stop?: SessionRestart.RecoverResult; go?: { decision: Extract<SessionRestart.RecoverDecision, { outcome: "scheduled" }>; now: number } } =>
+        "go" in value || "stop" in value ? value : { stop: value as SessionRestart.RecoverResult }))
+      const requestID = `recovery-${input.recoveryID}`
+      // Admission takes the Session's run lock, so it happens before the locked guard. While the step is
+      // unfinished an advisory wake never promotes it; the guard re-checks and withdraws it if declined.
+      const first = yield* evaluate
+      if (first.stop) return first.stop
+      const admitted = yield* inputs
+        .admit(input.sessionID, {
+          requestID,
+          delivery: "steer",
+          text: input.text,
+          source: { type: "editspace-mail", id: requestID, sender: input.sender, recipient: input.sessionID, kind: "recovery" },
+        })
+        .pipe(Effect.option)
+      if (Option.isNone(admitted)) return { outcome: "superseded" as const }
+      const guard = Effect.gen(function* () {
+        const evaluated = yield* evaluate
+        if (evaluated.stop) return evaluated.stop
+        const current = evaluated.go!
+        const rows = SessionRestart.settleRecovery(current.decision, input, current.now)
+        for (const part of rows.parts) yield* sessions.updatePart(part)
+        yield* sessions.updateMessage(rows.anchor)
+        for (const info of rows.trailing) yield* sessions.updateMessage(info)
+        scheduled = { marker: current.decision.marker, abandoned: current.decision.abandoned.length }
+        return undefined
+      })
+      const decision = yield* state.startIdle(input.sessionID, runLoop(input.sessionID), guard).pipe(
+        Effect.catchTag("SessionSuperseded", () => Effect.succeed({ outcome: "superseded" as const })),
+      )
+      if (decision.outcome === "started")
+        return { outcome: "scheduled" as const, marker: scheduled?.marker, abandonedTools: scheduled?.abandoned }
+      const repeated = yield* duplicate
+      if (!repeated) yield* inputs.cancel(input.sessionID, requestID).pipe(Effect.ignore)
+      if (decision.outcome === "busy") return repeated ?? { outcome: "running" as const }
+      if (decision.outcome === "superseded") return { outcome: "superseded" as const }
+      return decision.reason
+    })
+
     const restartStatus = Effect.fn("SessionPrompt.restartStatus")(function* (input: {
       sessionID: SessionID
       restartID: string
@@ -1671,6 +1755,7 @@ const layer = Layer.effect(
       wake,
       retry,
       restartContinue,
+      recover,
       restartStatus,
       cancel,
       prompt,
