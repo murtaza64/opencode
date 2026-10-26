@@ -20,11 +20,12 @@ const REF_RE = /\b[A-Z][A-Z0-9]{1,9}-\d+\b|(?:\b[\w.-]+\/)?(?:\b[\w.-]+)?#\d+(?!
 export function wrapTicketRefs(root: HTMLElement) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
-      const p = node.parentElement
-      if (!p || p.closest(".ticket-ref, .ticket-tip, textarea, select, script, style"))
-        return NodeFilter.FILTER_REJECT
+      // The regex first: almost no text node has a ref, and closest() per node dominated
+      // the renderer's long tasks on busy transcripts.
       REF_RE.lastIndex = 0
-      return REF_RE.test(node.nodeValue ?? "") ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
+      if (!REF_RE.test(node.nodeValue ?? "")) return NodeFilter.FILTER_SKIP
+      const p = node.parentElement
+      return !p || p.closest(".ticket-ref, .ticket-tip, textarea, select, script, style") ? NodeFilter.FILTER_SKIP : NodeFilter.FILTER_ACCEPT
     },
   })
   const targets: Text[] = []

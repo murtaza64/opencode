@@ -45,18 +45,19 @@ function Providers(props: ParentProps) {
     const dirty = new Set<HTMLElement>()
     const wrap = (records?: MutationRecord[]) => {
       if (!records) dirty.add(shellEl!)
-      for (const record of records ?? []) {
-        if (!record.addedNodes.length) continue
-        const target = record.target instanceof HTMLElement ? record.target : record.target.parentElement
-        // Our own decorations never need a second pass.
-        if (!target || target.closest(".session-ref, .ticket-ref, .session-chip, .session-picker")) continue
-        dirty.add(target)
+      // Walk only what was added, not the (often transcript-sized) parent it was added to.
+      for (const record of records ?? []) for (const node of record.addedNodes) {
+        const target = node instanceof HTMLElement ? node : node.parentElement
+        if (target) dirty.add(target)
       }
       if (frame !== undefined || !dirty.size) return
       frame = requestAnimationFrame(() => {
         frame = undefined
-        const roots = [...dirty].filter((el) => el.isConnected && ![...dirty].some((other) => other !== el && other.contains(el)))
+        // Our own decorations never need a second pass.
+        const added = [...dirty].filter((el) => el.isConnected && !el.closest(".session-ref, .ticket-ref, .session-chip, .session-picker"))
         dirty.clear()
+        const set = new Set(added)
+        const roots = added.filter((el) => { for (let up = el.parentElement; up; up = up.parentElement) if (set.has(up)) return false; return true })
         for (const root of roots) {
           wrapTicketRefs(root)
           wrapSessionRefs(root)
