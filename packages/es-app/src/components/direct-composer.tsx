@@ -39,6 +39,9 @@ export const DirectComposer = (props: {
     props.connected && !state.sending ? [...new Set([primary(), ...(menu() ? secondary() : [])]
       .filter((action) => reason(action) !== props.composer.outgoingReason(action)).map(reason).filter(Boolean))] : []
   const notice = () => {
+    // A refused set-aside (e.g. storage full) leaves the input unknown in its bubble; the reason must be seen,
+    // ahead of the general storage warning it caused.
+    if (state.admission?.status === "unknown" && state.recoveryError.startsWith("Cannot save this unknown input")) return { text: state.recoveryError, error: true }
     if (state.storageError) return { text: state.storageError, error: true,
       action: { label: "Clear saved images", run: () => props.composer.setImages([], state.visibleBuffer) } }
     if (state.error && !state.superseded) return { text: state.error, error: true }

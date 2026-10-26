@@ -49,6 +49,10 @@ export const createFixture = async () => {
     noActiveAside: false,
     acceptedAckLost: false,
     promoteOnCancel: false,
+    // Advertise and serve POST /input/:id/deliver (interrupt the turn, deliver steers) like Core.
+    interruptInput: false,
+    holdDeliver: false,
+    deliverReplies: [],
     receipts: [],
     messages: undefined,
     messagesB: [],
@@ -195,6 +199,7 @@ export const createFixture = async () => {
                 list: true,
                 cancel: true,
                 ...(fixture.updateInput ? { update: true } : {}),
+                ...(fixture.interruptInput ? { interrupt: true } : {}),
                 images: fixture.images,
               },
             }
@@ -240,6 +245,8 @@ export const createFixture = async () => {
       : json({ detail: "Not Found" }, 404)
     if (url.pathname === "/api/lane-provenance" && request.method === "GET")
       return json(fixture.laneProvenance?.(url.searchParams.get("es")) ?? { delegations: [], spawned: [] })
+    // Front Desk surfaces poll (src/surfaces.ts); none published in these fixtures.
+    if (url.pathname === "/api/surfaces" && request.method === "GET") return json({ surfaces: fixture.surfaces ?? [] })
     if (url.pathname === "/api/handoffs" && request.method === "GET")
       return json({ handoffs: fixture.handoffs ?? [], pending: fixture.pendingHandoffs })
     if (url.pathname === "/api/subscriptions" && fixture.subscriptions) {
@@ -536,6 +543,42 @@ export const createFixture = async () => {
           return
         }
         return json(receipt)
+      }
+      if (action.startsWith("/input/") && action.endsWith("/deliver") && request.method === "POST") {
+        if (!fixture.interruptInput) return json({ error: "not found" }, 404)
+        const receipt = fixture.receipts.find((item) => item.requestID === decodeURIComponent(action.slice(7, -8)) && item.sessionID === id)
+        if (!receipt) return json({ error: "not found" }, 404)
+        const complete = () => {
+          if (receipt.state !== "pending") return json({ outcome: "settled", receipt })
+          if (receipt.delivery !== "steer") return json({ outcome: "not-steer", receipt })
+          // Core: stop the running turn (a running shell keeps the output it had and notes the abort),
+          // then promote every pending steer into user messages and start the next turn.
+          const now = Date.now()
+          for (const message of fixture.messages ?? []) for (const part of message.parts ?? []) {
+            if (part.sessionID !== id || part.type !== "tool" || part.state.status !== "running") continue
+            const output = part.state.metadata?.output ?? ""
+            part.state = { ...part.state, status: "completed", output: `${output}\n\n<shell_metadata>\nUser aborted the command\n</shell_metadata>`,
+              title: part.state.input?.command ?? "", metadata: { ...part.state.metadata, exit: null }, time: { start: part.state.time.start, end: now } }
+            fixture.emit("message.part.updated", { part })
+            const info = { ...message.info, error: { name: "MessageAbortedError", data: { message: "Aborted" } }, time: { ...message.info.time, completed: now } }
+            message.info = info
+            fixture.emit("message.updated", { info })
+          }
+          for (const item of fixture.receipts.filter((row) => row.sessionID === id && row.state === "pending" && row.delivery === "steer")) {
+            const messageID = `msg_steer_${item.requestID}`
+            const info = { id: messageID, sessionID: id, role: "user", agent: item.agent ?? "build", model: { providerID: "fixture", modelID: "test" }, time: { created: Date.now() } }
+            const part = { id: `prt_${messageID}`, sessionID: id, messageID, type: "text", text: item.text }
+            fixture.messages?.push({ info, parts: [part] })
+            Object.assign(item, { state: "promoted", messageID, timePromoted: Date.now() })
+            fixture.emit("message.updated", { info })
+            fixture.emit("message.part.updated", { part })
+          }
+          fixture.setStatus("busy")
+          fixture.emit("session.input.updated", { sessionID: id })
+          return json({ outcome: "delivered", receipt })
+        }
+        if (fixture.holdDeliver) { fixture.deliverReplies.push(complete); return }
+        return complete()
       }
       if (action.startsWith("/input/")) {
         const receipt = fixture.receipts.find((item) => item.requestID === decodeURIComponent(action.slice(7)))

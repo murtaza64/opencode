@@ -2152,9 +2152,13 @@ ToolRegistry.register({
     const activityRows = useContext(ActivityRows)
     const pending = () => props.status === "pending" || props.status === "running"
     const sawPending = pending()
+    // The shell tool appends notes for the model (e.g. an abort) in a <shell_metadata> block; the card shows
+    // the command's own output and marks an interruption in its title row.
+    const raw = () => props.output || props.metadata.output || ""
+    const interrupted = () => /<shell_metadata>[\s\S]*User aborted the command/.test(raw())
     const text = createMemo(() => {
       const cmd = props.input.command ?? props.metadata.command ?? ""
-      const out = stripAnsi(props.output || props.metadata.output || "").replace(/\r\n?/g, "\n")
+      const out = stripAnsi(raw().replace(/\n*<shell_metadata>[\s\S]*?<\/shell_metadata>\s*$/, "")).replace(/\r\n?/g, "\n")
       return `$ ${cmd}${out ? "\n\n" + out : ""}`
     })
     const [copied, setCopied] = createSignal(false)
@@ -2187,6 +2191,9 @@ ToolRegistry.register({
                 * tool finishes — a running sleep/build should be identifiable */}
               <Show when={!open() && props.input.command}>
                 <ShellSubmessage text={props.input.command} animate={sawPending} />
+              </Show>
+              <Show when={interrupted()}>
+                <span data-slot="basic-tool-tool-subtitle" data-interrupted="">{i18n.t("ui.message.interrupted")}</span>
               </Show>
             </div>
           </div>
