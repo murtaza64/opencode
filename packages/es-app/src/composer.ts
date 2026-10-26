@@ -29,7 +29,7 @@ export type ComposerDraft = {
 }
 export type ComposerCapabilities = {
   sessionAside?: { version: number; cancel: boolean; images?: ImageCapability }
-  sessionInput?: { version: number; delivery: string[]; list: boolean; cancel: boolean; update?: boolean; images?: ImageCapability }
+  sessionInput?: { version: number; delivery: string[]; list: boolean; cancel: boolean; update?: boolean; interrupt?: boolean; images?: ImageCapability }
 }
 export type ImageCapability = NonNullable<ExperimentalCapabilities["sessionInput"]["images"]> & {
   compressedMetadata: false
@@ -126,6 +126,8 @@ export type ComposerState = {
   admission: ComposerAdmission | null
   recoveries: ComposerRecovery[]
   recoveryBusy: string | null
+  /** Steer whose interrupt-and-deliver request is in flight. Memory only. */
+  delivering: string | null
   recoveryError: string
   inputEdits: Record<string, ComposerInputEdit>
   superseded: ComposerSuperseded | null
@@ -250,6 +252,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     admission: null,
     recoveries: [],
     recoveryBusy: null,
+    delivering: null,
     recoveryError: "",
     inputEdits: {},
     superseded: null,
@@ -883,6 +886,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           list: input.list,
           cancel: input.cancel,
           update: input.update === true,
+          interrupt: input.interrupt === true,
           images: imageCapability(input.images),
         }
       }
@@ -1416,6 +1420,28 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       cancelling.delete(id)
     }
   }
+  /** Interrupt the running turn and deliver a pending steer now. Core stops the running tool the way Stop
+   * does, keeps its partial output, and starts the next turn with the steer under the same request ID;
+   * a repeated or late request interrupts nothing. */
+  const deliverInput = async (id: string) => {
+    if (state.hydrating) await hydration
+    if (state.delivering || !state.capabilities?.sessionInput?.interrupt) return
+    setState({ delivering: id, error: "" })
+    try {
+      const result = await json<{ outcome: string; receipt: InputReceipt }>(
+        await request(url(`/input/${encodeURIComponent(id)}/deliver`), { method: "POST" }),
+      )
+      accept(result.receipt, id)
+      if (result.outcome === "undeliverable")
+        setState("error", "This steer could not start a turn (its images need a model that accepts them). It is still pending.")
+    } catch (error) {
+      // The interrupt may or may not have happened; the receipt and transcript show which.
+      setState("error", `Interrupt and deliver not confirmed: ${message(error)}. The steer is kept; check the conversation.`)
+      void readInput(id).catch(() => {})
+    } finally {
+      setState("delivering", null)
+    }
+  }
   const cancelAside = async () => {
     const current = state.asideRequest
     if (
@@ -1698,6 +1724,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     setAsideAdmission,
     recoverAdmission,
     cancelInput,
+    deliverInput,
     editInput,
     saveInput,
     /** The pending input open in the main composer, if any. */

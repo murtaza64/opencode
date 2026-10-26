@@ -1,4 +1,4 @@
-import { createMemo, For, Show } from "solid-js"
+import { createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import type { Session } from "@opencode-ai/sdk/v2"
 import type { Composer } from "../composer"
 import { ComposerImages } from "./composer-images"
@@ -9,7 +9,11 @@ import { ComposerImages } from "./composer-images"
 // Full errors and request IDs live in the cue's title, never in extra rows.
 // Bubbles are keyed by request identity, so admission -> pending receipt keeps
 // the same element and position.
-export const OutgoingMessages = (props: { composer: Composer; connected: boolean; echo: boolean; session?: Session }) => {
+export type RunningTool = { name: string; at?: number }
+
+export const OutgoingMessages = (props: {
+  composer: Composer; connected: boolean; echo: boolean; session?: Session; busy?: boolean; running?: RunningTool
+}) => {
   const state = props.composer.state
   const receipts = () => state.receipts.filter((item) => item.state === "pending" && item.source?.type !== "editspace-mail")
   // The handoff banner owns a fenced admission; an acknowledged one is already a receipt.
@@ -29,7 +33,7 @@ export const OutgoingMessages = (props: { composer: Composer; connected: boolean
     <div class="outgoing" data-composer-controls>
       <Show when={ids().length}>
         <ul class="outgoing-list input-receipts" aria-label="Pending inputs">
-          <For each={ids()}>{(id) => <InputBubble composer={props.composer} connected={props.connected} id={id} />}</For>
+          <For each={ids()}>{(id) => <InputBubble composer={props.composer} connected={props.connected} id={id} busy={props.busy} running={props.running} />}</For>
         </ul>
       </Show>
       <Show when={props.echo && state.normalSubmission}>
@@ -69,7 +73,7 @@ export const OutgoingMessages = (props: { composer: Composer; connected: boolean
   )
 }
 
-const InputBubble = (props: { composer: Composer; connected: boolean; id: string }) => {
+const InputBubble = (props: { composer: Composer; connected: boolean; id: string; busy?: boolean; running?: RunningTool }) => {
   const state = props.composer.state
   const receipt = () => state.receipts.find((item) => item.requestID === props.id && item.state === "pending")
   const admission = () => receipt() ? undefined : state.admission?.payload.requestID === props.id ? state.admission : undefined
@@ -81,15 +85,32 @@ const InputBubble = (props: { composer: Composer; connected: boolean; id: string
   const status = () => receipt() ? "pending" : recovery() ? "unknown" : admission()?.status
   const cue = () => {
     const kind = delivery() === "steer" ? "Steer" : "Queued"
-    if (receipt()) return delivery() === "steer" ? "Steer · at the next safe point" : "Queued · after this task"
+    if (receipt() && delivery() === "steer") {
+      // A steer reaches the model only after every tool call of the current turn finishes.
+      if (props.running) return `Steer · waiting for ${props.running.name} to finish${elapsed() ? ` · ${elapsed()}` : ""}`
+      if (!props.busy) return "Steer · not delivered; the session stopped"
+      return "Steer · at the next safe point"
+    }
+    if (receipt()) return "Queued · after this task"
     if (recovery()) {
       const settled = state.receipts.find((item) => item.requestID === props.id)?.state
       return settled ? `Set aside · ${settled}` : "Set aside, not confirmed"
     }
     return admission()?.status === "sending" ? `${kind} · sending…` : `Not confirmed · ${kind.toLowerCase()}`
   }
-  const title = () => [recovery() ? state.recoveryError : admission()?.error, `Request ${props.id}`].filter(Boolean).join("\n")
+  const title = () => [recovery() ? state.recoveryError : admission()?.error, admission() && state.recoveryError.startsWith("Cannot save this unknown input") && state.recoveryError, `Request ${props.id}`]
+    .filter(Boolean).join("\n")
   const editing = () => props.composer.editingInput() === props.id
+  const [now, setNow] = createSignal(Date.now())
+  const timer = setInterval(() => setNow(Date.now()), 15_000)
+  onCleanup(() => clearInterval(timer))
+  const elapsed = () => {
+    const at = props.running?.at
+    if (at === undefined) return ""
+    const minutes = Math.floor((now() - at) / 60_000)
+    return minutes < 1 ? "" : minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+  }
+  const deliverable = () => receipt() && delivery() === "steer" && state.capabilities?.sessionInput?.interrupt
   return (
     <li class="pending-msg outgoing-item outgoing-msg" data-request-id={props.id} data-delivery={delivery()}
       data-status={status()} data-recovery-id={recovery() ? props.id : undefined}
@@ -99,6 +120,16 @@ const InputBubble = (props: { composer: Composer; connected: boolean; id: string
       <ComposerImages images={images()} />
       <div class="pending-hint outgoing-cue receipt-row" role="status" title={title()}>
         <span>{cue()}</span>
+        <Show when={deliverable()}>
+          <button class="outgoing-action outgoing-deliver" disabled={!props.connected || !!state.delivering}
+            aria-label={`${props.busy ? "Interrupt and deliver" : "Deliver"} steer: ${text()}`}
+            title={props.busy
+              ? `Stops ${props.running ? `${props.running.name} (its output so far is kept)` : "the current reply"} and starts the next turn with this steer. Nothing is rerun.`
+              : "Starts a turn with this steer."}
+            onClick={() => void props.composer.deliverInput(props.id)}>
+            {state.delivering === props.id ? "Delivering…" : props.busy ? "Interrupt & deliver" : "Deliver now"}
+          </button>
+        </Show>
         <Show when={receipt()}>
           <Show when={state.capabilities?.sessionInput?.update}>
             <button class="outgoing-action" disabled={!props.connected || !!props.composer.editingInput()}

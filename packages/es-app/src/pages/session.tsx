@@ -575,6 +575,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         })),
     }
   })
+  // What a waiting steer is waiting on: steers are delivered only once the turn's tool calls finish.
+  const runningTool = createMemo(() => {
+    const tool = briefInput().tools.findLast((item) => item.status === "running")
+    return tool ? { name: tool.name, at: tool.at } : undefined
+  }, undefined, { equals: (a, b) => a?.name === b?.name && a?.at === b?.at })
   const Thinking = () => {
     const tick = usePulse()
     return <div class="thinking" title="agent is thinking">
@@ -1780,7 +1785,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                 <Show when={recoveryError()}><div class="err" role="alert">{recoveryError()}</div></Show>
               </section>
             </Show>
-            <OutgoingMessages composer={composer} connected={connected()} session={session()} echo={echo() || composer.state.normalSubmission?.status === "unknown"} />
+            <OutgoingMessages composer={composer} connected={connected()} session={session()} busy={busy()} running={runningTool()} echo={echo() || composer.state.normalSubmission?.status === "unknown"} />
             <For each={appendedQuestions()}>
               {(item) => {
                 const owner = () => item.request.sessionID !== sessionID
@@ -1808,7 +1813,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
           </div>
           <WorkStatus />
           {/* The expanded editor covers the transcript, so its outgoing bubbles show here too. */}
-          <div class="float-outgoing"><OutgoingMessages composer={composer} connected={connected()} session={session()} echo={echo() || composer.state.normalSubmission?.status === "unknown"} /></div>
+          <div class="float-outgoing"><OutgoingMessages composer={composer} connected={connected()} session={session()} busy={busy()} running={runningTool()} echo={echo() || composer.state.normalSubmission?.status === "unknown"} /></div>
           <ComposerResults composer={composer} connected={connected()} />
           <ComposerPanel expanded />
         </div>
