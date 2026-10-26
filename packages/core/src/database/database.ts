@@ -38,9 +38,10 @@ const layer = Layer.effect(
 )
 
 export function layerFromPath(filename: string, options: { worker?: boolean } = {}) {
-  // A cold read or slow commit on the calling thread blocks every request; the worker keeps SQLite I/O
-  // off the event loop. OPENCODE_DB_WRITER_WORKER=0 restores in-thread statements.
-  const worker = options.worker ?? Flag.OPENCODE_DB_WRITER_WORKER !== "0"
+  // Opt-in (OPENCODE_DB_WRITER_WORKER=1): the worker keeps slow commits and cold writer reads off the
+  // event loop, but each statement then costs a thread hop. On an oversubscribed host (load 20-60) that
+  // made busy-session admissions 2-3x slower in A/B, so it stays off by default.
+  const worker = options.worker ?? Flag.OPENCODE_DB_WRITER_WORKER === "1"
   return layer.pipe(Layer.provide(sqliteLayer({ filename, worker })))
 }
 

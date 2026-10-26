@@ -12,7 +12,10 @@ const withWriter = async <A, E>(effect: Effect.Effect<A, E, Database.Service>, w
   const exit = await Effect.runPromiseExit(
     effect.pipe(Effect.provide(Database.layerFromPath(filename, { worker })), Effect.scoped),
   )
-  const rows = new Native(filename, { readonly: true }).query("SELECT value FROM writer_fixture ORDER BY id").all() as {
+  // The last connection to close checkpoints the WAL; wait for it instead of racing it.
+  const reader = new Native(filename, { readonly: true })
+  reader.run("PRAGMA busy_timeout = 5000")
+  const rows = reader.query("SELECT value FROM writer_fixture ORDER BY id").all() as {
     value: string
   }[]
   return { exit, rows: rows.map((row) => row.value) }
