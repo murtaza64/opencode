@@ -69,6 +69,9 @@ export const serve = async (options: {
   // authenticate with a pairing cookie instead of the native capability header.
   host?: string
   pairing?: { code: string; maxAgeSeconds?: number }
+  // Paired gateway behind an HTTPS identity proxy (Tailscale Serve): the exact client-facing
+  // origin, also accepted for Origin and Host checks. The proxy must be the only route in.
+  publicOrigin?: string
   // Native-only operator dictation; paired remote clients never reach this host's microphone.
   voice?: Voice
 }) => {
@@ -76,6 +79,8 @@ export const serve = async (options: {
   if (!host) throw new Error("Remote listeners must bind loopback or a tailnet address")
   if (!loopbackHost(host) && !options.pairing) throw new Error("Non-loopback listeners require pairing")
   const pairing = options.pairing
+  const publicOrigin = options.publicOrigin ? httpsOrigin(options.publicOrigin) : undefined
+  if (publicOrigin && !pairing) throw new Error("A public origin requires pairing")
   const failures = { count: 0, since: 0 }
   const targets = { oc: serviceURL(options.opencode), es: serviceURL(options.dashboard) }
   const renderer = serviceURL(options.renderer)
@@ -84,7 +89,9 @@ export const serve = async (options: {
   const key = randomBytes(32).toString("hex")
   const upstreams = new Set<ReturnType<typeof request>>()
   const surfaces = surfaceProxy({ dashboard: targets.es })
-  const sameHost = (req: { headers: IncomingHttpHeaders }) => req.headers.host === new URL(origin).host
+  const sameHost = (req: { headers: IncomingHttpHeaders }) =>
+    req.headers.host === new URL(origin).host || (!!publicOrigin && req.headers.host === new URL(publicOrigin).host)
+  const trusted = (value: string | undefined) => value === origin || (!!publicOrigin && value === publicOrigin)
   const allowed = (req: { headers: IncomingHttpHeaders; method?: string }) =>
     sameHost(req) &&
     (pairing
@@ -92,9 +99,9 @@ export const serve = async (options: {
         // SameSite ignores ports, so other local origins also carry the cookie:
         // require same-origin fetch metadata, and the page origin for writes.
         [undefined, "same-origin", "none"].includes(req.headers["sec-fetch-site"] as string | undefined) &&
-        (["GET", "HEAD"].includes(req.method ?? "") || req.headers.origin === origin)
+        (["GET", "HEAD"].includes(req.method ?? "") || trusted(req.headers.origin))
       : req.headers["x-editspace-key"] === key) &&
-    (!req.headers.origin || req.headers.origin === origin) &&
+    (!req.headers.origin || trusted(req.headers.origin)) &&
     req.headers["sec-fetch-site"] !== "cross-site"
   // Unpaired same-host requests: health probe, pairing form, or a 401 the shell can act on.
   const pair = async (
@@ -115,7 +122,7 @@ export const serve = async (options: {
         return page(401)
       return finish(401, JSON.stringify({ error: "Pairing required" }), "application/json")
     }
-    if (req.headers["sec-fetch-site"] === "cross-site" || ![undefined, "null", origin].includes(req.headers.origin))
+    if (req.headers["sec-fetch-site"] === "cross-site" || !(req.headers.origin === undefined || req.headers.origin === "null" || trusted(req.headers.origin)))
       return finish(403, "Forbidden")
     const now = Date.now()
     if (now - failures.since > 60_000) Object.assign(failures, { count: 0, since: now })
@@ -134,7 +141,7 @@ export const serve = async (options: {
     }
     res.writeHead(303, {
       location: "/",
-      "set-cookie": `${cookieName}=${issueCookie(pairing.code)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${pairing.maxAgeSeconds ?? 30 * 86400}`,
+      "set-cookie": `${cookieName}=${issueCookie(pairing.code)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${pairing.maxAgeSeconds ?? 30 * 86400}${publicOrigin ? "; Secure" : ""}`,
     })
     res.end()
   }
@@ -175,7 +182,7 @@ export const serve = async (options: {
     if (api && !apiAllowed(req.method ?? "", url.pathname)) return finish(403, "API route not exposed")
     // Routes the dashboard authorizes with the operator cookie: attention and the Front desk's own files.
     const attention = /^\/es\/api\/(?:attention(?:\/|$)|frontdesk\/(?:memory|ignored-failures|deliverables\/seen)$)/.test(url.pathname)
-    if (attention && req.method !== "GET" && req.headers.origin !== origin)
+    if (attention && req.method !== "GET" && !trusted(req.headers.origin))
       return finish(403, "Attention writes require the native origin")
     const target = api ? targets[api[1] as keyof typeof targets] : renderer
     if (api && !target) return finish(503, '{"error":"Service not configured"}', "application/json")
@@ -281,7 +288,7 @@ export const serve = async (options: {
     rejectUnknown: true,
     origin: () => origin,
     authorize: (req) =>
-      allowed(req) && req.headers.origin === origin && req.method === "GET" &&
+      allowed(req) && trusted(req.headers.origin) && req.method === "GET" &&
       !new URL(req.url ?? "/", origin).search,
     upstream: (prefix, requested) => {
       if (!eventPaths.includes(requested.pathname) || !apiAllowed("GET", requested.pathname))
@@ -358,4 +365,11 @@ const voiceRoute = async (
     ? 200
     : ({ busy: 409, inactive: 409, cancelled: 409, unavailable: 503, permission: 403, empty: 422, failed: 500 } as const)[result.code]
   return json(status, result)
+}
+
+const httpsOrigin = (value: string) => {
+  const url = new URL(value)
+  if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash)
+    throw new Error("Public origin must be an explicit https://host[:port] origin")
+  return url.origin
 }

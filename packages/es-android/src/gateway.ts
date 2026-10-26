@@ -15,6 +15,7 @@ export const startGateway = async (options: {
   opencode?: string
   dashboard?: string
   opencodeAuth?: string
+  publicOrigin?: string
 }) =>
   serve({
     root: options.root,
@@ -24,6 +25,7 @@ export const startGateway = async (options: {
     dashboard: options.dashboard,
     opencodeAuth: options.opencodeAuth,
     pairing: { code: options.code },
+    publicOrigin: options.publicOrigin,
   })
 
 // A stable code keeps devices paired across gateway restarts; delete the file to revoke them.
@@ -66,6 +68,8 @@ if (import.meta.main) {
     opencodeAuth: process.env.OPENCODE_SERVER_PASSWORD
       ? `Basic ${Buffer.from(`${process.env.OPENCODE_SERVER_USERNAME ?? "opencode"}:${process.env.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`
       : undefined,
+    // Set only when an HTTPS identity proxy (Tailscale Serve) is the sole route to this gateway.
+    publicOrigin: process.env.ES_GATEWAY_PUBLIC_ORIGIN || undefined,
   })
   const port = new URL(gateway.origin).port
   console.info(`Editspace gateway ${gateway.origin}`)

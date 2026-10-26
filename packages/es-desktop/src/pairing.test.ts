@@ -11,7 +11,7 @@ afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close()
 })
 const code = "ABCD2-EFGH3-JKLM4-NPQR5"
-const setup = async () => {
+const setup = async (publicOrigin?: string) => {
   const root = await mkdtemp(path.join(tmpdir(), "es-pairing-test-"))
   cleanup.push(() => rm(root, { recursive: true, force: true }))
   await Bun.write(path.join(root, "index.html"), "<title>Fixture renderer</title>")
@@ -32,6 +32,7 @@ const setup = async () => {
     dashboard: upstream.url.origin,
     host: "127.0.0.1",
     pairing: { code },
+    publicOrigin,
   })
   cleanup.push(server.close)
   const pair = (value: string, headers: Record<string, string> = {}) =>
@@ -155,4 +156,33 @@ test("event socket upgrades need the paired cookie and the page origin", async (
   expect(await open({ origin: server.origin })).toBe(false)
   expect(await open({ cookie, origin: "http://attacker.example" })).toBe(false)
   expect(await open({ cookie })).toBe(false)
+})
+
+const proxied = "https://agent-host.tailnet.ts.net:8443"
+
+test("behind an HTTPS identity proxy, the configured public origin pairs and writes with a Secure cookie", async () => {
+  const { server, pair } = await setup(proxied)
+  const paired = await pair(code, { origin: proxied })
+  expect(paired.status).toBe(303)
+  expect(paired.headers.get("set-cookie")).toMatch(/; Secure$/)
+  const cookie = cookieOf(paired)
+  const write = await fetch(`${server.origin}/oc/session/ses_a/prompt_async`, { method: "POST", headers: { cookie, origin: proxied }, body: "{}" })
+  expect(await write.json()).toEqual({ method: "POST", path: "/session/ses_a/prompt_async", cookieForwarded: false })
+  const forwardedHost = await fetch(`${server.origin}/oc/session`, { headers: { cookie, host: new URL(proxied).host } })
+  expect(forwardedHost.status).toBe(200)
+  expect((await fetch(`${server.origin}/oc/session/ses_a/prompt_async`, { method: "POST", headers: { cookie, origin: "https://other.tailnet.ts.net" }, body: "{}" })).status).toBe(401)
+  expect((await pair(code, { origin: "https://other.tailnet.ts.net" })).status).toBe(403)
+  expect((await fetch(`${server.origin}/oc/session`, { headers: { cookie, host: "other.tailnet.ts.net" } })).status).toBe(403)
+})
+
+test("without a public origin, pairing cookies stay non-Secure for the USB loopback path", async () => {
+  const { pair } = await setup()
+  expect((await pair(code, { origin: proxied })).status).toBe(403)
+  expect((await pair(code)).headers.get("set-cookie")).not.toContain("Secure")
+})
+
+test("public origins must be explicit https origins and require pairing", async () => {
+  for (const value of ["http://agent-host.tailnet.ts.net", "https://agent-host.tailnet.ts.net/path", "https://user:pw@agent-host.tailnet.ts.net"])
+    await expect(serve({ root: tmpdir(), host: "127.0.0.1", pairing: { code }, publicOrigin: value })).rejects.toThrow("explicit https")
+  await expect(serve({ root: tmpdir(), publicOrigin: proxied })).rejects.toThrow("requires pairing")
 })
