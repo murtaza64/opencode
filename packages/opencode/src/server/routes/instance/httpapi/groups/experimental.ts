@@ -40,6 +40,8 @@ const CapabilitiesResponse = Schema.Struct({
     list: Schema.Literal(true),
     cancel: Schema.Literal(true),
     update: Schema.Literal(true),
+    /** `POST /session/:id/input/:requestID/deliver` interrupts the running turn to deliver steers. */
+    interrupt: Schema.Literal(true),
     images: Schema.optionalKey(SessionV1.ImageCapabilities),
   }),
 }).annotate({ identifier: "ExperimentalCapabilities" })

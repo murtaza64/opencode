@@ -142,6 +142,7 @@ export const SessionPaths = {
   aside: `${root}/:sessionID/aside`,
   cancelAside: `${root}/:sessionID/aside/:requestID`,
   handleInput: `${root}/:sessionID/input/:requestID/handle`,
+  deliverInput: `${root}/:sessionID/input/:requestID/deliver`,
   updateInput: `${root}/:sessionID/input/:requestID`,
   share: `${root}/:sessionID/share`,
   init: `${root}/:sessionID/init`,
@@ -157,6 +158,11 @@ export const SessionPaths = {
   deletePart: `${root}/:sessionID/message/:messageID/part/:partID`,
   updatePart: `${root}/:sessionID/message/:messageID/part/:partID`,
 } as const
+
+const DeliverInputResult = Schema.Struct({
+  outcome: Schema.Literals(["delivered", "settled", "joined", "not-steer", "undeliverable", "superseded"]),
+  receipt: SessionV1.InputReceipt,
+}).annotate({ identifier: "SessionInputDeliverResult" })
 
 export const SessionApi = HttpApi.make("session")
   .add(
@@ -203,6 +209,19 @@ export const SessionApi = HttpApi.make("session")
           error: [ApiNotFoundError, ConflictError, InvalidRequestError, HttpApiError.BadRequest],
         }).annotateMerge(
           OpenApi.annotations({ identifier: "session.input.cancel", summary: "Cancel pending session input" }),
+        ),
+        HttpApiEndpoint.post("deliverInput", SessionPaths.deliverInput, {
+          params: { sessionID: SessionID, requestID: Schema.String },
+          query: WorkspaceRoutingQuery,
+          success: DeliverInputResult,
+          error: [ApiNotFoundError, HttpApiError.BadRequest],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.input.deliver",
+            summary: "Interrupt the running turn and deliver pending steers",
+            description:
+              "Stops the running turn the way abort does (the running tool is killed and recorded as interrupted with its partial output; background subagents keep running), then promotes every pending steer and starts the next turn with them. Nothing is replayed and no prompt is added. Also delivers steers left pending after an earlier abort. A receipt that is no longer pending interrupts nothing (`settled`), so a repeated request is safe; `joined` means another delivery or prompt already owns the session.",
+          }),
         ),
         HttpApiEndpoint.post("handleInput", SessionPaths.handleInput, {
           params: { sessionID: SessionID, requestID: Schema.String },

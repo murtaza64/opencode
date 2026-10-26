@@ -633,6 +633,16 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
           )
         }),
       )
+      .handle("deliverInput", (ctx) =>
+        Effect.gen(function* () {
+          yield* requireSession(ctx.params.sessionID)
+          const missing = (error: SessionInput.Missing) =>
+            new ApiNotFoundError({ name: "NotFoundError", data: { message: error.message } })
+          const outcome = yield* promptSvc.deliverSteer(ctx.params).pipe(Effect.catchTag("InputMissing", missing))
+          const receipt = yield* inputs.get(ctx.params.sessionID, ctx.params.requestID).pipe(Effect.catchTag("InputMissing", missing))
+          return { outcome, receipt }
+        }),
+      )
       .handle("handleInput", (ctx) =>
         Effect.gen(function* () {
           yield* requireSession(ctx.params.sessionID)
