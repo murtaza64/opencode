@@ -180,6 +180,8 @@ export const createFixture = async () => {
       })
       return
     }
+    // Front Desk surfaces: the desk queue reads them from every page; none unless a test sets fixture.surfaces.
+    if (url.pathname === "/api/surfaces" && request.method === "GET") return json({ surfaces: fixture.surfaces ?? [] })
     // Durable failed-session listing (#232); none unless a test sets fixture.failures.
     if (url.pathname === "/experimental/session/failed") return json(fixture.failures ?? [])
     if (url.pathname === "/experimental/capabilities")

@@ -55,6 +55,25 @@ import { isUserPrompt, promptPosition, promptTarget } from "../transcript-nav"
 import { restartMarkers } from "../restart-marker"
 import { anchorNote, anchorRange, parseAnchor, type MessageAnchor } from "../message-anchor"
 
+// The provider catalog per directory, shared by session views for a few minutes so switching
+// sessions does not refetch it each time.
+const PROVIDERS_TTL_MS = 5 * 60_000
+const providerCatalog = new Map<string, { at: number; value: Promise<Awaited<ReturnType<typeof oc.providers>>> }>()
+const providersCached = (directory: string) => {
+  const hit = providerCatalog.get(directory)
+  if (hit && Date.now() - hit.at < PROVIDERS_TTL_MS) return hit.value
+  const value = oc.providers(directory).catch(() => {
+    providerCatalog.delete(directory)
+    return { providers: [], default: {} }
+  })
+  providerCatalog.set(directory, { at: Date.now(), value })
+  return value
+}
+
+/** Transcript rows mounted when a session opens; the rest mount in idle chunks. */
+const INITIAL_ROWS = 16
+const ROW_CHUNK = 16
+
 // How long backend trouble must persist before the status slot reports it.
 export const STATUS_DELAY_MS = 2000
 
@@ -274,6 +293,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   let userScroll = false
   const loadEarlier = async () => {
     if (!transcriptEl || !live.hasOlder() || live.loadingOlder()) return
+    mountAll()
     stick = false
     userScroll = false
     const height = transcriptEl.scrollHeight
@@ -416,6 +436,43 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       from: session()?.time.created ?? Number.POSITIVE_INFINITY,
       to: next ? activity.session(next.successor)?.time.created : undefined,
     })
+  })
+  // Opening a session mounts only the newest rows on the click path; older rows mount in small
+  // idle chunks after the first paint (prepended above, so the bottom-pinned view does not move).
+  // Every DOM lookup across the transcript (find, links, prompt jumps) mounts the rest first.
+  const [mountedRows, setMountedRows] = createSignal(INITIAL_ROWS)
+  const visibleTimeline = createMemo(() => {
+    const rows = timeline()
+    return rows.length > mountedRows() ? rows.slice(rows.length - mountedRows()) : rows
+  })
+  const mountAll = () => setMountedRows(Number.POSITIVE_INFINITY)
+  /** Mount rows from the newest back to this message only (find hits, links). */
+  const mountThrough = (messageID: string) => {
+    const rows = timeline()
+    const index = rows.findIndex((row) => row.type !== "mail" && row.message.id === messageID)
+    if (index === -1) return mountAll()
+    setMountedRows((count) => Math.max(count, rows.length - index))
+  }
+  // Grows whenever rows exist beyond the mounted window: after the first load, a reconnect
+  // snapshot, or older pages, so a transcript never stays partly mounted.
+  let growHandle: number | undefined
+  const idle = (run: () => void) => typeof requestIdleCallback === "function"
+    ? requestIdleCallback(run, { timeout: 500 }) : setTimeout(run, 50) as unknown as number
+  const grow = () => {
+    growHandle = undefined
+    if (mountedRows() >= timeline().length) return
+    setMountedRows((count) => count + ROW_CHUNK)
+    growHandle = idle(grow)
+  }
+  createEffect(() => {
+    if (growHandle !== undefined || timeline().length <= mountedRows()) return
+    // Wait for the newest rows to paint before mounting older ones.
+    requestAnimationFrame(() => { if (growHandle === undefined) growHandle = idle(grow) })
+  })
+  onCleanup(() => {
+    if (growHandle === undefined) return
+    if (typeof cancelIdleCallback === "function") cancelIdleCallback(growHandle)
+    clearTimeout(growHandle)
   })
   const mailIDs = createMemo(() => new Set(mail()?.messages.map((message) => message.id) ?? []))
   const transcriptMailIDs = createMemo(() => new Set(timeline().flatMap(row => {
@@ -733,7 +790,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   }
 
   // Task selections persist on the session; Aside keeps its own draft model.
-  const [providers] = createResource(() => oc.providers(directory).catch(() => ({ providers: [], default: {} })))
+  const [providers] = createResource(() => providersCached(directory))
   // context usage of the latest completed turn (shared formula with the info
   // panel and sidebar hover card: all token classes vs the model's limit)
   const latestUsage = createMemo(() => contextUsage(latestCompletedTurn(messages()), providers()))
@@ -846,6 +903,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     vim.setMode(findMode)
   }
   const jumpFind = (hit: FindHit) => {
+    mountThrough(hit.messageID)
     findJumped = true
     anchorHold = undefined
     stick = false
@@ -895,6 +953,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       if (run !== anchorRun) return
       const range = missing ? anchorRange(messages().map((message) => message.id), anchor, (id) => !missing.includes(id)) : []
       setAnchorStatus(anchorNote(anchor, missing ?? [], !missing))
+      if (range[0]) mountThrough(range[0])
       await frame()
       await frame()
       if (run !== anchorRun || !transcriptEl) return
@@ -1130,6 +1189,12 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   onCleanup(() => cancelAnimationFrame(promptFrame))
   const jumpUserMessage = (dir: 1 | -1) => {
     if (!transcriptEl) return
+    if (dir === -1 && mountedRows() < timeline().length) {
+      // Earlier prompts are still mounting; mount them now and jump on the next frame.
+      mountAll()
+      requestAnimationFrame(() => jumpUserMessage(dir))
+      return
+    }
     const tops = promptTops()
     const index = promptTarget(tops, dir)
     anchorHold = undefined
@@ -1641,7 +1706,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             </Show>
             <DataProvider data={live.data} directory={directory} sessionID={sessionID} onNavigateToSession={inspectSubagent}>
             <ToolAdornment.Provider value={ToolSize}>
-            <For each={timeline()}>
+            <For each={visibleTimeline()}>
               {(row) => {
                  if (row.type === "mail") return <MailRow message={row.message} ids={transcriptMailIDs()} name={mailName} />
                 const m = row.message

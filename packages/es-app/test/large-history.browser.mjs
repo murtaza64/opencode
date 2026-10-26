@@ -81,7 +81,7 @@ try {
         document.querySelector('.sidebar a[href*="/session/ses_a"]').click()
       })
       await page.waitForFunction(
-        () => window.measurements.frame && window.measurements.pending === 0 && window.measurements.reads.length >= 2,
+        () => window.measurements.frame && window.measurements.pending === 0 && window.measurements.reads.length >= 1,
         undefined,
         { timeout: 30000 },
       )
@@ -96,7 +96,8 @@ try {
         heapBytes: performance.memory?.usedJSHeapSize,
       }))
       expect(Number.isFinite(metrics.firstFrameMs)).toBe(true)
-      expect(metrics.reads.length).toBeGreaterThanOrEqual(2)
+      // One snapshot read when the event stream is already open; a second when it opens during the load.
+      expect(metrics.reads.length).toBeGreaterThanOrEqual(1)
       console.log(
         JSON.stringify({
           mode,
