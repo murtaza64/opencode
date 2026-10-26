@@ -165,7 +165,9 @@ try {
         ...result,
       }),
     )
-    expect(result.user_nodes).toBe(40)
+    // The first paint mounts only the newest rows; the rest mount in idle chunks afterwards.
+    expect(result.user_nodes).toBeLessThan(40)
+    await expect(page.locator('[data-component="user-message"]')).toHaveCount(40)
     await expect(page.locator('[data-timeline-part-id="prt_msg_000399_1"]')).toBeInViewport()
     // 160 calls across 40 turns: each finished turn coalesces its 4 calls into one collapsed
     // run (#230); only the latest turn's calls render as standalone parts.

@@ -851,7 +851,9 @@ export const createComposer = (sessionID: string, directory: string, dependencie
   }
   const loadCapabilities = async () => {
     const version = ++capabilityVersion
-    setState({ capabilities: null, capabilityError: "" })
+    // A refresh keeps known capabilities, so reopening a session does not disable and re-enable
+    // its controls; only a failed read clears them.
+    setState({ capabilityError: "" })
     try {
       const value = await json<unknown>(
         await request(`/oc/experimental/capabilities?directory=${encodeURIComponent(directory)}`),
@@ -887,7 +889,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       if (version === capabilityVersion) setState("capabilities", capabilities)
     } catch (error) {
       if (version === capabilityVersion)
-        setState("capabilityError", `Cannot load server capabilities: ${message(error)}`)
+        setState({ capabilities: null, capabilityError: `Cannot load server capabilities: ${message(error)}` })
     }
   }
   /** Look up an unconfirmed Send by its own message ID. Found: it was sent. 404 from a
