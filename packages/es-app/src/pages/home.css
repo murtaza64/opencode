@@ -101,6 +101,13 @@
 .home-tabs button[data-empty] span { color: var(--overlay0); }
 .home-answer textarea[rows="1"] { min-block-size: 34px; }
 .home-answer .home-options { margin: 4px 0 6px; }
+/* Input a selected choice requires: labelled like the note, choice lists stack one per line. */
+.home-input { display: grid; gap: 4px; }
+.home-input > label, .home-input legend { font-size: 11px; color: var(--subtext0); padding: 0; }
+.home-input fieldset { margin: 0; padding: 0; border: 0; display: grid; gap: 4px; }
+.home-input fieldset label { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.home-input-problem { margin: 0; font-size: 12px; color: var(--peach); }
+.home-input-value { margin: 4px 0; font-size: 13px; white-space: pre-wrap; }
 .attention-home button.home-quiet { border-color: transparent; color: var(--subtext0); padding-inline: 6px; }
 .home-answer .home-actions .home-muted { margin-inline-start: auto; }
 @media (max-width: 650px) { .home-answer .home-actions .home-muted { margin-inline-start: 0; flex-basis: 100%; } }

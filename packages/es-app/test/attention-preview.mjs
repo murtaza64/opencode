@@ -75,8 +75,11 @@ export const startAttentionPreview = async (plugins = []) => {
           if (body.action === "choose") { record.status = "decided"; record.decision = { choice_id: body.choice_id } }
           if (body.action === "answer") {
             if (record.status === "answered") return json({ error: "record already answered", record }, 409)
+            // The real ledger's required-input refusal (dotfiles es_attention_store.input_value), reduced to presence.
+            const input = record.options.find(option => option.id === body.choice_id)?.input
+            if (input?.required && (body.input_value === undefined || body.input_value.length === 0)) return json({ error: `${input.label} is required for ${record.options.find(option => option.id === body.choice_id).label}` }, 400)
             record.status = "answered"
-            record.answer = { id: `answer-${record.id}`, text: body.text ?? "", choice_id: body.choice_id ?? null, answered_at: Date.now() }
+            record.answer = { id: `answer-${record.id}`, text: body.text ?? "", choice_id: body.choice_id ?? null, ...(body.input_value !== undefined ? { input_value: body.input_value } : {}), answered_at: Date.now() }
             record.delivery_state = "pending"
             record.delivery = { state: "pending", reason: null, lane: record.lane ?? null, session: null, message_id: null, error: null, updated_at: Date.now(), presented_at: null, handled_at: null, copies: [] }
           }
