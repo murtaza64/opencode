@@ -37,8 +37,11 @@ const layer = Layer.effect(
   }).pipe(Effect.orDie),
 )
 
-export function layerFromPath(filename: string) {
-  return layer.pipe(Layer.provide(sqliteLayer({ filename })))
+export function layerFromPath(filename: string, options: { worker?: boolean } = {}) {
+  // A cold read or slow commit on the calling thread blocks every request; the worker keeps SQLite I/O
+  // off the event loop. OPENCODE_DB_WRITER_WORKER=0 restores in-thread statements.
+  const worker = options.worker ?? Flag.OPENCODE_DB_WRITER_WORKER !== "0"
+  return layer.pipe(Layer.provide(sqliteLayer({ filename, worker })))
 }
 
 export function path() {
