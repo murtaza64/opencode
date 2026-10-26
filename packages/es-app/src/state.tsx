@@ -189,8 +189,20 @@ export function DashboardProvider(props: ParentProps) {
     }
   }
   const [pins, setPins] = createSignal<string[]>(loadPins())
-  const relevantDirectories = () => {
-    const rows = globalSessions() ?? []
+  // One pass over the session index per index change, not per caller per event.
+  const sessionIndex = createMemo(() => {
+    const directory = new Map<string, string>()
+    const children = new Map<string, string[]>()
+    for (const row of globalSessions() ?? []) {
+      directory.set(row.id, row.directory)
+      if (row.parentID) children.set(row.parentID, [...(children.get(row.parentID) ?? []), row.id])
+    }
+    return { directory, children }
+  })
+  // Memoized with set equality: busy-session events re-run it, but its readers (the activity
+  // refresh effect) only re-run when the set of directories actually changes.
+  const relevantDirectories = createMemo(() => {
+    const index = sessionIndex()
     const selected = /^\/session\/([^/]+)/.exec(route.pathname)?.[1]
     const ids = new Set([
       ...visibleSessions(),
@@ -202,23 +214,18 @@ export function DashboardProvider(props: ParentProps) {
         (thread.sessions ?? []).filter((session) => session.live === "busy" || session.live === "retry").map((session) => session.id)),
     ])
     // A visible root needs its descendants' requests even when they have no sidebar rows.
-    const children = new Map<string, string[]>()
-    for (const row of rows) {
-      if (!row.parentID) continue
-      children.set(row.parentID, [...(children.get(row.parentID) ?? []), row.id])
-    }
     const queue = [...ids]
-    for (const id of queue) for (const child of children.get(id) ?? []) {
+    for (const id of queue) for (const child of index.children.get(id) ?? []) {
       if (ids.has(child)) continue
       ids.add(child)
       queue.push(child)
     }
-    const dirs = rows.filter((row) => ids.has(row.id)).map((row) => row.directory)
+    const dirs = [...ids].flatMap((id) => index.directory.get(id) ?? [])
     const direct = new URLSearchParams(route.search).get("directory")
     if (selected && direct) dirs.push(direct)
     dirs.push(...(notificationState()?.notifications ?? []).map((item) => item.directory))
-    return [...new Set(dirs.filter(Boolean))]
-  }
+    return [...new Set(dirs.filter(Boolean))].sort()
+  }, [], { equals: (a, b) => a.length === b.length && a.every((value, index) => value === b[index]) })
   const sessionEvent = (event: Event, directory: string) => {
     if (event.type !== "session.created" && event.type !== "session.updated" && event.type !== "session.deleted") return false
     const info = event.properties.info

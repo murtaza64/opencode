@@ -225,13 +225,14 @@ export const createSessionActivity = (
     inflight.set(directory, { events, promise })
     return promise
   }
-  const relevant = () => [...new Set([
+  // Snapshots change on every status event; readers re-run only when the directory set changes.
+  const relevant = createMemo(() => [...new Set([
     ...(options?.directories() ?? sessions().map((s) => s.directory)),
     ...Object.entries(snapshots()).filter(([, snapshot]) =>
       snapshot.error || snapshot.permissions.length || snapshot.questions.length ||
       Object.values(snapshot.status).some((status) => status.type === "busy" || status.type === "retry"))
       .map(([directory]) => directory),
-  ])]
+  ])].sort(), [], { equals: (a, b) => a.length === b.length && a.every((value, index) => value === b[index]) })
   const refresh = async (dirs = relevant()) => {
     for (let offset = 0; offset < dirs.length && !disposed; offset += 4) {
       await Promise.all(dirs.slice(offset, offset + 4).map((directory) => refreshDirectory(directory)))
