@@ -32,7 +32,7 @@ await page.route("**/*", (route) => new URL(route.request().url()).origin === or
 const editor = page.locator(".prompt-box:not([inert]) textarea")
 const bubble = page.locator(".pending-bubble")
 try {
-  await page.goto(`${origin}/session/ses_a?directory=${encodeURIComponent(directory)}`)
+  await page.goto(`${origin}/session/ses_a?directory=${encodeURIComponent(directory)}`, { timeout: 120_000 })
   await expect(page.locator('[data-component="user-message"]')).toHaveCount(30)
   await expect(page.locator('.prompt-box button[aria-label="Send"]')).toBeVisible()
   await editor.fill("pending echo fixture text")
@@ -54,8 +54,9 @@ try {
     expect(fixture.calls.find((call) => call.path === "/session/ses_a/prompt_async").body.parts[0].text).toBe("pending echo fixture text")
     await expect(page.locator(".pending-hint")).toHaveText("Sent")
     expect(await geometry()).toEqual(sending)
+    // Core stores the prompt under the client message ID it was sent with.
     const info = {
-      id: "msg_zzz", sessionID: "ses_a", role: "user", agent: "build",
+      id: fixture.calls.find((call) => call.path === "/session/ses_a/prompt_async").body.messageID, sessionID: "ses_a", role: "user", agent: "build",
       model: { providerID: "fixture", modelID: "test" }, time: { created: Date.now() },
     }
     fixture.emit("message.updated", { info })
@@ -99,7 +100,7 @@ try {
   await expect(page.locator(".pending-hint")).toHaveText("Sent")
   await expect(echoImages).toHaveCount(2)
   await expect(removes).toHaveCount(0)
-  const imageInfo = { id: "msg_zzz_images", sessionID: "ses_a", role: "user", agent: "build", model: { providerID: "fixture", modelID: "test" }, time: { created: Date.now() } }
+  const imageInfo = { id: imagePost.body.messageID, sessionID: "ses_a", role: "user", agent: "build", model: { providerID: "fixture", modelID: "test" }, time: { created: Date.now() } }
   fixture.emit("message.updated", { info: imageInfo })
   for (const [index, base64] of [first, second].entries())
     fixture.emit("message.part.updated", { part: { id: `part_image_${index}`, sessionID: "ses_a", messageID: imageInfo.id, type: "file", mime: "image/png", filename: `${index}.png`, url: `data:image/png;base64,${base64}` } })

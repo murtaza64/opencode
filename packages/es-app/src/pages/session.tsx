@@ -382,17 +382,22 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     id: message.id,
     role: message.role,
     text: message.role === "user"
-      ? (live.data.part[message.id] ?? []).filter((part) => part.type === "text").map((part) => part.text).join("")
+      // Typed text only: attached context arrives as synthetic text parts of the same message.
+      ? (live.data.part[message.id] ?? []).flatMap((part) => part.type === "text" && !part.synthetic ? [part.text] : []).join("")
       : undefined,
   }))))
   createEffect(() => {
     const visible = echo()
     if (visible && stick) queueMicrotask(pin)
-    // A transcript message after the send boundary settles it, including an unknown outcome.
-    // Without a boundary (restored legacy send) an older identical message could match, so
-    // an unknown outcome then stays until the user dismisses it.
+    // The canonical message settles the send, including an unknown outcome: matched by its message ID,
+    // or for a legacy send by text after the send boundary. A legacy send without a boundary could match
+    // an older identical message, so its unknown outcome stays until the user dismisses it.
     const submission = composer.state.normalSubmission
-    if (!visible && submission && (submission.status === "accepted" || submission.status === "unknown" && submission.after !== undefined))
+    if (visible || !submission) return
+    // An unknown send seen in the transcript is confirmed by ID first, which also clears its restored
+    // draft if unchanged, so the editor is not left holding a message that was already delivered.
+    if (submission.status === "unknown" && submission.messageID) untrack(() => void composer.checkSubmission())
+    else if (submission.status === "accepted" || submission.status === "unknown" && submission.after !== undefined)
       untrack(() => composer.dismissNormalSubmission())
   })
   const inlineError = () => {
@@ -1796,7 +1801,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                 <Show when={recoveryError()}><div class="err" role="alert">{recoveryError()}</div></Show>
               </section>
             </Show>
-            <OutgoingMessages composer={composer} connected={connected()} session={session()} busy={busy()} running={runningTool()} echo={echo() || composer.state.normalSubmission?.status === "unknown"} />
+            <OutgoingMessages composer={composer} connected={connected()} session={session()} busy={busy()} running={runningTool()} echo={echo() || (composer.state.normalSubmission?.status === "unknown" && !composer.state.normalSubmission.messageID)} />
             <For each={appendedQuestions()}>
               {(item) => {
                 const owner = () => item.request.sessionID !== sessionID
@@ -1824,7 +1829,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
           </div>
           <WorkStatus />
           {/* The expanded editor covers the transcript, so its outgoing bubbles show here too. */}
-          <div class="float-outgoing"><OutgoingMessages composer={composer} connected={connected()} session={session()} busy={busy()} running={runningTool()} echo={echo() || composer.state.normalSubmission?.status === "unknown"} /></div>
+          <div class="float-outgoing"><OutgoingMessages composer={composer} connected={connected()} session={session()} busy={busy()} running={runningTool()} echo={echo() || (composer.state.normalSubmission?.status === "unknown" && !composer.state.normalSubmission.messageID)} /></div>
           <ComposerResults composer={composer} connected={connected()} />
           <ComposerPanel expanded />
         </div>
