@@ -192,7 +192,7 @@ export default function Sidebar() {
   const resultItem = (r: SessionSearchResult) => (
     <A href={sessionHref(r.id, r.directory)} class="nav-item search-result" title={r.directory}>
       <span class="search-result-body">
-        <span class="nav-title">{r.title || r.id}</span>
+        <span class="nav-title" dir="auto">{r.title || r.id}</span>
         <Show when={r.snippet}>
           <span class="search-snippet">{r.snippet}</span>
         </Show>
@@ -216,7 +216,7 @@ export default function Sidebar() {
       {...peekAttrs(s)}
     >
       <StatusDot state={dot()} label={dotText(s, dot())} />
-      <span class="nav-title">{s.title || s.id}</span>
+      <span class="nav-title" dir="auto">{s.title || s.id}</span>
       {/* All scope: the project lives in the hover/focus card; screen readers still hear it here. */}
       <Show when={allProjects() && s.project}><span class="sr-only">, {s.project}</span></Show>
     </A>
@@ -229,7 +229,7 @@ export default function Sidebar() {
         class="nav-item"
       >
         <StatusDot state={dot()} label={dotText(s, dot())} />
-        <span class="nav-title">{s.title || s.id}</span>
+        <span class="nav-title" dir="auto">{s.title || s.id}</span>
         <Show when={allProjects() && s.project}><span class="sr-only">, {s.project}</span></Show>
       </A>
       <button type="button" class="pin-action" classList={{ pinned: isPinned(s) }}
@@ -322,7 +322,7 @@ export default function Sidebar() {
                 >
                   <StatusDot state={dot()} />
                   <span class="notification-copy">
-                    <span class="nav-title">{notification.title}</span>
+                    <span class="nav-title" dir="auto">{notification.title}</span>
                     <span class="notification-meta">
                       {notification.editspace ? `${notification.editspace} · ` : ""}{notification.kind}
                     </span>

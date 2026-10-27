@@ -227,7 +227,7 @@ export function SessionPeek(props: { container: () => HTMLElement | undefined })
           onMouseEnter={() => clearTimeout(closeTimer)} onMouseLeave={scheduleClose}>
           <div class="peek-title">
             <span class={`dot ${dotFor(r())}`} />
-            <span class="peek-title-text">{r().title || r().id}</span>
+            <span class="peek-title-text" dir="auto">{r().title || r().id}</span>
           </div>
           <Show when={facts().length}>
             <dl class="peek-facts">
@@ -245,7 +245,7 @@ export function SessionPeek(props: { container: () => HTMLElement | undefined })
                     </li>
                   )}</For>
                   <Show when={list().more}><li class="dim peek-todo-more">+{list().more} more</li></Show>
-                  <Show when={list().done}><li class="dim peek-todo-done"><span class="peek-todo-glyph" aria-hidden="true">✓</span>{list().done} done</li></Show>
+                  <Show when={list().done}><li class="dim peek-todo-done"><span class="peek-todo-glyph" aria-hidden="true">✓</span><bdi>{list().done} done</bdi></li></Show>
                 </ul>
                 <div class="peek-todo-basis">{basis()}</div>
               </Show>

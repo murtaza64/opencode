@@ -3,8 +3,9 @@
  * [data-appearance=wallpaper] adds the laptop's colours (appearance.ts) and one backdrop. */
 :root {
   --accent: var(--blue);
-  --radius-control: 6px;
-  --radius-bubble: 12px;
+  /* Mostly square (manadj): 2px softens controls without reading as rounded; pills/circles only for badges and status. */
+  --radius-control: 2px;
+  --radius-bubble: 2px;
   --shadow-raised: 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent) inset, 0 6px 18px -10px rgb(0 0 0 / 0.6);
   --hover: color-mix(in srgb, var(--text) 6%, transparent);
   --selected: color-mix(in srgb, var(--accent) 16%, transparent);
@@ -12,7 +13,7 @@
 
 /* Sidebar: a quieter rail; selection is a tinted fill with an accent edge, not a black slab. */
 :root .sidebar { background: var(--mantle); border-inline-end: 0; box-shadow: inset calc(-1px * var(--inline-sign, 1)) 0 0 color-mix(in srgb, var(--text) 5%, transparent); }
-:root .nav-item { border-radius: var(--radius-control) !important; margin-inline: 6px; padding-inline: 10px; }
+:root .nav-item { margin-inline: 6px; padding-inline: 10px; }
 :root .nav-item:hover { background: var(--hover); }
 :root .nav-item.active { background: var(--selected); box-shadow: none; color: var(--text); }
 :root .nav-item.active .nav-title { font-weight: 600; }
@@ -24,10 +25,10 @@
 :root .transcript :is([data-component="user-message-text"], [data-slot="user-message-text"]) {
   background: color-mix(in srgb, var(--accent) 14%, var(--base));
   border: 0;
-  border-radius: var(--radius-bubble) var(--radius-bubble) 4px var(--radius-bubble) !important;
+  border-radius: var(--radius-bubble) !important;
   box-shadow: var(--shadow-raised);
 }
-:root .pending-bubble { border-radius: var(--radius-bubble) var(--radius-bubble) 4px var(--radius-bubble) !important; }
+:root .pending-bubble { border-radius: var(--radius-bubble) !important; }
 
 /* Composer: one raised field instead of a bordered box inside a bordered strip. */
 :root .prompt-box { border-top: 0; background: transparent; }
@@ -45,7 +46,7 @@
 :root .direct-split:has(.direct-more:not(.idle)) .direct-primary { border-start-end-radius: 0 !important; border-end-end-radius: 0 !important; }
 
 /* Front desk queue: rows as soft tiles; the selected item glows with the accent. */
-:root .desk-item { border-block-end: 0; border-radius: var(--radius-control) !important; margin-block-end: 2px; }
+:root .desk-item { border-block-end: 0; margin-block-end: 2px; }
 :root .desk-item:hover { background: var(--hover); }
 :root .desk-item[aria-pressed=true] { background: var(--selected); border-inline-start-color: var(--accent); }
 
@@ -76,12 +77,13 @@
 /* Inputs, chips and secondary buttons share the control radius; panels and rows stay square
  * where they meet the window edge. */
 :root :is(input, select, .desk-button, .home-option-card, .attachment-chip, .direct-session-actions button, .direct-model button) { border-radius: var(--radius-control) !important; }
-:root .dot { border-radius: 50% !important; }
+:root :is(.dot, .appearance-swatch) { border-radius: 50% !important; }
+:root :is(.mode-count, .host-badge) { border-radius: 999px !important; }
 :root .direct-primary .direct-button-hint { color: color-mix(in srgb, var(--crust) 70%, transparent); }
 :root .direct-primary:disabled .direct-button-hint { color: var(--subtext0); }
 
 /* Session hover/focus card: title, then compact label/value facts, then TODOs. */
-:root .session-peek { border-radius: 10px !important; border: 0; background: color-mix(in srgb, var(--surface0) 85%, var(--mantle)); box-shadow: 0 10px 30px -12px rgb(0 0 0 / .7), 0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent); }
+:root .session-peek { border-radius: var(--radius-control) !important; border: 0; background: color-mix(in srgb, var(--surface0) 85%, var(--mantle)); box-shadow: 0 10px 30px -12px rgb(0 0 0 / .7), 0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent); }
 :root .session-peek[data-side] { border-inline: 0; }
 .peek-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; margin: 8px 0 6px; font-size: 11px; line-height: 16px; }
 .peek-facts dt { color: var(--overlay1); }
