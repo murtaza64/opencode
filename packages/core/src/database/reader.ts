@@ -11,6 +11,7 @@ import { classifySqliteError, SqlError } from "effect/unstable/sql/SqlError"
 import * as Statement from "effect/unstable/sql/Statement"
 import { Database } from "./database"
 import { Flag } from "../flag/flag"
+import { Diagnostics } from "../diagnostics"
 import { makeGlobalNode } from "../effect/app-node"
 
 /**
@@ -151,7 +152,11 @@ export const make = Effect.fn("DatabaseReader.make")(function* (options: Options
         values,
         safeIntegers: Context.get(fiber.context, Client.SafeIntegers),
       } satisfies Request & { type: "query" })
-      return Deferred.await(deferred) as Effect.Effect<Array<any>, SqlError>
+      const start = performance.now()
+      // Reader time includes waiting behind other statements on the same worker.
+      return Deferred.await(deferred).pipe(
+        Effect.tap((rows) => Effect.sync(() => Diagnostics.sql("reader", sql, performance.now() - start, rows.length))),
+      ) as Effect.Effect<Array<any>, SqlError>
     })
 
   const connection = identity<Connection>({

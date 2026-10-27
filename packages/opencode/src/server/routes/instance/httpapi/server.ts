@@ -118,6 +118,7 @@ import { disposeMiddleware } from "./lifecycle"
 import { memoMap } from "@opencode-ai/core/effect/memo-map"
 import { compressionLayer } from "./middleware/compression"
 import { corsVaryFix } from "./middleware/cors-vary"
+import { diagnosticsRoute, diagnosticsTimingLayer } from "./middleware/diagnostics"
 import { errorLayer } from "./middleware/error"
 import { fenceLayer } from "./middleware/fence"
 import { schemaErrorLayer } from "./middleware/schema-error"
@@ -197,6 +198,8 @@ const docResponse = lazy(() => HttpServerResponse.jsonUnsafe(OpenApi.fromApi(Pub
 const docRoute = HttpRouter.use((router) => router.add("GET", "/doc", () => Effect.succeed(docResponse()))).pipe(
   Layer.provide(authOnlyRouterLayer),
 )
+
+const diagnosticsRoutes = diagnosticsRoute.pipe(Layer.provide(authOnlyRouterLayer))
 
 const uiRoute = HttpRouter.use((router) =>
   Effect.gen(function* () {
@@ -292,12 +295,14 @@ export function createRoutes(
     instanceRoutes,
     serverRoutes,
     docRoute,
+    diagnosticsRoutes,
     uiRoute,
   ).pipe(
     Layer.provide([
       errorLayer,
       compressionLayer,
       corsVaryFix,
+      diagnosticsTimingLayer,
       fenceLayer,
       cors(corsOptions),
       AppNodeBuilderV1.build(MoveSession.node, [[LocationServiceMap.node, locationServiceMapV2]]),

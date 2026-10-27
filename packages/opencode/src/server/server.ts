@@ -9,6 +9,7 @@ import { createServer } from "node:http"
 import { MDNS } from "./mdns"
 import { HttpApiApp } from "./routes/instance/httpapi/server"
 import { disposeMiddleware } from "./routes/instance/httpapi/lifecycle"
+import { Diagnostics } from "@opencode-ai/core/diagnostics"
 import { WebSocketTracker } from "./routes/instance/httpapi/websocket-tracker"
 import { PublicApi } from "./routes/instance/httpapi/public"
 import type { CorsOptions } from "@opencode-ai/server/cors"
@@ -87,6 +88,8 @@ const listenEffect: (opts: ListenOptions) => Effect.Effect<EffectListener, unkno
     const listenerUrl = makeURL(opts.hostname, address.port)
     const unpublishMdns = yield* setupMdns(opts, address.port, state.scope)
     url = listenerUrl
+    // Bounded always-on aggregates for `opencode debug diagnostics`; recorders are no-ops in other processes.
+    Diagnostics.start()
 
     return {
       hostname: opts.hostname,
