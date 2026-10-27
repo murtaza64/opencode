@@ -1654,7 +1654,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             <button class="header-icon" aria-label="Next prompt" aria-keyshortcuts="Control+N" aria-describedby={`prompt-scope-${sessionID}`}
               title={`Next prompt (Ctrl+N) · ${promptScope()}`} onPointerDown={(event) => event.preventDefault()}
               disabled={!promptState().next} onClick={() => jumpUserMessage(1)}><Icon name="chevron-down" size="small" /></button>
-            <Show when={location()}>{(scope) =>
+            {/* Mail routing tools are for debugging delivery, not daily use: only with localStorage es-app:debug=1. */}
+            <Show when={location() && localStorage.getItem("es-app:debug") === "1" ? location() : undefined}>{(scope) =>
               <HeaderMenu id={`session-mail-menu-${sessionID}`} label="Session mail" title="Mail subscriptions and lane mail"
                 icon={<Icon name="dot-grid" size="small" />} items={[
                   { label: subscriptionsOpen() ? "Hide mail subscriptions" : "Mail subscriptions", select: () => setSubscriptionsOpen(!subscriptionsOpen()) },

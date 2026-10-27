@@ -14,7 +14,7 @@ import { rightOpen, rightWidth, toggleRight } from "../ui"
 import { Pr } from "./pr"
 import { prFromHref } from "../pr-matching"
 import { linkUrl } from "../link-url"
-import { contextUsage, countCompletedTurns, latestCompletedTurn, tokenCount, usageLevel, type ProviderList } from "../context-usage"
+import { compactTokens, contextLimit, contextUsage, countCompletedTurns, latestCompletedTurn, usageLevel, type ProviderList } from "../context-usage"
 import { prDetail, requestPrDetails } from "../pr-details"
 import { CurrentWorkView } from "../current-work"
 import { TodoPanel } from "./todos"
@@ -293,12 +293,60 @@ function SessionInfoBody(props: {
     output: total.output + (message.tokens?.output ?? 0),
   }), { cost: 0, input: 0, output: 0 }))
   const tokens = () => (props.session as any)?.tokens
+  const cost = () => (props.session as any)?.cost || transcriptUsage().cost
+  // Current context against the selected model's window; the latest turn's own model as fallback.
+  const meter = createMemo(() => {
+    const used = usage()?.tokens
+    if (!used) return undefined
+    const selected = model()
+    const limit = (selected ? contextLimit(props.providers, selected.providerID, selected.id) : undefined) ?? usage()?.limit ?? undefined
+    return { used, limit, percent: limit ? Math.min(100, Math.round((used / limit) * 100)) : undefined }
+  })
 
   return (
     <aside class="session-info" style={{ width: `${rightWidth()}px` }}>
       <button class="mini-btn panel-collapse" title="collapse info panel (^l)" onClick={toggleRight}>
         ⟩
       </button>
+      {/* The panel leads with what is worth a glance: model, cost and how full the context is. */}
+      <Show when={props.session || props.messages.some((m) => m.sessionID === props.sessionID)}>
+        <div class="info-summary" data-section="context">
+          <div class="info-summary-row">
+            <Show when={model()?.id} fallback={<span class="info-model dim">Unknown model</span>}>
+              <span class="info-model" data-fact="model" dir="auto" title={`${model()!.providerID} · ${model()!.id}`}>{model()!.id}</span>
+            </Show>
+            <span class="info-cost" title="Cost of this session">${cost().toFixed(2)}</span>
+          </div>
+          <Show when={meter()} fallback={<div class="info-meter-empty dim">Context unknown until the first reply</div>}>{(m) => (
+            <div class="info-meter" role="meter" aria-label="Context used" aria-valuemin={0} aria-valuemax={m().limit ?? m().used}
+              aria-valuenow={m().used} aria-valuetext={m().limit ? `${compactTokens(m().used)} of ${compactTokens(m().limit!)} tokens` : `${compactTokens(m().used)} tokens, limit unknown`}
+              data-level={usageLevel(m().percent)} title="Context of the latest completed turn">
+              <div class="info-meter-track"><div class="info-meter-fill" style={{ transform: `scaleX(${(m().percent ?? 0) / 100})` }} /></div>
+              <span class="info-meter-text"><b>{compactTokens(m().used)}</b> / {m().limit ? compactTokens(m().limit!) : "?"}</span>
+            </div>
+          )}</Show>
+          <details class="info-details">
+            <summary>Details</summary>
+            <div class="info-row" data-fact="agent"><span class="dim">Agent</span><span>{agent()}</span></div>
+            <div class="info-row" data-fact="provider" title={props.session?.model ? "session provider" : model() ? "latest observed provider" : "provider not recorded"}><span class="dim">Provider</span><span>{model()?.providerID ?? "unknown"}</span></div>
+            <div class="info-row"><span class="dim">Turns</span><span>{turns()} completed</span></div>
+            <Show when={tokens() || assistants().length}>
+              <div class="info-row" title="Lifetime totals, not current context"><span class="dim">Total tokens</span>
+                <span>{compact(tokens()?.input || transcriptUsage().input)} in · {compact(tokens()?.output || transcriptUsage().output)} out</span></div>
+            </Show>
+            <Show when={latestTurn()}>{(t) => (
+              <Show when={model()?.id && model()!.id !== t().modelID}>
+                <div class="info-row" title="Model of the latest completed turn"><span class="dim">Last turn</span><span class="mono" dir="ltr">{t().modelID}</span></div>
+              </Show>
+            )}</Show>
+            <Show when={props.session}>{(s) => <>
+              <div class="info-row"><span class="dim">Updated</span><span>{ago(s().time?.updated)}</span></div>
+              <div class="info-row cwd" title={s().directory}><span class="dim">Folder</span><bdi dir="ltr">{home(s().directory ?? "")}</bdi></div>
+            </>}</Show>
+          </details>
+        </div>
+      </Show>
+
       <TodoPanel todos={props.todos} />
       <Show when={needsYou().length}>
         <div class="info-section">
@@ -313,75 +361,8 @@ function SessionInfoBody(props: {
           </For>
         </div>
       </Show>
-      <Show when={props.session}>
-        {(s) => (
-          <>
-            <div class="info-section">
-              <div class="info-heading">session</div>
-              <div class="info-row" data-fact="agent">
-                <span class="dim">agent</span>
-                <span>{agent()}</span>
-              </div>
-              <div class="info-row" data-fact="provider" title={s().model ? "session provider" : model() ? "latest observed provider" : "provider not recorded"}>
-                <span class="dim">provider</span>
-                <span>{model()?.providerID ?? "unknown"}</span>
-              </div>
-              <Show when={model()?.id}>
-                <div class="info-row" data-fact="model">
-                  <span class="dim">model</span>
-                  <span>{model()?.id}</span>
-                </div>
-              </Show>
-               <div class="info-row">
-                 <span class="dim">cost</span>
-                 <span>${((s() as any).cost || transcriptUsage().cost).toFixed(2)}</span>
-               </div>
-               <Show when={tokens() || assistants().length}>
-                 <div class="info-row" title="lifetime session totals, not current context">
-                   <span class="dim">tok total</span>
-                   <span>
-                     {compact(tokens()?.input || transcriptUsage().input)} in · {compact(tokens()?.output || transcriptUsage().output)} out
-                   </span>
-                 </div>
-               </Show>
-              <div class="info-row">
-                <span class="dim">updated</span>
-                <span>{ago(s().time?.updated)}</span>
-              </div>
-              <div class="info-row cwd" title={s().directory}>
-                <span class="dim">cwd</span>
-                <span>{home(s().directory ?? "")}</span>
-              </div>
-            </div>
-          </>
-        )}
-      </Show>
-
       <Show when={props.session?.directory}>
         {(directory) => <div class="info-section"><CurrentWorkView id={props.sessionID} directory={directory()} /></div>}
-      </Show>
-
-       <Show when={props.session || props.messages.some((m) => m.sessionID === props.sessionID)}>
-        <div class="info-section" data-section="context">
-          <div class="info-heading">context</div>
-          <div class="info-row">
-            <span class="dim">turns</span>
-            <span>{turns()} completed</span>
-          </div>
-          <Show when={latestTurn()}>{(t) => (
-            <Show when={props.session && (props.session as any).model?.id && (props.session as any).model.id !== t().modelID}>
-              <div class="info-row" title="model of the latest completed turn differs from the session model">
-                <span class="dim">latest</span>
-                <span class="mono" dir="ltr">{t().modelID}</span>
-              </div>
-            </Show>
-          )}</Show>
-          {/* One number, no breakdown: exact provider tokens of the latest completed turn. */}
-          <div class={`info-row ctx-exact ${usageLevel(usage()?.percent)}`} title="Context of the latest completed turn: input, output, reasoning and cache tokens, as counted by the provider">
-            <span class="dim">tokens</span>
-            <Show when={usage()} fallback={<span class="dim">unknown</span>}>{(u) => <span class="mono">{tokenCount(u().tokens)}</span>}</Show>
-          </div>
-        </div>
       </Show>
 
       <Show when={thread()?.lanes?.length}>
@@ -459,13 +440,6 @@ function SessionInfoBody(props: {
           <For each={prs()}>{(pr) => (
             <Pr pr={pr.data ?? { repo: pr.ref.repo, number: pr.ref.number, url: pr.ref.url }} compact={pr.compact} mentions={pr.mentions} />
           )}</For>
-        </div>
-      </Show>
-
-      <Show when={thread()?.digest?.result?.true_status}>
-        <div class="info-section">
-          <div class="info-heading">digest status</div>
-          <span class="chip">{thread().digest.result.true_status}</span>
         </div>
       </Show>
 
