@@ -1,0 +1,327 @@
+[
+  {
+    "name": "new decision posts once",
+    "origin": "https://mini:8443",
+    "attention": [
+      {
+        "id": "att_1",
+        "editspace": "opencode",
+        "status": "open",
+        "revision": 1,
+        "content_revision": 1,
+        "title": "Pick a reviewer"
+      }
+    ],
+    "requests": [],
+    "ledger": {},
+    "want": [
+      [
+        "post",
+        "https://mini:8443|opencode|att:att_1"
+      ]
+    ],
+    "want_ledger": {
+      "https://mini:8443|opencode|att:att_1": 1
+    }
+  },
+  {
+    "name": "same revision from a second source (poll after SSE, or FCM after poll) is a no-op",
+    "origin": "https://mini:8443",
+    "attention": [
+      {
+        "id": "att_1",
+        "editspace": "opencode",
+        "status": "open",
+        "revision": 1,
+        "content_revision": 1,
+        "title": "Pick a reviewer"
+      }
+    ],
+    "requests": [],
+    "ledger": {
+      "https://mini:8443|opencode|att:att_1": 1
+    },
+    "want": []
+  },
+  {
+    "name": "delivery/system revision bump without content change does not re-alert",
+    "origin": "https://mini:8443",
+    "attention": [
+      {
+        "id": "att_1",
+        "editspace": "opencode",
+        "status": "open",
+        "revision": 4,
+        "content_revision": 1,
+        "title": "Pick a reviewer"
+      }
+    ],
+    "requests": [],
+    "ledger": {
+      "https://mini:8443|opencode|att:att_1": 1
+    },
+    "want": []
+  },
+  {
+    "name": "producer update replaces the existing notification",
+    "origin": "https://mini:8443",
+    "attention": [
+      {
+        "id": "att_1",
+        "editspace": "opencode",
+        "status": "open",
+        "revision": 5,
+        "content_revision": 5,
+        "title": "Pick a reviewer (updated)"
+      }
+    ],
+    "requests": [],
+    "ledger": {
+      "https://mini:8443|opencode|att:att_1": 1
+    },
+    "want": [
+      [
+        "update",
+        "https://mini:8443|opencode|att:att_1"
+      ]
+    ]
+  },
+  {
+    "name": "answered elsewhere (another device) cancels",
+    "origin": "https://mini:8443",
+    "attention": [
+      {
+        "id": "att_1",
+        "editspace": "opencode",
+        "status": "answered",
+        "revision": 6,
+        "content_revision": 5,
+        "title": "Pick a reviewer"
+      }
+    ],
+    "requests": [],
+    "ledger": {
+      "https://mini:8443|opencode|att:att_1": 5
+    },
+    "want": [
+      [
+        "cancel",
+        "https://mini:8443|opencode|att:att_1"
+      ]
+    ],
+    "want_ledger": {}
+  },
+  {
+    "name": "snoozed cancels; wake re-alerts at same content revision",
+    "origin": "https://mini:8443",
+    "attention": [
+      {
+        "id": "att_2",
+        "editspace": "opencode",
+        "status": "open",
+        "revision": 3,
+        "content_revision": 1,
+        "title": "Woken"
+      }
+    ],
+    "requests": [],
+    "ledger": {},
+    "want": [
+      [
+        "post",
+        "https://mini:8443|opencode|att:att_2"
+      ]
+    ]
+  },
+  {
+    "name": "native permission uses canonical request id; idle never notifies",
+    "origin": "https://mini:8443",
+    "attention": [],
+    "requests": [
+      {
+        "id": "per_abc",
+        "kind": "permission",
+        "editspace": "opencode",
+        "session": "ses_1",
+        "title": "Edit file"
+      },
+      {
+        "id": "idle:ses_2",
+        "kind": "idle",
+        "editspace": "opencode",
+        "session": "ses_2",
+        "title": "Done"
+      }
+    ],
+    "ledger": {},
+    "want": [
+      [
+        "post",
+        "https://mini:8443|opencode|req:per_abc"
+      ]
+    ]
+  },
+  {
+    "name": "permission resolved on desktop cancels on phone",
+    "origin": "https://mini:8443",
+    "attention": [],
+    "requests": [],
+    "ledger": {
+      "https://mini:8443|opencode|req:per_abc": 0
+    },
+    "want": [
+      [
+        "cancel",
+        "https://mini:8443|opencode|req:per_abc"
+      ]
+    ]
+  },
+  {
+    "name": "reconciling one host never cancels another host's notifications",
+    "origin": "https://mini:8443",
+    "attention": [],
+    "requests": [],
+    "ledger": {
+      "https://agents.example:443|home|att:att_9": 2
+    },
+    "want": [],
+    "want_ledger": {
+      "https://agents.example:443|home|att:att_9": 2
+    }
+  },
+  {
+    "name": "answered within 4h: no alert (operator already acted)",
+    "origin": "https://mini:8443",
+    "now": 10000000,
+    "attention": [
+      {
+        "id": "att_3",
+        "editspace": "opencode",
+        "status": "answered",
+        "revision": 3,
+        "content_revision": 1,
+        "title": "T",
+        "delivery_state": "presented",
+        "answer": {
+          "answered_at": 9000000
+        }
+      }
+    ],
+    "requests": [],
+    "ledger": {},
+    "want": []
+  },
+  {
+    "name": "answered but unresolved over 4h alerts once as stalled",
+    "origin": "https://mini:8443",
+    "now": 20000000,
+    "attention": [
+      {
+        "id": "att_3",
+        "editspace": "opencode",
+        "status": "answered",
+        "revision": 3,
+        "content_revision": 1,
+        "title": "T",
+        "delivery_state": "presented",
+        "answer": {
+          "answered_at": 5000000
+        }
+      }
+    ],
+    "requests": [],
+    "ledger": {},
+    "want": [
+      [
+        "post",
+        "https://mini:8443|opencode|att:att_3:stalled"
+      ]
+    ]
+  },
+  {
+    "name": "stalled alert is not repeated on later passes",
+    "origin": "https://mini:8443",
+    "now": 30000000,
+    "attention": [
+      {
+        "id": "att_3",
+        "editspace": "opencode",
+        "status": "answered",
+        "revision": 3,
+        "content_revision": 1,
+        "title": "T",
+        "delivery_state": "presented",
+        "answer": {
+          "answered_at": 5000000
+        }
+      }
+    ],
+    "requests": [],
+    "ledger": {
+      "https://mini:8443|opencode|att:att_3:stalled": 0
+    },
+    "want": []
+  },
+  {
+    "name": "resolve clears stalled",
+    "origin": "https://mini:8443",
+    "now": 30000000,
+    "attention": [
+      {
+        "id": "att_3",
+        "editspace": "opencode",
+        "status": "resolved",
+        "revision": 4,
+        "content_revision": 1,
+        "title": "T",
+        "delivery_state": "handled",
+        "answer": {
+          "answered_at": 5000000
+        }
+      }
+    ],
+    "requests": [],
+    "ledger": {
+      "https://mini:8443|opencode|att:att_3:stalled": 0
+    },
+    "want": [
+      [
+        "cancel",
+        "https://mini:8443|opencode|att:att_3:stalled"
+      ]
+    ]
+  },
+  {
+    "name": "blocked answer delivery alerts; unblocked cancels",
+    "origin": "https://mini:8443",
+    "now": 0,
+    "attention": [
+      {
+        "id": "att_4",
+        "editspace": "opencode",
+        "status": "answered",
+        "revision": 2,
+        "content_revision": 1,
+        "title": "T",
+        "delivery_state": "blocked",
+        "answer": {
+          "answered_at": 0
+        }
+      }
+    ],
+    "requests": [],
+    "ledger": {
+      "https://mini:8443|opencode|att:att_5:blocked": 0
+    },
+    "want": [
+      [
+        "post",
+        "https://mini:8443|opencode|att:att_4:blocked"
+      ],
+      [
+        "cancel",
+        "https://mini:8443|opencode|att:att_5:blocked"
+      ]
+    ]
+  }
+]
