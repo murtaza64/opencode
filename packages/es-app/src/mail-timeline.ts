@@ -51,8 +51,17 @@ export const canonicalMail = (message: MailMessage): MailMessage => {
 
 // es admits an agent's `resume` or spawn kickoff text as sourced input so it
 // is never mistaken for the human; name it by what the agent did.
-export const mailActivityLabel = (kind: unknown) =>
-  kind === "resume" ? "Agent resume" : kind === "spawn" ? "Agent kickoff" : kind === "recovery" ? "Operator recovery" : "Mail"
+const ACTIVITY_LABELS: Record<string, string> = {
+  resume: "Agent resume",
+  spawn: "Agent kickoff",
+  handoff: "Handoff kickoff",
+  "handoff-request": "Handoff request",
+  delegate: "Delegated task",
+  workflow: "Scheduled workflow",
+  recovery: "Operator recovery",
+  nudge: "Nudge",
+}
+export const mailActivityLabel = (kind: unknown) => (typeof kind === "string" && Object.hasOwn(ACTIVITY_LABELS, kind) ? ACTIVITY_LABELS[kind]! : "Mail")
 
 // These inputs have no mail record, so they are transcript content in their own right.
 const agentInput = (message: Message) => !!mailSourceID(message) && "source" in message &&

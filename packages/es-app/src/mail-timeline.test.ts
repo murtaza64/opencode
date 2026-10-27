@@ -193,6 +193,11 @@ test("a mail run without its source record reports no send time rather than inve
 test("labels agent-originated resume and kickoff inputs by what the agent did", () => {
   expect(mailActivityLabel("resume")).toBe("Agent resume")
   expect(mailActivityLabel("spawn")).toBe("Agent kickoff")
+  expect(mailActivityLabel("handoff")).toBe("Handoff kickoff")
+  expect(mailActivityLabel("delegate")).toBe("Delegated task")
+  expect(mailActivityLabel("workflow")).toBe("Scheduled workflow")
+  expect(mailActivityLabel("nudge")).toBe("Nudge")
+  expect(mailActivityLabel("constructor")).toBe("Mail")
   expect(mailActivityLabel("task")).toBe("Mail")
   expect(mailActivityLabel(undefined)).toBe("Mail")
 })

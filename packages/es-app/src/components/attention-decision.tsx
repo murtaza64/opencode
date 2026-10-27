@@ -7,7 +7,7 @@ import { Glyph } from "./icons"
 import { LinkedText } from "./linked-text"
 import type { BriefResult } from "../desk"
 import { Visual } from "./attention-brief"
-import { answerDraftKey, attentionPath, blockedReason, decisionLabel, deliveryLabel, type createAttention, type AttentionRecord } from "../attention"
+import { answerDraftKey, attentionPath, blockedReason, decisionLabel, deliveryLabel, inputPayload, inputProblem, inputText, INPUT_KINDS, type createAttention, type AttentionOption, type AttentionRecord, type InputValue } from "../attention"
 import { requestAgent, type AgentRef, type RequestAgent } from "../attention-agent"
 
 type Attention = ReturnType<typeof createAttention>
@@ -56,20 +56,23 @@ const optionLabel = (record: AttentionRecord, id?: string | null) => record.opti
 // Delivery events append history without a revision bump, so include delivery evidence in the cache key.
 const historyVersion = (record: AttentionRecord) => `${record.revision}:${record.delivery_state}:${record.delivery?.updated_at ?? ""}`
 
-// One answer: a selected option, a written note, or both. Either alone is a complete answer;
-// nothing is written on the human's behalf. Secondary actions sit beside the single primary one.
+// One answer: a selected option, a written note, or both. Either alone is a complete answer unless the
+// option declares required input; nothing is written on the human's behalf. Secondary actions sit beside the single primary one.
 const Answer = (props: { record: AttentionRecord; attention: Attention; options: boolean; onView?: (view: AttentionView) => void; extra?: JSX.Element; prepared?: BriefResult; afterChoices?: JSX.Element; sends?: string }) => {
   const [text, setText] = createSignal(localStorage.getItem(answerDraftKey(props.record)) ?? "")
   const [choice, setChoice] = createSignal("")
   const [noteOpen, setNoteOpen] = createSignal(!!text())
   const canWrite = () => canWriteAttention(props.attention, props.record)
+  // Input typed for each option is kept while switching; only the selected option's value is sent.
+  const [values, setValues] = createSignal<Record<string, InputValue>>({})
   const selected = () => props.options ? props.record.options.find(option => option.id === choice()) : undefined
-  const ready = () => canWrite() && (!!selected() || !!text().trim())
+  const problem = () => inputProblem(selected(), values()[choice()])
+  const ready = () => canWrite() && (!!selected() || !!text().trim()) && !problem()
   const send = async () => {
     if (!ready()) return
     const option = selected()
     // Saved first by the ledger client; a lost response keeps this exact command for retry.
-    if (await props.attention.act(props.record, { action: "answer", ...(text().trim() ? { text: text() } : {}), ...(option ? { choice_id: option.id } : {}) })) props.onView?.("answered")
+    if (await props.attention.act(props.record, { action: "answer", ...(text().trim() ? { text: text() } : {}), ...(option ? { choice_id: option.id, ...inputPayload(option, values()[option.id]) } : {}) })) props.onView?.("answered")
   }
   const id = `answer-${props.record.id}`
   const dashboard = useDashboard()
@@ -101,6 +104,7 @@ const Answer = (props: { record: AttentionRecord; attention: Attention; options:
       {/* Not answering is shown as its own outcome only when no option already means it. */}
       <Show when={props.prepared?.ifWait}><div class="home-option-card home-option-wait" aria-hidden="true"><span class="home-option-body"><span class="home-option-label">No answer</span><span class="home-option-outcome" dir="auto">{props.prepared!.ifWait}</span></span></div></Show>
     </fieldset></Show>
+    <Show when={selected()?.input && selected()}>{option => <OptionField id={`${id}-input`} option={option()} value={values()[option().id]} disabled={!canWrite()} onChange={value => setValues(current => ({ ...current, [option().id]: value }))} />}</Show>
     {props.afterChoices}
     {/* With options, a note is optional and stays folded until asked for (or a saved draft exists). */}
     <Show when={!props.options || noteOpen()} fallback={<button type="button" class="home-note-toggle" disabled={!canWrite()} onClick={() => setNoteOpen(true)}>Add note</button>}>
@@ -119,7 +123,34 @@ const Answer = (props: { record: AttentionRecord; attention: Attention; options:
       {props.extra}
       <span class="home-muted"><bdi>To</bdi> {target()}</span>
     </div>
+    <Show when={selected() && problem()}><p class="home-input-problem" id={`${id}-input-problem`} role="status" dir="auto">{problem()}</p></Show>
   </div>
+}
+
+// The labelled control a choice asks for, by input kind; kinds this app does not know get no control (Send explains).
+const OptionField = (props: { id: string; option: AttentionOption; value?: InputValue; disabled: boolean; onChange: (value: InputValue) => void }) => {
+  const spec = () => props.option.input!
+  const picked = () => typeof props.value === "string" ? [props.value] : props.value ?? []
+  const label = () => <>{spec().label}<Show when={!spec().required}> <span class="home-muted">(optional)</span></Show></>
+  return <Show when={INPUT_KINDS.includes(spec().kind)}>
+    <div class="home-input" data-kind={spec().kind}>
+      <Show when={spec().kind === "text"} fallback={
+        <fieldset disabled={props.disabled} aria-describedby={`${props.id}-hint`}>
+          <legend dir="auto">{label()}</legend>
+          <Show when={spec().hint}><span class="home-muted" id={`${props.id}-hint`} dir="auto">{spec().hint}</span></Show>
+          <For each={spec().choices ?? []}>{choice => <label>
+            <input type={spec().kind === "multi" ? "checkbox" : "radio"} name={props.id} checked={picked().includes(choice.id)} onChange={event => props.onChange(spec().kind === "multi"
+              ? event.currentTarget.checked ? [...picked(), choice.id] : picked().filter(id => id !== choice.id)
+              : choice.id)} />
+            <bdi dir="auto">{choice.label}</bdi>
+          </label>}</For>
+        </fieldset>}>
+        <label for={props.id} dir="auto">{label()}</label>
+        <textarea id={props.id} dir="auto" rows={2} maxLength={2000} placeholder={spec().hint} required={spec().required} disabled={props.disabled}
+          value={typeof props.value === "string" ? props.value : ""} onInput={event => props.onChange(event.currentTarget.value)} />
+      </Show>
+    </div>
+  </Show>
 }
 
 const Delivery = (props: { record: AttentionRecord; attention: Attention }) => {
@@ -129,6 +160,8 @@ const Delivery = (props: { record: AttentionRecord; attention: Attention }) => {
   const target = () => delivery()?.session && delivery()?.session_directory ? { session: delivery()!.session!, directory: delivery()!.session_directory! } : undefined
   return <div class="home-delivery" data-delivery-state={props.record.delivery_state}>
     <p class="home-recorded">Your answer<Show when={optionLabel(props.record, props.record.answer?.choice_id)}>{label => <> · option <bdi dir="auto">{label()}</bdi></>}</Show></p>
+    <Show when={props.record.answer?.input_value !== undefined && props.record.options.find(option => option.id === props.record.answer?.choice_id)}>{option =>
+      <p class="home-input-value"><span class="home-source">{option().input?.label ?? "Provided"}</span> <bdi dir="auto" class="home-answer-text">{inputText(option(), props.record.answer?.input_value)}</bdi></p>}</Show>
     <Show when={props.record.answer?.text}><pre class="home-answer-text" dir="auto"><LinkedText text={props.record.answer?.text ?? ""} /></pre></Show>
     <p class={props.record.delivery_state === "blocked" ? "home-blocked" : "home-muted"} role="status">{deliveryLabel(props.record)}<Show when={props.record.delivery_state === "blocked" && delivery()?.reason}> — {blockedReason(delivery()?.reason)}</Show></p>
     <Show when={delivery()?.error && !["presented", "handled"].includes(props.record.delivery_state)}><p class="home-muted">Last attempt failed: <bdi dir="auto">{delivery()?.error}</bdi> · retrying</p></Show>

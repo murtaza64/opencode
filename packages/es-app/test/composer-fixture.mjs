@@ -492,6 +492,8 @@ export const createFixture = async () => {
         }
         return send()
       }
+      if (action === "/recover" && request.method === "POST")
+        return json({ outcome: fixture.recoverOutcome ?? "scheduled" })
       if (action === "/prompt_async" && request.method === "POST") {
         if (fixture.rejectImages && body.parts.some((part) => part.type === "file"))
           return json({ error: "Selected model does not support image input" }, 400)

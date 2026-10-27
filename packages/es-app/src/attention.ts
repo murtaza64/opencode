@@ -10,7 +10,7 @@ export type AttentionRecord = {
   kind: "decision" | "blocker"
   title: string
   context: string
-  options: { id: string; label: string }[]
+  options: AttentionOption[]
   recommendation?: string | null
   producer_session: string
   origin_session: string
@@ -18,7 +18,7 @@ export type AttentionRecord = {
   source_ref: { session_id: string; directory: string }
   decision: { choice_id: string; label?: string } | string | null
   delivery_state: DeliveryState
-  answer?: { id: string; text: string; choice_id: string | null; answered_at: number } | null
+  answer?: { id: string; text: string; choice_id: string | null; input_value?: InputValue; answered_at: number } | null
   delivery?: {
     state: DeliveryState
     reason: string | null
@@ -36,6 +36,48 @@ export type AttentionRecord = {
   updated_at: number
   snoozed_until?: number | null
 }
+/** What an option asks the human to supply with it; the ledger refuses the answer when a required value is missing or invalid. */
+export type OptionInput = {
+  kind: "text" | "choice" | "multi" | (string & {})
+  label: string
+  required?: boolean
+  hint?: string
+  choices?: { id: string; label: string }[]
+  max?: number
+}
+export type AttentionOption = { id: string; label: string; input?: OptionInput }
+export type InputValue = string | string[]
+export const INPUT_KINDS = ["text", "choice", "multi"]
+
+/** Why `value` cannot be sent with `option`, or undefined when it can. Mirrors the ledger's checks so Send explains itself. */
+export const inputProblem = (option: AttentionOption | undefined, value: InputValue | undefined) => {
+  const spec = option?.input
+  if (!spec) return
+  if (!INPUT_KINDS.includes(spec.kind)) return "This choice needs input this app cannot collect. Answer it in a newer app or the source thread."
+  const empty = value === undefined || (typeof value === "string" ? !value.trim() : value.length === 0)
+  if (empty) return spec.required ? `Add ${spec.label.toLowerCase()} to send` : undefined
+  if (spec.kind === "text") return typeof value === "string" && value.length <= 2000 ? undefined : `${spec.label} must be at most 2000 characters`
+  const ids = new Set(spec.choices?.map(choice => choice.id))
+  const picked = typeof value === "string" ? [value] : value
+  if (!picked.every(id => ids.has(id))) return `Pick ${spec.label.toLowerCase()} from the list`
+  const max = spec.kind === "choice" ? 1 : spec.max ?? ids.size
+  if (picked.length > max) return `Pick at most ${max}`
+}
+
+/** The `input_value` field for `option`, verbatim; omitted when nothing was supplied. */
+export const inputPayload = (option: AttentionOption | undefined, value: InputValue | undefined) => {
+  if (!option?.input || value === undefined) return {}
+  if (typeof value === "string" ? !value.trim() : value.length === 0) return {}
+  return { input_value: option.input.kind === "choice" && Array.isArray(value) ? value[0] : value }
+}
+
+/** A supplied value as the human reads it: choice labels, text verbatim. */
+export const inputText = (option: AttentionOption | undefined, value: InputValue | undefined) => {
+  if (value === undefined) return
+  const labels = new Map(option?.input?.choices?.map(choice => [choice.id, choice.label]))
+  return typeof value === "string" ? labels.get(value) ?? value : value.map(id => labels.get(id) ?? id).join(", ")
+}
+
 export type DeliveryState = "not-requested" | "pending" | "blocked" | "queued" | "admitted" | "presented" | "handled" | "closed"
 export type AttentionList = {
   records: AttentionRecord[]
@@ -47,6 +89,7 @@ export type AttentionAction = {
   action: "choose" | "answer" | "snooze" | "wake" | "resolve"
   choice_id?: string
   text?: string
+  input_value?: InputValue
   snoozed_until?: number
   reason?: string
 }
@@ -226,7 +269,9 @@ export const createAttention = (project: () => string | undefined, options: { re
           return false
         }
         if (response.status === 403) setOperator(false)
-        setNotice(response.status === 409 ? "This record changed. Review the current revision before choosing again." : `Action refused (HTTP ${response.status}); no local change was assumed.`)
+        // The ledger's own reason names what is missing (e.g. a required input) so the human can fix and resend.
+        const reason = response.status === 400 ? await response.json().then((body: { error?: unknown }) => typeof body.error === "string" ? body.error : undefined, () => undefined) : undefined
+        setNotice(response.status === 409 ? "This record changed. Review the current revision before choosing again." : reason ? `Not sent: ${reason}.` : `Action refused (HTTP ${response.status}); no local change was assumed.`)
         settle(command)
         await refresh()
         resume()
