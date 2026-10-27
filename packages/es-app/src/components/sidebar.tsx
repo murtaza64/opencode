@@ -6,7 +6,6 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "so
 import { A } from "@solidjs/router"
 import { es, type SessionSearchResult } from "../api"
 import { sessionHref, useDashboard, type DotState, type SessionRow } from "../state"
-import { usePulse } from "../pulse"
 import { leftOpen, leftWidth, toggleLeft } from "../ui"
 import { nativeHeader, NativeHeader } from "./native-header"
 import { NewSession } from "./new-session"
@@ -47,29 +46,12 @@ const dayLabel = (time: number) => {
   return new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short", ...(date.getFullYear() === today.getFullYear() ? {} : { year: "numeric" }) }).format(date)
 }
 
-const BusyDot = (props: { ref: (el: HTMLElement) => void }) => {
-  const [visible, setVisible] = createSignal(false)
-  const [foreground, setForeground] = createSignal(document.visibilityState === "visible")
-  const visibility = () => setForeground(document.visibilityState === "visible")
-  document.addEventListener("visibilitychange", visibility)
-  const observer = new IntersectionObserver((entries) => setVisible(entries.some((entry) => entry.isIntersecting && entry.intersectionRatio > 0)))
-  const enabled = () => visible() && foreground()
-  const tick = usePulse(enabled)
-  onCleanup(() => {
-    observer.disconnect()
-    document.removeEventListener("visibilitychange", visibility)
-  })
-  return <span ref={(el) => { observer.observe(el); props.ref(el) }} class="dot busy"
-    data-on={enabled() ? String(!!(tick() % 2)) : undefined} />
-}
-
 const StatusDot = (props: { state: DotState; label?: string }) => {
   let el: HTMLElement | undefined
   ringOnChange(() => el, () => props.state)
-  return <Show when={props.state === "busy"} fallback={<span ref={(node) => el = node} class={`dot ${props.state}`}
-    {...(props.state === "failed" ? { role: "img", "aria-label": props.label ?? "Failed" } : {})} />}>
-    <BusyDot ref={(node) => el = node} />
-  </Show>
+  // Busy rows show the static halo; only the open session's work line animates.
+  return <span ref={(node) => el = node} class={`dot ${props.state}`}
+    {...(props.state === "failed" ? { role: "img", "aria-label": props.label ?? "Failed" } : {})} />
 }
 
 export default function Sidebar() {

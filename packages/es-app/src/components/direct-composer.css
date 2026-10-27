@@ -70,9 +70,6 @@
 .dictation-status:empty { display: none; }
 .dictation-pill:is([data-phase="recording"], [data-elsewhere="recording"]) .dictation-status { color: var(--red); }
 .dictation-pill[data-phase="error"] .dictation-status { color: var(--peach); cursor: help; }
-.dictation-spinner { inline-size: 12px; block-size: 12px; border: 2px solid var(--surface2); border-block-start-color: var(--subtext1); border-radius: 50% !important; animation: dictation-spin 0.8s linear infinite; }
 .dictation-cancel, .dictation-action { flex: none; min-height: 24px; padding: 2px 6px; font-size: 11px; line-height: 1; background: transparent; color: var(--subtext1); }
 .dictation-cancel { font-size: 13px; color: var(--subtext0); }
 .dictation-cancel:hover, .dictation-action:hover { background: var(--surface0); color: var(--text); }
-@keyframes dictation-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .dictation-spinner { animation: none; border-color: var(--subtext1); } }

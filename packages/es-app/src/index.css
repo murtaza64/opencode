@@ -215,12 +215,22 @@
 .outgoing-action.receipt-cancel:hover:not(:disabled) { color: var(--red); }
 .outgoing-action:disabled { opacity: 0.5; cursor: default; }
 
-/* thinking pulse: busy with no visible motion (pre-first-token, reasoning) */
-.thinking { display: flex; gap: 5px; padding: 10px 2px; }
-/* Stepped by the shared pulse clock (pulse.ts), not a CSS animation. */
-.thinking span { width: 7px; height: 7px; background: var(--lavender); opacity: 0.35; contain: strict; will-change: opacity; }
-.thinking span[data-on] { opacity: 1; }
-@media (prefers-reduced-motion: reduce) { .thinking span { opacity: 1; } }
+/* One busy idiom: an accent dot with a soft halo. Every busy indicator shows it static; only the open
+ * session's work line sets data-animate. The halo animates opacity and scale on a pseudo-element only,
+ * so the one running animation stays on the compositor with no JS clock and no layout. */
+.busy-dot { position: relative; display: inline-block; flex: none; inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--accent, var(--lavender)); }
+.busy-dot::after, .dot.busy::after {
+  content: ""; position: absolute; inset: 0; border-radius: 50%;
+  background: var(--accent, var(--lavender)); opacity: 0.3; transform: scale(2);
+}
+.busy-dot[data-animate]::after { animation: busy-halo 1.6s ease-in-out infinite; will-change: opacity, transform; }
+@keyframes busy-halo {
+  0%, 100% { opacity: 0.15; transform: scale(1.2); }
+  50% { opacity: 0.45; transform: scale(2.2); }
+}
+@media (prefers-reduced-motion: reduce) { .busy-dot[data-animate]::after { animation: none; opacity: 0.5; will-change: auto; } }
+/* transcript tail while waiting for first output */
+.thinking { display: flex; padding: 10px 4px; }
 
 /* ticket refs (SD-123, dotfiles#77) wrapped in the transcript: subtle
  * affordance, hover card with tracker info */
@@ -599,9 +609,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 }
 .nav-item .nav-title { overflow: hidden; text-overflow: ellipsis; }
 .session-entry { display: flex; align-items: center; }
-/* Skip style/layout/paint for sidebar rows scrolled out of view; busy-dot
- * animations on hidden rows then cost nothing. The intrinsic size keeps the
- * scrollbar stable before a row is first rendered. */
+/* Skip style/layout/paint for sidebar rows scrolled out of view. The intrinsic
+ * size keeps the scrollbar stable before a row is first rendered. */
 .session-entry, .nav-item.archived { content-visibility: auto; contain-intrinsic-size: auto 28px; }
 .session-entry .nav-item { flex: 1; min-width: 0; }
 .pin-action {
@@ -860,30 +869,11 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
 }
 .dot.pending { background: var(--peach); }
 .session-work-status { display: flex; align-items: center; gap: 8px; flex-shrink: 0; min-block-size: 28px; padding: 6px 0; box-sizing: border-box; white-space: nowrap; font-size: 12px; color: var(--subtext0); }
-.session-work-status > span:not(.session-work-spinner) { min-width: 0; overflow: hidden; text-overflow: ellipsis; line-height: 16px; }
+.session-work-status > span:not(.busy-dot) { min-width: 0; overflow: hidden; text-overflow: ellipsis; line-height: 16px; }
 /* The reconnect action must fit the slot so a connection change never resizes it. */
 .session-work-status > button { box-sizing: border-box; padding-block: 0; min-block-size: 0; block-size: 16px; line-height: 14px; }
-/* Stepped by the shared pulse clock (pulse.ts), not a CSS animation. */
-/* Own layer: a phase change is then a compositor property update, not a
- * repaint of the whole root layer (~2 ms per tick otherwise). */
-.session-work-spinner { width: 7px; height: 7px; background: var(--lavender); opacity: 0.45; contain: strict; will-change: opacity; }
-.session-work-spinner[data-on] { opacity: 1; }
-@media (prefers-reduced-motion: reduce) { .session-work-spinner { opacity: 1; } }
 .dot.unread { background: var(--green); }
-.dot.busy { background: var(--lavender); }
-/* Share the low-rate pulse clock; CSS animations keep drawing at display rate. */
-.dot.busy::after {
-  content: "";
-  position: absolute;
-  inset: -3px;
-  border: 1px solid var(--lavender);
-  border-radius: inherit;
-  opacity: 0.6;
-}
-.dot.busy[data-on]::after { will-change: opacity; }
-.dot.busy[data-on="false"]::after { opacity: 0.25; }
-.dot.busy[data-on="true"]::after { opacity: 0.85; }
-@media (prefers-reduced-motion: reduce) { .dot.busy[data-on]::after { opacity: 0.6; will-change: auto; } }
+.dot.busy { background: var(--accent, var(--lavender)); }
 
 .digest {
   margin-top: 8px;

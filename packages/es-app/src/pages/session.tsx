@@ -36,7 +36,6 @@ import { TranscriptMessage } from "../components/transcript-message"
 import { MailCauseRow } from "../components/mail-cause"
 import { InlineQuestion } from "../components/inline-question"
 import { TodoPart } from "../components/todos"
-import { usePulse } from "../pulse"
 import { MailRow } from "../components/mail-row"
 import { useMailNamer } from "../components/mail-party"
 import { MailSubscriptions } from "../components/mail-subscriptions"
@@ -532,7 +531,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   })
 
   // busy with nothing visibly moving (no running tool, no streaming part):
-  // the model is thinking or the first token hasn't landed — show a pulse
+  // the model is thinking or the first token hasn't landed — show the busy dot
   const thinking = createMemo(() => {
     if (live.error() || live.connectionError() || error() || pending().length) return false
     const st = status()
@@ -583,10 +582,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     if (shownTrouble() && trouble()) return "stale"
     return "idle"
   })
-  const WorkSpinner = () => {
-    const tick = usePulse()
-    return <span class="session-work-spinner" data-on={tick() % 2 ? "true" : undefined} aria-hidden="true" />
-  }
+  // The open session's work line is the view's one animated busy indicator (CSS halo, compositor-only).
+  const WorkSpinner = () => <span class="busy-dot" data-animate aria-hidden="true" />
   const briefInput = createMemo(() => {
     const current = messages().slice(Math.max(0, messages().findLastIndex((message) => message.role === "user")))
     const tools = current.flatMap((message) => message.role !== "assistant" ? [] :
@@ -622,12 +619,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     const tool = briefInput().tools.findLast((item) => item.status === "running")
     return tool ? { name: tool.name, at: tool.at } : undefined
   }, undefined, { equals: (a, b) => a?.name === b?.name && a?.at === b?.at })
-  const Thinking = () => {
-    const tick = usePulse()
-    return <div class="thinking" title="agent is thinking">
-      <For each={[0, 1, 2]}>{(index) => <span data-on={tick() % 3 === index ? "true" : undefined} />}</For>
-    </div>
-  }
+  // The work line already animates while busy, so the transcript tail shows the same dot static.
+  const Thinking = () => <div class="thinking" title="agent is thinking"><span class="busy-dot" aria-hidden="true" /></div>
   const WorkStatus = () => (
     <div class="session-work-status" role="status" data-state={workState()} title={backendError() || undefined}>
       <Show when={workState() === "working" || workState() === "idle"} fallback={<>
