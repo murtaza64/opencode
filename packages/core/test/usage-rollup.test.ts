@@ -122,7 +122,8 @@ describe("UsageRollup", () => {
     }),
   )
 
-  it.effect("messages older than the cutoff are counted once by the backfill, not live", () =>
+  // The backfill pauses between chunks on the real clock.
+  it.live("messages older than the cutoff are counted once by the backfill, not live", () =>
     Effect.gen(function* () {
       const db = (yield* Database.Service).db
       const events = yield* EventV2.Service
@@ -140,6 +141,29 @@ describe("UsageRollup", () => {
       expect(yield* UsageRollup.backfill(db, db)).toMatchObject({ rows: 0, skipped: true })
       expect(yield* hourly()).toMatchObject([{ hour: Math.floor(old / HOUR), cost: 1.5, tokens_input: 7 }])
       expect((yield* db.select().from(UsageRollupStateTable).get())?.time_backfilled).toBeNumber()
+    }),
+  )
+
+  // The backfill pauses between chunks on the real clock.
+  it.live("the backfill sums an hour split across chunks exactly once", () =>
+    Effect.gen(function* () {
+      const db = (yield* Database.Service).db
+      const events = yield* EventV2.Service
+      const sessionID = "ses_usage_chunks"
+      const old = Date.UTC(2026, 0, 3, 5)
+      yield* setUp(sessionID)
+      for (const [index, cost] of [0.5, 1.25, 2].entries())
+        yield* events.publish(SessionV1.Event.MessageUpdated, {
+          sessionID: sessionID as never,
+          info: {
+            ...assistant(sessionID, `msg_chunk_${index}`, old + index),
+            cost,
+            tokens: { input: 10, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+          } as SessionV1.Info,
+        })
+
+      yield* UsageRollup.backfill(db, db, 1)
+      expect(yield* hourly()).toMatchObject([{ hour: Math.floor(old / HOUR), cost: 3.75, tokens_input: 30, tokens_output: 3 }])
     }),
   )
 
