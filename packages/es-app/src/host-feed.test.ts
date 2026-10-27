@@ -1,12 +1,18 @@
 import { describe, expect, test } from "bun:test"
 import type { GlobalSession } from "@opencode-ai/sdk/v2"
-import { hostRowKey, hostRows, hostSessionHref, workRows } from "./host-feed"
+import { hostDecisionHref, hostRowKey, hostRows, hostSessionHref, workRows } from "./host-feed"
 import { hostInfo } from "./host"
 
 const session = (id: string, directory: string, updated: number, extra: Partial<GlobalSession> = {}) =>
   ({ id, title: `${id} title`, directory, time: { created: 1, updated }, ...extra }) as GlobalSession
 
 describe("Work view rows", () => {
+  test("another host's decision opens on that host's own Front desk with the record selected", () => {
+    const mini = { id: "mini", label: "Mac Mini", origin: "http://127.0.0.1:65001" }
+    expect(hostDecisionHref(mini, { editspace: "opencode", id: "11111111-1111-4111-8111-111111111111" }))
+      .toBe("http://127.0.0.1:65001/desk?item=attention%3Aopencode%3A11111111-1111-4111-8111-111111111111")
+  })
+
   test("this host's rows keep their plain key; another host's are host-qualified", () => {
     expect(hostRowKey({ id: "ses_a" })).toBe("ses_a")
     expect(hostRowKey({ id: "ses_a", host: "mini" })).toBe("mini:ses_a")

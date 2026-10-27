@@ -13,12 +13,16 @@ const page = await browser.newPage()
 const mini = "http://127.0.0.1:65001"
 const miniRoot = "/Users/mini/fixture"
 const hostReads = { mini: 0, wing: 0 }
+const hostWrites = []
 const miniSessions = [
   { id: "ses_a", title: "Mini copy of a", directory: miniRoot, time: { created: 1, updated: Date.now() } },
   { id: "ses_mini", title: "Mini only", directory: `${miniRoot}/.editspace/lanes/x/repos/o/r`, time: { created: 1, updated: Date.now() - 1000 } },
   { id: "ses_elsewhere", title: "Mini other project", directory: "/Users/mini/other", time: { created: 1, updated: Date.now() } },
 ]
 let miniDown = false
+const attentionQueries = []
+const decision = (id, title, extra = {}) => ({ id, editspace: "fixture", revision: 1, status: "open", kind: "decision", title, options: [], delivery_state: "not-requested", created_at: Date.now() - 60_000, ...extra })
+const miniDecisions = [decision("11111111-1111-4111-8111-111111111111", "Rename the ledger table?"), decision("22222222-2222-4222-8222-222222222222", "Already answered", { status: "answered" })]
 await page.route("**/__es/host", (route) => route.fulfill({ json: { id: "local", label: "Local", remote: false, hosts: [], work: [
   { id: "local", label: "Local", origin: preview.fixture.url },
   { id: "mini", label: "Mac Mini", origin: mini, default: true },
@@ -26,9 +30,14 @@ await page.route("**/__es/host", (route) => route.fulfill({ json: { id: "local",
 ] } }))
 await page.route("**/hosts/mini/**", (route) => {
   hostReads.mini++
+  if (!["GET", "HEAD"].includes(route.request().method())) hostWrites.push(route.request().url())
   if (miniDown) return route.abort("connectionrefused")
   const url = new URL(route.request().url())
   if (url.pathname === "/hosts/mini/oc/experimental/session") return route.fulfill({ json: miniSessions })
+  if (url.pathname === "/hosts/mini/es/api/attention") {
+    attentionQueries.push(url.search)
+    return route.fulfill({ json: { records: miniDecisions, projects: [{ editspace: "fixture", available: true }], partial: false } })
+  }
   if (url.pathname === "/hosts/mini/es/api/editspaces") return route.fulfill({ json: { editspaces: [{ name: "fixture", root: `${miniRoot}/.editspace` }], default: "fixture" } })
   return route.fulfill({ status: 403, body: "not exposed" })
 })
@@ -105,11 +114,31 @@ try {
   miniDown = false
   await page.locator(".host-status", { hasText: "Mac Mini" }).getByRole("button", { name: "Retry" }).click()
   await expect(page.locator(".host-status", { hasText: "Mac Mini" })).toHaveCount(0)
+  // Needs you lists the Mini's open decisions after this host's, each named with its host; opening one
+  // goes to the Mini's own Front desk with that record selected (answered there, with its operator).
+  await page.goto(new URL("/desk", preview.url).href)
+  const miniDecision = page.getByRole("link", { name: /^Rename the ledger table\?, on Mac Mini$/ })
+  await expect(miniDecision).toBeVisible()
+  await expect(page.locator(".desk-host-item")).toHaveCount(1)
+  // Wingman never answers, so the count is already marked incomplete for it, by name.
+  await expect(page.locator(".desk-queue h2 span")).toHaveAttribute("title", "Wingman: not current")
+  expect(attentionQueries.at(-1)).toBe("?view=open&limit=200&es=fixture")
+  await miniDecision.click()
+  await expect.poll(() => opened.at(-1)).toBe(`${mini}/desk?item=${encodeURIComponent("attention:fixture:11111111-1111-4111-8111-111111111111")}`)
+  // With the Mini away its decisions are not shown as none: the count is marked incomplete and names it.
+  miniDown = true
+  await page.goto(new URL("/desk", preview.url).href)
+  await expect(page.locator(".desk-queue h2 span")).toHaveAttribute("title", "Mac Mini, Wingman: not current")
+  await expect(page.locator(".desk-queue h2 span")).toHaveText(/\+$/)
+  miniDown = false
+  await page.goto(preview.url)
   // Opening a Mini row goes to the Mini's own listener, never a local route.
   await page.getByRole("link", { name: /^Mini copy of a, on Mac Mini$/ }).click()
   await expect.poll(() => opened.at(-1)).toBe(`${mini}/session/ses_a?directory=${encodeURIComponent(miniRoot)}`)
-  expect(preview.fixture.calls.filter((call) => !["GET", "HEAD", "OPTIONS"].includes(call.method))).toEqual([])
-  console.log(`PASS work view: two hosts listed apart (same id), offline host shown unreachable, Mini default create without fallback, draft carried to the Mini page, host-keyed pins, Mini row opens on its listener; host reads mini=${hostReads.mini} wing=${hostReads.wing}; zero mutations`)
+  // The only local write is Front desk's own operator sign-in on this host; nothing is written through /hosts/*.
+  expect(preview.fixture.calls.filter((call) => !["GET", "HEAD", "OPTIONS"].includes(call.method) && call.path !== "/api/attention/session")).toEqual([])
+  expect(hostWrites).toEqual([])
+  console.log(`PASS work view: two hosts listed apart (same id), offline host shown unreachable, Mini default create without fallback, draft carried to the Mini page, host-keyed pins, Mini decisions listed in Needs you and opened on the Mini desk, Mini row opens on its listener; host reads mini=${hostReads.mini} wing=${hostReads.wing}; zero host writes, no local mutations beyond this desk's operator sign-in`)
 } finally {
   await browser.close()
   await preview.close()

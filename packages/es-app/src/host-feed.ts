@@ -7,6 +7,7 @@ import type { GlobalSession } from "@opencode-ai/sdk/v2"
 import { coalesced } from "./coalesced"
 import { createServerEvents } from "./event-source"
 import type { WorkHost } from "./host"
+import type { AttentionList, AttentionRecord } from "./attention"
 
 /** A session row; `host` names a Work view host other than this page's, undefined for this page's. */
 export type HostedRow = {
@@ -28,6 +29,10 @@ export type HostFeedState = {
   since?: number
   /** Whether `rows` were narrowed to the selected project (false: that host has no such project). */
   scoped: boolean
+  /** That host's open decisions (same project scope as `rows`); last-known while unavailable. */
+  decisions: AttentionRecord[]
+  /** The decision list could not be read on the last attempt, so `decisions` may be out of date. */
+  decisionsStale?: boolean
 }
 
 /** Key of a row across hosts: this page's rows keep their plain session ID (existing pins, drafts and
@@ -50,17 +55,23 @@ export const workRows = (...lists: HostedRow[][]) => {
   return [...rows.values()].sort((a, b) => b.updated - a.updated)
 }
 
+/** The opening URL of another host's decision: its own listener's Front desk, with the record selected,
+ * so it is answered there with that host's operator session. */
+export const hostDecisionHref = (host: WorkHost, record: Pick<AttentionRecord, "editspace" | "id">) =>
+  `${host.origin}/desk?item=${encodeURIComponent(`attention:${record.editspace}:${record.id}`)}`
+
 /** The opening URL of another host's session: its own listener's session route. */
 export const hostSessionHref = (host: WorkHost, row: Pick<HostedRow, "id" | "directory">) =>
   `${host.origin}/session/${encodeURIComponent(row.id)}?directory=${encodeURIComponent(row.directory)}`
 
 const LIST_MS = 5000
+const DECISIONS_MS = 30_000
 const SESSION_EVENTS = ["session.created", "session.updated", "session.deleted", "session.status"]
 
 /** `project`: the selected project name, undefined for all projects, null while not yet known. */
 export const createHostFeed = (host: WorkHost, project: () => string | undefined | null) => {
   const base = `/hosts/${host.id}`
-  const [state, setState] = createSignal<HostFeedState>({ status: "loading", rows: [], scoped: false })
+  const [state, setState] = createSignal<HostFeedState>({ status: "loading", rows: [], scoped: false, decisions: [] })
   const [live, setLive] = createSignal<Record<string, string>>({})
   let loading: Promise<void> | undefined
   const read = async <T,>(path: string) => {
@@ -70,6 +81,17 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
       throw new Error(`${host.label}: HTTP ${response.status}`)
     }
     return (await response.json()) as T
+  }
+  // The decision scope of the last list read: the project name, and that host's editspace for it
+  // (`none`: that host has no such project). Undefined until the first list read.
+  let scope: { project: string | undefined; es?: string; none?: boolean } | undefined
+  const readDecisions = async () => {
+    const current = scope
+    if (!current) return undefined
+    if (current.none) return []
+    return read<AttentionList>(`/es/api/attention?view=open&limit=200${current.es ? `&es=${encodeURIComponent(current.es)}` : ""}`)
+      .then((list) => Array.isArray(list.records) ? list.records.filter((record) => record.status === "open") : undefined)
+      .catch(() => undefined)
   }
   const run = async () => {
     const name = project()
@@ -81,10 +103,28 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
       ])
       if (!Array.isArray(sessions)) throw new Error(`${host.label}: invalid session list`)
       const root = name ? editspaces?.editspaces?.find((item) => item.name === name)?.root : undefined
-      setState({ status: "ready", rows: name && !root ? [] : hostRows(host.id, sessions, root), scoped: !!root })
+      const same = scope?.project === name
+      scope = { project: name, ...(root ? { es: name } : {}), ...(name && !root ? { none: true } : {}) }
+      // A decision list that fails to read keeps the last one for this project, marked stale.
+      const decisions = await readDecisions()
+      setState((previous) => ({
+        status: "ready",
+        rows: name && !root ? [] : hostRows(host.id, sessions, root),
+        scoped: !!root,
+        decisions: decisions ?? (same ? previous.decisions : []),
+        decisionsStale: !decisions,
+      }))
     } catch {
       setState((previous) => ({ ...previous, status: "unavailable", since: previous.since ?? Date.now() }))
     }
+  }
+  // Decisions have no event on the session stream: between list reads, read only the decision list.
+  const refreshDecisions = async () => {
+    const current = scope
+    if (loading || state().status !== "ready" || document.visibilityState !== "visible") return
+    const decisions = await readDecisions()
+    if (scope !== current) return
+    setState((previous) => ({ ...previous, decisions: decisions ?? previous.decisions, decisionsStale: !decisions }))
   }
   // Single-flight; a project change during a read reads again for the new project.
   const load = (): Promise<void> => (loading ??= (async () => {
@@ -114,9 +154,11 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     }
     changed()
   }
+  const timer = setInterval(() => void refreshDecisions(), DECISIONS_MS)
   onCleanup(() => {
     source.close()
     changed.cancel()
+    clearInterval(timer)
   })
   void load()
   return {

@@ -28,7 +28,8 @@ import { flash } from "../motion"
 import type { MemoryEntry, MemoryRevision } from "../desk-memory"
 import { SessionView } from "./session"
 import { Icon } from "@opencode-ai/ui/icon"
-import { Glyph } from "../components/icons"
+import { Glyph, HostGlyph } from "../components/icons"
+import { hostDecisionHref } from "../host-feed"
 import { getComposer } from "../composer"
 import { dictation } from "../dictation"
 import type { ContextPart } from "../api"
@@ -95,6 +96,12 @@ export default function Desk() {
   const problems = () => sources().filter(source => source.state !== "current")
   const records = () => attention.snapshot()?.value.records ?? []
   const recordKey = (record: AttentionRecord) => `attention:${record.editspace}:${record.id}`
+  // Other Work view hosts' open decisions, listed after this host's items. Each opens on its own
+  // host's Front desk (its tab, operator session and answer route); an unreachable host's last-known
+  // decisions stay listed, marked, with opening disabled, and the count says it may be incomplete.
+  const hostDecisions = createMemo(() => dashboard.work.feeds().flatMap(feed => feed.state().decisions.map(record => ({ feed, record }))))
+  const hostsBehind = createMemo(() => dashboard.work.feeds().filter(feed => feed.state().status === "unavailable" || feed.state().decisionsStale).map(feed => feed.host.label))
+  const timeOfDay = (time: number) => new Date(time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
   const [historyView, setHistoryView] = createSignal<Exclude<AttentionView, "open"> | "ignored">("answered")
   const inView = (record: AttentionRecord, view: AttentionView) => view === "history" ? ["resolved", "withdrawn"].includes(record.status) : view === "recorded" ? record.status === "decided" : record.status === view
   const historyCount = (view: AttentionView | "ignored") => view === "ignored" ? ignoredFailures().length : records().filter(record => inView(record, view)).length
@@ -214,9 +221,9 @@ export default function Desk() {
         <Show when={ignores.notice()}><div class={ignores.quiet() ? "home-muted desk-background" : "home-warning desk-background"} role="status" title={ignores.quiet()}>{ignores.notice()}</div></Show>
         <SurfaceList surfaces={surfaces} selected={selectedKey()} onSelect={select} />
         <DeliverableList surfaces={surfaces} selected={selectedKey()} onSelect={select} />
-        <h2>Needs you <span>{items().length}</span></h2>
+        <h2>Needs you <span title={hostsBehind().length ? `${hostsBehind().join(", ")}: not current` : undefined}>{items().length + hostDecisions().length}{hostsBehind().length ? "+" : ""}</span></h2>
         <ul class="desk-items">
-          <For each={items()} fallback={<li class="home-muted desk-empty">{problems().length ? "Nothing listed, but some sources could not be checked." : "Nothing needs you."}</li>}>{item => {
+          <For each={items()} fallback={<Show when={!hostDecisions().length}><li class="home-muted desk-empty">{problems().length || hostsBehind().length ? "Nothing listed, but some sources could not be checked." : "Nothing needs you."}</li></Show>}>{item => {
             const job = () => jobsFor(item.key).find(candidate => candidate.meta.revision === item.revision)
             return <li><button class="desk-item" aria-pressed={selectedKey() === item.key} data-desk-item={item.key} onClick={() => select(item.key)}>
               <bdi dir="auto" class="desk-item-title">{item.title}</bdi>
@@ -226,6 +233,20 @@ export default function Desk() {
                   {failure => <> · {failureLabel(failure())} · <span data-failure-age>{failureAge(failure().time, now())}</span></>}</Show>
                 <Show when={rowBrief(job())}>{label => <> · {label()}</>}</Show></span>
             </button></li>
+          }}</For>
+          <For each={hostDecisions()}>{entry => {
+            const label = entry.feed.host.label
+            const down = () => entry.feed.state().status === "unavailable"
+            const behind = () => down() ? `unreachable since ${timeOfDay(entry.feed.state().since ?? Date.now())}` : entry.feed.state().decisionsStale ? "not current" : ""
+            return <li class="desk-host-item" classList={{ unavailable: down() }}>
+              <a class="desk-item" href={hostDecisionHref(entry.feed.host, entry.record)} data-host-key={`${entry.feed.host.id}~${entry.record.editspace}:${entry.record.id}`}
+                aria-label={`${entry.record.title}, on ${label}${behind() ? `, ${behind()}` : ""}`} aria-disabled={down() || undefined}
+                title={down() ? `${label} is unreachable; answer it there when it is back` : `Answer on ${label}`} onClick={event => { if (down()) event.preventDefault() }}>
+                <bdi dir="auto" class="desk-item-title"><HostGlyph host={entry.feed.host.id} size={12} />{entry.record.title}</bdi>
+                <span class="home-source"><span class="desk-item-kind" data-kind={entry.record.kind}>{entry.record.kind}</span> · <bdi dir="auto">{entry.record.editspace}</bdi> · on {label}
+                  <Show when={behind()}> · <span class="home-blocked">{behind()}</span></Show></span>
+              </a>
+            </li>
           }}</For>
         </ul>
         <Show when={uncertainRequests().length}><details class="home-unknown"><summary>Unknown outcome ({uncertainRequests().length})</summary><For each={uncertainRequests()}>{item => <div class="home-source"><bdi dir="auto">{item.title}</bdi> · {item.state === "unavailable" ? "source unavailable" : "no longer pending; outcome unknown"} · <A href={sessionHref(item.session, item.directory)}>Open thread</A></div>}</For></details></Show>

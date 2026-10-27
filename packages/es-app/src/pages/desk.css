@@ -118,6 +118,10 @@
 .desk-failure-details dl { display: grid; grid-template-columns: max-content minmax(0,1fr); gap: 2px 10px; margin: 6px 0 0; }
 .desk-failure-details dd { margin: 0; overflow-wrap: anywhere; }
 .desk-ignored .desk-item { cursor: default; }
+/* Another Work view host's decision: a link to that host's Front desk. */
+a.desk-item { box-sizing: border-box; text-decoration: none; }
+.desk-host-item .host-glyph { vertical-align: -1px; margin-inline-end: 6px; }
+.desk-host-item.unavailable .desk-item { opacity: 0.55; cursor: not-allowed; }
 /* Visual-first brief. Three colors carry meaning: green = recommended, yellow = risk/unknown,
  * peach = selected/primary. Type: title 14/600, body 13, meta 11. */
 .home-answer { container-type: inline-size; }

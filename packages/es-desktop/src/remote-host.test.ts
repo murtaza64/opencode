@@ -236,6 +236,10 @@ test("the local listener reads another host's session list with no credential an
   expect(await response.json()).toMatchObject({ host: "mini", path: "/experimental/session" })
   expect(mini.seen.at(-1)).toEqual({ path: "/experimental/session", cookie: null, authorization: null, origin: null })
   expect(await (await get("/hosts/mini/es/api/editspaces")).json()).toMatchObject({ host: "mini", path: "/es/api/editspaces" })
+  // Needs you reads the other host's decision list the same way: no operator cookie travels.
+  const decisions = await get("/hosts/mini/es/api/attention?view=open&limit=200", { headers: { cookie: "es_attention_operator=local-operator; es_attention_operator__mini=mini-operator" } })
+  expect(await decisions.json()).toMatchObject({ host: "mini", path: "/es/api/attention" })
+  expect(mini.seen.at(-1)).toEqual({ path: "/es/api/attention", cookie: null, authorization: null, origin: null })
   expect(await (await get("/oc/experimental/session")).json()).toMatchObject({ host: "local" })
 })
 
@@ -247,6 +251,10 @@ test("host-qualified routes expose list reads only: writes, other routes and unk
   expect((await get("/hosts/mini/oc/experimental/session", { method: "POST", body: "{}" })).status).toBe(403)
   expect((await get("/hosts/mini/oc/session/ses_same/message")).status).toBe(403)
   expect((await get("/hosts/mini/es/api/attention/session")).status).toBe(403)
+  expect((await get("/hosts/mini/es/api/attention/session", { method: "POST", headers: { "content-type": "application/json", "x-attention-csrf": "1" }, body: "{}" })).status).toBe(403)
+  expect((await get("/hosts/mini/es/api/attention", { method: "POST", body: "{}" })).status).toBe(403)
+  expect((await get("/hosts/mini/es/api/attention/00000000-0000-4000-8000-000000000000")).status).toBe(403)
+  expect((await get("/hosts/mini/es/api/attention/00000000-0000-4000-8000-000000000000/commands", { method: "POST", body: "{}" })).status).toBe(403)
   expect((await get("/hosts/other/oc/experimental/session")).status).toBe(404)
   expect((await get("/hosts/local/oc/experimental/session")).status).toBe(404)
   expect((await get("/hosts/mini//oc/experimental/session")).status).toBe(404)
