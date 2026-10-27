@@ -315,7 +315,7 @@ test("retry exposes metadata, clears terminal failure, and idle removes retry me
   expect(live.retry()).toBeUndefined()
 })
 
-test("snapshot failures are visible, reject explicit loads, and stop stale busy", async () => {
+test("snapshot failures are visible, reject explicit loads, and keep the last known status", async () => {
   const live = start()
   busy()
   fetchSpy.mockRejectedValue(new Error("snapshot offline"))
@@ -324,7 +324,8 @@ test("snapshot failures are visible, reject explicit loads, and stop stale busy"
   await expect(loading).rejects.toThrow("snapshot offline")
   expect(live.connectionError()).toContain("snapshot offline")
   expect(live.loading()).toBe(false)
-  expect(live.data.session_status.ses_current.type).toBe("idle")
+  // A failed read says nothing about the session's work; it stays busy until an event or snapshot says otherwise.
+  expect(live.data.session_status.ses_current.type).toBe("busy")
   fetchSpy.mockImplementation(async (input) => response(input))
   await live.load()
   expect(live.connectionError()).toBe("")
@@ -361,7 +362,7 @@ test("disposing a failed session stops its scheduled snapshot retry", async () =
   expect(fetchSpy.mock.calls).toHaveLength(4)
 })
 
-test("disconnect stops stale busy and reconnect resnapshots missed messages and status", async () => {
+test("disconnect keeps the last known status and reconnect resnapshots missed messages and status", async () => {
   const live = start()
   await live.load()
   SessionEvents.current.onopen?.()
@@ -369,7 +370,7 @@ test("disconnect stops stale busy and reconnect resnapshots missed messages and 
   busy()
   SessionEvents.current.onerror?.()
   expect(live.connectionError()).not.toBe("")
-  expect(live.data.session_status.ses_current.type).toBe("idle")
+  expect(live.data.session_status.ses_current.type).toBe("busy")
   snapshot = [
     { info: user(), parts: [] },
     { info: assistant(), parts: [text("Recovered")] },
@@ -637,7 +638,8 @@ test("snapshot success cannot hide an ongoing SSE disconnect", async () => {
   statuses = { ses_current: { type: "busy" } }
   await live.load()
   expect(live.connectionError()).toContain("connection lost")
-  expect(live.data.session_status.ses_current.type).toBe("idle")
+  // The snapshot's own status applies; the error stays visible until the stream reopens.
+  expect(live.data.session_status.ses_current.type).toBe("busy")
 })
 
 test("malformed frames and synchronous callback failures are surfaced instead of swallowed", async () => {
