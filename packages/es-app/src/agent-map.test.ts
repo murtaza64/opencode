@@ -232,3 +232,19 @@ test("provenance for another project's lane name does not attach", () => {
   const agents = linkOrigins(flattenAgents(buildAgentMap(org())), [{ editspace: "squadron", lane: "worker", kind: "spawned", by: "ses_lead" }])
   expect(agents.some((agent) => agent.origin)).toBe(false)
 })
+
+test("a root-anchored lane owner joins by owner session id, with any runtime prefix", () => {
+  const root = { id: "ses_android", title: "android lead", directory: "/Users/me", updated: now - 100 }
+  for (const owner of ["ses_android", "opencode:ses_android", "es:ses_android"]) {
+    const [opencode] = buildAgentMap(input({
+      roots: [{ ...root, project: "opencode" }],
+      session: (id) => (id === root.id ? root : undefined),
+      lanes: [{ editspace: "opencode", lane: "android", owner }],
+      handoffs: [],
+      status: (id): AgentStatus => (id === root.id ? "busy" : "idle"),
+      filter: "active",
+    }))
+    expect(opencode!.lanes[0]!.ownerSession).toMatchObject({ id: "ses_android", known: true, status: "busy" })
+    expect(opencode!.standalone).toEqual([])
+  }
+})
