@@ -86,7 +86,9 @@ try {
   const model = (id) => ({ [id]: { id, name: id, attachment: false, reasoning: false, temperature: false, tool_call: true, release_date: "2025-01-01", limit: { context: 100_000, output: 10_000 }, cost: { input: 0, output: 0 }, options: {} } })
   const fake = (id, models) => ({ name: id, id, env: [], npm: "@ai-sdk/openai-compatible", models, options: { apiKey: "test-key", baseURL: `http://127.0.0.1:${provider.address().port}/v1` } })
   const config = { formatter: false, lsp: false, server: { hostname: "127.0.0.1", port, mdns: false },
-    provider: { test: fake("test", model("test-model")), "duolingo-openai": fake("duolingo-openai", model("gpt-6.1-sol")) } }
+    provider: { test: fake("test", model("test-model")), "duolingo-openai": fake("duolingo-openai", model("gpt-6.1-sol")) },
+    // The work host's machine config names the Front Desk model; the dashboard reads it from Core.
+    agent: { "front-desk": { model: "duolingo-openai/gpt-6.1-sol" } } }
   const runtime = spawn(binary, ["serve", "--hostname", "127.0.0.1", "--port", String(port)], { cwd: home, detached: true, stdio: ["ignore", "pipe", "pipe"], env: {
     ...process.env, HOME: home, OPENCODE_TEST_HOME: home, XDG_CONFIG_HOME: `${home}/config`, XDG_DATA_HOME: `${home}/data`,
     XDG_STATE_HOME: `${home}/state`, XDG_CACHE_HOME: `${home}/cache`, OPENCODE_DB: path.join(home, "opencode.sqlite"), OPENCODE_CONFIG: "",
