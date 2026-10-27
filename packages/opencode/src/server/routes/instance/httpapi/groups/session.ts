@@ -60,6 +60,10 @@ export const MessagesQuery = Schema.Struct({
   summaryPatches: Schema.optional(QueryBoolean).annotate({
     description: "Include user-summary patch text (default true).",
   }),
+  compact: Schema.optional(QueryBoolean).annotate({
+    description:
+      "Bound tool part sizes for initial page loads (default false): outputs over 8 KB keep their first and last 4 KB, metadata.output previews are dropped, and state.metadata.pageTruncated records the original output length. Fetch the full message with GET /session/:sessionID/message/:messageID.",
+  }),
 })
 export const RestartStatusQuery = Schema.Struct({
   ...WorkspaceRoutingQueryFields,

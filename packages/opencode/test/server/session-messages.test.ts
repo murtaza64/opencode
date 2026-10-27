@@ -136,6 +136,69 @@ describe("session messages endpoint", () => {
   )
 
   it.instance(
+    "compact pages bound large tool output while the single-message route keeps it whole",
+    withoutWatcher(
+      Effect.gen(function* () {
+        const current = yield* sessionScoped
+        const [user] = yield* fill(current.id, 1)
+        const session = yield* SessionNs.Service
+        const id = MessageID.ascending()
+        yield* session.updateMessage({
+          id,
+          sessionID: current.id,
+          role: "assistant",
+          parentID: user!,
+          agent: "test",
+          mode: "test",
+          modelID: model.modelID,
+          providerID: model.providerID,
+          path: { cwd: "/", root: "/" },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: Date.now() + 10 },
+        } satisfies SessionV1.Assistant)
+        const output = `first-line\n${"x".repeat(50_000)}\nlast-line`
+        const tool = (text: string) => ({
+          id: PartID.ascending(),
+          sessionID: current.id,
+          messageID: id,
+          type: "tool" as const,
+          callID: PartID.ascending(),
+          tool: "bash",
+          state: {
+            status: "completed" as const,
+            input: { command: "build" },
+            output: text,
+            title: "build",
+            metadata: { output: text, exit: 0 },
+            time: { start: 1, end: 2 },
+          },
+        })
+        yield* session.updatePart(tool(output))
+        yield* session.updatePart(tool("short"))
+
+        const page = yield* request(`/session/${current.id}/message?limit=10&compact=true`).pipe(
+          Effect.flatMap(json<SessionV1.WithParts[]>),
+        )
+        const [large, small] = page.at(-1)!.parts.map((part) => (part.type === "tool" ? part.state : undefined))
+        expect(large).toMatchObject({ status: "completed", metadata: { exit: 0, pageTruncated: { output: output.length } } })
+        const text = large?.status === "completed" ? large.output : ""
+        expect(text.startsWith("first-line")).toBe(true)
+        expect(text.endsWith("last-line")).toBe(true)
+        expect(text.length).toBeLessThan(9_000)
+        expect(small).toMatchObject({ output: "short", metadata: { exit: 0, pageTruncated: { output: 5 } } })
+        expect(JSON.stringify(page).length).toBeLessThan(20_000)
+
+        const whole = yield* request(`/session/${current.id}/message/${id}`).pipe(Effect.flatMap(json<SessionV1.WithParts>))
+        expect(whole.parts[0]?.type === "tool" && whole.parts[0].state.status === "completed" && whole.parts[0].state.output).toBe(output)
+        const plain = yield* request(`/session/${current.id}/message?limit=10`).pipe(Effect.flatMap(json<SessionV1.WithParts[]>))
+        expect(plain.at(-1)?.parts).toEqual(whole.parts)
+      }),
+    ),
+    { git: true },
+  )
+
+  it.instance(
     "returns cursor headers for older pages",
     withoutWatcher(
       Effect.gen(function* () {

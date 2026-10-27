@@ -121,8 +121,9 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       query: typeof MessagesQuery.Type
     }) {
-      const project = (items: SessionV1.WithParts[]) =>
-        ctx.query.summaryPatches !== false
+      const project = (all: SessionV1.WithParts[]) => {
+        const items = ctx.query.compact ? all.map(compactMessage) : all
+        return ctx.query.summaryPatches !== false
           ? items
           : items.map((message) => {
               if (message.info.role !== "user" || !message.info.summary) return message
@@ -141,6 +142,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
                 },
               }
             })
+      }
       if (ctx.query.before && ctx.query.limit === undefined) return yield* new HttpApiError.BadRequest({})
       if (ctx.query.before) {
         const before = ctx.query.before
@@ -692,3 +694,30 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("updatePart", updatePart)
   }),
 )
+
+const PAGE_OUTPUT_LIMIT = 8 * 1024
+
+/** The compact page shape: bounded tool part sizes, full data still available from the single-message route. */
+function compactMessage(message: SessionV1.WithParts): SessionV1.WithParts {
+  if (!message.parts.some((part) => part.type === "tool")) return message
+  return {
+    ...message,
+    parts: message.parts.map((part) => {
+      if (part.type !== "tool" || part.state.status === "pending") return part
+      const metadata = part.state.metadata ?? {}
+      const output = part.state.status === "completed" ? part.state.output : undefined
+      const long = output !== undefined && output.length > PAGE_OUTPUT_LIMIT
+      if (!long && !("output" in metadata)) return part
+      const { output: _, ...rest } = metadata
+      const half = PAGE_OUTPUT_LIMIT / 2
+      return {
+        ...part,
+        state: {
+          ...part.state,
+          ...(long ? { output: `${output.slice(0, half)}\n… [${output.length - PAGE_OUTPUT_LIMIT} characters omitted] …\n${output.slice(-half)}` } : {}),
+          metadata: { ...rest, pageTruncated: { output: output?.length ?? 0 } },
+        },
+      } as SessionV1.WithParts["parts"][number]
+    }),
+  }
+}

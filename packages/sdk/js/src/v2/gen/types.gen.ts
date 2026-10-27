@@ -11074,6 +11074,7 @@ export type SessionMessagesData = {
     limit?: number
     before?: string
     summaryPatches?: "true" | "false"
+    compact?: "true" | "false"
   }
   url: "/session/{sessionID}/message"
 }
