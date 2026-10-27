@@ -2,11 +2,11 @@ import { createMemo, createSignal, For, Index, Show, type ComponentProps, type J
 import { Message } from "@opencode-ai/session-ui/message-part"
 import { errorText } from "../live-session"
 import type { MailDelivery, MailMessage } from "../api"
-import { mailActivityLabel, mailSentAt, mailWake } from "../mail-timeline"
+import { mailActionableStatus, mailActivityLabel, mailSentAt, mailWake } from "../mail-timeline"
 import { MailWakeEvidence } from "./mail-wake-evidence"
 import type { Segment } from "../transcript-groups"
 import type { MailNamer } from "../mail-names"
-import { MailOriginDetail, MailRoute, MailSummary, originOf } from "./mail-summary"
+import { MailOriginDetail, MailRoute, MailSender, MailSummary, mailPurpose, originOf, senderText } from "./mail-summary"
 
 type MailSource = { type: "editspace-mail"; id: string; sender: string; recipient: string; senderSession?: string }
 const mailTime = (value: string | number | null) => value == null ? "" : new Date(value).toLocaleString()
@@ -22,11 +22,12 @@ const mailMetadata = (message: ComponentProps<typeof Message>["message"]) => {
     !("recipient" in source) || typeof source.recipient !== "string") return
   const mail: MailSource = { type: "editspace-mail", id: source.id, sender: source.sender, recipient: source.recipient,
     ...("senderSession" in source && typeof source.senderSession === "string" ? { senderSession: source.senderSession } : {}) }
-  const label = mailActivityLabel("kind" in source ? source.kind : undefined)
+  const kind = "kind" in source && typeof source.kind === "string" ? source.kind : undefined
+  const label = mailActivityLabel(kind)
   const delivery = "delivery" in message && (message.delivery === "queue" || message.delivery === "steer") ? message.delivery : undefined
   const state = "state" in message &&
     (message.state === "pending" || message.state === "promoted" || message.state === "cancelled") ? message.state : undefined
-  return { mail, delivery, state, label }
+  return { mail, delivery, state, label, kind }
 }
 
 export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
@@ -91,20 +92,28 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
       </Show>
     </details>
   </Show>}>
-    {(metadata) => <details class="mail-activity" id={`mail-${metadata().mail.id}`} data-mail-message-id={props.message.id}>
-      <MailSummary direction={props.mailRecord?.direction === "sent" ? "out" : "in"}
-        tag={metadata().label === "Mail" ? undefined : metadata().label}
-        route={<MailRoute from={metadata().mail.sender} fromEvidence={props.mailRecord?.sender_session ?? metadata().mail.senderSession}
-          // This transcript's session received the mail.
-          to={metadata().mail.recipient} toEvidence={props.message.sessionID} name={props.mailName} origin={origin()} />}
-        state={<span class="mail-state-text">
-          <For each={props.mailDeliveries ?? []}>{(delivery) => <span>{mailWake(delivery)} · {delivery.state}</span>}</For>
-          <Show when={!props.mailDeliveries?.length}><span>{mailWake()}</span></Show>
-          <Show when={metadata().delivery}>{(delivery) => <span>{delivery()}</span>}</Show>
-          <Show when={metadata().state}>{(state) => <span>{state()}</span>}</Show>
-        </span>} />
+    {(metadata) => <details class="mail-activity" id={`mail-${metadata().mail.id}`} data-mail-message-id={props.message.id} data-direction="in">
+      {/* Mail that reached this session as input is incoming, whoever sent it. */}
+      <MailSummary direction="in"
+        party={<MailSender from={metadata().mail.sender} evidence={props.mailRecord?.sender_session ?? metadata().mail.senderSession}
+          name={props.mailName} origin={origin()} />}
+        partyText={senderText(metadata().mail.sender, props.mailRecord?.sender_session ?? metadata().mail.senderSession, props.mailName, origin())}
+        purpose={mailPurpose(metadata().label, metadata().kind)} sentAt={props.mailRecord ? mailSentAt(props.mailRecord) : undefined}
+        status={mailActionableStatus({ deliveries: props.mailDeliveries ?? [], kind: metadata().kind, direction: "in" })} />
       <div class="mail-activity-details">
+        <Show when={props.parts.every(part => part.type === "text" || part.type === "file")}
+          fallback={<Message {...props} activityRows />}>
+          <Show when={mailText()}><div class="mail-activity-body" dir="auto">{mailText()}</div></Show>
+          <For each={props.parts.filter(part => part.type === "file")}>{(part) =>
+            <div class="mail-activity-attachment" dir="auto">Attachment: {part.type === "file" ? part.filename : ""}</div>
+          }</For>
+        </Show>
         <div>Mail ID: <bdi dir="auto">{metadata().mail.id}</bdi></div>
+        <div><MailRoute from={metadata().mail.sender} fromEvidence={props.mailRecord?.sender_session ?? metadata().mail.senderSession}
+          // This transcript's session received the mail.
+          to={metadata().mail.recipient} toEvidence={props.message.sessionID} name={props.mailName} origin={origin()} /></div>
+        <Show when={[metadata().delivery, metadata().state].filter(Boolean).join(" · ")}>{(input) => <div>Input: {input()}</div>}</Show>
+        <Show when={!props.mailDeliveries?.length}><div>{mailWake()}</div></Show>
         <MailOriginDetail origin={origin()} id={metadata().mail.id} />
         <Show when={props.mailRecord}>{(record) => <>
           <div>Sent: {mailTime(mailSentAt(record()))}</div>
@@ -115,13 +124,6 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
             <a href={`#mail-${ref.id}`}><bdi dir="auto">{ref.id}</bdi></a>
           </Show></div>}</For>
         </>}</Show>
-        <Show when={props.parts.every(part => part.type === "text" || part.type === "file")}
-          fallback={<Message {...props} activityRows />}>
-          <Show when={mailText()}><div class="mail-activity-body" dir="auto">{mailText()}</div></Show>
-          <For each={props.parts.filter(part => part.type === "file")}>{(part) =>
-            <div class="mail-activity-attachment" dir="auto">Attachment: {part.type === "file" ? part.filename : ""}</div>
-          }</For>
-        </Show>
         <For each={props.mailDeliveries ?? []}>{(delivery) => <div class="mail-delivery">
           <div>To <bdi dir="auto">{delivery.recipient}</bdi> · {delivery.mode ?? "delivery"} · {delivery.state}</div>
           <MailWakeEvidence delivery={delivery} />

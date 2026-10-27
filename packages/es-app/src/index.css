@@ -1057,57 +1057,58 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   &[data-open] .activity-disclosure { transform: rotate(90deg); }
   .todo-list { padding: 2px 10px 8px; }
 }
+/* Mail chips: one content-sized line on the side of whoever it belongs to. Incoming (delivered to this
+ * session) sits inline-end like the person's messages; outgoing and unknown sit inline-start. */
 .mail-activity {
-  container-type: inline-size;
   scroll-margin-block-start: 12px;
+  inline-size: fit-content;
   min-width: 0;
-  margin-block: 8px;
-  border: 1px solid var(--surface0);
-  border-inline-start: 2px solid var(--teal);
-  background: var(--mantle);
+  max-inline-size: 70%;
+  margin-block: 6px;
   color: var(--subtext1);
   font: 13px/1.5 var(--font-sans);
 }
+.mail-activity[data-direction=in] { margin-inline-start: auto; }
 .mail-activity-summary {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 3fr) minmax(0, 2fr) 16px;
-  gap: 10px;
+  display: flex;
   align-items: center;
-  min-block-size: 36px;
+  gap: 6px;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-block-size: 28px;
   box-sizing: border-box;
-  padding: 7px 10px;
+  padding: 3px 10px 3px 8px;
+  border-radius: 2px;
+  background: var(--surface0);
+  white-space: nowrap;
+  overflow: hidden;
   list-style: none;
   cursor: pointer;
 }
+.mail-activity[data-direction=in] > .mail-activity-summary { margin-inline-start: auto; }
 .mail-activity-summary::-webkit-details-marker { display: none; }
-.mail-activity-summary:hover { background: var(--surface0); }
-.mail-activity-summary:focus-visible { outline: 1px solid var(--lavender); outline-offset: -2px; }
-.mail-activity-kind { color: var(--teal); display: inline-flex; inline-size: 16px; justify-content: center; }
+.mail-activity-summary:hover { background: var(--surface1); }
+.mail-activity-summary:focus-visible { outline: 2px solid var(--accent, var(--lavender)); outline-offset: 1px; }
+.mail-activity-kind { color: var(--teal); display: inline-flex; flex: none; inline-size: 16px; justify-content: center; }
 .mail-activity-kind[data-direction=out] { color: var(--blue); }
-/* One truncation policy: every piece keeps its line; only names and state shrink. */
-.mail-activity-line, .mail-route { display: flex; align-items: baseline; gap: 6px; min-width: 0; white-space: nowrap; }
-.mail-route { flex: 1 1 auto; gap: 0; }
+.mail-activity-kind[data-direction=unknown] { color: var(--overlay1); }
+.mail-activity[data-direction=unknown] .mail-activity-summary { color: var(--subtext0); }
+.mail-activity-party { display: flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; }
+.mail-activity-party .mail-party { min-width: 3ch; overflow: hidden; text-overflow: ellipsis; }
+.mail-activity-sep { flex: none; color: var(--overlay1); }
+.mail-activity-purpose { flex: none; }
+.mail-activity-status { flex: none; color: var(--peach); }
+.mail-activity-status[data-status=Failed], .mail-activity-status[data-status="Not delivered"] { color: var(--red); }
+.mail-route { display: flex; align-items: baseline; gap: 0; min-width: 0; white-space: nowrap; }
 .mail-route > * { flex: none; }
 .mail-route .mail-party { flex: 0 1 auto; min-width: 3ch; overflow: hidden; text-overflow: ellipsis; }
-/* The recipient keeps at least a readable share; a long sender yields first. */
-.mail-route > .mail-party:last-child { flex-shrink: 0.25; max-inline-size: 45%; }
-.mail-activity-line { overflow: hidden; }
-.mail-route .mail-origin { margin-inline-end: 6px; }
 .mail-activity-arrow { display: inline-block; padding-inline: 5px; }
-.mail-tag, .mail-origin { flex: none; font-size: 11px; line-height: 16px; padding-inline: 5px; border-radius: 3px; border: 1px solid var(--surface1); color: var(--subtext0); }
-.mail-tag { color: var(--teal); }
-.mail-origin[data-origin=squadron] { color: var(--peach); border-color: color-mix(in srgb, var(--peach) 45%, transparent); }
+.mail-tag, .mail-origin { flex: none; font-size: 11px; line-height: 16px; padding-inline: 5px; border-radius: 2px; background: var(--surface1); color: var(--subtext0); }
+.mail-origin[data-origin=squadron] { color: var(--peach); }
 .mail-party[data-named], .mail-party[data-external] { color: var(--text); }
-.mail-activity-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--subtext0); }
-.mail-state-text > span { margin-inline-start: 6px; }
-.mail-state-text > span:first-child { margin-inline-start: 0; }
 .mail-activity:dir(rtl) .mail-activity-arrow { transform: scaleX(-1); }
-.mail-activity-disclosure { color: var(--subtext0); font-size: 16px; line-height: 1; }
-.mail-activity:dir(rtl) .mail-activity-disclosure { transform: rotate(180deg); }
-.mail-activity[open] .mail-activity-disclosure { transform: rotate(90deg); }
-.mail-activity-details { border-block-start: 1px solid var(--surface0); padding: 8px 10px; overflow-wrap: anywhere; }
-.mail-activity-details > div:first-child { color: var(--subtext0); font-family: var(--font-mono); }
-.mail-activity-body { margin-block-start: 8px; white-space: pre-wrap; user-select: text; }
+.mail-activity-details { margin-block-start: 2px; padding: 8px 10px; border-radius: 2px; background: var(--mantle); color: var(--subtext0); font-size: 12px; overflow-wrap: anywhere; }
+.mail-activity-body { margin-block-end: 8px; color: var(--text); font-size: 13px; white-space: pre-wrap; user-select: text; }
 .mail-activity-attachment { margin-block-start: 6px; color: var(--subtext0); }
 .mail-activity-details a { color: var(--teal); text-decoration: underline; }
 .mail-cause {
@@ -1128,11 +1129,6 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 @container (max-width: 420px) {
   .mail-origin-full { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .mail-origin-short { display: inline; }
-}
-/* A narrow row gives the route the whole line and moves state beneath it. */
-@container (max-width: 640px) {
-  .mail-activity-summary { grid-template-columns: 16px minmax(0, 1fr) 16px; }
-  .mail-activity-state { grid-column: 2; grid-row: 2; }
 }
 @media (max-width: 600px) {
   .mail-cause { grid-template-columns: 16px minmax(0, 1fr); }
@@ -2036,3 +2032,5 @@ a.mini-item > .glyph { margin: 0; }
  * label stays centred and the click target is unchanged); the count hangs off the end. */
 .mode-busy { position: absolute; inset-inline-end: calc(100% + 6px); inset-block-start: 50%; translate: 0 -50%; inline-size: 6px; block-size: 6px; }
 .mode-switch.compact .mode-busy { position: absolute; inset-block-start: 4px; inset-inline-start: 4px; margin: 0; }
+/* A mail chip sits at inline-end; its fork action moves to the free side so it never covers the chip. */
+.msg-wrap:has(> .mail-activity) .fork-here { inset-inline-end: auto; inset-inline-start: 4px; }

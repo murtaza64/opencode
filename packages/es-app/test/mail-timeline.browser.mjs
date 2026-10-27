@@ -55,19 +55,24 @@ try {
   await expect(page.locator('[id="mail-mail-c"]')).toHaveCount(1)
   await expect(page.locator('[data-mail-id="mail-c"]')).toHaveCount(0)
   await page.locator('[id="mail-mail-c"] summary').click()
-  await expect(page.locator('[id="mail-mail-c"] summary')).toContainText("Inbound")
+  await expect(page.locator('[id="mail-mail-c"] summary')).toHaveAttribute("aria-label", /^Mail from lane-beta: /)
   await expect(page.locator('[id="mail-mail-c"]')).toContainText("Promoted body")
   await expect(page.locator('[id="mail-mail-c"]')).toContainText("Sent:")
   await expect(page.locator('[id="mail-mail-c"]')).toContainText("To lane-alpha · queue · handled")
-  await expect(page.locator('[data-mail-id="mail-a"] summary')).toContainText("Inbound")
-  await expect(page.locator('[data-mail-id="mail-a"] summary')).toContainText("read")
-  await expect(page.locator('[data-mail-id="mail-a"] summary')).toContainText("Wake/resume unknown")
+  // Collapsed: sender and purpose only; delivery and wake detail live in the expansion.
+  await expect(page.locator('[data-mail-id="mail-a"] summary')).toHaveAttribute("aria-label", "Mail from lane-beta: Update")
+  await expect(page.locator('[data-mail-id="mail-a"] summary')).not.toContainText(/read|Wake/)
+  await expect(page.locator('[data-mail-id="mail-a"]')).toHaveAttribute("data-direction", "in")
+  await expect(page.locator('[data-mail-id="mail-a"] .mail-activity-details')).toContainText("To lane-alpha · queue · read")
+  await expect(page.locator('[data-mail-id="mail-a"] .mail-activity-details')).toContainText("Wake/resume unknown")
   await page.locator('[data-mail-id="mail-a"] summary').click()
   await expect(page.locator('[data-mail-id="mail-a"] .mail-activity-body')).toContainText("<img src=x onerror=alert(1)>")
   await expect(page.locator('[data-mail-id="mail-a"] img')).toHaveCount(0)
   await expect(page.locator('[data-mail-id="mail-a"]')).toContainText("Presented:")
   await page.locator('[data-mail-id="mail-b"] summary').click()
-  await expect(page.locator('[data-mail-id="mail-b"] summary')).toContainText("Outbound")
+  // The record says "sent" but names no sender session: direction stays unknown, said only in the expansion.
+  await expect(page.locator('[data-mail-id="mail-b"]')).toHaveAttribute("data-direction", "unknown")
+  await expect(page.locator('[data-mail-id="mail-b"] .mail-activity-details')).toContainText("Direction unknown")
   await expect(page.locator('[data-mail-id="mail-b"] .mail-delivery')).toHaveCount(2)
   await expect(page.locator('[data-mail-id="mail-b"]')).toContainText("To lane-beta · steer · pending")
   await expect(page.locator('[data-mail-id="mail-b"]')).toContainText("To lane-gamma · steer · handled")
@@ -75,18 +80,19 @@ try {
   delivery.state = "handled"
   delivery.handled_at = "2026-10-13T12:02:00Z"
   fixture.emitDashboard("mail")
-  await expect(page.locator('[data-mail-id="mail-a"] summary')).toContainText("handled")
+  await expect(page.locator('[data-mail-id="mail-a"] .mail-activity-details')).toContainText("To lane-alpha · queue · handled")
   await expect(page.locator('[data-mail-id="mail-a"]')).toContainText("Handled:")
   delivery.wake_observations = [{ outcome: "scheduled", observedAt: Date.parse(ts) + 1 }]
   outbound.wake_observations = [{ outcome: "coalesced", observedAt: Date.parse(ts) + 2 }]
   fixture.emitDashboard("mail")
-  await expect(page.locator('[data-mail-id="mail-a"] summary')).toContainText("Execution scheduled")
-  await expect(page.locator('[data-mail-id="mail-b"] summary')).toContainText("Coalesced · already active")
+  await expect(page.locator('[data-mail-id="mail-a"] .mail-wake-evidence')).toContainText("Execution scheduled")
+  await expect(page.locator('[data-mail-id="mail-b"] .mail-wake-evidence').first()).toContainText("Coalesced · already active")
+  await expect(page.locator('[data-mail-id="mail-a"] summary')).not.toContainText("scheduled")
   await page.locator('[data-mail-id="mail-a"] summary').click()
   await expect(page.locator('[data-mail-id="mail-a"] .mail-wake-evidence time')).toHaveAttribute("datetime", "2026-10-13T12:00:00.001Z")
   delivery.wake_observations.push({ outcome: "coalesced", observedAt: Date.parse(ts) + 2 })
   fixture.emitDashboard("mail")
-  await expect(page.locator('[data-mail-id="mail-a"] summary')).toContainText("Execution scheduled")
+  await expect(page.locator('[data-mail-id="mail-a"] .mail-wake-evidence')).toContainText("Execution scheduled")
   expect(fixture.calls.filter(call => call.path === "/api/mail").length).toBeGreaterThanOrEqual(2)
   // Lineage: ses_a handed the lane to ses_b. Each transcript shows only mail delivered to or sent by
   // that session; the lane mail view keeps the whole feed.
@@ -143,13 +149,21 @@ try {
   await page.locator('[data-mail-id="loop-1"] summary').focus()
   await page.keyboard.press("Enter")
   await expect(page.locator('[data-mail-id="loop-1"]')).toHaveAttribute("open", "")
+  await expect(page.locator('[data-mail-id="loop-1"]')).toHaveAttribute("data-direction", "out")
+  await expect(page.locator('[data-mail-id="loop-1"] summary')).toHaveAttribute("aria-label", "Mail to مراجعة-long-lane-1: Task")
   await expect(page.locator('[data-mail-id="loop-1"]')).toContainText("Origin tool call: call_loop")
   for (const dir of ["ltr", "rtl"]) {
     await page.evaluate(dir => { document.documentElement.dir = dir }, dir)
     await page.setViewportSize({ width: 800, height: 900 })
     expect(await page.locator('[data-mail-id="loop-1"]').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
-    expect(await page.locator('[data-mail-id="loop-1"] .mail-activity-arrow').evaluate(el => getComputedStyle(el).transform))
-      .toBe(dir === "rtl" ? "matrix(-1, 0, 0, 1, 0, 0)" : "none")
+    // Outgoing (verified sender session) sits inline-start: left in LTR, right in RTL.
+    const edges = await page.locator('[data-mail-id="loop-1"]').evaluate((el, dir) => {
+      const chip = el.querySelector("summary").getBoundingClientRect()
+      const column = el.parentElement.getBoundingClientRect()
+      return { start: dir === "rtl" ? column.right - chip.right : chip.left - column.left, height: chip.height }
+    }, dir)
+    expect(edges.start, `${dir}: outgoing chip at inline-start`).toBeLessThan(2)
+    expect(edges.height, `${dir}: one line`).toBeLessThan(32)
   }
   const fourSends = fixture.mail
   fixture.mail = (es, recipient) => ({ ...fourSends(es, recipient), messages: fourSends(es, recipient).messages.slice(0, 2) })

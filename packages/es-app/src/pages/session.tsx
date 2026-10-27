@@ -519,6 +519,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     return id ? [id] : []
   })))
   const mailRecords = createMemo(() => new Map(mail()?.messages.map((message) => [message.id, message] as const) ?? []))
+  const mailReplied = createMemo(() => new Set(mail()?.messages.flatMap((message) => message.in_reply_to ? [message.in_reply_to] : []) ?? []))
   const mailCauseRows = createMemo(() => mailCauses(timeline(), mailRecords()))
 
   // viewing the session clears its unread state, including as new content
@@ -1700,7 +1701,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                   <Show when={mail()?.error} fallback={<Show when={!mail()?.messages.length}><div class="dim">No lane mail.</div></Show>}>
                     <div class="dim" role="status">{mail()?.error}</div>
                   </Show>
-                  <For each={mail()?.messages ?? []}>{(message) => <MailRow message={message} ids={mailIDs()} anchor="lane-mail" name={mailName} />}</For>
+                  <For each={mail()?.messages ?? []}>{(message) => <MailRow message={message} ids={mailIDs()} anchor="lane-mail" name={mailName} session={sessionID} replied={mailReplied().has(message.id)} />}</For>
                 </section>
               </Show>
             </Show>
@@ -1767,7 +1768,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             <ToolAdornment.Provider value={ToolSize}>
             <For each={visibleTimeline()}>
               {(row) => {
-                 if (row.type === "mail") return <MailRow message={row.message} ids={transcriptMailIDs()} name={mailName} />
+                 if (row.type === "mail") return <MailRow message={row.message} ids={transcriptMailIDs()} name={mailName} session={sessionID} replied={mailReplied().has(row.message.id)} />
                 const m = row.message
                 const segments = createMemo(() => m.role === "assistant" ? messageSegments(live.data.part[m.id] ?? [], toolRuns()) : [],
                   [], { equals: sameSegments })

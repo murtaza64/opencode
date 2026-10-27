@@ -54,61 +54,49 @@ try {
     await page.goto(`${preview.origin}/session/ses_a?directory=${encodeURIComponent(directory)}`, { timeout: 120_000 })
     await expect(page.locator(".transcript .mail-activity")).toHaveCount(6)
 
-    // Origin: classified only from structured fields.
-    await expect(row(page, "internal-cross").locator("summary .mail-origin-full")).toHaveText("Electric Sheep")
-    await expect(row(page, "tether-out").locator("summary .mail-origin-full")).toHaveText("Electric Sheep")
+    // Origin: classified only from structured fields. Only an external origin is a collapsed cue;
+    // local Electric Sheep mail names its origin in the expansion.
+    await expect(row(page, "internal-cross").locator("summary .mail-origin")).toHaveCount(0)
+    await expect(row(page, "tether-out").locator("summary .mail-origin")).toHaveCount(0)
     await expect(row(page, "external-in").locator("summary .mail-origin-full")).toHaveText("Squadron")
     await expect(row(page, "unknown-in").locator(".mail-origin")).toHaveCount(0)
     // The external sender is the workspace author, not the local bridge.
     const sender = row(page, "external-in").locator("summary .mail-party").first()
     await expect(sender).toHaveText("smoke-peer")
     await expect(sender).toHaveAttribute("title", "smoke-peer · via integration:squadron")
-    await expect(row(page, "tether-out").locator("summary .mail-party")).toHaveText(["Tether", "Relay"])
+    // Outgoing names the counterpart only.
+    await expect(row(page, "tether-out").locator("summary .mail-party")).toHaveText(["Relay"])
+    await expect(row(page, "tether-out").locator("summary")).toHaveAttribute("aria-label", "Mail to Relay: Task")
+    await expect(row(page, "external-in").locator("summary")).toHaveAttribute("aria-label", "Mail from smoke-peer: Task")
     // Transcript input and the turn-input note use the same cue.
     const input = page.locator('[data-mail-message-id="msg_002"]')
     await expect(input.locator("summary .mail-origin-full")).toHaveText("Squadron")
     await expect(input.locator("summary .mail-party").first()).toHaveText("smoke-peer")
     await expect(page.locator(".mail-cause .mail-origin-full")).toHaveText("Squadron")
-    await expect(page.locator('[data-mail-message-id="msg_004"] .mail-tag')).toHaveText("Agent resume")
+    await expect(page.locator('[data-mail-message-id="msg_004"] summary .mail-activity-purpose')).toHaveText("Agent resume")
 
     for (const width of [1280, 760, 420]) {
       await page.setViewportSize({ width, height: 1000 })
-      const geometry = await page.evaluate(() => [...document.querySelectorAll(".transcript .mail-activity:not([open]) > .mail-activity-summary")].map((summary) => {
+      const geometry = await page.evaluate(() => [...document.querySelectorAll(".transcript .mail-activity:not([open])")].map((details) => {
+        const summary = details.querySelector(".mail-activity-summary")
         const box = summary.getBoundingClientRect()
-        const glyph = summary.querySelector(".mail-activity-kind").getBoundingClientRect()
-        const inner = [...summary.querySelectorAll(".mail-activity-line > *, .mail-route > *, .mail-activity-state")]
-          .map((element) => element.getBoundingClientRect()).filter((rect) => rect.width > 0)
-        const arrow = summary.querySelector(".mail-activity-arrow").getBoundingClientRect()
-        const recipient = [...summary.querySelectorAll(".mail-route > .mail-party")].at(-1).getBoundingClientRect()
-        const line = summary.querySelector(".mail-activity-line").getBoundingClientRect()
+        const column = document.querySelector(".transcript-inner").getBoundingClientRect()
+        const inner = [...summary.children].map((element) => element.getBoundingClientRect()).filter((rect) => rect.width > 0)
+        const end = document.dir === "rtl" ? box.left - column.left : column.right - box.right
+        const start = document.dir === "rtl" ? column.right - box.right : box.left - column.left
         return {
-          height: Math.round(box.height), glyphStart: Math.round(document.dir === "rtl" ? box.right - glyph.right : glyph.left - box.left),
-          glyphWidth: Math.round(glyph.width),
+          id: details.dataset.mailId ?? details.dataset.mailMessageId, direction: details.dataset.direction,
+          height: Math.round(box.height), share: box.width / column.width, start: Math.round(start), end: Math.round(end),
           overflow: inner.some((rect) => rect.left < box.left - 1 || rect.right > box.right + 1),
-          arrowVisible: arrow.width > 0 && arrow.left >= line.left - 1 && arrow.right <= line.right + 1,
-          recipientVisible: recipient.width >= 10 && recipient.left >= line.left - 1 && recipient.right <= line.right + 1,
-          lineHeight: Math.round(line.height),
         }
       }))
       const label = `${width}px ${rtl ? "rtl" : "ltr"}`
-      if (new Set(geometry.map((item) => item.height)).size !== 1) throw new Error(`${label}: unequal row heights ${JSON.stringify(geometry.map((g) => g.height))}`)
-      if (new Set(geometry.map((item) => item.glyphStart)).size !== 1 || geometry.some((item) => item.glyphWidth !== 16))
-        throw new Error(`${label}: misaligned glyph column ${JSON.stringify(geometry)}`)
-      if (geometry.some((item) => item.overflow)) throw new Error(`${label}: content spills out of a row`)
-      if (geometry.some((item) => !item.arrowVisible || !item.recipientVisible)) throw new Error(`${label}: arrow or recipient clipped ${JSON.stringify(geometry)}`)
-      if (geometry.some((item) => item.lineHeight > 24)) throw new Error(`${label}: route line wrapped`)
-      // The turn-input note keeps the same glyph column.
-      const cause = await page.evaluate(() => {
-        const note = document.querySelector(".mail-cause .mail-activity-kind").getBoundingClientRect()
-        const transcript = document.querySelector(".transcript-inner").getBoundingClientRect()
-        return Math.round(document.dir === "rtl" ? transcript.right - note.right : note.left - transcript.left)
-      })
-      const rowStart = await page.evaluate(() => {
-        const glyph = document.querySelector(".transcript .mail-activity .mail-activity-kind").getBoundingClientRect()
-        const transcript = document.querySelector(".transcript-inner").getBoundingClientRect()
-        return Math.round(document.dir === "rtl" ? transcript.right - glyph.right : glyph.left - transcript.left)
-      })
-      if (Math.abs(cause - rowStart) > 1) throw new Error(`${label}: note glyph at ${cause}, rows at ${rowStart}`)
+      if (geometry.some((item) => item.height > 32)) throw new Error(`${label}: chip wrapped ${JSON.stringify(geometry)}`)
+      if (geometry.some((item) => item.share > 0.71)) throw new Error(`${label}: chip wider than 70% ${JSON.stringify(geometry)}`)
+      if (geometry.some((item) => item.overflow)) throw new Error(`${label}: content spills out of a chip`)
+      const side = (item) => item.direction === "in" ? item.end : item.start
+      if (new Set(geometry.map(side)).size !== 1) throw new Error(`${label}: chips not on their side ${JSON.stringify(geometry)}`)
+      if (geometry.find((item) => item.id === "tether-out")?.direction !== "out") throw new Error(`${label}: verified outgoing mail is not outgoing`)
     }
     await page.setViewportSize({ width: 1280, height: 1000 })
 
@@ -127,7 +115,7 @@ try {
   }
   expect(errors).toEqual([])
   expect(fixture.calls.filter((call) => !["GET", "HEAD", "OPTIONS"].includes(call.method))).toEqual([])
-  console.log("PASS mail origin + layout: internal cross-ES, external bridged (row/input/note), unknown unlabeled; equal heights, one glyph column, no spill/clip at 1280/760/420 LTR+RTL; details with reply destination")
+  console.log("PASS mail origin + layout: internal cross-ES, external bridged (row/input/note), unknown unlabeled; one-line chips <= 70% on their verified side, no spill at 1280/760/420 LTR+RTL; details with reply destination")
 } finally {
   await browser.close()
   await preview.close()
