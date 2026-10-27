@@ -16,3 +16,9 @@ export const requestMarkdown = (text: string) => {
     return line.split(/(`+[^`]*?`+)/).map(part => /^(`+)[^`]*?\1$/.test(part) ? part : part.replace(/</g, "\\<")).join("")
   }).join("\n")
 }
+
+/** A request the human must carry out by hand: a blocker, or text with at least two numbered steps
+ * ("1." or "1)" at a line start). Such a request stays readable in full beside any brief, because a
+ * summary can drop the exact values (limits, operators, URLs) the human has to type. */
+export const requestHasSteps = (record: { kind: string; context: string }) =>
+  record.kind === "blocker" || (record.context.match(/^\s{0,3}\d{1,2}[.)]\s+\S/gm)?.length ?? 0) >= 2

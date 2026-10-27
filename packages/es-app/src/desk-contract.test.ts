@@ -14,11 +14,11 @@ const sha = (text: string) => createHash("sha256").update(text).digest("hex")
 
 test("brief prompt contract matches the dashboard copy", () => {
   expect(sha(JSON.stringify([`${BRIEF_SYSTEM}\n${JSON.stringify(BRIEF_SCHEMA)}`, BRIEF_PERMISSION])))
-    .toBe("6acd01236eba2d1080b8eecb66a4eda04841e80859fad0c3a2ae10f820780149")
+    .toBe("95f2ef4eed5fef584257fddd0a61642dd0895684ce62c0db791e721bbbee6430")
 })
 
 test("the whole brief contract file (drawing rules and tokens too) matches the dashboard's copy", () => {
-  expect(sha(JSON.stringify(contract))).toBe("f2924f794cf6728be998c73342d0d1105b50fb4ba9fcad986c92f74b5ab68d4f")
+  expect(sha(JSON.stringify(contract))).toBe("0eb61ae490472098f8d775204600300e214930d51af8be3486883cfc882af6d2")
 })
 
 test("brief anchor and job IDs match the dashboard's", async () => {

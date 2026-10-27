@@ -7,7 +7,7 @@ import { A } from "@solidjs/router"
 import { sessionHref } from "../state"
 import { docHref } from "../pages/doc"
 import { anchorHref } from "../message-anchor"
-import { briefCommands, briefComplete, safeSvg, sourceTarget, type BriefResult, type BriefShape, type BriefSource, type DeskItem, type EvidenceRef } from "../desk"
+import { briefCommands, briefComplete, briefSteps, safeSvg, sourceTarget, type BriefResult, type BriefShape, type BriefSource, type DeskItem, type EvidenceRef } from "../desk"
 import { currentJob, readConversation, regeneratingJob, type BriefJob } from "../desk-session"
 import { LinkedText } from "./linked-text"
 import contract from "../brief-contract.json"
@@ -61,6 +61,7 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
         <Show when={!props.item.record}><p class="desk-brief-question" dir="auto">{value().result.question}</p></Show>
         <Show when={value().result.context}><p class="desk-brief-context" dir="auto"><LinkedText text={value().result.context} /></p></Show>
         <Subjects subjects={value().result.subjects} refs={value().job.meta.refs} />
+        <Steps result={value().result} refs={value().job.meta.refs} item={props.item} />
         <Commands commands={value().result} item={props.item} />
         {/* A fresh brief of the same request, made by the host that owns it; this one stays until the new one is ready. */}
         <Show when={props.live && !props.pinned && props.item.record && props.regenerate}><p class="desk-brief-regenerate">
@@ -107,6 +108,30 @@ const Commands = (props: { commands: BriefResult; item: DeskItem }) => {
         <Show when={option(entry.option)}>{label => <span class="home-muted"> · for “<bdi dir="auto">{label()}</bdi>”</span>}</Show></span>
       <CopyCode text={entry.command} />
     </li>}</For></ul>
+  </Show>
+}
+
+// Steps an option asks the human to do by hand, in order: the page to open (a link only when the request gave
+// one), each field with its exact value to copy, and how to check it worked. A value the request does not state
+// is shown as missing, never filled in (briefSteps). Display only: nothing here changes any console.
+const Steps = (props: { result: BriefResult; refs: EvidenceRef[]; item: DeskItem }) => {
+  const [found] = createResource(() => props.item.record, readConversation)
+  const steps = () => briefSteps(props.result, props.item, found()?.documents)
+  const option = (id: string) => props.item.record?.options.find(entry => entry.id === id)?.label
+  const url = (refs: string[]) => refs.flatMap(id => props.refs.find(ref => ref.id === id)?.url ?? [])[0]
+  return <Show when={steps().length}>
+    <ol class="desk-commands desk-steps" aria-label="Steps to do"><For each={steps()}>{step => <li>
+      <span class="desk-command-label" dir="auto">{step.title}
+        <Show when={option(step.option)}>{label => <span class="home-muted"> · for “<bdi dir="auto">{label()}</bdi>”</span>}</Show></span>
+      <Show when={step.where}>{where => <p dir="auto">Open: <Show when={url(where().refs)} fallback={<bdi dir="auto">{where().label}</bdi>}>{href =>
+        <a href={href()} target="_blank" rel="noopener noreferrer">↗ <bdi dir="auto">{where().label}</bdi></a>}</Show></p>}</Show>
+      {/* Laid out like commands (label, then the exact value to copy), so long values stay inside the column. */}
+      <Show when={step.settings.length}><ul class="desk-commands" aria-label="Settings"><For each={step.settings}>{setting => <li>
+        <span class="desk-command-label" dir="auto">{setting.field}</span>
+        <Show when={setting.value} fallback={<span class="home-warning">Not given in the request; ask before applying.</span>}><CopyCode text={setting.value} /></Show>
+      </li>}</For></ul></Show>
+      <Show when={step.verify}><p class="home-muted" dir="auto">Check: {step.verify}</p></Show>
+    </li>}</For></ol>
   </Show>
 }
 

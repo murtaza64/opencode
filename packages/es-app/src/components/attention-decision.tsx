@@ -8,7 +8,7 @@ import { LinkedText } from "./linked-text"
 import type { BriefResult } from "../desk"
 import { Sketch } from "./attention-brief"
 import { Markdown } from "@opencode-ai/session-ui/markdown"
-import { requestMarkdown } from "../request-markdown"
+import { requestHasSteps, requestMarkdown } from "../request-markdown"
 import { answerDraftKey, attentionPath, blockedReason, contentRevision, decisionLabel, deliveryLabel, inputPayload, inputProblem, inputText, INPUT_KINDS, type createAttention, type AttentionOption, type AttentionRecord, type InputValue } from "../attention"
 import { requestAgent, type AgentRef, type RequestAgent } from "../attention-agent"
 
@@ -237,6 +237,8 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
         <h3 class="home-question"><bdi dir="auto">{prepared().question}</bdi></h3>
         <p class="home-request-line"><bdi>Request:</bdi> <bdi dir="auto">{props.record.title}</bdi></p>
         {props.brief}
+        {/* Steps the human must perform stay in the producer's exact words, unfolded, above the answer. */}
+        <Show when={requestHasSteps(props.record)}><RequestText record={props.record} /></Show>
       </div>}</Show>
       <Show when={!props.prepared}><RequestText record={props.record} />{props.brief}</Show>
       {/* The picture tells the story; the original conversation it came from follows. */}
@@ -272,7 +274,7 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
     {props.more}
     {props.briefDetails}
     {/* With a brief leading, the producer's exact request comes last, after the native controls. */}
-    <Show when={props.prepared}>
+    <Show when={props.prepared && !requestHasSteps(props.record)}>
       <details class="home-original"><summary>Original request</summary><RequestText record={props.record} /></details>
     </Show>
     <details onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>Record &amp; history</summary><div class="home-source"><bdi dir="ltr">{props.record.id} · {props.record.gate_key} · revision {props.record.revision}</bdi></div><Show when={history()?.version === historyVersion(props.record) ? history() : undefined} fallback={<p>Loading history…</p>}>{item => <Show when={!item().error} fallback={<p>{item().error}</p>}><pre dir="ltr">{JSON.stringify(item().events, null, 2)}</pre></Show>}</Show></details>
