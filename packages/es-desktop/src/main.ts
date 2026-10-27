@@ -4,7 +4,7 @@ import { readFile, writeFile } from "node:fs/promises"
 import { serve } from "./server"
 import { PERF_DIR } from "./perf-log"
 import { createVoice, voiceTools } from "./voice"
-import { appRouteURL, externalURL, internalURL, pageNavigation, serviceHosts, serviceOrigins, startupMode, startupPlan, surfaceFrameURL } from "./policy"
+import { appRouteURL, externalURL, internalURL, pageArrivedCrossSite, pageNavigation, serviceHosts, serviceOrigins, startupMode, startupPlan, surfaceFrameURL } from "./policy"
 import { createTabs, TITLE_BAR_HEIGHT } from "./tabs"
 import { watchBadges } from "./badges"
 import { createAppearance } from "./appearance"
@@ -231,6 +231,23 @@ const start = async () => {
       void openExternal(url).catch(() => console.error("External browser unavailable"))
     })
     contents.on("will-attach-webview", (event) => event.preventDefault())
+    // Back from a sign-in service: load the page again from its own site so its Strict session cookie
+    // is sent; otherwise a paired gateway shows its pairing page (or the app sits signed out).
+    const visit = { previous: undefined as string | undefined }
+    contents.on("did-start-navigation", (details) => {
+      if (details.isMainFrame && !details.isSameDocument) visit.previous = contents.getURL() || visit.previous
+    })
+    contents.on("did-navigate", (_event, url) => {
+      const previous = visit.previous
+      visit.previous = url
+      // A fresh load, not reload(): Chromium keeps a reloaded navigation's cross-site status.
+      if (pageArrivedCrossSite(previous, url, origin)) void contents.loadURL(url)
+    })
+    // A page that cannot load says so in the tab, with a retry; it never stays blank.
+    contents.on("did-fail-load", (_event, code, description, url, mainFrame) => {
+      if (!mainFrame || code === -3 || url.startsWith("data:")) return
+      void contents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(pageFailure(origin, description))}`)
+    })
   }
   if (window instanceof BrowserWindow) guardListener(window.webContents, server.origin, true)
   Menu.setApplicationMenu(
@@ -351,4 +368,9 @@ const pageSession = (partition: string) => {
     callback({ cancel: !/^(https|wss|data|blob):/.test(details.url) })
   })
   return result
+}
+
+const pageFailure = (origin: string, reason: string) => {
+  const escape = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`)
+  return `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Page unavailable</title><style>body{font:16px system-ui;background:#111113;color:#cdd6f4;margin:0;padding:10vh 8vw}p{color:#a6adc8;line-height:1.6}a{color:#89b4fa}code{direction:ltr;unicode-bidi:isolate}</style><h1>Page unavailable</h1><p><bdi dir="ltr">${escape(new URL(origin).host)}</bdi> did not load (<code>${escape(reason)}</code>). Nothing on this machine changed.</p><p><a href="${escape(origin)}/">Try again</a></p></html>`
 }

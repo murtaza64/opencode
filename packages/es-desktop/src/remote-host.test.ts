@@ -206,3 +206,14 @@ test("a page host's tab stays on its origin and its sign-in steps; anything else
   expect(pageNavigation("https://example.com/", origin)).toBe(false)
   expect(pageNavigation("http://evil.cloudflareaccess.com/", origin)).toBe(false)
 })
+
+test("a page host reloads once only when it lands on its own origin from another site", async () => {
+  const { pageArrivedCrossSite } = await import("./policy")
+  const origin = "https://agents.murtaza.earth"
+  expect(pageArrivedCrossSite("https://frosty-pond-8fd5.cloudflareaccess.com/cdn-cgi/access/login/x", "https://agents.murtaza.earth/", origin)).toBe(true)
+  expect(pageArrivedCrossSite("https://agents.murtaza.earth/cdn-cgi/access/authorized", "https://agents.murtaza.earth/", origin)).toBe(false)
+  expect(pageArrivedCrossSite("https://other.murtaza.earth/", "https://agents.murtaza.earth/", origin)).toBe(false)
+  expect(pageArrivedCrossSite(undefined, "https://agents.murtaza.earth/", origin)).toBe(false)
+  expect(pageArrivedCrossSite("data:text/html,x", "https://agents.murtaza.earth/", origin)).toBe(false)
+  expect(pageArrivedCrossSite("https://localhost:9/login", "https://frosty-pond-8fd5.cloudflareaccess.com/", origin)).toBe(false)
+})
