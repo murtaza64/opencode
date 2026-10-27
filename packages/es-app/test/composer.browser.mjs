@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url"
 import { mkdir } from "node:fs/promises"
 import { createServer } from "vite"
 import { createFixture, directory } from "./composer-fixture.mjs"
+import { warmVite } from "./composer-panel-preview.mjs"
 
 // Reuse the workspace's existing browser harness dependency, never a global install.
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
@@ -15,6 +16,7 @@ const vite = await createServer({
   server: { host: "127.0.0.1", port: 0 },
 })
 await vite.listen()
+await warmVite(`http://127.0.0.1:${vite.httpServer.address().port}`, fixture)
 const origin = `http://127.0.0.1:${vite.httpServer.address().port}`
 const browser = await chromium.launch({ headless: true, channel: "chrome" })
 const artifacts = fileURLToPath(new URL("../artifacts/composer/", import.meta.url))
