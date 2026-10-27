@@ -136,9 +136,16 @@ data class AttentionRecord(
     val resolution: String? = null,
     val snoozed_until: Long? = null,
     val revision: Int = 0,
+    val content_revision: Int? = null,
     val created_at: Long = 0,
     val updated_at: Long = 0,
 )
+
+@Serializable
+data class Notification(val id: String, val kind: String = "", val session: String? = null, val title: String = "", val directory: String? = null, val editspace: String = "")
+
+@Serializable
+data class NotificationsResponse(val notifications: List<Notification> = emptyList())
 
 @Serializable
 data class AttentionDetail(val record: AttentionRecord, val events: List<AttentionEvent> = emptyList())

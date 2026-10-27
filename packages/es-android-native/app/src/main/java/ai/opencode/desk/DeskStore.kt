@@ -22,6 +22,9 @@ import ai.opencode.desk.net.AccessRequired
 import ai.opencode.desk.net.AccessToken
 import ai.opencode.desk.net.Api
 import ai.opencode.desk.net.Gateway
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.Json
 import java.util.UUID
 import ai.opencode.desk.net.GatewayError
 import ai.opencode.desk.net.PairingRequired
@@ -113,6 +116,15 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     var operator by mutableStateOf(false)
         private set
     var surfaces by mutableStateOf<List<Surface>>(emptyList())
+        private set
+    // Notification reconciler state: the device ledger (tag → stamp) persisted per phone, and
+    // a deep link waiting to be shown once the record is loaded.
+    private val notifier = Notifier(app)
+    private var ledger: Map<String, Int> = prefs.getString("notify.ledger", null)
+        ?.let { runCatching { ai.opencode.desk.net.json.decodeFromString(MapSerializer(String.serializer(), Int.serializer()), it) }.getOrNull() }.orEmpty()
+    var deepLink by mutableStateOf<Reconciler.Target?>(null)
+    var deepLinkRevision by mutableStateOf<Int?>(null)
+    var notificationsError by mutableStateOf<String?>(null)
         private set
     var surfacesError by mutableStateOf<String?>(null)
         private set
@@ -263,6 +275,9 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
                 history = historyList.await().records.sortedByDescending { it.updated_at }
                 operator = session.await()?.operator == true
                 boards.await().fold({ surfaces = it.surfaces.sortedWith(compareBy({ !it.unseen }, { -it.updated_at })); surfacesError = null }, { surfacesError = it.message })
+                // One reconcile per refresh, over this origin only; all sources (nudge, poll, resume) land here.
+                val requests = runCatching { api.notifications().notifications }.onFailure { notificationsError = it.message }.getOrDefault(emptyList())
+                reconcileNotifications(attention.records + snoozedList.await().records + historyList.await().records, requests)
                 agents = deriveAgents()
             }
             updatedAt = System.currentTimeMillis()
@@ -280,6 +295,29 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
             lastError = error.message
             link = Link.Offline
         }
+    }
+
+    private fun reconcileNotifications(records: List<AttentionRecord>, requests: List<ai.opencode.desk.model.Notification>) {
+        val origin = DeskPointers.normalize(gateway.origin)
+        val result = Reconciler.reconcile(
+            origin,
+            records.map { Reconciler.Record(it.editspace, it.id, it.revision, it.title, it.status, it.content_revision, it.delivery_state, it.answer?.answered_at) },
+            requests.map { Reconciler.Request(it.kind, it.editspace, it.id, it.session, it.title) },
+            ledger, System.currentTimeMillis(),
+        )
+        ledger = result.ledger
+        prefs.edit().putString("notify.ledger", ai.opencode.desk.net.json.encodeToString(MapSerializer(String.serializer(), Int.serializer()), ledger)).apply()
+        notifier.apply(result.actions)
+    }
+
+    // A notification tap. Refused when the tag's origin is not this instance's pairing
+    // (the other profile owns it); otherwise the record is shown once loaded, and a moved
+    // revision or a status that left open shows the current state rather than a stale prompt.
+    fun openDeepLink(target: Reconciler.Target, revision: Int): Boolean {
+        if (target.origin != DeskPointers.normalize(gateway.origin)) return false
+        deepLink = target; deepLinkRevision = revision
+        nudges.tryEmit(Unit)
+        return true
     }
 
     private fun deriveAgents(): List<Agent> = states.flatMap { (es, state) ->

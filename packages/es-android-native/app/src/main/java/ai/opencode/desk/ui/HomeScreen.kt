@@ -46,6 +46,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -75,6 +76,22 @@ private enum class Tab(val label: String) { Desk("Desk"), Needs("Needs you"), Ag
 fun HomeScreen(store: DeskStore, nav: Nav) {
     val tab = Tab.entries[nav.tab]
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
+    var staleNote by rememberSaveable { mutableStateOf<String?>(null) }
+    // A notification deep link opens its record once the lists hold it; a moved revision or a
+    // status that left open is announced instead of showing the stale prompt.
+    val linked = store.deepLink
+    LaunchedEffect(linked, store.open.size, store.history.size, store.snoozed.size) {
+        val target = linked ?: return@LaunchedEffect
+        if (target.kind != "attention") { store.deepLink = null; nav.tab = 1; return@LaunchedEffect }
+        val found = (store.open + store.snoozed + store.history).firstOrNull { it.id == target.id } ?: return@LaunchedEffect
+        staleNote = when {
+            found.status != "open" -> "This was ${found.status} on another device."
+            store.deepLinkRevision != null && found.revision > store.deepLinkRevision!! -> "This decision changed since the notification; showing the current version."
+            else -> null
+        }
+        selected = found.id
+        store.deepLink = null
+    }
     var refreshing by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val record = (store.open + store.snoozed + store.history).firstOrNull { it.id == selected }
@@ -117,7 +134,7 @@ fun HomeScreen(store: DeskStore, nav: Nav) {
             }
         }
     }
-    if (record != null) DecisionSheet(store, record, onDismiss = { selected = null })
+    if (record != null) DecisionSheet(store, record, onDismiss = { selected = null; staleNote = null }, note = staleNote)
 }
 
 // ---- Desk: the glance ----

@@ -61,7 +61,7 @@ import kotlinx.coroutines.launch
 // a drag. Options are tall touch rows; the recommendation is marked, never pre-selected.
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
-fun DecisionSheet(store: DeskStore, record: AttentionRecord, onDismiss: () -> Unit) {
+fun DecisionSheet(store: DeskStore, record: AttentionRecord, onDismiss: () -> Unit, note: String? = null) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var choice by rememberSaveable(record.id) { mutableStateOf(record.answer?.choice_id ?: record.decision) }
     var note by rememberSaveable(record.id) { mutableStateOf("") }
@@ -111,6 +111,7 @@ fun DecisionSheet(store: DeskStore, record: AttentionRecord, onDismiss: () -> Un
                 Label(age(store.now, record.created_at) + " ago")
             }
             Spacer(Modifier.height(10.dp))
+            note?.let { Text(it, color = Ink.Amber, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 6.dp).testTag("stale-note")) }
             Text(record.title, style = MaterialTheme.typography.titleLarge)
             if (record.context.isNotBlank()) {
                 Spacer(Modifier.height(10.dp))

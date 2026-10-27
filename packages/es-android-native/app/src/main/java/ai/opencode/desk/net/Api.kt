@@ -9,6 +9,7 @@ import ai.opencode.desk.model.CurrentWork
 import ai.opencode.desk.model.EditspacesResponse
 import ai.opencode.desk.model.InputReceipt
 import ai.opencode.desk.model.MessageWithParts
+import ai.opencode.desk.model.NotificationsResponse
 import ai.opencode.desk.model.OperatorSession
 import ai.opencode.desk.model.PermissionRequest
 import ai.opencode.desk.model.QuestionRequest
@@ -46,6 +47,7 @@ class Api(val gateway: Gateway) {
     suspend fun attentionDetail(id: String, es: String): AttentionDetail =
         parse(gateway.get("/es/api/attention/$id", mapOf("es" to es)))
     suspend fun operator(): OperatorSession = parse(gateway.get("/es/api/attention/session"))
+    suspend fun notifications(): NotificationsResponse = parse(gateway.get("/es/api/notifications"))
     suspend fun currentWork(sessionID: String, directory: String): CurrentWork =
         parse(gateway.get("/es/api/current-work", mapOf("session_id" to sessionID, "directory" to directory)))
 

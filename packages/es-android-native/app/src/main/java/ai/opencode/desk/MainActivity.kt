@@ -1,5 +1,6 @@
 package ai.opencode.desk
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -39,9 +40,24 @@ class MainActivity : ComponentActivity() {
         (androidx.lifecycle.ViewModelProvider(this)[DeskStore::class.java]).refreshProfiles()
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleDeepLink(intent)
+    }
+
+    // Notification tap: ids + revision only; the record itself is refetched over the pairing.
+    private fun handleDeepLink(intent: Intent?) {
+        if (intent?.action != Notifier.ACTION_OPEN) return
+        val target = Reconciler.Target(intent.getStringExtra("desk.origin").orEmpty(), intent.getStringExtra("desk.editspace").orEmpty(), intent.getStringExtra("desk.kind").orEmpty(), intent.getStringExtra("desk.id").orEmpty())
+        val store = androidx.lifecycle.ViewModelProvider(this)[DeskStore::class.java]
+        if (!store.openDeepLink(target, intent.getIntExtra("desk.revision", 0)))
+            android.widget.Toast.makeText(this, "That decision belongs to the other profile's Desk", android.widget.Toast.LENGTH_LONG).show()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        handleDeepLink(intent)
         val reduced = android.provider.Settings.Global.getFloat(contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
         // Debug-only capture aids (ignored in release): force RTL and a narrow column, open a given agent.
         val debug = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
