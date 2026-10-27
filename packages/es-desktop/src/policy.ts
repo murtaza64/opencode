@@ -70,6 +70,21 @@ export const pageNavigation = (value: string, origin: string) => {
   return url.protocol === "https:" && SIGN_IN.some((pattern) => pattern.test(url.hostname))
 }
 
+// Site of a URL for cookie purposes: scheme + registrable-domain approximation (last two labels; IPs whole).
+const siteOf = (value: string) => {
+  const url = URL.parse(value)
+  if (!url) return undefined
+  const host = url.hostname
+  const domain = /^[\d.]+$|:/.test(host) ? host : host.split(".").slice(-2).join(".")
+  return `${url.protocol}//${domain}`
+}
+
+/** True when a page host tab has just arrived on its own origin from another site (e.g. a sign-in
+ * service). SameSite=Strict cookies are withheld on that navigation, so the page sees itself signed
+ * out; one reload from the same site sends them. */
+export const pageArrivedCrossSite = (previous: string | undefined, next: string, origin: string) =>
+  URL.parse(next)?.origin === origin && !!previous && !previous.startsWith("data:") && siteOf(previous) !== siteOf(next)
+
 export const surfaceFrameURL = (value: string, origin: string) => {
   const url = URL.parse(value)
   return !!url && url.origin === origin && url.pathname.startsWith("/__surface/")
