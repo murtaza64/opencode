@@ -5,7 +5,7 @@ import { ComposerImages } from "./composer-images"
 
 // Every input the transcript does not show yet, as one outgoing bubble with a
 // one-line cue. Durable states (admission, receipt, set-aside recovery, normal
-// send) collapse to Sending / Queued / Steer / Sent / Not confirmed / Set aside.
+// send) collapse to Sending / Queued / Steer / Sent / Not confirmed yet / Not sent.
 // Full errors and request IDs live in the cue's title, never in extra rows.
 // Bubbles are keyed by request identity, so admission -> pending receipt keeps
 // the same element and position.
@@ -44,9 +44,8 @@ export const OutgoingMessages = (props: {
             </Show>
             <ComposerImages images={submission().previews} />
             <div class="pending-hint outgoing-cue" role="status" title={[submission().error, submission().messageID && `Message ${submission().messageID}`].filter(Boolean).join("\n") || undefined}>
-              <span>{submission().status === "sending" ? "Sending…" : submission().status === "accepted" ? "Sent"
-                : submission().checking ? "Not confirmed · checking…"
-                : submission().absent ? "Not confirmed · the server has no record of it" : "Not confirmed; it may still arrive"}</span>
+              <span>{submission().status === "sending" || submission().checking ? "Sending…" : submission().status === "accepted" ? "Sent"
+                : submission().absent ? "Not sent" : "Not confirmed yet"}</span>
               <Show when={submission().status === "unknown"}>
                 <Show when={submission().messageID && !submission().absent}>
                   <button class="outgoing-action" title="Looks the message up by its ID; never resends"
@@ -83,6 +82,10 @@ const InputBubble = (props: { composer: Composer; connected: boolean; id: string
   const text = () => receipt()?.text ?? payload()?.text ?? ""
   const images = () => receipt()?.images ?? payload()?.images
   const status = () => receipt() ? "pending" : recovery() ? "unknown" : admission()?.status
+  // Core's last answer for a set-aside input, if it has one.
+  const settled = () => recovery() ? state.receipts.find((item) => item.requestID === props.id)?.state : undefined
+  const check = () => state.inputChecks[props.id]
+  const unconfirmed = () => admission()?.status === "unknown" || (!!recovery() && !settled())
   const cue = () => {
     const kind = delivery() === "steer" ? "Steer" : "Queued"
     if (receipt() && delivery() === "steer") {
@@ -92,11 +95,12 @@ const InputBubble = (props: { composer: Composer; connected: boolean; id: string
       return "Steer · at the next safe point"
     }
     if (receipt()) return "Queued · after this task"
-    if (recovery()) {
-      const settled = state.receipts.find((item) => item.requestID === props.id)?.state
-      return settled ? `Set aside · ${settled}` : "Set aside, not confirmed"
-    }
-    return admission()?.status === "sending" ? `${kind} · sending…` : `Not confirmed · ${kind.toLowerCase()}`
+    if (settled()) return settled() === "pending" ? (delivery() === "steer" ? "Steer · at the next safe point" : "Queued · after this task")
+      : settled() === "cancelled" ? "Cancelled" : "Sent"
+    // An unknown outcome reads as still sending only while its readback is in flight; after that it
+    // says what is known, so a lost answer never shows an indefinite "sending…".
+    if (admission()?.status === "sending" || check() === "checking") return `${kind} · sending…`
+    return check() === "absent" ? "Not sent" : "Not confirmed yet"
   }
   const title = () => [recovery() ? state.recoveryError : admission()?.error, admission() && state.recoveryError.startsWith("Cannot save this unknown input") && state.recoveryError, `Request ${props.id}`]
     .filter(Boolean).join("\n")
@@ -139,19 +143,20 @@ const InputBubble = (props: { composer: Composer; connected: boolean; id: string
           <button class="outgoing-action receipt-cancel" disabled={!props.connected}
             aria-label={`Cancel ${delivery()} input: ${text()}`} onClick={() => props.composer.cancelInput(props.id)}>Cancel</button>
         </Show>
-        <Show when={admission()?.status === "unknown"}>
-          <button class="outgoing-action" aria-label="Check admission" disabled={!props.connected || state.inputLoading}
-            onClick={() => props.composer.refreshInputs()}>Check</button>
-          <button class="outgoing-action" aria-label="Check and retry same input" title="Checks first; a retry reuses this exact request, so it cannot duplicate"
-            disabled={!props.connected || state.sending} onClick={() => props.composer.retryAdmission()}>Retry</button>
-          <button class="outgoing-action" aria-label="Set aside unknown input" title="Keeps it locally without resending or cancelling it"
-            disabled={state.sending || state.hydrating} onClick={() => props.composer.setAsideAdmission()}>Set aside</button>
-        </Show>
-        <Show when={recovery()}>
-          <button class="outgoing-action" aria-label="Check set-aside input" disabled={!props.connected || !!state.recoveryBusy}
-            onClick={() => props.composer.recoverAdmission(props.id)}>Check</button>
-          <button class="outgoing-action" aria-label="Check and retry same set-aside input" title="Checks first; a retry reuses this exact request, so it cannot duplicate"
-            disabled={!props.connected || !!state.recoveryBusy} onClick={() => props.composer.recoverAdmission(props.id, true)}>Retry</button>
+        {/* One action at a time: Check while the outcome is unknown, Retry only once Core said it has no such input. */}
+        <Show when={unconfirmed() && check() !== "checking"}>
+          <Show when={check() === "absent"} fallback={admission()
+            ? <button class="outgoing-action" aria-label="Check admission" title="Looks the input up by its request ID; never resends"
+                disabled={!props.connected || state.inputLoading} onClick={() => props.composer.refreshInputs()}>Check</button>
+            : <button class="outgoing-action" aria-label="Check set-aside input" title="Looks the input up by its request ID; never resends"
+                disabled={!props.connected || !!state.recoveryBusy} onClick={() => props.composer.recoverAdmission(props.id)}>Check</button>}>
+            <Show when={admission()} fallback={
+              <button class="outgoing-action" aria-label="Check and retry same set-aside input" title="Checks first; a retry reuses this exact request, so it cannot duplicate"
+                disabled={!props.connected || !!state.recoveryBusy} onClick={() => props.composer.recoverAdmission(props.id, true)}>Retry</button>}>
+              <button class="outgoing-action" aria-label="Check and retry same input" title="Checks first; a retry reuses this exact request, so it cannot duplicate"
+                disabled={!props.connected || state.sending} onClick={() => props.composer.retryAdmission()}>Retry</button>
+            </Show>
+          </Show>
         </Show>
       </div>
     </li>
