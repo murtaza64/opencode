@@ -27,7 +27,7 @@ const setup = async () => {
         keyForwarded: request.headers.has("x-editspace-key"),
         authForwarded: request.headers.has("authorization"),
       }, { headers: { "set-cookie": "es_attention_operator=synthetic; HttpOnly; SameSite=Strict; Path=/" } })
-      if (url.pathname.startsWith("/api/frontdesk/")) return Response.json({
+      if (url.pathname.startsWith("/api/frontdesk/") || /^\/api\/attention\/[0-9a-f-]{36}\//.test(url.pathname)) return Response.json({
         method: request.method,
         path: url.pathname,
         originBound: request.headers.get("origin") === url.origin,
@@ -502,4 +502,55 @@ test("only surface paths on the app origin may load in a subframe", () => {
   expect(surfaceFrameURL("http://127.0.0.1:60302/__surface/board/abc/", "http://127.0.0.1:60302")).toBe(true)
   expect(surfaceFrameURL("http://127.0.0.1:60302/oc/session", "http://127.0.0.1:60302")).toBe(false)
   expect(surfaceFrameURL("http://127.0.0.1:64878/__surface/board/abc/", "http://127.0.0.1:60302")).toBe(false)
+})
+
+const record = "0b0a8f8e-6a2b-4f39-9a41-5d0f6b1c2e3d"
+
+test("re-checking an answer's delivery and regenerating a brief reach the dashboard as operator writes", async () => {
+  const { server, get } = await setup()
+  const cookie = "unrelated=private; es_attention_operator=synthetic"
+  const headers = { origin: server.origin, cookie, "x-attention-csrf": "1", "content-type": "application/json" }
+  for (const pathname of [`/es/api/attention/${record}/delivery?es=dotfiles`, `/es/api/frontdesk/briefs/${record}/regenerate?es=dotfiles`]) {
+    const response = await get(pathname, { method: "POST", body: "{}", headers })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ method: "POST", path: pathname.slice(3).split("?")[0], originBound: true, operatorCookieOnly: true, keyForwarded: false })
+    expect((await get(pathname, { method: "POST", body: "{}" })).status).toBe(403)
+    expect((await get(pathname, { method: "POST", body: "{}", headers: { origin: "https://evil.test" } })).status).toBe(403)
+  }
+  expect(apiAllowed("POST", "/es/api/frontdesk/briefs/not-a-record/regenerate")).toBe(false)
+  expect(apiAllowed("GET", `/es/api/frontdesk/briefs/${record}/regenerate`)).toBe(false)
+  expect(apiAllowed("POST", `/es/api/attention/${record}/delivery/x`)).toBe(false)
+})
+
+test("the Front desk model and a request's conversation are read-only reads without browser credentials", async () => {
+  const { get } = await setup()
+  for (const pathname of ["/es/api/frontdesk/model", `/es/api/frontdesk/conversation?es=dotfiles&record=${record}`]) {
+    const response = await get(pathname, { headers: { cookie: "unrelated=private" } })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ method: "GET", operatorCookieOnly: false, keyForwarded: false })
+    expect(apiAllowed("POST", pathname.split("?")[0])).toBe(false)
+  }
+})
+
+// Every route es-app calls must be exposed by the native listener, or the native app fails where web works.
+test("every es-app API route is exposed by the native allowlist", async () => {
+  const root = path.join(import.meta.dirname, "../../es-app/src")
+  const files = [...new Bun.Glob("**/*.{ts,tsx}").scanSync(root)].filter((file) => !file.endsWith(".test.ts"))
+  const sample = (template: string) => template.replace(/\$\{[^}]*\}/g, (match) => (/record|item\.record|id\b|ticket/i.test(match) ? record : "ses_a"))
+  const routes = new Set<string>()
+  for (const file of files) {
+    const source = await Bun.file(path.join(root, file)).text()
+    for (const match of source.matchAll(/[`"](\/(?:oc|es)\/[^`"?]*)/g)) routes.add(match[1])
+    // The composer builds session routes from a relative path.
+    for (const match of source.matchAll(/url\(`(\/[^`?]*)/g)) routes.add(`/oc/session/ses_a${match[1]}`)
+  }
+  const concrete = [...routes]
+    // Bare prefixes and routes whose tail is a variable are checked where the tail is spelled out.
+    .filter((route) => !/^\/(oc|es)\/$/.test(route) && !/\$\{(path|editspace|q\(|esQ)[^}]*\}$/.test(route) && !route.endsWith("${path}"))
+    .map(sample)
+    // A template cut off inside an expression (a query built in code) is not a whole route.
+    .filter((route) => !route.includes("${"))
+  expect(concrete.length).toBeGreaterThan(50)
+  const missing = concrete.filter((route) => !["GET", "POST", "PUT", "PATCH", "DELETE"].some((method) => apiAllowed(method, route)))
+  expect(missing).toEqual([])
 })

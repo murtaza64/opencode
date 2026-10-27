@@ -101,6 +101,8 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/oc\/session\/[\w-]+(?:\/(message|input)(?:\/[\w-]+)?|\/todo|\/children)?$/,
       /^\/es\/api\/(editspaces|state|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work|mail|subscriptions|handoffs|lane-provenance|frontdesk\/memory|frontdesk\/ignored-failures|surfaces)$/,
       /^\/es\/api\/attention(?:\/session|\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/,
+      // This host's Front desk model and one request's linked conversation (read-only).
+      /^\/es\/api\/frontdesk\/(model|conversation)$/,
       /^\/es\/api\/wingman(?:\/transcript)?$/,
     ],
     POST: [
@@ -114,7 +116,9 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/es\/api\/handoffs$/,
       /^\/es\/api\/frontdesk\/ignored-failures$/,
       /^\/es\/api\/frontdesk\/deliverables\/seen$/,
-      /^\/es\/api\/attention\/(?:session|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/commands)$/,
+      /^\/es\/api\/attention\/(?:session|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(?:commands|delivery))$/,
+      // The operator asks for a fresh brief of one open request.
+      /^\/es\/api\/frontdesk\/briefs\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/regenerate$/,
     ],
     PATCH: [/^\/oc\/session\/[\w-]+$/, /^\/oc\/session\/[\w-]+\/input\/[\w-]+$/],
     PUT: [/^\/es\/api\/(subscriptions|frontdesk\/memory)$/],

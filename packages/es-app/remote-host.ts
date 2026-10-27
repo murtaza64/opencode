@@ -61,7 +61,7 @@ export const remoteHosts = (value: unknown): RemoteHost[] => {
 export const remoteTargets = (origin: string) => ({ opencode: origin, dashboard: `${origin}/es` })
 
 // Routes the dashboard authorizes with the operator cookie: attention and the Front desk's own files.
-export const attentionRoute = /^\/es\/api\/(?:attention(?:\/|$)|frontdesk\/(?:memory|ignored-failures|deliverables\/seen)$)/
+export const attentionRoute = /^\/es\/api\/(?:attention(?:\/|$)|frontdesk\/(?:memory|ignored-failures|deliverables\/seen|briefs\/[^/]+\/regenerate)$)/
 
 const OPERATOR = "es_attention_operator"
 // Cookies ignore ports, so every loopback listener sees every host's cookies: give each remote
