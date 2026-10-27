@@ -1,4 +1,4 @@
-import { app, BaseWindow, BrowserWindow, dialog, Menu, session, shell, systemPreferences } from "electron"
+import { app, BaseWindow, BrowserWindow, dialog, Menu, nativeImage, session, shell, systemPreferences } from "electron"
 import path from "node:path"
 import { readFile, writeFile } from "node:fs/promises"
 import { serve } from "./server"
@@ -6,6 +6,7 @@ import { createVoice, voiceTools } from "./voice"
 import { appRouteURL, externalURL, internalURL, pageNavigation, serviceHosts, serviceOrigins, startupMode, startupPlan, surfaceFrameURL } from "./policy"
 import { createTabs, TITLE_BAR_HEIGHT } from "./tabs"
 import { watchBadges } from "./badges"
+import { createAppearance } from "./appearance"
 
 app.setName("Editspace")
 app.setPath("userData", process.env.ES_DESKTOP_USER_DATA ?? path.join(app.getPath("appData"), "Editspace"))
@@ -74,7 +75,17 @@ const start = async () => {
         ? () => shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
         : undefined,
   })
+  const appearance = createAppearance({
+    directory: process.env.ES_APPEARANCE_DIR ?? path.join(app.getPath("home"), ".cache/wal"),
+    // Shrinking to a few dozen pixels and scaling back up gives a soft blur without an image library.
+    blur: async (file) => {
+      const image = nativeImage.createFromPath(file)
+      if (image.isEmpty()) throw new Error("Not an image")
+      return image.resize({ width: 24, quality: "good" }).resize({ width: 640, quality: "best" }).toJPEG(70)
+    },
+  })
   const server = await serve({
+    appearance,
     port,
     root: path.join(app.getAppPath(), "dist/renderer"),
     opencode: origins.opencode,
@@ -102,6 +113,8 @@ const start = async () => {
         root: path.join(app.getAppPath(), "dist/renderer"),
         renderer: app.isPackaged ? undefined : process.env.ES_DESKTOP_RENDERER,
         remote: { id: host.id, origin: host.origin },
+        // The look belongs to this laptop, whichever host a tab shows.
+        appearance,
         // Host tabs show placement natively, so the page needs no switcher of its own.
         hostInfo: () => ({ id: host.id, label: host.label, remote: true, hosts: [] }),
       })
@@ -267,6 +280,7 @@ const start = async () => {
     if (state.closing) return
     event.preventDefault()
     state.closing = true
+    appearance.close()
     for (const partition of tabs?.sessions() ?? [isolated]) partition.flushStorageData()
     void voice.close().finally(() => Promise.allSettled(listeners.map((item) => item.server.close()))).finally(() => app.quit())
   })

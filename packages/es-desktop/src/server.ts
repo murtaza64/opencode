@@ -11,6 +11,7 @@ import { eventProtocol, eventPaths } from "../../es-app/event-protocol"
 import { surfaceProxy } from "../../es-app/surface-proxy"
 import { attentionRoute, localHost, remoteCookie, remoteSetCookie, remoteTargets, type HostInfo } from "../../es-app/remote-host"
 import type { Voice } from "./voice"
+import type { Appearance } from "./appearance"
 
 const csp =
   "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
@@ -76,6 +77,8 @@ export const serve = async (options: {
   publicOrigin?: string
   // Native-only operator dictation; paired remote clients never reach this host's microphone.
   voice?: Voice
+  // This laptop's palette and blurred wallpaper; never offered to paired remote clients.
+  appearance?: Appearance
   // A remote execution host (validated tailnet origin) in place of the loopback services.
   remote?: { id: string; origin: string }
   // The hosts this listener reports to the app, read per request once every listener is up.
@@ -184,6 +187,10 @@ export const serve = async (options: {
     if (url.pathname === "/__es/events") {
       if (req.method !== "GET" || url.search) return finish(403, "Forbidden")
       return finish(200, JSON.stringify({ protocol: eventProtocol }), "application/json")
+    }
+    if (/^\/__es\/appearance(\/|$)/.test(url.pathname)) {
+      if (!options.appearance || pairing || req.method !== "GET") return finish(404, "Not found")
+      return appearanceRoute(options.appearance, req, res, url, finish)
     }
     if (url.pathname === "/__es/host") {
       if (req.method !== "GET" || url.search) return finish(403, "Forbidden")
@@ -405,4 +412,39 @@ const escape = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.
 const remoteOffline = (host: HostInfo | undefined) => {
   const local = host?.hosts.find((item) => item.id === "local")
   return `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="refresh" content="5"><title>${escape(host?.label ?? "Remote host")} unavailable</title><style>body{font:16px system-ui;background:#171819;color:#ececec;margin:0;padding:10vh 8vw}main{max-inline-size:42rem}h1{font-size:28px}p{line-height:1.6;color:#bbb}a{color:#9ac9ff}</style><main><h1>${escape(host?.label ?? "Remote host")} unavailable</h1><p>Its OpenCode or dashboard did not answer through the tailnet gate. Nothing on this machine changed.</p><p>Retrying every 5 seconds. <a href="/">Retry now</a>${local ? ` or <a href="${escape(local.origin)}/">return to ${escape(local.label)}</a>` : ""}.</p></main></html>`
+}
+
+const appearanceRoute = (
+  appearance: Appearance,
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  finish: (status: number, body: string, type?: string) => void,
+) => {
+  if (url.pathname === "/__es/appearance") {
+    const body = appearance.body()
+    if (!body || url.search) return finish(404, "Not found")
+    return finish(200, JSON.stringify(body), "application/json")
+  }
+  if (url.pathname === "/__es/appearance/wallpaper") {
+    const image = appearance.image()
+    const version = new URLSearchParams(url.search).get("v")
+    if (!image || !version || appearance.body()?.wallpaper !== `/__es/appearance/wallpaper?v=${encodeURIComponent(version)}`)
+      return finish(404, "Not found")
+    // Versioned by content: the URL changes whenever the wallpaper does.
+    res.writeHead(200, { "content-type": "image/jpeg", "cache-control": "private, max-age=31536000, immutable" })
+    return res.end(image)
+  }
+  if (url.pathname === "/__es/appearance/events" && !url.search) {
+    res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" })
+    res.write(": ready\n\n")
+    const stop = appearance.subscribe(() => res.write("data: changed\n\n"))
+    const ping = setInterval(() => res.write(": ping\n\n"), 25_000)
+    req.on("close", () => {
+      stop()
+      clearInterval(ping)
+    })
+    return
+  }
+  finish(404, "Not found")
 }
