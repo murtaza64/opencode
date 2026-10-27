@@ -171,21 +171,33 @@
   border: 1px solid color-mix(in srgb, var(--pink) 55%, transparent);
 }
 
-/* pasted/attached images in the transcript: session-ui's 48px thumbnails are
- * too small to read — show them inline up to ~300px (click still opens the
- * full-size preview dialog) */
-.transcript [data-slot="user-message-attachment"][data-type="image"] {
-  width: auto;
-  height: auto;
-  max-width: min(82%, 420px);
+/* Images in a user message (outgoing bubble and transcript alike): inline previews on the person's side.
+ * ChatImages sets each box's width and aspect from the image header, so decode never moves layout. */
+.chat-images {
+  display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: flex-end; gap: 4px;
+  inline-size: fit-content; max-inline-size: 85%; margin-inline-start: auto; margin-block-end: 2px;
 }
-.transcript [data-slot="user-message-attachment-image"] {
-  width: auto;
-  height: auto;
-  max-height: 300px;
-  max-width: 100%;
-  object-fit: contain;
+.pending-msg > .chat-images { margin-block-end: 0; }
+.chat-image {
+  display: block; height: auto; max-inline-size: 100%; object-fit: contain;
+  border-radius: 2px; background: var(--mantle); cursor: zoom-in;
 }
+.chat-image:focus-visible { outline: 2px solid var(--accent, var(--lavender)); outline-offset: 1px; }
+.chat-images[data-count="one"] .chat-image:not([style]) { width: auto; max-inline-size: min(100%, 360px); max-block-size: 280px; }
+.chat-images[data-count="many"] .chat-image:not([style]) { width: auto; max-block-size: 160px; }
+.chat-image-more {
+  padding: 0; border: 0; box-shadow: none; border-radius: 2px;
+  display: grid; place-items: center; block-size: 160px; inline-size: 96px;
+  background: var(--surface0); color: var(--subtext1); font-size: 14px; cursor: pointer;
+}
+.chat-image-more:hover { background: var(--surface1); }
+.chat-image-viewer {
+  max-inline-size: 96vw; max-block-size: 96vh; padding: 0; border: 0; background: transparent; overflow: visible;
+}
+.chat-image-viewer::backdrop { background: color-mix(in srgb, var(--crust) 85%, transparent); }
+.chat-image-viewer img { display: block; max-inline-size: 96vw; max-block-size: 90vh; object-fit: contain; }
+.chat-image-viewer-count { margin: 4px 0 0; color: var(--subtext1); font-size: 12px; text-align: center; }
+.chat-image-viewer-close { position: absolute; inset-block-start: 4px; inset-inline-end: 4px; }
 
 /* optimistic echo of a just-sent message, cleared once the daemon has it */
 .pending-msg { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; margin: 10px 0; width: 100%; }

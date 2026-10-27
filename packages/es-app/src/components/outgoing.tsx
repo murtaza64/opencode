@@ -1,7 +1,7 @@
 import { createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import type { Session } from "@opencode-ai/sdk/v2"
 import type { Composer } from "../composer"
-import { ComposerImages } from "./composer-images"
+import { ChatImages } from "./chat-images"
 
 // Every input the transcript does not show yet, as one outgoing bubble with a
 // one-line cue. Durable states (admission, receipt, set-aside recovery, normal
@@ -39,10 +39,10 @@ export const OutgoingMessages = (props: {
       <Show when={props.echo && state.normalSubmission}>
         {(submission) => (
           <section class="pending-msg outgoing-item outgoing-msg" data-status={submission().status} aria-label="Message status">
+            <ChatImages images={submission().previews} />
             <Show when={submission().text || !submission().previews?.length}>
               <div class="pending-bubble" dir="auto">{submission().text}{submission().images && !submission().previews?.length ? ` · ${submission().images} image(s)` : ""}</div>
             </Show>
-            <ComposerImages images={submission().previews} />
             <div class="pending-hint outgoing-cue" role="status" title={[submission().error, submission().messageID && `Message ${submission().messageID}`].filter(Boolean).join("\n") || undefined}>
               <span>{submission().status === "sending" ? "Sending…" : submission().status === "accepted" ? "Sent"
                 : submission().checking ? "Not confirmed · checking…"
@@ -116,8 +116,8 @@ const InputBubble = (props: { composer: Composer; connected: boolean; id: string
       data-status={status()} data-recovery-id={recovery() ? props.id : undefined}
       classList={{ "input-admission": !!admission(), "input-recovery": !!recovery() }}
       aria-label={admission() ? "Input admission" : recovery() ? "Set-aside input" : undefined}>
-      <div class="pending-bubble receipt-text" dir="auto">{text()}</div>
-      <ComposerImages images={images()} />
+      <ChatImages images={images()} />
+      <Show when={text() || !images()?.length}><div class="pending-bubble receipt-text" dir="auto">{text()}</div></Show>
       <div class="pending-hint outgoing-cue receipt-row" role="status" title={title()}>
         <span>{cue()}</span>
         <Show when={deliverable()}>

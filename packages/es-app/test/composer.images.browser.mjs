@@ -71,8 +71,8 @@ try {
   await expect(action("Queue message")).toBeEnabled()
   fixture.holdInput = true
   await action("Queue message").click()
-  const admissionImages = page.locator(".input-admission").getByRole("group", { name: "Attached images" })
-  await expect(admissionImages).toContainText("2 images")
+  const admissionImages = page.locator(".input-admission .chat-images")
+  await expect(admissionImages).toHaveAttribute("aria-label", "2 images")
   await expect(admissionImages.getByRole("img", { name: "repeat.png", exact: true })).toHaveCount(2)
   await expect(admissionImages).not.toContainText("data:image")
   await expect.poll(() => fixture.inputReplies.length).toBe(1)
@@ -80,7 +80,7 @@ try {
   fixture.inputReplies.shift()()
   await expect(active().getByRole("button", { name: /^Remove / })).toHaveCount(0)
   const firstReceipt = page.locator(`[data-request-id="${posts("/input")[0].body.requestID}"]`)
-  await expect(firstReceipt.getByRole("group", { name: "Attached images" })).toContainText("2 images")
+  await expect(firstReceipt.getByRole("group", { name: "2 images" })).toBeVisible()
   await expect(firstReceipt.getByRole("img", { name: "repeat.png", exact: true })).toHaveCount(2)
   expect(posts("/input")[0].body).toEqual({
     requestID: expect.any(String),
@@ -139,7 +139,7 @@ try {
   fixture.loseInput = true
   await action("Queue message").click()
   await expect(page.locator(".input-admission")).toContainText("Admission unknown")
-  await expect(admissionImages).toContainText("3 images")
+  await expect(admissionImages).toHaveAttribute("aria-label", "3 images")
   expect(await admissionImages.getByRole("img").evaluateAll((images) => images.map((image) => image.alt))).toEqual([
     "first.png",
     "second.png",
@@ -151,7 +151,7 @@ try {
   await page.reload()
   await expect(editor()).toHaveValue("new draft after unknown")
   await expect(active().getByRole("button", { name: /^Remove / })).toHaveCount(2)
-  await expect(admissionImages).toContainText("3 images")
+  await expect(admissionImages).toHaveAttribute("aria-label", "3 images")
   await expect(admissionImages.getByRole("img", { name: "second.png", exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Check and retry same input", exact: true }).click()
   await expect(page.locator(".input-admission")).toHaveCount(0)
