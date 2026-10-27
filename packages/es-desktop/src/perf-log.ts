@@ -65,7 +65,8 @@ export const createPerfLog = (options: { dir?: string; host?: string } = {}) => 
           if (total > 1000) void write([{ kind: "proxy.stream", route, method: req.method, status, openMs: Math.round(total), aborted }])
           return
         }
-        if (total < SLOW_MS && (status ?? 0) < 500 && !(aborted && headers === undefined)) return
+        // Fast client cancellations (navigation, reload, superseded reads) are routine.
+        if (total < SLOW_MS && (status ?? 0) < 500) return
         void write([{
           kind: "proxy.request",
           route,

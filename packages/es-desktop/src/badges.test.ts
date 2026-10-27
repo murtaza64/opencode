@@ -71,12 +71,27 @@ test("the watcher reads each host once per interval, one read in flight, and rep
   const mini = dashboard(state)
   const host = await listener({ remote: { id: "mini", origin: mini.origin } })
   const seen: unknown[] = []
-  const stop = watchBadges([{ ...host, id: "mini" }], (_id, badge) => seen.push(badge), 200)
+  const watcher = watchBadges([{ ...host, id: "mini" }], (_id, badge) => seen.push(badge), 200)
   await Bun.sleep(50)
   state.records.push(open("b"))
   await Bun.sleep(230)
-  stop()
+  watcher.stop()
   expect(seen).toEqual([{ count: 1, partial: false }, { count: 2, partial: false }])
   // Two small GETs per read: the whole idle budget.
   expect(mini.requests.map((item) => item.path).sort()).toEqual(["/es/api/attention", "/es/api/attention", "/es/api/notifications", "/es/api/notifications"])
+})
+
+test("no reads while the window is hidden; showing it reads once", async () => {
+  const mini = dashboard({ records: [open("a")], notifications: [] })
+  const host = await listener({ remote: { id: "mini", origin: mini.origin } })
+  const state = { visible: false }
+  const seen: unknown[] = []
+  const watcher = watchBadges([{ ...host, id: "mini" }], (_id, badge) => seen.push(badge), 1000, () => state.visible)
+  await Bun.sleep(1100)
+  expect(mini.requests).toEqual([])
+  state.visible = true
+  watcher.refresh()
+  await Bun.sleep(30)
+  watcher.stop()
+  expect(seen).toEqual([{ count: 1, partial: false }])
 })

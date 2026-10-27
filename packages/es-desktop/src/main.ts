@@ -293,13 +293,14 @@ const start = async () => {
   if (tabs) {
     tabs.select("local")
     // Inactive tabs show each host's open decisions from a small summary read, never a hidden page.
-    const stop = watchBadges([
+    const badges = watchBadges([
       { id: "local", read: (path) => fetch(`${server.origin}${path}`, { headers: { "x-editspace-key": server.key, origin: server.origin }, redirect: "error", signal: AbortSignal.timeout(10_000) }) },
       ...remotes.map((host) => ({ id: host.id, read: (path: string) => fetch(`${host.server.origin}${path}`, { headers: { "x-editspace-key": host.server.key, origin: host.server.origin }, redirect: "error", signal: AbortSignal.timeout(10_000) }) })),
       // A page host is read with its own partition (its own sign-in), on its own origin, read-only.
       ...pages.map((host) => ({ id: host.id, read: (path: string) => session.fromPartition(`persist:editspace-host-${host.id}`).fetch(`${host.origin}${path}`, { credentials: "include", redirect: "error", signal: AbortSignal.timeout(10_000) }) })),
-    ], (id, badge) => tabs.setBadge(id, badge))
-    app.on("before-quit", stop)
+    ], (id, badge) => tabs.setBadge(id, badge), undefined, () => window.isVisible() && !window.isMinimized())
+    for (const event of ["show", "restore", "focus"] as const) window.on(event as "show", badges.refresh)
+    app.on("before-quit", badges.stop)
   }
   await (tabs ? new Promise<void>((resolve) => localContents.once("did-finish-load", () => resolve())) : localContents.loadURL(server.origin))
   opened.ready = true
