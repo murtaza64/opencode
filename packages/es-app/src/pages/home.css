@@ -37,9 +37,6 @@
 .home-agent { display: grid; grid-template-columns: minmax(130px,1fr) minmax(0,3fr); gap: 20px; border-block-start: 1px solid var(--surface0); padding-block: 16px; line-height: 1.7; }
 .home-agent button { margin-block-start: 6px; padding: 1px 7px; border-color: transparent; color: var(--subtext0); }
 .home-name { font-weight: 600; }
-.home-agent .current-work { margin: 0; padding: 0; border: 0; }
-.home-agent .ctx-subheading { display: none; }
-.home-agent .current-work-generate { display: none; }
 .home-recorded { margin-block-start: 14px; color: var(--green); }
 .home-empty { padding: 30px 16px; color: var(--subtext0); border-block-end: 1px solid var(--surface0); }
 .home-activity, .home-workers, .home-unknown { border-block-start: 1px solid var(--surface0); margin-block-start: 22px; padding-block: 12px; }

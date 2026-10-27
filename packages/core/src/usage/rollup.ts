@@ -111,7 +111,13 @@ export const backfill = Effect.fn("UsageRollup.backfill")(function* (writer: Db,
  * the local offset from UTC (east positive); local days are built from UTC hours, so half-hour zones round
  * to the hour.
  */
-export const daily = Effect.fn("UsageRollup.daily")(function* (db: Db, input: { days: number; offsetMinutes: number; now?: number }) {
+/** Whether the price source has a rate for a model; `daily` falls back to "has cost" when none is given. */
+export type RateLookup = (provider: string, model: string) => boolean
+
+export const daily = Effect.fn("UsageRollup.daily")(function* (
+  db: Db,
+  input: { days: number; offsetMinutes: number; now?: number; hasRate?: RateLookup },
+) {
   const now = input.now ?? Date.now()
   const shift = Math.round(input.offsetMinutes / 60)
   const today = Math.floor((now / HOUR + shift) / 24)
@@ -134,19 +140,38 @@ export const daily = Effect.fn("UsageRollup.daily")(function* (db: Db, input: { 
     .all()
     .pipe(Effect.orDie)
   const state = yield* db.select().from(UsageRollupStateTable).where(eq(UsageRollupStateTable.id, 1)).get().pipe(Effect.orDie)
+  const backfilled = state?.time_backfilled !== null && state?.time_backfilled !== undefined
   const days = Array.from({ length: input.days }, (_, index) => today - index).map((day) => {
     const models = rows
-      .filter((row) => row.day === day && (row.cost !== 0 || row.input + row.output !== 0))
-      .map((row) => ({
-        provider: row.provider,
-        model: row.model,
-        cost: round(row.cost),
-        tokens: { input: row.input, output: row.output, reasoning: row.reasoning, cache: { read: row.cacheRead, write: row.cacheWrite } },
-      }))
-      .toSorted((a, b) => b.cost - a.cost)
+      .filter((row) => row.day === day)
+      .map((row) => {
+        const tokens = row.input + row.output + row.reasoning + row.cacheRead + row.cacheWrite
+        const coverage: "priced" | "missing-rate" | "no-usage" =
+          tokens === 0 ? "no-usage" : (input.hasRate ? input.hasRate(row.provider, row.model) : row.cost !== 0) ? "priced" : "missing-rate"
+        return {
+          provider: row.provider,
+          model: row.model,
+          // Unknown, not zero, when the price source has no rate for the model.
+          cost: coverage === "missing-rate" ? null : round(row.cost),
+          coverage,
+          tokens: { input: row.input, output: row.output, reasoning: row.reasoning, cache: { read: row.cacheRead, write: row.cacheWrite } },
+        }
+      })
+      .toSorted((a, b) => (b.cost ?? -1) - (a.cost ?? -1))
+    const unpriced = models.filter((model) => model.coverage === "missing-rate")
+    // Days before the live cutoff are only known once the backfill has run.
+    const complete = backfilled || (day * 24 - shift) * HOUR >= (state?.cutoff ?? Infinity)
     return {
       day: new Date(day * 24 * HOUR).toISOString().slice(0, 10),
-      cost: round(models.reduce((total, model) => total + model.cost, 0)),
+      complete,
+      // Sum of priced models only; unpriced usage is reported beside it, never folded in as $0.
+      cost: complete ? round(models.reduce((total, model) => total + (model.cost ?? 0), 0)) : null,
+      unpricedModels: unpriced.length,
+      unpricedTokens: unpriced.reduce(
+        (total, model) =>
+          total + model.tokens.input + model.tokens.output + model.tokens.reasoning + model.tokens.cache.read + model.tokens.cache.write,
+        0,
+      ),
       models,
     }
   })
@@ -159,8 +184,15 @@ export const daily = Effect.fn("UsageRollup.daily")(function* (db: Db, input: { 
     coverage: {
       scope: "assistant messages that ran on this host (all sessions and directories in this database)",
       liveSince: state ? new Date(state.cutoff).toISOString() : undefined,
-      backfilled: state?.time_backfilled !== null && state?.time_backfilled !== undefined,
+      backfilled,
     },
+    notes: [
+      "cost is null for days not yet covered (history before liveSince until the one-time backfill finishes)",
+      "models with coverage=missing-rate used tokens the price source has no rate for: cost null (unknown, not zero); day cost sums priced models only and unpricedModels/unpricedTokens report the rest",
+      "steps that ran on this host count; synced or moved sessions are skipped from liveSince on, but history before liveSince is counted from every local message, so history moved from another host can also count there",
+      "local days are built from UTC hours: zones with a 30 or 45 minute offset are rounded to the hour",
+      "not provider billing",
+    ],
     days,
   }
 })
@@ -193,7 +225,7 @@ function round(value: number) {
 }
 
 export interface Interface {
-  readonly daily: (input: { days: number; offsetMinutes: number }) => Effect.Effect<Effect.Success<ReturnType<typeof daily>>>
+  readonly daily: (input: { days: number; offsetMinutes: number; hasRate?: RateLookup }) => Effect.Effect<Effect.Success<ReturnType<typeof daily>>>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/UsageRollup") {}

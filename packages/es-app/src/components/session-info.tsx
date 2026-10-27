@@ -16,7 +16,6 @@ import { prFromHref } from "../pr-matching"
 import { linkUrl } from "../link-url"
 import { compactTokens, contextLimit, contextUsage, countCompletedTurns, latestCompletedTurn, usageLevel, type ProviderList } from "../context-usage"
 import { prDetail, requestPrDetails } from "../pr-details"
-import { CurrentWorkView } from "../current-work"
 import { TodoPanel } from "./todos"
 
 const URL_RE = /https?:\/\/[^\s)\]}"'`>]+/g
@@ -361,10 +360,6 @@ function SessionInfoBody(props: {
           </For>
         </div>
       </Show>
-      <Show when={props.session?.directory}>
-        {(directory) => <div class="info-section"><CurrentWorkView id={props.sessionID} directory={directory()} /></div>}
-      </Show>
-
       <Show when={thread()?.lanes?.length}>
         <div class="info-section">
           <div class="info-heading">lanes</div>

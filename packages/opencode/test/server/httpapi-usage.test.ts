@@ -17,7 +17,8 @@ const it = testEffect(
 type Daily = {
   estimate: true
   basis: string
-  days: { day: string; cost: number }[]
+  days: { day: string; cost: number | null; models: { coverage: string; cost: number | null }[] }[]
+  priceSource: { label: string }
   rateLimits: { source: string; providers: { provider: string; requests?: { limit?: number; remaining?: number } }[] }
 }
 
@@ -53,6 +54,11 @@ it.live(
           expect(daily.days).toHaveLength(3)
           expect(daily.days[0]?.day).toBe(new Date().toISOString().slice(0, 10))
           expect(daily.rateLimits.source).toContain("not billing or subscription quota")
+          expect(daily.priceSource.label).toContain("estimate")
+          // The test model has no cost card, so its usage is unpriced rather than free.
+          const today = daily.days[0]!
+          expect(today.models.every((model) => model.coverage !== "priced")).toBe(true)
+          expect(today.models.filter((model) => model.coverage === "missing-rate").every((model) => model.cost === null)).toBe(true)
           expect(daily.rateLimits.providers).toMatchObject([{ provider: "test", requests: { limit: 500, remaining: 499 } }])
         }),
       { config: testProviderConfig },

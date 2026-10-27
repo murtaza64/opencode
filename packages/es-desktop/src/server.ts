@@ -72,7 +72,7 @@ export const serve = async (options: {
   // Remote (Android) mode: listen on an explicit loopback/tailnet host and
   // authenticate with a pairing cookie instead of the native capability header.
   host?: string
-  pairing?: { code: string; maxAgeSeconds?: number }
+  pairing?: { code: string; codeFile?: string; maxAgeSeconds?: number }
   // Paired gateway behind an HTTPS identity proxy (Tailscale Serve): the exact client-facing
   // origin, also accepted for Origin and Host checks. The proxy must be the only route in.
   publicOrigin?: string
@@ -135,7 +135,7 @@ export const serve = async (options: {
       return finish(200, JSON.stringify({ service: "editspace", pairing: true }), "application/json")
     const page = (status: number, error?: string) => {
       res.setHeader("Content-Security-Policy", pairingCsp)
-      finish(status, pairingPage(error), "text/html; charset=utf-8")
+      finish(status, pairingPage(error, pairing.codeFile), "text/html; charset=utf-8")
     }
     if (url.pathname !== "/__es/pair" || req.method !== "POST") {
       if (req.method === "GET" && (req.headers["sec-fetch-dest"] === "document" || req.headers.accept?.includes("text/html")))

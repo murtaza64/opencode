@@ -2354,13 +2354,25 @@ export type UsageDaily = {
     liveSince?: string
     backfilled: boolean
   }
+  notes: Array<string>
+  priceSource: {
+    label: string
+    managedConfig: Array<{
+      path: string
+      modified: string
+    }>
+  }
   days: Array<{
     day: string
+    complete: boolean
     cost: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    unpricedModels: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    unpricedTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
     models: Array<{
       provider: string
       model: string
       cost: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      coverage: "priced" | "missing-rate" | "no-usage"
       tokens: {
         input: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
         output: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"

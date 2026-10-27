@@ -570,13 +570,6 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 .session-peek[data-side="start"] { border-inline-start-width: 1px; border-inline-end: 3px solid var(--lavender); }
 .session-peek .peek-title { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text); font-weight: 600; }
 .session-peek .peek-title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.current-work { min-width: 0; overflow-wrap: anywhere; }
-.current-work.compact { padding: 7px 0; border-block: 1px solid var(--border); }
-.current-work-line, .current-work-tools { font-size: 11px; line-height: 1.5; }
-.current-work .ctx-caption { margin-top: 3px; }
-.current-work-generate { color: var(--lavender); font-size: 11px; text-align: start; padding: 2px 0; }
-
-
 .ctx-caption { font-size: 10.5px; color: var(--overlay1); line-height: 1.3; }
 .ctx-exact { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .ctx-exact .mono { color: var(--text); }
