@@ -4,7 +4,8 @@ import { readFile, writeFile } from "node:fs/promises"
 import { serve } from "./server"
 import { createVoice, voiceTools } from "./voice"
 import { appRouteURL, externalURL, internalURL, pageNavigation, serviceHosts, serviceOrigins, startupMode, startupPlan, surfaceFrameURL } from "./policy"
-import { createTabs, TAB_BAR_HEIGHT } from "./tabs"
+import { createTabs, TITLE_BAR_HEIGHT } from "./tabs"
+import { watchBadges } from "./badges"
 
 app.setName("Editspace")
 app.setPath("userData", process.env.ES_DESKTOP_USER_DATA ?? path.join(app.getPath("appData"), "Editspace"))
@@ -136,8 +137,8 @@ const start = async () => {
     ...(process.platform === "darwin"
       ? {
           titleBarStyle: "hidden" as const,
-          trafficLightPosition: remotes.length || pages.length ? { x: 12, y: 11 } : { x: 12, y: 14 },
-          titleBarOverlay: { height: remotes.length || pages.length ? TAB_BAR_HEIGHT : 44 },
+          trafficLightPosition: { x: 12, y: 14 },
+          titleBarOverlay: { height: TITLE_BAR_HEIGHT },
         }
       : {}),
   }
@@ -151,15 +152,16 @@ const start = async () => {
   const tabs = window instanceof BrowserWindow
     ? undefined
     : createTabs(window, [
-        { id: "local", label: "Local", url: server.origin, session: isolated, guard: (contents) => guardListener(contents, server.origin, true) },
+        { id: "local", label: "Local", url: server.origin, session: isolated, kind: "app" as const, guard: (contents) => guardListener(contents, server.origin, true) },
         ...remotes.map((host) => ({
           id: host.id,
           label: host.label,
           url: host.server.origin,
           session: listenerSession(`persist:editspace-host-${host.id}`, host.server),
+          kind: "app" as const,
           guard: (contents: Electron.WebContents) => guardListener(contents, host.server.origin, false),
         })),
-        ...pages.map((host) => ({ id: host.id, label: host.label, url: `${host.origin}/`, session: pageSession(`persist:editspace-host-${host.id}`), guard: (contents: Electron.WebContents) => guardPage(contents, host.origin) })),
+        ...pages.map((host) => ({ id: host.id, label: host.label, url: `${host.origin}/`, session: pageSession(`persist:editspace-host-${host.id}`), kind: "page" as const, guard: (contents: Electron.WebContents) => guardPage(contents, host.origin) })),
       ], preferences)
   const localContents = window instanceof BrowserWindow ? window.webContents : tabs!.contents("local")
   if (process.platform === "darwin")
@@ -223,12 +225,33 @@ const start = async () => {
         role: "viewMenu",
         submenu: [
           { role: "reload" },
-          { role: "resetZoom" },
-          { role: "zoomIn" },
-          { role: "zoomOut" },
+          // Under host tabs, zoom applies to the shown host and re-fits its header beside the tabs.
+          ...(tabs
+            ? ([["resetzoom", "Actual Size", "CommandOrControl+0", () => 1], ["zoomin", "Zoom In", "CommandOrControl+Plus", (z: number) => Math.min(3, z + 0.1)], ["zoomout", "Zoom Out", "CommandOrControl+-", (z: number) => Math.max(0.5, z - 0.1)]] as const).map(([id, label, accelerator, next]) => ({
+                id,
+                label,
+                accelerator,
+                click: () => {
+                  const contents = tabs.shownContents()
+                  contents.setZoomFactor(Math.round(next(contents.getZoomFactor()) * 100) / 100)
+                  tabs.refresh()
+                },
+              }))
+            : ([{ role: "resetZoom" }, { role: "zoomIn" }, { role: "zoomOut" }] as const)),
           { role: "togglefullscreen" },
         ],
       },
+      // Host tabs: Cmd+Ctrl+1..9 selects a host; the native menu also reads hosts to VoiceOver.
+      ...(tabs
+        ? [{
+            label: "Hosts",
+            submenu: tabs.hosts().slice(0, 9).map((host, index) => ({
+              label: host.label,
+              accelerator: `${process.platform === "darwin" ? "Command+Control" : "Control+Alt"}+${index + 1}`,
+              click: () => tabs.select(host.id),
+            })),
+          }]
+        : []),
       {
         role: "windowMenu",
         // Reserve Command+M for the composer's target cycle, retaining the menu action.
@@ -250,7 +273,17 @@ const start = async () => {
   app.on("window-all-closed", () => app.quit())
   process.on("SIGTERM", () => app.quit())
   process.on("SIGINT", () => app.quit())
-  if (tabs) tabs.select("local")
+  if (tabs) {
+    tabs.select("local")
+    // Inactive tabs show each host's open decisions from a small summary read, never a hidden page.
+    const stop = watchBadges([
+      { id: "local", read: (path) => fetch(`${server.origin}${path}`, { headers: { "x-editspace-key": server.key, origin: server.origin }, redirect: "error", signal: AbortSignal.timeout(10_000) }) },
+      ...remotes.map((host) => ({ id: host.id, read: (path: string) => fetch(`${host.server.origin}${path}`, { headers: { "x-editspace-key": host.server.key, origin: host.server.origin }, redirect: "error", signal: AbortSignal.timeout(10_000) }) })),
+      // A page host is read with its own partition (its own sign-in), on its own origin, read-only.
+      ...pages.map((host) => ({ id: host.id, read: (path: string) => session.fromPartition(`persist:editspace-host-${host.id}`).fetch(`${host.origin}${path}`, { credentials: "include", redirect: "error", signal: AbortSignal.timeout(10_000) }) })),
+    ], (id, badge) => tabs.setBadge(id, badge))
+    app.on("before-quit", stop)
+  }
   await (tabs ? new Promise<void>((resolve) => localContents.once("did-finish-load", () => resolve())) : localContents.loadURL(server.origin))
   opened.ready = true
   if (startup.showOnLoad) window.show()

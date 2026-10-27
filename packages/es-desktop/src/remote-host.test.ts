@@ -21,6 +21,7 @@ const fakeHost = (name: string, options: { delay?: number; status?: number } = {
     port: 0,
     fetch: async (request) => {
       const url = new URL(request.url)
+      await request.text()
       seen.push({ path: url.pathname, cookie: request.headers.get("cookie"), authorization: request.headers.get("authorization"), origin: request.headers.get("origin") })
       if (options.status) return new Response("deny unlisted-login", { status: options.status })
       if (options.delay) await Bun.sleep(options.delay)

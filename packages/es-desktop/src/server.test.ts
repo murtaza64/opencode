@@ -20,6 +20,9 @@ const setup = async () => {
     port: 0,
     fetch: async (request) => {
       const url = new URL(request.url)
+      // Consume every request body: an unread body makes the server drop the keep-alive
+      // connection, and the proxy's next pooled request then fails as "socket closed".
+      const text = await request.text()
       if (url.pathname === "/api/attention/session") return Response.json({
         originBound: request.headers.get("origin") === url.origin,
         operatorCookieOnly: request.headers.get("cookie") === "es_attention_operator=synthetic",
@@ -49,7 +52,7 @@ const setup = async () => {
           method: request.method,
           path: url.pathname,
           directory: url.searchParams.get("directory"),
-          body: await request.text(),
+          body: text,
           credentialForwarded:
             request.headers.has("cookie") ||
             request.headers.has("x-editspace-key") ||
