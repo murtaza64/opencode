@@ -57,3 +57,26 @@ class ProvenanceTest {
         assertTrue(odd != Provenance.Human)
     }
 }
+
+class SourceUnionTest {
+    @Test
+    fun integration_system_and_operator_parse_with_their_fields() {
+        val integration = Provenance.of(buildJsonObject { put("type", "integration"); put("name", "rook"); put("request", "AND-1"); put("claimedAuthor", "M") })
+        assertEquals(Provenance.Integration("rook", "AND-1", "M"), integration)
+        assertEquals("integration · rook · claims: M", integration.headline())
+        val system = Provenance.of(buildJsonObject { put("type", "system"); put("kind", "nudge"); put("actor", "es-app") })
+        assertEquals(Provenance.System("nudge", "es-app"), system)
+        assertEquals("system · nudge · es-app", system.headline())
+        assertEquals("actor es-app", system.detail())
+        val operator = Provenance.of(buildJsonObject { put("type", "operator"); put("channel", "attention") })
+        assertEquals(Provenance.Operator("attention"), operator)
+        assertEquals("Murtaza · via attention", operator.headline())
+    }
+
+    @Test
+    fun missing_optional_fields_degrade_gracefully() {
+        assertEquals(Provenance.System("system", null), Provenance.of(buildJsonObject { put("type", "system") }))
+        assertEquals(Provenance.Operator(null), Provenance.of(buildJsonObject { put("type", "operator") }))
+        assertNull(Provenance.Operator(null).detail())
+    }
+}

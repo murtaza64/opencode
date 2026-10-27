@@ -75,9 +75,9 @@ class AuthorshipTest {
 
     @Test
     fun unknown_future_source_type_is_unattributed_with_its_type() {
-        val author = Authorship.of(user("m9", "hi", buildJsonObject { put("type", "integration"); put("sender", "slack") }), emptySet())
-        assertEquals(Author.Unattributed("integration"), author)
-        assertEquals("unattributed · integration", author!!.label)
+        val author = Authorship.of(user("m9", "hi", buildJsonObject { put("type", "telepathy"); put("sender", "slack") }), emptySet())
+        assertEquals(Author.Unattributed("telepathy"), author)
+        assertEquals("unattributed · telepathy", author!!.label)
     }
 
     @Test

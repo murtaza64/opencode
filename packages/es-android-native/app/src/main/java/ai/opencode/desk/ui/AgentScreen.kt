@@ -66,6 +66,7 @@ import ai.opencode.desk.Outbox
 import ai.opencode.desk.Pending
 import ai.opencode.desk.Pin
 import ai.opencode.desk.SendState
+import ai.opencode.desk.Timeline
 import ai.opencode.desk.ToolGroup
 import ai.opencode.desk.ToolRow
 import ai.opencode.desk.ToolRows
@@ -107,7 +108,7 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
         LazyColumn(Modifier.weight(1f).testTag("agent"), state = list, reverseLayout = true, contentPadding = PaddingValues(bottom = 8.dp, top = 8.dp)) {
             // Bottom of the screen first: pending inputs, then messages newest to oldest.
             val transcript = detail?.messages.orEmpty().map { it.info.id }.toSet()
-            val pending = Outbox.visible(store.outbox[agent.session?.id.orEmpty()].orEmpty(), transcript)
+            val pending = Timeline.dedupPending(Outbox.visible(store.outbox[agent.session?.id.orEmpty()].orEmpty(), transcript), detail?.messages.orEmpty())
             items(pending.asReversed(), key = { it.requestID }) { item ->
                 PendingRow(item,
                     onRetry = { scope.launch { store.retry(item) } },
@@ -116,8 +117,8 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
             if (pending.isNotEmpty()) item(key = "pending-header") { SectionHeader("Sent from this phone") }
             detail?.error?.let { item(key = "error") { Text(it, color = Ink.Red, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) } }
             if (detail == null) item(key = "loading") { Text("Loading…", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) }
-            val placed = Authorship.place(detail?.messages.orEmpty(), store.mine[agent.session?.id.orEmpty()].orEmpty())
-            items(placed.asReversed(), key = { it.message.info.id }) { Message(it.message, store.now, it.author, it.first, store) }
+            val timeline = Timeline.build(Authorship.place(detail?.messages.orEmpty(), store.mine[agent.session?.id.orEmpty()].orEmpty()))
+            items(timeline.asReversed(), key = { it.key() }) { TimelineItem(it, agent.lane, store.now, store) }
             item(key = "older") {
                 val more = detail?.cursor != null
                 Text(
@@ -198,8 +199,8 @@ fun PendingRow(item: Pending, onRetry: () -> Unit, onCancel: () -> Unit) {
 fun Message(message: MessageWithParts, now: Long, author: Author? = null, first: Boolean = true, store: DeskStore? = null) {
     val text = message.parts.filter { it.type == "text" && !it.text.isNullOrBlank() }.joinToString("\n\n") { it.text!!.trim() }
     val tools = message.parts.filter { it.type == "tool" }
-    if (author != null && author != Author.You) { SourcedMessage(author, text, message.info.id, now, message.info.time.created, first); return }
-    val you = author == Author.You
+    if (author != null && author != Author.You && author !is Author.Operator) { SourcedMessage(author, text, message.info.id, now, message.info.time.created, first); return }
+    val you = author == Author.You || author is Author.Operator
     Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = if (first) 6.dp else 2.dp, bottom = 6.dp), horizontalAlignment = if (you) Alignment.End else Alignment.Start) {
         if (you && first) AuthorHeader(author!!, Ink.Blue)
         if (text.isNotBlank()) {
@@ -220,10 +221,10 @@ fun Message(message: MessageWithParts, now: Long, author: Author? = null, first:
 @Composable
 fun AuthorHeader(author: Author, tint: Color, modifier: Modifier = Modifier) {
     val icon = when (author) {
-        Author.You -> Icons.Filled.Person
+        Author.You, is Author.Operator -> Icons.Filled.Person
         is Author.Agent -> Icons.Filled.Email
         is Author.System -> Icons.Filled.Settings
-        is Author.Unattributed -> Icons.Filled.Info
+        is Author.Unattributed, is Author.Integration -> Icons.Filled.Info
     }
     Row(modifier.semantics(mergeDescendants = true) { contentDescription = author.description }, verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(13.dp))

@@ -22,14 +22,28 @@ sealed interface Author {
         override val description = "Sent from this phone"
     }
 
+    // Core accepts sender "human" on mail from any caller; it is shown as unverified.
     data class Agent(val sender: String, val kind: String?, val relationship: String?) : Author {
-        override val label get() = listOfNotNull(sender.ifBlank { "agent" }, kind, relationship).joinToString(" · ")
-        override val description get() = "Mail from ${sender.ifBlank { "an agent" }}" + (kind?.let { ", $it" } ?: "") + (relationship?.let { ", $it" } ?: "")
+        val unverified get() = sender.trim().lowercase() == "human"
+        override val label get() = listOfNotNull(sender.ifBlank { "agent" }, if (unverified) "unverified" else null, kind, relationship).joinToString(" · ")
+        override val description get() = "Mail from ${sender.ifBlank { "an agent" }}" + (if (unverified) " (unverified)" else "") + (kind?.let { ", $it" } ?: "") + (relationship?.let { ", $it" } ?: "")
     }
 
-    data class System(val kind: String) : Author {
+    // Peer/bridge input. A claimed author is displayed as a claim and never promotes to You or Operator.
+    data class Integration(val name: String, val claimedAuthor: String?) : Author {
+        override val label get() = listOfNotNull("integration", name.ifBlank { null }, claimedAuthor?.let { "claims: $it" }).joinToString(" · ")
+        override val description get() = "Integration input from ${name.ifBlank { "an integration" }}" + (claimedAuthor?.let { ", claims to be $it" } ?: "")
+    }
+
+    data class System(val kind: String, val actor: String? = null) : Author {
         override val label get() = "system · $kind"
-        override val description get() = "System input: $kind"
+        override val description get() = "System input: $kind" + (actor?.let { " by $it" } ?: "")
+    }
+
+    // Server-stamped human. Plain bubble like You, but labelled by channel; never grouped or collapsed.
+    data class Operator(val channel: String?) : Author {
+        override val label get() = listOfNotNull("Murtaza", channel?.let { "via $it" }).joinToString(" · ")
+        override val description get() = "Murtaza" + (channel?.let { " via $it" } ?: "") + " (server-stamped)"
     }
 
     data class Unattributed(val type: String?) : Author {
@@ -48,6 +62,9 @@ object Authorship {
         if (message.info.id in mine) return Author.You
         return when (val source = Provenance.of(message.info.source)) {
             is Provenance.Mail -> Author.Agent(source.sender, source.kind, source.relationship)
+            is Provenance.Integration -> Author.Integration(source.name, source.claimedAuthor)
+            is Provenance.System -> Author.System(source.kind, source.actor)
+            is Provenance.Operator -> Author.Operator(source.channel)
             is Provenance.Other -> when {
                 source.type in SYSTEM_KINDS -> Author.System(source.type)
                 source.type == "unknown" -> Author.Unattributed(null)
@@ -64,6 +81,9 @@ object Authorship {
         if (receipt.requestID in mineRequests) return Author.You
         return when (val source = Provenance.of(receipt.source)) {
             is Provenance.Mail -> Author.Agent(source.sender, source.kind, source.relationship)
+            is Provenance.Integration -> Author.Integration(source.name, source.claimedAuthor)
+            is Provenance.System -> Author.System(source.kind, source.actor)
+            is Provenance.Operator -> Author.Operator(source.channel)
             is Provenance.Other -> if (source.type in SYSTEM_KINDS) Author.System(source.type) else Author.Unattributed(source.type.takeIf { it != "unknown" })
             Provenance.Human -> Author.Unattributed(null)
         }

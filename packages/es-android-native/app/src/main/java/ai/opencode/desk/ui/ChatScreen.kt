@@ -45,6 +45,7 @@ import ai.opencode.desk.Authorship
 import ai.opencode.desk.Nav
 import ai.opencode.desk.Outbox
 import ai.opencode.desk.SendState
+import ai.opencode.desk.Timeline
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -54,7 +55,7 @@ import kotlinx.coroutines.launch
 fun ChatScreen(store: DeskStore, nav: Nav) {
     val id = store.deskID
     val messages = store.deskMessages[id].orEmpty()
-    val pending = Outbox.visible(store.outbox[id].orEmpty(), messages.map { it.info.id }.toSet())
+    val pending = Timeline.dedupPending(Outbox.visible(store.outbox[id].orEmpty(), messages.map { it.info.id }.toSet()), messages)
     val scope = rememberCoroutineScope()
     val list = rememberLazyListState()
     var text by rememberSaveable { mutableStateOf("") }
@@ -91,8 +92,8 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
                     }
                 }
             }
-            val placed = Authorship.place(messages, store.mine[id].orEmpty())
-            items(placed.asReversed(), key = { it.message.info.id }) { Message(it.message, store.now, it.author, it.first, store) }
+            val timeline = Timeline.build(Authorship.place(messages, store.mine[id].orEmpty()))
+            items(timeline.asReversed(), key = { it.key() }) { TimelineItem(it, null, store.now, store) }
             item(key = "older") {
                 val more = store.deskCursors[id] != null
                 if (messages.isEmpty() && pending.isEmpty()) Column(Modifier.padding(20.dp)) {

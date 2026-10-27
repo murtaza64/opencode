@@ -20,6 +20,8 @@ data class Pending(
     // Null for this phone's own sends; set for receipts admitted by someone else.
     val author: Author? = null,
     val images: Int = 0,
+    // Mail id when the receipt was admitted from typed mail, for dedup against the transcript.
+    val mailID: String? = null,
 ) {
     val retryable get() = state == SendState.Failed || state == SendState.Uncertain
     val done get() = state == SendState.Handled
@@ -63,7 +65,7 @@ object Outbox {
         }
         val known = updated.map { it.requestID }.toSet()
         val foreign = receipts.filter { it.requestID !in known && it.state != "cancelled" && it.state != "handled" }.map {
-            Pending(it.requestID, it.sessionID, it.text, it.delivery, fromReceipt(it), messageID = it.messageID, createdAt = it.timeCreated, author = Authorship.ofReceipt(it, known))
+            Pending(it.requestID, it.sessionID, it.text, it.delivery, fromReceipt(it), messageID = it.messageID, createdAt = it.timeCreated, author = Authorship.ofReceipt(it, known), mailID = (Provenance.of(it.source) as? Provenance.Mail)?.id?.takeIf { id -> id.isNotBlank() })
         }
         return (updated + foreign).sortedBy { it.createdAt }
     }
