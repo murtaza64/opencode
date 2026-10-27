@@ -494,17 +494,23 @@ test("hosts Front Desk surfaces: keyed address, capability-only frame requests, 
   const framed = await fetch(`${server.origin}${src}api`, { headers: { origin: "null", "sec-fetch-site": "cross-site", "x-editspace-key": server.key } })
   expect(await framed.json()).toEqual({ path: "/api", key: false })
   expect(framed.headers.get("content-security-policy")).toStartWith("sandbox allow-scripts")
-  expect((await fetch(`${server.origin}/__surface/board/zzzzzz-${"0".repeat(32)}/`)).status).toBe(404)
+  expect((await fetch(`${server.origin}/__cap/surface/board/zzzzzz-${"0".repeat(32)}/`)).status).toBe(404)
   // The frame's prefix never reaches the app's own APIs.
   expect((await fetch(`${server.origin}/oc/session`, { headers: { origin: "null", "sec-fetch-site": "cross-site", "x-editspace-key": server.key } })).status).toBe(403)
   const page = await fetch(server.origin, { headers: { "x-editspace-key": server.key } })
   expect(page.headers.get("content-security-policy")).toContain("frame-src 'self'")
 })
 
+test("agents' surface snapshots are readable; other surface subpaths are not exposed", () => {
+  expect(apiAllowed("GET", "/es/api/surfaces/relay-board/snapshot")).toBe(true)
+  expect(apiAllowed("POST", "/es/api/surfaces/relay-board/snapshot")).toBe(false)
+  expect(apiAllowed("GET", "/es/api/surfaces/relay-board/static/index.html")).toBe(false)
+})
+
 test("only surface paths on the app origin may load in a subframe", () => {
-  expect(surfaceFrameURL("http://127.0.0.1:60302/__surface/board/abc/", "http://127.0.0.1:60302")).toBe(true)
+  expect(surfaceFrameURL("http://127.0.0.1:60302/__cap/surface/board/abc/", "http://127.0.0.1:60302")).toBe(true)
   expect(surfaceFrameURL("http://127.0.0.1:60302/oc/session", "http://127.0.0.1:60302")).toBe(false)
-  expect(surfaceFrameURL("http://127.0.0.1:64878/__surface/board/abc/", "http://127.0.0.1:60302")).toBe(false)
+  expect(surfaceFrameURL("http://127.0.0.1:64878/__cap/surface/board/abc/", "http://127.0.0.1:60302")).toBe(false)
 })
 
 const record = "0b0a8f8e-6a2b-4f39-9a41-5d0f6b1c2e3d"

@@ -1,29 +1,34 @@
 /* Front Desk surfaces: agent-maintained views served under the app origin at
- * /__surface/<id>/<capability>/. The dashboard registry names each surface's
+ * /__cap/surface/<id>/<capability>/. The dashboard registry names each surface's
  * upstream; this proxy forwards to it without the app's credentials and pins
  * every response into a script-capable sandbox whose network reach is its own
  * prefix. The capability keeps other local pages from reading surface content,
  * and lets the sandboxed (opaque-origin) frame load without ambient cookies.
  *
  * Browsers send no cookies with an opaque-origin frame's subresource requests, so an
- * authenticating edge (Cloudflare Access) in front of the app cannot gate /__surface/;
- * there the capability is the whole credential. It is minted only behind the app's own
- * authentication, names one surface, and expires, so a leaked frame URL stops working. */
+ * authenticating edge (Cloudflare Access) in front of the app cannot gate surface content.
+ * Everything under /__cap/ is capability-addressed instead: the edge bypasses that one prefix
+ * (and rate-limits it), and the path's capability is the whole credential. It is minted only
+ * behind the app's own authentication, names one resource, and expires within an hour, so a
+ * leaked URL stops working. Other capability-served content (e.g. shared files) belongs under
+ * the same prefix so one edge rule covers it. */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { request, type IncomingMessage, type ServerResponse } from "node:http"
 
 export type SurfaceEntry = { id: string; upstream: string }
 
 const CAPABILITY = /^\/__es\/surface\/([a-z0-9][a-z0-9-]{0,39})$/
-const SURFACE = /^\/__surface\/([a-z0-9][a-z0-9-]{0,39})\/([0-9a-z]{1,12})-([0-9a-f]{32})(\/.*)$/
-const CAPABILITY_TTL = 12 * 3600_000
+const SURFACE = /^\/__cap\/surface\/([a-z0-9][a-z0-9-]{0,39})\/([0-9a-z]{1,12})-([0-9a-f]{32})(\/.*)$/
+const CAPABILITY_TTL = 3600_000
 const METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])
 // Forward only content negotiation and payload shape; never cookies, auth, origin or app keys.
 const REQUEST_HEADERS = ["accept", "accept-language", "content-type", "content-length", "if-none-match", "if-modified-since", "last-event-id"]
 const RESPONSE_HEADERS = ["content-type", "content-length", "content-encoding", "last-modified", "etag"]
 const REGISTRY_TTL = 3000
 
-export const isSurfacePath = (pathname: string) => pathname.startsWith("/__surface/") || CAPABILITY.test(pathname)
+/** The edge-bypassed prefix: only capability-checked handlers may serve paths under it. */
+export const CAPABILITY_PREFIX = "/__cap/"
+export const isSurfacePath = (pathname: string) => pathname.startsWith(CAPABILITY_PREFIX) || CAPABILITY.test(pathname)
 
 export const surfaceCsp = (prefix: string) =>
   [
@@ -88,7 +93,7 @@ export const surfaceProxy = (options: {
     if (!match || req.method !== "GET" || req.headers["sec-fetch-site"] === "cross-site") return finish(res, 403, "Forbidden")
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" })
     const minted = capability(match[1])
-    res.end(JSON.stringify({ src: `/__surface/${match[1]}/${minted.token}/`, expires_at: minted.expiresAt }))
+    res.end(JSON.stringify({ src: `/__cap/surface/${match[1]}/${minted.token}/`, expires_at: minted.expiresAt }))
   }
 
   const serve = async (req: IncomingMessage, res: ServerResponse) => {
@@ -116,7 +121,7 @@ export const surfaceProxy = (options: {
     if (!entry) return finish(res, 404, "Surface withdrawn")
     const target = upstreamURL(entry, rest, url.search)
     if (!target) return finish(res, 400, "Invalid surface path")
-    const path = `/__surface/${id}/${presented}/`
+    const path = `/__cap/surface/${id}/${presented}/`
     const prefix = [`http://${req.headers.host}${path}`, ...(options.publicOrigin ? [`${options.publicOrigin}${path}`] : [])].join(" ")
     const upstream = request(
       target,

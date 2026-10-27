@@ -30,6 +30,6 @@ test("surfaces from a dashboard without purposes are boards", () => {
 
 test("frame addresses are renewed a few minutes before they expire, never in a tight loop", () => {
   expect(renewDelay(undefined, 0)).toBeUndefined()
-  expect(renewDelay(12 * 3600_000, 0)).toBe(12 * 3600_000 - 5 * 60_000)
+  expect(renewDelay(3600_000, 0)).toBe(55 * 60_000)
   expect(renewDelay(60_000, 0)).toBe(30_000)
 })

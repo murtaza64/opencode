@@ -87,7 +87,7 @@ export const pageArrivedCrossSite = (previous: string | undefined, next: string,
 
 export const surfaceFrameURL = (value: string, origin: string) => {
   const url = URL.parse(value)
-  return !!url && url.origin === origin && url.pathname.startsWith("/__surface/")
+  return !!url && url.origin === origin && url.pathname.startsWith("/__cap/")
 }
 
 export const internalURL = (value: string, origin: string) => {
@@ -115,6 +115,7 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/oc\/(event|global\/event|experimental\/(session|session\/failed|capabilities)|umbrella\/session|session|session\/status|permission|question|config\/providers|agent)$/,
       /^\/oc\/session\/[\w-]+(?:\/(message|input)(?:\/[\w-]+)?|\/todo|\/children)?$/,
       /^\/es\/api\/(editspaces|state|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work|mail|subscriptions|handoffs|lane-provenance|frontdesk\/memory|frontdesk\/ignored-failures|surfaces)$/,
+      /^\/es\/api\/surfaces\/[a-z0-9][a-z0-9-]{0,39}\/snapshot$/,
       /^\/es\/api\/attention(?:\/session|\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/,
       // This host's Front desk model and one request's linked conversation (read-only).
       /^\/es\/api\/frontdesk\/(model|conversation)$/,

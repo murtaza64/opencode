@@ -174,9 +174,10 @@ export const serve = async (options: {
       res.writeHead(status, { "content-type": type })
       res.end(body)
     }
-    // Surface frames are opaque-origin sandboxes without the app's cookie or key; their
-    // per-surface capability path is the only credential they carry.
-    if (sameHost(req) && req.url?.startsWith("/__surface/")) {
+    // Capability-addressed content (surface frames): opaque-origin sandboxes without the app's
+    // cookie or key, and outside the edge's sign-in. The path's capability is the only credential;
+    // anything under /__cap/ that is not a valid surface capability gets a plain 404.
+    if (sameHost(req) && req.url?.startsWith("/__cap/")) {
       if (!targets.es || remote) return finish(503, "Service not configured")
       res.removeHeader("Content-Security-Policy")
       return void surfaces.serve(req, res)
