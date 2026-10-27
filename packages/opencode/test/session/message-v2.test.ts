@@ -645,7 +645,7 @@ describe("session.message-v2.toModelMessage", () => {
             type: "file",
             mediaType: "application/pdf",
             filename: "example.pdf",
-            data: `data:application/pdf;base64,${pdf}`,
+            data: pdf,
           },
         ],
       },

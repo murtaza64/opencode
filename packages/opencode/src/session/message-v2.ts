@@ -422,7 +422,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
 
   const tools = Object.fromEntries(Array.from(toolNames).map((toolName) => [toolName, { toModelOutput }]))
 
-  return yield* Effect.promise(() =>
+  const messages = yield* Effect.promise(() =>
     convertToModelMessages(
       result.filter((msg) => msg.parts.some((part) => part.type !== "step-start")),
       {
@@ -431,7 +431,32 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
       },
     ),
   )
+  return messages.map(inlineDataUrls)
 })
+
+/**
+ * The AI SDK treats a `data:` URL file part as a URL to download: every turn it parses the multi-megabyte
+ * string into a URL and decodes it with fetch, then re-encodes the bytes as base64 for the request. Passing
+ * the base64 payload with its media type yields the same provider request without that per-turn work.
+ */
+function inlineDataUrls(message: ModelMessage): ModelMessage {
+  if (message.role !== "user" || !Array.isArray(message.content)) return message
+  if (!message.content.some((part) => part.type === "file" && isDataUrl(part.data))) return message
+  return {
+    ...message,
+    content: message.content.map((part) => {
+      if (part.type !== "file" || !isDataUrl(part.data)) return part
+      const comma = part.data.indexOf(",")
+      const header = part.data.slice(5, comma)
+      if (!header.endsWith(";base64")) return part
+      return { ...part, data: part.data.slice(comma + 1), mediaType: part.mediaType ?? header.slice(0, -7) }
+    }),
+  }
+}
+
+function isDataUrl(data: unknown): data is string {
+  return typeof data === "string" && data.startsWith("data:") && data.indexOf(",") > 5
+}
 
 export function toModelMessages(
   input: WithParts[],
