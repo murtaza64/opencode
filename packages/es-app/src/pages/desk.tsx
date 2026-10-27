@@ -46,6 +46,9 @@ const stateLabel = (job: BriefJob) => ({ starting: "starting", unconfirmed: "sta
 // Queue rows show a brief only while it is in progress or needs a retry; a ready brief is visible on selection.
 const rowBrief = (job?: BriefJob) => job && job.state.state !== "ready" ? (job.state.state === "running" || job.state.state === "starting" ? "preparing brief" : `brief ${stateLabel(job)}`) : undefined
 const STALE_MS = 45_000
+// An answered decision its agent has not resolved within this long is shown as stalled.
+const WAITING_STALE_MS = 4 * 3600_000
+const WAITING_DELIVERY: Record<string, string> = { handled: "agent read it", presented: "delivered", admitted: "delivered", queued: "sending", pending: "sending" }
 
 export default function Desk() {
   const dashboard = useDashboard()
@@ -99,6 +102,11 @@ export default function Desk() {
   const inView = (record: AttentionRecord, view: AttentionView) => view === "history" ? ["resolved", "withdrawn"].includes(record.status) : view === "recorded" ? record.status === "decided" : record.status === view
   const historyCount = (view: AttentionView | "ignored") => view === "ignored" ? ignoredFailures().length : records().filter(record => inView(record, view)).length
   const blockedDeliveries = () => records().filter(record => record.status === "answered" && record.delivery_state === "blocked").length
+  // An answer is not an outcome: until its agent resolves the record, it still needs follow-through.
+  // Blocked deliveries already surface in History; oldest first, so a stalled answer stays on top.
+  const waiting = () => records().filter(record => record.status === "answered" && record.delivery_state !== "blocked")
+    .sort((a, b) => (a.answer?.answered_at ?? a.updated_at) - (b.answer?.answered_at ?? b.updated_at))
+  const stalled = (record: AttentionRecord) => now() - (record.answer?.answered_at ?? record.updated_at) > WAITING_STALE_MS
   // Unsent or blocked answers open the history once; the reader closes it, nothing auto-closes it.
   const [historyOpen, setHistoryOpen] = createSignal(false)
   createEffect(on(() => historyCount("recorded") + blockedDeliveries() > 0, unsent => { if (unsent) setHistoryOpen(true) }))
@@ -229,6 +237,16 @@ export default function Desk() {
           }}</For>
         </ul>
         <Show when={uncertainRequests().length}><details class="home-unknown"><summary>Unknown outcome ({uncertainRequests().length})</summary><For each={uncertainRequests()}>{item => <div class="home-source"><bdi dir="auto">{item.title}</bdi> · {item.state === "unavailable" ? "source unavailable" : "no longer pending; outcome unknown"} · <A href={sessionHref(item.session, item.directory)}>Open thread</A></div>}</For></details></Show>
+        <Show when={waiting().length}>
+          <details class="desk-waiting">
+            <summary>Waiting on agents <span class="home-muted">{waiting().length}</span><Show when={waiting().filter(stalled).length}>{count => <span class="home-blocked"> · {count()} stalled</span>}</Show></summary>
+            <ul class="desk-items" aria-label="Answered, waiting on agents"><For each={waiting()}>{record =>
+              <li><button class="desk-item" aria-pressed={selectedKey() === recordKey(record)} data-desk-waiting={recordKey(record)} onClick={() => select(recordKey(record))}>
+                <bdi dir="auto" class="desk-item-title">{record.title}</bdi>
+                <span class="home-source"><RowAgent record={record} /> · <span classList={{ "home-blocked": stalled(record) }}>answered {ago(record.answer?.answered_at ?? record.updated_at)}</span> · {WAITING_DELIVERY[record.delivery_state] ?? record.delivery_state}</span>
+              </button></li>}</For></ul>
+          </details>
+        </Show>
         <details class="desk-history" open={historyOpen()} onToggle={event => setHistoryOpen(event.currentTarget.open)}>
           <summary>History <span class="home-muted">{historyCount("answered")}</span><Show when={historyCount("recorded")}> <span class="home-blocked">· {historyCount("recorded")} not sent</span></Show><Show when={blockedDeliveries()}> <span class="home-blocked">· {blockedDeliveries()} blocked</span></Show><Show when={historyCount("ignored")}> <span class="home-muted">· Ignored {historyCount("ignored")}</span></Show></summary>
           <div class="home-tabs" role="group" aria-label="Attention status"><For each={[["answered", "Answered"], ["recorded", "Not sent"], ["snoozed", "Snoozed"], ["history", "Resolved"], ["ignored", "Ignored"]] as const}>{([view, label]) => <button aria-pressed={historyView() === view} data-empty={historyCount(view) === 0 ? "" : undefined} onClick={() => setHistoryView(view)}>{label} <span>{historyCount(view)}</span></button>}</For></div>

@@ -82,6 +82,8 @@
   .desk-flow li + li::before { content: "↓"; inset-inline-start: 4px; inset-block-start: -15px; }
   .desk-visual iframe { block-size: 220px; }
 }
+.desk-waiting { margin-block-start: 12px; }
+.desk-waiting > summary { padding: 8px 10px; color: var(--subtext1); cursor: pointer; }
 .desk-history { margin-block-start: 12px; }
 .desk-history > summary { padding: 8px 10px; color: var(--subtext1); border: 1px solid var(--surface1); cursor: pointer; }
 .desk-history .home-tabs { flex-wrap: wrap; margin-block: 6px 2px; }
