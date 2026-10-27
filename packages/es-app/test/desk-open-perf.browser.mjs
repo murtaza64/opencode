@@ -75,12 +75,16 @@ try {
   // Warm the dev server's transform cache with the throwaway first load.
   await page.goto(preview.url, { waitUntil: "domcontentloaded", timeout: 300_000 })
   await page.waitForFunction(() => document.querySelector(".desk-chat textarea"), undefined, { timeout: 300_000 })
+  // Let the warm-up page finish its own reads before counting.
+  await page.waitForTimeout(4000)
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: THROTTLE })
   fixture.calls.length = 0
   await page.reload({ waitUntil: "domcontentloaded" })
   await measure("cold open", 0)
   const coldRequests = fixture.calls.length
   rows.at(-1).requests = coldRequests
+  rows.at(-1).desk_message_reads = fixture.calls.filter((call) => call.method === "GET" && call.path === "/session/ses_a/message").length
+  if (process.env.DEBUG_READS) console.log("READS", JSON.stringify(fixture.calls.filter((call) => call.method === "GET" && call.path === "/session/ses_a/message").map((call) => `${call.limit}/${call.before ?? ""}`)))
   // Revisit: Agents mode, then back to Front desk.
   await page.locator(".mode-tab", { hasText: "Agents" }).first().click()
   await page.waitForTimeout(1500)
@@ -89,8 +93,10 @@ try {
   await page.locator(".mode-tab").first().click()
   await measure("revisit", start)
   rows.at(-1).requests = fixture.calls.length
+  rows.at(-1).desk_message_reads = fixture.calls.filter((call) => call.method === "GET" && call.path === "/session/ses_a/message").length
   for (const row of rows) console.log(JSON.stringify(row))
   if (ASSERT) {
+    expect(rows[0].desk_message_reads, "cold open reads the desk chat's message page once").toBe(1)
     expect(rows[1].visible_ms, "revisit shows the chat quickly").toBeLessThan(300)
     expect(rows[1].worst_long_ms, "revisit has no long task").toBeLessThan(100)
     console.info("PASS desk open")

@@ -23,6 +23,7 @@ import { MoreDetail, PreparedBrief, useCompleteBrief, useCompleteJob } from "../
 import { RecordConversation } from "../components/desk-conversation"
 import { useBriefs } from "../desk-briefs"
 import { oc } from "../api"
+import { peekLiveSession } from "../live-session-cache"
 import { flash } from "../motion"
 import type { MemoryEntry, MemoryRevision } from "../desk-memory"
 import { SessionView } from "./session"
@@ -35,6 +36,9 @@ import { DeliverableList, SurfaceList, SurfaceView } from "../components/desk-su
 import { surfaceFromKey, surfaceKey } from "../surfaces"
 import { leftWidth } from "../ui"
 import "./home.css"
+
+/** Delay before the desk reads its chat's latest turn for memory changes. */
+const MEMORY_ABSORB_DELAY_MS = 1500
 import "./desk.css"
 
 const receiptText = (item: HomeReplyReceipt) => item.result === "applied" ? (item.reply === "once" ? "Allowed once" : item.reply === "always" ? "Always allowed" : "Rejected") : item.result === "not-applied" ? "Not applied" : "Outcome uncertain"
@@ -153,7 +157,19 @@ export default function Desk() {
   }, key => {
     const target = desk.pointer()
     if (!key || !target || ["busy", "retry"].includes(dashboard.activity.status(target.session) ?? "")) return
-    void oc.messagesTail(target.session, target.directory, 20).then(messages => memory.absorb(messages)).catch(() => undefined)
+    // Not urgent: once the desk chat's own view has loaded, read its latest messages from there
+    // instead of fetching the same page again; fetch only if that view never loaded.
+    const absorb = () => {
+      const live = peekLiveSession(target.session, target.directory)
+      if (live?.loaded()) {
+        const messages = (live.data.message[target.session] ?? []).slice(-20)
+        memory.absorb(messages.map(info => ({ info, parts: live.data.part[info.id] ?? [] })) as Parameters<typeof memory.absorb>[0])
+        return
+      }
+      void oc.messagesTail(target.session, target.directory, 20).then(messages => memory.absorb(messages)).catch(() => undefined)
+    }
+    const timer = setTimeout(absorb, MEMORY_ABSORB_DELAY_MS)
+    onCleanup(() => clearTimeout(timer))
   }))
   const jobsFor = (key: string) => briefs.jobs().filter(job => job.meta.source === key)
   const context = () => desk.context({

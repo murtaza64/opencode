@@ -12,6 +12,7 @@ import { perfSpan, perfTimed } from "./perf-telemetry"
 
 export const TAIL = 80
 export const SNAPSHOT_TIMEOUT_MS = 30_000
+export const RESYNC_TAIL = 10
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 // Keep diff statistics without retaining patch bodies unused by this transcript.
 const visibleMessage = (info: Message): Message => {
@@ -133,6 +134,9 @@ export function createLiveSession(
   // quietly and reconnects/retries wait until a view loads it again.
   let suspended = false
   let loadAbort: AbortController | undefined
+  // A stream that opens after the transcript is shown only needs the newest messages re-read to
+  // close the gap before it opened; older history is already held.
+  let resyncNext = false
   const load = (): Promise<void> => {
     if (disposed) return Promise.resolve()
     suspended = false
@@ -144,6 +148,8 @@ export function createLiveSession(
     // backoff, instead of leaving the view loading forever.
     const signal = AbortSignal.any([controller.signal, abort.signal, AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS)])
     duringLoad = []
+    const resync = resyncNext && loaded() && !!data.message[sessionID]?.length
+    resyncNext = false
     activeLoad = (async () => {
       if (!snapshotStarted && !streamOpened && source) {
         // Subscribe before the first snapshot so its one GET cannot miss events
@@ -165,7 +171,7 @@ export function createLiveSession(
       const snapshot = perfSpan("session.snapshot", { sessionID, warm: loaded() })
       const [session, page, status, todos] = await Promise.all([
         timed("session", oc.session(sessionID, directory, signal)),
-        timed("messages", oc.messagesPage(sessionID, directory, TAIL, undefined, signal)),
+        timed("messages", oc.messagesPage(sessionID, directory, resync ? RESYNC_TAIL : TAIL, undefined, signal)),
         timed("status", oc.status(directory, signal)),
         // Todos are auxiliary: a failed read keeps the last list, never the transcript.
         timed("todos", oc.todos(sessionID, directory, signal)).catch(() => undefined),
@@ -467,9 +473,15 @@ export function createLiveSession(
     source.onopen = () => {
       if (disposed) return
       setConnection("stream", "")
+      // Only the first open can use the short resync: a reopen after a drop may have missed any
+      // number of messages, so it re-reads the full tail.
+      const firstOpen = !streamOpened
       streamOpened = true
       releaseInitial?.()
-      if (!activeLoad || snapshotStarted) refresh()
+      if (!activeLoad || snapshotStarted) {
+        resyncNext = firstOpen
+        refresh()
+      }
     }
     source.onerror = () => {
       if (disposed) return

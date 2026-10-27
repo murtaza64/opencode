@@ -56,6 +56,59 @@ async function json<T>(res: Response): Promise<T> {
   return res.json()
 }
 
+type Page = { items: MessageWithParts[]; cursor?: string }
+const RECENT_PAGE_MS = 2000
+type Shared = { limit: number; value: Promise<Page>; consumers: number; waiting: number; abort: AbortController; done?: boolean }
+const pages = new Map<string, Shared>()
+const readPage = async (id: string, directory: string, limit: number, before: string | undefined, signal: AbortSignal): Promise<Page> => {
+  const res = await fetch(
+    `/oc/session/${id}/message?${q(directory)}&summaryPatches=false&limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ""}`,
+    { signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]) },
+  )
+  const items = await json<MessageWithParts[]>(res)
+  return { items, cursor: res.headers.get("X-Next-Cursor") ?? undefined }
+}
+// `exact`: the caller pages with the cursor, so only a read of the same size can serve it.
+// The shared request is cancelled only when every caller waiting on it has cancelled.
+const sharedPage = async (id: string, directory: string, limit: number, before: string | undefined, signal: AbortSignal | undefined, exact = false): Promise<Page> => {
+  signal?.throwIfAborted()
+  const key = `${id}\u0000${directory}\u0000${before ?? ""}`
+  let entry = pages.get(key)
+  // Snapshots and paging (exact) never take a completed result: they must see current history.
+  if (!entry || (exact ? entry.limit !== limit || entry.done : entry.limit < limit)) {
+    const abort = new AbortController()
+    const created: Shared = { limit, value: readPage(id, directory, limit, before, abort.signal), consumers: 0, waiting: 0, abort }
+    entry = created
+    pages.set(key, created)
+    // A completed read keeps serving smaller tails briefly: the desk asks for its last 20 messages
+    // right after its view loaded 80, which was a second full read for the same data.
+    void created.value.then(
+      () => (created.done = true, setTimeout(() => { if (pages.get(key) === created) pages.delete(key) }, RECENT_PAGE_MS)),
+      () => { if (pages.get(key) === created) pages.delete(key) },
+    )
+  }
+  const shared = entry
+  const first = shared.consumers++ === 0
+  shared.waiting++
+  const leave = () => {
+    if (--shared.waiting > 0) return
+    if (pages.get(key) === shared) pages.delete(key)
+    shared.abort.abort(signal?.reason)
+  }
+  try {
+    const result = await (signal ? Promise.race([shared.value, new Promise<never>((_, reject) => {
+      signal.addEventListener("abort", () => { leave(); reject(signal.reason) }, { once: true })
+    })]) : shared.value)
+    shared.waiting--
+    const items = result.items.length > limit ? result.items.slice(-limit) : result.items
+    const cursor = shared.limit === limit ? result.cursor : items[0]?.info.id
+    return { items: first ? [...items] : structuredClone(items), cursor }
+  } catch (error) {
+    if (!signal?.aborted) shared.waiting--
+    throw error
+  }
+}
+
 export const oc = {
   // The body is Core's create body. A client-chosen id makes a lost response reconcilable.
   createSession: async (directory: string, body: SessionCreateBody = {}): Promise<Session> => {
@@ -104,17 +157,15 @@ export const oc = {
     fetch(`/oc/session/${id}/message?${q(directory)}&summaryPatches=false`, { signal }).then(json<MessageWithParts[]>),
 
   // bounded tail: the newest `limit` messages only (hover insights fallback)
-  messagesTail: (id: string, directory: string, limit: number, signal?: AbortSignal): Promise<MessageWithParts[]> =>
-    fetch(`/oc/session/${id}/message?${q(directory)}&summaryPatches=false&limit=${limit}`, { signal }).then(json<MessageWithParts[]>),
+  // Message page reads are single-flight per (session, directory, cursor): opening the Front Desk
+  // asked for the same tail 4-6 times at once (live view, memory, briefs), which queued behind
+  // the browser's six-connection pool for 150-420 ms each. A tail is served from an in-flight
+  // page of at least that size; every caller gets its own copy (stores mutate what they hold).
+  messagesTail: async (id: string, directory: string, limit: number, signal?: AbortSignal): Promise<MessageWithParts[]> =>
+    (await sharedPage(id, directory, limit, undefined, signal)).items,
 
-  messagesPage: async (id: string, directory: string, limit: number, before?: string, signal?: AbortSignal) => {
-    const res = await fetch(
-      `/oc/session/${id}/message?${q(directory)}&summaryPatches=false&limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ""}`,
-      { signal },
-    )
-    const items = await json<MessageWithParts[]>(res)
-    return { items, cursor: res.headers.get("X-Next-Cursor") ?? undefined }
-  },
+  messagesPage: (id: string, directory: string, limit: number, before?: string, signal?: AbortSignal) =>
+    sharedPage(id, directory, limit, before, signal, true),
 
   /** Undefined when the session has no such message (404, or 400 for a malformed ID). */
   message: async (id: string, directory: string, messageID: string, signal?: AbortSignal) => {
