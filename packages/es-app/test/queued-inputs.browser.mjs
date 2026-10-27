@@ -67,28 +67,24 @@ try {
   expect(cancels().map((call) => decodeURIComponent(call.path.split("/").at(-1)))).toEqual(["s1"])
   await expect(editor).toHaveValue("draft kept while cancelling")
 
-  // Unknown admission: a lost ack keeps the input in the fixture; "Check admission" recovers it under the same ID without resending.
+  // Unknown admission: a lost ack keeps the input in the fixture; the background readback (GET by request ID)
+  // finds it under the same ID without resending, with no Check click.
   fixture.acceptedAckLost = true
+  const postsBefore = posts().length
   // Queue is a secondary action behind the send menu.
   await page.getByRole("button", { name: "More send options", exact: true }).click()
   await page.getByRole("button", { name: "Queue", exact: true }).click()
-  // The unknown input is an outgoing bubble with an inline cue, not a popup above the composer.
-  await expect(page.locator(".input-admission")).toContainText("Not confirmed · queued")
-  await expect(page.locator(".composer-results")).toBeHidden()
+  await expect.poll(() => posts().length).toBe(postsBefore + 1)
   const requestID = posts().at(-1).body.requestID
   expect(fixture.receipts.some((item) => item.requestID === requestID && item.state === "pending")).toBe(true)
-  const bubble = await row(requestID).elementHandle()
-  const before = await row(requestID).boundingBox()
-  await page.getByRole("button", { name: "Check admission", exact: true }).click()
+  // The unknown input is an outgoing bubble with an inline cue, not a popup above the composer.
+  await expect(page.locator(".composer-results")).toBeHidden()
   await expect(page.locator(".input-admission")).toHaveCount(0)
-  await expect(row(requestID)).toBeVisible()
+  await expect(row(requestID)).toHaveCount(1)
   await expect(row(requestID).locator(".outgoing-cue")).toContainText("Queued · after this task")
+  await expect(row(requestID).locator(".outgoing-cue")).not.toContainText("Not confirmed")
   await expect(row(requestID).locator(".receipt-text")).toHaveText("draft kept while cancelling")
-  // Reconciling keeps the same bubble element in place: only the cue changes.
-  expect(await bubble.evaluate((node) => node.isConnected)).toBe(true)
-  const after = await row(requestID).boundingBox()
-  expect(Math.round(after.y)).toBe(Math.round(before.y))
-  expect(Math.round(after.height)).toBe(Math.round(before.height))
+  expect(posts()).toHaveLength(postsBefore + 1)
   await expect(receipts.locator("li")).toHaveCount(2)
   expect(posts()).toHaveLength(1)
   await shot("recovered")

@@ -315,6 +315,8 @@ export const createFixture = async () => {
           })),
       )
     if (url.pathname === "/session/status") return json({ ses_a: { type: fixture.status }, ses_b: { type: "idle" } })
+    // Title-bar daily spend (today-cost.ts): an older Core without the route; the badge stays hidden.
+    if (url.pathname === "/experimental/usage/daily") return json({ error: "Not found" }, 404)
     if (url.pathname === "/config/providers")
       return json({
         providers: [{ id: "fixture", models: { test: { id: "test", name: "Fixture model" }, next: { id: "next", name: "Next model" } } }],

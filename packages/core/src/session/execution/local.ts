@@ -1,3 +1,4 @@
+import { FSUtil } from "../../fs-util"
 import { Cause, Effect, Layer, Option } from "effect"
 import { LocationServiceMap } from "../../location-service-map"
 import { makeGlobalNode } from "../../effect/app-node"
@@ -52,7 +53,7 @@ const layer = Layer.effect(
       activeDirectory: (directory) => Effect.gen(function* () {
         for (const sessionID of yield* coordinator.active) {
           const session = yield* store.get(sessionID)
-          if (session?.location.directory === directory) return true
+          if (session && FSUtil.sameDirectory(session.location.directory, directory)) return true
         }
         return false
       }),

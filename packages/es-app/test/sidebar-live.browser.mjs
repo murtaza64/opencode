@@ -58,13 +58,11 @@ const publish = (type) => {
     } })}\n\n`)
   }
 }
-const pulsePhases = async () => {
-  const phases = new Set()
-  await expect.poll(async () => {
-    const opacity = await row("ses_a").locator(".dot").evaluate((el) => getComputedStyle(el, "::after").opacity)
-    if (opacity) phases.add(opacity)
-    return phases.size
-  }, { message: "busy indicator changes phase without reload", intervals: [100], timeout: 3000 }).toBeGreaterThan(1)
+// Sidebar rows never animate: a busy row shows the static halo, with no animation and no JS clock.
+const staticHalo = async () => {
+  const dot = row("ses_a").locator(".dot")
+  expect(await dot.evaluate((el) => ({ opacity: getComputedStyle(el, "::after").opacity, animation: getComputedStyle(el, "::after").animationName })))
+    .toEqual({ opacity: "0.3", animation: "none" })
 }
 try {
   await page.goto(url)
@@ -87,7 +85,7 @@ try {
       await expect(row("ses_a").locator(".dot")).not.toHaveClass(/busy/)
       publish("busy")
       await expect(row("ses_a").locator(".dot")).toHaveClass("dot busy")
-      if (!stateOnly) await pulsePhases()
+      if (!stateOnly) await staticHalo()
       await page.getByRole("button", { name: "Pin Other session", exact: true }).click()
       await expect(pinned()).toHaveCount(1)
       await expect(page.getByRole("button", { name: "Unpin Other session", exact: true })).toHaveText("◆")
@@ -143,12 +141,11 @@ try {
   await expect(row("ses_a").locator(".dot")).not.toHaveClass(/busy/)
   publish("busy")
   await expect(row("ses_a").locator(".dot")).toHaveClass("dot busy")
-  if (!stateOnly) await pulsePhases()
+  if (!stateOnly) await staticHalo()
   if (!stateOnly) {
     await page.locator(".sidebar").evaluate((el) => { el.style.transform = "translateY(-200vh)" })
-    await expect(row("ses_a").locator(".dot")).not.toHaveAttribute("data-on")
     await page.locator(".sidebar").evaluate((el) => { el.style.transform = "" })
-    await pulsePhases()
+    await staticHalo()
   }
   await page.getByRole("button", { name: "Pin Other session", exact: true }).click()
   const saved = await context.storageState()
@@ -160,8 +157,7 @@ try {
     await expect(restoredPage.locator(".pinned-section .nav-item")).toHaveText([/Other session/])
     const dot = restoredPage.locator('.sidebar a[href*="/session/ses_a?"] .dot.busy')
     await expect(dot).toBeVisible()
-    await expect.poll(() => dot.evaluate((el) => getComputedStyle(el, "::after").opacity)).toBe("0.6")
-    await expect(dot).not.toHaveAttribute("data-on", "true")
+    await expect.poll(() => dot.evaluate((el) => getComputedStyle(el, "::after").opacity)).toBe("0.3")
   } finally {
     await restored.close()
   }

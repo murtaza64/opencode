@@ -1,3 +1,4 @@
+import { FSUtil } from "@opencode-ai/core/fs-util"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Slug } from "@opencode-ai/core/util/slug"
@@ -715,7 +716,7 @@ const layer: Layer.Layer<
         const info = fromRow(row)
         if (
           info.projectID !== ctx.project.id ||
-          info.directory !== ctx.directory ||
+          !FSUtil.sameDirectory(info.directory, ctx.directory) ||
           info.path !== sessionPath(ctx.worktree, ctx.directory) ||
           info.workspaceID !== workspaceID ||
           info.parentID !== input?.parentID ||

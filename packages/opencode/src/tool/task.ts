@@ -1,3 +1,4 @@
+import { FSUtil } from "@opencode-ai/core/fs-util"
 import * as Tool from "./tool"
 import DESCRIPTION from "./task.txt"
 import { ToolJsonSchema } from "./json-schema"
@@ -148,8 +149,8 @@ export const TaskTool = Tool.define(
       const session = params.task_id ? yield* sessions.get(SessionID.make(params.task_id)) : undefined
       const directory = yield* InstanceState.directory
       if (
-        parent.directory !== directory ||
-        (session && (session.parentID !== parent.id || session.directory !== directory))
+        !FSUtil.sameDirectory(parent.directory, directory) ||
+        (session && (session.parentID !== parent.id || !FSUtil.sameDirectory(session.directory, directory)))
       )
         return yield* Effect.fail(new Error("Task must belong to the caller session and directory"))
       if (session?.agent && session.agent !== next.name)

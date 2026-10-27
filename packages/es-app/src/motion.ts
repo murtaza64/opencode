@@ -2,7 +2,7 @@
  * the frame of the event (instant attack); these only fade a highlight away
  * afterwards, so they never delay input or move layout. Each runs once with
  * the Web Animations API on a small element and ends with no residue, unlike
- * an infinite CSS animation (see pulse.ts). Reduced motion skips them. */
+ * an infinite animation. Reduced motion skips them. */
 import { createEffect, on } from "solid-js"
 
 const reduced = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches

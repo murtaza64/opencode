@@ -1,0 +1,11 @@
+.usage-page section { margin-block: 22px; }
+.usage-eyebrow { color: var(--peach); font-size: 11px; }
+.usage-total { font-size: 28px; font-variant-numeric: tabular-nums; color: var(--text); margin-block: 6px 2px; }
+.usage-unpriced { color: var(--yellow); font-size: 12px; }
+.usage-incomplete { color: var(--yellow); }
+.attention-home button.usage-refresh { padding: 0 6px; font-size: 12px; }
+.usage-table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.usage-table :is(th, td) { padding: 5px 18px 5px 0; text-align: start; border-block-end: 1px solid var(--surface0); }
+.usage-table th { color: var(--subtext0); font-weight: 400; font-size: 11px; }
+.usage-days, .usage-limits { list-style: none; padding: 0; margin: 0; max-width: 520px; }
+.usage-days li, .usage-limits li { display: flex; gap: 14px; justify-content: space-between; padding-block: 4px; border-block-end: 1px solid var(--surface0); font-variant-numeric: tabular-nums; }

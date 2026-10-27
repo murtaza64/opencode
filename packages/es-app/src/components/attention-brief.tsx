@@ -196,14 +196,47 @@ const compareOf = (shape: Extract<BriefShape, { kind: "compare" }>, item: DeskIt
 // No scripts, forms, navigation or same-origin access, and CSP blocks every network request.
 const CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:"
 const FRAME_MARGIN = 8
-// The frame cannot see the app's stylesheet, so the app's own colour tokens are handed in under the names
-// brief-contract.json gives the model; a drawing then matches es-app (and, natively, Android) instead of its own palette.
-// Legacy HTML briefs (contract 3) used the older names, mapped to the same colours.
-const TOKENS = { fg: "--text", muted: "--subtext0", line: "--surface1", surface: "--surface0", accent: "--blue", ok: "--green", warn: "--yellow", risk: "--red",
-  bg: "--base", panel: "--surface0", text: "--text", good: "--green", bad: "--red" }
+// The frame cannot see the app's stylesheet, so colours are handed in under the names brief-contract.json gives
+// the model. Each role takes the system palette's value (wal-palette/1, `--wal-<role>`) when the page has one,
+// else es-app's own token. Status colours come from the palette only when it reports ok and risk stay apart for
+// colour-blind readers (`--wal-ok-risk-cvd-safe: 1`). Highlights fall back to the accent. Legacy HTML briefs
+// (contract 3) used older names, mapped to the same colours.
+const TOKENS: Record<string, { wal?: string; app: string; status?: boolean }> = {
+  fg: { wal: "--wal-fg", app: "--text" }, muted: { wal: "--wal-muted", app: "--subtext0" }, line: { wal: "--wal-line", app: "--overlay1" },
+  surface: { wal: "--wal-surface", app: "--surface0" }, accent: { wal: "--wal-accent", app: "--blue" },
+  ok: { wal: "--wal-ok", app: "--green", status: true }, warn: { wal: "--wal-warn", app: "--yellow", status: true }, risk: { wal: "--wal-risk", app: "--red", status: true },
+  bg: { wal: "--wal-bg", app: "--base" }, panel: { wal: "--wal-surface", app: "--surface0" }, text: { wal: "--wal-fg", app: "--text" },
+  good: { wal: "--wal-ok", app: "--green", status: true }, bad: { wal: "--wal-risk", app: "--red", status: true },
+}
+// es-app's line fallback is overlay1, not surface1: strokes and arrows need 3:1 against the drawing's boxes
+// (surface0), which surface1 does not reach (about 1.1-1.6:1).
+const HIGHLIGHTS = ["hl1", "hl2", "hl3", "hl4"]
+/** The colours a brief drawing gets right now, by contract name. */
+export const frameColours = (root: CSSStyleDeclaration) => {
+  const read = (name?: string) => name ? root.getPropertyValue(name).trim() : ""
+  const statusSafe = read("--wal-ok-risk-cvd-safe") === "1"
+  const colours = Object.fromEntries(Object.entries(TOKENS).map(([name, token]) =>
+    [name, (token.status && !statusSafe ? "" : read(token.wal)) || read(token.app) || "initial"]))
+  for (const name of HIGHLIGHTS) colours[name] = read(`--wal-${name}`) || colours.accent!
+  return colours
+}
+// The palette's revision; changes when the system palette is switched. Read again whenever the page's styles or
+// root attributes change (a palette stylesheet swapped in or out), so open drawings follow without a reload.
+const [paletteRevision, setPaletteRevision] = createSignal("")
+let watching = false
+const watchPalette = () => {
+  if (watching || typeof MutationObserver === "undefined") return
+  watching = true
+  const read = () => setPaletteRevision(`${getComputedStyle(document.documentElement).getPropertyValue("--wal-revision").trim()}|${document.documentElement.className}|${document.documentElement.getAttribute("style") ?? ""}`)
+  read()
+  const observer = new MutationObserver(() => queueMicrotask(read))
+  observer.observe(document.head, { childList: true, subtree: true, characterData: true })
+  observer.observe(document.documentElement, { attributes: true })
+}
 const frameStyle = (svg: boolean) => {
-  const root = getComputedStyle(document.documentElement)
-  const vars = Object.entries(TOKENS).map(([name, token]) => `--${name}:${root.getPropertyValue(token).trim() || "initial"}`).join(";")
+  watchPalette()
+  paletteRevision()
+  const vars = Object.entries(frameColours(getComputedStyle(document.documentElement))).map(([name, value]) => `--${name}:${value}`).join(";")
   return `:root{${vars}}html{color-scheme:dark;color:var(--fg);background:${svg ? "transparent" : "var(--bg)"};font:13px system-ui,sans-serif}`
     + (svg ? "body{margin:0}svg{display:block;inline-size:100%;block-size:auto}" : "body{margin:8px}svg{display:block;max-inline-size:min(100%,640px);block-size:auto}")
 }

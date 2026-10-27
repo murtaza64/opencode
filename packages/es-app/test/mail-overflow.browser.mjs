@@ -32,19 +32,26 @@ try {
       await bounded(`${label} collapsed`)
       for (const row of await rows.all()) {
         const summary = row.locator("summary")
-        await expect(summary).toContainText("queued")
-        await expect(summary).toContainText("handled")
-        // Each route party truncates on its own, so both ends stay visible.
-        for (const selector of [".mail-activity-route .mail-party >> nth=0", ".mail-activity-route .mail-party >> nth=1", ".mail-activity-state"]) {
-          const size = await row.locator(selector).evaluate(el => ({
-            client: el.clientWidth, scroll: el.scrollWidth,
-            ellipsis: getComputedStyle(el).textOverflow, overflow: getComputedStyle(el).overflowX,
-            nowrap: getComputedStyle(el).whiteSpace,
-          }))
-          expect(size.client, `${label} ${selector} has visible space`).toBeGreaterThan(0)
-          expect(size.scroll, `${label} ${selector} stress text is truncated`).toBeGreaterThan(size.client)
-          expect(size).toMatchObject({ ellipsis: "ellipsis", overflow: "hidden", nowrap: "nowrap" })
-        }
+        // Collapsed: one line, delivery detail stays in the expansion; the party truncates, purpose and status stay whole.
+        await expect(summary).not.toContainText(/queued|handled/)
+        const geometry = await summary.evaluate(el => {
+          const box = el.getBoundingClientRect()
+          const parts = [...el.children].map(child => child.getBoundingClientRect())
+          return { height: box.height, share: box.width / el.closest(".transcript-inner, .transcript").getBoundingClientRect().width,
+            inside: parts.every(rect => rect.left >= box.left - 1 && rect.right <= box.right + 1) }
+        })
+        expect(geometry.height, `${label} chip is one line`).toBeLessThan(32)
+        expect(geometry.share, `${label} chip is at most 70% of the column`).toBeLessThan(0.71)
+        expect(geometry.inside, `${label} chip parts stay inside`).toBe(true)
+        const party = await row.locator(".mail-activity-party .mail-party").first().evaluate(el => ({
+          client: el.clientWidth, scroll: el.scrollWidth,
+          ellipsis: getComputedStyle(el).textOverflow, overflow: getComputedStyle(el).overflowX,
+          nowrap: getComputedStyle(el).whiteSpace,
+        }))
+        expect(party.client, `${label} party has visible space`).toBeGreaterThan(0)
+        expect(party.scroll, `${label} party stress text is truncated`).toBeGreaterThan(party.client)
+        expect(party).toMatchObject({ ellipsis: "ellipsis", overflow: "hidden", nowrap: "nowrap" })
+        await expect(row.locator(".mail-activity-purpose")).toBeVisible()
         await summary.click()
         await expect(row).toHaveAttribute("open", "")
         await expect(row.locator(".mail-activity-body")).toHaveText(body)

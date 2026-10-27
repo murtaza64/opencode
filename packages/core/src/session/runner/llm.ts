@@ -9,6 +9,7 @@ import {
   type ProviderErrorEvent,
 } from "@opencode-ai/llm"
 import { Cause, DateTime, Effect, FiberSet, Layer, Option, Semaphore, Stream } from "effect"
+import { FSUtil } from "../../fs-util"
 import { AgentV2 } from "../../agent"
 import { Config } from "../../config"
 import { Database } from "../../database/database"
@@ -179,7 +180,10 @@ const layer = Layer.effect(
     ) {
       yield* SessionSupersession.assertOpen(db, sessionID)
       const session = yield* getSession(sessionID)
-      if (session.location.directory !== location.directory || session.location.workspaceID !== location.workspaceID)
+      if (
+        !FSUtil.sameDirectory(session.location.directory, location.directory) ||
+        session.location.workspaceID !== location.workspaceID
+      )
         return yield* Effect.interrupt
       const agent = yield* agents.select(session.agent)
       const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(agent), session.id)

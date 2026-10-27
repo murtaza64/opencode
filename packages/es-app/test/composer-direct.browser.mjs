@@ -82,7 +82,7 @@ try {
   await editor().press("Meta+m")
   fixture.loseInput = true
   await button("Queue").click()
-  await expect(page.locator(".input-admission")).toContainText("Not confirmed · queued")
+  await expect(page.locator(".input-admission")).toContainText("Not sent")
   const unknown = inputs().at(-1).body
   // Queue keeps the session agent: no agent override in the request.
   expect(unknown).toEqual({ requestID: unknown.requestID, text: "newer visible text", delivery: "queue" })
