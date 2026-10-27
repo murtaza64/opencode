@@ -64,21 +64,42 @@ try {
   expect(await page.evaluate(() => localStorage.getItem("es-app-sidebar-pins"))).toBeNull()
   await page.reload()
   await expect(page.locator(".sidebar .pinned-section .nav-item")).toHaveText([/Mini only/])
-  // New session: the destination is shown first and defaults to the Mini.
+  // New session: the destination is shown first and defaults to the Mini; each option names its state.
   await page.getByRole("link", { name: "New session" }).first().click()
   await expect(page.getByLabel("Run on")).toHaveValue("mini")
-  await expect(page.getByRole("link", { name: "Start on Mac Mini" })).toHaveAttribute("href", `${mini}/new?host=mini`)
-  await expect(page.getByLabel("Message")).toHaveCount(0)
+  await expect(page.getByLabel("Run on").locator("option")).toHaveText(["Local", "Mac Mini · default", "Wingman · unreachable"])
+  // The prompt is written here whatever the destination, and switching destination keeps it.
+  await page.getByLabel("Message").fill("Upgrade the scoring service")
+  await expect(page.locator(".new-session-draft").getByLabel("Project")).toHaveCount(0)
   await page.getByLabel("Run on").selectOption("local")
   await expect(page).toHaveURL(/\/new\?host=local$/)
-  await expect(page.getByLabel("Message")).toBeVisible()
+  await expect(page.getByLabel("Message")).toHaveValue("Upgrade the scoring service")
+  await expect(page.locator(".new-session-draft").getByLabel("Project")).toBeVisible()
   await expect(page.getByRole("button", { name: /Start on Local/ })).toBeVisible()
+  await page.getByLabel("Run on").selectOption("mini")
+  await expect(page.getByLabel("Message")).toHaveValue("Upgrade the scoring service")
+  // Start on the Mini hands the text to the Mini's own New session page and lets go of it here.
+  await page.getByRole("button", { name: /Start on Mac Mini/ }).click()
+  await page.waitForURL(`${mini}/new?host=mini#draft=${encodeURIComponent("Upgrade the scoring service")}`)
+  await page.goto(new URL("/new?host=local", preview.url).href)
+  await expect(page.getByLabel("Message")).toHaveValue("")
+  // Receiving a hand-off (a fresh page load on the receiving host): the carried text joins this
+  // page's draft and leaves the URL.
+  await page.goto(preview.url)
+  await page.goto(new URL("/new?host=local#draft=Carried%20prompt", preview.url).href)
+  await expect(page.getByLabel("Message")).toHaveValue("Carried prompt")
+  await expect(page).toHaveURL(/\/new\?host=local$/)
+  await page.getByLabel("Message").fill("")
   // The Mini goes away: its rows stay listed, dimmed and disabled; New session never falls back.
   miniDown = true
   await page.goto(new URL("/new", preview.url).href)
   await expect(page.getByRole("alert")).toHaveText("Mac Mini is unreachable. Choose Local or try again.")
-  await expect(page.getByRole("button", { name: "Start on Mac Mini" })).toBeDisabled()
-  await expect(page.getByLabel("Message")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /Start on Mac Mini/ })).toBeDisabled()
+  await expect(page.getByLabel("Run on").locator("option", { hasText: "Mac Mini" })).toHaveText("Mac Mini · default · unreachable")
+  await page.getByLabel("Message").fill("Kept while the Mini is away")
+  await page.getByLabel("Message").press("ControlOrMeta+Enter")
+  await expect(page).toHaveURL(/\/new$/)
+  await expect(page.getByLabel("Message")).toHaveValue("Kept while the Mini is away")
   await page.goto(preview.url)
   await expect(page.locator(".host-status", { hasText: "Mac Mini" })).toContainText(/unreachable since/)
   miniDown = false
@@ -88,7 +109,7 @@ try {
   await page.getByRole("link", { name: /^Mini copy of a, on Mac Mini$/ }).click()
   await expect.poll(() => opened.at(-1)).toBe(`${mini}/session/ses_a?directory=${encodeURIComponent(miniRoot)}`)
   expect(preview.fixture.calls.filter((call) => !["GET", "HEAD", "OPTIONS"].includes(call.method))).toEqual([])
-  console.log(`PASS work view: two hosts listed apart (same id), offline host shown unreachable, Mini default create without fallback, host-keyed pins, Mini row opens on its listener; host reads mini=${hostReads.mini} wing=${hostReads.wing}; zero mutations`)
+  console.log(`PASS work view: two hosts listed apart (same id), offline host shown unreachable, Mini default create without fallback, draft carried to the Mini page, host-keyed pins, Mini row opens on its listener; host reads mini=${hostReads.mini} wing=${hostReads.wing}; zero mutations`)
 } finally {
   await browser.close()
   await preview.close()

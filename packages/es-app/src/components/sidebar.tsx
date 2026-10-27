@@ -263,7 +263,7 @@ export default function Sidebar() {
     return (
     <div class="session-entry host-entry" classList={{ unavailable: down() }}>
       <a href={feed ? hostSessionHref(feed.host, s) : undefined} class="nav-item" aria-label={name()} aria-disabled={down() || undefined}
-        title={down() ? `${label()} is unreachable; this is its last-known list` : `${s.title || s.id} — on ${label()}`}
+        title={down() ? `${label()} · unreachable since ${clock(feed?.state().since ?? Date.now())}; last-known list, actions disabled` : `${s.title || s.id} — on ${label()}`}
         data-host-key={hostRowKey(s)} onClick={(event) => { if (down()) event.preventDefault() }}>
         <StatusDot state={dot()} label={`${label()}: ${dot()}`} />
         <HostGlyph host={s.host!} />

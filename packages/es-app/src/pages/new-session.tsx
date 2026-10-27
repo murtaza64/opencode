@@ -74,7 +74,23 @@ export default function NewSessionPage() {
   const here = () => workHosts().length < 2 || destination() === host()?.id
   const target = () => workHosts().find((item) => item.id === destination())
   const targetFeed = () => dashboard.work.feeds().find((feed) => feed.host.id === destination())
-  const targetDown = () => targetFeed()?.state().status === "unavailable"
+  const hostDown = (id?: string) => dashboard.work.feeds().find((feed) => feed.host.id === id)?.state().status === "unavailable"
+  const targetDown = () => hostDown(destination())
+  // The draft text goes with the hand-off (URL fragment: never sent to a server) and is cleared here,
+  // so one prompt cannot be started on two hosts. That host's page creates the session itself.
+  const handOff = () => {
+    const item = target()
+    if (!item || targetDown()) return
+    const draft = text().trim() ? `#draft=${encodeURIComponent(text())}` : ""
+    setText("")
+    window.location.assign(`${item.origin}/new?host=${encodeURIComponent(item.id)}${draft}`)
+  }
+  // Receiving a hand-off: the text joins this host's draft, never replacing text already here.
+  const incoming = new URLSearchParams(route.hash.replace(/^#/, "")).get("draft")
+  if (incoming !== null && !attempt()) {
+    setText((current) => current.trim() ? `${current}\n\n${incoming}` : incoming)
+    navigate(`${route.pathname}${route.search}`, { replace: true })
+  }
 
   const selected = createMemo(() => projects().find((item) => item.name === project()))
   // Project defaults once the project list loads: the current project, else the last one used here.
@@ -195,21 +211,11 @@ export default function NewSessionPage() {
         <Show when={workHosts().length > 1}>
           <label class="new-session-host">Run on
             <select aria-label="Run on" value={destination()} disabled={locked()} onChange={(event) => navigate(`/new?host=${encodeURIComponent(event.currentTarget.value)}`, { replace: true })}>
-              <For each={workHosts()}>{(item) => <option value={item.id} selected={item.id === destination()}>{item.label}</option>}</For>
+              <For each={workHosts()}>{(item) => <option value={item.id} selected={item.id === destination()}>{item.label}{item.default ? " · default" : ""}{hostDown(item.id) ? " · unreachable" : ""}</option>}</For>
             </select>
           </label>
         </Show>
-        <Show when={here()} fallback={
-          <div class="new-session-elsewhere" role="status">
-            <Show when={targetDown()} fallback={<>
-              <span>New sessions on {target()?.label} start on its own page, with its projects, agents and models.</span>
-              <a class="primary button" href={`${target()?.origin}/new?host=${encodeURIComponent(destination() ?? "")}`}>Start on {target()?.label}</a>
-            </>}>
-              <span class="err" role="alert">{target()?.label} is unreachable. Choose {host()?.label} or try again.</span>
-              <span><button type="button" disabled>Start on {target()?.label}</button> <button type="button" onClick={() => void targetFeed()?.load()}>Try again</button></span>
-            </Show>
-          </div>
-        }>
+        <Show when={here()}>
         <div class="new-session-settings" role="group" aria-label="New session settings">
           <select aria-label="Project" value={project()} disabled={locked()} onChange={(event) => chooseProject(event.currentTarget.value)}>
             <Show when={!project()}><option value="" disabled>Project…</option></Show>
@@ -230,9 +236,19 @@ export default function NewSessionPage() {
             </optgroup>}</For>
           </select>
         </div>
+        </Show>
         <textarea ref={editor} aria-label="Message" dir="auto" value={text()} readOnly={locked()}
           onInput={(event) => setText(event.currentTarget.value)}
-          onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.isComposing) { event.preventDefault(); if (here()) void send() } }} />
+          onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.isComposing) { event.preventDefault(); if (here()) void send(); else handOff() } }} />
+        <Show when={here()} fallback={
+          <div class="new-session-submit new-session-elsewhere">
+            <Show when={targetDown()} fallback={<span class="dim">Project, agent and model are chosen on {target()?.label}.</span>}>
+              <span class="err" role="alert">{target()?.label} is unreachable. Choose {host()?.label} or try again.</span>
+              <button type="button" onClick={() => void targetFeed()?.load()}>Try again</button>
+            </Show>
+            <button type="button" class="primary" disabled={targetDown()} onClick={handOff}>Start on {target()?.label} <kbd aria-hidden="true">⌘/Ctrl↵</kbd></button>
+          </div>
+        }>
         <div class="new-session-submit">
           <Show when={error()}><span class="err" role="alert">{error()}</span></Show>
           <Show when={attempt() && !pending()}><button type="button" onClick={() => void reconcile()}>Check again</button></Show>
