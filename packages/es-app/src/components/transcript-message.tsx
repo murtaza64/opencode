@@ -4,6 +4,7 @@ import { errorText } from "../live-session"
 import type { MailDelivery, MailMessage } from "../api"
 import { mailActivityLabel, mailSentAt, mailWake } from "../mail-timeline"
 import { MailWakeEvidence } from "./mail-wake-evidence"
+import { ChatImages } from "./chat-images"
 import type { Segment } from "../transcript-groups"
 import type { MailNamer } from "../mail-names"
 import { MailOriginDetail, MailRoute, MailSummary, originOf } from "./mail-summary"
@@ -49,6 +50,13 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
       !props.parts.every(part => part.type === "text" && part.synthetic === true)) return ""
     return props.parts.flatMap(part => part.type === "text" && !part.ignored && part.text.trim() ? [part.text] : []).join("\n\n")
   })
+  // Attached user images render through ChatImages, the same component as the outgoing bubble.
+  const imagePart = (part: ComponentProps<typeof Message>["parts"][number]) => props.message.role === "user" &&
+    part.type === "file" && part.mime.startsWith("image/") && part.url.startsWith("data:") && part.source?.text?.start === undefined
+  const images = createMemo(() => props.parts.flatMap(part => imagePart(part) && part.type === "file"
+    ? [{ url: part.url, mime: part.mime, ...(part.filename ? { filename: part.filename } : {}) }] : []),
+  [], { equals: (a, b) => a.length === b.length && a.every((image, index) => image.url === b[index]!.url && image.filename === b[index]!.filename) })
+  const rest = createMemo(() => props.parts.filter(part => !imagePart(part)))
   const [open, setOpen] = createSignal(false)
   const [copyState, setCopyState] = createSignal("Copy")
   const copy = async (event: MouseEvent & { currentTarget: HTMLButtonElement }) => {
@@ -66,7 +74,10 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
     setCopyState(result ? "Copied" : "Copy failed")
   }
   return <Show when={mail()} fallback={<Show when={generated()} fallback={<>
-    <Show when={props.message.role === "assistant" && props.segments} fallback={<Message {...props} activityRows />}>{(segments) =>
+    <Show when={props.message.role === "assistant" && props.segments} fallback={<>
+      <ChatImages images={images()} lazy />
+      <Message {...props} parts={images().length ? rest() : props.parts} activityRows />
+    </>}>{(segments) =>
       <Index each={segments()}>{(segment) => {
         const parts = createMemo(() => { const value = segment(); return value.kind === "parts" ? value.parts : [] })
         return <Show when={(() => { const value = segment(); return value.kind === "run" ? value.key : undefined })()} keyed
