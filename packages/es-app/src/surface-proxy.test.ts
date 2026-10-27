@@ -42,7 +42,8 @@ describe("surface proxy", () => {
     const clock = { now: Date.now() }
     const base = await app(() => [{ id: "relay-board", upstream: `${board.origin}/` }], undefined, undefined, clock)
     const minted = await fetch(`${base}/__es/surface/relay-board`).then(response => response.json())
-    expect(minted.expires_at - clock.now).toBeGreaterThan(11 * 3600_000)
+    expect(minted.expires_at - clock.now).toBeGreaterThan(59 * 60_000)
+    expect(minted.expires_at - clock.now).toBeLessThanOrEqual(3601_000)
     expect((await fetch(`${base}${minted.src}`)).status).toBe(200)
     const extended = minted.src.replace(/\/([0-9a-z]+)-/, (_: string, expiry: string) => `/${(parseInt(expiry, 36) + 86400).toString(36)}-`)
     expect((await fetch(`${base}${extended}`)).status).toBe(404)
@@ -56,7 +57,7 @@ describe("surface proxy", () => {
     const board = upstream()
     const base = await app(() => [{ id: "relay-board", upstream: `${board.origin}/board/` }])
     const { src } = await fetch(`${base}/__es/surface/relay-board`).then(response => response.json())
-    expect(src).toMatch(/^\/__surface\/relay-board\/[0-9a-z]+-[0-9a-f]{32}\/$/)
+    expect(src).toMatch(/^\/__cap\/surface\/relay-board\/[0-9a-z]+-[0-9a-f]{32}\/$/)
 
     const response = await fetch(`${base}${src}api/data?x=1`, { headers: { cookie: "es_attention_operator=secret", authorization: "Basic abc", "x-editspace-key": "k" } })
 
@@ -88,7 +89,7 @@ describe("surface proxy", () => {
     const board = upstream()
     const base = await app(() => [{ id: "relay-board", upstream: `${board.origin}/board/` }])
 
-    const response = await fetch(`${base}/__surface/relay-board/zzzzzz-${"0".repeat(32)}/`)
+    const response = await fetch(`${base}/__cap/surface/relay-board/zzzzzz-${"0".repeat(32)}/`)
 
     expect(response.status).toBe(404)
     expect(board.seen).toHaveLength(0)

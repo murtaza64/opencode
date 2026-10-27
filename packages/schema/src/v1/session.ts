@@ -619,11 +619,20 @@ const InputImageParts = Schema.Array(
   }),
 ).check(Schema.isMaxLength(ImageSupport.maxCount), Schema.makeFilter(InputImageValidation.issue))
 
+/** Context the user selected for an input (a file excerpt, a session reference, ...), sent to the model as text. */
+export const InputContext = Schema.Struct({
+  text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096)),
+  source: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
+  key: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
+}).annotate({ identifier: "SessionV1.InputContext", parseOptions: { onExcessProperty: "error" } })
+export interface InputContext extends Schema.Schema.Type<typeof InputContext> {}
+
 export const InputPayload = Schema.Struct({
   requestID: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
   delivery: Schema.Literals(["queue", "steer"]),
   text: Schema.String,
   images: optional(InputImages),
+  context: optional(Schema.Array(InputContext).check(Schema.isMinLength(1), Schema.isMaxLength(8))),
   agent: optional(Schema.String.check(Schema.isMinLength(1))),
   source: optional(SessionMailSource.MailSource),
 }).annotate({ identifier: "SessionV1.InputPayload", parseOptions: { onExcessProperty: "error" } })
@@ -734,6 +743,8 @@ const events = {
       info: User,
       part: TextPart,
       images: optional(InputImageParts),
+      // Selected context, in admitted order, as synthetic text parts of the same message.
+      context: optional(Schema.Array(TextPart)),
     },
   }),
   InputPresented: define({

@@ -1288,6 +1288,7 @@ export type GlobalEvent = {
             sessionID: string
             messageID: string
           }>
+          context?: Array<TextPart>
         }
       }
     | {
@@ -3628,11 +3629,18 @@ export type SessionV1InputImage = {
   filename?: string
 }
 
+export type SessionV1InputContext = {
+  text: string
+  source: string
+  key: string
+}
+
 export type SessionV1InputPayload = {
   requestID: string
   delivery: "queue" | "steer"
   text: string
   images?: Array<SessionV1InputImage>
+  context?: Array<SessionV1InputContext>
   agent?: string
   source?: SessionInputMailSource
 }
@@ -4462,6 +4470,7 @@ export type SyncEventSessionInputPromoted = {
         sessionID: string
         messageID: string
       }>
+      context?: Array<TextPart>
     }
   }
 }
@@ -4538,6 +4547,7 @@ export type SessionV1InputReceipt =
       delivery: "queue" | "steer"
       text: string
       images?: Array<SessionV1InputImage>
+      context?: Array<SessionV1InputContext>
       agent: string
       source?: SessionInputMailSource
       revision?: number
@@ -4555,6 +4565,7 @@ export type SessionV1InputReceipt =
       delivery: "queue" | "steer"
       text: string
       images?: Array<SessionV1InputImage>
+      context?: Array<SessionV1InputContext>
       agent: string
       source?: SessionInputMailSource
       revision?: number
@@ -4574,6 +4585,7 @@ export type SessionV1InputReceipt =
       delivery: "queue" | "steer"
       text: string
       images?: Array<SessionV1InputImage>
+      context?: Array<SessionV1InputContext>
       agent: string
       source?: SessionInputMailSource
       revision?: number
@@ -4594,6 +4606,7 @@ export type SessionV1InputReceipt =
       delivery: "queue" | "steer"
       text: string
       images?: Array<SessionV1InputImage>
+      context?: Array<SessionV1InputContext>
       agent: string
       source?: SessionInputMailSource
       revision?: number
@@ -4617,6 +4630,7 @@ export type SessionV1InputReceipt =
       delivery: "queue" | "steer"
       text: string
       images?: Array<SessionV1InputImage>
+      context?: Array<SessionV1InputContext>
       agent: string
       source?: SessionInputMailSource
       revision?: number
@@ -6112,6 +6126,7 @@ export type SessionV1InputPayload1 = {
   delivery: "queue" | "steer"
   text: string
   images?: Array<SessionV1InputImage>
+  context?: Array<SessionV1InputContext>
   agent?: string
   source?: SessionInputMailSource
 }
@@ -6202,6 +6217,7 @@ export type SessionInputPromoted = {
       sessionID: string
       messageID: string
     }>
+    context?: Array<TextPart>
   }
 }
 
@@ -7677,6 +7693,7 @@ export type EventSessionInputPromoted = {
       sessionID: string
       messageID: string
     }>
+    context?: Array<TextPart>
   }
 }
 

@@ -3,7 +3,7 @@
 // 302 to its login page, the way Access does. Browsers send no cookies with an opaque-origin
 // (sandboxed) frame's subresource requests, so a surface's CSS, JS and API calls hit that 302.
 // Phase 1 reproduces that with no edge exception. Phase 2 deploys the chosen transport: an edge
-// bypass for /__surface/ only, where the expiring per-surface capability is the whole credential.
+// bypass for /__cap/ only, where the expiring per-surface capability is the whole credential.
 // Run from packages/es-app: node test/surface-edge.browser.mjs
 import { createRequire } from "node:module"
 import { createServer } from "node:http"
@@ -48,7 +48,8 @@ const edge = await listen((req, res) => {
     return res.end("<html>Sign in</html>")
   }
   if (url.pathname.startsWith("/__es/surface/")) return proxy.address(req, res)
-  if (url.pathname.startsWith("/__surface/")) return void proxy.serve(req, res)
+  // Like the app server: every /__cap/ path goes to the capability-checked handler.
+  if (url.pathname.startsWith("/__cap/")) return void proxy.serve(req, res)
   res.writeHead(200, { "content-type": "text/html", "content-security-policy": "frame-src 'self'" })
   res.end(parent)
 })
@@ -75,12 +76,12 @@ try {
     await context.close()
   })
 
-  bypass = ["/__surface/"]
+  bypass = ["/__cap/"]
   await check("phase 2: signed-in parent renders the surface with its styles and data", async () => {
     const { context, page, frame } = await signedInFrame()
     await expect(frame.locator("#data")).toHaveText("41 migrated", { timeout: 15_000 })
     expect(await frame.locator("body").evaluate((body) => getComputedStyle(body).color)).toBe("rgb(1, 2, 3)")
-    const probe = await page.frames().find((item) => item.url().includes("/__surface/")).evaluate(async () => {
+    const probe = await page.frames().find((item) => item.url().includes("/__cap/surface/")).evaluate(async () => {
       const result = {}
       try { result.parent = String(window.parent.document.title) } catch { result.parent = "blocked" }
       try { result.storage = localStorage.length } catch { result.storage = "blocked" }
@@ -90,7 +91,7 @@ try {
     await context.close()
   })
 
-  await check("phase 2: anonymous requests still go to login everywhere except /__surface/", async () => {
+  await check("phase 2: anonymous requests still go to login everywhere except /__cap/", async () => {
     for (const path of ["/", "/__es/surface/migration", "/oc/session", "/es/api/surfaces"]) {
       const response = await fetch(`${edge.origin}${path}`, { redirect: "manual" })
       expect([path, response.status, response.headers.get("location")]).toEqual([path, 302, "/cdn-cgi/access/login"])
@@ -101,10 +102,11 @@ try {
     const minted = await fetch(`${edge.origin}/__es/surface/migration`, { headers: { cookie: SESSION } }).then((response) => response.json())
     const [expiry, signature] = minted.src.split("/")[3].split("-")
     const bad = [
-      `/__surface/migration/${expiry}-${"0".repeat(32)}/`,
-      `/__surface/other/${expiry}-${signature}/`,
-      `/__surface/migration/${(parseInt(expiry, 36) + 3600).toString(36)}-${signature}/`,
-      `/__surface/migration/${expiry}-${signature}/../../oc/session`,
+      `/__cap/surface/migration/${expiry}-${"0".repeat(32)}/`,
+      `/__cap/surface/other/${expiry}-${signature}/`,
+      `/__cap/surface/migration/${(parseInt(expiry, 36) + 3600).toString(36)}-${signature}/`,
+      `/__cap/surface/migration/${expiry}-${signature}/../../oc/session`,
+      "/__cap/anything-else",
     ]
     for (const path of bad) {
       const response = await fetch(`${edge.origin}${path}`, { redirect: "manual" })

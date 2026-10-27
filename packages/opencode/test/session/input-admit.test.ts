@@ -75,3 +75,53 @@ it.instance("admission uses the session agent and model over the latest user mes
     ).toEqual({ providerID: ProviderV2.ID.make("session-provider"), modelID: ModelV2.ID.make("session-model") })
   }),
 )
+
+const context = [
+  { text: "export const answer = 42", source: "file", key: "src/answer.ts#L1" },
+  { text: "Session summary: shipped U1", source: "session", key: "ses_other" },
+]
+
+it.instance("selected context is part of the admitted input and its exact-retry identity", () =>
+  Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const inputs = yield* SessionInput.Service
+    const session = yield* sessions.create({
+      title: "Context",
+      agent: "build",
+      model: { id: ModelV2.ID.make("m"), providerID: ProviderV2.ID.make("p") },
+    })
+    const payload = { requestID: "with-context", delivery: "queue", text: "explain", context } as const
+
+    const receipt = yield* inputs.admit(session.id, payload)
+    expect(receipt).toMatchObject({ state: "pending", text: "explain", context })
+    expect(yield* inputs.admit(session.id, payload)).toEqual(receipt)
+    expect(yield* inputs.get(session.id, "with-context")).toEqual(receipt)
+    const changed = yield* inputs.admit(session.id, { ...payload, context: context.slice(0, 1) }).pipe(Effect.flip)
+    expect(changed._tag).toBe("InputConflict")
+  }),
+)
+
+it.instance("promotion puts selected context on the same user message as synthetic text parts", () =>
+  Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const inputs = yield* SessionInput.Service
+    const session = yield* sessions.create({
+      title: "Context promotion",
+      agent: "build",
+      model: { id: ModelV2.ID.make("m"), providerID: ProviderV2.ID.make("p") },
+    })
+    yield* inputs.admit(session.id, { requestID: "promote-context", delivery: "steer", text: "explain", context })
+    expect(yield* inputs.promote(session.id, false)).toBe(true)
+
+    const receipt = yield* inputs.get(session.id, "promote-context")
+    expect(receipt).toMatchObject({ state: "promoted", context })
+    const message = yield* sessions.findMessage(session.id, (item) => item.info.role === "user")
+    const parts = message._tag === "Some" ? message.value.parts : []
+    expect(message._tag === "Some" && message.value.info.id).toBe(receipt.state === "promoted" && receipt.messageID)
+    expect(parts.map((part) => (part.type === "text" ? [part.text, part.synthetic ?? false, part.metadata] : part.type))).toEqual([
+      ["explain", false, undefined],
+      ["export const answer = 42", true, { contextSource: "file", contextKey: "src/answer.ts#L1" }],
+      ["Session summary: shipped U1", true, { contextSource: "session", contextKey: "ses_other" }],
+    ])
+  }),
+)
