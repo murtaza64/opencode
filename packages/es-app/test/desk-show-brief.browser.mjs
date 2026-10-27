@@ -57,7 +57,7 @@ page.on("pageerror", (error) => errors.push(error.message))
 const writes = []
 page.on("request", (request) => { if (request.method() !== "GET" && !request.url().includes("/es/api/attention/session")) writes.push(`${request.method()} ${request.url()}`) })
 
-const queue = page.getByRole("complementary", { name: "Desk queue" })
+const queue = page.getByRole("complementary", { name: "Decisions and inbox" })
 const decision = page.locator('.desk-item[data-desk-item="attention:fixture:decision_1"]')
 const permission = page.locator(`.desk-item[data-desk-item="permission:${directory}:per_tests"]`)
 const show = queue.getByRole("button", { name: "Show brief: Choose the bounded implementation scope" })

@@ -4,9 +4,6 @@
 import { createEffect, createMemo, createResource, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
 import { A, Navigate, useSearchParams } from "@solidjs/router"
 import { ago, sessionHref, useDashboard } from "../state"
-import { nativeHeader, NativeHeader } from "../components/native-header"
-import { ModeSwitch } from "../components/mode-switch"
-import { ProjectSelect } from "../components/sidebar"
 import type { createAttention, AttentionRecord } from "../attention"
 import { requestLive, type createHomeRequests } from "../home-requests"
 import { AttentionDecision, useRequestAgent, type AttentionView } from "../components/attention-decision"
@@ -17,7 +14,8 @@ import { useDeskQueue } from "../desk-queue"
 import { failureAge, failureLabel, failureWhen, OLD_FAILURE_MS } from "../session-failures"
 import type { SessionFailure } from "@opencode-ai/sdk/v2"
 import { attentionItem, briefBinding, briefPacket, briefSends, deskSources, detailRequest, type DeskItem, type DeskSource, SOURCE_TAIL } from "../desk"
-import { answeredJob, createDeskSession, createMemory, readConversation, type BriefJob } from "../desk-session"
+import { answeredJob, createMemory, readConversation, type BriefJob } from "../desk-session"
+import { useDeskChat } from "../desk-companion"
 import { anchorHref } from "../message-anchor"
 import { MoreDetail, PreparedBrief, useCompleteBrief, useCompleteJob } from "../components/attention-brief"
 import { RecordConversation } from "../components/desk-conversation"
@@ -26,17 +24,10 @@ import { oc } from "../api"
 import { peekLiveSession } from "../live-session-cache"
 import { flash } from "../motion"
 import type { MemoryEntry, MemoryRevision } from "../desk-memory"
-import { SessionView } from "./session"
-import { Icon } from "@opencode-ai/ui/icon"
-import { Glyph, HostGlyph } from "../components/icons"
+import { HostGlyph } from "../components/icons"
 import { hostDecisionHref } from "../host-feed"
-import { getComposer } from "../composer"
-import { dictation } from "../dictation"
-import type { ContextPart } from "../api"
 import { DeliverableList, SurfaceList, SurfaceView } from "../components/desk-surfaces"
 import { surfaceFromKey, surfaceKey } from "../surfaces"
-import { leftWidth } from "../ui"
-import { TodayCost } from "../components/today-cost"
 import "./home.css"
 
 /** Delay before the desk reads its chat's latest turn for memory changes. */
@@ -60,7 +51,9 @@ export default function Desk() {
   const attention = queue.attention
   const requests = queue.requests
   onMount(() => attention.activate())
-  const desk = createDeskSession()
+  // The desk chat lives in the shell as a companion pane; this view feeds it queue/selection context.
+  const chat = useDeskChat()
+  const desk = chat.desk
   // Defined below; read lazily when a brief starts.
   // Briefs are shared app-wide; the desk adds its other queue items for manual preparation.
   const prepared = useBriefs()
@@ -156,10 +149,7 @@ export default function Desk() {
       flash(brief)
     })
   }
-  const deskDirectory = () => {
-    const name = dashboard.editspace() ?? dashboard.editspaces()?.default
-    return dashboard.editspaces()?.editspaces.find(item => item.name === name)?.root
-  }
+  const deskDirectory = chat.directory
   // Shared session events end an active brief sooner than its poll would.
   createEffect(on(() => briefs.jobs().filter(job => job.state.state === "running").map(job => `${job.id}:${dashboard.activity.status(job.id) ?? ""}`).join(","),
     (now, before) => { if (before !== undefined && now !== before) void briefs.refresh() }))
@@ -210,20 +200,17 @@ export default function Desk() {
     const error = await desk.detail(request.text, [...note, request.context], deskDirectory())
     if (error) return error
     if (note.length) desk.sent(note, true)
-    document.querySelector(".desk-chat")?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+    chat.setOpen(true)
   }
 
+  onMount(() => { chat.setContext(context); onCleanup(() => chat.setContext(undefined)) })
   if (params.view === "agents") return <Navigate href="/agents" />
   const refresh = () => { void attention.refresh(); void requests.refresh(); void dashboard.failures.refresh(); void briefs.refresh(true); dashboard.activity.todos.reload(); void attention.checkOperator().catch(() => undefined) }
   // No page header: the queue is this mode's sidebar, and the chat or selected item fills the rest.
   return <main class="desk" classList={{ "desk-has-selection": !!selected() }}>
-    <Show when={nativeHeader}><NativeHeader><ProjectSelect /></NativeHeader></Show>
-    {/* Same width as the Agents sidebar, so the mode switch stays put across modes. */}
-    <div class="desk-grid" style={{ "--queue-width": `${leftWidth()}px` }}>
-      <aside class="desk-queue" aria-label="Desk queue">
-        <h1 class="sr-only">Front desk</h1>
-        <Show when={!nativeHeader}><div class="sidebar-top"><ProjectSelect /><TodayCost /></div></Show>
-        <ModeSwitch />
+    <div class="desk-grid">
+      <aside class="desk-queue" aria-label="Decisions and inbox">
+        <h1 class="sr-only">Decisions & inbox</h1>
         <Show when={!attention.operator()}><div class="home-login home-muted">Read-only: answers are off <button class="desk-button" title="This UI origin must be allowed by the attention server" onClick={() => attention.checkOperator().catch(() => undefined)}>Reconnect</button></div></Show>
         <Show when={attention.notice()}><div class="home-notice" role="status">{attention.notice()}<Show when={attention.pending()}><button class="desk-button" disabled={attention.writing()} onClick={() => void attention.retry()}>Retry same action</button></Show></div></Show>
         <Show when={briefs.error()}><div class="home-muted desk-background" role="status" title={briefs.detail()}>{briefs.error()}</div></Show>
@@ -318,7 +305,7 @@ export default function Desk() {
       <Show when={selectedSurface()} keyed>{id => <SurfaceView id={id} surface={surfaces.list().find(item => item.id === id)} checked={surfaces.checked()} onOpen={surface => void surfaces.markSeen(surface)} onRetry={() => void surfaces.refresh()} onClose={() => select()} />}</Show>
       <Show when={selected() && !selectedSurface() ? selectedKey() : undefined} keyed>{_key => <Show when={selected()}>{current => <section ref={setEvidence} class="desk-evidence attention-home" aria-label="Selected item">
         <div class="desk-evidence-head">
-          <button class="desk-button" aria-label="Close and return to chat" onClick={() => select()}>Close</button>
+          <button class="desk-button" aria-label="Close" onClick={() => select()}>Close</button>
         </div>
         <Show when={"record" in current() ? current() as { record: AttentionRecord } : undefined}>{entry => <Answered record={entry().record} attention={attention} onView={view => view !== "open" && setHistoryView(view)} />}</Show>
         <Show when={selectedItem()}>{entry => <>
@@ -331,7 +318,7 @@ export default function Desk() {
         </>}</Show>
       </section>}</Show>}</Show>
 
-      <DeskChat desk={desk} directory={deskDirectory()} context={context} beside={!!selected()} />
+      <Show when={!selected()}><section class="desk-idle home-muted" aria-label="Selected item">Select a decision, document or surface.</section></Show>
     </div>
   </main>
 }
@@ -342,92 +329,11 @@ const Source = (props: { source: DeskSource; compact?: boolean }) =>
     <Show when={!props.compact && props.source.detail}><div class="home-source"><bdi dir="auto">{props.source.detail}</bdi></div></Show>
   </div>
 
-const DeskStart = (props: { desk: ReturnType<typeof createDeskSession>; directory?: string }) =>
-  <div class="desk-start">
-    <Show when={props.desk.status() === "checking"}><p class="home-muted">Loading chat…</p></Show>
-    <Show when={props.desk.status() === "unavailable"}><p class="home-warning">Could not load the chat. <button class="desk-button" onClick={() => void props.desk.verify()}>Check again</button></p></Show>
-    {/* Confirm resends the identical create; Core returns the existing conversation if the first one landed. */}
-    <Show when={props.desk.status() === "unconfirmed"}><p class="home-warning">Chat start not confirmed. <button class="desk-button" onClick={() => void props.desk.confirm()}>Confirm start</button></p></Show>
-    <Show when={props.desk.status() === "missing"}><p class="home-warning">The saved chat no longer exists. <button class="desk-button" onClick={() => props.desk.forget()}>Clear</button></p></Show>
-    <Show when={props.desk.status() === "none" || props.desk.status() === "creating"}>
-      <button class="desk-button home-primary" disabled={!props.directory || props.desk.status() === "creating"} onClick={() => props.directory && void props.desk.start(props.directory)}>
-        {props.desk.status() === "creating" ? "Starting…" : "Start chat"}</button>
-      <p class="home-source">Read-only, in <bdi dir="ltr">{props.directory ?? "unknown"}</bdi></p>
-    </Show>
-  </div>
-
 // Rows are buttons, so the agent is named without a link; the selected header links it.
 const RowAgent = (props: { record: AttentionRecord }) => {
   const agentFor = useRequestAgent()
   const agent = () => agentFor(props.record)
   return <bdi dir="auto" class="desk-item-agent" data-named={agent().named ? "true" : undefined} title={agent().session}>{agent().label}</bdi>
-}
-
-const CHAT_HIDDEN = "es-app:front-desk:chat-hidden"
-const NARROW = "(max-width: 900px)"
-
-/** The desk conversation. Beside a selected item or surface it can fold to a rail (a bottom bar on
- * narrow windows, which opens it as a sheet). It stays mounted while folded, so the draft, caret,
- * scroll position, pending sends and a dictation target all survive. */
-const DeskChat = (props: { desk: ReturnType<typeof createDeskSession>; directory?: string; context: () => ContextPart[]; beside: boolean }) => {
-  const dashboard = useDashboard()
-  const [hidden, setHidden] = createSignal(localStorage.getItem(CHAT_HIDDEN) === "1")
-  const [sheet, setSheet] = createSignal(false)
-  const [width, setWidth] = createSignal(0)
-  const [replied, setReplied] = createSignal(false)
-  // With nothing selected the chat is the page, so the fold applies only beside a selection.
-  const folded = () => hidden() && props.beside
-  const target = () => props.desk.status() === "ready" ? props.desk.pointer() : undefined
-  const status = () => { const current = target(); return current ? dashboard.activity.status(current.session) ?? "" : "" }
-  const working = () => ["busy", "retry"].includes(status())
-  const draft = () => { const current = target(); if (!current) return false; const task = getComposer(current.session, current.directory).state.task; return !!task.text.trim() || task.images.length > 0 }
-  const recording = () => { const current = target(); return !!current && dictation.state.phase !== "idle" && dictation.state.target?.sessionID === current.session && dictation.state.target?.directory === current.directory }
-  // A turn that ends while folded is a reply the reader has not seen.
-  createEffect(on(working, (now, before) => { if (before && !now && folded()) setReplied(true) }))
-  createEffect(on(() => props.beside, beside => { if (!beside) setSheet(false) }))
-  let section: HTMLElement | undefined
-  let rail: HTMLButtonElement | undefined
-  createEffect(() => { if (section) section.inert = folded() && !sheet() })
-  const store = (value: boolean) => { setHidden(value); try { localStorage.setItem(CHAT_HIDDEN, value ? "1" : "0") } catch { /* stays for this page */ } }
-  const hide = () => {
-    if (sheet()) return setSheet(false)
-    const focused = !!section?.contains(document.activeElement)
-    // Keep the folded chat at its laid-out width so its text does not rewrap and move the scroll anchor.
-    setWidth(section?.getBoundingClientRect().width ?? 0)
-    setReplied(false)
-    store(true)
-    if (focused) queueMicrotask(() => rail?.focus())
-  }
-  const show = () => {
-    const fromRail = document.activeElement === rail
-    if (matchMedia(NARROW).matches) setSheet(true)
-    else store(false)
-    setReplied(false)
-    if (fromRail) requestAnimationFrame(() => section?.querySelector<HTMLTextAreaElement>(".desk-chat textarea")?.focus())
-  }
-  return <>
-    <section ref={section} class="desk-chat" classList={{ "desk-chat-folded": folded() && !sheet(), "desk-chat-sheet": sheet() }}
-      style={folded() && width() ? { "--chat-width": `${width()}px` } : undefined} aria-label="Front desk conversation">
-      <Show when={props.desk.error()}><div class="home-warning" role="alert">{props.desk.error()}</div></Show>
-      <Show when={target()} keyed fallback={<DeskStart desk={props.desk} directory={props.directory} />}>
-        {current => <SessionView sessionID={current.session} directory={current.directory} embedded context={props.context} onSent={props.desk.sent}
-          headerStart={<Show when={props.beside}><button class="header-icon desk-chat-hide" aria-label={sheet() ? "Close chat" : "Hide chat"} title={sheet() ? "Close chat" : "Hide chat"}
-            onClick={hide}><Icon name="chevron-down" size="small" /></button></Show>} />}
-      </Show>
-    </section>
-    <Show when={folded() && !sheet()}>
-      {/* The whole rail expands the chat; the dots say only what is true right now. */}
-      <div class="desk-chat-rail" onClick={show}>
-        <button ref={rail} class="desk-chat-show" aria-label="Show chat" title="Front desk chat" onClick={event => { event.stopPropagation(); show() }}>
-          <Glyph name="comment-discussion" /><span class="desk-chat-rail-label">Chat</span>
-        </button>
-        <Show when={working()}><span class="desk-chat-dot" data-dot="working" role="img" aria-label="Chat agent working" /></Show>
-        <Show when={replied()}><span class="desk-chat-dot" data-dot="reply" role="img" aria-label="New reply" /></Show>
-        <Show when={draft()}><span class="desk-chat-dot" data-dot="draft" role="img" aria-label="Unsent draft" /></Show>
-        <Show when={recording()}><span class="desk-chat-dot" data-dot="recording" role="img" aria-label="Dictating into this chat" /></Show>
-      </div>
-    </Show>
-  </>
 }
 
 /** A decision no longer waiting: the same explainer the human saw when answering (the brief recorded on the

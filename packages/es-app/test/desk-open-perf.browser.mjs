@@ -85,12 +85,12 @@ try {
   rows.at(-1).requests = coldRequests
   rows.at(-1).desk_message_reads = fixture.calls.filter((call) => call.method === "GET" && call.path === "/session/ses_a/message").length
   if (process.env.DEBUG_READS) console.log("READS", JSON.stringify(fixture.calls.filter((call) => call.method === "GET" && call.path === "/session/ses_a/message").map((call) => `${call.limit}/${call.before ?? ""}`)))
-  // Revisit: Agents mode, then back to Front desk.
-  await page.locator(".mode-tab", { hasText: "Agents" }).first().click()
+  // Revisit: navigate to Agent map, then back to Decisions; the chat stays mounted.
+  await page.locator('a.nav-entry[href="/agents"]').click()
   await page.waitForTimeout(1500)
   fixture.calls.length = 0
   const start = await page.evaluate(() => performance.now())
-  await page.locator(".mode-tab").first().click()
+  await page.locator('a.nav-entry[aria-label^="Decisions & inbox"]').click()
   await measure("revisit", start)
   rows.at(-1).requests = fixture.calls.length
   rows.at(-1).desk_message_reads = fixture.calls.filter((call) => call.method === "GET" && call.path === "/session/ses_a/message").length

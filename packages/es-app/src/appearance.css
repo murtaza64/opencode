@@ -181,3 +181,35 @@
 :root .session-info .todo-list li[data-status="pending"] { color: var(--subtext1); }
 :root .session-info .todo-list li:is([data-status="completed"], [data-status="cancelled"]) { color: var(--overlay0); }
 :root .session-info .todo-list li[data-status="completed"] .todo-glyph { color: var(--green); }
+
+/* Persistent-nav layout: [left nav | main | Front desk companion]. */
+:root .nav-entries { display: grid; padding-block: 4px 6px; border-block-end: 1px solid var(--surface1); margin-block-end: 6px; }
+:root .nav-entry { position: relative; width: 100%; font: inherit; font-size: 13px; text-align: start; background: transparent; border: 0; cursor: pointer; }
+:root .nav-entry .glyph { color: var(--subtext0); margin-inline-end: 2px; }
+:root .nav-entry.active, :root .nav-entry[aria-pressed=true] { color: var(--text); }
+:root .nav-entry.active { background: var(--selected); }
+:root .nav-entry[aria-pressed=true] .glyph { color: var(--accent); }
+:root .nav-entry .nav-count { position: static; margin-inline-start: auto; }
+:root .nav-entry .nav-busy { margin-inline-start: auto; inline-size: 7px; block-size: 7px; }
+:root .nav-entries.compact { justify-items: center; }
+:root .nav-entries.compact .nav-entry { justify-content: center; padding-inline: 0; }
+:root .nav-entries.compact .nav-count { position: absolute; inset-block-start: 0; inset-inline-end: 4px; }
+:root .nav-entries.compact .nav-busy { position: absolute; inset-block-end: 4px; inset-inline-end: 8px; }
+.desk-companion { --companion-width: clamp(320px, 26vw, 380px); flex: none; position: relative; box-sizing: border-box; inline-size: var(--companion-width); block-size: 100%; min-height: 0; overflow: hidden; background: var(--base); }
+.desk-companion-in { position: absolute; inset-block: 0; inset-inline-start: 0; inline-size: var(--companion-width); box-sizing: border-box; border-inline-start: 1px solid var(--surface1); display: flex; flex-direction: column; }
+.desk-companion-in > .session-page { flex: 1; min-height: 0; height: auto; padding: 0; --chat-gutter: 14px; }
+/* Closed: zero width but still laid out at its own width inside, so text never rewraps and scroll holds. */
+.desk-companion.closed { inline-size: 0; visibility: hidden; }
+.desk-companion.sheet:not(.closed) { position: fixed; inset: var(--native-header-height, 0px) 0 0; z-index: 30; inline-size: auto; }
+.desk-companion.sheet.closed { position: fixed; block-size: 0; }
+.desk-companion.sheet .desk-companion-in { inline-size: 100%; }
+.desk-companion.overlay:not(.closed) { position: fixed; inset-block: var(--native-header-height, 0px) 0; inset-inline-end: 0; z-index: 30; inline-size: 380px; --companion-width: 380px; box-shadow: 0 0 24px color-mix(in srgb, var(--crust) 60%, transparent); }
+.desk-companion.overlay.closed { position: fixed; }
+/* Decisions & inbox: queue column + selected item. */
+:root .desk-grid, :root .desk-has-selection .desk-grid { grid-template-columns: clamp(220px, 20vw, 320px) minmax(0, 1fr); }
+.desk-idle { display: grid; place-items: center; font-size: 12px; }
+/* The app-wide background-read status sits at the nav block's corner, not on its own row. */
+:root .nav-entries { position: relative; }
+:root .nav-entries > .backend-status { position: absolute; inset-block-end: 8px; inset-inline-end: 8px; }
+:root .nav-entries > .host-badge, :root .nav-entries > .host-switch { justify-self: start; margin-inline-start: 14px; }
+:root .nav-entries > .backend-status ~ .nav-entry { padding-inline-end: 28px; }

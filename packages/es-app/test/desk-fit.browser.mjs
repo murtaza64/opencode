@@ -21,7 +21,9 @@ const openDesk = async ({ width, height, userAgent, rtl = false }) => {
   page.on("pageerror", (error) => errors.push(error.message))
   await page.goto(preview.url, { waitUntil: "domcontentloaded", timeout: 90_000 })
   // A cold Vite dependency optimization can delay the first render.
+  // Below the docked width the chat floats over the view and starts closed; open it once the item is selected.
   await page.locator('.desk-item[data-desk-item="attention:fixture:decision_1"]').click({ timeout: 90_000 })
+  if (await page.locator(".desk-companion.closed").count()) await page.locator('[data-nav="front-desk"]').click()
   await expect(page.locator(".desk-chat textarea")).toBeVisible()
   if (rtl) await page.evaluate(() => { document.documentElement.dir = "rtl" })
   return { page, errors, close: () => context.close() }
@@ -35,20 +37,25 @@ const reachable = (locator) => locator.evaluate((el) => {
   return { bottom: Math.round(box.bottom), viewport: innerHeight, hit: !!hit && (hit === el || el.contains(hit)) }
 })
 const expectFits = async (name, page) => {
-  const desk = await page.locator(".desk").evaluate((el) => ({ bottom: Math.round(el.getBoundingClientRect().bottom), viewport: innerHeight }))
+  const desk = await page.locator(".desk").evaluate(el => ({ bottom: Math.round(el.getBoundingClientRect().bottom), viewport: innerHeight }))
   expect(desk.bottom, `${name}: desk ends inside the window`).toBeLessThanOrEqual(desk.viewport)
   for (const [part, locator] of [
     ["queue", page.locator(".desk-queue .desk-sources-all > summary")],
     ["selected item", page.locator(".desk-evidence :is(button, summary, a)").last()],
-    ["composer", page.locator(".desk-chat textarea")],
-    ["composer actions", page.locator(".desk-chat .prompt-box button").last()],
+    ["composer", page.locator(".desk-companion textarea")],
+    ["composer actions", page.locator(".desk-companion .prompt-box button").last()],
   ]) {
+    if (part === "queue" || part === "selected item") {
+      // A full-screen sheet covers the nav; it closes from its own header.
+      if (await page.locator(".desk-companion.sheet:not(.closed)").count()) await page.getByRole("button", { name: "Close Front desk chat" }).click()
+      else if (await page.locator(".desk-companion.overlay:not(.closed)").count()) await page.locator('[data-nav="front-desk"]').click()
+    } else if (await page.locator(".desk-companion.closed").count()) await page.locator('[data-nav="front-desk"]').click()
     const result = await reachable(locator)
     expect(result, `${name}: last ${part} control is reachable`).toMatchObject({ hit: true })
     expect(result.bottom, `${name}: last ${part} control ends inside the window`).toBeLessThanOrEqual(result.viewport)
   }
-  await page.locator(".desk-chat textarea").click()
-  await expect(page.locator(".desk-chat textarea"), `${name}: composer takes a click`).toBeFocused()
+  await page.locator(".desk-companion textarea").click()
+  await expect(page.locator(".desk-companion textarea"), `${name}: composer takes a click`).toBeFocused()
 }
 
 try {

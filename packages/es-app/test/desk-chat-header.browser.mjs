@@ -21,6 +21,9 @@ const openDesk = async ({ width, height, userAgent, rtl = false }) => {
   page.on("pageerror", (error) => errors.push(error.message))
   await page.goto(preview.url, { waitUntil: "domcontentloaded", timeout: 90_000 })
   // A cold Vite dependency optimization can delay the first render.
+  await expect(page.locator(".desk-companion")).toBeAttached({ timeout: 90_000 })
+  // Below the docked width the chat floats and starts closed; open it from the nav.
+  if (width < 1200) await page.locator('[data-nav="front-desk"]').click()
   await expect(page.locator(".desk-chat textarea")).toBeVisible({ timeout: 90_000 })
   if (rtl) await page.evaluate(() => { document.documentElement.dir = "rtl" })
   return { page, errors, close: () => context.close() }
@@ -34,16 +37,15 @@ const layout = (page) => page.evaluate(() => {
     return !!hit && (hit === el || el.contains(hit))
   }
   const visible = (el) => el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0
-  const chat = document.querySelector(".desk-chat")
-  const chatHeaders = [...document.querySelectorAll(".topbar")].filter((el) => visible(el) && el.querySelector("[aria-label=Find]"))
-  // Narrow windows stack the chat below the queue and selection; scroll to it as a reader would.
-  chatHeaders[0]?.scrollIntoView({ block: "nearest" })
+  const chat = document.querySelector(".desk-companion")
+  const chatHeaders = [...chat.querySelectorAll(".topbar")].filter((el) => visible(el) && el.querySelector("[aria-label=Find]"))
   const header = document.querySelector(".native-header")
   const headerControls = header ? [...header.querySelectorAll("button, select, a, input")].filter(visible) : []
   return {
     chat: rect(chat),
     chatHeaders: chatHeaders.map(rect),
     find: chatHeaders.map((el) => hittable(el.querySelector("[aria-label=Find]"))),
+    close: chatHeaders.map((el) => hittable(el.querySelector(".desk-chat-hide"))),
     header: header && rect(header),
     // Anything drawn below the window header's bottom edge spills over the page.
     spill: header ? [...header.querySelectorAll("*")].filter(visible).filter((el) => el.getBoundingClientRect().bottom > header.getBoundingClientRect().bottom + 1).map((el) => `${el.tagName.toLowerCase()}.${el.className}`) : [],
@@ -59,6 +61,7 @@ const expectContained = async (name, page) => {
   expect(box.right, `${name}: chat header ends inside the chat pane`).toBeLessThanOrEqual(result.chat.right)
   expect(box.top, `${name}: chat header is below the pane top`).toBeGreaterThanOrEqual(result.chat.top)
   expect(result.find, `${name}: chat tools are clickable`).toEqual([true])
+  expect(result.close, `${name}: chat close is clickable`).toEqual([true])
   expect(result.spill, `${name}: window header keeps one row`).toEqual([])
   expect(result.blocked, `${name}: window header controls are clickable`).toEqual([])
 }
@@ -73,8 +76,10 @@ try {
   ]) {
     const desk = await openDesk(options)
     await expectContained(`${name}, nothing selected`, desk.page)
+    if (options.width <= 900) await desk.page.getByRole("button", { name: "Close Front desk chat" }).click()
     await desk.page.locator('.desk-item[data-desk-item="attention:fixture:decision_1"]').click()
     await expect(desk.page.getByRole("region", { name: "Selected item" })).toBeVisible()
+    if (options.width <= 900) await desk.page.locator('[data-nav="front-desk"]').click()
     await expectContained(`${name}, item selected`, desk.page)
     expect(desk.errors).toEqual([])
     await desk.close()

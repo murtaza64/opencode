@@ -31,7 +31,7 @@ try {
     if (rtl) await context.addInitScript(() => document.addEventListener("DOMContentLoaded", () => { document.documentElement.dir = "rtl" }))
     const page = await context.newPage()
     page.on("pageerror", error => errors.push(error.message))
-    const queue = page.getByRole("complementary", { name: "Desk queue" })
+    const queue = page.getByRole("complementary", { name: "Decisions and inbox" })
     const row = title => queue.locator(".desk-item").filter({ hasText: title })
     // A fresh preview optimizes dependencies on first load; allow for a cold start.
     await page.goto(preview.url, { timeout: 120_000 })

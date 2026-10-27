@@ -25,7 +25,8 @@ import { TicketTip, wrapTicketRefs } from "./ticket-refs"
 import { SessionRefs, wrapSessionRefs } from "./session-mention-dom"
 import { installSidebarKeys, leftOpen } from "./ui"
 import { installAppLinks, installInkLinks } from "./link-url"
-import { modeOf, trackModes } from "./components/mode-switch"
+import { trackModes } from "./components/mode-switch"
+import { DeskChatProvider, DeskCompanion } from "./desk-companion"
 import { installAppearance } from "./appearance"
 import { startPerfTelemetry } from "./perf-telemetry"
 
@@ -39,8 +40,6 @@ function Providers(props: ParentProps) {
   onMount(() => onCleanup(installAppLinks(navigate)))
   const location = useLocation()
   trackModes()
-  // Front desk brings its own sidebar (the queue); Agents mode keeps the session sidebar.
-  const agents = () => modeOf(location.pathname) === "agents"
   let shellEl: HTMLDivElement | undefined
   // ticket refs everywhere in the shell (transcript, sidebar, panels):
   // rAF-debounced since streaming produces mutation bursts, and the wrap
@@ -91,15 +90,19 @@ function Providers(props: ParentProps) {
             <DashboardProvider>
               <BriefsProvider>
               <DeskQueueProvider>
+              <DeskChatProvider>
               <div class="shell" ref={shellEl}>
-                <Show when={agents()}><Sidebar /></Show>
-                <Show when={agents() && leftOpen()}>
+                {/* One persistent left nav on every view; the Front desk chat is a companion pane. */}
+                <Sidebar />
+                <Show when={leftOpen()}>
                   <ResizeHandle side="left" />
                 </Show>
                 <div class="content">{props.children}</div>
+                <DeskCompanion />
                 <TicketTip container={() => shellEl} />
                 <SessionRefs container={() => shellEl} />
               </div>
+              </DeskChatProvider>
               </DeskQueueProvider>
               </BriefsProvider>
             </DashboardProvider>

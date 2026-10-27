@@ -164,7 +164,7 @@ const browser = await chromium.launch({ channel: "chrome", headless: true })
 const open = async (viewport, id, rtl = false, folded = false) => {
   const context = await browser.newContext({ viewport })
   // Init scripts also run in the sandboxed brief frames, which have no storage.
-  await context.addInitScript(folded => { try { localStorage.setItem("es-app-all-projects", "true"); localStorage.setItem("es-app:front-desk:auto-prepare", "off"); localStorage.setItem("es-app:front-desk:chat-hidden", folded ? "1" : "0") } catch {} }, folded)
+  await context.addInitScript(folded => { try { localStorage.setItem("es-app-all-projects", "true"); localStorage.setItem("es-app:front-desk:auto-prepare", "off"); localStorage.setItem("es-app:companion:work", folded ? "0" : "1") } catch {} }, folded)
   await context.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
   const page = await context.newPage()
   // A cold dev server on a busy host can take minutes for the first load; later waits get headroom too.
@@ -190,7 +190,7 @@ try {
   } else {
     // 1. Storage probe: question, short context, the scope/flow diagram, consequence per option.
     {
-      const { page, card } = await open({ width: 1440, height: 1000 }, "probe")
+       const { page, card } = await open({ width: 1440, height: 1000 }, "probe", false, true)
       await expect(card.locator("h3.home-question")).toHaveText("Run a read-only test of whether storage reads cause the CPU slowdown?", { timeout: 120_000 })
       await expect(card.locator(".home-request-line")).toContainText("Request: Worker CPU: authorize the read-only storage comparison?")
       const frame = card.locator(".desk-visual iframe")
@@ -255,7 +255,8 @@ try {
       console.log("PALETTE switch recolours the open drawing in place (roles, highlights, CVD-gated status), same size, back to app colours when removed")
 
       // More detail on the same item: one desk message bound to the revision; draft and selection kept.
-      await page.getByRole("button", { name: "Start chat" }).click()
+       await page.locator('[data-nav="front-desk"]').click()
+       await page.getByRole("button", { name: "Start chat" }).click()
       const editor = page.locator(".desk-chat .prompt-box textarea")
       await editor.fill("draft I am still writing")
       const asks = []
@@ -275,7 +276,7 @@ try {
     }
     // 2. Reply to a person: where and who first, the exact reply above the action.
     {
-      const { page, card } = await open({ width: 1440, height: 1000 }, "reply")
+       const { page, card } = await open({ width: 1440, height: 1000 }, "reply", false, true)
       await expect(card.locator("h3.home-question")).toHaveText("Post this reply to Jordan on the GitHub review?", { timeout: 120_000 })
       const conversation = card.locator(".desk-conversation")
       await expect(conversation.locator(".desk-thread-where")).toHaveText("GitHub review · acme/etl-loader #143 · workbench.yaml:38 ↗")
@@ -315,7 +316,7 @@ try {
     }
     // 3. First screen: a picture of each option is the option.
     {
-      const { page, card } = await open({ width: 1440, height: 1000 }, "landing")
+       const { page, card } = await open({ width: 1440, height: 1000 }, "landing", false, true)
       await expect(card.locator("h3.home-question")).toHaveText("What should someone see first when they open a workspace?", { timeout: 120_000 })
       await expect(card.locator(".home-option-sketch iframe")).toHaveCount(3)
       // A plain label leads each option; the producer's exact label stays the radio's name.
@@ -390,17 +391,22 @@ try {
       await expect(card.getByRole("radio")).toHaveCount(2)
       console.log("HONEST incomplete brief -> plain radios + request as written")
     }
-    // Chat folded at 1440: the landscape layout puts the picture at inline-start and the question,
+    // Companion closed at 1440: the landscape layout puts the picture at inline-start and the question,
     // options and Send together at inline-end.
     for (const id of ["probe", "landing", "reply"]) {
-      const { page, card } = await open({ width: 1440, height: 1000 }, id, false, true)
-      await expect(card.locator("h3.home-question")).toBeVisible({ timeout: 120_000 })
+       const { page, card } = await open({ width: 1440, height: 1000 }, id, false, true)
+       await expect(card.locator("h3.home-question")).toBeVisible({ timeout: 120_000 })
+       await expect(page.locator(".desk-companion.closed")).toHaveCount(1)
+       await expect(page.locator(".desk-companion")).toHaveAttribute("aria-hidden", "true")
       const question = await card.locator(".home-decision-question").boundingBox()
       const explain = await card.locator(".home-decision-explain").boundingBox()
       const act = await card.locator(".home-decision-act").boundingBox()
       // Picture options are the options: they spread across the full width instead of a side column.
       // The question heads the explainer column; the options and Send sit beside it at the same top.
-      if (id === "landing") assert(question && act && act.width > 900 && act.y > question.y, JSON.stringify({ question, act }))
+       if (id === "landing") {
+         const evidence = await page.locator(".desk-evidence").boundingBox()
+         assert(question && act && evidence && act.width >= evidence.width - 80 && act.y > question.y, JSON.stringify({ question, act, evidence }))
+       }
       else assert(question && explain && act && question.x >= explain.x && question.x + question.width <= explain.x + explain.width + 1 && act.x >= explain.x + explain.width && Math.abs(act.y - explain.y) < 2, JSON.stringify({ question, explain, act }))
       const bottom = await sendBottom(card)
       assert(bottom && bottom <= 1000, `${id} folded Send bottom ${bottom}`)
