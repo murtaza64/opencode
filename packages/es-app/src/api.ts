@@ -109,6 +109,30 @@ const sharedPage = async (id: string, directory: string, limit: number, before: 
   }
 }
 
+export type UsageTokens = { input: number; output: number; reasoning: number; cache: { read: number; write: number } }
+export type UsageLimit = { limit?: number; remaining?: number; reset?: string }
+/** GET /experimental/usage/daily: estimated spend per local day on this host (not provider billing). */
+export type UsageDaily = {
+  estimate: true
+  basis: string
+  host: string
+  observedAt: string
+  offsetMinutes: number
+  coverage: { scope: string; liveSince?: string; backfilled: boolean }
+  /** Newer Cores: `cost` is null when nothing on the day is priced; `coverage` and `complete` say why. */
+  days: {
+    day: string
+    cost: number | null
+    complete?: boolean
+    unpricedModels?: number
+    models: { provider: string; model: string; cost: number | null; coverage?: "priced" | "missing-rate" | "no-usage"; tokens: UsageTokens }[]
+  }[]
+  rateLimits: {
+    source: string
+    providers: { provider: string; observedAt: string; requests?: UsageLimit; tokens?: UsageLimit; inputTokens?: UsageLimit; outputTokens?: UsageLimit }[]
+  }
+}
+
 export const oc = {
   // The body is Core's create body. A client-chosen id makes a lost response reconcilable.
   createSession: async (directory: string, body: SessionCreateBody = {}): Promise<Session> => {
@@ -262,6 +286,14 @@ export const oc = {
   abort: async (id: string, directory: string) => {
     const res = await fetch(`/oc/session/${id}/abort?${q(directory)}`, { method: "POST" })
     if (!res.ok) throw new Error(`abort failed: HTTP ${res.status} ${await res.text()}`)
+  },
+
+  // undefined = this Core predates the usage route (404 or the HTML app page); the page says so.
+  usageDaily: async (days: number, signal?: AbortSignal): Promise<UsageDaily | undefined> => {
+    // Days are local: the offset is east-positive minutes, the inverse of getTimezoneOffset().
+    const res = await fetch(`/oc/experimental/usage/daily?days=${days}&offsetMinutes=${-new Date().getTimezoneOffset()}`, { signal })
+    if (res.status === 404 || !res.headers.get("content-type")?.includes("application/json")) return undefined
+    return json<UsageDaily>(res)
   },
 
   // undefined = this Core predates failure tracking; the feature stays hidden.

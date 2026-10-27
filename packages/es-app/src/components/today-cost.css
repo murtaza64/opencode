@@ -1,0 +1,12 @@
+.today-cost { display: inline-flex; align-items: baseline; gap: 5px; white-space: nowrap; flex-shrink: 0; cursor: default; }
+.today-cost-label { font-size: 11px; color: var(--subtext0); }
+.today-cost-amount { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.today-cost-approx { color: var(--subtext0); font-weight: 400; }
+.today-cost[data-band=low] .today-cost-amount { color: var(--green); }
+.today-cost[data-band=mid] .today-cost-amount { color: var(--text); }
+.today-cost[data-band=high] .today-cost-amount { color: var(--peach); }
+.today-cost[data-stale] .today-cost-amount { color: var(--subtext0); }
+/* Web: the sidebar's top row; the badge sits at its inline end. The native title bar already pushes it there. */
+.sidebar-top .today-cost { margin-inline-start: auto; padding-inline-end: 2px; }
+/* The title bar drags the window; the badge is read-only text, so it keeps dragging but shows its tooltip. */
+.native-header .today-cost { -webkit-app-region: no-drag; }

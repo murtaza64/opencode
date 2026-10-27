@@ -35,6 +35,7 @@ import type { ContextPart } from "../api"
 import { DeliverableList, SurfaceList, SurfaceView } from "../components/desk-surfaces"
 import { surfaceFromKey, surfaceKey } from "../surfaces"
 import { leftWidth } from "../ui"
+import { TodayCost } from "../components/today-cost"
 import "./home.css"
 
 /** Delay before the desk reads its chat's latest turn for memory changes. */
@@ -206,7 +207,7 @@ export default function Desk() {
     <div class="desk-grid" style={{ "--queue-width": `${leftWidth()}px` }}>
       <aside class="desk-queue" aria-label="Desk queue">
         <h1 class="sr-only">Front desk</h1>
-        <Show when={!nativeHeader}><div class="sidebar-top"><ProjectSelect /></div></Show>
+        <Show when={!nativeHeader}><div class="sidebar-top"><ProjectSelect /><TodayCost /></div></Show>
         <ModeSwitch />
         <Show when={!attention.operator()}><div class="home-login home-muted">Read-only: answers are off <button class="desk-button" title="This UI origin must be allowed by the attention server" onClick={() => attention.checkOperator().catch(() => undefined)}>Reconnect</button></div></Show>
         <Show when={attention.notice()}><div class="home-notice" role="status">{attention.notice()}<Show when={attention.pending()}><button class="desk-button" disabled={attention.writing()} onClick={() => void attention.retry()}>Retry same action</button></Show></div></Show>

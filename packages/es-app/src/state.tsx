@@ -21,6 +21,7 @@ import { pinSessionID } from "./session-pins"
 import { createCloudAgents } from "./cloud-agents"
 import { createSessionFailures } from "./session-failures"
 import { coalesced } from "./coalesced"
+import { touchTodayCost } from "./today-cost"
 import { clearBackend, describeFailure, reportBackend } from "./backend-status"
 import type { GlobalSession, SessionFailure } from "@opencode-ai/sdk/v2"
 import type { Event } from "@opencode-ai/sdk/v2"
@@ -257,7 +258,11 @@ export function DashboardProvider(props: ParentProps) {
   const activity = createSessionActivity(() => globalSessions() ?? [], refetchGlobal, {
     directories: relevantDirectories,
     sessionEvent,
-    observe: failures.observe,
+    // A finished turn may have added spend; the title-bar total re-reads (coalesced to once a minute).
+    observe: (event) => {
+      failures.observe(event)
+      if (event.type === "session.idle") touchTodayCost()
+    },
     reconnected: failures.schedule,
   })
   createEffect(() => {

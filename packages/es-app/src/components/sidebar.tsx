@@ -16,6 +16,7 @@ import { failureLabel } from "../session-failures"
 import { ringOnChange } from "../motion"
 import { Glyph } from "./icons"
 import { ModeSwitch } from "./mode-switch"
+import { TodayCost } from "./today-cost"
 
 /** Project scope, shared by both modes' sidebars. */
 export const ProjectSelect = (props: { onChange?: () => void }) => {
@@ -286,12 +287,15 @@ export default function Sidebar() {
       }
     >
       <nav class="sidebar" ref={setNavEl} style={{ width: `${leftWidth()}px` }}>
-        <Show when={!nativeHeader}><div class="sidebar-top">{projectControls()}</div></Show>
+        <Show when={!nativeHeader}><div class="sidebar-top">{projectControls()}<TodayCost /></div></Show>
         <ModeSwitch />
         {/* The map is Agents mode's default page; sessions open beneath it. */}
         <nav class="sidebar-actions" aria-label="Agents">
           <A href="/agents" end activeClass="active" class="nav-item board-link">
             <Glyph name="graph" />Agent map
+          </A>
+          <A href="/usage" end activeClass="active" class="nav-item usage-link">
+            <Glyph name="zap" />Usage
           </A>
           <NewSession />
         </nav>
