@@ -92,7 +92,7 @@
     display: none;
   }
 }
-.appearance-toggle { -webkit-app-region: no-drag; flex: none; margin-inline-start: auto; display: grid; place-items: center; inline-size: 28px; block-size: 28px; padding: 0; background: transparent; border-radius: 6px; }
+.appearance-toggle { -webkit-app-region: no-drag; flex: none; margin-inline-start: auto; display: grid; place-items: center; inline-size: 28px; block-size: 28px; padding: 0; background: transparent; }
 .appearance-toggle:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
 .appearance-swatch { inline-size: 14px; block-size: 14px; border-radius: 50%; background: conic-gradient(var(--accent), var(--pink), var(--green), var(--accent)); box-shadow: 0 0 0 1.5px var(--surface1); opacity: .55; }
 .appearance-toggle[aria-pressed=true] .appearance-swatch { opacity: 1; box-shadow: 0 0 0 1.5px var(--text); }
