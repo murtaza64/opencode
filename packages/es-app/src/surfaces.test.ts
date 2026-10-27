@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { deliverables, type Surface } from "./surfaces"
+import { deliverables, renewDelay, type Surface } from "./surfaces"
 
 const surface = (id: string, extra: Partial<Surface>): Surface => ({
   id, title: id, summary: null, kind: "path", owner: "Relay", lane: "orchestrator", editspace: "opencode",
@@ -26,4 +26,10 @@ test("a deliverable opened on this page is no longer new even before the dashboa
 
 test("surfaces from a dashboard without purposes are boards", () => {
   expect(deliverables([surface("relay-board", {})], new Set())).toEqual({ fresh: [], earlier: [] })
+})
+
+test("frame addresses are renewed a few minutes before they expire, never in a tight loop", () => {
+  expect(renewDelay(undefined, 0)).toBeUndefined()
+  expect(renewDelay(12 * 3600_000, 0)).toBe(12 * 3600_000 - 5 * 60_000)
+  expect(renewDelay(60_000, 0)).toBe(30_000)
 })

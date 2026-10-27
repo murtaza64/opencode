@@ -1,10 +1,10 @@
 /* Agent-owned surfaces in the Front Desk: a sidebar group above the queue and the selected
  * surface in the main panel. Content runs in the server-sandboxed frame; the desk renders
  * only the title, owner, update time and health that the registry reports. */
-import { createEffect, createResource, createSignal, For, Show } from "solid-js"
+import { createEffect, createResource, createSignal, For, onCleanup, Show } from "solid-js"
 import { A } from "@solidjs/router"
 import { ago, sessionHref } from "../state"
-import { surfaceAddress, surfaceKey, surfaceProblem, surfaceUnavailable, type Surface, type createSurfaces } from "../surfaces"
+import { renewDelay, surfaceAddress, surfaceKey, surfaceProblem, surfaceUnavailable, type Surface, type createSurfaces } from "../surfaces"
 import { Glyph } from "./icons"
 import "./desk-surfaces.css"
 
@@ -63,14 +63,22 @@ export const DeliverableList = (props: { surfaces: ReturnType<typeof createSurfa
 export const SurfaceView = (props: { id: string; surface?: Surface; checked?: number; onOpen?: (surface: Surface) => void; onRetry: () => void; onClose: () => void }) => {
   // Showing a deliverable is what marks it seen, so only a loaded, reachable one counts.
   createEffect(() => { const surface = props.surface; if (surface && !surfaceUnavailable(surface)) props.onOpen?.(surface) })
-  const [src, { refetch }] = createResource(() => props.id, surfaceAddress)
+  const [address, { refetch }] = createResource(() => props.id, surfaceAddress)
+  const src = () => address()?.src
+  // Re-mint the frame address before it expires; the frame remounts on the new address.
+  createEffect(() => {
+    const delay = renewDelay(address()?.expiresAt, Date.now())
+    if (delay === undefined) return
+    const timer = setTimeout(() => void refetch(), delay)
+    onCleanup(() => clearTimeout(timer))
+  })
   const [retries, setRetries] = createSignal(0)
   // Remount the frame on republish, on retry, and when an offline surface comes back.
   const frameKey = () => `${src() ?? ""}|${props.surface?.revision ?? 0}|${props.surface?.health.state}|${retries()}`
   const retry = () => {
     setRetries(retries() + 1)
     props.onRetry()
-    if (src.error) void refetch()
+    if (address.error) void refetch()
   }
   return <section class="desk-evidence desk-surface" aria-label="Surface">
     <div class="desk-evidence-head">
@@ -92,7 +100,7 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
         <p><bdi dir="auto">{surface().owner}</bdi> is not serving this surface right now{surface().health.last_ok_at ? `; last seen ${ago(surface().health.last_ok_at!)}` : ""}.</p>
         <button class="desk-button" onClick={retry}>Try again</button>
       </div>}>
-        <Show when={!src.error} fallback={<div class="desk-surface-state" role="alert"><p>Cannot open this surface: {String(src.error?.message ?? src.error)}</p><button class="desk-button" onClick={retry}>Try again</button></div>}>
+        <Show when={!address.error} fallback={<div class="desk-surface-state" role="alert"><p>Cannot open this surface: {String(address.error?.message ?? address.error)}</p><button class="desk-button" onClick={retry}>Try again</button></div>}>
           <Show when={src() ? frameKey() : undefined} keyed>{_key =>
             <iframe class="desk-surface-frame" title={surface().title} src={src()} referrerpolicy="no-referrer"
               sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" />}</Show>
