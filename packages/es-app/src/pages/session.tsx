@@ -54,6 +54,7 @@ import { completedTurns, messageSegments, planToolRuns, samePlan, sameSegments }
 import { isUserPrompt, promptPosition, promptTarget } from "../transcript-nav"
 import { restartMarkers } from "../restart-marker"
 import { anchorNote, anchorRange, parseAnchor, type MessageAnchor } from "../message-anchor"
+import { perfEvent, perfSpan } from "../perf-telemetry"
 
 // The provider catalog per directory, shared by session views for a few minutes so switching
 // sessions does not refetch it each time.
@@ -251,6 +252,14 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       setTodoUpdate({ messageID: live.data.message[sessionID]?.findLast((message) => message.role === "user")?.id, at: Date.now() })
   })
   const connected = () => !!session() && !live.loading() && !live.connectionError()
+  // Journal what opening this session costs: transcript shown, then input usable.
+  const opened = perfSpan("session.open", { sessionID, cached: live.loaded() })
+  let transcriptMs: number | undefined
+  createEffect(() => {
+    if (live.loaded() && transcriptMs === undefined) transcriptMs = Math.round(opened.elapsed())
+    if (connected()) opened.end("ok", { transcriptMs })
+  })
+  onCleanup(() => opened.end("left", { transcriptMs }))
   createEffect(() => {
     const current = session()
     if (current) composer.observeSessionModel(current)
@@ -551,7 +560,10 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   createEffect(() => {
     const kind = trouble()
     if (!kind) return setShownTrouble("")
-    const timer = setTimeout(() => setShownTrouble(kind), STATUS_DELAY_MS)
+    const timer = setTimeout(() => {
+      setShownTrouble(kind)
+      perfEvent("session.trouble", { sessionID, trouble: kind, error: backendError().slice(0, 160) })
+    }, STATUS_DELAY_MS)
     onCleanup(() => clearTimeout(timer))
   })
   const workState = createMemo(() => {

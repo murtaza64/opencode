@@ -8,6 +8,7 @@ import type { Message, Part, Session, SessionStatus, Todo } from "@opencode-ai/s
 import { oc } from "./api"
 import { createServerEvents, type ServerEvents } from "./event-source"
 import { anchorValid } from "./message-anchor"
+import { perfSpan, perfTimed } from "./perf-telemetry"
 
 export const TAIL = 80
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
@@ -153,13 +154,21 @@ export function createLiveSession(
       }
       if (disposed) return
       snapshotStarted = true
+      // Journal which of the snapshot reads holds the transcript back.
+      const timings: Record<string, number> = {}
+      const timed = <T>(name: string, read: Promise<T>) => perfTimed(read, (ms) => { timings[name] = ms })
+      const snapshot = perfSpan("session.snapshot", { sessionID, warm: loaded() })
       const [session, page, status, todos] = await Promise.all([
-        oc.session(sessionID, directory, signal),
-        oc.messagesPage(sessionID, directory, TAIL, undefined, signal),
-        oc.status(directory, signal),
+        timed("session", oc.session(sessionID, directory, signal)),
+        timed("messages", oc.messagesPage(sessionID, directory, TAIL, undefined, signal)),
+        timed("status", oc.status(directory, signal)),
         // Todos are auxiliary: a failed read keeps the last list, never the transcript.
-        oc.todos(sessionID, directory, signal).catch(() => undefined),
-      ])
+        timed("todos", oc.todos(sessionID, directory, signal)).catch(() => undefined),
+      ]).catch((failure: unknown) => {
+        snapshot.end(signal.aborted ? "aborted" : "failed", timings)
+        throw failure
+      })
+      snapshot.end("ok", { ...timings, messages: page.items.length })
       if (disposed) return
       const events = duringLoad!
       duringLoad = undefined

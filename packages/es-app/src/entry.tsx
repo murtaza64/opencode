@@ -25,6 +25,9 @@ import { installSidebarKeys, leftOpen, startDrag } from "./ui"
 import { installAppLinks, installInkLinks } from "./link-url"
 import { modeOf, trackModes } from "./components/mode-switch"
 import { installAppearance } from "./appearance"
+import { startPerfTelemetry } from "./perf-telemetry"
+
+startPerfTelemetry()
 
 function Providers(props: ParentProps) {
   onMount(() => onCleanup(installSidebarKeys()))

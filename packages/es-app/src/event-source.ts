@@ -1,4 +1,5 @@
 import { eventMuxPaths, eventProtocol, eventRecord } from "../event-protocol"
+import { perfEvent } from "./perf-telemetry"
 
 // Subscribers name the event type prefixes they reduce; the mux drops the rest.
 export type EventFilter = { types?: string[] }
@@ -84,8 +85,10 @@ export const createEventHub = (connect: () => WebSocket, capability: Promise<boo
     current.onerror = () => {
       if (socket === current) sources.forEach((entry) => entry.source.onerror?.(new Event("error")))
     }
-    current.onclose = () => {
+    current.onclose = (event) => {
       if (socket !== current) return
+      // Every subscriber sees this as an error; journal the cause (1013 = consumer fell behind).
+      perfEvent("events.closed", { code: event.code, reason: event.reason.slice(0, 120), subscribers: sources.size })
       clearTimeout(opening)
       opening = undefined
       socket = undefined

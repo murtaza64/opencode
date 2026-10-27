@@ -2,6 +2,7 @@ import { app, BaseWindow, BrowserWindow, dialog, Menu, nativeImage, session, she
 import path from "node:path"
 import { readFile, writeFile } from "node:fs/promises"
 import { serve } from "./server"
+import { PERF_DIR } from "./perf-log"
 import { createVoice, voiceTools } from "./voice"
 import { appRouteURL, externalURL, internalURL, pageNavigation, serviceHosts, serviceOrigins, startupMode, startupPlan, surfaceFrameURL } from "./policy"
 import { createTabs, TITLE_BAR_HEIGHT } from "./tabs"
@@ -95,6 +96,7 @@ const start = async () => {
       : undefined,
     renderer: app.isPackaged ? undefined : process.env.ES_DESKTOP_RENDERER,
     voice,
+    perfDir: PERF_DIR,
   })
   await writeFile(portFile, new URL(server.origin).port, { mode: 0o600 })
   // Each remote execution host gets its own keyed loopback listener on a stable saved port, so its
@@ -117,6 +119,7 @@ const start = async () => {
         appearance,
         // Host tabs show placement natively, so the page needs no switcher of its own.
         hostInfo: () => ({ id: host.id, label: host.label, remote: true, hosts: [] }),
+        perfDir: PERF_DIR,
       })
       await writeFile(file, new URL(listener.origin).port, { mode: 0o600 })
       return { ...host, server: listener }
