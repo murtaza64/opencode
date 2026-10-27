@@ -617,6 +617,20 @@ export const turn = Effect.fn("MessageV2.turn")(function* (input: { sessionID: S
   }
 })
 
+/** Messages with their parts by id, oldest first; ids that no longer exist are absent. */
+export const byIDs = Effect.fn("MessageV2.byIDs")(function* (input: { sessionID: SessionID; ids: readonly string[] }) {
+  if (input.ids.length === 0) return [] as WithParts[]
+  const { db } = yield* Database.Service
+  const rows = yield* db
+    .select()
+    .from(MessageTable)
+    .where(and(eq(MessageTable.session_id, input.sessionID), inArray(MessageTable.id, input.ids as MessageID[])))
+    .orderBy(asc(MessageTable.time_created), asc(MessageTable.id))
+    .all()
+    .pipe(Effect.orDie)
+  return yield* hydrate(db, rows)
+})
+
 export function compactedFilter() {
   const result = [] as WithParts[]
   const completed = new Set<string>()
