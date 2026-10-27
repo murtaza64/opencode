@@ -150,6 +150,8 @@ try {
   await expect(detail()).toContainText("orchestrator · delegation (submitted)")
   await expect(detail()).toContainText("Composer fixture · ses_a")
   await expect(detail().locator(".home-todo")).toContainText("Draw the project map")
+  await expect.poll(() => fixture.calls.filter((call) => call.path === "/api/current-work").length).toBeGreaterThan(0)
+  expect(fixture.calls.filter((call) => call.path === "/api/current-work").every((call) => call.generate === null)).toBe(true)
   await page.screenshot({ path: path.join(artifacts, "agent-map-ltr.png"), fullPage: true })
 
   // Filters: Events and Runtime.
