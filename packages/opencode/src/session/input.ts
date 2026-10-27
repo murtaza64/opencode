@@ -427,22 +427,19 @@ const make = Effect.gen(function* () {
   })
   const presented = Effect.fn("SessionInput.presented")(function* (sessionID: SessionID, messageIDs: MessageID[]) {
     if (!messageIDs.length) return
-    const rows = yield* db
-      .select()
-      .from(V1InputTable)
-      .where(
-        and(
-          eq(V1InputTable.session_id, sessionID),
-          eq(V1InputTable.state, "promoted"),
-          inArray(sql`json_extract(${V1InputTable.receipt}, '$.messageID')`, messageIDs),
-          sql`json_extract(${V1InputTable.receipt}, '$.timePresented') is null`,
-          sql`json_extract(${V1InputTable.payload}, '$.source.type') = 'editspace-mail'`,
-        ),
+    // Runs every runner step. The partial index holds only promoted, not-yet-presented mail inputs, so
+    // the lookup stays proportional to undelivered mail rather than the Session's whole input history.
+    // The planner would otherwise pick v1_session_input_pending_idx and parse every promoted receipt.
+    const wanted = new Set<string>(messageIDs)
+    const rows = (yield* db
+      .all<{ request_id: string; receipt: string }>(
+        sql`SELECT request_id, receipt FROM v1_session_input INDEXED BY v1_session_input_unpresented_mail_idx
+          WHERE session_id = ${sessionID} AND state = 'promoted' AND json_extract(receipt, '$.timePresented') IS NULL
+            AND json_extract(payload, '$.source.type') = 'editspace-mail'`,
       )
-      .all()
-      .pipe(Effect.orDie)
+      .pipe(Effect.orDie)).map((row) => ({ request_id: row.request_id, receipt: JSON.parse(row.receipt) as SessionV1.InputReceipt }))
     for (const row of rows) {
-      if (row.receipt.state !== "promoted") continue
+      if (row.receipt.state !== "promoted" || !wanted.has(row.receipt.messageID)) continue
       yield* reconcile(
         events.publish(SessionV1.Event.InputPresented, {
           sessionID,

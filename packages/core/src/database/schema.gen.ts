@@ -307,6 +307,9 @@ export default {
       yield* tx.run(
         `CREATE INDEX \`v1_session_input_pending_idx\` ON \`v1_session_input\` (\`session_id\`,\`state\`,\`admitted_seq\`);`,
       )
+      yield* tx.run(
+        `CREATE INDEX \`v1_session_input_unpresented_mail_idx\` ON \`v1_session_input\` (\`session_id\`) WHERE state = 'promoted' AND json_extract(receipt, '$.timePresented') IS NULL AND json_extract(payload, '$.source.type') = 'editspace-mail';`,
+      )
     })
   },
 } satisfies Omit<DatabaseMigration.Migration, "id">
