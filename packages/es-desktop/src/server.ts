@@ -12,6 +12,7 @@ import { surfaceProxy } from "../../es-app/surface-proxy"
 import { attentionRoute, localHost, remoteCookie, remoteSetCookie, remoteTargets, type HostInfo } from "../../es-app/remote-host"
 import type { Voice } from "./voice"
 import type { Appearance } from "./appearance"
+import { createPerfLog, routeOf } from "./perf-log"
 
 const csp =
   "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
@@ -81,6 +82,8 @@ export const serve = async (options: {
   appearance?: Appearance
   // A remote execution host (validated tailnet origin) in place of the loopback services.
   remote?: { id: string; origin: string }
+  // Local performance journal directory (renderer reports + slow proxied requests); off when unset.
+  perfDir?: string
   // The hosts this listener reports to the app, read per request once every listener is up.
   hostInfo?: () => HostInfo
 }) => {
@@ -104,6 +107,8 @@ export const serve = async (options: {
   const upstreams = new Set<ReturnType<typeof httpRequest>>()
   // Surface upstreams are loopback addresses on the dashboard's machine; never resolve a remote host's here.
   const surfaces = surfaceProxy({ dashboard: remote ? undefined : targets.es })
+  // Paired remote clients never write this machine's performance journal.
+  const perf = pairing || !options.perfDir ? undefined : createPerfLog({ dir: options.perfDir, host: remote?.id ?? "local" })
   const sameHost = (req: { headers: IncomingHttpHeaders }) =>
     req.headers.host === new URL(origin).host || (!!publicOrigin && req.headers.host === new URL(publicOrigin).host)
   const trusted = (value: string | undefined) => value === origin || (!!publicOrigin && value === publicOrigin)
@@ -200,6 +205,10 @@ export const serve = async (options: {
       if (remote) return finish(503, "Surfaces are not available on a remote host")
       return surfaces.address(req, res)
     }
+    if (url.pathname === "/__es/perf") {
+      if (!perf || url.search) return finish(404, "Not found")
+      return perf.receive(req, finish)
+    }
     if (/^\/__es\/voice(\/|$)/.test(url.pathname)) {
       if (!options.voice || pairing || url.search) return finish(404, "Not found")
       return voiceRoute(options.voice, req, url.pathname, origin, finish)
@@ -247,6 +256,8 @@ export const serve = async (options: {
         const kept = values?.filter(value => value.startsWith("es_attention_operator="))
         return kept?.length ? kept : undefined
       }
+      const timing = api ? perf?.proxy(req, res, `${api[1]}${routeOf(url.pathname.slice(api[1].length + 1))}`) : undefined
+      if (timing) res.on("close", () => timing.done())
       // Concatenate the path rather than resolving it: //host must never switch upstreams.
       const upstream = (target.startsWith("https:") ? httpsRequest : httpRequest)(
         `${target}${api ? url.pathname.slice(api[1].length + 1) || "/" : url.pathname}${url.search}`,
@@ -268,6 +279,8 @@ export const serve = async (options: {
             response.resume()
             return finish(502, '{"error":"Upstream redirect blocked"}', "application/json")
           }
+          timing?.headers(response.statusCode)
+          if (timing) response.on("data", (chunk: Buffer) => timing.data(chunk.length))
           const cookies = setCookie(response.headers["set-cookie"])
           res.writeHead(response.statusCode ?? 502, { ...proxyHeaders(response.headers), ...(cookies ? { "set-cookie": cookies } : {}) })
           response.on("error", () => res.destroy())

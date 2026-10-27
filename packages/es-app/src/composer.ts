@@ -14,6 +14,7 @@ import { composerStorage } from "./composer-storage"
 import type { ContextPart } from "./api"
 import { defaultImageCapability } from "./image-fit"
 import { createImageStore, type ImageStore } from "./image-store"
+import { perfEvent } from "./perf-telemetry"
 
 export type ComposerMode = "send" | "aside" | "queue" | "steer"
 export type ComposerAction = Exclude<ComposerMode, "send">
@@ -1034,6 +1035,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         return
       }
       if (error instanceof DOMException && error.name === "TimeoutError") timedOut.add(admission.payload.requestID)
+      perfEvent("input.unconfirmed", { sessionID, path: "input", error: message(error).slice(0, 160) })
       setState("admission", {
         status: "unknown",
         error: `Admission not confirmed: ${message(error)}. Reconcile before retrying.`,
@@ -1182,6 +1184,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           // unlocks, and the send is looked up by its ID whenever the session is reachable.
           // A confirmation clears the editor only if it still holds that restored draft.
           const restored = restoreSubmitted(buffer, { ...draft, model: submittedModel })
+          perfEvent("input.unconfirmed", { sessionID, path: "prompt", error: message(error).slice(0, 160) })
           setState("normalSubmission", {
             status: "unknown", error: message(error),
             ...(restored ? { draft: undefined, revision: state[buffer].revision } : {}),
