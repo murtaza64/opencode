@@ -15,6 +15,7 @@ import type { Connection } from "effect/unstable/sql/SqlConnection"
 import { classifySqliteError, SqlError } from "effect/unstable/sql/SqlError"
 import * as Statement from "effect/unstable/sql/Statement"
 import { Sqlite } from "./sqlite"
+import { Diagnostics } from "../diagnostics"
 
 const ATTR_DB_SYSTEM_NAME = "db.system.name"
 
@@ -185,7 +186,10 @@ const make = (options: Config) =>
         // @ts-ignore bun-types missing safeIntegers method, fixed in https://github.com/oven-sh/bun/pull/26627
         statement.safeIntegers(Context.get(fiber.context, Client.SafeIntegers))
         try {
-          return Effect.succeed((statement.all(...(params as any)) ?? []) as Array<Record<string, unknown>>)
+          const start = performance.now()
+          const rows = (statement.all(...(params as any)) ?? []) as Array<Record<string, unknown>>
+          Diagnostics.sql("writer", query, performance.now() - start, rows.length)
+          return Effect.succeed(rows)
         } catch (cause) {
           return Effect.fail(
             new SqlError({
@@ -206,7 +210,10 @@ const make = (options: Config) =>
         // @ts-ignore bun-types missing safeIntegers method, fixed in https://github.com/oven-sh/bun/pull/26627
         statement.safeIntegers(Context.get(fiber.context, Client.SafeIntegers))
         try {
-          return Effect.succeed((statement.values(...(params as any)) ?? []) as Array<unknown[]>)
+          const start = performance.now()
+          const rows = (statement.values(...(params as any)) ?? []) as Array<unknown[]>
+          Diagnostics.sql("writer", query, performance.now() - start, rows.length)
+          return Effect.succeed(rows)
         } catch (cause) {
           return Effect.fail(
             new SqlError({
