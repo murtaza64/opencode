@@ -397,10 +397,13 @@ const Canonical = (props: { item: DeskItem; live: boolean; detail: (question: st
   const job = useCompleteJob(() => props.item)
   // Documents the request names (a draft to send) let the exact text it would publish be shown verbatim.
   const [found] = createResource(() => props.item.record, readConversation)
+  // Plain getters, read only when the card needs them: a conditional JSX prop would compile to a memo that
+  // re-reads this card's item while it unmounts (after an answer) and aborts that update.
+  const briefJob = () => { const value = job(); return value ? { job: value.id, revision: value.meta.revision } : undefined }
+  const sends = () => { const value = brief(); return value ? { text: briefSends(value, props.item, found()?.documents), to: value.sendsTo, as: value.sendsAs } : undefined }
   return <div class="desk-canonical">
     <Show when={props.item.record}>{record => <AttentionDecision record={record()} attention={props.attention} prepared={brief()}
-      briefJob={job() ? { job: job()!.id, revision: job()!.meta.revision } : undefined}
-      sends={brief() ? { text: briefSends(brief()!, props.item, found()?.documents), to: brief()!.sendsTo, as: brief()!.sendsAs } : undefined} conversation={<RecordConversation record={record()} />}
+      briefJob={briefJob()} sends={sends()} conversation={<RecordConversation record={record()} />}
       brief={<PreparedBrief item={props.item} live={props.live} part="lead" />} briefVisual={<PreparedBrief item={props.item} live={props.live} part="visual" />} briefAfter={<PreparedBrief item={props.item} live={props.live} part="after" />}
       briefDetails={<PreparedBrief item={props.item} live={props.live} part="details" />} more={<MoreDetail ask={props.detail} />} />}</Show>
     <Show when={props.item.request?.kind === "permission" ? props.item.request : undefined}>{request =>
