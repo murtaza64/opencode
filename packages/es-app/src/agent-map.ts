@@ -40,7 +40,7 @@ export type MapInput = {
 }
 
 const day = 86_400_000
-export const sessionOwner = (owner: string) => /^(?:opencode:)?(ses_[\w-]+)$/.exec(owner)?.[1]
+export const sessionOwner = (owner: string) => /^(?:opencode:|es:)?(ses_[\w-]+)$/.exec(owner)?.[1]
 
 export const buildAgentMap = (input: MapInput): MapCluster[] => {
   const ref = (id: string, depth = 0): SessionRef => {
