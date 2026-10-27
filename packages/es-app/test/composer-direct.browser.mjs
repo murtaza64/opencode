@@ -7,7 +7,8 @@ const fixture = preview.fixture
 fixture.messages[1].info.tokens = { input: 200, output: 800, reasoning: 0, cache: { read: 0, write: 0 } }
 // Context usage counts completed turns only.
 fixture.messages[1].info.time.completed = 3
-const browser = await chromium.launch({ channel: "chrome", headless: true })
+const browser = await chromium.launch({ headless: true,
+  ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : { channel: "chrome" }) })
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
 await context.route("**/*", (route) =>
   new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort(),
@@ -29,7 +30,7 @@ const normal = () => fixture.calls.filter((call) => call.method === "POST" && ca
 const asides = () => fixture.calls.filter((call) => call.method === "POST" && call.path.endsWith("/aside"))
 await mkdir("artifacts/direct-composer", { recursive: true })
 try {
-  await page.goto(preview.url, { waitUntil: "domcontentloaded" })
+  await page.goto(preview.url, { waitUntil: "domcontentloaded", timeout: 180_000 })
   // Busy default: Steer is the one primary action; Queue and Aside wait in a closed menu.
   await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
   await expect(button("Steer").locator("kbd")).toHaveText("⌘↵")
@@ -214,13 +215,17 @@ try {
   await button("Delete").click()
   await expect(editor()).toHaveValue(draftBefore)
   await expect(button("Nudge")).toBeVisible()
+  // Nudge is native recovery (or labelled sourced input), never an invented user prompt.
+  const recovers = () => fixture.calls.filter((call) => call.method === "POST" && call.path.endsWith("/recover"))
   await button("Nudge").click()
-  await expect.poll(() => normal().length).toBe(2)
-  expect(normal().at(-1).body.parts[0].text).toContain("Resume where you left off")
+  await expect.poll(() => recovers().length).toBe(1)
+  expect(recovers()[0].body).toMatchObject({ sender: "human (Nudge)", reason: "human pressed Nudge" })
+  expect(recovers()[0].body.text).toContain("The human pressed Nudge")
+  expect(normal()).toHaveLength(1)
   await expect(editor()).toHaveValue(draftBefore)
   await expect(button("Nudge")).toBeEnabled()
   await editor().press("Control+Enter")
-  await expect.poll(() => normal().length).toBe(3)
+  await expect.poll(() => normal().length).toBe(2)
   expect(normal().at(-1).body.parts[0].text).toBe(draftBefore)
   expect(inputs()).toHaveLength(before)
   expect(asides()).toHaveLength(1)
@@ -237,7 +242,16 @@ try {
   await expect(page.getByRole("region", { name: "Message status", exact: true })).toHaveAttribute("data-status", "unknown")
   await expect(page.getByRole("button", { name: "Dismiss send status", exact: true })).toBeVisible()
   await expect(editor()).toHaveValue("uncertain normal message")
-  expect(normal()).toHaveLength(4)
+  expect(normal()).toHaveLength(3)
+  // A finished turn has nothing to recover: the nudge becomes labelled sourced input instead.
+  fixture.recoverOutcome = "complete"
+  const inputsBefore = inputs().length
+  const promptsBefore = normal().length
+  await button("Nudge").click()
+  await expect.poll(() => inputs().length).toBe(inputsBefore + 1)
+  expect(inputs().at(-1).body.source).toMatchObject({ type: "editspace-mail", kind: "nudge", sender: "human (Nudge)" })
+  expect(normal()).toHaveLength(promptsBefore)
+  fixture.recoverOutcome = undefined
   expect(errors).toEqual([])
   expect(fixture.unexpected).toEqual([])
   console.log(

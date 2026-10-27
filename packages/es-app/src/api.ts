@@ -153,6 +153,28 @@ export const oc = {
 
   agents: (directory: string): Promise<Agent[]> => fetch(`/oc/agent?${q(directory)}`).then(json<Agent[]>),
 
+  /** Reviewed recovery of an interrupted step (Core `POST /session/:id/recover`); typed system provenance, no fake user turn. */
+  recover: async (id: string, directory: string, body: { recoveryID: string; anchorMessageID: string; text: string; reason: string; sender: string }) => {
+    const res = await fetch(`/oc/session/${id}/recover?${q(directory)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) throw await httpError(res)
+    return (await res.json()) as { outcome: string }
+  },
+
+  /** Durable sourced input (Core `POST /session/:id/input`): labelled by kind, never shown as the human typing. */
+  sourcedInput: async (id: string, directory: string, input: { requestID: string; text: string; kind: string; sender: string }) => {
+    const res = await fetch(`/oc/session/${id}/input?${q(directory)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestID: input.requestID, delivery: "queue", text: input.text,
+        source: { type: "editspace-mail", id: input.requestID, sender: input.sender, recipient: id, kind: input.kind } }),
+    })
+    if (!res.ok) throw await httpError(res)
+  },
+
   prompt: async (
     session: Session,
     directory: string,

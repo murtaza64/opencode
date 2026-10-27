@@ -818,13 +818,24 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const nudge = async () => {
     const s = session()
     if (!s || nudgePhase() || aborting() || sending()) return
-    const model = composer.state.sessionModel ?? lastTurnModel() ?? undefined
     setError("")
     setNudgePhase("stopping")
     try {
       await oc.abort(sessionID, directory)
       setNudgePhase("resuming")
-      await oc.prompt(s, directory, "Resume where you left off. Reorient briefly and continue the outstanding work.", { model })
+      // A nudge is the app acting on the human's click, not words they typed: it goes through Core's
+      // native recovery (an interrupted step) or labelled sourced input (a finished turn), never a user prompt.
+      const id = crypto.randomUUID()
+      const text = "The human pressed Nudge: resume where you left off. Reorient briefly and continue the outstanding work."
+      const anchor = (await oc.messagesPage(sessionID, directory, 1)).items.at(-1)?.info.id
+      const outcome = anchor
+        ? (await oc.recover(sessionID, directory, { recoveryID: `nudge-${id}`, anchorMessageID: anchor, text,
+            reason: "human pressed Nudge", sender: "human (Nudge)" })).outcome
+        : "not-interrupted"
+      if (outcome === "complete" || outcome === "not-interrupted")
+        await oc.sourcedInput(sessionID, directory, { requestID: `nudge-${id}`, text, kind: "nudge", sender: "human (Nudge)" })
+      else if (outcome !== "scheduled" && outcome !== "duplicate")
+        throw new Error(`Core did not resume the session (${outcome})`)
       stick = true
       queueMicrotask(pin)
       void live.load().catch(() => {})
