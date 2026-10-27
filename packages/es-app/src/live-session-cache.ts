@@ -57,6 +57,9 @@ function evict() {
   }
 }
 
+/** The cached store for a session if one exists, without mounting or retaining it. */
+export const peekLiveSession = (sessionID: string, directory: string) => entries.get(`${sessionID}\u0000${directory}`)?.live
+
 /** Test seam: drop every unmounted store. */
 export function clearLiveSessions() {
   for (const [key, entry] of entries) {
