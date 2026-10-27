@@ -56,6 +56,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
 import { DatabaseReader } from "@opencode-ai/core/database/reader"
+import { SessionHistory } from "./history"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { eq } from "drizzle-orm"
@@ -1120,7 +1121,15 @@ const layer = Layer.effect(
     })
 
     const lastAssistant = Effect.fnUntraced(function* (sessionID: SessionID) {
-      const match = yield* sessions.findMessage(sessionID, (m) => m.info.role !== "user").pipe(Effect.orDie)
+      // Served from the incremental history window (fresh to the Session's durable sequence) so a drain's
+      // end does not hydrate the newest 50 messages on the writer connection.
+      const cached = yield* SessionHistory.newest(sessionID, (m) => m.info.role !== "user").pipe(
+        Effect.provideService(Database.Service, reader),
+      )
+      if (cached?.found) return cached.found
+      const match = cached
+        ? Option.none<SessionV1.WithParts>()
+        : yield* sessions.findMessage(sessionID, (m) => m.info.role !== "user").pipe(Effect.orDie)
       if (Option.isSome(match)) return match.value
       const msgs = yield* sessions.messages({ sessionID, limit: 1 }).pipe(Effect.orDie)
       if (msgs.length > 0) return msgs[0]
@@ -1141,7 +1150,7 @@ const layer = Layer.effect(
           yield* Effect.logInfo("loop", { "session.id": sessionID, step })
 
           yield* state.consume(sessionID)
-          let msgs = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
+          let msgs = yield* SessionHistory.load(sessionID).pipe(
             Effect.provideService(Database.Service, reader),
           )
 
@@ -1420,7 +1429,7 @@ const layer = Layer.effect(
       return yield* state.wake(
         sessionID,
         Effect.gen(function* () {
-          const history = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
+          const history = yield* SessionHistory.load(sessionID).pipe(
             Effect.provideService(Database.Service, reader),
           )
           const latest = MessageV2.latest(history)
@@ -1506,7 +1515,7 @@ const layer = Layer.effect(
           (yield* permission.list()).some((item) => item.sessionID === input.sessionID) ||
           (yield* questions.list()).some((item) => item.sessionID === input.sessionID)
         if (waiting) return { outcome: "running" as const }
-        const history = yield* MessageV2.filterCompactedEffect(input.sessionID).pipe(
+        const history = yield* SessionHistory.load(input.sessionID).pipe(
           Effect.provideService(Database.Service, reader),
         )
         const latest = MessageV2.latest(history)
@@ -1565,7 +1574,7 @@ const layer = Layer.effect(
           (yield* permission.list()).some((item) => item.sessionID === input.sessionID) ||
           (yield* questions.list()).some((item) => item.sessionID === input.sessionID)
         if (waiting) return { outcome: "running" as const }
-        const history = yield* MessageV2.filterCompactedEffect(input.sessionID).pipe(
+        const history = yield* SessionHistory.load(input.sessionID).pipe(
           Effect.provideService(Database.Service, database),
         )
         const now = Date.now()
