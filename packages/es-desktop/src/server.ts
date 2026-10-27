@@ -72,7 +72,8 @@ export const serve = async (options: {
   // Remote (Android) mode: listen on an explicit loopback/tailnet host and
   // authenticate with a pairing cookie instead of the native capability header.
   host?: string
-  pairing?: { code: string; codeFile?: string; maxAgeSeconds?: number }
+  // `code` as a function is read per check, so a rotated code takes effect without a restart.
+  pairing?: { code: string | (() => string); codeFile?: string; sshHost?: string; maxAgeSeconds?: number }
   // Paired gateway behind an HTTPS identity proxy (Tailscale Serve): the exact client-facing
   // origin, also accepted for Origin and Host checks. The proxy must be the only route in.
   publicOrigin?: string
@@ -91,6 +92,7 @@ export const serve = async (options: {
   if (!host) throw new Error("Remote listeners must bind loopback or a tailnet address")
   if (!loopbackHost(host) && !options.pairing) throw new Error("Non-loopback listeners require pairing")
   const pairing = options.pairing
+  const pairingCode = () => (typeof pairing?.code === "function" ? pairing.code() : pairing?.code ?? "")
   const publicOrigin = options.publicOrigin ? httpsOrigin(options.publicOrigin) : undefined
   if (publicOrigin && !pairing) throw new Error("A public origin requires pairing")
   const failures = { count: 0, since: 0 }
@@ -115,7 +117,7 @@ export const serve = async (options: {
   const allowed = (req: { headers: IncomingHttpHeaders; method?: string }) =>
     sameHost(req) &&
     (pairing
-      ? cookieValid(pairing.code, req.headers) &&
+      ? cookieValid(pairingCode(), req.headers) &&
         // SameSite ignores ports, so other local origins also carry the cookie:
         // require same-origin fetch metadata, and the page origin for writes.
         [undefined, "same-origin", "none"].includes(req.headers["sec-fetch-site"] as string | undefined) &&
@@ -135,7 +137,7 @@ export const serve = async (options: {
       return finish(200, JSON.stringify({ service: "editspace", pairing: true }), "application/json")
     const page = (status: number, error?: string) => {
       res.setHeader("Content-Security-Policy", pairingCsp)
-      finish(status, pairingPage(error, pairing.codeFile), "text/html; charset=utf-8")
+      finish(status, pairingPage(error, pairing.codeFile, process.platform, pairing.sshHost), "text/html; charset=utf-8")
     }
     if (url.pathname !== "/__es/pair" || req.method !== "POST") {
       if (req.method === "GET" && (req.headers["sec-fetch-dest"] === "document" || req.headers.accept?.includes("text/html")))
@@ -155,13 +157,13 @@ export const serve = async (options: {
       chunks.push(chunk)
     }
     const code = new URLSearchParams(Buffer.concat(chunks).toString()).get("code") ?? ""
-    if (!pairingMatches(pairing.code, code)) {
+    if (!pairingMatches(pairingCode(), code)) {
       failures.count++
-      return page(401, "That code does not match. Check the gateway output and try again.")
+      return page(401, "That code does not match. Check it again on the host and try once more.")
     }
     res.writeHead(303, {
       location: "/",
-      "set-cookie": `${cookieName}=${issueCookie(pairing.code)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${pairing.maxAgeSeconds ?? 30 * 86400}${publicOrigin ? "; Secure" : ""}`,
+      "set-cookie": `${cookieName}=${issueCookie(pairingCode())}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${pairing.maxAgeSeconds ?? 30 * 86400}${publicOrigin ? "; Secure" : ""}`,
     })
     res.end()
   }

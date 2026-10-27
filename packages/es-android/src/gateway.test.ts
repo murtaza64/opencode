@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test"
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { pairingCode } from "./gateway"
+import { gatewayDescriptor, pairingCode, storePairingCode, watchedPairingCode } from "./gateway"
 
 const cleanup: (() => Promise<unknown>)[] = []
 afterEach(async () => {
@@ -51,4 +51,36 @@ test("gateway output names where the code lives but never prints it", async () =
   expect(output.join("")).toContain(file)
   expect(output.join("")).not.toContain(code)
   expect(output.join("")).not.toContain(code.replaceAll("-", ""))
+  // Pair a Phone reads the phone-facing origin beside the code file; it holds no secret.
+  const descriptor = await Bun.file(gatewayDescriptor(file)).json()
+  expect(descriptor).toEqual({ v: 1, origin: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/) })
+  expect(JSON.stringify(descriptor)).not.toContain(code)
+})
+
+test("a rewritten code file is picked up within a second; nothing else changes the code", async () => {
+  const file = path.join(await scratch(), "remote-pairing-code")
+  const first = await pairingCode(file)
+  const clock = { now: 1_000_000 }
+  const code = watchedPairingCode(file, first, () => clock.now)
+  await Bun.sleep(5)
+  const rotated = await storePairingCode(file, "ZZZZZ-YYYYY-XXXXX-WWWWW")
+  expect(code()).toBe(first)
+  clock.now += 1000
+  expect(code()).toBe(rotated)
+  await writeFile(file, "SHORT\n")
+  clock.now += 1000
+  expect(code()).toBe(rotated)
+})
+
+test("deleting the code file revokes: a new owner-only code is written", async () => {
+  const file = path.join(await scratch(), "remote-pairing-code")
+  const first = await pairingCode(file)
+  const clock = { now: 1_000_000 }
+  const code = watchedPairingCode(file, first, () => clock.now)
+  await rm(file)
+  clock.now += 1000
+  const next = code()
+  expect(next).not.toBe(first)
+  expect((await Bun.file(file).text()).trim()).toBe(next)
+  expect((await stat(file)).mode & 0o777).toBe(0o600)
 })
