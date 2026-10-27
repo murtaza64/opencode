@@ -1,6 +1,8 @@
 package ai.opencode.desk.net
 
 import android.content.Context
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -25,8 +27,17 @@ val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues 
 class Gateway(context: Context) {
     private val prefs = context.getSharedPreferences("gateway", Context.MODE_PRIVATE)
     private val jar = CookieStore(prefs)
+    // Cloudflare Access service token: app-private, encrypted at rest with a Keystore master
+    // key. Read on demand; never logged or surfaced after save.
+    private val secrets = EncryptedSharedPreferences.create(
+        context, "gateway-secrets",
+        MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
+        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+    )
     val client: OkHttpClient = OkHttpClient.Builder()
         .cookieJar(jar)
+        .addInterceptor(Access.TokenInterceptor({ origin.toHttpUrlOrNull() }, { accessToken }))
         .followRedirects(false)
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
@@ -38,8 +49,25 @@ class Gateway(context: Context) {
 
     val paired: Boolean get() = jar.has(origin, "es_remote")
 
+    val accessToken: AccessToken?
+        get() {
+            val id = secrets.getString("access.id", null) ?: return null
+            val secret = secrets.getString("access.secret", null) ?: return null
+            return AccessToken(id, secret)
+        }
+    val hasAccessToken: Boolean get() = secrets.contains("access.id")
+
+    fun saveAccessToken(token: AccessToken?) {
+        val editor = secrets.edit()
+        if (token == null) editor.remove("access.id").remove("access.secret")
+        else editor.putString("access.id", token.id).putString("access.secret", token.secret)
+        editor.apply()
+    }
+
+    // Forgetting the pairing also drops the Access token: both are credentials for this host.
     fun forget() {
         jar.clear()
+        saveAccessToken(null)
     }
 
     private fun url(path: String, query: Map<String, String?> = emptyMap()): HttpUrl {
@@ -58,15 +86,18 @@ class Gateway(context: Context) {
         val body = "code=${java.net.URLEncoder.encode(code.trim(), "UTF-8")}"
             .toRequestBody("application/x-www-form-urlencoded".toMediaType())
         client.newCall(Request.Builder().url(url("/__es/pair")).post(body).build()).execute().use { response ->
+            Access.check(response)
             // 303 + Set-Cookie is success; the jar captured the cookie.
             response.code == 303 && paired
         }
     }
 
+    // True when the gateway answers; throws AccessRequired when Access intercepts instead.
     suspend fun health(): Boolean = withContext(Dispatchers.IO) {
-        runCatching {
-            client.newCall(Request.Builder().url(url("/__es/health")).build()).execute().use { it.isSuccessful }
-        }.getOrDefault(false)
+        client.newCall(Request.Builder().url(url("/__es/health")).build()).execute().use { response ->
+            Access.check(response)
+            response.isSuccessful
+        }
     }
 
     suspend fun get(path: String, query: Map<String, String?> = emptyMap()): String = withContext(Dispatchers.IO) {
@@ -83,6 +114,7 @@ class Gateway(context: Context) {
 
     private fun execute(request: Request): String =
         client.newCall(request).execute().use { response ->
+            Access.check(response)
             val text = response.body?.string().orEmpty()
             if (response.code == 401 && text.contains("Pairing required")) throw PairingRequired()
             if (!response.isSuccessful) throw GatewayError(response.code, "HTTP ${response.code} ${request.method} ${request.url.encodedPath}", text)
@@ -95,6 +127,7 @@ class Gateway(context: Context) {
         val request = Request.Builder().url(url(path, query)).header("Accept", "text/event-stream").get().build()
         val call = client.newBuilder().readTimeout(0, TimeUnit.MILLISECONDS).build().newCall(request)
         call.execute().use { response ->
+            Access.check(response)
             if (response.code == 401) throw PairingRequired()
             if (!response.isSuccessful) throw GatewayError(response.code, "SSE ${response.code}")
             val source = response.body?.source() ?: return

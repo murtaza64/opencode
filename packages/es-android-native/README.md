@@ -29,6 +29,11 @@ So the information architecture is an inbox plus a messaging thread, not a dashb
 - **Native idioms.** Bottom `NavigationBar` for the three jobs, `ModalBottomSheet` for a
   decision (the list stays behind the scrim as context; drag or Back dismisses), predictive-back
   friendly single-activity stack, pull-to-refresh, IME-aware composers, edge-to-edge insets.
+- **Cloudflare Access.** A gateway host behind Access answers with a redirect to
+  `*.cloudflareaccess.com` or `WWW-Authenticate: Cloudflare-Access`; the client reports that as
+  "behind Cloudflare Access" rather than offline. Connect accepts an optional service token
+  (client ID + secret), stored in `EncryptedSharedPreferences`, sent as `CF-Access-Client-Id/Secret`
+  only to the exact configured origin (scheme, host, port). Redirects are never followed.
 - **Honest connection state.** Data stays visible when the gateway drops; the header says
   `offline · <reason>` and polling backs off. A lost pairing returns to the Connect screen.
 

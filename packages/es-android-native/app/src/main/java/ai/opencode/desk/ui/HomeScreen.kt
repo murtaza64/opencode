@@ -169,6 +169,7 @@ private fun Pulse(store: DeskStore, nav: Nav) {
                 Link.Online -> "updated ${age(store.now, store.updatedAt)}" to Ink.Muted
                 Link.Connecting -> "connecting" to Ink.Amber
                 Link.Offline -> "offline · ${store.lastError?.take(40) ?: "retrying"}" to Ink.Red
+                Link.Access -> "behind Cloudflare Access" to Ink.Red
                 Link.Unpaired -> "unpaired" to Ink.Red
             }
             // The connection label doubles as the only settings surface: refresh or forget the pairing.
@@ -179,6 +180,7 @@ private fun Pulse(store: DeskStore, nav: Nav) {
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Ink.Raised) {
                     DropdownMenuItem(text = { Text("Refresh now") }, onClick = { menu = false; scope.launch { store.refresh() } })
                     DropdownMenuItem(text = { Text(store.gateway.origin, style = MaterialTheme.typography.labelMedium) }, onClick = { menu = false }, enabled = false)
+                    if (store.link == Link.Access) DropdownMenuItem(text = { Text("This server is behind Cloudflare Access. Forget the pairing to enter a service token.", style = MaterialTheme.typography.bodyMedium) }, onClick = { menu = false }, enabled = false)
                     DropdownMenuItem(text = { Text("Forget pairing", color = Ink.Red) }, onClick = { menu = false; store.unpair() }, modifier = Modifier.testTag("unpair"))
                 }
             }

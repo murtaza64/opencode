@@ -18,6 +18,8 @@ import ai.opencode.desk.model.LaneRecord
 import ai.opencode.desk.model.MessageWithParts
 import ai.opencode.desk.model.StateResponse
 import ai.opencode.desk.model.Todo
+import ai.opencode.desk.net.AccessRequired
+import ai.opencode.desk.net.AccessToken
 import ai.opencode.desk.net.Api
 import ai.opencode.desk.net.Gateway
 import ai.opencode.desk.net.GatewayError
@@ -37,7 +39,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
-enum class Link { Unpaired, Connecting, Online, Offline }
+enum class Link { Unpaired, Connecting, Online, Offline, Access }
 
 // One lane (or lone session) as the phone presents it: a named agent with a live status.
 data class Agent(
@@ -123,11 +125,16 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
 
     // ---- connection ----
 
-    suspend fun pair(origin: String, code: String): String? {
+    // The service token is stored before pairing so the pair request itself carries it.
+    suspend fun pair(origin: String, code: String, access: AccessToken?): String? {
         gateway.origin = origin
+        if (access != null) gateway.saveAccessToken(access)
         return runCatching { gateway.pair(code) }.fold(
             onSuccess = { ok -> if (ok) { connect(); null } else "That code was not accepted." },
-            onFailure = { it.message ?: "Could not reach the gateway." },
+            onFailure = {
+                if (it is AccessRequired) "This server is behind Cloudflare Access. Add the Access service token (client ID and secret) and pair again."
+                else it.message ?: "Could not reach the gateway."
+            },
         )
     }
 
@@ -154,7 +161,10 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
             while (isActive) {
                 runCatching {
                     gateway.stream("/es/api/notification-events") { data -> if (data != "connected") nudges.tryEmit(Unit) }
-                }.onFailure { if (it is PairingRequired) { link = Link.Unpaired; return@launch } }
+                }.onFailure {
+                    if (it is PairingRequired) { link = Link.Unpaired; return@launch }
+                    if (it is AccessRequired) link = Link.Access
+                }
                 delay(backoff)
                 backoff = (backoff * 2).coerceAtMost(30_000)
             }
@@ -188,6 +198,9 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
             throw cancelled
         } catch (error: PairingRequired) {
             link = Link.Unpaired
+        } catch (error: AccessRequired) {
+            lastError = error.message
+            link = Link.Access
         } catch (error: Exception) {
             Log.w("Desk", "refresh failed: ${error.javaClass.simpleName}: ${error.message}")
             lastError = error.message
