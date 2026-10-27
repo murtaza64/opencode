@@ -2,12 +2,15 @@ import { EventSource } from "eventsource"
 import { WebSocketServer, WebSocket } from "ws"
 import type { IncomingMessage } from "node:http"
 import type { Duplex } from "node:stream"
-import { eventMuxPaths, eventPaths, eventProtocol, eventRecord, eventTypes, type EventPacket } from "./event-protocol"
+import { eventMuxPaths, eventPaths, eventProtocol, eventRecord, eventTypes, hostEventPath, type EventPacket } from "./event-protocol"
 
 export const eventMux = (options: {
   origin: (request: IncomingMessage) => string
   authorize: (request: IncomingMessage, pathname: string) => boolean
   upstream: (prefix: "/oc" | "/es", requested: URL, request: IncomingMessage) => { url: string; headers?: HeadersInit }
+  // A Work view host's stream (/hosts/<id>/...): `requested` carries the unqualified path. Without
+  // this, host-qualified subscriptions fail individually and the socket's other streams continue.
+  hostUpstream?: (host: string, prefix: "/oc" | "/es", requested: URL) => { url: string; headers?: HeadersInit }
   rejectUnknown?: boolean
 }) => {
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 })
@@ -70,6 +73,8 @@ export const eventMux = (options: {
         }
         let lastEventId = typeof message.lastEventId === "string" ? message.lastEventId : ""
         const requested = URL.parse(message.url, origin)
+        const qualified = requested ? hostEventPath(requested.pathname) : undefined
+        if (qualified && requested) requested.pathname = qualified.path
         if (!requested || requested.origin !== origin || !eventPaths.includes(requested.pathname) || !requested.pathname.startsWith(prefix + "/")) {
           client.close(1008)
           return
@@ -77,7 +82,8 @@ export const eventMux = (options: {
         streams.get(id)?.close()
         let target: ReturnType<typeof options.upstream>
         try {
-          target = options.upstream(prefix, requested, request)
+          if (qualified && !options.hostUpstream) throw new Error("Host streams not available")
+          target = qualified ? options.hostUpstream!(qualified.host, prefix, requested) : options.upstream(prefix, requested, request)
         } catch {
           send({ id, type: "error", code: 502 })
           return

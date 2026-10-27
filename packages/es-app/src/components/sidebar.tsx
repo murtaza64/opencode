@@ -14,7 +14,8 @@ import { peekAttrs, SessionPeek } from "./session-peek"
 import { CloudNav, CloudDiscovery } from "./cloud-sidebar"
 import { failureLabel } from "../session-failures"
 import { ringOnChange } from "../motion"
-import { Glyph } from "./icons"
+import { Glyph, HostGlyph } from "./icons"
+import { hostRowKey, hostSessionHref, workRows, type HostFeed } from "../host-feed"
 import { ModeSwitch } from "./mode-switch"
 
 /** Project scope, shared by both modes' sidebars. */
@@ -75,8 +76,17 @@ const StatusDot = (props: { state: DotState; label?: string }) => {
 export default function Sidebar() {
   const { state, dotFor, editspace, setEditspace, editspaces, archivedIds, notifications, markViewed,
     allProjects, sessionRows, sessions, pinnedSessions, unpinnedSessions, isPinned, togglePin,
-    sessionsLoading, sessionsError, setVisibleSessions, cloud, failures } =
+    sessionsLoading, sessionsError, setVisibleSessions, cloud, failures, work, stateError } =
     useDashboard()
+  // Work view: this host's rows and every other Work view host's rows in one list. Other hosts' rows
+  // carry their host and open on that host's own tab; a host that stops answering keeps its last
+  // rows, dimmed and disabled, never emptied or merged into this host's.
+  const hosted = () => work.feeds().length > 0
+  const allPinned = createMemo(() => [...pinnedSessions(), ...work.pinned()])
+  const allUnpinned = createMemo(() => workRows(unpinnedSessions(), work.unpinned()))
+  const feedOf = (s: SessionRow) => work.feeds().find((feed) => feed.host.id === s.host)
+  const localUnavailable = () => hosted() && !!(allProjects() ? sessionsError() : stateError())
+  const clock = (time: number) => new Date(time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
   const dotText = (s: SessionRow, dot: DotState) => {
     const failure = dot === "failed" ? failures.failure(s.id) : undefined
     return failure ? `failed: ${failureLabel(failure)}` : dot
@@ -207,6 +217,7 @@ export default function Sidebar() {
   // and request updates do not rewrite each row's class and title (~100
   // same-value class writes/s across a long sidebar).
   const item = (s: SessionRow, cls = "") => {
+    if (s.host) return hostItem(s)
     const dot = createMemo(() => dotFor(s))
     return cls === "archived" ? (
     <A
@@ -229,8 +240,10 @@ export default function Sidebar() {
         class="nav-item"
       >
         <StatusDot state={dot()} label={dotText(s, dot())} />
+        <Show when={hosted()}><HostGlyph host="local" /></Show>
         <span class="nav-title" dir="auto">{s.title || s.id}</span>
         <Show when={allProjects() && s.project}><span class="sr-only">, {s.project}</span></Show>
+        <Show when={hosted()}><span class="sr-only">, on Local</span></Show>
       </A>
       <button type="button" class="pin-action" classList={{ pinned: isPinned(s) }}
         aria-label={`${isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
@@ -240,7 +253,53 @@ export default function Sidebar() {
   )
   }
 
+  // Another host's session: opens on that host's tab (its own origin, auth, drafts and receipts).
+  const hostItem = (s: SessionRow) => {
+    const feed = feedOf(s)
+    const label = () => feed?.host.label ?? s.host!
+    const down = () => feed?.state().status === "unavailable"
+    const dot = createMemo(() => work.dot(s))
+    const name = () => `${s.title || s.id}, on ${label()}${down() ? ", unavailable" : ""}`
+    return (
+    <div class="session-entry host-entry" classList={{ unavailable: down() }}>
+      <a href={feed ? hostSessionHref(feed.host, s) : undefined} class="nav-item" aria-label={name()} aria-disabled={down() || undefined}
+        title={down() ? `${label()} is unreachable; this is its last-known list` : `${s.title || s.id} — on ${label()}`}
+        data-host-key={hostRowKey(s)} onClick={(event) => { if (down()) event.preventDefault() }}>
+        <StatusDot state={dot()} label={`${label()}: ${dot()}`} />
+        <HostGlyph host={s.host!} />
+        <span class="nav-title" dir="auto">{s.title || s.id}</span>
+      </a>
+      <button type="button" class="pin-action" classList={{ pinned: work.isPinned(s) }}
+        aria-label={`${work.isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id} on ${label()}`}
+        title={`${work.isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
+        onClick={() => work.togglePin(s)}>{work.isPinned(s) ? "◆" : "◇"}</button>
+    </div>
+  )
+  }
+  // A host's availability, shown only when it differs from "listed": loading, unreachable, or nothing here.
+  const hostStatus = (feed: HostFeed) => {
+    const state = feed.state
+    return <Show when={state().status !== "ready" || !state().rows.length}>
+      <div class="dim nav-empty host-status" classList={{ unavailable: state().status === "unavailable" }} role="status">
+        <HostGlyph host={feed.host.id} />
+        <span>{feed.host.label} · {state().status === "loading" ? "loading…"
+          : state().status === "unavailable" ? `unreachable since ${clock(state().since ?? Date.now())}`
+          : allProjects() ? "no sessions" : `no ${current()} sessions`}</span>
+        <Show when={state().status === "unavailable"}><button type="button" class="link-button" onClick={() => void feed.load()}>Retry</button></Show>
+      </div>
+    </Show>
+  }
+
   const miniItem = (s: SessionRow) => {
+    if (s.host) {
+      const feed = feedOf(s)
+      return <div class="mini-session" classList={{ unavailable: feed?.state().status === "unavailable" }}>
+        <a href={feed ? hostSessionHref(feed.host, s) : undefined} class="mini-item" title={`${s.title} — on ${feed?.host.label ?? s.host}`}
+          aria-label={`${s.title || s.id}, on ${feed?.host.label ?? s.host}`}>
+          <StatusDot state={work.dot(s)} />
+        </a>
+      </div>
+    }
     const dot = createMemo(() => dotFor(s))
     return (
     <div class="mini-session" {...peekAttrs(s)}>
@@ -276,12 +335,12 @@ export default function Sidebar() {
           </button></Show>
           <ModeSwitch compact />
           <NewSession compact />
-          <Show when={pinnedSessions().length || cloud.pins().length}>
+          <Show when={allPinned().length || cloud.pins().length}>
             <div class="mini-pinned-heading" title="Pinned sessions" aria-label="Pinned sessions" />
-            <For each={pinnedSessions()}>{miniItem}</For>
+            <For each={allPinned()}>{miniItem}</For>
             <For each={cloud.pins()}>{pin => <CloudNav pin={pin} mini />}</For>
           </Show>
-          <For each={unpinnedSessions()}>{miniItem}</For>
+          <For each={allUnpinned()}>{miniItem}</For>
         </nav>
       }
     >
@@ -295,10 +354,10 @@ export default function Sidebar() {
           </A>
           <NewSession />
         </nav>
-        <Show when={!query().trim() && (pinnedSessions().length || cloud.pins().length)}>
+        <Show when={!query().trim() && (allPinned().length || cloud.pins().length)}>
           <section class="pinned-section" aria-label="Pinned sessions">
             <div class="nav-heading">Pinned</div>
-            <For each={pinnedSessions()}>{(s) => item(s)}</For>
+            <For each={allPinned()}>{(s) => item(s)}</For>
             <For each={cloud.pins()}>{pin => <CloudNav pin={pin} />}</For>
           </section>
         </Show>
@@ -367,15 +426,22 @@ export default function Sidebar() {
           }
         >
           {/* Cached rows stay; load trouble is the header's shared status, not a list banner. */}
-          <Show when={unpinnedSessions().length} fallback={
-            <div class="dim nav-empty">{sessionsError() ? "Sessions unavailable — retrying" : sessionsLoading() ? "loading..." : pinnedSessions().length ? "All active sessions pinned" : "none"}</div>
+          <Show when={hosted()}>
+            <Show when={localUnavailable() || (!unpinnedSessions().length && !pinnedSessions().length && !sessionsLoading())}>
+              <div class="dim nav-empty host-status" classList={{ unavailable: localUnavailable() }} role="status"><HostGlyph host="local" />
+                <span>Local · {localUnavailable() ? "unavailable — retrying" : allProjects() ? "no sessions" : `no ${current()} sessions`}</span></div>
+            </Show>
+            <For each={work.feeds()}>{hostStatus}</For>
+          </Show>
+          <Show when={allUnpinned().length} fallback={
+            <Show when={!hosted()}><div class="dim nav-empty">{sessionsError() ? "Sessions unavailable — retrying" : sessionsLoading() ? "loading..." : pinnedSessions().length ? "All active sessions pinned" : "none"}</div></Show>
           }>
-            <For each={unpinnedSessions()}>
+            <For each={allUnpinned()}>
               {(s, index) => {
                 const day = () => dayKey(s.updated)
                 return (
                   <>
-                    <Show when={index() === 0 || day() !== dayKey(unpinnedSessions()[index() - 1].updated)}>
+                    <Show when={index() === 0 || day() !== dayKey(allUnpinned()[index() - 1].updated)}>
                       <div class="nav-heading nav-day">{dayLabel(s.updated)}</div>
                     </Show>
                     {item(s)}

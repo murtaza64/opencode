@@ -6,7 +6,7 @@
 
 export type HostLink = { id: string; label: string; origin: string }
 /** What a listener reports to the app at /__es/host. */
-export type HostInfo = { id: string; label: string; remote: boolean; hosts: HostLink[] }
+export type HostInfo = { id: string; label: string; remote: boolean; hosts: HostLink[]; work?: WorkHost[] }
 
 export const localHost: HostInfo = { id: "local", label: "Local", remote: false, hosts: [] }
 
@@ -40,9 +40,10 @@ export const pageOrigin = (value: unknown) => {
 
 /** How a host is reached: "proxy" serves this machine's app against its Core and dashboard through a
  * laptop listener; "page" shows the host's own served page in an unprivileged, isolated view. */
-export type RemoteHost = HostLink & { mode: "proxy" | "page" }
+export type RemoteHost = HostLink & { mode: "proxy" | "page"; default?: boolean }
 
-/** Configured remote hosts: [{ id, label, origin, mode? }] with distinct ids other than "local". */
+/** Configured remote hosts: [{ id, label, origin, mode?, default? }] with distinct ids other than "local";
+ * at most one proxied host is the default for new work. */
 export const remoteHosts = (value: unknown): RemoteHost[] => {
   if (value === undefined) return []
   if (!Array.isArray(value)) throw new Error("Remote hosts must be a list")
@@ -51,9 +52,10 @@ export const remoteHosts = (value: unknown): RemoteHost[] => {
     if (typeof record.id !== "string" || !ID.test(record.id) || record.id === "local") throw new Error("Invalid remote host id")
     const label = typeof record.label === "string" && record.label.trim() ? record.label.trim().slice(0, 40) : record.id
     const mode = record.mode === "page" ? "page" : "proxy"
-    return { id: record.id, label, origin: mode === "page" ? pageOrigin(record.origin) : remoteOrigin(record.origin), mode } as RemoteHost
+    return { id: record.id, label, origin: mode === "page" ? pageOrigin(record.origin) : remoteOrigin(record.origin), mode, ...(record.default === true && mode === "proxy" ? { default: true } : {}) } as RemoteHost
   })
   if (new Set(hosts.map((host) => host.id)).size !== hosts.length) throw new Error("Duplicate remote host id")
+  if (hosts.filter((host) => host.default).length > 1) throw new Error("Only one default host")
   return hosts
 }
 
@@ -81,4 +83,17 @@ export const remoteSetCookie = (values: string[] | undefined, id: string) => {
     .filter((value) => value.startsWith(`${OPERATOR}=`))
     .map((value) => operatorCookie(id) + value.slice(OPERATOR.length))
   return renamed.length ? renamed : undefined
+}
+
+/** A host aggregated into the Work view: its laptop listener origin (for opening its pages) and
+ * whether new work goes there by default. */
+export type WorkHost = HostLink & { default?: boolean }
+
+const HOST_PATH = /^\/hosts\/([a-z][a-z0-9-]{0,31})(\/(?:oc|es)(?:\/.*)?)$/
+
+/** A host-qualified path on the laptop listener: /hosts/<id>/oc/... or /hosts/<id>/es/... */
+export const hostPath = (pathname: string) => {
+  const match = HOST_PATH.exec(pathname)
+  if (!match || match[1] === "local") return undefined
+  return { host: match[1]!, path: match[2]! }
 }

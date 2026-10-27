@@ -1,5 +1,10 @@
 export const eventProtocol = "opencode-events-v1"
 export const eventPaths = ["/oc/global/event", "/oc/event", "/es/api/events", "/es/api/notification-events"]
+// A Work view host's event stream through the laptop listener: /hosts/<id> + one of eventPaths.
+export const hostEventPath = (pathname: string) => {
+  const match = /^\/hosts\/([a-z][a-z0-9-]{0,31})(\/.+)$/.exec(pathname)
+  return match && match[1] !== "local" && eventPaths.includes(match[2]!) ? { host: match[1]!, path: match[2]! } : undefined
+}
 export const eventMuxPaths = { opencode: "/oc/global/event", dashboard: "/es/api/notification-events" }
 
 export type EventPacket =

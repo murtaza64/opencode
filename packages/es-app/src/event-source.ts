@@ -175,7 +175,8 @@ export const createServerEvents = (url: string, filter: EventFilter = {}): Serve
       return eventRecord(value) && value.protocol === eventProtocol
     })
     .catch(() => false)
-  const key = url.startsWith("/oc/") ? "opencode" : "dashboard"
+  // A Work view host's stream (/hosts/<id>/oc/...) shares the Core socket with this host's.
+  const key = /^(?:\/hosts\/[a-z][a-z0-9-]*)?\/oc\//.test(url) ? "opencode" : "dashboard"
   let hub = hubs.get(key)
   if (!hub) {
     const target = new URL(eventMuxPaths[key], location.href)

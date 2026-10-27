@@ -4,12 +4,12 @@ import { createReadStream } from "node:fs"
 import { readFile, realpath, stat } from "node:fs/promises"
 import path from "node:path"
 import { randomBytes } from "node:crypto"
-import { apiAllowed, serviceURL } from "./policy"
+import { apiAllowed, hostApiAllowed, serviceURL } from "./policy"
 import { cookieName, cookieValid, issueCookie, loopbackHost, pairingCsp, pairingMatches, pairingPage, remoteListenHost } from "./pairing"
 import { eventMux } from "../../es-app/event-mux"
 import { eventProtocol, eventPaths } from "../../es-app/event-protocol"
 import { surfaceProxy } from "../../es-app/surface-proxy"
-import { attentionRoute, localHost, remoteCookie, remoteSetCookie, remoteTargets, type HostInfo } from "../../es-app/remote-host"
+import { attentionRoute, hostPath, localHost, remoteCookie, remoteSetCookie, remoteTargets, type HostInfo } from "../../es-app/remote-host"
 import type { Voice } from "./voice"
 import type { Appearance } from "./appearance"
 import { createPerfLog, routeOf } from "./perf-log"
@@ -86,6 +86,9 @@ export const serve = async (options: {
   perfDir?: string
   // The hosts this listener reports to the app, read per request once every listener is up.
   hostInfo?: () => HostInfo
+  // Work view hosts this (local) listener reads at /hosts/<id>/...: list reads and their event
+  // streams only, with no credential or cookie. Their app pages stay on their own listeners.
+  peers?: { id: string; origin: string }[]
 }) => {
   const host = options.host ? remoteListenHost(options.host) : "127.0.0.1"
   if (!host) throw new Error("Remote listeners must bind loopback or a tailnet address")
@@ -95,6 +98,7 @@ export const serve = async (options: {
   if (publicOrigin && !pairing) throw new Error("A public origin requires pairing")
   const failures = { count: 0, since: 0 }
   const remote = options.remote
+  const peers = new Map((remote || pairing ? [] : options.peers ?? []).map((peer) => [peer.id, remoteTargets(peer.origin)]))
   if (remote && (options.opencode || options.dashboard || options.opencodeAuth || options.voice))
     throw new Error("A remote host listener attaches to that host only")
   const targets = remote
@@ -213,6 +217,13 @@ export const serve = async (options: {
       if (!options.voice || pairing || url.search) return finish(404, "Not found")
       return voiceRoute(options.voice, req, url.pathname, origin, finish)
     }
+    if (url.pathname.startsWith("/hosts/")) {
+      const qualified = hostPath(url.pathname)
+      const peer = qualified && peers.get(qualified.host)
+      if (!qualified || !peer) return finish(404, "Not found")
+      if (!hostApiAllowed(req.method ?? "", qualified.path)) return finish(403, "Host route not exposed")
+      return peerRead(req, res, `${qualified.path.startsWith("/oc") ? peer.opencode : peer.dashboard}${qualified.path.slice(3) || "/"}${url.search}`, finish)
+    }
     const api = /^\/(oc|es)(\/|$)/.exec(url.pathname)
     if (api && !apiAllowed(req.method ?? "", url.pathname)) return finish(403, "API route not exposed")
     const attention = attentionRoute.test(url.pathname)
@@ -240,7 +251,8 @@ export const serve = async (options: {
               : false,
         ),
       )
-      if (ready.some((value) => !value))
+      // With Work view hosts the app still loads: it shows Local as unavailable beside the others.
+      if (ready.some((value) => !value) && !peers.size)
         return finish(503, remote ? remoteOffline(options.hostInfo?.()) : offline, "text/html; charset=utf-8")
     }
     if (target) {
@@ -346,6 +358,12 @@ export const serve = async (options: {
       if (remote) return { url, headers: { origin: remote.origin } as HeadersInit }
       return { url, headers: prefix === "/oc" && options.opencodeAuth ? { authorization: options.opencodeAuth } : undefined }
     },
+    // Session events only: a Work view host's list follows its Core's global stream.
+    hostUpstream: (id, prefix, requested) => {
+      const peer = peers.get(id)
+      if (!peer || requested.pathname !== "/oc/global/event") throw new Error("Host stream not exposed")
+      return { url: `${peer.opencode}${requested.pathname.slice(prefix.length)}${requested.search}`, headers: { origin: new URL(peer.opencode).origin } }
+    },
   })
   server.on("upgrade", mux.upgrade)
   await new Promise<void>((resolve, reject) => {
@@ -368,6 +386,26 @@ export const serve = async (options: {
       })
     },
   }
+}
+
+// One read of a Work view host: no browser credential, no redirect, bounded time.
+const peerRead = (req: IncomingMessage, res: ServerResponse, target: string, finish: (status: number, body: string, type?: string) => void) => {
+  const upstream = (target.startsWith("https:") ? httpsRequest : httpRequest)(target, { method: req.method, headers: proxyHeaders(req.headers) }, (response) => {
+    if ([301, 302, 303, 307, 308].includes(response.statusCode ?? 0)) {
+      response.resume()
+      return finish(502, '{"error":"Upstream redirect blocked"}', "application/json")
+    }
+    res.writeHead(response.statusCode ?? 502, proxyHeaders(response.headers))
+    response.on("error", () => res.destroy())
+    response.pipe(res)
+  })
+  upstream.setTimeout(30_000, () => upstream.destroy(new Error("Upstream idle timeout")))
+  upstream.on("error", () => {
+    if (res.headersSent) return res.destroy()
+    finish(502, '{"error":"Host unavailable"}', "application/json")
+  })
+  res.on("close", () => upstream.destroy())
+  upstream.end()
 }
 
 const voiceID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
