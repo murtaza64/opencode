@@ -87,7 +87,8 @@ export const eventMux = (options: {
             const headers = new Headers(init?.headers)
             new Headers(target.headers).forEach((value, name) => headers.set(name, value))
             if (lastEventId && !headers.has("last-event-id")) headers.set("last-event-id", lastEventId)
-            headers.set("origin", origin)
+            // An upstream may require its own origin (a remote dashboard); otherwise present the app origin.
+            if (!headers.has("origin")) headers.set("origin", origin)
             return fetch(input, { ...init, headers, redirect: "error" })
           },
         })

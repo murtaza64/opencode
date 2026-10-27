@@ -1,9 +1,10 @@
-import { app, BrowserWindow, dialog, Menu, session, shell, systemPreferences } from "electron"
+import { app, BaseWindow, BrowserWindow, dialog, Menu, session, shell, systemPreferences } from "electron"
 import path from "node:path"
 import { readFile, writeFile } from "node:fs/promises"
 import { serve } from "./server"
 import { createVoice, voiceTools } from "./voice"
-import { appRouteURL, externalURL, internalURL, serviceOrigins, startupMode, startupPlan, surfaceFrameURL } from "./policy"
+import { appRouteURL, externalURL, internalURL, pageNavigation, serviceHosts, serviceOrigins, startupMode, startupPlan, surfaceFrameURL } from "./policy"
+import { createTabs, TAB_BAR_HEIGHT } from "./tabs"
 
 app.setName("Editspace")
 app.setPath("userData", process.env.ES_DESKTOP_USER_DATA ?? path.join(app.getPath("appData"), "Editspace"))
@@ -14,7 +15,7 @@ if (process.platform === "darwin" && startup.activationPolicy) app.setActivation
 const opened = { ready: false, requested: false }
 // Reveal a background start: a second launch may arrive before load and is queued; it then becomes regular.
 const reveal = () => {
-  const window = BrowserWindow.getAllWindows()[0]
+  const window = BaseWindow.getAllWindows()[0]
   if (!window || !opened.ready) {
     opened.requested = true
     return
@@ -32,7 +33,7 @@ const start = async () => {
       if (startup.revealOnReopen) reveal()
       return
     }
-    const window = BrowserWindow.getAllWindows()[0]
+    const window = BaseWindow.getAllWindows()[0]
     if (window?.isMinimized()) window.restore()
     window?.show()
     window?.focus()
@@ -84,23 +85,47 @@ const start = async () => {
     voice,
   })
   await writeFile(portFile, new URL(server.origin).port, { mode: 0o600 })
-  const isolated = session.fromPartition("persist:editspace")
-  isolated.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
-  isolated.setPermissionCheckHandler(() => false)
-  isolated.on("will-download", (event) => event.preventDefault())
-  const local = (value: string) => {
-    const url = new URL(value)
-    return url.host === new URL(server.origin).host && ["http:", "ws:"].includes(url.protocol)
-  }
-  isolated.webRequest.onBeforeRequest((details, callback) => {
-    callback({ cancel: !local(details.url) })
+  // Each remote execution host gets its own keyed loopback listener on a stable saved port, so its
+  // origin (and with it storage, drafts and receipts) stays separate from local work across launches.
+  // Remote host problems never stop local startup: that host is left out and the reason logged.
+  const configured = await serviceHosts(app.getPath("userData"), { ES_REMOTE_HOSTS: process.env.ES_REMOTE_HOSTS }).catch((error: unknown) => {
+    console.error("Editspace remote hosts ignored", { message: error instanceof Error ? error.message : "Unknown error" })
+    return []
   })
-  isolated.webRequest.onBeforeSendHeaders((details, callback) => {
-    // The renderer never receives the capability protecting the loopback listener.
-    if (local(details.url)) details.requestHeaders["x-editspace-key"] = server.key
-    callback({ requestHeaders: details.requestHeaders })
+  const started = await Promise.all(
+    configured.filter((host) => host.mode === "proxy").map(async (host) => {
+      const file = path.join(app.getPath("userData"), `loopback-port-${host.id}`)
+      const value = Number(await readFile(file, "utf8").catch(() => "0"))
+      const listener = await serve({
+        port: Number.isInteger(value) && value >= 1024 && value <= 65535 && ![4096, 7777, port].includes(value) ? value : 0,
+        root: path.join(app.getAppPath(), "dist/renderer"),
+        renderer: app.isPackaged ? undefined : process.env.ES_DESKTOP_RENDERER,
+        remote: { id: host.id, origin: host.origin },
+        // Host tabs show placement natively, so the page needs no switcher of its own.
+        hostInfo: () => ({ id: host.id, label: host.label, remote: true, hosts: [] }),
+      })
+      await writeFile(file, new URL(listener.origin).port, { mode: 0o600 })
+      return { ...host, server: listener }
+    }).map((started) => started.catch((error: unknown) => {
+      console.error("Editspace remote host listener failed", { message: error instanceof Error ? error.message : "Unknown error" })
+      return undefined
+    })),
+  )
+  const remotes = started.filter((item) => item !== undefined)
+  const pages = configured.filter((host) => host.mode === "page")
+  const listeners = [{ id: "local", label: "Local", server }, ...remotes]
+  const isolated = listenerSession("persist:editspace", server)
+  const preferences = (partition: Electron.Session): Electron.WebPreferences => ({
+    backgroundThrottling: startup.backgroundThrottling,
+    session: partition,
+    contextIsolation: true,
+    sandbox: true,
+    nodeIntegration: false,
+    webSecurity: true,
+    allowRunningInsecureContent: false,
+    webviewTag: false,
   })
-  const window = new BrowserWindow({
+  const frame = {
     title: "Editspace",
     width: 1440,
     height: 960,
@@ -111,55 +136,85 @@ const start = async () => {
     ...(process.platform === "darwin"
       ? {
           titleBarStyle: "hidden" as const,
-          trafficLightPosition: { x: 12, y: 14 },
-          titleBarOverlay: { height: 44 },
+          trafficLightPosition: remotes.length || pages.length ? { x: 12, y: 11 } : { x: 12, y: 14 },
+          titleBarOverlay: { height: remotes.length || pages.length ? TAB_BAR_HEIGHT : 44 },
         }
       : {}),
-    webPreferences: {
-      backgroundThrottling: startup.backgroundThrottling,
-      session: isolated,
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-      webSecurity: true,
-      allowRunningInsecureContent: false,
-      webviewTag: false,
-    },
-  })
-  if (process.platform === "darwin")
-    window.webContents.on("did-finish-load", () => {
-      void window.webContents.insertCSS(
-        "body:not(:has(#root))::before { content: ''; position: fixed; top: 0; left: 84px; right: 0; height: 44px; -webkit-app-region: drag; }",
-      )
-    })
+  }
+  // Without other hosts the window is exactly the local app; with them, host tabs sit above one view per host.
+  const window = remotes.length || pages.length ? new BaseWindow(frame) : new BrowserWindow({ ...frame, webPreferences: preferences(isolated) })
   const openExternal = async (value: string) => {
     const url = externalURL(value)
     if (!url || window.isDestroyed()) return
     await shell.openExternal(url)
   }
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    // The renderer navigates plain clicks on app links itself; this covers new-window opens of app routes.
-    const route = appRouteURL(url, server.origin)
-    if (route) void window.loadURL(route)
-    else void openExternal(url).catch(() => console.error("External browser unavailable"))
-    return { action: "deny" }
-  })
-  window.webContents.on("will-navigate", (event, url) => {
-    if (internalURL(url, server.origin)) return
-    event.preventDefault()
-    const route = appRouteURL(url, server.origin)
-    if (route) void window.loadURL(route)
-    else if (new URL(url).origin !== server.origin)
+  const tabs = window instanceof BrowserWindow
+    ? undefined
+    : createTabs(window, [
+        { id: "local", label: "Local", url: server.origin, session: isolated, guard: (contents) => guardListener(contents, server.origin, true) },
+        ...remotes.map((host) => ({
+          id: host.id,
+          label: host.label,
+          url: host.server.origin,
+          session: listenerSession(`persist:editspace-host-${host.id}`, host.server),
+          guard: (contents: Electron.WebContents) => guardListener(contents, host.server.origin, false),
+        })),
+        ...pages.map((host) => ({ id: host.id, label: host.label, url: `${host.origin}/`, session: pageSession(`persist:editspace-host-${host.id}`), guard: (contents: Electron.WebContents) => guardPage(contents, host.origin) })),
+      ], preferences)
+  const localContents = window instanceof BrowserWindow ? window.webContents : tabs!.contents("local")
+  if (process.platform === "darwin")
+    localContents.on("did-finish-load", () => {
+      if (tabs) return
+      void localContents.insertCSS(
+        "body:not(:has(#root))::before { content: ''; position: fixed; top: 0; left: 84px; right: 0; height: 44px; -webkit-app-region: drag; }",
+      )
+    })
+  // One host's app listener: same-origin navigation stays; app links to local ports belong to the Local tab.
+  function guardListener(contents: Electron.WebContents, origin: string, local: boolean) {
+    const open = (url: string) => {
+      const route = appRouteURL(url, local ? origin : server.origin)
+      if (!route) return false
+      if (local) void contents.loadURL(route)
+      else {
+        tabs?.select("local")
+        void localContents.loadURL(route)
+      }
+      return true
+    }
+    contents.setWindowOpenHandler(({ url }) => {
+      // The renderer navigates plain clicks on app links itself; this covers new-window opens of app routes.
+      if (!open(url)) void openExternal(url).catch(() => console.error("External browser unavailable"))
+      return { action: "deny" }
+    })
+    contents.on("will-navigate", (event, url) => {
+      if (internalURL(url, origin)) return
+      event.preventDefault()
+      if (!open(url) && !listeners.some((item) => new URL(item.server.origin).host === URL.parse(url)?.host))
+        void openExternal(url).catch(() => console.error("External browser unavailable"))
+    })
+    contents.on("will-redirect", (event, url) => {
+      if (!internalURL(url, origin)) event.preventDefault()
+    })
+    contents.on("will-frame-navigate", (event) => {
+      // Subframes may only show Front Desk surfaces, which the server sandboxes.
+      if (!event.isMainFrame && !surfaceFrameURL(event.url, origin)) event.preventDefault()
+    })
+    contents.on("will-attach-webview", (event) => event.preventDefault())
+  }
+  // A host's own served page: its origin and its sign-in flow stay in the tab; other links open externally.
+  function guardPage(contents: Electron.WebContents, origin: string) {
+    contents.setWindowOpenHandler(({ url }) => {
       void openExternal(url).catch(() => console.error("External browser unavailable"))
-  })
-  window.webContents.on("will-redirect", (event, url) => {
-    if (!internalURL(url, server.origin)) event.preventDefault()
-  })
-  window.webContents.on("will-frame-navigate", (event) => {
-    // Subframes may only show Front Desk surfaces, which the server sandboxes.
-    if (!event.isMainFrame && !surfaceFrameURL(event.url, server.origin)) event.preventDefault()
-  })
-  window.webContents.on("will-attach-webview", (event) => event.preventDefault())
+      return { action: "deny" }
+    })
+    contents.on("will-navigate", (event, url) => {
+      if (pageNavigation(url, origin)) return
+      event.preventDefault()
+      void openExternal(url).catch(() => console.error("External browser unavailable"))
+    })
+    contents.on("will-attach-webview", (event) => event.preventDefault())
+  }
+  if (window instanceof BrowserWindow) guardListener(window.webContents, server.origin, true)
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       { role: "appMenu" },
@@ -189,17 +244,20 @@ const start = async () => {
     if (state.closing) return
     event.preventDefault()
     state.closing = true
-    isolated.flushStorageData()
-    void voice.close().finally(() => server.close()).finally(() => app.quit())
+    for (const partition of tabs?.sessions() ?? [isolated]) partition.flushStorageData()
+    void voice.close().finally(() => Promise.allSettled(listeners.map((item) => item.server.close()))).finally(() => app.quit())
   })
   app.on("window-all-closed", () => app.quit())
   process.on("SIGTERM", () => app.quit())
   process.on("SIGINT", () => app.quit())
-  await window.loadURL(server.origin)
+  if (tabs) tabs.select("local")
+  await (tabs ? new Promise<void>((resolve) => localContents.once("did-finish-load", () => resolve())) : localContents.loadURL(server.origin))
   opened.ready = true
   if (startup.showOnLoad) window.show()
   else if (opened.requested) reveal()
   console.info(`Editspace listening at ${server.origin} (native session only)`)
+  remotes.forEach((item) => console.info(`Editspace ${item.label} listening at ${item.server.origin} (native session only)`))
+  pages.forEach((item) => console.info(`Editspace ${item.label} tab shows ${item.origin}`))
 }
 
 void start().catch((error: unknown) => {
@@ -210,3 +268,36 @@ void start().catch((error: unknown) => {
   )
   app.exit(1)
 })
+
+// A laptop listener's partition: requests reach only that listener, carrying its capability key.
+const listenerSession = (partition: string, listener: { origin: string; key: string }) => {
+  const result = session.fromPartition(partition)
+  const own = (value: string) => {
+    const url = URL.parse(value)
+    return !!url && ["http:", "ws:"].includes(url.protocol) && url.host === new URL(listener.origin).host
+  }
+  result.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+  result.setPermissionCheckHandler(() => false)
+  result.on("will-download", (event) => event.preventDefault())
+  result.webRequest.onBeforeRequest((details, callback) => {
+    callback({ cancel: !own(details.url) })
+  })
+  result.webRequest.onBeforeSendHeaders((details, callback) => {
+    // The renderer never receives the capability protecting the loopback listener.
+    if (own(details.url)) details.requestHeaders["x-editspace-key"] = listener.key
+    callback({ requestHeaders: details.requestHeaders })
+  })
+  return result
+}
+
+// A remote page's partition: secure web only, so it can never reach this machine's loopback services.
+const pageSession = (partition: string) => {
+  const result = session.fromPartition(partition)
+  result.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+  result.setPermissionCheckHandler(() => false)
+  result.on("will-download", (event) => event.preventDefault())
+  result.webRequest.onBeforeRequest((details, callback) => {
+    callback({ cancel: !/^(https|wss|data|blob):/.test(details.url) })
+  })
+  return result
+}

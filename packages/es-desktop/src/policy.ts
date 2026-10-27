@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
+import { remoteHosts } from "../../es-app/remote-host"
 
 export const serviceURL = (value: string | undefined) => {
   if (!value) return undefined
@@ -38,11 +39,35 @@ export const serviceOrigins = async (
   }
 }
 
+/** Remote execution hosts from ES_REMOTE_HOSTS or service-origins.json "hosts" (validated tailnet origins). */
+export const serviceHosts = async (directory: string, env: { ES_REMOTE_HOSTS?: string }) => {
+  if (env.ES_REMOTE_HOSTS) return remoteHosts(JSON.parse(env.ES_REMOTE_HOSTS))
+  const content = await readFile(path.join(directory, "service-origins.json"), "utf8").catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return "{}"
+      throw error
+    },
+  )
+  const saved: unknown = JSON.parse(content)
+  return remoteHosts(saved && typeof saved === "object" && !Array.isArray(saved) ? (saved as Record<string, unknown>).hosts : undefined)
+}
+
 export const externalURL = (value: string) => {
   if (value.length > 4096 || /[\s\u0000-\u001f\u007f]/.test(value)) return undefined
   const url = URL.parse(value)
   if (!url || !["https:", "http:"].includes(url.protocol) || url.username || url.password) return undefined
   return url.href
+}
+
+// Sign-in services a page host may pass through (Cloudflare Access and its identity providers).
+const SIGN_IN = [/\.cloudflareaccess\.com$/, /^accounts\.google\.com$/, /^github\.com$/]
+
+/** Whether a page host's tab may navigate in place: its own origin, or a secure sign-in step. */
+export const pageNavigation = (value: string, origin: string) => {
+  const url = URL.parse(value)
+  if (!url || url.username || url.password) return false
+  if (url.origin === origin) return true
+  return url.protocol === "https:" && SIGN_IN.some((pattern) => pattern.test(url.hostname))
 }
 
 export const surfaceFrameURL = (value: string, origin: string) => {

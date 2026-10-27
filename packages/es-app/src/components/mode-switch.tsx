@@ -7,6 +7,7 @@ import { A, useLocation } from "@solidjs/router"
 import { Glyph } from "./icons"
 import { useDeskQueue } from "../desk-queue"
 import { BackendStatus } from "./backend-status"
+import { HostSwitch } from "./host-switch"
 
 export type Mode = "desk" | "agents"
 export const modeOf = (pathname: string): Mode => pathname === "/" ? "desk" : "agents"
@@ -46,5 +47,6 @@ export const ModeSwitch = (props: { compact?: boolean }) => {
     </A>
     {/* The mode switch is on every page, so it carries the one app-wide background-read status. */}
     <BackendStatus />
+    <HostSwitch compact={props.compact} />
   </nav>
 }
