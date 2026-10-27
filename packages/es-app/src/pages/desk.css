@@ -265,3 +265,9 @@
 .home-option-chips > [data-chosen] { color: var(--peach); border-color: var(--peach); }
 .desk-brief-regenerate { margin: 2px 0 0; font-size: 12px; }
 .desk-brief .desk-link-button { padding: 0; min-block-size: 0; border: 0; background: none; color: var(--subtext0); text-decoration: underline; font: inherit; cursor: pointer; }
+/* Commands to run: exact text in a scrollable block, where to run it above, Copy beside. */
+.desk-brief .desk-commands { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 8px; }
+.desk-command-label { display: block; font-size: 12px; margin-block-end: 2px; }
+.desk-command { position: relative; }
+.desk-command pre { margin: 0; padding: 8px 64px 8px 10px; max-inline-size: 100%; overflow-x: auto; background: var(--mantle); border: 1px solid var(--surface0); font-size: 12px; line-height: 1.5; white-space: pre; text-align: left; }
+.desk-command-copy { position: absolute; inset-block-start: 4px; inset-inline-end: 4px; padding: 2px 8px; border: 1px solid var(--surface1); background: var(--base); color: var(--subtext0); font-size: 11px; cursor: pointer; }
