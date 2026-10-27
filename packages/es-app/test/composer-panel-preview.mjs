@@ -1,5 +1,6 @@
 import { createServer } from "vite"
 import net from "node:net"
+import { createRequire } from "node:module"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -7,9 +8,33 @@ import path from "node:path"
 import { createFixture, directory } from "./composer-fixture.mjs"
 
 // `opencode` points /oc requests and event streams at another (private) runtime.
+/** Warm Vite's transform cache once with a throwaway page and a generous allowance: the dev
+ * server transforms ~2k modules on first load, which exceeded tests' 30 s first navigation on a
+ * loaded host. ES_APP_PREVIEW_WARM=0 skips it. The warmup's fixture calls are cleared. */
+export const warmVite = async (origin, fixture, path = `/session/ses_a?directory=${encodeURIComponent(directory)}`) => {
+  if (process.env.ES_APP_PREVIEW_WARM === "0") return
+  const { chromium } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
+  const browser = await chromium.launch({ channel: "chrome", headless: true })
+  try {
+    const page = await browser.newPage()
+    await page.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort())
+    await page.goto(`${origin}${path}`, { timeout: 600_000 }).catch(() => {})
+  } finally {
+    await browser.close()
+  }
+  if (fixture) {
+    fixture.calls.length = 0
+    fixture.unexpected.length = 0
+  }
+}
+
 export const startPanelPreview = async (plugins = [], portHint = 0, options = {}) => {
   const fixture = await createFixture()
-  const cache = await mkdtemp(path.join(tmpdir(), "es-app-preview-vite-"))
+  // A shared dependency cache: a fresh one per run made Vite re-scan and re-bundle every
+  // dependency (minutes on a loaded host), so the first page.goto of most browser tests timed out.
+  // ES_APP_PREVIEW_FRESH_CACHE=1 restores an isolated cache for a run that needs it.
+  const fresh = process.env.ES_APP_PREVIEW_FRESH_CACHE === "1"
+  const cache = fresh ? await mkdtemp(path.join(tmpdir(), "es-app-preview-vite-")) : fileURLToPath(new URL("../node_modules/.vite-es-app-preview", import.meta.url))
   fixture.permissions = []
   fixture.messages = [
     {
@@ -72,11 +97,12 @@ export const startPanelPreview = async (plugins = [], portHint = 0, options = {}
   })
   await vite.listen()
   const origin = `http://127.0.0.1:${port}`
+  await warmVite(origin, fixture)
   return {
     fixture,
     origin,
     url: `${origin}/session/ses_a?directory=${encodeURIComponent(directory)}`,
-    close: async () => { await Promise.all([vite.close(), fixture.close()]); await rm(cache, { recursive: true, force: true }) },
+    close: async () => { await Promise.all([vite.close(), fixture.close()]); await (fresh ? rm(cache, { recursive: true, force: true }) : undefined) },
   }
 }
 

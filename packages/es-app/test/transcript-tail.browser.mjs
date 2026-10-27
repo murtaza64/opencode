@@ -2,6 +2,7 @@ import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
 import { createServer } from "vite"
 import { createFixture, directory } from "./composer-fixture.mjs"
+import { warmVite } from "./composer-panel-preview.mjs"
 
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const fixture = await createFixture()
@@ -34,6 +35,7 @@ const vite = await createServer({
   server: { host: "127.0.0.1", port: 0 },
 })
 await vite.listen()
+await warmVite(`http://127.0.0.1:${vite.httpServer.address().port}`, fixture)
 const origin = `http://127.0.0.1:${vite.httpServer.address().port}`
 const browser = await chromium.launch({ headless: true, channel: "chrome" })
 const errors = []
