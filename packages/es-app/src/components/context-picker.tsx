@@ -2,11 +2,35 @@ import { For, Show } from "solid-js"
 import { contextBound, contextKey, type ContextGroup, type ContextRef } from "../context-mention"
 import { ago } from "../state"
 
-const meta = (ref: ContextRef) => ref.kind === "agent"
-  ? ref.live === "busy" || ref.live === "retry" ? "working" : ref.status ?? (ref.owner ? "idle" : "no session")
-  : ago(ref.updated)
+const meta = (ref: ContextRef) => {
+  if (ref.kind === "agent") return ref.live === "busy" || ref.live === "retry" ? "working" : ref.status ?? (ref.owner ? "idle" : "no session")
+  if (ref.kind === "decision") return `${ref.status === "open" ? "" : `${ref.status} · `}rev ${ref.revision} · ${ago(ref.updated)}`
+  if (ref.kind === "surface") return `${ref.health === "unreachable" ? "offline · " : ""}rev ${ref.revision} · ${ago(ref.updated)}`
+  return ago(ref.updated)
+}
 
-const busy = (ref: ContextRef) => ref.live === "busy" || ref.live === "retry"
+const busy = (ref: ContextRef) => "live" in ref && (ref.live === "busy" || ref.live === "retry")
+
+export const contextKindLabel = (ref: ContextRef) => ({ agent: "Agent", session: "Session", decision: ref.kind === "decision" && ref.ask === "blocker" ? "Blocker" : "Decision", surface: "Surface" })[ref.kind]
+
+/** Kind-specific preview lines: what the snapshot holds, so the bound is concrete. */
+const Detail = (props: { item: ContextRef }) => {
+  const ref = props.item
+  if (ref.kind === "agent") return <>
+    <div>Lane <bdi>{ref.lane}</bdi> · <bdi>{ref.editspace}</bdi></div>
+    <Show when={ref.activity}>{(activity) => <div class="context-picker-activity" dir="auto">{activity()}</div>}</Show>
+  </>
+  if (ref.kind === "session") return <div><bdi dir="ltr">{ref.id}</bdi><Show when={ref.lane}>{(lane) => <> · lane <bdi>{lane()}</bdi></>}</Show></div>
+  if (ref.kind === "decision") return <>
+    <div><Show when={ref.lane} fallback={<bdi>{ref.editspace}</bdi>}>{(lane) => <>Lane <bdi>{lane()}</bdi></>}</Show> · rev {ref.revision}</div>
+    <div class="context-picker-activity" dir="auto">{ref.question}</div>
+    <Show when={ref.options.length}><ol class="context-picker-options"><For each={ref.options}>{(option) => <li><bdi>{option}</bdi></li>}</For></ol></Show>
+  </>
+  return <>
+    <div>By <bdi>{ref.owner}</bdi><Show when={ref.lane}>{(lane) => <> · lane <bdi>{lane()}</bdi></>}</Show> · rev {ref.revision}</div>
+    <Show when={ref.summary}>{(summary) => <div class="context-picker-activity" dir="auto">{summary()}</div>}</Show>
+  </>
+}
 
 /** Grouped @ picker: rows on the start side, a preview of exactly what will be attached on the end side. */
 export const ContextPicker = (props: { groups: ContextGroup[]; selected: number; select: (index: number) => void; add: (ref: ContextRef) => void }) => {
@@ -31,11 +55,7 @@ export const ContextPicker = (props: { groups: ContextGroup[]; selected: number;
     </div>
     <Show when={current()}>{(ref) => <div class="context-picker-preview" aria-live="polite">
       <bdi class="context-picker-preview-title">{ref().label}</bdi>
-      <Show when={ref().kind === "agent" ? ref() as Extract<ContextRef, { kind: "agent" }> : undefined} fallback={
-        <div><bdi dir="ltr">{ref().id}</bdi><Show when={(ref() as Extract<ContextRef, { kind: "session" }>).lane}>{(lane) => <> · lane <bdi>{lane()}</bdi></>}</Show></div>}>{(agent) => <>
-        <div>Lane <bdi>{agent().lane}</bdi> · <bdi>{agent().editspace}</bdi></div>
-        <Show when={agent().activity}>{(activity) => <div class="context-picker-activity" dir="auto">{activity()}</div>}</Show>
-      </>}</Show>
+      <Show when={ref()} keyed>{(item) => <Detail item={item} />}</Show>
       <div class="context-picker-host">Host <bdi dir="ltr">{ref().host}</bdi></div>
       <div class="context-picker-bound">{contextBound(ref())}</div>
     </div>}</Show>
@@ -47,9 +67,10 @@ export const ContextPicker = (props: { groups: ContextGroup[]; selected: number;
 export const ContextChips = (props: { refs: readonly ContextRef[]; remove: (ref: ContextRef) => void; note?: string }) =>
   <Show when={props.refs.length}>
     <div class="context-chips" role="list" aria-label="Attached context">
-      <For each={props.refs}>{(ref) => <span class="context-chip" role="listitem" data-kind={ref.kind} title={`${contextBound(ref)}\n${ref.kind} ${ref.id} · host ${ref.host}`}>
-        <span class="context-chip-kind">{ref.kind === "agent" ? "Agent" : "Session"}</span>
+      <For each={props.refs}>{(ref) => <span class="context-chip" role="listitem" data-kind={ref.kind} title={`${contextBound(ref)}\n${ref.kind} ${ref.id}${"revision" in ref ? ` rev ${ref.revision}` : ""} · host ${ref.host}`}>
+        <span class="context-chip-kind">{contextKindLabel(ref)}</span>
         <bdi class="context-chip-label">{ref.label}</bdi>
+        <Show when={"revision" in ref ? ref.revision : undefined}>{(revision) => <span class="context-chip-rev">rev {revision()}</span>}</Show>
         <span class="context-chip-host" dir="ltr">{ref.host}</span>
         <button type="button" class="context-chip-remove" aria-label={`Remove context ${ref.label}`}
           onMouseDown={(event) => event.preventDefault()} onClick={() => props.remove(ref)}>×</button>

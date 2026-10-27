@@ -233,7 +233,8 @@ export const createFixture = async () => {
       })
     if (url.pathname === "/api/notifications") return json({ notifications: fixture.notifications ?? [] })
     if (url.pathname === "/api/attention/session") return json({ operator: false })
-    if (url.pathname === "/api/attention") return json({ records: [], projects: [], partial: false })
+    // Attention records: none unless a test sets fixture.attention.
+    if (url.pathname === "/api/attention") return json({ records: fixture.attention ?? [], projects: fixture.attention ? [{ editspace: "fixture", available: true }] : [], partial: false })
     // The shared Front desk queue reads ignored failures app-wide for the mode tab count.
     if (url.pathname === "/api/frontdesk/ignored-failures" && request.method === "GET") return json({ format: "front-desk-ignored-failures/1", entries: [] })
     if (url.pathname === "/api/mail") return fixture.mail

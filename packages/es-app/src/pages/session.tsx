@@ -13,7 +13,8 @@ import { useLiveSession } from "../live-session-cache"
 import FakeCaret from "../components/fake-caret"
 import { SessionChips } from "../components/session-chips"
 import { ContextChips, ContextPicker } from "../components/context-picker"
-import { contextGroups, contextKey, contextPart, insertContextLabel, type AgentCandidate, type ContextRef } from "../context-mention"
+import { contextGroups, contextKey, contextPart, insertContextLabel, MAX_CONTEXT, type AgentCandidate, type ContextRef } from "../context-mention"
+import { useDeskQueue } from "../desk-queue"
 import { mentionQuery, sessionLane, tokenBefore } from "../session-mention"
 import { RelativeLines } from "../components/relative-lines"
 import SessionInfo from "../components/session-info"
@@ -1457,11 +1458,18 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         return { editspace: name, lane: lane.lane, owner: lane.owner, status: lane.status, activity: lane.activity, title: owner?.title, live: owner?.live }
       }))
   })
-  const contextParts = () => contextRefs().map((ref) => {
-    const owner = ref.kind === "agent" ? sessionRows().find((row) => row.id === ref.owner) : undefined
-    const href = ref.kind === "session" ? sessionHref(ref.id, ref.directory) : owner ? sessionHref(owner.id, owner.directory) : "/"
-    return contextPart(ref, linkUrl(href), Date.now())
-  })
+  // Decisions and surfaces come from the shell's shared desk reads, so the picker adds no requests.
+  const deskQueue = useDeskQueue()
+  const contextHref = (ref: ContextRef) => {
+    if (ref.kind === "session") return sessionHref(ref.id, ref.directory)
+    // Same keys the desk opens with `/?item=` and `/?surface=`.
+    if (ref.kind === "decision") return `/?item=${encodeURIComponent(`attention:${ref.editspace}:${ref.id}`)}`
+    if (ref.kind === "surface") return `/?surface=${encodeURIComponent(ref.id)}`
+    const owner = sessionRows().find((row) => row.id === ref.owner)
+    return owner ? sessionHref(owner.id, owner.directory) : "/"
+  }
+  // Absolute so the receiving agent can re-fetch from the attaching host.
+  const contextParts = () => contextRefs().map((ref) => contextPart(ref, linkUrl(new URL(contextHref(ref), window.location.origin).href), Date.now()))
 
   const Editor = (props: { expanded?: boolean }) => {
     const [query, setQuery] = createSignal<ReturnType<typeof mentionQuery>>()
@@ -1471,6 +1479,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     const groups = createMemo(() => query() ? contextGroups({
       query: query()!.query, host: contextHost, agents: contextAgents(), currentID: sessionID, added: contextRefs(),
       sessions: sessionRows().filter((row) => !archivedIds().has(row.id)), laneOf: (id) => sessionLane(id, lineage(), lineageOwners()),
+      decisions: deskQueue.attention.snapshot()?.value.records ?? [], surfaces: deskQueue.surfaces.list(),
     }) : [])
     const rows = () => groups().flatMap((group) => group.items)
     const update = (el: HTMLTextAreaElement, isComposing = false) => {
@@ -1492,7 +1501,10 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       const el = target()
       const active = query()
       if (!el || !active) return
-      if (!contextRefs().some((item) => contextKey(item) === contextKey(ref))) setContextRefs([...contextRefs(), ref])
+      if (!contextRefs().some((item) => contextKey(item) === contextKey(ref))) {
+        if (contextRefs().length >= MAX_CONTEXT) return setContextNote(`At most ${MAX_CONTEXT} context items per message. Remove one to add another.`)
+        setContextRefs([...contextRefs(), ref])
+      }
       const next = insertContextLabel(el.value, active.start, el.selectionStart, ref.label)
       apply(el, next.text, next.caret)
     }

@@ -1595,17 +1595,21 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .context-picker-row[aria-selected="true"] { background: color-mix(in srgb, var(--accent, var(--lavender)) 18%, transparent); }
 .context-picker-dot { flex: none; inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--overlay1); }
 .context-picker-row[data-kind=session] .context-picker-dot { border-radius: 1px; }
+.context-picker-row[data-kind=decision] .context-picker-dot { border-radius: 1px; transform: rotate(45deg); background: var(--peach); }
+.context-picker-row[data-kind=surface] .context-picker-dot { border-radius: 1px; background: none; box-shadow: inset 0 0 0 1.5px var(--overlay1); }
 .context-picker-dot[data-busy] { background: var(--accent, var(--lavender)); }
 .context-picker-label { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .context-picker-meta { margin-inline-start: auto; flex: none; color: var(--overlay1); font-size: 11px; }
 .context-picker-empty { padding: 8px 10px; color: var(--subtext0); }
 .context-picker-preview { padding: 10px; color: var(--subtext0); overflow-y: auto; overflow-wrap: anywhere; display: flex; flex-direction: column; gap: 4px; }
 .context-picker-preview-title { color: var(--text); font-weight: 600; }
+.context-picker-preview .context-picker-activity { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; overflow: hidden; white-space: pre-line; }
+.context-picker-options { margin: 0; padding-inline-start: 18px; }
 .context-picker-bound { margin-block-start: 6px; color: var(--overlay1); }
 .context-picker-hint { grid-column: 1 / -1; padding: 6px 10px; border-block-start: 1px solid var(--surface0); color: var(--overlay1); font-size: 11px; }
 .context-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-block-end: 6px; }
 .context-chip { display: inline-flex; align-items: center; gap: 6px; max-inline-size: 100%; padding: 2px 4px 2px 8px; border-radius: 2px; background: var(--surface0); font-size: 12px; }
-.context-chip-kind, .context-chip-host { flex: none; color: var(--overlay1); font-size: 11px; }
+.context-chip-kind, .context-chip-host, .context-chip-rev { flex: none; color: var(--overlay1); font-size: 11px; }
 .context-chip-label { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .context-chip-remove { flex: none; padding: 0 4px; border: 0; background: none; color: var(--overlay1); cursor: pointer; }
 .context-chip-remove:hover, .context-chip-remove:focus-visible { color: var(--text); }

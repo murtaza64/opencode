@@ -27,6 +27,13 @@ fixture.sessionTitles.set(mentioned, "Orchestrator main")
 fixture.sessionTimes.set(mentioned, { created: 1, updated: Date.now() })
 // The lane record is the agent's logical identity; its activity comes from the lane, never the title.
 fixture.laneOwners = [{ lane: "orchestrator", owner: mentioned, status: "active", activity: "routing perf pins" }]
+// Slice 2: an open decision and a surface come from the shell's shared desk reads.
+fixture.attention = [{ id: "att_release", editspace: "fixture", revision: 7, content_revision: 3, status: "open", lane: "runtime-options", kind: "decision",
+  title: "Release order for relay", context: "Which build ships first?", options: [{ id: "a", label: "Cost number first" }, { id: "b", label: "Auth first" }],
+  recommendation: null, producer_session: "ses_p", origin_session: "ses_p", gate_key: "g", source_ref: { session_id: "ses_p", directory: "/p" },
+  decision: null, delivery_state: "not-requested", created_at: Date.now() - 5000, updated_at: Date.now() - 5000 }]
+fixture.surfaces = [{ id: "release-board", title: "Release board", summary: "Pins waiting for install", kind: "url", owner: "ses_board", lane: "relay-board",
+  editspace: "fixture", updated_at: Date.now() - 60_000, revision: 4, purpose: "board", health: { state: "ok" } }]
 fixture.handoffs = [{ lane: "orchestrator", predecessor: `ses_${"P".repeat(26)}`, successor: mentioned }]
 process.env.OPENCODE_URL = fixture.url
 process.env.ES_DASHBOARD_URL = fixture.url
@@ -139,6 +146,41 @@ try {
     // Adding context never mails or notifies: the only write is the send itself.
     expect(writes().slice(baselineWrites).map((call) => call.path)).toEqual(["/session/ses_a/prompt_async"])
 
+    // Slice 2: decisions and surfaces from the shared desk reads, with exact revision and stated bounds.
+    await editor().pressSequentially("see @release")
+    await expect(picker().getByRole("group")).toHaveCount(2)
+    await expect(picker().getByRole("group").first()).toHaveAttribute("aria-label", "Decisions")
+    await expect(picker().getByRole("group", { name: "Decisions" }).getByRole("option")).toHaveText([/Release order for relay.*rev 3/])
+    await expect(picker().locator(".context-picker-preview")).toContainText("Which build ships first?")
+    await expect(picker().locator(".context-picker-preview")).toContainText("Cost number first")
+    await expect(picker().locator(".context-picker-preview")).toContainText("Adds: question + options (rev 3), link. Does not answer or notify.")
+    await editor().press("Tab")
+    await expect(picker().getByRole("group", { name: "Surfaces" }).getByRole("option").first()).toHaveAttribute("aria-selected", "true")
+    await expect(picker().locator(".context-picker-preview")).toContainText("Pins waiting for install")
+    await expect(picker().locator(".context-picker-preview")).toContainText("Not the surface content")
+    await page.screenshot({ path: join(shots, `picker-slice2-${dir}.png`) })
+    await editor().press("Shift+Tab")
+    await editor().press("Enter")
+    await editor().pressSequentially("on @release")
+    await expect(picker().getByRole("group", { name: "Decisions" })).toHaveCount(0)
+    await editor().press("Enter")
+    await expect(editor()).toHaveValue("see @Release order for relay on @Release board ")
+    await expect(chips()).toHaveText([/Decision\s*Release order for relay\s*rev 3/, /Surface\s*Release board\s*rev 4/])
+    const slice2Sends = fixture.calls.filter((call) => call.path === "/session/ses_a/prompt_async").length
+    await editor().press("Control+Enter")
+    await expect.poll(() => fixture.calls.filter((call) => call.path === "/session/ses_a/prompt_async").length).toBe(slice2Sends + 1)
+    const slice2 = fixture.calls.filter((call) => call.path === "/session/ses_a/prompt_async").at(-1).body.parts.filter((part) => part.metadata?.source === "es-app/mention")
+    expect(slice2.map((part) => part.metadata.key)).toEqual([`decision:${new URL(origin).host}:att_release`, `surface:${new URL(origin).host}:release-board`])
+    expect(slice2[0].text).toContain("Options: 1) Cost number first; 2) Auth first")
+    expect(slice2[0].text).toContain("does not answer, approve or notify anyone")
+    expect(JSON.parse(slice2[0].text.split("Reference: ")[1])).toMatchObject({ kind: "decision", id: "att_release", revision: 3, url: `${origin}/?item=attention%3Afixture%3Aatt_release` })
+    expect(slice2[1].text).toContain("Content: not included")
+    expect(JSON.parse(slice2[1].text.split("Reference: ")[1])).toMatchObject({ kind: "surface", id: "release-board", revision: 4, url: `${origin}/?surface=release-board` })
+    expect(slice2.every((part) => new TextEncoder().encode(part.text).length <= 2048)).toBe(true)
+    await expect(chips()).toHaveCount(0)
+    // Attaching a decision never answers it: the only writes are the two sends.
+    expect(writes().slice(baselineWrites).map((call) => call.path)).toEqual(["/session/ses_a/prompt_async", "/session/ses_a/prompt_async"])
+
     // Transcript session references still resolve and navigate.
     const info = { id: `msg_zmention${dir}`, sessionID: "ses_a", role: "assistant", agent: "build", parentID: "msg_user", providerID: "fixture", modelID: "test", path: { cwd: directory, root: directory }, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: Date.now() } }
     fixture.emit("message.updated", { info })
@@ -150,7 +192,7 @@ try {
   }
   expect(fixture.unexpected).toEqual([])
   expect(errors).toEqual([])
-  console.log(`PASS context picker: grouped agents + sessions, preview bound, Tab groups, chips, readable labels, persistence, removal, one-send context parts, no reads/writes before send, LTR/RTL; screenshots ${shots}`)
+  console.log(`PASS context picker: grouped agents + sessions + decisions + surfaces, preview bound, Tab groups, chips, readable labels, persistence, removal, one-send context parts, no reads/writes before send, LTR/RTL; screenshots ${shots}`)
 } finally {
   await browser.close()
   await vite.close()
