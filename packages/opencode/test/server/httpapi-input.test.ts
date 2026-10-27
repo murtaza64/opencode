@@ -870,3 +870,40 @@ it.live(
     ),
   90_000,
 )
+
+it.live(
+  "input context reaches the model on the promoted message and invalid context is rejected",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.text("context received")
+          const session = yield* Session.use.create({ title: "Context input" })
+          const post = (body: unknown) =>
+            requestInDirectory(`/session/${session.id}/input`, dir, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(body),
+            })
+          const item = { text: "CONTEXT-MARKER from answer.ts", source: "file", key: "answer.ts" }
+          expect((yield* post({ requestID: "too-many", delivery: "steer", text: "x", context: Array(9).fill(item) })).status).toBe(400)
+          expect((yield* post({ requestID: "too-long", delivery: "steer", text: "x", context: [{ ...item, text: "y".repeat(4097) }] })).status).toBe(400)
+          expect((yield* post({ requestID: "extra", delivery: "steer", text: "x", context: [{ ...item, extra: 1 }] })).status).toBe(400)
+
+          const admitted = yield* post({ requestID: "with-context", delivery: "steer", agent: "build", text: "use it", context: [item] })
+          expect(admitted.status).toBe(200)
+          yield* llm.wait(1)
+          expect(JSON.stringify(yield* llm.inputs)).toContain("CONTEXT-MARKER from answer.ts")
+          const receipt = yield* pollWithTimeout(
+            readReceipt(`/session/${session.id}/input/with-context`, dir).pipe(
+              Effect.map((value) => (value.state === "pending" ? undefined : value)),
+            ),
+            "context input was not promoted",
+            "10 seconds",
+          )
+          expect(receipt).toMatchObject({ context: [item] })
+        }),
+      { config: testProviderConfig },
+    ),
+  30_000,
+)

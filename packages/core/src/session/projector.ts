@@ -482,6 +482,8 @@ const layer = Layer.effectDiscard(
         if (!row) return yield* Effect.die(new InputLifecycleConflict())
         const info = event.data.info
         const images = event.data.images ?? []
+        const context = event.data.context ?? []
+        const lastID = images.at(-1)?.id ?? event.data.part.id
         if (
           info.sessionID !== event.data.sessionID ||
           info.agent !== row.receipt.agent ||
@@ -507,6 +509,19 @@ const layer = Layer.effectDiscard(
               ...(image.filename === undefined ? {} : { filename: image.filename }),
             })),
             row.images ?? [],
+          ) ||
+          // Context parts follow the text and images, and match the admitted context exactly.
+          !isDeepStrictEqual(
+            context.map((item) => ({ text: item.text, source: item.metadata?.contextSource, key: item.metadata?.contextKey })),
+            row.payload.context ?? [],
+          ) ||
+          context.some(
+            (item, index) =>
+              item.sessionID !== info.sessionID ||
+              item.messageID !== info.id ||
+              item.synthetic !== true ||
+              !/^prt_[A-Za-z0-9]+$/.test(item.id) ||
+              item.id <= (index === 0 ? lastID : context[index - 1].id),
           )
         )
           return yield* Effect.die(new InputLifecycleConflict())
@@ -526,7 +541,7 @@ const layer = Layer.effectDiscard(
           })
           .run()
           .pipe(Effect.orDie)
-        for (const image of event.data.images ?? []) {
+        for (const image of [...(event.data.images ?? []), ...context]) {
           yield* db
             .insert(PartTable)
             .values({

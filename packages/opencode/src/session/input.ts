@@ -407,6 +407,17 @@ const make = Effect.gen(function* () {
         sessionID,
         messageID: info.id,
       }))
+      const context = (payload.context ?? []).map(
+        (item): SessionV1.TextPart => ({
+          id: PartID.ascending(),
+          sessionID,
+          messageID: info.id,
+          type: "text",
+          text: item.text,
+          synthetic: true,
+          metadata: { contextSource: item.source, contextKey: item.key },
+        }),
+      )
       yield* reconcile(
         events.publish(SessionV1.Event.InputPromoted, {
           sessionID,
@@ -416,6 +427,7 @@ const make = Effect.gen(function* () {
           info,
           part,
           ...(images.length ? { images } : {}),
+          ...(context.length ? { context } : {}),
         }),
       )
       const receipt = yield* get(sessionID, row.request_id).pipe(Effect.orDie)
@@ -424,6 +436,7 @@ const make = Effect.gen(function* () {
       yield* sessions.updateMessage(info)
       yield* sessions.updatePart(part)
       for (const image of images) yield* sessions.updatePart(image)
+      for (const item of context) yield* sessions.updatePart(item)
       promoted = true
       promotedModel = row.model
       batch = { mail, agent: row.receipt.agent }
