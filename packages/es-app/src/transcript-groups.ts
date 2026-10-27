@@ -48,6 +48,14 @@ export const completedTurns = (messages: readonly Message[], input: {
   return done
 }
 
+// Turns whose tool calls may coalesce. Grouping is finalized only at a real idle: while a run is active
+// or its status is unknown (reconnecting), only turns already finished when the run began (`before`)
+// may group, plus older history paged in meanwhile (parent prompt older than `oldest`, the oldest
+// message loaded at run start). Nothing on screen then reparents, collapses or moves under a person
+// reading or drafting. Message IDs sort by creation.
+export const groupableTurns = (done: ReadonlySet<string>, run?: { before: ReadonlySet<string>; oldest?: string }): ReadonlySet<string> =>
+  run ? new Set([...done].filter((id) => run.before.has(id) || (run.oldest !== undefined && id < run.oldest))) : done
+
 const finalStep = (message: Extract<Message, { role: "assistant" }>, parts: readonly Part[]) => {
   if (message.structured !== undefined) return true
   if (!message.finish || message.finish === "tool-calls" || message.finish === "unknown") return false

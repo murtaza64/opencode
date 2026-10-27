@@ -115,8 +115,20 @@ const run = async (viewport, label) => {
   for (const id of ["p61_la", "p62_lb", "p63_lc", "p70_ma", "p71_mb"]) await expect(chip(id)).toHaveCount(1)
   await expect(page.locator(".tool-run")).toHaveCount(3)
   await expect(page.locator('[data-find-message="msg_1012"] .turn-summary')).toHaveCount(0)
-  // The final step completes the turn: its adjacent calls coalesce across both steps and the footer appears.
+  // The final step completes the turn while the session still reports busy: nothing regroups under the
+  // reader or a draft until the run is actually idle (CHAT-PARTS §2).
+  await editor().fill("drafting while it works")
+  const draftBox = await editor().boundingBox()
   emitMessage(preview.assistant("msg_1013", "msg_1010", [preview.text("p80_done", "All checks pass.")], { info: { finish: "stop" } }))
+  await expect(page.locator('[data-find-message="msg_1013"]')).toBeVisible()
+  await page.waitForTimeout(300)
+  await expect(page.locator(".tool-run")).toHaveCount(3)
+  for (const id of ["p61_la", "p62_lb", "p63_lc", "p70_ma", "p71_mb"]) await expect(chip(id)).toHaveCount(1)
+  await expect(editor()).toHaveValue("drafting while it works")
+  await expect(editor()).toBeFocused()
+  expect(await editor().boundingBox()).toEqual(draftBox)
+  // Real idle finalizes grouping once: adjacent calls coalesce across both steps.
+  fixture.setStatus("idle")
   const tail = runFor("p61_la")
   await expect(tail).toHaveAttribute("data-timeline-part-ids", "p61_la,p62_lb,p63_lc,p70_ma,p71_mb")
   await expect(tail.locator(".tool-run-tools")).toHaveText("read ×3 · bash · edit")
