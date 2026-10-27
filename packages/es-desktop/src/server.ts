@@ -95,7 +95,9 @@ export const serve = async (options: {
   if (publicOrigin && !pairing) throw new Error("A public origin requires pairing")
   const failures = { count: 0, since: 0 }
   const remote = options.remote
-  if (remote && (options.opencode || options.dashboard || options.opencodeAuth || options.voice))
+  // Voice may join a remote listener: capture and transcription stay on this machine and the
+  // text only reaches that tab's draft, never the remote host.
+  if (remote && (options.opencode || options.dashboard || options.opencodeAuth))
     throw new Error("A remote host listener attaches to that host only")
   const targets = remote
     ? { oc: remoteTargets(remote.origin).opencode, es: remoteTargets(remote.origin).dashboard }
@@ -380,7 +382,8 @@ const voiceRoute = async (
   finish: (status: number, body: string, type?: string) => void,
 ) => {
   const json = (status: number, value: unknown) => finish(status, JSON.stringify(value), "application/json")
-  if (pathname === "/__es/voice" && req.method === "GET") return json(200, await voice.status())
+  // Listener origins identify host tabs sharing this process's one microphone.
+  if (pathname === "/__es/voice" && req.method === "GET") return json(200, await voice.status(origin))
   const action = /^\/__es\/voice\/(start|stop|cancel|settings)$/.exec(pathname)?.[1]
   if (!action || req.method !== "POST") return finish(404, "Not found")
   if (req.headers.origin !== origin || !req.headers["content-type"]?.startsWith("application/json"))
@@ -406,7 +409,7 @@ const voiceRoute = async (
     await voice.cancel(id)
     return json(200, { ok: true })
   }
-  const result = action === "start" ? await voice.start(id) : await voice.stop(id)
+  const result = action === "start" ? await voice.start(id, origin) : await voice.stop(id)
   const status = result.ok
     ? 200
     : ({ busy: 409, inactive: 409, cancelled: 409, unavailable: 503, permission: 403, empty: 422, failed: 500 } as const)[result.code]

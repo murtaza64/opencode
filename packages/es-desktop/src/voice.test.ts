@@ -226,6 +226,32 @@ test("the bridge is native-keyed, origin-bound and absent for paired listeners",
   expect((await fetch(`${paired.origin}/__es/voice`, { headers: { "x-editspace-key": paired.key } })).status).not.toBe(200)
 })
 
+test("remote host tabs get this machine's dictation, and only the starting tab sees its capture", async () => {
+  const { voice, recording } = await setup()
+  const root = await mkdtemp(path.join(tmpdir(), "es-voice-root-"))
+  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  await writeFile(path.join(root, "index.html"), "<title>Fixture</title>")
+  // The remote origin is never contacted for voice; it only needs to be a valid target.
+  const local = await serve({ root, voice })
+  const mini = await serve({ root, voice, remote: { id: "mini", origin: "http://127.0.0.1:9" } })
+  cleanup.push(local.close, mini.close)
+  const call = (server: typeof local, action?: string, body?: unknown) =>
+    fetch(`${server.origin}/__es/voice${action ? `/${action}` : ""}`, {
+      method: action ? "POST" : "GET",
+      headers: { "x-editspace-key": server.key, origin: server.origin, "content-type": "application/json" },
+      body: action ? JSON.stringify(body) : undefined,
+    })
+  expect(await (await call(mini)).json()).toEqual({ available: true, state: "idle" })
+  const run = id()
+  expect((await call(mini, "start", { id: run })).status).toBe(200)
+  await recording()
+  // The local tab sees the shared microphone is busy, but not the id it could reload-cancel.
+  expect(await (await call(local)).json()).toEqual({ available: true, state: "recording" })
+  expect(await (await call(mini)).json()).toEqual({ available: true, state: "recording", id: run })
+  expect((await call(local, "start", { id: id() })).status).toBe(409)
+  expect(await (await call(mini, "stop", { id: run })).json()).toEqual({ ok: true, text: "Hello there. And more." })
+})
+
 // Real whisper.cpp over a synthesized private clip, when the local pipeline is installed. Capture
 // stays a fixture: no test opens the microphone.
 const real = await voiceTools({ home: process.env.HOME ?? "", env: process.env, config: "/nonexistent" })

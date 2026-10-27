@@ -39,6 +39,8 @@ export const createVoice = (options: {
 }) => {
   type Active = {
     id: string
+    // The listener (host tab) that started it; only that renderer may adopt or reload-cancel it.
+    owner?: string
     phase: "starting" | "recording" | "transcribing"
     cancelled: boolean
     dir?: string
@@ -58,17 +60,17 @@ export const createVoice = (options: {
     if (active.dir) await rm(active.dir, { recursive: true, force: true })
   }
 
-  const status = async (): Promise<VoiceStatus> => {
+  const status = async (owner?: string): Promise<VoiceStatus> => {
     const state = holder.active ? (holder.active.phase === "transcribing" ? "transcribing" : "recording") : "idle"
-    const id = holder.active?.id
+    const id = holder.active?.owner === owner ? holder.active?.id : undefined
     const tools = await options.resolve()
     if ("missing" in tools) return { available: false, missing: tools.missing, message: tools.message, state, id }
     return { available: true, state, id }
   }
 
-  const start = async (id: string): Promise<{ ok: true } | VoiceFailure> => {
+  const start = async (id: string, owner?: string): Promise<{ ok: true } | VoiceFailure> => {
     if (holder.active) return fail("busy", "Dictation is already running.")
-    const active: Active = { id, phase: "starting", cancelled: false }
+    const active: Active = { id, owner, phase: "starting", cancelled: false }
     holder.active = active
     const tools = await options.resolve().catch(() => undefined)
     if (!tools || "missing" in tools) {
