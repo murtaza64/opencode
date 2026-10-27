@@ -1,3 +1,8 @@
+import fs from "node:fs/promises"
+import path from "node:path"
+import { Provider } from "@/provider/provider"
+import { managedConfigDir } from "@/config/managed"
+import { ProviderV2 } from "@opencode-ai/core/provider"
 import { Account } from "@/account/account"
 import { Agent } from "@/agent/agent"
 import { BackgroundJob } from "@/background/job"
@@ -43,6 +48,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const flags = yield* RuntimeFlags.Service
     const reader = yield* DatabaseReader.Service
     const usage = yield* UsageRollup.Service
+    const providers = yield* Provider.Service
 
     const capabilities = Effect.fn("ExperimentalHttpApi.capabilities")(function* () {
       return {
@@ -63,11 +69,18 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const usageDaily = Effect.fn("ExperimentalHttpApi.usageDaily")(function* (ctx: {
       query: { days?: number; offsetMinutes?: number }
     }) {
+      const catalog = yield* providers.list()
       const daily = yield* usage.daily({
         days: ctx.query.days ?? 7,
         offsetMinutes: ctx.query.offsetMinutes ?? -new Date().getTimezoneOffset(),
+        // A model has a rate when the catalog (managed config cost card, then models.dev) gives it a non-zero
+        // input or output price. Absent and zero cost entries parse to the same zeros, so both count as missing.
+        hasRate: (provider, model) => {
+          const cost = catalog[ProviderV2.ID.make(provider)]?.models[model]?.cost
+          return cost !== undefined && (cost.input > 0 || cost.output > 0)
+        },
       })
-      return { ...daily, rateLimits: RateLimits.snapshot() }
+      return { ...daily, priceSource: yield* priceSource(), rateLimits: RateLimits.snapshot() }
     })
 
     const getConsole = Effect.fn("ExperimentalHttpApi.console")(function* () {
@@ -228,3 +241,22 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       .handle("resource", resource)
   }),
 )
+
+/** Where rates come from, by path and modified time only: the managed config can hold credentials. */
+const priceSource = Effect.fnUntraced(function* () {
+  const dir = managedConfigDir()
+  const cards = yield* Effect.promise(() =>
+    Promise.all(
+      ["opencode.json", "opencode.jsonc"].map((name) =>
+        fs.stat(path.join(dir, name)).then(
+          (stat) => ({ path: path.join(dir, name), modified: stat.mtime.toISOString() }),
+          () => undefined,
+        ),
+      ),
+    ),
+  )
+  return {
+    label: "estimate from the provider catalog: managed config cost card where present, otherwise models.dev",
+    managedConfig: cards.filter((card) => card !== undefined),
+  }
+})

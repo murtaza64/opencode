@@ -146,6 +146,7 @@ describe("UsageRollup", () => {
   it.effect("daily totals follow the caller's local day", () =>
     Effect.gen(function* () {
       const db = (yield* Database.Service).db
+      yield* db.update(UsageRollupStateTable).set({ time_backfilled: 1 }).run()
       const now = Date.UTC(2026, 9, 27, 3, 30)
       // 22:00 UTC on the 26th: the 26th in UTC, the 27th at UTC+3.
       const hour = Date.UTC(2026, 9, 26, 22) / HOUR
@@ -153,7 +154,7 @@ describe("UsageRollup", () => {
         .insert(UsageHourlyTable)
         .values([
           { hour, provider_id: "anthropic", model_id: "opus", cost: 3, tokens_input: 1 },
-          { hour: hour - 48, provider_id: "openai", model_id: "gpt", cost: 1 },
+          { hour: hour - 48, provider_id: "openai", model_id: "gpt", cost: 1, tokens_input: 1 },
         ])
         .run()
       const utc = yield* UsageRollup.daily(db, { days: 7, offsetMinutes: 0, now })
@@ -171,9 +172,57 @@ describe("UsageRollup", () => {
         ["2026-10-27", 3],
         ["2026-10-26", 0],
       ])
-      expect(east).toMatchObject({ estimate: true, offsetMinutes: 180, coverage: { backfilled: false } })
+      expect(east).toMatchObject({ estimate: true, offsetMinutes: 180, coverage: { backfilled: true } })
       expect(east.days[0]?.models).toEqual([
-        { provider: "anthropic", model: "opus", cost: 3, tokens: { input: 1, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } },
+        {
+          provider: "anthropic",
+          model: "opus",
+          cost: 3,
+          coverage: "priced",
+          tokens: { input: 1, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+      ])
+    }),
+  )
+
+  it.effect("usage without a known rate is reported as unpriced, never as zero cost", () =>
+    Effect.gen(function* () {
+      const db = (yield* Database.Service).db
+      yield* db.update(UsageRollupStateTable).set({ time_backfilled: 1 }).run()
+      const now = Date.UTC(2026, 9, 27, 12)
+      const hour = Date.UTC(2026, 9, 27, 10) / HOUR
+      yield* db
+        .insert(UsageHourlyTable)
+        .values([
+          { hour, provider_id: "gateway", model_id: "priced", cost: 2, tokens_input: 10 },
+          { hour, provider_id: "gateway", model_id: "no-card", cost: 0, tokens_input: 500, tokens_output: 50 },
+          { hour, provider_id: "gateway", model_id: "aborted", cost: 0 },
+        ])
+        .run()
+      const [today] = (yield* UsageRollup.daily(db, {
+        days: 1,
+        offsetMinutes: 0,
+        now,
+        hasRate: (_provider, model) => model === "priced",
+      })).days
+      expect(today).toMatchObject({ complete: true, cost: 2, unpricedModels: 1, unpricedTokens: 550 })
+      expect(today?.models.map((model) => [model.model, model.coverage, model.cost])).toEqual([
+        ["priced", "priced", 2],
+        ["aborted", "no-usage", 0],
+        ["no-card", "missing-rate", null],
+      ])
+    }),
+  )
+
+  it.effect("days before the live cutoff are unknown until the backfill has run", () =>
+    Effect.gen(function* () {
+      const db = (yield* Database.Service).db
+      const cutoff = Date.UTC(2026, 9, 27, 6)
+      yield* db.update(UsageRollupStateTable).set({ cutoff, time_backfilled: null }).run()
+      const days = (yield* UsageRollup.daily(db, { days: 2, offsetMinutes: 0, now: Date.UTC(2026, 9, 28, 1) })).days
+      expect(days.map((day) => [day.day, day.complete, day.cost])).toEqual([
+        ["2026-10-28", true, 0],
+        ["2026-10-27", false, null],
       ])
     }),
   )

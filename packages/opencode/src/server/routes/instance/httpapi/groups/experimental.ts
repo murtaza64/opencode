@@ -133,12 +133,26 @@ export const UsageDailyResponse = Schema.Struct({
     liveSince: Schema.optional(Schema.String),
     backfilled: Schema.Boolean,
   }),
+  notes: Schema.Array(Schema.String),
+  priceSource: Schema.Struct({
+    label: Schema.String,
+    managedConfig: Schema.Array(Schema.Struct({ path: Schema.String, modified: Schema.String })),
+  }),
   days: Schema.Array(
     Schema.Struct({
       day: Schema.String,
-      cost: Schema.Number,
+      complete: Schema.Boolean,
+      cost: Schema.NullOr(Schema.Number),
+      unpricedModels: Schema.Number,
+      unpricedTokens: Schema.Number,
       models: Schema.Array(
-        Schema.Struct({ provider: Schema.String, model: Schema.String, cost: Schema.Number, tokens: UsageTokens }),
+        Schema.Struct({
+          provider: Schema.String,
+          model: Schema.String,
+          cost: Schema.NullOr(Schema.Number),
+          coverage: Schema.Literals(["priced", "missing-rate", "no-usage"]),
+          tokens: UsageTokens,
+        }),
       ),
     }),
   ),
