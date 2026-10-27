@@ -23,8 +23,8 @@ const upstream = () => {
   return { origin: `http://127.0.0.1:${server.port}`, seen }
 }
 
-const app = async (entries: () => SurfaceEntry[], dashboard?: string) => {
-  const proxy = surfaceProxy({ dashboard, registry: async () => entries() })
+const app = async (entries: () => SurfaceEntry[], dashboard?: string, publicOrigin?: string) => {
+  const proxy = surfaceProxy({ dashboard, registry: async () => entries(), publicOrigin })
   const server: Server = createServer((req, res) => {
     if (req.url?.startsWith("/__es/surface/")) return proxy.address(req, res)
     void proxy.serve(req, res)
@@ -56,6 +56,17 @@ describe("surface proxy", () => {
     expect(csp).not.toContain("allow-same-origin")
     expect(csp).toContain(`connect-src ${base}${src};`)
     expect(response.headers.get("access-control-allow-origin")).toBe("null")
+  })
+
+  test("allows the public origin's prefix when a proxy fronts the gateway with a loopback Host", async () => {
+    const board = upstream()
+    const base = await app(() => [{ id: "relay-board", upstream: `${board.origin}/board/` }], undefined, "https://mini.example.ts.net:8443")
+    const { src } = await fetch(`${base}/__es/surface/relay-board`).then(response => response.json())
+
+    const csp = (await fetch(`${base}${src}api/status`)).headers.get("content-security-policy") ?? ""
+
+    expect(csp).toContain(`connect-src ${base}${src} https://mini.example.ts.net:8443${src};`)
+    expect(csp).toContain(`script-src ${base}${src} https://mini.example.ts.net:8443${src} 'unsafe-inline'`)
   })
 
   test("refuses a wrong capability without contacting the surface", async () => {
