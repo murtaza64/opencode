@@ -50,6 +50,7 @@ import { ToolSize } from "../components/tool-size"
 import { ToolRun } from "../components/tool-run"
 import { HeaderMenu } from "../components/header-menu"
 import { FailureRetry } from "../components/session-failure"
+import { blockTime } from "../recorded-time"
 import { completedTurns, messageSegments, planToolRuns, samePlan, sameSegments } from "../transcript-groups"
 import { isUserPrompt, promptPosition, promptTarget } from "../transcript-nav"
 import { restartMarkers } from "../restart-marker"
@@ -1611,6 +1612,18 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const promptIDs = createMemo(() => new Set(timeline().flatMap((row) =>
     row.type === "transcript" && isUserPrompt(row.message, live.data.part[row.message.id] ?? []) ? [row.message.id] : [])))
   createEffect(() => { promptIDs(); schedulePromptPosition() })
+  // Hover shows when an agent text block or human message was recorded, as a native tooltip: nothing is
+  // drawn until asked, and blocks are stamped on first hover instead of on every render.
+  const stampBlock = (event: Event) => {
+    const block = (event.target as Element).closest?.<HTMLElement>("[data-component='text-part'], .msg-wrap")
+    if (!block || block.dataset.recordedAt !== undefined) return
+    const messageID = block.closest<HTMLElement>("[data-find-message]")?.dataset.findMessage
+    const partID = block.matches("[data-component='text-part']") ? block.dataset.timelinePartId : undefined
+    const time = blockTime(messageID ? messageByID().get(messageID) : undefined,
+      partID && messageID ? live.data.part[messageID]?.find((part) => part.id === partID) : undefined)
+    block.dataset.recordedAt = time ?? ""
+    if (time) block.title = time
+  }
   const renderRun = (key: string) => <Show when={toolRuns().runs.get(key)}>{(run) => {
     const hit = () => findHit() && run().members.some((member) => member.partID === findHit()!.partID) ? findHit() : undefined
     return <ToolRun run={run()} message={(id) => messageByID().get(id)} parts={(id) => live.data.part[id] ?? []}
@@ -1717,7 +1730,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         </div>
 
         <div class="transcript" ref={transcriptEl}>
-          <div ref={inner} class="transcript-inner" classList={{ "transcript-arrive": arrived() }} onClick={(event) => {
+          <div ref={inner} class="transcript-inner" classList={{ "transcript-arrive": arrived() }}
+            onPointerOver={stampBlock} onFocusIn={stampBlock} onClick={(event) => {
             // Only a standalone chip's own disclosure counts; action buttons inside it do not.
             const trigger = (event.target as Element).closest("[data-slot='collapsible-trigger']")
             if (!trigger || trigger.closest(".tool-run")) return
