@@ -2,7 +2,19 @@
  * shadow; separators only where content would otherwise run together. Applies in both themes;
  * [data-appearance=wallpaper] adds the laptop's colours (appearance.ts) and one backdrop. */
 :root {
-  --accent: var(--blue);
+  /* Default theme with few neutral levels (manadj): page, panel, raised, one line colour, three text
+   * weights. Older token names alias onto them; wallpaper mode (appearance.ts) does the same. */
+  --crust: #050506;
+  --mantle: #050506;
+  --base: #0b0c0e;
+  --surface0: #17181c;
+  --surface1: #2b2d33;
+  --surface2: #2b2d33;
+  --overlay0: #7f849c;
+  --overlay1: #7f849c;
+  --subtext0: #a6adc8;
+  --subtext1: #a6adc8;
+  --accent: #4a9eff;
   /* Mostly square (manadj): 2px softens controls without reading as rounded; pills/circles only for badges and status. */
   --radius-control: 2px;
   --radius-bubble: 2px;
@@ -29,6 +41,16 @@
   box-shadow: var(--shadow-raised);
 }
 :root .pending-bubble { border-radius: var(--radius-bubble) !important; }
+/* A sent message keeps its exact shape from pending to accepted: same box, padding, type and width as
+ * the transcript's user message; only colour says it is still on its way (the cue line names the state). */
+:root .transcript :is([data-component="user-message-text"], [data-slot="user-message-text"]),
+:root .pending-bubble {
+  padding: 8px 12px; border: 1px solid transparent; font: inherit; font-size: 13px; line-height: 1.5;
+  box-sizing: border-box; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+:root .pending-bubble { background: color-mix(in srgb, var(--accent) 7%, var(--base)); color: var(--subtext1); border-color: color-mix(in srgb, var(--accent) 35%, transparent); border-style: solid !important; }
+:root .pending-msg[data-status="pending"] .pending-bubble { border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+:root .pending-msg[data-status="unknown"] .pending-bubble { border-color: color-mix(in srgb, var(--yellow) 60%, transparent); }
 
 /* Composer: one raised field instead of a bordered box inside a bordered strip. */
 :root .prompt-box { border-top: 0; background: transparent; }
@@ -44,6 +66,9 @@
 :root .direct-primary:disabled { background: transparent; }
 :root .direct-more { border-start-end-radius: var(--radius-control) !important; border-end-end-radius: var(--radius-control) !important; }
 :root .direct-split:has(.direct-more:not(.idle)) .direct-primary { border-start-end-radius: 0 !important; border-end-end-radius: 0 !important; }
+/* Shortcut hint: same font and baseline as the label, sized to read (the global kbd rule forces mono). */
+:root .shell .direct-button-hint { font: 500 12px/1 var(--font-sans) !important; letter-spacing: .02em; align-self: center; }
+:root .direct-primary { gap: 12px; }
 
 /* Front desk queue: rows as soft tiles; the selected item glows with the accent. */
 :root .desk-item { border-block-end: 0; margin-block-end: 2px; }
@@ -59,10 +84,11 @@
   inset: 0;
   z-index: -1;
   background:
-    linear-gradient(color-mix(in srgb, var(--base) 62%, transparent), color-mix(in srgb, var(--base) 84%, transparent)),
+    linear-gradient(color-mix(in srgb, var(--base) 48%, transparent), color-mix(in srgb, var(--base) 78%, transparent)),
     var(--wallpaper, none) center / cover no-repeat;
   pointer-events: none;
 }
+:root[data-appearance=wallpaper] .sidebar { background: color-mix(in srgb, var(--accent) 5%, var(--mantle)); }
 :root[data-appearance=wallpaper] .session-page,
 :root[data-appearance=wallpaper] .session-main .prompt-box { background: transparent; }
 :root[data-appearance=wallpaper] .direct-composer textarea { background: color-mix(in srgb, var(--mantle) 78%, transparent); }
@@ -88,3 +114,7 @@
 .peek-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; margin: 8px 0 6px; font-size: 11px; line-height: 16px; }
 .peek-facts dt { color: var(--overlay1); }
 .peek-facts dd { margin: 0; color: var(--subtext1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Coalesced tool/mail runs: a quiet filled band instead of a dashed outline; focus stays visible. */
+:root .tool-run { border: 0; background: var(--surface0); }
+:root .tool-run :focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
