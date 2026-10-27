@@ -26,6 +26,7 @@ import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import * as Option from "effect/Option"
 import * as OtelTracer from "@effect/opentelemetry/Tracer"
+import { RateLimits } from "@opencode-ai/core/usage/rate-limits"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
@@ -397,6 +398,11 @@ const live: Layer.Layer<
             return Stream.fromAsyncIterable(result.result.fullStream, (e) =>
               e instanceof Error ? e : new Error(String(e)),
             ).pipe(
+              Stream.tap((event) =>
+                Effect.sync(() => {
+                  if (event.type === "finish-step") RateLimits.record(input.model.providerID, event.response?.headers)
+                }),
+              ),
               Stream.mapEffect((event) => LLMAISDK.toLLMEvents(state, event)),
               Stream.flatMap((events) => Stream.fromIterable(events)),
             )

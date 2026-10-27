@@ -743,7 +743,7 @@ export class Usage extends HeyApiClient {
   /**
    * Get estimated daily spend
    *
-   * Estimated model spend on this host per local day (default 7 days including today; offsetMinutes = local offset from UTC, default the server's). Token counts priced by the local model catalog, not provider billing. Only messages that ran on this host count.
+   * Estimated model spend on this host per local day (default 7 days including today; offsetMinutes = local offset from UTC, default the server's). Token counts priced by the local model catalog, not provider billing. Only messages that ran on this host count. rateLimits: latest provider-reported rate-limit response headers per provider (memory only).
    */
   public daily<ThrowOnError extends boolean = false>(
     parameters?: {

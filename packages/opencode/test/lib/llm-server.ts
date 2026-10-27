@@ -427,7 +427,11 @@ function send(item: Sse) {
   if (item.error) end = Stream.concat(empty, Stream.fail(item.error))
   else if (item.hang) end = Stream.concat(empty, Stream.never)
 
-  return HttpServerResponse.stream(Stream.concat(body, end), { contentType: "text/event-stream" })
+  return HttpServerResponse.stream(Stream.concat(body, end), {
+    contentType: "text/event-stream",
+    // Representative provider rate-limit headers (OpenAI form) for rate-limit capture tests.
+    headers: { "x-ratelimit-limit-requests": "500", "x-ratelimit-remaining-requests": "499", "x-ratelimit-reset-requests": "120ms" },
+  })
 }
 
 const reset = Effect.fn("TestLLMServer.reset")(function* (item: Sse) {

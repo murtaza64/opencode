@@ -2372,6 +2372,36 @@ export type UsageDaily = {
       }
     }>
   }>
+  rateLimits: {
+    source: string
+    providers: Array<{
+      provider: string
+      observedAt: string
+      headers: {
+        [key: string]: string
+      }
+      requests?: {
+        limit?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        remaining?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        reset?: string
+      }
+      tokens?: {
+        limit?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        remaining?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        reset?: string
+      }
+      inputTokens?: {
+        limit?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        remaining?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        reset?: string
+      }
+      outputTokens?: {
+        limit?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        remaining?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        reset?: string
+      }
+    }>
+  }
 }
 
 export type ConsoleState = {

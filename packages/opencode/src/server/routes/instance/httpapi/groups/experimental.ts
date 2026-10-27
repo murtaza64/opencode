@@ -117,6 +117,11 @@ export const UsageDailyQuery = Schema.Struct({
     Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: -840, maximum: 840 })),
   ),
 })
+const RateLimit = Schema.Struct({
+  limit: Schema.optional(Schema.Number),
+  remaining: Schema.optional(Schema.Number),
+  reset: Schema.optional(Schema.String),
+})
 export const UsageDailyResponse = Schema.Struct({
   estimate: Schema.Literal(true),
   basis: Schema.String,
@@ -137,6 +142,20 @@ export const UsageDailyResponse = Schema.Struct({
       ),
     }),
   ),
+  rateLimits: Schema.Struct({
+    source: Schema.String,
+    providers: Schema.Array(
+      Schema.Struct({
+        provider: Schema.String,
+        observedAt: Schema.String,
+        headers: Schema.Record(Schema.String, Schema.String),
+        requests: Schema.optional(RateLimit),
+        tokens: Schema.optional(RateLimit),
+        inputTokens: Schema.optional(RateLimit),
+        outputTokens: Schema.optional(RateLimit),
+      }),
+    ),
+  }),
 }).annotate({ identifier: "UsageDaily" })
 
 export const ExperimentalPaths = {
@@ -177,7 +196,7 @@ export const ExperimentalApi = HttpApi.make("experimental")
             identifier: "experimental.usage.daily",
             summary: "Get estimated daily spend",
             description:
-              "Estimated model spend on this host per local day (default 7 days including today; offsetMinutes = local offset from UTC, default the server's). Token counts priced by the local model catalog, not provider billing. Only messages that ran on this host count.",
+              "Estimated model spend on this host per local day (default 7 days including today; offsetMinutes = local offset from UTC, default the server's). Token counts priced by the local model catalog, not provider billing. Only messages that ran on this host count. rateLimits: latest provider-reported rate-limit response headers per provider (memory only).",
           }),
         ),
         HttpApiEndpoint.get("console", ExperimentalPaths.console, {

@@ -9,6 +9,7 @@ import { Project } from "@/project/project"
 import { Session } from "@/session/session"
 import { SessionFailure } from "@/session/failure"
 import { Database } from "@opencode-ai/core/database/database"
+import { RateLimits } from "@opencode-ai/core/usage/rate-limits"
 import { UsageRollup } from "@opencode-ai/core/usage/rollup"
 import { DatabaseReader } from "@opencode-ai/core/database/reader"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
@@ -62,10 +63,11 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const usageDaily = Effect.fn("ExperimentalHttpApi.usageDaily")(function* (ctx: {
       query: { days?: number; offsetMinutes?: number }
     }) {
-      return yield* usage.daily({
+      const daily = yield* usage.daily({
         days: ctx.query.days ?? 7,
         offsetMinutes: ctx.query.offsetMinutes ?? -new Date().getTimezoneOffset(),
       })
+      return { ...daily, rateLimits: RateLimits.snapshot() }
     })
 
     const getConsole = Effect.fn("ExperimentalHttpApi.console")(function* () {
