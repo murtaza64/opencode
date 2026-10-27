@@ -90,4 +90,36 @@ describe("Diagnostics", () => {
     expect(await Diagnostics.authorized(token.slice(1))).toBe(false)
     expect(await Diagnostics.authorized(undefined)).toBe(false)
   })
+
+  test("a blocked loop is recorded with the request that was running", async () => {
+    Diagnostics.start()
+    await Bun.sleep(120)
+    const id = Diagnostics.requestStart("/session/ses_123456789abc/message", "GET")
+    const until = performance.now() + 300
+    while (performance.now() < until) {}
+    Diagnostics.requestEnd(id, { status: 200, bytes: 10 })
+    await Bun.sleep(120)
+    const stall = Diagnostics.recent().stalls.at(-1)
+    expect(stall?.ms).toBeGreaterThanOrEqual(200)
+    expect(stall?.routes).toContain("/session/:id/message")
+  })
+
+  test("slow requests are kept and appended to the local log without IDs", async () => {
+    Diagnostics.start()
+    const id = Diagnostics.requestStart("/session/ses_123456789abc/message", "GET", "/work/dir")
+    await Bun.sleep(550)
+    Diagnostics.requestEnd(id, { status: 200, bytes: 3_600_000 })
+    expect(Diagnostics.recent().slowRequests.at(-1)).toMatchObject({
+      type: "slow-request",
+      method: "GET",
+      route: "/session/:id/message",
+      status: 200,
+      bytes: 3_600_000,
+      directory: "/work/dir",
+    })
+    await Diagnostics.flushLog()
+    const lines = (await fs.readFile(Diagnostics.recent().logFile, "utf8")).trim().split("\n")
+    expect(lines.some((line) => line.includes('"slow-request"') && line.includes("/session/:id/message"))).toBe(true)
+    expect(lines.join("")).not.toContain("ses_123456789abc")
+  })
 })

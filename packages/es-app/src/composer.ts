@@ -1,4 +1,5 @@
 import { batch } from "solid-js"
+import { clearBackend, reportBackend } from "./backend-status"
 import { ascending } from "@opencode-ai/schema/identifier"
 import { createStore, reconcile } from "solid-js/store"
 import type {
@@ -864,7 +865,8 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     setState({ capabilityError: "" })
     try {
       const value = await json<unknown>(
-        await request(`/oc/experimental/capabilities?directory=${encodeURIComponent(directory)}`),
+        // A hung read must fail (and show a retry) rather than leave Steer/Queue disabled forever.
+        await request(`/oc/experimental/capabilities?directory=${encodeURIComponent(directory)}`, { signal: AbortSignal.timeout(dependencies.sendDeadlineMs ?? SEND_DEADLINE_MS) }),
       )
       if (!record(value)) throw new Error("Invalid server capabilities")
       const aside = value.sessionAside
@@ -953,10 +955,14 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       persist()
     }
   }
+  let refreshFailures = 0
+  let refreshRetryAt = 0
   const refreshInputs = async () => {
     if (state.hydrating) await hydration
     void checkSubmission()
     if (state.inputLoading) return
+    // Periodic refreshes wait out the backoff after failures; one in flight at a time.
+    if (Date.now() < refreshRetryAt) return
     const input = state.capabilities?.sessionInput
     if (input?.version !== 1 || !input.list) return
     setState("inputLoading", true)
@@ -987,8 +993,14 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       if (state.admission?.status === "unknown" && !missingAdmission)
         setState("admission", "error", "Input not found. Retry explicitly with the same request ID.")
       if (state.error.startsWith("Cannot refresh inputs:")) setState("error", "")
+      refreshFailures = 0
+      clearBackend("Session inputs")
     } catch (error) {
-      setState("error", `Cannot refresh inputs: ${message(error)}`)
+      // A failed receipt read is background trouble, not a composer error: drafts, request IDs and
+      // unknown receipts stay as they are, nothing is re-POSTed, and the read retries with backoff.
+      refreshFailures++
+      refreshRetryAt = Date.now() + Math.min(60_000, 2_000 * 2 ** Math.min(refreshFailures, 5))
+      reportBackend("Session inputs", error)
     } finally {
       setState("inputLoading", false)
       persist()

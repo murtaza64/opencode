@@ -7,8 +7,20 @@ export const diagnosticsTimingLayer = HttpRouter.middleware(
   (effect) =>
     Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest
-      const id = Diagnostics.requestStart(new URL(request.url, "http://localhost").pathname)
-      return yield* effect.pipe(Effect.ensuring(Effect.sync(() => Diagnostics.requestEnd(id))))
+      const id = Diagnostics.requestStart(
+        new URL(request.url, "http://localhost").pathname,
+        request.method,
+        request.headers["x-opencode-directory"],
+      )
+      return yield* effect.pipe(
+        Effect.tap((response) =>
+          Effect.sync(() => {
+            Diagnostics.requestEnd(id, { status: response.status, bytes: "contentLength" in response.body ? response.body.contentLength : undefined })
+          }),
+        ),
+        // Failures and interruptions still end the request; the tap above already ended successful ones.
+        Effect.ensuring(Effect.sync(() => Diagnostics.requestEnd(id))),
+      )
     }),
   { global: true },
 )
@@ -16,7 +28,7 @@ export const diagnosticsTimingLayer = HttpRouter.middleware(
 const ProfileBody = Schema.Struct({ seconds: Schema.optional(Schema.Number), label: Schema.optional(Schema.String) })
 
 /**
- * `GET /global/diagnostics` and `POST /global/diagnostics/profile`, outside the public API. Both need the
+ * `GET /global/diagnostics`, `GET /global/diagnostics/recent` and `POST /global/diagnostics/profile`, outside the public API. Both need the
  * local diagnostics token (see `Diagnostics.localToken`) in addition to the server's normal authorization.
  */
 export const diagnosticsRoute = HttpRouter.use((router) =>
@@ -31,6 +43,11 @@ export const diagnosticsRoute = HttpRouter.use((router) =>
         return yield* handler
       })
     yield* router.add("GET", "/global/diagnostics", guard(Effect.sync(() => HttpServerResponse.jsonUnsafe(Diagnostics.snapshot()))))
+    yield* router.add(
+      "GET",
+      "/global/diagnostics/recent",
+      guard(Effect.sync(() => HttpServerResponse.jsonUnsafe(Diagnostics.recent()))),
+    )
     yield* router.add(
       "POST",
       "/global/diagnostics/profile",

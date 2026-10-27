@@ -2066,7 +2066,7 @@ test("refresh of an unknown ID only reconciles and never automatically retries a
   expect(composer.state.admission?.error).toContain("Retry explicitly")
 })
 
-test("pagination failure leaves known receipts intact and releases the loading guard", async () => {
+test("receipt read failure leaves known receipts intact, shows no composer error and releases the loading guard", async () => {
   const { composer } = harness((request) => {
     if (request.url.searchParams.has("after")) throw new Error("offline")
     return Response.json({ items: [pending()], next: 1 })
@@ -2074,7 +2074,9 @@ test("pagination failure leaves known receipts intact and releases the loading g
   await composer.loadCapabilities()
   await composer.refreshInputs()
   expect(composer.state.receipts).toEqual([pending()])
-  expect(composer.state.error).toContain("offline")
+  // A failed receipt read is background trouble: no composer error, and nothing blocks sending.
+  expect(composer.state.error).toBe("")
+  expect(composer.reasonForAction("steer")).toBe("")
   expect(composer.state.inputLoading).toBe(false)
 })
 

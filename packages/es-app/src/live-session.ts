@@ -11,6 +11,7 @@ import { anchorValid } from "./message-anchor"
 import { perfSpan, perfTimed } from "./perf-telemetry"
 
 export const TAIL = 80
+export const SNAPSHOT_TIMEOUT_MS = 30_000
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 // Keep diff statistics without retaining patch bodies unused by this transcript.
 const visibleMessage = (info: Message): Message => {
@@ -112,7 +113,9 @@ export function createLiveSession(
     setClearedThrough((previous) => (id > previous ? id : previous))
   }
   const stopOnFailure = () => {
-    if (error() || connectionError()) setData("session_status", sessionID, reconcile({ type: "idle" }))
+    // A failed turn ends work. A dropped stream does not: the session's last known status stays,
+    // so a busy session never looks idle (and never routes a new message as a plain Send).
+    if (error()) setData("session_status", sessionID, reconcile({ type: "idle" }))
   }
   let disposed = false
   const controller = new AbortController()
@@ -137,7 +140,9 @@ export function createLiveSession(
     setLoading(true)
     const abort = new AbortController()
     loadAbort = abort
-    const signal = AbortSignal.any([controller.signal, abort.signal])
+    // A snapshot read that never answers fails after SNAPSHOT_TIMEOUT_MS and is retried with
+    // backoff, instead of leaving the view loading forever.
+    const signal = AbortSignal.any([controller.signal, abort.signal, AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS)])
     duringLoad = []
     activeLoad = (async () => {
       if (!snapshotStarted && !streamOpened && source) {

@@ -251,7 +251,12 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     if (event.type === "todo.updated" && event.properties?.sessionID === sessionID)
       setTodoUpdate({ messageID: live.data.message[sessionID]?.findLast((message) => message.role === "user")?.id, at: Date.now() })
   })
-  const connected = () => !!session() && !live.loading() && !live.connectionError()
+  // The composer is usable once the session record is known. Stream reconnects, snapshot refreshes
+  // and slow status reads never disable typing or sending (ux-feel INTERACTION.md: typing never
+  // waits; sending never waits on status); sends go through durable /input with a request ID.
+  const connected = () => !!session()
+  // While the event stream is down the live status may be stale.
+  const statusUnknown = () => !!live.connectionError()
   // Journal what opening this session costs: transcript shown, then input usable.
   const opened = perfSpan("session.open", { sessionID, cached: live.loaded() })
   let transcriptMs: number | undefined
@@ -273,7 +278,10 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   })
   onMount(() => {
     const timer = window.setInterval(() => {
-      if (connected()) void composer.refreshInputs()
+      if (!connected()) return
+      // Capabilities that failed to load (slow daemon) retry here; Steer/Queue stay disabled until then.
+      if (composer.state.capabilityError) void composer.loadCapabilities()
+      void composer.refreshInputs()
     }, 5000)
     onCleanup(() => window.clearInterval(timer))
   })
@@ -543,7 +551,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     return !!lastPart.time?.end
   })
 
-  const busy = () => !live.error() && !live.connectionError() && (status() === "busy" || status() === "retry")
+  const busy = () => !live.error() && (status() === "busy" || status() === "retry")
   // Daemon trouble shares one status slot, shown only once it persists: brief
   // stalls change nothing visible and cannot stack banners. Auxiliary dashboard
   // reads (mail, handoffs) report inside their own panels instead.
@@ -642,7 +650,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     </div>
   )
   createEffect(() => {
-    const running = busy()
+    // Unknown status routes like busy: a steer through durable /input, never a plain prompt_async.
+    const running = busy() || statusUnknown()
     if (!connected()) return
     untrack(() => composer.observeBusy(running))
   })
@@ -898,7 +907,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       return
     }
     // Read status again at submission; a mode switch never sends by itself.
-    composer.observeBusy(busy())
+    composer.observeBusy(busy() || statusUnknown())
     stick = true
     queueMicrotask(pin)
     const chosen = action ?? (composer.state.busy ? composer.state.keyboardTarget : "steer")

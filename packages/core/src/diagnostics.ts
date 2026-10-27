@@ -33,6 +33,14 @@ export const PROFILE_MIN_SECONDS = 1
 export const PROFILE_MAX_SECONDS = 120
 const PROFILE_MAX_BYTES = 64 * 1024 * 1024
 const PROFILE_KEEP = 5
+const TICK_MS = 50
+const TICK_STALL_MS = 100
+const SLOW_REQUEST_MS = 500
+const RECENT_ENDED = 50
+const LOG_MAX_BYTES = 5 * 1024 * 1024
+const LOG_FLUSH_MS = 2_000
+const LOG_MAX_PENDING = 1_000
+const SLOW_KEEP = 100
 
 type Stat = { n: number; totalMs: number; maxMs: number; rows: number; buckets: number[] }
 type Window = {
@@ -54,13 +62,20 @@ const state = {
   timer: undefined as Timer | undefined,
   loop: undefined as ReturnType<typeof monitorEventLoopDelay> | undefined,
   windows: [] as Window[],
-  stalls: [] as { at: string; ms: number }[],
+  stalls: [] as { at: string; ms: number; routes?: string[] }[],
   slowWindows: 0,
   stallWindows: 0,
   routes: new Map<string, Stat>(),
   sql: new Map<string, Stat>(),
   transactions: newStat(),
-  inflight: new Map<number, { label: string; start: number }>(),
+  inflight: new Map<number, { label: string; start: number; method: string; directory?: string }>(),
+  ended: [] as { label: string; start: number; end: number }[],
+  slow: [] as Record<string, unknown>[],
+  ticker: undefined as Timer | undefined,
+  flusher: undefined as Timer | undefined,
+  lastTick: 0,
+  pending: [] as string[],
+  minute: { p99: 0, max: 0, stalls: 0, windows: 0 },
   nextRequest: 0,
   window: { requests: 0, requestMaxMs: 0, sqlMs: 0 },
   cpu: process.cpuUsage(),
@@ -78,11 +93,19 @@ export function start() {
   state.loop.enable()
   state.timer = setInterval(roll, WINDOW_MS)
   state.timer.unref?.()
+  // A 50 ms ticker attributes each block of the loop >= 100 ms to the requests running when it happened.
+  state.lastTick = performance.now()
+  state.ticker = setInterval(tick, TICK_MS)
+  state.ticker.unref?.()
+  state.flusher = setInterval(() => void flush(), LOG_FLUSH_MS)
+  state.flusher.unref?.()
 }
 
 /** Disables collection and drops everything collected (tests). */
 export function stop() {
   if (state.timer) clearInterval(state.timer)
+  if (state.ticker) clearInterval(state.ticker)
+  if (state.flusher) clearInterval(state.flusher)
   state.loop?.disable()
   Object.assign(state, {
     started: undefined,
@@ -96,6 +119,12 @@ export function stop() {
     sql: new Map(),
     transactions: newStat(),
     inflight: new Map(),
+    ended: [],
+    slow: [],
+    ticker: undefined,
+    flusher: undefined,
+    pending: [],
+    minute: { p99: 0, max: 0, stalls: 0, windows: 0 },
     window: { requests: 0, requestMaxMs: 0, sqlMs: 0 },
     transactionStart: undefined,
     keys: new Map(),
@@ -107,22 +136,45 @@ export function enabled() {
 }
 
 /** Marks an HTTP request as in flight; pass the result to `requestEnd`. Undefined when disabled. */
-export function requestStart(pathname: string) {
+export function requestStart(pathname: string, method = "GET", directory?: string) {
   if (state.started === undefined) return undefined
   const id = state.nextRequest++
-  state.inflight.set(id, { label: route(pathname), start: performance.now() })
+  state.inflight.set(id, { label: route(pathname), start: performance.now(), method, directory })
   return id
 }
 
-export function requestEnd(id: number | undefined) {
+/** Ends a request; requests slower than 500 ms are kept (last 100) and appended to the local log. */
+export function requestEnd(id: number | undefined, response: { status?: number; bytes?: number } = {}) {
   if (id === undefined) return
   const entry = state.inflight.get(id)
   if (!entry) return
   state.inflight.delete(id)
-  const ms = performance.now() - entry.start
+  const end = performance.now()
+  const ms = end - entry.start
   add(state.routes, entry.label, ms, 0)
   state.window.requests++
   state.window.requestMaxMs = Math.max(state.window.requestMaxMs, ms)
+  state.ended.push({ label: entry.label, start: entry.start, end })
+  if (state.ended.length > RECENT_ENDED) state.ended.shift()
+  if (ms < SLOW_REQUEST_MS) return
+  const record = {
+    type: "slow-request",
+    at: new Date().toISOString(),
+    method: entry.method,
+    route: entry.label,
+    ms: Math.round(ms),
+    status: response.status,
+    bytes: response.bytes,
+    directory: entry.directory,
+  }
+  state.slow.push(record)
+  if (state.slow.length > SLOW_KEEP) state.slow.shift()
+  log(record)
+}
+
+/** Recent slow requests and loop stalls (newest last), as kept in memory. */
+export function recent() {
+  return { slowRequests: state.slow, stalls: state.stalls, logFile: logFile() }
 }
 
 /** Records one SQL statement. `source` distinguishes the main connection from reader workers. */
@@ -325,10 +377,12 @@ function roll() {
   const memory = process.memoryUsage()
   const at = new Date().toISOString()
   if (loop.maxMs >= SLOW_MS) state.slowWindows++
-  if (loop.maxMs >= STALL_MS) {
-    state.stallWindows++
-    state.stalls.push({ at, ms: loop.maxMs })
-    if (state.stalls.length > STALLS) state.stalls.shift()
+  if (loop.maxMs >= STALL_MS) state.stallWindows++
+  state.minute.p99 = Math.max(state.minute.p99, loop.p99Ms)
+  state.minute.max = Math.max(state.minute.max, loop.maxMs)
+  if (++state.minute.windows === 6) {
+    log({ type: "loop", at, p99Ms: state.minute.p99, maxMs: state.minute.max, stalls: state.minute.stalls, rssMB: mb(memory.rss) })
+    state.minute = { p99: 0, max: 0, stalls: 0, windows: 0 }
   }
   state.windows.push({
     at,
@@ -345,6 +399,46 @@ function roll() {
   })
   if (state.windows.length > WINDOWS) state.windows.shift()
   state.window = { requests: 0, requestMaxMs: 0, sqlMs: 0 }
+}
+
+function tick() {
+  const now = performance.now()
+  const blocked = now - state.lastTick - TICK_MS
+  state.lastTick = now
+  if (blocked < TICK_STALL_MS) return
+  const since = now - blocked - TICK_MS
+  const routes = [
+    ...[...state.inflight.values()].filter((item) => item.start <= now).map((item) => item.label),
+    ...state.ended.filter((item) => item.end >= since).map((item) => item.label),
+  ]
+  const record = { at: new Date().toISOString(), ms: Math.round(blocked), routes: [...new Set(routes)].slice(0, 5) }
+  state.stalls.push(record)
+  if (state.stalls.length > STALLS) state.stalls.shift()
+  state.minute.stalls++
+  log({ type: "stall", ...record })
+}
+
+/** Appends to the local JSONL in batches; bounded queue, one rotated file of 5 MB. */
+function log(record: Record<string, unknown>) {
+  if (state.pending.length < LOG_MAX_PENDING) state.pending.push(JSON.stringify(record))
+}
+
+function logFile() {
+  return path.join(Global.Path.log, "diagnostics.jsonl")
+}
+
+async function flush() {
+  if (state.pending.length === 0) return
+  const lines = state.pending.splice(0).join("\n") + "\n"
+  const file = logFile()
+  const size = await fs.stat(file).then((stat) => stat.size, () => 0)
+  if (size + lines.length > LOG_MAX_BYTES) await fs.rename(file, `${file}.1`).catch(() => {})
+  await fs.appendFile(file, lines, { mode: 0o600 }).catch(() => {})
+}
+
+/** Writes queued log records now (tests and shutdown). */
+export function flushLog() {
+  return flush()
 }
 
 function loopSummary() {
