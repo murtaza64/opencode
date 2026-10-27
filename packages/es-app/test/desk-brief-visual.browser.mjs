@@ -228,6 +228,31 @@ try {
       assert(bottom && bottom <= 1000, `Send bottom ${bottom}`)
       if (shots) await page.screenshot({ path: path.join(shots, "after-probe.png") })
       console.log(`PROBE question + scope/flow diagram + 3 consequences; Send bottom ${Math.round(bottom)}px`)
+      // A system palette switch (wal-palette/1 stylesheet) recolours the open drawing in place: same frame
+      // size, no new brief request. Status colours follow only when the palette says they stay CVD-distinct.
+      const frameBox0 = await frame.boundingBox()
+      const jobsBefore = preview.ledger.calls.length
+      const palette = (revision, safe) => page.evaluate(([revision, safe]) => {
+        document.getElementById("wal-palette")?.remove()
+        const style = Object.assign(document.createElement("style"), { id: "wal-palette" })
+        style.textContent = `:root{--wal-revision:${revision};--wal-fg:#fefefe;--wal-surface:#101820;--wal-accent:#ff00aa;--wal-ok:#00ff00;--wal-risk:#ff0000;--wal-hl1:#123456${safe ? ";--wal-ok-risk-cvd-safe:1" : ""}}`
+        document.head.append(style)
+      }, [revision, safe])
+      await palette("r1", false)
+      await expect.poll(() => frame.getAttribute("srcdoc")).toContain("--accent:#ff00aa")
+      let doc = await frame.getAttribute("srcdoc")
+      assert(doc.includes("--fg:#fefefe") && doc.includes("--hl1:#123456") && doc.includes("--hl2:#ff00aa") && !doc.includes("--ok:#00ff00"), doc.slice(0, 500))
+      await palette("r2", true)
+      await expect.poll(() => frame.getAttribute("srcdoc")).toContain("--ok:#00ff00")
+      doc = await frame.getAttribute("srcdoc")
+      assert(doc.includes("--risk:#ff0000"), doc.slice(0, 500))
+      await expect(frame.contentFrame().locator("svg")).toContainText("a proxy, not a measured cause")
+      const frameBox1 = await frame.boundingBox()
+      assert(Math.abs(frameBox1.width - frameBox0.width) < 1 && Math.abs(frameBox1.height - frameBox0.height) < 1, JSON.stringify({ frameBox0, frameBox1 }))
+      await page.evaluate(() => document.getElementById("wal-palette")?.remove())
+      await expect.poll(() => frame.getAttribute("srcdoc")).toContain("--accent:#89b4fa")
+      assert.equal(preview.ledger.calls.length, jobsBefore, "a palette switch makes no ledger or brief requests")
+      console.log("PALETTE switch recolours the open drawing in place (roles, highlights, CVD-gated status), same size, back to app colours when removed")
 
       // More detail on the same item: one desk message bound to the revision; draft and selection kept.
       await page.getByRole("button", { name: "Start chat" }).click()

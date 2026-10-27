@@ -128,6 +128,12 @@ export type ComposerState = {
   admission: ComposerAdmission | null
   recoveries: ComposerRecovery[]
   recoveryBusy: string | null
+  /**
+   * Background readback of inputs whose admission is unknown, by request ID (GET only):
+   * "checking" while the first read after the failed POST is in flight, "absent" once Core
+   * answered that it has no such input. Memory only.
+   */
+  inputChecks: Record<string, "checking" | "absent" | undefined>
   /** Steer whose interrupt-and-deliver request is in flight. Memory only. */
   delivering: string | null
   recoveryError: string
@@ -146,6 +152,8 @@ export type ComposerState = {
 export type ComposerDependencies = {
   fetch?: (url: string, init?: RequestInit) => Promise<Response>
   prompt?: typeof oc.prompt
+  /** Test seam for READBACK_WINDOW_MS. */
+  readbackWindowMs?: number
   /** Test seam for SEND_DEADLINE_MS. */
   sendDeadlineMs?: number
   storage?: Pick<Storage, "getItem" | "setItem"> | null
@@ -229,6 +237,7 @@ const readSubmission = (storage: () => Pick<Storage, "getItem"> | null, key: str
 
 /** A send with no answer by then is shown as not confirmed and stops blocking the composer. */
 export const SEND_DEADLINE_MS = 25_000
+export const READBACK_WINDOW_MS = 30_000
 
 export const createComposer = (sessionID: string, directory: string, dependencies: ComposerDependencies = {}) => {
   const request = dependencies.fetch ?? ((url, init) => fetch(url, init))
@@ -254,6 +263,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     admission: null,
     recoveries: [],
     recoveryBusy: null,
+    inputChecks: {},
     delivering: null,
     recoveryError: "",
     inputEdits: {},
@@ -804,6 +814,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
   const accept = (receipt: InputReceipt, expectedID = receipt.requestID) => {
     if (receipt.sessionID !== sessionID || receipt.requestID !== expectedID)
       throw new Error("Input receipt identity did not match this request.")
+    if (state.inputChecks[receipt.requestID]) setState("inputChecks", receipt.requestID, undefined)
     const recovery = state.recoveries.find((entry) => entry.admission.payload.requestID === receipt.requestID)
     if (recovery && (recovery.missingImages || !matchesRecovery(receipt, recovery)))
       throw new Error("Receipt does not match the saved exact input; admission remains unknown")
@@ -982,22 +993,33 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       // A pending-only list cannot tell us whether a previously seen input was promoted or cancelled.
       const ids = [...tracked]
       for (let index = 0; index < ids.length; index += 8) {
-        const results = await Promise.allSettled(ids.slice(index, index + 8).map(readInput))
+        const results = await Promise.allSettled(ids.slice(index, index + 8).map(async (id) => {
+          const receipt = await readInput(id)
+          if (receipt === null && state.recoveries.some((entry) => entry.admission.payload.requestID === id)) setState("inputChecks", id, "absent")
+          return receipt
+        }))
         const failed = results.find((result) => result.status === "rejected")
         if (failed?.status === "rejected") throw failed.reason
       }
       // Set-aside inputs too (GET only): one may have been promoted while this page was closed. A read that
       // fails or does not match leaves the entry for its own Check, so it never blocks the refresh.
       await Promise.allSettled(state.recoveries.filter((entry) => !entry.missingImages && !tracked.has(entry.admission.payload.requestID))
-        .map((entry) => readInput(entry.admission.payload.requestID)))
-      if (state.admission?.status === "unknown" && !missingAdmission)
+        .map(async (entry) => {
+          const id = entry.admission.payload.requestID
+          if (await readInput(id) === null) setState("inputChecks", id, "absent")
+        }))
+      if (state.admission?.status === "unknown" && !missingAdmission) {
         setState("admission", "error", "Input not found. Retry explicitly with the same request ID.")
+        setState("inputChecks", state.admission.payload.requestID, "absent")
+      }
       if (state.error.startsWith("Cannot refresh inputs:")) setState("error", "")
+      endReadbacks()
       refreshFailures = 0
       clearBackend("Session inputs")
     } catch (error) {
       // A failed receipt read is background trouble, not a composer error: drafts, request IDs and
       // unknown receipts stay as they are, nothing is re-POSTed, and the read retries with backoff.
+      endReadbacks()
       refreshFailures++
       refreshRetryAt = Date.now() + Math.min(60_000, 2_000 * 2 ** Math.min(refreshFailures, 5))
       reportBackend("Session inputs", error)
@@ -1005,6 +1027,19 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       setState("inputLoading", false)
       persist()
     }
+  }
+  // An unconfirmed input reads as still sending until the next input refresh reads it back by request ID
+  // (GET only, never re-POSTs): found settles it, not found marks it absent (one Retry). A failed refresh,
+  // or none within the window, drops it to "not confirmed yet", so "sending" is never indefinite.
+  const awaitReadback = (id: string) => {
+    setState("inputChecks", id, "checking")
+    setTimeout(() => {
+      if (state.inputChecks[id] === "checking") setState("inputChecks", id, undefined)
+    }, dependencies.readbackWindowMs ?? READBACK_WINDOW_MS)
+  }
+  const endReadbacks = () => {
+    for (const id of Object.keys(state.inputChecks))
+      if (state.inputChecks[id] === "checking") setState("inputChecks", id, undefined)
   }
   // Inputs whose POST got no answer before the deadline (a stalled server, not a refusal).
   const timedOut = new Set<string>()
@@ -1052,6 +1087,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         status: "unknown",
         error: `Admission not confirmed: ${message(error)}. Reconcile before retrying.`,
       })
+      awaitReadback(admission.payload.requestID)
     } finally {
       if (activeInput === admission.payload.requestID) {
         activeInput = undefined
@@ -1332,6 +1368,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         return
       }
       if (!retry) {
+        setState("inputChecks", id, "absent")
         setState("recoveryError", "Input not found. Its admission is still unknown; no retry was sent.")
         return
       }

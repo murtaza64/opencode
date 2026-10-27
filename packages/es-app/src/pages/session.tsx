@@ -276,6 +276,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       await composer.refreshInputs()
     })
   })
+  // A send whose answer was lost is read back at once rather than at the next 5 s tick.
+  createEffect(() => {
+    const id = composer.state.admission?.payload.requestID
+    if (id && composer.state.inputChecks[id] === "checking") untrack(() => void composer.refreshInputs())
+  })
   onMount(() => {
     const timer = window.setInterval(() => {
       if (!connected()) return

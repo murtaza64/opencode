@@ -1497,7 +1497,7 @@ const layer = Layer.effect(
       const session = yield* sessions.get(input.sessionID)
       const guard = Effect.gen(function* () {
         // Each directory owns its own runner map; only the Session's own directory serializes its runs.
-        if (session.directory !== ctx.directory) return { outcome: "mismatch" as const }
+        if (!FSUtil.sameDirectory(session.directory, ctx.directory)) return { outcome: "mismatch" as const }
         const fresh = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
         if (fresh.parentID) return { outcome: "child" as const }
         if (fresh.time.archived) return { outcome: "archived" as const }
@@ -1551,7 +1551,7 @@ const layer = Layer.effect(
         return marker ? { outcome: "duplicate" as const, marker } : undefined
       })
       const guard = Effect.gen(function* () {
-        if (session.directory !== ctx.directory) return { outcome: "mismatch" as const }
+        if (!FSUtil.sameDirectory(session.directory, ctx.directory)) return { outcome: "mismatch" as const }
         const fresh = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
         if (fresh.parentID) return { outcome: "child" as const }
         if (fresh.time.archived) return { outcome: "archived" as const }
@@ -1610,7 +1610,7 @@ const layer = Layer.effect(
         return marker ? { outcome: "duplicate" as const, marker } : undefined
       })
       const evaluate = Effect.gen(function* () {
-        if (session.directory !== ctx.directory) return { outcome: "mismatch" as const }
+        if (!FSUtil.sameDirectory(session.directory, ctx.directory)) return { outcome: "mismatch" as const }
         const fresh = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
         if (fresh.parentID) return { outcome: "child" as const }
         if (fresh.time.archived) return { outcome: "archived" as const }

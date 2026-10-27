@@ -175,7 +175,8 @@ try {
   await measure("busy-502")
   if (!report) {
     const cue = page.locator('.outgoing-msg[data-status="unknown"] .pending-hint')
-    await expect(cue).toContainText("Not confirmed")
+    // The readback by request ID finds no such input, so the cue says so (one Retry), not "Not confirmed".
+    await expect(cue).toContainText("Not sent")
     expect(await cue.getAttribute("title"), "diagnostics stay out of the HTML error page").not.toContain("<")
   }
   await page.unroute(admission)
