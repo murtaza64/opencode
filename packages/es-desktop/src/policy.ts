@@ -59,8 +59,11 @@ export const externalURL = (value: string) => {
   return url.href
 }
 
-// Sign-in services a page host may pass through (Cloudflare Access and its identity providers).
-const SIGN_IN = [/\.cloudflareaccess\.com$/, /^accounts\.google\.com$/, /^github\.com$/]
+// Sign-in services a page host may pass through (Cloudflare Access and its identity providers). The
+// whole round trip must stay in the tab's partition: Access binds its OAuth state to the session that
+// started sign-in, so finishing a provider step in another browser ends at "invalid state".
+// dash.cloudflare.com is Access's "Cloudflare" identity provider (its OAuth authorize page).
+const SIGN_IN = [/\.cloudflareaccess\.com$/, /^dash\.cloudflare\.com$/, /^accounts\.google\.com$/, /^github\.com$/]
 
 /** Whether a page host's tab may navigate in place: its own origin, or a secure sign-in step. */
 export const pageNavigation = (value: string, origin: string) => {

@@ -202,6 +202,12 @@ test("a page host's tab stays on its origin and its sign-in steps; anything else
   expect(pageNavigation("https://agents.murtaza.earth/session/x", origin)).toBe(true)
   expect(pageNavigation("https://frosty-pond-8fd5.cloudflareaccess.com/cdn-cgi/access/login/agents.murtaza.earth", origin)).toBe(true)
   expect(pageNavigation("https://accounts.google.com/o/oauth2/auth", origin)).toBe(true)
+  // Access's Cloudflare identity provider and its shared OAuth callback stay in the tab.
+  expect(pageNavigation("https://dash.cloudflare.com/oauth2/auth?response_type=code", origin)).toBe(true)
+  expect(pageNavigation("https://oauth-callbacks.cloudflareaccess.com/cdn-cgi/access/outbound-oauth-callback", origin)).toBe(true)
+  expect(pageNavigation("http://dash.cloudflare.com/oauth2/auth", origin)).toBe(false)
+  expect(pageNavigation("https://evil-dash.cloudflare.com/", origin)).toBe(false)
+  expect(pageNavigation("https://dash.cloudflare.com.evil.example/", origin)).toBe(false)
   expect(pageNavigation("http://127.0.0.1:4096/", origin)).toBe(false)
   expect(pageNavigation("https://example.com/", origin)).toBe(false)
   expect(pageNavigation("http://evil.cloudflareaccess.com/", origin)).toBe(false)
