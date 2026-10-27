@@ -77,10 +77,31 @@ data class AttentionList(
 data class AttentionProject(val editspace: String, val available: Boolean = true, val observed_at: Long? = null, val error: String? = null)
 
 @Serializable
-data class AttentionOption(val id: String, val label: String = "")
+data class OptionChoice(val id: String, val label: String = "")
+
+// Declared by an option that is only actionable with data attached (es-attention.md "input").
+@Serializable
+data class OptionInput(
+    val kind: String = "",
+    val label: String = "",
+    val required: Boolean = false,
+    val hint: String? = null,
+    val choices: List<OptionChoice> = emptyList(),
+    val max: Int? = null,
+)
 
 @Serializable
-data class AttentionAnswer(val id: String = "", val text: String = "", val choice_id: String? = null, val answered_at: Long? = null)
+data class AttentionOption(val id: String, val label: String = "", val input: OptionInput? = null)
+
+@Serializable
+data class AttentionAnswer(
+    val id: String = "",
+    val text: String = "",
+    val choice_id: String? = null,
+    // string for text/choice input, string[] for multi
+    val input_value: JsonElement? = null,
+    val answered_at: Long? = null,
+)
 
 @Serializable
 data class AttentionDelivery(

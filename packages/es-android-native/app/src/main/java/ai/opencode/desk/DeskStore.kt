@@ -22,6 +22,7 @@ import ai.opencode.desk.net.AccessRequired
 import ai.opencode.desk.net.AccessToken
 import ai.opencode.desk.net.Api
 import ai.opencode.desk.net.Gateway
+import java.util.UUID
 import ai.opencode.desk.net.GatewayError
 import ai.opencode.desk.net.PairingRequired
 import kotlinx.coroutines.CancellationException
@@ -113,6 +114,8 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         private set
 
     val details = mutableStateMapOf<String, AgentDetail>()
+    // Inputs this phone sent, by session, from tap to handled (see Outbox).
+    val outbox = mutableStateMapOf<String, List<Pending>>()
     val deskMessages = mutableStateMapOf<String, List<MessageWithParts>>()
     val deskReceipts = mutableStateMapOf<String, List<InputReceipt>>()
 
@@ -223,19 +226,17 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     private fun deriveAgents(): List<Agent> = states.flatMap { (es, state) ->
         val fromLanes = state.threads.flatMap { thread ->
             thread.lanes.map { lane ->
-                val sessions = thread.sessions.sortedByDescending { it.updated }
-                val head = sessions.firstOrNull { it.id == lane.activity_session || it.id == lane.owner } ?: sessions.firstOrNull()
+                // Only sessions anchored in the lane directory count; a parent session that
+                // holds the lane record while the worker starts is never shown as the lane.
+                val sessions = thread.sessions.filter { Anchors.inLane(lane, it) }.sortedByDescending { it.updated }
+                val head = Anchors.pick(lane, thread.sessions)
                 Agent(
                     key = "$es/${lane.lane}",
                     editspace = es,
                     lane = lane.lane,
                     title = thread.title.ifBlank { lane.lane },
                     description = thread.description,
-                    status = when {
-                        sessions.any { it.live == "busy" } -> "busy"
-                        lane.status == "parked" || lane.activity.startsWith("parked") -> "parked"
-                        else -> "idle"
-                    },
+                    status = Anchors.status(lane, head, sessions),
                     // The session title usually repeats the thread title; fall back to the lane name instead.
                     activity = lane.activity.ifBlank { head?.title?.takeIf { it != thread.title } ?: lane.lane },
                     activityAt = parseIso(lane.activity_at) ?: head?.updated?.toLong() ?: 0L,
@@ -287,6 +288,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
                 }
             }.getOrElse { AgentDetail(error = it.message, loadedAt = System.currentTimeMillis(), messages = previous?.messages.orEmpty(), cursor = previous?.cursor) }
             details[agent.key] = detail
+            outbox[session.id] = Outbox.reconcile(outbox[session.id].orEmpty(), detail.receipts, detail.messages.map { it.info.id }.toSet())
         }
     }
 
@@ -304,9 +306,44 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    suspend fun steer(agent: Agent, text: String, delivery: String): Result<InputReceipt> {
-        val session = agent.session ?: return Result.failure(IllegalStateException("No session"))
-        return runCatching { api.input(session.id, session.directory, text, delivery) }.onSuccess { load(agent) }
+    // Local echo first, then the durable POST. The requestID is fixed at tap time so a retry
+    // after a timeout cannot double-admit: Core returns the original receipt for the same ID.
+    private suspend fun send(sessionID: String, directory: String, text: String, delivery: String, requestID: String = UUID.randomUUID().toString(), after: () -> Unit = {}): Pending {
+        val existing = outbox[sessionID].orEmpty().firstOrNull { it.requestID == requestID }
+        val item = existing?.copy(state = SendState.Sending, error = null, attempts = existing.attempts + 1)
+            ?: Pending(requestID, sessionID, text, delivery, SendState.Sending, createdAt = System.currentTimeMillis())
+        outbox[sessionID] = outbox[sessionID].orEmpty().filter { it.requestID != requestID } + item
+        val result = runCatching { api.input(sessionID, directory, text, delivery, requestID = requestID) }
+        val settled = result.fold(
+            onSuccess = { item.copy(state = Outbox.fromReceipt(it), messageID = it.messageID) },
+            onFailure = { error ->
+                when {
+                    error is GatewayError && error.code in 400..499 -> item.copy(state = SendState.Failed, error = AttentionInput.ledgerError(error.body, error.message ?: "rejected"))
+                    // Timeouts, resets and 5xx: the server may or may not have admitted it. Same ID retries safely.
+                    else -> item.copy(state = SendState.Uncertain, error = error.message)
+                }
+            },
+        )
+        outbox[sessionID] = outbox[sessionID].orEmpty().map { if (it.requestID == requestID) settled else it }
+        after()
+        return settled
+    }
+
+    suspend fun steer(agent: Agent, text: String, delivery: String): Result<Pending> {
+        val session = agent.session ?: return Result.failure(IllegalStateException("This lane has no session yet"))
+        return Result.success(send(session.id, session.directory, text, delivery) { load(agent) })
+    }
+
+    suspend fun retry(item: Pending): Pending {
+        val directory = agents.firstOrNull { it.session?.id == item.sessionID }?.session?.directory ?: desk?.takeIf { it.id == item.sessionID }?.directory
+            ?: return item.copy(state = SendState.Failed, error = "session not found")
+        return send(item.sessionID, directory, item.text, item.delivery, item.requestID) {
+            agents.firstOrNull { it.session?.id == item.sessionID }?.let(::load) ?: loadDesk()
+        }
+    }
+
+    fun dismiss(item: Pending) {
+        outbox[item.sessionID] = outbox[item.sessionID].orEmpty().filter { it.requestID != item.requestID }
     }
 
     suspend fun stop(agent: Agent): Result<Boolean> {
@@ -314,9 +351,9 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         return runCatching { api.abort(session.id, session.directory) }.onSuccess { nudges.tryEmit(Unit) }
     }
 
-    suspend fun cancel(agent: Agent, receipt: InputReceipt): Result<Unit> {
+    suspend fun cancel(agent: Agent, requestID: String): Result<Unit> {
         val session = agent.session ?: return Result.failure(IllegalStateException("No session"))
-        return runCatching { api.cancelInput(session.id, session.directory, receipt.requestID) }.onSuccess { load(agent) }
+        return runCatching { api.cancelInput(session.id, session.directory, requestID) }.onSuccess { load(agent) }
     }
 
     // ---- front desk ----
@@ -366,7 +403,10 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
                 deskMessages[pointer.id] = mergeNewest(older, page.items)
                 if (older.size <= page.items.size || !deskCursors.containsKey(pointer.id)) deskCursors[pointer.id] = page.cursor
             }
-            runCatching { api.receipts(pointer.id, pointer.directory).items }.onSuccess { deskReceipts[pointer.id] = it.filter { r -> r.state == "pending" || r.state == "promoted" } }
+            runCatching { api.receipts(pointer.id, pointer.directory).items }.onSuccess { receipts ->
+                deskReceipts[pointer.id] = receipts.filter { r -> r.state == "pending" || r.state == "promoted" }
+                outbox[pointer.id] = Outbox.reconcile(outbox[pointer.id].orEmpty(), receipts, deskMessages[pointer.id].orEmpty().map { it.info.id }.toSet())
+            }
             // Core status, not the dashboard list: the desk session is not in any lane.
             runCatching { api.status(pointer.directory)[pointer.id]?.type == "busy" }.onSuccess { deskBusy = it }
         }
@@ -387,8 +427,8 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    suspend fun askDesk(text: String): Result<InputReceipt> =
-        ensureDesk().mapCatching { pointer -> api.input(pointer.id, pointer.directory, text, "queue") }.onSuccess { loadDesk() }
+    suspend fun askDesk(text: String): Result<Pending> =
+        ensureDesk().map { pointer -> send(pointer.id, pointer.directory, text, "queue") { loadDesk() } }
 }
 
 fun parseIso(value: String): Long? = runCatching { java.time.Instant.parse(value).toEpochMilli() }.getOrNull()

@@ -52,6 +52,9 @@ import androidx.compose.ui.unit.dp
 import ai.opencode.desk.Agent
 import ai.opencode.desk.DeskStore
 import ai.opencode.desk.Nav
+import ai.opencode.desk.Outbox
+import ai.opencode.desk.Pending
+import ai.opencode.desk.SendState
 import ai.opencode.desk.ToolGroup
 import ai.opencode.desk.ToolRow
 import ai.opencode.desk.ToolRows
@@ -91,9 +94,14 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
         }
         LazyColumn(Modifier.weight(1f).testTag("agent"), state = list, reverseLayout = true, contentPadding = PaddingValues(bottom = 8.dp, top = 8.dp)) {
             // Bottom of the screen first: pending inputs, then messages newest to oldest.
-            val pending = detail?.receipts.orEmpty().filter { it.state == "pending" || it.state == "promoted" }
-            items(pending.asReversed(), key = { it.requestID }) { receipt -> ReceiptRow(receipt) { scope.launch { store.cancel(agent, receipt) } } }
-            if (pending.isNotEmpty()) item(key = "pending-header") { SectionHeader("Waiting to deliver") }
+            val transcript = detail?.messages.orEmpty().map { it.info.id }.toSet()
+            val pending = Outbox.visible(store.outbox[agent.session?.id.orEmpty()].orEmpty(), transcript)
+            items(pending.asReversed(), key = { it.requestID }) { item ->
+                PendingRow(item,
+                    onRetry = { scope.launch { store.retry(item) } },
+                    onCancel = { scope.launch { if (item.state == SendState.Accepted) store.cancel(agent, item.requestID); store.dismiss(item) } })
+            }
+            if (pending.isNotEmpty()) item(key = "pending-header") { SectionHeader("Sent from this phone") }
             detail?.error?.let { item(key = "error") { Text(it, color = Ink.Red, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) } }
             if (detail == null) item(key = "loading") { Text("Loading…", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) }
             items(detail?.messages.orEmpty().asReversed(), key = { it.info.id }) { Message(it, store.now) }
@@ -142,14 +150,18 @@ fun TopBar(title: String, onBack: () -> Unit, subtitle: (@Composable () -> Unit)
     }
 }
 
+// One send and what has been proven about it so far. Failed and unconfirmed sends can be
+// retried with the same request ID; accepted ones can still be cancelled before promotion.
 @Composable
-private fun ReceiptRow(receipt: InputReceipt, onCancel: () -> Unit) {
+fun PendingRow(item: Pending, onRetry: () -> Unit, onCancel: () -> Unit) {
+    val tint = when (item.state) { SendState.Failed -> Ink.Red; SendState.Uncertain -> Ink.Amber; SendState.Presented, SendState.Handled -> Ink.Green; else -> Ink.Amber }
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(receipt.text, style = MaterialTheme.typography.bodyMedium, color = Ink.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Label("${receipt.delivery} · ${receipt.state}", color = Ink.Amber)
+            Text(item.text, style = MaterialTheme.typography.bodyMedium, color = Ink.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Label(item.label, color = tint)
         }
-        if (receipt.state == "pending") TextButton(onClick = onCancel) { Text("Cancel", color = Ink.Muted) }
+        if (item.retryable) TextButton(onClick = onRetry) { Text("Retry", color = Ink.Blue) }
+        if (item.retryable || item.state == SendState.Accepted) TextButton(onClick = onCancel) { Text(if (item.retryable) "Discard" else "Cancel", color = Ink.Muted) }
     }
 }
 
@@ -197,7 +209,7 @@ private fun SteerBar(store: DeskStore, agent: Agent) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextField(
                 value = text, onValueChange = { text = it }, maxLines = 4,
-                placeholder = { Text("Tell ${agent.lane}…", color = Ink.Dim) },
+                placeholder = { Text(if (agent.session == null) "Lane is starting; no session yet" else "Tell ${agent.lane}…", color = Ink.Dim) },
                 modifier = Modifier.weight(1f).testTag("steer-text"), shape = RoundedCornerShape(22.dp),
                 colors = TextFieldDefaults.colors(focusedContainerColor = Ink.Panel, unfocusedContainerColor = Ink.Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = Ink.Blue),
             )

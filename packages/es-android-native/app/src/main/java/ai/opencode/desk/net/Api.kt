@@ -20,6 +20,7 @@ import ai.opencode.desk.model.Todo
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -48,9 +49,10 @@ class Api(val gateway: Gateway) {
     // The operator cookie lasts 8 h; callers re-bootstrap on 401 and retry once.
     suspend fun bootstrapOperator(): OperatorSession = parse(gateway.post("/es/api/attention/session", "{}"))
 
-    suspend fun command(record: AttentionRecord, action: String, extra: JsonObject = JsonObject(emptyMap())): AttentionRecord {
+    // commandID is stable per draft so a retry after a lost response is the same command.
+    suspend fun command(record: AttentionRecord, action: String, extra: JsonObject = JsonObject(emptyMap()), commandID: String = UUID.randomUUID().toString()): AttentionRecord {
         val body = buildJsonObject {
-            put("command_id", UUID.randomUUID().toString())
+            put("command_id", commandID)
             put("expected_revision", record.revision)
             put("action", action)
             extra.forEach { (key, value) -> put(key, value) }
@@ -63,8 +65,12 @@ class Api(val gateway: Gateway) {
     suspend fun choose(record: AttentionRecord, choice: String) =
         command(record, "choose", buildJsonObject { put("choice_id", choice) })
 
-    suspend fun answer(record: AttentionRecord, text: String, choice: String?) =
-        command(record, "answer", buildJsonObject { put("text", text); if (choice != null) put("choice_id", choice) })
+    suspend fun answer(record: AttentionRecord, text: String, choice: String?, inputValue: JsonElement? = null, commandID: String = UUID.randomUUID().toString()) =
+        command(record, "answer", buildJsonObject {
+            put("text", text)
+            if (choice != null) put("choice_id", choice)
+            if (inputValue != null) put("input_value", inputValue)
+        }, commandID)
 
     suspend fun snooze(record: AttentionRecord, until: Long) =
         command(record, "snooze", buildJsonObject { put("snoozed_until", until) })

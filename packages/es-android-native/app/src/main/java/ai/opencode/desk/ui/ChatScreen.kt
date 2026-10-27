@@ -1,6 +1,7 @@
 package ai.opencode.desk.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -41,6 +42,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import ai.opencode.desk.DeskStore
 import ai.opencode.desk.Nav
+import ai.opencode.desk.Outbox
+import ai.opencode.desk.SendState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -50,16 +53,16 @@ import kotlinx.coroutines.launch
 fun ChatScreen(store: DeskStore, nav: Nav) {
     val id = store.deskID
     val messages = store.deskMessages[id].orEmpty()
-    val pending = store.deskReceipts[id].orEmpty()
+    val pending = Outbox.visible(store.outbox[id].orEmpty(), messages.map { it.info.id }.toSet())
+    val scope = rememberCoroutineScope()
     val list = rememberLazyListState()
     var text by rememberSaveable { mutableStateOf("") }
     var sending by rememberSaveable { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
     // Poll while the screen is open: the reply arrives as a new assistant message and there is
     // no desk-specific event stream. Faster while the desk is busy or an input is pending.
     LaunchedEffect(Unit) {
-        while (true) { store.loadDesk(); delay(if (store.deskBusy || store.deskReceipts[store.deskID].orEmpty().isNotEmpty()) 3_000 else 8_000) }
+        while (true) { store.loadDesk(); delay(if (store.deskBusy || store.outbox[store.deskID].orEmpty().any { !it.done }) 3_000 else 8_000) }
     }
     // Reversed list: newest at the bottom on open; older pages append at the top edge.
     val atTop by remember { derivedStateOf { list.layoutInfo.visibleItemsInfo.lastOrNull()?.key == "older" } }
@@ -74,10 +77,17 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
             }
         }
         LazyColumn(Modifier.weight(1f).testTag("chat"), state = list, reverseLayout = true, contentPadding = PaddingValues(vertical = 8.dp)) {
-            items(pending.asReversed(), key = { "r-" + it.requestID }) { receipt ->
+            items(pending.asReversed(), key = { "r-" + it.requestID }) { item ->
+                val tint = when (item.state) { SendState.Failed -> Ink.Red; SendState.Presented, SendState.Handled -> Ink.Green; else -> Ink.Amber }
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), horizontalAlignment = Alignment.End) {
-                    Text(receipt.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.background(Ink.Blue.copy(alpha = 0.12f), RoundedCornerShape(16.dp)).padding(horizontal = 14.dp, vertical = 10.dp))
-                    Label(if (receipt.state == "pending") "sending…" else "delivered", color = Ink.Amber)
+                    Text(item.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.background(Ink.Blue.copy(alpha = if (item.state == SendState.Sending) 0.08f else 0.14f), RoundedCornerShape(16.dp)).padding(horizontal = 14.dp, vertical = 10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Label(item.label, color = tint)
+                        if (item.retryable) {
+                            Label("retry", color = Ink.Blue, modifier = Modifier.padding(start = 10.dp).clickable { scope.launch { store.retry(item) } })
+                            Label("discard", color = Ink.Muted, modifier = Modifier.padding(start = 10.dp).clickable { store.dismiss(item) })
+                        }
+                    }
                 }
             }
             items(messages.asReversed(), key = { it.info.id }) { Message(it, store.now) }
