@@ -61,6 +61,7 @@ import ai.opencode.desk.DeskStore
 import ai.opencode.desk.Link
 import ai.opencode.desk.Pin
 import ai.opencode.desk.PinView
+import ai.opencode.desk.Surface
 import ai.opencode.desk.Nav
 import ai.opencode.desk.Route
 import ai.opencode.desk.model.AttentionRecord
@@ -140,6 +141,11 @@ private fun DeskTab(store: DeskStore, nav: Nav, onOpen: (AttentionRecord) -> Uni
         if (pinned.isNotEmpty()) {
             item { SectionHeader("Pinned") }
             items(pinned, key = { "pin-" + it.pin.key }) { view -> PinRow(store, view, nav) }
+        }
+        val boards = store.surfaces.filter { store.filter.isEmpty() || it.editspace in store.filter }
+        if (boards.isNotEmpty()) {
+            item { SectionHeader("Boards & reports", "${boards.size}") }
+            items(boards.take(6), key = { "surf-" + it.id }) { SurfaceRow(it, store.now) { nav.push(Route.Surface(it.id)) } }
         }
         if (working.isNotEmpty()) {
             item { SectionHeader("Working now", "${working.size}") }
@@ -381,5 +387,24 @@ private fun PinRow(store: DeskStore, view: PinView, nav: Nav) {
         }
         if (view.updatedAt > 0) Label(age(store.now, view.updatedAt), color = Ink.Dim)
         PinButton(true) { store.togglePin(view.pin) }
+    }
+}
+
+// One published surface: title, owner · purpose, health as a dot, updated age. Unseen
+// deliverables carry an amber "new" chip (read-only: opening does not mark them seen).
+@Composable
+private fun SurfaceRow(surface: Surface, now: Long, onClick: () -> Unit) {
+    val health = when (surface.health.state) { "ok" -> "busy"; "error", "unreachable" -> "error"; else -> "idle" }
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 10.dp).testTag("surface-" + surface.id), verticalAlignment = Alignment.CenterVertically) {
+        StatusDot(health, 8)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(surface.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                if (surface.unseen) Chip("new", Ink.Amber, filled = true)
+            }
+            Label(listOfNotNull(surface.owner, surface.purpose, surface.health.detail ?: surface.health.state.takeIf { it != "ok" }).joinToString(" · "))
+        }
+        Label(age(now, surface.updated_at))
     }
 }

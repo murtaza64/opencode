@@ -147,6 +147,24 @@ try {
   await waitFor(byId("agents"), "back to agents")
   pass("Back returns to the list")
 
+  // 4b. boards & reports: list on Home, open in the sandboxed WebView, script-rendered text visible,
+  // same-prefix navigation allowed, Back walks history then closes.
+  await tap(await waitFor(byId("tab-desk"), "desk tab"))
+  await tap(await waitFor(byId("surface-fixture-board"), "surface row"))
+  await waitFor(byId("surface"), "surface screen")
+  await waitFor(byText("SCRIPT RENDERED 21"), "script output in WebView", 60_000)
+  pass("surface opened through /__es/surface + /__surface capability prefix; script executed")
+  await screenshot("10-surface")
+  await tap(await waitFor(byText("page 2"), "same-prefix link"))
+  await waitFor(byText("PAGE TWO"), "same-prefix navigation")
+  pass("same-prefix navigation allowed")
+  await adb("shell", "input", "keyevent", "KEYCODE_BACK")
+  await waitFor(byText("SCRIPT RENDERED 21"), "history back inside surface")
+  await adb("shell", "input", "keyevent", "KEYCODE_BACK")
+  await waitFor(byId("desk"), "back to home from surface")
+  pass("Back walks surface history, then closes")
+  if (fixture.writes.some((w) => w.path.includes("surface"))) throw new Error("surface flow must not write")
+
   // 5. desk conversation
   await tap(await waitFor(byId("tab-desk"), "desk tab"))
   await type("composer", "What changed since this morning?")

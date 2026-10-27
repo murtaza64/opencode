@@ -108,6 +108,10 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         private set
     var operator by mutableStateOf(false)
         private set
+    var surfaces by mutableStateOf<List<Surface>>(emptyList())
+        private set
+    var surfacesError by mutableStateOf<String?>(null)
+        private set
 
     // Project filter persists across launches; empty = all projects.
     var filter by mutableStateOf<Set<String>>(prefs.getStringSet("filter", emptySet())?.filterNotNull()?.toSet() ?: emptySet())
@@ -189,7 +193,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     fun unpair() {
         loop?.cancel(); events?.cancel()
         gateway.forget()
-        states.clear(); open = emptyList(); agents = emptyList()
+        states.clear(); open = emptyList(); agents = emptyList(); surfaces = emptyList()
         desk = null; deskBusy = false
         outbox.clear(); drafts.clear(); pins = emptyList()
         link = Link.Unpaired
@@ -229,6 +233,8 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
                 val snoozedList = async { api.attention("snoozed") }
                 val historyList = async { api.attention("history", limit = 60) }
                 val session = async { runCatching { api.operator() }.getOrNull() }
+                // Surfaces are optional: an older gateway without the route leaves the section empty.
+                val boards = async { runCatching { api.surfaces() } }
                 val names = spaces.await().editspaces.map { it.name }
                 editspaces = names
                 val loaded = names.map { name -> async { name to runCatching { api.state(name) }.getOrNull() } }.awaitAll()
@@ -239,6 +245,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
                 snoozed = snoozedList.await().records
                 history = historyList.await().records.sortedByDescending { it.updated_at }
                 operator = session.await()?.operator == true
+                boards.await().fold({ surfaces = it.surfaces.sortedWith(compareBy({ !it.unseen }, { -it.updated_at })); surfacesError = null }, { surfacesError = it.message })
                 agents = deriveAgents()
             }
             updatedAt = System.currentTimeMillis()

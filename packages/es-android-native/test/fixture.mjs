@@ -138,6 +138,16 @@ export const createFixture = () => new Promise((resolve) => {
     const path = url.pathname
     if (request.method !== "GET") fixture.writes.push({ method: request.method, path, query: Object.fromEntries(url.searchParams), body, headers: { origin: request.headers.origin, csrf: request.headers["x-attention-csrf"], cookie: request.headers.cookie } })
 
+    // surfaces: registry + one static script-rendered board served at /api/surfaces/<id>/static/
+    if (path === "/api/surfaces") return json({ surfaces: [{ id: "fixture-board", title: "Fixture board", summary: "Script-rendered status", kind: "path", owner: "Relay", lane: "orchestrator", editspace: "opencode", updated_at: minutes(30), revision: 2, health: { state: "ok", checked_at: now }, purpose: "board", upstream: "/api/surfaces/fixture-board/static/" }, { id: "fixture-deck", title: "Fixture deck", kind: "path", owner: "front-desk", editspace: "dotfiles", updated_at: minutes(90), revision: 1, health: { state: "error", detail: "index.html missing" }, purpose: "deliverable", seen: false, upstream: "/api/surfaces/fixture-deck/static/" }] })
+    if (path.startsWith("/api/surfaces/fixture-board/static/")) {
+      const rest = path.slice("/api/surfaces/fixture-board/static/".length)
+      if (rest === "" || rest === "index.html") { response.writeHead(200, { "content-type": "text/html; charset=utf-8" }); return response.end(`<!doctype html><meta name=viewport content="width=device-width"><title>Fixture board</title><body style="background:#000;color:#eee;font:20px system-ui;padding:24px"><h1 id=static>Fixture board</h1><p id=dyn>script pending</p><a id=same href="page2.html">page 2</a> <a id=ext href="https://example.com/">external</a><script src="app.js"></script>`) }
+      if (rest === "app.js") { response.writeHead(200, { "content-type": "application/javascript" }); return response.end(`document.getElementById("dyn").textContent = "SCRIPT RENDERED " + (3 * 7)`) }
+      if (rest === "page2.html") { response.writeHead(200, { "content-type": "text/html; charset=utf-8" }); return response.end(`<!doctype html><body style="background:#000;color:#eee;font:24px system-ui;padding:24px"><h1>PAGE TWO</h1>`) }
+      return json({ error: "no such surface file" }, 404)
+    }
+
     // dashboard
     if (path === "/api/editspaces") return json({ editspaces: Object.keys(state).map((name) => ({ name, root: state[name].root })), default: "opencode" })
     if (path === "/api/state") return json(state[url.searchParams.get("es")] ?? state.opencode)

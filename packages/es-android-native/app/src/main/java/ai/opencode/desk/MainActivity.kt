@@ -27,6 +27,7 @@ import ai.opencode.desk.ui.ConnectScreen
 import ai.opencode.desk.ui.DeskTheme
 import ai.opencode.desk.ui.HomeScreen
 import ai.opencode.desk.ui.Ink
+import ai.opencode.desk.ui.SurfaceScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -62,6 +63,7 @@ private fun App() {
                 Route.Home -> HomeScreen(store, nav)
                 is Route.Agent -> AgentScreen(store, nav, route.key)
                 Route.Chat -> ChatScreen(store, nav)
+                is Route.Surface -> SurfaceScreen(store, nav, route.id)
             }
         }
     }

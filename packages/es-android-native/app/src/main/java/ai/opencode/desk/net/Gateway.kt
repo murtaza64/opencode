@@ -118,6 +118,14 @@ class Gateway(context: Context) {
         execute(Request.Builder().url(url(path, query)).write(path).delete().build()).body
     }
 
+    // Full response for a same-origin GET/HEAD the surface WebView asked for; the token and
+    // cookies ride along via the client. Callers guard scope and method.
+    fun fetch(method: String, url: String, headers: Map<String, String>): okhttp3.Response {
+        val builder = Request.Builder().url(url).method(method, null)
+        headers.forEach { (name, value) -> if (name.lowercase() in SAFE_REQUEST_HEADERS) builder.header(name, value) }
+        return client.newCall(builder.build()).execute()
+    }
+
     // Raw bytes from an absolute same-origin URL (transcript images). Callers guard the origin.
     fun bytes(url: String): ByteArray =
         client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
@@ -160,5 +168,7 @@ class Gateway(context: Context) {
 
     companion object {
         val JSON = "application/json".toMediaType()
+        // The surface proxy forwards only these; the WebView's own cookie/referer never reach the gateway.
+        val SAFE_REQUEST_HEADERS = setOf("accept", "accept-language", "if-none-match", "if-modified-since", "last-event-id", "range")
     }
 }

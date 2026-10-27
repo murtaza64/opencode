@@ -16,6 +16,9 @@ import ai.opencode.desk.model.ReceiptPage
 import ai.opencode.desk.model.SessionInfo
 import ai.opencode.desk.model.SessionStatus
 import ai.opencode.desk.model.StateResponse
+import ai.opencode.desk.Surface
+import ai.opencode.desk.SurfaceAddress
+import ai.opencode.desk.SurfacesResponse
 import ai.opencode.desk.model.Todo
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
@@ -45,6 +48,10 @@ class Api(val gateway: Gateway) {
     suspend fun operator(): OperatorSession = parse(gateway.get("/es/api/attention/session"))
     suspend fun currentWork(sessionID: String, directory: String): CurrentWork =
         parse(gateway.get("/es/api/current-work", mapOf("session_id" to sessionID, "directory" to directory)))
+
+    // ---- surfaces (read-only) ----
+    suspend fun surfaces(): SurfacesResponse = parse(gateway.get("/es/api/surfaces"))
+    suspend fun surfaceAddress(id: String): SurfaceAddress = parse(gateway.get("/__es/surface/$id"))
 
     // ---- dashboard writes (attention) ----
     // The operator cookie lasts 8 h; callers re-bootstrap on 401 and retry once.
