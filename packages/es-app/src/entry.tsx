@@ -61,7 +61,7 @@ function Providers(props: ParentProps) {
       frame = requestAnimationFrame(() => {
         frame = undefined
         // Our own decorations never need a second pass.
-        const added = [...dirty].filter((el) => el.isConnected && !el.closest(".session-ref, .ticket-ref, .session-chip, .session-picker"))
+        const added = [...dirty].filter((el) => el.isConnected && !el.closest(".session-ref, .ticket-ref, .session-chip, .context-picker, .context-chips"))
         dirty.clear()
         const set = new Set(added)
         const roots = added.filter((el) => { for (let up = el.parentElement; up; up = up.parentElement) if (set.has(up)) return false; return true })
