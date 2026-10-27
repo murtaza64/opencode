@@ -2326,6 +2326,7 @@ export type ExperimentalCapabilities = {
     list: true
     cancel: true
     update: true
+    interrupt: true
     images?: {
       version: 1
       encoding: "data-url"
@@ -2772,6 +2773,11 @@ export type InputUpdateConflict = {
   _tag: "InputUpdateConflict"
   message: string
   current: SessionV1InputReceipt
+}
+
+export type SessionInputDeliverResult = {
+  outcome: "delivered" | "settled" | "joined" | "not-steer" | "undeliverable" | "superseded"
+  receipt: SessionV1InputReceipt
 }
 
 export type AsideError = {
@@ -10652,6 +10658,41 @@ export type SessionInputUpdateResponses = {
 }
 
 export type SessionInputUpdateResponse = SessionInputUpdateResponses[keyof SessionInputUpdateResponses]
+
+export type SessionInputDeliverData = {
+  body?: never
+  path: {
+    sessionID: string
+    requestID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/input/{requestID}/deliver"
+}
+
+export type SessionInputDeliverErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionInputDeliverError = SessionInputDeliverErrors[keyof SessionInputDeliverErrors]
+
+export type SessionInputDeliverResponses = {
+  /**
+   * SessionInputDeliverResult
+   */
+  200: SessionInputDeliverResult
+}
+
+export type SessionInputDeliverResponse = SessionInputDeliverResponses[keyof SessionInputDeliverResponses]
 
 export type SessionInputHandleData = {
   body?: SessionV1InputHandlePayload

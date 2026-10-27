@@ -229,7 +229,7 @@ it.instance("admits an invisible durable input and reconciles retries and cancel
     const caps = yield* requestInDirectory("/experimental/capabilities", instance.directory)
     expect(yield* caps.json).toMatchObject({
       sessionAside: { version: 1, cancel: true },
-      sessionInput: { version: 1, delivery: ["queue", "steer"], list: true, cancel: true },
+      sessionInput: { version: 1, delivery: ["queue", "steer"], list: true, cancel: true, interrupt: true },
     })
   }),
 )
@@ -448,7 +448,8 @@ it.live(
           yield* llm.wait(1)
           const payload = { requestID: "abort-pending", delivery: "steer", text: "do not run after abort" }
           expect((yield* post("input", payload)).status).toBe(200)
-          expect((yield* post("abort", {})).status).toBe(200)
+          // abort takes no body; a JSON body here leaves the test fiber interrupted at teardown.
+          expect((yield* requestInDirectory(`${url}/abort`, dir, { method: "POST" })).status).toBe(200)
           expect((yield* readReceipt(`${url}/input/abort-pending`, dir)).state).toBe("pending")
           expect((yield* post("input", payload)).status).toBe(200)
           const messages = yield* requestInDirectory(`${url}/message`, dir)
@@ -724,4 +725,148 @@ it.live(
       { config: testProviderConfig },
     ),
   25_000,
+)
+
+const DeliverResult = Schema.Struct({ outcome: Schema.String, receipt: SessionV1.InputReceipt })
+const Messages = Schema.Array(SessionV1.WithParts)
+type Messages = typeof Messages.Type
+const readMessages = (url: string, dir: string) =>
+  requestInDirectory(`${url}/message`, dir).pipe(
+    Effect.flatMap((response) => response.json),
+    Effect.flatMap(Schema.decodeUnknownEffect(Messages)),
+  )
+const bashPart = (messages: Messages) =>
+  messages.flatMap((message) => message.parts).find(
+    (part): part is Extract<Messages[number]["parts"][number], { type: "tool" }> => part.type === "tool" && part.tool === "bash",
+  )
+const userTexts = (messages: Messages) =>
+  messages.filter((message) => message.info.role === "user")
+    .map((message) => message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join(""))
+
+it.live(
+  "deliver interrupts a long tool, keeps its partial output, and starts the next turn with the waiting steer",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.tool("bash", { command: "printf partial-before-interrupt; sleep 60", description: "Long build" })
+          yield* llm.text("acting on the steer")
+          const session = yield* Session.use.create({ title: "Deliver steer" })
+          const url = `/session/${session.id}`
+          const post = (suffix: string, body?: unknown) =>
+            requestInDirectory(`${url}/${suffix}`, dir, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+            })
+          yield* post("prompt_async", {
+            agent: "build",
+            model: { providerID: "test", modelID: "test-model" },
+            parts: [{ type: "text", text: "run the long build" }],
+          })
+          yield* pollWithTimeout(
+            readMessages(url, dir).pipe(Effect.map((messages) => {
+              const part = bashPart(messages)
+              return part?.state.status === "running" && String(part.state.metadata?.output ?? "").includes("partial-before-interrupt") ? true : undefined
+            })),
+            "bash did not start streaming output",
+            "10 seconds",
+          )
+          expect((yield* post("input", { requestID: "long-steer", delivery: "steer", text: "stop that, use the cache" })).status).toBe(200)
+          // The steer waits for the running tool: it is not promoted on its own.
+          yield* Effect.sleep("300 millis")
+          expect((yield* readReceipt(`${url}/input/long-steer`, dir)).state).toBe("pending")
+          expect(yield* llm.calls).toBe(1)
+
+          const delivered = yield* (yield* post("input/long-steer/deliver")).json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(DeliverResult)))
+          expect(delivered.outcome).toBe("delivered")
+          expect(delivered.receipt.state).not.toBe("pending")
+          yield* llm.wait(2)
+          const settled = yield* pollWithTimeout(
+            readMessages(url, dir).pipe(Effect.map((messages) =>
+              messages.some((message) => message.parts.some((part) => part.type === "text" && part.text === "acting on the steer")) ? messages : undefined,
+            )),
+            "steer turn did not run",
+            "10 seconds",
+          )
+          const part = bashPart(settled)!
+          // The shell tool stops its process and records the abort with the output it had.
+          expect(part.state.status).toBe("completed")
+          if (part.state.status !== "completed") throw new Error("unreachable")
+          expect(part.state.output).toContain("partial-before-interrupt")
+          expect(part.state.output).toContain("User aborted the command")
+          expect(part.state.metadata?.exit).toBeNull()
+          const interrupted = settled.find((message) => message.parts.some((item) => item.id === part.id))!
+          expect(interrupted.info.role === "assistant" && interrupted.info.error?.name).toBe("MessageAbortedError")
+          expect(userTexts(settled)).toEqual(["run the long build", "stop that, use the cache"])
+          // The model sees the interrupted call with its partial output, then the steer; nothing is replayed.
+          const second = JSON.stringify((yield* llm.inputs)[1])
+          expect(second).toContain("partial-before-interrupt")
+          expect(second).toContain("stop that, use the cache")
+
+          // Repeating the request interrupts nothing and sends nothing.
+          const again = yield* (yield* post("input/long-steer/deliver")).json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(DeliverResult)))
+          expect(again.outcome).toBe("settled")
+          yield* Effect.sleep("300 millis")
+          expect(yield* llm.calls).toBe(2)
+          expect(userTexts(yield* readMessages(url, dir))).toEqual(["run the long build", "stop that, use the cache"])
+        }),
+      { config: testProviderConfig },
+    ),
+  30_000,
+)
+
+it.live(
+  "deliver runs a steer left pending by an earlier abort, and refuses queued input",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.tool("bash", { command: "sleep 60", description: "Long wait" })
+          const session = yield* Session.use.create({ title: "Stranded steer" })
+          const url = `/session/${session.id}`
+          const post = (suffix: string, body?: unknown) =>
+            requestInDirectory(`${url}/${suffix}`, dir, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+            })
+          yield* post("prompt_async", {
+            agent: "build",
+            model: { providerID: "test", modelID: "test-model" },
+            parts: [{ type: "text", text: "interrupted task" }],
+          })
+          yield* pollWithTimeout(
+            readMessages(url, dir).pipe(Effect.map((messages) => (bashPart(messages)?.state.status === "running" ? true : undefined))),
+            "bash did not start",
+            "10 seconds",
+          )
+          yield* post("input", { requestID: "stranded-steer", delivery: "steer", text: "after the stop" })
+          yield* post("input", { requestID: "stranded-queue", delivery: "queue", text: "later work" })
+          expect((yield* post("abort")).status).toBe(200)
+          expect((yield* readReceipt(`${url}/input/stranded-steer`, dir)).state).toBe("pending")
+
+          const queued = yield* (yield* post("input/stranded-queue/deliver")).json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(DeliverResult)))
+          expect(queued.outcome).toBe("not-steer")
+          expect(queued.receipt.state).toBe("pending")
+
+          yield* llm.text("resumed with the steer")
+          yield* llm.text("then the queued work")
+          const delivered = yield* (yield* post("input/stranded-steer/deliver")).json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(DeliverResult)))
+          expect(delivered.outcome).toBe("delivered")
+          const messages = yield* pollWithTimeout(
+            readMessages(url, dir).pipe(Effect.map((messages) =>
+              messages.some((message) => message.parts.some((part) => part.type === "text" && part.text === "then the queued work")) ? messages : undefined,
+            )),
+            "stranded steer did not run",
+            "10 seconds",
+          )
+          // The steer runs first; the queued input keeps its own idle boundary after it.
+          expect(userTexts(messages)).toEqual(["interrupted task", "after the stop", "later work"])
+          expect(JSON.stringify((yield* llm.inputs)[1])).not.toContain("later work")
+          expect(yield* llm.calls).toBe(3)
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
 )

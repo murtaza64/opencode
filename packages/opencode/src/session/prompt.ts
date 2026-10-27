@@ -113,6 +113,7 @@ export interface Interface {
   readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error | SessionSupersession.Closed>
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts, SessionSupersession.Closed>
   readonly retry: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<SessionFailure.RetryResult, Session.NotFound>
+  readonly deliverSteer: (input: { sessionID: SessionID; requestID: string }) => Effect.Effect<DeliverOutcome, SessionInput.Missing>
   readonly restartContinue: (
     input: { sessionID: SessionID } & SessionRestart.ContinuePayload,
   ) => Effect.Effect<SessionRestart.ContinueResult, Session.NotFound>
@@ -130,6 +131,10 @@ export interface Interface {
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionPrompt") {}
+
+/** `delivered`: the turn was interrupted and the steer starts the next one. `settled`: it was no longer
+ * pending, so nothing was interrupted. `joined`: another delivery for this session is in progress. */
+export type DeliverOutcome = "delivered" | "settled" | "joined" | "not-steer" | "undeliverable" | "superseded"
 
 // Tests can hold the final history decision without replacing the runner or store.
 export const FinalBoundary = Context.Reference<Effect.Effect<void>>("@opencode/SessionPrompt/FinalBoundary", {
@@ -1443,6 +1448,48 @@ const layer = Layer.effect(
       )
     })
 
+    // Deliver waiting steers now instead of after the running tool calls. The turn is stopped the way Stop
+    // stops it (the running tool is killed and recorded as interrupted with its partial output; background
+    // subagents keep running), then the steers are promoted under the runner lock and start the next turn.
+    // Nothing is replayed and no prompt is added. A receipt that is no longer pending interrupts nothing,
+    // so a repeated request cannot stop the turn its first attempt started.
+    const delivering = new Set<SessionID>()
+    const deliverSteer = Effect.fn("SessionPrompt.deliverSteer")(function* (input: { sessionID: SessionID; requestID: string }) {
+      const receipt = yield* inputs.get(input.sessionID, input.requestID)
+      if (receipt.state !== "pending") return "settled" as const
+      if (receipt.delivery !== "steer") return "not-steer" as const
+      if (delivering.has(input.sessionID)) return "joined" as const
+      delivering.add(input.sessionID)
+      return yield* Effect.gen(function* () {
+        yield* Effect.logInfo("deliver steer", { "session.id": input.sessionID, requestID: input.requestID })
+        yield* state.interrupt(input.sessionID)
+        const guard = Effect.gen(function* () {
+          const current = yield* inputs.get(input.sessionID, input.requestID).pipe(Effect.option)
+          if (Option.isNone(current)) return "settled" as const
+          if (current.value.state === "pending")
+            return (yield* inputs.promote(input.sessionID, false)) ? undefined : ("undeliverable" as const)
+          // Promoted at a natural boundary just before the interrupt: the turn that was stopped is this
+          // steer's own reply, so it resumes from its durable boundary (as retry does) instead of being
+          // left cut off. Anything else already moved on and is left alone.
+          const receipt = current.value
+          const latest = yield* sessions.messages({ sessionID: input.sessionID, limit: 2 }).pipe(Effect.orDie)
+          const user = latest.findLast((message) => message.info.role === "user")
+          const reply = latest.at(-1)?.info
+          const cut = "messageID" in receipt && user?.info.id === receipt.messageID &&
+            reply?.role === "assistant" && reply.parentID === user.info.id && reply.error?.name === "MessageAbortedError"
+          return cut ? undefined : ("settled" as const)
+        })
+        const decision = yield* state.startIdle(input.sessionID, runLoop(input.sessionID), guard).pipe(
+          Effect.catchTag("SessionSuperseded", () => Effect.succeed({ outcome: "superseded" as const })),
+        )
+        if (decision.outcome === "started") return "delivered" as const
+        // Another prompt started meanwhile; it picks up pending steers at its own boundary.
+        if (decision.outcome === "busy") return "joined" as const
+        if (decision.outcome === "superseded") return "superseded" as const
+        return decision.reason
+      }).pipe(Effect.ensuring(Effect.sync(() => delivering.delete(input.sessionID))))
+    })
+
     // Continue a failed turn from its durable boundary: the runner starts only while the failed step is
     // still the newest message, and that step stays out of model history, so nothing is fabricated or replayed.
     const retry = Effect.fn("SessionPrompt.retry")(function* (input: { sessionID: SessionID; messageID: MessageID }) {
@@ -1782,6 +1829,7 @@ const layer = Layer.effect(
     return Service.of({
       wake,
       retry,
+      deliverSteer,
       restartContinue,
       recover,
       restartStatus,

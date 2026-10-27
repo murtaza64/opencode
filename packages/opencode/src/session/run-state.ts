@@ -22,6 +22,8 @@ export interface Interface {
   ) => Effect.Effect<SessionSupersession.Receipt, SessionSupersession.Invalid | SessionSupersession.Closed>
   readonly cancelSupersession: (sessionID: SessionID) => Effect.Effect<SessionSupersession.Receipt | undefined, SessionSupersession.Closed>
   readonly consume: (sessionID: SessionID) => Effect.Effect<void>
+  /** Stops only the running turn; unlike cancel, background subagents keep running. */
+  readonly interrupt: (sessionID: SessionID) => Effect.Effect<void>
   readonly ensureRunning: (
     sessionID: SessionID,
     onInterrupt: Effect.Effect<SessionV1.WithParts>,
@@ -190,6 +192,12 @@ const layer = Layer.effect(
       yield* existing.cancel
     })
 
+    const interrupt = Effect.fn("SessionRunState.interrupt")(function* (sessionID: SessionID) {
+      const data = yield* InstanceState.get(state)
+      const existing = data.runners.get(sessionID)
+      if (existing) yield* existing.cancel
+    })
+
     const ensureRunning = Effect.fn("SessionRunState.ensureRunning")(function* (
       sessionID: SessionID,
       onInterrupt: Effect.Effect<SessionV1.WithParts>,
@@ -244,6 +252,7 @@ const layer = Layer.effect(
     return Service.of({
       assertNotBusy,
       cancel,
+      interrupt,
       ensureRunning: (sessionID, onInterrupt, work, admission) =>
         hold(sessionID, ensureRunning(sessionID, onInterrupt, work, admission)),
       startShell: (sessionID, onInterrupt, work, ready) => hold(sessionID, startShell(sessionID, onInterrupt, work, ready)),

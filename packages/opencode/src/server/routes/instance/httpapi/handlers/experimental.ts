@@ -51,6 +51,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
           list: true as const,
           cancel: true as const,
           update: true as const,
+          interrupt: true as const,
           images: SessionV1.ImageSupport,
         },
       }

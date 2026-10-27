@@ -209,6 +209,8 @@ import type {
   SessionInputAdmitResponses,
   SessionInputCancelErrors,
   SessionInputCancelResponses,
+  SessionInputDeliverErrors,
+  SessionInputDeliverResponses,
   SessionInputGetErrors,
   SessionInputGetResponses,
   SessionInputHandleErrors,
@@ -3624,6 +3626,42 @@ export class Input extends HeyApiClient {
         ...params.headers,
       },
     })
+  }
+
+  /**
+   * Interrupt the running turn and deliver pending steers
+   *
+   * Stops the running turn the way abort does (the running tool is killed and recorded as interrupted with its partial output; background subagents keep running), then promotes every pending steer and starts the next turn with them. Nothing is replayed and no prompt is added. Also delivers steers left pending after an earlier abort. A receipt that is no longer pending interrupts nothing (`settled`), so a repeated request is safe; `joined` means another delivery or prompt already owns the session.
+   */
+  public deliver<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      requestID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "requestID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionInputDeliverResponses, SessionInputDeliverErrors, ThrowOnError>(
+      {
+        url: "/session/{sessionID}/input/{requestID}/deliver",
+        ...options,
+        ...params,
+      },
+    )
   }
 
   /**

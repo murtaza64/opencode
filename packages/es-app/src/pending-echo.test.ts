@@ -27,3 +27,17 @@ test("identical text before the submission does not clear the echo", () => {
 test("unknown outcome still has an echo", () => {
   expect(pendingEcho({ text: "hello", status: "unknown" }, [])).toBe(true)
 })
+
+test("a send with a message ID is cleared by that message even with context parts and an earlier-sorting ID", () => {
+  // Typed text plus a surface context part, and a client clock behind the host's last message.
+  expect(pendingEcho({ text: "buttons do not work", status: "accepted", after: "msg_9", messageID: "msg_5" }, [
+    { id: "msg_5", role: "user", text: "buttons do not work" },
+    { id: "msg_9", role: "assistant" },
+  ])).toBe(false)
+})
+
+test("a send with a message ID is not cleared by an identical message under another ID", () => {
+  expect(pendingEcho({ text: "same text", status: "accepted", after: "msg_1", messageID: "msg_3" }, [
+    { id: "msg_2", role: "user", text: "same text" },
+  ])).toBe(true)
+})

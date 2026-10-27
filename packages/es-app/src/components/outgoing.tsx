@@ -122,12 +122,12 @@ const InputBubble = (props: { composer: Composer; connected: boolean; id: string
         <span>{cue()}</span>
         <Show when={deliverable()}>
           <button class="outgoing-action outgoing-deliver" disabled={!props.connected || !!state.delivering}
-            aria-label={`${props.busy ? "Interrupt and deliver" : "Deliver"} steer: ${text()}`}
+            aria-label={`${props.busy ? "Interrupt and steer now" : "Steer now"}: ${text()}`}
             title={props.busy
               ? `Stops ${props.running ? `${props.running.name} (its output so far is kept)` : "the current reply"} and starts the next turn with this steer. Nothing is rerun.`
               : "Starts a turn with this steer."}
             onClick={() => void props.composer.deliverInput(props.id)}>
-            {state.delivering === props.id ? "Delivering…" : props.busy ? "Interrupt & deliver" : "Deliver now"}
+            {state.delivering === props.id ? "Steering…" : props.busy ? "Interrupt and steer now" : "Steer now"}
           </button>
         </Show>
         <Show when={receipt()}>
