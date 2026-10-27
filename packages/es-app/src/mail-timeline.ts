@@ -60,6 +60,7 @@ const ACTIVITY_LABELS: Record<string, string> = {
   workflow: "Scheduled workflow",
   recovery: "Operator recovery",
   nudge: "Nudge",
+  "passive-review": "Passive mail review",
 }
 export const mailActivityLabel = (kind: unknown) => (typeof kind === "string" && Object.hasOwn(ACTIVITY_LABELS, kind) ? ACTIVITY_LABELS[kind]! : "Mail")
 

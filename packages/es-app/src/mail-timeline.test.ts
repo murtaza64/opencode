@@ -197,6 +197,7 @@ test("labels agent-originated resume and kickoff inputs by what the agent did", 
   expect(mailActivityLabel("delegate")).toBe("Delegated task")
   expect(mailActivityLabel("workflow")).toBe("Scheduled workflow")
   expect(mailActivityLabel("nudge")).toBe("Nudge")
+  expect(mailActivityLabel("passive-review")).toBe("Passive mail review")
   expect(mailActivityLabel("constructor")).toBe("Mail")
   expect(mailActivityLabel("task")).toBe("Mail")
   expect(mailActivityLabel(undefined)).toBe("Mail")
