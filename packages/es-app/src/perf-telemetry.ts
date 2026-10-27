@@ -123,6 +123,8 @@ export const startPerfTelemetry = () => {
   }, 500)
   window.addEventListener("pagehide", () => void flush())
   document.addEventListener("visibilitychange", () => {
+    // Hidden pages are throttled; time spent hidden is not a stall.
+    last = performance.now()
     if (document.visibilityState === "hidden") void flush()
   })
   perfEvent("page.start", { ua: navigator.userAgent.slice(0, 120) })
