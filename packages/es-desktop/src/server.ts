@@ -1,4 +1,5 @@
-import { createServer, request, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http"
+import { createServer, request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http"
+import { request as httpsRequest } from "node:https"
 import { createReadStream } from "node:fs"
 import { readFile, realpath, stat } from "node:fs/promises"
 import path from "node:path"
@@ -8,6 +9,7 @@ import { cookieName, cookieValid, issueCookie, loopbackHost, pairingCsp, pairing
 import { eventMux } from "../../es-app/event-mux"
 import { eventProtocol, eventPaths } from "../../es-app/event-protocol"
 import { surfaceProxy } from "../../es-app/surface-proxy"
+import { attentionRoute, localHost, remoteCookie, remoteSetCookie, remoteTargets, type HostInfo } from "../../es-app/remote-host"
 import type { Voice } from "./voice"
 
 const csp =
@@ -74,6 +76,10 @@ export const serve = async (options: {
   publicOrigin?: string
   // Native-only operator dictation; paired remote clients never reach this host's microphone.
   voice?: Voice
+  // A remote execution host (validated tailnet origin) in place of the loopback services.
+  remote?: { id: string; origin: string }
+  // The hosts this listener reports to the app, read per request once every listener is up.
+  hostInfo?: () => HostInfo
 }) => {
   const host = options.host ? remoteListenHost(options.host) : "127.0.0.1"
   if (!host) throw new Error("Remote listeners must bind loopback or a tailnet address")
@@ -82,13 +88,19 @@ export const serve = async (options: {
   const publicOrigin = options.publicOrigin ? httpsOrigin(options.publicOrigin) : undefined
   if (publicOrigin && !pairing) throw new Error("A public origin requires pairing")
   const failures = { count: 0, since: 0 }
-  const targets = { oc: serviceURL(options.opencode), es: serviceURL(options.dashboard) }
+  const remote = options.remote
+  if (remote && (options.opencode || options.dashboard || options.opencodeAuth || options.voice))
+    throw new Error("A remote host listener attaches to that host only")
+  const targets = remote
+    ? { oc: remoteTargets(remote.origin).opencode, es: remoteTargets(remote.origin).dashboard }
+    : { oc: serviceURL(options.opencode), es: serviceURL(options.dashboard) }
   const renderer = serviceURL(options.renderer)
   const root = await realpath(options.root)
   const index = renderer ? undefined : await readFile(path.join(root, "index.html"))
   const key = randomBytes(32).toString("hex")
-  const upstreams = new Set<ReturnType<typeof request>>()
-  const surfaces = surfaceProxy({ dashboard: targets.es })
+  const upstreams = new Set<ReturnType<typeof httpRequest>>()
+  // Surface upstreams are loopback addresses on the dashboard's machine; never resolve a remote host's here.
+  const surfaces = surfaceProxy({ dashboard: remote ? undefined : targets.es })
   const sameHost = (req: { headers: IncomingHttpHeaders }) =>
     req.headers.host === new URL(origin).host || (!!publicOrigin && req.headers.host === new URL(publicOrigin).host)
   const trusted = (value: string | undefined) => value === origin || (!!publicOrigin && value === publicOrigin)
@@ -157,7 +169,7 @@ export const serve = async (options: {
     // Surface frames are opaque-origin sandboxes without the app's cookie or key; their
     // per-surface capability path is the only credential they carry.
     if (sameHost(req) && req.url?.startsWith("/__surface/")) {
-      if (!targets.es) return finish(503, "Service not configured")
+      if (!targets.es || remote) return finish(503, "Service not configured")
       res.removeHeader("Content-Security-Policy")
       return void surfaces.serve(req, res)
     }
@@ -173,15 +185,21 @@ export const serve = async (options: {
       if (req.method !== "GET" || url.search) return finish(403, "Forbidden")
       return finish(200, JSON.stringify({ protocol: eventProtocol }), "application/json")
     }
-    if (url.pathname.startsWith("/__es/surface/")) return surfaces.address(req, res)
+    if (url.pathname === "/__es/host") {
+      if (req.method !== "GET" || url.search) return finish(403, "Forbidden")
+      return finish(200, JSON.stringify(options.hostInfo?.() ?? localHost), "application/json")
+    }
+    if (url.pathname.startsWith("/__es/surface/")) {
+      if (remote) return finish(503, "Surfaces are not available on a remote host")
+      return surfaces.address(req, res)
+    }
     if (/^\/__es\/voice(\/|$)/.test(url.pathname)) {
       if (!options.voice || pairing || url.search) return finish(404, "Not found")
       return voiceRoute(options.voice, req, url.pathname, origin, finish)
     }
     const api = /^\/(oc|es)(\/|$)/.exec(url.pathname)
     if (api && !apiAllowed(req.method ?? "", url.pathname)) return finish(403, "API route not exposed")
-    // Routes the dashboard authorizes with the operator cookie: attention and the Front desk's own files.
-    const attention = /^\/es\/api\/(?:attention(?:\/|$)|frontdesk\/(?:memory|ignored-failures|deliverables\/seen)$)/.test(url.pathname)
+    const attention = attentionRoute.test(url.pathname)
     if (attention && req.method !== "GET" && !trusted(req.headers.origin))
       return finish(403, "Attention writes require the native origin")
     const target = api ? targets[api[1] as keyof typeof targets] : renderer
@@ -206,12 +224,24 @@ export const serve = async (options: {
               : false,
         ),
       )
-      if (ready.some((value) => !value)) return finish(503, offline, "text/html; charset=utf-8")
+      if (ready.some((value) => !value))
+        return finish(503, remote ? remoteOffline(options.hostInfo?.()) : offline, "text/html; charset=utf-8")
     }
     if (target) {
-      const operatorCookie = attention ? req.headers.cookie?.split(";").map(value => value.trim()).find(value => value.startsWith("es_attention_operator=")) : undefined
+      const operatorCookie = !attention
+        ? undefined
+        : remote
+          ? remoteCookie(req.headers.cookie, remote.id)
+          : req.headers.cookie?.split(";").map(value => value.trim()).find(value => value.startsWith("es_attention_operator="))
+      // Only the operator cookie returns to the browser, renamed per remote host.
+      const setCookie = (values: string[] | undefined) => {
+        if (!attention) return undefined
+        if (remote) return remoteSetCookie(values, remote.id)
+        const kept = values?.filter(value => value.startsWith("es_attention_operator="))
+        return kept?.length ? kept : undefined
+      }
       // Concatenate the path rather than resolving it: //host must never switch upstreams.
-      const upstream = request(
+      const upstream = (target.startsWith("https:") ? httpsRequest : httpRequest)(
         `${target}${api ? url.pathname.slice(api[1].length + 1) || "/" : url.pathname}${url.search}`,
         {
           method: req.method,
@@ -220,7 +250,7 @@ export const serve = async (options: {
             // The keyed listener has authenticated the dynamic native origin above.
             // Bind it to the configured dashboard origin; never wildcard local ports.
             ...(attention ? {
-              origin: target,
+              origin: new URL(target).origin,
               ...(operatorCookie ? { cookie: operatorCookie } : {}),
             } : {}),
             ...(api?.[1] === "oc" && options.opencodeAuth ? { authorization: options.opencodeAuth } : {}),
@@ -231,12 +261,8 @@ export const serve = async (options: {
             response.resume()
             return finish(502, '{"error":"Upstream redirect blocked"}', "application/json")
           }
-          res.writeHead(response.statusCode ?? 502, {
-            ...proxyHeaders(response.headers),
-            ...(attention && response.headers["set-cookie"]?.some(value => value.startsWith("es_attention_operator="))
-              ? { "set-cookie": response.headers["set-cookie"].filter(value => value.startsWith("es_attention_operator=")) }
-              : {}),
-          })
+          const cookies = setCookie(response.headers["set-cookie"])
+          res.writeHead(response.statusCode ?? 502, { ...proxyHeaders(response.headers), ...(cookies ? { "set-cookie": cookies } : {}) })
           response.on("error", () => res.destroy())
           response.pipe(res)
         },
@@ -295,10 +321,10 @@ export const serve = async (options: {
         throw new Error("Event path not exposed")
       const target = targets[prefix === "/oc" ? "oc" : "es"]
       if (!target) throw new Error("Event service not configured")
-      return {
-        url: `${target}${requested.pathname.slice(prefix.length)}${requested.search}`,
-        headers: prefix === "/oc" && options.opencodeAuth ? { authorization: options.opencodeAuth } : undefined,
-      }
+      const url = `${target}${requested.pathname.slice(prefix.length)}${requested.search}`
+      // A remote dashboard trusts only its own public origin.
+      if (remote) return { url, headers: { origin: remote.origin } as HeadersInit }
+      return { url, headers: prefix === "/oc" && options.opencodeAuth ? { authorization: options.opencodeAuth } : undefined }
     },
   })
   server.on("upgrade", mux.upgrade)
@@ -372,4 +398,11 @@ const httpsOrigin = (value: string) => {
   if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash)
     throw new Error("Public origin must be an explicit https://host[:port] origin")
   return url.origin
+}
+
+const escape = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`)
+
+const remoteOffline = (host: HostInfo | undefined) => {
+  const local = host?.hosts.find((item) => item.id === "local")
+  return `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="refresh" content="5"><title>${escape(host?.label ?? "Remote host")} unavailable</title><style>body{font:16px system-ui;background:#171819;color:#ececec;margin:0;padding:10vh 8vw}main{max-inline-size:42rem}h1{font-size:28px}p{line-height:1.6;color:#bbb}a{color:#9ac9ff}</style><main><h1>${escape(host?.label ?? "Remote host")} unavailable</h1><p>Its OpenCode or dashboard did not answer through the tailnet gate. Nothing on this machine changed.</p><p>Retrying every 5 seconds. <a href="/">Retry now</a>${local ? ` or <a href="${escape(local.origin)}/">return to ${escape(local.label)}</a>` : ""}.</p></main></html>`
 }

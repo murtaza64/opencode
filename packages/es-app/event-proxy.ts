@@ -2,7 +2,7 @@ import type { Plugin, PreviewServer, ViteDevServer } from "vite"
 import { eventProtocol } from "./event-protocol"
 import { eventMux } from "./event-mux"
 
-export const eventProxy = (targets: { opencode: string; dashboard: string }): Plugin => {
+export const eventProxy = (targets: { opencode: string; dashboard: string }, remote?: { origin: string }): Plugin => {
   const cleanups = new Set<() => void>()
   const configure = (server: ViteDevServer | PreviewServer) => {
     const http = server.httpServer
@@ -31,6 +31,8 @@ export const eventProxy = (targets: { opencode: string; dashboard: string }): Pl
         if (!["http:", "https:"].includes(target.protocol)) throw new Error("Unsupported event upstream")
         target.pathname = target.pathname.replace(/\/$/, "") + requested.pathname.slice(prefix.length)
         target.search = [target.search.slice(1), requested.search.slice(1)].filter(Boolean).join("&")
+        // A remote host's gate authenticates the tailnet user: send no local credential, only its own origin.
+        if (remote) return { url: target.href, headers: { origin: remote.origin } as HeadersInit }
         const authorization =
           request.headers.authorization ??
           (target.username || target.password

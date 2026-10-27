@@ -7,6 +7,7 @@ import { createAttention } from "./attention"
 import { deskItems, type DeskItem } from "./desk"
 import { createBriefAnchor, createBriefs, currentJob, hostModel, readHostModel } from "./desk-session"
 import { useDashboard } from "./state"
+import { readHost } from "./host"
 
 const waitFor = (ready: () => boolean) => new Promise<void>(resolve => {
   const deadline = Date.now() + 10_000
@@ -20,8 +21,10 @@ const MAX_RUNNING = 2
 
 const create = () => {
   const dashboard = useDashboard()
-  // Automation-driven browsers (tests, agents) default to off so they never start model work unasked.
-  const [auto, setAutoRaw] = createSignal(localStorage.getItem(SETTING) === "on" || (localStorage.getItem(SETTING) !== "off" && !navigator.webdriver))
+  // Automation-driven browsers (tests, agents) default to off so they never start model work unasked,
+  // and so does a remote host: its model work starts only when chosen there. Off until the host is known.
+  const [auto, setAutoRaw] = createSignal(localStorage.getItem(SETTING) === "on")
+  if (localStorage.getItem(SETTING) === null && !navigator.webdriver) void readHost().then(value => { if (localStorage.getItem(SETTING) === null) setAutoRaw(!value.remote) })
   const setAuto = (value: boolean) => {
     localStorage.setItem(SETTING, value ? "on" : "off")
     setAutoRaw(value)

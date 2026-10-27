@@ -2023,6 +2023,10 @@ a.mini-item > .glyph { margin: 0; }
 /* Unread-style count; positioned out of flow so it never moves the tab label. */
 .mode-label { position: relative; display: inline-flex; align-items: center; }
 .mode-count { position: absolute; inset-block-start: -7px; inset-inline-start: calc(100% + 2px); min-inline-size: 16px; block-size: 16px; padding-inline: 4px; box-sizing: border-box; border-radius: 8px !important; background: var(--peach); color: var(--crust); font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+.host-switch { display: flex; align-items: center; padding-inline-start: 4px; }
+.host-switch select { font: inherit; font-size: 12px; color: var(--subtext0); background: var(--mantle, transparent); border: 1px solid var(--surface1); border-radius: 4px; padding: 2px 4px; }
+.host-switch.remote select, .host-badge { color: var(--peach); border-color: var(--peach); }
+.host-badge.compact { display: block; font-size: 9px; text-align: center; border: 1px solid; border-radius: 3px; margin: 4px 2px 0; padding: 1px 0; }
 .mode-switch.compact { flex-direction: column; padding: 0; inline-size: 100%; }
 .mode-switch.compact .mode-tab { position: relative; padding: 6px 0; border-block-end: 0; border-inline-start: 2px solid transparent; }
 .mode-switch.compact .mode-tab[aria-current=page] { border-inline-start-color: var(--peach); }
