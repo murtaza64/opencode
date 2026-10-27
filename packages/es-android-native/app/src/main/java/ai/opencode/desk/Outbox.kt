@@ -19,12 +19,13 @@ data class Pending(
     val attempts: Int = 1,
     // Null for this phone's own sends; set for receipts admitted by someone else.
     val author: Author? = null,
+    val images: Int = 0,
 ) {
     val retryable get() = state == SendState.Failed || state == SendState.Uncertain
     val done get() = state == SendState.Handled
 
     val label: String
-        get() = when (state) {
+        get() = (if (images > 0) "$images image${if (images == 1) "" else "s"} · " else "") + when (state) {
             SendState.Sending -> "sending…"
             // "queued" and "promoted" both mean the runtime holds it; never say the model saw it.
             SendState.Accepted -> if (delivery == "queue") "accepted · runs when idle" else "accepted · next safe boundary"

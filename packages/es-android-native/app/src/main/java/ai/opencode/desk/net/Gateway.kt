@@ -118,6 +118,14 @@ class Gateway(context: Context) {
         execute(Request.Builder().url(url(path, query)).write(path).delete().build()).body
     }
 
+    // Raw bytes from an absolute same-origin URL (transcript images). Callers guard the origin.
+    fun bytes(url: String): ByteArray =
+        client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
+            Access.check(response)
+            if (!response.isSuccessful) throw GatewayError(response.code, "HTTP ${response.code} GET image")
+            response.body?.bytes() ?: ByteArray(0)
+        }
+
     private class Reply(val body: String, val headers: Map<String, String>)
 
     private fun execute(request: Request): Reply =

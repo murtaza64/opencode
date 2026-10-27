@@ -232,6 +232,10 @@ data class Part(
     val reason: String? = null,
     val cost: Double? = null,
     val metadata: JsonObject? = null,
+    // file parts
+    val mime: String? = null,
+    val url: String? = null,
+    val filename: String? = null,
 )
 
 @Serializable

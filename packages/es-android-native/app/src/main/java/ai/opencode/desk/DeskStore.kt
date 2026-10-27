@@ -116,11 +116,22 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     val details = mutableStateMapOf<String, AgentDetail>()
     // Inputs this phone sent, by session, from tap to handled (see Outbox).
     val outbox = mutableStateMapOf<String, List<Pending>>()
-    // Message ids of this phone's own sends, persisted so "you" survives a restart.
-    private val sent = SentLedger(object : KeyValue {
+    private val kv = object : KeyValue {
         override fun get(key: String) = prefs.getString(key, null)
         override fun put(key: String, value: String?) { prefs.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply() }
-    })
+    }
+    // Message ids of this phone's own sends, persisted so "you" survives a restart.
+    private val sent = SentLedger(kv)
+    // Durable sends (text + normalised image bytes) so a kill mid-send can be retried verbatim.
+    val blobs = FileBlobStore(app.filesDir)
+    private val durable = OutboxStore(kv, blobs)
+    private val pinStore = PinStore(kv)
+    var pins by mutableStateOf(pinStore.list(gateway.origin))
+        private set
+    // Images picked for the next send, per session, already normalised and stored under a
+    // reserved requestID so the send can be retried byte-for-byte.
+    val drafts = mutableStateMapOf<String, ImageDraft>()
+    data class ImageDraft(val requestID: String, val images: List<StoredImage>)
     val mine = mutableStateMapOf<String, Set<String>>()
     private fun remember(sessionID: String, items: List<Pending>) {
         items.filter { it.author == null && it.messageID != null }.forEach { sent.record(sessionID, it.messageID!!) }
@@ -134,6 +145,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     private var events: Job? = null
 
     init {
+        restoreOutbox()
         if (gateway.paired) connect()
         viewModelScope.launch { while (isActive) { now = System.currentTimeMillis(); delay(10_000) } }
     }
@@ -146,12 +158,24 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     val filteredOpen get() = open.filter { filter.isEmpty() || it.editspace in filter }
     val filteredAgents get() = agents.filter { filter.isEmpty() || it.editspace in filter }
 
+    // Entries composed for this origin come back as Uncertain: the POST may or may not have
+    // landed before the process died, and the same requestID makes the retry safe either way.
+    private fun restoreOutbox() {
+        durable.list(gateway.origin).forEach { entry ->
+            val item = Pending(entry.requestID, entry.sessionID, entry.text, entry.delivery, SendState.Uncertain, error = "app restarted", createdAt = entry.createdAt, images = entry.images.size)
+            outbox[entry.sessionID] = outbox[entry.sessionID].orEmpty().filter { it.requestID != entry.requestID } + item
+        }
+    }
+
     // ---- connection ----
 
     // The service token is stored before pairing so the pair request itself carries it.
     suspend fun pair(origin: String, code: String, access: AccessToken?): String? {
         gateway.origin = origin
         desk = pointers.get(origin)
+        pins = pinStore.list(origin)
+        outbox.clear(); drafts.clear()
+        restoreOutbox()
         if (access != null) gateway.saveAccessToken(access)
         return runCatching { gateway.pair(code) }.fold(
             onSuccess = { ok -> if (ok) { connect(); null } else "That code was not accepted." },
@@ -167,6 +191,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         gateway.forget()
         states.clear(); open = emptyList(); agents = emptyList()
         desk = null; deskBusy = false
+        outbox.clear(); drafts.clear(); pins = emptyList()
         link = Link.Unpaired
     }
 
@@ -300,6 +325,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
             details[agent.key] = detail
             outbox[session.id] = Outbox.reconcile(outbox[session.id].orEmpty(), detail.receipts, detail.messages.map { it.info.id }.toSet())
             remember(session.id, outbox[session.id].orEmpty())
+            release(outbox[session.id].orEmpty())
         }
     }
 
@@ -320,11 +346,20 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     // Local echo first, then the durable POST. The requestID is fixed at tap time so a retry
     // after a timeout cannot double-admit: Core returns the original receipt for the same ID.
     private suspend fun send(sessionID: String, directory: String, text: String, delivery: String, requestID: String = UUID.randomUUID().toString(), after: () -> Unit = {}): Pending {
+        val origin = gateway.origin
+        // The durable entry is written before the first attempt and reused verbatim by retries.
+        val entry = durable.get(origin, requestID) ?: OutboxEntry(
+            requestID, origin, sessionID, directory, text, delivery,
+            images = drafts[sessionID]?.takeIf { it.requestID == requestID }?.images.orEmpty(), createdAt = System.currentTimeMillis(),
+        ).also { durable.put(it); drafts.remove(sessionID) }
         val existing = outbox[sessionID].orEmpty().firstOrNull { it.requestID == requestID }
         val item = existing?.copy(state = SendState.Sending, error = null, attempts = existing.attempts + 1)
-            ?: Pending(requestID, sessionID, text, delivery, SendState.Sending, createdAt = System.currentTimeMillis())
+            ?: Pending(requestID, sessionID, entry.text, entry.delivery, SendState.Sending, createdAt = entry.createdAt, images = entry.images.size)
         outbox[sessionID] = outbox[sessionID].orEmpty().filter { it.requestID != requestID } + item
-        val result = runCatching { api.input(sessionID, directory, text, delivery, requestID = requestID) }
+        val result = runCatching {
+            val images = withContext(Dispatchers.IO) { durable.payload(entry) }
+            api.input(sessionID, entry.directory, entry.text, entry.delivery, requestID = requestID, images = images)
+        }
         val settled = result.fold(
             onSuccess = { item.copy(state = Outbox.fromReceipt(it), messageID = it.messageID) },
             onFailure = { error ->
@@ -343,11 +378,13 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
 
     suspend fun steer(agent: Agent, text: String, delivery: String): Result<Pending> {
         val session = agent.session ?: return Result.failure(IllegalStateException("This lane has no session yet"))
-        return Result.success(send(session.id, session.directory, text, delivery) { load(agent) })
+        return Result.success(send(session.id, session.directory, text, delivery, requestID(session.id)) { load(agent) })
     }
 
     suspend fun retry(item: Pending): Pending {
-        val directory = agents.firstOrNull { it.session?.id == item.sessionID }?.session?.directory ?: desk?.takeIf { it.id == item.sessionID }?.directory
+        // Retry only what was composed for this gateway; an entry from another host is never replayed here.
+        val entry = durable.get(gateway.origin, item.requestID)
+        val directory = entry?.directory ?: agents.firstOrNull { it.session?.id == item.sessionID }?.session?.directory ?: desk?.takeIf { it.id == item.sessionID }?.directory
             ?: return item.copy(state = SendState.Failed, error = "session not found")
         return send(item.sessionID, directory, item.text, item.delivery, item.requestID) {
             agents.firstOrNull { it.session?.id == item.sessionID }?.let(::load) ?: loadDesk()
@@ -356,7 +393,46 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
 
     fun dismiss(item: Pending) {
         outbox[item.sessionID] = outbox[item.sessionID].orEmpty().filter { it.requestID != item.requestID }
+        durable.remove(gateway.origin, item.requestID)
     }
+
+    // Stored bytes are released as soon as the server has handled the input.
+    private fun release(items: List<Pending>) {
+        items.filter { it.done || (it.author == null && it.state == SendState.Presented) }.forEach { durable.remove(gateway.origin, it.requestID) }
+    }
+
+    // ---- image drafts ----
+    // Normalises off the main thread once at pick time and stores the bytes under the send's
+    // reserved requestID, so the later POST (and any retry) reads identical bytes.
+    suspend fun attach(sessionID: String, uris: List<android.net.Uri>): String? {
+        val draft = drafts[sessionID] ?: ImageDraft(UUID.randomUUID().toString(), emptyList())
+        if (draft.images.size + uris.size > ImagePolicy.MAX_COUNT) return "At most ${ImagePolicy.MAX_COUNT} images are supported"
+        val added = mutableListOf<StoredImage>()
+        for ((offset, uri) in uris.withIndex()) {
+            val normalized = withContext(Dispatchers.Default) { ImageIO.normalize(getApplication(), uri) }.getOrElse { return it.message ?: "Could not read image" }
+            val index = draft.images.size + offset
+            val path = withContext(Dispatchers.IO) { durable.store(draft.requestID, index, normalized.mime, normalized.bytes) }
+            added += StoredImage(path, normalized.mime, normalized.bytes.size.toLong(), normalized.width, normalized.height)
+        }
+        val next = draft.copy(images = draft.images + added)
+        ImagePolicy.issue(next.images)?.let { issue -> added.forEach { blobs.delete(it.path) }; return issue }
+        drafts[sessionID] = next
+        return null
+    }
+
+    fun detach(sessionID: String, image: StoredImage) {
+        val draft = drafts[sessionID] ?: return
+        blobs.delete(image.path)
+        val next = draft.copy(images = draft.images - image)
+        if (next.images.isEmpty()) { drafts.remove(sessionID); blobs.deleteAll("outbox/${draft.requestID}/") } else drafts[sessionID] = next
+    }
+
+    fun requestID(sessionID: String) = drafts[sessionID]?.requestID ?: UUID.randomUUID().toString()
+
+    // ---- pins ----
+    fun togglePin(pin: Pin) { pins = pinStore.toggle(gateway.origin, pin) }
+    fun pinned(pin: Pin) = pins.any { it.key == pin.key }
+    val pinViews: List<PinView> get() = Pins.resolve(pins, agents, states.mapValues { it.value.sessions })
 
     suspend fun stop(agent: Agent): Result<Boolean> {
         val session = agent.session ?: return Result.failure(IllegalStateException("No session"))
@@ -365,7 +441,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
 
     suspend fun cancel(agent: Agent, requestID: String): Result<Unit> {
         val session = agent.session ?: return Result.failure(IllegalStateException("No session"))
-        return runCatching { api.cancelInput(session.id, session.directory, requestID) }.onSuccess { load(agent) }
+        return runCatching { api.cancelInput(session.id, session.directory, requestID) }.onSuccess { durable.remove(gateway.origin, requestID); load(agent) }
     }
 
     // ---- front desk ----
@@ -419,6 +495,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
                 deskReceipts[pointer.id] = receipts.filter { r -> r.state == "pending" || r.state == "promoted" }
                 outbox[pointer.id] = Outbox.reconcile(outbox[pointer.id].orEmpty(), receipts, deskMessages[pointer.id].orEmpty().map { it.info.id }.toSet())
                 remember(pointer.id, outbox[pointer.id].orEmpty())
+                release(outbox[pointer.id].orEmpty())
             }
             // Core status, not the dashboard list: the desk session is not in any lane.
             runCatching { api.status(pointer.directory)[pointer.id]?.type == "busy" }.onSuccess { deskBusy = it }
@@ -441,7 +518,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     }
 
     suspend fun askDesk(text: String): Result<Pending> =
-        ensureDesk().map { pointer -> send(pointer.id, pointer.directory, text, "queue") { loadDesk() } }
+        ensureDesk().map { pointer -> send(pointer.id, pointer.directory, text, "queue", requestID(pointer.id)) { loadDesk() } }
 }
 
 fun parseIso(value: String): Long? = runCatching { java.time.Instant.parse(value).toEpochMilli() }.getOrNull()

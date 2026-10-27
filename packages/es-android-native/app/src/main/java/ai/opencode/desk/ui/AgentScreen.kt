@@ -29,6 +29,8 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -62,6 +64,7 @@ import ai.opencode.desk.Authorship
 import ai.opencode.desk.Nav
 import ai.opencode.desk.Outbox
 import ai.opencode.desk.Pending
+import ai.opencode.desk.Pin
 import ai.opencode.desk.SendState
 import ai.opencode.desk.ToolGroup
 import ai.opencode.desk.ToolRow
@@ -94,7 +97,8 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
     LaunchedEffect(atTop, detail?.cursor) { if (atTop) store.loadOlder(agent) }
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        TopBar(agent.title, onBack = { nav.pop() }) {
+        val pin = Pin(agent.editspace, agent.lane)
+        TopBar(agent.title, onBack = { nav.pop() }, trailing = { PinButton(store.pinned(pin)) { store.togglePin(pin) } }) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatusDot(agent.status, 8)
                 Label(listOfNotNull(agent.editspace, agent.lane, agent.status, agent.session?.cost?.takeIf { it > 0 }?.let { "$%.2f".format(it) }).joinToString(" · "))
@@ -113,7 +117,7 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
             detail?.error?.let { item(key = "error") { Text(it, color = Ink.Red, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) } }
             if (detail == null) item(key = "loading") { Text("Loading…", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) }
             val placed = Authorship.place(detail?.messages.orEmpty(), store.mine[agent.session?.id.orEmpty()].orEmpty())
-            items(placed.asReversed(), key = { it.message.info.id }) { Message(it.message, store.now, it.author, it.first) }
+            items(placed.asReversed(), key = { it.message.info.id }) { Message(it.message, store.now, it.author, it.first, store) }
             item(key = "older") {
                 val more = detail?.cursor != null
                 Text(
@@ -149,13 +153,21 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
 }
 
 @Composable
-fun TopBar(title: String, onBack: () -> Unit, subtitle: (@Composable () -> Unit)? = null) {
-    Row(Modifier.fillMaxWidth().padding(end = 16.dp, top = 4.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+fun TopBar(title: String, onBack: () -> Unit, trailing: (@Composable () -> Unit)? = null, subtitle: (@Composable () -> Unit)? = null) {
+    Row(Modifier.fillMaxWidth().padding(end = 8.dp, top = 4.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onBack, modifier = Modifier.testTag("back")) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.Text) }
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             subtitle?.invoke()
         }
+        trailing?.invoke()
+    }
+}
+
+@Composable
+fun PinButton(pinned: Boolean, onToggle: () -> Unit) {
+    IconButton(onClick = onToggle, modifier = Modifier.testTag("pin")) {
+        Icon(if (pinned) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, if (pinned) "Unpin from home" else "Pin to home", tint = if (pinned) Ink.Amber else Ink.Muted)
     }
 }
 
@@ -183,7 +195,7 @@ fun PendingRow(item: Pending, onRetry: () -> Unit, onCancel: () -> Unit) {
 // (never colour alone). `first` is false when the previous message shares the author exactly,
 // in which case the header is omitted and the card continues the run.
 @Composable
-fun Message(message: MessageWithParts, now: Long, author: Author? = null, first: Boolean = true) {
+fun Message(message: MessageWithParts, now: Long, author: Author? = null, first: Boolean = true, store: DeskStore? = null) {
     val text = message.parts.filter { it.type == "text" && !it.text.isNullOrBlank() }.joinToString("\n\n") { it.text!!.trim() }
     val tools = message.parts.filter { it.type == "tool" }
     if (author != null && author != Author.You) { SourcedMessage(author, text, message.info.id, now, message.info.time.created, first); return }
@@ -199,6 +211,7 @@ fun Message(message: MessageWithParts, now: Long, author: Author? = null, first:
                     .padding(horizontal = if (you) 14.dp else 0.dp, vertical = if (you) 10.dp else 0.dp),
             ) { Text(if (you) AnnotatedString(text) else markdownish(text), style = MaterialTheme.typography.bodyLarge, maxLines = if (expanded) Int.MAX_VALUE else 10, overflow = TextOverflow.Ellipsis) }
         }
+        if (store != null) ImageParts(message.parts, store)
         ToolRows.groups(message.parts).forEach { group -> ToolGroupView(group, message.info.id) }
         Label(age(now, message.info.time.created), color = Ink.Dim, modifier = Modifier.padding(top = 2.dp))
     }
@@ -250,8 +263,10 @@ private fun SteerBar(store: DeskStore, agent: Agent) {
     var busy by rememberSaveable(agent.key) { mutableStateOf(false) }
     var error by rememberSaveable(agent.key) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val sessionID = agent.session?.id.orEmpty()
     Column(Modifier.fillMaxWidth().background(Ink.Black).imePadding().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
         error?.let { Text(it, color = Ink.Red, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 8.dp)) }
+        if (sessionID.isNotEmpty()) DraftStrip(store, sessionID)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Toggle(if (queue) "queue" else "steer", if (queue) Ink.Violet else Ink.Green) { queue = !queue }
             Spacer(Modifier.width(8.dp))
@@ -261,19 +276,21 @@ private fun SteerBar(store: DeskStore, agent: Agent) {
         }
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (sessionID.isNotEmpty()) AttachButton(store, sessionID) { error = it }
             TextField(
                 value = text, onValueChange = { text = it }, maxLines = 4,
                 placeholder = { Text(if (agent.session == null) "Lane is starting; no session yet" else "Tell ${agent.lane}…", color = Ink.Dim) },
                 modifier = Modifier.weight(1f).testTag("steer-text"), shape = RoundedCornerShape(22.dp),
                 colors = TextFieldDefaults.colors(focusedContainerColor = Ink.Panel, unfocusedContainerColor = Ink.Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = Ink.Blue),
             )
-            IconButton(enabled = text.isNotBlank() && !busy && agent.session != null, modifier = Modifier.testTag("steer-send"), onClick = {
+            val hasImages = store.drafts[sessionID]?.images?.isNotEmpty() == true
+            IconButton(enabled = (text.isNotBlank() || hasImages) && !busy && agent.session != null, modifier = Modifier.testTag("steer-send"), onClick = {
                 val message = text.trim(); busy = true; error = null
                 scope.launch {
                     store.steer(agent, message, if (queue) "queue" else "steer").fold({ text = "" }, { error = it.message?.take(120) })
                     busy = false
                 }
-            }) { Icon(Icons.Filled.Send, "Send", tint = if (text.isNotBlank()) Ink.Blue else Ink.Dim) }
+            }) { Icon(Icons.Filled.Send, "Send", tint = if (text.isNotBlank() || hasImages) Ink.Blue else Ink.Dim) }
         }
     }
 }

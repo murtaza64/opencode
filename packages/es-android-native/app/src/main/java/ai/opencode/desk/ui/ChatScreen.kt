@@ -92,7 +92,7 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
                 }
             }
             val placed = Authorship.place(messages, store.mine[id].orEmpty())
-            items(placed.asReversed(), key = { it.message.info.id }) { Message(it.message, store.now, it.author, it.first) }
+            items(placed.asReversed(), key = { it.message.info.id }) { Message(it.message, store.now, it.author, it.first, store) }
             item(key = "older") {
                 val more = store.deskCursors[id] != null
                 if (messages.isEmpty() && pending.isEmpty()) Column(Modifier.padding(20.dp)) {
@@ -102,20 +102,23 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
             }
         }
         error?.let { Text(it, color = Ink.Red, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 20.dp)) }
+        if (store.deskReady) DraftStrip(store, id)
+        val hasImages = store.drafts[id]?.images?.isNotEmpty() == true
         Row(Modifier.fillMaxWidth().background(Ink.Black).imePadding().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (store.deskReady) AttachButton(store, id) { error = it }
             TextField(
                 value = text, onValueChange = { text = it }, maxLines = 5,
                 placeholder = { Text("Message the desk", color = Ink.Dim) },
                 modifier = Modifier.weight(1f).testTag("chat-text"), shape = RoundedCornerShape(22.dp),
                 colors = TextFieldDefaults.colors(focusedContainerColor = Ink.Panel, unfocusedContainerColor = Ink.Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = Ink.Blue),
             )
-            IconButton(enabled = text.isNotBlank() && !sending, modifier = Modifier.testTag("chat-send"), onClick = {
+            IconButton(enabled = (text.isNotBlank() || hasImages) && !sending, modifier = Modifier.testTag("chat-send"), onClick = {
                 val message = text.trim(); sending = true; error = null
                 scope.launch {
                     store.askDesk(message).fold({ text = "" }, { error = it.message?.take(120) })
                     sending = false
                 }
-            }) { Icon(Icons.Filled.Send, "Send", tint = if (text.isNotBlank()) Ink.Blue else Ink.Dim) }
+            }) { Icon(Icons.Filled.Send, "Send", tint = if (text.isNotBlank() || hasImages) Ink.Blue else Ink.Dim) }
         }
     }
 }

@@ -59,6 +59,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ai.opencode.desk.DeskStore
 import ai.opencode.desk.Link
+import ai.opencode.desk.Pin
+import ai.opencode.desk.PinView
 import ai.opencode.desk.Nav
 import ai.opencode.desk.Route
 import ai.opencode.desk.model.AttentionRecord
@@ -133,6 +135,11 @@ private fun DeskTab(store: DeskStore, nav: Nav, onOpen: (AttentionRecord) -> Uni
         } else item {
             SectionHeader("Needs you")
             Text("Nothing waiting on you.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 20.dp))
+        }
+        val pinned = store.pinViews.filter { store.filter.isEmpty() || it.pin.editspace in store.filter }
+        if (pinned.isNotEmpty()) {
+            item { SectionHeader("Pinned") }
+            items(pinned, key = { "pin-" + it.pin.key }) { view -> PinRow(store, view, nav) }
         }
         if (working.isNotEmpty()) {
             item { SectionHeader("Working now", "${working.size}") }
@@ -296,7 +303,10 @@ private fun AgentsTab(store: DeskStore, nav: Nav) {
         }
         groups.forEach { (es, agents) ->
             item(key = "h-$es") { SectionHeader(es, "${agents.count { it.busy }} live") }
-            items(agents, key = { it.key }) { AgentRow(it, store.now, onClick = { nav.push(Route.Agent(it.key)) }) }
+            items(agents, key = { it.key }) { agent ->
+                val pin = Pin(agent.editspace, agent.lane)
+                AgentRow(agent, store.now, onClick = { nav.push(Route.Agent(agent.key)) }, trailing = { PinButton(store.pinned(pin)) { store.togglePin(pin) } })
+            }
         }
         if (groups.isEmpty()) item { Text("No lanes yet.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) }
     }
@@ -352,4 +362,24 @@ fun deliveryLabel(state: String) = when (state) {
     "blocked" -> "undeliverable"
     "closed" -> "closed"
     else -> state
+}
+
+// A pinned lane as the human left it: live status from the last refresh, one tap to open.
+// An unavailable pin stays (the lane may come back) and offers unpin instead of a screen.
+@Composable
+private fun PinRow(store: DeskStore, view: PinView, nav: Nav) {
+    val unavailable = view.status == "unavailable"
+    Row(
+        Modifier.fillMaxWidth().clickable(enabled = !unavailable) { view.agentKey?.let { nav.push(Route.Agent(it)) } }.padding(start = 20.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StatusDot(if (unavailable) "idle" else view.status, 8)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(view.title, style = MaterialTheme.typography.bodyMedium, color = if (unavailable) Ink.Muted else Ink.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Label(listOfNotNull(view.pin.editspace, view.status, view.activity.takeIf { it.isNotBlank() }).joinToString(" · "), color = if (unavailable) Ink.Dim else Ink.Muted)
+        }
+        if (view.updatedAt > 0) Label(age(store.now, view.updatedAt), color = Ink.Dim)
+        PinButton(true) { store.togglePin(view.pin) }
+    }
 }

@@ -81,9 +81,9 @@ fun AttentionRow(record: AttentionRecord, now: Long, onClick: () -> Unit) {
 }
 
 @Composable
-fun AgentRow(agent: Agent, now: Long, onClick: () -> Unit) {
+fun AgentRow(agent: Agent, now: Long, onClick: () -> Unit, trailing: (@Composable () -> Unit)? = null) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 20.dp, end = if (trailing != null) 4.dp else 20.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StatusDot(agent.status)
@@ -97,6 +97,7 @@ fun AgentRow(agent: Agent, now: Long, onClick: () -> Unit) {
             Label(agent.status, color = statusColor(agent.status).takeIf { agent.status != "idle" } ?: Ink.Muted)
             Label(age(now, agent.activityAt))
         }
+        trailing?.invoke()
     }
     HorizontalDivider(color = Ink.Line, thickness = 0.5.dp, modifier = Modifier.padding(start = 44.dp))
 }

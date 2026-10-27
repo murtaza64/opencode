@@ -137,7 +137,7 @@ try {
   await tap(await waitFor(byId("steer-send"), "steer send"))
   const steer = await waitWrite((w) => w.path === "/session/ses_composer/input" && w.method === "POST", "steer input")
   if (steer.body.delivery !== "steer" || steer.query.directory !== fixture.sessions.ses_composer?.directory && !steer.query.directory) throw new Error(`Unexpected steer ${JSON.stringify(steer)}`)
-  await waitFor(byText("Waiting to deliver"), "pending receipt")
+  await waitFor(byText("Sent from this phone"), "pending receipt")
   pass(`steer admitted as durable input (delivery=${steer.body.delivery}, requestID present=${!!steer.body.requestID})`)
   await screenshot("08-agent-steer")
   await tap(await waitFor(byId("stop"), "stop"))

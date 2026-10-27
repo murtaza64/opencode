@@ -52,6 +52,7 @@ object Ink {
 fun statusColor(status: String) = when (status) {
     "busy" -> Ink.Green
     "parked" -> Ink.Violet
+    "starting" -> Ink.Amber
     "retry", "error" -> Ink.Red
     else -> Ink.Dim
 }

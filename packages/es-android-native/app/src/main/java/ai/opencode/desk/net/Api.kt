@@ -20,6 +20,7 @@ import ai.opencode.desk.model.Todo
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -107,12 +108,13 @@ class Api(val gateway: Gateway) {
 
     // ---- Core writes ----
     // Durable, idempotent input: a stable requestID makes retries safe.
-    suspend fun input(id: String, directory: String, text: String, delivery: String, agent: String? = null, requestID: String = UUID.randomUUID().toString()): InputReceipt {
+    suspend fun input(id: String, directory: String, text: String, delivery: String, agent: String? = null, requestID: String = UUID.randomUUID().toString(), images: JsonArray? = null): InputReceipt {
         val body = buildJsonObject {
             put("requestID", requestID)
             put("delivery", delivery)
             put("text", text)
             if (agent != null) put("agent", agent)
+            if (images != null && images.isNotEmpty()) put("images", images)
         }
         return parse(gateway.post("/oc/session/$id/input", body.toString(), mapOf("directory" to directory)))
     }
