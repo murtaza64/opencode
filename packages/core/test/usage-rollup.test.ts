@@ -197,6 +197,7 @@ describe("UsageRollup", () => {
           { hour, provider_id: "gateway", model_id: "priced", cost: 2, tokens_input: 10 },
           { hour, provider_id: "gateway", model_id: "no-card", cost: 0, tokens_input: 500, tokens_output: 50 },
           { hour, provider_id: "gateway", model_id: "aborted", cost: 0 },
+          { hour, provider_id: "lmstudio", model_id: "qwen", cost: 0, tokens_input: 900 },
         ])
         .run()
       const [today] = (yield* UsageRollup.daily(db, {
@@ -204,11 +205,13 @@ describe("UsageRollup", () => {
         offsetMinutes: 0,
         now,
         hasRate: (_provider, model) => model === "priced",
+        isLocal: (provider) => provider === "lmstudio",
       })).days
       expect(today).toMatchObject({ complete: true, cost: 2, unpricedModels: 1, unpricedTokens: 550 })
       expect(today?.models.map((model) => [model.model, model.coverage, model.cost])).toEqual([
         ["priced", "priced", 2],
         ["aborted", "no-usage", 0],
+        ["qwen", "local", 0],
         ["no-card", "missing-rate", null],
       ])
     }),

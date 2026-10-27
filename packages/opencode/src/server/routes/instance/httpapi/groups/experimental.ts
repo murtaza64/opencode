@@ -150,7 +150,7 @@ export const UsageDailyResponse = Schema.Struct({
           provider: Schema.String,
           model: Schema.String,
           cost: Schema.NullOr(Schema.Number),
-          coverage: Schema.Literals(["priced", "missing-rate", "no-usage"]),
+          coverage: Schema.Literals(["priced", "missing-rate", "local", "no-usage"]),
           tokens: UsageTokens,
         }),
       ),

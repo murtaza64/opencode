@@ -79,6 +79,13 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
           const cost = catalog[ProviderV2.ID.make(provider)]?.models[model]?.cost
           return cost !== undefined && (cost.input > 0 || cost.output > 0)
         },
+        // Local inference servers (lmstudio, omlx, ollama, ...) are configured with a loopback endpoint.
+        isLocal: (provider) => {
+          const url = catalog[ProviderV2.ID.make(provider)]?.options?.baseURL
+          if (typeof url !== "string") return false
+          const host = URL.parse(url)?.hostname
+          return host === "localhost" || host === "::1" || host === "[::1]" || host?.startsWith("127.") === true
+        },
       })
       return { ...daily, priceSource: yield* priceSource(), rateLimits: RateLimits.snapshot() }
     })

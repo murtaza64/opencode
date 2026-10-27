@@ -116,7 +116,7 @@ export type RateLookup = (provider: string, model: string) => boolean
 
 export const daily = Effect.fn("UsageRollup.daily")(function* (
   db: Db,
-  input: { days: number; offsetMinutes: number; now?: number; hasRate?: RateLookup },
+  input: { days: number; offsetMinutes: number; now?: number; hasRate?: RateLookup; isLocal?: (provider: string) => boolean },
 ) {
   const now = input.now ?? Date.now()
   const shift = Math.round(input.offsetMinutes / 60)
@@ -146,13 +146,15 @@ export const daily = Effect.fn("UsageRollup.daily")(function* (
       .filter((row) => row.day === day)
       .map((row) => {
         const tokens = row.input + row.output + row.reasoning + row.cacheRead + row.cacheWrite
-        const coverage: "priced" | "missing-rate" | "no-usage" =
-          tokens === 0 ? "no-usage" : (input.hasRate ? input.hasRate(row.provider, row.model) : row.cost !== 0) ? "priced" : "missing-rate"
+        const priced = input.hasRate ? input.hasRate(row.provider, row.model) : row.cost !== 0
+        // Models served on this machine have no API bill; that is distinct from a billed model with no known rate.
+        const coverage: "priced" | "missing-rate" | "local" | "no-usage" =
+          tokens === 0 ? "no-usage" : priced ? "priced" : input.isLocal?.(row.provider) ? "local" : "missing-rate"
         return {
           provider: row.provider,
           model: row.model,
-          // Unknown, not zero, when the price source has no rate for the model.
-          cost: coverage === "missing-rate" ? null : round(row.cost),
+          // Unknown, not zero, when the price source has no rate for the model; local models are not billed.
+          cost: coverage === "missing-rate" ? null : coverage === "local" ? 0 : round(row.cost),
           coverage,
           tokens: { input: row.input, output: row.output, reasoning: row.reasoning, cache: { read: row.cacheRead, write: row.cacheWrite } },
         }
@@ -188,7 +190,7 @@ export const daily = Effect.fn("UsageRollup.daily")(function* (
     },
     notes: [
       "cost is null for days not yet covered (history before liveSince until the one-time backfill finishes)",
-      "models with coverage=missing-rate used tokens the price source has no rate for: cost null (unknown, not zero); day cost sums priced models only and unpricedModels/unpricedTokens report the rest",
+      "models with coverage=missing-rate used tokens the price source has no rate for: cost null (unknown, not zero); day cost sums priced models only and unpricedModels/unpricedTokens report the rest. coverage=local: a provider served from this machine (loopback endpoint), no API bill",
       "steps that ran on this host count; synced or moved sessions are skipped from liveSince on, but history before liveSince is counted from every local message, so history moved from another host can also count there",
       "local days are built from UTC hours: zones with a 30 or 45 minute offset are rounded to the hour",
       "not provider billing",
@@ -225,7 +227,12 @@ function round(value: number) {
 }
 
 export interface Interface {
-  readonly daily: (input: { days: number; offsetMinutes: number; hasRate?: RateLookup }) => Effect.Effect<Effect.Success<ReturnType<typeof daily>>>
+  readonly daily: (input: {
+    days: number
+    offsetMinutes: number
+    hasRate?: RateLookup
+    isLocal?: (provider: string) => boolean
+  }) => Effect.Effect<Effect.Success<ReturnType<typeof daily>>>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/UsageRollup") {}
