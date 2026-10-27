@@ -24,7 +24,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -45,12 +49,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ai.opencode.desk.Agent
 import ai.opencode.desk.DeskStore
+import ai.opencode.desk.Author
+import ai.opencode.desk.Authorship
 import ai.opencode.desk.Nav
 import ai.opencode.desk.Outbox
 import ai.opencode.desk.Pending
@@ -104,7 +112,8 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
             if (pending.isNotEmpty()) item(key = "pending-header") { SectionHeader("Sent from this phone") }
             detail?.error?.let { item(key = "error") { Text(it, color = Ink.Red, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) } }
             if (detail == null) item(key = "loading") { Text("Loading…", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) }
-            items(detail?.messages.orEmpty().asReversed(), key = { it.info.id }) { Message(it, store.now) }
+            val placed = Authorship.place(detail?.messages.orEmpty(), store.mine[agent.session?.id.orEmpty()].orEmpty())
+            items(placed.asReversed(), key = { it.message.info.id }) { Message(it.message, store.now, it.author, it.first) }
             item(key = "older") {
                 val more = detail?.cursor != null
                 Text(
@@ -158,32 +167,77 @@ fun PendingRow(item: Pending, onRetry: () -> Unit, onCancel: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(item.text, style = MaterialTheme.typography.bodyMedium, color = Ink.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Label(item.label, color = tint)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                item.author?.let { AuthorHeader(it, Ink.Violet, Modifier.padding(end = 8.dp)) }
+                Label(item.label, color = tint)
+            }
         }
         if (item.retryable) TextButton(onClick = onRetry) { Text("Retry", color = Ink.Blue) }
         if (item.retryable || item.state == SendState.Accepted) TextButton(onClick = onCancel) { Text(if (item.retryable) "Discard" else "Cancel", color = Ink.Muted) }
     }
 }
 
-// Transcript rows: user text right-aligned on the desk blue, assistant text plain,
-// tools folded into one mono line each (name + title), expandable to the output.
+// Transcript rows. Assistant prose is plain. User-role input is labelled by what the phone can
+// prove about its author (Authorship): only this phone's own sends sit in the blue bubble;
+// mail, system and unattributed input are left-aligned cards with an icon + text header
+// (never colour alone). `first` is false when the previous message shares the author exactly,
+// in which case the header is omitted and the card continues the run.
 @Composable
-fun Message(message: MessageWithParts, now: Long) {
-    val user = message.info.role == "user"
+fun Message(message: MessageWithParts, now: Long, author: Author? = null, first: Boolean = true) {
     val text = message.parts.filter { it.type == "text" && !it.text.isNullOrBlank() }.joinToString("\n\n") { it.text!!.trim() }
     val tools = message.parts.filter { it.type == "tool" }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), horizontalAlignment = if (user) Alignment.End else Alignment.Start) {
+    if (author != null && author != Author.You) { SourcedMessage(author, text, message.info.id, now, message.info.time.created, first); return }
+    val you = author == Author.You
+    Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = if (first) 6.dp else 2.dp, bottom = 6.dp), horizontalAlignment = if (you) Alignment.End else Alignment.Start) {
+        if (you && first) AuthorHeader(author!!, Ink.Blue)
         if (text.isNotBlank()) {
             var expanded by rememberSaveable(message.info.id) { mutableStateOf(false) }
             Box(
                 Modifier
-                    .background(if (user) Ink.Blue.copy(alpha = 0.22f) else Color.Transparent, RoundedCornerShape(16.dp))
+                    .background(if (you) Ink.Blue.copy(alpha = 0.22f) else Color.Transparent, RoundedCornerShape(16.dp))
                     .clickable { expanded = !expanded }
-                    .padding(horizontal = if (user) 14.dp else 0.dp, vertical = if (user) 10.dp else 0.dp),
-            ) { Text(if (user) AnnotatedString(text) else markdownish(text), style = MaterialTheme.typography.bodyLarge, maxLines = if (expanded) Int.MAX_VALUE else 10, overflow = TextOverflow.Ellipsis) }
+                    .padding(horizontal = if (you) 14.dp else 0.dp, vertical = if (you) 10.dp else 0.dp),
+            ) { Text(if (you) AnnotatedString(text) else markdownish(text), style = MaterialTheme.typography.bodyLarge, maxLines = if (expanded) Int.MAX_VALUE else 10, overflow = TextOverflow.Ellipsis) }
         }
         ToolRows.groups(message.parts).forEach { group -> ToolGroupView(group, message.info.id) }
         Label(age(now, message.info.time.created), color = Ink.Dim, modifier = Modifier.padding(top = 2.dp))
+    }
+}
+
+@Composable
+fun AuthorHeader(author: Author, tint: Color, modifier: Modifier = Modifier) {
+    val icon = when (author) {
+        Author.You -> Icons.Filled.Person
+        is Author.Agent -> Icons.Filled.Email
+        is Author.System -> Icons.Filled.Settings
+        is Author.Unattributed -> Icons.Filled.Info
+    }
+    Row(modifier.semantics(mergeDescendants = true) { contentDescription = author.description }, verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(13.dp))
+        Spacer(Modifier.width(5.dp))
+        Label(author.label, color = tint)
+    }
+}
+
+// Input the human did not type on this phone: a left-aligned card whose header says who did.
+// Quoted approvals inside the text stay inside the text; they never change the header.
+@Composable
+fun SourcedMessage(author: Author, text: String, messageID: String, now: Long, created: Long, first: Boolean) {
+    var expanded by rememberSaveable("srcx-$messageID") { mutableStateOf(false) }
+    val tint = when (author) { is Author.Agent -> Ink.Violet; is Author.System -> Ink.Muted; else -> Ink.Amber }
+    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = if (first) 6.dp else 2.dp, bottom = 6.dp)) {
+        Column(Modifier.weight(1f).background(tint.copy(alpha = 0.10f), RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 8.dp)) {
+            if (first) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                AuthorHeader(author, tint, Modifier.weight(1f))
+                Label(age(now, created), color = Ink.Dim)
+            }
+            if (text.isNotBlank()) Text(
+                markdownish(text), style = MaterialTheme.typography.bodyMedium, color = Ink.Text,
+                maxLines = if (expanded) Int.MAX_VALUE else 8, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = if (first) 6.dp else 0.dp).clickable { expanded = !expanded },
+            )
+            if (!first) Label(age(now, created), color = Ink.Dim, modifier = Modifier.padding(top = 2.dp))
+        }
     }
 }
 
@@ -271,3 +325,4 @@ fun ToolRowView(row: ToolRow, key: String) {
         }
     }
 }
+

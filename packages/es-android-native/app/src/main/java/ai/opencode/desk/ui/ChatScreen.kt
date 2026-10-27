@@ -41,6 +41,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import ai.opencode.desk.DeskStore
+import ai.opencode.desk.Authorship
 import ai.opencode.desk.Nav
 import ai.opencode.desk.Outbox
 import ai.opencode.desk.SendState
@@ -90,7 +91,8 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
                     }
                 }
             }
-            items(messages.asReversed(), key = { it.info.id }) { Message(it, store.now) }
+            val placed = Authorship.place(messages, store.mine[id].orEmpty())
+            items(placed.asReversed(), key = { it.message.info.id }) { Message(it.message, store.now, it.author, it.first) }
             item(key = "older") {
                 val more = store.deskCursors[id] != null
                 if (messages.isEmpty() && pending.isEmpty()) Column(Modifier.padding(20.dp)) {

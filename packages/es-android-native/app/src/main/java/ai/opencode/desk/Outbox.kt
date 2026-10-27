@@ -17,6 +17,8 @@ data class Pending(
     val messageID: String? = null,
     val createdAt: Long,
     val attempts: Int = 1,
+    // Null for this phone's own sends; set for receipts admitted by someone else.
+    val author: Author? = null,
 ) {
     val retryable get() = state == SendState.Failed || state == SendState.Uncertain
     val done get() = state == SendState.Handled
@@ -60,7 +62,7 @@ object Outbox {
         }
         val known = updated.map { it.requestID }.toSet()
         val foreign = receipts.filter { it.requestID !in known && it.state != "cancelled" && it.state != "handled" }.map {
-            Pending(it.requestID, it.sessionID, it.text, it.delivery, fromReceipt(it), messageID = it.messageID, createdAt = it.timeCreated)
+            Pending(it.requestID, it.sessionID, it.text, it.delivery, fromReceipt(it), messageID = it.messageID, createdAt = it.timeCreated, author = Authorship.ofReceipt(it, known))
         }
         return (updated + foreign).sortedBy { it.createdAt }
     }

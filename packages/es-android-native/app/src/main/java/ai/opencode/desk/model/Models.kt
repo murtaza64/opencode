@@ -204,6 +204,9 @@ data class MessageInfo(
     val time: SessionTime = SessionTime(),
     val cost: Double? = null,
     val finish: String? = null,
+    // Where a user message came from when not typed by the human. Kept raw and interpreted
+    // by Provenance so a new server source type degrades to a labelled card, not a crash.
+    val source: JsonObject? = null,
 )
 
 @Serializable
@@ -246,6 +249,8 @@ data class InputReceipt(
     val messageID: String? = null,
     val timeCreated: Long = 0,
     val timeHandled: Long? = null,
+    // Same shape as MessageInfo.source: who admitted this input when it was not a human.
+    val source: JsonObject? = null,
 )
 
 @Serializable

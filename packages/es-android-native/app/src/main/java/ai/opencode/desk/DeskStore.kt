@@ -116,6 +116,16 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     val details = mutableStateMapOf<String, AgentDetail>()
     // Inputs this phone sent, by session, from tap to handled (see Outbox).
     val outbox = mutableStateMapOf<String, List<Pending>>()
+    // Message ids of this phone's own sends, persisted so "you" survives a restart.
+    private val sent = SentLedger(object : KeyValue {
+        override fun get(key: String) = prefs.getString(key, null)
+        override fun put(key: String, value: String?) { prefs.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply() }
+    })
+    val mine = mutableStateMapOf<String, Set<String>>()
+    private fun remember(sessionID: String, items: List<Pending>) {
+        items.filter { it.author == null && it.messageID != null }.forEach { sent.record(sessionID, it.messageID!!) }
+        mine[sessionID] = sent.mine(sessionID)
+    }
     val deskMessages = mutableStateMapOf<String, List<MessageWithParts>>()
     val deskReceipts = mutableStateMapOf<String, List<InputReceipt>>()
 
@@ -289,6 +299,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
             }.getOrElse { AgentDetail(error = it.message, loadedAt = System.currentTimeMillis(), messages = previous?.messages.orEmpty(), cursor = previous?.cursor) }
             details[agent.key] = detail
             outbox[session.id] = Outbox.reconcile(outbox[session.id].orEmpty(), detail.receipts, detail.messages.map { it.info.id }.toSet())
+            remember(session.id, outbox[session.id].orEmpty())
         }
     }
 
@@ -325,6 +336,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
             },
         )
         outbox[sessionID] = outbox[sessionID].orEmpty().map { if (it.requestID == requestID) settled else it }
+        remember(sessionID, listOf(settled))
         after()
         return settled
     }
@@ -406,6 +418,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
             runCatching { api.receipts(pointer.id, pointer.directory).items }.onSuccess { receipts ->
                 deskReceipts[pointer.id] = receipts.filter { r -> r.state == "pending" || r.state == "promoted" }
                 outbox[pointer.id] = Outbox.reconcile(outbox[pointer.id].orEmpty(), receipts, deskMessages[pointer.id].orEmpty().map { it.info.id }.toSet())
+                remember(pointer.id, outbox[pointer.id].orEmpty())
             }
             // Core status, not the dashboard list: the desk session is not in any lane.
             runCatching { api.status(pointer.directory)[pointer.id]?.type == "busy" }.onSuccess { deskBusy = it }
