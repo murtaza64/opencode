@@ -10,6 +10,13 @@ import androidx.compose.foundation.border
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.testTag
+import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -174,5 +181,22 @@ fun age(now: Long, at: Long): String {
         seconds < 3600 -> "${seconds / 60}m"
         seconds < 86_400 -> "${seconds / 3600}h"
         else -> "${seconds / 86_400}d"
+    }
+}
+
+// Header action to switch to the other profile's Desk. Hidden when the other profile has no
+// Desk. Label and icon come from Android so they match the launcher's own wording.
+@Composable
+fun ProfileSwitchAction(store: ai.opencode.desk.DeskStore, modifier: Modifier = Modifier) {
+    val decision = store.profileSwitch
+    if (!decision.visible) return
+    val icon = androidx.compose.runtime.remember(decision.label) { store.profiles.icon() }
+    androidx.compose.foundation.layout.Row(
+        modifier.clip(RoundedCornerShape(2.dp)).background(Ink.Panel).clickable { store.profiles.switch() }.padding(horizontal = 8.dp, vertical = 6.dp).testTag("profile-switch"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        icon?.let { androidx.compose.foundation.Image(androidx.compose.ui.graphics.painter.BitmapPainter(it.toBitmap(40, 40).asImageBitmap()), null, Modifier.size(14.dp)) }
+        if (icon != null) androidx.compose.foundation.layout.Spacer(Modifier.width(6.dp))
+        Label(decision.label.orEmpty(), color = Ink.Text)
     }
 }

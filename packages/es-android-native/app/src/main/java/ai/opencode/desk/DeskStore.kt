@@ -81,6 +81,10 @@ fun mergeNewest(existing: List<MessageWithParts>, page: List<MessageWithParts>):
 
 class DeskStore(app: Application) : AndroidViewModel(app) {
     val gateway = Gateway(app)
+    val profiles = ProfileBridge(app)
+    var profileSwitch by mutableStateOf(Profiles.decide(profiles.current, profiles.targets()))
+        private set
+    fun refreshProfiles() { profileSwitch = Profiles.decide(profiles.current, profiles.targets()) }
     val api = Api(gateway)
     private val prefs = app.getSharedPreferences("desk", Context.MODE_PRIVATE)
 

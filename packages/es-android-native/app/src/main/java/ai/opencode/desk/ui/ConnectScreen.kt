@@ -3,6 +3,8 @@ package ai.opencode.desk.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -45,7 +47,12 @@ fun ConnectScreen(store: DeskStore) {
         Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(24.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("Desk", style = MaterialTheme.typography.titleLarge)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Desk", style = MaterialTheme.typography.titleLarge)
+            if (store.profileSwitch.visible) Label(" · ${store.profiles.current.name}", color = Ink.Muted)
+            Spacer(Modifier.weight(1f))
+            ProfileSwitchAction(store)
+        }
         Spacer(Modifier.height(4.dp))
         Text("Pair this phone with the gateway running on your Mac.", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(28.dp))

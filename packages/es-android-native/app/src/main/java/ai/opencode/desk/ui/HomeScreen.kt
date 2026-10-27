@@ -61,6 +61,7 @@ import ai.opencode.desk.DeskStore
 import ai.opencode.desk.Link
 import ai.opencode.desk.Pin
 import ai.opencode.desk.PinView
+import ai.opencode.desk.Profiles
 import ai.opencode.desk.Surface
 import ai.opencode.desk.Nav
 import ai.opencode.desk.Route
@@ -177,14 +178,18 @@ private fun Pulse(store: DeskStore, nav: Nav) {
             Text("Desk", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.width(12.dp))
             Label("conversation →", color = Ink.Blue, modifier = Modifier.clickable { nav.push(Route.Chat) }.padding(4.dp).testTag("open-chat"))
+            Spacer(Modifier.width(8.dp))
+            ProfileSwitchAction(store)
             Spacer(Modifier.weight(1f))
-            val (text, color) = when (store.link) {
+            val profile = Profiles.profileSuffix(store.profiles.current, store.profileSwitch.let { if (it.visible) listOf(Profiles.Target(it.label.orEmpty(), !store.profiles.current.managed)) else emptyList() })
+            val (base, color) = when (store.link) {
                 Link.Online -> "updated ${age(store.now, store.updatedAt)}" to Ink.Muted
                 Link.Connecting -> "connecting" to Ink.Amber
                 Link.Offline -> "offline · ${store.lastError?.take(40) ?: "retrying"}" to Ink.Red
                 Link.Access -> "behind Cloudflare Access" to Ink.Red
                 Link.Unpaired -> "unpaired" to Ink.Red
             }
+            val text = if (profile != null) "$profile · $base" else base
             // The connection label doubles as the only settings surface: refresh or forget the pairing.
             var menu by rememberSaveable { mutableStateOf(false) }
             val scope = rememberCoroutineScope()
