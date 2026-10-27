@@ -106,7 +106,7 @@ export const serve = async (options: {
   const key = randomBytes(32).toString("hex")
   const upstreams = new Set<ReturnType<typeof httpRequest>>()
   // Surface upstreams are loopback addresses on the dashboard's machine; never resolve a remote host's here.
-  const surfaces = surfaceProxy({ dashboard: remote ? undefined : targets.es })
+  const surfaces = surfaceProxy({ dashboard: remote ? undefined : targets.es, publicOrigin })
   // Paired remote clients never write this machine's performance journal.
   const perf = pairing || !options.perfDir ? undefined : createPerfLog({ dir: options.perfDir, host: remote?.id ?? "local" })
   const sameHost = (req: { headers: IncomingHttpHeaders }) =>

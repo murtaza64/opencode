@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { Message, Part, ToolPart } from "@opencode-ai/sdk/v2"
-import { completedTurns, messageSegments, planToolRuns, runSummary, toolOutcome } from "./transcript-groups"
+import { completedTurns, groupableTurns, messageSegments, planToolRuns, runSummary, toolOutcome } from "./transcript-groups"
 
 const user = (id: string) => ({ id, sessionID: "ses", role: "user", time: { created: 0 } }) as unknown as Message
 const assistant = (id: string, parentID = "u1", extra: Record<string, unknown> = {}) =>
@@ -214,5 +214,19 @@ describe("run summary", () => {
   test("outcome reads metadata errors as failures", () => {
     expect(toolOutcome(tool("a", "1", { metadata: { error: "denied" } }) as ToolPart)).toBe("failed")
     expect(toolOutcome(tool("a", "1", { tool: "bash", metadata: { exit: 0 } }) as ToolPart)).toBe("ok")
+  })
+})
+
+describe("groupableTurns", () => {
+  const done = new Set(["msg_010", "msg_020", "msg_030"])
+  test("at idle every finished turn may group", () => {
+    expect([...groupableTurns(done)]).toEqual(["msg_010", "msg_020", "msg_030"])
+  })
+  test("during a run only turns finished before it began may group", () => {
+    // msg_020 finished mid-run (a steer ended its turn): it stays ungrouped until idle.
+    expect([...groupableTurns(done, { before: new Set(["msg_010"]), oldest: "msg_010" })]).toEqual(["msg_010"])
+  })
+  test("older history paged in during a run may group", () => {
+    expect([...groupableTurns(new Set(["msg_001", "msg_020"]), { before: new Set(), oldest: "msg_010" })]).toEqual(["msg_001"])
   })
 })

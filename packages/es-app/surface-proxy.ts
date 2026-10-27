@@ -37,7 +37,13 @@ export const surfaceCsp = (prefix: string) =>
     "frame-ancestors 'self'",
   ].join("; ")
 
-export const surfaceProxy = (options: { dashboard: string | undefined; registry?: () => Promise<SurfaceEntry[]> }) => {
+// publicOrigin: the browser-facing origin when a proxy (e.g. Tailscale Serve) fronts this
+// gateway; the Host reaching us is then loopback, so the frame needs the public prefix too.
+export const surfaceProxy = (options: {
+  dashboard: string | undefined
+  registry?: () => Promise<SurfaceEntry[]>
+  publicOrigin?: string
+}) => {
   const key = randomBytes(32)
   const capability = (id: string) => createHmac("sha256", key).update(id).digest("hex").slice(0, 32)
   let cached: { at: number; value: Promise<SurfaceEntry[]> } | undefined
@@ -90,7 +96,8 @@ export const surfaceProxy = (options: { dashboard: string | undefined; registry?
     if (!entry) return finish(res, 404, "Surface withdrawn")
     const target = upstreamURL(entry, rest, url.search)
     if (!target) return finish(res, 400, "Invalid surface path")
-    const prefix = `http://${req.headers.host}/__surface/${id}/${presented}/`
+    const path = `/__surface/${id}/${presented}/`
+    const prefix = [`http://${req.headers.host}${path}`, ...(options.publicOrigin ? [`${options.publicOrigin}${path}`] : [])].join(" ")
     const upstream = request(
       target,
       {

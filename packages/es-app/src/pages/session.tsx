@@ -50,7 +50,7 @@ import { ToolSize } from "../components/tool-size"
 import { ToolRun } from "../components/tool-run"
 import { HeaderMenu } from "../components/header-menu"
 import { FailureRetry } from "../components/session-failure"
-import { completedTurns, messageSegments, planToolRuns, samePlan, sameSegments } from "../transcript-groups"
+import { completedTurns, groupableTurns, messageSegments, planToolRuns, samePlan, sameSegments } from "../transcript-groups"
 import { isUserPrompt, promptPosition, promptTarget } from "../transcript-nav"
 import { restartMarkers } from "../restart-marker"
 import { anchorNote, anchorRange, parseAnchor, type MessageAnchor } from "../message-anchor"
@@ -1588,10 +1588,25 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   // Display-only coalescing of adjacent tool calls in finished turns; see transcript-groups.
   const partVisible = (part: Part) => part.type === "text" || part.type === "reasoning"
     ? /\S/.test(part.text ?? "") : renderable(part, true, renderTools)
+  // What had finished when the current run began; cleared at idle (see groupableTurns).
+  let lastIdle: ReadonlySet<string> | undefined
+  let runStart: { before: ReadonlySet<string>; oldest?: string } | undefined
+  const groupTurns = createMemo((): ReadonlySet<string> => {
+    const done = turnsDone()
+    if (status() === "idle" && !pending().length && !live.connectionError()) {
+      runStart = undefined
+      lastIdle = live.loaded() ? done : undefined
+      return done
+    }
+    // Opened mid-run: whatever had finished once history loaded counts as before the run.
+    if (!runStart && !live.loaded()) return done
+    runStart ??= { before: lastIdle ?? done, oldest: messages()[0]?.id }
+    return groupableTurns(done, runStart)
+  }, undefined, { equals: (a, b) => a.size === b.size && [...a].every((id) => b.has(id)) })
   const toolRuns = createMemo(() => planToolRuns(timeline(), {
     parts: (id) => live.data.part[id] ?? [],
     visible: partVisible,
-    completed: turnsDone(),
+    completed: groupTurns(),
     breakAfter: (message) => turnSummaries().has(message.id),
   }), undefined, { equals: samePlan })
   // Expansion follows member parts, not run keys: prepending history or a
