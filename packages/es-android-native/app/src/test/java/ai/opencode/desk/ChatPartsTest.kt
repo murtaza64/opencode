@@ -93,16 +93,16 @@ class ChatPartsTest {
             reply("b"),
             tools("t7", "bash"), tools("t8", "bash"),
         ), mine = setOf("you"))
-        val kinds = items.map { when (it) { is Timeline.Item.ToolRun -> "run${it.count}"; is Timeline.Item.Single -> it.unit::class.simpleName!! } }
+        val kinds = items.map { when (it) { is Timeline.Item.ToolRun -> "run${it.count}"; is Timeline.Item.IncomingStrip -> "strip${it.count}"; is Timeline.Item.Single -> it.unit::class.simpleName!! } }
         assertEquals(listOf("Reply", "run3", "Chip", "run2", "Bubble", "run2", "Reply", "run2"), kinds)
         assertTrue(items.filterIsInstance<Timeline.Item.ToolRun>().all { run -> run.units.all { it is Timeline.Unit.Tools } })
     }
 
     @Test
-    fun consecutive_mail_chips_stay_separate_by_default() {
+    fun consecutive_incoming_mail_chips_fold_into_one_strip() {
         val items = build(listOf(user("m1", "a", mail("1")), user("m2", "b", mail("2")), user("m3", "c", mail("3"))))
-        assertEquals(3, items.size)
-        assertTrue(items.all { it is Timeline.Item.Single && it.unit is Timeline.Unit.Chip })
+        assertEquals(1, items.size)
+        assertTrue(items.single() is Timeline.Item.IncomingStrip)
     }
 
     @Test
@@ -165,7 +165,8 @@ class ImageLayoutTest {
 
     @Test
     fun unknown_dimensions_still_reserve_a_box() {
-        assertEquals(ImageLayout.Box(360, 140), ImageLayout.single(0, 0, 390))
+        assertEquals(ImageLayout.Box(360, 270), ImageLayout.single(0, 0, 390))
+        assertEquals(ImageLayout.Box(300, 225), ImageLayout.single(0, 0, 300))
         assertEquals(ImageLayout.Box(160, 160), ImageLayout.tile(0, 0, 390))
     }
 }

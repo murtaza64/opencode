@@ -29,6 +29,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -58,6 +60,15 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
     val pending = Timeline.dedupPending(Outbox.visible(store.outbox[id].orEmpty(), messages.map { it.info.id }.toSet()), messages)
     val scope = rememberCoroutineScope()
     val list = rememberLazyListState()
+    val previousTimeline = remember(id) { mutableStateOf<List<Timeline.Item>?>(null) }
+    val expandedIds = remember(id) { mutableStateMapOf<String, Boolean>() }
+    val lastStatus = remember(id) { mutableStateOf(if (store.deskBusy) "busy" else "idle") }
+    val frozen = remember(id) { mutableStateOf(store.deskBusy) }
+    LaunchedEffect(store.deskBusy) {
+        val status = if (store.deskBusy) "busy" else "idle"
+        if (Timeline.finalizes(lastStatus.value, status)) frozen.value = false else if (store.deskBusy) frozen.value = true
+        lastStatus.value = status
+    }
     var text by rememberSaveable { mutableStateOf("") }
     var sending by rememberSaveable { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
@@ -78,11 +89,12 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
                 Label(if (store.deskBusy) "thinking" else if (store.deskReady) "front-desk · ${store.deskSpace}" else "new conversation")
             }
         }
+        CompositionLocalProvider(LocalExpanded provides expandedIds) {
         LazyColumn(Modifier.weight(1f).testTag("chat"), state = list, reverseLayout = true, contentPadding = PaddingValues(vertical = 8.dp)) {
             items(pending.asReversed(), key = { "r-" + it.requestID }) { item ->
                 PendingBubble(item, store, onRetry = { scope.launch { store.retry(item) } }, onCancel = { store.dismiss(item) })
             }
-            val timeline = Timeline.build(Authorship.place(messages, store.mine[id].orEmpty()))
+            val timeline = Timeline.buildFrozen(previousTimeline.value, Authorship.place(messages, store.mine[id].orEmpty()), frozen.value).also { previousTimeline.value = it }
             items(timeline.asReversed(), key = { it.key() }) { TimelineItem(it, store.now, store) }
             item(key = "older") {
                 val more = store.deskCursors[id] != null
@@ -91,6 +103,7 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
                     Text("The desk knows the open decisions and every lane's recent activity. Try: “what changed since this morning?” or “start a lane to fix the flaky composer test”.", style = MaterialTheme.typography.bodyMedium)
                 } else Text(if (more) "Scroll for earlier" else "Start of conversation", style = MaterialTheme.typography.labelSmall, modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp), textAlign = TextAlign.Center)
             }
+        }
         }
         error?.let { Text(it, color = Ink.Red, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 20.dp)) }
         if (store.deskReady) DraftStrip(store, id)

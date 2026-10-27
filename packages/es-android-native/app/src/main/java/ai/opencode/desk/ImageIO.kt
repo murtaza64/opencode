@@ -61,6 +61,13 @@ object ImageIO {
     @Suppress("DEPRECATION")
     private fun webpFormat() = if (Build.VERSION.SDK_INT >= 30) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
 
+    // Intrinsic dimensions without decoding pixels.
+    fun bounds(bytes: ByteArray): Pair<Int, Int>? {
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
+        return if (o.outWidth > 0 && o.outHeight > 0) o.outWidth to o.outHeight else null
+    }
+
     // Decodes bytes for display, subsampled to roughly the requested width.
     fun thumbnail(bytes: ByteArray, targetWidth: Int): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }

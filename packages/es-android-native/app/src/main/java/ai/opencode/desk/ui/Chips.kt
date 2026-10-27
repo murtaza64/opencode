@@ -44,8 +44,14 @@ import ai.opencode.desk.Provenance
 import ai.opencode.desk.Timeline
 import ai.opencode.desk.ToolRows
 import ai.opencode.desk.detail
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import java.text.DateFormat
 import java.util.Date
+
+// Expanded ids for the transcript on screen: message ids for chips, and group keys. Kept by
+// the screen (not the item) so a regroup that moves an item into a strip keeps it open.
+val LocalExpanded = compositionLocalOf<SnapshotStateMap<String, Boolean>> { error("no expanded map") }
 
 private val ChipShape = RoundedCornerShape(2.dp)
 
@@ -78,7 +84,9 @@ private fun ChipSurface(alignEnd: Boolean, description: String, onClick: () -> U
 // like You; unknown direction aligns start, muted.
 @Composable
 fun MailChip(unit: Timeline.Unit.Chip, now: Long, store: DeskStore?) {
-    var expanded by rememberSaveable("chip-${unit.message.info.id}") { mutableStateOf(false) }
+    val expandedMap = LocalExpanded.current
+    val id = unit.message.info.id
+    val expanded = expandedMap[id] == true
     val line = Timeline.chipLine(unit)
     val incoming = unit.direction == Timeline.Direction.Incoming
     val author = unit.author
@@ -88,7 +96,7 @@ fun MailChip(unit: Timeline.Unit.Chip, now: Long, store: DeskStore?) {
         else -> Ink.Violet
     }
     val description = "${author.description}${line.purpose?.let { ", $it" } ?: ""}, ${if (expanded) "expanded" else "collapsed"}"
-    ChipSurface(alignEnd = incoming, description = description, onClick = { expanded = !expanded }) {
+    ChipSurface(alignEnd = incoming, description = description, onClick = { expandedMap[id] = !expanded }) {
         Row(Modifier.heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(if (author is Author.Integration) Icons.Filled.Info else Icons.Filled.Email, null, tint = tint, modifier = Modifier.size(14.dp))
             if (line.crossHost) { Spacer(Modifier.width(4.dp)); Icon(Icons.Filled.Share, null, tint = Ink.Dim, modifier = Modifier.size(11.dp)) }
@@ -118,12 +126,13 @@ fun MailChip(unit: Timeline.Unit.Chip, now: Long, store: DeskStore?) {
 // action>" with a size bar; expands into the individual tool rows.
 @Composable
 fun ToolRunChip(run: Timeline.Item.ToolRun, now: Long) {
-    val key = run.units.first().message.info.id
-    var expanded by rememberSaveable("run-$key") { mutableStateOf(false) }
+    val expandedMap = LocalExpanded.current
+    val runKey = Timeline.key(run)
+    val expanded = expandedMap[runKey] ?: Timeline.inheritsExpanded(run, expandedMap.filterValues { it }.keys)
     val tint = when { run.failed -> Ink.Red; run.live -> Ink.Green; else -> Ink.Muted }
     val label = "${run.count} tool${if (run.count == 1) "" else "s"}" + run.headline.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
     val description = "Tool run: $label, ${if (expanded) "expanded" else "collapsed"}"
-    ChipSurface(alignEnd = false, description = description, onClick = { expanded = !expanded }) {
+    ChipSurface(alignEnd = false, description = description, onClick = { expandedMap[runKey] = !expanded }) {
         Row(Modifier.heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
             if (run.live) StatusDot("busy", 5) else Icon(Icons.Filled.Build, null, tint = tint, modifier = Modifier.size(14.dp))
             Spacer(Modifier.width(8.dp))
@@ -138,9 +147,31 @@ fun ToolRunChip(run: Timeline.Item.ToolRun, now: Long) {
     }
 }
 
+// Consecutive incoming mail on the incoming side: "N mail · <latest party> · <status>", end-aligned
+// like a chip, expands to the individual chips in order (each still expandable).
+@Composable
+fun IncomingStripChip(strip: Timeline.Item.IncomingStrip, now: Long, store: DeskStore?) {
+    val key = Timeline.key(strip)
+    val expandedMap = LocalExpanded.current
+    // Opens expanded when any member chip was expanded before finalization.
+    val expanded = expandedMap[key] ?: Timeline.inheritsExpanded(strip, expandedMap.filterValues { it }.keys)
+    val description = "Mail strip: ${strip.label}, ${if (expanded) "expanded" else "collapsed"}"
+    Column(Modifier.fillMaxWidth()) {
+        ChipSurface(alignEnd = true, description = description, onClick = { expandedMap[key] = !expanded }) {
+            Row(Modifier.heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Email, null, tint = Ink.Violet, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(strip.label, style = MaterialTheme.typography.bodyMedium, color = Ink.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        if (expanded) strip.chips.forEach { MailChip(it, now, store) }
+    }
+}
+
 @Composable
 fun TimelineItem(item: Timeline.Item, now: Long, store: DeskStore?) {
     when (item) {
+        is Timeline.Item.IncomingStrip -> IncomingStripChip(item, now, store)
         is Timeline.Item.ToolRun -> ToolRunChip(item, now)
         is Timeline.Item.Single -> when (val unit = item.unit) {
             is Timeline.Unit.Chip -> MailChip(unit, now, store)
@@ -150,7 +181,4 @@ fun TimelineItem(item: Timeline.Item, now: Long, store: DeskStore?) {
     }
 }
 
-fun Timeline.Item.key(): String = when (this) {
-    is Timeline.Item.ToolRun -> "run-" + units.first().message.info.id
-    is Timeline.Item.Single -> unit.message.info.id
-}
+fun Timeline.Item.key(): String = Timeline.key(this)

@@ -29,6 +29,17 @@ object Timeline {
     sealed interface Item {
         data class Single(val unit: Unit) : Item
 
+        // Consecutive typed incoming mail/integration on the incoming side:
+        // "N mail · <latest party> · <actionable status>", expandable to the individual chips.
+        data class IncomingStrip(val chips: List<Unit.Chip>) : Item {
+            val count get() = chips.distinctBy { it.key }.size
+            val latest get() = chips.last()
+            val party get() = chipLine(latest).party
+            // The most recent actionable status across the strip, if any.
+            val status get() = chips.asReversed().firstNotNullOfOrNull { chipLine(it).status }
+            val label get() = listOfNotNull("$count mail", party, status).joinToString(" · ")
+        }
+
         // Consecutive tool-only messages: "N tools · <most significant action>".
         data class ToolRun(val units: List<Unit.Tools>) : Item {
             val count get() = units.sumOf { it.count }
@@ -45,6 +56,12 @@ object Timeline {
     }
 
     private val WRITES = setOf("edit", "write", "bash", "task", "todowrite")
+
+    // Host a chip came from: the part after '@' in the sender or sender session, else local.
+    fun host(chip: Unit.Chip): String = when (val p = chip.provenance) {
+        is Provenance.Mail -> (p.senderSession?.substringAfter('@', "") ?: "").ifBlank { p.sender.substringAfter('@', "") }.ifBlank { "local" }
+        else -> "local"
+    }
 
     fun mailID(message: MessageWithParts): String? = (Provenance.of(message.info.source) as? Provenance.Mail)?.id?.takeIf { it.isNotBlank() }
 
@@ -72,26 +89,83 @@ object Timeline {
         }
     }
 
-    // Tool-only messages fold into one run; a run ends at any chip, prose or bubble. Chips are
-    // never grouped with tools or with each other (ux-feel default: each mail separate).
+    // Grouping by same side + source class. Agent side: consecutive tool-only messages fold
+    // into one run. Incoming side: consecutive typed incoming mail/integration fold into one
+    // strip. A run never takes mail and a strip never takes tools; both end at You/Operator,
+    // prose, Unattributed/System, a direction change or a host change. Mail-id dedup first, so
+    // counts are distinct ids.
     fun build(placed: List<Authorship.Placed>): List<Item> {
         val out = mutableListOf<Item>()
-        var run = mutableListOf<Unit.Tools>()
-        fun flush() {
-            if (run.isEmpty()) return
-            if (run.size >= 2) out += Item.ToolRun(run.toList()) else out += Item.Single(run.single())
-            run = mutableListOf()
-        }
+        var tools = mutableListOf<Unit.Tools>()
+        var chips = mutableListOf<Unit.Chip>()
+        fun flushTools() { if (tools.isEmpty()) return; out += if (tools.size >= 2) Item.ToolRun(tools.toList()) else Item.Single(tools.single()); tools = mutableListOf() }
+        fun flushChips() { if (chips.isEmpty()) return; out += if (chips.size >= 2) Item.IncomingStrip(chips.toList()) else Item.Single(chips.single()); chips = mutableListOf() }
         val seen = mutableSetOf<String>()
         placed.map(::unit).forEach { unit ->
             when (unit) {
-                is Unit.Tools -> run += unit
-                is Unit.Chip -> { flush(); if (seen.add(unit.key)) out += Item.Single(unit) }
-                is Unit.Reply, is Unit.Bubble -> { flush(); out += Item.Single(unit) }
+                is Unit.Tools -> { flushChips(); tools += unit }
+                is Unit.Chip -> {
+                    flushTools()
+                    if (!seen.add(unit.key)) return@forEach
+                    val last = chips.lastOrNull()
+                    if (last != null && (last.direction != unit.direction || host(last) != host(unit) || unit.direction != Direction.Incoming)) flushChips()
+                    if (unit.direction == Direction.Incoming) chips += unit else { flushChips(); out += Item.Single(unit) }
+                }
+                is Unit.Reply, is Unit.Bubble -> { flushTools(); flushChips(); out += Item.Single(unit) }
             }
         }
-        flush()
+        flushTools(); flushChips()
         return out
+    }
+
+    // Stable identity of a group: the id of its first message. Expansion state is keyed by this,
+    // never by position, so a regroup that keeps the same first member keeps its expanded state.
+    fun key(item: Item): String = when (item) {
+        is Item.ToolRun -> "run-" + item.units.first().message.info.id
+        is Item.IncomingStrip -> "strip-" + item.chips.first().message.info.id
+        is Item.Single -> item.unit.message.info.id
+    }
+
+    // While the visible agent run is active nothing regroups: items already placed keep their
+    // groups, and every new part is appended as its own chip with a stable key (never
+    // reparented, reordered or collapsed into a trailing group). Grouping is finalized once,
+    // by the caller, when the session status is actually idle/completed.
+    fun buildFrozen(previous: List<Item>?, placed: List<Authorship.Placed>, running: Boolean): List<Item> {
+        val fresh = build(placed)
+        if (!running || previous.isNullOrEmpty()) return fresh
+        val units = placed.map(::unit)
+        val present = units.map { it.message.info.id }.toSet()
+        val seen = mutableSetOf<String>()
+        // Groups keep only while every member is still present; survivors of a broken group
+        // become singles in their original order, ahead of anything new.
+        val kept = mutableListOf<Item>()
+        previous.forEach { item ->
+            val alive = members(item).filter { it.message.info.id in present }
+            if (alive.size == members(item).size) kept += item
+            else alive.forEach { m -> kept += Item.Single(units.first { it.message.info.id == m.message.info.id }) }
+        }
+        kept.flatMap(::members).forEach { if (it is Unit.Chip) seen += it.key }
+        val known = kept.flatMap(::members).map { it.message.info.id }.toSet()
+        units.filter { it.message.info.id !in known }.forEach { unit ->
+            if (unit is Unit.Chip && !seen.add(unit.key)) return@forEach
+            kept += Item.Single(unit)
+        }
+        return kept
+    }
+
+    // Whether a status transition finalizes grouping: only a real idle/completed/error status
+    // does; reconnecting, unknown and retry do not, and timers never call this.
+    fun finalizes(previous: String?, current: String?): Boolean =
+        previous == "busy" && (current == "idle" || current == "error" || current == "completed")
+
+    // Expanded state is keyed by part/message ids. A group opens expanded when any member
+    // was expanded before finalization.
+    fun inheritsExpanded(item: Item, expanded: Set<String>): Boolean = members(item).any { it.message.info.id in expanded }
+
+    fun members(item: Item): List<Unit> = when (item) {
+        is Item.ToolRun -> item.units
+        is Item.IncomingStrip -> item.chips
+        is Item.Single -> listOf(item.unit)
     }
 
     // Pending receipts admitted from mail that already appear in the transcript are not drawn twice.

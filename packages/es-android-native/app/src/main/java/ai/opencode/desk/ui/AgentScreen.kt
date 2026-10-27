@@ -48,6 +48,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -91,6 +93,16 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
     // reverseLayout: index 0 sits at the bottom, so the screen opens at the newest message and
     // older pages append at the far end without moving what the reader is looking at.
     val list = rememberLazyListState()
+    val previousTimeline = remember(key) { mutableStateOf<List<Timeline.Item>?>(null) }
+    val expandedIds = remember(key) { mutableStateMapOf<String, Boolean>() }
+    // Finalize grouping once, on a real busy→idle/error transition of this session's status.
+    val lastStatus = remember(key) { mutableStateOf(agent.status) }
+    val frozen = remember(key) { mutableStateOf(agent.busy) }
+    LaunchedEffect(agent.status) {
+        if (Timeline.finalizes(lastStatus.value, agent.status)) frozen.value = false
+        else if (agent.status == "busy") frozen.value = true
+        lastStatus.value = agent.status
+    }
     LaunchedEffect(key) { store.load(agent) }
     // Busy lanes change quickly; refresh the tail while this screen is open.
     LaunchedEffect(key, agent.busy) { while (agent.busy) { delay(8_000); store.load(agent) } }
@@ -106,6 +118,7 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
                 Label(listOfNotNull(agent.editspace, agent.lane, agent.status, agent.session?.cost?.takeIf { it > 0 }?.let { "$%.2f".format(it) }).joinToString(" · "))
             }
         }
+        CompositionLocalProvider(LocalExpanded provides expandedIds) {
         LazyColumn(Modifier.weight(1f).testTag("agent"), state = list, reverseLayout = true, contentPadding = PaddingValues(bottom = 8.dp, top = 8.dp)) {
             // Bottom of the screen first: pending inputs, then messages newest to oldest.
             val transcript = detail?.messages.orEmpty().map { it.info.id }.toSet()
@@ -117,7 +130,9 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
             }
             detail?.error?.let { item(key = "error") { Text(it, color = Ink.Red, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) } }
             if (detail == null) item(key = "loading") { Text("Loading…", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) }
-            val timeline = Timeline.build(Authorship.place(detail?.messages.orEmpty(), store.mine[agent.session?.id.orEmpty()].orEmpty()))
+            // Grouping is frozen while this agent's run is live so chips and strips do not reshuffle under the reader.
+            val placed = Authorship.place(detail?.messages.orEmpty(), store.mine[agent.session?.id.orEmpty()].orEmpty())
+            val timeline = Timeline.buildFrozen(previousTimeline.value, placed, frozen.value).also { previousTimeline.value = it }
             items(timeline.asReversed(), key = { it.key() }) { TimelineItem(it, store.now, store) }
             item(key = "older") {
                 val more = detail?.cursor != null
@@ -148,6 +163,7 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
                 }
             }
             if (agent.description.isNotBlank()) item(key = "description") { Text(agent.description, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 20.dp), maxLines = 3, overflow = TextOverflow.Ellipsis) }
+        }
         }
         SteerBar(store, agent)
     }

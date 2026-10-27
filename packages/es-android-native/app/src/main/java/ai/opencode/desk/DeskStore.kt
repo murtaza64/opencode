@@ -435,6 +435,9 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun requestID(sessionID: String) = drafts[sessionID]?.requestID ?: UUID.randomUUID().toString()
+    // Dimensions learned from the first decode of a transcript image on this device, by part id,
+    // so a later mount reserves the exact box (CHAT-PARTS §3 interim).
+    val imageDims = mutableStateMapOf<String, Pair<Int, Int>>()
     fun storedImages(requestID: String): List<StoredImage> = durable.get(gateway.origin, requestID)?.images.orEmpty()
     // Stored images for a transcript message this phone sent (by its message id), while the outbox record exists.
     fun storedImagesForMessage(sessionID: String, messageID: String): List<StoredImage> =

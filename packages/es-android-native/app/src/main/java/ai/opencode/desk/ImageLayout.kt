@@ -14,7 +14,8 @@ object ImageLayout {
 
     // One image: natural aspect inside max 360x280 and the available column width.
     fun single(width: Int, height: Int, columnWidth: Int): Box {
-        if (width <= 0 || height <= 0) return Box(minOf(MAX_W, columnWidth), MAX_H / 2)
+        // Unknown dimensions: a 4:3 contain box at the single-image width, identical for pending and accepted.
+        if (width <= 0 || height <= 0) { val w = minOf(MAX_W, columnWidth); return Box(w, minOf(MAX_H, w * 3 / 4)) }
         val maxW = minOf(MAX_W, columnWidth)
         val scale = minOf(maxW.toDouble() / width, MAX_H.toDouble() / height, 1.0)
         return Box(maxOf(1, (width * scale).toInt()), maxOf(1, (height * scale).toInt()))

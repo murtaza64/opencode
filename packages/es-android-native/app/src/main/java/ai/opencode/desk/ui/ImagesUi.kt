@@ -148,15 +148,15 @@ private fun PreviewTile(item: Preview, store: DeskStore, modifier: Modifier) {
 // Transcript file parts as previews. The server does not carry dimensions for file parts, so
 // a transcript image reserves the default box; images this phone sent keep their stored box
 // through the outbox record while it exists.
-fun previews(parts: List<Part>, stored: List<StoredImage> = emptyList()): List<Preview> =
+fun previews(parts: List<Part>, stored: List<StoredImage> = emptyList(), cached: Map<String, Pair<Int, Int>> = emptyMap()): List<Preview> =
     parts.filter { it.type == "file" && it.mime?.startsWith("image/") == true && it.url != null }.mapIndexed { index, part ->
-        val known = stored.getOrNull(index)
-        Preview.Remote(part, known?.width ?: 0, known?.height ?: 0)
+        val known = stored.getOrNull(index)?.let { it.width to it.height } ?: cached[part.id] ?: (0 to 0)
+        Preview.Remote(part, known.first, known.second)
     }
 
 @Composable
 fun ImageParts(parts: List<Part>, store: DeskStore, stored: List<StoredImage> = emptyList()) {
-    InlinePreviews(previews(parts, stored), store, Modifier.padding(top = 6.dp))
+    InlinePreviews(previews(parts, stored, store.imageDims), store, Modifier.padding(top = 6.dp))
 }
 
 @Composable
@@ -176,11 +176,12 @@ private fun StoredViewer(store: DeskStore, image: StoredImage, onClose: () -> Un
 private fun loadImage(part: Part, store: DeskStore, targetWidth: Int): Pair<Bitmap?, String?> {
     val state by produceState<Pair<Bitmap?, String?>>(null to null, part.id, targetWidth) {
         value = withContext(Dispatchers.IO) {
-            when (val fetch = ImagePolicy.classify(part.url.orEmpty(), part.mime.orEmpty(), store.gateway.origin)) {
-                is ImagePolicy.Fetch.Inline -> runCatching { ImageIO.thumbnail(Base64.getDecoder().decode(fetch.base64), targetWidth) }.getOrNull() to null
-                is ImagePolicy.Fetch.SameOrigin -> runCatching { ImageIO.thumbnail(store.gateway.bytes(fetch.url), targetWidth) }.fold({ it to null }, { null to "unavailable" })
+            val decoded: Pair<Bitmap?, String?> = when (val fetch = ImagePolicy.classify(part.url.orEmpty(), part.mime.orEmpty(), store.gateway.origin)) {
+                is ImagePolicy.Fetch.Inline -> runCatching { Base64.getDecoder().decode(fetch.base64) }.getOrNull()?.let { bytes -> ImageIO.bounds(bytes)?.let { store.imageDims.putIfAbsent(part.id, it) }; ImageIO.thumbnail(bytes, targetWidth) } to null
+                is ImagePolicy.Fetch.SameOrigin -> runCatching { store.gateway.bytes(fetch.url) }.fold({ bytes -> ImageIO.bounds(bytes)?.let { store.imageDims.putIfAbsent(part.id, it) }; ImageIO.thumbnail(bytes, targetWidth) to null }, { null to "unavailable" })
                 ImagePolicy.Fetch.External -> null to "external image"
             }
+            decoded
         }
     }
     return state

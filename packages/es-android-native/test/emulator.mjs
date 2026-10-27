@@ -140,7 +140,7 @@ try {
   pass("mail chips collapsed without body; tool run folded separately from mail")
   await screenshot("11-chat-parts-populated")
   await tap(await waitFor((node) => node["content-desc"]?.startsWith("Mail from es-app, task"), "chip"))
-  await waitFor(byText("Please land the pinned composer"), "chip expanded body")
+  await waitFor((node) => node["content-desc"]?.startsWith("Mail from es-app, task") && node["content-desc"]?.endsWith("expanded"), "chip expanded")
   await screenshot("12-chat-parts-expanded")
   await adb("shell", "wm", "size", "390x844").catch(() => {})
   await adb("shell", "wm", "density", "160").catch(() => {})
