@@ -181,6 +181,12 @@ test("API surface excludes direct shell, PTY, file, and config access", () => {
   expect(apiAllowed("PUT", "/es/api/frontdesk/ignored-failures")).toBe(false)
   expect(apiAllowed("DELETE", "/es/api/frontdesk/ignored-failures")).toBe(false)
   expect(apiAllowed("GET", "/es/api/frontdesk/ignored-failures/x")).toBe(false)
+  // steer delivery and interrupted-step recovery
+  expect(apiAllowed("POST", "/oc/session/ses_a/input/req_1/deliver")).toBe(true)
+  expect(apiAllowed("POST", "/oc/session/ses_a/recover")).toBe(true)
+  expect(apiAllowed("GET", "/oc/session/ses_a/input/req_1/deliver")).toBe(false)
+  expect(apiAllowed("POST", "/oc/session/ses_a/input/req_1/deliver/x")).toBe(false)
+  expect(apiAllowed("POST", "/oc/session/ses_a/input/../deliver")).toBe(false)
   // failed-turn recovery: read the durable list, retry one exact failure
   expect(apiAllowed("GET", "/oc/experimental/session/failed")).toBe(true)
   expect(apiAllowed("POST", "/oc/session/ses_a/retry")).toBe(true)

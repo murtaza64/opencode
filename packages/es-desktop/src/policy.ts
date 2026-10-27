@@ -106,6 +106,9 @@ export const apiAllowed = (method: string, pathname: string) => {
     POST: [
       /^\/oc\/session$/,
       /^\/oc\/session\/[\w-]+\/(prompt_async|abort|fork|input|aside|retry)$/,
+      // Interrupt and steer now: deliver one pending steer; Nudge on an interrupted step: recover.
+      /^\/oc\/session\/[\w-]+\/input\/[\w-]+\/deliver$/,
+      /^\/oc\/session\/[\w-]+\/recover$/,
       /^\/oc\/(permission|question)\/[\w-]+\/(reply|reject)$/,
       /^\/es\/api\/(refresh|frontdesk|curate|(?:digest|brief)\/[^/]+)$/,
       /^\/es\/api\/handoffs$/,
