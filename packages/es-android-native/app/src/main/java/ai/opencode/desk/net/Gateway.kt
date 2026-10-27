@@ -101,24 +101,32 @@ class Gateway(context: Context) {
     }
 
     suspend fun get(path: String, query: Map<String, String?> = emptyMap()): String = withContext(Dispatchers.IO) {
-        execute(Request.Builder().url(url(path, query)).get().build())
+        execute(Request.Builder().url(url(path, query)).get().build()).body
+    }
+
+    // Body plus one named response header, for paginated reads that advertise the next cursor.
+    suspend fun getWithHeader(path: String, header: String, query: Map<String, String?> = emptyMap()): Pair<String, String?> = withContext(Dispatchers.IO) {
+        val reply = execute(Request.Builder().url(url(path, query)).get().build())
+        reply.body to reply.headers[header.lowercase()]
     }
 
     suspend fun post(path: String, body: String, query: Map<String, String?> = emptyMap()): String = withContext(Dispatchers.IO) {
-        execute(Request.Builder().url(url(path, query)).write(path).post(body.toRequestBody(JSON)).build())
+        execute(Request.Builder().url(url(path, query)).write(path).post(body.toRequestBody(JSON)).build()).body
     }
 
     suspend fun delete(path: String, query: Map<String, String?> = emptyMap()): String = withContext(Dispatchers.IO) {
-        execute(Request.Builder().url(url(path, query)).write(path).delete().build())
+        execute(Request.Builder().url(url(path, query)).write(path).delete().build()).body
     }
 
-    private fun execute(request: Request): String =
+    private class Reply(val body: String, val headers: Map<String, String>)
+
+    private fun execute(request: Request): Reply =
         client.newCall(request).execute().use { response ->
             Access.check(response)
             val text = response.body?.string().orEmpty()
             if (response.code == 401 && text.contains("Pairing required")) throw PairingRequired()
             if (!response.isSuccessful) throw GatewayError(response.code, "HTTP ${response.code} ${request.method} ${request.url.encodedPath}", text)
-            text
+            Reply(text, response.headers.names().associateWith { response.header(it).orEmpty() }.mapKeys { it.key.lowercase() })
         }
 
     // Streams one server-sent-events connection; `onEvent` receives each `data:` payload.

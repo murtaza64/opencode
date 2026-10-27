@@ -15,10 +15,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -31,23 +27,6 @@ import ai.opencode.desk.ui.ConnectScreen
 import ai.opencode.desk.ui.DeskTheme
 import ai.opencode.desk.ui.HomeScreen
 import ai.opencode.desk.ui.Ink
-
-// Hand-rolled back stack: a list of routes, Back pops. Keeps navigation explicit and
-// lets every screen own its Back behaviour (sheets close before the screen pops).
-sealed interface Route {
-    data object Home : Route
-    data class Agent(val key: String) : Route
-    data object Chat : Route
-}
-
-class Nav {
-    val stack = mutableStateListOf<Route>(Route.Home)
-    // Home's selected tab lives here so Back from a detail screen lands on the same tab.
-    var tab by mutableStateOf(0)
-    val current get() = stack.last()
-    fun push(route: Route) { if (current != route) stack.add(route) }
-    fun pop(): Boolean { if (stack.size <= 1) return false; stack.removeAt(stack.lastIndex); return true }
-}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -72,7 +51,7 @@ private fun App() {
         AnimatedContent(
             targetState = nav.current,
             transitionSpec = {
-                val forward = nav.stack.indexOf(targetState) >= nav.stack.indexOf(initialState)
+                val forward = nav.forward
                 val enter = slideInHorizontally { if (forward) it / 3 else -it / 3 } + fadeIn()
                 val exit = slideOutHorizontally { if (forward) -it / 3 else it / 3 } + fadeOut()
                 enter togetherWith exit

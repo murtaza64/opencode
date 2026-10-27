@@ -37,7 +37,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.UUID
 
 enum class Link { Unpaired, Connecting, Online, Offline, Access }
 
@@ -66,7 +65,18 @@ data class AgentDetail(
     val work: CurrentWork? = null,
     val loadedAt: Long = 0,
     val error: String? = null,
+    // Cursor for the page older than `messages`; null once the whole history is loaded.
+    val cursor: String? = null,
+    val loadingOlder: Boolean = false,
 )
+
+// Newest page replaces the tail; pages the user already scrolled back through are kept in front.
+fun mergeNewest(existing: List<MessageWithParts>, page: List<MessageWithParts>): List<MessageWithParts> {
+    if (page.isEmpty()) return existing
+    val ids = page.map { it.info.id }.toSet()
+    val oldest = page.first().info.time.created
+    return existing.filter { it.info.id !in ids && it.info.time.created < oldest } + page
+}
 
 class DeskStore(app: Application) : AndroidViewModel(app) {
     val gateway = Gateway(app)
@@ -128,6 +138,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     // The service token is stored before pairing so the pair request itself carries it.
     suspend fun pair(origin: String, code: String, access: AccessToken?): String? {
         gateway.origin = origin
+        desk = pointers.get(origin)
         if (access != null) gateway.saveAccessToken(access)
         return runCatching { gateway.pair(code) }.fold(
             onSuccess = { ok -> if (ok) { connect(); null } else "That code was not accepted." },
@@ -142,6 +153,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         loop?.cancel(); events?.cancel()
         gateway.forget()
         states.clear(); open = emptyList(); agents = emptyList()
+        desk = null; deskBusy = false
         link = Link.Unpaired
     }
 
@@ -257,16 +269,38 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     fun load(agent: Agent) {
         val session = agent.session ?: return
         viewModelScope.launch {
+            val previous = details[agent.key]
             val detail = runCatching {
                 coroutineScope {
-                    val messages = async { api.messages(session.id, session.directory, 30) }
+                    val page = async { api.page(session.id, session.directory, 30, null) }
                     val todos = async { runCatching { api.todos(session.id, session.directory) }.getOrDefault(emptyList()) }
                     val receipts = async { runCatching { api.receipts(session.id, session.directory).items }.getOrDefault(emptyList()) }
                     val work = async { runCatching { api.currentWork(session.id, session.directory) }.getOrNull() }
-                    AgentDetail(messages.await(), todos.await(), receipts.await(), work.await(), System.currentTimeMillis())
+                    val newest = page.await()
+                    val older = previous?.messages.orEmpty()
+                    AgentDetail(
+                        messages = mergeNewest(older, newest.items),
+                        todos = todos.await(), receipts = receipts.await(), work = work.await(), loadedAt = System.currentTimeMillis(),
+                        // Keep the deeper cursor when older pages are already loaded.
+                        cursor = if (previous != null && older.size > newest.items.size) previous.cursor else newest.cursor,
+                    )
                 }
-            }.getOrElse { AgentDetail(error = it.message, loadedAt = System.currentTimeMillis()) }
+            }.getOrElse { AgentDetail(error = it.message, loadedAt = System.currentTimeMillis(), messages = previous?.messages.orEmpty(), cursor = previous?.cursor) }
             details[agent.key] = detail
+        }
+    }
+
+    fun loadOlder(agent: Agent) {
+        val session = agent.session ?: return
+        val detail = details[agent.key] ?: return
+        val cursor = detail.cursor ?: return
+        if (detail.loadingOlder) return
+        details[agent.key] = detail.copy(loadingOlder = true)
+        viewModelScope.launch {
+            val page = runCatching { api.page(session.id, session.directory, 40, cursor) }.getOrNull()
+            val current = details[agent.key] ?: return@launch
+            details[agent.key] = if (page == null) current.copy(loadingOlder = false)
+            else current.copy(messages = page.items + current.messages.filter { m -> page.items.none { it.info.id == m.info.id } }, cursor = page.cursor, loadingOlder = false)
         }
     }
 
@@ -287,34 +321,74 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
 
     // ---- front desk ----
     // The desk is a plain Core session with agent `front-desk`, one per gateway, created
-    // lazily with a client-chosen id so a lost response never duplicates it.
-    val deskDirectory: String? get() = states.values.firstOrNull { it.editspace == deskSpace }?.root ?: states.values.firstOrNull()?.root
-    val deskSpace: String get() = prefs.getString("desk.space", null) ?: editspaces.firstOrNull { it == "opencode" } ?: editspaces.firstOrNull().orEmpty()
-    val deskID: String get() = prefs.getString("desk.id", null) ?: "ses_desk_${UUID.randomUUID().toString().replace("-", "").take(20)}".also { prefs.edit().putString("desk.id", it).apply() }
-    val deskReady get() = prefs.getBoolean("desk.ready", false)
+    // lazily with a client-chosen id so a lost response never duplicates it. The pointer
+    // (id + pinned directory) is keyed by gateway origin; see DeskPointers.
+    private val pointers = DeskPointers(object : KeyValue {
+        override fun get(key: String) = prefs.getString(key, null)
+        override fun put(key: String, value: String?) { prefs.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply() }
+    })
+    var desk by mutableStateOf(pointers.get(gateway.origin))
+        private set
+    var deskBusy by mutableStateOf(false)
+        private set
+    val deskID: String get() = desk?.id ?: "none"
+    val deskSpace: String get() = desk?.space.orEmpty()
+    val deskReady: Boolean get() = desk?.ready == true
 
-    suspend fun ensureDesk(): Result<String> {
-        val directory = deskDirectory ?: return Result.failure(IllegalStateException("No editspace root yet"))
-        if (deskReady) return Result.success(deskID)
-        return runCatching { api.createSession(directory, deskID, "Desk (phone)", "front-desk").id }
-            .onSuccess { prefs.edit().putBoolean("desk.ready", true).apply() }
+    // Preferred editspace for a new desk: "opencode" when the host has it, else the first one.
+    private fun pickDeskRoot(): Pair<String, String>? {
+        val space = editspaces.firstOrNull { it == "opencode" } ?: editspaces.firstOrNull() ?: return null
+        val root = states[space]?.root ?: return null
+        return space to root
     }
 
+    suspend fun ensureDesk(): Result<DeskPointer> {
+        val existing = pointers.get(gateway.origin)
+        if (existing?.ready == true) { desk = existing; return Result.success(existing) }
+        val pointer = existing ?: run {
+            val (space, root) = pickDeskRoot() ?: return Result.failure(IllegalStateException("No editspace root yet"))
+            pointers.create(gateway.origin, space, root)
+        }
+        desk = pointer
+        return runCatching { api.createSession(pointer.directory, pointer.id, "Desk (phone)", "front-desk") }
+            .map { pointers.markReady(gateway.origin)!!.also { desk = it } }
+    }
+
+    val deskCursors = mutableStateMapOf<String, String?>()
+    private var deskLoadingOlder = false
+
     fun loadDesk() {
-        val directory = deskDirectory ?: return
-        if (!deskReady) return
+        val pointer = pointers.get(gateway.origin)?.takeIf { it.ready } ?: return
+        desk = pointer
         viewModelScope.launch {
-            runCatching { api.messages(deskID, directory, 60) }.onSuccess { deskMessages[deskID] = it }
-            runCatching { api.receipts(deskID, directory).items }.onSuccess { deskReceipts[deskID] = it.filter { r -> r.state == "pending" || r.state == "promoted" } }
+            runCatching { api.page(pointer.id, pointer.directory, 40, null) }.onSuccess { page ->
+                val older = deskMessages[pointer.id].orEmpty()
+                deskMessages[pointer.id] = mergeNewest(older, page.items)
+                if (older.size <= page.items.size || !deskCursors.containsKey(pointer.id)) deskCursors[pointer.id] = page.cursor
+            }
+            runCatching { api.receipts(pointer.id, pointer.directory).items }.onSuccess { deskReceipts[pointer.id] = it.filter { r -> r.state == "pending" || r.state == "promoted" } }
+            // Core status, not the dashboard list: the desk session is not in any lane.
+            runCatching { api.status(pointer.directory)[pointer.id]?.type == "busy" }.onSuccess { deskBusy = it }
         }
     }
 
-    suspend fun askDesk(text: String): Result<InputReceipt> {
-        val directory = deskDirectory ?: return Result.failure(IllegalStateException("No editspace root yet"))
-        return ensureDesk().mapCatching { id -> api.input(id, directory, text, "queue") }.onSuccess { loadDesk() }
+    fun loadOlderDesk() {
+        val pointer = desk?.takeIf { it.ready } ?: return
+        val cursor = deskCursors[pointer.id] ?: return
+        if (deskLoadingOlder) return
+        deskLoadingOlder = true
+        viewModelScope.launch {
+            runCatching { api.page(pointer.id, pointer.directory, 40, cursor) }.onSuccess { page ->
+                val current = deskMessages[pointer.id].orEmpty()
+                deskMessages[pointer.id] = page.items + current.filter { m -> page.items.none { it.info.id == m.info.id } }
+                deskCursors[pointer.id] = page.cursor
+            }
+            deskLoadingOlder = false
+        }
     }
 
-    val deskBusy: Boolean get() = states.values.flatMap { it.sessions }.any { it.id == deskID && it.live == "busy" }
+    suspend fun askDesk(text: String): Result<InputReceipt> =
+        ensureDesk().mapCatching { pointer -> api.input(pointer.id, pointer.directory, text, "queue") }.onSuccess { loadDesk() }
 }
 
 fun parseIso(value: String): Long? = runCatching { java.time.Instant.parse(value).toEpochMilli() }.getOrNull()

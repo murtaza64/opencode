@@ -192,6 +192,7 @@ data class ToolState(
     val output: String? = null,
     val error: String? = null,
     val input: JsonObject? = null,
+    val metadata: JsonObject? = null,
     val time: SessionTime? = null,
 )
 

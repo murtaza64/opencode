@@ -27,6 +27,8 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import java.util.UUID
 
+data class MessagePage(val items: List<MessageWithParts>, val cursor: String?)
+
 // Typed calls over the gateway. Paths are exactly the allowlisted ones in es-desktop policy.ts.
 class Api(val gateway: Gateway) {
     private inline fun <reified T> parse(text: String): T = json.decodeFromString(text)
@@ -79,8 +81,14 @@ class Api(val gateway: Gateway) {
         parse(gateway.get("/oc/session/$id", mapOf("directory" to directory)))
     suspend fun status(directory: String? = null): Map<String, SessionStatus> =
         json.decodeFromString(MapSerializer(String.serializer(), SessionStatus.serializer()), gateway.get("/oc/session/status", mapOf("directory" to directory)))
-    suspend fun messages(id: String, directory: String, limit: Int = 40): List<MessageWithParts> =
-        json.decodeFromString(ListSerializer(MessageWithParts.serializer()), gateway.get("/oc/session/$id/message", mapOf("directory" to directory, "limit" to limit.toString())))
+    suspend fun messages(id: String, directory: String, limit: Int = 40): List<MessageWithParts> = page(id, directory, limit, null).items
+
+    // One page, newest first within the window. `before` is the cursor from a previous page;
+    // the server advertises the next one in X-Next-Cursor when older messages exist.
+    suspend fun page(id: String, directory: String, limit: Int, before: String?): MessagePage {
+        val (body, next) = gateway.getWithHeader("/oc/session/$id/message", "X-Next-Cursor", mapOf("directory" to directory, "limit" to limit.toString(), "before" to before))
+        return MessagePage(json.decodeFromString(ListSerializer(MessageWithParts.serializer()), body), next)
+    }
     suspend fun todos(id: String, directory: String): List<Todo> =
         json.decodeFromString(ListSerializer(Todo.serializer()), gateway.get("/oc/session/$id/todo", mapOf("directory" to directory)))
     suspend fun receipts(id: String, directory: String): ReceiptPage =

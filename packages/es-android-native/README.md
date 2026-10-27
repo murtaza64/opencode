@@ -52,7 +52,7 @@ are what Android users already know.
 | Decision sheet | Kind chip, title, context (collapses past 5 lines), options as tall selectable rows with the recommendation marked, optional note, **Send to agent** (= `answer`), and under *More*: **Record only** (= `choose`), **Snooze 1h**, **Resolve**. Closed records show the outcome and delivery state. |
 | Needs you | Open / Snoozed / History segments; unreachable projects called out. |
 | Agents | Lanes grouped by project with live count. |
-| Agent | Status line, current turn (elapsed, tool calls, running tool), plan (todos), pending inputs with Cancel, transcript tail (user bubbles, assistant prose with light markdown, tool runs folded into `bash ×7`), composer with **steer / queue** toggle and **Stop**. Opens at the newest message. |
+| Agent | Status line, current turn (elapsed, tool calls, running tool), plan (todos), pending inputs with Cancel, full conversation (opens at the newest message; scrolling to the top pages older history via `before` cursors, anchored by a reversed list), composer with **steer / queue** toggle and **Stop**. Tool calls are per-tool rows: bash = command + exit, read/grep/glob = path or pattern + count, edit/write = file + `+a −r` / new-or-replaced, task = subagent title + type, webfetch = host + path; running green, failed red; tap for output; three or more consecutive calls of one tool fold into `bash ×7 · last command` with a failure count and open into rows. |
 | Desk conversation | The Front Desk session (`front-desk` agent). Created lazily with a client-chosen `ses_desk_…` id, one per paired gateway. Inputs go in as `queue`. Pending receipts render as bubbles with a sending state. |
 
 ## Contracts used

@@ -26,6 +26,8 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -35,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import ai.opencode.desk.DeskStore
 import ai.opencode.desk.Nav
@@ -53,9 +56,14 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
     var sending by rememberSaveable { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    LaunchedEffect(Unit) { store.loadDesk() }
-    LaunchedEffect(store.deskBusy, pending.size) { while (store.deskBusy || pending.isNotEmpty()) { delay(4_000); store.loadDesk() } }
-    LaunchedEffect(messages.size) { if (messages.isNotEmpty()) list.animateScrollToItem(messages.size + pending.size) }
+    // Poll while the screen is open: the reply arrives as a new assistant message and there is
+    // no desk-specific event stream. Faster while the desk is busy or an input is pending.
+    LaunchedEffect(Unit) {
+        while (true) { store.loadDesk(); delay(if (store.deskBusy || store.deskReceipts[store.deskID].orEmpty().isNotEmpty()) 3_000 else 8_000) }
+    }
+    // Reversed list: newest at the bottom on open; older pages append at the top edge.
+    val atTop by remember { derivedStateOf { list.layoutInfo.visibleItemsInfo.lastOrNull()?.key == "older" } }
+    LaunchedEffect(atTop, store.deskCursors[id]) { if (atTop) store.loadOlderDesk() }
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         TopBar("Desk", onBack = { nav.pop() }) {
@@ -65,19 +73,20 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
                 Label(if (store.deskBusy) "thinking" else if (store.deskReady) "front-desk · ${store.deskSpace}" else "new conversation")
             }
         }
-        LazyColumn(Modifier.weight(1f).testTag("chat"), state = list, contentPadding = PaddingValues(vertical = 8.dp)) {
-            if (messages.isEmpty() && pending.isEmpty()) item {
-                Column(Modifier.padding(20.dp)) {
-                    Text("Ask what's going on, or start work.", style = MaterialTheme.typography.bodyLarge)
-                    Text("The desk knows the open decisions and every lane's recent activity. Try: “what changed since this morning?” or “start a lane to fix the flaky composer test”.", style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-            items(messages, key = { it.info.id }) { Message(it, store.now) }
-            items(pending, key = { "r-" + it.requestID }) { receipt ->
+        LazyColumn(Modifier.weight(1f).testTag("chat"), state = list, reverseLayout = true, contentPadding = PaddingValues(vertical = 8.dp)) {
+            items(pending.asReversed(), key = { "r-" + it.requestID }) { receipt ->
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), horizontalAlignment = Alignment.End) {
                     Text(receipt.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.background(Ink.Blue.copy(alpha = 0.12f), RoundedCornerShape(16.dp)).padding(horizontal = 14.dp, vertical = 10.dp))
                     Label(if (receipt.state == "pending") "sending…" else "delivered", color = Ink.Amber)
                 }
+            }
+            items(messages.asReversed(), key = { it.info.id }) { Message(it, store.now) }
+            item(key = "older") {
+                val more = store.deskCursors[id] != null
+                if (messages.isEmpty() && pending.isEmpty()) Column(Modifier.padding(20.dp)) {
+                    Text("Ask what's going on, or start work.", style = MaterialTheme.typography.bodyLarge)
+                    Text("The desk knows the open decisions and every lane's recent activity. Try: “what changed since this morning?” or “start a lane to fix the flaky composer test”.", style = MaterialTheme.typography.bodyMedium)
+                } else Text(if (more) "Scroll for earlier" else "Start of conversation", style = MaterialTheme.typography.labelSmall, modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp), textAlign = TextAlign.Center)
             }
         }
         error?.let { Text(it, color = Ink.Red, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 20.dp)) }

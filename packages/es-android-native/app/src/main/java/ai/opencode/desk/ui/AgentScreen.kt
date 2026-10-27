@@ -39,17 +39,22 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ai.opencode.desk.Agent
 import ai.opencode.desk.DeskStore
 import ai.opencode.desk.Nav
+import ai.opencode.desk.ToolGroup
+import ai.opencode.desk.ToolRow
+import ai.opencode.desk.ToolRows
 import ai.opencode.desk.model.InputReceipt
 import ai.opencode.desk.model.MessageWithParts
 import kotlinx.coroutines.delay
@@ -67,16 +72,15 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
     }
     val detail = store.details[key]
     val scope = rememberCoroutineScope()
+    // reverseLayout: index 0 sits at the bottom, so the screen opens at the newest message and
+    // older pages append at the far end without moving what the reader is looking at.
     val list = rememberLazyListState()
     LaunchedEffect(key) { store.load(agent) }
-    // Open at the newest message; the plan and current turn sit above it to scroll back to.
-    LaunchedEffect(detail?.loadedAt) {
-        if (detail == null || detail.messages.isEmpty()) return@LaunchedEffect
-        withFrameNanos {}
-        list.scrollToItem((list.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
-    }
     // Busy lanes change quickly; refresh the tail while this screen is open.
     LaunchedEffect(key, agent.busy) { while (agent.busy) { delay(8_000); store.load(agent) } }
+    // Reaching the top (last reversed item) loads the page before the oldest loaded message.
+    val atTop by remember { derivedStateOf { list.layoutInfo.visibleItemsInfo.lastOrNull()?.key == "older" } }
+    LaunchedEffect(atTop, detail?.cursor) { if (atTop) store.loadOlder(agent) }
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         TopBar(agent.title, onBack = { nav.pop() }) {
@@ -85,10 +89,35 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
                 Label(listOfNotNull(agent.editspace, agent.lane, agent.status, agent.session?.cost?.takeIf { it > 0 }?.let { "$%.2f".format(it) }).joinToString(" · "))
             }
         }
-        LazyColumn(Modifier.weight(1f).testTag("agent"), state = list, contentPadding = PaddingValues(bottom = 16.dp)) {
-            if (agent.description.isNotBlank()) item { Text(agent.description, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 20.dp), maxLines = 3, overflow = TextOverflow.Ellipsis) }
+        LazyColumn(Modifier.weight(1f).testTag("agent"), state = list, reverseLayout = true, contentPadding = PaddingValues(bottom = 8.dp, top = 8.dp)) {
+            // Bottom of the screen first: pending inputs, then messages newest to oldest.
+            val pending = detail?.receipts.orEmpty().filter { it.state == "pending" || it.state == "promoted" }
+            items(pending.asReversed(), key = { it.requestID }) { receipt -> ReceiptRow(receipt) { scope.launch { store.cancel(agent, receipt) } } }
+            if (pending.isNotEmpty()) item(key = "pending-header") { SectionHeader("Waiting to deliver") }
+            detail?.error?.let { item(key = "error") { Text(it, color = Ink.Red, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) } }
+            if (detail == null) item(key = "loading") { Text("Loading…", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) }
+            items(detail?.messages.orEmpty().asReversed(), key = { it.info.id }) { Message(it, store.now) }
+            item(key = "older") {
+                val more = detail?.cursor != null
+                Text(
+                    when { detail?.loadingOlder == true -> "Loading earlier…"; more -> "Scroll for earlier" ; detail != null && detail.messages.isNotEmpty() -> "Start of conversation"; else -> "" },
+                    style = MaterialTheme.typography.labelSmall, modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp), textAlign = TextAlign.Center,
+                )
+            }
+            item(key = "conversation-header") { SectionHeader("Conversation", detail?.let { "updated " + age(store.now, it.loadedAt) }) }
+            val todos = detail?.todos.orEmpty().filter { it.status != "completed" && it.status != "cancelled" }
+            if (todos.isNotEmpty()) {
+                items(todos.take(5).asReversed(), key = { "todo-" + it.content.hashCode() }) { todo ->
+                    Row(Modifier.padding(horizontal = 20.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(8.dp).background(if (todo.status == "in_progress") Ink.Green else Ink.Dim, CircleShape))
+                        Spacer(Modifier.width(12.dp))
+                        Text(todo.content, style = MaterialTheme.typography.bodyMedium, color = if (todo.status == "in_progress") Ink.Text else Ink.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                item(key = "plan-header") { SectionHeader("Plan", "${detail?.todos?.count { it.status == "completed" }}/${detail?.todos?.size} done") }
+            }
             detail?.work?.turn?.let { turn ->
-                item {
+                item(key = "turn") {
                     Row(Modifier.padding(horizontal = 20.dp, vertical = 10.dp).fillMaxWidth().background(Ink.Panel, RoundedCornerShape(12.dp)).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         Column { Text("${turn.elapsed_seconds / 60}m", style = MaterialTheme.typography.titleMedium); Label("this turn") }
                         Column { Text("${turn.tool_calls}", style = MaterialTheme.typography.titleMedium); Label("tool calls") }
@@ -96,26 +125,7 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
                     }
                 }
             }
-            val todos = detail?.todos.orEmpty().filter { it.status != "completed" && it.status != "cancelled" }
-            if (todos.isNotEmpty()) {
-                item { SectionHeader("Plan", "${detail?.todos?.count { it.status == "completed" }}/${detail?.todos?.size} done") }
-                items(todos.take(5)) { todo ->
-                    Row(Modifier.padding(horizontal = 20.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(8.dp).background(if (todo.status == "in_progress") Ink.Green else Ink.Dim, CircleShape))
-                        Spacer(Modifier.width(12.dp))
-                        Text(todo.content, style = MaterialTheme.typography.bodyMedium, color = if (todo.status == "in_progress") Ink.Text else Ink.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-            }
-            val pending = detail?.receipts.orEmpty().filter { it.state == "pending" || it.state == "promoted" }
-            if (pending.isNotEmpty()) {
-                item { SectionHeader("Waiting to deliver") }
-                items(pending, key = { it.requestID }) { receipt -> ReceiptRow(receipt) { scope.launch { store.cancel(agent, receipt) } } }
-            }
-            item { SectionHeader("Conversation", detail?.let { "updated " + age(store.now, it.loadedAt) }) }
-            if (detail == null) item { Text("Loading…", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) }
-            detail?.error?.let { item { Text(it, color = Ink.Red, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) } }
-            items(detail?.messages.orEmpty().takeLast(12), key = { it.info.id }) { Message(it, store.now) }
+            if (agent.description.isNotBlank()) item(key = "description") { Text(agent.description, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 20.dp), maxLines = 3, overflow = TextOverflow.Ellipsis) }
         }
         SteerBar(store, agent)
     }
@@ -160,30 +170,7 @@ fun Message(message: MessageWithParts, now: Long) {
                     .padding(horizontal = if (user) 14.dp else 0.dp, vertical = if (user) 10.dp else 0.dp),
             ) { Text(if (user) AnnotatedString(text) else markdownish(text), style = MaterialTheme.typography.bodyLarge, maxLines = if (expanded) Int.MAX_VALUE else 10, overflow = TextOverflow.Ellipsis) }
         }
-        // Runs of the same tool fold into one line ("bash ×7") so a long turn stays skimmable.
-        val runs = tools.fold(mutableListOf<MutableList<ai.opencode.desk.model.Part>>()) { acc, part ->
-            if (acc.lastOrNull()?.first()?.tool == part.tool) acc.last().add(part) else acc.add(mutableListOf(part))
-            acc
-        }
-        runs.forEach { run ->
-            val last = run.last()
-            var open by rememberSaveable(last.id) { mutableStateOf(false) }
-            val state = last.state
-            val tint = when {
-                run.any { it.state?.status == "error" } -> Ink.Red
-                state?.status == "running" || state?.status == "pending" -> Ink.Green
-                else -> Ink.Muted
-            }
-            Column(Modifier.fillMaxWidth().clickable { open = !open }.padding(vertical = 3.dp)) {
-                val count = if (run.size > 1) " ×${run.size}" else ""
-                Mono("${last.tool}$count  ${state?.title ?: ""}".trim(), color = tint)
-                if (open) run.forEach { part ->
-                    val body = part.state?.error ?: part.state?.output ?: part.state?.input?.toString().orEmpty()
-                    if (run.size > 1) Mono(part.state?.title ?: part.tool.orEmpty(), color = Ink.Text, modifier = Modifier.padding(start = 8.dp, top = 4.dp))
-                    Text(body.take(800), style = MaterialTheme.typography.labelMedium, color = Ink.Muted, modifier = Modifier.padding(start = 8.dp, top = 2.dp))
-                }
-            }
-        }
+        ToolRows.groups(message.parts).forEach { group -> ToolGroupView(group, message.info.id) }
         Label(age(now, message.info.time.created), color = Ink.Dim, modifier = Modifier.padding(top = 2.dp))
     }
 }
@@ -228,4 +215,47 @@ private fun SteerBar(store: DeskStore, agent: Agent) {
 @Composable
 private fun Toggle(text: String, color: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Box(modifier.background(color.copy(alpha = 0.16f), RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp)) { Label(text, color = color) }
+}
+
+// A run of the same tool. One or two calls show as rows; three or more fold into a summary
+// line ("bash ×7 · last command", failures counted) that opens into the individual rows.
+@Composable
+fun ToolGroupView(group: ToolGroup, messageID: String) {
+    if (group.rows.size <= 2) { group.rows.forEachIndexed { index, row -> ToolRowView(row, "$messageID-${group.tool}-$index") }; return }
+    var open by rememberSaveable("$messageID-${group.tool}-group") { mutableStateOf(group.live || group.failures > 0) }
+    val tint = when { group.failures > 0 -> Ink.Red; group.live -> Ink.Green; else -> Ink.Muted }
+    Row(Modifier.fillMaxWidth().clickable { open = !open }.padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(6.dp).background(tint, CircleShape))
+        Spacer(Modifier.width(10.dp))
+        Mono("${group.tool} ×${group.rows.size}", color = tint)
+        Spacer(Modifier.width(10.dp))
+        Mono(group.rows.last().primary, color = Ink.Muted, modifier = Modifier.weight(1f))
+        if (group.failures > 0) Label("${group.failures} failed", color = Ink.Red)
+        Label(if (open) "hide" else "show", color = Ink.Dim, modifier = Modifier.padding(start = 8.dp))
+    }
+    if (open) Column(Modifier.padding(start = 16.dp)) { group.rows.forEachIndexed { index, row -> ToolRowView(row, "$messageID-${group.tool}-$index") } }
+}
+
+// One call: status dot, tool name, what it did, and the number that matters. Tap for output.
+@Composable
+fun ToolRowView(row: ToolRow, key: String) {
+    var open by rememberSaveable(key) { mutableStateOf(false) }
+    val tint = when { row.failed -> Ink.Red; row.live -> Ink.Green; else -> Ink.Muted }
+    Column(Modifier.fillMaxWidth().clickable(enabled = !row.output.isNullOrBlank()) { open = !open }.padding(vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (row.live) StatusDot("busy", 6) else Box(Modifier.size(6.dp).background(tint, CircleShape))
+            Spacer(Modifier.width(10.dp))
+            Mono(row.tool, color = tint, modifier = Modifier.width(56.dp))
+            if (row.mono) Mono(row.primary, color = Ink.Text, modifier = Modifier.weight(1f))
+            else Text(row.primary, style = MaterialTheme.typography.bodyMedium, color = Ink.Text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            row.secondary?.let { Label(it, color = if (row.failed) Ink.Red else Ink.Muted, modifier = Modifier.padding(start = 8.dp)) }
+        }
+        if (open && !row.output.isNullOrBlank()) {
+            Text(
+                row.output.take(1500) + if (row.output.length > 1500) "\n…" else "",
+                style = MaterialTheme.typography.labelMedium, color = if (row.failed) Ink.Red else Ink.Muted,
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp).background(Ink.Panel, RoundedCornerShape(8.dp)).padding(10.dp),
+            )
+        }
+    }
 }
