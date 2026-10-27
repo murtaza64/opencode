@@ -254,6 +254,19 @@ export namespace FSUtil {
     }
   }
 
+  /**
+   * Whether two directory spellings name the same directory (symlinks resolved). Stored session directories keep
+   * the spelling they were created with, so identity checks compare through this rather than with `===`.
+   */
+  export function sameDirectory(a: string, b: string): boolean {
+    if (a === b) return true
+    try {
+      return resolve(a) === resolve(b)
+    } catch {
+      return false
+    }
+  }
+
   export function windowsPath(p: string): string {
     if (process.platform !== "win32") return p
     return p

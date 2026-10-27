@@ -1,4 +1,6 @@
 import { Effect, Layer, LayerMap } from "effect"
+import { FSUtil } from "./fs-util"
+import { AbsolutePath } from "./schema"
 import { AgentV2 } from "./agent"
 import { AISDK } from "./aisdk"
 import { Catalog } from "./catalog"
@@ -86,7 +88,7 @@ export function buildLocationServiceMap(
 ): Layer.Layer<LocationServiceMap.Service> {
   return Layer.effect(
     LocationServiceMap.Service,
-    LayerMap.make(
+    Effect.map(LayerMap.make(
       (ref: Location.Ref) => {
         const allReplacements = replacements.concat([[Location.node, Location.boundNode(ref)]])
         // Apply replacements during hoist, not afterward: replacements can
@@ -107,8 +109,26 @@ export function buildLocationServiceMap(
         )
       },
       { idleTimeToLive: "60 minutes" },
-    ),
+    ), canonicalKeys),
   )
+}
+
+/**
+ * One set of Location services per real directory: a symlink spelling and its realpath share an instance (and
+ * the bound Location carries the realpath). Stored session directories keep their spelling; see
+ * `FSUtil.sameDirectory` for identity checks against them.
+ */
+function canonicalKeys<I, E>(map: LayerMap.LayerMap<Location.Ref, I, E>): LayerMap.LayerMap<Location.Ref, I, E> {
+  const key = (ref: Location.Ref) => {
+    const directory = FSUtil.resolve(ref.directory)
+    return directory === ref.directory ? ref : Location.Ref.make({ ...ref, directory: AbsolutePath.make(directory) })
+  }
+  return {
+    ...map,
+    get: (ref) => map.get(key(ref)),
+    contextEffect: (ref) => map.contextEffect(key(ref)),
+    invalidate: (ref) => map.invalidate(key(ref)),
+  }
 }
 
 // This is temporary for backwards compatibility

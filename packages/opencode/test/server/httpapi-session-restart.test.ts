@@ -585,3 +585,46 @@ it.live(
     ),
   90_000,
 )
+
+it.live(
+  "a session created through a symlinked directory recovers and resumes from either spelling",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          const link = `${dir}-link`
+          yield* Effect.promise(() => import("fs/promises").then((fs) => fs.symlink(dir, link)))
+          yield* Effect.addFinalizer(() => Effect.promise(() => import("fs/promises").then((fs) => fs.rm(link, { force: true }))))
+          yield* llm.text("recovered through the link")
+          yield* llm.text("queued input answered")
+
+          // The V2 create keeps the caller's spelling, as live sessions created under ~/editspaces do.
+          const created = yield* requestInDirectory("/api/session", link, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ location: { directory: link }, title: "Symlinked" }),
+          }).pipe(Effect.flatMap((response) => response.json))
+          const sessionID = (created as { data: { id: string } }).data.id
+          const session = yield* Session.use.get(sessionID as never)
+          expect(session.directory).toBe(link)
+          const seeded = yield* seedInterrupted(session, dir, { tools: "cancelled" })
+
+          const first = yield* recover(link, sessionID, { recoveryID: "link-recovery", anchorMessageID: seeded.assistant.id })
+          expect(first.outcome).toBe("scheduled")
+          // The same recovery from the realpath spelling reaches the same Session state, not a second instance.
+          expect((yield* recover(dir, sessionID, { recoveryID: "link-recovery", anchorMessageID: seeded.assistant.id })).outcome).toBe("duplicate")
+          yield* idleWithReply(dir, sessionID, "recovered through the link")
+
+          const queued = yield* requestInDirectory(`/session/${sessionID}/input`, link, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ requestID: "link-queued", delivery: "queue", text: "queued through the link" }),
+          })
+          expect(queued.status).toBe(200)
+          const history = yield* idleWithReply(link, sessionID, "queued input answered")
+          expect(history.some((message) => message.parts.some((part) => part.type === "text" && part.text === "queued through the link"))).toBe(true)
+        }),
+      { config: testProviderConfig },
+    ),
+  60_000,
+)

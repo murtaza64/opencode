@@ -1,3 +1,4 @@
+import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Effect, Schema } from "effect"
 import { BackgroundJob } from "@/background/job"
 import { InstanceState } from "@/effect/instance-state"
@@ -27,7 +28,7 @@ export const TaskStatusTool = define(
       execute: Effect.fn("TaskStatusTool.execute")(function* (params: typeof Parameters.Type, ctx: Context) {
         const child = yield* sessions.get(SessionID.make(params.task_id))
         const directory = yield* InstanceState.directory
-        if (child.parentID !== ctx.sessionID || child.directory !== directory)
+        if (child.parentID !== ctx.sessionID || !FSUtil.sameDirectory(child.directory, directory))
           return yield* Effect.die(new Error("Task must belong to the caller session and directory"))
         yield* ctx.ask({
           permission: "task",
