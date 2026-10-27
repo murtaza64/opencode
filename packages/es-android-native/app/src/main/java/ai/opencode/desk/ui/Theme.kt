@@ -200,3 +200,16 @@ fun ProfileSwitchAction(store: ai.opencode.desk.DeskStore, modifier: Modifier = 
         Label(decision.label.orEmpty(), color = Ink.Text)
     }
 }
+
+// A small filled lightning bolt, drawn rather than pulled from the extended icon set.
+@Composable
+fun Bolt(color: Color, size: Int = 13, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.Canvas(modifier.size(size.dp)) {
+        val w = this.size.width; val h = this.size.height
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(w * 0.62f, 0f); lineTo(w * 0.18f, h * 0.58f); lineTo(w * 0.48f, h * 0.58f)
+            lineTo(w * 0.38f, h); lineTo(w * 0.84f, h * 0.40f); lineTo(w * 0.54f, h * 0.40f); close()
+        }
+        drawPath(path, color)
+    }
+}

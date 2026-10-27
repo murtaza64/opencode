@@ -95,6 +95,7 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
                 PendingBubble(item, store, onRetry = { scope.launch { store.retry(item) } }, onCancel = { store.dismiss(item) })
             }
             val timeline = Timeline.buildFrozen(previousTimeline.value, Authorship.place(messages, store.mine[id].orEmpty()), frozen.value).also { previousTimeline.value = it }
+            // The desk session is not a lane: no mail evidence or wake markers apply here.
             items(timeline.asReversed(), key = { it.key() }) { TimelineItem(it, store.now, store) }
             item(key = "older") {
                 val more = store.deskCursors[id] != null

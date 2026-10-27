@@ -72,6 +72,9 @@ data class AgentDetail(
     // Cursor for the page older than `messages`; null once the whole history is loaded.
     val cursor: String? = null,
     val loadingOlder: Boolean = false,
+    // Wake evidence per mail id (from /es/api/mail deliveries) and wake markers for this session.
+    val mail: List<MailMessage> = emptyList(),
+    val wakeEvents: List<WakeEvent> = emptyList(),
 )
 
 // Newest page replaces the tail; pages the user already scrolled back through are kept in front.
@@ -374,6 +377,8 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
                     val todos = async { runCatching { api.todos(session.id, session.directory) }.getOrDefault(emptyList()) }
                     val receipts = async { runCatching { api.receipts(session.id, session.directory).items }.getOrDefault(emptyList()) }
                     val work = async { runCatching { api.currentWork(session.id, session.directory) }.getOrNull() }
+                    val mail = async { runCatching { api.mail(agent.editspace, agent.lane, session.id).messages }.getOrDefault(emptyList()) }
+                    val wakes = async { runCatching { api.wakeEvents(agent.editspace, session.id).events }.getOrDefault(emptyList()) }
                     val newest = page.await()
                     val older = previous?.messages.orEmpty()
                     AgentDetail(
@@ -381,6 +386,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
                         todos = todos.await(), receipts = receipts.await(), work = work.await(), loadedAt = System.currentTimeMillis(),
                         // Keep the deeper cursor when older pages are already loaded.
                         cursor = if (previous != null && older.size > newest.items.size) previous.cursor else newest.cursor,
+                        mail = mail.await(), wakeEvents = wakes.await(),
                     )
                 }
             }.getOrElse { AgentDetail(error = it.message, loadedAt = System.currentTimeMillis(), messages = previous?.messages.orEmpty(), cursor = previous?.cursor) }

@@ -138,6 +138,11 @@ try {
   if ((await nodes()).some((node) => node.text?.includes("Please land the pinned composer"))) throw new Error("mail body visible while collapsed")
   await waitFor((node) => node["content-desc"]?.startsWith("Tool run: 5 tools"), "tool run chip")
   pass("mail chips collapsed without body; tool run folded separately from mail")
+  // Wake cues (§4) only when the gateway exposes /es/api/mail (it does) and markers only via /es/api/wake-events (gateway allowlist pending).
+  await waitFor((node) => node["content-desc"]?.includes("Woke composer-float"), "caused wake cue on the task chip")
+  pass("wake cue: task mail shows 'Woke composer-float' from delivery evidence")
+  if ((await nodes()).some((node) => node["content-desc"]?.startsWith("Woke for passive review"))) pass("wake marker rendered (gateway exposes /es/api/wake-events)")
+  else console.info("note: no wake marker — /es/api/wake-events not exposed by this gateway build (expected until es-desktop allowlists it)")
   await screenshot("11-chat-parts-populated")
   await tap(await waitFor((node) => node["content-desc"]?.startsWith("Mail from es-app, task"), "chip"))
   await waitFor((node) => node["content-desc"]?.startsWith("Mail from es-app, task") && node["content-desc"]?.endsWith("expanded"), "chip expanded")
@@ -156,8 +161,14 @@ try {
   await relaunch()
   await waitFor(byId("steer-text"), "agent screen after reset")
   // After a relaunch the IME may not attach on the first tap; focus, verify the typed text landed, then send.
-  await type("steer-text", "Prefer the tool boundary, keep the fixture green.")
-  if (!(await nodes()).some((node) => node.text?.includes("Prefer the tool boundary"))) await type("steer-text", "Prefer the tool boundary, keep the fixture green.")
+  // After the debug relaunches the IME may not be attached; type, then confirm by the send button
+  // becoming enabled (Compose text is not exposed to uiautomator), retrying with a fresh tap.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await type("steer-text", "Prefer the tool boundary, keep the fixture green.")
+    const send = (await nodes()).find(byId("steer-send"))
+    if (send?.enabled === "true") break
+    await adb("shell", "input", "keyevent", "KEYCODE_BACK"); await sleep(500)
+  }
   await tap(await waitFor(byId("steer-send"), "steer send"))
   const steer = await waitWrite((w) => w.path === "/session/ses_composer/input" && w.method === "POST", "steer input")
   if (steer.body.delivery !== "steer" || steer.query.directory !== fixture.sessions.ses_composer?.directory && !steer.query.directory) throw new Error(`Unexpected steer ${JSON.stringify(steer)}`)

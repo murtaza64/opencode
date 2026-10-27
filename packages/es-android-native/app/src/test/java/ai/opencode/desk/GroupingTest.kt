@@ -24,7 +24,7 @@ class GroupingTest {
         put("type", "editspace-mail"); put("id", id); put("sender", sender); put("recipient", "android-native"); if (kind != null) put("kind", kind); if (senderSession != null) put("senderSession", senderSession)
     }
     private fun build(messages: List<MessageWithParts>, mine: Set<String> = emptySet()) = Timeline.build(Authorship.place(messages, mine))
-    private fun shape(items: List<Timeline.Item>) = items.map { when (it) { is Timeline.Item.ToolRun -> "run${it.count}"; is Timeline.Item.IncomingStrip -> "strip${it.count}"; is Timeline.Item.Single -> it.unit::class.simpleName!! } }
+    private fun shape(items: List<Timeline.Item>) = items.map { when (it) { is Timeline.Item.ToolRun -> "run${it.count}"; is Timeline.Item.IncomingStrip -> "strip${it.count}"; is Timeline.Item.Single -> it.unit::class.simpleName!!; is Timeline.Item.Marker -> "marker" } }
 
     @Test
     fun consecutive_incoming_mail_folds_into_a_strip_with_latest_party_and_status() {

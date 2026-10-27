@@ -17,7 +17,9 @@ import ai.opencode.desk.model.ReceiptPage
 import ai.opencode.desk.model.SessionInfo
 import ai.opencode.desk.model.SessionStatus
 import ai.opencode.desk.model.StateResponse
+import ai.opencode.desk.MailResponse
 import ai.opencode.desk.Surface
+import ai.opencode.desk.WakeEventsResponse
 import ai.opencode.desk.SurfaceAddress
 import ai.opencode.desk.SurfacesResponse
 import ai.opencode.desk.model.Todo
@@ -48,6 +50,11 @@ class Api(val gateway: Gateway) {
         parse(gateway.get("/es/api/attention/$id", mapOf("es" to es)))
     suspend fun operator(): OperatorSession = parse(gateway.get("/es/api/attention/session"))
     suspend fun notifications(): NotificationsResponse = parse(gateway.get("/es/api/notifications"))
+    suspend fun mail(es: String, lane: String, session: String? = null): MailResponse =
+        parse(gateway.get("/es/api/mail", mapOf("es" to es, "lane" to lane, "session" to session)))
+    // Not on the gateway allowlist as of dev 0708efef; callers tolerate 403 (markers simply absent).
+    suspend fun wakeEvents(es: String, session: String): WakeEventsResponse =
+        parse(gateway.get("/es/api/wake-events", mapOf("es" to es, "session" to session)))
     suspend fun currentWork(sessionID: String, directory: String): CurrentWork =
         parse(gateway.get("/es/api/current-work", mapOf("session_id" to sessionID, "directory" to directory)))
 

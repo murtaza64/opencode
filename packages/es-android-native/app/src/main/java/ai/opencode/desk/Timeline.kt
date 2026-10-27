@@ -28,6 +28,8 @@ object Timeline {
 
     sealed interface Item {
         data class Single(val unit: Unit) : Item
+        // A wake marker row (passive review, resume, recovery, handoff): separate from mail, agent side.
+        data class Marker(val event: WakeEvent) : Item
 
         // Consecutive typed incoming mail/integration on the incoming side:
         // "N mail · <latest party> · <actionable status>", expandable to the individual chips.
@@ -124,6 +126,19 @@ object Timeline {
         is Item.ToolRun -> "run-" + item.units.first().message.info.id
         is Item.IncomingStrip -> "strip-" + item.chips.first().message.info.id
         is Item.Single -> item.unit.message.info.id
+        is Item.Marker -> "wake-" + item.event.id
+    }
+
+    // Inserts wake markers into a built timeline by time, after the last item created at or
+    // before the marker. Markers never join or restyle groups.
+    fun withMarkers(items: List<Item>, events: List<WakeEvent>): List<Item> {
+        if (events.isEmpty()) return items
+        val out = items.toMutableList()
+        events.filter { it.at != null }.sortedBy { it.at }.forEach { event ->
+            val index = out.indexOfLast { item -> item !is Item.Marker && members(item).lastOrNull()?.message?.info?.time?.created?.let { it <= event.at!! } == true }
+            out.add(index + 1, Item.Marker(event))
+        }
+        return out
     }
 
     // While the visible agent run is active nothing regroups: items already placed keep their
@@ -140,6 +155,7 @@ object Timeline {
         // become singles in their original order, ahead of anything new.
         val kept = mutableListOf<Item>()
         previous.forEach { item ->
+            if (item is Item.Marker) return@forEach
             val alive = members(item).filter { it.message.info.id in present }
             if (alive.size == members(item).size) kept += item
             else alive.forEach { m -> kept += Item.Single(units.first { it.message.info.id == m.message.info.id }) }
@@ -166,6 +182,7 @@ object Timeline {
         is Item.ToolRun -> item.units
         is Item.IncomingStrip -> item.chips
         is Item.Single -> listOf(item.unit)
+        is Item.Marker -> emptyList()
     }
 
     // Pending receipts admitted from mail that already appear in the transcript are not drawn twice.

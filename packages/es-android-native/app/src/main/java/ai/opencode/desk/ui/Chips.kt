@@ -44,6 +44,12 @@ import ai.opencode.desk.Provenance
 import ai.opencode.desk.Timeline
 import ai.opencode.desk.ToolRows
 import ai.opencode.desk.detail
+import ai.opencode.desk.Wake
+import ai.opencode.desk.WakeEvent
+import ai.opencode.desk.WakeEvidence
+import ai.opencode.desk.WakeRules
+import ai.opencode.desk.Timestamps
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import java.text.DateFormat
@@ -83,11 +89,12 @@ private fun ChipSurface(alignEnd: Boolean, description: String, onClick: () -> U
 // details (sender/recipient with sessions, absolute time, delivery, ids). Incoming aligns end
 // like You; unknown direction aligns start, muted.
 @Composable
-fun MailChip(unit: Timeline.Unit.Chip, now: Long, store: DeskStore?) {
+fun MailChip(unit: Timeline.Unit.Chip, now: Long, store: DeskStore?, evidence: WakeEvidence? = null, agent: String = "the agent") {
     val expandedMap = LocalExpanded.current
     val id = unit.message.info.id
     val expanded = expandedMap[id] == true
     val line = Timeline.chipLine(unit)
+    val wake = evidence?.wake
     val incoming = unit.direction == Timeline.Direction.Incoming
     val author = unit.author
     val tint = when {
@@ -95,13 +102,25 @@ fun MailChip(unit: Timeline.Unit.Chip, now: Long, store: DeskStore?) {
         unit.direction == Timeline.Direction.Unknown -> Ink.Muted
         else -> Ink.Violet
     }
-    val description = "${author.description}${line.purpose?.let { ", $it" } ?: ""}, ${if (expanded) "expanded" else "collapsed"}"
+    val wakeText = wake?.let { WakeRules.description(it, agent) }
+    val description = "${author.description}${line.purpose?.let { ", $it" } ?: ""}${wakeText?.let { ", $it" } ?: ""}, ${if (expanded) "expanded" else "collapsed"}"
     ChipSurface(alignEnd = incoming, description = description, onClick = { expandedMap[id] = !expanded }) {
         Row(Modifier.heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(if (author is Author.Integration) Icons.Filled.Info else Icons.Filled.Email, null, tint = tint, modifier = Modifier.size(14.dp))
             if (line.crossHost) { Spacer(Modifier.width(4.dp)); Icon(Icons.Filled.Share, null, tint = Ink.Dim, modifier = Modifier.size(11.dp)) }
+            // Wake cue (§4): only `caused` draws attention (filled bolt, accent); unknown is a hollow dot; joined/none have no glyph.
+            when (wake) {
+                Wake.Caused -> { Spacer(Modifier.width(6.dp)); Bolt(Ink.Green, 13) }
+                Wake.Unknown -> { Spacer(Modifier.width(6.dp)); Box(Modifier.size(7.dp).border(1.5.dp, Ink.Muted, androidx.compose.foundation.shape.CircleShape)) }
+                else -> Unit
+            }
             Spacer(Modifier.width(8.dp))
-            Text(line.text, style = MaterialTheme.typography.bodyMedium, color = if (incoming) Ink.Text else Ink.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                line.text, style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (wake == Wake.Caused) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (!incoming || wake == Wake.None) Ink.Muted else Ink.Text,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
         }
         if (expanded) {
             val text = unit.message.parts.filter { it.type == "text" && !it.text.isNullOrBlank() }.joinToString("\n\n") { it.text!!.trim() }
@@ -115,7 +134,12 @@ fun MailChip(unit: Timeline.Unit.Chip, now: Long, store: DeskStore?) {
                 }
                 if (unit.direction == Timeline.Direction.Unknown) Mono("direction unknown")
                 Mono(DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(unit.message.info.time.created)) + " · " + age(now, unit.message.info.time.created) + " ago")
-                Mono("in transcript (received)")
+                if (evidence != null) {
+                    Mono(wakeText.orEmpty())
+                    evidence.observedAt?.let { Mono("observed " + Timestamps.format(it)) }
+                    evidence.presentedAt?.let { Mono("presented " + Timestamps.format(it)) }
+                    evidence.handledAt?.let { Mono("handled " + Timestamps.format(it)) }
+                } else Mono("in transcript (received)")
                 p.detail()?.let { Mono(it) }
             }
         }
@@ -150,7 +174,7 @@ fun ToolRunChip(run: Timeline.Item.ToolRun, now: Long) {
 // Consecutive incoming mail on the incoming side: "N mail · <latest party> · <status>", end-aligned
 // like a chip, expands to the individual chips in order (each still expandable).
 @Composable
-fun IncomingStripChip(strip: Timeline.Item.IncomingStrip, now: Long, store: DeskStore?) {
+fun IncomingStripChip(strip: Timeline.Item.IncomingStrip, now: Long, store: DeskStore?, evidence: (Timeline.Unit.Chip) -> WakeEvidence? = { null }, agent: String = "the agent") {
     val key = Timeline.key(strip)
     val expandedMap = LocalExpanded.current
     // Opens expanded when any member chip was expanded before finalization.
@@ -164,17 +188,32 @@ fun IncomingStripChip(strip: Timeline.Item.IncomingStrip, now: Long, store: Desk
                 Text(strip.label, style = MaterialTheme.typography.bodyMedium, color = Ink.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        if (expanded) strip.chips.forEach { MailChip(it, now, store) }
+        if (expanded) strip.chips.forEach { MailChip(it, now, store, evidence(it), agent) }
+    }
+}
+
+// A wake marker row on the agent side (§4): thin, quiet, never restyles the mail it covers.
+@Composable
+fun WakeMarker(event: WakeEvent) {
+    val label = WakeRules.markerLabel(event)
+    val description = label + (event.at?.let { ", " + Timestamps.format(it) } ?: "") + (event.outcome?.let { ", $it" } ?: "")
+    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp).semantics { contentDescription = description }, verticalAlignment = Alignment.CenterVertically) {
+        Bolt(Ink.Dim, 12)
+        Spacer(Modifier.width(8.dp))
+        Mono(label, color = Ink.Dim)
+        Spacer(Modifier.width(8.dp))
+        Box(Modifier.weight(1f).size(1.dp).background(Ink.Line))
     }
 }
 
 @Composable
-fun TimelineItem(item: Timeline.Item, now: Long, store: DeskStore?) {
+fun TimelineItem(item: Timeline.Item, now: Long, store: DeskStore?, evidence: (Timeline.Unit.Chip) -> WakeEvidence? = { null }, agent: String = "the agent") {
     when (item) {
-        is Timeline.Item.IncomingStrip -> IncomingStripChip(item, now, store)
+        is Timeline.Item.Marker -> WakeMarker(item.event)
+        is Timeline.Item.IncomingStrip -> IncomingStripChip(item, now, store, evidence, agent)
         is Timeline.Item.ToolRun -> ToolRunChip(item, now)
         is Timeline.Item.Single -> when (val unit = item.unit) {
-            is Timeline.Unit.Chip -> MailChip(unit, now, store)
+            is Timeline.Unit.Chip -> MailChip(unit, now, store, evidence(unit), agent)
             is Timeline.Unit.Tools, is Timeline.Unit.Reply -> Message(unit.message, now, null, true, store)
             is Timeline.Unit.Bubble -> Message(unit.message, now, unit.author, unit.first, store)
         }

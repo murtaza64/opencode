@@ -93,7 +93,7 @@ class ChatPartsTest {
             reply("b"),
             tools("t7", "bash"), tools("t8", "bash"),
         ), mine = setOf("you"))
-        val kinds = items.map { when (it) { is Timeline.Item.ToolRun -> "run${it.count}"; is Timeline.Item.IncomingStrip -> "strip${it.count}"; is Timeline.Item.Single -> it.unit::class.simpleName!! } }
+        val kinds = items.map { when (it) { is Timeline.Item.ToolRun -> "run${it.count}"; is Timeline.Item.IncomingStrip -> "strip${it.count}"; is Timeline.Item.Single -> it.unit::class.simpleName!!; is Timeline.Item.Marker -> "marker" } }
         assertEquals(listOf("Reply", "run3", "Chip", "run2", "Bubble", "run2", "Reply", "run2"), kinds)
         assertTrue(items.filterIsInstance<Timeline.Item.ToolRun>().all { run -> run.units.all { it is Timeline.Unit.Tools } })
     }

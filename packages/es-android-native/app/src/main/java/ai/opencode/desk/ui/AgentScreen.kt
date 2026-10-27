@@ -70,6 +70,9 @@ import ai.opencode.desk.Pending
 import ai.opencode.desk.Pin
 import ai.opencode.desk.SendState
 import ai.opencode.desk.Timeline
+import ai.opencode.desk.Timestamps
+import ai.opencode.desk.WakeRules
+import androidx.compose.foundation.combinedClickable
 import ai.opencode.desk.ToolGroup
 import ai.opencode.desk.ToolRow
 import ai.opencode.desk.ToolRows
@@ -132,8 +135,11 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
             if (detail == null) item(key = "loading") { Text("Loading…", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) }
             // Grouping is frozen while this agent's run is live so chips and strips do not reshuffle under the reader.
             val placed = Authorship.place(detail?.messages.orEmpty(), store.mine[agent.session?.id.orEmpty()].orEmpty())
-            val timeline = Timeline.buildFrozen(previousTimeline.value, placed, frozen.value).also { previousTimeline.value = it }
-            items(timeline.asReversed(), key = { it.key() }) { TimelineItem(it, store.now, store) }
+            val built = Timeline.buildFrozen(previousTimeline.value, placed, frozen.value).also { previousTimeline.value = it }
+            val timeline = Timeline.withMarkers(built, detail?.wakeEvents.orEmpty())
+            val mail = detail?.mail.orEmpty()
+            val sessionID = agent.session?.id
+            items(timeline.asReversed(), key = { it.key() }) { TimelineItem(it, store.now, store, evidence = { chip -> WakeRules.forMail(mail, chip.key, sessionID) }, agent = agent.lane) }
             item(key = "older") {
                 val more = detail?.cursor != null
                 Text(
@@ -249,8 +255,18 @@ fun Message(message: MessageWithParts, now: Long, author: Author? = null, first:
             if (images.isNotEmpty()) InlinePreviews(images, store!!, Modifier.padding(top = 6.dp))
         }
         ToolRows.groups(message.parts).forEach { group -> ToolGroupView(group, message.info.id) }
-        Label(age(now, message.info.time.created), color = Ink.Dim, modifier = Modifier.padding(top = 2.dp))
+        TimeLabel(message.info.time.created, message.info.time.completed, now)
     }
+}
+
+// Quiet relative age; long-press shows the recorded time (never the render clock) and the
+// block's duration when known (CHAT-PARTS §5, Android).
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun TimeLabel(created: Long, completed: Long?, now: Long) {
+    var details by rememberSaveable("ts-$created") { mutableStateOf(false) }
+    val text = if (details) Timestamps.details(created, completed) else age(now, created)
+    Label(text, color = Ink.Dim, modifier = Modifier.padding(top = 2.dp).combinedClickable(onClick = { if (details) details = false }, onLongClick = { details = true }).semantics { contentDescription = Timestamps.details(created, completed) })
 }
 
 @Composable
@@ -286,7 +302,7 @@ fun SourcedMessage(author: Author, text: String, messageID: String, now: Long, c
                 modifier = Modifier.padding(top = if (first) 6.dp else 0.dp).clickable { expanded = !expanded },
             )
             if (images.isNotEmpty() && store != null) InlinePreviews(images, store, Modifier.padding(top = if (text.isNotBlank()) 6.dp else 0.dp))
-            if (!first) Label(age(now, created), color = Ink.Dim, modifier = Modifier.padding(top = 2.dp))
+            if (!first) TimeLabel(created, null, now)
         }
     }
 }

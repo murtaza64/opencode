@@ -192,6 +192,12 @@ export const createFixture = () => new Promise((resolve) => {
       response.write("data: connected\n\n"); streams.add(response); request.on("close", () => streams.delete(response)); return
     }
     if (path === "/api/notifications") return json({ notifications: [] })
+    if (path === "/api/mail") return json({ editspace: url.searchParams.get("es"), lane: url.searchParams.get("lane"), messages: [
+      { id: "composer-float#7", ts: "2026-10-27T10:00:00Z", from: "es-app", to: "composer-float", kind: "task", deliveries: [{ message_id: "composer-float#7", recipient: "composer-float", session: "ses_composer", mode: "actionable", state: "handled", request_id: "msg_m1", presented_at: minutes(19), handled_at: minutes(18), wake_observations: [{ outcome: "scheduled", observedAt: minutes(20) }] }] },
+      { id: "composer-float#8", ts: "2026-10-27T10:05:00Z", from: "front-desk", to: "composer-float", kind: "question", deliveries: [{ message_id: "composer-float#8", recipient: "composer-float", session: "ses_composer", mode: "actionable", state: "admitted", request_id: "msg_m2", presented_at: null, handled_at: null, wake_observations: [] }] },
+      { id: "composer-float#9", ts: "2026-10-27T10:06:00Z", from: "human", to: "composer-float", kind: "answer", deliveries: [{ message_id: "composer-float#9", recipient: "composer-float", session: "ses_composer", mode: "actionable", state: "presented", request_id: "msg_m3", presented_at: minutes(13), handled_at: null, wake_observations: [{ outcome: "coalesced", observedAt: minutes(14) }] }] },
+    ] })
+    if (path === "/api/wake-events") return json({ events: [{ id: "pr-1", session: url.searchParams.get("session"), host: "laptop", cause: "passive-review", recipient: "composer-float", at: minutes(16), admission: "admitted", outcome: "unknown", covers: ["composer-float#7"] }] })
 
     // core
     if (path === "/session" && request.method === "GET") return json(Object.values(fixture.sessions))
