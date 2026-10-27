@@ -314,10 +314,32 @@ function markInlineCode(root: HTMLDivElement) {
   }
 }
 
+// A quoted message (often a draft to send) gets the same copy affordance as a code block.
+function ensureQuoteWrapper(quote: HTMLQuoteElement, labels: CopyLabels) {
+  const parent = quote.parentElement
+  if (!parent || parent.getAttribute("data-component") === "markdown-quote") return
+  const wrapper = document.createElement("div")
+  wrapper.setAttribute("data-component", "markdown-quote")
+  parent.replaceChild(wrapper, quote)
+  wrapper.append(quote, createCopyButton(labels))
+}
+
+/** A quote's own text: its paragraphs separated by a blank line and line breaks kept, without '>' markers. */
+export function quoteText(quote: Element) {
+  const block = (element: Element): string =>
+    element instanceof HTMLElement && element.innerText !== undefined ? element.innerText : (element.textContent ?? "")
+  const parts = Array.from(quote.children).map((child) => block(child).trim()).filter(Boolean)
+  return (parts.length ? parts.join("\n\n") : (quote.textContent ?? "")).trim()
+}
+
 function decorate(root: HTMLDivElement, labels: CopyLabels) {
   const blocks = Array.from(root.querySelectorAll("pre"))
   for (const block of blocks) {
     ensureCodeWrapper(block, labels)
+  }
+  // Only outermost quotes: a nested quote is copied as part of its parent.
+  for (const quote of Array.from(root.querySelectorAll("blockquote")).filter((quote) => !quote.parentElement?.closest("blockquote"))) {
+    ensureQuoteWrapper(quote as HTMLQuoteElement, labels)
   }
   if (!document.body.hasAttribute("data-new-layout")) return
   markInlineCode(root)
@@ -338,7 +360,8 @@ function setupCodeCopy(root: HTMLDivElement, getLabels: () => CopyLabels) {
     const button = target.closest('[data-slot="markdown-copy-button"]')
     if (!(button instanceof HTMLElement)) return
     const code = button.closest('[data-component="markdown-code"]')?.querySelector("code")
-    const content = code?.textContent ?? ""
+    const quote = button.closest('[data-component="markdown-quote"]')?.querySelector(":scope > blockquote")
+    const content = quote ? quoteText(quote) : (code?.textContent ?? "")
     if (!content) return
     const copied =
       (await navigator.clipboard?.writeText(content).then(

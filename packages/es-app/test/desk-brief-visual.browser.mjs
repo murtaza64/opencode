@@ -37,29 +37,30 @@ const thin = { ...base, id: "thin", revision: 1, created_at: now - 900_000, gate
   title: "Rename the ledger table?", context: "The table name collides with a new view. Rename it now or after the migration lands.",
   options: [{ id: "now", label: "Rename now" }, { id: "later", label: "After the migration" }], recommendation: "later" }
 
-// Drawn at a fixed 560 px width with 12-13 px text: never scaled up past the question's size.
-const svg = (body, height) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 ${height}" width="560" height="${height}" font-family="system-ui,sans-serif" font-size="12" fill="#cdd6f4">${body}</svg>`
-const box = (x, y, w, h, stroke, lines, extra = "") => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5" fill="#1e1e2e" stroke="${stroke}" ${extra}/>` +
-  lines.map((line, index) => `<text x="${x + 8}" y="${y + 18 + index * 15}"${index ? ' fill="#a6adc8"' : ' font-weight="600" font-size="13"'}>${line}</text>`).join("")
-const arrow = (x1, y1, x2, y2) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#7f849c" stroke-width="1.5" marker-end="url(#a)"/>`
-const defs = '<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#7f849c"/></marker></defs>'
+// Contract 4: mobile-first SVG laid out top to bottom at viewBox width 360, no width/height, text 13+ units,
+// colours only from the contract's tokens. Never scaled past 400 px on desktop, so text stays below the question's size.
+const svg = (body, height, width = 360) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" font-family="system-ui,sans-serif" font-size="13" style="fill:var(--fg)">${body}</svg>`
+const box = (x, y, w, h, stroke, lines, extra = "") => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5" style="fill:var(--surface);stroke:${stroke}" ${extra}/>` +
+  lines.map((line, index) => `<text x="${x + 8}" y="${y + 19 + index * 16}"${index ? ' style="fill:var(--muted)"' : ' font-weight="600"'}>${line}</text>`).join("")
+const arrow = (x1, y1, x2, y2) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" style="stroke:var(--line)" stroke-width="1.5" marker-end="url(#a)"/>`
+const defs = '<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" style="fill:var(--line)"/></marker></defs>'
 const probeVisual = svg(defs +
-  box(2, 2, 170, 50, "#89b4fa", ["Stage data", "read only"]) + arrow(172, 27, 192, 27) +
-  box(194, 2, 170, 50, "#89b4fa", ["6 build runs", "old vs new runtime"]) + arrow(364, 27, 384, 27) +
-  box(386, 2, 170, 50, "#89b4fa", ["Compare", "CPU seconds"]) + arrow(471, 52, 471, 70) +
-  box(386, 72, 170, 64, "#a6e3a1", ["Can show", "whether storage", "is the cause"]) +
-  box(194, 72, 170, 64, "#f9e2af", ["Can't show", "that fixing it fixes", "all of the CPU"]) +
-  box(2, 72, 170, 64, "#f38ba8", ["Not touched", "deploys, production,", "permissions, the fix"], 'stroke-dasharray="4 3"') +
-  `<text x="2" y="160" fill="#f9e2af">Observed: CPU per message about 9× baseline since the upgrade</text><text x="2" y="176" fill="#f9e2af">(a proxy, not a measured cause)</text>`, 184)
-// Option mockups at 16:10 with 11 px+ text, as the card shows them at full card width.
-const screen = (title, body) => `<style>body{margin:0!important}</style><div style="font:12px system-ui;color:#cdd6f4;display:flex;flex-direction:column;height:100vh;box-sizing:border-box;padding:6px">` +
-  `<div style="flex:1;border:1px solid #45475a;border-radius:6px;overflow:hidden;background:#11111b"><div style="padding:3px 8px;background:#313244;font-size:11px;color:#a6adc8">Payments workspace</div>` +
-  `<div style="padding:6px 8px">${body}</div></div><div style="margin-top:4px;color:#f9e2af;font-size:12px">${title}</div></div>`
-const tile = (text, color = "#45475a") => `<div style="border:1px solid ${color};border-radius:4px;padding:2px 6px;margin:3px 0">${text}</div>`
+  box(2, 2, 356, 42, "var(--accent)", ["Stage data, read only"]) + arrow(180, 44, 180, 62) +
+  box(2, 64, 356, 42, "var(--accent)", ["6 build runs: old vs new runtime"]) + arrow(180, 106, 180, 124) +
+  box(2, 126, 356, 42, "var(--accent)", ["Compare CPU seconds"]) + arrow(180, 168, 180, 186) +
+  box(2, 188, 174, 58, "var(--ok)", ["Can show", "if storage is the cause"]) +
+  box(184, 188, 174, 58, "var(--warn)", ["Can't show", "the whole CPU fix"]) +
+  box(2, 254, 356, 42, "var(--risk)", ["Not touched: deploys, production"], 'stroke-dasharray="4 3"') +
+  `<text x="2" y="318" style="fill:var(--warn)">Observed: CPU per message ~9× baseline</text><text x="2" y="336" style="fill:var(--warn)">(a proxy, not a measured cause)</text>`, 344)
+// Option mockups as SVG at viewBox 300×188 (16:10), text 13+ units.
+const screen = (title, lines) => svg(`<rect x="1" y="1" width="298" height="160" rx="6" style="fill:var(--surface);stroke:var(--line)"/>` +
+  `<text x="10" y="20" style="fill:var(--muted)">Payments workspace</text>` +
+  lines.map((line, index) => `<text x="12" y="${48 + index * 22}"${line.muted ? ' style="fill:var(--muted)"' : ""}>${line.text}</text>`).join("") +
+  `<text x="2" y="182" style="fill:var(--warn)">${title}</text>`, 188, 300)
 const sketches = {
-  overview: screen("You land on what's happening", tile("📌 Pinned: Launch plan · Runbook") + tile("● 2 agents working", "#a6e3a1") + tile("Changed today: 4 docs")),
-  "last-doc": screen("You land where you left off", '<div style="font-weight:600">Q3 pricing notes</div><div style="color:#a6adc8">…the doc you had open last…</div>'),
-  "start-doc": screen("Everyone lands on one page", '<div style="font-weight:600">Workspace README</div><div style="color:#a6adc8">the same page for everyone</div>'),
+  overview: screen("You land on what's happening", [{ text: "Pinned: Launch plan · Runbook" }, { text: "2 agents working" }, { text: "Changed today: 4 docs" }]),
+  "last-doc": screen("You land where you left off", [{ text: "Q3 pricing notes" }, { text: "…the doc you had open last…", muted: true }]),
+  "start-doc": screen("Everyone lands on one page", [{ text: "Workspace README" }, { text: "the same page for everyone", muted: true }]),
 }
 const refs = [{ id: "C1", label: "canonical decision" }, { id: "E1", label: "assistant message in source session", messageID: "msg_e1" },
   { id: "X1", label: "review-bot (bot) on GitHub review acme/etl-loader#143 workbench.yaml:38", url: "https://github.com/acme/etl-loader/pull/143#discussion_r4317428422" },
@@ -92,7 +93,7 @@ const results = old ? {
   probe: {
     question: "Run a read-only test of whether storage reads cause the CPU slowdown?",
     context: "Workers use about 9× more CPU since the runtime upgrade; nobody knows why yet. The test only reads data, but it runs build jobs with team credentials, so it needs your OK.",
-    visual: { title: "What the test touches and what it can tell us", html: probeVisual, height: 184 },
+    visual: { title: "What the test touches and what it can tell us", svg: probeVisual, alt: "Read-only stage data feeds six build runs whose CPU is compared; it can show whether storage is the cause, not the whole fix, and touches no deploys." },
     choices: [
       { id: "h1-probe", outcome: "About 90 minutes of read-only runs answer the storage question", note: "May stop early if the build machine can't read the data" },
       { id: "revert-gated", outcome: "The upgrade is undone through the normal review, without learning why" },
@@ -129,9 +130,12 @@ const message = (id, sessionID, role, text) => ({
 const session = (id, extra = {}) => ({ id, slug: id, projectID: "fixture", directory, title: id, version: "1", time: { created: now - 120_000, updated: now - 30_000 }, ...extra })
 const send = (res, body) => { res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify(body)) }
 const records = [probe, reply, squadron, thin]
+const published = structuredClone(records)
 // The reply's brief job failed: the conversation must still show, with one quiet line.
 let replyFails = false
 const briefs = records.map(item => ({ id: `ses_brief_${item.id}`, item }))
+// A brief for a later revision of the landing record, which History must never show for the earlier answer.
+let laterBrief = false
 const preview = await startAttentionPreview([{
   name: "visual-brief-fixture",
   configureServer(server) {
@@ -142,8 +146,10 @@ const preview = await startAttentionPreview([{
     server.middlewares.use("/oc/session", (req, res, next) => {
       const [, id, tail] = new URL(req.url, "http://preview").pathname.split("/")
       if (id?.startsWith("ses_fdbrief_") && !tail) return send(res, session(id, { time: { created: now, updated: now, archived: now } }))
-      if (id?.startsWith("ses_fdbrief_") && tail === "children") return send(res, briefs.map(brief => session(brief.id, { parentID: id, metadata: { frontDesk: {
-        kind: "brief", requestID: brief.id, source: `attention:fixture:${brief.item.id}`, revision: String(brief.item.revision), title: brief.item.title, refs, contract: old ? 2 : 3 } } })))
+      if (id?.startsWith("ses_fdbrief_") && tail === "children") return send(res, [...briefs, ...(laterBrief ? [{ id: "ses_brief_later", item: { ...squadron, revision: 5 } }] : [])].map(brief => session(brief.id, { parentID: id, metadata: { frontDesk: {
+        kind: "brief", requestID: brief.id, source: `attention:fixture:${brief.item.id}`, revision: String(brief.item.revision), title: brief.item.title, refs, contract: old ? 2 : 4 } } })))
+      if (id === "ses_brief_later" && tail === "message") return send(res, [message("msg_user", id, "user", "packet"),
+        message("msg_reply", id, "assistant", JSON.stringify({ ...results.landing, question: "A NEWER BRIEF for a later revision" }))])
       const brief = briefs.find(item => item.id === id)
       if (brief && tail === "message") return send(res, brief.item.id === "reply" && replyFails
         ? [message("msg_user", id, "user", "packet"), { ...message("msg_reply", id, "assistant", ""), info: { ...message("msg_reply", id, "assistant", "").info, error: { name: "ProviderAuthError" } } }]
@@ -161,7 +167,9 @@ const open = async (viewport, id, rtl = false, folded = false) => {
   await context.addInitScript(folded => { try { localStorage.setItem("es-app-all-projects", "true"); localStorage.setItem("es-app:front-desk:auto-prepare", "off"); localStorage.setItem("es-app:front-desk:chat-hidden", folded ? "1" : "0") } catch {} }, folded)
   await context.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
   const page = await context.newPage()
-  page.setDefaultNavigationTimeout(120_000)
+  // A cold dev server on a busy host can take minutes for the first load; later waits get headroom too.
+  page.setDefaultNavigationTimeout(300_000)
+  page.setDefaultTimeout(90_000)
   page.on("pageerror", error => console.error(`pageerror: ${error.message}`))
   await page.goto(`${preview.origin}/?item=${encodeURIComponent(`attention:fixture:${id}`)}`)
   if (rtl) await page.evaluate(() => { document.documentElement.dir = "rtl" })
@@ -187,11 +195,22 @@ try {
       await expect(card.locator(".home-request-line")).toContainText("Request: Worker CPU: authorize the read-only storage comparison?")
       const frame = card.locator(".desk-visual iframe")
       await expect(frame).toHaveAttribute("sandbox", "")
-      await expect(frame).toHaveAttribute("style", /block-size: 200px/)
+      // The drawing gets the app's colour tokens, so it matches es-app.
+      const srcdoc = await frame.getAttribute("srcdoc")
+      assert(srcdoc.includes("--fg:") && srcdoc.includes("--accent:#89b4fa") && srcdoc.includes("--surface:"), srcdoc.slice(0, 400))
+      // Sized by its viewBox, at most 400 px wide; described for screen readers.
+      await expect(frame).toHaveAttribute("style", /aspect-ratio: 1 \/ 0\.9555/)
+      await expect(frame).toHaveAttribute("title", /Read-only stage data feeds six build runs/)
+      const frameBox = await frame.boundingBox()
+      assert(frameBox && frameBox.width <= 400.5 && Math.abs(frameBox.height / frameBox.width - 344 / 360) < 0.02, JSON.stringify(frameBox))
       // Never cropped: the drawing fits its frame, and its text is no larger than the question.
       const drawn = await frame.contentFrame().locator("svg").evaluate(element => ({ height: element.getBoundingClientRect().height, view: innerHeight, scroll: document.documentElement.scrollHeight }))
       assert(drawn.scroll <= drawn.view + 1, `visual cropped ${JSON.stringify(drawn)}`)
-      const sizes = await frame.contentFrame().locator("text").evaluateAll(items => items.map(item => item.getBoundingClientRect().height))
+      // Rendered font size: the SVG font size scaled by the drawn width over the viewBox width.
+      const sizes = await frame.contentFrame().locator("text").evaluateAll(items => items.map(item => {
+        const root = item.ownerSVGElement
+        return parseFloat(getComputedStyle(item).fontSize) * root.getBoundingClientRect().width / root.viewBox.baseVal.width
+      }))
       const question = await card.locator("h3.home-question").evaluate(element => parseFloat(getComputedStyle(element).fontSize))
       assert(Math.max(...sizes) <= question, `visual text ${Math.max(...sizes)} > question ${question}`)
       await expect(frame.contentFrame().locator("svg")).toContainText("a proxy, not a measured cause")
@@ -245,9 +264,8 @@ try {
       await expect(bubbles.nth(1).locator(".desk-bubble-text")).toHaveText("seems legit enough; check if true and fix")
       await expect(bubbles.nth(1).locator("a.desk-bubble-who")).toHaveAttribute("href", "https://github.com/acme/etl-loader/pull/143#discussion_r4351575820")
       await expect(bubbles.nth(1).locator(".desk-bubble-text a")).toHaveCount(0)
-      // Notes fold behind "Add note"; no agent-speak after the recipient.
-      await expect(card.getByRole("textbox", { name: /Note/ })).toHaveCount(0)
-      await expect(card.getByRole("button", { name: "Add note" })).toBeVisible()
+      // The note is always an open text box; no agent-speak after the recipient.
+      await expect(card.getByRole("textbox", { name: /Note/ })).toBeVisible()
       await expect(card.locator(".home-answer")).not.toContainText("tool approval")
       await expect(card.locator(".home-sends blockquote")).toHaveText(DRAFT)
       await expect(card.locator(".desk-brief-sources a").first()).toHaveText("↗ GitHub · Jordan's comment")
@@ -278,12 +296,12 @@ try {
       // A plain label leads each option; the producer's exact label stays the radio's name.
       await expect(card.locator(".home-option-label").first()).toHaveText("An overview")
       await expect(card.locator(".home-option-label").filter({ hasText: "start:" })).toHaveCount(0)
-      // The picture sits on top of the card at full card width, 16:10.
+      // The picture sits on top of the card, 16:10, at its drawn width (300) or the card's, whichever is smaller.
       const sketchBox = await card.locator(".home-option-sketch iframe").first().boundingBox()
       const cardBox = await card.locator(".home-option-card").first().boundingBox()
-      assert(sketchBox && cardBox && sketchBox.y < cardBox.y + 20 && sketchBox.width > cardBox.width * 0.85 && Math.abs(sketchBox.width / sketchBox.height - 1.6) < 0.05, JSON.stringify({ sketchBox, cardBox }))
-      await expect(card.locator(".home-option-sketch iframe").nth(1).contentFrame().locator("body")).toContainText("the doc you had open last")
-      await expect(card.locator(".home-option-sketch iframe").first().contentFrame().locator("body")).toContainText("You land on what's happening")
+      assert(sketchBox && cardBox && sketchBox.y < cardBox.y + 20 && sketchBox.width >= Math.min(cardBox.width * 0.85, 299) && sketchBox.width <= 361 && Math.abs(sketchBox.width / sketchBox.height - 1.6) < 0.05, JSON.stringify({ sketchBox, cardBox }))
+      await expect(card.locator(".home-option-sketch iframe").nth(1).contentFrame().locator("svg")).toContainText("the doc you had open last")
+      await expect(card.locator(".home-option-sketch iframe").first().contentFrame().locator("svg")).toContainText("You land on what's happening")
       await expect(card.locator(".home-option-card").first()).toContainText("Pinned docs, active agents and recent changes")
       // Configuration names stay out of the reading path; the producer's labels still bind the answer.
       await expect(card.locator(".desk-brief-context")).not.toContainText("start:")
@@ -300,6 +318,44 @@ try {
       if (shots) await page.screenshot({ path: path.join(shots, "after-landing.png") })
       console.log(`LANDING 3 option mockups; Send bottom ${Math.round(bottom)}px`)
     }
+    // Answering retires the action, not the explanation: History reopens the exact brief seen when
+    // answering (recorded on the answer), across reload, even after the record moved to a later revision.
+    {
+      const { page, card } = await open({ width: 1440, height: 1000 }, "landing")
+      await expect(card.locator("h3.home-question")).toBeVisible({ timeout: 120_000 })
+      const posts = []
+      page.on("request", request => { if (request.method() === "POST" && request.url().includes("/commands")) posts.push(JSON.parse(request.postData())) })
+      await card.getByRole("radio", { name: squadron.options[0].label, exact: true }).check()
+      await card.getByRole("button", { name: `Send ${squadron.options[0].label}`, exact: true }).click()
+      await expect.poll(() => posts.length, { timeout: 30_000 }).toBe(1)
+      assert.deepEqual(posts[0].brief, { job: "ses_brief_landing", revision: "2" })
+      // Later the record moves on (resolved at a newer revision) and a brief exists for that revision too.
+      const stored = preview.ledger.records.find(item => item.id === "landing")
+      await expect.poll(() => stored.answer?.brief?.job, { timeout: 30_000 }).toBe("ses_brief_landing")
+      stored.status = "resolved"
+      stored.revision = 5
+      laterBrief = true
+      await page.reload()
+      await page.locator(".desk-history summary").click()
+      await page.locator(".desk-history").getByRole("button", { name: /^Resolved/ }).click()
+      const row = page.locator(".desk-history .desk-item", { hasText: squadron.title })
+      await expect(row.locator(".desk-item-answer")).toContainText(squadron.options[0].label)
+      await row.click()
+      const reopened = page.locator('[data-attention-id="landing"]')
+      await expect(reopened.locator("h3.home-question")).toHaveText("What should someone see first when they open a workspace?", { timeout: 60_000 })
+      await expect(reopened.locator(".home-option-sketch iframe")).toHaveCount(3)
+      await expect(reopened.getByRole("radio")).toHaveCount(0)
+      await expect(reopened.getByRole("button", { name: /^Send/ })).toHaveCount(0)
+      await expect(reopened).toContainText(`You chose ${squadron.options[0].label}`)
+      await expect(reopened).not.toContainText("A NEWER BRIEF")
+      if (shots) await page.screenshot({ path: path.join(shots, "after-landing-history.png") })
+      console.log("HISTORY answered brief reopened after reload at a later revision: same question + mockups, answer shown, no controls")
+      // Later checks use the landing request open again, as published.
+      const fresh = published.find(item => item.id === "landing")
+      Object.assign(stored, structuredClone(fresh), { status: "open", answer: undefined, delivery_state: "not-requested", delivery: undefined })
+      laterBrief = false
+    }
+
     // An incomplete brief does not stand in: plain radios and the request as written.
     {
       const { card } = await open({ width: 1440, height: 1000 }, "thin")
@@ -318,13 +374,14 @@ try {
       const explain = await card.locator(".home-decision-explain").boundingBox()
       const act = await card.locator(".home-decision-act").boundingBox()
       // Picture options are the options: they spread across the full width instead of a side column.
-      if (id === "landing") assert(question && act && Math.abs(question.x - act.x) < 2 && act.width > 900, JSON.stringify({ question, act }))
-      else assert(question && explain && act && explain.x + explain.width <= question.x && Math.abs(question.x - act.x) < 2 && act.y >= question.y, JSON.stringify({ question, explain, act }))
+      // The question heads the explainer column; the options and Send sit beside it at the same top.
+      if (id === "landing") assert(question && act && act.width > 900 && act.y > question.y, JSON.stringify({ question, act }))
+      else assert(question && explain && act && question.x >= explain.x && question.x + question.width <= explain.x + explain.width + 1 && act.x >= explain.x + explain.width && Math.abs(act.y - explain.y) < 2, JSON.stringify({ question, explain, act }))
       const bottom = await sendBottom(card)
       assert(bottom && bottom <= 1000, `${id} folded Send bottom ${bottom}`)
       assert.deepEqual(await unclipped(card), [])
       if (shots) await page.screenshot({ path: path.join(shots, `after-${id}-folded.png`) })
-      console.log(`FOLDED ${id}: ${id === "landing" ? "picture options across the width" : "picture left, question+options+Send right"}; Send bottom ${Math.round(bottom)}px`)
+      console.log(`FOLDED ${id}: ${id === "landing" ? "picture options across the width" : "question + picture left, options + Send right"}; Send bottom ${Math.round(bottom)}px`)
     }
     // Narrow and RTL: nothing scrolls sideways, nothing is clipped.
     for (const [id, rtl] of [["landing", false], ["reply", true], ["probe", false]]) {
@@ -340,6 +397,7 @@ try {
 } catch (error) {
   failed = true
   console.error(error)
+  for (const context of browser.contexts()) for (const page of context.pages()) console.error(`--- page ${page.url()}\n${(await page.locator("main").innerText().catch(() => "")).slice(0, 1500)}`)
 } finally {
   await browser.close()
   await preview.close()

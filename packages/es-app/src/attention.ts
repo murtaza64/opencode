@@ -5,6 +5,8 @@ export type AttentionRecord = {
   id: string
   editspace: string
   revision: number
+  /** Revision of the last publish/update; answer/snooze/wake leave it. Absent on older records. */
+  content_revision?: number
   status: "open" | "snoozed" | "decided" | "answered" | "resolved" | "withdrawn"
   lane?: string | null
   kind: "decision" | "blocker"
@@ -18,7 +20,8 @@ export type AttentionRecord = {
   source_ref: { session_id: string; directory: string }
   decision: { choice_id: string; label?: string } | string | null
   delivery_state: DeliveryState
-  answer?: { id: string; text: string; choice_id: string | null; input_value?: InputValue; answered_at: number } | null
+  /** `brief`: the prepared brief shown when answering, so History can reopen exactly that explanation. */
+  answer?: { id: string; text: string; choice_id: string | null; input_value?: InputValue; answered_at: number; revision?: number; brief?: { job: string; revision: string } | null } | null
   delivery?: {
     state: DeliveryState
     reason: string | null
@@ -90,9 +93,13 @@ export type AttentionAction = {
   choice_id?: string
   text?: string
   input_value?: InputValue
+  brief?: { job: string; revision: string }
   snoozed_until?: number
   reason?: string
 }
+
+/** What a brief is prepared for: the request's content, not its status (older records fall back to revision). */
+export const contentRevision = (record: AttentionRecord) => record.content_revision ?? record.revision
 
 export const attentionPath = (path = "", editspace?: string) => `/es/api/attention${path}${editspace ? `?es=${encodeURIComponent(editspace)}` : ""}`
 

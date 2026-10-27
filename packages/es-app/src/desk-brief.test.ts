@@ -17,7 +17,7 @@ test("a file source resolves only to a markdown doc; anything else has no destin
 })
 
 test("a brief stands in for the request only with a question and every option's outcome", () => {
-  const result: BriefResult = { question: "Pick A or B?", context: "", choices: [{ id: "a", label: "", outcome: "Ships", note: "" }], ifWait: "", sends: "", sources: [], facts: [], timeline: [], gaps: [] }
+  const result: BriefResult = { question: "Pick A or B?", context: "", choices: [{ id: "a", label: "", outcome: "Ships", note: "" }], ifWait: "", sends: "", sendsTo: "", sendsAs: "", subjects: [], sources: [], facts: [], timeline: [], gaps: [] }
   expect(briefComplete(result, item)).toBe(false)
   const both = { ...result, choices: [...result.choices, { id: "b", label: "", outcome: "Waits", note: "" }] }
   expect(briefComplete(both, item)).toBe(true)
@@ -26,7 +26,7 @@ test("a brief stands in for the request only with a question and every option's 
 
 test("text a decision would publish is shown only when quoted verbatim from the request", () => {
   const record = { ...item, record: { options: [], context: "Draft reply: 'Checked: not needed.' Rule: ask first." } } as unknown as DeskItem
-  const result: BriefResult = { question: "Post it?", context: "", choices: [], ifWait: "", sends: "Checked: not needed.", sources: [], facts: [], timeline: [], gaps: [] }
+  const result: BriefResult = { question: "Post it?", context: "", choices: [], ifWait: "", sends: "Checked: not needed.", sendsTo: "", sendsAs: "", subjects: [], sources: [], facts: [], timeline: [], gaps: [] }
   expect(briefSends(result, record)).toBe("Checked: not needed.")
   expect(briefSends({ ...result, sends: "Checked: definitely not needed." }, record)).toBe("")
 })

@@ -147,8 +147,6 @@ try {
   const answerInUi = async (id, text) => {
     await openItem(id)
     const card = page.locator(`[data-attention-id="${id}"]`)
-    // With options the note is folded behind "Add note".
-    if (await card.getByRole("button", { name: "Add note" }).count()) await card.getByRole("button", { name: "Add note" }).click()
     await card.getByRole("textbox", { name: /Your answer|Note/ }).fill(text)
     await card.getByRole("button", { name: "Send answer", exact: true }).click()
     await expect(page.locator(".home-notice")).toContainText("Answer saved")
@@ -220,10 +218,7 @@ try {
     await openItem(id)
     const card = page.locator(`[data-attention-id="${id}"]`)
     await card.getByRole("radio", { name: label, exact: true }).check()
-    if (note) {
-      await card.getByRole("button", { name: "Add note" }).click()
-      await card.getByRole("textbox", { name: /Note/ }).fill(note)
-    }
+    if (note) await card.getByRole("textbox", { name: /Note/ }).fill(note)
     await card.getByRole("button", { name: `Send ${label}`, exact: true }).click()
   }
   const pick = publish(sessionB, "issue:238:selection-only:v1", "Selection-only decision")

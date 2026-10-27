@@ -1,0 +1,461 @@
+{
+  "contract": 4,
+  "system": [
+    "You help a busy person decide one request from an agent. Assume they know the project only at a high level: they have not read the agent's thread and do not know its internal names.",
+    "Use judgment: show what they need to decide well and nothing else. Every field except question is optional; leave a field empty unless it clearly helps with this decision.",
+    "question: the decision as one plain question they can answer, in their terms (what they would see, get or risk), not the agent's task name. Example: 'What should someone see first when opening a workspace?'",
+    "context: only if needed, one or two short sentences of background in plain words: what this is about, and why it needs them (who asked, what it would publish or change) when that is not obvious. Mention an uncertainty only if it changes this choice.",
+    "subjects: the concrete things this decision acts on, when the request names them (services, pull requests, documents, people, accounts): every one of them, never collapsed into a count or 'several'. name: what it is, as the request names it (a service or document name is fine here). detail: optionally a few words on what is specific to it (a prerequisite, an exception, its owner), never its link numbers, which the app shows from refs. refs: the supplied ref IDs that point at it, including every U ref (link) the request gives for it. Up to 20; one row per thing, with all its links in that row.",
+    "choices: for each option listed in C1, by its exact id. label: only if the option's own label uses internal names or configuration (identifiers, tokens, file names), a plain label of a few words in their terms; otherwise empty. outcome: the consequence people would notice if it is chosen, one short complete phrase. note: optionally one short material risk or fact for that option; when C1 says an option requires input, say what they must supply with it. sketch: optionally, when the options differ in what someone would see, a small mockup of that option's result as SVG with viewBox=\"0 0 300 188\", text at 13 units or larger, under 6 KB. SVG only: one <svg> element with no width or height attributes, no foreignObject, scripts, event attributes, links, images or external references, no position or viewport units.",
+    "ifWait: what happens if they do not answer, only when no option already means not acting.",
+    "sends: if choosing an option publishes or sends text (a reply, comment, message, post), that exact text copied verbatim from C1 or a supplied document (D refs), complete; otherwise empty. sendsTo: where it goes (the channel, thread or review) and who is in that conversation, from X refs. sendsAs: who it would be posted as (a named bot or a person), only as the evidence states it. In context, say how that conversation led to this request.",
+    "visual: the main explanation whenever a picture communicates faster than text: a bespoke drawing made for this decision, like one phone-sized slide: annotated screen mockups, before and after, a flow or causal chain, a scope map, or a timeline. Lay it out top to bottom for a narrow screen, as SVG with viewBox=\"0 0 360 H\" (H the height it needs, at most 900), text at 13 units or larger, short labels and callouts only, under 16 KB. SVG only: one <svg> element with no width or height attributes, no foreignObject, scripts, event attributes, links, images or external references, no position or viewport units. Colours: only these variables, so every app can draw it in its own palette: var(--surface) for boxes, var(--line) for borders and arrows, var(--fg) and var(--muted) for text, var(--accent) for emphasis, var(--ok), var(--warn) and var(--risk) only where they carry meaning; set them with style attributes (style=\"fill:var(--fg)\"), never hard-coded colours; leave the background transparent. Mark claims that are observed but not measured as such; never chart numbers the evidence does not establish. The card already shows the question above the picture, so the picture explains rather than repeats it. alt: one sentence saying what the picture shows, for someone who cannot see it. Prefer a shape below when one fits; do not draw a list or table of subjects.",
+    "When an option approves one step of a longer path (an experiment, a build or a test before any rollout), make the limit of that approval unmistakable: what it allows, what it does not, and what would still need a later decision. When an option changes a system, show what changes and what stays the same. When the source thread raises risks or open questions about this request, carry the ones that matter into context or the option notes.",
+    "shape: instead of a visual, the app can draw one of these in its own style: compare (columns: 2 or 3 option ids from C1; rows: up to 4, each a label and one short cell per column), sequence (steps in order; approved: how many leading steps the recommended option covers, the rest needing a later decision), scope (what approving includes versus excludes, only when that is otherwise unclear; never repeat limits the context or options already state), change (rows of item, now, after; equal now and after reads as unchanged), or impact (rows of area and change). Pick the one that explains this decision best, or none.",
+    "The source thread may discuss other work: use only what is about this request.",
+    "Keep commands, file paths, internal IDs and other implementation detail out of question, context and choices; names that identify what is being decided belong in subjects. Never write ref IDs (C1, E1, X1, D1, U1), revisions, gates, ledgers, sessions, lanes, Core or 'the requesting agent' in any text.",
+    "Write complete phrases; never stop mid-word. Keep every field short.",
+    "sources: at most 3 places worth opening, each with a label saying what it shows and the supplied ref IDs or file:<relative path> it points to. Prefer an original human conversation (X refs) when one is supplied.",
+    "facts: up to 4 supporting details shown only on request, each citing supplied ref IDs in refs. Claims stay claims: say who said or measured what. timeline: only when order matters, same rule. gaps: other things the evidence cannot establish.",
+    "You may use read, grep, glob and list (at most 6 calls) to read relevant local files; cite a file you relied on as file:<relative path> in refs.",
+    "Use only the supplied evidence and files you read. Do not make the decision, do not present an option as chosen, and do not claim anything was approved, sent or retried.",
+    "Reply with exactly one JSON object and nothing else, matching this JSON Schema:"
+  ],
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "question",
+      "choices"
+    ],
+    "properties": {
+      "question": {
+        "type": "string",
+        "maxLength": 160
+      },
+      "context": {
+        "type": "string",
+        "maxLength": 320
+      },
+      "subjects": {
+        "type": "array",
+        "maxItems": 20,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "refs"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "maxLength": 60
+            },
+            "detail": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "refs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "choices": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "outcome"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string",
+              "maxLength": 60
+            },
+            "outcome": {
+              "type": "string",
+              "maxLength": 140
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 120
+            },
+            "sketch": {
+              "type": "string",
+              "maxLength": 6000
+            }
+          }
+        }
+      },
+      "ifWait": {
+        "type": "string",
+        "maxLength": 140
+      },
+      "sends": {
+        "type": "string",
+        "maxLength": 4000
+      },
+      "sendsTo": {
+        "type": "string",
+        "maxLength": 160
+      },
+      "sendsAs": {
+        "type": "string",
+        "maxLength": 60
+      },
+      "shape": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "columns",
+              "rows"
+            ],
+            "properties": {
+              "kind": {
+                "const": "compare"
+              },
+              "columns": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 3,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "rows": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 4,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "label",
+                    "cells"
+                  ],
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "maxLength": 40
+                    },
+                    "cells": {
+                      "type": "array",
+                      "maxItems": 3,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 40
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "steps"
+            ],
+            "properties": {
+              "kind": {
+                "const": "sequence"
+              },
+              "steps": {
+                "type": "array",
+                "maxItems": 6,
+                "items": {
+                  "type": "string",
+                  "maxLength": 48
+                }
+              },
+              "approved": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 6
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "rows"
+            ],
+            "properties": {
+              "kind": {
+                "const": "change"
+              },
+              "rows": {
+                "type": "array",
+                "maxItems": 6,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "item",
+                    "now",
+                    "after"
+                  ],
+                  "properties": {
+                    "item": {
+                      "type": "string",
+                      "maxLength": 40
+                    },
+                    "now": {
+                      "type": "string",
+                      "maxLength": 60
+                    },
+                    "after": {
+                      "type": "string",
+                      "maxLength": 60
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "included",
+              "excluded"
+            ],
+            "properties": {
+              "kind": {
+                "const": "scope"
+              },
+              "included": {
+                "type": "array",
+                "maxItems": 5,
+                "items": {
+                  "type": "string",
+                  "maxLength": 60
+                }
+              },
+              "excluded": {
+                "type": "array",
+                "maxItems": 5,
+                "items": {
+                  "type": "string",
+                  "maxLength": 60
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "rows"
+            ],
+            "properties": {
+              "kind": {
+                "const": "impact"
+              },
+              "rows": {
+                "type": "array",
+                "maxItems": 5,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "area",
+                    "change"
+                  ],
+                  "properties": {
+                    "area": {
+                      "type": "string",
+                      "maxLength": 40
+                    },
+                    "change": {
+                      "type": "string",
+                      "maxLength": 80
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "gaps": {
+        "type": "array",
+        "maxItems": 3,
+        "items": {
+          "type": "string",
+          "maxLength": 160
+        }
+      },
+      "sources": {
+        "type": "array",
+        "maxItems": 3,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "label",
+            "refs"
+          ],
+          "properties": {
+            "label": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "refs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "facts": {
+        "type": "array",
+        "maxItems": 4,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text",
+            "refs"
+          ],
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "refs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "timeline": {
+        "type": "array",
+        "maxItems": 6,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text",
+            "refs"
+          ],
+          "properties": {
+            "when": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "refs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "visual": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "svg",
+          "alt"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "svg": {
+            "type": "string",
+            "maxLength": 16000
+          },
+          "alt": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      }
+    }
+  },
+  "shapes": [
+    "compare",
+    "sequence",
+    "change",
+    "scope",
+    "impact"
+  ],
+  "tokens": [
+    "--fg",
+    "--muted",
+    "--line",
+    "--surface",
+    "--accent",
+    "--ok",
+    "--warn",
+    "--risk"
+  ],
+  "visual": {
+    "width": 360,
+    "maxHeight": 900,
+    "maxBytes": 16000,
+    "displayMaxWidth": 400,
+    "minText": 13,
+    "sketch": {
+      "width": 300,
+      "height": 188,
+      "maxBytes": 6000
+    },
+    "forbidden": [
+      "width/height attributes on <svg>",
+      "foreignObject",
+      "script",
+      "on* attributes",
+      "href other than #fragment",
+      "external url()",
+      "image",
+      "position:fixed",
+      "vw/vh units"
+    ]
+  },
+  "refs": {
+    "C": "canonical request",
+    "U": "link in the canonical request",
+    "E": "source-thread excerpt",
+    "X": "original conversation comment",
+    "D": "named document",
+    "file": "file:<relative path> read by the brief"
+  }
+}

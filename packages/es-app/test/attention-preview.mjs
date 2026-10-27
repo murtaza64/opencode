@@ -79,7 +79,8 @@ export const startAttentionPreview = async (plugins = []) => {
             const input = record.options.find(option => option.id === body.choice_id)?.input
             if (input?.required && (body.input_value === undefined || body.input_value.length === 0)) return json({ error: `${input.label} is required for ${record.options.find(option => option.id === body.choice_id).label}` }, 400)
             record.status = "answered"
-            record.answer = { id: `answer-${record.id}`, text: body.text ?? "", choice_id: body.choice_id ?? null, ...(body.input_value !== undefined ? { input_value: body.input_value } : {}), answered_at: Date.now() }
+            // As the ledger does: the answered revision, any supplied input, and the brief on screen when answering.
+            record.answer = { id: `answer-${record.id}`, text: body.text ?? "", choice_id: body.choice_id ?? null, ...(body.input_value !== undefined ? { input_value: body.input_value } : {}), answered_at: Date.now(), revision: record.revision, ...(body.brief ? { brief: body.brief } : {}) }
             record.delivery_state = "pending"
             record.delivery = { state: "pending", reason: null, lane: record.lane ?? null, session: null, message_id: null, error: null, updated_at: Date.now(), presented_at: null, handled_at: null, copies: [] }
           }
