@@ -104,7 +104,43 @@ export const SessionListQuery = Schema.Struct({
   archived: Schema.optional(QueryBoolean),
 })
 
+const UsageTokens = Schema.Struct({
+  input: Schema.Number,
+  output: Schema.Number,
+  reasoning: Schema.Number,
+  cache: Schema.Struct({ read: Schema.Number, write: Schema.Number }),
+})
+export const UsageDailyQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  days: Schema.optional(Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 90 }))),
+  offsetMinutes: Schema.optional(
+    Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: -840, maximum: 840 })),
+  ),
+})
+export const UsageDailyResponse = Schema.Struct({
+  estimate: Schema.Literal(true),
+  basis: Schema.String,
+  host: Schema.String,
+  observedAt: Schema.String,
+  offsetMinutes: Schema.Number,
+  coverage: Schema.Struct({
+    scope: Schema.String,
+    liveSince: Schema.optional(Schema.String),
+    backfilled: Schema.Boolean,
+  }),
+  days: Schema.Array(
+    Schema.Struct({
+      day: Schema.String,
+      cost: Schema.Number,
+      models: Schema.Array(
+        Schema.Struct({ provider: Schema.String, model: Schema.String, cost: Schema.Number, tokens: UsageTokens }),
+      ),
+    }),
+  ),
+}).annotate({ identifier: "UsageDaily" })
+
 export const ExperimentalPaths = {
+  usageDaily: "/experimental/usage/daily",
   capabilities: "/experimental/capabilities",
   console: "/experimental/console",
   consoleOrgs: "/experimental/console/orgs",
@@ -131,6 +167,17 @@ export const ExperimentalApi = HttpApi.make("experimental")
             identifier: "experimental.capabilities.get",
             summary: "Get experimental capabilities",
             description: "Get experimental features enabled on the OpenCode server.",
+          }),
+        ),
+        HttpApiEndpoint.get("usageDaily", ExperimentalPaths.usageDaily, {
+          query: UsageDailyQuery,
+          success: described(UsageDailyResponse, "Estimated spend per local day"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.usage.daily",
+            summary: "Get estimated daily spend",
+            description:
+              "Estimated model spend on this host per local day (default 7 days including today; offsetMinutes = local offset from UTC, default the server's). Token counts priced by the local model catalog, not provider billing. Only messages that ran on this host count.",
           }),
         ),
         HttpApiEndpoint.get("console", ExperimentalPaths.console, {

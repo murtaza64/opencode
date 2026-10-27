@@ -117,6 +117,7 @@ import { workspaceRoutingLayer } from "./middleware/workspace-routing"
 import { disposeMiddleware } from "./lifecycle"
 import { memoMap } from "@opencode-ai/core/effect/memo-map"
 import { compressionLayer } from "./middleware/compression"
+import { UsageRollup } from "@opencode-ai/core/usage/rollup"
 import { corsVaryFix } from "./middleware/cors-vary"
 import { diagnosticsRoute, diagnosticsTimingLayer } from "./middleware/diagnostics"
 import { errorLayer } from "./middleware/error"
@@ -224,6 +225,7 @@ const app = LayerNode.group([
   FSUtil.node,
   Database.node,
   DatabaseReader.node,
+  UsageRollup.node,
   Auth.node,
   Account.node,
   Config.node,

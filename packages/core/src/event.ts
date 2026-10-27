@@ -115,6 +115,12 @@ export class SubscriberOverflowError extends Schema.TaggedErrorClass<SubscriberO
 export const define = Event.define
 export const versionedType = Event.versionedType
 
+/**
+ * True while projectors run for a replayed event (sync, import, workspace moves) rather than for an event this
+ * process published. Projections of host-local facts, such as where model spend happened, skip replays.
+ */
+export const Replaying = Context.Reference<boolean>("@opencode/Event/Replaying", { defaultValue: () => false })
+
 export interface PublishOptions {
   readonly id?: ID
   readonly metadata?: Record<string, unknown>
@@ -459,7 +465,7 @@ export const layerWith = (options?: LayerOptions) =>
               aggregateID: event.aggregateID,
               ownerID: options?.ownerID,
               strictOwner: options?.strictOwner,
-            })
+            }).pipe(Effect.provideService(Replaying, true))
             if (committed && options?.publish) {
               yield* notify(
                 {

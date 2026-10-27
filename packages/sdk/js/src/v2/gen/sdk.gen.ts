@@ -48,6 +48,8 @@ import type {
   ExperimentalSessionFailedResponses,
   ExperimentalSessionListErrors,
   ExperimentalSessionListResponses,
+  ExperimentalUsageDailyErrors,
+  ExperimentalUsageDailyResponses,
   ExperimentalWorkspaceAdapterListErrors,
   ExperimentalWorkspaceAdapterListResponses,
   ExperimentalWorkspaceCreateErrors,
@@ -737,6 +739,46 @@ export class Capabilities extends HeyApiClient {
   }
 }
 
+export class Usage extends HeyApiClient {
+  /**
+   * Get estimated daily spend
+   *
+   * Estimated model spend on this host per local day (default 7 days including today; offsetMinutes = local offset from UTC, default the server's). Token counts priced by the local model catalog, not provider billing. Only messages that ran on this host count.
+   */
+  public daily<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      days?: string
+      offsetMinutes?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "days" },
+            { in: "query", key: "offsetMinutes" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      ExperimentalUsageDailyResponses,
+      ExperimentalUsageDailyErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/usage/daily",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Console extends HeyApiClient {
   /**
    * Get active Console provider metadata
@@ -1327,6 +1369,11 @@ export class Experimental extends HeyApiClient {
   private _capabilities?: Capabilities
   get capabilities(): Capabilities {
     return (this._capabilities ??= new Capabilities({ client: this.client }))
+  }
+
+  private _usage?: Usage
+  get usage(): Usage {
+    return (this._usage ??= new Usage({ client: this.client }))
   }
 
   private _console?: Console

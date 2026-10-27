@@ -2343,6 +2343,37 @@ export type ExperimentalCapabilities = {
   }
 }
 
+export type UsageDaily = {
+  estimate: true
+  basis: string
+  host: string
+  observedAt: string
+  offsetMinutes: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  coverage: {
+    scope: string
+    liveSince?: string
+    backfilled: boolean
+  }
+  days: Array<{
+    day: string
+    cost: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    models: Array<{
+      provider: string
+      model: string
+      cost: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      tokens: {
+        input: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        output: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        reasoning: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        cache: {
+          read: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          write: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        }
+      }
+    }>
+  }>
+}
+
 export type ConsoleState = {
   consoleManagedProviders: Array<string>
   activeOrgName?: string
@@ -8526,6 +8557,36 @@ export type ExperimentalCapabilitiesGetResponses = {
 
 export type ExperimentalCapabilitiesGetResponse =
   ExperimentalCapabilitiesGetResponses[keyof ExperimentalCapabilitiesGetResponses]
+
+export type ExperimentalUsageDailyData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    days?: string
+    offsetMinutes?: string
+  }
+  url: "/experimental/usage/daily"
+}
+
+export type ExperimentalUsageDailyErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ExperimentalUsageDailyError = ExperimentalUsageDailyErrors[keyof ExperimentalUsageDailyErrors]
+
+export type ExperimentalUsageDailyResponses = {
+  /**
+   * Estimated spend per local day
+   */
+  200: UsageDaily
+}
+
+export type ExperimentalUsageDailyResponse = ExperimentalUsageDailyResponses[keyof ExperimentalUsageDailyResponses]
 
 export type ExperimentalConsoleGetData = {
   body?: never
