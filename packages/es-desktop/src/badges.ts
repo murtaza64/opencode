@@ -8,7 +8,13 @@ export type BadgeHost = { id: string; read: (path: string) => Promise<Response> 
 
 const INTERVAL = 30_000
 
-export const watchBadges = (hosts: BadgeHost[], set: (id: string, badge: Badge) => void, interval = INTERVAL) => {
+export const watchBadges = (
+  hosts: BadgeHost[],
+  set: (id: string, badge: Badge) => void,
+  interval = INTERVAL,
+  // Reads pause while this is false (window hidden or minimized) and resume with one read.
+  visible: () => boolean = () => true,
+) => {
   const running = new Set<string>()
   const check = (host: BadgeHost) => {
     if (running.has(host.id)) return
@@ -17,10 +23,12 @@ export const watchBadges = (hosts: BadgeHost[], set: (id: string, badge: Badge) 
       .then((badge) => set(host.id, badge))
       .finally(() => running.delete(host.id))
   }
-  const all = () => hosts.forEach(check)
+  const all = () => {
+    if (visible()) hosts.forEach(check)
+  }
   all()
   const timer = setInterval(all, interval)
-  return () => clearInterval(timer)
+  return { stop: () => clearInterval(timer), refresh: all }
 }
 
 export const readBadge = async (host: BadgeHost): Promise<Badge> => {
