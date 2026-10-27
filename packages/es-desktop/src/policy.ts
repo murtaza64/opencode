@@ -115,7 +115,7 @@ export const appRouteURL = (value: string, origin: string) => {
 export const apiAllowed = (method: string, pathname: string) => {
   const routes: Record<string, RegExp[]> = {
     GET: [
-      /^\/oc\/(event|global\/event|experimental\/(session|session\/failed|capabilities)|umbrella\/session|session|session\/status|permission|question|config\/providers|agent)$/,
+      /^\/oc\/(event|global\/event|experimental\/(session|session\/failed|capabilities|usage\/daily)|umbrella\/session|session|session\/status|permission|question|config\/providers|agent)$/,
       /^\/oc\/session\/[\w-]+(?:\/(message|input)(?:\/[\w-]+)?|\/todo|\/children)?$/,
       /^\/es\/api\/(editspaces|state|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work|mail|subscriptions|handoffs|lane-provenance|frontdesk\/memory|frontdesk\/ignored-failures|surfaces)$/,
       /^\/es\/api\/attention(?:\/session|\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/,
