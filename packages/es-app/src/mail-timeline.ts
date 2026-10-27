@@ -1,5 +1,5 @@
 import type { Message } from "@opencode-ai/sdk/v2"
-import type { MailDelivery, MailMessage, MailTimeline } from "./api"
+import type { MailDelivery, MailMessage, MailTimeline, MailWakeState } from "./api"
 import type { SquadronMeta } from "./mail-origin"
 
 export const mailLocation = (directory: string, editspaces: { name: string; root: string }[], sessionID?: string):
@@ -101,6 +101,24 @@ export const mailWake = (delivery?: MailDelivery) => {
   if (delivery?.mode === "passive" || delivery?.mode === "mute") return "Did not wake · passive"
   return "Wake/resume unknown"
 }
+
+// The chip's wake cue comes only from the dashboard's typed evidence, never from text, admission or
+// scheduling. Incoming mail reads this session's delivery; outgoing reads the recipients'. Mixed or
+// missing evidence draws no cue: per-recipient detail stays in the expansion.
+export const mailChipWake = (deliveries: readonly MailDelivery[], direction: MailDirection, sessionID?: string) => {
+  if (direction === "unknown") return undefined
+  const relevant = direction === "in" ? deliveries.filter((delivery) => delivery.session === sessionID) : deliveries
+  const states = new Set(relevant.map((delivery) => delivery.wake))
+  const [state] = states
+  return states.size === 1 && state ? state : undefined
+}
+
+export const mailWakeLabel = (state: MailWakeState, agent: string) => ({
+  caused: `Woke ${agent}`,
+  joined: `Arrived while ${agent} was working`,
+  none: "Recorded, did not wake",
+  unknown: "Wake not confirmed",
+})[state]
 
 type TimelineRow = { type: "transcript"; message: Message; timestamp: number } | { type: "mail"; message: MailMessage; timestamp: number }
 

@@ -2,7 +2,7 @@ import { createMemo, createSignal, For, Index, Show, type ComponentProps, type J
 import { Message } from "@opencode-ai/session-ui/message-part"
 import { errorText } from "../live-session"
 import type { MailDelivery, MailMessage } from "../api"
-import { mailActionableStatus, mailActivityLabel, mailSentAt, mailWake } from "../mail-timeline"
+import { mailActionableStatus, mailActivityLabel, mailChipWake, mailSentAt, mailWake, mailWakeLabel } from "../mail-timeline"
 import { MailWakeEvidence } from "./mail-wake-evidence"
 import { ChatImages } from "./chat-images"
 import type { Segment } from "../transcript-groups"
@@ -110,6 +110,10 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
           name={props.mailName} origin={origin()} />}
         partyText={senderText(metadata().mail.sender, props.mailRecord?.sender_session ?? metadata().mail.senderSession, props.mailName, origin())}
         purpose={mailPurpose(metadata().label, metadata().kind)} sentAt={props.mailRecord ? mailSentAt(props.mailRecord) : undefined}
+        wake={(() => {
+          const state = mailChipWake(props.mailDeliveries ?? [], "in", props.message.sessionID)
+          return state && { state, label: mailWakeLabel(state, "this agent") }
+        })()}
         status={mailActionableStatus({ deliveries: props.mailDeliveries ?? [], kind: metadata().kind, direction: "in" })} />
       <div class="mail-activity-details">
         <Show when={props.parts.every(part => part.type === "text" || part.type === "file")}

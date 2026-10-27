@@ -1,6 +1,6 @@
 import { For, Show } from "solid-js"
 import type { MailMessage } from "../api"
-import { mailActionableStatus, mailDirection, mailSentAt } from "../mail-timeline"
+import { mailActionableStatus, mailChipWake, mailDirection, mailSentAt, mailWakeLabel } from "../mail-timeline"
 import { MailWakeEvidence } from "./mail-wake-evidence"
 import { MailParty } from "./mail-party"
 import { MailOriginDetail, MailRoute, MailSender, MailSummary, mailPurpose, originOf, senderText } from "./mail-summary"
@@ -30,9 +30,13 @@ export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?
       : { element: <MailRoute from={props.message.from} fromEvidence={props.message.sender_session} to={props.message.to}
           toEvidence={recipientSession(props.message.deliveries, props.message.to)} name={props.name} origin={origin()} />,
         text: `${senderText(props.message.from, props.message.sender_session, props.name, origin())} to ${props.name?.(props.message.to, recipientSession(props.message.deliveries, props.message.to))?.label ?? props.message.to}` }
+  const wake = () => {
+    const state = mailChipWake(props.message.deliveries, direction(), props.session)
+    return state && { state, label: mailWakeLabel(state, direction() === "out" ? party().text : "this agent") }
+  }
   return <details class="mail-activity" id={`${anchor()}-${props.message.id}`} data-mail-id={props.message.id} data-direction={direction()}>
     <MailSummary direction={direction()} party={party().element} partyText={party().text}
-      purpose={mailPurpose(undefined, props.message.kind)} sentAt={mailSentAt(props.message)}
+      purpose={mailPurpose(undefined, props.message.kind)} sentAt={mailSentAt(props.message)} wake={wake()}
       status={mailActionableStatus({ deliveries: props.message.deliveries, kind: props.message.kind, direction: direction(), replied: props.replied })} />
     <div class="mail-activity-details">
       <div class="mail-activity-body" dir="auto">{props.message.text}</div>

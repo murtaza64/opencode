@@ -1103,6 +1103,12 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .mail-activity[data-direction=unknown] .mail-activity-summary { color: var(--subtext0); }
 .mail-activity-party { display: flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; }
 .mail-activity-party .mail-party { min-width: 3ch; overflow: hidden; text-overflow: ellipsis; }
+.mail-activity-wake { display: inline-flex; flex: none; margin-inline-end: -2px; }
+.mail-activity-wake[data-wake=caused] { color: var(--accent, var(--lavender)); }
+.mail-activity-wake[data-wake=unknown] { color: var(--overlay1); }
+.mail-activity-summary[data-wake=caused] .mail-activity-party { font-weight: 600; }
+.mail-activity-summary[data-wake=none] .mail-activity-party, .mail-activity-summary[data-wake=none] .mail-activity-purpose,
+.mail-activity-summary[data-wake=unknown] .mail-activity-party, .mail-activity-summary[data-wake=unknown] .mail-activity-purpose { color: var(--overlay1); }
 .mail-activity-sep { flex: none; color: var(--overlay1); }
 .mail-activity-purpose { flex: none; }
 .mail-activity-status { flex: none; color: var(--peach); }

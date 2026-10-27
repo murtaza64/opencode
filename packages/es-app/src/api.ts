@@ -471,7 +471,13 @@ export type MailDelivery = {
   presented_at: string | number | null
   handled_at: string | number | null
   wake_observations?: readonly { outcome: "scheduled" | "coalesced"; observedAt: number }[]
+  /** Typed wake evidence from es-dashboard (absent on older dashboards). */
+  wake?: MailWakeState
+  wake_observed_at?: number | null
+  presented_ms?: number | null
+  handled_ms?: number | null
 }
+export type MailWakeState = "caused" | "joined" | "none" | "unknown"
 export type MailTimeline = { editspace: string; lane: string; messages: MailMessage[] }
 export type Handoff = { lane: string; predecessor: string; successor: string; reason?: string; kickoff?: "skipped"; context?: string }
 export type LaneProvenance = {
