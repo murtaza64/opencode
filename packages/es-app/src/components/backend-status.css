@@ -1,12 +1,10 @@
 /* The slot keeps its size whether or not anything is shown, so the header never reflows. */
 .backend-status { position: relative; display: inline-flex; align-self: center; align-items: center; justify-content: center; flex: none; inline-size: 20px; block-size: 20px; }
 .backend-status-button { display: inline-flex; align-items: center; justify-content: center; inline-size: 20px; block-size: 20px; padding: 0; border: 0; background: none; cursor: pointer; }
-.backend-status-dot { inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--subtext0); opacity: 0.35; contain: strict; will-change: opacity; }
-.backend-status-dot[data-on] { opacity: 1; }
+.backend-status-dot { inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--subtext0); opacity: 0.6; }
 .backend-status[data-state="problem"] .backend-status-dot { background: var(--peach); }
 /* Out of flow: opening diagnostics moves nothing. */
 .backend-status-panel { position: absolute; inset-block-start: calc(100% + 6px); inset-inline-start: 0; z-index: 30; inline-size: max-content; max-inline-size: min(360px, 80vw); padding: 8px 10px; border: 1px solid var(--surface1); border-radius: 6px; background: var(--mantle); font-size: 12px; white-space: normal; -webkit-app-region: no-drag; }
 .backend-status-panel p { margin: 0 0 6px; }
 .backend-status-panel ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
 .backend-status-panel li { display: flex; gap: 8px; justify-content: space-between; }
-@media (prefers-reduced-motion: reduce) { .backend-status-dot { opacity: 1; } }

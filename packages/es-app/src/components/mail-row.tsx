@@ -1,9 +1,9 @@
 import { For, Show } from "solid-js"
 import type { MailMessage } from "../api"
-import { mailSentAt, mailWake } from "../mail-timeline"
+import { mailActionableStatus, mailDirection, mailSentAt } from "../mail-timeline"
 import { MailWakeEvidence } from "./mail-wake-evidence"
 import { MailParty } from "./mail-party"
-import { MailOriginDetail, MailRoute, MailSummary, originOf } from "./mail-summary"
+import { MailOriginDetail, MailRoute, MailSender, MailSummary, mailPurpose, originOf, senderText } from "./mail-summary"
 import { recipientSession, type MailNamer } from "../mail-names"
 
 const timestamp = (value: string | number | null) => {
@@ -12,7 +12,7 @@ const timestamp = (value: string | number | null) => {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
 }
 
-export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?: string; name?: MailNamer }) => {
+export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?: string; name?: MailNamer; session?: string; replied?: boolean }) => {
   const anchor = () => props.anchor ?? "mail"
   const origin = () => originOf(props.message.from, props.message.squadron, props.name)
   const from = (detail?: boolean) => <MailParty party={props.message.from} evidence={props.message.sender_session} name={props.name} detail={detail} />
@@ -21,17 +21,23 @@ export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?
     { label: "Reply to", id: props.message.in_reply_to },
     { label: "Supersedes", id: props.message.supersedes },
   ].filter((item): item is { label: string; id: string } => !!item.id)
-  return <details class="mail-activity" id={`${anchor()}-${props.message.id}`} data-mail-id={props.message.id}>
-    <MailSummary direction={props.message.direction === "sent" ? "out" : "in"}
-      route={<MailRoute from={props.message.from} fromEvidence={props.message.sender_session} to={props.message.to}
-        toEvidence={recipientSession(props.message.deliveries, props.message.to)} name={props.name} origin={origin()} />}
-      state={<span class="mail-state-text" title={props.message.deliveries.map(delivery => `${mailWake(delivery)} · ${delivery.state}`).join("; ") || mailWake()}>
-        <For each={props.message.deliveries}>{(delivery) => <span>{mailWake(delivery)} · {delivery.state}</span>}</For>
-        <Show when={!props.message.deliveries.length}><span>{mailWake()}</span></Show>
-        <span> · <span class="mail-kind" data-kind={props.message.kind}>{props.message.kind}</span> · {timestamp(mailSentAt(props.message))}</span>
-      </span>} />
+  const direction = () => mailDirection(props.message, props.session)
+  const party = () => direction() === "out"
+    ? { element: to(), text: props.name?.(props.message.to, recipientSession(props.message.deliveries, props.message.to))?.label ?? props.message.to }
+    : direction() === "in"
+      ? { element: <MailSender from={props.message.from} evidence={props.message.sender_session} name={props.name} origin={origin()} />,
+        text: senderText(props.message.from, props.message.sender_session, props.name, origin()) }
+      : { element: <MailRoute from={props.message.from} fromEvidence={props.message.sender_session} to={props.message.to}
+          toEvidence={recipientSession(props.message.deliveries, props.message.to)} name={props.name} origin={origin()} />,
+        text: `${senderText(props.message.from, props.message.sender_session, props.name, origin())} to ${props.name?.(props.message.to, recipientSession(props.message.deliveries, props.message.to))?.label ?? props.message.to}` }
+  return <details class="mail-activity" id={`${anchor()}-${props.message.id}`} data-mail-id={props.message.id} data-direction={direction()}>
+    <MailSummary direction={direction()} party={party().element} partyText={party().text}
+      purpose={mailPurpose(undefined, props.message.kind)} sentAt={mailSentAt(props.message)}
+      status={mailActionableStatus({ deliveries: props.message.deliveries, kind: props.message.kind, direction: direction(), replied: props.replied })} />
     <div class="mail-activity-details">
+      <div class="mail-activity-body" dir="auto">{props.message.text}</div>
       <div>Mail ID: <bdi dir="auto">{props.message.id}</bdi></div>
+      <Show when={direction() === "unknown"}><div>Direction unknown: no verified session evidence links this mail to this session.</div></Show>
       <div>From: {from(true)}</div>
       <div>To: {to(true)}</div>
       <MailOriginDetail origin={origin()} id={props.message.id} />
@@ -45,7 +51,6 @@ export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?
       <For each={references()}>{(ref) => <div>{ref.label}: <Show when={props.ids.has(ref.id)} fallback={<bdi dir="auto">{ref.id}</bdi>}>
         <a href={`#${anchor()}-${ref.id}`}><bdi dir="auto">{ref.id}</bdi></a>
       </Show></div>}</For>
-      <div class="mail-activity-body" dir="auto">{props.message.text}</div>
        <For each={props.message.deliveries}>{(delivery) => <div class="mail-delivery">
          <div>To <bdi dir="auto">{delivery.recipient}</bdi> · {delivery.mode ?? "delivery"} · {delivery.state}</div>
          <MailWakeEvidence delivery={delivery} />

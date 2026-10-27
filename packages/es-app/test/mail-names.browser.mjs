@@ -47,7 +47,7 @@ fixture.messages = [
 const browser = await chromium.launch({ headless: true,
   ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : { channel: "chrome" }) })
 const errors = []
-const route = (page, id) => page.locator(`.transcript [data-mail-id="${id}"] .mail-activity-route`)
+const chip = (page, id) => page.locator(`.transcript [data-mail-id="${id}"] .mail-activity-summary`)
 const parties = (locator) => locator.locator(".mail-party")
 try {
   for (const rtl of [false, true]) {
@@ -57,26 +57,27 @@ try {
     page.on("pageerror", (error) => errors.push(error.message))
     await page.goto(`${preview.origin}/session/ses_a?directory=${encodeURIComponent(directory)}`)
 
-    // Inbound: verified continuity names the sender; legacy, impostor and unknown lanes keep the address.
-    await expect(parties(route(page, "from-predecessor"))).toHaveText(["Relay", "Tether"])
-    await expect(parties(route(page, "from-predecessor")).first()).toHaveAttribute("title", "Lane orchestrator · session ses_relay_old → ses_relay")
-    await expect(parties(route(page, "legacy"))).toHaveText(["orchestrator", "squadron-v2"])
-    await expect(parties(route(page, "legacy")).first()).toHaveAttribute("title", "Lane orchestrator")
-    await expect(parties(route(page, "impostor"))).toHaveText(["orchestrator", "squadron-v2"])
-    await expect(parties(route(page, "unknown-lane"))).toHaveText(["ghost-lane", "squadron-v2"])
+    // Incoming (delivered to this session): the chip names the sender, by verified continuity.
+    await expect(parties(chip(page, "from-predecessor"))).toHaveText(["Relay"])
+    await expect(parties(chip(page, "from-predecessor")).first()).toHaveAttribute("title", "Lane orchestrator · session ses_relay_old → ses_relay")
+    // No receipt in this session: direction unknown, so the chip keeps the full route; addresses stay unnamed.
+    await expect(parties(chip(page, "legacy"))).toHaveText(["orchestrator", "squadron-v2"])
+    await expect(parties(chip(page, "legacy")).first()).toHaveAttribute("title", "Lane orchestrator")
+    await expect(parties(chip(page, "impostor"))).toHaveText(["orchestrator", "squadron-v2"])
+    await expect(parties(chip(page, "unknown-lane"))).toHaveText(["ghost-lane", "squadron-v2"])
 
-    // Outbound: the recipient is named by the session that received it.
-    await expect(parties(route(page, "to-relay"))).toHaveText(["Tether", "Relay"])
-    await expect(parties(route(page, "to-joiner"))).toHaveText(["Tether", long])
+    // Outgoing (this session sent it): the chip names the recipient by the session that received it.
+    await expect(parties(chip(page, "to-relay"))).toHaveText(["Relay"])
+    await expect(parties(chip(page, "to-joiner"))).toHaveText([long])
 
-    // A long name truncates on its own; the other party stays visible.
-    const box = await route(page, "to-joiner").boundingBox()
-    const sender = await parties(route(page, "to-joiner")).first().boundingBox()
-    const recipient = await parties(route(page, "to-joiner")).last().boundingBox()
-    if (!box || !sender || !recipient) throw new Error("mail route not laid out")
-    for (const item of [sender, recipient])
-      if (item.x < box.x - 1 || item.x + item.width > box.x + box.width + 1) throw new Error(`party overflows its route (rtl=${rtl})`)
-    if (rtl && !(sender.x > recipient.x)) throw new Error("RTL route does not read right to left")
+    // A long name truncates inside the chip; purpose stays visible.
+    const box = await chip(page, "to-joiner").boundingBox()
+    const recipient = await parties(chip(page, "to-joiner")).first().boundingBox()
+    const purpose = await chip(page, "to-joiner").locator(".mail-activity-purpose").boundingBox()
+    if (!box || !recipient || !purpose) throw new Error("mail chip not laid out")
+    for (const item of [recipient, purpose])
+      if (item.x < box.x - 1 || item.x + item.width > box.x + box.width + 1) throw new Error(`chip part overflows (rtl=${rtl})`)
+    if (rtl && !(recipient.x > purpose.x)) throw new Error("RTL chip does not read right to left")
 
     // Transcript mail input, agent resume and the turn-input note.
     const promoted = page.locator('[data-mail-message-id="msg_002"] .mail-activity-route .mail-party')
@@ -85,13 +86,13 @@ try {
     await expect(page.locator(".mail-cause .mail-party")).toHaveText(["Relay"])
 
     // Expanded details keep the lane address beside the name.
-    await route(page, "to-relay").click()
+    await chip(page, "to-relay").click()
     await expect(page.locator('.transcript [data-mail-id="to-relay"] .mail-activity-details')).toContainText("To: Relay · lane orchestrator")
 
     // Lane mail panel rows use the same names.
     await page.getByRole("button", { name: "Session mail" }).click()
     await page.getByRole("menuitem", { name: /Lane mail/ }).click()
-    await expect(page.locator('.lane-mail [data-mail-id="to-relay"] .mail-activity-route .mail-party')).toHaveText(["Tether", "Relay"])
+    await expect(page.locator('.lane-mail [data-mail-id="to-relay"] .mail-activity-summary .mail-party')).toHaveText(["Relay"])
 
     if (!rtl) {
       // A rename shows the current title; the lane address is unchanged.
@@ -99,8 +100,8 @@ try {
       const info = { ...session("ses_relay"), title: "Relay Prime", time: { created: 1, updated: Date.now() } }
       for (const [response, stream] of fixture.eventStreams) if (stream.path === "/global/event")
         response.write(`data: ${JSON.stringify({ directory: info.directory, payload: { type: "session.updated", properties: { sessionID: "ses_relay", info } } })}\n\n`)
-      await expect(parties(route(page, "to-relay")).last()).toHaveText("Relay Prime", { timeout: 15000 })
-      await expect(parties(route(page, "to-relay")).last()).toHaveAttribute("data-lane", "orchestrator")
+      await expect(parties(chip(page, "to-relay")).last()).toHaveText("Relay Prime", { timeout: 15000 })
+      await expect(parties(chip(page, "to-relay")).last()).toHaveAttribute("data-lane", "orchestrator")
       fixture.sessionTitles.set("ses_relay", "Relay")
     }
     await context.close()

@@ -199,3 +199,23 @@ export const mailCauses = (rows: TimelineRow[], records: Map<string, MailMessage
   })
   return causes
 }
+
+export type MailDirection = "in" | "out" | "unknown"
+
+// Direction from verified session evidence only, never from display names: mail this session's
+// own session sent is outgoing; mail delivered to this session is incoming.
+export const mailDirection = (message: MailMessage, sessionID: string | undefined): MailDirection => {
+  if (!sessionID) return "unknown"
+  if (message.sender_session === sessionID) return "out"
+  if (message.deliveries.some((delivery) => delivery.session === sessionID)) return "in"
+  return "unknown"
+}
+
+// The one status a collapsed chip may show: only states the person may need to act on.
+// Admission, wake and scheduling detail stays in the expansion.
+export const mailActionableStatus = (input: { deliveries: readonly MailDelivery[]; kind?: string; direction: MailDirection; replied?: boolean }) => {
+  if (input.deliveries.some((delivery) => delivery.error || /fail|error/i.test(delivery.state))) return "Failed"
+  if (input.deliveries.some((delivery) => /undeliver|reject|expired|dead|bounce/i.test(delivery.state))) return "Not delivered"
+  if (input.kind === "question" && input.direction === "out" && !input.replied) return "Waiting for reply"
+  return undefined
+}

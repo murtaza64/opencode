@@ -36,7 +36,6 @@ import { TranscriptMessage } from "../components/transcript-message"
 import { MailCauseRow } from "../components/mail-cause"
 import { InlineQuestion } from "../components/inline-question"
 import { TodoPart } from "../components/todos"
-import { usePulse } from "../pulse"
 import { MailRow } from "../components/mail-row"
 import { useMailNamer } from "../components/mail-party"
 import { MailSubscriptions } from "../components/mail-subscriptions"
@@ -50,6 +49,7 @@ import { ToolSize } from "../components/tool-size"
 import { ToolRun } from "../components/tool-run"
 import { HeaderMenu } from "../components/header-menu"
 import { FailureRetry } from "../components/session-failure"
+import { blockTime } from "../recorded-time"
 import { completedTurns, groupableTurns, messageSegments, planToolRuns, samePlan, sameSegments } from "../transcript-groups"
 import { isUserPrompt, promptPosition, promptTarget } from "../transcript-nav"
 import { restartMarkers } from "../restart-marker"
@@ -519,6 +519,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     return id ? [id] : []
   })))
   const mailRecords = createMemo(() => new Map(mail()?.messages.map((message) => [message.id, message] as const) ?? []))
+  const mailReplied = createMemo(() => new Set(mail()?.messages.flatMap((message) => message.in_reply_to ? [message.in_reply_to] : []) ?? []))
   const mailCauseRows = createMemo(() => mailCauses(timeline(), mailRecords()))
 
   // viewing the session clears its unread state, including as new content
@@ -532,7 +533,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   })
 
   // busy with nothing visibly moving (no running tool, no streaming part):
-  // the model is thinking or the first token hasn't landed — show a pulse
+  // the model is thinking or the first token hasn't landed — show the busy dot
   const thinking = createMemo(() => {
     if (live.error() || live.connectionError() || error() || pending().length) return false
     const st = status()
@@ -583,10 +584,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     if (shownTrouble() && trouble()) return "stale"
     return "idle"
   })
-  const WorkSpinner = () => {
-    const tick = usePulse()
-    return <span class="session-work-spinner" data-on={tick() % 2 ? "true" : undefined} aria-hidden="true" />
-  }
+  // The open session's work line is the view's one animated busy indicator (CSS halo, compositor-only).
+  const WorkSpinner = () => <span class="busy-dot" data-animate aria-hidden="true" />
   const briefInput = createMemo(() => {
     const current = messages().slice(Math.max(0, messages().findLastIndex((message) => message.role === "user")))
     const tools = current.flatMap((message) => message.role !== "assistant" ? [] :
@@ -622,12 +621,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     const tool = briefInput().tools.findLast((item) => item.status === "running")
     return tool ? { name: tool.name, at: tool.at } : undefined
   }, undefined, { equals: (a, b) => a?.name === b?.name && a?.at === b?.at })
-  const Thinking = () => {
-    const tick = usePulse()
-    return <div class="thinking" title="agent is thinking">
-      <For each={[0, 1, 2]}>{(index) => <span data-on={tick() % 3 === index ? "true" : undefined} />}</For>
-    </div>
-  }
+  // The work line already animates while busy, so the transcript tail shows the same dot static.
+  const Thinking = () => <div class="thinking" title="agent is thinking"><span class="busy-dot" aria-hidden="true" /></div>
   const WorkStatus = () => (
     <div class="session-work-status" role="status" data-state={workState()} title={backendError() || undefined}>
       <Show when={workState() === "working" || workState() === "idle"} fallback={<>
@@ -1626,6 +1621,18 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const promptIDs = createMemo(() => new Set(timeline().flatMap((row) =>
     row.type === "transcript" && isUserPrompt(row.message, live.data.part[row.message.id] ?? []) ? [row.message.id] : [])))
   createEffect(() => { promptIDs(); schedulePromptPosition() })
+  // Hover shows when an agent text block or human message was recorded, as a native tooltip: nothing is
+  // drawn until asked, and blocks are stamped on first hover instead of on every render.
+  const stampBlock = (event: Event) => {
+    const block = (event.target as Element).closest?.<HTMLElement>("[data-component='text-part'], .msg-wrap")
+    if (!block || block.dataset.recordedAt !== undefined) return
+    const messageID = block.closest<HTMLElement>("[data-find-message]")?.dataset.findMessage
+    const partID = block.matches("[data-component='text-part']") ? block.dataset.timelinePartId : undefined
+    const time = blockTime(messageID ? messageByID().get(messageID) : undefined,
+      partID && messageID ? live.data.part[messageID]?.find((part) => part.id === partID) : undefined)
+    block.dataset.recordedAt = time ?? ""
+    if (time) block.title = time
+  }
   const renderRun = (key: string) => <Show when={toolRuns().runs.get(key)}>{(run) => {
     const hit = () => findHit() && run().members.some((member) => member.partID === findHit()!.partID) ? findHit() : undefined
     return <ToolRun run={run()} message={(id) => messageByID().get(id)} parts={(id) => live.data.part[id] ?? []}
@@ -1716,7 +1723,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                   <Show when={mail()?.error} fallback={<Show when={!mail()?.messages.length}><div class="dim">No lane mail.</div></Show>}>
                     <div class="dim" role="status">{mail()?.error}</div>
                   </Show>
-                  <For each={mail()?.messages ?? []}>{(message) => <MailRow message={message} ids={mailIDs()} anchor="lane-mail" name={mailName} />}</For>
+                  <For each={mail()?.messages ?? []}>{(message) => <MailRow message={message} ids={mailIDs()} anchor="lane-mail" name={mailName} session={sessionID} replied={mailReplied().has(message.id)} />}</For>
                 </section>
               </Show>
             </Show>
@@ -1732,7 +1739,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         </div>
 
         <div class="transcript" ref={transcriptEl}>
-          <div ref={inner} class="transcript-inner" classList={{ "transcript-arrive": arrived() }} onClick={(event) => {
+          <div ref={inner} class="transcript-inner" classList={{ "transcript-arrive": arrived() }}
+            onPointerOver={stampBlock} onFocusIn={stampBlock} onClick={(event) => {
             // Only a standalone chip's own disclosure counts; action buttons inside it do not.
             const trigger = (event.target as Element).closest("[data-slot='collapsible-trigger']")
             if (!trigger || trigger.closest(".tool-run")) return
@@ -1783,7 +1791,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             <ToolAdornment.Provider value={ToolSize}>
             <For each={visibleTimeline()}>
               {(row) => {
-                 if (row.type === "mail") return <MailRow message={row.message} ids={transcriptMailIDs()} name={mailName} />
+                 if (row.type === "mail") return <MailRow message={row.message} ids={transcriptMailIDs()} name={mailName} session={sessionID} replied={mailReplied().has(row.message.id)} />
                 const m = row.message
                 const segments = createMemo(() => m.role === "assistant" ? messageSegments(live.data.part[m.id] ?? [], toolRuns()) : [],
                   [], { equals: sameSegments })

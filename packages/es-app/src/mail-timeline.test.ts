@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { Message } from "@opencode-ai/sdk/v2"
 import type { MailMessage, MailTimeline } from "./api"
-import { canonicalMail, mailActivityLabel, mailCauses, mailForSession, mailLocation, mailRows, mailSourceID, mailWake } from "./mail-timeline"
+import { canonicalMail, mailActionableStatus, mailActivityLabel, mailDirection, mailCauses, mailForSession, mailLocation, mailRows, mailSourceID, mailWake } from "./mail-timeline"
 
 test("selects the matching editspace and lane from the session directory", () => {
   const roots = [
@@ -250,4 +250,25 @@ test("mail sent to a lane here from another editspace keeps its local id", () =>
   const input = { id: "msg_task", role: "user", time: { created: 1 }, source: { type: "editspace-mail",
     id: "batch-orchestrator#1", sender: "home/squadron-v2", recipient: "batch-orchestrator" } } as Message
   expect(mailSourceID(input)).toBe("batch-orchestrator#1")
+})
+
+const record = (input: Partial<MailMessage>): MailMessage => ({ id: "m", ts: 0, from: "relay", to: "lane", direction: "received", deliveries: [], text: "", ...input })
+const delivery = (input: Partial<MailMessage["deliveries"][number]>) =>
+  ({ message_id: "m", recipient: "lane", session: "ses_b", mode: "actionable", state: "handled", request_id: null, error: null, presented_at: null, handled_at: null, ...input })
+
+test("mail direction comes from verified sessions, never names", () => {
+  expect(mailDirection(record({ sender_session: "ses_a" }), "ses_a")).toBe("out")
+  expect(mailDirection(record({ deliveries: [delivery({ session: "ses_a" })] }), "ses_a")).toBe("in")
+  expect(mailDirection(record({ from: "ses_a", to: "ses_a", deliveries: [delivery({})] }), "ses_a")).toBe("unknown")
+  expect(mailDirection(record({ sender_session: "ses_a" }), undefined)).toBe("unknown")
+})
+
+test("collapsed mail status shows only actionable states", () => {
+  expect(mailActionableStatus({ deliveries: [delivery({ state: "queued", mode: "passive" })], direction: "in" })).toBeUndefined()
+  expect(mailActionableStatus({ deliveries: [delivery({ state: "admitted" })], kind: "task", direction: "out" })).toBeUndefined()
+  expect(mailActionableStatus({ deliveries: [delivery({ error: "session gone" })], direction: "out" })).toBe("Failed")
+  expect(mailActionableStatus({ deliveries: [delivery({ state: "undeliverable" })], direction: "out" })).toBe("Not delivered")
+  expect(mailActionableStatus({ deliveries: [], kind: "question", direction: "out" })).toBe("Waiting for reply")
+  expect(mailActionableStatus({ deliveries: [], kind: "question", direction: "out", replied: true })).toBeUndefined()
+  expect(mailActionableStatus({ deliveries: [], kind: "question", direction: "in" })).toBeUndefined()
 })

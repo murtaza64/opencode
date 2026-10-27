@@ -159,7 +159,7 @@ export const DictationButton = (props: Props) => {
             onClick={toggle}
           >
             <Show when={phase() === "recording"} fallback={
-              <Show when={phase() === "idle"} fallback={<span class="dictation-spinner" aria-hidden="true" />}>
+              <Show when={phase() === "idle"} fallback={<span class="busy-dot" aria-hidden="true" />}>
                 <svg class="glyph" width={14} height={14} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d={MIC} /></svg>
               </Show>
             }>
