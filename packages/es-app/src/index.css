@@ -6,6 +6,12 @@
  * bases, zero border-radius, solid colors, left-inset accent bars,
  * monospace everywhere. */
 :root {
+  /* Motion tokens (ux-feel motion proposal): short, composited, cause -> effect only. */
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-sheet: 260ms;
+  --ease-standard: cubic-bezier(.2, 0, 0, 1);
+  --ease-exit: cubic-bezier(.4, 0, 1, 1);
   /* two shades darker than the baymax originals */
   --base: #111113;
   --mantle: #0a0a0c;
@@ -1663,6 +1669,13 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .session-page .transcript { min-height: 32px; }
 /* Fixed placeholder for a never-loaded transcript; cached sessions skip it. */
 .transcript-skeleton { display: grid; gap: 12px; padding: 16px 0; }
+/* Shown only when a load outlasts the delay (the element mounts then), so fast loads never flash. */
+.transcript-skeleton, .transcript-arrive { animation: transcript-fade var(--dur-fast) var(--ease-standard) both; }
+@keyframes transcript-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 0ms; --dur-base: 0ms; --dur-sheet: 0ms; }
+  .transcript-skeleton, .transcript-arrive { animation: none; }
+}
 .transcript-skeleton-line { block-size: 14px; border-radius: 4px; background: var(--surface0); opacity: 0.6; }
 .transcript-skeleton-line:nth-child(odd) { inline-size: 70%; }
 .transcript-skeleton-line:nth-child(even) { inline-size: 45%; }

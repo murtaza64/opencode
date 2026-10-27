@@ -5,7 +5,7 @@ import { oc } from "../api"
 import { errorText } from "../live-session"
 import "./session-title.css"
 
-export const SessionTitle = (props: {
+export const SessionTitle = (props: { knownTitle?: string;
   sessionID: string
   directory: string
   session: Session | undefined
@@ -17,7 +17,9 @@ export const SessionTitle = (props: {
   let blur: ReturnType<typeof setTimeout> | undefined
   let button: HTMLButtonElement | undefined
   const previousTitle = document.title
-  createEffect(() => { document.title = props.session?.title ?? props.sessionID })
+  // Until the session record loads, the title comes from the sidebar row (known before the fetch).
+  const shown = () => props.session?.title ?? props.knownTitle ?? props.sessionID
+  createEffect(() => { document.title = shown() })
   createEffect(() => { if (props.suspendBlurSave) clearTimeout(blur) })
   onCleanup(() => {
     disposed = true
@@ -50,9 +52,9 @@ export const SessionTitle = (props: {
     <div class="session-title">
       <Show when={state.editing} fallback={
         <h1><button ref={button} type="button" class="session-title-button" dir="auto"
-          aria-label="Rename session" title={props.session?.title ?? props.sessionID} disabled={!props.session}
+          aria-label="Rename session" title={shown()} disabled={!props.session}
           onClick={() => setState({ editing: true, draft: props.session?.title ?? "", error: "" })}>
-          {props.session?.title ?? props.sessionID}
+          {shown()}
         </button></h1>
       }>
         <form class="session-title-form" aria-label="Rename session" onSubmit={(event) => {
