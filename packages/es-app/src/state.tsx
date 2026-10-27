@@ -20,9 +20,13 @@ import { reconcilePins, transferPins, type Handoff, type PendingHandoff } from "
 import { pinSessionID } from "./session-pins"
 import { createCloudAgents } from "./cloud-agents"
 import { createSessionFailures } from "./session-failures"
+import { coalesced } from "./coalesced"
 import { clearBackend, describeFailure, reportBackend } from "./backend-status"
 import type { GlobalSession, SessionFailure } from "@opencode-ai/sdk/v2"
 import type { Event } from "@opencode-ai/sdk/v2"
+
+/** How often other editspaces' handoff lineage (used for cross-project pins) is re-read. */
+const OTHER_LINEAGE_MS = 60_000
 import { useLocation } from "@solidjs/router"
 export { linkUrl } from "./link-url"
 
@@ -266,15 +270,24 @@ export function DashboardProvider(props: ParentProps) {
     const name = editspace()
     const source = createServerEvents(`/es/api/events?${name ? `es=${encodeURIComponent(name)}` : ""}`)
     let opened = false
+    // Dashboard events only say "something changed"; each answer is a whole snapshot. Bursts of
+    // events collapse into at most one refetch per resource per interval (leading and trailing),
+    // so the request rate no longer scales with the event rate (a 199 req/s storm on a remote host).
+    const state = coalesced(() => refetch())
+    const mail = coalesced(() => setMailRevision((value) => value + 1))
     source.onopen = () => {
-      if (opened) setMailRevision((value) => value + 1)
+      if (opened) mail()
       opened = true
     }
     source.onmessage = (event) => {
-      refetch()
-      if (event.data === "mail") setMailRevision((value) => value + 1)
+      state()
+      if (event.data === "mail") mail()
     }
-    onCleanup(() => source.close())
+    onCleanup(() => {
+      source.close()
+      state.cancel()
+      mail.cancel()
+    })
   })
   const notificationSource = createServerEvents("/es/api/notification-events")
   notificationSource.onmessage = () => refetchNotifications()
@@ -385,9 +398,15 @@ export function DashboardProvider(props: ParentProps) {
     }
   }
   const currentEditspaceName = () => editspace() ?? editspaces()?.default ?? ""
+  // Other editspaces' lineage changes are not signalled by this editspace's event stream, so
+  // re-reading them on every local state refresh only multiplied requests: each dashboard event
+  // cost one state + one handoffs GET per other editspace. They refresh on their own slow clock.
+  const [otherTick, setOtherTick] = createSignal(0)
+  const otherInterval = setInterval(() => setOtherTick((value) => value + 1), OTHER_LINEAGE_MS)
+  onCleanup(() => clearInterval(otherInterval))
   const [otherLineages] = createResource(
-    () => ({ names: editspaces()?.editspaces.map((item) => item.name) ?? [], selected: currentEditspaceName(), revision: state() }),
-    async ({ names, selected }) => Promise.all(names.filter((name) => name !== selected).map(async (name) => {
+    () => ({ names: (editspaces()?.editspaces.map((item) => item.name) ?? []).join("\n"), selected: currentEditspaceName(), tick: otherTick() }),
+    async ({ names, selected }) => Promise.all(names.split("\n").filter((name) => name && name !== selected).map(async (name) => {
       try {
         const [lineage, dashboard] = await Promise.all([es.handoffs(name), es.state(name)])
         if (dashboard.editspace !== name) return { edges: [], owners: [], pending: [] }
