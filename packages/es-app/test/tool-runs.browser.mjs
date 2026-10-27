@@ -191,21 +191,20 @@ const run = async (viewport, label) => {
     const container = document.querySelector(".session-page .transcript").getBoundingClientRect().top
     return [...document.querySelectorAll("[data-user-prompt]")].findLastIndex((element) => element.getBoundingClientRect().top - container < -30)
   })
-  const seen = []
-  for (let step = 0; step < 3; step++) {
-    await previous.click()
-    await expect(editor()).toBeFocused()
-    seen.push(await page.evaluate(() => {
-      const container = document.querySelector(".session-page .transcript").getBoundingClientRect().top
-      return [...document.querySelectorAll("[data-user-prompt]")].find((element) => Math.abs(element.getBoundingClientRect().top - container - 8) < 2)?.dataset.userPrompt
-    }))
-  }
-  expect(seen).toEqual([prompts[startAt], prompts[startAt - 1], prompts[startAt - 2]])
-  await next.click()
-  expect(await page.evaluate(() => {
+  // The prompt pinned at the top edge. A jump may land on the next frame when it first mounts held-back rows.
+  const pinnedPrompt = () => page.evaluate(() => {
     const container = document.querySelector(".session-page .transcript").getBoundingClientRect().top
     return [...document.querySelectorAll("[data-user-prompt]")].find((element) => Math.abs(element.getBoundingClientRect().top - container - 8) < 2)?.dataset.userPrompt
-  })).toBe(prompts[startAt - 1])
+  })
+  await previous.click()
+  await expect(editor()).toBeFocused()
+  await expect.poll(pinnedPrompt).toBe(prompts[startAt])
+  await previous.click()
+  await expect.poll(pinnedPrompt).toBe(prompts[startAt - 1])
+  await previous.click()
+  await expect.poll(pinnedPrompt).toBe(prompts[startAt - 2])
+  await next.click()
+  await expect.poll(pinnedPrompt).toBe(prompts[startAt - 1])
   // Manual scroll is respected: next is relative to where the reader is now.
   const manual = await transcript.evaluate((element) => {
     element.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 }))
@@ -219,10 +218,7 @@ const run = async (viewport, label) => {
   })
   await next.click()
   expect(await transcript.evaluate((element) => element.scrollTop)).toBeGreaterThan(manual)
-  expect(await page.evaluate(() => {
-    const container = document.querySelector(".session-page .transcript").getBoundingClientRect().top
-    return [...document.querySelectorAll("[data-user-prompt]")].find((element) => Math.abs(element.getBoundingClientRect().top - container - 8) < 2)?.dataset.userPrompt
-  })).toBe(expected)
+  expect(await pinnedPrompt()).toBe(expected)
   // At the first loaded prompt, Previous shows the explicit loader and fetches nothing.
   for (let step = 0; step < 80 && await transcript.evaluate((element) => element.scrollTop > 0); step++) await previous.click()
   await expect(page.locator(".transcript-older")).toBeInViewport()

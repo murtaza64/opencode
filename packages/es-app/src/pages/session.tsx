@@ -313,11 +313,12 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   let userScroll = false
   const loadEarlier = async () => {
     if (!transcriptEl || !live.hasOlder() || live.loadingOlder()) return
-    mountAll()
     stick = false
     userScroll = false
+    // Measure before mounting held-back rows so the restore below covers them too.
     const height = transcriptEl.scrollHeight
     const top = transcriptEl.scrollTop
+    mountAll()
     try {
       await live.older()
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
@@ -1249,8 +1250,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const jumpUserMessage = (dir: 1 | -1) => {
     if (!transcriptEl) return
     if (dir === -1 && mountedRows() < timeline().length) {
-      // Earlier prompts are still mounting; mount them now and jump on the next frame.
+      // Earlier prompts are still mounting; mount them now and jump on the next frame. Rows mount
+      // above the reader, so hold the visible content in place or the jump starts from shifted tops.
+      const fromBottom = transcriptEl.scrollHeight - transcriptEl.scrollTop
       mountAll()
+      transcriptEl.scrollTop = transcriptEl.scrollHeight - fromBottom
       requestAnimationFrame(() => jumpUserMessage(dir))
       return
     }
