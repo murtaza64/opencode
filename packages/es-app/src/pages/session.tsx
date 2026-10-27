@@ -70,6 +70,9 @@ const providersCached = (directory: string) => {
   return value
 }
 
+/** How long a cold session open waits before showing the transcript skeleton. */
+const SKELETON_DELAY_MS = 150
+
 /** Transcript rows mounted when a session opens; the rest mount in idle chunks. */
 const INITIAL_ROWS = 16
 const ROW_CHUNK = 16
@@ -451,6 +454,16 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     return rows.length > mountedRows() ? rows.slice(rows.length - mountedRows()) : rows
   })
   const mountAll = () => setMountedRows(Number.POSITIVE_INFINITY)
+  // A transcript that arrives within the delay replaces the empty view directly; the skeleton
+  // appears only for slower loads. Content that arrives after the skeleton fades in once.
+  const [skeletonDue, setSkeletonDue] = createSignal(false)
+  const [arrived, setArrived] = createSignal(false)
+  onMount(() => {
+    if (live.loaded()) return
+    const timer = setTimeout(() => setSkeletonDue(true), SKELETON_DELAY_MS)
+    onCleanup(() => clearTimeout(timer))
+  })
+  createEffect(() => { if (skeletonDue() && live.loaded()) setArrived(true) })
   /** Mount rows from the newest back to this message only (find hits, links). */
   const mountThrough = (messageID: string) => {
     const rows = timeline()
@@ -466,7 +479,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const grow = () => {
     growHandle = undefined
     if (mountedRows() >= timeline().length) return
+    // Rows mount above the reader. Keep the visible content where it is in the same task (Solid
+    // updates the DOM synchronously), so no frame paints shifted content before a later pin.
+    const fromBottom = transcriptEl ? transcriptEl.scrollHeight - transcriptEl.scrollTop : 0
     setMountedRows((count) => count + ROW_CHUNK)
+    if (transcriptEl && !inspecting) transcriptEl.scrollTop = transcriptEl.scrollHeight - fromBottom
     growHandle = idle(grow)
   }
   createEffect(() => {
@@ -1587,7 +1604,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         {/* Embedded beside the desk queue, the chat's title and tools belong to its own pane. */}
         <AppHeader inline={props.embedded}>
           {props.headerStart}
-          <SessionTitle sessionID={sessionID} directory={directory} session={session()} suspendBlurSave={findOpen()} onSaved={(info) => {
+          <SessionTitle sessionID={sessionID} directory={directory} session={session()} knownTitle={activity.session(sessionID)?.title} suspendBlurSave={findOpen()} onSaved={(info) => {
             live.apply({ type: "session.updated", properties: { sessionID, info } })
             void refetch()
           }} />
@@ -1678,7 +1695,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         </div>
 
         <div class="transcript" ref={transcriptEl}>
-          <div ref={inner} class="transcript-inner" onClick={(event) => {
+          <div ref={inner} class="transcript-inner" classList={{ "transcript-arrive": arrived() }} onClick={(event) => {
             // Only a standalone chip's own disclosure counts; action buttons inside it do not.
             const trigger = (event.target as Element).closest("[data-slot='collapsible-trigger']")
             if (!trigger || trigger.closest(".tool-run")) return
@@ -1715,7 +1732,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                 : "Preparing the next session. Your draft is saved here."}
               <Show when={transfer().reason}>{(reason) => <> <bdi dir="auto">{reason()}</bdi>.</>}</Show>
             </div>}</Show>
-            <Show when={!live.loaded() && !messages().length}>
+            <Show when={!live.loaded() && !messages().length && skeletonDue()}>
               <div class="transcript-skeleton" aria-busy="true" aria-label="Loading transcript">
                 <For each={[0, 1, 2, 3]}>{() => <div class="transcript-skeleton-line" />}</For>
               </div>

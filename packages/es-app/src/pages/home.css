@@ -111,3 +111,8 @@
 .attention-home button.home-quiet { border-color: transparent; color: var(--subtext0); padding-inline: 6px; }
 .home-answer .home-actions .home-muted { margin-inline-start: auto; }
 @media (max-width: 650px) { .home-answer .home-actions .home-muted { margin-inline-start: 0; flex-basis: 100%; } }
+/* An agent's request rendered as Markdown: compact, wraps long words, long commands scroll inside their block. */
+.home-request-text { min-inline-size: 0; max-inline-size: 90ch; overflow-wrap: anywhere; font-size: 13px; line-height: 1.55; }
+.home-request-text [data-component="markdown"] > :first-child { margin-block-start: 0; }
+.home-request-text pre { max-inline-size: 100%; overflow-x: auto; white-space: pre; }
+.home-request-text :not(pre) > code { overflow-wrap: anywhere; }

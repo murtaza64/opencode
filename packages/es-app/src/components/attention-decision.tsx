@@ -7,6 +7,8 @@ import { Glyph } from "./icons"
 import { LinkedText } from "./linked-text"
 import type { BriefResult } from "../desk"
 import { Sketch } from "./attention-brief"
+import { Markdown } from "@opencode-ai/session-ui/markdown"
+import { requestMarkdown } from "../request-markdown"
 import { answerDraftKey, attentionPath, blockedReason, contentRevision, decisionLabel, deliveryLabel, inputPayload, inputProblem, inputText, INPUT_KINDS, type createAttention, type AttentionOption, type AttentionRecord, type InputValue } from "../attention"
 import { requestAgent, type AgentRef, type RequestAgent } from "../attention-agent"
 
@@ -179,6 +181,11 @@ const copyBySelection = (text: string) => {
   try { input.select(); return document.execCommand("copy") } catch { return false } finally { input.remove() }
 }
 
+// The request as its agent wrote it, with Markdown formatting (lists, links, code with copy) and no raw HTML;
+// the options and actions stay native controls outside it. No brief or model is needed to read it.
+const RequestText = (props: { record: AttentionRecord }) =>
+  <div class="home-request-text" dir="auto"><Markdown text={requestMarkdown(props.record.context)} cacheKey={`attention-request:${props.record.editspace}:${props.record.id}:${props.record.revision}`} /></div>
+
 const Delivery = (props: { record: AttentionRecord; attention: Attention }) => {
   const delivery = () => props.record.delivery
   const canWrite = () => canWriteAttention(props.attention, props.record)
@@ -231,7 +238,7 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
         <p class="home-request-line"><bdi>Request:</bdi> <bdi dir="auto">{props.record.title}</bdi></p>
         {props.brief}
       </div>}</Show>
-      <Show when={!props.prepared}><p dir="auto"><LinkedText text={props.record.context} /></p>{props.brief}</Show>
+      <Show when={!props.prepared}><RequestText record={props.record} />{props.brief}</Show>
       {/* The picture tells the story; the original conversation it came from follows. */}
       {props.briefVisual}
       {props.conversation}
@@ -266,7 +273,7 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
     {props.briefDetails}
     {/* With a brief leading, the producer's exact request comes last, after the native controls. */}
     <Show when={props.prepared}>
-      <details class="home-original"><summary>Original request</summary><p dir="auto"><LinkedText text={props.record.context} /></p></details>
+      <details class="home-original"><summary>Original request</summary><RequestText record={props.record} /></details>
     </Show>
     <details onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>Record &amp; history</summary><div class="home-source"><bdi dir="ltr">{props.record.id} · {props.record.gate_key} · revision {props.record.revision}</bdi></div><Show when={history()?.version === historyVersion(props.record) ? history() : undefined} fallback={<p>Loading history…</p>}>{item => <Show when={!item().error} fallback={<p>{item().error}</p>}><pre dir="ltr">{JSON.stringify(item().events, null, 2)}</pre></Show>}</Show></details>
     </div>
