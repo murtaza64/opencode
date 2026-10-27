@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { MessageWithParts } from "./api"
 import type { AttentionRecord } from "./attention"
-import { attentionItem, briefComplete, briefPacket, briefState, requestLinks, safeSvg, type BriefMeta, type BriefResult } from "./desk"
+import { attentionItem, briefCommands, briefComplete, briefPacket, briefState, requestLinks, safeSvg, type BriefMeta, type BriefResult } from "./desk"
 import { answeredJob, currentJob, regeneratingJob, type BriefJob } from "./desk-session"
 
 // A request shaped like a bulk review gate: nine service/config pull-request pairs, one with a prerequisite.
@@ -94,4 +94,21 @@ test("the newest attempt is shown, but a ready brief stays while a regenerated o
   // An answer made after snooze/wake (revision 3) still finds the brief made for content 1.
   expect(answeredJob([first, done], item, { revision: 3 })?.id).toBe("ses_fdjob_2")
   expect(answeredJob([first, done], item, { revision: 3, brief: { job: "ses_fdjob_1" } })?.id).toBe("ses_fdjob_1")
+})
+
+test("a command is shown only when quoted exactly from the request; paraphrased or invented ones are dropped", () => {
+  const command = `ssh -t me@mini 'zsh -lc "cd ~/dotfiles && es agent resume ses_x --task \\"Reply once\\""'`
+  const moving = attentionItem({ ...record, id: "att_move", context: `Option 1: run on the laptop: ${command} then ~30 min test.` }, 0)
+  const result = { ...reply({ question: "Q?", choices, subjects: everySubject }), commands: [] as BriefResult["commands"] }
+  const exact = { label: "Resume the Mini pilot", where: "laptop terminal", option: "name-reviewers", command }
+  expect(briefCommands({ ...result, commands: [exact] }, moving)).toEqual([exact])
+  expect(briefCommands({ ...result, commands: [{ ...exact, command: "ssh me@mini es agent resume ses_x" }] }, moving)).toEqual([])
+  expect(briefCommands({ ...result, commands: [{ ...exact, command: "rm -rf ~" }] }, moving)).toEqual([])
+  // A command quoted only in a named document counts too.
+  expect(briefCommands({ ...result, commands: [{ ...exact, command: "make deploy" }] }, moving, [{ name: "runbook.md", text: "then run make deploy" }])).toHaveLength(1)
+})
+
+test("commands survive parsing whole, without whitespace or quote rewriting", () => {
+  const command = `printf '%s\\n'  "a  b"`
+  expect(reply({ question: "Q?", choices, commands: [{ label: "Print", command: `  ${command}\n` }, { label: "", command: "x" }] }).commands).toEqual([{ label: "Print", where: "", option: "", command }])
 })

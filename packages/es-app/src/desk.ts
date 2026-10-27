@@ -145,6 +145,8 @@ export type BriefResult = {
   /** Per canonical option ID: the consequence they would notice, an optional short note (a material risk
    * or fact), and optionally a small picture of what choosing it looks like. Labels and IDs stay the producer's. */
   choices: { id: string; label: string; outcome: string; note: string; sketch?: string }[]
+  /** Commands an option asks the human to run, shown only when quoted exactly from the request or a named document. */
+  commands: { label: string; where: string; option: string; command: string }[]
   /** What not answering leads to, only when no option already means that. */
   ifWait: string
   /** For a decision to publish something: the exact text it would send, quoted from the request. */
@@ -425,6 +427,8 @@ export const briefState = (meta: BriefMeta, messages: MessageWithParts[], status
       omitted: facts.omitted + timeline.omitted,
       result: {
         question: text(value.question, 160), context: text(value.context, 320), subjects: subjectsOf(value.subjects, known), choices: choicesOf(value.choices, legacy),
+        commands: objects(value.commands).slice(0, 4).flatMap(row => typeof row.command === "string" && row.command.trim() && row.command.length <= 2000 && text(row.label, 80)
+          ? [{ label: text(row.label, 80), where: text(row.where, 80), option: typeof row.option === "string" ? row.option : "", command: row.command.trim() }] : []),
         ifWait: text(value.ifWait, 140), sends: typeof value.sends === "string" ? value.sends.trim() : "", sendsTo: text(value.sendsTo, 160), sendsAs: text(value.sendsAs, 60),
         ...shapeOf(value.shape), gaps: strings(value.gaps, 160, 3),
         // A source survives only with at least one ref the app can resolve; the label alone is never shown.
@@ -481,6 +485,13 @@ export const briefComplete = (result: BriefResult, item: DeskItem) => {
 /** The text a decision would publish, shown only when it is quoted verbatim from the request itself. */
 export const briefSends = (result: BriefResult, item: DeskItem, documents: ConversationDocument[] = []) =>
   result.sends && [item.record?.context ?? "", ...documents.map(document => document.text)].some(source => source.includes(result.sends)) ? result.sends : ""
+
+/** Commands a brief may show: each must appear character for character in the request or a named document,
+ * so a paraphrased, shortened or invented command is never offered for copying. */
+export const briefCommands = (result: BriefResult, item: DeskItem, documents: ConversationDocument[] = []) => {
+  const sources = [item.record?.context ?? "", ...documents.map(document => document.text)]
+  return result.commands.filter(entry => sources.some(source => source.includes(entry.command)))
+}
 
 /** Where a cited source can be opened: the source thread at its cited messages, or a markdown file.
  * Undefined when nothing new resolves, so the source is dropped rather than shown as a bare label. */

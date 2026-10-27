@@ -1,14 +1,14 @@
 /* Derived, source-revision-bound brief for one queue item. The canonical request it explains is
  * rendered separately and stays the authority; this only makes it decidable at a glance. The UI does
  * not caption it as derived: the binding is enforced in code and provenance sits in Details. */
-import { createSignal, For, Match, Show, Switch } from "solid-js"
+import { createResource, createSignal, For, Match, Show, Switch } from "solid-js"
 import { useBriefs } from "../desk-briefs"
 import { A } from "@solidjs/router"
 import { sessionHref } from "../state"
 import { docHref } from "../pages/doc"
 import { anchorHref } from "../message-anchor"
-import { briefComplete, safeSvg, sourceTarget, type BriefResult, type BriefShape, type BriefSource, type DeskItem, type EvidenceRef } from "../desk"
-import { currentJob, regeneratingJob, type BriefJob } from "../desk-session"
+import { briefCommands, briefComplete, safeSvg, sourceTarget, type BriefResult, type BriefShape, type BriefSource, type DeskItem, type EvidenceRef } from "../desk"
+import { currentJob, readConversation, regeneratingJob, type BriefJob } from "../desk-session"
 import { LinkedText } from "./linked-text"
 import contract from "../brief-contract.json"
 
@@ -61,6 +61,7 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
         <Show when={!props.item.record}><p class="desk-brief-question" dir="auto">{value().result.question}</p></Show>
         <Show when={value().result.context}><p class="desk-brief-context" dir="auto"><LinkedText text={value().result.context} /></p></Show>
         <Subjects subjects={value().result.subjects} refs={value().job.meta.refs} />
+        <Commands commands={value().result} item={props.item} />
         {/* A fresh brief of the same request, made by the host that owns it; this one stays until the new one is ready. */}
         <Show when={props.live && !props.pinned && props.item.record && props.regenerate}><p class="desk-brief-regenerate">
         <Show when={!props.regenerating && !regeneratingJob(props.jobs, props.item)} fallback={<span class="home-muted" role="status">Regenerating brief…</span>}>
@@ -92,6 +93,42 @@ export const linkName = (url: string) => {
   const pull = /^\/[^/]+\/([^/]+)\/(?:pull|issues)\/(\d+)/.exec(parsed.pathname)
   if (parsed.hostname === "github.com" && pull) return `${pull[1]}#${pull[2]}`
   return parsed.hostname.endsWith(".slack.com") ? "Slack" : parsed.hostname
+}
+
+// Commands an option asks the human to run, exactly as the request quotes them, with where to run them and a
+// Copy button. Display only: nothing here runs anything. Dropped unless quoted verbatim (briefCommands).
+const Commands = (props: { commands: BriefResult; item: DeskItem }) => {
+  const [found] = createResource(() => props.item.record, readConversation)
+  const commands = () => briefCommands(props.commands, props.item, found()?.documents)
+  const option = (id: string) => props.item.record?.options.find(entry => entry.id === id)?.label
+  return <Show when={commands().length}>
+    <ul class="desk-commands" aria-label="Commands to run"><For each={commands()}>{entry => <li>
+      <span class="desk-command-label" dir="auto">{entry.label}<Show when={entry.where}> · <span class="home-muted">{entry.where}</span></Show>
+        <Show when={option(entry.option)}>{label => <span class="home-muted"> · for “<bdi dir="auto">{label()}</bdi>”</span>}</Show></span>
+      <CopyCode text={entry.command} />
+    </li>}</For></ul>
+  </Show>
+}
+
+const CopyCode = (props: { text: string }) => {
+  const [copied, setCopied] = createSignal<"Copied" | "Copy failed">()
+  const copy = async () => {
+    const ok = await navigator.clipboard?.writeText(props.text).then(() => true, () => false) || copyBySelection(props.text)
+    setCopied(ok ? "Copied" : "Copy failed")
+    setTimeout(() => setCopied(), 2000)
+  }
+  return <div class="desk-command"><pre dir="ltr"><code>{props.text}</code></pre>
+    <button type="button" class="desk-command-copy" aria-label="Copy command" onClick={() => void copy()}>{copied() ?? "Copy"}</button></div>
+}
+
+// The async Clipboard API is unavailable outside secure contexts; a selection copy inside the click still works.
+const copyBySelection = (text: string) => {
+  const input = document.createElement("textarea")
+  input.value = text
+  input.readOnly = true
+  input.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0"
+  document.body.append(input)
+  try { input.select(); return document.execCommand("copy") } catch { return false } finally { input.remove() }
 }
 
 // The things a decision acts on, one compact row each with its links, readable on a phone; never a picture.

@@ -105,7 +105,7 @@ test("brief state keeps only cited facts and resolvable sources from the JSON re
     facts: [{ text: "Canary exists", refs: ["E1"] }, { text: "Invented", refs: ["E9"] }], timeline: [], gaps: ["Cost"] })
   const state = briefState(meta(), [message("msg_u", "user", "packet"), message("msg_a", "assistant", "```json\n" + reply + "\n```")], "idle")
   expect(state).toEqual({ state: "ready", omitted: 1, result: { question: "Roll out to everyone now?", context: "The canary has been healthy for a day.",
-    subjects: [], choices: [{ id: "a", label: "", outcome: "Canary keeps 5%", note: "Slower" }], ifWait: "", sends: "", sendsTo: "", sendsAs: "", gaps: ["Cost"],
+    subjects: [], choices: [{ id: "a", label: "", outcome: "Canary keeps 5%", note: "Slower" }], commands: [], ifWait: "", sends: "", sendsTo: "", sendsAs: "", gaps: ["Cost"],
     sources: [{ label: "Latency report", refs: ["E1"] }, { label: "Plan", refs: ["file:docs/plan.md"] }],
     facts: [{ text: "Canary exists", refs: ["E1"] }], timeline: [] } })
 })
