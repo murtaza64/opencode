@@ -2372,7 +2372,7 @@ export type UsageDaily = {
       provider: string
       model: string
       cost: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-      coverage: "priced" | "missing-rate" | "no-usage"
+      coverage: "priced" | "missing-rate" | "local" | "no-usage"
       tokens: {
         input: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
         output: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"

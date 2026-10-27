@@ -4,7 +4,9 @@
 import { createSignal } from "solid-js"
 
 export type HostLink = { id: string; label: string; origin: string }
-export type HostInfo = { id: string; label: string; remote: boolean; hosts: HostLink[] }
+/** A host in the Work view: its laptop listener origin, and whether new work goes there by default. */
+export type WorkHost = HostLink & { default?: boolean }
+export type HostInfo = { id: string; label: string; remote: boolean; hosts: HostLink[]; work: WorkHost[] }
 
 const [info, setInfo] = createSignal<HostInfo>()
 
@@ -35,6 +37,13 @@ export const hostInfo = (value: unknown): HostInfo => {
           : [],
       )
     : []
-  if (typeof record.id !== "string" || typeof record.label !== "string") return { id: "local", label: "Local", remote: false, hosts }
-  return { id: record.id, label: record.label, remote: record.remote === true, hosts }
+  const work = Array.isArray(record.work)
+    ? record.work.flatMap((item: Record<string, unknown>) =>
+        item && typeof item.id === "string" && /^[a-z][a-z0-9-]{0,31}$/.test(item.id) && typeof item.label === "string" && typeof item.origin === "string" && URL.parse(item.origin)
+          ? [{ id: item.id, label: item.label, origin: URL.parse(item.origin)!.origin, ...(item.default === true ? { default: true } : {}) }]
+          : [],
+      )
+    : []
+  if (typeof record.id !== "string" || typeof record.label !== "string") return { id: "local", label: "Local", remote: false, hosts, work }
+  return { id: record.id, label: record.label, remote: record.remote === true, hosts, work }
 }

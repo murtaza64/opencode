@@ -499,7 +499,7 @@ test("hosts Front Desk surfaces: keyed address, capability-only frame requests, 
   const framed = await fetch(`${server.origin}${src}api`, { headers: { origin: "null", "sec-fetch-site": "cross-site", "x-editspace-key": server.key } })
   expect(await framed.json()).toEqual({ path: "/api", key: false })
   expect(framed.headers.get("content-security-policy")).toStartWith("sandbox allow-scripts")
-  expect((await fetch(`${server.origin}/__surface/board/${"0".repeat(32)}/`)).status).toBe(404)
+  expect((await fetch(`${server.origin}/__surface/board/zzzzzz-${"0".repeat(32)}/`)).status).toBe(404)
   // The frame's prefix never reaches the app's own APIs.
   expect((await fetch(`${server.origin}/oc/session`, { headers: { origin: "null", "sec-fetch-site": "cross-site", "x-editspace-key": server.key } })).status).toBe(403)
   const page = await fetch(server.origin, { headers: { "x-editspace-key": server.key } })

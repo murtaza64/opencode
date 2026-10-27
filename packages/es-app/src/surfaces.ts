@@ -104,10 +104,15 @@ export const createSurfaces = () => {
   return { list, boards: () => list().filter(surface => !isDeliverable(surface)), deliverables: split, markSeen, seenError, error, checked, refresh }
 }
 
-/** The sandboxed frame address for one surface, minted by the app server. */
+/** The sandboxed frame address for one surface, minted by the app server, and when it lapses. */
 export const surfaceAddress = (id: string) =>
   fetch(`/__es/surface/${encodeURIComponent(id)}`, { cache: "no-store" }).then(async response => {
     // An app server without the surface route answers with its page fallback, not JSON.
     if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) throw new Error("this app server does not host surfaces yet")
-    return (await response.json() as { src: string }).src
+    const body = await response.json() as { src: string; expires_at?: number }
+    return { src: body.src, expiresAt: body.expires_at }
   })
+
+/** Delay before re-minting a frame address: a few minutes ahead of expiry, never sooner than 30 s. */
+export const renewDelay = (expiresAt: number | undefined, now: number) =>
+  expiresAt === undefined ? undefined : Math.max(30_000, expiresAt - now - 5 * 60_000)

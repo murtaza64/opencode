@@ -6,7 +6,9 @@ import {
   createMemo,
   createResource,
   createSignal,
+  getOwner,
   onCleanup,
+  runWithOwner,
   untrack,
   useContext,
   type ParentProps,
@@ -23,6 +25,8 @@ import { createSessionFailures } from "./session-failures"
 import { coalesced } from "./coalesced"
 import { touchTodayCost } from "./today-cost"
 import { clearBackend, describeFailure, reportBackend } from "./backend-status"
+import { readHost, type WorkHost } from "./host"
+import { createHostFeed, type HostFeed, type HostedRow } from "./host-feed"
 import type { GlobalSession, SessionFailure } from "@opencode-ai/sdk/v2"
 import type { Event } from "@opencode-ai/sdk/v2"
 
@@ -41,6 +45,20 @@ export type SessionRow = {
   live?: string
   project?: string
   archived?: number
+  /** A Work view host other than this page's; its rows open on that host's own tab. */
+  host?: string
+}
+
+/** Other hosts' sessions in this page's Work view (only the laptop listener aggregates). */
+type WorkCtx = {
+  /** One feed per other Work view host, in registry order. */
+  feeds: () => HostFeed[]
+  host: (id: string) => WorkHost | undefined
+  pinned: () => HostedRow[]
+  unpinned: () => HostedRow[]
+  isPinned: (row: Pick<HostedRow, "id" | "directory" | "host">) => boolean
+  togglePin: (row: Pick<HostedRow, "id" | "directory" | "host">) => void
+  dot: (row: HostedRow) => DotState
 }
 
 type DashboardCtx = {
@@ -85,6 +103,7 @@ type DashboardCtx = {
   handedOff: (sessionID: string) => boolean
   cloud: ReturnType<typeof createCloudAgents>
   setVisibleSessions: (ids: Set<string>) => void
+  work: WorkCtx
 }
 
 const Ctx = createContext<DashboardCtx>()
@@ -520,6 +539,60 @@ export function DashboardProvider(props: ParentProps) {
     return next
   })
 
+  // Work view: other hosts listed beside this one, each read independently, so one host being
+  // unreachable never blocks or empties another. Pins of another host's sessions live under that
+  // host's storage prefix; this host's pin keys are unchanged.
+  const owner = getOwner()
+  const [feeds, setFeeds] = createSignal<HostFeed[]>([])
+  // null until the project is known, so a host is not first read for the wrong scope.
+  const workProject = () => allProjects() ? undefined : editspace() ?? editspaces()?.default ?? (editspaces() ? undefined : null)
+  void readHost().then((info) => {
+    if (info.remote) return
+    runWithOwner(owner, () => setFeeds(info.work.filter((item) => item.id !== info.id).map((item) => createHostFeed(item, workProject))))
+  })
+  createEffect((previous: string | null | undefined) => {
+    const project = workProject()
+    const name = project === null ? null : project ?? ""
+    if (previous !== undefined && previous !== name && name !== null) untrack(feeds).forEach((feed) => void feed.load())
+    return name
+  })
+  const hostPinKey = (host: string) => `host:${host}:${PIN_KEY}`
+  const [hostPins, setHostPins] = createSignal<Record<string, string[]>>({})
+  createEffect(() => setHostPins(Object.fromEntries(feeds().map((feed) => {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem(hostPinKey(feed.host.id)) ?? "[]")
+      return [feed.host.id, Array.isArray(value) ? value.filter((key): key is string => typeof key === "string") : []]
+    } catch {
+      return [feed.host.id, []]
+    }
+  }))))
+  const workPinned = (row: Pick<HostedRow, "id" | "directory" | "host">) =>
+    !!row.host && (hostPins()[row.host] ?? []).some((key) => pinSessionID(key) === row.id)
+  const work: WorkCtx = {
+    feeds,
+    host: (id) => feeds().find((feed) => feed.host.id === id)?.host,
+    pinned: createMemo(() => feeds().flatMap((feed) => {
+      const rows = new Map(feed.state().rows.map((row) => [row.id, row]))
+      return (hostPins()[feed.host.id] ?? []).flatMap((key) => rows.get(pinSessionID(key) ?? "") ?? [])
+    })),
+    unpinned: createMemo(() => feeds().flatMap((feed) => feed.state().rows.filter((row) => !workPinned(row)))),
+    isPinned: workPinned,
+    togglePin: (row) => {
+      if (!row.host) return
+      const current = hostPins()[row.host] ?? []
+      const next = workPinned(row) ? current.filter((key) => pinSessionID(key) !== row.id) : [...current, pinKey(row)]
+      try { localStorage.setItem(hostPinKey(row.host), JSON.stringify(next)) } catch {
+        // Keep the pin for this window when browser storage is unavailable.
+      }
+      setHostPins((previous) => ({ ...previous, [row.host!]: next }))
+    },
+    dot: (row) => {
+      const feed = feeds().find((item) => item.host.id === row.host)
+      const status = feed?.live(row.id)
+      return status === "busy" || status === "retry" ? "busy" : "idle"
+    },
+  }
+
   const value: DashboardCtx = {
     state,
     stateError: () => [stateError(), metadataError(), notificationError()].filter(Boolean).join(" "),
@@ -588,6 +661,7 @@ export function DashboardProvider(props: ParentProps) {
     handedOff,
     cloud,
     setVisibleSessions,
+    work,
   }
   return <Ctx.Provider value={value}>{props.children}</Ctx.Provider>
 }

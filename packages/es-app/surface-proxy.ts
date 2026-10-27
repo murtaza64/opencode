@@ -3,14 +3,20 @@
  * upstream; this proxy forwards to it without the app's credentials and pins
  * every response into a script-capable sandbox whose network reach is its own
  * prefix. The capability keeps other local pages from reading surface content,
- * and lets the sandboxed (opaque-origin) frame load without ambient cookies. */
+ * and lets the sandboxed (opaque-origin) frame load without ambient cookies.
+ *
+ * Browsers send no cookies with an opaque-origin frame's subresource requests, so an
+ * authenticating edge (Cloudflare Access) in front of the app cannot gate /__surface/;
+ * there the capability is the whole credential. It is minted only behind the app's own
+ * authentication, names one surface, and expires, so a leaked frame URL stops working. */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { request, type IncomingMessage, type ServerResponse } from "node:http"
 
 export type SurfaceEntry = { id: string; upstream: string }
 
 const CAPABILITY = /^\/__es\/surface\/([a-z0-9][a-z0-9-]{0,39})$/
-const SURFACE = /^\/__surface\/([a-z0-9][a-z0-9-]{0,39})\/([0-9a-f]{32})(\/.*)$/
+const SURFACE = /^\/__surface\/([a-z0-9][a-z0-9-]{0,39})\/([0-9a-z]{1,12})-([0-9a-f]{32})(\/.*)$/
+const CAPABILITY_TTL = 12 * 3600_000
 const METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])
 // Forward only content negotiation and payload shape; never cookies, auth, origin or app keys.
 const REQUEST_HEADERS = ["accept", "accept-language", "content-type", "content-length", "if-none-match", "if-modified-since", "last-event-id"]
@@ -43,9 +49,19 @@ export const surfaceProxy = (options: {
   dashboard: string | undefined
   registry?: () => Promise<SurfaceEntry[]>
   publicOrigin?: string
+  /** Lifetime of a minted frame address; the desk remounts the frame before it lapses. */
+  capabilityTtl?: number
+  now?: () => number
 }) => {
   const key = randomBytes(32)
-  const capability = (id: string) => createHmac("sha256", key).update(id).digest("hex").slice(0, 32)
+  const now = options.now ?? Date.now
+  const ttl = options.capabilityTtl ?? CAPABILITY_TTL
+  // The expiry is part of the signed message, so it cannot be extended by editing the path.
+  const mac = (id: string, expiry: string) => createHmac("sha256", key).update(`${id}|${expiry}`).digest("hex").slice(0, 32)
+  const capability = (id: string, expiresAt = now() + ttl) => {
+    const expiry = Math.ceil(expiresAt / 1000).toString(36)
+    return { token: `${expiry}-${mac(id, expiry)}`, expiresAt: parseInt(expiry, 36) * 1000 }
+  }
   let cached: { at: number; value: Promise<SurfaceEntry[]> } | undefined
   const registry =
     options.registry ??
@@ -71,15 +87,19 @@ export const surfaceProxy = (options: {
     const match = CAPABILITY.exec(new URL(req.url ?? "/", "http://surface").pathname)
     if (!match || req.method !== "GET" || req.headers["sec-fetch-site"] === "cross-site") return finish(res, 403, "Forbidden")
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" })
-    res.end(JSON.stringify({ src: `/__surface/${match[1]}/${capability(match[1])}/` }))
+    const minted = capability(match[1])
+    res.end(JSON.stringify({ src: `/__surface/${match[1]}/${minted.token}/`, expires_at: minted.expiresAt }))
   }
 
   const serve = async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://surface")
     const match = SURFACE.exec(url.pathname)
     if (!match || !(METHODS.has(req.method ?? "") || req.method === "OPTIONS")) return finish(res, 404, "Not found")
-    const [, id, presented, rest] = match
-    if (!timingSafeEqual(Buffer.from(presented), Buffer.from(capability(id)))) return finish(res, 404, "Not found")
+    const [, id, expiry, signature, rest] = match
+    // Wrong, foreign and expired capabilities answer the same plain 404, never a login page.
+    if (parseInt(expiry, 36) * 1000 <= now() || !timingSafeEqual(Buffer.from(signature), Buffer.from(mac(id, expiry))))
+      return finish(res, 404, "Not found")
+    const presented = `${expiry}-${signature}`
     if (req.method === "OPTIONS") {
       res.writeHead(204, {
         "access-control-allow-origin": "null",

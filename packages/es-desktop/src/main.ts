@@ -2,6 +2,7 @@ import { app, BaseWindow, BrowserWindow, dialog, Menu, nativeImage, session, she
 import path from "node:path"
 import { readFile, writeFile } from "node:fs/promises"
 import { serve } from "./server"
+import { localHost, type WorkHost } from "../../es-app/remote-host"
 import { PERF_DIR } from "./perf-log"
 import { createVoice, voiceTools } from "./voice"
 import { appRouteURL, externalURL, internalURL, pageArrivedCrossSite, pageNavigation, serviceHosts, serviceOrigins, startupMode, startupPlan, surfaceFrameURL } from "./policy"
@@ -85,7 +86,18 @@ const start = async () => {
       return image.resize({ width: 24, quality: "good" }).resize({ width: 640, quality: "best" }).toJPEG(70)
     },
   })
+  // Remote host problems never stop local startup: that host is left out and the reason logged.
+  const configured = await serviceHosts(app.getPath("userData"), { ES_REMOTE_HOSTS: process.env.ES_REMOTE_HOSTS }).catch((error: unknown) => {
+    console.error("Editspace remote hosts ignored", { message: error instanceof Error ? error.message : "Unknown error" })
+    return []
+  })
+  // Hosts in the Work view (proxied app hosts; page hosts such as Personal stay their own tab), with
+  // their listener origins once started. New work goes to the configured default, else the first.
+  const work: WorkHost[] = []
+  const workDefault = configured.find((host) => host.mode === "proxy" && host.default)?.id ?? configured.find((host) => host.mode === "proxy")?.id
   const server = await serve({
+    peers: configured.filter((host) => host.mode === "proxy").map((host) => ({ id: host.id, origin: host.origin })),
+    hostInfo: () => ({ ...localHost, work }),
     appearance,
     port,
     root: path.join(app.getAppPath(), "dist/renderer"),
@@ -101,11 +113,6 @@ const start = async () => {
   await writeFile(portFile, new URL(server.origin).port, { mode: 0o600 })
   // Each remote execution host gets its own keyed loopback listener on a stable saved port, so its
   // origin (and with it storage, drafts and receipts) stays separate from local work across launches.
-  // Remote host problems never stop local startup: that host is left out and the reason logged.
-  const configured = await serviceHosts(app.getPath("userData"), { ES_REMOTE_HOSTS: process.env.ES_REMOTE_HOSTS }).catch((error: unknown) => {
-    console.error("Editspace remote hosts ignored", { message: error instanceof Error ? error.message : "Unknown error" })
-    return []
-  })
   const started = await Promise.all(
     configured.filter((host) => host.mode === "proxy").map(async (host) => {
       const file = path.join(app.getPath("userData"), `loopback-port-${host.id}`)
@@ -118,7 +125,7 @@ const start = async () => {
         // The look belongs to this laptop, whichever host a tab shows.
         appearance,
         // Host tabs show placement natively, so the page needs no switcher of its own.
-        hostInfo: () => ({ id: host.id, label: host.label, remote: true, hosts: [] }),
+        hostInfo: () => ({ id: host.id, label: host.label, remote: true, hosts: [], work }),
         perfDir: PERF_DIR,
       })
       await writeFile(file, new URL(listener.origin).port, { mode: 0o600 })
@@ -129,6 +136,10 @@ const start = async () => {
     })),
   )
   const remotes = started.filter((item) => item !== undefined)
+  work.push(
+    { id: "local", label: "Local", origin: server.origin, ...(workDefault ? {} : { default: true }) },
+    ...remotes.map((host) => ({ id: host.id, label: host.label, origin: host.server.origin, ...(host.id === workDefault ? { default: true } : {}) })),
+  )
   const pages = configured.filter((host) => host.mode === "page")
   const listeners = [{ id: "local", label: "Local", server }, ...remotes]
   const isolated = listenerSession("persist:editspace", server)
@@ -187,9 +198,17 @@ const start = async () => {
         "body:not(:has(#root))::before { content: ''; position: fixed; top: 0; left: 84px; right: 0; height: 44px; -webkit-app-region: drag; }",
       )
     })
-  // One host's app listener: same-origin navigation stays; app links to local ports belong to the Local tab.
+  // One host's app listener: same-origin navigation stays; app links to local ports belong to the Local
+  // tab, and Work view links to another host's listener open in that host's own tab and partition.
   function guardListener(contents: Electron.WebContents, origin: string, local: boolean) {
     const open = (url: string) => {
+      const target = listeners.find((item) => item.server.origin !== origin && item.id !== "local" && URL.parse(url)?.origin === item.server.origin)
+      const hosted = target && appRouteURL(url, target.server.origin)
+      if (target && hosted && tabs) {
+        tabs.select(target.id)
+        void tabs.contents(target.id).loadURL(hosted)
+        return true
+      }
       const route = appRouteURL(url, local ? origin : server.origin)
       if (!route) return false
       if (local) void contents.loadURL(route)

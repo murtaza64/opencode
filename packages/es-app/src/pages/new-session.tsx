@@ -7,7 +7,8 @@
  * submission before the request) before this page lets go of it; the composer
  * then owns the pending echo and unknown-outcome recovery. */
 import { createEffect, createMemo, createResource, createSignal, For, Show } from "solid-js"
-import { useNavigate } from "@solidjs/router"
+import { useLocation, useNavigate } from "@solidjs/router"
+import { host, readHost } from "../host"
 import { descending } from "@opencode-ai/schema/identifier"
 import { oc, SessionCreateError, type SessionCreateBody } from "../api"
 import { sendFirstMessage } from "../composer"
@@ -56,6 +57,40 @@ export default function NewSessionPage() {
   // A reserved attempt can only be sent again as the identical request, once its id is known absent.
   const retryable = () => !pending() && !!attempt()?.absent
   let editor: HTMLTextAreaElement | undefined
+
+  // Where the session runs, visible before Send. New work defaults to the registry's default host
+  // (the Mini); this host is an explicit choice (?host=). Another host's session is created on that
+  // host's own page, so its draft, request and receipt stay there; an unavailable host is never
+  // replaced by another.
+  const route = useLocation()
+  void readHost()
+  const workHosts = () => host()?.work ?? []
+  const destination = createMemo(() => {
+    const hosts = workHosts()
+    const asked = new URLSearchParams(route.search).get("host")
+    if (attempt()) return host()?.id
+    return hosts.find((item) => item.id === asked)?.id ?? hosts.find((item) => item.default)?.id ?? host()?.id
+  })
+  const here = () => workHosts().length < 2 || destination() === host()?.id
+  const target = () => workHosts().find((item) => item.id === destination())
+  const targetFeed = () => dashboard.work.feeds().find((feed) => feed.host.id === destination())
+  const hostDown = (id?: string) => dashboard.work.feeds().find((feed) => feed.host.id === id)?.state().status === "unavailable"
+  const targetDown = () => hostDown(destination())
+  // The draft text goes with the hand-off (URL fragment: never sent to a server) and is cleared here,
+  // so one prompt cannot be started on two hosts. That host's page creates the session itself.
+  const handOff = () => {
+    const item = target()
+    if (!item || targetDown()) return
+    const draft = text().trim() ? `#draft=${encodeURIComponent(text())}` : ""
+    setText("")
+    window.location.assign(`${item.origin}/new?host=${encodeURIComponent(item.id)}${draft}`)
+  }
+  // Receiving a hand-off: the text joins this host's draft, never replacing text already here.
+  const incoming = new URLSearchParams(route.hash.replace(/^#/, "")).get("draft")
+  if (incoming !== null && !attempt()) {
+    setText((current) => current.trim() ? `${current}\n\n${incoming}` : incoming)
+    navigate(`${route.pathname}${route.search}`, { replace: true })
+  }
 
   const selected = createMemo(() => projects().find((item) => item.name === project()))
   // Project defaults once the project list loads: the current project, else the last one used here.
@@ -172,7 +207,15 @@ export default function NewSessionPage() {
     <div class="session-main">
       <AppHeader><h1>New session</h1></AppHeader>
       <div class="new-session-space" />
-      <form class="prompt-box new-session-draft" onSubmit={(event) => { event.preventDefault(); void send() }}>
+      <form class="prompt-box new-session-draft" onSubmit={(event) => { event.preventDefault(); if (here()) void send() }}>
+        <Show when={workHosts().length > 1}>
+          <label class="new-session-host">Run on
+            <select aria-label="Run on" value={destination()} disabled={locked()} onChange={(event) => navigate(`/new?host=${encodeURIComponent(event.currentTarget.value)}`, { replace: true })}>
+              <For each={workHosts()}>{(item) => <option value={item.id} selected={item.id === destination()}>{item.label}{item.default ? " · default" : ""}{hostDown(item.id) ? " · unreachable" : ""}</option>}</For>
+            </select>
+          </label>
+        </Show>
+        <Show when={here()}>
         <div class="new-session-settings" role="group" aria-label="New session settings">
           <select aria-label="Project" value={project()} disabled={locked()} onChange={(event) => chooseProject(event.currentTarget.value)}>
             <Show when={!project()}><option value="" disabled>Project…</option></Show>
@@ -193,16 +236,27 @@ export default function NewSessionPage() {
             </optgroup>}</For>
           </select>
         </div>
+        </Show>
         <textarea ref={editor} aria-label="Message" dir="auto" value={text()} readOnly={locked()}
           onInput={(event) => setText(event.currentTarget.value)}
-          onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.isComposing) { event.preventDefault(); void send() } }} />
+          onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.isComposing) { event.preventDefault(); if (here()) void send(); else handOff() } }} />
+        <Show when={here()} fallback={
+          <div class="new-session-submit new-session-elsewhere">
+            <Show when={targetDown()} fallback={<span class="dim">Project, agent and model are chosen on {target()?.label}.</span>}>
+              <span class="err" role="alert">{target()?.label} is unreachable. Choose {host()?.label} or try again.</span>
+              <button type="button" onClick={() => void targetFeed()?.load()}>Try again</button>
+            </Show>
+            <button type="button" class="primary" disabled={targetDown()} onClick={handOff}>Start on {target()?.label} <kbd aria-hidden="true">⌘/Ctrl↵</kbd></button>
+          </div>
+        }>
         <div class="new-session-submit">
           <Show when={error()}><span class="err" role="alert">{error()}</span></Show>
           <Show when={attempt() && !pending()}><button type="button" onClick={() => void reconcile()}>Check again</button></Show>
           <button type="submit" class="primary" disabled={attempt() ? !retryable() : locked() || !directory() || !text().trim()}>
-            {pending() ? "Creating…" : "Send"} <kbd aria-hidden="true">⌘/Ctrl↵</kbd>
+            {pending() ? "Creating…" : workHosts().length > 1 ? `Start on ${host()?.label}` : "Send"} <kbd aria-hidden="true">⌘/Ctrl↵</kbd>
           </button>
         </div>
+        </Show>
       </form>
     </div>
   </main>

@@ -628,6 +628,15 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 }
 .session-entry:hover .pin-action, .session-entry:focus-within .pin-action, .pin-action.pinned { opacity: 1; }
 .pin-action.pinned { color: var(--mauve); }
+/* Work view location glyphs and host availability (ux-feel §4). */
+.host-glyph { flex: none; margin-inline-end: 6px; color: var(--overlay1); }
+.session-entry.unavailable .nav-item, .mini-session.unavailable { opacity: 0.55; }
+.session-entry.unavailable .nav-item { cursor: not-allowed; }
+.host-status { display: flex; align-items: center; gap: 2px; font-size: 12px; }
+.host-status.unavailable { color: var(--peach); }
+.host-status .link-button { margin-inline-start: auto; padding: 0 4px; background: transparent; color: var(--blue); }
+.new-session-host { display: flex; align-items: center; gap: 8px; }
+.new-session-elsewhere { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; }
 .pin-action:hover, .mini-pin:hover { background: var(--surface0); }
 .pinned-section { padding-bottom: 6px; border-bottom: 1px solid var(--surface0); }
 .pinned-section .nav-heading { padding-top: 4px; }

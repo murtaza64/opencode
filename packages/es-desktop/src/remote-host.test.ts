@@ -223,3 +223,106 @@ test("a page host reloads once only when it lands on its own origin from another
   expect(pageArrivedCrossSite("data:text/html,x", "https://agents.murtaza.earth/", origin)).toBe(false)
   expect(pageArrivedCrossSite("https://localhost:9/login", "https://frosty-pond-8fd5.cloudflareaccess.com/", origin)).toBe(false)
 })
+
+// The Work view: the local listener reads other hosts at /hosts/<id>/..., list routes only.
+const workListener = async (mini: ReturnType<typeof fakeHost>, local = fakeHost("local")) => {
+  const server = await serve({ root: await renderer(), opencode: local.origin, dashboard: local.origin, opencodeAuth: "Basic bG9jYWw6c2VjcmV0", peers: [{ id: "mini", origin: mini.origin }] })
+  cleanup.push(() => Promise.race([server.close(), Bun.sleep(500)]))
+  const get = (pathname: string, init?: RequestInit) =>
+    fetch(`${server.origin}${pathname}`, { ...init, headers: { "x-editspace-key": server.key, ...init?.headers } })
+  return { server, get, local }
+}
+
+test("the local listener reads another host's session list with no credential and the same session IDs stay apart", async () => {
+  const mini = fakeHost("mini")
+  const { get } = await workListener(mini)
+  const response = await get("/hosts/mini/oc/experimental/session?roots=true&limit=200", {
+    headers: { cookie: "es_attention_operator=local-operator; es_attention_operator__mini=mini-operator", authorization: "Basic bG9jYWw6c2VjcmV0" },
+  })
+  expect(await response.json()).toMatchObject({ host: "mini", path: "/experimental/session" })
+  expect(mini.seen.at(-1)).toEqual({ path: "/experimental/session", cookie: null, authorization: null, origin: null })
+  expect(await (await get("/hosts/mini/es/api/editspaces")).json()).toMatchObject({ host: "mini", path: "/es/api/editspaces" })
+  // Needs you reads the other host's decision list the same way: no operator cookie travels.
+  const decisions = await get("/hosts/mini/es/api/attention?view=open&limit=200", { headers: { cookie: "es_attention_operator=local-operator; es_attention_operator__mini=mini-operator" } })
+  expect(await decisions.json()).toMatchObject({ host: "mini", path: "/es/api/attention" })
+  expect(mini.seen.at(-1)).toEqual({ path: "/es/api/attention", cookie: null, authorization: null, origin: null })
+  expect(await (await get("/oc/experimental/session")).json()).toMatchObject({ host: "local" })
+})
+
+test("host-qualified routes expose list reads only: writes, other routes and unknown hosts are refused", async () => {
+  const mini = fakeHost("mini")
+  const { get } = await workListener(mini)
+  const before = mini.seen.length
+  expect((await get("/hosts/mini/oc/session", { method: "POST", body: "{}" })).status).toBe(403)
+  expect((await get("/hosts/mini/oc/experimental/session", { method: "POST", body: "{}" })).status).toBe(403)
+  expect((await get("/hosts/mini/oc/session/ses_same/message")).status).toBe(403)
+  expect((await get("/hosts/mini/es/api/attention/session")).status).toBe(403)
+  expect((await get("/hosts/mini/es/api/attention/session", { method: "POST", headers: { "content-type": "application/json", "x-attention-csrf": "1" }, body: "{}" })).status).toBe(403)
+  expect((await get("/hosts/mini/es/api/attention", { method: "POST", body: "{}" })).status).toBe(403)
+  expect((await get("/hosts/mini/es/api/attention/00000000-0000-4000-8000-000000000000")).status).toBe(403)
+  expect((await get("/hosts/mini/es/api/attention/00000000-0000-4000-8000-000000000000/commands", { method: "POST", body: "{}" })).status).toBe(403)
+  expect((await get("/hosts/other/oc/experimental/session")).status).toBe(404)
+  expect((await get("/hosts/local/oc/experimental/session")).status).toBe(404)
+  expect((await get("/hosts/mini//oc/experimental/session")).status).toBe(404)
+  expect(mini.seen.length).toBe(before)
+})
+
+test("a remote or paired listener never offers host-qualified routes", async () => {
+  const mini = fakeHost("mini")
+  const server = await serve({ root: await renderer(), remote: { id: "mini", origin: mini.origin }, peers: [{ id: "other", origin: fakeHost("other").origin }] })
+  cleanup.push(server.close)
+  expect((await fetch(`${server.origin}/hosts/other/oc/experimental/session`, { headers: { "x-editspace-key": server.key } })).status).toBe(404)
+})
+
+test("an unreachable host answers its own reads as unavailable while local reads continue", async () => {
+  const mini = fakeHost("mini")
+  const { get } = await workListener(mini)
+  await mini.stop()
+  expect((await get("/hosts/mini/oc/experimental/session")).status).toBe(502)
+  expect(await (await get("/oc/experimental/session")).json()).toMatchObject({ host: "local" })
+})
+
+test("with Work view hosts the app loads even when local services are down", async () => {
+  const local = fakeHost("local")
+  const { get } = await workListener(fakeHost("mini"), local)
+  await local.stop()
+  const page = await get("/", { headers: { "sec-fetch-dest": "document" } })
+  expect(page.status).toBe(200)
+  expect(await page.text()).toContain("Fixture renderer")
+})
+
+test("another host's session events arrive through the local socket with that host's origin only", async () => {
+  const mini = fakeHost("mini")
+  const { server } = await workListener(mini)
+  const packets = await new Promise<{ id: number; type: string; data?: string; code?: number }[]>((resolve, reject) => {
+    const seen: { id: number; type: string; data?: string; code?: number }[] = []
+    const socket = new WebSocket(`${server.origin.replace("http", "ws")}/oc/global/event`, "opencode-events-v1", {
+      headers: { origin: server.origin, "x-editspace-key": server.key },
+    })
+    socket.on("open", () => {
+      socket.send(JSON.stringify({ type: "subscribe", id: 1, url: "/hosts/other/oc/global/event" }))
+      socket.send(JSON.stringify({ type: "subscribe", id: 2, url: "/hosts/mini/oc/global/event" }))
+    })
+    socket.on("message", (data) => {
+      const packet = JSON.parse(data.toString())
+      seen.push(packet)
+      if (packet.type !== "message") return
+      socket.on("close", () => resolve(seen))
+      socket.close()
+    })
+    socket.on("error", reject)
+  })
+  // An unknown host fails only its own subscription; the socket keeps serving the others.
+  expect(packets).toContainEqual({ id: 1, type: "error", code: 502 })
+  expect(JSON.parse(packets.find((packet) => packet.type === "message")!.data!)).toEqual({ type: "session.updated", host: "mini" })
+  expect(mini.seen.find((item) => item.path === "/global/event")).toMatchObject({ origin: mini.origin, authorization: null, cookie: null })
+})
+
+test("one proxied host may be the default for new work", async () => {
+  const directory = await renderer()
+  expect(await serviceHosts(directory, { ES_REMOTE_HOSTS: '[{"id":"mini","origin":"https://a.b.ts.net","default":true},{"id":"personal","origin":"https://x.y","mode":"page","default":true}]' })).toEqual([
+    { id: "mini", label: "mini", origin: "https://a.b.ts.net", mode: "proxy", default: true },
+    { id: "personal", label: "personal", origin: "https://x.y", mode: "page" },
+  ])
+  await expect(serviceHosts(directory, { ES_REMOTE_HOSTS: '[{"id":"mini","origin":"https://a.b.ts.net","default":true},{"id":"m2","origin":"https://c.b.ts.net","default":true}]' })).rejects.toThrow("Only one default host")
+})
