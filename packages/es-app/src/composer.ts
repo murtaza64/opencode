@@ -110,6 +110,8 @@ export type ComposerState = {
     error?: string
     status: "sending" | "accepted" | "unknown"
     after?: string
+    /** Context parts sent with the message; an explicit retry under the same ID resends them unchanged. */
+    context?: readonly ContextPart[]
     action?: ComposerAction
     /** Client-chosen user message ID; the only way to find an unconfirmed send again. */
     messageID?: string
@@ -236,6 +238,12 @@ const readSubmission = (storage: () => Pick<Storage, "getItem"> | null, key: str
 }
 
 /** A send with no answer by then is shown as not confirmed and stops blocking the composer. */
+const isContextPart = (value: unknown): value is ContextPart => {
+  const part = value as ContextPart | null
+  return !!part && part.type === "text" && typeof part.text === "string" && part.synthetic === true &&
+    !!part.metadata && typeof part.metadata.source === "string" && typeof part.metadata.key === "string"
+}
+
 export const SEND_DEADLINE_MS = 25_000
 export const READBACK_WINDOW_MS = 30_000
 
@@ -370,6 +378,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           images: saved.normalSubmission.images,
           status: saved.normalSubmission.status === "accepted" ? "accepted" : "unknown",
           ...(typeof saved.normalSubmission.after === "string" ? { after: saved.normalSubmission.after } : {}),
+          ...(Array.isArray(saved.normalSubmission.context) && saved.normalSubmission.context.every(isContextPart) ? { context: saved.normalSubmission.context } : {}),
           ...(isAction(saved.normalSubmission.action) ? { action: saved.normalSubmission.action } : {}),
           ...(typeof saved.normalSubmission.messageID === "string" ? { messageID: saved.normalSubmission.messageID } : {}),
           ...(typeof saved.normalSubmission.revision === "number" ? { revision: saved.normalSubmission.revision } : {}),
@@ -955,7 +964,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     persist()
     try {
       await prompt(session, directory, submission.text, {
-        images: submission.images ? draft.images : [], messageID: submission.messageID, signal: AbortSignal.timeout(dependencies.sendDeadlineMs ?? SEND_DEADLINE_MS),
+        images: submission.images ? draft.images : [], ...(submission.context?.length ? { context: submission.context } : {}), messageID: submission.messageID, signal: AbortSignal.timeout(dependencies.sendDeadlineMs ?? SEND_DEADLINE_MS),
       })
       if (submission.revision !== undefined) clearTask(submission.revision, buffer)
       setState("normalSubmission", "status", "accepted")
@@ -1204,6 +1213,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           buffer,
           status: "sending",
           after: latestMessageID,
+          ...(context?.length ? { context: context.map((part) => ({ ...part, metadata: { ...part.metadata } })) } : {}),
           ...(direct ? { action: direct.action } : {}),
           messageID,
           revision: draft.revision,
@@ -1718,6 +1728,12 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     reasonForAction: (action: ComposerAction) =>
       blockedReason(action === "steer" && !state.busy ? "send" : action, state.visibleBuffer),
     outgoingReason: (action: ComposerAction) => outgoingReason(action === "steer" && !state.busy ? "send" : action),
+    /**
+     * Whether context parts reach Core with this action. Only a plain send (Steer while idle) carries
+     * them: a busy steer and a queue go through /input, which takes none yet, so the UI must say
+     * context is not attached.
+     */
+    contextAttaches: (action: ComposerAction) => action === "steer" && !state.busy,
     // `context` rides only on a plain send, inside the same message as the human's text.
     submitVisible: (action: ComposerAction, session: Session, nextModel?: ComposerModel | null, latestMessageID?: string, context?: readonly ContextPart[]) =>
       submit(session, nextModel, {

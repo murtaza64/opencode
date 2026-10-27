@@ -2870,6 +2870,42 @@ test("an absent Send is offered again only explicitly, with the same ID, text an
   expect(composer.state.task.images).toEqual([])
 })
 
+test("an absent Send with context parts resends the same parts under the same ID, also after reload", async () => {
+  const context = [{ type: "text" as const, text: "Lane brief: runtime-options", synthetic: true as const, metadata: { source: "es-context", key: "lane:runtime-options" } }]
+  const sent: { messageID?: string; context?: unknown }[] = []
+  const storage = new MemoryStorage()
+  const respond = (request: { url: URL }) => {
+    if (request.url.pathname.startsWith(`/oc/session/${session.id}/message/`)) return new Response("{}", { status: 404 })
+    if (request.url.pathname === `/oc/session/${session.id}`) return Response.json(session)
+    throw new Error(`Unexpected request: ${request.url}`)
+  }
+  const prompt = async (_session: unknown, _directory: string, _text: string, options?: { messageID?: string; context?: unknown }) => {
+    sent.push({ messageID: options?.messageID, context: options?.context })
+    if (sent.length === 1) throw new Error("server stalled")
+  }
+  const { composer } = harness(respond, { storage, prompt })
+  composer.setText("with context")
+  await composer.submitVisible("steer", session, undefined, undefined, context)
+  expect(composer.state.normalSubmission?.status).toBe("unknown")
+  await composer.persistAsync()
+  const restored = harness(respond, { storage, prompt }).composer
+  await restored.persistAsync()
+  await restored.checkSubmission()
+  expect(restored.state.normalSubmission?.absent).toBe(true)
+  await restored.sendAgain(session)
+  expect(sent).toHaveLength(2)
+  expect(sent[1]).toEqual({ messageID: sent[0]!.messageID, context })
+})
+
+test("context parts attach only to a plain send; a busy steer and a queue say they cannot", () => {
+  const { composer } = harness()
+  expect(composer.contextAttaches("steer")).toBe(true)
+  expect(composer.contextAttaches("queue")).toBe(false)
+  composer.observeBusy(true)
+  expect(composer.contextAttaches("steer")).toBe(false)
+  expect(composer.contextAttaches("queue")).toBe(false)
+})
+
 test("an unconfirmed Send survives reload with its ID and is checked, not resent", async () => {
   let messageID = ""
   const storage = new MemoryStorage()
