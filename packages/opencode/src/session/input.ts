@@ -217,12 +217,17 @@ const make = Effect.gen(function* () {
       return receipt(existing.receipt)
     }
     const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
-    const latest = yield* MessageV2.latestInfo({ sessionID, role: "user" }).pipe(Effect.provideService(Database.Service, database))
+    const selected = session.preferredModel ?? session.model
+    // The latest user message is only a fallback for an unset agent or model. Sessions almost always carry
+    // both, and the lookup scans message rows newest first on the writer, which is slow on cold pages.
+    const latest =
+      (payload.agent ?? session.agent) && selected
+        ? undefined
+        : yield* MessageV2.latestInfo({ sessionID, role: "user" }).pipe(Effect.provideService(Database.Service, database))
     const user = latest?.role === "user" ? latest : undefined
     const name = payload.agent ?? session.agent ?? user?.agent
     const agent = name ? yield* agents.get(name) : yield* agents.defaultInfo()
     if (!agent) return yield* new Invalid({ message: `Unknown agent: ${name}` })
-    const selected = session.preferredModel ?? session.model
     const model = selected
       ? {
           providerID: selected.providerID,

@@ -235,14 +235,12 @@ const layer = Layer.effectDiscard(
         }
       }),
     )
-    yield* events.project(SessionV1.Event.Updated, (event) =>
-      db
-        .update(SessionTable)
-        .set(sessionRow(event.data.info))
-        .where(eq(SessionTable.id, event.data.sessionID))
-        .run()
-        .pipe(Effect.orDie),
-    )
+    yield* events.project(SessionV1.Event.Updated, (event) => {
+      // Assigning the primary key, even to its current value, makes SQLite's foreign-key check count every
+      // child row (messages, inputs, ...) of the Session twice on each update.
+      const { id: _, ...row } = sessionRow(event.data.info)
+      return db.update(SessionTable).set(row).where(eq(SessionTable.id, event.data.sessionID)).run().pipe(Effect.orDie)
+    })
     yield* events.project(SessionEvent.Moved, (event) =>
       Effect.gen(function* () {
         yield* db

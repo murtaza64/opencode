@@ -805,7 +805,11 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     const recovery = state.recoveries.find((entry) => entry.admission.payload.requestID === receipt.requestID)
     if (recovery && (recovery.missingImages || !matchesRecovery(receipt, recovery)))
       throw new Error("Receipt does not match the saved exact input; admission remains unknown")
-    if (recovery && !recovery.reconciled)
+    // Delivered (promoted into the transcript or beyond): the set-aside copy has served its purpose and is
+    // dropped, with its saved images. Pending and cancelled inputs keep their set-aside entry.
+    if (recovery && ["promoted", "presented", "handled"].includes(receipt.state))
+      setState("recoveries", state.recoveries.filter((entry) => entry.admission.payload.requestID !== receipt.requestID))
+    else if (recovery && !recovery.reconciled)
       setState("recoveries", (entry) => entry.admission.payload.requestID === receipt.requestID, "reconciled", true)
     const admission = state.admission
     if (
@@ -975,6 +979,10 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         const failed = results.find((result) => result.status === "rejected")
         if (failed?.status === "rejected") throw failed.reason
       }
+      // Set-aside inputs too (GET only): one may have been promoted while this page was closed. A read that
+      // fails or does not match leaves the entry for its own Check, so it never blocks the refresh.
+      await Promise.allSettled(state.recoveries.filter((entry) => !entry.missingImages && !tracked.has(entry.admission.payload.requestID))
+        .map((entry) => readInput(entry.admission.payload.requestID)))
       if (state.admission?.status === "unknown" && !missingAdmission)
         setState("admission", "error", "Input not found. Retry explicitly with the same request ID.")
       if (state.error.startsWith("Cannot refresh inputs:")) setState("error", "")
