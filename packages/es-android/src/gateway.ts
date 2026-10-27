@@ -11,6 +11,7 @@ export const startGateway = async (options: {
   host: string
   port: number
   code: string
+  codeFile?: string
   root: string
   opencode?: string
   dashboard?: string
@@ -24,7 +25,7 @@ export const startGateway = async (options: {
     opencode: options.opencode,
     dashboard: options.dashboard,
     opencodeAuth: options.opencodeAuth,
-    pairing: { code: options.code },
+    pairing: { code: options.code, codeFile: options.codeFile },
     publicOrigin: options.publicOrigin,
   })
 
@@ -61,6 +62,7 @@ if (import.meta.main) {
     host: args.values.host,
     port: Number(args.values.port),
     code,
+    codeFile: fromEnvironment ? undefined : path.resolve(args.values["code-file"]),
     root: args.values.root,
     // serve() accepts only explicit http://127.0.0.1:PORT service origins.
     opencode: process.env.OPENCODE_URL,

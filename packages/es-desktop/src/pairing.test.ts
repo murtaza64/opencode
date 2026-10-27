@@ -4,14 +4,14 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import WebSocket from "ws"
 import { serve } from "./server"
-import { createPairingCode, issueCookie, remoteListenHost } from "./pairing"
+import { codeCommand, createPairingCode, issueCookie, pairingPage, remoteListenHost } from "./pairing"
 
 const cleanup: (() => Promise<unknown>)[] = []
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close()
 })
 const code = "ABCD2-EFGH3-JKLM4-NPQR5"
-const setup = async (publicOrigin?: string) => {
+const setup = async (publicOrigin?: string, codeFile?: string) => {
   const root = await mkdtemp(path.join(tmpdir(), "es-pairing-test-"))
   cleanup.push(() => rm(root, { recursive: true, force: true }))
   await Bun.write(path.join(root, "index.html"), "<title>Fixture renderer</title>")
@@ -31,7 +31,7 @@ const setup = async (publicOrigin?: string) => {
     opencode: upstream.url.origin,
     dashboard: upstream.url.origin,
     host: "127.0.0.1",
-    pairing: { code },
+    pairing: { code, codeFile },
     publicOrigin,
   })
   cleanup.push(server.close)
@@ -185,4 +185,29 @@ test("public origins must be explicit https origins and require pairing", async 
   for (const value of ["http://agent-host.tailnet.ts.net", "https://agent-host.tailnet.ts.net/path", "https://user:pw@agent-host.tailnet.ts.net"])
     await expect(serve({ root: tmpdir(), host: "127.0.0.1", pairing: { code }, publicOrigin: value })).rejects.toThrow("explicit https")
   await expect(serve({ root: tmpdir(), publicOrigin: proxied })).rejects.toThrow("requires pairing")
+})
+
+test("the pairing page shows the exact command for the gateway's code file, never the code", async () => {
+  const { server } = await setup(undefined, "/home/m/.local/state/editspace/remote-pairing-code")
+  const page = await (await fetch(`${server.origin}/`, { headers: { accept: "text/html" } })).text()
+  expect(page).toContain("<code>cat -- &#39;/home/m/.local/state/editspace/remote-pairing-code&#39;</code>")
+  expect(page).toContain("Do not run this on the device you are pairing")
+  expect(page).not.toContain(code)
+  expect(page.toLowerCase()).not.toContain(code.toLowerCase())
+})
+
+test("a code-file path is quoted for the host's shell, then escaped for HTML", () => {
+  const file = `/tmp/it's <b>"x"</b> & $(rm -rf ~)`
+  expect(codeCommand(file, "linux")).toBe(`cat -- '/tmp/it'\\''s <b>"x"</b> & $(rm -rf ~)'`)
+  expect(codeCommand("C:\\Users\\m\\it's\\code", "win32")).toBe("Get-Content -LiteralPath 'C:\\Users\\m\\it''s\\code'")
+  const page = pairingPage("", file, "linux")
+  expect(page).toContain("<code>cat -- &#39;/tmp/it&#39;\\&#39;&#39;s &lt;b&gt;&quot;x&quot;&lt;/b&gt; &amp; $(rm -rf ~)&#39;</code>")
+  expect(page).not.toContain("<b>")
+})
+
+test("a code from the environment or an unshowable path gets the generic wording", () => {
+  for (const page of [pairingPage(""), pairingPage("", "/tmp/a\nb", "linux")]) {
+    expect(page).not.toContain("<pre>")
+    expect(page).toContain("set when it was started")
+  }
 })
