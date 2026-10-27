@@ -170,7 +170,7 @@ export function createLiveSession(
         // Todos are auxiliary: a failed read keeps the last list, never the transcript.
         timed("todos", oc.todos(sessionID, directory, signal)).catch(() => undefined),
       ]).catch((failure: unknown) => {
-        snapshot.end(signal.aborted ? "aborted" : "failed", timings)
+        snapshot.end(signal.aborted ? "aborted" : "failed", { ...timings, error: errorText(failure).slice(0, 160) })
         throw failure
       })
       snapshot.end("ok", { ...timings, messages: page.items.length })
