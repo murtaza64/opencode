@@ -122,6 +122,8 @@ const start = async () => {
         root: path.join(app.getAppPath(), "dist/renderer"),
         renderer: app.isPackaged ? undefined : process.env.ES_DESKTOP_RENDERER,
         remote: { id: host.id, origin: host.origin },
+        // Dictation uses this laptop's microphone and Whisper, whichever host a tab shows.
+        voice,
         // The look belongs to this laptop, whichever host a tab shows.
         appearance,
         // Host tabs show placement natively, so the page needs no switcher of its own.
