@@ -45,6 +45,9 @@ type CreateBody = Parameters<typeof oc.createSession>[1] & { id: string }
 /** `create` is kept until Core confirms the session, so a lost response is retried with the same identity. */
 export type DeskPointer = { session: string; directory: string; create?: CreateBody }
 
+/** The saved Front Desk chat session id, read from local storage only (no request). */
+export const deskSessionID = () => readJSON<DeskPointer>(POINTER, value => typeof value?.session === "string")?.session
+
 export const createDeskSession = () => {
   const [pointer, setPointer] = createSignal(readJSON<DeskPointer>(POINTER, value => typeof value?.session === "string" && typeof value?.directory === "string"))
   const [session, setSession] = createSignal<Session>()

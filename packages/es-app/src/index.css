@@ -2032,3 +2032,7 @@ a.mini-item > .glyph { margin: 0; }
 .mode-switch.compact .mode-tab[aria-current=page] { border-inline-start-color: var(--peach); }
 .mode-switch.compact .mode-count { inset-block-start: -6px; inset-inline-start: calc(100% - 7px); min-inline-size: 14px; block-size: 14px; padding-inline: 3px; font-size: 9px; line-height: 14px; }
 @media (max-width: 600px) { .shell > .sidebar-mini .mode-switch.compact { flex-direction: row; inline-size: auto; } }
+/* Front desk chat working: the session-row busy dot hanging off the label's start (out of flow, so the
+ * label stays centred and the click target is unchanged); the count hangs off the end. */
+.mode-busy { position: absolute; inset-inline-end: calc(100% + 6px); inset-block-start: 50%; translate: 0 -50%; inline-size: 6px; block-size: 6px; }
+.mode-switch.compact .mode-busy { position: absolute; inset-block-start: 4px; inset-inline-start: 4px; margin: 0; }
