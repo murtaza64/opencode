@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "3afb2e81-ed47-4b48-9a68-6dbb270ea623",
+  "id": "712bfe82-1989-4698-a1a9-6fe9a76f4444",
   "prevIds": [
-    "d823037c-f38f-42d7-892d-7cad7b3dd6e7"
+    "3afb2e81-ed47-4b48-9a68-6dbb270ea623"
   ],
   "ddl": [
     {
@@ -92,6 +92,14 @@
     },
     {
       "name": "session_share",
+      "entityType": "tables"
+    },
+    {
+      "name": "usage_hourly",
+      "entityType": "tables"
+    },
+    {
+      "name": "usage_rollup_state",
       "entityType": "tables"
     },
     {
@@ -1695,6 +1703,126 @@
       "table": "session_share"
     },
     {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "hour",
+      "entityType": "columns",
+      "table": "usage_hourly"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "provider_id",
+      "entityType": "columns",
+      "table": "usage_hourly"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "model_id",
+      "entityType": "columns",
+      "table": "usage_hourly"
+    },
+    {
+      "type": "real",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "cost",
+      "entityType": "columns",
+      "table": "usage_hourly"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "tokens_input",
+      "entityType": "columns",
+      "table": "usage_hourly"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "tokens_output",
+      "entityType": "columns",
+      "table": "usage_hourly"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "tokens_reasoning",
+      "entityType": "columns",
+      "table": "usage_hourly"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "tokens_cache_read",
+      "entityType": "columns",
+      "table": "usage_hourly"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "tokens_cache_write",
+      "entityType": "columns",
+      "table": "usage_hourly"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "usage_rollup_state"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cutoff",
+      "entityType": "columns",
+      "table": "usage_rollup_state"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_backfilled",
+      "entityType": "columns",
+      "table": "usage_rollup_state"
+    },
+    {
       "columns": [
         "project_id"
       ],
@@ -1966,6 +2094,17 @@
     },
     {
       "columns": [
+        "hour",
+        "provider_id",
+        "model_id"
+      ],
+      "nameExplicit": false,
+      "name": "usage_hourly_pk",
+      "entityType": "pks",
+      "table": "usage_hourly"
+    },
+    {
+      "columns": [
         "id"
       ],
       "nameExplicit": false,
@@ -2133,6 +2272,15 @@
       "nameExplicit": false,
       "name": "session_share_pk",
       "table": "session_share",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "usage_rollup_state_pk",
+      "table": "usage_rollup_state",
       "entityType": "pks"
     },
     {

@@ -1,5 +1,6 @@
 export * as SessionProjector from "./projector"
 
+import { UsageRollup } from "../usage/rollup"
 import { and, desc, eq, gt, or, sql } from "drizzle-orm"
 import { isDeepStrictEqual } from "node:util"
 import { DateTime, Effect, Layer, Schema } from "effect"
@@ -610,7 +611,9 @@ const layer = Layer.effectDiscard(
           .pipe(Effect.orDie)
         for (const row of rows) {
           const previous = usage(row.data)
-          if (previous) yield* applyUsage(db, event.data.sessionID, previous, -1)
+          if (!previous) continue
+          yield* applyUsage(db, event.data.sessionID, previous, -1)
+          yield* UsageRollup.apply(db, row.message_id, previous, -1)
         }
         yield* db
           .delete(MessageTable)
@@ -629,6 +632,7 @@ const layer = Layer.effectDiscard(
           .pipe(Effect.orDie)
         const previous = row && usage(row.data)
         if (previous) yield* applyUsage(db, event.data.sessionID, previous, -1)
+        if (row && previous) yield* UsageRollup.apply(db, row.message_id, previous, -1)
         yield* db
           .delete(PartTable)
           .where(and(eq(PartTable.id, event.data.partID), eq(PartTable.session_id, event.data.sessionID)))
@@ -653,6 +657,8 @@ const layer = Layer.effectDiscard(
         const next = usage(event.data.part)
         if (previous) yield* applyUsage(db, row.session_id, previous, -1)
         if (next) yield* applyUsage(db, sessionID, next)
+        if (row && previous) yield* UsageRollup.apply(db, row.message_id, previous, -1)
+        if (next) yield* UsageRollup.apply(db, messageID, next, 1)
       }),
     )
     yield* events.project(SessionEvent.AgentSwitched, (event) =>

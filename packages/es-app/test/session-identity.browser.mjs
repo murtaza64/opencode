@@ -15,7 +15,8 @@ preview.fixture.messages[1].info.providerID = "openai"
 preview.fixture.messages[1].info.modelID = "gpt-6-astra"
 const writes = []
 page.on("request", (request) => {
-  if (!["GET", "HEAD", "OPTIONS"].includes(request.method())) writes.push(request.method())
+  // The local perf journal beacon is telemetry, not a session write.
+  if (!["GET", "HEAD", "OPTIONS"].includes(request.method()) && new URL(request.url()).pathname !== "/__es/perf") writes.push(`${request.method()} ${new URL(request.url()).pathname}`)
 })
 await page.route((url) => url.pathname === "/oc/session/ses_a", (route) => route.fulfill({ json: metadata }))
 try {

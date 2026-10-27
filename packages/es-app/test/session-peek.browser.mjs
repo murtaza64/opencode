@@ -63,7 +63,8 @@ try {
   await page.goto(preview.url)
   await expect(page.locator(".session-info [data-section='context']")).toContainText("1 completed")
   // One number, no breakdown.
-  await expect(page.locator(".session-info .ctx-exact")).toHaveText("tokens473k tokens")
+  await expect(page.locator(".session-info .info-meter-text")).toHaveText("473k / 500k")
+  await expect(page.locator(".session-info .info-meter")).toHaveAttribute("aria-valuetext", "473k of 500k tokens")
   await expect(page.locator(".session-info :is(.ctx-provider, .ctx-legend, .ctx-bar, .ctx-accounting-disclosure)")).toHaveCount(0)
   await expect(page.locator(".session-info [data-section='context'] .info-row", { hasText: "latest" })).toHaveCount(0)
   await expect(card).toHaveCount(0)
@@ -211,7 +212,7 @@ try {
   // 390px RTL: the panel's single number fits without horizontal scroll
   await page.setViewportSize({ width: 390, height: 844 })
   await page.evaluate(() => { document.documentElement.dir = "rtl" })
-  await expect(page.locator(".session-info .ctx-exact")).toContainText("tokens")
+  await expect(page.locator(".session-info .info-meter-text")).toContainText("/")
   expect(await page.locator(".session-info").evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
   if (process.env.PEEK_SHOTS) {
     await page.locator(".session-entry[data-peek-id='ses_a'] a").first().focus()

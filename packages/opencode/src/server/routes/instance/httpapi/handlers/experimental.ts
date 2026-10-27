@@ -9,6 +9,8 @@ import { Project } from "@/project/project"
 import { Session } from "@/session/session"
 import { SessionFailure } from "@/session/failure"
 import { Database } from "@opencode-ai/core/database/database"
+import { RateLimits } from "@opencode-ai/core/usage/rate-limits"
+import { UsageRollup } from "@opencode-ai/core/usage/rollup"
 import { DatabaseReader } from "@opencode-ai/core/database/reader"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import type { SessionID } from "@/session/schema"
@@ -40,6 +42,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const background = yield* BackgroundJob.Service
     const flags = yield* RuntimeFlags.Service
     const reader = yield* DatabaseReader.Service
+    const usage = yield* UsageRollup.Service
 
     const capabilities = Effect.fn("ExperimentalHttpApi.capabilities")(function* () {
       return {
@@ -55,6 +58,16 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
           images: SessionV1.ImageSupport,
         },
       }
+    })
+
+    const usageDaily = Effect.fn("ExperimentalHttpApi.usageDaily")(function* (ctx: {
+      query: { days?: number; offsetMinutes?: number }
+    }) {
+      const daily = yield* usage.daily({
+        days: ctx.query.days ?? 7,
+        offsetMinutes: ctx.query.offsetMinutes ?? -new Date().getTimezoneOffset(),
+      })
+      return { ...daily, rateLimits: RateLimits.snapshot() }
     })
 
     const getConsole = Effect.fn("ExperimentalHttpApi.console")(function* () {
@@ -199,6 +212,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
 
     return handlers
       .handle("capabilities", capabilities)
+      .handle("usageDaily", usageDaily)
       .handle("console", getConsole)
       .handle("consoleOrgs", listConsoleOrgs)
       .handle("consoleSwitch", switchConsole)

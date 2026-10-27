@@ -25,7 +25,9 @@
 
 /* Sidebar: a quieter rail; selection is a tinted fill with an accent edge, not a black slab. */
 :root .sidebar { background: var(--mantle); border-inline-end: 0; box-shadow: inset calc(-1px * var(--inline-sign, 1)) 0 0 color-mix(in srgb, var(--text) 5%, transparent); }
-:root .nav-item { margin-inline: 6px; padding-inline: 10px; }
+:root .nav-item { margin-inline: 0; padding-inline: 14px; }
+/* One rule between the action row and the list; the cloud drawer adds no second one. */
+:root .cloud-discovery { border-block-start: 0; margin-block-start: 0; }
 :root .nav-item:hover { background: var(--hover); }
 :root .nav-item.active { background: var(--selected); box-shadow: none; color: var(--text); }
 :root .nav-item.active .nav-title { font-weight: 600; }
@@ -118,3 +120,27 @@
 /* Coalesced tool/mail runs: a quiet filled band instead of a dashed outline; focus stays visible. */
 :root .tool-run { border: 0; background: var(--surface0); }
 :root .tool-run :focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Right panel summary: model and cost on one line, then the context meter; the rest behind Details. */
+.info-summary { padding: 10px 12px 8px; display: grid; gap: 8px; border-block-end: 1px solid var(--surface1); }
+.info-summary-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-width: 0; }
+.info-model { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.info-cost { flex: none; font-variant-numeric: tabular-nums; color: var(--text); }
+.info-meter { display: grid; gap: 4px; }
+.info-meter-track { block-size: 6px; background: var(--surface0); overflow: hidden; }
+.info-meter-fill { block-size: 100%; inline-size: 100%; background: var(--accent); transform-origin: left center; transition: transform var(--dur-base) var(--ease-standard); }
+[dir="rtl"] .info-meter-fill { transform-origin: right center; }
+.info-meter[data-level="warn"] .info-meter-fill { background: var(--yellow); }
+.info-meter[data-level="high"] .info-meter-fill { background: var(--red); }
+.info-meter-text { font-size: 11px; color: var(--subtext0); font-variant-numeric: tabular-nums; }
+.info-meter-text b { color: var(--text); font-weight: 600; }
+.info-meter-empty { font-size: 11px; }
+.info-details > summary { font-size: 11px; color: var(--subtext0); cursor: pointer; list-style: none; }
+.info-details > summary::before { content: "› "; }
+.info-details[open] > summary::before { content: "⌄ "; }
+.info-details .info-row { font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { .info-meter-fill { transition: none; } }
+/* Selected session: the band runs the full sidebar width (row plus its pin button). */
+:root .session-entry { margin-inline: 0; }
+:root .session-entry:has(> .nav-item.active) { background: var(--selected); }
+:root .session-entry > .nav-item.active { background: transparent; }
