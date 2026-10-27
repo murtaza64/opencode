@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ux-feel host glyph "mini" (ux-review/glyphs/host-glyphs.svg). 16 grid, 1.5 stroke; tinted at use. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="16dp" android:height="16dp" android:viewportWidth="16" android:viewportHeight="16">
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="1.5" android:fillColor="#00000000" android:pathData="M3.75,5.5 h8.5 a2,2 0 0 1 2,2 v1.5 a2,2 0 0 1 -2,2 h-8.5 a2,2 0 0 1 -2,-2 v-1.5 a2,2 0 0 1 2,-2 z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M11.3,7.35 a0.9,0.9 0 1 1 0,1.8 a0.9,0.9 0 1 1 0,-1.8 z"/>
+</vector>

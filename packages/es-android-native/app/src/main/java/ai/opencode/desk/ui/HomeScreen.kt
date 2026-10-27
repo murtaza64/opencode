@@ -60,6 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ai.opencode.desk.DeskStore
 import ai.opencode.desk.Link
+import ai.opencode.desk.Hosts
 import ai.opencode.desk.Pin
 import ai.opencode.desk.PinView
 import ai.opencode.desk.Profiles
@@ -150,7 +151,7 @@ private fun DeskTab(store: DeskStore, nav: Nav, onOpen: (AttentionRecord) -> Uni
         item { ProjectChips(store) }
         if (open.isNotEmpty()) {
             item { SectionHeader("Needs you", if (open.size > 3) "All ${open.size}" else null, onAll) }
-            items(open.take(3), key = { it.id }) { AttentionRow(it, store.now, onClick = { onOpen(it) }) }
+            items(open.take(3), key = { it.id }) { AttentionRow(it, store.now, onClick = { onOpen(it) }, host = store.host) }
         } else item {
             SectionHeader("Needs you")
             Text("Nothing waiting on you.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 20.dp))
@@ -163,16 +164,16 @@ private fun DeskTab(store: DeskStore, nav: Nav, onOpen: (AttentionRecord) -> Uni
         val boards = store.surfaces.filter { store.filter.isEmpty() || it.editspace in store.filter }
         if (boards.isNotEmpty()) {
             item { SectionHeader("Boards & reports", "${boards.size}") }
-            items(boards.take(6), key = { "surf-" + it.id }) { SurfaceRow(it, store.now) { nav.push(Route.Surface(it.id)) } }
+            items(boards.take(6), key = { "surf-" + it.id }) { SurfaceRow(it, store.now, { nav.push(Route.Surface(it.id)) }, store) }
         }
         if (working.isNotEmpty()) {
             item { SectionHeader("Working now", "${working.size}") }
-            items(working, key = { it.key }) { AgentRow(it, store.now, onClick = { nav.push(Route.Agent(it.key)) }) }
+            items(working, key = { it.key }) { AgentRow(it, store.now, onClick = { nav.push(Route.Agent(it.key)) }, host = store.host) }
         }
         val idle = agents.filter { !it.busy }.take(if (working.isEmpty()) 6 else 3)
         if (idle.isNotEmpty()) {
             item { SectionHeader(if (working.isEmpty()) "Agents" else "Recently active") }
-            items(idle, key = { it.key }) { AgentRow(it, store.now, onClick = { nav.push(Route.Agent(it.key)) }) }
+            items(idle, key = { it.key }) { AgentRow(it, store.now, onClick = { nav.push(Route.Agent(it.key)) }, host = store.host) }
         }
         if (recent.isNotEmpty()) {
             item { SectionHeader("Decided") }
@@ -315,7 +316,7 @@ private fun NeedsTab(store: DeskStore, onOpen: (AttentionRecord) -> Unit) {
         if (list.isEmpty()) item { Text(listOf("Nothing waiting on you.", "Nothing snoozed.", "No history yet.")[view], style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) }
         items(list, key = { it.id }) { record ->
             if (view == 2) DecidedRow(record, store.now, onClick = { onOpen(record) })
-            else AttentionRow(record, store.now, onClick = { onOpen(record) })
+            else AttentionRow(record, store.now, onClick = { onOpen(record) }, host = store.host)
         }
     }
 }
@@ -336,7 +337,7 @@ private fun AgentsTab(store: DeskStore, nav: Nav) {
             item(key = "h-$es") { SectionHeader(es, "${agents.count { it.busy }} live") }
             items(agents, key = { it.key }) { agent ->
                 val pin = Pin(agent.editspace, agent.lane)
-                AgentRow(agent, store.now, onClick = { nav.push(Route.Agent(agent.key)) }, trailing = { PinButton(store.pinned(pin)) { store.togglePin(pin) } })
+                AgentRow(agent, store.now, onClick = { nav.push(Route.Agent(agent.key)) }, trailing = { PinButton(store.pinned(pin)) { store.togglePin(pin) } }, host = store.host)
             }
         }
         if (groups.isEmpty()) item { Text("No lanes yet.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) }
@@ -407,7 +408,10 @@ private fun PinRow(store: DeskStore, view: PinView, nav: Nav) {
         StatusDot(if (unavailable) "unknown" else view.status, 7)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(view.title, style = MaterialTheme.typography.bodyMedium, color = if (unavailable) Ink.Muted else Ink.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Hosts.glyph(store.host?.id)?.let { HostGlyph(it); Spacer(Modifier.width(6.dp)) }
+                Text(view.title, style = MaterialTheme.typography.bodyMedium, color = if (unavailable) Ink.Muted else Ink.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             Label(listOfNotNull(view.pin.editspace, view.status, view.activity.takeIf { it.isNotBlank() }).joinToString(" · "), color = if (unavailable) Ink.Dim else Ink.Muted)
         }
         if (view.updatedAt > 0) Label(age(store.now, view.updatedAt), color = Ink.Dim)
@@ -418,13 +422,14 @@ private fun PinRow(store: DeskStore, view: PinView, nav: Nav) {
 // One published surface: title, owner · purpose, health as a dot, updated age. Unseen
 // deliverables carry an amber "new" chip (read-only: opening does not mark them seen).
 @Composable
-private fun SurfaceRow(surface: Surface, now: Long, onClick: () -> Unit) {
+private fun SurfaceRow(surface: Surface, now: Long, onClick: () -> Unit, store: DeskStore? = null) {
     val health = when (surface.health.state) { "ok" -> "busy"; "error", "unreachable" -> "error"; else -> "idle" }
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 10.dp).testTag("surface-" + surface.id), verticalAlignment = Alignment.CenterVertically) {
         StatusDot(health, 7)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Hosts.glyph(store?.host?.id)?.let { HostGlyph(it) }
                 Text(surface.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 if (surface.unseen) Chip("new", Ink.Amber, filled = true)
             }

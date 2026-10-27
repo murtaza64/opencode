@@ -24,6 +24,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ai.opencode.desk.Agent
+import ai.opencode.desk.HostInfo
+import ai.opencode.desk.Hosts
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import ai.opencode.desk.model.AttentionRecord
 
 @Composable
@@ -52,13 +56,20 @@ fun Chip(text: String, color: Color, filled: Boolean = false) {
 // A decision or blocker as one row: colour rail on the left says the kind at a glance,
 // the title carries the ask, one line of context, then where it came from and how old.
 @Composable
-fun AttentionRow(record: AttentionRecord, now: Long, onClick: () -> Unit) {
+fun AttentionRow(record: AttentionRecord, now: Long, onClick: () -> Unit, host: HostInfo? = null) {
     val color = kindColor(record.kind)
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 12.dp, end = 20.dp, top = 12.dp, bottom = 12.dp)) {
+    val glyph = Hosts.glyph(host?.id)
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 12.dp, end = 20.dp, top = 12.dp, bottom = 12.dp)
+            .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(record.kind, record.title, Hosts.accessibleSuffix(host)).joinToString(", ") },
+    ) {
         Box(Modifier.width(4.dp).height(56.dp).background(color, RoundedCornerShape(2.dp)))
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(record.title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.Top) {
+                if (glyph != null) { HostGlyph(glyph, size = 12); Spacer(Modifier.width(6.dp)) }
+                Text(record.title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
             if (record.context.isNotBlank()) {
                 Spacer(Modifier.height(2.dp))
                 Text(record.context.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty(), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -81,15 +92,21 @@ fun AttentionRow(record: AttentionRecord, now: Long, onClick: () -> Unit) {
 }
 
 @Composable
-fun AgentRow(agent: Agent, now: Long, onClick: () -> Unit, trailing: (@Composable () -> Unit)? = null) {
+fun AgentRow(agent: Agent, now: Long, onClick: () -> Unit, trailing: (@Composable () -> Unit)? = null, host: HostInfo? = null) {
+    val glyph = Hosts.forLane(agent.owner, host)
+    val suffix = if (glyph == Hosts.Glyph.Wingman) "on Wingman" else Hosts.accessibleSuffix(host)
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 20.dp, end = if (trailing != null) 4.dp else 20.dp, top = 12.dp, bottom = 12.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 20.dp, end = if (trailing != null) 4.dp else 20.dp, top = 12.dp, bottom = 12.dp)
+            .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(agent.title, suffix, agent.status).joinToString(", ") },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StatusDot(agent.status, 7)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(agent.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (glyph != null) { HostGlyph(glyph); Spacer(Modifier.width(6.dp)) }
+                Text(agent.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             if (agent.activity.isNotBlank()) Text(agent.activity, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.width(12.dp))

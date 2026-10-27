@@ -104,6 +104,9 @@ try {
   await waitFor(byId("desk"), "desk home")
   await waitFor(byText("Promote steers"), "attention row")
   pass("paired and the desk shows live fixture data")
+  // Host glyphs (§4): the fixture gateway reports verified id "local" → rows carry "on Local" in their accessible name.
+  await waitFor((node) => node["content-desc"]?.includes("on Local"), "host glyph accessible suffix on a row")
+  pass("host glyph keyed by verified gateway host id (local → laptop), accessible 'on Local'")
   await screenshot("02-desk")
 
   // 2. decide
@@ -147,6 +150,16 @@ try {
   await tap(await waitFor((node) => node["content-desc"]?.startsWith("Mail from es-app, task"), "chip"))
   await waitFor((node) => node["content-desc"]?.startsWith("Mail from es-app, task") && node["content-desc"]?.endsWith("expanded"), "chip expanded")
   await screenshot("12-chat-parts-expanded")
+  await type("steer-text", "Prefer the tool boundary, keep the fixture green.")
+  await tap(await waitFor(byId("steer-send"), "steer send"))
+  const steer = await waitWrite((w) => w.path === "/session/ses_composer/input" && w.method === "POST", "steer input")
+  if (steer.body.delivery !== "steer" || steer.query.directory !== fixture.sessions.ses_composer?.directory && !steer.query.directory) throw new Error(`Unexpected steer ${JSON.stringify(steer)}`)
+  await waitFor((node) => node["content-desc"]?.startsWith("Sent from this phone: Prefer the tool boundary"), "pending bubble")
+  pass(`steer admitted as durable input (delivery=${steer.body.delivery}, requestID present=${!!steer.body.requestID})`)
+  await screenshot("08-agent-steer")
+  await tap(await waitFor(byId("stop"), "stop"))
+  await waitWrite((w) => w.path === "/session/ses_composer/abort", "abort")
+  pass("stop sends abort")
   // Narrow (390dp column) and RTL captures via debug intent extras; the activity reopens on the fixture agent.
   const relaunch = async (...extras) => {
     await adb("shell", "am", "force-stop", pkg)
@@ -159,28 +172,15 @@ try {
   await relaunch("--ez", "desk.rtl", "true")
   await screenshot("14-chat-parts-rtl")
   await relaunch()
-  await waitFor(byId("steer-text"), "agent screen after reset")
+  await waitFor(byId("steer-text"), "agent screen after captures")
   // After a relaunch the IME may not attach on the first tap; focus, verify the typed text landed, then send.
-  // After the debug relaunches the IME may not be attached; type, then confirm by the send button
-  // becoming enabled (Compose text is not exposed to uiautomator), retrying with a fresh tap.
-  for (let attempt = 0; attempt < 3; attempt++) {
-    await type("steer-text", "Prefer the tool boundary, keep the fixture green.")
-    const send = (await nodes()).find(byId("steer-send"))
-    if (send?.enabled === "true") break
-    await adb("shell", "input", "keyevent", "KEYCODE_BACK"); await sleep(500)
-  }
-  await tap(await waitFor(byId("steer-send"), "steer send"))
-  const steer = await waitWrite((w) => w.path === "/session/ses_composer/input" && w.method === "POST", "steer input")
-  if (steer.body.delivery !== "steer" || steer.query.directory !== fixture.sessions.ses_composer?.directory && !steer.query.directory) throw new Error(`Unexpected steer ${JSON.stringify(steer)}`)
-  await waitFor(byText("Prefer the tool boundary"), "pending bubble")
-  pass(`steer admitted as durable input (delivery=${steer.body.delivery}, requestID present=${!!steer.body.requestID})`)
-  await screenshot("08-agent-steer")
-  await tap(await waitFor(byId("stop"), "stop"))
-  await waitWrite((w) => w.path === "/session/ses_composer/abort", "abort")
-  pass("stop sends abort")
+  // After the capture relaunches the activity was recreated at Home with the agent pushed on top,
+  // so Back lands on Home (tab state is per activity); open the Agents tab from there.
   await adb("shell", "input", "keyevent", "KEYCODE_BACK")
-  await waitFor(byId("agents"), "back to agents")
+  await waitFor(byId("desk"), "back to home")
   pass("Back returns to the list")
+  await tap(await waitFor(byId("tab-agents"), "agents tab"))
+  await waitFor(byId("agents"), "agents list")
 
   // 4b. boards & reports: list on Home, open in the sandboxed WebView, script-rendered text visible,
   // same-prefix navigation allowed, Back walks history then closes.
@@ -209,7 +209,7 @@ try {
   const ask = await waitWrite((w) => w.path === `/session/${created.body.id}/input`, "desk input")
   if (ask.body.delivery !== "queue") throw new Error("Desk input should queue")
   await waitFor(byId("chat"), "chat screen")
-  await waitFor(byText("What changed since this morning"), "pending bubble")
+  await waitFor((node) => node["content-desc"]?.startsWith("Sent from this phone: What changed since this morning"), "pending bubble")
   pass("desk conversation created lazily with the front-desk agent and the message queued")
   await screenshot("09-chat")
   await adb("shell", "input", "keyevent", "KEYCODE_BACK")
@@ -220,6 +220,8 @@ try {
   console.info("ALL PASS")
 } catch (error) {
   console.error(`FAIL ${error.message}`)
+  // Dump what was on screen so a failed predicate can be read without another run.
+  console.error("nodes: " + (await nodes()).map((n) => [n["resource-id"], n["content-desc"], n.text].filter(Boolean).join(" | ")).filter(Boolean).join("\n       "))
   await screenshot("failure").catch(() => {})
   process.exitCode = 1
 } finally {

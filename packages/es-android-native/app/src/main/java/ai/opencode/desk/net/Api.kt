@@ -17,6 +17,7 @@ import ai.opencode.desk.model.ReceiptPage
 import ai.opencode.desk.model.SessionInfo
 import ai.opencode.desk.model.SessionStatus
 import ai.opencode.desk.model.StateResponse
+import ai.opencode.desk.HostInfo
 import ai.opencode.desk.MailResponse
 import ai.opencode.desk.Surface
 import ai.opencode.desk.WakeEventsResponse
@@ -43,6 +44,8 @@ class Api(val gateway: Gateway) {
 
     // ---- dashboard reads ----
     suspend fun editspaces(): EditspacesResponse = parse(gateway.get("/es/api/editspaces"))
+    // Verified host identity of the paired gateway; older gateways without the route leave it unknown.
+    suspend fun host(): HostInfo = parse(gateway.get("/__es/host"))
     suspend fun state(es: String): StateResponse = parse(gateway.get("/es/api/state", mapOf("es" to es)))
     suspend fun attention(view: String = "open", es: String? = null, limit: Int = 200): AttentionList =
         parse(gateway.get("/es/api/attention", mapOf("view" to view, "es" to es, "limit" to limit.toString())))

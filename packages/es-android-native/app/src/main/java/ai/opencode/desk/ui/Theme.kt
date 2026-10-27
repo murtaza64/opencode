@@ -213,3 +213,18 @@ fun Bolt(color: Color, size: Int = 13, modifier: Modifier = Modifier) {
         drawPath(path, color)
     }
 }
+
+// Location glyph before a title (DESK-AND-SIDEBARS §4): 12dp, current text colour, same optical
+// weight for every host. Nothing is drawn for an unverified host.
+@Composable
+fun HostGlyph(glyph: ai.opencode.desk.Hosts.Glyph?, color: Color = Ink.Muted, size: Int = 12) {
+    if (glyph == null) return
+    val id = when (glyph) {
+        ai.opencode.desk.Hosts.Glyph.Laptop -> ai.opencode.desk.R.drawable.host_laptop
+        ai.opencode.desk.Hosts.Glyph.Ygnium -> ai.opencode.desk.R.drawable.host_ygnium
+        ai.opencode.desk.Hosts.Glyph.Mini -> ai.opencode.desk.R.drawable.host_mini
+        ai.opencode.desk.Hosts.Glyph.Excalibur -> ai.opencode.desk.R.drawable.host_excalibur
+        ai.opencode.desk.Hosts.Glyph.Wingman -> ai.opencode.desk.R.drawable.host_wingman
+    }
+    androidx.compose.material3.Icon(androidx.compose.ui.res.painterResource(id), contentDescription = null, tint = color, modifier = Modifier.size(size.dp).padding(end = 0.dp))
+}

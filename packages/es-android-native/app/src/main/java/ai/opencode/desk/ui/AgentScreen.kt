@@ -64,6 +64,7 @@ import ai.opencode.desk.Agent
 import ai.opencode.desk.DeskStore
 import ai.opencode.desk.Author
 import ai.opencode.desk.Authorship
+import ai.opencode.desk.Hosts
 import ai.opencode.desk.Nav
 import ai.opencode.desk.Outbox
 import ai.opencode.desk.Pending
@@ -115,10 +116,11 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         val pin = Pin(agent.editspace, agent.lane)
-        TopBar(agent.title, onBack = { nav.pop() }, trailing = { PinButton(store.pinned(pin)) { store.togglePin(pin) } }) {
+        val glyph = Hosts.forLane(agent.owner, store.host)
+        TopBar(agent.title, onBack = { nav.pop() }, trailing = { PinButton(store.pinned(pin)) { store.togglePin(pin) } }, glyph = glyph) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatusDot(agent.status, 7, animate = true)
-                Label(listOfNotNull(agent.editspace, agent.lane, agent.status, agent.session?.cost?.takeIf { it > 0 }?.let { "$%.2f".format(it) }).joinToString(" · "))
+                Label(listOfNotNull(store.host?.takeIf { glyph != null }?.let { "on ${it.label}" }, agent.editspace, agent.lane, agent.status, agent.session?.cost?.takeIf { it > 0 }?.let { "$%.2f".format(it) }).joinToString(" · "))
             }
         }
         CompositionLocalProvider(LocalExpanded provides expandedIds) {
@@ -176,11 +178,14 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
 }
 
 @Composable
-fun TopBar(title: String, onBack: () -> Unit, trailing: (@Composable () -> Unit)? = null, subtitle: (@Composable () -> Unit)? = null) {
+fun TopBar(title: String, onBack: () -> Unit, trailing: (@Composable () -> Unit)? = null, glyph: Hosts.Glyph? = null, subtitle: (@Composable () -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().padding(end = 8.dp, top = 4.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onBack, modifier = Modifier.testTag("back")) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.Text) }
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (glyph != null) { HostGlyph(glyph, color = Ink.Text, size = 14); Spacer(Modifier.width(6.dp)) }
+                Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             subtitle?.invoke()
         }
         trailing?.invoke()
@@ -202,7 +207,7 @@ fun PendingBubble(item: Pending, store: DeskStore, onRetry: () -> Unit, onCancel
     val tint = when (item.state) { SendState.Failed -> Ink.Red; SendState.Uncertain -> Ink.Amber; SendState.Presented, SendState.Handled -> Ink.Green; else -> Ink.Amber }
     val stored = store.storedImages(item.requestID)
     val status = Timeline.pendingStatus(item.state)
-    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), horizontalAlignment = Alignment.End) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp).testTag("pending-" + item.state.name.lowercase()).semantics { contentDescription = "Sent from this phone: ${item.text.take(60)}, ${status ?: item.label}" }, horizontalAlignment = Alignment.End) {
         item.author?.let { AuthorHeader(it, Ink.Violet) }
         val sending = item.state == SendState.Sending || item.state == SendState.Uncertain
         Column(

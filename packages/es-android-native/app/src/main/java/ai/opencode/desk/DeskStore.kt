@@ -57,6 +57,7 @@ data class Agent(
     val issue: String,
     val session: DashSession?,
     val sessions: List<DashSession>,
+    val owner: String = "",
 ) {
     val busy get() = status == "busy"
     val directory get() = session?.directory.orEmpty()
@@ -119,6 +120,9 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     var operator by mutableStateOf(false)
         private set
     var surfaces by mutableStateOf<List<Surface>>(emptyList())
+        private set
+    // Verified host identity of the current gateway (null until read, or when the route is absent).
+    var host by mutableStateOf<HostInfo?>(null)
         private set
     // Notification reconciler state: the device ledger (tag → stamp) persisted per phone, and
     // a deep link waiting to be shown once the record is loaded.
@@ -214,7 +218,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         loop?.cancel(); events?.cancel()
         gateway.origin = origin
         gateway.credentials.touch(origin)
-        states.clear(); open = emptyList(); agents = emptyList(); surfaces = emptyList()
+        states.clear(); open = emptyList(); agents = emptyList(); surfaces = emptyList(); host = null
         desk = pointers.get(origin); deskBusy = false
         pins = pinStore.list(origin)
         outbox.clear(); drafts.clear()
@@ -225,7 +229,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     fun unpair() {
         loop?.cancel(); events?.cancel()
         gateway.forget()
-        states.clear(); open = emptyList(); agents = emptyList(); surfaces = emptyList()
+        states.clear(); open = emptyList(); agents = emptyList(); surfaces = emptyList(); host = null
         desk = null; deskBusy = false
         outbox.clear(); drafts.clear(); pins = emptyList()
         link = Link.Unpaired
@@ -261,12 +265,14 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         try {
             coroutineScope {
                 val spaces = async { api.editspaces() }
+                val hostInfo = async { runCatching { api.host() }.getOrNull() }
                 val openList = async { api.attention("open") }
                 val snoozedList = async { api.attention("snoozed") }
                 val historyList = async { api.attention("history", limit = 60) }
                 val session = async { runCatching { api.operator() }.getOrNull() }
                 // Surfaces are optional: an older gateway without the route leaves the section empty.
                 val boards = async { runCatching { api.surfaces() } }
+                hostInfo.await()?.let { host = it }
                 val names = spaces.await().editspaces.map { it.name }
                 editspaces = names
                 val loaded = names.map { name -> async { name to runCatching { api.state(name) }.getOrNull() } }.awaitAll()
@@ -343,6 +349,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
                     issue = lane.issue,
                     session = head,
                     sessions = sessions,
+                    owner = lane.owner,
                 )
             }
         }

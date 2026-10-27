@@ -39,6 +39,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ai.opencode.desk.Author
+import ai.opencode.desk.Hosts
 import ai.opencode.desk.DeskStore
 import ai.opencode.desk.Provenance
 import ai.opencode.desk.Timeline
@@ -107,7 +108,11 @@ fun MailChip(unit: Timeline.Unit.Chip, now: Long, store: DeskStore?, evidence: W
     ChipSurface(alignEnd = incoming, description = description, onClick = { expandedMap[id] = !expanded }) {
         Row(Modifier.heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(if (author is Author.Integration) Icons.Filled.Info else Icons.Filled.Email, null, tint = tint, modifier = Modifier.size(14.dp))
-            if (line.crossHost) { Spacer(Modifier.width(4.dp)); Icon(Icons.Filled.Share, null, tint = Ink.Dim, modifier = Modifier.size(11.dp)) }
+            if (line.crossHost) {
+                Spacer(Modifier.width(4.dp))
+                val senderHost = (unit.provenance as? Provenance.Mail)?.let { Hosts.glyph((it.senderSession?.substringAfter('@', "") ?: "").ifBlank { it.sender.substringAfter('@', "") }) }
+                if (senderHost != null) HostGlyph(senderHost, color = Ink.Dim, size = 11) else Icon(Icons.Filled.Share, null, tint = Ink.Dim, modifier = Modifier.size(11.dp))
+            }
             // Wake cue (§4): only `caused` draws attention (filled bolt, accent); unknown is a hollow dot; joined/none have no glyph.
             when (wake) {
                 Wake.Caused -> { Spacer(Modifier.width(6.dp)); Bolt(Ink.Green, 13) }
