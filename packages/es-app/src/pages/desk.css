@@ -266,8 +266,10 @@
 .desk-brief-regenerate { margin: 2px 0 0; font-size: 12px; }
 .desk-brief .desk-link-button { padding: 0; min-block-size: 0; border: 0; background: none; color: var(--subtext0); text-decoration: underline; font: inherit; cursor: pointer; }
 /* Commands to run: exact text in a scrollable block, where to run it above, Copy beside. */
-.desk-brief .desk-commands { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 8px; }
+/* The track may shrink below a command's one-line width, so a long command scrolls in its block instead of widening the column. */
+.desk-brief .desk-commands { list-style: none; margin: 8px 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .desk-command-label { display: block; font-size: 12px; margin-block-end: 2px; }
-.desk-command { position: relative; }
-.desk-command pre { margin: 0; padding: 8px 64px 8px 10px; max-inline-size: 100%; overflow-x: auto; background: var(--mantle); border: 1px solid var(--surface0); font-size: 12px; line-height: 1.5; white-space: pre; text-align: left; }
-.desk-command-copy { position: absolute; inset-block-start: 4px; inset-inline-end: 4px; padding: 2px 8px; border: 1px solid var(--surface1); background: var(--base); color: var(--subtext0); font-size: 11px; cursor: pointer; }
+/* Copy sits beside the command, not over it: the block scrolls, so a padding gap would scroll away with the text. */
+.desk-command { display: flex; align-items: flex-start; gap: 6px; }
+.desk-command pre { flex: 1; min-inline-size: 0; margin: 0; padding: 8px 10px; overflow-x: auto; background: var(--mantle); border: 1px solid var(--surface0); font-size: 12px; line-height: 1.5; white-space: pre; text-align: left; }
+.desk-command-copy { flex: none; margin-block-start: 4px; padding: 2px 8px; border: 1px solid var(--surface1); background: var(--base); color: var(--subtext0); font-size: 11px; cursor: pointer; }
