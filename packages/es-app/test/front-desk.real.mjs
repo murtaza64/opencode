@@ -171,6 +171,8 @@ const dashboard = http.createServer((request, response) => {
     return response.write("data: connected\n\n")
   }
   if (request.method === "POST" && url.pathname.startsWith("/api/attention/") && url.pathname !== "/api/attention/session") attentionPosts.push(url.pathname)
+  // The work host's dashboard reports its Front Desk model (es_dashboard_frontdesk.desk_model over Core's config).
+  if (url.pathname === "/api/frontdesk/model") return json({ model: { providerID: "duolingo-openai", modelID: "gpt-6.1-sol" }, available: true, reason: "" })
   if (url.pathname === "/api/editspaces") return json({ editspaces: [{ name: "fixture", root: project }], default: "fixture" })
   if (url.pathname === "/api/state") return json({ editspace: "fixture", root: project, threads: [], attention: [], frontier: [], unattached_prs: [], sessions: [] })
   if (url.pathname === "/api/notifications") return json({ notifications: [] })

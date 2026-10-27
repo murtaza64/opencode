@@ -4,7 +4,7 @@ import type { MessageWithParts } from "./api"
 import type { AttentionRecord } from "./attention"
 import { BRIEF_SCHEMA, BRIEF_SYSTEM, briefPacket, deskItems } from "./desk"
 import contract from "./brief-contract.json"
-import { BRIEF_PERMISSION, DESK_MODEL, briefAnchorID, briefID } from "./desk-session"
+import { BRIEF_PERMISSION, briefAnchorID, briefID } from "./desk-session"
 
 // The es-dashboard starts the same brief jobs when no client is open
 // (murtaza64/dotfiles bin/es_dashboard_frontdesk.py, tests/test_es_dashboard_frontdesk.py).
@@ -19,10 +19,6 @@ test("brief prompt contract matches the dashboard copy", () => {
 
 test("the whole brief contract file (drawing rules and tokens too) matches the dashboard's copy", () => {
   expect(sha(JSON.stringify(contract))).toBe("545a37bd9d1e394e11bb670707a8b1d5034c8f1b559a06ec1ee52bfd719937f9")
-})
-
-test("briefs run on the same explicit model as the dashboard's", () => {
-  expect(DESK_MODEL).toEqual({ providerID: "duolingo-openai", modelID: "gpt-6.1-sol" })
 })
 
 test("brief anchor and job IDs match the dashboard's", async () => {

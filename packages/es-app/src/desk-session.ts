@@ -15,9 +15,23 @@ const POINTER = "es-app:front-desk:1"
 const NOTE = "es-app:front-desk:context:1"
 const PENDING = "es-app:front-desk:brief-create:1"
 const AGENT = "front-desk"
-/** The model the Front Desk chat and its brief jobs run on, set explicitly so nothing inherits another
- * default. The dashboard's server-side preparation uses the same value (es_dashboard_frontdesk.py). */
-export const DESK_MODEL = { providerID: "duolingo-openai", modelID: "gpt-6.1-sol" } as const
+/** The model the Front Desk chat and its brief jobs run on is the host's own: the `front-desk` agent's model
+ * as the host's Core resolves its config, reported by the host's dashboard (GET /api/frontdesk/model, shared
+ * with its server-side preparation). Nothing here names a provider; an unusable model is reported, never replaced. */
+export type DeskModel = { providerID: string; modelID: string }
+export type HostModel = { model: DeskModel | null; available: boolean; reason: string }
+const [hostModel, setHostModel] = createSignal<HostModel>()
+let hostModelRead: Promise<HostModel> | undefined
+export const readHostModel = (force = false) => {
+  if (!hostModelRead || force) hostModelRead = fetch("/es/api/frontdesk/model", { credentials: "include" })
+    .then(async response => response.ok ? await response.json() as HostModel : { model: null, available: false, reason: `the dashboard did not report it (HTTP ${response.status})` })
+    .catch(() => ({ model: null, available: false, reason: "the dashboard is unreachable" }))
+    .then(value => { setHostModel(value); return value })
+  return hostModelRead
+}
+/** This host's desk model when it can run here; undefined while unknown or unusable. */
+export const deskModel = () => { const value = hostModel(); return value?.available ? value.model ?? undefined : undefined }
+export { hostModel }
 const CONTEXT_SOURCE = "es-app/front-desk"
 
 const readJSON = <T,>(key: string, valid: (value: any) => boolean): T | undefined => {
@@ -54,8 +68,10 @@ export const createDeskSession = () => {
   // model through the session's own preference, which applies from its next turn: a running turn and
   // the transcript are untouched. A preference someone chose explicitly is left alone.
   const preferDeskModel = async (current: Session) => {
-    if (current.preferredModel || (current.model?.providerID === DESK_MODEL.providerID && current.model.id === DESK_MODEL.modelID)) return
-    await oc.preferModel(current.id, current.directory, DESK_MODEL).then(setSession, () => undefined)
+    const host = await readHostModel()
+    const model = host.available ? host.model : undefined
+    if (!model || current.preferredModel || (current.model?.providerID === model.providerID && current.model.id === model.modelID)) return
+    await oc.preferModel(current.id, current.directory, model).then(setSession, () => undefined)
   }
   const verify = async () => {
     const current = pointer()
@@ -91,7 +107,7 @@ export const createDeskSession = () => {
   const start = async (directory: string) => {
     if (status() !== "none") return
     setStatus("creating")
-    const agents = await oc.agents(directory).catch(() => [])
+    const [agents, host] = await Promise.all([oc.agents(directory).catch(() => []), readHostModel()])
     const id = `ses_${descending()}`
     const value = {
       session: id, directory,
@@ -99,7 +115,8 @@ export const createDeskSession = () => {
         id,
         title: "Front desk",
         ...(agents.some(agent => agent.name === AGENT) ? { agent: AGENT } : {}),
-        model: { providerID: DESK_MODEL.providerID, id: DESK_MODEL.modelID },
+        // Without a usable host model the agent's own resolution applies, and Core reports any failure.
+        ...(host.available && host.model ? { model: { providerID: host.model.providerID, id: host.model.modelID } } : {}),
         // The desk answers and routes; it never edits files, whichever agent serves it.
         permission: [{ permission: "edit", pattern: "*", action: "deny" as const }],
       },
@@ -148,7 +165,7 @@ export const createDeskSession = () => {
     try {
       await oc.promptBody(current.id, current.directory, {
         ...(fresh.agent ? { agent: fresh.agent } : {}),
-        ...(fresh.preferredModel ? {} : { model: DESK_MODEL }),
+        ...(fresh.preferredModel || !deskModel() ? {} : { model: deskModel()! }),
         parts: [{ type: "text", text }, ...parts],
       })
     } catch (cause) {
@@ -159,7 +176,8 @@ export const createDeskSession = () => {
 }
 
 export type BriefJob = { id: string; directory: string; meta: BriefMeta; created: number; state: BriefState | { state: "starting" } | { state: "unconfirmed" } }
-type PendingCreate = { id: string; directory: string; body: Parameters<typeof oc.createSession>[1] & { id: string }; packet: string; created: number }
+/** `model`: the host's desk model when the job was claimed; the prompt runs on it, never on a later host's. */
+type PendingCreate = { id: string; directory: string; body: Parameters<typeof oc.createSession>[1] & { id: string }; packet: string; created: number; model?: DeskModel }
 
 /** A brief made under the current contract for exactly this item revision: the newest attempt, except that
  * a ready one stays shown while a newer (regenerated) attempt is still being prepared. */
@@ -302,7 +320,8 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
     }
     savePending(undefined)
     await oc.promptBody(child.id, child.directory, {
-      model: DESK_MODEL,
+      // Older saved creates carry no model: the session keeps the one it was created with.
+      ...(value.model ? { model: value.model } : {}),
       // Plain-text JSON: Core's message listing cannot yet encode stored json_schema formats.
       system: `${BRIEF_SYSTEM}\n${JSON.stringify(BRIEF_SCHEMA)}`,
       parts: [{ type: "text", text: value.packet }],
@@ -324,6 +343,11 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
       if (!desk() && ensure) await ensure()
       const target = desk()
       if (!target) return
+      const host = await readHostModel()
+      if (!host.available || !host.model) {
+        setError(`Briefs are unavailable on this host: ${host.reason}.`)
+        return
+      }
       const [tail, conversation] = await Promise.all([oc.messagesTail(item.source.session, item.source.directory, SOURCE_TAIL).catch(() => []), item.record ? readConversation(item.record) : undefined])
       // Re-read the canonical item: the source may have moved on while its thread was read.
       const latest = current(item.key)
@@ -333,18 +357,18 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
       }
       if (desk()?.session !== target.session || pending() || inflight() || reusable(latest)) return
       const packet = briefPacket(latest, tail, conversation?.threads ?? [], conversation?.documents ?? [])
-      const meta: BriefMeta = { kind: "brief", requestID: crypto.randomUUID(), source: latest.key, revision: latest.revision, title: latest.title, refs: packet.refs, contract: BRIEF_CONTRACT }
+      const meta: BriefMeta = { kind: "brief", requestID: crypto.randomUUID(), source: latest.key, revision: latest.revision, title: latest.title, refs: packet.refs, contract: BRIEF_CONTRACT, model: `${host.model.providerID}/${host.model.modelID}` }
       // Deterministic per (parent, source, revision, attempt): every client computes the same ID, so
       // Core's create reconciliation makes the first creator win and the rest adopt its job.
       const attempt = jobs().filter(job => job.meta.source === latest.key && job.meta.revision === latest.revision).length
       const id = await briefID(target.session, latest.key, latest.revision, attempt)
       const value: PendingCreate = {
-        id, directory: target.directory, packet: packet.text, created: Date.now(),
+        id, directory: target.directory, packet: packet.text, created: Date.now(), model: host.model,
         body: {
           id,
           parentID: target.session,
           title: `Brief: ${latest.title.slice(0, 60)}`,
-          model: { providerID: DESK_MODEL.providerID, id: DESK_MODEL.modelID },
+          model: { providerID: host.model.providerID, id: host.model.modelID },
           metadata: { frontDesk: meta },
           permission: BRIEF_PERMISSION,
         },

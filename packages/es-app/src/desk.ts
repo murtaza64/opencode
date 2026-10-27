@@ -122,7 +122,7 @@ export const deskSources = (input: {
 /** `url` marks evidence fetched read-only from an external conversation (e.g. a GitHub review thread). */
 export type EvidenceRef = { id: string; label: string; messageID?: string; url?: string }
 /** `contract` names the brief format; a job made under an older one is kept but not shown or reused. */
-export type BriefMeta = { kind: "brief"; requestID: string; source: string; revision: string; title: string; refs: EvidenceRef[]; contract?: number }
+export type BriefMeta = { kind: "brief"; requestID: string; source: string; revision: string; title: string; refs: EvidenceRef[]; contract?: number; model?: string }
 export const BRIEF_CONTRACT = contract.contract
 export type BriefShape =
   /** Options side by side: `columns` are canonical option ids (unknown ones are dropped), one cell per column. */

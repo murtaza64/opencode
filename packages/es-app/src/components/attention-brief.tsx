@@ -53,6 +53,7 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
         <Show when={job().state.state === "unconfirmed"}><p class="home-warning">Brief start not confirmed.</p>
           <button class="desk-button" disabled={props.confirming} onClick={props.confirm}>Confirm start</button></Show>
         <Show when={(job().state.state === "failed" || job().state.state === "unknown") && props.live}><button class="desk-button" disabled={!props.canStart} onClick={props.start}>Prepare again</button></Show>
+        <Show when={(job().state.state === "failed" || job().state.state === "unknown") && props.unavailable}><span class="home-source" title={props.unavailableDetail}> {props.unavailable}</span></Show>
       </>}</Show>
       <Show when={!current() && discarded().length}><p class="home-source">The request changed since the last brief.</p></Show>
       {/* The question itself is the card's heading; the lead adds only context and the picture. */}
@@ -238,7 +239,7 @@ export const PreparedBrief = (props: { item: DeskItem; live: boolean; part?: Par
   const briefs = prepared.briefs
   return <BriefPanel item={props.item} live={props.live} auto={prepared.auto()} part={props.part} pinned={props.pinned}
     jobs={briefs.jobs().filter(job => job.meta.source === props.item.key)}
-    canStart={(!prepared.auto() || prepared.anchor.ready()) && !briefs.pending() && !briefs.preparing()} unavailable={prepared.anchor.error() || undefined} unavailableDetail={prepared.anchor.detail()}
+    canStart={(!prepared.auto() || prepared.anchor.ready()) && !briefs.pending() && !briefs.preparing() && !prepared.unavailable()} unavailable={prepared.unavailable() || prepared.anchor.error() || undefined} unavailableDetail={prepared.anchor.detail()}
     confirming={briefs.jobs().some(job => job.state.state === "starting")}
     start={() => void briefs.start(props.item)} confirm={() => void briefs.confirm()}
     regenerate={() => void briefs.regenerate(props.item)} regenerating={briefs.regenerating()} />
