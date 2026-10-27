@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "d823037c-f38f-42d7-892d-7cad7b3dd6e7",
+  "id": "3afb2e81-ed47-4b48-9a68-6dbb270ea623",
   "prevIds": [
-    "3282506d-3cbf-496e-aa00-affba4d28684"
+    "d823037c-f38f-42d7-892d-7cad7b3dd6e7"
   ],
   "ddl": [
     {
@@ -2464,6 +2464,20 @@
       "where": null,
       "origin": "manual",
       "name": "v1_session_input_pending_idx",
+      "entityType": "indexes",
+      "table": "v1_session_input"
+    },
+    {
+      "columns": [
+        {
+          "value": "session_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": "state = 'promoted' AND json_extract(receipt, '$.timePresented') IS NULL AND json_extract(payload, '$.source.type') = 'editspace-mail'",
+      "origin": "manual",
+      "name": "v1_session_input_unpresented_mail_idx",
       "entityType": "indexes",
       "table": "v1_session_input"
     }

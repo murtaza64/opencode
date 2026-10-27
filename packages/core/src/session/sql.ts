@@ -1,4 +1,5 @@
 import { sqliteTable, text, integer, index, primaryKey, real, uniqueIndex } from "drizzle-orm/sqlite-core"
+import { sql } from "drizzle-orm"
 import * as DatabasePath from "../database/path"
 import { ProjectTable } from "../project/sql"
 import type { SessionMessage } from "./message"
@@ -106,7 +107,16 @@ export const V1InputTable = sqliteTable(
     model: text({ mode: "json" }).$type<SessionV1.User["model"]>().notNull(),
     receipt: text({ mode: "json" }).$type<SessionV1.InputReceipt>().notNull(),
   },
-  (table) => [index("v1_session_input_pending_idx").on(table.session_id, table.state, table.admitted_seq)],
+  (table) => [
+    index("v1_session_input_pending_idx").on(table.session_id, table.state, table.admitted_seq),
+    // Each runner step marks newly visible mail inputs presented; without this the lookup scans every
+    // promoted input of the Session and parses its receipt, which grows with the Session's mail history.
+    index("v1_session_input_unpresented_mail_idx")
+      .on(table.session_id)
+      .where(
+        sql`state = 'promoted' AND json_extract(receipt, '$.timePresented') IS NULL AND json_extract(payload, '$.source.type') = 'editspace-mail'`,
+      ),
+  ],
 )
 
 export const V1InputCommandTable = sqliteTable("v1_session_input_command", {
