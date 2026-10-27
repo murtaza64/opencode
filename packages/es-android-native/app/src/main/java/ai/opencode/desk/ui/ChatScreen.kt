@@ -73,27 +73,17 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         TopBar("Desk", onBack = { nav.pop() }) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                StatusDot(if (store.deskBusy) "busy" else "idle", 8)
+                StatusDot(if (store.deskBusy) "busy" else "idle", 7, animate = true)
                 Spacer(Modifier.width(8.dp))
                 Label(if (store.deskBusy) "thinking" else if (store.deskReady) "front-desk · ${store.deskSpace}" else "new conversation")
             }
         }
         LazyColumn(Modifier.weight(1f).testTag("chat"), state = list, reverseLayout = true, contentPadding = PaddingValues(vertical = 8.dp)) {
             items(pending.asReversed(), key = { "r-" + it.requestID }) { item ->
-                val tint = when (item.state) { SendState.Failed -> Ink.Red; SendState.Presented, SendState.Handled -> Ink.Green; else -> Ink.Amber }
-                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), horizontalAlignment = Alignment.End) {
-                    Text(item.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.background(Ink.Blue.copy(alpha = if (item.state == SendState.Sending) 0.08f else 0.14f), RoundedCornerShape(16.dp)).padding(horizontal = 14.dp, vertical = 10.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Label(item.label, color = tint)
-                        if (item.retryable) {
-                            Label("retry", color = Ink.Blue, modifier = Modifier.padding(start = 10.dp).clickable { scope.launch { store.retry(item) } })
-                            Label("discard", color = Ink.Muted, modifier = Modifier.padding(start = 10.dp).clickable { store.dismiss(item) })
-                        }
-                    }
-                }
+                PendingBubble(item, store, onRetry = { scope.launch { store.retry(item) } }, onCancel = { store.dismiss(item) })
             }
             val timeline = Timeline.build(Authorship.place(messages, store.mine[id].orEmpty()))
-            items(timeline.asReversed(), key = { it.key() }) { TimelineItem(it, null, store.now, store) }
+            items(timeline.asReversed(), key = { it.key() }) { TimelineItem(it, store.now, store) }
             item(key = "older") {
                 val more = store.deskCursors[id] != null
                 if (messages.isEmpty() && pending.isEmpty()) Column(Modifier.padding(20.dp)) {
@@ -110,7 +100,7 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
             TextField(
                 value = text, onValueChange = { text = it }, maxLines = 5,
                 placeholder = { Text("Message the desk", color = Ink.Dim) },
-                modifier = Modifier.weight(1f).testTag("chat-text"), shape = RoundedCornerShape(22.dp),
+                modifier = Modifier.weight(1f).testTag("chat-text"), shape = RoundedCornerShape(4.dp),
                 colors = TextFieldDefaults.colors(focusedContainerColor = Ink.Panel, unfocusedContainerColor = Ink.Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = Ink.Blue),
             )
             IconButton(enabled = (text.isNotBlank() || hasImages) && !sending, modifier = Modifier.testTag("chat-send"), onClick = {

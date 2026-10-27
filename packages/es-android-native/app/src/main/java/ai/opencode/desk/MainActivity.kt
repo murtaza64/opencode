@@ -27,13 +27,16 @@ import ai.opencode.desk.ui.ConnectScreen
 import ai.opencode.desk.ui.DeskTheme
 import ai.opencode.desk.ui.HomeScreen
 import ai.opencode.desk.ui.Ink
+import ai.opencode.desk.ui.LocalReducedMotion
+import androidx.compose.runtime.CompositionLocalProvider
 import ai.opencode.desk.ui.SurfaceScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { DeskTheme { App() } }
+        val reduced = android.provider.Settings.Global.getFloat(contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+        setContent { CompositionLocalProvider(LocalReducedMotion provides reduced) { DeskTheme { App() } } }
     }
 }
 

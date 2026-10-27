@@ -235,7 +235,7 @@ private fun ProjectChips(store: DeskStore) {
 private fun FilterChip(text: String, selected: Boolean, dim: Boolean = false, onClick: () -> Unit) {
     Box(
         Modifier
-            .background(if (selected) Ink.Text else Ink.Panel, RoundedCornerShape(20.dp))
+            .background(if (selected) Ink.Text else Ink.Panel, RoundedCornerShape(2.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 7.dp),
     ) {
@@ -334,7 +334,7 @@ private fun Composer(store: DeskStore, nav: Nav) {
             placeholder = { Text(if (store.deskBusy) "Desk is thinking… add to it" else "Ask the desk or start work", style = MaterialTheme.typography.bodyLarge, color = Ink.Dim) },
             modifier = Modifier.weight(1f).testTag("composer"),
             maxLines = 4,
-            shape = RoundedCornerShape(22.dp),
+            shape = RoundedCornerShape(4.dp),
             colors = TextFieldDefaults.colors(focusedContainerColor = Ink.Panel, unfocusedContainerColor = Ink.Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = Ink.Blue),
         )
         Spacer(Modifier.width(6.dp))
@@ -379,7 +379,7 @@ private fun PinRow(store: DeskStore, view: PinView, nav: Nav) {
         Modifier.fillMaxWidth().clickable(enabled = !unavailable) { view.agentKey?.let { nav.push(Route.Agent(it)) } }.padding(start = 20.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        StatusDot(if (unavailable) "idle" else view.status, 8)
+        StatusDot(if (unavailable) "unknown" else view.status, 7)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(view.title, style = MaterialTheme.typography.bodyMedium, color = if (unavailable) Ink.Muted else Ink.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -396,7 +396,7 @@ private fun PinRow(store: DeskStore, view: PinView, nav: Nav) {
 private fun SurfaceRow(surface: Surface, now: Long, onClick: () -> Unit) {
     val health = when (surface.health.state) { "ok" -> "busy"; "error", "unreachable" -> "error"; else -> "idle" }
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 10.dp).testTag("surface-" + surface.id), verticalAlignment = Alignment.CenterVertically) {
-        StatusDot(health, 8)
+        StatusDot(health, 7)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

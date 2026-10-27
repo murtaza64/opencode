@@ -128,8 +128,8 @@ fun DecisionSheet(store: DeskStore, record: AttentionRecord, onDismiss: () -> Un
                             Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp)
-                                .border(1.dp, if (picked) Ink.Text else Ink.Line, RoundedCornerShape(12.dp))
-                                .background(if (picked) Ink.Raised else Color.Transparent, RoundedCornerShape(12.dp))
+                                .border(1.dp, if (picked) Ink.Text else Ink.Line, RoundedCornerShape(2.dp))
+                                .background(if (picked) Ink.Raised else Color.Transparent, RoundedCornerShape(2.dp))
                                 .clickable(enabled = !busy) { choice = option.id }
                                 .padding(horizontal = 14.dp, vertical = 14.dp)
                                 .testTag("option-${option.id}"),
@@ -156,7 +156,7 @@ fun DecisionSheet(store: DeskStore, record: AttentionRecord, onDismiss: () -> Un
                             value = note, onValueChange = { note = it },
                             placeholder = { Text(if (record.options.isEmpty()) "Your answer" else "Add a note (optional)", color = Ink.Dim) },
                             modifier = Modifier.fillMaxWidth().testTag("answer-text"), minLines = 2, maxLines = 6,
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(2.dp),
                             colors = TextFieldDefaults.colors(focusedContainerColor = Ink.Raised, unfocusedContainerColor = Ink.Raised, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = Ink.Blue),
                         )
                     }
@@ -212,7 +212,7 @@ private fun Context(text: String) {
 @Composable
 private fun Outcome(record: AttentionRecord) {
     val choice = record.options.firstOrNull { it.id == (record.answer?.choice_id ?: record.decision) }?.label
-    Column(Modifier.fillMaxWidth().background(Ink.Raised, RoundedCornerShape(12.dp)).padding(14.dp)) {
+    Column(Modifier.fillMaxWidth().background(Ink.Raised, RoundedCornerShape(2.dp)).padding(14.dp)) {
         Label(record.status, color = Ink.Text)
         if (choice != null) Text(choice, style = MaterialTheme.typography.bodyLarge)
         val option = record.options.firstOrNull { it.id == record.answer?.choice_id }
@@ -239,7 +239,7 @@ private fun OptionInputEditor(input: OptionInput, draft: AttentionInput.Draft, b
                 label = { Text(input.label) },
                 placeholder = { input.hint?.let { Text(it, color = Ink.Dim) } },
                 modifier = Modifier.fillMaxWidth().testTag("option-input-text"), minLines = 1, maxLines = 5,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(4.dp),
                 colors = TextFieldDefaults.colors(focusedContainerColor = Ink.Raised, unfocusedContainerColor = Ink.Raised, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = Ink.Blue),
             )
             "choice", "multi" -> {
@@ -249,7 +249,7 @@ private fun OptionInputEditor(input: OptionInput, draft: AttentionInput.Draft, b
                         val on = option.id in draft.picks
                         Box(
                             Modifier
-                                .background(if (on) Ink.Text else Ink.Raised, RoundedCornerShape(18.dp))
+                                .background(if (on) Ink.Text else Ink.Raised, RoundedCornerShape(2.dp))
                                 .clickable(enabled = !busy) {
                                     onPicks(
                                         when {

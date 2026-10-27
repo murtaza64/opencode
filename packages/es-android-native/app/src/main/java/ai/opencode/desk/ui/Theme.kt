@@ -4,7 +4,12 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.EaseInOut
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.border
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -50,10 +55,11 @@ object Ink {
 }
 
 fun statusColor(status: String) = when (status) {
-    "busy" -> Ink.Green
+    "busy", "retry" -> Ink.Green
     "parked" -> Ink.Violet
     "starting" -> Ink.Amber
-    "retry", "error" -> Ink.Red
+    "error", "failed" -> Ink.Red
+    "unread" -> Ink.Blue
     else -> Ink.Dim
 }
 
@@ -96,20 +102,36 @@ fun DeskTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = Scheme,
         typography = DeskType,
-        shapes = Shapes(small = RoundedCornerShape(8.dp), medium = RoundedCornerShape(14.dp), large = RoundedCornerShape(24.dp)),
+        shapes = Shapes(small = RoundedCornerShape(2.dp), medium = RoundedCornerShape(4.dp), large = RoundedCornerShape(4.dp)),
         content = content,
     )
 }
 
-// A status dot that breathes while the agent is working, so motion itself says "live".
+// The one busy idiom (CHAT-PARTS §1): a 7dp circle; busy = accent dot with a soft halo. Only the
+// indicator for the thing the screen is about animates (`animate = true`), everything else is static.
+// The halo animates alpha + scale, 1.6 s ease-in-out, compositor-only; reduced motion (animator
+// duration scale 0) shows a static halo at 50%.
+val LocalReducedMotion = compositionLocalOf { false }
+
 @Composable
-fun StatusDot(status: String, size: Int = 10) {
+fun StatusDot(status: String, size: Int = 7, animate: Boolean = false) {
     val color = statusColor(status)
-    val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(
-        initialValue = 1f, targetValue = if (status == "busy") 0.35f else 1f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "alpha",
-    )
-    Box(Modifier.size(size.dp).alpha(pulse).background(color, CircleShape))
+    val busy = status == "busy" || status == "retry"
+    val hollow = status == "unknown" || status == "starting"
+    val reduced = LocalReducedMotion.current
+    Box(Modifier.size((size * 2).dp), contentAlignment = Alignment.Center) {
+        if (busy) {
+            if (animate && !reduced) {
+                val halo by rememberInfiniteTransition(label = "halo").animateFloat(
+                    initialValue = 0f, targetValue = 1f,
+                    animationSpec = infiniteRepeatable(tween(1600, easing = EaseInOut), RepeatMode.Restart), label = "halo",
+                )
+                Box(Modifier.size((size * 2).dp).graphicsLayer { scaleX = 0.6f + halo * 0.6f; scaleY = 0.6f + halo * 0.6f; alpha = (1f - halo) * 0.45f }.background(color, CircleShape))
+            } else Box(Modifier.size((size * 1.6f).dp).alpha(if (animate) 0.5f else 0.25f).background(color, CircleShape))
+        }
+        if (hollow) Box(Modifier.size(size.dp).border(1.5.dp, color, CircleShape))
+        else Box(Modifier.size(size.dp).background(color, CircleShape))
+    }
 }
 
 @Composable

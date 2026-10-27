@@ -44,7 +44,7 @@ fun SectionHeader(title: String, trailing: String? = null, onTrailing: (() -> Un
 fun Chip(text: String, color: Color, filled: Boolean = false) {
     Box(
         Modifier
-            .background(if (filled) color else color.copy(alpha = 0.14f), RoundedCornerShape(6.dp))
+            .background(if (filled) color else color.copy(alpha = 0.14f), RoundedCornerShape(2.dp))
             .padding(horizontal = 7.dp, vertical = 2.dp),
     ) { Label(text, color = if (filled) Ink.Black else color) }
 }
@@ -86,7 +86,7 @@ fun AgentRow(agent: Agent, now: Long, onClick: () -> Unit, trailing: (@Composabl
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 20.dp, end = if (trailing != null) 4.dp else 20.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        StatusDot(agent.status)
+        StatusDot(agent.status, 7)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(agent.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)

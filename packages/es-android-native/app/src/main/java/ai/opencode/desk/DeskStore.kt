@@ -435,6 +435,10 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     }
 
     fun requestID(sessionID: String) = drafts[sessionID]?.requestID ?: UUID.randomUUID().toString()
+    fun storedImages(requestID: String): List<StoredImage> = durable.get(gateway.origin, requestID)?.images.orEmpty()
+    // Stored images for a transcript message this phone sent (by its message id), while the outbox record exists.
+    fun storedImagesForMessage(sessionID: String, messageID: String): List<StoredImage> =
+        outbox[sessionID].orEmpty().firstOrNull { it.messageID == messageID }?.let { storedImages(it.requestID) }.orEmpty()
 
     // ---- pins ----
     fun togglePin(pin: Pin) { pins = pinStore.toggle(gateway.origin, pin) }

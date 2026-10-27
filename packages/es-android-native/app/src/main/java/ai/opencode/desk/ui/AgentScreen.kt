@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -101,7 +102,7 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
         val pin = Pin(agent.editspace, agent.lane)
         TopBar(agent.title, onBack = { nav.pop() }, trailing = { PinButton(store.pinned(pin)) { store.togglePin(pin) } }) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatusDot(agent.status, 8)
+                StatusDot(agent.status, 7, animate = true)
                 Label(listOfNotNull(agent.editspace, agent.lane, agent.status, agent.session?.cost?.takeIf { it > 0 }?.let { "$%.2f".format(it) }).joinToString(" · "))
             }
         }
@@ -110,15 +111,14 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
             val transcript = detail?.messages.orEmpty().map { it.info.id }.toSet()
             val pending = Timeline.dedupPending(Outbox.visible(store.outbox[agent.session?.id.orEmpty()].orEmpty(), transcript), detail?.messages.orEmpty())
             items(pending.asReversed(), key = { it.requestID }) { item ->
-                PendingRow(item,
+                PendingBubble(item, store,
                     onRetry = { scope.launch { store.retry(item) } },
                     onCancel = { scope.launch { if (item.state == SendState.Accepted) store.cancel(agent, item.requestID); store.dismiss(item) } })
             }
-            if (pending.isNotEmpty()) item(key = "pending-header") { SectionHeader("Sent from this phone") }
             detail?.error?.let { item(key = "error") { Text(it, color = Ink.Red, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) } }
             if (detail == null) item(key = "loading") { Text("Loading…", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) }
             val timeline = Timeline.build(Authorship.place(detail?.messages.orEmpty(), store.mine[agent.session?.id.orEmpty()].orEmpty()))
-            items(timeline.asReversed(), key = { it.key() }) { TimelineItem(it, agent.lane, store.now, store) }
+            items(timeline.asReversed(), key = { it.key() }) { TimelineItem(it, store.now, store) }
             item(key = "older") {
                 val more = detail?.cursor != null
                 Text(
@@ -140,7 +140,7 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
             }
             detail?.work?.turn?.let { turn ->
                 item(key = "turn") {
-                    Row(Modifier.padding(horizontal = 20.dp, vertical = 10.dp).fillMaxWidth().background(Ink.Panel, RoundedCornerShape(12.dp)).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(Modifier.padding(horizontal = 20.dp, vertical = 10.dp).fillMaxWidth().background(Ink.Panel, RoundedCornerShape(2.dp)).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         Column { Text("${turn.elapsed_seconds / 60}m", style = MaterialTheme.typography.titleMedium); Label("this turn") }
                         Column { Text("${turn.tool_calls}", style = MaterialTheme.typography.titleMedium); Label("tool calls") }
                         if (turn.active_tools.isNotEmpty()) Column(Modifier.weight(1f)) { Text(turn.active_tools.joinToString(), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis); Label("running") }
@@ -172,21 +172,32 @@ fun PinButton(pinned: Boolean, onToggle: () -> Unit) {
     }
 }
 
-// One send and what has been proven about it so far. Failed and unconfirmed sends can be
-// retried with the same request ID; accepted ones can still be cancelled before promotion.
+// One send from this phone as an outgoing bubble: text and inline previews from the stored
+// record (same composable and box as the accepted message), then the proven state. Failed and
+// unconfirmed sends can be retried with the same request ID; accepted ones can be cancelled.
 @Composable
-fun PendingRow(item: Pending, onRetry: () -> Unit, onCancel: () -> Unit) {
+fun PendingBubble(item: Pending, store: DeskStore, onRetry: () -> Unit, onCancel: () -> Unit) {
     val tint = when (item.state) { SendState.Failed -> Ink.Red; SendState.Uncertain -> Ink.Amber; SendState.Presented, SendState.Handled -> Ink.Green; else -> Ink.Amber }
-    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(item.text, style = MaterialTheme.typography.bodyMedium, color = Ink.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                item.author?.let { AuthorHeader(it, Ink.Violet, Modifier.padding(end = 8.dp)) }
-                Label(item.label, color = tint)
-            }
+    val stored = store.storedImages(item.requestID)
+    val status = Timeline.pendingStatus(item.state)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), horizontalAlignment = Alignment.End) {
+        item.author?.let { AuthorHeader(it, Ink.Violet) }
+        val sending = item.state == SendState.Sending || item.state == SendState.Uncertain
+        Column(
+            Modifier.widthIn(max = 320.dp).background(Ink.Blue.copy(alpha = if (sending) 0.08f else 0.22f), RoundedCornerShape(2.dp))
+                .padding(horizontal = if (item.text.isNotBlank()) 14.dp else 4.dp, vertical = if (item.text.isNotBlank()) 10.dp else 4.dp),
+        ) {
+            if (item.text.isNotBlank()) Text(item.text, style = MaterialTheme.typography.bodyLarge, color = Ink.Text, maxLines = 6, overflow = TextOverflow.Ellipsis)
+            if (stored.isNotEmpty()) InlinePreviews(stored.map { Preview.Stored(it) }, store, Modifier.padding(top = if (item.text.isNotBlank()) 6.dp else 0.dp))
         }
-        if (item.retryable) TextButton(onClick = onRetry) { Text("Retry", color = Ink.Blue) }
-        if (item.retryable || item.state == SendState.Accepted) TextButton(onClick = onCancel) { Text(if (item.retryable) "Discard" else "Cancel", color = Ink.Muted) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (item.state == SendState.Sending) StatusDot("busy", 5)
+            Label(status ?: item.label.substringAfter("· ", item.label), color = tint, modifier = Modifier.padding(start = if (item.state == SendState.Sending) 4.dp else 0.dp))
+            if (item.retryable) {
+                Label("retry", color = Ink.Blue, modifier = Modifier.padding(start = 10.dp).clickable(onClick = onRetry))
+                Label("discard", color = Ink.Muted, modifier = Modifier.padding(start = 10.dp).clickable(onClick = onCancel))
+            } else if (item.state == SendState.Accepted) Label("cancel", color = Ink.Muted, modifier = Modifier.padding(start = 10.dp).clickable(onClick = onCancel))
+        }
     }
 }
 
@@ -199,20 +210,28 @@ fun PendingRow(item: Pending, onRetry: () -> Unit, onCancel: () -> Unit) {
 fun Message(message: MessageWithParts, now: Long, author: Author? = null, first: Boolean = true, store: DeskStore? = null) {
     val text = message.parts.filter { it.type == "text" && !it.text.isNullOrBlank() }.joinToString("\n\n") { it.text!!.trim() }
     val tools = message.parts.filter { it.type == "tool" }
-    if (author != null && author != Author.You && author !is Author.Operator) { SourcedMessage(author, text, message.info.id, now, message.info.time.created, first); return }
+    if (author != null && author != Author.You && author !is Author.Operator) { SourcedMessage(author, text, message.info.id, now, message.info.time.created, first, if (store != null) previews(message.parts) else emptyList(), store); return }
     val you = author == Author.You || author is Author.Operator
+    val stored = if (you && store != null) store.storedImagesForMessage(message.info.sessionID, message.info.id) else emptyList()
+    val images = if (store != null) previews(message.parts, stored) else emptyList()
     Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = if (first) 6.dp else 2.dp, bottom = 6.dp), horizontalAlignment = if (you) Alignment.End else Alignment.Start) {
         if (you && first) AuthorHeader(author!!, Ink.Blue)
-        if (text.isNotBlank()) {
+        if (you) {
             var expanded by rememberSaveable(message.info.id) { mutableStateOf(false) }
-            Box(
-                Modifier
-                    .background(if (you) Ink.Blue.copy(alpha = 0.22f) else Color.Transparent, RoundedCornerShape(16.dp))
-                    .clickable { expanded = !expanded }
-                    .padding(horizontal = if (you) 14.dp else 0.dp, vertical = if (you) 10.dp else 0.dp),
-            ) { Text(if (you) AnnotatedString(text) else markdownish(text), style = MaterialTheme.typography.bodyLarge, maxLines = if (expanded) Int.MAX_VALUE else 10, overflow = TextOverflow.Ellipsis) }
+            Column(
+                Modifier.widthIn(max = 320.dp).background(Ink.Blue.copy(alpha = 0.22f), RoundedCornerShape(2.dp)).clickable { expanded = !expanded }
+                    .padding(horizontal = if (text.isNotBlank()) 14.dp else 4.dp, vertical = if (text.isNotBlank()) 10.dp else 4.dp),
+            ) {
+                if (text.isNotBlank()) Text(AnnotatedString(text), style = MaterialTheme.typography.bodyLarge, maxLines = if (expanded) Int.MAX_VALUE else 10, overflow = TextOverflow.Ellipsis)
+                if (images.isNotEmpty()) InlinePreviews(images, store!!, Modifier.padding(top = if (text.isNotBlank()) 6.dp else 0.dp))
+            }
+        } else {
+            if (text.isNotBlank()) {
+                var expanded by rememberSaveable(message.info.id) { mutableStateOf(false) }
+                Box(Modifier.clickable { expanded = !expanded }) { Text(markdownish(text), style = MaterialTheme.typography.bodyLarge, maxLines = if (expanded) Int.MAX_VALUE else 10, overflow = TextOverflow.Ellipsis) }
+            }
+            if (images.isNotEmpty()) InlinePreviews(images, store!!, Modifier.padding(top = 6.dp))
         }
-        if (store != null) ImageParts(message.parts, store)
         ToolRows.groups(message.parts).forEach { group -> ToolGroupView(group, message.info.id) }
         Label(age(now, message.info.time.created), color = Ink.Dim, modifier = Modifier.padding(top = 2.dp))
     }
@@ -236,11 +255,11 @@ fun AuthorHeader(author: Author, tint: Color, modifier: Modifier = Modifier) {
 // Input the human did not type on this phone: a left-aligned card whose header says who did.
 // Quoted approvals inside the text stay inside the text; they never change the header.
 @Composable
-fun SourcedMessage(author: Author, text: String, messageID: String, now: Long, created: Long, first: Boolean) {
+fun SourcedMessage(author: Author, text: String, messageID: String, now: Long, created: Long, first: Boolean, images: List<Preview> = emptyList(), store: DeskStore? = null) {
     var expanded by rememberSaveable("srcx-$messageID") { mutableStateOf(false) }
     val tint = when (author) { is Author.Agent -> Ink.Violet; is Author.System -> Ink.Muted; else -> Ink.Amber }
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = if (first) 6.dp else 2.dp, bottom = 6.dp)) {
-        Column(Modifier.weight(1f).background(tint.copy(alpha = 0.10f), RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Column(Modifier.weight(1f).background(tint.copy(alpha = 0.10f), RoundedCornerShape(2.dp)).padding(horizontal = 12.dp, vertical = 8.dp)) {
             if (first) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 AuthorHeader(author, tint, Modifier.weight(1f))
                 Label(age(now, created), color = Ink.Dim)
@@ -250,6 +269,7 @@ fun SourcedMessage(author: Author, text: String, messageID: String, now: Long, c
                 maxLines = if (expanded) Int.MAX_VALUE else 8, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = if (first) 6.dp else 0.dp).clickable { expanded = !expanded },
             )
+            if (images.isNotEmpty() && store != null) InlinePreviews(images, store, Modifier.padding(top = if (text.isNotBlank()) 6.dp else 0.dp))
             if (!first) Label(age(now, created), color = Ink.Dim, modifier = Modifier.padding(top = 2.dp))
         }
     }
@@ -281,7 +301,7 @@ private fun SteerBar(store: DeskStore, agent: Agent) {
             TextField(
                 value = text, onValueChange = { text = it }, maxLines = 4,
                 placeholder = { Text(if (agent.session == null) "Lane is starting; no session yet" else "Tell ${agent.lane}…", color = Ink.Dim) },
-                modifier = Modifier.weight(1f).testTag("steer-text"), shape = RoundedCornerShape(22.dp),
+                modifier = Modifier.weight(1f).testTag("steer-text"), shape = RoundedCornerShape(4.dp),
                 colors = TextFieldDefaults.colors(focusedContainerColor = Ink.Panel, unfocusedContainerColor = Ink.Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = Ink.Blue),
             )
             val hasImages = store.drafts[sessionID]?.images?.isNotEmpty() == true
@@ -298,7 +318,7 @@ private fun SteerBar(store: DeskStore, agent: Agent) {
 
 @Composable
 private fun Toggle(text: String, color: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Box(modifier.background(color.copy(alpha = 0.16f), RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp)) { Label(text, color = color) }
+    Box(modifier.background(color.copy(alpha = 0.16f), RoundedCornerShape(2.dp)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp)) { Label(text, color = color) }
 }
 
 // A run of the same tool. One or two calls show as rows; three or more fold into a summary
@@ -338,7 +358,7 @@ fun ToolRowView(row: ToolRow, key: String) {
             Text(
                 row.output.take(1500) + if (row.output.length > 1500) "\n…" else "",
                 style = MaterialTheme.typography.labelMedium, color = if (row.failed) Ink.Red else Ink.Muted,
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp).background(Ink.Panel, RoundedCornerShape(8.dp)).padding(10.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp).background(Ink.Panel, RoundedCornerShape(2.dp)).padding(10.dp),
             )
         }
     }
