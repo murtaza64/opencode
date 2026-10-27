@@ -153,7 +153,11 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       }
       yield* requireSession(ctx.params.sessionID)
       if (ctx.query.limit === undefined || ctx.query.limit === 0) {
-        return project(yield* SessionError.mapStorageNotFound(session.messages({ sessionID: ctx.params.sessionID })))
+        // Whole-history reads page on reader workers: cold pages of a large session would block every request.
+        // `stream` yields newest first; the route returns oldest first.
+        return project(
+          (yield* MessageV2.stream(ctx.params.sessionID).pipe(Effect.provideService(Database.Service, reader))).reverse(),
+        )
       }
 
       const page = yield* SessionError.mapStorageNotFound(
@@ -184,7 +188,9 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID; messageID: MessageID }
     }) {
       return yield* SessionError.mapStorageNotFound(
-        MessageV2.get({ sessionID: ctx.params.sessionID, messageID: ctx.params.messageID }),
+        MessageV2.get({ sessionID: ctx.params.sessionID, messageID: ctx.params.messageID }).pipe(
+          Effect.provideService(Database.Service, reader),
+        ),
       )
     })
 
@@ -414,9 +420,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     }) {
       yield* runState.admit(ctx.params.sessionID, Effect.gen(function* () {
         yield* revertSvc.cleanup(yield* requireSession(ctx.params.sessionID))
-        const messages = yield* SessionError.mapStorageNotFound(session.messages({ sessionID: ctx.params.sessionID }))
+        const messages = yield* MessageV2.stream(ctx.params.sessionID).pipe(Effect.provideService(Database.Service, reader))
         const defaultAgent = yield* agentSvc.defaultAgent()
-        const currentAgent = messages.findLast((message) => message.info.role === "user")?.info.agent ?? defaultAgent
+        // Newest first, so this is the latest user message.
+        const currentAgent = messages.find((message) => message.info.role === "user")?.info.agent ?? defaultAgent
         yield* compactSvc.create({
           sessionID: ctx.params.sessionID,
           agent: currentAgent,
