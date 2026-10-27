@@ -56,6 +56,15 @@ fun ConnectScreen(store: DeskStore) {
         Spacer(Modifier.height(4.dp))
         Text("Pair this phone with the gateway running on your Mac.", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(28.dp))
+        // Hosts this phone is already paired to: one tap switches without a code.
+        val saved = store.gateway.savedOrigins.filter { store.gateway.credentials.paired(it) }
+        if (saved.isNotEmpty()) {
+            Label("paired hosts")
+            saved.forEach { host ->
+                Text(host, style = MaterialTheme.typography.bodyLarge, color = Ink.Blue, modifier = Modifier.fillMaxWidth().clickable { store.switchOrigin(host) }.padding(vertical = 8.dp).testTag("saved-origin"))
+            }
+            Spacer(Modifier.height(16.dp))
+        }
         OutlinedTextField(
             value = origin, onValueChange = { origin = it }, singleLine = true,
             label = { Text("Gateway") }, modifier = Modifier.fillMaxWidth().testTag("origin"),

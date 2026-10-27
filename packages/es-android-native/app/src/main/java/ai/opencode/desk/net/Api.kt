@@ -70,6 +70,10 @@ class Api(val gateway: Gateway) {
         ).record
     }
 
+    // Raw command body (built by AttentionInput.answerBody) so a retry resends identical bytes.
+    suspend fun commandRaw(record: AttentionRecord, body: JsonObject): AttentionRecord =
+        parse<AttentionCommandResponse>(gateway.post("/es/api/attention/${record.id}/commands", body.toString(), mapOf("es" to record.editspace))).record
+
     suspend fun choose(record: AttentionRecord, choice: String) =
         command(record, "choose", buildJsonObject { put("choice_id", choice) })
 

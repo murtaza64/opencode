@@ -69,6 +69,8 @@ fun DecisionSheet(store: DeskStore, record: AttentionRecord, onDismiss: () -> Un
     var more by rememberSaveable(record.id) { mutableStateOf(false) }
     var error by rememberSaveable(record.id) { mutableStateOf<String?>(null) }
     var busy by rememberSaveable(record.id) { mutableStateOf(false) }
+    // A send whose response was lost: the ledger may have it; the same command_id retries safely.
+    var unconfirmed by rememberSaveable(record.id) { mutableStateOf(false) }
     // Option-input draft (es-attention.md): text or picked choice ids for the selected option.
     var inputText by rememberSaveable(record.id, choice) { mutableStateOf("") }
     var inputPicks by rememberSaveable(record.id, choice) { mutableStateOf(listOf<String>()) }
@@ -89,9 +91,9 @@ fun DecisionSheet(store: DeskStore, record: AttentionRecord, onDismiss: () -> Un
             block().fold(
                 onSuccess = { updated -> if (proof(updated)) onDismiss() else error = "The ledger accepted the command but the record does not show it yet; pull to refresh." },
                 onFailure = {
-                    error = when (it) {
-                        is GatewayError -> AttentionInput.ledgerError(it.body, it.message ?: "HTTP ${it.code}")
-                        else -> it.message?.take(160) ?: "Failed"
+                    when (val outcome = AttentionInput.outcome(it)) {
+                        is AttentionInput.Outcome.Refused -> { unconfirmed = false; error = outcome.reason }
+                        is AttentionInput.Outcome.Unconfirmed -> { unconfirmed = true; error = "Not confirmed: retry is safe (${outcome.reason})" }
                     }
                 },
             )
@@ -168,11 +170,12 @@ fun DecisionSheet(store: DeskStore, record: AttentionRecord, onDismiss: () -> Un
                 val canSend = (choice != null || note.isNotBlank()) && !busy && blocker == null && AttentionInput.sendable(selected)
                 Button(
                     onClick = {
-                        run({ store.act(record) { r -> answer(r, note.ifBlank { selected?.label ?: "" }, choice, AttentionInput.value(selected, draft), commandID) } }) { it.answer != null }
+                        val body = AttentionInput.answerBody(record, choice, note, draft, commandID)
+                        run({ store.act(record) { r -> commandRaw(r, body) } }) { it.answer != null }
                     },
                     enabled = canSend, modifier = Modifier.fillMaxWidth().testTag("send-answer"),
                     colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Ink.Black),
-                ) { Text(if (busy) "Sending…" else "Send to agent") }
+                ) { Text(if (busy) "Sending…" else if (unconfirmed) "Retry (safe)" else "Send to agent") }
                 blocker?.let { Label(it, color = Ink.Amber, modifier = Modifier.padding(top = 6.dp).testTag("send-blocker")) }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     if (!writing) TextButton(onClick = { writing = true }) { Text("Add a note", color = Ink.Muted) } else Spacer(Modifier.width(1.dp))

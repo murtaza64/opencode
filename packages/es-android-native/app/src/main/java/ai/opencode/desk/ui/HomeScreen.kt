@@ -198,8 +198,11 @@ private fun Pulse(store: DeskStore, nav: Nav) {
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Ink.Raised) {
                     DropdownMenuItem(text = { Text("Refresh now") }, onClick = { menu = false; scope.launch { store.refresh() } })
                     DropdownMenuItem(text = { Text(store.gateway.origin, style = MaterialTheme.typography.labelMedium) }, onClick = { menu = false }, enabled = false)
+                    store.gateway.savedOrigins.filter { it != ai.opencode.desk.DeskPointers.normalize(store.gateway.origin) }.forEach { other ->
+                        DropdownMenuItem(text = { Text("Switch to $other", style = MaterialTheme.typography.bodyMedium) }, onClick = { menu = false; store.switchOrigin(other) }, modifier = Modifier.testTag("switch-origin"))
+                    }
                     if (store.link == Link.Access) DropdownMenuItem(text = { Text("This server is behind Cloudflare Access. Forget the pairing to enter a service token.", style = MaterialTheme.typography.bodyMedium) }, onClick = { menu = false }, enabled = false)
-                    DropdownMenuItem(text = { Text("Forget pairing", color = Ink.Red) }, onClick = { menu = false; store.unpair() }, modifier = Modifier.testTag("unpair"))
+                    DropdownMenuItem(text = { Text("Forget this host", color = Ink.Red) }, onClick = { menu = false; store.unpair() }, modifier = Modifier.testTag("unpair"))
                 }
             }
         }

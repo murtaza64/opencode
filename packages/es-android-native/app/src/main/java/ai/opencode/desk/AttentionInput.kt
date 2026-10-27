@@ -1,6 +1,9 @@
 package ai.opencode.desk
 
 import ai.opencode.desk.model.AttentionOption
+import ai.opencode.desk.model.AttentionRecord
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import ai.opencode.desk.model.OptionInput
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -69,6 +72,35 @@ object AttentionInput {
             is JsonPrimitive -> value.contentOrNull?.let { labels[it] ?: it }
             else -> value.toString()
         }
+    }
+
+    // The answer command body (es-attention.md): text, optional choice_id, input_value only
+    // when the selected option declares input and a value was supplied. The same draft and
+    // commandID always produce the same body, which is what makes a retry after a lost
+    // response safe (the ledger returns the original result for an identical command).
+    fun answerBody(record: AttentionRecord, choice: String?, note: String, draft: Draft, commandID: String): JsonObject {
+        val option = record.options.firstOrNull { it.id == choice }
+        return buildJsonObject {
+            put("command_id", commandID)
+            put("expected_revision", record.revision)
+            put("action", "answer")
+            put("text", note.ifBlank { option?.label ?: "" })
+            if (choice != null) put("choice_id", choice)
+            value(option, draft)?.let { put("input_value", it) }
+        }
+    }
+
+    // How a failed send reads to the human. 4xx is a definite refusal (draft kept, same
+    // command id); anything else (timeout, reset, 5xx, lost response) is "not confirmed":
+    // the ledger may have committed it, and the identical retry is safe either way.
+    sealed interface Outcome {
+        data class Refused(val reason: String) : Outcome
+        data class Unconfirmed(val reason: String) : Outcome
+    }
+
+    fun outcome(error: Throwable): Outcome = when {
+        error is ai.opencode.desk.net.GatewayError && error.code in 400..499 -> Outcome.Refused(ledgerError(error.body, error.message ?: "HTTP ${error.code}"))
+        else -> Outcome.Unconfirmed(error.message?.take(120) ?: error.javaClass.simpleName)
     }
 
     // The ledger's own words from a 4xx body `{error: "..."}`; falls back to the raw body.

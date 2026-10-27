@@ -1,6 +1,7 @@
 package ai.opencode.desk
 
 import ai.opencode.desk.model.AttentionOption
+import ai.opencode.desk.model.AttentionRecord
 import ai.opencode.desk.model.OptionChoice
 import ai.opencode.desk.model.OptionInput
 import kotlinx.serialization.json.JsonArray
@@ -86,5 +87,40 @@ class AttentionInputTest {
         assertEquals("plain text body", AttentionInput.ledgerError("plain text body", "HTTP 400"))
         assertEquals("HTTP 400", AttentionInput.ledgerError("", "HTTP 400"))
         assertEquals("HTTP 400", AttentionInput.ledgerError("""{"detail":"other"}""", "HTTP 400"))
+    }
+}
+
+class AnswerRetryTest {
+    private val required = AttentionOption("assign", "Assign reviewers", OptionInput("text", "Reviewers", required = true))
+    private val plain = AttentionOption("go", "Go ahead")
+    private val record = AttentionRecord(id = "rec-1", editspace = "opencode", revision = 4, options = listOf(required, plain))
+
+    @Test
+    fun payload_carries_input_value_for_required_text_and_omits_it_otherwise() {
+        val with = AttentionInput.answerBody(record, "assign", "", AttentionInput.Draft(text = "alice, bob"), "cmd-1")
+        assertEquals("\"alice, bob\"", with["input_value"].toString())
+        assertEquals("\"Assign reviewers\"", with["text"].toString())
+        assertEquals("\"cmd-1\"", with["command_id"].toString())
+        assertEquals("4", with["expected_revision"].toString())
+        val without = AttentionInput.answerBody(record, "go", "note", AttentionInput.Draft(text = "ignored"), "cmd-2")
+        assertNull(without["input_value"])
+        assertEquals("\"note\"", without["text"].toString())
+    }
+
+    @Test
+    fun retry_builds_a_byte_identical_payload_with_the_same_command_id() {
+        val draft = AttentionInput.Draft(text = "alice")
+        val first = AttentionInput.answerBody(record, "assign", "", draft, "cmd-7").toString()
+        val retry = AttentionInput.answerBody(record, "assign", "", draft, "cmd-7").toString()
+        assertEquals(first, retry)
+    }
+
+    @Test
+    fun a_4xx_is_a_refusal_and_everything_else_is_unconfirmed() {
+        val refused = AttentionInput.outcome(ai.opencode.desk.net.GatewayError(400, "HTTP 400", """{"error":"Reviewers is required for Assign reviewers"}"""))
+        assertEquals(AttentionInput.Outcome.Refused("Reviewers is required for Assign reviewers"), refused)
+        assertTrue(AttentionInput.outcome(java.net.SocketTimeoutException("timeout")) is AttentionInput.Outcome.Unconfirmed)
+        assertTrue(AttentionInput.outcome(ai.opencode.desk.net.GatewayError(502, "HTTP 502", "")) is AttentionInput.Outcome.Unconfirmed)
+        assertTrue(AttentionInput.outcome(java.io.IOException("reset")) is AttentionInput.Outcome.Unconfirmed)
     }
 }

@@ -1,6 +1,8 @@
 package ai.opencode.desk.net
 
 import android.content.Context
+import ai.opencode.desk.Credentials
+import ai.opencode.desk.KeyValueWithKeys
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.Dispatchers
@@ -26,8 +28,7 @@ val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues 
 // add X-Attention-CSRF, and the es_remote / es_attention_operator cookies ride along.
 class Gateway(context: Context) {
     private val prefs = context.getSharedPreferences("gateway", Context.MODE_PRIVATE)
-    private val jar = CookieStore(prefs)
-    // Cloudflare Access service token: app-private, encrypted at rest with a Keystore master
+    // Cloudflare Access service tokens: app-private, encrypted at rest with a Keystore master
     // key. Read on demand; never logged or surfaced after save.
     private val secrets = EncryptedSharedPreferences.create(
         context, "gateway-secrets",
@@ -35,6 +36,14 @@ class Gateway(context: Context) {
         EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
     )
+    private fun kv(p: android.content.SharedPreferences) = object : KeyValueWithKeys {
+        override fun get(key: String) = p.getString(key, null)
+        override fun put(key: String, value: String?) { p.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply() }
+        override fun keys() = p.all.keys.toList()
+    }
+    // Every credential is scoped to the exact origin it was issued for.
+    val credentials = Credentials(kv(prefs), kv(secrets))
+    private val jar = CookieStore(credentials) { origin }
     val client: OkHttpClient = OkHttpClient.Builder()
         .cookieJar(jar)
         .addInterceptor(Access.TokenInterceptor({ origin.toHttpUrlOrNull() }, { accessToken }))
@@ -43,32 +52,29 @@ class Gateway(context: Context) {
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
+    init {
+        // Pre-0.1.13 layouts keyed cookies by bare host and kept one global token; attach them
+        // to the current origin once so the existing pairing survives the upgrade.
+        if (!prefs.getBoolean("credentials.v2", false)) {
+            origin.toHttpUrlOrNull()?.host?.let { credentials.migrate(origin, it) }
+            prefs.edit().putBoolean("credentials.v2", true).apply()
+        }
+    }
+
     var origin: String
         get() = prefs.getString("origin", "http://127.0.0.1:47120") ?: "http://127.0.0.1:47120"
         set(value) { prefs.edit().putString("origin", value.trimEnd('/')).apply() }
 
-    val paired: Boolean get() = jar.has(origin, "es_remote")
+    val paired: Boolean get() = credentials.paired(origin)
+    val savedOrigins: List<String> get() = credentials.saved()
 
-    val accessToken: AccessToken?
-        get() {
-            val id = secrets.getString("access.id", null) ?: return null
-            val secret = secrets.getString("access.secret", null) ?: return null
-            return AccessToken(id, secret)
-        }
-    val hasAccessToken: Boolean get() = secrets.contains("access.id")
+    val accessToken: AccessToken? get() = credentials.token(origin)
+    val hasAccessToken: Boolean get() = accessToken != null
 
-    fun saveAccessToken(token: AccessToken?) {
-        val editor = secrets.edit()
-        if (token == null) editor.remove("access.id").remove("access.secret")
-        else editor.putString("access.id", token.id).putString("access.secret", token.secret)
-        editor.apply()
-    }
+    fun saveAccessToken(token: AccessToken?) = credentials.saveToken(origin, token)
 
-    // Forgetting the pairing also drops the Access token: both are credentials for this host.
-    fun forget() {
-        jar.clear()
-        saveAccessToken(null)
-    }
+    // Forgetting the current origin leaves every other saved origin paired.
+    fun forget() = credentials.forget(origin)
 
     private fun url(path: String, query: Map<String, String?> = emptyMap()): HttpUrl {
         val base = origin.toHttpUrlOrNull() ?: throw IOException("Bad gateway URL")
@@ -88,7 +94,7 @@ class Gateway(context: Context) {
         client.newCall(Request.Builder().url(url("/__es/pair")).post(body).build()).execute().use { response ->
             Access.check(response)
             // 303 + Set-Cookie is success; the jar captured the cookie.
-            response.code == 303 && paired
+            (response.code == 303 && paired).also { if (it) credentials.touch(origin) }
         }
     }
 

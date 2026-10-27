@@ -155,7 +155,9 @@ try {
   await screenshot("14-chat-parts-rtl")
   await relaunch()
   await waitFor(byId("steer-text"), "agent screen after reset")
+  // After a relaunch the IME may not attach on the first tap; focus, verify the typed text landed, then send.
   await type("steer-text", "Prefer the tool boundary, keep the fixture green.")
+  if (!(await nodes()).some((node) => node.text?.includes("Prefer the tool boundary"))) await type("steer-text", "Prefer the tool boundary, keep the fixture green.")
   await tap(await waitFor(byId("steer-send"), "steer send"))
   const steer = await waitWrite((w) => w.path === "/session/ses_composer/input" && w.method === "POST", "steer input")
   if (steer.body.delivery !== "steer" || steer.query.directory !== fixture.sessions.ses_composer?.directory && !steer.query.directory) throw new Error(`Unexpected steer ${JSON.stringify(steer)}`)

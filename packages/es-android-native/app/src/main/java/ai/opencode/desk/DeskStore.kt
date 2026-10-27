@@ -194,6 +194,19 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    // Switch to another saved (already paired) origin without a code.
+    fun switchOrigin(origin: String) {
+        loop?.cancel(); events?.cancel()
+        gateway.origin = origin
+        gateway.credentials.touch(origin)
+        states.clear(); open = emptyList(); agents = emptyList(); surfaces = emptyList()
+        desk = pointers.get(origin); deskBusy = false
+        pins = pinStore.list(origin)
+        outbox.clear(); drafts.clear()
+        restoreOutbox()
+        if (gateway.paired) connect() else link = Link.Unpaired
+    }
+
     fun unpair() {
         loop?.cancel(); events?.cancel()
         gateway.forget()
@@ -310,7 +323,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         runCatching { asOperator { api.action(record) } }.onSuccess { updated ->
             open = open.map { if (it.id == updated.id) updated else it }.filter { it.status == "open" }
             nudges.tryEmit(Unit)
-        }
+        }.onFailure { nudges.tryEmit(Unit) }
 
     // ---- agent detail ----
     fun load(agent: Agent) {
