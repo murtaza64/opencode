@@ -79,3 +79,10 @@
 :root .dot { border-radius: 50% !important; }
 :root .direct-primary .direct-button-hint { color: color-mix(in srgb, var(--crust) 70%, transparent); }
 :root .direct-primary:disabled .direct-button-hint { color: var(--subtext0); }
+
+/* Session hover/focus card: title, then compact label/value facts, then TODOs. */
+:root .session-peek { border-radius: 10px !important; border: 0; background: color-mix(in srgb, var(--surface0) 85%, var(--mantle)); box-shadow: 0 10px 30px -12px rgb(0 0 0 / .7), 0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent); }
+:root .session-peek[data-side] { border-inline: 0; }
+.peek-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; margin: 8px 0 6px; font-size: 11px; line-height: 16px; }
+.peek-facts dt { color: var(--overlay1); }
+.peek-facts dd { margin: 0; color: var(--subtext1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

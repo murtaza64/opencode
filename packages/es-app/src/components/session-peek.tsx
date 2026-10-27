@@ -10,7 +10,8 @@ import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from
 import { Portal } from "solid-js/web"
 import type { Todo } from "@opencode-ai/sdk/v2"
 import { ago, useDashboard, type SessionRow } from "../state"
-import { contextUsage, tokenCount } from "../context-usage"
+import { compactTokens, contextUsage } from "../context-usage"
+import { host } from "../host"
 import { cancelInsights, sessionInsights } from "../session-insights"
 
 const LIMIT = 5
@@ -32,7 +33,7 @@ type Anchor = { el: HTMLElement; row: SessionRow }
 export const peekAttrs = (s: SessionRow) => ({ "data-peek-id": s.id, "data-peek-dir": s.directory })
 
 export function SessionPeek(props: { container: () => HTMLElement | undefined }) {
-  const { activity, sessionRows, dotFor } = useDashboard()
+  const { activity, sessionRows, dotFor, laneOwners } = useDashboard()
   const todos = activity.todos
   const [anchor, setAnchor] = createSignal<Anchor | null>(null)
   const [tick, setTick] = createSignal(0)
@@ -148,6 +149,26 @@ export function SessionPeek(props: { container: () => HTMLElement | undefined })
   const insights = () => insightsState()?.()
   // One number from the cached insights read; no provider limit, no breakdown.
   const usage = createMemo(() => contextUsage(insights()?.value?.latest ?? null, undefined))
+  // Facts already in the dashboard store or the card's one cached insights read; missing ones are omitted.
+  const facts = createMemo(() => {
+    const r = row()
+    if (!r) return []
+    const parentID = activity.session(r.id)?.parentID
+    const parent = parentID ? activity.session(parentID)?.title || parentID : undefined
+    const lane = laneOwners().find((owner) => owner.owner === r.id || owner.owner.endsWith(`:${r.id}`))?.lane
+    const current = host()
+    const cost = insights()?.value?.cost
+    const u = usage()
+    return [
+      ["Project", r.project],
+      ["Lane", lane],
+      ["Host", current && (current.remote || current.hosts.length > 1) ? current.label : undefined],
+      ["Parent", parent],
+      ["Updated", r.updated ? ago(r.updated) : undefined],
+      ["Cost", cost != null && cost > 0 ? `$${cost.toFixed(2)} this session` : undefined],
+      ["Context", u ? (u.limit ? `${compactTokens(u.tokens)} of ${compactTokens(u.limit)} tokens` : `${compactTokens(u.tokens)} tokens, last turn`) : undefined],
+    ].filter((fact): fact is [string, string] => !!fact[1])
+  })
   // Watch the row's TODOs only while its card is open.
   createEffect(() => {
     const r = row()
@@ -207,8 +228,12 @@ export function SessionPeek(props: { container: () => HTMLElement | undefined })
           <div class="peek-title">
             <span class={`dot ${dotFor(r())}`} />
             <span class="peek-title-text">{r().title || r().id}</span>
-            <Show when={usage()}>{(u) => <span class="peek-tokens mono" title="Context of the latest completed turn">{tokenCount(u().tokens)}</span>}</Show>
           </div>
+          <Show when={facts().length}>
+            <dl class="peek-facts">
+              <For each={facts()}>{([label, value]) => <><dt>{label}</dt><dd><bdi dir="auto">{value}</bdi></dd></>}</For>
+            </dl>
+          </Show>
           <Show when={entry()?.state !== "loading" || entry()?.todos.length} fallback={<div class="dim peek-todo-state">Checking TODOs…</div>}>
             <Show when={entry() && !(entry()!.state === "error" && !entry()!.todos.length)} fallback={<div class="dim peek-todo-state">TODOs unavailable</div>}>
               <Show when={list().shown.length || list().done} fallback={<div class="dim peek-todo-state">No TODO list</div>}>

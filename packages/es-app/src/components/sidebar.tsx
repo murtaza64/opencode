@@ -213,12 +213,12 @@ export default function Sidebar() {
       href={sessionHref(s.id, s.directory)}
       activeClass="active"
       class="nav-item archived"
-      title={`${s.title} (${dotText(s, dot())})${allProjects() ? ` · ${s.directory}` : ""}`}
       {...peekAttrs(s)}
     >
       <StatusDot state={dot()} label={dotText(s, dot())} />
       <span class="nav-title">{s.title || s.id}</span>
-      <Show when={allProjects()}><span class="session-project">{s.project}</span></Show>
+      {/* All scope: the project lives in the hover/focus card; screen readers still hear it here. */}
+      <Show when={allProjects() && s.project}><span class="sr-only">, {s.project}</span></Show>
     </A>
   ) : (
     <div class="session-entry" {...peekAttrs(s)}>
@@ -227,11 +227,10 @@ export default function Sidebar() {
         href={sessionHref(s.id, s.directory)}
         activeClass="active"
         class="nav-item"
-        title={`${s.title} (${dotText(s, dot())})${allProjects() ? ` · ${s.directory}` : ""}`}
       >
         <StatusDot state={dot()} label={dotText(s, dot())} />
         <span class="nav-title">{s.title || s.id}</span>
-        <Show when={allProjects()}><span class="session-project">{s.project}</span></Show>
+        <Show when={allProjects() && s.project}><span class="sr-only">, {s.project}</span></Show>
       </A>
       <button type="button" class="pin-action" classList={{ pinned: isPinned(s) }}
         aria-label={`${isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}

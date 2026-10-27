@@ -72,13 +72,15 @@ try {
   // hover expanded row: anchored off the row's end edge; TODOs + one number
   await rowA.hover()
   await expect(card).toHaveCount(1)
-  await expect(card.locator(".peek-tokens")).toHaveText("473k tokens")
+  const fact = (label) => card.locator(".peek-facts dt", { hasText: label }).locator("xpath=following-sibling::dd[1]")
+  await expect(fact("Context")).toHaveText("473k tokens, last turn")
+  await expect(fact("Cost")).toHaveText("$4.20 this session")
   await expect(card.locator(".peek-todos li").first()).toContainText("Wire the peek")
   await expect(card.locator(".peek-todos li").first()).toHaveAttribute("data-status", "in_progress")
   await expect(card.locator(".peek-todos li").nth(1)).toContainText("Verify in RTL مرحبا")
   await expect(card.locator(".peek-todo-done")).toHaveText("✓1 done")
   await expect(card.locator(".peek-todo-basis")).toContainText("list read on open")
-  await expect(card).not.toContainText(/donut|composition|cost|cache read/)
+  await expect(card).not.toContainText(/donut|composition|cache read/)
   await expect(rowA.locator("a")).toHaveAttribute("aria-describedby", "session-peek")
   const rect = await rowA.boundingBox()
   const cardRect = await card.boundingBox()
@@ -110,7 +112,7 @@ try {
   await expect(card).toHaveCount(0)
   await rowB.hover()
   await expect(card.locator(".peek-todo-state")).toHaveText("No TODO list")
-  await expect(card.locator(".peek-tokens")).toHaveCount(0)
+  await expect(card.locator(".peek-facts dt", { hasText: /Context|Cost/ })).toHaveCount(0)
   expect(messageCalls("ses_b")).toEqual([])
   await page.mouse.move(700, 600)
   await expect(card).toHaveCount(0)
@@ -149,7 +151,8 @@ try {
   const mini = page.locator(".mini-session[data-peek-id='ses_a']")
   await expect(mini).toHaveCount(1)
   await mini.hover()
-  await expect(card.locator(".peek-tokens")).toHaveText("473k tokens")
+  await expect(fact("Context")).toHaveText("473k tokens, last turn")
+  await expect(fact("Cost")).toHaveText("$4.20 this session")
   const miniRect = await mini.boundingBox()
   expect((await card.boundingBox()).x).toBeGreaterThanOrEqual(miniRect.x + miniRect.width)
   await page.mouse.move(700, 600)
@@ -174,7 +177,7 @@ try {
   await page.reload()
   await expect(page.locator(".session-info [data-section='context']")).toContainText("1 completed")
   await rowB.hover()
-  await expect(card.locator(".peek-tokens")).toHaveText("1.1k tokens")
+  await expect(fact("Context")).toHaveText("1.1k tokens, last turn")
   const tail = messageCalls("ses_b")
   expect(tail.length).toBe(1)
   expect(tail[0].limit).toBe("6")
@@ -185,11 +188,36 @@ try {
   expect(insightCalls().length).toBe(1)
   await page.mouse.move(700, 600)
 
+  // All scope: rows carry no project subtitle; the card names the project; hovering adds no requests.
+  await page.locator(".es-switcher").selectOption("__all__")
+  await expect(rowA.locator(".session-project")).toHaveCount(0)
+  await expect(rowA.locator(".sr-only")).toHaveCount(1)
+  const callsBefore = fixture.calls.length
+  await rowA.hover()
+  await expect(card.locator(".peek-facts dt", { hasText: "Project" })).toHaveCount(1)
+  await page.mouse.move(700, 600)
+  await rowA.locator("a").focus()
+  await expect(card.locator(".peek-facts")).toBeVisible()
+  await page.keyboard.press("Escape")
+  expect(fixture.calls.slice(callsBefore).filter((c) => !/\/event|\/session\/status|\/api\/(state|events)/.test(c.path)).map((c) => c.path)).toEqual([])
+  if (process.env.PEEK_SHOTS) {
+    for (const [name, row] of [["all-1440", rowA], ["all-1440-sparse", rowB]]) {
+      await row.hover(); await expect(card).toHaveCount(1); await page.waitForTimeout(300)
+      await page.screenshot({ path: `${process.env.PEEK_SHOTS}/${name}.png`, clip: { x: 0, y: 180, width: 560, height: 260 } })
+      await page.mouse.move(700, 600); await expect(card).toHaveCount(0)
+    }
+  }
+
   // 390px RTL: the panel's single number fits without horizontal scroll
   await page.setViewportSize({ width: 390, height: 844 })
   await page.evaluate(() => { document.documentElement.dir = "rtl" })
   await expect(page.locator(".session-info .ctx-exact")).toContainText("tokens")
   expect(await page.locator(".session-info").evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+  if (process.env.PEEK_SHOTS) {
+    await page.locator(".session-entry[data-peek-id='ses_a'] a").first().focus()
+    await page.waitForTimeout(300)
+    await page.screenshot({ path: `${process.env.PEEK_SHOTS}/all-390-rtl.png` })
+  }
    expect(fixture.calls.filter(call => !["GET", "HEAD", "OPTIONS"].includes(call.method))).toEqual([])
    console.log(`PASS session peek ${app ? "native" : "browser"}: persisted TODOs + one token number, stream update without re-read, aria-describedby, hover/focus/Escape, gap, cache, unknowns, pin stability, compact, RTL/mobile, degraded tail, zero mutations`)
 } finally {
