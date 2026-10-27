@@ -92,3 +92,11 @@
     display: none;
   }
 }
+.appearance-toggle { -webkit-app-region: no-drag; flex: none; margin-inline-start: auto; display: grid; place-items: center; inline-size: 28px; block-size: 28px; padding: 0; background: transparent; border-radius: 6px; }
+.appearance-toggle:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.appearance-swatch { inline-size: 14px; block-size: 14px; border-radius: 50%; background: conic-gradient(var(--accent), var(--pink), var(--green), var(--accent)); box-shadow: 0 0 0 1.5px var(--surface1); opacity: .55; }
+.appearance-toggle[aria-pressed=true] .appearance-swatch { opacity: 1; box-shadow: 0 0 0 1.5px var(--text); }
+/* Host tabs (native, es-desktop tabs.ts) end where this safe area starts; a 1px rule separates
+ * which host from the app's own navigation. Zero-width unless the desktop sets --host-tabs-end.
+ * Physical left: the host segment is window chrome and stays left in RTL too. */
+.native-header-safe::before { content: ""; position: absolute; left: 0; inset-block: 12px; inline-size: clamp(0px, calc(var(--host-tabs-end, 0px) * 100), 1px); background: var(--surface1); }

@@ -1,6 +1,7 @@
 import { createSignal, onCleanup, onMount, Show, type ParentProps } from "solid-js"
 import { Portal } from "solid-js/web"
 import "./native-header.css"
+import { current, enabled, setEnabled, themeVars } from "../appearance"
 
 export const nativeHeader =
   typeof navigator !== "undefined" &&
@@ -23,6 +24,13 @@ export const NativeHeader = (props: ParentProps) => {
         <div class="native-header-safe">
           <div class="native-header-project">{props.children}</div>
           <div class="native-header-session" ref={setHeaderTarget} />
+          {/* Offered only when this laptop has a usable wallpaper palette. */}
+          <Show when={current() && themeVars(current()!.palette)}>
+            <button class="appearance-toggle" aria-pressed={enabled()} title={enabled() ? "Use the default colours" : "Use colours from your wallpaper"}
+              aria-label="Wallpaper colours" onClick={() => setEnabled(!enabled())}>
+              <span class="appearance-swatch" aria-hidden="true" />
+            </button>
+          </Show>
         </div>
       </div>
     </Portal>

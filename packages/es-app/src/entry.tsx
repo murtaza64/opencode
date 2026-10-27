@@ -1,4 +1,5 @@
 import "./index.css"
+import "./appearance.css"
 import { render } from "solid-js/web"
 import { onCleanup, onMount, Show, type ParentProps } from "solid-js"
 import { MetaProvider } from "@solidjs/meta"
@@ -23,10 +24,12 @@ import { SessionRefs, wrapSessionRefs } from "./session-mention-dom"
 import { installSidebarKeys, leftOpen, startDrag } from "./ui"
 import { installAppLinks, installInkLinks } from "./link-url"
 import { modeOf, trackModes } from "./components/mode-switch"
+import { installAppearance } from "./appearance"
 
 function Providers(props: ParentProps) {
   onMount(() => onCleanup(installSidebarKeys()))
   onMount(() => onCleanup(installInkLinks()))
+  onMount(() => onCleanup(installAppearance()))
   const navigate = useNavigate()
   onMount(() => onCleanup(installAppLinks(navigate)))
   const location = useLocation()

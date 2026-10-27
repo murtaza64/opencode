@@ -1,0 +1,81 @@
+/* Visual pass (dotfiles#240): depth from tone, not boxes. Surfaces step by lightness and soft
+ * shadow; separators only where content would otherwise run together. Applies in both themes;
+ * [data-appearance=wallpaper] adds the laptop's colours (appearance.ts) and one backdrop. */
+:root {
+  --accent: var(--blue);
+  --radius-control: 6px;
+  --radius-bubble: 12px;
+  --shadow-raised: 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent) inset, 0 6px 18px -10px rgb(0 0 0 / 0.6);
+  --hover: color-mix(in srgb, var(--text) 6%, transparent);
+  --selected: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* Sidebar: a quieter rail; selection is a tinted fill with an accent edge, not a black slab. */
+:root .sidebar { background: var(--mantle); border-inline-end: 0; box-shadow: inset calc(-1px * var(--inline-sign, 1)) 0 0 color-mix(in srgb, var(--text) 5%, transparent); }
+:root .nav-item { border-radius: var(--radius-control) !important; margin-inline: 6px; padding-inline: 10px; }
+:root .nav-item:hover { background: var(--hover); }
+:root .nav-item.active { background: var(--selected); box-shadow: none; color: var(--text); }
+:root .nav-item.active .nav-title { font-weight: 600; }
+:root .mode-tab { border-block-end-color: transparent; }
+:root .mode-tab:hover { background: var(--hover); }
+:root .mode-tab[aria-current=page] { border-block-end-color: var(--accent); }
+
+/* Transcript: user turns read as your own messages; agent prose sits directly on the page. */
+:root .transcript :is([data-component="user-message-text"], [data-slot="user-message-text"]) {
+  background: color-mix(in srgb, var(--accent) 14%, var(--base));
+  border: 0;
+  border-radius: var(--radius-bubble) var(--radius-bubble) 4px var(--radius-bubble) !important;
+  box-shadow: var(--shadow-raised);
+}
+:root .pending-bubble { border-radius: var(--radius-bubble) var(--radius-bubble) 4px var(--radius-bubble) !important; }
+
+/* Composer: one raised field instead of a bordered box inside a bordered strip. */
+:root .prompt-box { border-top: 0; background: transparent; }
+:root .direct-composer textarea, :root .prompt-box textarea {
+  background: color-mix(in srgb, var(--surface0) 70%, var(--base));
+  border: 1px solid transparent;
+  border-radius: var(--radius-control) !important;
+  box-shadow: var(--shadow-raised);
+}
+:root .direct-composer textarea:focus:not(.vim-insert), :root .prompt-box textarea:focus:not(.vim-insert) { border-color: color-mix(in srgb, var(--accent) 70%, transparent); outline: 0; }
+:root .direct-bar { border-block-start: 0; }
+:root .direct-primary { border-radius: var(--radius-control) !important; background: var(--accent); color: var(--crust); border-color: var(--accent); font-weight: 600; }
+:root .direct-primary:disabled { background: transparent; }
+:root .direct-more { border-start-end-radius: var(--radius-control) !important; border-end-end-radius: var(--radius-control) !important; }
+:root .direct-split:has(.direct-more:not(.idle)) .direct-primary { border-start-end-radius: 0 !important; border-end-end-radius: 0 !important; }
+
+/* Front desk queue: rows as soft tiles; the selected item glows with the accent. */
+:root .desk-item { border-block-end: 0; border-radius: var(--radius-control) !important; margin-block-end: 2px; }
+:root .desk-item:hover { background: var(--hover); }
+:root .desk-item[aria-pressed=true] { background: var(--selected); border-inline-start-color: var(--accent); }
+
+/* Wallpaper backdrop: one fixed, pre-blurred image under the transcript column, dimmed with a
+ * scrim so text contrast holds. Painted once; no backdrop-filter on content. */
+:root[data-appearance=wallpaper] .session-main { position: relative; isolation: isolate; }
+:root[data-appearance=wallpaper] .session-main::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(color-mix(in srgb, var(--base) 62%, transparent), color-mix(in srgb, var(--base) 84%, transparent)),
+    var(--wallpaper, none) center / cover no-repeat;
+  pointer-events: none;
+}
+:root[data-appearance=wallpaper] .session-page,
+:root[data-appearance=wallpaper] .session-main .prompt-box { background: transparent; }
+:root[data-appearance=wallpaper] .direct-composer textarea { background: color-mix(in srgb, var(--mantle) 78%, transparent); }
+:root[data-appearance=wallpaper] .transcript pre,
+:root[data-appearance=wallpaper] .transcript [data-component="diff"],
+:root[data-appearance=wallpaper] .transcript [data-component="tool-part-wrapper"] { background: color-mix(in srgb, var(--mantle) 88%, transparent); }
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-appearance=wallpaper] .session-main::before { background: var(--base); }
+}
+
+/* Inputs, chips and secondary buttons share the control radius; panels and rows stay square
+ * where they meet the window edge. */
+:root :is(input, select, .desk-button, .home-option-card, .attachment-chip, .direct-session-actions button, .direct-model button) { border-radius: var(--radius-control) !important; }
+:root .dot { border-radius: 50% !important; }
+:root .direct-primary .direct-button-hint { color: color-mix(in srgb, var(--crust) 70%, transparent); }
+:root .direct-primary:disabled .direct-button-hint { color: var(--subtext0); }
