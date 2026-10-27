@@ -2,12 +2,14 @@
  * sidebar, with the agent map at /agents as its default page and transcripts under it).
  * Each mode remembers where the reader last was, so switching back returns to the same
  * selected item or session; clicking the current mode's tab returns to that mode's home. */
-import { createEffect, Show } from "solid-js"
+import { createEffect, createSignal, onCleanup, Show } from "solid-js"
 import { A, useLocation } from "@solidjs/router"
 import { Glyph } from "./icons"
 import { useDeskQueue } from "../desk-queue"
 import { BackendStatus } from "./backend-status"
 import { HostSwitch } from "./host-switch"
+import { useDashboard } from "../state"
+import { deskSessionID } from "../desk-session"
 
 export type Mode = "desk" | "agents"
 export const modeOf = (pathname: string): Mode => pathname === "/" ? "desk" : "agents"
@@ -24,7 +26,15 @@ export const trackModes = () => {
 export const ModeSwitch = (props: { compact?: boolean }) => {
   const location = useLocation()
   const queue = useDeskQueue()
+  const { activity } = useDashboard()
   const current = () => modeOf(location.pathname)
+  // The desk chat's own session status from the shared status stream; unknown is not idle, so it shows nothing.
+  const [deskID, setDeskID] = createSignal(deskSessionID())
+  createEffect(() => { location.pathname; setDeskID(deskSessionID()) })
+  const storage = () => setDeskID(deskSessionID())
+  addEventListener("storage", storage)
+  onCleanup(() => removeEventListener("storage", storage))
+  const deskBusy = () => { const id = deskID(); const status = id ? activity.status(id) : undefined; return status === "busy" || status === "retry" }
   const href = (mode: Mode) => {
     location.pathname
     return current() === mode ? HOME[mode] : sessionStorage.getItem(KEY[mode]) ?? HOME[mode]
@@ -39,7 +49,8 @@ export const ModeSwitch = (props: { compact?: boolean }) => {
     <A href={href("desk")} class="mode-tab" aria-current={current() === "desk" ? "page" : undefined} title="Front desk"
       aria-label={waiting() ? `Front desk, ${label()}` : props.compact ? "Front desk" : undefined}>
       {/* The count hangs off the label's end so the label stays centred when it appears. */}
-      <span class="mode-label"><Show when={props.compact} fallback="Front desk"><Glyph name="home" /></Show>
+      <span class="mode-label"><Show when={deskBusy()}><span class="mode-busy dot busy" role="status" aria-label="Front desk is working" title="Front desk is working" /></Show>
+        <Show when={props.compact} fallback="Front desk"><Glyph name="home" /></Show>
         <Show when={waiting()}><span class="mode-count" aria-hidden="true">{waiting() > 99 ? "99+" : waiting()}</span></Show></span>
     </A>
     <A href={href("agents")} class="mode-tab" aria-current={current() === "agents" ? "page" : undefined} title="Agents" aria-label={props.compact ? "Agents" : undefined}>

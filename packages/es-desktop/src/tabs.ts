@@ -82,7 +82,9 @@ export const createTabs = (
     if (previous?.width === width) return
     // The in-app host select is redundant under native host tabs.
     const key = await contents
-      .insertCSS(`:root{--host-tabs-end:${width}px}.native-header-safe{left:max(84px,${width}px)!important}.host-switch{display:none!important}`)
+      // The window's drag regions come from this view even where the strip view is layered above it:
+      // only the header's own content area (after the strip) drags here, or clicks on host tabs become window drags.
+      .insertCSS(`:root{--host-tabs-end:${width}px}.native-header-safe{left:max(84px,${width}px)!important}.host-switch{display:none!important}.native-header{-webkit-app-region:no-drag!important}.native-header-safe{-webkit-app-region:drag}`)
       .catch(() => undefined)
     if (previous) void contents.removeInsertedCSS(previous.key).catch(() => {})
     if (key) css.set(tab.id, { key, width })

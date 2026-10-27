@@ -134,6 +134,17 @@ try {
     }
   }
   result.wide = await geometry()
+  // OS clicks on the strip must not land in a drag region of the app view under it.
+  result.dragUnderTabs = await settled(async () => {
+    const points = await bar.evaluate(() => [...document.querySelectorAll("a")].map((a) => { const r = a.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] }))
+    return local.evaluate((points) => points.map(([x, y]) => {
+      for (let el = document.elementFromPoint(x, y); el; el = el.parentElement) {
+        const region = getComputedStyle(el).getPropertyValue("-webkit-app-region") || getComputedStyle(el).webkitAppRegion
+        if (region === "drag" || region === "no-drag") return region
+      }
+      return "none"
+    }), points)
+  })
   await bar.screenshot({ path: path.join(artifacts, "strip.png") })
   await local.screenshot({ path: path.join(artifacts, "local-top.png"), clip: { x: 0, y: 0, width: 1440, height: 44 } })
   await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0].setContentSize(760, 900))
@@ -159,6 +170,7 @@ try {
   await local.screenshot({ path: path.join(artifacts, "local.png") })
   console.log(JSON.stringify(result, null, 2))
   expect(result.tabs).toEqual(["Local", "Mac Mini", "Personal"])
+  expect(result.dragUnderTabs.every((region) => region !== "drag")).toBe(true)
   expect(result.localHost).toMatchObject({ id: "local", remote: false })
   expect(result.miniHost).toMatchObject({ id: "mini", label: "Mac Mini", remote: true })
   expect(result.miniCapabilities).toBe(200)
