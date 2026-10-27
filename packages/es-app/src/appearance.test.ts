@@ -16,6 +16,8 @@ test("maps semantic pywal keys onto the app's surface and text tokens", () => {
   expect(vars["--mantle"]).toBe("#000001")
   expect(vars["--base"]).toBe("#10151f")
   expect(vars["--surface0"]).toBe("#242933")
+  expect(vars["--surface1"]).toBe(vars["--surface2"])
+  expect(vars["--crust"]).toBe(vars["--mantle"])
   expect(vars["--text"]).toBe("#c4dee5")
 })
 

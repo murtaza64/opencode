@@ -22,7 +22,8 @@ export { current }
 
 function read() {
   try {
-    return globalThis.localStorage?.getItem(KEY) === "wallpaper"
+    // On whenever this laptop has a usable palette, unless the person turned it off.
+    return globalThis.localStorage?.getItem(KEY) !== "default"
   } catch {
     return false
   }
@@ -46,35 +47,41 @@ export const themeVars = (palette: Record<string, string>) => {
   if (!bg || !fg) return undefined
   const dark = luminance(bg) < 0.4
   if (!dark) return undefined // Light palettes keep the default theme until a light variant exists.
-  const base = pick("surface1") ?? mix(bg, fg, 0.06)
+  // Few neutral levels, as in manadj: page, panel, raised (fields, hover, selection base) and one line
+  // colour. The older token names map onto these so every surface draws from the same four.
+  const page = bg
+  const panel = pick("surface1") ?? mix(bg, fg, 0.05)
   const raised = pick("surface2") ?? mix(bg, fg, 0.12)
-  const text = contrast(fg, base) >= 7 ? fg : "#e6e9ef"
-  // Accents are boosted to stay readable on the darkest surface; pywal often yields muted mid-tones.
-  const accent = (value: string | undefined, fallback: string) => readable(value ?? fallback, base, 4.5)
+  const line = pick("surface3") ?? mix(bg, fg, 0.2)
+  const text = contrast(fg, panel) >= 7 ? fg : "#e6e9ef"
+  const muted = mix(bg, text, 0.72)
+  const faint = mix(bg, text, 0.5)
+  // Accents are boosted to stay readable on the panel; pywal often yields muted mid-tones.
+  const accent = (value: string | undefined, fallback: string) => readable(value ?? fallback, panel, 4.5)
   return {
-    "--crust": pick("subsurface0") ?? mix(bg, "#000000", 0.4),
-    "--mantle": bg,
-    "--base": base,
+    "--crust": page,
+    "--mantle": page,
+    "--base": panel,
     "--surface0": raised,
-    "--surface1": pick("surface3") ?? mix(bg, fg, 0.2),
-    "--surface2": pick("surface4") ?? mix(bg, fg, 0.28),
-    "--overlay0": pick("surface5") ?? mix(bg, fg, 0.4),
-    "--overlay1": mix(bg, text, 0.5),
-    "--subtext0": mix(bg, text, 0.68),
-    "--subtext1": mix(bg, text, 0.82),
+    "--surface1": line,
+    "--surface2": line,
+    "--overlay0": faint,
+    "--overlay1": faint,
+    "--subtext0": muted,
+    "--subtext1": muted,
     "--text": text,
-    "--red": accent(pick("bright_red", "red"), "#f38ba8"),
-    "--green": accent(pick("bright_green", "green"), "#a6e3a1"),
-    "--yellow": accent(pick("bright_yellow", "yellow"), "#f9e2af"),
-    "--blue": accent(pick("bright_blue", "blue"), "#89b4fa"),
-    "--sky": accent(pick("bright_cyan", "cyan"), "#89dceb"),
-    "--sapphire": accent(pick("cyan", "color2"), "#74c7ec"),
-    "--teal": accent(pick("bright_cyan", "color10"), "#94e2d5"),
-    "--mauve": accent(pick("bright_magenta", "magenta"), "#cba6f7"),
-    "--lavender": accent(pick("color15", "bright_blue"), "#b4befe"),
-    "--pink": accent(pick("color12", "bright_red"), "#f5c2e7"),
-    "--peach": accent(pick("color14", "color6"), "#fab387"),
-    "--accent": accent(pick("color2", "cyan", "blue"), "#89b4fa"),
+    "--red": accent(pick("bright_red", "red"), "#ff2d55"),
+    "--green": accent(pick("bright_green", "green"), "#00e676"),
+    "--yellow": accent(pick("bright_yellow", "yellow"), "#ffcc00"),
+    "--blue": accent(pick("bright_blue", "blue"), "#4a9eff"),
+    "--sky": accent(pick("bright_cyan", "cyan"), "#00e5ff"),
+    "--sapphire": accent(pick("cyan", "color2"), "#00e5ff"),
+    "--teal": accent(pick("bright_cyan", "color10"), "#00ffc4"),
+    "--mauve": accent(pick("bright_magenta", "magenta"), "#8f4dff"),
+    "--lavender": accent(pick("color15", "bright_blue"), "#4a9eff"),
+    "--pink": accent(pick("color12", "bright_red"), "#ff2d95"),
+    "--peach": accent(pick("color14", "color6"), "#ff9500"),
+    "--accent": accent(pick("color2", "cyan", "blue"), "#4a9eff"),
   }
 }
 
