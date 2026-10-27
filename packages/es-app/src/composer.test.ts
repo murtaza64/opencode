@@ -188,6 +188,30 @@ test("set-aside recovery checks pending state without clearing a new draft or ca
   expect(requests.filter((request) => request.method !== "GET")).toHaveLength(1)
 })
 
+test("a set-aside input reported promoted is dropped on refresh, keeping the newer draft and sending nothing", async () => {
+  let promoted = false
+  const { composer, requests } = harness((request) => {
+    if (request.method === "POST") throw new Error("lost acknowledgement")
+    if (request.url.pathname.endsWith("/input")) return Response.json({ items: [], next: null })
+    if (!promoted) return new Response("not found", { status: 404 })
+    return Response.json({ ...pending("request-1", "uncertain request", "steer"), state: "promoted", messageID: "msg_promoted", timePromoted: 2 })
+  })
+  await composer.loadCapabilities()
+  composer.observeBusy(true)
+  composer.selectMode("steer")
+  composer.setText("uncertain request")
+  await composer.submit(session)
+  composer.setText("new draft")
+  await composer.setAsideAdmission()
+  await composer.refreshInputs()
+  expect(composer.state.recoveries).toHaveLength(1)
+  promoted = true
+  await composer.refreshInputs()
+  expect(composer.state.recoveries).toHaveLength(0)
+  expect(composer.state.task.text).toBe("new draft")
+  expect(requests.filter((request) => request.method !== "GET")).toHaveLength(1)
+})
+
 test("set-aside recovery retries only explicitly with exact original payload after a not-found check", async () => {
   const { composer, requests } = harness((request) => {
     if (request.method === "PATCH" || request.url.pathname.endsWith(session.id)) return Response.json(selectedSession)

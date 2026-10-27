@@ -75,6 +75,23 @@ try {
   await expect(editor).toHaveValue("Newer unsent draft with caret")
   expect(posts()).toHaveLength(0)
   console.info("PASS set aside with a newer draft: bubble with image and Check/Retry before and after reload; draft kept; nothing sent")
+  // 3. The set-aside input was delivered after all (promoted while this page was away): once Core reports it
+  // promoted and the transcript shows it, the "Set aside · promoted" card goes; the newer draft stays.
+  const original = (await saved()).recoveries[0].admission.payload
+  const info = { id: "msg_setaside_promoted", sessionID: "ses_a", role: "user", agent: "build", model: { providerID: "fixture", modelID: "test" }, time: { created: Date.now() } }
+  fixture.messages.push({ info, parts: [{ id: "prt_setaside_promoted", sessionID: "ses_a", messageID: info.id, type: "text", text: original.text }] })
+  fixture.receipts.push({ requestID: id, sessionID: "ses_a", delivery: "steer", text: original.text, images: original.images.map((image) => ({ type: "file", mime: image.mime, url: `data:image/png;base64,${png}`, filename: image.filename })),
+    agent: "build", admittedSeq: 1, timeCreated: Date.now(), state: "promoted", messageID: info.id, timePromoted: Date.now() })
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(page.locator('[data-component="user-message"]').filter({ hasText: original.text })).toHaveCount(1)
+  await expect(recovery).toHaveCount(0)
+  await expect(page.locator(".outgoing-item")).toHaveCount(0)
+  await expect(editor).toHaveValue("Newer unsent draft with caret")
+  await expect.poll(async () => (await saved()).recoveries.length).toBe(0)
+  expect(posts()).toHaveLength(0)
+  expect(fixture.calls.filter((call) => call.method !== "GET" && call.path.startsWith("/session/ses_a/input"))).toEqual([])
+  console.info("PASS set-aside input promoted elsewhere: card removed once Core reports it promoted (GET only), message shown once, newer draft kept, nothing sent")
+
   expect(errors).toEqual([])
 } finally {
   await browser.close()
