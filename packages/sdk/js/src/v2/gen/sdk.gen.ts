@@ -4149,6 +4149,7 @@ export class Session2 extends HeyApiClient {
       limit?: number
       before?: string
       summaryPatches?: "true" | "false"
+      compact?: "true" | "false"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -4163,6 +4164,7 @@ export class Session2 extends HeyApiClient {
             { in: "query", key: "limit" },
             { in: "query", key: "before" },
             { in: "query", key: "summaryPatches" },
+            { in: "query", key: "compact" },
           ],
         },
       ],
