@@ -223,6 +223,10 @@ export type Session = {
     updated: number
     compacting?: number
     archived?: number
+    turn?: {
+      started?: number
+      ended?: number
+    }
   }
   permission?: PermissionRuleset
   revert?: {
@@ -2354,6 +2358,9 @@ export type ExperimentalCapabilities = {
     nudge?: true
   }
   noReplyRecordOnly?: true
+  session?: {
+    turnTime: true
+  }
 }
 
 export type UsageDaily = {
@@ -2584,6 +2591,10 @@ export type GlobalSession = {
     updated: number
     compacting?: number
     archived?: number
+    turn?: {
+      started?: number
+      ended?: number
+    }
   }
   permission?: PermissionRuleset
   revert?: {
@@ -3174,6 +3185,10 @@ export type UmbrellaSession = {
     updated: number
     compacting?: number
     archived?: number
+    turn?: {
+      started?: number
+      ended?: number
+    }
   }
   permission?: PermissionRuleset
   revert?: {

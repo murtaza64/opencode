@@ -167,6 +167,8 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/es\/api\/attention(?:\/session|\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/,
       // This host's Front desk model and one request's linked conversation (read-only).
       /^\/es\/api\/frontdesk\/(model|conversation)$/,
+      // One brief's saved rating (?job=) or every rating for export; read-only.
+      /^\/es\/api\/frontdesk\/brief-feedback$/,
       /^\/es\/api\/wingman(?:\/transcript)?$/,
       SELF_HANDOFF,
     ],
@@ -182,6 +184,8 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/es\/api\/handoffs\/self$/,
       /^\/es\/api\/frontdesk\/ignored-failures$/,
       /^\/es\/api\/frontdesk\/deliverables\/seen$/,
+      // The operator rates one prepared brief; the dashboard checks operator, CSRF and that it is a brief.
+      /^\/es\/api\/frontdesk\/brief-feedback$/,
       // One masked decision field's single submission; the dashboard checks handle, operator, origin and scope.
       /^\/es\/api\/secret-intake\/[\w-]+$/,
       /^\/es\/api\/attention\/(?:session|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(?:commands|delivery))$/,
