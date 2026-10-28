@@ -305,3 +305,46 @@
 :root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+6) .dot.busy::after { animation-delay: -1000ms; }
 :root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+7) .dot.busy::after { animation-delay: -1200ms; }
 :root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+8) .dot.busy::after { animation-delay: -1400ms; }
+
+/* Design system v1 (ux-review/design-system/TOKENS.md). Semantic aliases of the base variables that the default
+ * theme and wal-palette/1 (appearance.ts) both set, so every theme and a live theme switch flow through. Consumers
+ * use these names; they never define their own palette or type sizes. */
+:root {
+  --ds-page: var(--mantle);
+  --ds-surface: var(--base);
+  --ds-raised: var(--surface0);
+  --ds-fill: var(--chip-fill);
+  --ds-line: var(--surface1);
+  --ds-text: var(--text);
+  --ds-muted: var(--subtext0);
+  --ds-accent: var(--accent);
+  --ds-ok: var(--green);
+  --ds-warn: var(--yellow);
+  --ds-risk: var(--red);
+  --ds-attention: var(--peach);
+  --ds-pin: var(--mauve);
+  /* Three type roles: title (the one emphasis), body, meta. */
+  --ds-type-title: 600 13px/1.45 var(--font-sans);
+  --ds-type-body: 400 13px/1.5 var(--font-sans);
+  --ds-type-meta: 400 11px/1.45 var(--font-sans);
+  --ds-space-1: 2px;
+  --ds-space-2: 4px;
+  --ds-space-3: 8px;
+  --ds-space-4: 12px;
+  --ds-space-5: 20px;
+}
+/* Shared parts: grouping by space and one meta heading, never a box or a decorative rule. */
+.ds-section { display: grid; gap: var(--ds-space-3); margin-block: var(--ds-space-4) 0; }
+.ds-section-heading { font: var(--ds-type-meta); color: var(--ds-muted); margin: 0; }
+.ds-values { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--ds-space-2) var(--ds-space-4); margin: 0; align-items: baseline; }
+.ds-values > dt { font: var(--ds-type-meta); color: var(--ds-muted); }
+.ds-values > dd { margin: 0; font: var(--ds-type-body); color: var(--ds-text); min-inline-size: 0; overflow-wrap: anywhere; }
+.ds-values > dd :is(code, kbd, samp) { font: 400 12px/1.5 var(--font-mono); }
+.ds-status { display: flex; align-items: baseline; gap: var(--ds-space-2); font: var(--ds-type-body); color: var(--ds-text); }
+.ds-status[data-tone=ok] { color: var(--ds-ok); }
+.ds-status[data-tone=warn] { color: var(--ds-warn); }
+.ds-status[data-tone=risk] { color: var(--ds-risk); }
+.ds-status[data-tone=active] { color: var(--ds-accent); }
+.ds-status[data-tone=unknown] { color: var(--ds-muted); }
+.ds-links { display: flex; flex-wrap: wrap; gap: var(--ds-space-1) var(--ds-space-4); font: var(--ds-type-meta); }
+.ds-links a { color: var(--ds-accent); }
