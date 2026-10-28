@@ -14,6 +14,13 @@ export const TAIL = 80
 export const SNAPSHOT_TIMEOUT_MS = 30_000
 export const RESYNC_TAIL = 10
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
+const isStep = (part: Part) => part.type === "step-start" || part.type === "step-finish"
+/** Provider-turn boundaries: step-start opens a turn, step-finish carries its reported usage. Kept apart from
+ * rendered parts so no transcript row, grouping or thinking state sees them; only id, type and tokens are kept. */
+export type StepPart = { id: string; type: "step-start" | "step-finish"; tokens?: Extract<Part, { type: "step-finish" }>["tokens"] }
+const stepPart = (part: Part): StepPart =>
+  part.type === "step-finish" ? { id: part.id, type: part.type, tokens: part.tokens } : { id: part.id, type: part.type as "step-start" }
+const stepParts = (parts: readonly Part[]) => parts.filter(isStep).map(stepPart)
 // Keep diff statistics without retaining patch bodies unused by this transcript.
 const visibleMessage = (info: Message): Message => {
   if (info.role !== "user" || !info.summary || !info.summary.diffs.some((diff) => diff.patch !== undefined)) return info
@@ -56,6 +63,8 @@ export type LiveData = {
   session_diff: Record<string, any[]>
   message: Record<string, Message[]>
   part: Record<string, Part[]>
+  /** Step parts per message ID, in ID order; see StepPart. */
+  step: Record<string, StepPart[]>
   part_text_accum_delta: Record<string, string>
   todo: Todo[]
 }
@@ -80,6 +89,7 @@ export function createLiveSession(
     session_diff: {},
     message: {},
     part: {},
+    step: {},
     part_text_accum_delta: {},
     todo: [],
   })
@@ -218,6 +228,15 @@ export function createLiveSession(
             ]),
           ),
         )
+        setData(
+          "step",
+          reconcile(
+            Object.fromEntries([
+              ...retained.map((message) => [message.id, data.step[message.id] ?? []] as const),
+              ...messages.map((message) => [message.info.id, stepParts(message.parts)] as const),
+            ]),
+          ),
+        )
         setOlderCursor(cursor)
         if (todos) setData("todo", reconcile(todos))
         setData("part_text_accum_delta", reconcile({}))
@@ -299,9 +318,10 @@ export function createLiveSession(
         const byID = new Map(existing.map((message) => [message.id, message]))
         page.items.forEach((message) => byID.set(message.info.id, visibleMessage(message.info)))
         setData("message", sessionID, reconcile([...byID.values()].sort((a, b) => a.id.localeCompare(b.id))))
-        page.items.forEach((message) =>
-          setData("part", message.info.id, reconcile(message.parts.filter((part) => !SKIP_PARTS.has(part.type)))),
-        )
+        page.items.forEach((message) => {
+          setData("part", message.info.id, reconcile(message.parts.filter((part) => !SKIP_PARTS.has(part.type))))
+          setData("step", message.info.id, reconcile(stepParts(message.parts)))
+        })
         setOlderCursor(page.cursor)
       })
     } finally {
@@ -389,13 +409,22 @@ export function createLiveSession(
               if (i !== -1) messages.splice(i, 1)
             }
             delete draft.part[props.messageID]
+            delete draft.step[props.messageID]
           }),
         )
         break
       }
       case "message.part.updated": {
         const part: Part = props.part
-        if (part.sessionID !== sessionID || SKIP_PARTS.has(part.type) || !data.message[sessionID]?.some((message) => message.id === part.messageID)) break
+        if (part.sessionID !== sessionID || !data.message[sessionID]?.some((message) => message.id === part.messageID)) break
+        if (isStep(part)) {
+          setData(produce((draft) => {
+            draft.step[part.messageID] ??= []
+            insertSorted(draft.step[part.messageID]!, stepPart(part), (p) => p.id)
+          }))
+          break
+        }
+        if (SKIP_PARTS.has(part.type)) break
         setData(
           produce((draft) => {
             delete draft.part_text_accum_delta[part.id]
@@ -410,6 +439,9 @@ export function createLiveSession(
         setData(
           produce((draft) => {
             delete draft.part_text_accum_delta[props.partID]
+            const steps = draft.step[props.messageID]
+            const step = steps?.findIndex((p) => p.id === props.partID) ?? -1
+            if (step !== -1) steps!.splice(step, 1)
             const parts = draft.part[props.messageID]
             if (!parts) return
             const i = parts.findIndex((p) => p.id === props.partID)
