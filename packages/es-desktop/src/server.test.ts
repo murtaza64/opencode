@@ -200,6 +200,61 @@ test("API surface excludes direct shell, PTY, file, and config access", () => {
   expect(apiAllowed("POST", "/oc/session/ses_a/retry")).toBe(true)
   expect(apiAllowed("GET", "/oc/session/ses_a/retry")).toBe(false)
   expect(apiAllowed("POST", "/oc/experimental/session/failed")).toBe(false)
+  // A completed tool part's attachment: one exact read-only route, by index.
+  expect(apiAllowed("GET", "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0")).toBe(true)
+  expect(apiAllowed("GET", "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/12")).toBe(true)
+  for (const method of ["POST", "PUT", "PATCH", "DELETE"]) expect(apiAllowed(method, "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0")).toBe(false)
+  for (const pathname of [
+    "/oc/session/ses_a/message/msg_b/part/prt_c/attachment",
+    "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/x",
+    "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0/raw",
+    "/oc/session/ses_a/message/msg_b/part/../attachment/0",
+    "/oc/session/ses_a/message/msg_b/part/prt_c",
+    "/oc/session/ses_a/message/msg_b/part",
+  ]) expect(apiAllowed("GET", pathname)).toBe(false)
+})
+
+test("a tool attachment is proxied keyed, without browser credentials, keeping Core's type and cache headers", async () => {
+  const upstream = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: (request) => new Response("PNGBYTES", {
+      headers: {
+        "content-type": "image/png",
+        "cache-control": new URL(request.url).pathname.endsWith("/1") ? "public, max-age=31536000" : "private, max-age=3600",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": "sandbox",
+        "x-path": new URL(request.url).pathname,
+        "x-credential": String(request.headers.has("cookie") || request.headers.has("x-editspace-key")),
+      },
+    }),
+  })
+  cleanup.push(async () => upstream.stop(true))
+  const root = await mkdtemp(path.join(tmpdir(), "es-desktop-attachment-"))
+  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  await Bun.write(path.join(root, "index.html"), "<title>Fixture</title>")
+  const server = await serve({ root, opencode: upstream.url.origin, dashboard: upstream.url.origin })
+  cleanup.push(server.close)
+  const route = "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0"
+  expect((await fetch(`${server.origin}${route}`)).status).toBe(403)
+  const response = await fetch(`${server.origin}${route}`, { headers: { "x-editspace-key": server.key, cookie: "es_attention_operator=x" } })
+  expect(response.status).toBe(200)
+  expect(await response.text()).toBe("PNGBYTES")
+  expect(response.headers.get("x-path")).toBe("/session/ses_a/message/msg_b/part/prt_c/attachment/0")
+  expect(response.headers.get("x-credential")).toBe("false")
+  expect(response.headers.get("content-type")).toBe("image/png")
+  expect(response.headers.get("cache-control")).toBe("private, max-age=3600")
+  expect(response.headers.get("x-content-type-options")).toBe("nosniff")
+  // Opened directly it can never run as the app: an empty sandbox replaces whatever Core sent.
+  expect(response.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'")
+  expect((await fetch(`${server.origin}${route}`, { method: "POST", headers: { "x-editspace-key": server.key } })).status).toBe(403)
+  // Only private caching passes through; anything else is no-store.
+  const shared = await fetch(`${server.origin}${route.replace(/0$/, "1")}`, { headers: { "x-editspace-key": server.key } })
+  expect(shared.headers.get("cache-control")).toBe("no-store")
+  // Every other route keeps the app's own CSP and no-store.
+  const other = await fetch(`${server.origin}/oc/session/ses_a/message/msg_b`, { headers: { "x-editspace-key": server.key } })
+  expect(other.headers.get("cache-control")).toBe("no-store")
+  expect(other.headers.get("content-security-policy")).toContain("script-src 'self'")
 })
 
 test("rejects unauthenticated, cross-origin, and foreign Host requests", async () => {

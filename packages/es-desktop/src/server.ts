@@ -32,6 +32,19 @@ const types: Record<string, string> = {
 }
 
 // Do not forward browser credentials or hop-by-hop headers to attached services.
+// A tool part's attachment is data from an agent's tool, served on the app origin: opened directly it
+// must never run as the app, so it gets an empty sandbox whatever Core sent, keeps nosniff, and may
+// be cached only privately (Core's private max-age), never shared.
+const ATTACHMENT = /^\/oc\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/attachment\/\d{1,4}$/
+const attachmentHeaders = (headers: IncomingHttpHeaders) => {
+  const cache = headers["cache-control"]
+  return {
+    "content-security-policy": "sandbox; default-src 'none'",
+    "x-content-type-options": "nosniff",
+    "cache-control": typeof cache === "string" && /^private(?:,\s*max-age=\d{1,7})?$/.test(cache.trim()) ? cache.trim() : "no-store",
+  }
+}
+
 const proxyHeaders = (headers: IncomingHttpHeaders) =>
   Object.fromEntries(
     Object.entries(headers).filter(
@@ -230,6 +243,7 @@ export const serve = async (options: {
     const api = /^\/(oc|es)(\/|$)/.exec(url.pathname)
     if (api && !apiAllowed(req.method ?? "", url.pathname)) return finish(403, "API route not exposed")
     const attention = attentionRoute.test(url.pathname)
+    const attachment = api?.[1] === "oc" && ATTACHMENT.test(url.pathname)
     if (attention && req.method !== "GET" && !trusted(req.headers.origin))
       return finish(403, "Attention writes require the native origin")
     const target = api ? targets[api[1] as keyof typeof targets] : renderer
@@ -297,7 +311,7 @@ export const serve = async (options: {
           timing?.headers(response.statusCode)
           if (timing) response.on("data", (chunk: Buffer) => timing.data(chunk.length))
           const cookies = setCookie(response.headers["set-cookie"])
-          res.writeHead(response.statusCode ?? 502, { ...proxyHeaders(response.headers), ...(cookies ? { "set-cookie": cookies } : {}) })
+          res.writeHead(response.statusCode ?? 502, { ...proxyHeaders(response.headers), ...(cookies ? { "set-cookie": cookies } : {}), ...(attachment ? attachmentHeaders(response.headers) : {}) })
           response.on("error", () => res.destroy())
           response.pipe(res)
         },
