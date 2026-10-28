@@ -79,6 +79,7 @@ try {
   // A local draft written before switching must survive the round trip and stay invisible to the Mini.
   await local.evaluate(() => localStorage.setItem("es-app:host-tabs-check", "local draft"))
   result.tabs = await settled(() => bar.locator("a bdi").allTextContents())
+  result.initialTab = await settled(() => bar.locator('a[aria-current="page"] bdi').textContent())
   // One title bar: the strip ends where the app header's content begins, same row and height.
   result.strip = await settled(() => bar.evaluate(() => ({ width: innerWidth, height: innerHeight, tabs: [...document.querySelectorAll("a")].map((a) => ({ text: a.textContent, right: Math.round(a.getBoundingClientRect().right) })) })))
   await local.waitForFunction(() => document.querySelector(".native-header-safe"), null, { timeout: 15_000 })
@@ -97,7 +98,10 @@ try {
     }
   })()
 
-  await bar.getByRole("link", { name: "Mac Mini" }).click()
+  // Physical Work hosts open from the Hosts menu; the Work tab already shows their rows.
+  const openHost = (label) => app.evaluate(({ Menu }, label) => Menu.getApplicationMenu().items.find((item) => item.label === "Hosts").submenu.items.find((item) => item.label === label).click(), label)
+  result.hostsMenu = await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.find((item) => item.label === "Hosts").submenu.items.filter((item) => item.type !== "separator").map((item) => item.label))
+  await openHost("Mac Mini")
   const remote = await page((url) => url.startsWith("http://127.0.0.1:") && !url.startsWith(localOrigin))
   await remote.waitForLoadState("domcontentloaded")
   result.miniOrigin = new URL(remote.url()).origin
@@ -107,7 +111,8 @@ try {
   result.miniCapabilities = await remote.evaluate(() => fetch("/oc/experimental/capabilities").then((response) => response.status))
   result.miniEditspaces = await remote.evaluate(() => fetch("/es/api/editspaces").then((response) => response.json()).then((value) => value.editspaces.map((item) => item.name)))
   result.miniSeesLocalDraft = await remote.evaluate(() => localStorage.getItem("es-app:host-tabs-check"))
-  result.miniCurrentTab = await bar.locator('a[aria-current="page"]').textContent()
+  result.miniCurrentTab = await settled(() => bar.locator('a[aria-current="page"] bdi').textContent())
+  result.tabsWhileMini = await settled(() => bar.locator("a bdi").allTextContents())
   result.miniHeader = await remote.evaluate(() => Math.round(document.querySelector(".native-header-safe")?.getBoundingClientRect().left ?? -1))
   await new Promise((resolve) => setTimeout(resolve, 2000))
   await remote.screenshot({ path: path.join(artifacts, "mini.png") })
@@ -119,7 +124,7 @@ try {
   await personalPage.screenshot({ path: path.join(artifacts, "personal.png") })
   result.personalStrip = await bar.evaluate(() => innerWidth)
 
-  await bar.getByRole("link", { name: "Local" }).click()
+  await bar.getByRole("link", { name: "Work" }).click()
   const geometry = async () => {
     await new Promise((resolve) => setTimeout(resolve, 600))
     return {
@@ -158,18 +163,22 @@ try {
   result.zoomed = await geometry()
   await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById("resetzoom").click())
   // Idle budget while another host is shown: requests the hidden Local host makes in 65 s.
-  await bar.getByRole("link", { name: "Mac Mini" }).click()
+  await openHost("Mac Mini")
   const t0 = Date.now()
   await new Promise((resolve) => setTimeout(resolve, 65_000))
   const window = counted.filter((item) => item.at >= t0)
   result.idleLocalWhileHidden = { seconds: Math.round((Date.now() - t0) / 1000), requests: window.length, byPath: Object.entries(window.reduce((all, item) => ({ ...all, [`${item.method} ${item.path}`]: (all[`${item.method} ${item.path}`] ?? 0) + 1 }), {})).sort((a, b) => b[1] - a[1]).slice(0, 12) }
-  result.badgeLocalFromMini = await settled(() => bar.locator("a", { hasText: "Local" }).locator("b").evaluateAll((items) => items.map((item) => item.getAttribute("aria-label"))))
-  await bar.getByRole("link", { name: "Local" }).click()
+  result.badgeLocalFromMini = await settled(() => bar.locator("a", { hasText: "Work" }).locator("b").evaluateAll((items) => items.map((item) => item.getAttribute("aria-label"))))
+  await bar.getByRole("link", { name: "Work" }).click()
   result.localDraftAfterRoundTrip = await local.evaluate(() => localStorage.getItem("es-app:host-tabs-check"))
   result.localURLKept = local.url() === `${localOrigin}/`
   await local.screenshot({ path: path.join(artifacts, "local.png") })
   console.log(JSON.stringify(result, null, 2))
-  expect(result.tabs).toEqual(["Local", "Mac Mini", "Personal"])
+  expect(result.tabs).toEqual(["Work", "Personal"])
+  expect(result.hostsMenu).toEqual(["Work", "Mac Mini", "Personal", "Pair a Phone"])
+  expect(result.miniCurrentTab).toBe("Mac Mini")
+  expect(result.tabsWhileMini).toEqual(["Work", "Mac Mini", "Personal"])
+  expect(result.initialTab).toBe("Work")
   expect(result.dragUnderTabs.every((region) => region !== "drag")).toBe(true)
   expect(result.localHost).toMatchObject({ id: "local", remote: false })
   expect(result.miniHost).toMatchObject({ id: "mini", label: "Mac Mini", remote: true })

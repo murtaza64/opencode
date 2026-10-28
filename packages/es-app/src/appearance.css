@@ -305,3 +305,12 @@
 :root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+6) .dot.busy::after { animation-delay: -1000ms; }
 :root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+7) .dot.busy::after { animation-delay: -1200ms; }
 :root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+8) .dot.busy::after { animation-delay: -1400ms; }
+
+/* Unified Work: the profile name and its hosts as toggles above the agent list (all on by default). */
+.work-hosts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 6px 14px 4px; }
+.work-hosts-label { font-size: 11px; color: var(--subtext0); margin-inline-end: 2px; }
+.work-host { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; font: inherit; font-size: 12px; color: var(--subtext0); background: transparent; border: 1px solid var(--surface1); border-radius: 999px; cursor: pointer; }
+.work-host[aria-pressed=true] { color: var(--text); background: var(--chip-fill); border-color: transparent; }
+.work-host .host-glyph { margin: 0; }
+.work-host-count { font-size: 10px; color: var(--overlay1); font-variant-numeric: tabular-nums; }
+.work-host:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

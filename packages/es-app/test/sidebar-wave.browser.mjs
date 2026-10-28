@@ -29,6 +29,13 @@ const check = async (reducedMotion) => {
   const list = page.locator(".sidebar [role=tabpanel]")
   await expect(list.locator(".session-entry")).toHaveCount(3, { timeout: 120_000 })
   await expect.poll(() => [...preview.fixture.eventStreams.values()].some(s => s.path === "/global/event")).toBe(true)
+  // Active above idle (NAV-11): only ses_c busy -> it leads; going idle moves it back, by title.
+  publish("ses_c", "busy")
+  await expect(list.locator(".session-entry .nav-title").first()).toHaveText("Third session")
+  publish("ses_c", "idle")
+  await expect(list.locator(".session-entry .dot.busy")).toHaveCount(0)
+  const idleOrder = await list.locator(".session-entry .nav-title").allTextContents()
+  assert.deepEqual(idleOrder, [...idleOrder].sort((a, b) => a.localeCompare(b)), `idle rows by title: ${idleOrder}`)
   for (const id of ["ses_a", "ses_b", "ses_c"]) publish(id, "busy")
   await expect(list.locator(".dot.busy")).toHaveCount(3)
   const halos = () => list.locator(".session-entry").evaluateAll(rows => rows.map(row => {
@@ -52,7 +59,7 @@ try {
   assert.equal(new Set(moving.map(h => h.delay)).size, moving.length, `each row has its own phase: ${JSON.stringify(moving)}`)
   const still = await check("reduce")
   assert(still.every(h => h.name === "none"), `reduced motion is static: ${JSON.stringify(still)}`)
-  console.log("PASS sidebar wave: busy halos offset per row, no reorder or remount on time bumps, reduced motion static")
+  console.log("PASS sidebar wave: active rows above idle (NAV-11), busy halos offset per row, no reorder or remount on time bumps, reduced motion static")
 } finally {
   await browser.close()
   await preview.close()

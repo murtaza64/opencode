@@ -155,7 +155,10 @@ const start = async () => {
     ...remotes.map((host) => ({ id: host.id, label: host.label, origin: host.server.origin, profile: host.profile, ...(host.kind ? { kind: host.kind } : {}), ...(host.id === workDefault ? { default: true } : {}) })),
   )
   const pages = configured.filter((host) => host.mode === "page")
-  const listeners = [{ id: "local", label: "Local", server }, ...remotes]
+  // The Local-origin listener is the Work view: it shows every Work host's rows (this machine and each
+  // proxied host), so its tab reads "Work". Each proxied host keeps its own view, opened from the
+  // Hosts menu. The id stays "local" because partitions, drafts and per-origin storage are keyed by it.
+  const listeners = [{ id: "local", label: "Work", server }, ...remotes]
   const isolated = listenerSession("persist:editspace", server)
   const preferences = (partition: Electron.Session): Electron.WebPreferences => ({
     backgroundThrottling: startup.backgroundThrottling,
@@ -193,7 +196,7 @@ const start = async () => {
   const tabs = window instanceof BrowserWindow
     ? undefined
     : createTabs(window, [
-        { id: "local", label: "Local", url: server.origin, session: isolated, kind: "app" as const, guard: (contents) => guardListener(contents, server.origin, true) },
+        { id: "local", label: "Work", url: server.origin, session: isolated, kind: "app" as const, guard: (contents) => guardListener(contents, server.origin, true) },
         ...remotes.map((host) => ({
           id: host.id,
           label: host.label,
@@ -201,6 +204,7 @@ const start = async () => {
           session: listenerSession(`persist:editspace-host-${host.id}`, host.server),
           kind: "app" as const,
           guard: (contents: Electron.WebContents) => guardListener(contents, host.server.origin, false),
+          within: "local",
         })),
         ...pages.map((host) => ({ id: host.id, label: host.label, url: `${host.origin}/`, session: pageSession(`persist:editspace-host-${host.id}`), kind: "page" as const, guard: (contents: Electron.WebContents) => guardPage(contents, host.origin) })),
       ], preferences)

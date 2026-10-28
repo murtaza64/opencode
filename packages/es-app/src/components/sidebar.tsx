@@ -13,12 +13,14 @@ import { peekAttrs, SessionPeek } from "./session-peek"
 import { CloudNav, CloudSource } from "./cloud-sidebar"
 import { cloudRows } from "../cloud-rows"
 import { byBoundary, dateGroup, type DateGroup } from "../turn-order"
+import { compareRows } from "../session-recency"
 import { cloudKey, type CloudPin } from "../cloud-agents"
 import { rankSearch, type Searchable } from "../search-rank"
 import { failureLabel } from "../session-failures"
 import { ringOnChange } from "../motion"
 import { Glyph, HostGlyph } from "./icons"
 import { hostRowKey, hostSessionHref, workRows, type HostFeed } from "../host-feed"
+import { host } from "../host"
 import { NavEntries } from "./mode-switch"
 import { TodayCost } from "./today-cost"
 import { NavTabs, NeedsYouBand } from "./nav-tabs"
@@ -62,17 +64,46 @@ export default function Sidebar() {
   // carry their host and open on that host's own tab; a host that stops answering keeps its last
   // rows, dimmed and disabled, never emptied or merged into this host's.
   const hosted = () => work.feeds().length > 0
+  // Unified Work: this machine and every other Work host, all shown by default. Hiding a host is a per-page
+  // choice stored as the hidden set, so a host added later is shown; Personal pages have no Work strip.
+  const ownHost = () => host()?.work.find((item) => item.id === host()?.id) ?? { id: host()?.id ?? "local", label: "Local" }
+  const workHosts = () => [{ id: ownHost().id, label: ownHost().label }, ...work.feeds().map((feed) => ({ id: feed.host.id, label: feed.host.label }))]
+  const HIDDEN_KEY = "es-app:work-hidden-hosts"
+  const readHidden = () => {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? "[]")
+      return new Set(Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [])
+    } catch {
+      return new Set<string>()
+    }
+  }
+  const [hiddenHosts, setHiddenHosts] = createSignal(readHidden())
+  // A stored choice that would hide every host (or names no current host) shows them all.
+  const shownHost = (id: string) => !hiddenHosts().has(id) || workHosts().every((item) => hiddenHosts().has(item.id))
+  const toggleHost = (id: string) => {
+    const next = new Set(hiddenHosts())
+    if (next.has(id)) next.delete(id)
+    else if (workHosts().filter((item) => !next.has(item.id)).length > 1) next.add(id)
+    setHiddenHosts(next)
+    try { localStorage.setItem(HIDDEN_KEY, JSON.stringify([...next])) } catch { /* kept for this page */ }
+  }
+  const hostCount = (id: string) => id === ownHost().id ? unpinnedSessions().length + pinnedSessions().length
+    : (work.feeds().find((feed) => feed.host.id === id)?.state().rows.length ?? 0)
   const allPinned = createMemo(() => [...pinnedSessions(), ...work.pinned()])
   const allUnpinned = createMemo(() => workRows(unpinnedSessions(), work.unpinned()))
   // Cloud agents the view already discovers sit in the ordinary list beside sessions, newest first; pinned
   // ones stay in Pinned. Same entries, account scope and pins as before; no separate drawer.
   const cloudUnpinned = createMemo(() => cloudRows({ pins: [], observed: cloud.observed(), other: cloud.other(), snapshots: cloud.snapshots() }))
-  // One order for every Work row: its last turn boundary (byBoundary); rows without one are undated, in a stable
-  // order by host-qualified key. The boundary comes from Core's turn time once it exists; never time.updated.
+  // Default order (NAV-11, session-recency.ts compareRows): rows working on their own host above idle ones; within
+  // each group, the last turn boundary newest first, unknown boundaries by title then key. Turn boundaries come from
+  // Core's Session.time.turn once it exists (none yet: every row is undated); never time.updated. Parts, tools and
+  // polls change none of these inputs, so a row moves only when its status or a turn boundary changes.
   const boundaryOf = (_row: { kind: "session" | "cloud" }): number | undefined => undefined
+  const liveOf = (row: { kind: "session"; item: SessionRow } | { kind: "cloud"; item: ReturnType<typeof cloudRows>[number] }) =>
+    row.kind === "cloud" ? row.item.status.chip === "busy" : row.item.host ? work.dot(row.item) === "busy" : dotFor(row.item) === "busy"
   // Row wrappers are reused while their item and boundary are unchanged, so streamed updates never remount a row
   // (its DOM, focus and busy-halo phase stay put); only a boundary change can move it.
-  type AgentRow = ({ kind: "session"; item: SessionRow } | { kind: "cloud"; item: ReturnType<typeof cloudRows>[number] }) & { key: string; boundary?: number }
+  type AgentRow = ({ kind: "session"; item: SessionRow } | { kind: "cloud"; item: ReturnType<typeof cloudRows>[number] }) & { key: string; boundary?: number; live?: boolean }
   // What a row renders (activity time excluded): a session.updated that only bumps time keeps the same row.
   const sameShown = (a: AgentRow, b: AgentRow) => a.item === b.item || (a.kind === "session" && b.kind === "session"
     ? a.item.title === b.item.title && a.item.directory === b.item.directory && a.item.archived === b.item.archived && a.item.project === b.item.project && a.item.host === b.item.host
@@ -82,14 +113,17 @@ export default function Sidebar() {
     const next = new Map<string, AgentRow>()
     const keep = (row: AgentRow) => {
       const old = previousRows.get(row.key)
-      const kept = old && old.boundary === row.boundary && sameShown(old, row) ? old : row
+      const kept = old && old.boundary === row.boundary && old.live === row.live && sameShown(old, row) ? old : row
       next.set(row.key, kept)
       return kept
     }
     const rows = [
-      ...allUnpinned().map((item): AgentRow => ({ kind: "session", key: hostRowKey(item), item })),
+      ...allUnpinned().filter((item) => shownHost(item.host ?? ownHost().id)).map((item): AgentRow => ({ kind: "session", key: hostRowKey(item), item })),
       ...cloudUnpinned().map((item): AgentRow => ({ kind: "cloud", key: `wingman:${item.key}`, item })),
-    ].map((row) => keep({ ...row, boundary: boundaryOf(row) })).sort(byBoundary)
+    ].map((row) => keep({ ...row, boundary: boundaryOf(row), live: liveOf(row) }))
+      .sort((a, b) => compareRows(
+        { clock: { key: a.key, recency: a.boundary, state: "unknown", live: !!a.live }, title: a.item.title },
+        { clock: { key: b.key, recency: b.boundary, state: "unknown", live: !!b.live }, title: b.item.title }))
     previousRows = next
     return rows
   })
@@ -413,6 +447,16 @@ export default function Sidebar() {
           </section>
         </Show>
         <NavTabs agents={<>
+          <Show when={hosted() && host()?.profile !== "personal"}>
+            <div class="work-hosts" role="group" aria-label="Work hosts">
+              <span class="work-hosts-label">Work</span>
+              <For each={workHosts()}>{(item) =>
+                <button type="button" class="work-host" aria-pressed={shownHost(item.id)} title={shownHost(item.id) ? `Hide ${item.label} sessions` : `Show ${item.label} sessions`}
+                  onClick={() => toggleHost(item.id)}>
+                  <HostGlyph host={item.id} /><span>{item.label}</span><span class="work-host-count">{hostCount(item.id) || ""}</span>
+                </button>}</For>
+            </div>
+          </Show>
         <div class="search-box">
           <input
             class="search-input"
