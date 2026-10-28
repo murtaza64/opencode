@@ -41,22 +41,27 @@ export type AttentionRecord = {
 }
 /** What an option asks the human to supply with it; the ledger refuses the answer when a required value is missing or invalid. */
 export type OptionInput = {
-  kind: "text" | "choice" | "multi" | (string & {})
+  kind: "text" | "choice" | "multi" | "secret" | (string & {})
   label: string
   required?: boolean
   hint?: string
   choices?: { id: string; label: string }[]
   max?: number
+  /** `secret` only: values go through the secure intake route (secret-field.ts), never an answer. */
+  consumer?: string
+  handle?: string
+  fields?: { id: string; label: string }[]
 }
 export type AttentionOption = { id: string; label: string; input?: OptionInput }
 export type InputValue = string | string[]
-export const INPUT_KINDS = ["text", "choice", "multi"]
+export const INPUT_KINDS = ["text", "choice", "multi", "secret"]
 
 /** Why `value` cannot be sent with `option`, or undefined when it can. Mirrors the ledger's checks so Send explains itself. */
 export const inputProblem = (option: AttentionOption | undefined, value: InputValue | undefined) => {
   const spec = option?.input
   if (!spec) return
   if (!INPUT_KINDS.includes(spec.kind)) return "This choice needs input this app cannot collect. Answer it in a newer app or the source thread."
+  if (spec.kind === "secret") return "Use Submit securely above; a secret is never sent with an answer"
   const empty = value === undefined || (typeof value === "string" ? !value.trim() : value.length === 0)
   if (empty) return spec.required ? `Add ${spec.label.toLowerCase()} to send` : undefined
   if (spec.kind === "text") return typeof value === "string" && value.length <= 2000 ? undefined : `${spec.label} must be at most 2000 characters`
@@ -69,7 +74,7 @@ export const inputProblem = (option: AttentionOption | undefined, value: InputVa
 
 /** The `input_value` field for `option`, verbatim; omitted when nothing was supplied. */
 export const inputPayload = (option: AttentionOption | undefined, value: InputValue | undefined) => {
-  if (!option?.input || value === undefined) return {}
+  if (!option?.input || option.input.kind === "secret" || value === undefined) return {}
   if (typeof value === "string" ? !value.trim() : value.length === 0) return {}
   return { input_value: option.input.kind === "choice" && Array.isArray(value) ? value[0] : value }
 }
@@ -77,6 +82,7 @@ export const inputPayload = (option: AttentionOption | undefined, value: InputVa
 /** A supplied value as the human reads it: choice labels, text verbatim. */
 export const inputText = (option: AttentionOption | undefined, value: InputValue | undefined) => {
   if (value === undefined) return
+  if (option?.input?.kind === "secret") return "Handed to the approved program · values not recorded"
   const labels = new Map(option?.input?.choices?.map(choice => [choice.id, choice.label]))
   return typeof value === "string" ? labels.get(value) ?? value : value.map(id => labels.get(id) ?? id).join(", ")
 }
