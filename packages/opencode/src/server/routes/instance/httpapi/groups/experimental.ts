@@ -175,8 +175,35 @@ export const UsageDailyResponse = Schema.Struct({
   }),
 }).annotate({ identifier: "UsageDaily" })
 
+export const UsageSessionsQuery = Schema.Struct({
+  ...UsageDailyQuery.fields,
+  limit: Schema.optional(Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 200 }))),
+})
+export const UsageSessionsResponse = Schema.Struct({
+  estimate: Schema.Literal(true),
+  basis: Schema.String,
+  host: Schema.String,
+  observedAt: Schema.String,
+  offsetMinutes: Schema.Number,
+  coverage: Schema.Struct({ since: Schema.String, backfilled: Schema.Boolean, liveSince: Schema.optional(Schema.String) }),
+  sessions: Schema.Array(
+    Schema.Struct({
+      sessionID: Schema.String,
+      parentID: Schema.optional(Schema.String),
+      title: Schema.optional(Schema.String),
+      directory: Schema.optional(Schema.String),
+      cost: Schema.NullOr(Schema.Number),
+      pricedCost: Schema.Number,
+      unpricedTokens: Schema.Number,
+      tokens: UsageTokens,
+      lastActive: Schema.String,
+    }),
+  ),
+}).annotate({ identifier: "UsageSessions" })
+
 export const ExperimentalPaths = {
   usageDaily: "/experimental/usage/daily",
+  usageSessions: "/experimental/usage/sessions",
   capabilities: "/experimental/capabilities",
   console: "/experimental/console",
   consoleOrgs: "/experimental/console/orgs",
@@ -214,6 +241,17 @@ export const ExperimentalApi = HttpApi.make("experimental")
             summary: "Get estimated daily spend",
             description:
               "Estimated model spend on this host per local day (default 7 days including today; offsetMinutes = local offset from UTC, default the server's). Token counts priced by the local model catalog, not provider billing. Only messages that ran on this host count. rateLimits: latest provider-reported rate-limit response headers per provider (memory only).",
+          }),
+        ),
+        HttpApiEndpoint.get("usageSessions", ExperimentalPaths.usageSessions, {
+          query: UsageSessionsQuery,
+          success: described(UsageSessionsResponse, "Sessions by estimated spend"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.usage.sessions",
+            summary: "Get top sessions by estimated spend",
+            description:
+              "Sessions on this host ranked by estimated spend over the last N local days (default 1; limit default 20, max 200). cost is null when the session used a billed model with no known rate (pricedCost and unpricedTokens give the parts). Local estimate, not provider billing; same origin rules as /experimental/usage/daily.",
           }),
         ),
         HttpApiEndpoint.get("console", ExperimentalPaths.console, {

@@ -30,7 +30,7 @@ it.live(
       ({ dir, llm }) =>
         Effect.gen(function* () {
           RateLimits.clear()
-          yield* llm.text("done")
+          yield* llm.text("done", { usage: { input: 120, output: 30 } })
           const session = yield* Session.use.create({ title: "Usage" })
           yield* requestInDirectory(`/session/${session.id}/prompt_async`, dir, {
             method: "POST",
@@ -58,10 +58,25 @@ it.live(
           expect(daily.priceSource.label).toContain("estimate")
           expect(daily.coverage.origin.basis).toContain("originating-host-only")
           expect(typeof daily.days[0]!.originOnly).toBe("boolean")
-          // The test model has no cost card, so its usage is unpriced rather than free.
           const today = daily.days[0]!
           expect(today.models.every((model) => model.coverage !== "priced")).toBe(true)
-          expect(today.models.filter((model) => model.coverage === "missing-rate").every((model) => model.cost === null)).toBe(true)
+
+          type Top = { estimate: true; sessions: { sessionID: string; title?: string; cost: number | null; unpricedTokens: number; tokens: { input: number; output: number } }[] }
+          // The step's usage is projected when the step finishes, after its response headers were seen.
+          const top = yield* pollWithTimeout(
+            requestInDirectory("/experimental/usage/sessions?days=1&offsetMinutes=0", dir).pipe(
+              Effect.flatMap((response) => response.json),
+              Effect.map((body) => body as unknown as Top),
+              Effect.map((body) => (body.sessions.some((item) => item.sessionID === session.id) ? body : undefined)),
+            ),
+            "session usage was not recorded",
+            "10 seconds",
+          )
+          expect(top.estimate).toBe(true)
+          const row = top.sessions.find((item) => item.sessionID === session.id)
+          // The turn's usage is attributed to its session. The test provider is served on loopback, so it counts as
+          // local (no API bill): cost 0, not unknown.
+          expect(row).toMatchObject({ title: "Usage", cost: 0, unpricedTokens: 0, tokens: { input: 120, output: 30 } })
           expect(daily.rateLimits.providers).toMatchObject([{ provider: "test", requests: { limit: 500, remaining: 499 } }])
         }),
       { config: testProviderConfig },

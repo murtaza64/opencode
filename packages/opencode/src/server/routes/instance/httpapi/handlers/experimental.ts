@@ -73,21 +73,21 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       const daily = yield* usage.daily({
         days: ctx.query.days ?? 7,
         offsetMinutes: ctx.query.offsetMinutes ?? -new Date().getTimezoneOffset(),
-        // A model has a rate when the catalog (managed config cost card, then models.dev) gives it a non-zero
-        // input or output price. Absent and zero cost entries parse to the same zeros, so both count as missing.
-        hasRate: (provider, model) => {
-          const cost = catalog[ProviderV2.ID.make(provider)]?.models[model]?.cost
-          return cost !== undefined && (cost.input > 0 || cost.output > 0)
-        },
-        // Local inference servers (lmstudio, omlx, ollama, ...) are configured with a loopback endpoint.
-        isLocal: (provider) => {
-          const url = catalog[ProviderV2.ID.make(provider)]?.options?.baseURL
-          if (typeof url !== "string") return false
-          const host = URL.parse(url)?.hostname
-          return host === "localhost" || host === "::1" || host === "[::1]" || host?.startsWith("127.") === true
-        },
+        ...pricing(catalog),
       })
       return { ...daily, priceSource: yield* priceSource(), rateLimits: RateLimits.snapshot() }
+    })
+
+    const usageSessions = Effect.fn("ExperimentalHttpApi.usageSessions")(function* (ctx: {
+      query: { days?: number; offsetMinutes?: number; limit?: number }
+    }) {
+      const catalog = yield* providers.list()
+      return yield* usage.sessions({
+        days: ctx.query.days ?? 1,
+        offsetMinutes: ctx.query.offsetMinutes ?? -new Date().getTimezoneOffset(),
+        limit: ctx.query.limit ?? 20,
+        ...pricing(catalog),
+      })
     })
 
     const getConsole = Effect.fn("ExperimentalHttpApi.console")(function* () {
@@ -233,6 +233,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     return handlers
       .handle("capabilities", capabilities)
       .handle("usageDaily", usageDaily)
+      .handle("usageSessions", usageSessions)
       .handle("console", getConsole)
       .handle("consoleOrgs", listConsoleOrgs)
       .handle("consoleSwitch", switchConsole)
@@ -267,3 +268,24 @@ const priceSource = Effect.fnUntraced(function* () {
     managedConfig: cards.filter((card) => card !== undefined),
   }
 })
+
+/** Rate presence and local-provider detection from the provider catalog, shared by the usage routes. */
+function pricing(
+  catalog: Record<string, { models: Record<string, { cost?: { input: number; output: number } }>; options?: Record<string, unknown> }>,
+): { hasRate: UsageRollup.RateLookup; isLocal: (provider: string) => boolean } {
+  return {
+    // A model has a rate when the catalog (managed config cost card, then models.dev) gives it a non-zero
+    // input or output price. Absent and zero cost entries parse to the same zeros, so both count as missing.
+    hasRate: (provider, model) => {
+      const cost = catalog[ProviderV2.ID.make(provider)]?.models[model]?.cost
+      return cost !== undefined && (cost.input > 0 || cost.output > 0)
+    },
+    // Local inference servers (lmstudio, omlx, ollama, ...) are configured with a loopback endpoint.
+    isLocal: (provider) => {
+      const url = catalog[ProviderV2.ID.make(provider)]?.options?.baseURL
+      if (typeof url !== "string") return false
+      const host = URL.parse(url)?.hostname
+      return host === "localhost" || host === "::1" || host === "[::1]" || host?.startsWith("127.") === true
+    },
+  }
+}

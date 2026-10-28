@@ -1,3 +1,4 @@
+import { ResizeHandle } from "./components/resize-handle"
 import "./index.css"
 import "./appearance.css"
 import { render } from "solid-js/web"
@@ -22,7 +23,7 @@ import { BriefsProvider } from "./desk-briefs"
 import { DeskQueueProvider } from "./desk-queue"
 import { TicketTip, wrapTicketRefs } from "./ticket-refs"
 import { SessionRefs, wrapSessionRefs } from "./session-mention-dom"
-import { installSidebarKeys, leftOpen, startDrag } from "./ui"
+import { installSidebarKeys, leftOpen } from "./ui"
 import { installAppLinks, installInkLinks } from "./link-url"
 import { modeOf, trackModes } from "./components/mode-switch"
 import { installAppearance } from "./appearance"
@@ -93,7 +94,7 @@ function Providers(props: ParentProps) {
               <div class="shell" ref={shellEl}>
                 <Show when={agents()}><Sidebar /></Show>
                 <Show when={agents() && leftOpen()}>
-                  <div class="drag-handle" onMouseDown={(e) => startDrag("left", e)} />
+                  <ResizeHandle side="left" />
                 </Show>
                 <div class="content">{props.children}</div>
                 <TicketTip container={() => shellEl} />

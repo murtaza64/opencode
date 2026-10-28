@@ -5,8 +5,13 @@ import { createSignal } from "solid-js"
 
 export type HostLink = { id: string; label: string; origin: string }
 /** A host in the Work view: its laptop listener origin, and whether new work goes there by default. */
-export type WorkHost = HostLink & { default?: boolean }
-export type HostInfo = { id: string; label: string; remote: boolean; hosts: HostLink[]; work: WorkHost[] }
+export type Profile = "work" | "personal"
+export type HostKind = "laptop" | "mini" | "pc"
+export type WorkHost = HostLink & { default?: boolean; profile?: Profile; kind?: HostKind }
+export type HostInfo = { id: string; label: string; remote: boolean; hosts: HostLink[]; work: WorkHost[]; profile?: Profile; kind?: HostKind }
+
+const profileOf = (value: unknown) => (value === "work" || value === "personal" ? { profile: value as Profile } : {})
+const kindOf = (value: unknown) => (value === "laptop" || value === "mini" || value === "pc" ? { kind: value as HostKind } : {})
 
 const [info, setInfo] = createSignal<HostInfo>()
 
@@ -40,10 +45,10 @@ export const hostInfo = (value: unknown): HostInfo => {
   const work = Array.isArray(record.work)
     ? record.work.flatMap((item: Record<string, unknown>) =>
         item && typeof item.id === "string" && /^[a-z][a-z0-9-]{0,31}$/.test(item.id) && typeof item.label === "string" && typeof item.origin === "string" && URL.parse(item.origin)
-          ? [{ id: item.id, label: item.label, origin: URL.parse(item.origin)!.origin, ...(item.default === true ? { default: true } : {}) }]
+          ? [{ id: item.id, label: item.label, origin: URL.parse(item.origin)!.origin, ...profileOf(item.profile), ...kindOf(item.kind), ...(item.default === true ? { default: true } : {}) }]
           : [],
       )
     : []
   if (typeof record.id !== "string" || typeof record.label !== "string") return { id: "local", label: "Local", remote: false, hosts, work }
-  return { id: record.id, label: record.label, remote: record.remote === true, hosts, work }
+  return { id: record.id, label: record.label, remote: record.remote === true, hosts, work, ...profileOf(record.profile), ...kindOf(record.kind) }
 }

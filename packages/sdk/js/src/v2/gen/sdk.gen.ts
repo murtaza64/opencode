@@ -50,6 +50,8 @@ import type {
   ExperimentalSessionListResponses,
   ExperimentalUsageDailyErrors,
   ExperimentalUsageDailyResponses,
+  ExperimentalUsageSessionsErrors,
+  ExperimentalUsageSessionsResponses,
   ExperimentalWorkspaceAdapterListErrors,
   ExperimentalWorkspaceAdapterListResponses,
   ExperimentalWorkspaceCreateErrors,
@@ -773,6 +775,46 @@ export class Usage extends HeyApiClient {
       ThrowOnError
     >({
       url: "/experimental/usage/daily",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get top sessions by estimated spend
+   *
+   * Sessions on this host ranked by estimated spend over the last N local days (default 1; limit default 20, max 200). cost is null when the session used a billed model with no known rate (pricedCost and unpricedTokens give the parts). Local estimate, not provider billing; same origin rules as /experimental/usage/daily.
+   */
+  public sessions<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      days?: string
+      offsetMinutes?: string
+      limit?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "days" },
+            { in: "query", key: "offsetMinutes" },
+            { in: "query", key: "limit" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      ExperimentalUsageSessionsResponses,
+      ExperimentalUsageSessionsErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/usage/sessions",
       ...options,
       ...params,
     })

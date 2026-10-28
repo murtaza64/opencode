@@ -1,6 +1,7 @@
 /* Conversation view: live transcript (session-ui renderer over an SSE-fed
  * store), prompt input, and inline permission/question replies. */
 import { HostSession } from "../components/host-session"
+import { ResizeHandle } from "../components/resize-handle"
 import { createEffect, createMemo, createResource, createSignal, For, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js"
 import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router"
 import { DataProvider } from "@opencode-ai/session-ui/context"
@@ -20,7 +21,7 @@ import { mentionQuery, sessionLane, tokenBefore } from "../session-mention"
 import { RelativeLines } from "../components/relative-lines"
 import SessionInfo from "../components/session-info"
 import { linkUrl, sessionHref, useDashboard } from "../state"
-import { rightOpen, startDrag } from "../ui"
+import { rightOpen } from "../ui"
 import { createVim } from "../vim"
 import { contextUsage, latestCompletedTurn, tokenCount } from "../context-usage"
 import { getComposer, type ComposerAction } from "../composer"
@@ -2007,7 +2008,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
 
       <Show when={!props.embedded}>
         <Show when={rightOpen()}>
-          <div class="drag-handle" onMouseDown={(e) => startDrag("right", e)} />
+          <ResizeHandle side="right" />
         </Show>
         <SessionInfo sessionID={sessionID} session={session()} messages={messages()} parts={live.data.part} providers={providers()} todos={live.data.todo} />
       </Show>

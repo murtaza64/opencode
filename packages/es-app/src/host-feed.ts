@@ -21,8 +21,15 @@ export type HostedRow = {
   host?: string
 }
 
+/** Why a host is unavailable: sign-in needed (401/403/sign-in redirect) is shown apart from unreachable. */
+export type ReachReason = "network" | "auth" | "server"
+
 export type HostFeedState = {
   status: "loading" | "ready" | "unavailable"
+  /** Set while unavailable. */
+  reason?: ReachReason
+  /** Last read attempt (success or failure). */
+  checkedAt?: number
   /** Last-known rows; kept, marked unavailable, when the host stops answering. */
   rows: HostedRow[]
   /** When the host was first seen unavailable in the current outage. */
@@ -69,6 +76,22 @@ export const hostSessionHref = (host: WorkHost, row: Pick<HostedRow, "id" | "dir
 export const hostTabHref = (host: WorkHost, row: Pick<HostedRow, "id" | "directory">) =>
   `${host.origin}/session/${encodeURIComponent(row.id)}?directory=${encodeURIComponent(row.directory)}`
 
+class ReachError extends Error {
+  constructor(readonly reason: ReachReason, message: string) {
+    super(message)
+  }
+}
+
+/** The reason a failed response gives: 401/403 and a redirect (to a sign-in page) need sign-in; any other status is the server. */
+export const reasonFor = (status: number): ReachReason => (status === 401 || status === 403 || (status >= 300 && status < 400) ? "auth" : "server")
+
+/** The registry reach of a host feed (contract v0.2.1 §2). */
+export const reachOf = (state: HostFeedState) => ({
+  state: state.status === "ready" ? "reachable" as const : state.status === "unavailable" ? "unreachable" as const : "unknown" as const,
+  ...(state.status === "unavailable" ? { reason: state.reason ?? "network", since: state.since } : {}),
+  ...(state.checkedAt ? { checkedAt: state.checkedAt } : {}),
+})
+
 const LIST_MS = 5000
 const DECISIONS_MS = 30_000
 const SESSION_EVENTS = ["session.created", "session.updated", "session.deleted", "session.status"]
@@ -83,7 +106,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     const response = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(15_000) })
     if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) {
       await response.body?.cancel()
-      throw new Error(`${host.label}: HTTP ${response.status}`)
+      throw new ReachError(reasonFor(response.status), `${host.label}: HTTP ${response.status}`)
     }
     return (await response.json()) as T
   }
@@ -113,14 +136,16 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
       // A decision list that fails to read keeps the last one for this project, marked stale.
       const decisions = await readDecisions()
       setState((previous) => ({
+        checkedAt: Date.now(),
         status: "ready",
         rows: name && !root ? [] : hostRows(host.id, sessions, root),
         scoped: !!root,
         decisions: decisions ?? (same ? previous.decisions : []),
         decisionsStale: !decisions,
       }))
-    } catch {
-      setState((previous) => ({ ...previous, status: "unavailable", since: previous.since ?? Date.now() }))
+    } catch (error) {
+      const reason = error instanceof ReachError ? error.reason : "network"
+      setState((previous) => ({ ...previous, status: "unavailable", reason, checkedAt: Date.now(), since: previous.since ?? Date.now() }))
     }
   }
   // Decisions have no event on the session stream: between list reads, read only the decision list.

@@ -5,6 +5,7 @@ import path from "node:path"
 import { parseArgs } from "node:util"
 import { serve } from "../../es-desktop/src/server"
 import { createPairingCode, normalizePairingCode } from "../../es-desktop/src/pairing"
+import { hostIdentity, localHost } from "../../es-app/remote-host"
 
 // Host-side half of the Android thin client: serves the es-app bundle and the
 // es-desktop API policy to paired devices. It attaches to running services only.
@@ -18,8 +19,11 @@ export const startGateway = async (options: {
   dashboard?: string
   opencodeAuth?: string
   publicOrigin?: string
+  // This host's own identity (ES_HOST_ID/LABEL/PROFILE/KIND), reported to paired devices at /__es/host.
+  identity?: ReturnType<typeof hostIdentity>
 }) =>
   serve({
+    ...(options.identity ? { hostInfo: () => ({ ...localHost, ...options.identity! }) } : {}),
     root: options.root,
     host: options.host,
     port: options.port,
@@ -106,6 +110,8 @@ if (import.meta.main) {
       : undefined,
     // Set only when an HTTPS identity proxy (Tailscale Serve) is the sole route to this gateway.
     publicOrigin: process.env.ES_GATEWAY_PUBLIC_ORIGIN || undefined,
+    // Desk keys reach, pins and glyphs by this verified id; an invalid setting stops the gateway.
+    identity: hostIdentity(process.env.ES_HOST_ID ? { id: process.env.ES_HOST_ID, label: process.env.ES_HOST_LABEL, profile: process.env.ES_HOST_PROFILE || undefined, kind: process.env.ES_HOST_KIND || undefined } : undefined),
   })
   const port = new URL(gateway.origin).port
   // The phone-facing origin for Pair a Phone (owner-only, no secret): the public origin when an HTTPS

@@ -2424,6 +2424,38 @@ export type UsageDaily = {
   }
 }
 
+export type UsageSessions = {
+  estimate: true
+  basis: string
+  host: string
+  observedAt: string
+  offsetMinutes: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  coverage: {
+    since: string
+    backfilled: boolean
+    liveSince?: string
+  }
+  sessions: Array<{
+    sessionID: string
+    parentID?: string
+    title?: string
+    directory?: string
+    cost: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    pricedCost: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    unpricedTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    tokens: {
+      input: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      output: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      reasoning: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      cache: {
+        read: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        write: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      }
+    }
+    lastActive: string
+  }>
+}
+
 export type ConsoleState = {
   consoleManagedProviders: Array<string>
   activeOrgName?: string
@@ -8653,6 +8685,38 @@ export type ExperimentalUsageDailyResponses = {
 }
 
 export type ExperimentalUsageDailyResponse = ExperimentalUsageDailyResponses[keyof ExperimentalUsageDailyResponses]
+
+export type ExperimentalUsageSessionsData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    days?: string
+    offsetMinutes?: string
+    limit?: string
+  }
+  url: "/experimental/usage/sessions"
+}
+
+export type ExperimentalUsageSessionsErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ExperimentalUsageSessionsError = ExperimentalUsageSessionsErrors[keyof ExperimentalUsageSessionsErrors]
+
+export type ExperimentalUsageSessionsResponses = {
+  /**
+   * Sessions by estimated spend
+   */
+  200: UsageSessions
+}
+
+export type ExperimentalUsageSessionsResponse =
+  ExperimentalUsageSessionsResponses[keyof ExperimentalUsageSessionsResponses]
 
 export type ExperimentalConsoleGetData = {
   body?: never

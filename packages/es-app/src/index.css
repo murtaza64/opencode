@@ -591,14 +591,12 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
   .session-peek { display: none; }
 }
 
-/* drag-to-resize */
-.drag-handle {
-  width: 4px;
-  flex-shrink: 0;
-  cursor: col-resize;
-  background: transparent;
-}
-.drag-handle:hover { background: var(--surface1); }
+/* Resize edge: no layout width, so it sits exactly on the panel seam; an 8px hit strip centred on the
+ * seam and a 2px line that shows on hover, focus and drag. */
+.drag-handle { flex: none; position: relative; z-index: 6; inline-size: 0; align-self: stretch; outline: none; touch-action: none; }
+.drag-handle::before { content: ""; position: absolute; inset-block: 0; inset-inline-start: -4px; inline-size: 8px; cursor: col-resize; }
+.drag-handle::after { content: ""; position: absolute; inset-block: 0; inset-inline-start: -1px; inline-size: 2px; pointer-events: none; background: transparent; }
+.drag-handle:is(:hover, :focus-visible, [data-dragging])::after { background: var(--accent, var(--lavender)); }
 
 .panel-collapse { align-self: flex-end; }
 .nav-item {
@@ -1150,15 +1148,18 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 }
 .session-page {
   display: flex;
-  gap: 20px;
+  gap: 0;
   max-width: none;
   height: 100vh;
   overflow: hidden;
-  padding: 0 20px;
+  /* The chat column carries its own gutters, equal on both sides; the info panel and resize edge meet it flush. */
+  padding: 0;
   box-sizing: border-box;
   margin: 0;
 }
 .session-main {
+  padding-inline: var(--chat-gutter, 20px);
+  box-sizing: border-box;
   flex: 1;
   min-width: 0;
   display: flex;
@@ -1339,7 +1340,6 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   font-size: 12.5px;
   background: var(--mantle);
   border-inline-start: 1px solid var(--crust);
-  margin-inline-end: -20px; /* bleed to the window edge past .session-page padding */
 }
 .info-section { padding: 0; margin-bottom: 4px; }
 .info-heading {
@@ -1722,8 +1722,7 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 @media (max-width: 1100px) {
   .sidebar:not(.sidebar-mini) { max-width: 200px; }
   .session-info:not(.sidebar-mini) { max-width: 210px; }
-  .session-page { gap: 8px; padding-inline: 10px; }
-  .session-info { margin-inline-end: -10px; }
+  .session-page { --chat-gutter: 10px; }
   .prompt-row { flex-wrap: wrap; }
   .prompt-row > .ta-wrap { flex-basis: 100%; }
   .prompt-side { flex-direction: row; flex-wrap: wrap; width: 100%; max-width: none; align-items: center; }
@@ -1740,7 +1739,7 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
   .shell > .sidebar-mini > * { width: auto; min-width: 36px; }
   .shell > .content { height: auto; min-height: 0; }
   .drag-handle { display: none; }
-  .session-page { height: 100%; flex-direction: column; gap: 0; padding-inline: 8px; }
+  .session-page { height: 100%; flex-direction: column; gap: 0; --chat-gutter: 8px; }
   .session-main { min-height: 0; height: auto; }
   .session-info, .session-info:not(.sidebar-mini) { width: 100% !important; max-width: none; max-height: 16dvh; height: auto; margin: 0; padding: 4px 8px; }
   .session-info.sidebar-mini { min-height: 28px; align-items: flex-end; }

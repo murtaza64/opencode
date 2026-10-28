@@ -2,7 +2,8 @@ import { afterEach, expect, test } from "bun:test"
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { gatewayDescriptor, pairingCode, storePairingCode, watchedPairingCode } from "./gateway"
+import { gatewayDescriptor, pairingCode, startGateway, storePairingCode, watchedPairingCode } from "./gateway"
+import { issueCookie } from "../../es-desktop/src/pairing"
 
 const cleanup: (() => Promise<unknown>)[] = []
 afterEach(async () => {
@@ -83,4 +84,15 @@ test("deleting the code file revokes: a new owner-only code is written", async (
   expect(next).not.toBe(first)
   expect((await Bun.file(file).text()).trim()).toBe(next)
   expect((await stat(file)).mode & 0o777).toBe(0o600)
+})
+
+test("a paired device reads the gateway host's verified id, profile and kind; unpaired it gets nothing", async () => {
+  const dir = await scratch()
+  await writeFile(path.join(dir, "index.html"), "<title>fixture</title>")
+  const code = "ABCD2-EFGH3-JKLM4-NPQR5"
+  const gateway = await startGateway({ host: "127.0.0.1", port: 0, code, root: dir, identity: { id: "mini", label: "Mac Mini", profile: "work", kind: "mini" } })
+  cleanup.push(() => gateway.close())
+  expect((await fetch(`${gateway.origin}/__es/host`)).status).toBe(401)
+  const body = await (await fetch(`${gateway.origin}/__es/host`, { headers: { cookie: `es_remote=${issueCookie(code)}` } })).json()
+  expect(body).toMatchObject({ id: "mini", label: "Mac Mini", profile: "work", kind: "mini" })
 })
