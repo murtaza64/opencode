@@ -26,7 +26,16 @@ export type Node = {
   inputRank?: number
   outputRank?: number
 }
+// Prompt-cache continuity of one provider turn, from reported usage only (never from timing or
+// turn index). `unknown` covers missing, zero-filled and unsupported telemetry.
+export type CacheState = "unknown" | "warm" | "cold" | "mixed"
+// `anchor` is the first drawable node of the step (what the seam sits above); a step with no
+// drawable node yet (just started) has none and draws nothing.
+export type Turn = { messageID: string; anchor?: string; cache: CacheState; read: number; write: number; input: number; settled: boolean }
+
 export type Snapshot = {
+  // One entry per assistant message (provider turn), in order; the seam before each is drawn from it.
+  turns: Turn[]
   phase: Phase
   status: string
   nodes: Node[]
@@ -40,10 +49,14 @@ export type Delta =
   | { type: "ask.open"; id: string }
   | { type: "ask.closed"; id: string }
   | { type: "phase"; from: Phase; to: Phase }
+  | { type: "cache"; messageID: string; from: CacheState; to: CacheState }
 
+export type StepPart = { id: string; type: "step-start" | "step-finish"; tokens?: { input?: number; cache?: { read?: number; write?: number } } }
 export type Input = {
   messages: readonly Message[]
   parts: (messageID: string) => readonly Part[]
+  // Provider-step parts, served apart from transcript parts (live.data.step). Absent = no seams.
+  steps?: (messageID: string) => readonly StepPart[]
   status: string
   pending: readonly { kind: "permission" | "question"; request: { id: string } }[]
   subagents: number
@@ -54,6 +67,7 @@ const toolStatus = (part: Extract<Part, { type: "tool" }>): Node["status"] =>
 
 export const snapshot = (input: Input): Snapshot => {
   const nodes: Node[] = []
+  const turns: Turn[] = []
   const branches = new Map<string, { id: string; alive: boolean; first: string; last: string }>()
   const busy = input.status === "busy" || input.status === "retry" || input.subagents > 0
   const lastMessage = input.messages[input.messages.length - 1]
@@ -65,6 +79,7 @@ export const snapshot = (input: Input): Snapshot => {
       nodes.push({ id: message.id, anchor: "message", kind: "user", messageID: message.id, status: "done", length: 0 })
       continue
     }
+    const first = nodes.length
     for (const part of input.parts(message.id)) {
       if (part.type === "text" && !part.synthetic) {
         nodes.push({ id: part.id, anchor: "part", kind: "text", messageID: message.id, status: open(part.time?.end) ? "running" : "done", started: part.time?.start, ended: part.time?.end, length: part.text.length })
@@ -86,6 +101,16 @@ export const snapshot = (input: Input): Snapshot => {
         if (kind === "task") branches.set(part.id, { id: part.id, alive: status === "running", first: part.id, last: part.id })
       }
     }
+    // Provider turns: step-start..step-finish pairs from live.data.step (ID order; a late finish
+    // fills its start; an orphan finish is not placed). Part ids are time-ordered, so a step's
+    // anchor is this message's first drawable node created after the step-start. No step parts =
+    // no boundary (message.tokens holds only the last step).
+    const mine = nodes.slice(first)
+    let pendingStep: Turn | undefined
+    for (const sp of input.steps?.(message.id) ?? []) {
+      if (sp.type === "step-start") { pendingStep = { messageID: message.id, anchor: mine.find((n) => n.id > sp.id)?.id, cache: "unknown", read: 0, write: 0, input: 0, settled: false }; turns.push(pendingStep); continue }
+      if (pendingStep) { Object.assign(pendingStep, cacheFrom(sp.tokens, true)); pendingStep = undefined }
+    }
   }
   const waiting = input.pending[0]
   if (waiting) nodes.push({ id: waiting.request.id, anchor: "ask", kind: "ask", messageID: "", status: "open", length: 0, askKind: waiting.kind })
@@ -99,6 +124,7 @@ export const snapshot = (input: Input): Snapshot => {
     : streaming ? "streaming"
     : "thinking"
   return {
+    turns,
     phase,
     status: input.status,
     nodes,
@@ -106,6 +132,18 @@ export const snapshot = (input: Input): Snapshot => {
     branches: [...branches.values()],
     errors: nodes.filter((node) => node.status === "error").length,
   }
+}
+
+// Usage can arrive after the turn completes: an unfinished message, or a finished one whose cache
+// counts are all zero, is provisional (unknown). Only explicit cache telemetry is evidence: read
+// alone = warm, write alone = cold (rebuild), read + write = mixed. Uncached input alone is NOT a
+// miss (providers that report no cache fields look exactly like that), so it stays unknown.
+const cacheFrom = (tokens: { input?: number; cache?: { read?: number; write?: number } } | undefined, settled: boolean) => {
+  const read = tokens?.cache?.read ?? 0
+  const write = tokens?.cache?.write ?? 0
+  const uncached = tokens?.input ?? 0
+  const cache: CacheState = read > 0 && write > 0 ? "mixed" : read > 0 ? "warm" : write > 0 ? "cold" : "unknown"
+  return { cache, read, write, input: uncached, settled }
 }
 
 // Events between two snapshots; the scene turns each into one transient (pulse, flash, ring).
@@ -121,6 +159,8 @@ export const diff = (previous: Snapshot | undefined, next: Snapshot): Delta[] =>
   }
   for (const node of previous.nodes) if (node.kind === "ask" && !next.nodes.some((n) => n.id === node.id)) out.push({ type: "ask.closed", id: node.id })
   if (previous.phase !== next.phase) out.push({ type: "phase", from: previous.phase, to: next.phase })
+  const was = new Map(previous.turns.map((t) => [t.messageID, t.cache] as const))
+  for (const t of next.turns) { const old = was.get(t.messageID); if (old !== undefined && old !== t.cache) out.push({ type: "cache", messageID: t.messageID, from: old, to: t.cache }) }
   return out
 }
 

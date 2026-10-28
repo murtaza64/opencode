@@ -1861,7 +1861,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
           </For>
         </div>
 
-        <Show when={livingActivity()}><Filament messages={messages} parts={(id) => live.data.part[id] ?? []} status={status}
+        <Show when={livingActivity()}><Filament messages={messages} parts={(id) => live.data.part[id] ?? []} steps={(id) => live.data.step[id] ?? []} status={status}
           pending={pending} subagents={subagentsRunning} transcript={() => transcriptEl} /></Show>
         <div class="transcript" ref={transcriptEl}>
           <div ref={inner} class="transcript-inner" classList={{ "transcript-arrive": arrived() }}

@@ -18,6 +18,7 @@ const clamp01 = (x: number) => Math.min(1, Math.max(0, x))
 
 type Pulse = { born: number; from: number; to: number; x: number; kind: "text" | "reasoning" | "jet" }
 type Flash = { born: number; x: number; y: number; status: "done" | "error" }
+type Knit = { born: number; messageID: string; to: "warm" | "cold" | "mixed" }
 
 export type Frame = { now: number; wall: number; reduced: boolean; hidden: boolean; activity?: number }
 const hash = (n: number) => { const x = Math.sin(n * 12.9898) * 43758.5453; return x - Math.floor(x) }
@@ -25,6 +26,7 @@ const hash = (n: number) => { const x = Math.sin(n * 12.9898) * 43758.5453; retu
 export const createScene = (paint: Painter) => {
   const pulses: Pulse[] = []
   const flashes: Flash[] = []
+  const knits: Knit[] = []
   let energy = 0
   let clock = 0
   let lastJet = 0
@@ -45,6 +47,10 @@ export const createScene = (paint: Painter) => {
         const r = layout.rects.get(d.id)
         if (r) flashes.push({ born: now, x: layout.gx, y: r.cy, status: d.status })
         recent.push(now)
+      } else if (d.type === "cache" && d.to !== "unknown") {
+        // Late usage: the seam re-knits (or cuts) when the evidence lands, not when the turn began.
+        knits.push({ born: now, messageID: d.messageID, to: d.to })
+        if (knits.length > 8) knits.shift()
       }
     }
   }
@@ -106,6 +112,35 @@ export const createScene = (paint: Painter) => {
       } else segs.push([gx, y, gx, endY])
     }
     for (const sg of segs) paint.capsule(sg[0]!, sg[1]!, sg[2]!, sg[3]!, width, col, glow)
+    // ---- prompt-cache seams at provider-turn starts (usage-driven; never timing) ----
+    for (const turn of s.turns) {
+      const r = turn.anchor ? layout.rects.get(turn.anchor) : undefined
+      if (!r) continue
+      const sy = r.y - 2
+      if (sy < top - 10 || sy > bottom + 10) continue
+      const knit = knits.find((k) => k.messageID === turn.messageID)
+      const k = knit ? Math.min(1, (f.now - knit.born) / 700) : 1
+      if (turn.cache === "warm") {
+        // Dim stretch above the turn: continuity kept; a fresh knit fades the dim in.
+        const dim = f.reduced ? 1 : 0.55 + 0.45 * (1 - ease(k)) * (knit ? 1 : 0)
+        paint.capsule(gx, sy - 18, gx, sy, width + 0.4, rgba([0.02, 0.03, 0.05], 0.9 * (1 - dim) * 0.6), 0)
+        paint.capsule(gx, sy - 18, gx, sy, width, rgba(ACCENT, (0.3 + energy * 0.5) * dim), glow * dim)
+      } else if (turn.cache === "cold") {
+        // Hard seam: a gap with two cut ends, re-knitting as the bridge grows back.
+        const gap = f.reduced ? 0 : 7 * (knit ? 1 - ease(k) : 0.35)
+        paint.capsule(gx, sy - 18, gx, sy - 2 - gap, width, rgba([0.02, 0.03, 0.05], 0.95), 0)
+        paint.capsule(gx - 3 * layout.sign, sy - 2 - gap, gx + 3 * layout.sign, sy - 2 - gap, 1.2, rgba(ACCENT, 0.8), 1.5)
+        paint.capsule(gx - 3 * layout.sign, sy + 1, gx + 3 * layout.sign, sy + 1, 1.2, rgba(ACCENT, 0.8), 1.5)
+        if (!knit || k >= 1) paint.capsule(gx, sy - 2 - gap, gx, sy + 1, width, rgba(ACCENT, 0.3 + energy * 0.5), glow)
+      } else if (turn.cache === "mixed") {
+        // Continuity kept plus an extension pulse: a short bright sleeve widening past the seam.
+        const p = f.reduced ? 1 : knit ? ease(k) : 1
+        paint.capsule(gx, sy - 14 * p, gx, sy + 2, width + 1.2, rgba([0.7, 0.86, 1.0], 0.35 + (knit ? (1 - k) * 0.4 : 0)), 3 + (knit ? (1 - k) * 4 : 0))
+      }
+      // Unknown: plain thread (provisional until usage arrives).
+    }
+    for (let i = knits.length - 1; i >= 0; i--) if (f.now - knits[i]!.born > 800) knits.splice(i, 1)
+
     // Energetic active stretch: a brightness wave travels down the last 160px toward the orb; its
     // speed and brightness follow evidence rate, so a quiet model turn reads calmer than a burst.
     if (active && !f.reduced && segs.length) {
@@ -210,7 +245,7 @@ export const createScene = (paint: Painter) => {
       }
     } else { pulses.length = 0; flashes.length = 0 }
     paint.flush()
-    return pulses.length > 0 || flashes.length > 0 || active || Math.abs(energy - target) > 0.01
+    return pulses.length > 0 || flashes.length > 0 || knits.length > 0 || active || Math.abs(energy - target) > 0.01
   }
   const energyNow = () => energy
 

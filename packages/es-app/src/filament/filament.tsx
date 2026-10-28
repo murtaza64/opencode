@@ -4,7 +4,7 @@
  * (which gets the static state badge instead). */
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show } from "solid-js"
 import type { Message, Part } from "@opencode-ai/sdk/v2"
-import { describe, diff, snapshot, type Snapshot } from "./adapter"
+import { describe, diff, snapshot, type Snapshot, type StepPart } from "./adapter"
 import { measure, type Layout } from "./geometry"
 import { chooseBackend, createPainter, type Painter } from "./paint"
 import { createScene } from "./scene"
@@ -16,6 +16,8 @@ const GUTTER = 40
 export const Filament = (props: {
   messages: () => readonly Message[]
   parts: (messageID: string) => readonly Part[]
+  // Provider-step parts (live.data.step) once the store keeps them; omitted = no cache seams.
+  steps?: (messageID: string) => readonly StepPart[]
   status: () => string
   pending: () => readonly { kind: "permission" | "question"; request: { id: string } }[]
   subagents: () => number
@@ -42,7 +44,7 @@ export const Filament = (props: {
   const box = { x: 0, y: 0, w: 0, h: 0, scale: 1 }
 
   // Reactive part of the pipeline: a new snapshot per store update, deltas queued for the loop.
-  const snap = createMemo(() => snapshot({ messages: props.messages(), parts: props.parts, status: props.status(), pending: props.pending(), subagents: props.subagents() }))
+  const snap = createMemo(() => snapshot({ messages: props.messages(), parts: props.parts, steps: props.steps, status: props.status(), pending: props.pending(), subagents: props.subagents() }))
   createEffect(on(snap, (next) => {
     previous = current
     current = next
