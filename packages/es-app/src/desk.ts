@@ -133,6 +133,9 @@ export type BriefShape =
   | { kind: "impact"; rows: { area: string; change: string }[] }
   /** What a choice changes and what it keeps: a row whose now and after are equal stays as it is. */
   | { kind: "change"; rows: { item: string; now: string; after: string }[] }
+/** One numbered or named item from the request (D1…, 1., Q2), kept as its own row. Values are shown only when
+ * quoted exactly (briefItems); which answer was chosen comes from the record, never from the brief. */
+export type BriefItem = { id: string; question: string; recommended: string; alternatives: string[]; refs: string[] }
 export type BriefStep = {
   title: string
   where?: { label: string; refs: string[] }
@@ -157,6 +160,8 @@ export type BriefResult = {
   /** Steps an option asks the human to do by hand (a console or settings page), in order: where to go, each
    * field and its value, and how to tell it worked. Values are shown only when quoted exactly (briefSteps). */
   steps: BriefStep[]
+  /** Every numbered or named item the request lists, in its order, never merged (contract 4, optional). */
+  items: BriefItem[]
   /** What not answering leads to, only when no option already means that. */
   ifWait: string
   /** For a decision to publish something: the exact text it would send, quoted from the request. */
@@ -395,7 +400,8 @@ const visualOf = (value: unknown, legacy: boolean) => {
   const visual = value as Record<string, unknown>
   if (legacy) return typeof visual.html === "string" && visual.html.trim() && visual.html.length <= 20000
     ? { visual: { title: text(visual.title, 80), alt: "", html: visual.html, height: visualHeight(visual.height) } } : {}
-  const aspect = safeSvg(visual.svg, contract.visual.width, contract.visual.maxHeight, contract.visual.maxBytes)
+  // New briefs are asked for at most maxHeight; briefs made before that limit stay readable up to acceptMaxHeight.
+  const aspect = safeSvg(visual.svg, contract.visual.width, contract.visual.acceptMaxHeight, contract.visual.maxBytes)
   const alt = text(visual.alt, 200)
   return aspect && alt ? { visual: { title: text(visual.title, 80), alt, svg: (visual.svg as string).trim(), aspect } } : {}
 }
@@ -427,6 +433,15 @@ const stepsOf = (value: unknown, known: { has: (ref: string) => boolean }): Brie
   }]
 })
 
+const itemsOf = (value: unknown, known: { has: (ref: string) => boolean }): BriefItem[] => objects(value).slice(0, 20).flatMap(row => {
+  const id = typeof row.id === "string" ? row.id.trim().slice(0, 24) : ""
+  if (!id) return []
+  const quote = (value: unknown) => typeof value === "string" ? value.trim().slice(0, 300) : ""
+  return [{ id, question: quote(row.question), recommended: quote(row.recommended),
+    alternatives: (Array.isArray(row.alternatives) ? row.alternatives : []).slice(0, 4).map(quote).filter(Boolean),
+    refs: Array.isArray(row.refs) ? row.refs.filter((ref): ref is string => typeof ref === "string" && known.has(ref)) : [] }]
+})
+
 // The reply is plain text; tolerate a fenced block, nothing more.
 const parseBrief = (message?: MessageWithParts) => {
   const text = message?.parts.flatMap(part => part.type === "text" && !part.synthetic ? [part.text] : []).join("").trim()
@@ -454,7 +469,7 @@ export const briefState = (meta: BriefMeta, messages: MessageWithParts[], status
         question: text(value.question, 160), context: text(value.context, 320), subjects: subjectsOf(value.subjects, known), choices: choicesOf(value.choices, legacy),
         commands: objects(value.commands).slice(0, 4).flatMap(row => typeof row.command === "string" && row.command.trim() && row.command.length <= 2000 && text(row.label, 80)
           ? [{ label: text(row.label, 80), where: text(row.where, 80), option: typeof row.option === "string" ? row.option : "", command: row.command.trim() }] : []),
-        steps: stepsOf(value.steps, known),
+        steps: stepsOf(value.steps, known), items: itemsOf(value.items, known),
         ifWait: text(value.ifWait, 140), sends: typeof value.sends === "string" ? value.sends.trim() : "", sendsTo: text(value.sendsTo, 160), sendsAs: text(value.sendsAs, 60),
         ...shapeOf(value.shape), gaps: strings(value.gaps, 160, 3),
         // A source survives only with at least one ref the app can resolve; the label alone is never shown.
@@ -530,6 +545,21 @@ export const briefSteps = (result: BriefResult, item: DeskItem, documents: Conve
     ...step,
     verify: quoted(step.verify) ? step.verify : "",
     settings: step.settings.map(setting => quoted(setting.value) ? setting : { ...setting, value: "" }),
+  }))
+}
+
+/** Items a brief may show. A row whose ID is not written in the request or a named document is dropped (an
+ * invented or renumbered item); a question, recommendation or alternative not quoted exactly is blanked and
+ * shows as not given. Rows keep the brief's order, which the prompt binds to the request's. */
+export const briefItems = (result: BriefResult, item: DeskItem, documents: ConversationDocument[] = []) => {
+  const sources = [item.record?.context ?? "", item.record?.title ?? "", ...documents.map(document => document.text)]
+  const quoted = (value: string) => value !== "" && sources.some(source => source.includes(value))
+  const seen = new Set<string>()
+  return result.items.filter(row => quoted(row.id) && !seen.has(row.id) && seen.add(row.id)).map(row => ({
+    ...row,
+    question: quoted(row.question) ? row.question : "",
+    recommended: quoted(row.recommended) ? row.recommended : "",
+    alternatives: row.alternatives.map(value => quoted(value) ? value : ""),
   }))
 }
 
