@@ -63,7 +63,7 @@ const historyVersion = (record: AttentionRecord) => `${record.revision}:${record
 
 // One answer: a selected option, a written note, or both. Either alone is a complete answer unless the
 // option declares required input; nothing is written on the human's behalf. Secondary actions sit beside the single primary one.
-const Answer = (props: { record: AttentionRecord; attention: Attention; options: boolean; onView?: (view: AttentionView) => void; extra?: JSX.Element; prepared?: BriefResult; afterChoices?: JSX.Element; sends?: Sends; briefJob?: { job: string; revision: string } }) => {
+export const Answer = (props: { record: AttentionRecord; attention: Attention; options: boolean; onView?: (view: AttentionView) => void; extra?: JSX.Element; prepared?: BriefResult; afterChoices?: JSX.Element; sends?: Sends; briefJob?: { job: string; revision: string } }) => {
   const [text, setText] = createSignal(localStorage.getItem(answerDraftKey(props.record)) ?? "")
   const [choice, setChoice] = createSignal("")
   const canWrite = () => canWriteAttention(props.attention, props.record)

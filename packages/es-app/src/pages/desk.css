@@ -207,6 +207,21 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
 }
 /* Question-first card: the human question is the largest text; the producer title is one muted line. */
 .home-decision h3.home-question { font-size: 16px; line-height: 1.35; margin-block: 2px 0; }
+
+.attention-series { padding: 18px 17px; background: var(--mantle); border-inline-start: 2px solid var(--yellow); min-inline-size: 0; overflow-wrap: anywhere; }
+.attention-series-head h3 { margin-block: 5px; }
+.attention-series-progress { color: var(--green); font-weight: 600; font-variant-numeric: tabular-nums; }
+.attention-series-questions { list-style: none; padding: 0; margin: 14px 0 0; }
+.attention-series-question { border-block-start: 1px solid var(--surface1); padding-block: 14px; min-inline-size: 0; }
+.attention-series-question-head { display: flex; align-items: baseline; gap: 10px; justify-content: space-between; }
+.attention-series-question h4 { margin: 0 0 8px; font-size: 13px; line-height: 1.5; }
+.attention-series-withdrawn { color: var(--subtext0); font-size: 11px; }
+.attention-series-suggestions { padding-inline-start: 18px; margin-block: 3px 8px; line-height: 1.7; }
+.attention-series-recommended { color: var(--peach); font-size: 11px; margin-inline-start: 6px; }
+.attention-series-recorded { border-inline-start: 2px solid var(--green); background: var(--base); padding: 8px 12px; margin-block: 8px; white-space: pre-wrap; }
+.attention-series-recorded strong { color: var(--green); }
+.attention-series-recorded pre { margin: 4px 0; }
+.attention-series .home-answer { max-inline-size: 100%; }
 .home-request-line { font-size: 11px; color: var(--subtext0); margin: 2px 0 6px; }
 .desk-brief-context { font-size: 13px !important; line-height: 1.5; margin-block: 4px 8px !important; }
 .desk-visual iframe { inline-size: 100%; border: 0; background: #181825; display: block; resize: none; }
