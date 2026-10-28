@@ -11,17 +11,15 @@ import { HostSwitch } from "./host-switch"
 import { useDeskChat } from "../desk-companion"
 import { useDashboard } from "../state"
 import { deskSessionID } from "../desk-session"
-
-export type Mode = "desk" | "agents"
-export const modeOf = (pathname: string): Mode => pathname === "/" ? "desk" : "agents"
-
-const KEY = { desk: "es-app:mode:desk", agents: "es-app:mode:agents" } as const
-const HOME = { desk: "/", agents: "/agents" } as const
+import { KEY, modeHref, modeOf, REDIRECTS, type Mode } from "../mode"
 
 /** Mounted once in the shell: records the last URL seen in each mode. */
 export const trackModes = () => {
   const location = useLocation()
-  createEffect(() => sessionStorage.setItem(KEY[modeOf(location.pathname)], location.pathname + location.search + location.hash))
+  createEffect(() => {
+    if (REDIRECTS.has(location.pathname)) return
+    sessionStorage.setItem(KEY[modeOf(location.pathname)], location.pathname + location.search + location.hash)
+  })
 }
 
 export const ModeSwitch = (props: { compact?: boolean }) => {
@@ -38,7 +36,7 @@ export const ModeSwitch = (props: { compact?: boolean }) => {
   const deskBusy = () => { const id = deskID(); const status = id ? activity.status(id) : undefined; return status === "busy" || status === "retry" }
   const href = (mode: Mode) => {
     location.pathname
-    return current() === mode ? HOME[mode] : sessionStorage.getItem(KEY[mode]) ?? HOME[mode]
+    return modeHref(mode, current(), sessionStorage.getItem(KEY[mode]))
   }
   // Unread-style: the desk's Needs-you count plus new requested deliverables, shown away from the desk
   // where the queue is out of view.
@@ -76,7 +74,7 @@ export const NavEntries = (props: { compact?: boolean }) => {
     return status === "busy" || status === "retry"
   }
   const onDecisions = () => location.pathname === "/"
-  const href = () => { location.pathname; return onDecisions() ? HOME.desk : sessionStorage.getItem(KEY.desk) ?? HOME.desk }
+  const href = () => { location.pathname; return modeHref("desk", onDecisions() ? "desk" : "agents", sessionStorage.getItem(KEY.desk)) }
   const delivered = () => queue.surfaces.deliverables().fresh.length
   const waiting = () => queue.items().length + delivered()
   const label = () => [queue.items().length ? `${queue.items().length} need${queue.items().length === 1 ? "s" : ""} you` : "",
