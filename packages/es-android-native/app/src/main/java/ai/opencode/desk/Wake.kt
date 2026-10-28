@@ -23,6 +23,7 @@ data class Delivery(
     val state: String? = null,
     val request_id: String? = null,
     val error: String? = null,
+    val host: String? = null,
     val presented_at: JsonElement? = null,
     val handled_at: JsonElement? = null,
     val wake: String? = null,

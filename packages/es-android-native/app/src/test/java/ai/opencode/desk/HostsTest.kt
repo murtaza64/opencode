@@ -8,7 +8,7 @@ import org.junit.Test
 class HostsTest {
     @Test
     fun glyphs_are_keyed_by_verified_host_id_only() {
-        assertEquals(Hosts.Glyph.Laptop, Hosts.glyph("local"))
+        assertNull(Hosts.glyph("local"))
         assertEquals(Hosts.Glyph.Laptop, Hosts.glyph("laptop"))
         assertEquals(Hosts.Glyph.Ygnium, Hosts.glyph("ygnium"))
         assertEquals(Hosts.Glyph.Mini, Hosts.glyph("Mini"))
@@ -31,7 +31,8 @@ class HostsTest {
     @Test
     fun accessible_suffix_uses_the_host_label() {
         assertEquals("on Mac Mini", Hosts.accessibleSuffix(HostInfo(id = "mini", label = "Mac Mini", remote = true)))
-        assertEquals("on Local", Hosts.accessibleSuffix(HostInfo()))
+        assertNull(Hosts.accessibleSuffix(HostInfo()))
+        assertEquals("on Local", Hosts.accessibleSuffix(HostInfo(self = "laptop")))
         assertEquals("on mini", Hosts.accessibleSuffix(HostInfo(id = "mini", label = "")))
         assertNull(Hosts.accessibleSuffix(null))
     }

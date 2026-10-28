@@ -1,0 +1,138 @@
+{
+ "editspace": "opencode",
+ "root": "/Users/murtaza/editspaces/opencode",
+ "lanes": [
+  {
+   "thread_key": "ses_7598080490d6c65e13f12a46b9707a94",
+   "lane": {
+    "lane": "remote-host-client",
+    "owner": "ses_7598080490d6c65e13f12a46b9707a94",
+    "activity": "",
+    "activity_at": "",
+    "activity_session": "",
+    "status": "active",
+    "dir": "/Users/murtaza/editspaces/opencode/lanes/remote-host-client"
+   },
+   "sessions": [
+    {
+     "id": "ses_7598080490d6c65e13f12a46b9707a94",
+     "title": "remote-host-client (Mini)",
+     "live": "busy",
+     "updated": 1793145665647.203,
+     "directory": "/Users/murtaza/opencode/.editspace/lanes/remote-host-client/repos/murtaza64/opencode"
+    }
+   ],
+   "owner_session_present": true
+  },
+  {
+   "thread_key": "ses_d218a78255fd4173ec7f696a0463e10c",
+   "lane": {
+    "lane": "front-desk",
+    "owner": "ses_d218a78255fd4173ec7f696a0463e10c",
+    "activity": "waiting perf-lead slot (~00:25Z) for es-app install/typecheck/tests; source ready: dotfiles ukovr (mail correction wake) + new contract-steps change; opencode lzyoo (steps renderer)",
+    "activity_at": "2026-10-28T00:01:10Z",
+    "activity_session": "ses_d218a78255fd4173ec7f696a0463e10c",
+    "status": "active",
+    "dir": "/Users/murtaza/editspaces/opencode/lanes/front-desk"
+   },
+   "sessions": [
+    {
+     "id": "ses_d218a78255fd4173ec7f696a0463e10c",
+     "title": "front-desk (Mini)",
+     "live": "busy",
+     "updated": 1793145663649.84,
+     "directory": "/Users/murtaza/opencode/.editspace/lanes/front-desk/repos/murtaza64/opencode"
+    }
+   ],
+   "owner_session_present": true
+  },
+  {
+   "thread_key": "ses_08ea4eaf26425e580731ac0e6fee52ba",
+   "lane": {
+    "lane": "ux-feel",
+    "owner": "ses_08ea4eaf26425e580731ac0e6fee52ba",
+    "activity": "parked: waiting for heavy-job window to test rebased tmmwm 65dc5efb; BUG03 pin 0827ff19 sent",
+    "activity_at": "2026-10-27T23:57:47Z",
+    "activity_session": "ses_08ea4eaf26425e580731ac0e6fee52ba",
+    "status": "active",
+    "dir": "/Users/murtaza/editspaces/opencode/lanes/ux-feel"
+   },
+   "sessions": [
+    {
+     "id": "ses_08ea4eaf26425e580731ac0e6fee52ba",
+     "title": "ux-feel (Mini)",
+     "live": "idle",
+     "updated": 1793145480705.397,
+     "directory": "/Users/murtaza/opencode/.editspace/lanes/ux-feel/repos/murtaza64/opencode"
+    }
+   ],
+   "owner_session_present": true
+  },
+  {
+   "thread_key": "ses_b1017a6751085e804559a25277a80b4e",
+   "lane": {
+    "lane": "performance-lead-sustained-daemon-and-desktop-reliability",
+    "owner": "ses_b1017a6751085e804559a25277a80b4e",
+    "activity": "post-gate owner for Mini Core restart; awaiting android-lead/es-app readbacks",
+    "activity_at": "2026-10-27T23:52:37Z",
+    "activity_session": "ses_b1017a6751085e804559a25277a80b4e",
+    "status": "active",
+    "dir": "/Users/murtaza/editspaces/opencode/lanes/performance-lead-sustained-daemon-and-desktop-reliability"
+   },
+   "sessions": [
+    {
+     "id": "ses_b1017a6751085e804559a25277a80b4e",
+     "title": "performance head (Mini)",
+     "live": "busy",
+     "updated": 1793145456554.309,
+     "directory": "/Users/murtaza/opencode/.editspace/lanes/performance-lead-sustained-daemon-and-desktop-reliability/repos/murtaza64/opencode"
+    }
+   ],
+   "owner_session_present": true
+  },
+  {
+   "thread_key": "ses_7efac8ae359f5cc8eed9a52ed73b2344",
+   "lane": {
+    "lane": "orchestrator",
+    "owner": "ses_7efac8ae359f5cc8eed9a52ed73b2344",
+    "activity": "Driving pending es-app/OpenCode/Android delivery; local spike delegated to verify worker ses_032e14696862dab2922018aa37de7572",
+    "activity_at": "2026-10-27T23:10:10Z",
+    "activity_session": "ses_7efac8ae359f5cc8eed9a52ed73b2344",
+    "status": "active",
+    "dir": "/Users/murtaza/editspaces/opencode/lanes/orchestrator"
+   },
+   "sessions": [
+    {
+     "id": "ses_7efac8ae359f5cc8eed9a52ed73b2344",
+     "title": "Relay (Mini receiving orchestrator)",
+     "live": "busy",
+     "updated": 1793145456535.429,
+     "directory": "/Users/murtaza/opencode/.editspace/lanes/orchestrator/repos/murtaza64/opencode"
+    }
+   ],
+   "owner_session_present": true
+  },
+  {
+   "thread_key": "ses_912bac3aed956cd1aca19eacd25f743f",
+   "lane": {
+    "lane": "composer-refs-mention-lane-title-pending-image-echo",
+    "owner": "ses_912bac3aed956cd1aca19eacd25f743f",
+    "activity": "slice2 at rest (oqmyz 98c5d35c); heavy slot held until Mini Core restart completes",
+    "activity_at": "2026-10-27T23:52:48Z",
+    "activity_session": "ses_912bac3aed956cd1aca19eacd25f743f",
+    "status": "active",
+    "dir": "/Users/murtaza/editspaces/opencode/lanes/composer-refs-mention-lane-title-pending-image-echo"
+   },
+   "sessions": [
+    {
+     "id": "ses_912bac3aed956cd1aca19eacd25f743f",
+     "title": "composer-refs (Mini)",
+     "live": "busy",
+     "updated": 1793144595976.222,
+     "directory": "/Users/murtaza/opencode/.editspace/lanes/composer-refs-mention-lane-title-pending-image-echo/repos/murtaza64/opencode"
+    }
+   ],
+   "owner_session_present": true
+  }
+ ]
+}

@@ -69,7 +69,8 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
         if (Timeline.finalizes(lastStatus.value, status)) frozen.value = false else if (store.deskBusy) frozen.value = true
         lastStatus.value = status
     }
-    var text by rememberSaveable { mutableStateOf("") }
+    val text = store.draftText(DeskStore.DESK_DRAFT)
+    val setText = { value: String -> store.setDraftText(DeskStore.DESK_DRAFT, value) }
     var sending by rememberSaveable { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     // Poll while the screen is open: the reply arrives as a new assistant message and there is
@@ -112,7 +113,7 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
         Row(Modifier.fillMaxWidth().background(Ink.Black).imePadding().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (store.deskReady) AttachButton(store, id) { error = it }
             TextField(
-                value = text, onValueChange = { text = it }, maxLines = 5,
+                value = text, onValueChange = setText, maxLines = 5,
                 placeholder = { Text("Message the desk", color = Ink.Dim) },
                 modifier = Modifier.weight(1f).testTag("chat-text"), shape = RoundedCornerShape(4.dp),
                 colors = TextFieldDefaults.colors(focusedContainerColor = Ink.Panel, unfocusedContainerColor = Ink.Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = Ink.Blue),
@@ -120,7 +121,7 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
             IconButton(enabled = (text.isNotBlank() || hasImages) && !sending, modifier = Modifier.testTag("chat-send"), onClick = {
                 val message = text.trim(); sending = true; error = null
                 scope.launch {
-                    store.askDesk(message).fold({ text = "" }, { error = it.message?.take(120) })
+                    store.askDesk(message).fold({ /* draft cleared by the store once accepted */ }, { error = it.message?.take(120) })
                     sending = false
                 }
             }) { Icon(Icons.Filled.Send, "Send", tint = if (text.isNotBlank() || hasImages) Ink.Blue else Ink.Dim) }

@@ -44,8 +44,10 @@ class Gateway(context: Context) {
     // Every credential is scoped to the exact origin it was issued for.
     val credentials = Credentials(kv(prefs), kv(secrets))
     private val jar = CookieStore(credentials) { origin }
+    val diagnostics = ai.opencode.desk.Diagnostics()
     val client: OkHttpClient = OkHttpClient.Builder()
         .cookieJar(jar)
+        .eventListenerFactory(diagnostics.factory)
         .addInterceptor(Access.TokenInterceptor({ origin.toHttpUrlOrNull() }, { accessToken }))
         .followRedirects(false)
         .connectTimeout(5, TimeUnit.SECONDS)

@@ -58,7 +58,7 @@ fun Chip(text: String, color: Color, filled: Boolean = false) {
 @Composable
 fun AttentionRow(record: AttentionRecord, now: Long, onClick: () -> Unit, host: HostInfo? = null) {
     val color = kindColor(record.kind)
-    val glyph = Hosts.glyph(host?.id)
+    val glyph = Hosts.glyph(Hosts.resolve(host)?.id)
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 12.dp, end = 20.dp, top = 12.dp, bottom = 12.dp)
             .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(record.kind, record.title, Hosts.accessibleSuffix(host)).joinToString(", ") },

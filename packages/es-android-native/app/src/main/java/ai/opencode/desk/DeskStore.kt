@@ -87,6 +87,10 @@ fun mergeNewest(existing: List<MessageWithParts>, page: List<MessageWithParts>):
 }
 
 class DeskStore(app: Application) : AndroidViewModel(app) {
+    companion object {
+        // Draft key for the Front Desk conversation: stable before the desk session exists.
+        const val DESK_DRAFT = "desk"
+    }
     val gateway = Gateway(app)
     val profiles = ProfileBridge(app)
     var profileSwitch by mutableStateOf(Profiles.decide(profiles.current, profiles.targets()))
@@ -124,6 +128,16 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     // Verified host identity of the current gateway (null until read, or when the route is absent).
     var host by mutableStateOf<HostInfo?>(null)
         private set
+    // Verified machine id of the current gateway, learned from delivery/wake-event `host` fields
+    // (the federation registry's `self`); persisted per origin.
+    private var hostSelf: String?
+        get() = prefs.getString("host.self:${DeskPointers.normalize(gateway.origin)}", null)
+        set(value) { prefs.edit().putString("host.self:${DeskPointers.normalize(gateway.origin)}", value).apply() }
+    private fun learnHost(id: String?) {
+        if (id.isNullOrBlank() || Hosts.glyph(id) == null || hostSelf == id) return
+        hostSelf = id
+        host = host?.copy(self = id) ?: HostInfo(self = id)
+    }
     // Notification reconciler state: the device ledger (tag → stamp) persisted per phone, and
     // a deep link waiting to be shown once the record is loaded.
     private val notifier = Notifier(app)
@@ -157,8 +171,18 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         private set
     // Images picked for the next send, per session, already normalised and stored under a
     // reserved requestID so the send can be retried byte-for-byte.
-    val drafts = mutableStateMapOf<String, ImageDraft>()
-    data class ImageDraft(val requestID: String, val images: List<StoredImage>)
+    // Drafts are durable per (origin, session): text + attachments + reserved requestID
+    // (DraftStore); this map mirrors the current origin's entries for Compose.
+    private val draftStore = DraftStore(kv)
+    val drafts = mutableStateMapOf<String, Draft>()
+    private fun loadDrafts() { drafts.clear(); draftStore.list(gateway.origin).forEach { drafts[it.sessionID] = it } }
+    private fun saveDraft(draft: Draft) { if (draft.empty) drafts.remove(draft.sessionID) else drafts[draft.sessionID] = draft; draftStore.put(draft) }
+    fun draftText(sessionID: String): String = drafts[sessionID]?.text.orEmpty()
+    fun setDraftText(sessionID: String, text: String) {
+        val current = drafts[sessionID] ?: Draft(gateway.origin, sessionID, UUID.randomUUID().toString())
+        if (current.text == text) return
+        saveDraft(current.copy(text = text, updatedAt = System.currentTimeMillis()))
+    }
     val mine = mutableStateMapOf<String, Set<String>>()
     private fun remember(sessionID: String, items: List<Pending>) {
         items.filter { it.author == null && it.messageID != null }.forEach { sent.record(sessionID, it.messageID!!) }
@@ -172,6 +196,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     private var events: Job? = null
 
     init {
+        loadDrafts()
         restoreOutbox()
         if (gateway.paired) connect()
         viewModelScope.launch { while (isActive) { now = System.currentTimeMillis(); delay(10_000) } }
@@ -201,7 +226,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         gateway.origin = origin
         desk = pointers.get(origin)
         pins = pinStore.list(origin)
-        outbox.clear(); drafts.clear()
+        outbox.clear(); loadDrafts()
         restoreOutbox()
         if (access != null) gateway.saveAccessToken(access)
         return runCatching { gateway.pair(code) }.fold(
@@ -221,7 +246,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         states.clear(); open = emptyList(); agents = emptyList(); surfaces = emptyList(); host = null
         desk = pointers.get(origin); deskBusy = false
         pins = pinStore.list(origin)
-        outbox.clear(); drafts.clear()
+        outbox.clear(); loadDrafts()
         restoreOutbox()
         if (gateway.paired) connect() else link = Link.Unpaired
     }
@@ -272,7 +297,12 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
                 val session = async { runCatching { api.operator() }.getOrNull() }
                 // Surfaces are optional: an older gateway without the route leaves the section empty.
                 val boards = async { runCatching { api.surfaces() } }
-                hostInfo.await()?.let { host = it }
+                hostInfo.await()?.let { info ->
+                    // The gateway reports "local" for itself; the federation registry's own id rides on
+                    // mail deliveries (`host`) and wake events. Learn it once per origin and keep it.
+                    val learned = hostSelf ?: info.self
+                    host = if (learned != null) info.copy(self = learned) else info
+                }
                 val names = spaces.await().editspaces.map { it.name }
                 editspaces = names
                 val loaded = names.map { name -> async { name to runCatching { api.state(name) }.getOrNull() } }.awaitAll()
@@ -334,8 +364,10 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
             thread.lanes.map { lane ->
                 // Only sessions anchored in the lane directory count; a parent session that
                 // holds the lane record while the worker starts is never shown as the lane.
-                val sessions = thread.sessions.filter { Anchors.inLane(lane, it) }.sortedByDescending { it.updated }
-                val head = Anchors.pick(lane, thread.sessions)
+                // Join by the lane's recorded session id across the whole editspace page (threads may
+                // not list every session), then by normalised directory.
+                val head = Anchors.pick(lane, thread.sessions + state.sessions)
+                val sessions = Anchors.anchored(lane, thread.sessions + state.sessions, head).sortedByDescending { it.updated }
                 Agent(
                     key = "$es/${lane.lane}",
                     editspace = es,
@@ -394,13 +426,16 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
                         // Keep the deeper cursor when older pages are already loaded.
                         cursor = if (previous != null && older.size > newest.items.size) previous.cursor else newest.cursor,
                         mail = mail.await(), wakeEvents = wakes.await(),
-                    )
+                    ).also { d ->
+                        learnHost(d.mail.flatMap { m -> m.deliveries }.firstNotNullOfOrNull { it.host } ?: d.wakeEvents.firstNotNullOfOrNull { it.host })
+                    }
                 }
             }.getOrElse { AgentDetail(error = it.message, loadedAt = System.currentTimeMillis(), messages = previous?.messages.orEmpty(), cursor = previous?.cursor) }
             details[agent.key] = detail
             outbox[session.id] = Outbox.reconcile(outbox[session.id].orEmpty(), detail.receipts, detail.messages.map { it.info.id }.toSet())
             remember(session.id, outbox[session.id].orEmpty())
             release(outbox[session.id].orEmpty())
+            confirmDrafts(session.id)
         }
     }
 
@@ -426,7 +461,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         val entry = durable.get(origin, requestID) ?: OutboxEntry(
             requestID, origin, sessionID, directory, text, delivery,
             images = drafts[sessionID]?.takeIf { it.requestID == requestID }?.images.orEmpty(), createdAt = System.currentTimeMillis(),
-        ).also { durable.put(it); drafts.remove(sessionID) }
+        ).also { durable.put(it) }
         val existing = outbox[sessionID].orEmpty().firstOrNull { it.requestID == requestID }
         val item = existing?.copy(state = SendState.Sending, error = null, attempts = existing.attempts + 1)
             ?: Pending(requestID, sessionID, entry.text, entry.delivery, SendState.Sending, createdAt = entry.createdAt, images = entry.images.size)
@@ -447,6 +482,11 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         )
         outbox[sessionID] = outbox[sessionID].orEmpty().map { if (it.requestID == requestID) settled else it }
         remember(sessionID, listOf(settled))
+        // The draft survives a failed or unconfirmed send; only a confirmed accept clears it.
+        if (settled.state == SendState.Accepted || settled.state == SendState.Presented || settled.state == SendState.Handled) {
+            draftStore.clear(origin, sessionID, requestID)
+            drafts[sessionID]?.takeIf { it.requestID == requestID }?.let { drafts.remove(sessionID) }
+        }
         after()
         return settled
     }
@@ -471,6 +511,12 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         durable.remove(gateway.origin, item.requestID)
     }
 
+    private fun confirmDrafts(sessionID: String) {
+        val draft = drafts[sessionID] ?: return
+        val proven = outbox[sessionID].orEmpty().firstOrNull { it.requestID == draft.requestID && it.state != SendState.Sending && !it.retryable }
+        if (proven != null) { draftStore.clear(gateway.origin, sessionID, draft.requestID); drafts.remove(sessionID) }
+    }
+
     // Stored bytes are released as soon as the server has handled the input.
     private fun release(items: List<Pending>) {
         items.filter { it.done || (it.author == null && it.state == SendState.Presented) }.forEach { durable.remove(gateway.origin, it.requestID) }
@@ -480,7 +526,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     // Normalises off the main thread once at pick time and stores the bytes under the send's
     // reserved requestID, so the later POST (and any retry) reads identical bytes.
     suspend fun attach(sessionID: String, uris: List<android.net.Uri>): String? {
-        val draft = drafts[sessionID] ?: ImageDraft(UUID.randomUUID().toString(), emptyList())
+        val draft = drafts[sessionID] ?: Draft(gateway.origin, sessionID, UUID.randomUUID().toString())
         if (draft.images.size + uris.size > ImagePolicy.MAX_COUNT) return "At most ${ImagePolicy.MAX_COUNT} images are supported"
         val added = mutableListOf<StoredImage>()
         for ((offset, uri) in uris.withIndex()) {
@@ -489,17 +535,18 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
             val path = withContext(Dispatchers.IO) { durable.store(draft.requestID, index, normalized.mime, normalized.bytes) }
             added += StoredImage(path, normalized.mime, normalized.bytes.size.toLong(), normalized.width, normalized.height)
         }
-        val next = draft.copy(images = draft.images + added)
+        val next = draft.copy(images = draft.images + added, updatedAt = System.currentTimeMillis())
         ImagePolicy.issue(next.images)?.let { issue -> added.forEach { blobs.delete(it.path) }; return issue }
-        drafts[sessionID] = next
+        saveDraft(next)
         return null
     }
 
     fun detach(sessionID: String, image: StoredImage) {
         val draft = drafts[sessionID] ?: return
         blobs.delete(image.path)
-        val next = draft.copy(images = draft.images - image)
-        if (next.images.isEmpty()) { drafts.remove(sessionID); blobs.deleteAll("outbox/${draft.requestID}/") } else drafts[sessionID] = next
+        val next = draft.copy(images = draft.images - image, updatedAt = System.currentTimeMillis())
+        if (next.empty) blobs.deleteAll("outbox/${draft.requestID}/")
+        saveDraft(next)
     }
 
     fun requestID(sessionID: String) = drafts[sessionID]?.requestID ?: UUID.randomUUID().toString()
@@ -578,6 +625,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
                 outbox[pointer.id] = Outbox.reconcile(outbox[pointer.id].orEmpty(), receipts, deskMessages[pointer.id].orEmpty().map { it.info.id }.toSet())
                 remember(pointer.id, outbox[pointer.id].orEmpty())
                 release(outbox[pointer.id].orEmpty())
+                confirmDrafts(pointer.id)
             }
             // Core status, not the dashboard list: the desk session is not in any lane.
             runCatching { api.status(pointer.directory)[pointer.id]?.type == "busy" }.onSuccess { deskBusy = it }
@@ -600,7 +648,12 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     }
 
     suspend fun askDesk(text: String): Result<Pending> =
-        ensureDesk().map { pointer -> send(pointer.id, pointer.directory, text, "queue", requestID(pointer.id)) { loadDesk() } }
+        ensureDesk().map { pointer ->
+            // The desk draft is keyed by DESK_DRAFT; move its identity + images onto the real session id for the send.
+            val draft = drafts[DESK_DRAFT]
+            if (draft != null && drafts[pointer.id] == null) { saveDraft(draft.copy(sessionID = pointer.id)); saveDraft(draft.copy(text = "", images = emptyList())) }
+            send(pointer.id, pointer.directory, text, "queue", requestID(pointer.id)) { loadDesk() }
+        }
 }
 
 fun parseIso(value: String): Long? = runCatching { java.time.Instant.parse(value).toEpochMilli() }.getOrNull()

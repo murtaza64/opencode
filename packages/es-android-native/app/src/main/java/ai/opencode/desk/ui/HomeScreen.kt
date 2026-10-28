@@ -348,7 +348,8 @@ private fun AgentsTab(store: DeskStore, nav: Nav) {
 
 @Composable
 private fun Composer(store: DeskStore, nav: Nav) {
-    var text by rememberSaveable { mutableStateOf("") }
+    val text = store.draftText(DeskStore.DESK_DRAFT)
+    val setText = { value: String -> store.setDraftText(DeskStore.DESK_DRAFT, value) }
     var sending by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     Row(
@@ -356,7 +357,7 @@ private fun Composer(store: DeskStore, nav: Nav) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         TextField(
-            value = text, onValueChange = { text = it },
+            value = text, onValueChange = setText,
             placeholder = { Text(if (store.deskBusy) "Desk is thinking… add to it" else "Ask the desk or start work", style = MaterialTheme.typography.bodyLarge, color = Ink.Dim) },
             modifier = Modifier.weight(1f).testTag("composer"),
             maxLines = 4,
@@ -370,7 +371,7 @@ private fun Composer(store: DeskStore, nav: Nav) {
             onClick = {
                 val message = text.trim(); sending = true
                 scope.launch {
-                    store.askDesk(message).onSuccess { text = ""; nav.push(Route.Chat) }
+                    store.askDesk(message).onSuccess { nav.push(Route.Chat) }
                     sending = false
                 }
             },
@@ -409,7 +410,7 @@ private fun PinRow(store: DeskStore, view: PinView, nav: Nav) {
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Hosts.glyph(store.host?.id)?.let { HostGlyph(it); Spacer(Modifier.width(6.dp)) }
+                Hosts.glyph(Hosts.resolve(store.host)?.id)?.let { HostGlyph(it); Spacer(Modifier.width(6.dp)) }
                 Text(view.title, style = MaterialTheme.typography.bodyMedium, color = if (unavailable) Ink.Muted else Ink.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Label(listOfNotNull(view.pin.editspace, view.status, view.activity.takeIf { it.isNotBlank() }).joinToString(" · "), color = if (unavailable) Ink.Dim else Ink.Muted)
@@ -429,7 +430,7 @@ private fun SurfaceRow(surface: Surface, now: Long, onClick: () -> Unit, store: 
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Hosts.glyph(store?.host?.id)?.let { HostGlyph(it) }
+                Hosts.glyph(Hosts.resolve(store?.host)?.id)?.let { HostGlyph(it) }
                 Text(surface.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 if (surface.unseen) Chip("new", Ink.Amber, filled = true)
             }

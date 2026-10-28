@@ -117,7 +117,11 @@ class Api(val gateway: Gateway) {
     // the server advertises the next one in X-Next-Cursor when older messages exist.
     suspend fun page(id: String, directory: String, limit: Int, before: String?): MessagePage {
         val (body, next) = gateway.getWithHeader("/oc/session/$id/message", "X-Next-Cursor", mapOf("directory" to directory, "limit" to limit.toString(), "before" to before))
-        return MessagePage(json.decodeFromString(ListSerializer(MessageWithParts.serializer()), body), next)
+        val t0 = System.nanoTime()
+        val items = json.decodeFromString(ListSerializer(MessageWithParts.serializer()), body)
+        // Desk does not request compact=true today; recorded so the diagnostics sheet says so.
+        gateway.diagnostics.annotate("/session/$id/message", parseMs = (System.nanoTime() - t0) / 1_000_000, compact = false)
+        return MessagePage(items, next)
     }
     suspend fun todos(id: String, directory: String): List<Todo> =
         json.decodeFromString(ListSerializer(Todo.serializer()), gateway.get("/oc/session/$id/todo", mapOf("directory" to directory)))

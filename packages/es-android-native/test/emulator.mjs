@@ -104,9 +104,9 @@ try {
   await waitFor(byId("desk"), "desk home")
   await waitFor(byText("Promote steers"), "attention row")
   pass("paired and the desk shows live fixture data")
-  // Host glyphs (§4): the fixture gateway reports verified id "local" → rows carry "on Local" in their accessible name.
-  await waitFor((node) => node["content-desc"]?.includes("on Local"), "host glyph accessible suffix on a row")
-  pass("host glyph keyed by verified gateway host id (local → laptop), accessible 'on Local'")
+  // Host glyphs (§4): a bare gateway "local" draws nothing; the machine id is learned from delivery host fields.
+  if ((await nodes()).some((node) => node["content-desc"]?.includes("on Local"))) throw new Error("glyph drawn from bare local before any verified id")
+  pass("no host glyph from bare gateway local")
   await screenshot("02-desk")
 
   // 2. decide
@@ -144,6 +144,8 @@ try {
   // Wake cues (§4) only when the gateway exposes /es/api/mail (it does) and markers only via /es/api/wake-events (gateway allowlist pending).
   await waitFor((node) => node["content-desc"]?.includes("Woke composer-float"), "caused wake cue on the task chip")
   pass("wake cue: task mail shows 'Woke composer-float' from delivery evidence")
+  await waitFor((node) => node.text === "ON LOCAL" || node.text?.startsWith("ON LOCAL ·"), "host learned from delivery host field")
+  pass("host glyph resolved from the delivery host field (laptop), not from bare local")
   if ((await nodes()).some((node) => node["content-desc"]?.startsWith("Woke for passive review"))) pass("wake marker rendered (gateway exposes /es/api/wake-events)")
   else console.info("note: no wake marker — /es/api/wake-events not exposed by this gateway build (expected until es-desktop allowlists it)")
   await screenshot("11-chat-parts-populated")
@@ -165,8 +167,17 @@ try {
     await adb("shell", "am", "force-stop", pkg)
     await adb("shell", "am", "start", "-W", "-n", `${pkg}/.MainActivity`, "--es", "desk.agent", "opencode/composer-float", ...extras)
     await reverse()
-    await waitFor((node) => node["content-desc"]?.startsWith("Mail from es-app, task"), "agent reopened", 60_000)
+    await waitFor(byId("steer-text"), "agent reopened", 60_000)
   }
+  // Durable draft (AND-W3): typed text survives a process kill + relaunch on the same origin/session.
+  await type("steer-text", "draft survives kill")
+  await relaunch()
+  await waitFor(byId("steer-text"), "agent after kill")
+  const draftField = (await nodes()).find(byId("steer-text"))
+  if (!draftField?.text?.includes("draft survives kill")) throw new Error(`draft lost after kill: ${JSON.stringify(draftField?.text)}`)
+  pass("durable draft restored after process kill")
+  // clear it so later steps start clean
+  await tap(draftField); await adb("shell", "input", "keyevent", "KEYCODE_MOVE_END", ...Array(24).fill("KEYCODE_DEL")); await hideKeyboard()
   await relaunch("--ei", "desk.width", "390")
   await screenshot("13-chat-parts-narrow-390")
   await relaunch("--ez", "desk.rtl", "true")

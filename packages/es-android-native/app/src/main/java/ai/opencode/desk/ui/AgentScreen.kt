@@ -48,6 +48,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Alignment
@@ -98,6 +99,14 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
     // older pages append at the far end without moving what the reader is looking at.
     val list = rememberLazyListState()
     val previousTimeline = remember(key) { mutableStateOf<List<Timeline.Item>?>(null) }
+    var diagnostics by rememberSaveable(key) { mutableStateOf(false) }
+    // First frame after a transcript load: measured from loadedAt to the next drawn frame.
+    LaunchedEffect(detail?.loadedAt) {
+        val at = detail?.loadedAt ?: return@LaunchedEffect
+        if (detail.messages.isEmpty()) return@LaunchedEffect
+        withFrameNanos { }
+        store.gateway.diagnostics.annotate("/session/${agent.session?.id}/message", renderMs = System.currentTimeMillis() - at)
+    }
     val expandedIds = remember(key) { mutableStateMapOf<String, Boolean>() }
     // Finalize grouping once, on a real busy→idle/error transition of this session's status.
     val lastStatus = remember(key) { mutableStateOf(agent.status) }
@@ -117,10 +126,10 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         val pin = Pin(agent.editspace, agent.lane)
         val glyph = Hosts.forLane(agent.owner, store.host)
-        TopBar(agent.title, onBack = { nav.pop() }, trailing = { PinButton(store.pinned(pin)) { store.togglePin(pin) } }, glyph = glyph) {
+        TopBar(agent.title, onBack = { nav.pop() }, trailing = { PinButton(store.pinned(pin)) { store.togglePin(pin) } }, glyph = glyph, onLongPress = { diagnostics = true }) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatusDot(agent.status, 7, animate = true)
-                Label(listOfNotNull(store.host?.takeIf { glyph != null }?.let { "on ${it.label}" }, agent.editspace, agent.lane, agent.status, agent.session?.cost?.takeIf { it > 0 }?.let { "$%.2f".format(it) }).joinToString(" · "))
+                Label(listOfNotNull(Hosts.resolve(store.host)?.takeIf { glyph != null }?.let { "on ${it.label}" }, agent.editspace, agent.lane, agent.status, agent.session?.cost?.takeIf { it > 0 }?.let { "$%.2f".format(it) }).joinToString(" · "))
             }
         }
         CompositionLocalProvider(LocalExpanded provides expandedIds) {
@@ -175,11 +184,30 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
         }
         SteerBar(store, agent)
     }
+    if (diagnostics) DiagnosticsSheet(store) { diagnostics = false }
+}
+
+// Long-press on the agent header: the last 20 requests with stage timings, parse/frame ms for
+// the message page, and whether it used the compact shape. Read-only.
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun DiagnosticsSheet(store: DeskStore, onDismiss: () -> Unit) {
+    val rows = store.gateway.diagnostics.snapshot().asReversed()
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Ink.Panel) {
+        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp).testTag("diagnostics")) {
+            Text("Diagnostics", style = MaterialTheme.typography.titleMedium)
+            Label("last ${rows.size} requests · ${store.gateway.origin}")
+            Spacer(Modifier.height(8.dp))
+            if (rows.isEmpty()) Text("No requests yet.", style = MaterialTheme.typography.bodyMedium)
+            rows.forEach { t -> Mono(ai.opencode.desk.Diagnostics.line(t), color = if (t.error != null) Ink.Red else Ink.Muted, modifier = Modifier.padding(vertical = 3.dp), lines = 2) }
+        }
+    }
 }
 
 @Composable
-fun TopBar(title: String, onBack: () -> Unit, trailing: (@Composable () -> Unit)? = null, glyph: Hosts.Glyph? = null, subtitle: (@Composable () -> Unit)? = null) {
-    Row(Modifier.fillMaxWidth().padding(end = 8.dp, top = 4.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+fun TopBar(title: String, onBack: () -> Unit, trailing: (@Composable () -> Unit)? = null, glyph: Hosts.Glyph? = null, onLongPress: (() -> Unit)? = null, subtitle: (@Composable () -> Unit)? = null) {
+    Row(Modifier.fillMaxWidth().padding(end = 8.dp, top = 4.dp, bottom = 6.dp).then(if (onLongPress != null) Modifier.combinedClickable(onClick = {}, onLongClick = onLongPress) else Modifier), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onBack, modifier = Modifier.testTag("back")) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.Text) }
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -316,12 +344,14 @@ fun SourcedMessage(author: Author, text: String, messageID: String, now: Long, c
 // otherwise go idle. Stop interrupts the current turn.
 @Composable
 private fun SteerBar(store: DeskStore, agent: Agent) {
-    var text by rememberSaveable(agent.key) { mutableStateOf("") }
+    val sessionID = agent.session?.id.orEmpty()
+    // Durable draft: text lives in the store per (origin, session) and survives kill/rotation/navigation.
+    val text = store.draftText(sessionID)
+    val setText = { value: String -> store.setDraftText(sessionID, value) }
     var queue by rememberSaveable(agent.key) { mutableStateOf(!agent.busy) }
     var busy by rememberSaveable(agent.key) { mutableStateOf(false) }
     var error by rememberSaveable(agent.key) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    val sessionID = agent.session?.id.orEmpty()
     Column(Modifier.fillMaxWidth().background(Ink.Black).imePadding().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
         error?.let { Text(it, color = Ink.Red, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 8.dp)) }
         if (sessionID.isNotEmpty()) DraftStrip(store, sessionID)
@@ -336,8 +366,8 @@ private fun SteerBar(store: DeskStore, agent: Agent) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (sessionID.isNotEmpty()) AttachButton(store, sessionID) { error = it }
             TextField(
-                value = text, onValueChange = { text = it }, maxLines = 4,
-                placeholder = { Text(if (agent.session == null) "Lane is starting; no session yet" else "Tell ${agent.lane}…", color = Ink.Dim) },
+                value = text, onValueChange = setText, maxLines = 4,
+                placeholder = { Text(if (agent.session == null) "No session yet" else "Tell ${agent.lane}…", color = Ink.Dim) },
                 modifier = Modifier.weight(1f).testTag("steer-text"), shape = RoundedCornerShape(4.dp),
                 colors = TextFieldDefaults.colors(focusedContainerColor = Ink.Panel, unfocusedContainerColor = Ink.Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = Ink.Blue),
             )
@@ -345,7 +375,7 @@ private fun SteerBar(store: DeskStore, agent: Agent) {
             IconButton(enabled = (text.isNotBlank() || hasImages) && !busy && agent.session != null, modifier = Modifier.testTag("steer-send"), onClick = {
                 val message = text.trim(); busy = true; error = null
                 scope.launch {
-                    store.steer(agent, message, if (queue) "queue" else "steer").fold({ text = "" }, { error = it.message?.take(120) })
+                    store.steer(agent, message, if (queue) "queue" else "steer").fold({ /* draft cleared by the store once accepted */ }, { error = it.message?.take(120) })
                     busy = false
                 }
             }) { Icon(Icons.Filled.Send, "Send", tint = if (text.isNotBlank() || hasImages) Ink.Blue else Ink.Dim) }

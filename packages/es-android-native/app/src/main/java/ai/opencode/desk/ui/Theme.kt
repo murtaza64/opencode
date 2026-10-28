@@ -148,8 +148,8 @@ fun Label(text: String, color: Color = Ink.Muted, modifier: Modifier = Modifier,
 
 // Mono without the uppercase: for paths, commands and other case-sensitive detail.
 @Composable
-fun Mono(text: String, color: Color = Ink.Muted, modifier: Modifier = Modifier) {
-    Text(text, style = MaterialTheme.typography.labelMedium, color = color, modifier = modifier, maxLines = 1, overflow = TextOverflow.Ellipsis)
+fun Mono(text: String, color: Color = Ink.Muted, modifier: Modifier = Modifier, lines: Int = 1) {
+    Text(text, style = MaterialTheme.typography.labelMedium, color = color, modifier = modifier, maxLines = lines, overflow = TextOverflow.Ellipsis)
 }
 
 // Enough markdown for agent prose on a phone: **bold**, `code`, and # headings as bold lines.
