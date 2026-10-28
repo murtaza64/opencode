@@ -23,6 +23,8 @@ export const createAppearance = (options: {
   // per-launch key. Holds colours and the wal-palette revision only, never paths.
   receipt?: string
 }) => {
+  // What each tab's page reports it actually applied, by listener host id (bounded: one entry per host).
+  const applied = new Map<string, Applied>()
   const file = path.join(options.directory, "colors.json")
   const contract = path.join(options.directory, "palette.json")
   const listeners = new Set<() => void>()
@@ -51,7 +53,7 @@ export const createAppearance = (options: {
     if (state.body && JSON.stringify({ palette: state.body.palette, wallpaper: state.body.wallpaper, wal: state.body.wal }) === JSON.stringify(next)) return
     state.body = { ...next, updatedAt: Date.now() }
     listeners.forEach((listener) => listener())
-    if (options.receipt) await writeReceipt(options.receipt, state.body).catch(() => undefined)
+    if (options.receipt) await writeReceipt(options.receipt, state.body, applied).catch(() => undefined)
   }
   // One reload at a time, so an older read never lands after a newer one; a change during a reload
   // reads once more after it.
@@ -83,6 +85,12 @@ export const createAppearance = (options: {
     ready,
     body: () => state.body,
     image: () => (state.body?.wallpaper ? state.image : undefined),
+    /** A tab's page reports what it applied; the receipt then shows it beside what this app serves. */
+    applied: async (host: string, value: Omit<Applied, "appliedAt">) => {
+      if (!applied.has(host) && applied.size >= 16) return
+      applied.set(host, { ...value, appliedAt: Date.now() })
+      if (options.receipt && state.body) await writeReceipt(options.receipt, state.body, applied).catch(() => undefined)
+    },
     subscribe: (listener: () => void) => {
       listeners.add(listener)
       return () => listeners.delete(listener)
@@ -98,8 +106,19 @@ export const createAppearance = (options: {
 
 export type Appearance = ReturnType<typeof createAppearance>
 
-const writeReceipt = async (file: string, body: AppearanceState) => {
-  const receipt = { schema: "es-appearance-receipt/1", background: body.palette.background, foreground: body.palette.foreground, walRevision: body.wal?.revision, updatedAt: body.updatedAt }
+/** What one tab's page applied: the wal-palette revision of its style element (null when none) and its theme. */
+export type Applied = { walRevision: string | null; theme: "wallpaper" | "default"; appliedAt: number }
+
+const writeReceipt = async (file: string, body: AppearanceState, applied: Map<string, Applied>) => {
+  // `walRevision` is what this app serves; `applied` is what each tab's page confirmed it shows.
+  const receipt = {
+    schema: "es-appearance-receipt/1",
+    background: body.palette.background,
+    foreground: body.palette.foreground,
+    walRevision: body.wal?.revision,
+    updatedAt: body.updatedAt,
+    applied: [...applied].map(([host, value]) => ({ host, ...value })),
+  }
   // Write then rename, so a reader never sees a partial file.
   await writeFile(`${file}.tmp`, JSON.stringify(receipt), { mode: 0o600 })
   await rename(`${file}.tmp`, file)

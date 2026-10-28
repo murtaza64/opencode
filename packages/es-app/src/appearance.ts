@@ -41,6 +41,7 @@ export const setEnabled = (on: boolean) => {
   }
   setEnabledSignal(on)
   apply()
+  if (current()) acknowledge()
 }
 
 // Returns CSS custom properties for a palette, or undefined when it is unusable.
@@ -134,6 +135,20 @@ const applyWal = (value: unknown) => {
   if (!existing) document.head.append(style)
 }
 
+// Tells this app's desktop what this page now shows (the palette style's revision and the theme), so a
+// palette tool can confirm an apply reached the page. Sent only when it changes; silent where there is
+// no desktop route.
+let acknowledged = ""
+const acknowledge = () => {
+  const style = document.getElementById("wal-palette")?.textContent ?? ""
+  const walRevision = /--wal-revision:"([A-Za-z0-9._-]{1,64})"/.exec(style)?.[1] ?? null
+  const theme = document.documentElement.dataset.appearance === "wallpaper" ? "wallpaper" : "default"
+  const body = JSON.stringify({ walRevision, theme })
+  if (body === acknowledged) return
+  acknowledged = body
+  void fetch(`${ROUTE}/applied`, { method: "POST", headers: { "content-type": "application/json" }, body }).catch(() => undefined)
+}
+
 // Loads the laptop's appearance once and follows its change events. A missing route (web,
 // remote browser, older desktop) is silent and keeps the default theme.
 export const installAppearance = () => {
@@ -146,6 +161,7 @@ export const installAppearance = () => {
     setCurrent({ palette: body.palette, wallpaper: typeof body.wallpaper === "string" ? body.wallpaper : undefined, wal: body.wal, updatedAt: body.updatedAt })
     applyWal(body.wal)
     apply()
+    acknowledge()
   }
   void load()
   const events = typeof EventSource === "function" ? new EventSource(`${ROUTE}/events`) : undefined
