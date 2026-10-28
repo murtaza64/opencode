@@ -7,11 +7,14 @@ import assert from "node:assert/strict"
 import { createRequire } from "node:module"
 import path from "node:path"
 import { startAttentionPreview } from "./attention-preview.mjs"
+import { createHash } from "node:crypto"
 import { directory } from "./composer-fixture.mjs"
 
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const shots = process.argv.includes("--shots") ? process.argv[process.argv.indexOf("--shots") + 1] : undefined
 const now = Date.now()
+const OTHER_ROOT = "/fixture/other project"
+const OTHER_ANCHOR = `ses_fdbrief_${createHash("sha256").update(OTHER_ROOT).digest("hex").slice(0, 20)}`
 const CONSOLE = "https://console.example.com/zones/z1/security/rules"
 // The producer's own numbered steps: two rules, each with the exact values the human must type.
 const CONTEXT = [
@@ -55,6 +58,8 @@ const preview = await startAttentionPreview([{
     server.middlewares.use("/oc/session", (req, res, next) => {
       const [, id, tail] = new URL(req.url, "http://preview").pathname.split("/")
       if (id?.startsWith("ses_fdbrief_") && !tail) return send(res, session(id, { time: { created: now, updated: now, archived: now } }))
+      // The brief was prepared while another project was in view: it lives only under that project's anchor.
+      if (id?.startsWith("ses_fdbrief_") && tail === "children" && id !== OTHER_ANCHOR) return send(res, [])
       if (id?.startsWith("ses_fdbrief_") && tail === "children") return send(res, [session("ses_brief_rule", { parentID: id, metadata: { frontDesk: {
         kind: "brief", requestID: "ses_brief_rule", source: "attention:fixture:rule", revision: "1", title: record.title, refs, contract: 4 } } })])
       if (id === "ses_brief_rule" && tail === "message") return send(res, briefFails
@@ -64,7 +69,7 @@ const preview = await startAttentionPreview([{
     })
   },
 }])
-preview.fixture.editspaces = [{ name: "fixture", root: directory }]
+preview.fixture.editspaces = [{ name: "fixture", root: directory }, { name: "other", root: OTHER_ROOT }]
 let failed = false
 const browser = await chromium.launch({ channel: "chrome", headless: true })
 const open = async (viewport, rtl = false) => {

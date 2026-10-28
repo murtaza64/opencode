@@ -235,7 +235,10 @@ export const BRIEF_PERMISSION = [
   { permission: "external_directory", pattern: "*", action: "deny" as const },
 ]
 
-export const createBriefs = (desk: () => DeskPointer | undefined, current: (key: string) => DeskItem | undefined, ensure?: () => Promise<unknown>) => {
+/** `others`: the brief anchors of the host's other projects. A client prepares under the anchor of the project
+ * in view, so a record's brief may sit under any of them; jobs are matched by their source, wherever they are. */
+export const createBriefs = (desk: () => DeskPointer | undefined, current: (key: string) => DeskItem | undefined, ensure?: () => Promise<unknown>,
+  others: () => DeskPointer[] = () => []) => {
   const [jobs, setJobs] = createSignal<BriefJob[]>([])
   const [error, setError] = createSignal("")
   // The underlying cause of a non-actionable read error: kept for diagnostics, not shown as a banner.
@@ -260,19 +263,28 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
   // "unknown" is not settled: a job read between its prompt's admission and Core reporting it busy looks stopped,
   // and caching that would show "Brief stopped before finishing" beside a brief that finished moments later.
   const isSettled = (job: BriefJob) => ["ready", "failed"].includes(job.state.state)
+  const absent = new Map<string, number>()
   const refresh = async (explicit = false) => {
     const target = desk()
     const local = () => pending() ? [pendingJob(pending()!)] : []
-    if (!target) return setJobs(local())
+    // Other anchors are read only. One that does not exist (never used) is not asked again for a few minutes, so
+    // N unused projects are not N reads per poll. Without this project's own anchor, those briefs still show.
+    const elsewhere = others().filter(other => other.session !== target?.session && (absent.get(other.session) ?? 0) < Date.now())
+    if (!target && !elsewhere.length) return setJobs(local())
     const current = ++generation
     try {
-      const [children, status] = await Promise.all([oc.children(target.session, target.directory), oc.status(target.directory)])
-      const briefs = children.flatMap(child => { const meta = metaOf(child); return meta ? [{ child, meta }] : [] })
-      const live = (id: string) => ["busy", "retry"].includes(status[id]?.type ?? "")
+      const [children, status, ...extra] = await Promise.all([target ? oc.children(target.session, target.directory) : [], target ? oc.status(target.directory) : ({} as Awaited<ReturnType<typeof oc.status>>),
+        ...elsewhere.map(other => Promise.all([oc.children(other.session, other.directory), oc.status(other.directory)])
+          .catch(cause => { if (String(cause).includes("404")) absent.set(other.session, Date.now() + 300_000); return undefined }))])
+      const statuses = Object.assign({}, ...extra.flatMap(value => value ? [value[1]] : []), status) as typeof status
+      const seen = new Set<string>()
+      const briefs = [...children, ...extra.flatMap(value => value?.[0] ?? [])].filter(child => !seen.has(child.id) && seen.add(child.id))
+        .flatMap(child => { const meta = metaOf(child); return meta ? [{ child, meta }] : [] })
+      const live = (id: string) => ["busy", "retry"].includes(statuses[id]?.type ?? "")
       const stale = briefs.filter(({ child }) => explicit || !settled.has(child.id) || live(child.id) || child.id === inflight())
       const read = await limited(stale, 4, ({ child, meta }) => oc.messagesTail(child.id, child.directory, 4).then((messages): BriefJob => ({
         id: child.id, directory: child.directory, meta, created: child.time.created,
-        state: briefState(meta, messages, status[child.id]?.type),
+        state: briefState(meta, messages, statuses[child.id]?.type),
       })))
       if (current !== generation) return
       for (const job of read) {
@@ -284,7 +296,7 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
       const found = briefs.map(({ child }) => read.find(job => job.id === child.id) ?? settled.get(child.id)!)
       if (pending() && found.some(job => job.id === pending()!.id)) savePending(undefined)
       setJobs([...found, ...local()].sort((a, b) => b.created - a.created))
-      setSynced(target.session)
+      if (target) setSynced(target.session)
       setError("")
       clearBackend("Brief checks")
     } catch (cause) {
