@@ -211,11 +211,20 @@ try {
   await tap(await waitFor((node) => node["content-desc"]?.startsWith("Mail from es-app, task"), "chip"))
   await waitFor((node) => node["content-desc"]?.startsWith("Mail from es-app, task") && node["content-desc"]?.endsWith("expanded"), "chip expanded")
   await screenshot("12-chat-parts-expanded")
+  // Follow-scroll: scrolling up on purpose shows "jump to latest" and nothing yanks the view;
+  // a Send jumps back to the bottom and the button goes away.
+  await adb("shell", "input", "swipe", "540", "600", "540", "1500", "300")
+  await adb("shell", "input", "swipe", "540", "600", "540", "1500", "300")
+  await waitFor(byId("jump-latest"), "jump to latest after scrolling up")
+  await sleep(2_500)
+  if (!(await nodes()).some(byId("jump-latest"))) throw new Error("view was yanked to the bottom while the reader was scrolled up")
+  pass("scrolled-up reader keeps their place and gets a jump-to-latest button")
   await type("steer-text", "Prefer the tool boundary, keep the fixture green.")
   await tap(await waitFor(byId("steer-send"), "steer send"))
   const steer = await waitWrite((w) => w.path === "/session/ses_composer/input" && w.method === "POST", "steer input")
   if (steer.body.delivery !== "steer" || steer.query.directory !== fixture.sessions.ses_composer?.directory && !steer.query.directory) throw new Error(`Unexpected steer ${JSON.stringify(steer)}`)
   await waitFor((node) => node["content-desc"]?.startsWith("Sent from this phone: Prefer the tool boundary"), "pending bubble")
+  await until(async () => !(await nodes()).some(byId("jump-latest")), "back at the bottom after Send")
   pass(`steer admitted as durable input (delivery=${steer.body.delivery}, requestID present=${!!steer.body.requestID})`)
   await screenshot("08-agent-steer")
   await tap(await waitFor(byId("stop"), "stop"))
@@ -282,6 +291,39 @@ try {
   await waitFor((node) => node["content-desc"]?.startsWith("Sent from this phone: What changed since this morning"), "pending bubble")
   pass("desk conversation created lazily with the front-desk agent and the message queued")
   await screenshot("09-chat")
+
+  // 5b. chat reliability (BUG06). KEEP: POST answers 500 but the input was admitted -> the
+  // bubble is "not confirmed" with its request id, then the receipt confirms it on the next
+  // read with NO second POST, and the transcript message renders as You via the receipt link.
+  const posts = (text) => fixture.writes.filter((w) => w.path === `/session/${created.body.id}/input` && w.body.text === text)
+  await type("chat-text", "FAIL500-KEEP one")
+  await tap(await waitFor(byId("chat-send"), "send keep"))
+  // The receipt poll may confirm it before the node tree is read; either interim state is fine.
+  await waitFor((n) => n["resource-id"] === "pending-uncertain" || n["content-desc"]?.includes("FAIL500-KEEP one, accepted"), "keep bubble")
+  await screenshot("20-chat-keep")
+  await waitFor((n) => n["content-desc"] === "Sent from this phone", "transcript message attributed to You (header)", 30_000)
+  await waitFor((n) => n.text === "FAIL500-KEEP one", "transcript message text")
+  if ((await nodes()).some(byId("pending-uncertain"))) throw new Error("bubble still not confirmed after the receipt was read")
+  if (posts("FAIL500-KEEP one").length !== 1) throw new Error(`expected exactly one POST for KEEP, saw ${posts("FAIL500-KEEP one").length}`)
+  pass("POST 500 + receipt exists -> confirmed from the receipt, no second POST, rendered as You")
+
+  // DROP: 500 and nothing admitted -> stays not confirmed; Retry resends the SAME request id.
+  await type("chat-text", "FAIL500-DROP two")
+  await tap(await waitFor(byId("chat-send"), "send drop"))
+  await waitFor(byId("pending-uncertain"), "not confirmed bubble (drop)")
+  const drop1 = await waitFor(byId("pending-request"), "request id shown on the not-confirmed bubble")
+  if (!/request [0-9a-f-]{36} · attempt 1/.test(drop1.text ?? "")) throw new Error(`request id not visible: ${drop1.text}`)
+  await screenshot("20b-chat-not-confirmed")
+  await sleep(4_000)
+  if (!(await nodes()).some(byId("pending-uncertain"))) throw new Error("DROP bubble was confirmed without a receipt")
+  if (posts("FAIL500-DROP two").length !== 1) throw new Error("DROP must not be resent automatically")
+  await tap(await waitFor((n) => n.text?.toLowerCase() === "retry", "retry"))
+  await waitFor((n) => n["content-desc"]?.includes("FAIL500-DROP two, accepted") || n["content-desc"]?.includes("FAIL500-DROP two, Accepted"), "accepted after retry", 30_000)
+  const drop = posts("FAIL500-DROP two")
+  if (drop.length !== 2 || drop[0].body.requestID !== drop[1].body.requestID) throw new Error(`retry must reuse the request id: ${drop.map((w) => w.body.requestID).join(" vs ")}`)
+  pass("POST 500 + no receipt -> not confirmed, no auto-resend; Retry reuses the same request id")
+  await screenshot("21-chat-retry")
+  // Diagnostics lists the outbox with request ids.
   await adb("shell", "input", "keyevent", "KEYCODE_BACK")
   await waitFor(byId("desk"), "home after back")
 

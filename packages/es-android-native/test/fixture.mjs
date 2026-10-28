@@ -121,6 +121,7 @@ export const fixture = {
   },
   todos: { ses_composer: [{ content: "Pin composer while transcript scrolls", status: "completed", priority: "high" }, { content: "Promote steers at tool boundaries", status: "in_progress", priority: "high" }, { content: "Browser fixture for mid-turn steer", status: "pending", priority: "medium" }] },
   receipts: { ses_composer: [] },
+  attempts: {},
   status: { ses_composer: { type: "busy" }, ses_handoff: { type: "idle" }, ses_desk_lane: { type: "busy" } },
   operator: false,
   writes: [],
@@ -222,8 +223,16 @@ export const createFixture = () => new Promise((resolve) => {
       if (rest === "/todo") return json(fixture.todos[id] ?? [])
       if (rest === "/input" && request.method === "GET") return json({ items: fixture.receipts[id] ?? [], next: null })
       if (rest === "/input" && request.method === "POST") {
-        const receipt = { requestID: body.requestID, state: "pending", delivery: body.delivery, text: body.text, agent: body.agent ?? "build", revision: 1, sessionID: id, admittedSeq: 1, timeCreated: Date.now() }
+        const receipt = { requestID: body.requestID, state: "pending", delivery: body.delivery, text: body.text, agent: body.agent ?? "build", revision: 1, sessionID: id, admittedSeq: 1, timeCreated: Date.now(), messageID: `msg_${body.requestID.slice(0, 8)}` }
+        // BUG06 shapes. KEEP: admitted (receipt + transcript message) but the response is a 500.
+        // DROP: 500 on the first attempt only, nothing admitted; a retry with the same id lands.
+        const attempts = (fixture.attempts[body.requestID] = (fixture.attempts[body.requestID] ?? 0) + 1)
+        if (body.text.includes("FAIL500-DROP") && attempts === 1) return json({ error: "fixture: history write failed" }, 500)
         ;(fixture.receipts[id] ??= []).push(receipt)
+        if (body.text.includes("FAIL500-KEEP")) {
+          ;(fixture.messages[id] ??= []).push({ info: { id: receipt.messageID, sessionID: id, role: "user", time: { created: Date.now() } }, parts: [{ id: `p_${receipt.messageID}`, type: "text", text: body.text }] })
+          return json({ error: "fixture: read-after-write failed" }, 500)
+        }
         for (const stream of streams) stream.write("data: session.input\n\n")
         return json(receipt)
       }

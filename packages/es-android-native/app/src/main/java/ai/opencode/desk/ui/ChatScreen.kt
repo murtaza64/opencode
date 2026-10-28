@@ -26,6 +26,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.Box
+import ai.opencode.desk.Follow
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
@@ -90,8 +92,16 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
                 Label(if (store.deskBusy) "thinking" else if (store.deskReady) "front-desk · ${store.deskSpace}" else "new conversation")
             }
         }
+        val scrolledUp by remember { derivedStateOf { Follow.scrolledUp(list.firstVisibleItemIndex, list.firstVisibleItemScrollOffset) } }
+        val justSent = remember(id) { mutableStateOf(false) }
+        val newestKey = (store.outbox[id].orEmpty().lastOrNull()?.requestID ?: messages.lastOrNull()?.info?.id)
+        LaunchedEffect(newestKey, justSent.value) {
+            if (newestKey == null) return@LaunchedEffect
+            if (Follow.shouldFollow(scrolledUp, justSent.value)) { list.animateScrollToItem(0); justSent.value = false }
+        }
+        Box(Modifier.weight(1f)) {
         CompositionLocalProvider(LocalExpanded provides expandedIds) {
-        LazyColumn(Modifier.weight(1f).testTag("chat"), state = list, reverseLayout = true, contentPadding = PaddingValues(vertical = 8.dp)) {
+        LazyColumn(Modifier.fillMaxSize().testTag("chat"), state = list, reverseLayout = true, contentPadding = PaddingValues(vertical = 8.dp)) {
             items(pending.asReversed(), key = { "r-" + it.requestID }) { item ->
                 PendingBubble(item, store, onRetry = { scope.launch { store.retry(item) } }, onCancel = { store.dismiss(item) })
             }
@@ -107,6 +117,8 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
             }
         }
         }
+        if (scrolledUp) Label("↓ jump to latest", color = Ink.Blue, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp).background(Ink.Raised, RoundedCornerShape(12.dp)).clickable { scope.launch { list.animateScrollToItem(0) } }.padding(horizontal = 12.dp, vertical = 6.dp).testTag("jump-latest"))
+        }
         error?.let { Text(it, color = Ink.Red, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 20.dp)) }
         if (store.deskReady) DraftStrip(store, id)
         val hasImages = store.drafts[id]?.images?.isNotEmpty() == true
@@ -121,6 +133,7 @@ fun ChatScreen(store: DeskStore, nav: Nav) {
             IconButton(enabled = (text.isNotBlank() || hasImages) && !sending, modifier = Modifier.testTag("chat-send"), onClick = {
                 val message = text.trim(); sending = true; error = null
                 scope.launch {
+                    justSent.value = true
                     store.askDesk(message).fold({ /* draft cleared by the store once accepted */ }, { error = it.message?.take(120) })
                     sending = false
                 }

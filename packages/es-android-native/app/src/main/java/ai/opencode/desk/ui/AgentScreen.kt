@@ -39,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import ai.opencode.desk.Follow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -134,8 +135,18 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
                 Label(listOfNotNull(Hosts.resolve(store.host)?.takeIf { glyph != null }?.let { "on ${it.label}" }, agent.editspace, agent.lane.takeIf { it.isNotBlank() }, agent.status, agent.session?.cost?.takeIf { it > 0 }?.let { "$%.2f".format(it) }).joinToString(" · "))
             }
         }
+        // Follow-scroll: newest is index 0 in the reversed list. Follow new output unless the
+        // reader scrolled up on purpose; a Send always jumps back to the bottom.
+        val scrolledUp by remember { derivedStateOf { Follow.scrolledUp(list.firstVisibleItemIndex, list.firstVisibleItemScrollOffset) } }
+        val justSent = remember(key) { mutableStateOf(false) }
+        val newestKey = (store.outbox[agent.session?.id.orEmpty()].orEmpty().lastOrNull()?.requestID ?: detail?.messages?.lastOrNull()?.info?.id)
+        LaunchedEffect(newestKey, justSent.value) {
+            if (newestKey == null) return@LaunchedEffect
+            if (Follow.shouldFollow(scrolledUp, justSent.value)) { list.animateScrollToItem(0); justSent.value = false }
+        }
+        Box(Modifier.weight(1f)) {
         CompositionLocalProvider(LocalExpanded provides expandedIds) {
-        LazyColumn(Modifier.weight(1f).testTag("agent"), state = list, reverseLayout = true, contentPadding = PaddingValues(bottom = 8.dp, top = 8.dp)) {
+        LazyColumn(Modifier.fillMaxSize().testTag("agent"), state = list, reverseLayout = true, contentPadding = PaddingValues(bottom = 8.dp, top = 8.dp)) {
             // Bottom of the screen first: pending inputs, then messages newest to oldest.
             val transcript = detail?.messages.orEmpty().map { it.info.id }.toSet()
             val pending = Timeline.dedupPending(Outbox.visible(store.outbox[agent.session?.id.orEmpty()].orEmpty(), transcript), detail?.messages.orEmpty())
@@ -193,7 +204,9 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
             if (agent.description.isNotBlank()) item(key = "description") { Text(agent.description, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 20.dp), maxLines = 3, overflow = TextOverflow.Ellipsis) }
         }
         }
-        SteerBar(store, agent)
+        if (scrolledUp) Label("↓ jump to latest", color = Ink.Blue, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp).background(Ink.Raised, RoundedCornerShape(12.dp)).clickable { scope.launch { list.animateScrollToItem(0) } }.padding(horizontal = 12.dp, vertical = 6.dp).testTag("jump-latest"))
+        }
+        SteerBar(store, agent) { justSent.value = true }
     }
     if (diagnostics) DiagnosticsSheet(store) { diagnostics = false }
 }
@@ -211,6 +224,12 @@ fun DiagnosticsSheet(store: DeskStore, onDismiss: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             if (rows.isEmpty()) Text("No requests yet.", style = MaterialTheme.typography.bodyMedium)
             rows.forEach { t -> Mono(ai.opencode.desk.Diagnostics.line(t), color = if (t.error != null) Ink.Red else Ink.Muted, modifier = Modifier.padding(vertical = 3.dp), lines = 2) }
+            val sends = store.outbox.values.flatten().filter { it.author == null && !it.done }.sortedByDescending { it.createdAt }
+            if (sends.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Label("outbox · ${sends.size} not yet handled")
+                sends.forEach { p -> Mono("${p.state.name.lowercase()} ${p.requestID} session ${p.sessionID.take(16)} attempt ${p.attempts}${p.messageID?.let { " msg $it" } ?: ""}${p.error?.let { " · $it" } ?: ""}", color = if (p.retryable) Ink.Amber else Ink.Muted, modifier = Modifier.padding(vertical = 3.dp).testTag("diag-outbox"), lines = 2) }
+            }
         }
     }
 }
@@ -256,14 +275,17 @@ fun PendingBubble(item: Pending, store: DeskStore, onRetry: () -> Unit, onCancel
             if (item.text.isNotBlank()) Text(item.text, style = MaterialTheme.typography.bodyLarge, color = Ink.Text, maxLines = 6, overflow = TextOverflow.Ellipsis)
             if (stored.isNotEmpty()) InlinePreviews(stored.map { Preview.Stored(it) }, store, Modifier.padding(top = if (item.text.isNotBlank()) 6.dp else 0.dp))
         }
+        var details by remember(item.requestID) { mutableStateOf(false) }
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (item.state == SendState.Sending) StatusDot("busy", 5)
-            Label(status ?: item.label.substringAfter("· ", item.label), color = tint, modifier = Modifier.padding(start = if (item.state == SendState.Sending) 4.dp else 0.dp))
+            Label(status ?: item.label.substringAfter("· ", item.label), color = tint, modifier = Modifier.padding(start = if (item.state == SendState.Sending) 4.dp else 0.dp).clickable { details = !details }.testTag("pending-status"))
             if (item.retryable) {
                 Label("retry", color = Ink.Blue, modifier = Modifier.padding(start = 10.dp).clickable(onClick = onRetry))
                 Label("discard", color = Ink.Muted, modifier = Modifier.padding(start = 10.dp).clickable(onClick = onCancel))
             } else if (item.state == SendState.Accepted) Label("cancel", color = Ink.Muted, modifier = Modifier.padding(start = 10.dp).clickable(onClick = onCancel))
         }
+        // The request id is the one fact that lets a lost response be reconciled; show it on tap.
+        if (details || item.retryable) Mono("request ${item.requestID} · attempt ${item.attempts}${item.messageID?.let { " · message $it" } ?: ""}${item.error?.let { " · $it" } ?: ""}", color = Ink.Dim, modifier = Modifier.padding(top = 2.dp).testTag("pending-request"), lines = 2)
     }
 }
 
@@ -354,7 +376,7 @@ fun SourcedMessage(author: Author, text: String, messageID: String, now: Long, c
 // Steer goes in at the next safe boundary while the agent works; Queue waits until it would
 // otherwise go idle. Stop interrupts the current turn.
 @Composable
-private fun SteerBar(store: DeskStore, agent: Agent) {
+private fun SteerBar(store: DeskStore, agent: Agent, onSent: () -> Unit) {
     val sessionID = agent.session?.id.orEmpty()
     // Durable draft: text lives in the store per (origin, session) and survives kill/rotation/navigation.
     val text = store.draftText(sessionID)
@@ -386,6 +408,7 @@ private fun SteerBar(store: DeskStore, agent: Agent) {
             IconButton(enabled = (text.isNotBlank() || hasImages) && !busy && agent.session != null, modifier = Modifier.testTag("steer-send"), onClick = {
                 val message = text.trim(); busy = true; error = null
                 scope.launch {
+                    onSent()
                     store.steer(agent, message, if (queue) "queue" else "steer").fold({ /* draft cleared by the store once accepted */ }, { error = it.message?.take(120) })
                     busy = false
                 }

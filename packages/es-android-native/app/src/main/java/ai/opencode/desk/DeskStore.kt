@@ -73,6 +73,8 @@ data class AgentDetail(
     val messages: List<MessageWithParts> = emptyList(),
     val todos: List<Todo> = emptyList(),
     val receipts: List<InputReceipt> = emptyList(),
+    // False when the receipt read failed this load (BUG06): the outbox must not reconcile against it.
+    val receiptsFresh: Boolean = true,
     val work: CurrentWork? = null,
     val loadedAt: Long = 0,
     val error: String? = null,
@@ -438,7 +440,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
                 coroutineScope {
                     val page = async { api.page(session.id, session.directory, 30, null) }
                     val todos = async { runCatching { api.todos(session.id, session.directory) }.getOrDefault(emptyList()) }
-                    val receipts = async { runCatching { api.receipts(session.id, session.directory).items }.getOrDefault(emptyList()) }
+                    val receipts = async { runCatching { api.receipts(session.id, session.directory).items }.getOrNull() }
                     val work = async { runCatching { api.currentWork(session.id, session.directory) }.getOrNull() }
                     val mail = async { runCatching { api.mail(agent.editspace, agent.lane, session.id).messages }.getOrDefault(emptyList()) }
                     val wakes = async { runCatching { api.wakeEvents(agent.editspace, session.id).events }.getOrDefault(emptyList()) }
@@ -446,7 +448,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
                     val older = previous?.messages.orEmpty()
                     AgentDetail(
                         messages = mergeNewest(older, newest.items),
-                        todos = todos.await(), receipts = receipts.await(), work = work.await(), loadedAt = System.currentTimeMillis(),
+                        todos = todos.await(), receipts = receipts.await() ?: previous?.receipts.orEmpty(), receiptsFresh = receipts.await() != null, work = work.await(), loadedAt = System.currentTimeMillis(),
                         // Keep the deeper cursor when older pages are already loaded.
                         cursor = if (previous != null && older.size > newest.items.size) previous.cursor else newest.cursor,
                         mail = mail.await(), wakeEvents = wakes.await(),
@@ -456,7 +458,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
                 }
             }.getOrElse { AgentDetail(error = it.message, loadedAt = System.currentTimeMillis(), messages = previous?.messages.orEmpty(), cursor = previous?.cursor) }
             details[agent.key] = detail
-            outbox[session.id] = Outbox.reconcile(outbox[session.id].orEmpty(), detail.receipts, detail.messages.map { it.info.id }.toSet())
+            outbox[session.id] = Outbox.reconcile(outbox[session.id].orEmpty(), detail.receipts.takeIf { detail.receiptsFresh }, detail.messages.map { it.info.id }.toSet())
             remember(session.id, outbox[session.id].orEmpty())
             release(outbox[session.id].orEmpty())
             confirmDrafts(session.id)
@@ -526,6 +528,21 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         val entry = durable.get(gateway.origin, item.requestID)
         val directory = entry?.directory ?: agents.firstOrNull { it.session?.id == item.sessionID }?.session?.directory ?: desk?.takeIf { it.id == item.sessionID }?.directory
             ?: return item.copy(state = SendState.Failed, error = "session not found")
+        // Reconcile by requestID before any second POST: a receipt means the first one landed.
+        val receipts = runCatching { api.receipts(item.sessionID, directory).items }.getOrNull()
+        if (receipts != null) when (val plan = Outbox.retryPlan(item, receipts)) {
+            is Outbox.Plan.Confirm -> {
+                val confirmed = item.copy(state = Outbox.fromReceipt(plan.receipt), messageID = plan.receipt.messageID, error = null)
+                outbox[item.sessionID] = outbox[item.sessionID].orEmpty().map { if (it.requestID == item.requestID) confirmed else it }
+                remember(item.sessionID, listOf(confirmed))
+                markSent(item.sessionID)
+                draftStore.clear(gateway.origin, item.sessionID, item.requestID)
+                drafts[item.sessionID]?.takeIf { it.requestID == item.requestID }?.let { drafts.remove(item.sessionID) }
+                agents.firstOrNull { it.session?.id == item.sessionID }?.let(::load) ?: loadDesk()
+                return confirmed
+            }
+            is Outbox.Plan.Resend -> Unit
+        }
         return send(item.sessionID, directory, item.text, item.delivery, item.requestID) {
             agents.firstOrNull { it.session?.id == item.sessionID }?.let(::load) ?: loadDesk()
         }

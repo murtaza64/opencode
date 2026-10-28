@@ -50,7 +50,20 @@ object Outbox {
     // (also for an Uncertain send whose response was lost); a receipt that vanished after we
     // saw it accepted is treated as handled once its message is in the transcript, or dropped
     // if cancelled. Receipts the phone never sent (other clients) show as accepted.
-    fun reconcile(mine: List<Pending>, receipts: List<InputReceipt>, transcript: Set<String>): List<Pending> {
+    // What a Retry must do: confirm from an existing receipt (never a second POST), or resend
+    // with the SAME requestID so the server can dedupe.
+    sealed interface Plan {
+        data class Confirm(val receipt: InputReceipt) : Plan
+        data class Resend(val requestID: String) : Plan
+    }
+
+    fun retryPlan(item: Pending, receipts: List<InputReceipt>): Plan =
+        receipts.firstOrNull { it.requestID == item.requestID && it.state != "cancelled" }?.let { Plan.Confirm(it) } ?: Plan.Resend(item.requestID)
+
+    // `receipts == null` means the receipt read itself failed (BUG06): the outbox keeps what it
+    // knows, so an accepted row and its requestID -> messageID link survive a transient 500.
+    fun reconcile(mine: List<Pending>, receipts: List<InputReceipt>?, transcript: Set<String>): List<Pending> {
+        if (receipts == null) return mine
         val byID = receipts.associateBy { it.requestID }
         val updated = mine.mapNotNull { item ->
             val receipt = byID[item.requestID]
