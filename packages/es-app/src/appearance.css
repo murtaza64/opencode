@@ -77,10 +77,12 @@
 :root .desk-item:hover { background: var(--hover); }
 :root .desk-item[aria-pressed=true] { background: var(--selected); border-inline-start-color: var(--accent); }
 
-/* Wallpaper backdrop: one fixed, pre-blurred image under the transcript column, dimmed with a
+/* Wallpaper backdrop: one fixed, pre-blurred image under the session page, dimmed with a
  * scrim so text contrast holds. Painted once; no backdrop-filter on content. */
-:root[data-appearance=wallpaper] .session-main { position: relative; isolation: isolate; }
-:root[data-appearance=wallpaper] .session-main::before {
+/* The backdrop spans the whole session page, padding and gaps included, so it meets the nav and the
+ * info panel (opaque) with no solid gutters. */
+:root[data-appearance=wallpaper] .session-page { position: relative; isolation: isolate; }
+:root[data-appearance=wallpaper] .session-page::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -92,6 +94,7 @@
 }
 :root[data-appearance=wallpaper] .sidebar { background: color-mix(in srgb, var(--accent) 5%, var(--mantle)); }
 :root[data-appearance=wallpaper] .session-page,
+:root[data-appearance=wallpaper] .session-page .topbar,
 :root[data-appearance=wallpaper] .session-main .prompt-box { background: transparent; }
 :root[data-appearance=wallpaper] .direct-composer textarea { background: color-mix(in srgb, var(--mantle) 78%, transparent); }
 :root[data-appearance=wallpaper] .transcript pre,
@@ -99,7 +102,7 @@
 :root[data-appearance=wallpaper] .transcript [data-component="tool-part-wrapper"] { background: color-mix(in srgb, var(--mantle) 88%, transparent); }
 
 @media (prefers-reduced-transparency: reduce) {
-  :root[data-appearance=wallpaper] .session-main::before { background: var(--base); }
+  :root[data-appearance=wallpaper] .session-page::before { background: var(--base); }
 }
 
 /* Inputs, chips and secondary buttons share the control radius; panels and rows stay square
