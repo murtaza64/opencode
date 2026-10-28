@@ -132,6 +132,7 @@ export const UsageDailyResponse = Schema.Struct({
     scope: Schema.String,
     liveSince: Schema.optional(Schema.String),
     backfilled: Schema.Boolean,
+    origin: Schema.Struct({ basis: Schema.String, hostID: Schema.String, originSince: Schema.optional(Schema.String) }),
   }),
   notes: Schema.Array(Schema.String),
   priceSource: Schema.Struct({
@@ -143,6 +144,8 @@ export const UsageDailyResponse = Schema.Struct({
       day: Schema.String,
       complete: Schema.Boolean,
       cost: Schema.NullOr(Schema.Number),
+      originOnly: Schema.Boolean,
+      originCost: Schema.NullOr(Schema.Number),
       unpricedModels: Schema.Number,
       unpricedTokens: Schema.Number,
       models: Schema.Array(

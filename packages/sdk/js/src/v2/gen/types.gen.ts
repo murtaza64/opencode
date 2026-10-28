@@ -2354,6 +2354,11 @@ export type UsageDaily = {
     scope: string
     liveSince?: string
     backfilled: boolean
+    origin: {
+      basis: string
+      hostID: string
+      originSince?: string
+    }
   }
   notes: Array<string>
   priceSource: {
@@ -2367,6 +2372,8 @@ export type UsageDaily = {
     day: string
     complete: boolean
     cost: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    originOnly: boolean
+    originCost: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
     unpricedModels: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
     unpricedTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
     models: Array<{
