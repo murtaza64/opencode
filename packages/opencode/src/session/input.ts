@@ -415,7 +415,7 @@ const make = Effect.gen(function* () {
           type: "text",
           text: item.text,
           synthetic: true,
-          metadata: { contextSource: item.source, contextKey: item.key },
+          metadata: { source: item.source, key: item.key },
         }),
       )
       yield* reconcile(

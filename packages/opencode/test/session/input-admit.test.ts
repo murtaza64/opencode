@@ -120,8 +120,39 @@ it.instance("promotion puts selected context on the same user message as synthet
     expect(message._tag === "Some" && message.value.info.id).toBe(receipt.state === "promoted" && receipt.messageID)
     expect(parts.map((part) => (part.type === "text" ? [part.text, part.synthetic ?? false, part.metadata] : part.type))).toEqual([
       ["explain", false, undefined],
-      ["export const answer = 42", true, { contextSource: "file", contextKey: "src/answer.ts#L1" }],
-      ["Session summary: shipped U1", true, { contextSource: "session", contextKey: "ses_other" }],
+      // Same metadata shape as context on a plain send, so shared chips and lookups read both alike.
+      ["export const answer = 42", true, { source: "file", key: "src/answer.ts#L1" }],
+      ["Session summary: shipped U1", true, { source: "session", key: "ses_other" }],
     ])
+  }),
+)
+
+it.instance("a promotion recorded with the earlier contextSource/contextKey metadata still projects", () =>
+  Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const inputs = yield* SessionInput.Service
+    const events = yield* EventV2.Service
+    const session = yield* sessions.create({ title: "Legacy context promotion" })
+    const model = { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test") }
+    const payload = { requestID: "legacy-context", delivery: "steer", text: "explain", context } as const
+    yield* events.publish(SessionV1.Event.InputAdmitted, { sessionID: session.id, payload, agent: "build", model, time: 10 })
+    const messageID = SessionV1.MessageID.ascending()
+    const part = { id: SessionV1.PartID.ascending(), messageID, sessionID: session.id, type: "text", text: "explain" } as const
+    yield* events.publish(SessionV1.Event.InputPromoted, {
+      sessionID: session.id,
+      requestID: payload.requestID,
+      info: { id: messageID, sessionID: session.id, role: "user", agent: "build", model, time: { created: 20 } },
+      part,
+      context: context.map((item) => ({
+        id: SessionV1.PartID.ascending(),
+        messageID,
+        sessionID: session.id,
+        type: "text" as const,
+        text: item.text,
+        synthetic: true,
+        metadata: { contextSource: item.source, contextKey: item.key },
+      })),
+    })
+    expect(yield* inputs.get(session.id, payload.requestID)).toMatchObject({ state: "promoted", messageID })
   }),
 )

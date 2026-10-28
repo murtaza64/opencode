@@ -510,9 +510,14 @@ const layer = Layer.effectDiscard(
             })),
             row.images ?? [],
           ) ||
-          // Context parts follow the text and images, and match the admitted context exactly.
+          // Context parts follow the text and images, and match the admitted context exactly. Promotions
+          // written before context metadata matched plain sends carry contextSource/contextKey instead.
           !isDeepStrictEqual(
-            context.map((item) => ({ text: item.text, source: item.metadata?.contextSource, key: item.metadata?.contextKey })),
+            context.map((item) => ({
+              text: item.text,
+              source: item.metadata?.source ?? item.metadata?.contextSource,
+              key: item.metadata?.key ?? item.metadata?.contextKey,
+            })),
             row.payload.context ?? [],
           ) ||
           context.some(
