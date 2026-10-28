@@ -28,6 +28,7 @@ import { touchTodayCost } from "./today-cost"
 import { clearBackend, describeFailure, reportBackend } from "./backend-status"
 import { readHost, type WorkHost } from "./host"
 import { createHostFeed, type HostFeed, type HostedRow } from "./host-feed"
+import { forgetSeen, loadSeen, saveSeen } from "./last-seen"
 import type { GlobalSession, SessionFailure } from "@opencode-ai/sdk/v2"
 import type { Event } from "@opencode-ai/sdk/v2"
 
@@ -397,6 +398,7 @@ export function DashboardProvider(props: ParentProps) {
     rowCache.set(row.id, row)
     return row
   }
+  const localProject = () => allProjects() ? undefined : editspace() ?? editspaces()?.default ?? undefined
   const sessionRows = createMemo<SessionRow[]>(() => {
     const rows: SessionRow[] = allProjects()
       ? (globalSessions() ?? []).filter((s) => !s.parentID).map((s) => ({
@@ -410,10 +412,19 @@ export function DashboardProvider(props: ParentProps) {
       : (state()?.threads ?? [])
           .filter((t: any) => t.kind === "session" && t.sessions[0])
           .map((t: any) => t.sessions[0])
-    const next = rows.map(stableRow)
+    // This host unreachable on load: its last-seen rows for this project, not an empty list.
+    // When the project list itself is down, the project is unknown: take the last list, whatever its project.
+    const known = allProjects() || !!editspace() || !!editspaces()?.default
+    const fallback = !rows.length && (sessionsError() || stateError()) ? loadSeen("local", known ? localProject() : "*")?.rows : undefined
+    const next = (fallback ?? rows).map(stableRow)
     const keep = new Set(next.map((row) => row.id))
     for (const id of rowCache.keys()) if (!keep.has(id)) rowCache.delete(id)
     return next
+  })
+  // Remember what this host listed, so a reload while it is down still shows it (bounded, ids and titles only).
+  createEffect(() => {
+    const rows = sessionRows()
+    if (rows.length && !sessionsError() && !stateError()) saveSeen("local", rows, localProject())
   })
   const archivedIds = archived
   const sessions = createMemo(() => sessionRows()
@@ -570,6 +581,8 @@ export function DashboardProvider(props: ParentProps) {
   const workProject = () => allProjects() ? undefined : editspace() ?? editspaces()?.default ?? (editspaces() ? undefined : null)
   void readHost().then((info) => {
     if (info.remote) return
+    // A host removed from the Work view (or unpaired) leaves no cached rows behind.
+    forgetSeen(info.work.map((item) => item.id))
     runWithOwner(owner, () => setFeeds(info.work.filter((item) => item.id !== info.id).map((item) => createHostFeed(item, workProject))))
   })
   createEffect((previous: string | null | undefined) => {

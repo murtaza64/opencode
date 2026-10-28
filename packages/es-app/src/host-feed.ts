@@ -8,6 +8,7 @@ import { coalesced } from "./coalesced"
 import { createServerEvents } from "./event-source"
 import type { WorkHost } from "./host"
 import type { AttentionList, AttentionRecord } from "./attention"
+import { loadSeen, saveSeen } from "./last-seen"
 
 /** A session row; `host` names a Work view host other than this page's, undefined for this page's. */
 export type HostedRow = {
@@ -30,6 +31,8 @@ export type HostFeedState = {
   reason?: ReachReason
   /** Last read attempt (success or failure). */
   checkedAt?: number
+  /** Set while `rows` are a previous page load's last-seen rows, not yet confirmed by a read. */
+  cachedAt?: number
   /** Last-known rows; kept, marked unavailable, when the host stops answering. */
   rows: HostedRow[]
   /** When the host was first seen unavailable in the current outage. */
@@ -90,6 +93,7 @@ export const reachOf = (state: HostFeedState) => ({
   state: state.status === "ready" ? "reachable" as const : state.status === "unavailable" ? "unreachable" as const : "unknown" as const,
   ...(state.status === "unavailable" ? { reason: state.reason ?? "network", since: state.since } : {}),
   ...(state.checkedAt ? { checkedAt: state.checkedAt } : {}),
+  ...(state.cachedAt ? { cachedAt: state.cachedAt } : {}),
 })
 
 const LIST_MS = 5000
@@ -99,7 +103,18 @@ const SESSION_EVENTS = ["session.created", "session.updated", "session.deleted",
 /** `project`: the selected project name, undefined for all projects, null while not yet known. */
 export const createHostFeed = (host: WorkHost, project: () => string | undefined | null) => {
   const base = `/hosts/${host.id}`
-  const [state, setState] = createSignal<HostFeedState>({ status: "loading", rows: [], scoped: false, decisions: [] })
+  // Until the first read answers, show what this host last listed (if the project matches), marked by its age.
+  const seen = (() => {
+    const name = project()
+    return name === null ? undefined : loadSeen(host.id, name)
+  })()
+  const [state, setState] = createSignal<HostFeedState>({
+    status: "loading",
+    rows: seen ? seen.rows.map((row) => ({ ...row, host: host.id })) : [],
+    scoped: false,
+    decisions: [],
+    ...(seen ? { cachedAt: seen.cachedAt } : {}),
+  })
   const [live, setLive] = createSignal<Record<string, string>>({})
   let loading: Promise<void> | undefined
   const read = async <T,>(path: string) => {
@@ -135,17 +150,25 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
       scope = { project: name, ...(root ? { es: name } : {}), ...(name && !root ? { none: true } : {}) }
       // A decision list that fails to read keeps the last one for this project, marked stale.
       const decisions = await readDecisions()
+      const rows = name && !root ? [] : hostRows(host.id, sessions, root)
+      saveSeen(host.id, rows, name)
       setState((previous) => ({
         checkedAt: Date.now(),
         status: "ready",
-        rows: name && !root ? [] : hostRows(host.id, sessions, root),
+        rows,
         scoped: !!root,
         decisions: decisions ?? (same ? previous.decisions : []),
         decisionsStale: !decisions,
       }))
     } catch (error) {
       const reason = error instanceof ReachError ? error.reason : "network"
-      setState((previous) => ({ ...previous, status: "unavailable", reason, checkedAt: Date.now(), since: previous.since ?? Date.now() }))
+      // Nothing listed yet in this page (the host was down at load): show its last-seen rows for this project.
+      const fallback = !state().rows.length && !state().checkedAt ? loadSeen(host.id, name) : undefined
+      setState((previous) => ({
+        ...previous,
+        ...(fallback ? { rows: fallback.rows.map((row) => ({ ...row, host: host.id })), cachedAt: fallback.cachedAt } : {}),
+        status: "unavailable", reason, checkedAt: Date.now(), since: previous.since ?? Date.now(),
+      }))
     }
   }
   // Decisions have no event on the session stream: between list reads, read only the decision list.
