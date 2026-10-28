@@ -16,11 +16,16 @@ let total = 142.4
 let mode = "json"
 // Newer Cores: nullable cost with per-model coverage.
 let shape = "old"
+// /__es/host answer (undefined: route missing, single host) and the Mini host's rollup.
+let hostInfo
+let mini = { mode: "fail" }
+const originDay = (cost) => ({ day: new Date().toLocaleDateString("en-CA"), complete: true, cost, originOnly: true, originCost: cost, unpricedModels: cost === null ? 1 : 0, unpricedTokens: 0,
+  models: [{ provider: "anthropic", model: "claude-opus", cost, coverage: cost === null ? "missing-rate" : "priced", tokens: tokens(1_000, 100) }] })
 const reads = []
 const rollup = () => ({
   estimate: true, basis: "Estimated; not provider billing.", host: "local", observedAt: new Date().toISOString(), offsetMinutes: -new Date().getTimezoneOffset(),
-  coverage: { scope: "API-billed work agents on this host", liveSince: new Date(Date.now() - 3_600_000).toISOString(), backfilled: false },
-  days: [shape === "old"
+  coverage: { scope: "API-billed work agents on this host", liveSince: new Date(Date.now() - 3_600_000).toISOString(), backfilled: shape === "origin" },
+  days: shape === "origin" ? [originDay(total)] : [shape === "old"
     ? { day: new Date().toLocaleDateString("en-CA"), cost: total, models: [{ provider: "anthropic", model: "claude-opus", cost: total, tokens: tokens(1_000_000, 50_000) }] }
     : { day: new Date().toLocaleDateString("en-CA"), complete: true, cost: total, unpricedModels: total === null ? 1 : 0, unpricedTokens: 0, models: [
       { provider: "gateway", model: "internal", cost: null, coverage: "missing-rate", tokens: tokens(10_000, 1_000) },
@@ -30,7 +35,20 @@ const rollup = () => ({
 })
 const preview = await startAttentionPreview([{
   name: "today-cost-fixture",
+  // Before the app config's own /__es/host handler.
+  enforce: "pre",
   configureServer(server) {
+    server.middlewares.use("/__es/host", (_req, res) => {
+      if (!hostInfo) { res.writeHead(404); return res.end() }
+      res.writeHead(200, { "content-type": "application/json" })
+      res.end(JSON.stringify(hostInfo))
+    })
+    server.middlewares.use("/hosts/mini/oc/experimental/usage/daily", (_req, res) => {
+      if (mini.mode === "fail") { res.writeHead(503); return res.end("{}") }
+      const day = mini.mode === "origin" ? originDay(mini.cost) : { day: new Date().toLocaleDateString("en-CA"), cost: mini.cost, models: [{ provider: "a", model: "m", cost: mini.cost, tokens: tokens(1_000, 100) }] }
+      res.writeHead(200, { "content-type": "application/json" })
+      res.end(JSON.stringify({ ...rollup(), days: [day], coverage: { scope: "Mini", backfilled: true } }))
+    })
     server.middlewares.use("/oc/experimental/usage/daily", (req, res) => {
       // Count only the page under test: the preview's warm-up page also loads the app (and its badge).
       if (req.headers["x-under-test"]) reads.push(req.url)
@@ -60,7 +78,7 @@ try {
   await expect(amount).toHaveText("~$142")
   await expect(badge.locator(".today-cost-label")).toHaveText("Today")
   await expect(badge).toHaveAttribute("aria-label", "AI spend today: about 142 dollars, estimate")
-  await expect(badge).toHaveAttribute("title", /Estimated spend today \(local date\), API-billed work agents on this host · 1 of 1 models priced · counted since .* · updated/)
+  await expect(badge).toHaveAttribute("title", /^Estimated spend today \(local date\), API-billed work agents\n.*: \$142\.40 \(some usage unpriced or not yet counted\)|^Estimated spend today \(local date\), API-billed work agents\n.*\$142\.40/)
   await expect(badge).toHaveAttribute("data-band", "low")
   expect(await amount.evaluate((node) => getComputedStyle(node).color)).toBe(await colour("green"))
   if (shots) await page.screenshot({ path: `${shots}/desk-1440.png` })
@@ -110,12 +128,44 @@ try {
   total = 90
   await page.reload({ waitUntil: "domcontentloaded" })
   await expect(amount).toHaveText("~$90")
-  await expect(badge).toHaveAttribute("title", /1 of 2 models priced/)
+  await expect(badge).toHaveAttribute("title", /\$90\.00/)
   total = null
   await page.reload({ waitUntil: "domcontentloaded" })
   await page.waitForTimeout(2000)
   await expect(page.locator(".today-cost")).toHaveCount(0)
   console.log("PASS newer rollup: unpriced model counted as partial; null total hidden, never $0")
+
+  // Several WORK hosts: the badge sums origin-only costs; a host that cannot say is named and never blocks.
+  hostInfo = { id: "local", label: "Laptop", remote: false, hosts: [], work: [{ id: "local", label: "Laptop", origin: preview.origin }, { id: "mini", label: "Mini", origin: "http://127.0.0.1:1" }] }
+  shape = "origin"
+  total = 40
+  mini = { mode: "origin", cost: 25 }
+  await page.reload({ waitUntil: "domcontentloaded" })
+  // Rollups are always estimates, so the '~' stays; partial vs complete shows in the per-host tooltip.
+  await expect(amount).toHaveText("~$65")
+  await expect(badge).toHaveAttribute("aria-label", "AI spend today: about 65 dollars, estimate")
+  await expect(badge).toHaveAttribute("data-partial", "false")
+  await expect(badge).toHaveAttribute("title", /Laptop: \$40\.00/)
+  await expect(badge).toHaveAttribute("title", /Mini: \$25\.00/)
+  console.log("PASS two WORK hosts, origin-only: summed, complete")
+  mini = { mode: "fail" }
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(amount).toHaveText("~$40")
+  await expect(badge).toHaveAttribute("title", /Mini: unreachable/)
+  await expect(badge).toHaveAttribute("data-partial", "true")
+  console.log("PASS one WORK host unreachable: the other's total shows, partial, host named")
+  mini = { mode: "raw", cost: 25 }
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(amount).toHaveText("~$40")
+  await expect(badge).toHaveAttribute("title", /Mini: \$25\.00 \(may overlap another host.*not in total/)
+  console.log("PASS older Core without origin-only cost: not summed (may overlap), partial")
+  mini = { mode: "origin", cost: null }
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(amount).toHaveText("~$40")
+  await expect(badge).toHaveAttribute("title", /Mini: unpriced/)
+  console.log("PASS unpriced WORK host: partial, never $0")
+  hostInfo = undefined
+  shape = "old"
 
   mode = "html"
   await page.reload({ waitUntil: "domcontentloaded" })

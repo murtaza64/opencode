@@ -118,12 +118,15 @@ export type UsageDaily = {
   host: string
   observedAt: string
   offsetMinutes: number
-  coverage: { scope: string; liveSince?: string; backfilled: boolean }
+  coverage: { scope: string; liveSince?: string; backfilled: boolean; origin?: { basis: string; hostID: string; originSince: string } }
   /** Newer Cores: `cost` is null when nothing on the day is priced; `coverage` and `complete` say why. */
   days: {
     day: string
     cost: number | null
     complete?: boolean
+    /** Newer Cores: the whole local day is after originSince, so originCost counts only steps this host ran. */
+    originOnly?: boolean
+    originCost?: number | null
     unpricedModels?: number
     models: { provider: string; model: string; cost: number | null; coverage?: "priced" | "missing-rate" | "no-usage"; tokens: UsageTokens }[]
   }[]
@@ -289,9 +292,10 @@ export const oc = {
   },
 
   // undefined = this Core predates the usage route (404 or the HTML app page); the page says so.
-  usageDaily: async (days: number, signal?: AbortSignal): Promise<UsageDaily | undefined> => {
+  /** `base`: "" for this page's host, or "/hosts/<id>" for another Work host through this listener. */
+  usageDaily: async (days: number, signal?: AbortSignal, base = ""): Promise<UsageDaily | undefined> => {
     // Days are local: the offset is east-positive minutes, the inverse of getTimezoneOffset().
-    const res = await fetch(`/oc/experimental/usage/daily?days=${days}&offsetMinutes=${-new Date().getTimezoneOffset()}`, { signal })
+    const res = await fetch(`${base}/oc/experimental/usage/daily?days=${days}&offsetMinutes=${-new Date().getTimezoneOffset()}`, { signal })
     if (res.status === 404 || !res.headers.get("content-type")?.includes("application/json")) return undefined
     return json<UsageDaily>(res)
   },
