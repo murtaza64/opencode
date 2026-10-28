@@ -133,6 +133,13 @@ export type BriefShape =
   | { kind: "impact"; rows: { area: string; change: string }[] }
   /** What a choice changes and what it keeps: a row whose now and after are equal stays as it is. */
   | { kind: "change"; rows: { item: string; now: string; after: string }[] }
+export type BriefStep = {
+  title: string
+  where?: { label: string; refs: string[] }
+  settings: { field: string; value: string; refs: string[] }[]
+  verify: string
+  option: string
+}
 /** A link the brief cites, resolved by the app from evidence refs; never a model-written URL it did not see. */
 export type BriefSource = { label: string; refs: string[] }
 export type BriefResult = {
@@ -147,6 +154,9 @@ export type BriefResult = {
   choices: { id: string; label: string; outcome: string; note: string; sketch?: string }[]
   /** Commands an option asks the human to run, shown only when quoted exactly from the request or a named document. */
   commands: { label: string; where: string; option: string; command: string }[]
+  /** Steps an option asks the human to do by hand (a console or settings page), in order: where to go, each
+   * field and its value, and how to tell it worked. Values are shown only when quoted exactly (briefSteps). */
+  steps: BriefStep[]
   /** What not answering leads to, only when no option already means that. */
   ifWait: string
   /** For a decision to publish something: the exact text it would send, quoted from the request. */
@@ -402,6 +412,21 @@ const citedOf = (value: unknown, known: { has: (ref: string) => boolean }) => {
   return { kept, omitted: (Array.isArray(value) ? value.length : 0) - kept.length }
 }
 
+const stepsOf = (value: unknown, known: { has: (ref: string) => boolean }): BriefStep[] => objects(value).slice(0, 8).flatMap(row => {
+  const title = text(row.title, 100)
+  if (!title) return []
+  const refsOf = (value: unknown) => Array.isArray(value) ? value.filter((ref): ref is string => typeof ref === "string" && known.has(ref)) : []
+  const where = row.where && typeof row.where === "object" ? row.where as Record<string, unknown> : undefined
+  return [{
+    title,
+    ...(where && text(where.label, 80) ? { where: { label: text(where.label, 80), refs: refsOf(where.refs) } } : {}),
+    settings: objects(row.settings).slice(0, 8).flatMap(setting => text(setting.field, 80)
+      ? [{ field: text(setting.field, 80), value: typeof setting.value === "string" ? setting.value.trim().slice(0, 300) : "", refs: refsOf(setting.refs) }] : []),
+    verify: text(row.verify, 160),
+    option: typeof row.option === "string" ? row.option : "",
+  }]
+})
+
 // The reply is plain text; tolerate a fenced block, nothing more.
 const parseBrief = (message?: MessageWithParts) => {
   const text = message?.parts.flatMap(part => part.type === "text" && !part.synthetic ? [part.text] : []).join("").trim()
@@ -429,6 +454,7 @@ export const briefState = (meta: BriefMeta, messages: MessageWithParts[], status
         question: text(value.question, 160), context: text(value.context, 320), subjects: subjectsOf(value.subjects, known), choices: choicesOf(value.choices, legacy),
         commands: objects(value.commands).slice(0, 4).flatMap(row => typeof row.command === "string" && row.command.trim() && row.command.length <= 2000 && text(row.label, 80)
           ? [{ label: text(row.label, 80), where: text(row.where, 80), option: typeof row.option === "string" ? row.option : "", command: row.command.trim() }] : []),
+        steps: stepsOf(value.steps, known),
         ifWait: text(value.ifWait, 140), sends: typeof value.sends === "string" ? value.sends.trim() : "", sendsTo: text(value.sendsTo, 160), sendsAs: text(value.sendsAs, 60),
         ...shapeOf(value.shape), gaps: strings(value.gaps, 160, 3),
         // A source survives only with at least one ref the app can resolve; the label alone is never shown.
@@ -472,13 +498,14 @@ export const detailRequest = (item: DeskItem, question: string, packet: { text: 
 }
 
 /** A brief replaces reading only when it states the question, with options every option's outcome, and
- * carries every link the request gives (in subjects or sources), so the things being decided cannot be
+ * carries every link the request gives (in subjects, sources or a step's page), so the things being decided cannot be
  * summarised away. Anything less leaves the request as written. */
 export const briefComplete = (result: BriefResult, item: DeskItem) => {
   const options = item.record?.options ?? []
   if (!result.question) return false
   if (!options.every(option => result.choices.some(choice => choice.id === option.id))) return false
-  const cited = new Set([...result.subjects, ...result.sources].flatMap(row => row.refs))
+  // A step's page link shows the request's own URL too.
+  const cited = new Set([...result.subjects, ...result.sources, ...result.steps.flatMap(step => step.where ? [step.where] : [])].flatMap(row => row.refs))
   return requestLinks(item).every((_, index) => cited.has(`U${index + 1}`))
 }
 
@@ -491,6 +518,19 @@ export const briefSends = (result: BriefResult, item: DeskItem, documents: Conve
 export const briefCommands = (result: BriefResult, item: DeskItem, documents: ConversationDocument[] = []) => {
   const sources = [item.record?.context ?? "", ...documents.map(document => document.text)]
   return result.commands.filter(entry => sources.some(source => source.includes(entry.command)))
+}
+
+/** Steps a brief may show. A setting's value and a step's check survive only when they appear character for
+ * character in the request or a named document; any other value is blanked so the step reads "not given"
+ * rather than offering a guessed, rounded or completed value to type into a live console. */
+export const briefSteps = (result: BriefResult, item: DeskItem, documents: ConversationDocument[] = []) => {
+  const sources = [item.record?.context ?? "", ...documents.map(document => document.text)]
+  const quoted = (value: string) => value !== "" && sources.some(source => source.includes(value))
+  return result.steps.map(step => ({
+    ...step,
+    verify: quoted(step.verify) ? step.verify : "",
+    settings: step.settings.map(setting => quoted(setting.value) ? setting : { ...setting, value: "" }),
+  }))
 }
 
 /** Where a cited source can be opened: the source thread at its cited messages, or a markdown file.

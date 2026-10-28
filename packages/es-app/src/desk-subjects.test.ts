@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { MessageWithParts } from "./api"
 import type { AttentionRecord } from "./attention"
-import { attentionItem, briefCommands, briefComplete, briefPacket, briefState, requestLinks, safeSvg, type BriefMeta, type BriefResult } from "./desk"
+import { attentionItem, briefCommands, briefComplete, briefSteps, briefPacket, briefState, requestLinks, safeSvg, type BriefMeta, type BriefResult } from "./desk"
 import { answeredJob, currentJob, regeneratingJob, type BriefJob } from "./desk-session"
 
 // A request shaped like a bulk review gate: nine service/config pull-request pairs, one with a prerequisite.
@@ -106,6 +106,46 @@ test("a command is shown only when quoted exactly from the request; paraphrased 
   expect(briefCommands({ ...result, commands: [{ ...exact, command: "rm -rf ~" }] }, moving)).toEqual([])
   // A command quoted only in a named document counts too.
   expect(briefCommands({ ...result, commands: [{ ...exact, command: "make deploy" }] }, moving, [{ name: "runbook.md", text: "then run make deploy" }])).toHaveLength(1)
+})
+
+// A console walkthrough shaped like a rule change: one link, two values given, one value the request never states.
+const consoleRecord = { ...record, id: "att_console", options: [{ id: "apply", label: "Apply the rule" }, { id: "skip", label: "Skip" }], recommendation: "apply",
+  context: "Open https://console.example.com/zones/z1/rules and add a rule named block-scrapers with expression (http.user_agent contains \"scraper\") and action Block. Pick a request limit." }
+const consoleItem = attentionItem(consoleRecord, 0)
+const walkthrough = [{ title: "Add the rule", where: { label: "Zone rules page", refs: ["U1", "U9"] }, option: "apply", verify: "The rule shows as Active",
+  settings: [{ field: "Rule name", value: "block-scrapers", refs: ["C1"] }, { field: "Expression", value: `(http.user_agent contains "scraper")`, refs: ["C1"] },
+    { field: "Requests per minute", value: "100", refs: ["C1"] }] }]
+const consoleReply = (value: unknown) => {
+  const packet = briefPacket(consoleItem, [])
+  const meta: BriefMeta = { kind: "brief", requestID: "r", source: consoleItem.key, revision: consoleItem.revision, title: consoleRecord.title, refs: packet.refs, contract: 4 }
+  const messages = [{ info: { id: "msg_u", role: "user" }, parts: [{ type: "text", text: packet.text }] },
+    { info: { id: "msg_a", role: "assistant", time: { created: 1, completed: 2 } }, parts: [{ type: "text", text: JSON.stringify(value) }] }] as unknown as MessageWithParts[]
+  const state = briefState(meta, messages, "idle")
+  if (state.state !== "ready") throw Error(`not ready: ${JSON.stringify(state)}`)
+  return state.result
+}
+
+test("console steps keep their order, page link and every setting, dropping refs the request never supplied", () => {
+  const steps = consoleReply({ question: "Add the scraper rule?", choices: [], steps: [...walkthrough, { title: "" }] }).steps
+  expect(steps).toEqual([{ ...walkthrough[0]!, where: { label: "Zone rules page", refs: ["U1"] } }])
+})
+
+test("a setting value not quoted exactly from the request is shown as not given, never as a guess", () => {
+  const result = consoleReply({ question: "Add the scraper rule?", choices: [], steps: walkthrough })
+  expect(briefSteps(result, consoleItem)[0]!.settings.map(setting => [setting.field, setting.value])).toEqual([
+    ["Rule name", "block-scrapers"], ["Expression", `(http.user_agent contains "scraper")`], ["Requests per minute", ""]])
+  // A value stated only in a named document counts too.
+  expect(briefSteps(result, consoleItem, [{ name: "limits.md", text: "limit: 100 per minute" }])[0]!.settings[2]!.value).toBe("100")
+})
+
+test("a request link shown as a step's page counts as carried by the brief", () => {
+  const choices = [{ id: "apply", outcome: "Blocked once saved" }, { id: "skip", outcome: "Unchanged" }]
+  expect(briefComplete(consoleReply({ question: "Add the scraper rule?", choices, steps: walkthrough }), consoleItem)).toBe(true)
+  expect(briefComplete(consoleReply({ question: "Add the scraper rule?", choices }), consoleItem)).toBe(false)
+})
+
+test("a brief written before steps existed still parses, with no steps", () => {
+  expect(consoleReply({ question: "Add the scraper rule?", choices: [] }).steps).toEqual([])
 })
 
 test("commands survive parsing whole, without whitespace or quote rewriting", () => {
