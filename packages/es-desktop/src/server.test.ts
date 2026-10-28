@@ -332,6 +332,35 @@ test("Front desk ignored failures and memory reach the dashboard with only the o
   expect((await get("/es/api/frontdesk/ignored-failures", { method: "POST", body: "{}", headers: { origin: "https://evil.test" } })).status).toBe(403)
 })
 
+test("pin writes reach this host's dashboard as operator writes, the lane ref still encoded once", async () => {
+  const { server, get } = await setup()
+  const cookie = "unrelated=private; es_attention_operator=synthetic"
+  const headers = { origin: server.origin, cookie, "x-attention-csrf": "1", "content-type": "application/json" }
+  const lane = await get("/es/api/pins/lane:opencode%2Forchestrator", { method: "PUT", body: '{"at":1,"op":"op-12345678"}', headers })
+  expect(await lane.json()).toMatchObject({ method: "PUT", path: "/api/pins/lane:opencode%2Forchestrator", body: '{"at":1,"op":"op-12345678"}' })
+  const order = await get("/es/api/pins/session:ses_a/order", { method: "PATCH", body: "{}", headers })
+  expect(await order.json()).toMatchObject({ method: "PATCH", path: "/api/pins/session:ses_a/order" })
+  const unpin = await get("/es/api/pins/session:ses_a", { method: "DELETE", body: "{}", headers })
+  expect(await unpin.json()).toMatchObject({ method: "DELETE", path: "/api/pins/session:ses_a" })
+  // Without the native origin a pin write never leaves the listener.
+  expect((await get("/es/api/pins/session:ses_a", { method: "PUT", body: "{}" })).status).toBe(403)
+  expect((await get("/es/api/pins/session:ses_a", { method: "PUT", body: "{}", headers: { origin: "https://evil.test" } })).status).toBe(403)
+})
+
+test("only exact pin routes are exposed", () => {
+  expect(apiAllowed("GET", "/es/api/pins")).toBe(true)
+  expect(apiAllowed("GET", "/es/api/pins/events")).toBe(true)
+  for (const method of ["PUT", "DELETE"]) {
+    expect(apiAllowed(method, "/es/api/pins/session:ses_a")).toBe(true)
+    expect(apiAllowed(method, "/es/api/pins/lane:opencode%2Forchestrator")).toBe(true)
+  }
+  expect(apiAllowed("PATCH", "/es/api/pins/lane:opencode%2forchestrator/order")).toBe(true)
+  for (const [method, pathname] of [
+    ["POST", "/es/api/pins"], ["PUT", "/es/api/pins"], ["GET", "/es/api/pins/session:ses_a"], ["PUT", "/es/api/pins/lane:opencode/orchestrator"],
+    ["PUT", "/es/api/pins/lane:a%252Fb"], ["PUT", "/es/api/pins/other:x"], ["PATCH", "/es/api/pins/session:ses_a"], ["PUT", "/es/api/pins/session:ses_a/order"],
+  ]) expect(apiAllowed(method, pathname)).toBe(false)
+})
+
 test("marking a requested deliverable seen reaches the dashboard with only the operator cookie", async () => {
   const { server, get } = await setup()
   const cookie = "unrelated=private; es_attention_operator=synthetic"
