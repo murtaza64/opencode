@@ -76,13 +76,17 @@ export const touchTodayCost = () => {
 }
 
 /** Per-host coverage: ok (origin-only, complete, fresh read), partial (origin-only but some usage unpriced or
- * not yet counted), offline (last read failed; showing the last value), unpriced (no priced usage), overlap
- * (older Core: raw daily cost, never summed), unreachable (no value yet), pending (first read in flight). */
-export type HostCost = { id: string; label: string; current: boolean; state: "ok" | "partial" | "offline" | "unpriced" | "overlap" | "unreachable" | "pending"; cost?: number; observedAt?: number; note?: string }
+ * not yet counted), offline (last read failed; showing the last value), unpriced (no priced usage), unsupported
+ * (older Core without origin-only cost: its raw daily cost may include history moved from another host, so it is
+ * shown on its own and never combined), unreachable (no value yet), pending (first read in flight). */
+export type HostCost = { id: string; label: string; current: boolean; state: "ok" | "partial" | "offline" | "unpriced" | "unsupported" | "unreachable" | "pending"; cost?: number; observedAt?: number; note?: string }
 
 export const todayCost = (now = Date.now()) => costSummary(targets(), readings(), now)
 
-/** The badge total from each WORK host's latest reading. */
+/** One Work Today summary. With several WORK hosts the total is the sum of origin-only costs and exists
+ * only when every host reports one, so history copied between hosts is counted once; otherwise the summary
+ * is partial with no amount, never a guessed sum. A lone WORK host's own cost is its total (nothing to
+ * overlap). Per-host figures and coverage are for the details. Undefined when no host has a cost. */
 export const costSummary = (targets: Target[], readings: Record<string, Reading>, now: number) => {
   const hosts: HostCost[] = targets.map((target) => {
     const reading = readings[target.id]
@@ -102,16 +106,19 @@ export const costSummary = (targets: Target[], readings: Record<string, Reading>
       const notes = [failed, partial ? "some usage unpriced or not yet counted" : undefined].filter(Boolean).join("; ")
       return { ...base, state: failed ? "offline" : partial ? "partial" : "ok", cost: today.originCost, note: notes || undefined }
     }
-    return { ...base, state: "overlap", cost: today.cost, note: ["may overlap another host (not origin-attributed)", failed].filter(Boolean).join("; ") }
+    return { ...base, state: "unsupported", cost: today.cost, note: ["Core has no origin-only cost", failed].filter(Boolean).join("; ") }
   })
-  // Sum origin-only costs. If none is available (older Cores), fall back to this host's own cost.
-  const summed = hosts.filter((item) => (item.state === "ok" || item.state === "partial" || item.state === "offline") && item.cost !== undefined)
-  const counted = summed.length ? summed : hosts.filter((item) => item.current && item.cost !== undefined)
-  if (!counted.length) return undefined
-  const observedAt = Math.min(...counted.map((item) => item.observedAt ?? now))
+  const known = hosts.filter((item) => item.cost !== undefined)
+  if (!known.length) return undefined
+  const combinable = (item: HostCost) => item.state === "ok" || item.state === "partial" || item.state === "offline"
+  const counted = hosts.length === 1 ? known : hosts.every(combinable) ? hosts : []
+  const observedAt = Math.min(...known.map((item) => item.observedAt ?? now))
   const exact = hosts.every((item) => item.state === "ok" && now - (item.observedAt ?? 0) <= STALE_MS)
   return {
-    total: counted.reduce((sum, item) => sum + (item.cost ?? 0), 0),
+    /** Deduplicated Work total; undefined when some host cannot be combined. */
+    total: counted.length ? counted.reduce((sum, item) => sum + (item.cost ?? 0), 0) : undefined,
+    /** Hosts that keep the summary partial, for the details. */
+    gaps: hosts.filter((item) => item.state !== "ok"),
     estimate: true,
     partial: !exact,
     observedAt,
