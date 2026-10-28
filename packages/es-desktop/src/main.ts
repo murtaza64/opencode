@@ -5,7 +5,7 @@ import { serve } from "./server"
 import { localHost, type WorkHost } from "../../es-app/remote-host"
 import { PERF_DIR } from "./perf-log"
 import { createVoice, voiceTools } from "./voice"
-import { appRouteURL, externalURL, internalURL, pageArrivedCrossSite, pageNavigation, serviceHosts, serviceOrigins, startupMode, startupPlan, surfaceFrameURL } from "./policy"
+import { appRouteURL, externalURL, internalURL, pageArrivedCrossSite, pageNavigation, serviceHosts, serviceOrigins, serviceSelf, startupMode, startupPlan, surfaceFrameURL } from "./policy"
 import { createTabs, TITLE_BAR_HEIGHT } from "./tabs"
 import { watchBadges } from "./badges"
 import { createAppearance } from "./appearance"
@@ -93,13 +93,19 @@ const start = async () => {
     console.error("Editspace remote hosts ignored", { message: error instanceof Error ? error.message : "Unknown error" })
     return []
   })
+  // This machine's own identity, reported to its pages and used as the Local row's host id.
+  const self = await serviceSelf(app.getPath("userData")).catch((error: unknown) => {
+    console.error("Editspace host identity ignored", { message: error instanceof Error ? error.message : "Unknown error" })
+    return undefined
+  })
+  const selfInfo = { ...localHost, ...(self ?? {}) }
   // Hosts in the Work view (proxied app hosts; page hosts such as Personal stay their own tab), with
   // their listener origins once started. New work goes to the configured default, else the first.
   const work: WorkHost[] = []
   const workDefault = configured.find((host) => host.mode === "proxy" && host.default)?.id ?? configured.find((host) => host.mode === "proxy")?.id
   const server = await serve({
     peers: configured.filter((host) => host.mode === "proxy").map((host) => ({ id: host.id, origin: host.origin })),
-    hostInfo: () => ({ ...localHost, work }),
+    hostInfo: () => ({ ...selfInfo, work }),
     appearance,
     port,
     root: path.join(app.getAppPath(), "dist/renderer"),
@@ -129,7 +135,7 @@ const start = async () => {
         // The look belongs to this laptop, whichever host a tab shows.
         appearance,
         // Host tabs show placement natively, so the page needs no switcher of its own.
-        hostInfo: () => ({ id: host.id, label: host.label, remote: true, hosts: [], work }),
+        hostInfo: () => ({ id: host.id, label: host.label, remote: true, hosts: [], work, profile: host.profile, ...(host.kind ? { kind: host.kind } : {}) }),
         perfDir: PERF_DIR,
       })
       await writeFile(file, new URL(listener.origin).port, { mode: 0o600 })
@@ -141,8 +147,8 @@ const start = async () => {
   )
   const remotes = started.filter((item) => item !== undefined)
   work.push(
-    { id: "local", label: "Local", origin: server.origin, ...(workDefault ? {} : { default: true }) },
-    ...remotes.map((host) => ({ id: host.id, label: host.label, origin: host.server.origin, ...(host.id === workDefault ? { default: true } : {}) })),
+    { id: selfInfo.id, label: selfInfo.label, origin: server.origin, ...(selfInfo.profile ? { profile: selfInfo.profile } : {}), ...(selfInfo.kind ? { kind: selfInfo.kind } : {}), ...(workDefault ? {} : { default: true }) },
+    ...remotes.map((host) => ({ id: host.id, label: host.label, origin: host.server.origin, profile: host.profile, ...(host.kind ? { kind: host.kind } : {}), ...(host.id === workDefault ? { default: true } : {}) })),
   )
   const pages = configured.filter((host) => host.mode === "page")
   const listeners = [{ id: "local", label: "Local", server }, ...remotes]

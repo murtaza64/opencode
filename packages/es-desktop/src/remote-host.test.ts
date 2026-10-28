@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import WebSocket from "ws"
@@ -171,7 +171,7 @@ test("remote hosts must be credential-free tailnet HTTPS origins with distinct i
   const directory = await renderer()
   expect(await serviceHosts(directory, {})).toEqual([])
   expect(await serviceHosts(directory, { ES_REMOTE_HOSTS: '[{"id":"mini","label":"Mac Mini","origin":"https://murtaza-mac-mini.tailc81fd.ts.net"}]' })).toEqual([
-    { id: "mini", label: "Mac Mini", origin: "https://murtaza-mac-mini.tailc81fd.ts.net", mode: "proxy" },
+    { id: "mini", label: "Mac Mini", origin: "https://murtaza-mac-mini.tailc81fd.ts.net", mode: "proxy", profile: "work" },
   ])
   for (const origin of [
     "http://murtaza-mac-mini.tailc81fd.ts.net",
@@ -185,13 +185,13 @@ test("remote hosts must be credential-free tailnet HTTPS origins with distinct i
   await expect(serviceHosts(directory, { ES_REMOTE_HOSTS: '[{"id":"local","origin":"https://a.b.ts.net"}]' })).rejects.toThrow("Invalid remote host id")
   await expect(serviceHosts(directory, { ES_REMOTE_HOSTS: '[{"id":"mini","origin":"https://a.b.ts.net"},{"id":"mini","origin":"https://c.b.ts.net"}]' })).rejects.toThrow("Duplicate")
   await Bun.write(path.join(directory, "service-origins.json"), JSON.stringify({ hosts: [{ id: "mini", label: "Mac Mini", origin: "https://murtaza-mac-mini.tailc81fd.ts.net" }] }))
-  expect(await serviceHosts(directory, {})).toEqual([{ id: "mini", label: "Mac Mini", origin: "https://murtaza-mac-mini.tailc81fd.ts.net", mode: "proxy" }])
+  expect(await serviceHosts(directory, {})).toEqual([{ id: "mini", label: "Mac Mini", origin: "https://murtaza-mac-mini.tailc81fd.ts.net", mode: "proxy", profile: "work" }])
 })
 
 test("a page host is any credential-free https origin shown as its own page", async () => {
   const directory = await renderer()
   expect(await serviceHosts(directory, { ES_REMOTE_HOSTS: '[{"id":"personal","label":"Personal","origin":"https://agents.murtaza.earth","mode":"page"}]' })).toEqual([
-    { id: "personal", label: "Personal", origin: "https://agents.murtaza.earth", mode: "page" },
+    { id: "personal", label: "Personal", origin: "https://agents.murtaza.earth", mode: "page", profile: "personal" },
   ])
   for (const origin of ["http://agents.murtaza.earth", "https://user:pass@agents.murtaza.earth", "https://agents.murtaza.earth/app"])
     await expect(serviceHosts(directory, { ES_REMOTE_HOSTS: JSON.stringify([{ id: "personal", origin, mode: "page" }]) })).rejects.toThrow("Page hosts must be")
@@ -335,11 +335,42 @@ test("another host's session events arrive through the local socket with that ho
   expect(mini.seen.find((item) => item.path === "/global/event")).toMatchObject({ origin: mini.origin, authorization: null, cookie: null })
 })
 
+test("a host's profile defaults by mode, may be set, and is validated, as is its kind", async () => {
+  const directory = await renderer()
+  expect(await serviceHosts(directory, { ES_REMOTE_HOSTS: '[{"id":"mini","origin":"https://a.b.ts.net","kind":"mini"},{"id":"wing","origin":"https://w.b.ts.net","profile":"personal","kind":"pc"}]' })).toEqual([
+    { id: "mini", label: "mini", origin: "https://a.b.ts.net", mode: "proxy", profile: "work", kind: "mini" },
+    { id: "wing", label: "wing", origin: "https://w.b.ts.net", mode: "proxy", profile: "personal", kind: "pc" },
+  ])
+  await expect(serviceHosts(directory, { ES_REMOTE_HOSTS: '[{"id":"mini","origin":"https://a.b.ts.net","profile":"home"}]' })).rejects.toThrow("profile")
+  await expect(serviceHosts(directory, { ES_REMOTE_HOSTS: '[{"id":"mini","origin":"https://a.b.ts.net","kind":"phone"}]' })).rejects.toThrow("kind")
+})
+
+test("this machine's own identity comes from service-origins.json self, validated; absent it stays local", async () => {
+  const { serviceSelf } = await import("./policy")
+  const directory = await mkdtemp(path.join(tmpdir(), "es-self-"))
+  cleanup.push(() => rm(directory, { recursive: true, force: true }))
+  expect(await serviceSelf(directory)).toBeUndefined()
+  await writeFile(path.join(directory, "service-origins.json"), JSON.stringify({ self: { id: "laptop", label: "Laptop", profile: "work", kind: "laptop" } }))
+  expect(await serviceSelf(directory)).toEqual({ id: "laptop", label: "Laptop", profile: "work", kind: "laptop" })
+  for (const self of [{ id: "local" }, { id: "Laptop" }, { id: "laptop", profile: "home" }, { id: "laptop", kind: "phone" }, "laptop"]) {
+    await writeFile(path.join(directory, "service-origins.json"), JSON.stringify({ self }))
+    await expect(serviceSelf(directory)).rejects.toThrow("Invalid host")
+  }
+})
+
+test("a listener reports its own identity and the Work hosts' profile and kind at /__es/host", async () => {
+  const server = await serve({ root: await renderer(), hostInfo: () => ({ id: "laptop", label: "Laptop", remote: false, hosts: [], profile: "work", kind: "laptop",
+    work: [{ id: "laptop", label: "Laptop", origin: "http://127.0.0.1:1", profile: "work", kind: "laptop" }, { id: "mini", label: "Mac Mini", origin: "http://127.0.0.1:2", profile: "work", kind: "mini", default: true }] }) })
+  cleanup.push(server.close)
+  const body = await (await fetch(`${server.origin}/__es/host`, { headers: { "x-editspace-key": server.key } })).json()
+  expect(body).toMatchObject({ id: "laptop", profile: "work", kind: "laptop", work: [{ id: "laptop", profile: "work" }, { id: "mini", profile: "work", kind: "mini", default: true }] })
+})
+
 test("one proxied host may be the default for new work", async () => {
   const directory = await renderer()
   expect(await serviceHosts(directory, { ES_REMOTE_HOSTS: '[{"id":"mini","origin":"https://a.b.ts.net","default":true},{"id":"personal","origin":"https://x.y","mode":"page","default":true}]' })).toEqual([
-    { id: "mini", label: "mini", origin: "https://a.b.ts.net", mode: "proxy", default: true },
-    { id: "personal", label: "personal", origin: "https://x.y", mode: "page" },
+    { id: "mini", label: "mini", origin: "https://a.b.ts.net", mode: "proxy", profile: "work", default: true },
+    { id: "personal", label: "personal", origin: "https://x.y", mode: "page", profile: "personal" },
   ])
   await expect(serviceHosts(directory, { ES_REMOTE_HOSTS: '[{"id":"mini","origin":"https://a.b.ts.net","default":true},{"id":"m2","origin":"https://c.b.ts.net","default":true}]' })).rejects.toThrow("Only one default host")
 })

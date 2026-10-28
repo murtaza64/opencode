@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { GlobalSession } from "@opencode-ai/sdk/v2"
-import { hostDecisionHref, hostRowKey, hostRows, hostSessionHref, hostTabHref, workRows } from "./host-feed"
+import { hostDecisionHref, hostRowKey, hostRows, hostSessionHref, hostTabHref, reachOf, reasonFor, workRows } from "./host-feed"
 import { hostInfo } from "./host"
 
 const session = (id: string, directory: string, updated: number, extra: Partial<GlobalSession> = {}) =>
@@ -62,5 +62,30 @@ describe("host info", () => {
   test("an older listener without a Work view reports none", () => {
     expect(hostInfo({ id: "local", label: "Local", remote: false, hosts: [] }).work).toEqual([])
     expect(hostInfo(undefined).work).toEqual([])
+  })
+})
+
+describe("host reach", () => {
+  test("sign-in needed is told apart from a failing server", () => {
+    expect([401, 403, 302, 307].map(reasonFor)).toEqual(["auth", "auth", "auth", "auth"])
+    expect([500, 502, 503, 404].map(reasonFor)).toEqual(["server", "server", "server", "server"])
+  })
+
+  test("a feed's state maps to the registry reach, keeping when the outage began and the last check", () => {
+    expect(reachOf({ status: "loading", rows: [], scoped: false, decisions: [] })).toEqual({ state: "unknown" })
+    expect(reachOf({ status: "ready", rows: [], scoped: false, decisions: [], checkedAt: 5 })).toEqual({ state: "reachable", checkedAt: 5 })
+    expect(reachOf({ status: "unavailable", reason: "auth", since: 3, checkedAt: 9, rows: [], scoped: false, decisions: [] }))
+      .toEqual({ state: "unreachable", reason: "auth", since: 3, checkedAt: 9 })
+  })
+})
+
+describe("host identity", () => {
+  test("profile and kind are kept only when valid", () => {
+    const info = hostInfo({ id: "laptop", label: "Laptop", profile: "work", kind: "laptop", hosts: [], work: [
+      { id: "mini", label: "Mac Mini", origin: "http://127.0.0.1:2", profile: "work", kind: "mini" },
+      { id: "odd", label: "Odd", origin: "http://127.0.0.1:3", profile: "home", kind: "phone" },
+    ] })
+    expect(info).toMatchObject({ id: "laptop", profile: "work", kind: "laptop" })
+    expect(info.work).toEqual([{ id: "mini", label: "Mac Mini", origin: "http://127.0.0.1:2", profile: "work", kind: "mini" }, { id: "odd", label: "Odd", origin: "http://127.0.0.1:3" }])
   })
 })

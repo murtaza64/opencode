@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
-import { remoteHosts } from "../../es-app/remote-host"
+import { hostIdentity, remoteHosts } from "../../es-app/remote-host"
 
 export const serviceURL = (value: string | undefined) => {
   if (!value) return undefined
@@ -50,6 +50,18 @@ export const serviceHosts = async (directory: string, env: { ES_REMOTE_HOSTS?: s
   )
   const saved: unknown = JSON.parse(content)
   return remoteHosts(saved && typeof saved === "object" && !Array.isArray(saved) ? (saved as Record<string, unknown>).hosts : undefined)
+}
+
+/** This machine's own identity from service-origins.json "self" ({ id, label?, profile?, kind? }); absent = "local". */
+export const serviceSelf = async (directory: string) => {
+  const content = await readFile(path.join(directory, "service-origins.json"), "utf8").catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return "{}"
+      throw error
+    },
+  )
+  const saved: unknown = JSON.parse(content)
+  return hostIdentity(saved && typeof saved === "object" && !Array.isArray(saved) ? (saved as Record<string, unknown>).self : undefined)
 }
 
 export const externalURL = (value: string) => {
