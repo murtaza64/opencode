@@ -199,6 +199,78 @@ describe("session messages endpoint", () => {
   )
 
   it.instance(
+    "compact pages reference large tool attachments through an authorized route serving the exact bytes",
+    withoutWatcher(
+      Effect.gen(function* () {
+        const current = yield* sessionScoped
+        const [user] = yield* fill(current.id, 1)
+        const session = yield* SessionNs.Service
+        const id = MessageID.ascending()
+        yield* session.updateMessage({
+          id,
+          sessionID: current.id,
+          role: "assistant",
+          parentID: user!,
+          agent: "test",
+          mode: "test",
+          modelID: model.modelID,
+          providerID: model.providerID,
+          path: { cwd: "/", root: "/" },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: Date.now() + 10 },
+        } satisfies SessionV1.Assistant)
+        const png = Buffer.alloc(30_000, 7)
+        const large = `data:image/png;base64,${png.toString("base64")}`
+        const tiny = "data:image/png;base64,iVBORw0KGgo="
+        const html = `data:text/html;base64,${Buffer.from("<script>alert(1)</script>".repeat(200)).toString("base64")}`
+        const partID = PartID.ascending()
+        const attachment = (url: string, mime: string) => ({ id: PartID.ascending(), sessionID: current.id, messageID: id, type: "file" as const, mime, url })
+        yield* session.updatePart({
+          id: partID,
+          sessionID: current.id,
+          messageID: id,
+          type: "tool",
+          callID: "call_shot",
+          tool: "screenshot",
+          state: {
+            status: "completed",
+            input: {},
+            output: "captured",
+            title: "screenshot",
+            metadata: {},
+            time: { start: 1, end: 2 },
+            attachments: [attachment(large, "image/png"), attachment(tiny, "image/png"), attachment(html, "text/html")],
+          },
+        })
+
+        const page = yield* request(`/session/${current.id}/message?limit=10&compact=true`).pipe(Effect.flatMap(json<SessionV1.WithParts[]>))
+        const state = page.at(-1)!.parts[0]!.type === "tool" ? (page.at(-1)!.parts[0] as SessionV1.ToolPart).state : undefined
+        const urls = state?.status === "completed" ? (state.attachments ?? []).map((file) => file.url) : []
+        const path = `/session/${current.id}/message/${id}/part/${partID}/attachment/0`
+        expect(urls).toEqual([path, tiny, `/session/${current.id}/message/${id}/part/${partID}/attachment/2`])
+        expect(state?.status === "completed" && state.metadata).toMatchObject({ pageTruncated: { attachments: [{ index: 0 }, { index: 2 }] } })
+        expect(JSON.stringify(page).length).toBeLessThan(10_000)
+
+        const served = yield* request(path)
+        expect(served.status).toBe(200)
+        expect(served.headers["content-type"]).toBe("image/png")
+        expect(Buffer.from(yield* served.arrayBuffer).equals(png)).toBe(true)
+        const script = yield* request(`/session/${current.id}/message/${id}/part/${partID}/attachment/2`)
+        expect(script.headers["content-type"]).toBe("application/octet-stream")
+        expect(script.headers["x-content-type-options"]).toBe("nosniff")
+        expect((yield* request(`/session/ses_other/message/${id}/part/${partID}/attachment/0`)).status).toBe(404)
+        expect((yield* request(`/session/${current.id}/message/${id}/part/${partID}/attachment/9`)).status).toBe(404)
+
+        const whole = yield* request(`/session/${current.id}/message/${id}`).pipe(Effect.flatMap(json<SessionV1.WithParts>))
+        const wholeState = (whole.parts[0] as SessionV1.ToolPart).state
+        expect(wholeState.status === "completed" && wholeState.attachments?.[0]?.url).toBe(large)
+      }),
+    ),
+    { git: true },
+  )
+
+  it.instance(
     "returns cursor headers for older pages",
     withoutWatcher(
       Effect.gen(function* () {

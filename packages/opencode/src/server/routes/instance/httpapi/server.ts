@@ -118,6 +118,7 @@ import { disposeMiddleware } from "./lifecycle"
 import { memoMap } from "@opencode-ai/core/effect/memo-map"
 import { compressionLayer } from "./middleware/compression"
 import { UsageRollup } from "@opencode-ai/core/usage/rollup"
+import { attachmentRoute } from "./attachment"
 import { corsVaryFix } from "./middleware/cors-vary"
 import { diagnosticsRoute, diagnosticsTimingLayer } from "./middleware/diagnostics"
 import { errorLayer } from "./middleware/error"
@@ -201,6 +202,7 @@ const docRoute = HttpRouter.use((router) => router.add("GET", "/doc", () => Effe
 )
 
 const diagnosticsRoutes = diagnosticsRoute.pipe(Layer.provide(authOnlyRouterLayer))
+const attachmentRoutes = attachmentRoute.pipe(Layer.provide(authOnlyRouterLayer))
 
 const uiRoute = HttpRouter.use((router) =>
   Effect.gen(function* () {
@@ -298,6 +300,7 @@ export function createRoutes(
     serverRoutes,
     docRoute,
     diagnosticsRoutes,
+    attachmentRoutes,
     uiRoute,
   ).pipe(
     Layer.provide([
