@@ -3,6 +3,7 @@
  * existing colour tokens and applies it to :root. It never reads from an agent host, and a
  * missing or partial palette leaves the default theme in place. */
 import { createSignal } from "solid-js"
+import { roleVars } from "./theme-roles"
 
 /** The viewing device's wal-palette/1 artifact roles (pywal docs/wal-palette.md), as served by its desktop app. */
 export type WalPalette = { revision: string; scheme: "dark" | "light"; roles: Record<string, string>; highlights: string[]; okRiskCvdSafe: boolean }
@@ -118,7 +119,8 @@ const apply = () => {
   applied.forEach((name) => root.style.removeProperty(name))
   applied = []
   const value = current()
-  const vars = enabled() && value ? themeVars(value.palette) : undefined
+  // wal-palette/1 roles when the desktop serves them, so one --wal-revision covers app and briefs.
+  const vars = enabled() && value ? roleVars(value.wal) ?? themeVars(value.palette) : undefined
   root.dataset.appearance = vars ? "wallpaper" : "default"
   if (!vars) return
   Object.entries(vars).forEach(([name, color]) => root.style.setProperty(name, color))
