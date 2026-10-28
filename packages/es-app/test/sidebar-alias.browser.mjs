@@ -62,7 +62,7 @@ try {
   await expect(row("ses_a")).toHaveAttribute("href", `/session/ses_a?directory=${encodeURIComponent(directory)}`)
   await expect(row("ses_a")).toHaveClass(/\bactive\b/)
   await expect(pinned).toHaveText([/Composer fixture/])
-  await expect(unpin("Composer fixture")).toHaveText("◆")
+  await expect(unpin("Composer fixture")).toHaveText("\u2665\ufe0e")
   await pin("Other session").click()
   await expect(pinned).toHaveText([/Composer fixture/, /Other session/])
   await page.locator(".es-switcher").selectOption("__all__")
@@ -87,7 +87,7 @@ try {
   await expect(page.locator(".topbar")).toContainText("Composer fixture")
   await unpin("Composer fixture").click()
   await expect(pinned).toHaveText([/Other session/])
-  await expect(pin("Composer fixture")).toHaveText("◇")
+  await expect(pin("Composer fixture")).toHaveText("\u2661\ufe0e")
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem("es-app-sidebar-pins")))).toEqual([
     JSON.stringify([directory, "ses_b"]),
   ])
