@@ -16,15 +16,19 @@ try {
   expect(composer.y).toBeGreaterThanOrEqual(transcript.y + transcript.height - 1)
   await page.locator(".session-main .transcript").evaluate((el) => { el.scrollTop = el.scrollHeight })
   await expect(page.locator('.input-receipts li[data-request-id="pending-24"]')).toBeInViewport()
-  // One busy idiom: the work line's halo is the only running animation, CSS-only on a pseudo-element.
+  // One busy idiom: the only running animations are CSS busy-halo pulses on ::after (work line, plus any busy sidebar row).
   const dot = page.locator(".session-work-status .busy-dot[data-animate]").first()
   await expect(dot).toBeVisible()
   const animations = () => page.evaluate(() => document.getAnimations().filter((animation) => animation.playState === "running")
-    .map((animation) => ({ name: animation.animationName, pseudo: animation.effect?.pseudoElement ?? null })))
-  // One-shot entrance fades finish; the halo keeps running.
-  await expect.poll(animations).toEqual([{ name: "busy-halo", pseudo: "::after" }])
+    .map((animation) => ({ name: animation.animationName, pseudo: animation.effect?.pseudoElement ?? null,
+      workLine: !!animation.effect?.target?.closest(".session-work-status") })))
+  // One-shot entrance fades finish; the halos keep running.
+  await expect.poll(async () => {
+    const running = await animations()
+    return running.every((item) => item.name === "busy-halo" && item.pseudo === "::after") && running.some((item) => item.workLine)
+  }).toBe(true)
   await page.emulateMedia({ reducedMotion: "reduce" })
   await expect.poll(animations).toEqual([])
   expect(await dot.evaluate((el) => getComputedStyle(el, "::after").opacity)).toBe("0.5")
-  console.log("PASS 25 pending inputs as transcript bubbles with no composer panel, one CSS halo animation (work line only), static under reduced motion")
+  console.log("PASS 25 pending inputs as transcript bubbles with no composer panel, CSS halo animations only (work line + busy sidebar rows), static under reduced motion")
 } finally { await preview.close(); await browser.close() }

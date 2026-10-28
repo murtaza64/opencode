@@ -2,10 +2,13 @@
  * One desk session for the whole app, mounted once: closing the pane hides it without unmounting, so
  * the draft, caret, scroll position, pending sends and a dictation target survive. Whether it is open
  * is remembered separately beside work views (Decisions, map, surfaces) and beside a transcript. */
-import { createContext, createEffect, createSignal, Show, useContext, type Accessor, type ParentProps } from "solid-js"
-import { useLocation } from "@solidjs/router"
+import { createContext, createEffect, createResource, createSignal, For, Show, useContext, type Accessor, type ParentProps } from "solid-js"
+import { A, useLocation } from "@solidjs/router"
 import { Icon } from "@opencode-ai/ui/icon"
-import { useDashboard } from "./state"
+import { ago, sessionHref, useDashboard } from "./state"
+import { useBriefs } from "./desk-briefs"
+import { createTasks, deskTasksSupported, type TaskJob } from "./desk-tasks"
+import { getComposer } from "./composer"
 import { createDeskSession } from "./desk-session"
 import type { ContextPart } from "./api"
 import { SessionView } from "./pages/session"
@@ -41,6 +44,10 @@ type DeskChat = {
   // The Decisions view supplies its queue/selection context while mounted; other views send none.
   setContext: (context: (() => ContextPart[]) | undefined) => void
   context: () => ContextPart[]
+  /** Background tasks started from the chat; their packet is the current view's text (empty elsewhere). */
+  tasks: ReturnType<typeof createTasks>
+  setView: (view: (() => string) | undefined) => void
+  view: () => string
 }
 
 const Ctx = createContext<DeskChat>()
@@ -54,6 +61,10 @@ export const DeskChatProvider = (props: ParentProps) => {
   // A floating companion's open state is for this page only; it never changes the remembered docked state.
   const [floatingOpen, setFloatingOpen] = createSignal(false)
   const [contextGetter, setContextGetter] = createSignal<(() => ContextPart[]) | undefined>()
+  const [viewGetter, setViewGetter] = createSignal<(() => string) | undefined>()
+  const prepared = useBriefs()
+  const tasks = createTasks(prepared.anchor.pointer, prepared.anchor.ensure, () => desk.status() === "ready" ? desk.pointer() : undefined,
+    async () => { prepared.activate(); await prepared.waitReady() })
   const kind = () => companionKind(location.pathname)
   const directory = () => {
     const name = dashboard.editspace() ?? dashboard.editspaces()?.default
@@ -71,6 +82,9 @@ export const DeskChatProvider = (props: ParentProps) => {
     },
     setContext: (getter) => setContextGetter(() => getter),
     context: () => contextGetter()?.() ?? [],
+    tasks,
+    setView: (getter) => setViewGetter(() => getter),
+    view: () => viewGetter()?.() ?? "",
   }
   return <Ctx.Provider value={value}>{props.children}</Ctx.Provider>
 }
@@ -103,6 +117,8 @@ export const DeskCompanion = () => {
   const narrow = media(NARROW)
   const floating = media(FLOATING)
   createEffect(() => { if (section) section.inert = !chat.open() })
+  // Background tasks appear only against a Core that records the question without answering it.
+  const [supported] = createResource(() => target()?.directory, deskTasksSupported)
   const close = () => {
     const focused = !!section?.contains(document.activeElement)
     chat.setOpen(false)
@@ -111,6 +127,7 @@ export const DeskCompanion = () => {
   return <aside ref={section} class="desk-companion" classList={{ closed: !chat.open(), sheet: narrow(), overlay: floating() && !narrow() }} aria-label="Front desk chat" aria-hidden={!chat.open()}>
     <div class="desk-companion-in desk-chat">
       <Show when={chat.desk.error()}><div class="home-warning" role="alert">{chat.desk.error()}</div></Show>
+      <Show when={supported() ? target() : undefined}>{(current) => <DeskTasks tasks={chat.tasks} view={chat.view} session={current().session} directory={current().directory} />}</Show>
       <Show when={target()} keyed fallback={<DeskStart desk={chat.desk} directory={chat.directory()} />}>
         {(current) => <SessionView sessionID={current.session} directory={current.directory} embedded context={chat.context} onSent={chat.desk.sent}
           headerStart={<button class="header-icon desk-chat-hide" aria-label="Close Front desk chat" title="Close Front desk chat" onClick={close}>
@@ -118,4 +135,45 @@ export const DeskCompanion = () => {
       </Show>
     </div>
   </aside>
+}
+
+// Background tasks started from the chat: "Ask in background" takes what is typed in the composer, shows a
+// receipt at once and leaves the chat free; each finished result is added to the asking conversation once.
+const DeskTasks = (props: { tasks: ReturnType<typeof createTasks>; view: () => string; session: string; directory: string }) => {
+  const composer = () => getComposer(props.session, props.directory)
+  const [notice, setNotice] = createSignal("")
+  const ask = async (again?: string) => {
+    const asked = Date.now()
+    const text = again ?? composer().state.task.text
+    if (!text.trim()) return setNotice("Type a question in the chat box first.")
+    const started = await props.tasks.start(text, props.view())
+    if ("error" in started) return setNotice(started.error ?? "")
+    if (again === undefined) composer().setText("")
+    setNotice("")
+    requestAnimationFrame(() => props.tasks.rendered(started.id!, asked, started.packetBytes!))
+  }
+  // Task track only (sending, registered, working, outcome); the question itself is a chat message with its own state.
+  const label = (job: TaskJob) => job.state.state === "ready"
+    ? props.tasks.outcome(job.id) ? "outcome · result added to the chat" : "finished · adding the result to the chat"
+    // "sending" until Core has the task; "registered" only once its session exists durably and the model has not started.
+    : ({ starting: "sending", unconfirmed: "start not confirmed", delegated: "registered", running: "working", failed: "failed", unknown: "stopped" } as const)[job.state.state]
+  const follow = async (job: TaskJob) => {
+    const result = await props.tasks.amend(job, composer().state.task.text)
+    if ("error" in result) return setNotice(result.error ?? "")
+    composer().setText("")
+    setNotice("")
+  }
+  return <div class="desk-tasks" aria-label="Background tasks">
+    <button type="button" class="desk-button" title="Run what you typed as a background check; keep chatting meanwhile" onClick={() => void ask()}>Ask in background</button>
+    <Show when={props.tasks.jobs().some(job => job.state.state === "unconfirmed")}><button type="button" class="desk-button" onClick={() => void props.tasks.confirm()}>Confirm task start</button></Show>
+    <Show when={notice() || props.tasks.error()}><span class="home-muted" role="status">{notice() || props.tasks.error()}</span></Show>
+    <ul><For each={props.tasks.jobs().slice(0, 5)}>{job => <li class="desk-task home-source" data-state={job.state.state}>
+      <span>Background · <bdi dir="auto">{job.meta.question.slice(0, 80)}</bdi> · {ago(job.meta.asked)} · {label(job)}<Show when={job.meta.initiatingSession !== props.session}> · asked in an earlier conversation</Show></span>
+      <Show when={!job.id.startsWith("local:") && job.state.state !== "starting" && job.state.state !== "unconfirmed"}> <A href={sessionHref(job.id, job.directory)}>Task thread</A></Show>
+      {/* Adds what is typed to this running task; it reaches the task at its next safe step. */}
+      <Show when={job.state.state === "running" || job.state.state === "delegated"}> <button type="button" class="desk-link-button" title="Send what you typed to this task as a follow-up" onClick={() => void follow(job)}>Add to this task</button></Show>
+      {/* A stopped or failed task is never rerun on its own; asking again starts a new task. */}
+      <Show when={job.state.state === "failed" || job.state.state === "unknown"}> <button type="button" class="desk-link-button" onClick={() => void ask(job.meta.question)}>Ask again</button></Show>
+    </li>}</For></ul>
+  </div>
 }

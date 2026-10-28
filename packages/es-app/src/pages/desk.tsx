@@ -13,7 +13,7 @@ import type { IgnoredFailure } from "../failure-ignores"
 import { useDeskQueue } from "../desk-queue"
 import { failureAge, failureLabel, failureWhen, OLD_FAILURE_MS } from "../session-failures"
 import type { SessionFailure } from "@opencode-ai/sdk/v2"
-import { attentionItem, briefBinding, briefPacket, briefSends, deskSources, detailRequest, type DeskItem, type DeskSource, SOURCE_TAIL } from "../desk"
+import { attentionItem, briefBinding, briefPacket, briefSends, deskContext, deskSources, detailRequest, type DeskItem, type DeskSource, SOURCE_TAIL } from "../desk"
 import { answeredJob, createMemory, readConversation, type BriefJob } from "../desk-session"
 import { useDeskChat } from "../desk-companion"
 import { anchorHref } from "../message-anchor"
@@ -178,7 +178,7 @@ export default function Desk() {
     onCleanup(() => clearTimeout(timer))
   }))
   const jobsFor = (key: string) => briefs.jobs().filter(job => job.meta.source === key)
-  const context = () => desk.context({
+  const contextInput = () => ({
     now: Date.now(),
     scope: project(),
     sources: sources(),
@@ -189,6 +189,7 @@ export default function Desk() {
     memory: memory.document(),
     surface: (() => { const id = selectedSurface(); const surface = surfaces.list().find(item => item.id === id); return surface && { id: surface.id, title: surface.title, owner: surface.owner } })(),
   })
+  const context = () => desk.context(contextInput())
 
   // "More detail" on a selected item: fresh bounded evidence from its source thread, sent to the desk chat.
   const askDetail = async (item: DeskItem, question: string) => {
@@ -203,7 +204,8 @@ export default function Desk() {
     chat.setOpen(true)
   }
 
-  onMount(() => { chat.setContext(context); onCleanup(() => chat.setContext(undefined)) })
+  // Background tasks start from what this view shows (a clipped copy), not from the conversation.
+  onMount(() => { chat.setContext(context); chat.setView(() => deskContext(contextInput()).text); onCleanup(() => { chat.setContext(undefined); chat.setView(undefined) }) })
   if (params.view === "agents") return <Navigate href="/agents" />
   const refresh = () => { void attention.refresh(); void requests.refresh(); void dashboard.failures.refresh(); void briefs.refresh(true); dashboard.activity.todos.reload(); void attention.checkOperator().catch(() => undefined) }
   // No page header: the queue is this mode's sidebar, and the chat or selected item fills the rest.
