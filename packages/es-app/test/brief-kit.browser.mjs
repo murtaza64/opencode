@@ -45,7 +45,7 @@ const CASES = {
     brief: { question: "Roll out in ten daily stages?", choices: [{ id: "go", outcome: "Ten days to full rollout" }, { id: "wait", outcome: "Nothing changes for a week" }],
       visual: { title: "Stages", alt: "Ten stacked stages from 10% to 100% rollout.", svg: tall } } },
   plain: { record: { ...base, id: "plain", gate_key: "plain", title: "Rename the ledger table?", context: "The name collides with a new view.", options: two, recommendation: "wait" },
-    brief: { question: "Rename the ledger table now?", context: "Its name collides with a new view.", choices: [{ id: "go", outcome: "Renamed today" }, { id: "wait", outcome: "Renamed after the migration" }] } },
+    brief: { question: "rename the ledger  table?", context: "Its name collides with a new view.", choices: [{ id: "go", outcome: "Renamed today" }, { id: "wait", outcome: "Renamed after the migration" }] } },
   error: { record: { ...base, id: "error", gate_key: "error", title: "Archive the old dashboards?", context: "Twelve dashboards unused since June.", options: two, recommendation: "go" }, brief: "error" },
   absent: { record: { ...base, id: "absent", gate_key: "absent", title: "Close the stale tickets?", context: "Nine tickets untouched for 90 days.", options: two, recommendation: "go" }, brief: "none" },
 }
@@ -109,10 +109,18 @@ const check = async (page, card, name) => card.evaluate((element, [name, missing
     "5 gaps kept": name !== "single" || element.innerHTML.includes("Cost at full traffic is not measured."),
     "6 steps copyable": name !== "steps" || element.querySelectorAll(".desk-steps .desk-command-copy").length === 2 && /Check: shows as Active/.test(text),
     "7 visual earns place": name === "visual" ? !!iframe && !!iframe.title && !!window && window.getBoundingClientRect().height <= innerHeight * 0.45 + 2 && !!element.querySelector(".desk-visual-expand") : !iframe,
+    "8 no title repeat": name !== "plain" || !element.querySelector(".home-request-line"),
     "8 no duplicate request": !(element.querySelector(".home-request-text") && visible(element.querySelector(".home-request-text")) && element.querySelector("details.home-original")) && !/This brief explains|several/.test(text),
     "8 no empty Approved or Question labels": !/Approved/.test(text) && ![...element.querySelectorAll(".desk-brief-item-label")].some(node => node.textContent === "Question"),
     "8 missing styled alike": name !== "items" || !!element.querySelector(".desk-brief-item:nth-child(5) .brief-missing"),
     "8 one failure line": name !== "error" || /The model provider refused sign-in\./.test(text) && !visible([...element.querySelectorAll("p")].find(node => /Briefs unavailable/.test(node.textContent))),
+    "9 labels one line, value columns wide": name !== "items" || [...element.querySelectorAll(".desk-brief-item")].every(row => {
+      const width = row.getBoundingClientRect().width
+      const labels = [...row.querySelectorAll(".desk-brief-item-label")].filter(label => getComputedStyle(label).display !== "none")
+      const oneLine = labels.every(label => { const style = getComputedStyle(label); return label.getBoundingClientRect().height <= (parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.4) * 1.5 + 1 })
+      const values = [...row.querySelectorAll(".desk-brief-item-cell")].slice(1, 3)
+      return oneLine && values.every(cell => cell.getBoundingClientRect().width >= width * (labels.length ? 0.35 : 0.2))
+    }),
     "9 type sizes": sizes.size,
     "9 brief type sizes": new Set([...element.querySelectorAll(".desk-brief *")].filter(node => visible(node) && [...node.childNodes].some(child => child.nodeType === 3 && child.textContent.trim()))
       .map(node => getComputedStyle(node).fontSize)).size,

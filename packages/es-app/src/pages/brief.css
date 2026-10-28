@@ -89,7 +89,10 @@
 .desk-brief-item-id { white-space: nowrap; }
 .desk-brief-item-number { color: var(--subtext0); }
 /* Without a recorded answer there is no Approved column. */
-.desk-brief-items:not([data-answered]) :is(.desk-brief-item-head, .desk-brief-item) { grid-template-columns: minmax(58px, .55fr) minmax(0, 2fr) repeat(2, minmax(0, 1fr)); }
+/* Lowest specificity, so the narrow layouts below still stack the row. */
+:where(.desk-brief-items:not([data-answered])) :is(.desk-brief-item-head, .desk-brief-item) { grid-template-columns: minmax(58px, .55fr) minmax(0, 2fr) repeat(2, minmax(0, 1fr)); }
+/* Labels never break inside a word; only long values wrap. */
+.desk-brief-item-label, .desk-brief-item-head span { overflow-wrap: normal; white-space: nowrap; }
 .desk-brief-item-cell { min-inline-size: 0; overflow-wrap: anywhere; }
 .desk-brief-item-label { display: none; color: var(--subtext0); font-size: 11px; }
 @container (max-width: 680px) {
