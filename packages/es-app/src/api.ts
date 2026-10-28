@@ -252,12 +252,21 @@ export const oc = {
   },
 
   /** Durable sourced input (Core `POST /session/:id/input`): labelled by kind, never shown as the human typing. */
-  sourcedInput: async (id: string, directory: string, input: { requestID: string; text: string; kind: string; sender: string }) => {
+  /** Durable input with a caller-built body, posted byte for byte (callers whose retries must be exactly identical). */
+  admitInput: async (id: string, directory: string, body: Record<string, unknown>) => {
+    const res = await fetch(`/oc/session/${id}/input?${q(directory)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+    if (!res.ok) throw await httpError(res)
+  },
+
+  /** `origin`: the real producing session and the message it answers, for inputs one session sends another. */
+  sourcedInput: async (id: string, directory: string, input: { requestID: string; text: string; kind: string; sender: string; delivery?: "queue" | "steer"
+    origin?: { senderSession: string; relationship: string; inReplyTo: string } }) => {
     const res = await fetch(`/oc/session/${id}/input?${q(directory)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ requestID: input.requestID, delivery: "queue", text: input.text,
-        source: { type: "editspace-mail", id: input.requestID, sender: input.sender, recipient: id, kind: input.kind } }),
+      body: JSON.stringify({ requestID: input.requestID, delivery: input.delivery ?? "queue", text: input.text,
+        source: { type: "editspace-mail", id: input.requestID, sender: input.sender, recipient: id, kind: input.kind,
+          ...(input.origin ? { senderSession: input.origin.senderSession, relationship: input.origin.relationship, in_reply_to: input.origin.inReplyTo } : {}) } }),
     })
     if (!res.ok) throw await httpError(res)
   },

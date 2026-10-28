@@ -192,6 +192,7 @@ export const createFixture = async () => {
       return json(
         fixture.capabilities
           ? {
+              ...(fixture.noReplyRecordOnly ? { noReplyRecordOnly: true } : {}),
               sessionAside: { version: 1, cancel: true, images: fixture.images },
               sessionInput: {
                 version: 1,
@@ -203,7 +204,7 @@ export const createFixture = async () => {
                 images: fixture.images,
               },
             }
-          : {},
+          : fixture.noReplyRecordOnly ? { noReplyRecordOnly: true } : {},
       )
     if (url.pathname === "/api/editspaces")
       return json({ editspaces: fixture.editspaces, default: "fixture" })

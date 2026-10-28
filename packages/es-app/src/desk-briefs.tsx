@@ -32,7 +32,8 @@ const create = () => {
   // All connected projects: a decision anywhere is prepared, whatever page is in view.
   // With automatic preparation off nothing is read until a brief is started by hand.
   // An unconfirmed start from an earlier page must be reconciled, so it counts as activity.
-  const [manual, setManual] = createSignal(localStorage.getItem("es-app:front-desk:brief-create:1") !== null)
+  // Background tasks live under the same parent, so a page that has started one keeps reading it.
+  const [manual, setManual] = createSignal(localStorage.getItem("es-app:front-desk:brief-create:1") !== null || localStorage.getItem("es-app:front-desk:tasks-used:1") !== null)
   // A visible brief also activates reads, so existing results show even with automatic preparation off.
   const [viewers, setViewers] = createSignal(0)
   const active = () => auto() || manual() || viewers() > 0
@@ -74,6 +75,8 @@ const create = () => {
   })
   return {
     auto, setAuto, attention, items, anchor, jobFor, track, unavailable,
+    /** Starts reading the shared parent (briefs and background tasks) without starting any job. */
+    activate: () => setManual(true), waitReady: () => waitFor(anchor.ready),
     view: () => { setViewers(count => count + 1); onCleanup(() => setViewers(count => count - 1)) },
     briefs: {
       ...briefs,
