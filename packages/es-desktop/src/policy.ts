@@ -169,6 +169,8 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/es\/api\/frontdesk\/(model|conversation)$/,
       // One brief's saved rating (?job=) or every rating for export; read-only.
       /^\/es\/api\/frontdesk\/brief-feedback$/,
+      // This host's Front Desk cases (metadata only); read-only.
+      /^\/es\/api\/frontdesk\/cases$/,
       /^\/es\/api\/wingman(?:\/transcript)?$/,
       SELF_HANDOFF,
     ],
