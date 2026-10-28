@@ -25,6 +25,8 @@ export type Usage = {
 }
 
 const HOUR = 3_600_000
+const BACKFILL_CHUNK = 10_000
+const BACKFILL_PAUSE = "20 millis"
 
 /** Adds (`sign` 1) or retracts (-1) one step's usage for `messageID`; called inside the projecting transaction. */
 export const apply = Effect.fnUntraced(function* (db: Db, messageID: string, usage: Usage, sign: 1 | -1) {
@@ -63,7 +65,7 @@ export const apply = Effect.fnUntraced(function* (db: Db, messageID: string, usa
  * Counts assistant messages created before the cutoff, once. `reader` runs the history aggregate (off the
  * event loop when it is a reader-worker connection); `writer` stores the result atomically with the done mark.
  */
-export const backfill = Effect.fn("UsageRollup.backfill")(function* (writer: Db, reader: Db) {
+export const backfill = Effect.fn("UsageRollup.backfill")(function* (writer: Db, reader: Db, chunkSize = BACKFILL_CHUNK) {
   const state = yield* writer
     .select()
     .from(UsageRollupStateTable)
@@ -72,23 +74,56 @@ export const backfill = Effect.fn("UsageRollup.backfill")(function* (writer: Db,
     .pipe(Effect.orDie)
   if (!state) return { rows: 0, skipped: true, ms: 0 }
   const start = Date.now()
-  const rows = yield* reader
-    .select({
-      hour: sql<number>`${MessageTable.time_created} / ${HOUR}`,
-      provider_id: sql<string>`coalesce(json_extract(${MessageTable.data}, '$.providerID'), 'unknown')`,
-      model_id: sql<string>`coalesce(json_extract(${MessageTable.data}, '$.modelID'), 'unknown')`,
-      cost: sql<number>`coalesce(sum(json_extract(${MessageTable.data}, '$.cost')), 0)`,
-      tokens_input: sql<number>`coalesce(sum(json_extract(${MessageTable.data}, '$.tokens.input')), 0)`,
-      tokens_output: sql<number>`coalesce(sum(json_extract(${MessageTable.data}, '$.tokens.output')), 0)`,
-      tokens_reasoning: sql<number>`coalesce(sum(json_extract(${MessageTable.data}, '$.tokens.reasoning')), 0)`,
-      tokens_cache_read: sql<number>`coalesce(sum(json_extract(${MessageTable.data}, '$.tokens.cache.read')), 0)`,
-      tokens_cache_write: sql<number>`coalesce(sum(json_extract(${MessageTable.data}, '$.tokens.cache.write')), 0)`,
-    })
-    .from(MessageTable)
-    .where(and(lt(MessageTable.time_created, state.cutoff), sql`json_extract(${MessageTable.data}, '$.role') = 'assistant'`))
-    .groupBy(sql`1`, sql`2`, sql`3`)
-    .all()
-    .pipe(Effect.orDie)
+  const last =
+    (yield* reader
+      .select({ rowid: sql<number>`max(rowid)` })
+      .from(MessageTable)
+      .get()
+      .pipe(Effect.orDie))?.rowid ?? 0
+  // Each chunk holds a reader worker for well under a second, so foreground reads queued on the same worker
+  // wait for one chunk rather than a whole-history scan.
+  const totals = new Map<string, typeof UsageHourlyTable.$inferInsert>()
+  for (let from = 0; from < last; from += chunkSize) {
+    const chunk = yield* reader
+      .select({
+        hour: sql<number>`${MessageTable.time_created} / ${HOUR}`,
+        provider_id: sql<string>`coalesce(json_extract(${MessageTable.data}, '$.providerID'), 'unknown')`,
+        model_id: sql<string>`coalesce(json_extract(${MessageTable.data}, '$.modelID'), 'unknown')`,
+        cost: sql<number>`coalesce(sum(json_extract(${MessageTable.data}, '$.cost')), 0)`,
+        tokens_input: sql<number>`coalesce(sum(json_extract(${MessageTable.data}, '$.tokens.input')), 0)`,
+        tokens_output: sql<number>`coalesce(sum(json_extract(${MessageTable.data}, '$.tokens.output')), 0)`,
+        tokens_reasoning: sql<number>`coalesce(sum(json_extract(${MessageTable.data}, '$.tokens.reasoning')), 0)`,
+        tokens_cache_read: sql<number>`coalesce(sum(json_extract(${MessageTable.data}, '$.tokens.cache.read')), 0)`,
+        tokens_cache_write: sql<number>`coalesce(sum(json_extract(${MessageTable.data}, '$.tokens.cache.write')), 0)`,
+      })
+      .from(MessageTable)
+      .where(
+        and(
+          sql`rowid > ${from} and rowid <= ${from + chunkSize}`,
+          lt(MessageTable.time_created, state.cutoff),
+          sql`json_extract(${MessageTable.data}, '$.role') = 'assistant'`,
+        ),
+      )
+      .groupBy(sql`1`, sql`2`, sql`3`)
+      .all()
+      .pipe(Effect.orDie)
+    for (const row of chunk) {
+      const key = `${row.hour}\u0000${row.provider_id}\u0000${row.model_id}`
+      const total = totals.get(key)
+      if (!total) {
+        totals.set(key, row)
+        continue
+      }
+      total.cost = (total.cost ?? 0) + row.cost
+      total.tokens_input = (total.tokens_input ?? 0) + row.tokens_input
+      total.tokens_output = (total.tokens_output ?? 0) + row.tokens_output
+      total.tokens_reasoning = (total.tokens_reasoning ?? 0) + row.tokens_reasoning
+      total.tokens_cache_read = (total.tokens_cache_read ?? 0) + row.tokens_cache_read
+      total.tokens_cache_write = (total.tokens_cache_write ?? 0) + row.tokens_cache_write
+    }
+    yield* Effect.sleep(BACKFILL_PAUSE)
+  }
+  const rows = [...totals.values()]
   // Statements on `writer` inside the transaction effect run in that transaction.
   yield* writer.transaction(() =>
     Effect.gen(function* () {
