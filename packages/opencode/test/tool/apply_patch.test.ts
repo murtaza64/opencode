@@ -193,6 +193,8 @@ describe("tool.apply_patch freeform", () => {
         expect(calls.length).toBe(1)
         const permissionCall = calls[0]
         expect(permissionCall.metadata.files).toHaveLength(1)
+        // The destination is written too, so it is checked alongside the source.
+        expect(permissionCall.patterns).toEqual(["old/name.txt", "renamed/dir/name.txt"])
 
         const moveFile = permissionCall.metadata.files[0]
         expect(moveFile.type).toBe("move")

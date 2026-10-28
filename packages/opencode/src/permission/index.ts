@@ -3,7 +3,9 @@ import { ConfigPermissionV1 } from "@opencode-ai/core/v1/config/permission"
 import { InstanceState } from "@/effect/instance-state"
 import { Wildcard } from "@opencode-ai/core/util/wildcard"
 import { Deferred, Effect, Layer, Context } from "effect"
+import fs from "fs"
 import os from "os"
+import path from "path"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { EventV2Bridge } from "@/event-v2-bridge"
 
@@ -35,6 +37,55 @@ export function evaluate(permission: string, pattern: string, ...rulesets: Permi
       pattern: "*",
     }
   )
+}
+
+/**
+ * Evaluate an `edit` request for one file. Edit tools ask with the worktree-relative path, while config
+ * rules are absolute once `~` is expanded, so absolute rule patterns are matched against the file's
+ * absolute forms and relative patterns against `relative`. `absolute` holds the lexical path and its
+ * symlink-resolved path; each is evaluated with last-match-wins and the strictest wins: any deny denies,
+ * and only allow on every form allows, so an alias cannot reach a denied tree through an allowed path.
+ */
+export function evaluateEdit(relative: string, absolute: readonly string[], ...rulesets: PermissionV1.Ruleset[]): PermissionV1.Rule {
+  const rules = rulesets.flat().filter((rule) => Wildcard.match("edit", rule.permission))
+  const fallback: PermissionV1.Rule = { action: "ask", permission: "edit", pattern: "*" }
+  const decided = absolute.map(
+    (target) =>
+      rules.findLast((rule) => Wildcard.match(path.isAbsolute(rule.pattern) ? target : relative, rule.pattern)) ?? fallback,
+  )
+  return decided.find((rule) => rule.action === "deny") ?? decided.find((rule) => rule.action !== "allow") ?? decided[0] ?? fallback
+}
+
+/**
+ * An edit decision with session approvals: a configured deny always stands. Approvals come from
+ * "Always" replies, which approve every later edit, so they may raise ask to allow but never lift a deny.
+ */
+export function editDecision(
+  relative: string,
+  absolute: readonly string[],
+  ruleset: PermissionV1.Ruleset,
+  approved: PermissionV1.Ruleset,
+): PermissionV1.Rule {
+  const configured = evaluateEdit(relative, absolute, ruleset)
+  return configured.action === "deny" ? configured : evaluateEdit(relative, absolute, ruleset, approved)
+}
+
+/** The lexical absolute path of a worktree-relative target and, when it differs, its symlink-resolved path. */
+export function editTargets(worktree: string, relative: string) {
+  const lexical = path.resolve(worktree, relative)
+  const canonical = resolveExisting(lexical)
+  return canonical === lexical ? [lexical] : [lexical, canonical]
+}
+
+// A file being created does not exist yet: resolve its deepest existing ancestor and keep the rest.
+function resolveExisting(target: string): string {
+  const parent = path.dirname(target)
+  try {
+    return fs.realpathSync.native(target)
+  } catch {
+    if (parent === target) return target
+    return path.join(resolveExisting(parent), path.basename(target))
+  }
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Permission") {}
@@ -69,8 +120,11 @@ const layer = Layer.effect(
       const { ruleset, ...request } = input
       let needsAsk = false
 
+      const worktree = request.permission === "edit" ? (yield* InstanceState.context).worktree : undefined
       for (const pattern of request.patterns) {
-        const rule = evaluate(request.permission, pattern, ruleset, approved)
+        const rule = worktree
+          ? editDecision(pattern, editTargets(worktree, pattern), ruleset, approved)
+          : evaluate(request.permission, pattern, ruleset, approved)
         yield* Effect.logInfo("evaluated", { permission: request.permission, pattern, action: rule })
         if (rule.action === "deny") {
           return yield* new PermissionV1.DeniedError({
