@@ -4,7 +4,7 @@
  * row carries its runtime ("cloud") and owner, so it never collides with a host session of the same name. */
 import { cloudHref, cloudKey, type CloudPin } from "./cloud-agents"
 import type { WingmanLane } from "./api"
-import { wingmanStatus, wingmanSyncedAt } from "./wingman"
+import { wingmanActivityAt, wingmanStatus } from "./wingman"
 
 export type CloudRow = {
   /** Stable across refreshes: the cloud pin key (editspace, lane, owner). */
@@ -14,8 +14,12 @@ export type CloudRow = {
   project: string
   owner: string
   href: string
-  /** Last sync of the lane's state, or undefined when the source never recorded one. */
-  updated?: number
+  /** Ordering time: always undefined (unknown) until Wingman reports real turn boundaries; such rows sit in
+   * the undated group in a stable order. Never the fetch time. */
+  updated?: undefined
+  /** When sync last saw this agent's status or turn count change (wingman-activity), for display only
+   * ("changed 2 h ago"); not a turn boundary and never used for order. */
+  changedAt?: number
   status: { label: string; chip: string }
   pinned: boolean
   /** The source for this project could not be read: the row is its last-known state. */
@@ -29,7 +33,7 @@ type Snapshot = { error?: string }
 export const cloudRows = (input: {
   pins: CloudPin[]
   observed: Observed[]
-  /** Unpinned agents the current view lists (the model's `other()`: active only unless finished are included). */
+  /** Unpinned agents the current view lists (the model's `other()`, finished ones included). */
   other: Observed[]
   snapshots: Record<string, Snapshot | undefined>
 }): CloudRow[] => {
@@ -40,7 +44,8 @@ export const cloudRows = (input: {
     project: pin.editspace,
     owner: pin.owner,
     href: cloudHref(pin),
-    updated: record ? wingmanSyncedAt(record) : undefined,
+    updated: undefined,
+    changedAt: record ? wingmanActivityAt(record) : undefined,
     // A pin whose owner the source no longer lists is shown as such, never as finished.
     status: record ? wingmanStatus(record["wingman-status"]) : { label: "owner not observed", chip: "plain" },
     pinned,

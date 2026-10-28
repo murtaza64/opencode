@@ -533,7 +533,10 @@ export type WingmanLane = {
   "wingman-prs"?: string
   "wingman-ci"?: string
   "wingman-url"?: string
+  /** When this lane's snapshot was last fetched (freshness only; not activity). */
   "wingman-synced"?: string
+  /** When sync last saw the session's status or turn count change (ISO); absent/empty = unknown. */
+  "wingman-activity"?: string
   "wingman-error"?: string
 }
 export type WingmanTurn = {

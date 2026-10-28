@@ -294,3 +294,14 @@
 .nav-prs { padding-inline: 10px; display: grid; gap: 4px; }
 .host-decision .host-glyph { margin: 0; }
 .host-decision.stale { opacity: 0.6; }
+
+/* Busy rows pulse as a wave down the list, not in unison: each row's halo is offset by its position (8 steps of
+ * 200ms across the 1.6s cycle). CSS only, so streamed updates to a row keep its phase; reduced motion stays static. */
+:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+1) .dot.busy::after { animation-delay: 0ms; }
+:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+2) .dot.busy::after { animation-delay: -200ms; }
+:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+3) .dot.busy::after { animation-delay: -400ms; }
+:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+4) .dot.busy::after { animation-delay: -600ms; }
+:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+5) .dot.busy::after { animation-delay: -800ms; }
+:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+6) .dot.busy::after { animation-delay: -1000ms; }
+:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+7) .dot.busy::after { animation-delay: -1200ms; }
+:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+8) .dot.busy::after { animation-delay: -1400ms; }
