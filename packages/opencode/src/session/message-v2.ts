@@ -710,11 +710,15 @@ export const filterCompactedEffect = Effect.fnUntraced(function* (sessionID: Ses
 // because imported messages do not necessarily have monotonic IDs.
 export function latest(msgs: WithParts[]) {
   let user: User | undefined
+  let recorded: User | undefined
   let assistant: Assistant | undefined
   let finished: Assistant | undefined
   for (const msg of msgs) {
     const info = msg.info
-    if (info.role === "user" && isAfter(info, user)) user = info
+    // A no-reply message is context for the next turn, never the one a turn answers: a turn that finished after
+    // it was recorded stays finished instead of continuing to answer it.
+    if (info.role === "user" && info.noReply && isAfter(info, recorded)) recorded = info
+    if (info.role === "user" && !info.noReply && isAfter(info, user)) user = info
     if (info.role === "assistant" && isAfter(info, assistant)) assistant = info
     if (info.role === "assistant" && info.finish && isAfter(info, finished)) finished = info
   }
@@ -723,7 +727,8 @@ export function latest(msgs: WithParts[]) {
       ? []
       : m.parts.filter((p): p is CompactionPart | SubtaskPart => p.type === "compaction" || p.type === "subtask"),
   )
-  return { user, assistant, finished, tasks }
+  // Only no-reply messages so far: keep the previous behaviour rather than having no user at all.
+  return { user: user ?? recorded, assistant, finished, tasks }
 }
 
 function isAfter(info: Info, other?: Info) {

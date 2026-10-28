@@ -698,6 +698,7 @@ const layer = Layer.effect(
         sessionID: input.sessionID,
         time: { created: Date.now() },
         tools: input.tools,
+        ...(input.noReply === true ? { noReply: true } : {}),
         agent: ag.name,
         model: {
           providerID: model.providerID,

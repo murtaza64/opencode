@@ -367,6 +367,8 @@ export const User = Schema.Struct({
   }),
   system: Schema.optional(Schema.String),
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
+  // Recorded without asking for a reply: part of history, but never the message a turn answers.
+  noReply: Schema.optional(Schema.Boolean),
 }).annotate({ identifier: "UserMessage" })
 export type User = Types.DeepMutable<Schema.Schema.Type<typeof User>>
 

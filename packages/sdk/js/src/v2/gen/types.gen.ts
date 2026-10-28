@@ -282,6 +282,7 @@ export type UserMessage = {
   tools?: {
     [key: string]: boolean
   }
+  noReply?: boolean
 }
 
 export type ProviderAuthError = {
@@ -2341,7 +2342,9 @@ export type ExperimentalCapabilities = {
       animated: false
       compressedMetadata: false
     }
+    context?: true
   }
+  noReplyRecordOnly?: true
 }
 
 export type UsageDaily = {

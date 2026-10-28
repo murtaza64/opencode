@@ -43,7 +43,11 @@ const CapabilitiesResponse = Schema.Struct({
     /** `POST /session/:id/input/:requestID/deliver` interrupts the running turn to deliver steers. */
     interrupt: Schema.Literal(true),
     images: Schema.optionalKey(SessionV1.ImageCapabilities),
+    /** Selected context on `POST /session/:id/input` (`context` items), promoted as synthetic text parts. */
+    context: Schema.optionalKey(Schema.Literal(true)),
   }),
+  /** `prompt_async` with `noReply` records the message only: no turn starts or continues to answer it, busy or idle. */
+  noReplyRecordOnly: Schema.optionalKey(Schema.Literal(true)),
 }).annotate({ identifier: "ExperimentalCapabilities" })
 
 const ConsoleOrgOption = Schema.Struct({
