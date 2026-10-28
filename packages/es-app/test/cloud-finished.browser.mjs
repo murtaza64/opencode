@@ -7,14 +7,13 @@ preview.ledger.cloudLanes = [{ ...preview.ledger.cloudLanes[0], lane: "ended-rev
 const browser = await chromium.launch({ channel: "chrome", headless: true })
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
 await page.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
-const discovery = page.locator(".sidebar .cloud-discovery")
+// The cloud filter sits in the agent list's cloud status line; cloud rows sit in the list itself.
+const discovery = page.locator(".sidebar")
 try {
   await page.goto(`${preview.url}/agents`)
   await page.locator(".sidebar .pinned-section").getByRole("link", { name: /Composer fixture/ }).click()
   const draft = page.getByRole("textbox", { name: "Message", exact: true })
   await draft.fill("Keep my local draft while finding completed cloud work")
-  await discovery.locator("summary").click()
-  await expect(discovery.locator(".cloud-sidebar-source")).not.toContainText("Active tasks only")
   await expect(discovery.getByRole("button", { name: "Pin cloud agent ended-review", exact: true })).toHaveCount(0)
   await discovery.getByRole("checkbox", { name: "Include finished", exact: true }).check()
   await expect(discovery.getByRole("checkbox", { name: "Include finished", exact: true })).toBeChecked()

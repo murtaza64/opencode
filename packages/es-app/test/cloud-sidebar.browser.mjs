@@ -12,8 +12,9 @@ const sidebar = page.locator(".sidebar")
 const pinned = () => sidebar.locator(".pinned-section")
 try {
   await page.goto(`${preview.url}/agents`)
-  await sidebar.locator(".cloud-discovery summary").click()
-  await expect(sidebar.locator(".cloud-discovery")).toContainText("cloud-review")
+  // Cloud agents sit in the ordinary agent list (no drawer).
+  await expect(sidebar.locator(".cloud-nav-entry", { hasText: "cloud-review" })).toHaveCount(1)
+  await expect(sidebar.locator(".cloud-discovery")).toHaveCount(0)
   await sidebar.getByRole("button", { name: "Pin cloud agent cloud-review", exact: true }).click()
   await expect(pinned().locator(".nav-item")).toHaveCount(2)
   const link = pinned().locator("a.cloud-nav")

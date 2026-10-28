@@ -1,4 +1,4 @@
-import { For, Show } from "solid-js"
+import { Show } from "solid-js"
 import { A, useLocation } from "@solidjs/router"
 import { Icon } from "@opencode-ai/ui/icon"
 import { cloudHref, cloudKey, cloudOwnerKnown, type CloudPin } from "../cloud-agents"
@@ -23,12 +23,15 @@ export const CloudNav = (props: { pin: CloudPin; mini?: boolean }) => {
   </div>
 }
 
-export const CloudDiscovery = () => {
+/** Cloud source status inside the agent list: shown only when it says something (unavailable, a pin error),
+ * plus the one cloud filter, Include finished. */
+export const CloudSource = () => {
   const cloud = useDashboard().cloud
-  return <details class="cloud-discovery"><summary>Cloud agents <span>({cloud.other().length})</span></summary>
-    <label class="cloud-discovery-filter"><input type="checkbox" checked={cloud.includeFinished()} onChange={event => cloud.setIncludeFinished(event.currentTarget.checked)} />Include finished</label>
-    <Show when={cloud.pinError()}><p class="cloud-sidebar-source">{cloud.pinError()}</p></Show>
-    <Show when={cloud.scopes().some(name => cloud.snapshots()[name]?.error)}><p class="cloud-sidebar-source">Cloud source unavailable; saved pins retained.</p></Show>
-    <For each={cloud.other()} fallback={<p class="cloud-sidebar-source">{cloud.loading() ? "Checking cloud source…" : cloud.includeFinished() ? "No known unpinned tasks in checked sources." : "No active tasks."}</p>}>{item => <CloudNav pin={item} />}</For>
-  </details>
+  return <Show when={cloud.scopes().length}>
+    <div class="dim nav-empty host-status cloud-source" classList={{ unavailable: cloud.scopes().some(name => cloud.snapshots()[name]?.error) }} role="status">
+      <span class="cloud-runtime-icon" aria-hidden="true"><Icon name="cloud-upload" size="small" /></span>
+      <span>Cloud{cloud.scopes().some(name => cloud.snapshots()[name]?.error) ? " · source unavailable; saved pins kept" : cloud.loading() ? " · checking…" : ""}{cloud.pinError() ? ` · ${cloud.pinError()}` : ""}</span>
+      <label class="cloud-discovery-filter"><input type="checkbox" checked={cloud.includeFinished()} onChange={event => cloud.setIncludeFinished(event.currentTarget.checked)} />Include finished</label>
+    </div>
+  </Show>
 }

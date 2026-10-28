@@ -10,7 +10,8 @@ import { leftOpen, leftWidth, toggleLeft } from "../ui"
 import { nativeHeader, NativeHeader } from "./native-header"
 import { NewSession } from "./new-session"
 import { peekAttrs, SessionPeek } from "./session-peek"
-import { CloudNav, CloudDiscovery } from "./cloud-sidebar"
+import { CloudNav, CloudSource } from "./cloud-sidebar"
+import { cloudRows, mergeAgentRows } from "../cloud-rows"
 import { failureLabel } from "../session-failures"
 import { ringOnChange } from "../motion"
 import { Glyph, HostGlyph } from "./icons"
@@ -67,6 +68,11 @@ export default function Sidebar() {
   const hosted = () => work.feeds().length > 0
   const allPinned = createMemo(() => [...pinnedSessions(), ...work.pinned()])
   const allUnpinned = createMemo(() => workRows(unpinnedSessions(), work.unpinned()))
+  // Cloud agents the view already discovers sit in the ordinary list beside sessions, newest first; pinned
+  // ones stay in Pinned. Same entries, account scope and pins as before; no separate drawer.
+  const cloudUnpinned = createMemo(() => cloudRows({ pins: [], observed: cloud.observed(), other: cloud.other(), snapshots: cloud.snapshots() }))
+  const agentRows = createMemo(() => mergeAgentRows(allUnpinned(), cloudUnpinned()))
+  const cloudPin = (row: { project: string; title: string; owner: string }) => cloud.other().find((item) => item.editspace === row.project && item.lane === row.title && item.owner === row.owner)
   const feedOf = (s: SessionRow) => work.feeds().find((feed) => feed.host.id === s.host)
   const localUnavailable = () => hosted() && !!(allProjects() ? sessionsError() : stateError())
   const clock = (time: number) => new Date(time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -153,6 +159,9 @@ export default function Sidebar() {
     const order = (a: Found, b: Found) => { const x = rank(a), y = rank(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2] }
     return [...searchResults().map((local): Found => ({ local })), ...hostMatches.map((host): Found => ({ host }))].sort(order)
   })
+  const cloudFound = createMemo(() => [...cloud.pins(), ...cloud.other()].filter((pin, index, all) =>
+    all.findIndex((other) => other.editspace === pin.editspace && other.lane === pin.lane && other.owner === pin.owner) === index &&
+    pin.lane.toLocaleLowerCase().includes(query().trim().toLocaleLowerCase())))
   const [searching, setSearching] = createSignal(false)
   const [allTime, setAllTime] = createSignal(false)
   const [searchError, setSearchError] = createSignal("")
@@ -357,7 +366,6 @@ export default function Sidebar() {
         <nav class="sidebar-actions" aria-label="Agents">
           <NewSession />
         </nav>
-        <CloudDiscovery />
         <Show when={notifications().length}>
           <div class="notification-section">
             <div class="nav-heading">needs you</div>
@@ -403,16 +411,18 @@ export default function Sidebar() {
           fallback={
             <>
               <div class="nav-heading">
-                results ({foundRows().length})
+                results ({foundRows().length + cloudFound().length})
               </div>
               <Show when={searching()}><div class="dim nav-empty">searching transcripts…</div></Show>
               <Show when={searchError()}>
                 <div class="dim nav-empty">{searchError()}</div>
               </Show>
-              <Show when={!searching() && !searchError() && !foundRows().length}>
+              <Show when={!searching() && !searchError() && !foundRows().length && !cloudFound().length}>
                 <div class="dim nav-empty">no matches</div>
               </Show>
               <For each={foundRows()}>{(found) => found.host ? hostItem(found.host) : resultItem(found.local)}</For>
+              {/* Cloud agents match the same title query (pinned and listed ones). */}
+              <For each={cloudFound()}>{(pin) => <CloudNav pin={pin} />}</For>
               <Show when={query().trim().length >= 3 && !allTime() && !searching() && !searchError()}>
                 <button class="archived-toggle" onClick={searchAllTime}>
                   ⌕ all time (slow)
@@ -429,18 +439,20 @@ export default function Sidebar() {
             </Show>
             <For each={work.feeds()}>{hostStatus}</For>
           </Show>
-          <Show when={allUnpinned().length} fallback={
+          <CloudSource />
+          <Show when={agentRows().length} fallback={
             <Show when={!hosted()}><div class="dim nav-empty">{sessionsError() ? "Sessions unavailable — retrying" : sessionsLoading() ? "loading..." : pinnedSessions().length ? "All active sessions pinned" : "none"}</div></Show>
           }>
-            <For each={allUnpinned()}>
-              {(s, index) => {
-                const day = () => dayKey(s.updated)
+            <For each={agentRows()}>
+              {(row, index) => {
+                const day = () => dayKey(row.updated)
+                const before = () => index() > 0 ? agentRows()[index() - 1] : undefined
                 return (
                   <>
-                    <Show when={index() === 0 || day() !== dayKey(allUnpinned()[index() - 1].updated)}>
-                      <div class="nav-heading nav-day">{dayLabel(s.updated)}</div>
+                    <Show when={row.updated >= 0 && (index() === 0 || day() !== dayKey(before()!.updated))}>
+                      <div class="nav-heading nav-day">{dayLabel(row.updated)}</div>
                     </Show>
-                    {item(s)}
+                    {row.kind === "session" ? item(row.item) : <Show when={cloudPin(row.item)}>{(pin) => <CloudNav pin={pin()} />}</Show>}
                   </>
                 )
               }}

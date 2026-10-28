@@ -29,7 +29,7 @@
 :root .sidebar { background: var(--mantle); border-inline-end: 0; box-shadow: inset calc(-1px * var(--inline-sign, 1)) 0 0 color-mix(in srgb, var(--text) 5%, transparent); }
 :root .nav-item { margin-inline: 0; padding-inline: 14px; }
 /* One rule between the action row and the list; the cloud drawer adds no second one. */
-:root .cloud-discovery { border-block-start: 0; margin-block-start: 0; }
+:root .cloud-source { padding-inline: 14px; }
 :root .nav-item:hover { background: var(--hover); }
 :root .nav-item.active { background: var(--selected); box-shadow: none; color: var(--text); }
 :root .nav-item.active .nav-title { font-weight: 600; }
