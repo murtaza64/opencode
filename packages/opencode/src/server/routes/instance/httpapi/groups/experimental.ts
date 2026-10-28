@@ -45,6 +45,8 @@ const CapabilitiesResponse = Schema.Struct({
     images: Schema.optionalKey(SessionV1.ImageCapabilities),
     /** Selected context on `POST /session/:id/input` (`context` items), promoted as synthetic text parts. */
     context: Schema.optionalKey(Schema.Literal(true)),
+    /** `POST /session/:id/nudge` continues an idle session on an explicit Nudge. */
+    nudge: Schema.optionalKey(Schema.Literal(true)),
   }),
   /** `prompt_async` with `noReply` records the message only: no turn starts or continues to answer it, busy or idle. */
   noReplyRecordOnly: Schema.optionalKey(Schema.Literal(true)),

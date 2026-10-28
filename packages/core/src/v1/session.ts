@@ -32,6 +32,7 @@ export {
   Range,
   ReasoningPart,
   ResourceSource,
+  NudgeMarker,
   RestartContinuation,
   RetryPart,
   SessionInfo,

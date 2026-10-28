@@ -14,6 +14,7 @@ import { SessionCompaction } from "@/session/compaction"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionFailure } from "@/session/failure"
+import { SessionNudge } from "@/session/nudge"
 import { SessionRestart } from "@/session/restart"
 import { SessionInput } from "@/session/input"
 import { SessionRevert } from "@/session/revert"
@@ -335,6 +336,15 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     }) {
       return yield* SessionError.mapStorageNotFound(
         promptSvc.retry({ sessionID: ctx.params.sessionID, messageID: ctx.payload.messageID }),
+      )
+    })
+
+    const nudge = Effect.fn("SessionHttpApi.nudge")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof SessionNudge.Payload.Type
+    }) {
+      return yield* SessionError.mapStorageNotFound(promptSvc.nudge({ sessionID: ctx.params.sessionID, ...ctx.payload })).pipe(
+        Effect.catchTag("InputConflict", (error) => new ConflictError({ message: error.message })),
       )
     })
 
@@ -704,6 +714,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handleRaw("fork", forkRaw)
       .handle("abort", abort)
       .handle("retry", retry)
+      .handle("nudge", nudge)
       .handle("restartContinue", restartContinue)
       .handle("recover", recover)
       .handle("restartStatus", restartStatus)

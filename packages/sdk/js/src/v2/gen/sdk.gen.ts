@@ -230,6 +230,9 @@ import type {
   SessionMessageResponses,
   SessionMessagesErrors,
   SessionMessagesResponses,
+  SessionNudgeErrors,
+  SessionNudgeInput,
+  SessionNudgeResponses,
   SessionPromptAsyncErrors,
   SessionPromptAsyncResponses,
   SessionPromptErrors,
@@ -4583,6 +4586,45 @@ export class Session2 extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<SessionRetryResponses, SessionRetryErrors, ThrowOnError>({
       url: "/session/{sessionID}/retry",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Continue an idle session on an explicit Nudge
+   *
+   * Explicit UI control for an idle root session whose newest message is still `observedMessageID`. A tail ending in tool results whose effects are durable resumes with no message added. A naturally finished turn continues through one sourced Nudge input (`editspace-mail`, kind `nudge`, text `Continue.`), settled once presented. Refused without writing: `busy`, `waiting` (permission or question), `pending-input` (with `requestIDs`; nothing is promoted or re-routed), `failed` (use retry), `uncertain` (a pending, running, interrupted or abandoned tool, an aborted or unfinished step; use recover), `unanswered`, `stale` (re-read the tail), `child`, `archived`, `superseded`, `mismatch`. A marker on the observed message records the decision: the same body returns the same outcome, the same requestID with a different body answers 409. Interrupted tools are never re-run.
+   */
+  public nudge<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      sessionNudgeInput?: SessionNudgeInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "sessionNudgeInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionNudgeResponses, SessionNudgeErrors, ThrowOnError>({
+      url: "/session/{sessionID}/nudge",
       ...options,
       ...params,
       headers: {
