@@ -637,6 +637,10 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 .pin-action.pinned { color: var(--mauve); }
 /* Work view location glyphs and host availability (ux-feel §4). */
 .host-glyph { flex: none; margin-inline-end: 6px; color: var(--overlay1); }
+/* Session rows: one rhythm for status dot, host icon and label (dot 8, 6 gap, icon 14, 8 gap). The
+ * generic link-glyph margin would add 5px after the icon; the icon box is fixed so laptop and Mini rows align. */
+.session-entry .nav-item { gap: 6px; }
+.session-entry .nav-item > .host-glyph { inline-size: 14px; block-size: 14px; margin: 0; margin-inline-end: 2px; }
 .session-entry.unavailable .nav-item, .mini-session.unavailable { opacity: 0.55; }
 .session-entry.unavailable .nav-item { cursor: not-allowed; }
 .host-status { display: flex; align-items: center; gap: 2px; font-size: 12px; }
