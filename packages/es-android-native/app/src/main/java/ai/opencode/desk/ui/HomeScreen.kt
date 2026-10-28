@@ -326,12 +326,23 @@ private fun NeedsTab(store: DeskStore, onOpen: (AttentionRecord) -> Unit) {
 
 @Composable
 private fun AgentsTab(store: DeskStore, nav: Nav) {
-    val groups = store.filteredAgents.groupBy { it.editspace }
+    val groups = store.searchedAgents.groupBy { it.editspace }
     LazyColumn(Modifier.fillMaxSize().testTag("agents"), contentPadding = PaddingValues(bottom = 24.dp)) {
         item {
             Column(Modifier.padding(horizontal = 20.dp).padding(top = 12.dp)) {
                 Text("Agents", style = MaterialTheme.typography.titleLarge)
                 Label("${store.filteredAgents.count { it.busy }} working · ${store.filteredAgents.size} lanes")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextField(
+                        value = store.agentQuery, onValueChange = { store.agentQuery = it },
+                        placeholder = { Text("Search title, lane, project, session id", style = MaterialTheme.typography.bodyMedium, color = Ink.Dim) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f).padding(top = 8.dp).testTag("agent-search"),
+                        shape = RoundedCornerShape(4.dp),
+                        colors = TextFieldDefaults.colors(focusedContainerColor = Ink.Panel, unfocusedContainerColor = Ink.Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = Ink.Blue),
+                    )
+                    if (store.agentQuery.isNotEmpty()) Label("clear", color = Ink.Blue, modifier = Modifier.clickable { store.agentQuery = "" }.padding(start = 8.dp, top = 8.dp).testTag("agent-search-clear"))
+                }
             }
         }
         groups.forEach { (es, agents) ->
@@ -341,7 +352,14 @@ private fun AgentsTab(store: DeskStore, nav: Nav) {
                 AgentRow(agent, store.now, onClick = { nav.push(Route.Agent(agent.key)) }, trailing = { PinButton(store.pinned(pin)) { store.togglePin(pin) } }, host = store.host)
             }
         }
-        if (groups.isEmpty()) item { Text("No lanes yet.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) }
+        if (groups.isEmpty()) item {
+            val text = when {
+                store.agentQuery.isNotBlank() && store.filteredAgents.isNotEmpty() -> "No agents match “${store.agentQuery.trim()}”."
+                store.link == Link.Offline || store.link == Link.Connecting -> "Offline: the list refreshes once the gateway answers."
+                else -> "No lanes yet."
+            }
+            Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp).testTag("agents-empty"))
+        }
     }
 }
 

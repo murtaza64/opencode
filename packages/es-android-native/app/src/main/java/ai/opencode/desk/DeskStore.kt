@@ -61,6 +61,10 @@ data class Agent(
 ) {
     val busy get() = status == "busy"
     val directory get() = session?.directory.orEmpty()
+    // Older sessions anchored in the lane (rollover history): openable, never the target.
+    val history get() = sessions.filter { it.id != session?.id }
+    // Secondary label so a lane is discoverable by its name when the display title differs.
+    val laneLabel get() = lane.takeIf { it.isNotBlank() && !it.equals(title, ignoreCase = true) }
     // Pin identity: lane rows pin by lane name, lane-less rows by session id.
     val pin get() = if (lane.isNotBlank()) Pin(editspace, lane) else Pin(editspace, sessionID = session?.id)
 }
@@ -211,6 +215,13 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
 
     val filteredOpen get() = open.filter { filter.isEmpty() || it.editspace in filter }
     val filteredAgents get() = agents.filter { filter.isEmpty() || it.editspace in filter }
+    // Agents search (AND-W5): a view over the list only; the open conversation and drafts are untouched.
+    var agentQuery by mutableStateOf("")
+    val searchedAgents get() = Agents.search(filteredAgents, agentQuery)
+
+    // A row by key, or a synthetic row for an older session of a lane ("<es>#<sessionID>",
+    // rollover history) so it is openable without being listed twice.
+    fun agent(key: String): Agent? = agents.firstOrNull { it.key == key } ?: Agents.historyRow(agents, key)
 
     // Entries composed for this origin come back as Uncertain: the POST may or may not have
     // landed before the process died, and the same requestID makes the retry safe either way.

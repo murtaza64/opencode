@@ -97,7 +97,7 @@ fun AgentRow(agent: Agent, now: Long, onClick: () -> Unit, trailing: (@Composabl
     val suffix = if (glyph == Hosts.Glyph.Wingman) "on Wingman" else Hosts.accessibleSuffix(host)
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 20.dp, end = if (trailing != null) 4.dp else 20.dp, top = 12.dp, bottom = 12.dp)
-            .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(agent.title, suffix, agent.status).joinToString(", ") },
+            .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(agent.title, agent.laneLabel, suffix, agent.status).joinToString(", ") },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StatusDot(agent.status, 7)
@@ -105,7 +105,8 @@ fun AgentRow(agent: Agent, now: Long, onClick: () -> Unit, trailing: (@Composabl
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (glyph != null) { HostGlyph(glyph); Spacer(Modifier.width(6.dp)) }
-                Text(agent.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(agent.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                agent.laneLabel?.let { Spacer(Modifier.width(8.dp)); Label(it) }
             }
             if (agent.activity.isNotBlank()) Text(agent.activity, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }

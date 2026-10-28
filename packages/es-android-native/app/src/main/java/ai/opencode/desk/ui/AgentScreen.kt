@@ -67,6 +67,7 @@ import ai.opencode.desk.Author
 import ai.opencode.desk.Authorship
 import ai.opencode.desk.Hosts
 import ai.opencode.desk.Nav
+import ai.opencode.desk.Route
 import ai.opencode.desk.Outbox
 import ai.opencode.desk.Pending
 import ai.opencode.desk.Pin
@@ -85,7 +86,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
-    val agent = store.agents.firstOrNull { it.key == key }
+    val agent = store.agent(key)
     if (agent == null) {
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(20.dp)) {
             TopBar("Agent", onBack = { nav.pop() })
@@ -141,6 +142,15 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
                 PendingBubble(item, store,
                     onRetry = { scope.launch { store.retry(item) } },
                     onCancel = { scope.launch { if (item.state == SendState.Accepted) store.cancel(agent, item.requestID); store.dismiss(item) } })
+            }
+            if (agent.history.isNotEmpty()) item(key = "history") {
+                Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                    Label("Earlier sessions")
+                    agent.history.forEach { s ->
+                        Text(s.title.ifBlank { s.id }, color = Ink.Blue, style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.clickable { nav.push(Route.Agent("${agent.editspace}#${s.id}")) }.padding(vertical = 4.dp).testTag("history-${s.id}"))
+                    }
+                }
             }
             detail?.error?.let { item(key = "error") { Text(it, color = Ink.Red, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) } }
             if (detail == null) item(key = "loading") { Text("Loading…", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(20.dp)) }

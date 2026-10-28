@@ -22,7 +22,8 @@ class StayConnectedService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) { stopSelf(); return START_NOT_STICKY }
+        // Disconnect from the notification is the user turning Stay connected off.
+        if (intent?.action == ACTION_STOP) { Settings.setStayConnected(this, false); stopSelf(); return START_NOT_STICKY }
         val store = DeskApp.store(this)
         if (!Settings.stayConnected(this) || !store.gateway.paired) { stopSelf(); return START_NOT_STICKY }
         ensureChannel()
@@ -54,13 +55,6 @@ class StayConnectedService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, "Stay connected", NotificationManager.IMPORTANCE_LOW).apply { description = "Shown while Desk keeps its connection open in the background" },
         )
-    }
-
-    override fun onDestroy() {
-        // Disconnect from the notification action turns the preference off; the loop keeps
-        // running only while the UI is open (the store's own lifecycle).
-        if (Settings.stayConnected(this) && !DeskApp.store(this).gateway.paired) Settings.setStayConnected(this, false)
-        super.onDestroy()
     }
 
     companion object {
