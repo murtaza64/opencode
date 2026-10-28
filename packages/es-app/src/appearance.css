@@ -125,10 +125,28 @@
 :root .tool-run :focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 /* Right panel summary: model and cost on one line, then the context meter; the rest behind Details. */
-.info-summary { padding: 10px 12px 8px; display: grid; gap: 8px; border-block-end: 1px solid var(--surface1); }
+.info-summary { padding: 10px 12px 8px; display: grid; gap: 8px; min-inline-size: 0; }
+/* Details rows wrap long values (paths, model IDs) inside the panel instead of widening it. */
+.info-details { min-inline-size: 0; }
+.info-details .info-row > :first-child { flex: none; }
+.info-details .info-row > :last-child { min-inline-size: 0; overflow-wrap: anywhere; }
 .info-summary-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-width: 0; }
 .info-model { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .info-cost { flex: none; font-variant-numeric: tabular-nums; color: var(--text); }
+/* Session cost emphasis by decade (presentation, not a budget): quiet under $1, plain to $10, bold to $100, peach beyond. */
+.info-cost[data-decade="0"] { color: var(--subtext0); }
+.info-cost[data-decade="2"] { font-weight: 600; }
+.info-cost[data-decade="3"] { font-weight: 600; color: var(--peach); }
+.info-cost-scale { display: grid; gap: 2px; }
+.info-cost-track { position: relative; block-size: 4px; background: var(--surface0); overflow: hidden; }
+/* Decade marks at $1, $10 and $100 on a log track from $0.10 to $100. */
+.info-cost-track::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to right, transparent calc(33.333% - 1px), var(--base) 0 33.333%, transparent 0 calc(66.666% - 1px), var(--base) 0 66.666%, transparent 0); }
+.info-cost-fill { block-size: 100%; inline-size: 100%; background: var(--subtext0); transform-origin: left center; }
+.info-cost-fill:dir(rtl) { transform-origin: right center; }
+.info-cost-scale[data-decade="1"] .info-cost-fill, .info-cost-scale[data-decade="2"] .info-cost-fill { background: var(--text); }
+.info-cost-scale[data-decade="3"] .info-cost-fill { background: var(--peach); }
+.info-cost-ticks { display: grid; grid-template-columns: repeat(3, 1fr); font-size: 10px; color: var(--overlay0); font-variant-numeric: tabular-nums; }
+.info-cost-ticks > span { text-align: end; }
 .info-meter { display: grid; gap: 4px; }
 .info-meter-track { block-size: 6px; background: var(--surface0); overflow: hidden; }
 .info-meter-fill { block-size: 100%; inline-size: 100%; background: var(--accent); transform-origin: left center; transition: transform var(--dur-base) var(--ease-standard); }
@@ -147,3 +165,13 @@
 :root .session-entry { margin-inline: 0; }
 :root .session-entry:has(> .nav-item.active) { background: var(--selected); }
 :root .session-entry > .nav-item.active { background: transparent; }
+
+/* Sidebar todos: borderless; the current item carries the weight, pending is plain, done is quiet. */
+:root .session-info .todo-panel { border: 0; background: transparent; margin-block-start: 10px; padding-inline: 12px; }
+:root .session-info .todo-panel .todo-panel-head { padding-inline: 0; }
+:root .session-info .todo-panel .todo-list { padding: 2px 0 8px; }
+:root .session-info .todo-list li[data-status="in_progress"] { color: var(--text); font-weight: 600; }
+:root .session-info .todo-list li[data-status="in_progress"] .todo-glyph { color: var(--accent); }
+:root .session-info .todo-list li[data-status="pending"] { color: var(--subtext1); }
+:root .session-info .todo-list li:is([data-status="completed"], [data-status="cancelled"]) { color: var(--overlay0); }
+:root .session-info .todo-list li[data-status="completed"] .todo-glyph { color: var(--green); }

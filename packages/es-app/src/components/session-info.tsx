@@ -293,6 +293,18 @@ function SessionInfoBody(props: {
   }), { cost: 0, input: 0, output: 0 }))
   const tokens = () => (props.session as any)?.tokens
   const cost = () => (props.session as any)?.cost || transcriptUsage().cost
+  // Unknown is not zero: a cost is known only when the session or one of its replies records one.
+  const costKnown = () => typeof (props.session as any)?.cost === "number" || assistants().some((message) => typeof message.cost === "number")
+  // Presentation scale, not a budget: decades of session spend ($1, $10, $100) on a log track.
+  const costScale = createMemo(() => {
+    const value = cost()
+    const decade = value < 1 ? 0 : value < 10 ? 1 : value < 100 ? 2 : 3
+    return { value, decade, fill: Math.min(1, Math.max(0, (Math.log10(Math.max(value, 0.1)) + 1) / 3)) }
+  })
+  const costText = () => costKnown() ? `$${cost().toFixed(2)}` : "—"
+  const costLabel = () => costKnown()
+    ? `Session cost ${costText()}, estimate. Scale marks $1, $10 and $100 (presentation only, not a budget).`
+    : "Session cost unknown: no reply has reported a cost yet."
   // Current context against the selected model's window; the latest turn's own model as fallback.
   const meter = createMemo(() => {
     const used = usage()?.tokens
@@ -314,8 +326,14 @@ function SessionInfoBody(props: {
             <Show when={model()?.id} fallback={<span class="info-model dim">Unknown model</span>}>
               <span class="info-model" data-fact="model" dir="auto" title={`${model()!.providerID} · ${model()!.id}`}>{model()!.id}</span>
             </Show>
-            <span class="info-cost" title="Cost of this session">${cost().toFixed(2)}</span>
+            <span class="info-cost" data-decade={costKnown() ? costScale().decade : undefined} title={costLabel()}>{costText()}</span>
           </div>
+          <Show when={costKnown()}>
+            <div class="info-cost-scale" role="img" aria-label={costLabel()} title={costLabel()} data-decade={costScale().decade}>
+              <div class="info-cost-track"><div class="info-cost-fill" style={{ transform: `scaleX(${costScale().fill})` }} /></div>
+              <div class="info-cost-ticks" aria-hidden="true"><span>$1</span><span>$10</span><span>$100</span></div>
+            </div>
+          </Show>
           <Show when={meter()} fallback={<div class="info-meter-empty dim">Context unknown until the first reply</div>}>{(m) => (
             <div class="info-meter" role="meter" aria-label="Context used" aria-valuemin={0} aria-valuemax={m().limit ?? m().used}
               aria-valuenow={m().used} aria-valuetext={m().limit ? `${compactTokens(m().used)} of ${compactTokens(m().limit!)} tokens` : `${compactTokens(m().used)} tokens, limit unknown`}

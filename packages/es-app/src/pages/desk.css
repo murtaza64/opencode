@@ -48,7 +48,7 @@
 .desk-flow li + li:dir(rtl)::before { content: "←"; }
 .desk-ref { display: inline-block; margin-inline-start: 4px; padding: 0 4px; font-size: 10px; border: 1px solid var(--surface1); color: var(--subtext0); text-decoration: none; }
 .desk-chat { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.desk-chat > .session-page { flex: 1; min-height: 0; height: auto; padding: 0 16px; }
+.desk-chat > .session-page { flex: 1; min-height: 0; height: auto; padding: 0; --chat-gutter: 16px; }
 .desk-background { padding: 6px 16px; border-block-end: 1px solid var(--surface0); display: grid; gap: 4px; font-size: 12px; }
 .desk-job { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
 .desk-job[data-state=ready][data-current=true] > span:first-child { color: var(--green); }
