@@ -186,10 +186,12 @@ export const UsageSessionsResponse = Schema.Struct({
   observedAt: Schema.String,
   offsetMinutes: Schema.Number,
   coverage: Schema.Struct({ since: Schema.String, backfilled: Schema.Boolean, liveSince: Schema.optional(Schema.String) }),
+  totals: Schema.Struct({ sessions: Schema.Number, pricedCost: Schema.Number, unpricedTokens: Schema.Number }),
   sessions: Schema.Array(
     Schema.Struct({
       sessionID: Schema.String,
       parentID: Schema.optional(Schema.String),
+      projectID: Schema.optional(Schema.String),
       title: Schema.optional(Schema.String),
       directory: Schema.optional(Schema.String),
       cost: Schema.NullOr(Schema.Number),

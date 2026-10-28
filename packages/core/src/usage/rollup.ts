@@ -305,13 +305,15 @@ export const sessions = Effect.fn("UsageRollup.sessions")(function* (
     total.lastHour = Math.max(total.lastHour, row.lastHour)
     totals.set(row.sessionID, total)
   }
-  const top = [...totals]
-    .filter(([, total]) => total.cost !== 0 || total.unpricedTokens !== 0 || totalTokens(total.tokens) !== 0)
+  const counted = [...totals].filter(
+    ([, total]) => total.cost !== 0 || total.unpricedTokens !== 0 || totalTokens(total.tokens) !== 0,
+  )
+  const top = counted
     .toSorted((a, b) => b[1].cost - a[1].cost || b[1].unpricedTokens - a[1].unpricedTokens)
     .slice(0, input.limit)
   const info = top.length
     ? yield* db
-        .select({ id: SessionTable.id, title: SessionTable.title, directory: SessionTable.directory, parentID: SessionTable.parent_id, updated: SessionTable.time_updated })
+        .select({ id: SessionTable.id, title: SessionTable.title, directory: SessionTable.directory, parentID: SessionTable.parent_id, projectID: SessionTable.project_id })
         .from(SessionTable)
         .where(inArray(SessionTable.id, top.map(([id]) => id) as never[]))
         .all()
@@ -330,11 +332,18 @@ export const sessions = Effect.fn("UsageRollup.sessions")(function* (
       backfilled: state?.time_backfilled !== null && state?.time_backfilled !== undefined,
       liveSince: state ? new Date(state.cutoff).toISOString() : undefined,
     },
+    // Window totals over every counted session, so a client can tell when `limit` dropped rows.
+    totals: {
+      sessions: counted.length,
+      pricedCost: round(counted.reduce((sum, [, total]) => sum + total.cost, 0)),
+      unpricedTokens: counted.reduce((sum, [, total]) => sum + total.unpricedTokens, 0),
+    },
     sessions: top.map(([sessionID, total]) => {
       const row = byID.get(sessionID)
       return {
         sessionID,
         parentID: row?.parentID ?? undefined,
+        projectID: row?.projectID ?? undefined,
         title: row?.title ?? undefined,
         directory: row?.directory ?? undefined,
         cost: total.unknown ? null : round(total.cost),

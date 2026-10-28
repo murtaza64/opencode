@@ -328,7 +328,10 @@ describe("UsageRollup", () => {
         ["ses_top_b", null, 1.5, 70, "t"],
       ])
       expect(result.sessions[0]?.lastActive).toBe(new Date(Date.UTC(2026, 9, 28, 10) - 1).toISOString())
-      expect((yield* UsageRollup.sessions(db, { days: 1, offsetMinutes: 0, limit: 1, now })).sessions).toHaveLength(1)
+      expect(result.sessions[0]?.projectID).toBe(Project.ID.global)
+      const limited = yield* UsageRollup.sessions(db, { days: 1, offsetMinutes: 0, limit: 1, now, hasRate: (_p, model) => model === "priced" })
+      expect(limited.sessions).toHaveLength(1)
+      expect(limited.totals).toEqual({ sessions: 2, pricedCost: 4.5, unpricedTokens: 70 })
     }),
   )
 })
