@@ -63,10 +63,11 @@ try {
     }))
   }, { key, image: b })
   await page.goto(preview.url, { waitUntil: "domcontentloaded" })
-  await expect(action("Queue")).toHaveAttribute("data-keyboard-target", "true")
   await expect(editor()).toHaveValue("")
   await expect(active().getByRole("radio")).toHaveCount(0)
   await paste([a, b, a])
+  // The restored target applies once the draft has content (an empty draft offers Nudge).
+  await expect(action("Queue")).toHaveAttribute("data-keyboard-target", "true")
   fixture.holdAside = true
   await action("Aside").click()
   await expect.poll(() => fixture.asideReplies.length).toBe(1)

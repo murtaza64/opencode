@@ -10,6 +10,8 @@ try {
     const page = await context.newPage()
     await page.route("**/*", (route) => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
     await page.goto(preview.url, { waitUntil: "domcontentloaded" })
+    // A draft makes the primary a send action (an empty draft offers Nudge).
+    await page.locator(".prompt-box:not([inert]) textarea[aria-label='Message']").fill("draft")
     await expect(page.getByRole("button", { name: "Send", exact: true })).toBeVisible()
     await expect(page.getByRole("button", { name: "Refresh availability", exact: true })).toHaveCount(0)
     // The model action and the primary send button keep their place when the session turns busy.

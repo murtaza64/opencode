@@ -181,6 +181,39 @@ try {
     // Attaching a decision never answers it: the only writes are the two sends.
     expect(writes().slice(baselineWrites).map((call) => call.path)).toEqual(["/session/ses_a/prompt_async", "/session/ses_a/prompt_async"])
 
+    // Busy steer: chips are never dropped. Without Core's context capability the steer is refused with a reason
+    // and the chips stay; with it, the steer's /input payload carries the exact parts and the chips clear.
+    fixture.status = "busy"
+    fixture.emit("session.status", { sessionID: "ses_a", status: { type: "busy" } })
+    await editor().pressSequentially("steer with @orch")
+    await editor().press("Enter")
+    await expect(chips()).toHaveCount(1)
+    const steerButton = page.locator(".prompt-box:not([inert]) .direct-primary")
+    await expect(steerButton).toHaveAccessibleName("Steer")
+    await expect(steerButton).toBeDisabled()
+    await expect(steerButton).toHaveAttribute("title", /does not attach @context/)
+    const inputsBefore = fixture.calls.filter((call) => call.method === "POST" && call.path === "/session/ses_a/input").length
+    await editor().press("Control+Enter")
+    await page.waitForTimeout(300)
+    expect(fixture.calls.filter((call) => call.method === "POST" && call.path === "/session/ses_a/input").length).toBe(inputsBefore)
+    await expect(chips()).toHaveCount(1)
+    fixture.inputContext = true
+    await page.reload()
+    await expect(chips()).toHaveCount(1)
+    await expect(steerButton).toBeEnabled({ timeout: 15_000 })
+    await editor().focus()
+    await editor().press("Control+Enter")
+    await expect.poll(() => fixture.calls.filter((call) => call.method === "POST" && call.path === "/session/ses_a/input").length).toBe(inputsBefore + 1)
+    const steerBody = fixture.calls.filter((call) => call.method === "POST" && call.path === "/session/ses_a/input").at(-1).body
+    expect(steerBody.delivery).toBe("steer")
+    expect(steerBody.context).toHaveLength(1)
+    expect(steerBody.context[0]).toMatchObject({ source: "es-app/mention", key: `agent:${new URL(origin).host}:fixture/orchestrator` })
+    expect(Object.keys(steerBody.context[0]).sort()).toEqual(["key", "source", "text"])
+    await expect(chips()).toHaveCount(0)
+    fixture.inputContext = false
+    fixture.status = "idle"
+    fixture.emit("session.status", { sessionID: "ses_a", status: { type: "idle" } })
+
     // Transcript session references still resolve and navigate.
     const info = { id: `msg_zmention${dir}`, sessionID: "ses_a", role: "assistant", agent: "build", parentID: "msg_user", providerID: "fixture", modelID: "test", path: { cwd: directory, root: directory }, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: Date.now() } }
     fixture.emit("message.updated", { info })
@@ -192,7 +225,7 @@ try {
   }
   expect(fixture.unexpected).toEqual([])
   expect(errors).toEqual([])
-  console.log(`PASS context picker: grouped agents + sessions + decisions + surfaces, preview bound, Tab groups, chips, readable labels, persistence, removal, one-send context parts, no reads/writes before send, LTR/RTL; screenshots ${shots}`)
+  console.log(`PASS context picker: grouped agents + sessions + decisions + surfaces, preview bound, Tab groups, chips, readable labels, persistence, removal, one-send context parts, busy steer blocked without capability / carries exact parts with it, no reads/writes before send, LTR/RTL; screenshots ${shots}`)
 } finally {
   await browser.close()
   await vite.close()

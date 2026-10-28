@@ -200,6 +200,8 @@ export const createFixture = async () => {
                 cancel: true,
                 ...(fixture.updateInput ? { update: true } : {}),
                 ...(fixture.interruptInput ? { interrupt: true } : {}),
+                // Busy steer and queue carry @context (Core dfd17490); off unless a test sets fixture.inputContext.
+                ...(fixture.inputContext ? { context: true } : {}),
                 images: fixture.images,
               },
             }

@@ -1,16 +1,24 @@
 import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js"
+import type { ContextPart } from "../api"
 import type { Composer, ComposerAction } from "../composer"
 import { ComposerImages } from "./composer-images"
 import { ariaShortcut, shortcutLabel } from "../shortcuts"
+import type { PrimaryResolution } from "../primary-action"
 import "./direct-composer.css"
 
-// One primary action (Send when idle, Steer while busy); Queue and Aside sit in
-// a secondary menu because they are rarely used. Cmd+M still cycles the
-// keyboard target, and the primary button always shows that target.
+// One primary action: with a draft, Send when idle and the keyboard target while busy; with an empty
+// draft, deliver a pending steer now or nudge (primary-action.ts decides, the same for Cmd/Ctrl+Enter).
+// Queue and Aside sit in a secondary menu because they are rarely used. Cmd+M still cycles the
+// keyboard target.
 export const DirectComposer = (props: {
   composer: Composer
   connected: boolean
   submit: (action: ComposerAction) => void
+  /** The current primary action; `activate` re-resolves it at the moment of activation. */
+  primary: () => PrimaryResolution
+  activate: () => void
+  /** Attached @context parts; an action that cannot carry them is refused with the composer's reason. */
+  context?: () => readonly ContextPart[]
   restoreDraft: () => void
   editor: JSX.Element
   attachments: JSX.Element
@@ -24,6 +32,8 @@ export const DirectComposer = (props: {
   const [menu, setMenu] = createSignal(false)
   createEffect(on(() => state.busy, () => setMenu(false), { defer: true }))
   const primary = () => (state.busy ? state.keyboardTarget : "steer")
+  // Every label the primary button can show, laid out in one cell so its width never changes.
+  const PRIMARY_LABELS = ["Send", "Steer", "Queue", "Aside", "Nudge", "Nudging…", "Steer now", "Interrupt & steer now", "Steering…"]
   const secondary = () => (state.busy ? actions.filter((action) => action !== primary()) : [])
   const nextTarget = () => actions[(actions.indexOf(state.keyboardTarget) + 1) % actions.length]
   const label = (action: ComposerAction) => (state.busy ? action[0]!.toUpperCase() + action.slice(1) : "Send")
@@ -32,7 +42,7 @@ export const DirectComposer = (props: {
   const reason = (action: ComposerAction) =>
     !props.connected
       ? "Session unavailable or another session action is running."
-      : props.composer.reasonForAction(action)
+      : props.composer.reasonForAction(action, props.context?.())
   const empty = () => !props.composer.visibleDraft().text.trim() && !props.composer.visibleDraft().images.length
   // Blocks from an input already shown as an outgoing bubble (or in flight) are explained there
   // and in the button title; repeating them here would add a line that shifts the composer.
@@ -79,6 +89,32 @@ export const DirectComposer = (props: {
     document.removeEventListener("pointerdown", dismiss, true)
     document.removeEventListener("keydown", escape, true)
   })
+  const PrimaryButton = () => {
+    const current = () => props.primary()
+    const sendAction = () => { const value = current(); return value.kind === "send" ? value.action : undefined }
+    const disabled = () => { const action = sendAction(); return action ? reason(action) : current().disabled }
+    const title = () => { const action = sendAction(); return action ? reason(action) || (state.busy ? hint(action) : undefined) : current().disabled || current().title }
+    return <button
+      class="direct-primary"
+      data-keyboard-target="true"
+      data-primary-kind={current().kind}
+      aria-label={current().name ?? current().label}
+      aria-keyshortcuts={disabled() ? undefined : ariaShortcut("primaryAction")}
+      title={title()}
+      disabled={!!disabled()}
+      onPointerDown={keepFocus}
+      onClick={() => {
+        setMenu(false)
+        props.activate()
+      }}
+    >
+      <span class="direct-primary-label">
+        <For each={PRIMARY_LABELS}>{(text) => <span aria-hidden="true" data-current={text === current().label ? "" : undefined}>{text}</span>}</For>
+      </span>
+      {/* A disabled action has no chord (Cmd/Ctrl+Enter does nothing); the hint keeps its space so Send does not resize. */}
+      <kbd class="direct-button-hint" aria-hidden="true" style={{ visibility: disabled() ? "hidden" : undefined }}>{shortcutLabel("primaryAction")}</kbd>
+    </button>
+  }
   const SubmitButton = (p: { action: ComposerAction; class: string }) => (
     <button
       class={p.class}
@@ -134,12 +170,15 @@ export const DirectComposer = (props: {
             </span>
           )}</Show>
           {props.dictation}
-          <span class="direct-session-metadata">{props.sessionMetadata}</span>
-          <div class="direct-model" role="group" aria-label="Model">
-            {props.children}
+          {/* Footer meta (ux-feel contract): model, context, cost; shrinks before Send ever moves. */}
+          <div class="composer-meta">
+            <div class="direct-model" role="group" aria-label="Model">
+              {props.children}
+            </div>
+            <span class="direct-session-metadata">{props.sessionMetadata}</span>
           </div>
           <div class="direct-split" ref={menuRoot}>
-            <SubmitButton action={primary()} class="direct-primary" />
+            <PrimaryButton />
             {/* Always laid out so the primary button does not move when the session turns busy. */}
             <button
               class="direct-more"

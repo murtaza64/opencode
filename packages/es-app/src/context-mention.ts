@@ -12,6 +12,8 @@ export const CONTEXT_MENTION_SOURCE = "es-app/mention"
 // Free-text fields are clipped so a snapshot stays well under 2 KB and its reference line survives.
 const clip = (value: string, limit = 300) => value.length > limit ? `${value.slice(0, limit - 1)}…` : value
 export const SNAPSHOT_BYTES = 2048
+// A missing or invalid time reads as unknown rather than throwing.
+const iso = (at: number | undefined) => at !== undefined && Number.isFinite(at) ? new Date(at).toISOString() : "unknown"
 // Matches the input contract's per-message context limit.
 export const MAX_CONTEXT = 8
 const encoder = new TextEncoder()
@@ -128,21 +130,21 @@ export const insertContextLabel = (text: string, start: number, caret: number, l
 /** The bounded, source-linked snapshot one chip sends as a synthetic context part. */
 export const contextPart = (ref: ContextRef, url: string, asOf: number): ContextPart => {
   const revision = ref.kind === "decision" || ref.kind === "surface" ? { revision: ref.revision } : {}
-  const record = { kind: ref.kind, id: ref.id, host: ref.host, ...revision, asOf: new Date(asOf).toISOString(), url }
+  const record = { kind: ref.kind, id: ref.id, host: ref.host, ...revision, asOf: iso(asOf), url }
   const lead = "Context the person attached (a reference, not a request to contact anyone)"
   const lines = ({
     agent: (ref: Extract<ContextRef, { kind: "agent" }>) => [`${lead}: agent for lane ${ref.lane} in editspace ${ref.editspace} on host ${ref.host}.`,
       ref.owner ? `Current session: ${ref.owner}` : "Current session: none recorded",
       ref.status ? `Status: ${clip(ref.status, 40)}` : "", ref.activity ? `Activity: ${clip(ref.activity)}` : ""],
     session: (ref: Extract<ContextRef, { kind: "session" }>) => [`${lead}: session ${ref.id} "${clip(ref.label, 200)}" on host ${ref.host}.`,
-      ref.lane ? `Lane: ${ref.lane}` : "", `Last updated: ${new Date(ref.updated).toISOString()}`, `Directory: ${clip(ref.directory)}`],
+      ref.lane ? `Lane: ${ref.lane}` : "", `Last updated: ${iso(ref.updated)}`, `Directory: ${clip(ref.directory)}`],
     decision: (ref: Extract<ContextRef, { kind: "decision" }>) => [
       `${lead}: ${ref.ask} ${ref.id} "${clip(ref.label, 200)}" in editspace ${ref.editspace}${ref.lane ? `, lane ${ref.lane}` : ""} on host ${ref.host}, revision ${ref.revision}, ${ref.status} when attached.`,
       "Attaching it does not answer, approve or notify anyone.",
       ref.options.length ? `Options: ${ref.options.map((option, index) => `${index + 1}) ${option}`).join("; ")}` : "",
       ref.recommendation ? `Recommendation: ${ref.recommendation}` : "", `Question: ${ref.question}`],
     surface: (ref: Extract<ContextRef, { kind: "surface" }>) => [
-      `${lead}: surface ${ref.id} "${clip(ref.label, 200)}" (${ref.purpose}) published by ${ref.owner}${ref.lane ? ` for lane ${ref.lane}` : ""} in editspace ${ref.editspace} on host ${ref.host}, revision ${ref.revision}, updated ${new Date(ref.updated).toISOString()}.`,
+      `${lead}: surface ${ref.id} "${clip(ref.label, 200)}" (${ref.purpose}) published by ${ref.owner}${ref.lane ? ` for lane ${ref.lane}` : ""} in editspace ${ref.editspace} on host ${ref.host}, revision ${ref.revision}, updated ${iso(ref.updated)}.`,
       ref.summary ? `Summary: ${ref.summary}` : "", "Content: not included (no text snapshot is available); open the link."],
   } as Record<ContextRef["kind"], (ref: ContextRef) => string[]>)[ref.kind](ref).filter(Boolean)
   // The link and reference always survive; the descriptive lines are clipped to fit the byte bound.

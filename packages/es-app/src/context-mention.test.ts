@@ -97,3 +97,8 @@ test("a long multi-byte snapshot stays within 2 KB of UTF-8 and keeps its refere
   expect(new TextEncoder().encode(part.text).length).toBeLessThanOrEqual(2048)
   expect(JSON.parse(part.text.split("Reference: ")[1]!)).toMatchObject({ kind: "decision", id: "d1", revision: 3 })
 })
+
+test("a session with an unknown update time still produces its part", () => {
+  const ref: ContextRef = { kind: "session", id: "ses_x", host: "mini:4096", label: "X", directory: "/w", updated: Number.NaN }
+  expect(contextPart(ref, "https://mini/session/ses_x", 0).text).toContain("Last updated: unknown")
+})

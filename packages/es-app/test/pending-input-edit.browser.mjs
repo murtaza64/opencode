@@ -34,9 +34,9 @@ try {
   await expect(row("human-queue")).toBeVisible()
   await expect(row("peer").getByRole("button", { name: /^Edit / })).toHaveCount(0)
   await editor.fill("Main unsent text")
-  await page.getByRole("button", { name: "Change model", exact: true }).click()
+  await page.getByRole("button", { name: /^Change model/ }).click()
   await page.getByRole("combobox", { name: "Session model" }).selectOption("fixture\u0000next")
-  await expect(page.locator(".prompt-box .direct-model-name")).toHaveText("next")
+  await expect(page.locator(".prompt-box .direct-model-name")).toHaveText("Next model")
   await expect(page.getByRole("button", { name: "Steer", exact: true })).toHaveAttribute("data-keyboard-target", "true")
   await editor.evaluate((el) => {
     el.setSelectionRange(2, 7)
@@ -48,7 +48,7 @@ try {
   const unchanged = async () => {
     await expect(editor).toHaveValue("Main unsent text")
     await expect(page.locator(".prompt-box .direct-draft .attachment-chip")).toHaveCount(1)
-    await expect(page.locator(".prompt-box .direct-model-name")).toHaveText("next")
+    await expect(page.locator(".prompt-box .direct-model-name")).toHaveText("Next model")
     await expect(primary).toHaveAttribute("aria-label", "Steer")
     expect(await editor.evaluate((el) => [el.selectionStart, el.selectionEnd])).toEqual([2, 7])
   }

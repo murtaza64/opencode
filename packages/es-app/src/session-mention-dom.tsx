@@ -10,7 +10,7 @@ export const wrapSessionRefs = (root: HTMLElement) => {
       // The regex first; closest() runs only for the rare text node that has a session ID.
       REF.lastIndex = 0
       if (!REF.test(node.nodeValue ?? "")) return NodeFilter.FILTER_SKIP
-      return !node.parentElement || node.parentElement.closest("pre, code, textarea, select, script, style, .session-ref, .ticket-ref, .session-picker, .session-chip")
+      return !node.parentElement || node.parentElement.closest("pre, code, textarea, select, script, style, .session-ref, .ticket-ref, .context-picker, .context-chips, .session-chip")
         ? NodeFilter.FILTER_SKIP : NodeFilter.FILTER_ACCEPT
     },
   })
