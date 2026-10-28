@@ -91,7 +91,8 @@ try {
 
   // Idle: receipts stay listed and cancellable; nothing is resent.
   fixture.setStatus("idle")
-  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeVisible()
+  // Empty draft: the primary is Nudge, never an empty Send.
+  await expect(page.locator(".prompt-box .direct-primary")).toHaveAccessibleName("Nudge the agent (empty message)")
   await expect(row("q1")).toBeVisible()
   await expect(receipts.locator("li")).toHaveCount(2)
   expect(posts()).toHaveLength(1)

@@ -21,7 +21,8 @@ page.on("pageerror", (error) => errors.push(error.message))
 try {
   await page.goto(`${origin}/session/ses_a?directory=${encodeURIComponent(directory)}`)
   const editor = page.locator(".direct-composer textarea:visible")
-  await expect(page.getByRole("button", { name: "Steer", exact: true })).toBeVisible()
+  // Ready: the empty draft's primary is Nudge.
+  await expect(page.locator(".prompt-box .direct-primary")).toHaveAccessibleName("Nudge the agent (empty message)")
   const originals = await editor.evaluate(async (el) => {
     const paste = async (file) => {
       const url = await new Promise((resolve) => {

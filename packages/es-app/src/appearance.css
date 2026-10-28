@@ -216,3 +216,28 @@
 :root .nav-entries > .backend-status { position: absolute; inset-block-end: 8px; inset-inline-end: 8px; }
 :root .nav-entries > .host-badge, :root .nav-entries > .host-switch { justify-self: start; margin-inline-start: 14px; }
 :root .nav-entries > .backend-status ~ .nav-entry { padding-inline-end: 28px; }
+
+/* Composer footer meta (ux-feel contract) */
+/* [model] [ctx] [cost] [Send]: the meta group shrinks and ellipsizes before Send moves. */
+.composer-meta { display: flex; align-items: center; gap: 10px; flex: 0 1 auto; min-inline-size: 0; }
+.composer-meta .direct-model { flex: 0 1 auto; min-inline-size: 0; }
+.composer-meta .direct-session-metadata { flex: none; gap: 10px; }
+.composer-model { display: inline-flex; align-items: center; gap: 4px; min-inline-size: 0; font-size: 12px; }
+.direct-model .composer-model { font-size: 12px; color: var(--subtext1); }
+.composer-model .direct-model-name { min-inline-size: 0; max-inline-size: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.composer-model .glyph { flex: none; color: var(--overlay1); }
+.composer-model:hover .glyph, .composer-model:focus-visible .glyph { color: var(--text); }
+.composer-ctx, .composer-cost { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--subtext0); white-space: nowrap; }
+.composer-ctx[data-level="warn"] { color: var(--yellow); }
+.composer-ctx[data-level="high"] { color: var(--red); }
+.composer-cost[data-decade="1"] { color: var(--text); }
+.composer-cost[data-decade="2"] { color: var(--text); font-weight: 600; }
+.composer-cost[data-decade="3"] { color: var(--peach); font-weight: 600; }
+.composer-cost[data-unknown] { color: var(--overlay1); }
+/* Every primary label shares one cell, so Send keeps one width whichever action it shows. */
+.direct-primary-label { display: inline-grid; }
+.direct-primary-label > span { grid-area: 1 / 1; visibility: hidden; white-space: nowrap; }
+.direct-primary-label > span[data-current] { visibility: visible; }
+@media (max-width: 600px) {
+  .composer-meta { flex-basis: 100%; justify-content: flex-end; }
+}

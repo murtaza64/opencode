@@ -31,19 +31,22 @@ const asides = () => fixture.calls.filter((call) => call.method === "POST" && ca
 await mkdir("artifacts/direct-composer", { recursive: true })
 try {
   await page.goto(preview.url, { waitUntil: "domcontentloaded", timeout: 180_000 })
-  // Busy default: Steer is the one primary action; Queue and Aside wait in a closed menu.
-  await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
-  await expect(button("Steer").locator("kbd")).toHaveText("⌘↵")
+  // An empty draft offers Nudge (unavailable without Core's capability), never an empty send.
+  await expect(active().locator(".direct-primary")).toHaveAccessibleName("Nudge the agent (empty message)")
+  await expect(active().locator(".direct-primary")).toBeDisabled()
   await expect(more()).toHaveAttribute("aria-expanded", "false")
   await expect(button("Queue")).toHaveCount(0)
   await expect(button("Aside")).toHaveCount(0)
-  // No agent preset picker; the model is named once with an explicit Change model action.
+  // No agent preset picker; the model name is the Change model button.
   await expect(active().getByLabel("Queue agent", { exact: true })).toHaveCount(0)
   await expect(active().getByRole("combobox")).toHaveCount(0)
-  await expect(active().locator(".direct-model-name")).toHaveText("test")
-  await expect(active().locator(".context-pct")).toContainText("1k tokens")
+  await expect(active().locator(".direct-model-name")).toHaveText("Fixture model")
+  await expect(active().locator(".composer-ctx")).toContainText("k ctx")
   await expect(editor()).toBeFocused()
   await page.keyboard.type("current visible message")
+  // Busy with a draft: Steer is the one primary action; Queue and Aside wait in a closed menu.
+  await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
+  await expect(button("Steer").locator("kbd")).toHaveText("⌘↵")
   await editor().evaluate((el) => el.setSelectionRange(2, 7))
   await editor().dispatchEvent("keydown", { code: "KeyM", key: "m", altKey: true })
   await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
@@ -105,9 +108,11 @@ try {
   expect(inputs().at(-1).body.text).toBe("draft after unknown")
   expect(inputs().at(-1).body.agent).toBeUndefined()
   await expect(editor()).toHaveValue("")
-  await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
   // The editor clears as soon as the bubble holds the steer; wait for its acknowledgement.
   await expect(page.locator('.input-receipts li[data-delivery="steer"][data-status="pending"]')).toHaveCount(1)
+  // Empty draft with a pending steer: the primary offers to deliver it (this runtime cannot interrupt).
+  await expect(active().locator(".direct-primary")).toHaveAccessibleName("Interrupt & steer now with your pending steer")
+  await expect(active().locator(".direct-primary")).toBeDisabled()
   await expect(page.locator(".input-receipts li")).toHaveCount(2)
   await editor().fill("keyboard uses current target")
   await editor().press("Meta+m")
@@ -115,7 +120,7 @@ try {
   await expect.poll(() => inputs().at(-1).body.text).toBe("keyboard uses current target")
   expect(inputs().at(-1).body.delivery).toBe("queue")
   await expect(editor()).toHaveValue("")
-  await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
+  // The target reset to Steer: one Cmd+M on the next draft chooses Queue (below).
   await page.screenshot({ path: "artifacts/direct-composer/desktop.png", fullPage: true })
 
   await editor().fill("idle starts in chat")
@@ -139,9 +144,10 @@ try {
   await editor().press("Control+Enter")
   expect(normal()).toHaveLength(1)
   fixture.setStatus("busy")
+  await expect(page.locator(".topbar")).toContainText("busy")
   // The Send cleared the editor and reset the target to Steer.
-  await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
   await editor().fill("new draft while chat sends")
+  await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
   await editor().press("Meta+m")
   fixture.holdNormal = false
   fixture.normalReplies.shift()()
@@ -214,16 +220,11 @@ try {
   page.once("dialog", (dialog) => dialog.dismiss())
   await button("Delete").click()
   await expect(editor()).toHaveValue(draftBefore)
-  await expect(button("Nudge")).toBeVisible()
-  // Nudge is native recovery (or labelled sourced input), never an invented user prompt.
+  // Nudge waits for Core's explicit continuation: disabled, and it never falls back to abort + recover.
   const recovers = () => fixture.calls.filter((call) => call.method === "POST" && call.path.endsWith("/recover"))
-  await button("Nudge").click()
-  await expect.poll(() => recovers().length).toBe(1)
-  expect(recovers()[0].body).toMatchObject({ sender: "human (Nudge)", reason: "human pressed Nudge" })
-  expect(recovers()[0].body.text).toContain("The human pressed Nudge")
-  expect(normal()).toHaveLength(1)
-  await expect(editor()).toHaveValue(draftBefore)
-  await expect(button("Nudge")).toBeEnabled()
+  await expect(button("Nudge")).toBeDisabled()
+  await expect(button("Nudge")).toHaveAttribute("title", "Nudge is not available on this agent runtime yet.")
+  expect(recovers()).toHaveLength(0)
   await editor().press("Control+Enter")
   await expect.poll(() => normal().length).toBe(2)
   expect(normal().at(-1).body.parts[0].text).toBe(draftBefore)
@@ -243,15 +244,7 @@ try {
   await expect(page.getByRole("button", { name: "Dismiss send status", exact: true })).toBeVisible()
   await expect(editor()).toHaveValue("uncertain normal message")
   expect(normal()).toHaveLength(3)
-  // A finished turn has nothing to recover: the nudge becomes labelled sourced input instead.
-  fixture.recoverOutcome = "complete"
-  const inputsBefore = inputs().length
-  const promptsBefore = normal().length
-  await button("Nudge").click()
-  await expect.poll(() => inputs().length).toBe(inputsBefore + 1)
-  expect(inputs().at(-1).body.source).toMatchObject({ type: "editspace-mail", kind: "nudge", sender: "human (Nudge)" })
-  expect(normal()).toHaveLength(promptsBefore)
-  fixture.recoverOutcome = undefined
+  expect(recovers()).toHaveLength(0)
   expect(errors).toEqual([])
   expect(fixture.unexpected).toEqual([])
   console.log(

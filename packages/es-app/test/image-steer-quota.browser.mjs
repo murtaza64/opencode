@@ -25,7 +25,8 @@ try {
   })
   await page.goto(`http://127.0.0.1:${vite.httpServer.address().port}/session/ses_a?directory=${encodeURIComponent(directory)}`)
   const editor = page.locator(".direct-composer textarea:visible")
-  await expect(page.getByRole("button", { name: "Steer", exact: true })).toBeVisible()
+  // Ready: the empty draft's primary is Nudge.
+  await expect(page.locator(".prompt-box .direct-primary")).toHaveAccessibleName("Nudge the agent (empty message)")
   const originalSize = await editor.evaluate(async (el) => {
     const canvas = document.createElement("canvas")
     canvas.width = 3000

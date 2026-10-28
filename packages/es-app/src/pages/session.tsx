@@ -23,7 +23,10 @@ import SessionInfo from "../components/session-info"
 import { linkUrl, sessionHref, useDashboard } from "../state"
 import { rightOpen } from "../ui"
 import { createVim } from "../vim"
-import { contextUsage, latestCompletedTurn, tokenCount } from "../context-usage"
+import { contextLimit, contextUsage, latestCompletedTurn } from "../context-usage"
+import { ComposerMeta } from "../components/composer-meta"
+import { footerContext, footerCost } from "../composer-meta"
+import { primaryAction } from "../primary-action"
 import { getComposer, type ComposerAction } from "../composer"
 import { pendingEcho } from "../pending-echo"
 import { defaultImageCapability, prepareImageFile } from "../image-fit"
@@ -867,9 +870,6 @@ export function SessionView(props: { sessionID: string; directory: string; embed
 
   // Task selections persist on the session; Aside keeps its own draft model.
   const [providers] = createResource(() => providersCached(directory))
-  // context usage of the latest completed turn (shared formula with the info
-  // panel and sidebar hover card: all token classes vs the model's limit)
-  const latestUsage = createMemo(() => contextUsage(latestCompletedTurn(messages()), providers()))
 
   const modelChoice = () => composer.state.visibleBuffer === "aside"
     ? composer.state.aside.model
@@ -885,39 +885,31 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const nextModel = () => composer.state.sessionModel ?? lastTurnModel()
   // The picker opens on the model in use; for an Aside, empty means "use the session model".
   const pickerModel = () => composer.state.visibleBuffer === "aside" ? modelChoice() : modelChoice() ?? nextModel()
-
-  const nudge = async () => {
-    const s = session()
-    if (!s || nudgePhase() || aborting() || sending()) return
-    setError("")
-    setNudgePhase("stopping")
-    try {
-      await oc.abort(sessionID, directory)
-      setNudgePhase("resuming")
-      // A nudge is the app acting on the human's click, not words they typed: it goes through Core's
-      // native recovery (an interrupted step) or labelled sourced input (a finished turn), never a user prompt.
-      const id = crypto.randomUUID()
-      const text = "The human pressed Nudge: resume where you left off. Reorient briefly and continue the outstanding work."
-      const anchor = (await oc.messagesPage(sessionID, directory, 1)).items.at(-1)?.info.id
-      const outcome = anchor
-        ? (await oc.recover(sessionID, directory, { recoveryID: `nudge-${id}`, anchorMessageID: anchor, text,
-            reason: "human pressed Nudge", sender: "human (Nudge)" })).outcome
-        : "not-interrupted"
-      if (outcome === "complete" || outcome === "not-interrupted")
-        await oc.sourcedInput(sessionID, directory, { requestID: `nudge-${id}`, text, kind: "nudge", sender: "human (Nudge)" })
-      else if (outcome !== "scheduled" && outcome !== "duplicate")
-        throw new Error(`Core did not resume the session (${outcome})`)
-      stick = true
-      queueMicrotask(pin)
-      void live.load().catch(() => {})
-      void activity.refreshDirectory(directory, true)
-    } catch (e) {
-      setError(`${nudgePhase() === "stopping" ? "Could not interrupt session" : "Session interrupted, but resume failed"}: ${String(e)}`)
-    } finally {
-      setNudgePhase(undefined)
-    }
+  const shownModel = () => modelChoice() ?? nextModel()
+  const shownModelName = () => { const model = shownModel(); return model ? modelName(model.providerID, model.modelID) : "Default model" }
+  let modelButton: HTMLButtonElement | undefined
+  // Closing the picker returns focus to the model button, so the keyboard position is not lost.
+  const closeModelPicker = () => {
+    setChangingModel(false)
+    queueMicrotask(() => modelButton?.focus())
   }
+  // Footer meta: context of the latest completed turn against the selected model's window, and the
+  // session's estimated cost (the info panel's sources; unknown stays unknown).
+  const footerMeta = createMemo(() => {
+    const turn = latestCompletedTurn(messages())
+    const selected = composer.state.sessionModel ?? nextModel()
+    const used = turn ? contextUsage(turn, providers())?.tokens : undefined
+    const limit = (selected ? contextLimit(providers(), selected.providerID, selected.modelID) : undefined) ?? (turn && !selected ? contextLimit(providers(), turn.providerID, turn.modelID) : undefined)
+    return {
+      context: footerContext({ used, limit, selected: selected ? modelName(selected.providerID, selected.modelID) : undefined,
+        turnModel: turn ? modelName(turn.providerID, turn.modelID) : undefined }),
+      cost: footerCost((session() as { cost?: unknown } | undefined)?.cost, messages().flatMap((message) => message.role === "assistant" ? [message.cost] : [])),
+    }
+  })
 
+  // Nudge is Core's explicit continuation (POST /session/:id/nudge, capability sessionInput.nudge). Until Core
+  // advertises it, Nudge is unavailable everywhere: the old abort + recover + resume-text path is not a nudge.
+  const nudgeAvailable = () => false
   const send = async (action?: ComposerAction) => {
     const s = session()
     // While a pending input is open for editing, the composer saves that input and never sends.
@@ -939,18 +931,45 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     stick = true
     queueMicrotask(pin)
     const chosen = action ?? (composer.state.busy ? composer.state.keyboardTarget : "steer")
-    // The composer owns which actions carry context to Core; chips follow it rather than guessing.
-    const plain = composer.contextAttaches(chosen)
-    const attached = plain ? contextParts() : []
-    const context = plain ? [...props.context?.() ?? [], ...attached] : []
+    // Chips always go to the composer: it attaches them or refuses the send with a reason (never sends without
+    // them). Generated page context (props.context) rides only where the composer can attach it.
+    const chips = contextParts()
+    const context = [...composer.contextAttaches(chosen) ? props.context?.() ?? [] : [], ...chips]
+    const plain = chosen === "steer" && !composer.state.busy
     await composer.submitVisible(chosen, s, nextModel(), messages().at(-1)?.id, context)
-    const accepted = composer.state.normalSubmission?.status === "accepted"
+    // A plain send is accepted by its message; a steer or queue once its input is admitted (no admission left
+    // pending or unknown, and no refusal).
+    const accepted = plain ? composer.state.normalSubmission?.status === "accepted" : !composer.state.admission && !composer.state.error
     if (context.length) props.onSent?.(context, accepted)
-    if (attached.length && accepted) setContextRefs([])
-    // Steer and queue carry text only; the chips stay for the next plain send rather than vanish silently.
-    if (!plain && contextRefs().length) setContextNote("Not attached: this send carries text only. Chips go with your next message to an idle agent.")
+    if (chips.length && accepted) setContextRefs([])
   }
 
+
+  // One resolver for the primary button's label, title, state and Cmd/Ctrl+Enter.
+  const primary = () => {
+    const draft = composer.visibleDraft()
+    return primaryAction({
+      hasContent: !!draft.text.trim() || draft.images.length > 0,
+      busy: composer.state.busy,
+      keyboardTarget: composer.state.keyboardTarget,
+      receipts: composer.state.receipts,
+      interrupt: !!composer.state.capabilities?.sessionInput?.interrupt,
+      delivering: composer.state.delivering,
+      nudge: nudgeAvailable(),
+      unsettled: !!composer.state.admission || composer.state.normalSubmission?.status === "sending" || composer.state.normalSubmission?.status === "unknown",
+      nudging: !!nudgePhase(),
+    })
+  }
+  // Re-resolves at activation, after reading status again, so a race since render cannot pick a stale action.
+  const activatePrimary = () => {
+    if (!session() || !connected() || aborting() || composer.editingInput()) return
+    composer.observeBusy(busy() || statusUnknown())
+    const current = primary()
+    if (current.disabled) return
+    if (current.kind === "send") return void send()
+    if (current.kind === "deliver") return void composer.deliverInput(current.requestID)
+    // kind "nudge" is disabled until Core's continuation capability exists (see primary()).
+  }
 
   let transcriptEl: HTMLDivElement | undefined
   let inner: HTMLDivElement | undefined
@@ -1345,7 +1364,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     if (cycleMode(e)) return
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
-      send()
+      activatePrimary()
       return
     }
     if (e.key === "Escape" && vim.mode() === "normal" && composer.state.keyboardTarget !== "aside") escTap()
@@ -1602,15 +1621,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       dictation={<DictationButton composer={composer} sessionID={sessionID} directory={directory}
         editor={() => floating() ? floatEl : promptEl} normalMode={() => vim.mode() === "normal"}
         checkpoint={(el) => activeVim().checkpoint(el)} refresh={(el) => vim.refresh(el)} />}
-      sessionMetadata={<Show when={latestUsage()}>
-        {(u) => (
-          <span class="context-pct"
-            classList={{ warn: (u().percent ?? 0) >= 70, high: (u().percent ?? 0) >= 90 }}
-            title="Context of the last completed turn: input, output, reasoning and cache tokens">
-            {tokenCount(u().tokens)}
-          </span>
-        )}
-      </Show>}
+      sessionMetadata={<ComposerMeta context={footerMeta().context} cost={footerMeta().cost} />}
+      primary={primary} activate={activatePrimary} context={contextParts}
       sessionActions={<>
         <Show when={!props.expanded}><button aria-label="Expand editor" aria-keyshortcuts={ariaShortcut("expandEditor")} title={shortcutLabel("expandEditor")} onClick={toggleFloat}><Glyph name="screen-full" />Expand editor</button></Show>
         <button class="act-fork" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
@@ -1630,30 +1642,33 @@ export function SessionView(props: { sessionID: string; directory: string; embed
           </button>
         </Show>
         <button
-          class="act-nudge" title="Interrupt, then send a resume message"
-          disabled={!session() || !!nudgePhase() || aborting() || sending()}
-          onClick={nudge}
+          class="act-nudge" title={nudgeAvailable() ? "Continue the agent from where it stopped" : "Nudge is not available on this agent runtime yet."}
+          disabled={!nudgeAvailable() || !session() || !!nudgePhase() || aborting() || sending()}
         >
           <Glyph name="zap" />{nudgePhase() === "stopping" ? "Stopping…" : nudgePhase() === "resuming" ? "Sending resume…" : "Nudge"}
         </button>
       </>}>
       {/* Changing model mid-conversation is rare and costly, so the picker opens on request. */}
       <Show when={changingModel()} fallback={<>
-        <span class="direct-model-name" title={composer.state.visibleBuffer === "aside" ? "Aside model" : "Session model"}>
-          {(modelChoice() ?? nextModel())?.modelID ?? "Default model"}
-        </span>
-        <button class="direct-change-model" disabled={!!composer.state.modelSelection && composer.state.modelSelection.status !== "unknown"}
-          onClick={() => setChangingModel(true)}>Change model</button>
+        {/* The model name is the picker's button; the small glyph marks it as changeable. */}
+        <button class="direct-change-model composer-model" ref={modelButton}
+          disabled={!!composer.state.modelSelection && composer.state.modelSelection.status !== "unknown"}
+          aria-label={`Change model, current ${shownModelName()}`}
+          title={`${composer.state.visibleBuffer === "aside" ? "Aside model" : "Session model"} · ${shownModel() ? `${shownModel()!.providerID} · ${shownModel()!.modelID}` : "default"} · Change model`}
+          onClick={() => setChangingModel(true)}>
+          <bdi class="direct-model-name">{shownModelName()}</bdi>
+          <Glyph name="arrow-switch" size={12} />
+        </button>
       </>}>
         <select class="model-select" ref={(el) => queueMicrotask(() => el.focus())}
           aria-label={composer.state.visibleBuffer === "aside" ? "Aside model" : "Session model"}
           title={composer.state.visibleBuffer === "aside" ? "Model for this Aside only" : "Applies to future turns"}
           value={pickerModel() ? `${pickerModel()!.providerID}\u0000${pickerModel()!.modelID}` : ""}
-          onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setChangingModel(false) } }}
+          onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); closeModelPicker() } }}
           onChange={(e) => {
             const [providerID, modelID] = e.currentTarget.value.split("\u0000")
             const model = providerID && modelID ? { providerID, modelID } : null
-            setChangingModel(false)
+            closeModelPicker()
             if (composer.state.visibleBuffer === "aside") return composer.setVisibleModel(model)
             if (!model) return
             const selected = providers()?.providers.find((provider) => provider.id === providerID)?.models?.[modelID]
@@ -1674,7 +1689,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             )}
           </For>
         </select>
-        <button onClick={() => setChangingModel(false)}>Cancel</button>
+        <button onClick={closeModelPicker}>Cancel</button>
       </Show>
       <Show when={composer.state.visibleBuffer === "aside" && composer.state.aside.model}><button onClick={() => composer.setVisibleModel(null)}>Use session model</button></Show>
       <Show when={composer.state.modelSelection}>{(selection) => <span class="dim" role="status">{selection().status === "unknown" ? "Model change unconfirmed" : "Confirming model…"}</span>}</Show>

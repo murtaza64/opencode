@@ -247,7 +247,7 @@ export default function Sidebar() {
       <button type="button" class="pin-action" classList={{ pinned: isPinned(s) }}
         aria-label={`${isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
         title={`${isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
-        onClick={() => togglePin(s)}>{isPinned(s) ? "◆" : "◇"}</button>
+        onClick={() => togglePin(s)}>{isPinned(s) ? "\u2665\ufe0e" : "\u2661\ufe0e"}</button>
     </div>
   )
   }
@@ -271,7 +271,7 @@ export default function Sidebar() {
       <button type="button" class="pin-action" classList={{ pinned: work.isPinned(s) }}
         aria-label={`${work.isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id} on ${label()}`}
         title={`${work.isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
-        onClick={() => work.togglePin(s)}>{work.isPinned(s) ? "◆" : "◇"}</button>
+        onClick={() => work.togglePin(s)}>{work.isPinned(s) ? "\u2665\ufe0e" : "\u2661\ufe0e"}</button>
     </div>
   )
   }
@@ -310,7 +310,7 @@ export default function Sidebar() {
       <button type="button" class="mini-pin" classList={{ pinned: isPinned(s) }}
         aria-label={`${isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
         title={`${isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
-        onClick={() => togglePin(s)}>{isPinned(s) ? "◆" : "◇"}</button>
+        onClick={() => togglePin(s)}>{isPinned(s) ? "\u2665\ufe0e" : "\u2661\ufe0e"}</button>
     </div>
   )
   }

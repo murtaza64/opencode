@@ -80,7 +80,7 @@ try {
   await expect(pinned).toHaveText([/Other session/, /Composer fixture/])
   await page.getByRole("button", { name: "Collapse sidebar" }).click()
   await expect(page.locator(".sidebar-mini .mini-session .mini-pin.pinned")).toHaveCount(2)
-  await page.locator(".sidebar-mini .mini-pin.pinned", { hasText: "◆" }).first().focus()
+  await page.locator(".sidebar-mini .mini-pin.pinned", { hasText: "\u2665\ufe0e" }).first().focus()
   await page.keyboard.press("Enter")
   expect(page.url()).toBe(original)
   await expect(page.locator(".sidebar-mini .mini-pin.pinned")).toHaveCount(1)
