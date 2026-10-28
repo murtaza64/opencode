@@ -5,7 +5,7 @@
 import { createContext, createEffect, createMemo, createSignal, onCleanup, useContext, type ParentProps } from "solid-js"
 import { createAttention } from "./attention"
 import { deskItems, type DeskItem } from "./desk"
-import { createBriefAnchor, createBriefs, currentJob, hostModel, readHostModel } from "./desk-session"
+import { briefAnchorID, createBriefAnchor, createBriefs, currentJob, hostModel, readHostModel, type DeskPointer } from "./desk-session"
 import { useDashboard } from "./state"
 import { readHost } from "./host"
 
@@ -54,7 +54,13 @@ const create = () => {
     const name = dashboard.editspace() ?? dashboard.editspaces()?.default
     return dashboard.editspaces()?.editspaces.find(item => item.name === name)?.root
   })
-  const briefs = createBriefs(anchor.pointer, lookup, anchor.ensure)
+  // Every project's anchor ID, so a brief prepared while another project was in view is found, not repeated.
+  const [others, setOthers] = createSignal<DeskPointer[]>([])
+  createEffect(() => {
+    const roots = active() ? dashboard.editspaces()?.editspaces.map(item => item.root) ?? [] : []
+    void Promise.all(roots.map(async root => ({ session: await briefAnchorID(root), directory: root }))).then(setOthers)
+  })
+  const briefs = createBriefs(anchor.pointer, lookup, anchor.ensure, others)
   // The host's desk model is read once per page; a host without a usable one prepares nothing automatically.
   createEffect(() => { if (active()) void readHostModel() })
   const unavailable = () => hostModel()?.available === false ? `Briefs unavailable on this host: ${hostModel()!.reason}.` : ""
