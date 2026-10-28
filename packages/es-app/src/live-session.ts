@@ -150,6 +150,16 @@ export function createLiveSession(
     duringLoad = []
     const resync = resyncNext && loaded() && !!data.message[sessionID]?.length
     resyncNext = false
+    // Journal which of the snapshot reads holds the transcript back.
+    const timings: Record<string, number> = {}
+    const timed = <T>(name: string, read: Promise<T>) => perfTimed(read, (ms) => { timings[name] = ms })
+    // The session record alone makes the composer usable (Send needs only the session), so it is
+    // read at once, without the stream wait below, and published as soon as it arrives instead
+    // of waiting for history, status and todos. Later session.updated events reconcile it.
+    const record = timed("session", oc.session(sessionID, directory, signal))
+    void record.then((value) => {
+      if (!disposed && !signal.aborted && value.id === sessionID && !data.session.length) setData("session", [value])
+    }, () => {})
     activeLoad = (async () => {
       if (!snapshotStarted && !streamOpened && source) {
         // Subscribe before the first snapshot so its one GET cannot miss events
@@ -165,12 +175,9 @@ export function createLiveSession(
       }
       if (disposed) return
       snapshotStarted = true
-      // Journal which of the snapshot reads holds the transcript back.
-      const timings: Record<string, number> = {}
-      const timed = <T>(name: string, read: Promise<T>) => perfTimed(read, (ms) => { timings[name] = ms })
       const snapshot = perfSpan("session.snapshot", { sessionID, warm: loaded() })
       const [session, page, status, todos] = await Promise.all([
-        timed("session", oc.session(sessionID, directory, signal)),
+        record,
         timed("messages", oc.messagesPage(sessionID, directory, resync ? RESYNC_TAIL : TAIL, undefined, signal)),
         timed("status", oc.status(directory, signal)),
         // Todos are auxiliary: a failed read keeps the last list, never the transcript.
