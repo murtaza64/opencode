@@ -305,7 +305,7 @@ try {
       // A failed brief: the conversation still shows, the request is readable, one quiet line.
       replyFails = true
       const failedView = await open({ width: 1440, height: 1000 }, "reply")
-      await expect(failedView.card.locator(".desk-brief[data-part=\"lead\"]")).toContainText("Brief failed.", { timeout: 120_000 })
+      await expect(failedView.card.locator(".desk-brief[data-part=\"lead\"]")).toContainText("Brief failed: ProviderAuthError", { timeout: 120_000 })
       await expect(failedView.card.locator(".desk-bubble")).toHaveCount(2)
       await expect(failedView.card.locator("h3")).toHaveText(reply.title)
       await expect(failedView.card).toContainText("Draft reply:")

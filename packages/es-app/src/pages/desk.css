@@ -37,16 +37,6 @@
 .desk-evidence.attention-home { overflow-y: auto; padding: 0 18px 30px; max-width: none; margin: 0; border-inline-end: 1px solid var(--surface0); }
 .desk-evidence-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 10px; padding-block: 8px; background: var(--base); }
 .desk-evidence-head > button { margin-inline-start: auto; }
-.desk-brief { margin-block-start: 22px; padding: 14px 16px; border-inline-start: 2px solid var(--blue); background: var(--mantle); }
-.desk-brief-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
-.desk-brief h2 { margin: 0; }
-.desk-brief h3 { font-size: 12px; margin-block: 12px 4px; }
-.desk-brief ul, .desk-brief ol { margin: 0; padding-inline-start: 18px; line-height: 1.6; }
-.desk-flow { display: flex; flex-wrap: wrap; gap: 6px 22px; list-style: none; padding: 0 !important; margin-block: 10px !important; }
-.desk-flow li { position: relative; padding: 4px 9px; border: 1px solid var(--surface1); background: var(--base); font-size: 12px; }
-.desk-flow li + li::before { content: "→"; position: absolute; inset-inline-start: -17px; color: var(--subtext0); }
-.desk-flow li + li:dir(rtl)::before { content: "←"; }
-.desk-ref { display: inline-block; margin-inline-start: 4px; padding: 0 4px; font-size: 10px; border: 1px solid var(--surface1); color: var(--subtext0); text-decoration: none; }
 .desk-chat { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .desk-chat > .session-page { flex: 1; min-height: 0; height: auto; padding: 0; --chat-gutter: 16px; }
 .desk-background { padding: 6px 16px; border-block-end: 1px solid var(--surface0); display: grid; gap: 4px; font-size: 12px; }
@@ -68,20 +58,8 @@
 .desk-memory-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; margin-block-start: 8px; }
 .desk-memory-add textarea, .desk-memory-add button { grid-column: 1 / -1; }
 .desk-memory-history ol { padding-inline-start: 18px; margin: 4px 0; }
-.home-decision .desk-brief { margin-block: 10px; padding: 10px 14px; }
 .home-original { margin-block: 6px; }
-.desk-brief h3, .attention-home .desk-brief h3 { font-size: 12px; font-weight: 400; color: var(--subtext0); margin-block: 10px 2px; }
-.desk-visual { margin: 8px 0; }
-.desk-visual iframe { inline-size: 100%; block-size: 280px; border: 1px solid var(--surface1); background: var(--mantle); }
 .desk-auto { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
-/* Card type scale: title (from the card), 13px body, 11px muted meta. */
-.desk-brief-chip { display: inline-block; font-size: 11px; color: var(--blue); border: 1px solid var(--surface1); padding: 0 6px; margin-block-end: 4px; }
-.desk-brief .desk-button { border-color: transparent; padding-inline: 4px; text-decoration: underline; }
-@media (max-width: 600px) {
-  .desk-flow { flex-direction: column; gap: 6px; }
-  .desk-flow li + li::before { content: "↓"; inset-inline-start: 4px; inset-block-start: -15px; }
-  .desk-visual iframe { block-size: 220px; }
-}
 .desk-waiting { margin-block-start: 12px; }
 .desk-waiting > summary { padding: 8px 10px; color: var(--subtext1); cursor: pointer; }
 .desk-history { margin-block-start: 12px; }
@@ -103,16 +81,7 @@
 .attention-home legend.sr-only { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .home-options label .home-source { margin-inline-start: 2px; color: var(--green); }
 .home-decision .home-eyebrow > a { margin-inline-start: auto; font-size: 11px; }
-.desk-brief-ask { color: var(--text); margin-block: 0 6px !important; }
-.home-decision .desk-brief { margin-block: 12px 4px; padding-block: 2px; padding-inline: 12px 0; background: none; }
-.attention-home details.desk-brief-detail { font-size: 13px; }
-.desk-brief-detail > summary { font-size: 11px; }
-.desk-brief-detail ul, .desk-brief-detail ol { margin: 6px 0; padding-inline-start: 18px; line-height: 1.6; }
-.desk-brief-detail h3 { font-size: 11px !important; font-weight: 400 !important; color: var(--subtext0); margin-block: 8px 2px !important; }
 .desk .home-answer > label { font-size: 11px; }
-.desk-visual iframe { block-size: 220px; resize: vertical; overflow: auto; }
-/* Until a brief is ready, its slot is a status line or one button, not an empty panel. */
-.desk-brief:not(:has(.desk-brief-body)) { padding: 0; background: none; border: 0; margin-block-start: 10px; }
 .desk-item-old { opacity: 0.6; }
 .desk-failure { padding: 15px 17px; border-inline-start: 2px solid var(--red); border-block-end: 1px solid var(--surface0); display: grid; gap: 8px; }
 .desk-failure h3 { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
@@ -140,21 +109,10 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
 .home-option-chips > [data-recommended] { color: var(--green); border-color: var(--green); }
 .attention-home .home-option-wait { border-style: dashed; cursor: default; }
 .attention-home .home-option-wait .home-option-label { color: var(--subtext0); }
-.home-decision .desk-brief-ask { font-size: 13px !important; font-weight: 600; }
-.home-decision .desk-brief[data-part] { margin: 0; padding: 0; border: 0; background: none; }
-.desk-brief-after { display: flex; flex-direction: column; gap: 6px; margin-block: 10px 8px; }
-.desk-brief-sources { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 11px; margin: 0 !important; }
-.desk-brief-after .desk-flow { margin-block: 0 !important; }
-.desk-scope { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; font-size: 13px; }
-.desk-scope > div { padding: 4px 10px; border-inline-start: 2px solid var(--surface1); }
-.desk-scope ul { list-style: none; padding: 0 !important; margin: 2px 0 0 !important; line-height: 1.5; }
-.desk-impact { list-style: none; padding: 0 !important; margin: 0 !important; font-size: 13px; line-height: 1.5; }
 .desk-more { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-block: 10px 4px; font-size: 13px; }
 .desk-more-form { display: flex; gap: 6px; flex: 1 1 260px; }
 .desk-more-form input { flex: 1; min-inline-size: 0; font: inherit; color: var(--text); background: var(--base); border: 1px solid var(--surface1); padding: 5px 8px; }
 .desk-more > [role=status] { font-size: 11px; }
-.desk-brief:focus { outline: none; }
-.desk-brief:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
 
 /* Decision rows and headers lead with the requesting agent; the project is secondary. */
 .desk-item-agent[data-named] { color: var(--text); }
@@ -223,8 +181,6 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
 .attention-series-recorded pre { margin: 4px 0; }
 .attention-series .home-answer { max-inline-size: 100%; }
 .home-request-line { font-size: 11px; color: var(--subtext0); margin: 2px 0 6px; }
-.desk-brief-context { font-size: 13px !important; line-height: 1.5; margin-block: 4px 8px !important; }
-.desk-visual iframe { inline-size: 100%; border: 0; background: #181825; display: block; resize: none; }
 /* An option with a picture: the picture fills the top of the card at 16:10, the label and consequence
  * sit under it, and cards stack one per row when too narrow for a readable picture. */
 .attention-home fieldset.home-option-cards:has(.home-option-sketch) { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
@@ -245,36 +201,12 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
 .home-sends blockquote { margin: 0; max-inline-size: 88%; max-block-size: 14em; overflow-y: auto; padding: 6px 10px; border-radius: 10px; border-start-end-radius: 2px; background: color-mix(in srgb, var(--peach) 16%, var(--base)); font-size: 13px; line-height: 1.45; white-space: pre-wrap; }
 .home-sends figcaption { font-size: 11px; margin-block-end: 2px; }
 .home-sends-copy { margin-block-start: 2px; padding: 0; border: 0; background: none; color: var(--subtext0); text-decoration: underline; font-size: 11px; cursor: pointer; }
-/* What the decision acts on: one row per thing, links as compact chips; wraps on a phone. */
-.desk-brief .desk-subjects { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
-.desk-subjects li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding-block: 3px; border-block-end: 1px solid var(--surface0); }
-.desk-subject-name { font-weight: 600; }
-.desk-subject-detail { color: var(--subtext0); }
-.desk-subject-links { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-inline-start: auto; }
-.desk-subject-links a { font-size: 12px; color: var(--blue); }
-/* Options side by side under their own labels; the recommended column carries the request's own marker. */
-.desk-compare { border-collapse: collapse; font-size: 13px; margin: 8px 0; inline-size: 100%; }
-.desk-compare th, .desk-compare td { text-align: start; vertical-align: top; padding: 4px 8px; border-block-end: 1px solid var(--surface0); }
-.desk-compare thead th { font-weight: 600; }
-.desk-compare-recommended { display: block; font-size: 11px; font-weight: 400; color: var(--green); }
-.desk-visual[data-kind="svg"] iframe { border: 0; background: transparent; resize: none; }
 .desk-bubble-who a { color: inherit; }
 .desk-bubble-text { color: inherit; }
 .home-answer:has(.home-option-sketch) { max-width: none; }
 
-/* Approval scope on a sequence: covered steps solid, later ones dashed and muted. */
-.desk-flow li[data-later] { border-style: dashed; color: var(--subtext0); }
-.desk-flow-later { display: block; font-size: 11px; color: var(--subtext0); }
-.desk-flow li[data-stop] { border-block-end: 2px solid var(--text); }
-.desk-flow-stop { display: block; font-size: 11px; color: var(--text); }
-/* What changes and what stays. */
-.desk-change { border-collapse: collapse; font-size: 13px; margin-block: 4px 8px; inline-size: 100%; max-inline-size: 560px; }
 .desk-change :is(th, td) { padding: 3px 10px 3px 0; text-align: start; vertical-align: top; border-block-end: 1px solid var(--surface0); }
-.desk-change thead th { font-size: 11px; font-weight: 400; color: var(--subtext0); }
-.desk-change tbody th { font-weight: 400; color: var(--subtext0); white-space: nowrap; }
-.desk-change tr:not([data-same]) td:last-child { color: var(--text); font-weight: 600; }
 .desk-change tr[data-same] :is(th, td) { color: var(--subtext0); }
-.desk-change-same { color: var(--subtext0); font-size: 11px; }
 .desk-thread-more > summary { font-size: 11px; color: var(--subtext0); cursor: pointer; margin-inline-start: 10px; }
 .desk-thread-more[open] { display: flex; flex-direction: column; gap: 4px; }
 .desk-item-answer { display: block; font-size: 12px; color: var(--subtext1); }
@@ -284,41 +216,5 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
 .attention-home .home-chosen .home-option-card { opacity: 0.7; }
 .attention-home .home-chosen .home-option-card[data-chosen] { opacity: 1; border-color: var(--peach); }
 .home-option-chips > [data-chosen] { color: var(--peach); border-color: var(--peach); }
-.desk-brief-regenerate { margin: 2px 0 0; font-size: 12px; }
-.desk-brief .desk-link-button { padding: 0; min-block-size: 0; border: 0; background: none; color: var(--subtext0); text-decoration: underline; font: inherit; cursor: pointer; }
-/* Commands to run: exact text in a scrollable block, where to run it above, Copy beside. */
-/* The track may shrink below a command's one-line width, so a long command scrolls in its block instead of widening the column. */
-.desk-brief .desk-commands { list-style: none; margin: 8px 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
-.desk-command-label { display: block; font-size: 12px; margin-block-end: 2px; }
-/* Copy sits beside the command, not over it: the block scrolls, so a padding gap would scroll away with the text. */
-.desk-command { display: flex; align-items: flex-start; gap: 6px; }
-.desk-command pre { flex: 1; min-inline-size: 0; margin: 0; padding: 8px 10px; overflow-x: auto; background: var(--mantle); border: 1px solid var(--surface0); font-size: 12px; line-height: 1.5; white-space: pre; text-align: left; }
-.desk-command-copy { flex: none; margin-block-start: 4px; padding: 2px 8px; border: 1px solid var(--surface1); background: var(--base); color: var(--subtext0); font-size: 11px; cursor: pointer; }
 
-/* Numbered source items remain separate even when the brief also has subjects or an option shape. */
-.desk-brief-items { margin-block: 10px; container-type: inline-size; min-inline-size: 0; }
-.desk-brief-ledger { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.desk-brief-item-head, .desk-brief-item { display: grid; grid-template-columns: minmax(58px, .55fr) minmax(0, 2fr) repeat(3, minmax(0, 1fr)); gap: 8px; align-items: start; }
-.desk-brief-item-head { color: var(--subtext0); font-size: 11px; padding-block: 3px; border-block-end: 1px solid var(--surface1); }
-.desk-brief .desk-brief-item-list { list-style: none; padding: 0; margin: 0; }
-.desk-brief-item { padding-block: 5px; border-block-end: 1px solid var(--surface0); line-height: 1.4; }
-.desk-brief-item-id { white-space: nowrap; }
-.desk-brief-item-number { color: var(--subtext0); }
-.desk-brief-item-cell { min-inline-size: 0; overflow-wrap: anywhere; }
-.desk-brief-item-label { display: none; color: var(--subtext0); font-size: 11px; }
-@container (max-width: 680px) {
-  .desk-brief-item-head { display: none; }
-  .desk-brief-item { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 3px 10px; }
-  .desk-brief-item-id { grid-column: 1 / -1; font-weight: 600; }
-  .desk-brief-item-cell:nth-child(2) { grid-column: 1 / -1; }
-  .desk-brief-item-cell:nth-child(5) { grid-column: 1 / -1; }
-  .desk-brief-item-label { display: block; }
-}
-@container (max-width: 300px) {
-  .desk-brief-item { grid-template-columns: minmax(0, 1fr); }
-  .desk-brief-item-id, .desk-brief-item-cell:nth-child(2), .desk-brief-item-cell:nth-child(5) { grid-column: 1; }
-}
 
-.desk-visual-window { max-block-size: 45vh; overflow-y: auto; }
-.desk-visual-window[data-expanded] { max-block-size: none; overflow: visible; }
-.desk-visual-expand { padding: 2px 0; border: 0; background: none; color: var(--subtext0); text-decoration: underline; font: inherit; font-size: 11px; cursor: pointer; }

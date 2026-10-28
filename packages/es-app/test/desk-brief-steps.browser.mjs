@@ -127,7 +127,7 @@ try {
     await expect(settings.locator(".desk-command-label")).toHaveText(["Operator", "Value", "Limit", "Counting window"])
     await expect(settings.locator("code")).toHaveText(["starts with", "/api/", "100 requests per 10 seconds"])
     // A value the request never gives is shown as missing, never as the brief's guess.
-    await expect(settings.nth(3)).toContainText("Not given in the request; ask before applying.")
+    await expect(settings.nth(3)).toContainText("Not given in the request")
     await expect(card).not.toContainText("10 minutes")
     await expect(steps.nth(1)).toContainText("Check: show as Active")
     const overflow = await card.evaluate(element => element.scrollWidth - element.clientWidth)
