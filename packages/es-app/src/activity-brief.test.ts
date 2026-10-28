@@ -108,7 +108,7 @@ describe("activityBrief", () => {
 })
 
 test("source labels distinguish unknown age from actual source timestamps", () => {
-  expect(activityBriefLabel({ text: "Task", source: "todo" }, now)).toBe("TODO · age unknown")
+  expect(activityBriefLabel({ text: "Task", source: "todo" }, now)).toBe("")
   expect(activityBriefLabel({ text: "Task", source: "reported", at: now - 60_000 }, now)).toBe("reported · 1m ago")
   expect(activityBriefLabel({ text: "read", source: "tool", at: now - 20_000 }, now)).toBe("tool · 20s ago")
 })

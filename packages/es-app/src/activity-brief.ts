@@ -54,7 +54,8 @@ export const activityBrief = (input: ActivityBriefInput, now = Date.now()): Acti
 export const activityBriefLabel = (brief: ActivityBrief, now = Date.now()) => {
   const age = brief.at === undefined ? undefined : Math.max(0, Math.floor((now - brief.at) / 1000))
   const source = brief.source === "todo" ? "TODO" : brief.source
-  if (age === undefined) return `${source} · age unknown`
+  // An unknown age says nothing actionable, so nothing is shown (stale or disconnected states have their own line).
+  if (age === undefined) return ""
   if (age < 60) return `${source} · ${age}s ago`
   if (age < 3600) return `${source} · ${Math.floor(age / 60)}m ago`
   if (age < 86400) return `${source} · ${Math.floor(age / 3600)}h ago`
