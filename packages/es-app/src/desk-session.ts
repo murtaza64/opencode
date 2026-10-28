@@ -257,7 +257,9 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
   // Settled briefs never change on their own, so their transcripts are read once per explicit
   // refresh, not on every tick: N finished briefs must not mean N reads per poll.
   const settled = new Map<string, BriefJob>()
-  const isSettled = (job: BriefJob) => ["ready", "failed", "unknown"].includes(job.state.state)
+  // "unknown" is not settled: a job read between its prompt's admission and Core reporting it busy looks stopped,
+  // and caching that would show "Brief stopped before finishing" beside a brief that finished moments later.
+  const isSettled = (job: BriefJob) => ["ready", "failed"].includes(job.state.state)
   const refresh = async (explicit = false) => {
     const target = desk()
     const local = () => pending() ? [pendingJob(pending()!)] : []

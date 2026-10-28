@@ -207,6 +207,21 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
 }
 /* Question-first card: the human question is the largest text; the producer title is one muted line. */
 .home-decision h3.home-question { font-size: 16px; line-height: 1.35; margin-block: 2px 0; }
+
+.attention-series { padding: 18px 17px; background: var(--mantle); border-inline-start: 2px solid var(--yellow); min-inline-size: 0; overflow-wrap: anywhere; }
+.attention-series-head h3 { margin-block: 5px; }
+.attention-series-progress { color: var(--green); font-weight: 600; font-variant-numeric: tabular-nums; }
+.attention-series-questions { list-style: none; padding: 0; margin: 14px 0 0; }
+.attention-series-question { border-block-start: 1px solid var(--surface1); padding-block: 14px; min-inline-size: 0; }
+.attention-series-question-head { display: flex; align-items: baseline; gap: 10px; justify-content: space-between; }
+.attention-series-question h4 { margin: 0 0 8px; font-size: 13px; line-height: 1.5; }
+.attention-series-withdrawn { color: var(--subtext0); font-size: 11px; }
+.attention-series-suggestions { padding-inline-start: 18px; margin-block: 3px 8px; line-height: 1.7; }
+.attention-series-recommended { color: var(--peach); font-size: 11px; margin-inline-start: 6px; }
+.attention-series-recorded { border-inline-start: 2px solid var(--green); background: var(--base); padding: 8px 12px; margin-block: 8px; white-space: pre-wrap; }
+.attention-series-recorded strong { color: var(--green); }
+.attention-series-recorded pre { margin: 4px 0; }
+.attention-series .home-answer { max-inline-size: 100%; }
 .home-request-line { font-size: 11px; color: var(--subtext0); margin: 2px 0 6px; }
 .desk-brief-context { font-size: 13px !important; line-height: 1.5; margin-block: 4px 8px !important; }
 .desk-visual iframe { inline-size: 100%; border: 0; background: #181825; display: block; resize: none; }
@@ -279,3 +294,31 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
 .desk-command { display: flex; align-items: flex-start; gap: 6px; }
 .desk-command pre { flex: 1; min-inline-size: 0; margin: 0; padding: 8px 10px; overflow-x: auto; background: var(--mantle); border: 1px solid var(--surface0); font-size: 12px; line-height: 1.5; white-space: pre; text-align: left; }
 .desk-command-copy { flex: none; margin-block-start: 4px; padding: 2px 8px; border: 1px solid var(--surface1); background: var(--base); color: var(--subtext0); font-size: 11px; cursor: pointer; }
+
+/* Numbered source items remain separate even when the brief also has subjects or an option shape. */
+.desk-brief-items { margin-block: 10px; container-type: inline-size; min-inline-size: 0; }
+.desk-brief-ledger { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.desk-brief-item-head, .desk-brief-item { display: grid; grid-template-columns: minmax(58px, .55fr) minmax(0, 2fr) repeat(3, minmax(0, 1fr)); gap: 8px; align-items: start; }
+.desk-brief-item-head { color: var(--subtext0); font-size: 11px; padding-block: 3px; border-block-end: 1px solid var(--surface1); }
+.desk-brief .desk-brief-item-list { list-style: none; padding: 0; margin: 0; }
+.desk-brief-item { padding-block: 5px; border-block-end: 1px solid var(--surface0); line-height: 1.4; }
+.desk-brief-item-id { white-space: nowrap; }
+.desk-brief-item-number { color: var(--subtext0); }
+.desk-brief-item-cell { min-inline-size: 0; overflow-wrap: anywhere; }
+.desk-brief-item-label { display: none; color: var(--subtext0); font-size: 11px; }
+@container (max-width: 680px) {
+  .desk-brief-item-head { display: none; }
+  .desk-brief-item { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 3px 10px; }
+  .desk-brief-item-id { grid-column: 1 / -1; font-weight: 600; }
+  .desk-brief-item-cell:nth-child(2) { grid-column: 1 / -1; }
+  .desk-brief-item-cell:nth-child(5) { grid-column: 1 / -1; }
+  .desk-brief-item-label { display: block; }
+}
+@container (max-width: 300px) {
+  .desk-brief-item { grid-template-columns: minmax(0, 1fr); }
+  .desk-brief-item-id, .desk-brief-item-cell:nth-child(2), .desk-brief-item-cell:nth-child(5) { grid-column: 1; }
+}
+
+.desk-visual-window { max-block-size: 45vh; overflow-y: auto; }
+.desk-visual-window[data-expanded] { max-block-size: none; overflow: visible; }
+.desk-visual-expand { padding: 2px 0; border: 0; background: none; color: var(--subtext0); text-decoration: underline; font: inherit; font-size: 11px; cursor: pointer; }

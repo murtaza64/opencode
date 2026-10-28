@@ -134,7 +134,7 @@ export const blockedReason = (reason: string | null | undefined) => ({
   "no-actionable-recipient": "The lane's mail subscription is muted for this message.",
 } as Record<string, string>)[reason ?? ""] ?? reason ?? ""
 
-export const answerDraftKey = (record: AttentionRecord) => `es-attention-answer:${record.editspace}:${record.id}`
+export const answerDraftKey = (record: AttentionRecord) => `es-attention-answer:${record.editspace}:${record.id}${record.series ? `:${contentRevision(record)}` : ""}`
 // An answer command whose outcome is unknown survives reload with its exact identity and payload.
 const pendingPrefix = "es-attention-pending:"
 type PendingCommand = { record: AttentionRecord; body: AttentionAction & { command_id: string; expected_revision: number } }

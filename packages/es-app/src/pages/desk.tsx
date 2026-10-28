@@ -7,6 +7,7 @@ import { ago, sessionHref, useDashboard } from "../state"
 import type { createAttention, AttentionRecord } from "../attention"
 import { requestLive, type createHomeRequests } from "../home-requests"
 import { AttentionDecision, useRequestAgent, type AttentionView } from "../components/attention-decision"
+import { AttentionSeries } from "../components/attention-series"
 import { HomePermission, type HomeReplyReceipt } from "../components/home-permission"
 import { FailureRetry } from "../components/session-failure"
 import type { IgnoredFailure } from "../failure-ignores"
@@ -225,6 +226,7 @@ export default function Desk() {
             const job = () => jobsFor(item.key).find(candidate => candidate.meta.revision === item.revision)
             return <li><button class="desk-item" aria-pressed={selectedKey() === item.key} data-desk-item={item.key} onClick={() => select(item.key)}>
               <bdi dir="auto" class="desk-item-title">{item.title}</bdi>
+              <Show when={item.series}><span class="home-source">{item.series!.answered}/{item.series!.live} answered</span></Show>
               <span class="home-source" classList={{ "desk-item-old": !!item.failure && !(now() - item.failure.time < OLD_FAILURE_MS) }}><span class="desk-item-kind" data-kind={item.kind}>{item.kind}</span>
                 <Show when={item.failure} fallback={<><Show when={item.record}>{record => <> · <RowAgent record={record()} /></>}</Show><Show when={item.project}> · <bdi dir="auto">{item.project}</bdi></Show>
                   <Show when={now() - item.checked > STALE_MS}> · <span class="home-blocked">checked {ago(item.checked) || "never"}</span></Show></>}>
@@ -366,10 +368,10 @@ const Canonical = (props: { item: DeskItem; live: boolean; detail: (question: st
   const briefJob = () => { const value = job(); return value ? { job: value.id, revision: value.meta.revision } : undefined }
   const sends = () => { const value = brief(); return value ? { text: briefSends(value, props.item, found()?.documents), to: value.sendsTo, as: value.sendsAs } : undefined }
   return <div class="desk-canonical">
-    <Show when={props.item.record}>{record => <AttentionDecision record={record()} attention={props.attention} prepared={brief()}
+    <Show when={props.item.series} fallback={<Show when={props.item.record}>{record => <AttentionDecision record={record()} attention={props.attention} prepared={brief()}
       briefJob={briefJob()} sends={sends()} conversation={<RecordConversation record={record()} />}
       brief={<PreparedBrief item={props.item} live={props.live} part="lead" />} briefVisual={<PreparedBrief item={props.item} live={props.live} part="visual" />} briefAfter={<PreparedBrief item={props.item} live={props.live} part="after" />}
-      briefDetails={<PreparedBrief item={props.item} live={props.live} part="details" />} more={<MoreDetail ask={props.detail} />} />}</Show>
+      briefDetails={<PreparedBrief item={props.item} live={props.live} part="details" />} more={<MoreDetail ask={props.detail} />} />}</Show>}><AttentionSeries item={props.item} attention={props.attention} /></Show>
     <Show when={props.item.request?.kind === "permission" ? props.item.request : undefined}>{request =>
       <HomePermission item={request()} live={requestLive(props.live, request(), props.requests.rows(), dashboard.activity.requestState("permission", request().session, request().directory, request().id))}
         siblings={dashboard.activity.requests().filter(other => other.kind === "permission" && other.directory === request().directory && other.request.sessionID === request().session && other.request.id !== request().id).length}

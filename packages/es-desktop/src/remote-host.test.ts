@@ -78,6 +78,28 @@ test("each host's listener reaches only that host's Core and dashboard for the s
   expect(await (await localGet("/es/api/editspaces")).json()).toMatchObject({ host: "local", path: "/api/editspaces" })
 })
 
+test("self-handoff writes through /hosts stay forbidden without contacting either upstream", async () => {
+  const mini = fakeHost("mini")
+  const { local, server, get } = await workListener(mini)
+  const before = [local.seen.length, mini.seen.length]
+  const headers = { origin: server.origin, cookie: "es_attention_operator=local; es_attention_operator__mini=mini", "content-type": "application/json", "x-attention-csrf": "1" }
+  for (const [method, pathname] of [["POST", "/hosts/mini/es/api/handoffs/self"], ["DELETE", "/hosts/mini/es/api/handoffs/self/click-1"]]) {
+    expect((await get(pathname, { method, body: "{}", headers })).status).toBe(403)
+  }
+  expect([local.seen.length, mini.seen.length]).toEqual(before)
+})
+
+test("a remote host's own listener binds self-handoff writes to its dashboard and operator cookie", async () => {
+  const mini = fakeHost("mini")
+  const { miniServer, miniGet } = await twoHosts(mini)
+  const headers = { origin: miniServer.origin, cookie: "unrelated=private; es_attention_operator__mini=mini-operator", "content-type": "application/json", "x-attention-csrf": "1" }
+  for (const [method, pathname] of [["POST", "/es/api/handoffs/self"], ["DELETE", "/es/api/handoffs/self/click-1"]]) {
+    expect((await miniGet(pathname, { method, body: "{}", headers })).status).toBe(200)
+    expect(mini.seen.at(-1)).toEqual({ path: pathname, cookie: "es_attention_operator=mini-operator", authorization: null, origin: mini.origin })
+  }
+  expect((await miniGet("/es/api/handoffs/self", { method: "POST", body: "{}", headers: { ...headers, origin: "https://evil.test" } })).status).toBe(403)
+})
+
 test("a delayed local response stays on the local listener while the Mini answers its own", async () => {
   const mini = fakeHost("mini")
   const { localGet, miniGet } = await twoHosts(mini, fakeHost("local", { delay: 300 }))
