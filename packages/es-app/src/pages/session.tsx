@@ -1768,7 +1768,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     const hit = () => findHit() && run().members.some((member) => member.partID === findHit()!.partID) ? findHit() : undefined
     return <ToolRun run={run()} message={(id) => messageByID().get(id)} parts={(id) => live.data.part[id] ?? []}
       open={runOpen(key)} onToggle={(open) => toggleRun(key, open)} renderTools={renderTools}
-      selectedPart={hit()?.partID} compact={livingActivity()}
+      selectedPart={hit()?.partID} compact
       excerpt={<Show when={hit()}>{(selected) => <div class="find-jump" role="region" aria-label="Selected transcript match"><FindExcerpt hit={selected()} /></div>}</Show>} />
   }}</Show>
 
@@ -1796,8 +1796,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
           </Show>
           {/* Icon controls keep the title primary; names, shortcuts and prompt scope stay accessible. */}
           <div class="session-header-tools">
-            <button class="header-icon" aria-label="Living activity (Filament + icon rows)" aria-pressed={livingActivity()}
-              title="Living activity (Filament + icon rows)" onClick={() => setLivingActivity(!livingActivity())}>
+            <button class="header-icon" aria-label="Living activity (Filament)" aria-pressed={livingActivity()}
+              title="Living activity (Filament)" onClick={() => setLivingActivity(!livingActivity())}>
               <Icon name="brain" size="small" />
             </button>
             <span class="sr-only" id={`prompt-scope-${sessionID}`}>{promptScope()}</span>
@@ -1874,15 +1874,17 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         </div>
 
         <Show when={livingActivity()}><Filament messages={messages} parts={(id) => live.data.part[id] ?? []} steps={(id) => live.data.step[id] ?? []} status={status}
+          connected={() => !statusUnknown()}
           pending={pending} subagents={subagentsRunning} transcript={() => transcriptEl} /></Show>
         <div class="transcript" ref={transcriptEl}>
           <div ref={inner} class="transcript-inner" classList={{ "transcript-arrive": arrived() }}
             onPointerOver={stampBlock} onFocusIn={stampBlock} onClick={(event) => {
-            // Only a standalone chip's own disclosure counts; action buttons inside it do not.
-            const trigger = (event.target as Element).closest("[data-slot='collapsible-trigger']")
+            // Only a standalone chip's own disclosure counts (an icon chip's summary, or a session-ui chip's trigger);
+            // action buttons inside it do not.
+            const trigger = (event.target as Element).closest(".tool-chip-summary, [data-slot='collapsible-trigger']")
             if (!trigger || trigger.closest(".tool-run")) return
-            const chip = trigger.closest("[data-component='tool-part-wrapper'], .tool-collapsible[data-timeline-part-ids]")
-            if (!chip || chip.querySelector("[data-slot='collapsible-trigger']") !== trigger) return
+            const chip = trigger.closest(".tool-chip, [data-component='tool-part-wrapper'], .tool-collapsible[data-timeline-part-ids]")
+            if (!chip || chip.querySelector(".tool-chip-summary, [data-slot='collapsible-trigger']") !== trigger) return
             const ids = (chip.getAttribute("data-timeline-part-id") ?? chip.getAttribute("data-timeline-part-ids") ?? "").split(",").filter(Boolean)
             // Read the state after the chip's own handler has toggled it.
             queueMicrotask(() => {
