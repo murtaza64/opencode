@@ -33,3 +33,13 @@ test("free text may name an item but substring matches and a different brief can
   expect(briefApproval(rows, item, { id: "new-brief", revision: "2" }).answered).toBe(false)
   expect(briefApproval(rows, attentionItem({ ...record, answer: { ...answered, brief: { job: job.id, revision: "1" } } }, 0), job).answered).toBe(false)
 })
+
+test("an ID range names no row individually, even at its ends", () => {
+  const item = attentionItem({ ...record, options: [...record.options, { id: "all", label: "Approve recommendations D1-D3" }], answer: { ...answered, choice_id: "all" } }, 0)
+  expect(briefApproval(rows, item, job)).toEqual({ answered: true, values: ["Not individually recorded", "Not individually recorded", "Not individually recorded"], verbatim: "Approve recommendations D1-D3" })
+})
+
+test("per-item changes in the input mark only the named rows", () => {
+  const item = attentionItem({ ...record, options: [...record.options, { id: "changes", label: "Approve with changes (name item IDs)", input: { kind: "text", label: "Changes", required: true } }], answer: { ...answered, choice_id: "changes", input_value: "D2: park; D3: per item" } }, 0)
+  expect(briefApproval(rows, item, job).values).toEqual(["Not individually recorded", "D2: park", "D3: per item"])
+})

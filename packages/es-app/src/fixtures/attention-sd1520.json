@@ -1,0 +1,46 @@
+{
+ "id": "61d19c8e-fixture",
+ "editspace": "fixture",
+ "revision": 1,
+ "content_revision": 1,
+ "status": "open",
+ "kind": "decision",
+ "title": "Q4 direction: 6 decisions",
+ "context": "Report: reports/q4-direction/REPORT.md. Six decisions follow.\n\nD1 \u00b7 Q4 framing \u00b7 recommended: A reliability + ownership \u00b7 alternatives: B evaluation push; A then B from Dec; D maintenance mode\nD2 \u00b7 Suite-quality evaluation system \u00b7 recommended: commit artifacts + deploy minimal dashboard \u00b7 alternatives: park; continue current trajectory\nD3 \u00b7 Lead authority for maintenance work \u00b7 recommended: standing grant to open PRs and file tickets; landing stays review \u00b7 alternatives: per item; PRs+tickets only\nD4 \u00b7 Test-user service ownership \u00b7 recommended: co-own with the platform team \u00b7 alternatives: keep here; hand to platform\nD5 \u00b7 Tracker reconciliation (~27 parked claims) \u00b7 recommended: lead prepares close/release list, you approve in one pass \u00b7 alternatives: delegate fully; live triage session\nD6 \u00b7 Automate daily check-in \u00b7 recommended: scheduled job + standing-red tickets \u00b7 alternatives: standing grant to post the digest; not now",
+ "options": [
+  {
+   "id": "approve-d1-d6",
+   "label": "Approve recommendations D1-D6"
+  },
+  {
+   "id": "approve-with-changes",
+   "input": {
+    "kind": "text",
+    "label": "Changes per item, e.g. D2: park; D3: per item",
+    "required": true
+   },
+   "label": "Approve with changes (name item IDs)"
+  },
+  {
+   "id": "discuss",
+   "input": {
+    "kind": "text",
+    "label": "What to discuss / when",
+    "required": true
+   },
+   "label": "Discuss first"
+  }
+ ],
+ "recommendation": "approve-d1-d6",
+ "producer_session": "ses_fixture",
+ "origin_session": "ses_fixture",
+ "gate_key": "fixture:q4-direction-decisions:v1",
+ "source_ref": {
+  "directory": "/fixture/lanes/lead",
+  "session_id": "ses_fixture"
+ },
+ "decision": null,
+ "delivery_state": "not-requested",
+ "created_at": 1793180577615,
+ "updated_at": 1793180577615
+}
