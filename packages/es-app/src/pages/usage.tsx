@@ -5,7 +5,7 @@
 import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { oc, type UsageDaily, type UsageLimit, type UsageSessions, type UsageTokens } from "../api"
 import { seriesColor, short, STATE_LABEL, UsageChart } from "../components/usage-chart"
-import { buildTrend, OTHER, unpricedModel, type Trend } from "../usage-trend"
+import { buildTrend, groupByDirectory, OTHER, unpricedModel, type Trend } from "../usage-trend"
 import { AppHeader } from "../components/native-header"
 import { host, readHost } from "../host"
 import { unpriced } from "../today-cost"
@@ -14,6 +14,8 @@ import "./usage.css"
 
 const DAYS = 30
 const WINDOWS = [7, 30] as const
+const SESSION_LIMIT = 200
+const SHOWN = 20
 const REVIEW = "Cost review: cost-report/index.html in lane sheep-review"
 const STALE_MS = 60_000
 
@@ -109,7 +111,12 @@ const TrendSection = (props: { usage: UsageDaily }) => {
   const trend = createMemo(() => buildTrend(props.usage, window(), today()))
   const day = () => trend().days.find((item) => item.day === selected()) ?? trend().days.at(-1)
   const dayModels = () => props.usage.days.find((item) => item.day === day()?.day)?.models.filter((model) => model.coverage !== "no-usage").toSorted((a, b) => (b.cost ?? 0) - (a.cost ?? 0)) ?? []
-  const [sessions] = createResource(window, (days) => oc.usageSessions(days).catch(() => undefined))
+  // One sessions read per window per daily read: toggling back reuses it; Refresh (a new observedAt) re-reads.
+  const cache = new Map<string, Promise<UsageSessions | undefined>>()
+  const [sessions] = createResource(() => `${window()}|${props.usage.observedAt}`, (key) => {
+    if (!cache.has(key)) cache.set(key, oc.usageSessions(window(), SESSION_LIMIT).catch(() => undefined))
+    return cache.get(key)!
+  })
   return <>
     <section aria-label="Trend" class="usage-trend">
       <div class="usage-trend-head">
@@ -174,15 +181,35 @@ const ModelSection = (props: { trend: Trend; window: number }) =>
     </Show>
   </section>
 
-const SessionSection = (props: { sessions?: UsageSessions; loading: boolean; window: number }) =>
-  <section aria-label="Top sessions">
-    <h3>Most expensive sessions, {props.window} days</h3>
+const SessionSection = (props: { sessions?: UsageSessions; loading: boolean; window: number }) => {
+  const [view, setView] = createSignal<"sessions" | "directories">("sessions")
+  const grouped = () => props.sessions ? groupByDirectory(props.sessions.sessions, SESSION_LIMIT) : undefined
+  return <section aria-label="Top sessions">
+    <div class="usage-trend-head">
+      <h3>{view() === "sessions" ? "Most expensive sessions" : "By directory"}, {props.window} days</h3>
+      <Show when={props.sessions?.sessions.length}>
+        <div class="usage-window" role="radiogroup" aria-label="Group">
+          <button type="button" role="radio" aria-checked={view() === "sessions"} classList={{ selected: view() === "sessions" }} onClick={() => setView("sessions")}>Sessions</button>
+          <button type="button" role="radio" aria-checked={view() === "directories"} classList={{ selected: view() === "directories" }} onClick={() => setView("directories")}>Directories</button>
+        </div>
+      </Show>
+    </div>
     <Show when={!props.loading} fallback={<p class="home-muted">Loading…</p>}>
       <Show when={props.sessions} fallback={<p class="home-muted" data-usage-sessions-unavailable>Per-session spend needs a newer Core on this host.</p>}>
         {(value) => <>
           <Show when={value().sessions.length} fallback={<p class="home-muted">No session usage in this window.</p>}>
-            <ol class="usage-sessions">
-              <For each={value().sessions}>{(item) => <li>
+            <Show when={view() === "directories"}>
+              <ol class="usage-sessions" data-usage-groups>
+                <For each={grouped()!.groups.slice(0, SHOWN)}>{(group) => <li>
+                  <bdi dir="ltr">{group.label}</bdi>
+                  <span class="home-muted">{group.kind === "lane" ? "lane" : group.kind === "directory" ? "directory" : ""} · {group.sessions} {group.sessions === 1 ? "session" : "sessions"}</span>
+                  <span>{!group.pricedCost && group.unpriced ? <span class="usage-unpriced">pricing missing</span> : money(group.pricedCost)}{group.pricedCost && group.unpriced ? <span class="usage-unpriced"> + unpriced</span> : ""}</span>
+                </li>}</For>
+              </ol>
+              <p class="home-source">Grouped by where each session ran: editspace lanes by their folder, anything else by directory. Not a project or workstream.{grouped()!.partial ? ` From the ${SESSION_LIMIT} most expensive sessions; smaller groups may be missing.` : ""}</p>
+            </Show>
+            <ol class="usage-sessions" hidden={view() !== "sessions"}>
+              <For each={value().sessions.slice(0, SHOWN)}>{(item) => <li>
                 <Show when={item.directory} fallback={<bdi>{item.title || item.sessionID}</bdi>}>
                   <a href={`/session/${encodeURIComponent(item.sessionID)}?directory=${encodeURIComponent(item.directory!)}`}><bdi>{item.title || item.sessionID}</bdi></a>
                 </Show>
@@ -196,6 +223,7 @@ const SessionSection = (props: { sessions?: UsageSessions; loading: boolean; win
       </Show>
     </Show>
   </section>
+}
 
 const lane = (directory: string) => directory.match(/\/lanes\/([^/]+)/)?.[1] ?? directory.split("/").filter(Boolean).at(-1) ?? directory
 

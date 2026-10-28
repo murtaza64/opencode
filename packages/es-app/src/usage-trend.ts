@@ -163,3 +163,37 @@ const addTokens = (a: UsageTokens, b: UsageTokens): UsageTokens => ({
   reasoning: a.reasoning + b.reasoning,
   cache: { read: a.cache.read + b.cache.read, write: a.cache.write + b.cache.write },
 })
+
+export type SessionUsage = { sessionID: string; parentID?: string; directory?: string; cost: number | null; pricedCost: number; unpricedTokens: number }
+export type DirectoryGroup = {
+  key: string
+  /** Lane name when the directory sits in an editspace lane, else the directory's last two segments. */
+  label: string
+  /** "lane" only from the editspace path layout (…/lanes/<lane>/…); never a guessed project or workstream. */
+  kind: "lane" | "directory" | "unknown"
+  pricedCost: number
+  unpriced: boolean
+  sessions: number
+}
+
+/** Groups ranked sessions by where they ran. `partial` when the route hit its limit, so smaller groups may be missing. */
+export function groupByDirectory(sessions: SessionUsage[], limit: number): { groups: DirectoryGroup[]; partial: boolean } {
+  const groups = new Map<string, DirectoryGroup>()
+  for (const session of sessions) {
+    const place = locate(session.directory)
+    const group = groups.get(place.key) ?? { ...place, pricedCost: 0, unpriced: false, sessions: 0 }
+    group.pricedCost += session.pricedCost
+    group.unpriced ||= session.cost == null || session.unpricedTokens > 0
+    group.sessions += 1
+    groups.set(place.key, group)
+  }
+  return { groups: [...groups.values()].toSorted((a, b) => b.pricedCost - a.pricedCost), partial: sessions.length >= limit }
+}
+
+function locate(directory?: string): Pick<DirectoryGroup, "key" | "label" | "kind"> {
+  if (!directory) return { key: "", label: "unknown directory", kind: "unknown" }
+  const lane = directory.match(/^(.*?\/lanes\/([^/]+))(?:\/|$)/)
+  if (lane && /(?:^|\/)(?:\.editspace|editspaces\/[^/]+)\/lanes\//.test(lane[1] + "/")) return { key: lane[1], label: lane[2], kind: "lane" }
+  const parts = directory.split("/").filter(Boolean)
+  return { key: directory, label: parts.slice(-2).join("/") || directory, kind: "directory" }
+}

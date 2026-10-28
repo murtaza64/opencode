@@ -36,10 +36,12 @@ const rollup = {
 let mode = "json"
 let sessions = "missing"
 const reads = []
+const sessionReads = []
 const preview = await startAttentionPreview([{
   name: "usage-fixture",
   configureServer(server) {
     server.middlewares.use("/oc/experimental/usage/sessions", (req, res) => {
+      if (req.headers["x-under-test"]) sessionReads.push(req.url)
       if (sessions === "missing") { res.writeHead(404); return res.end() }
       res.writeHead(200, { "content-type": "application/json" })
       res.end(JSON.stringify({ estimate: true, coverage: { backfilled: true }, sessions: [
@@ -55,7 +57,7 @@ const preview = await startAttentionPreview([{
         return res.end("<!doctype html><html><body>app</body></html>")
       }
       res.writeHead(200, { "content-type": "application/json" })
-      res.end(JSON.stringify(rollup))
+      res.end(JSON.stringify({ ...rollup, observedAt: new Date().toISOString() }))
     })
   },
 }])
@@ -141,7 +143,28 @@ try {
   await expect(rows2.nth(0)).toContainText("$41.50")
   await expect(rows2.nth(1)).toContainText("pricing missing")
   await expect(rows2.nth(1)).toContainText("subagent")
-  console.log("PASS usage v2: per-session ranking from a newer Core; unpriced session not $0")
+  // Traffic: one sessions read per window; toggling back reuses it; Refresh re-reads both routes once.
+  const since = sessionReads.length
+  await page.getByRole("radio", { name: "30 days" }).click()
+  await expect.poll(() => sessionReads.length).toBe(since + 1)
+  expect(sessionReads.at(-1)).toContain("days=30")
+  expect(sessionReads.at(-1)).toContain("limit=200")
+  await page.getByRole("radio", { name: "7 days" }).click()
+  await page.waitForTimeout(1000)
+  expect(sessionReads.length).toBe(since + 1)
+  const daily = reads.length
+  await page.getByRole("button", { name: "Refresh", exact: true }).click()
+  await expect.poll(() => reads.length).toBe(daily + 1)
+  await expect.poll(() => sessionReads.length).toBe(since + 2)
+  // Directory grouping: lanes by folder, labelled as such, never as a project.
+  await page.getByRole("radio", { name: "Directories" }).click()
+  const groups = page.locator("[data-usage-groups] li")
+  await expect(groups).toHaveCount(1)
+  await expect(groups.nth(0)).toContainText("es-app")
+  await expect(groups.nth(0)).toContainText("lane · 2 sessions")
+  await expect(groups.nth(0)).toContainText("$41.50 + unpriced")
+  await expect(page.getByLabel("Top sessions")).toContainText("Not a project or workstream.")
+  console.log("PASS usage v2: per-session ranking; unpriced not $0; one sessions read per window, Refresh re-reads; lane/directory grouping")
 
   mode = "html"
   await page.reload({ waitUntil: "domcontentloaded" })

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { UsageDaily } from "./api"
-import { buildTrend, OTHER } from "./usage-trend"
+import { buildTrend, groupByDirectory, OTHER } from "./usage-trend"
 
 const tokens = (input: number, output: number, read = 0, write = 0) => ({ input, output, reasoning: 0, cache: { read, write } })
 const model = (name: string, cost: number | null, coverage: "priced" | "missing-rate" | "local" = "priced", t = tokens(1000, 100)) =>
@@ -92,5 +92,29 @@ describe("buildTrend", () => {
     expect(trend.cuts[0].title).toContain("92%")
     expect(trend.cuts[2].title).toContain("2026-10-27")
     expect(buildTrend(usage([{ day: "2026-10-27", complete: true, cost: 0, models: [] }]), 7, "2026-10-28").cuts).toEqual([])
+  })
+})
+
+describe("groupByDirectory", () => {
+  const session = (sessionID: string, directory: string | undefined, pricedCost: number, cost: number | null = pricedCost) =>
+    ({ sessionID, directory, pricedCost, cost, unpricedTokens: cost == null ? 10 : 0 })
+  test("groups editspace lanes by lane root and plain directories by path, most expensive first", () => {
+    const { groups, partial } = groupByDirectory([
+      session("a", "/u/opencode/.editspace/lanes/es-app/repos/o/r", 10),
+      session("b", "/u/opencode/.editspace/lanes/es-app", 5),
+      session("c", "/u/editspaces/wb/lanes/batch/repos/o/r", 20),
+      session("d", "/u/projects/thing", 3, null),
+      session("e", undefined, 1),
+    ], 200)
+    expect(groups.map((g) => [g.label, g.kind, g.pricedCost, g.sessions])).toEqual([
+      ["batch", "lane", 20, 1], ["es-app", "lane", 15, 2], ["projects/thing", "directory", 3, 1], ["unknown directory", "unknown", 1, 1],
+    ])
+    expect(groups[2].unpriced).toBe(true)
+    expect(partial).toBe(false)
+  })
+  test("a lanes folder outside an editspace is just a directory, and a full page is partial", () => {
+    const { groups, partial } = groupByDirectory([session("a", "/srv/lanes/x/app", 2), session("b", "/srv/lanes/x/app", 2)], 2)
+    expect(groups[0]).toMatchObject({ kind: "directory", label: "x/app" })
+    expect(partial).toBe(true)
   })
 })
