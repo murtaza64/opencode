@@ -11,16 +11,9 @@ import { briefCommands, briefComplete, briefItems, briefSteps, safeSvg, sourceTa
 import { briefApproval } from "../brief-approval"
 import { currentJob, readConversation, regeneratingJob, type BriefJob } from "../desk-session"
 import { LinkedText } from "./linked-text"
+import { CopyCode, linkName, MISSING, Refs, Value } from "./brief-kit"
 import contract from "../brief-contract.json"
 import { readBriefFeedback, sendBriefFeedback, type BriefRating } from "../brief-feedback"
-
-const Refs = (props: { refs: string[]; known: EvidenceRef[]; item: DeskItem }) =>
-  <For each={props.refs}>{id => {
-    const ref = () => props.known.find(candidate => candidate.id === id)
-    return <Show when={ref()?.messageID} fallback={<span class="desk-ref" title={ref()?.label}>{id}</span>}>
-      <A class="desk-ref" title={ref()?.label} href={sessionHref(props.item.source.session, props.item.source.directory)}>{id}</A>
-    </Show>
-  }}</For>
 
 /** Where a cited source opens: the source thread at the cited messages, or a markdown doc in the editspace. */
 const sourceLink = (source: BriefSource, refs: EvidenceRef[], item: DeskItem) => {
@@ -49,7 +42,8 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
       </Show>}>{job => <>
         <Show when={job().state.state === "starting" || job().state.state === "running"}><p class="home-muted" role="status">Preparing brief…</p></Show>
         {/* A brief that did not finish is one quiet line: the request below stays readable as written. */}
-        <Show when={job().state.state === "failed"}><p class="home-muted" title={(job().state as { error: string }).error}>Brief failed.</p></Show>
+        {/* The reason is part of the line: a failure is never shown without why. */}
+        <Show when={job().state.state === "failed"}><p class="home-muted">Brief failed: <bdi dir="ltr">{(job().state as { error: string }).error}</bdi></p></Show>
         <Show when={job().state.state === "unknown"}><p class="home-muted">{(job().state as { reason: string }).reason}</p></Show>
         {/* Confirm resends the identical request; Core returns the same brief if the first start landed. */}
         <Show when={job().state.state === "unconfirmed"}><p class="home-warning">Brief start not confirmed.</p>
@@ -124,14 +118,6 @@ const BriefFeedbackControls = (props: { job: BriefJob }) => {
   </div>
 }
 
-/** A short name for a link: owner/repo#123 becomes repo#123; otherwise the host. */
-export const linkName = (url: string) => {
-  const parsed = new URL(url)
-  const pull = /^\/[^/]+\/([^/]+)\/(?:pull|issues)\/(\d+)/.exec(parsed.pathname)
-  if (parsed.hostname === "github.com" && pull) return `${pull[1]}#${pull[2]}`
-  return parsed.hostname.endsWith(".slack.com") ? "Slack" : parsed.hostname
-}
-
 // Commands an option asks the human to run, exactly as the request quotes them, with where to run them and a
 // Copy button. Display only: nothing here runs anything. Dropped unless quoted verbatim (briefCommands).
 const Commands = (props: { commands: BriefResult; item: DeskItem }) => {
@@ -164,32 +150,11 @@ const Steps = (props: { result: BriefResult; refs: EvidenceRef[]; item: DeskItem
       {/* Laid out like commands (label, then the exact value to copy), so long values stay inside the column. */}
       <Show when={step.settings.length}><ul class="desk-commands" aria-label="Settings"><For each={step.settings}>{setting => <li>
         <span class="desk-command-label" dir="auto">{setting.field}</span>
-        <Show when={setting.value} fallback={<span class="home-warning">Not given in the request; ask before applying.</span>}><CopyCode text={setting.value} /></Show>
+        <Show when={setting.value} fallback={<span class="brief-missing">{MISSING}</span>}><CopyCode text={setting.value} /></Show>
       </li>}</For></ul></Show>
       <Show when={step.verify}><p class="home-muted" dir="auto">Check: {step.verify}</p></Show>
     </li>}</For></ol>
   </Show>
-}
-
-const CopyCode = (props: { text: string }) => {
-  const [copied, setCopied] = createSignal<"Copied" | "Copy failed">()
-  const copy = async () => {
-    const ok = await navigator.clipboard?.writeText(props.text).then(() => true, () => false) || copyBySelection(props.text)
-    setCopied(ok ? "Copied" : "Copy failed")
-    setTimeout(() => setCopied(), 2000)
-  }
-  return <div class="desk-command"><pre dir="ltr"><code>{props.text}</code></pre>
-    <button type="button" class="desk-command-copy" aria-label="Copy command" onClick={() => void copy()}>{copied() ?? "Copy"}</button></div>
-}
-
-// The async Clipboard API is unavailable outside secure contexts; a selection copy inside the click still works.
-const copyBySelection = (text: string) => {
-  const input = document.createElement("textarea")
-  input.value = text
-  input.readOnly = true
-  input.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0"
-  document.body.append(input)
-  try { input.select(); return document.execCommand("copy") } catch { return false } finally { input.remove() }
 }
 
 // The things a decision acts on, one compact row each with its links, readable on a phone; never a picture.
@@ -212,12 +177,12 @@ const Items = (props: { result: BriefResult; item: DeskItem; job: BriefJob }) =>
   return <Show when={rows().length}>
     <section class="desk-brief-items" aria-label="Request items">
       <Show when={approval().verbatim}><p class="desk-brief-ledger">Recorded answer: <bdi dir="auto">{approval().verbatim}</bdi></p></Show>
-      <div class="desk-brief-item-head" aria-hidden="true"><span>ID</span><span>Question</span><span>Recommended</span><span>Alternative(s)</span><span>Approved</span></div>
+      <div class="desk-brief-item-head" aria-hidden="true"><span>ID</span><span>Question</span><span>Agent recommends</span><span>Alternative(s)</span><span>Approved</span></div>
       <ol class="desk-brief-item-list"><For each={rows()}>{(row, index) => <li class="desk-brief-item">
         <span class="desk-brief-item-id"><span class="desk-brief-item-number">{index() + 1}.</span> <bdi dir="ltr">{row.id}</bdi></span>
         <ItemCell label="Question" value={row.question} />
-        <ItemCell label="Recommended" value={row.recommended} />
-        <div class="desk-brief-item-cell"><span class="desk-brief-item-label">Alternative(s)</span><span dir="auto">{row.alternatives.length ? row.alternatives.map(value => value || "Not given in the request").join(" · ") : "Not given in the request"}</span></div>
+        <ItemCell label="Agent recommends" value={row.recommended} />
+        <div class="desk-brief-item-cell"><span class="desk-brief-item-label">Alternative(s)</span><span dir="auto">{row.alternatives.length ? row.alternatives.map(value => value || MISSING).join(" · ") : MISSING}</span></div>
         <ItemCell label="Approved" value={approval().answered ? approval().values[index()] : "—"} missing={false} />
       </li>}</For></ol>
     </section>
@@ -225,7 +190,7 @@ const Items = (props: { result: BriefResult; item: DeskItem; job: BriefJob }) =>
 }
 
 const ItemCell = (props: { label: string; value: string; missing?: boolean }) =>
-  <div class="desk-brief-item-cell"><span class="desk-brief-item-label">{props.label}</span><span dir="auto">{props.value || (props.missing === false ? "—" : "Not given in the request")}</span></div>
+  <div class="desk-brief-item-cell"><span class="desk-brief-item-label">{props.label}</span><Show when={props.missing !== false} fallback={<span dir="auto">{props.value || "—"}</span>}><Value value={props.value} /></Show></div>
 
 const SourceLinks = (props: { sources: BriefSource[]; refs: EvidenceRef[]; item: DeskItem }) => {
   const links = () => props.sources.flatMap(source => { const link = sourceLink(source, props.refs, props.item); return link ? [{ ...link, label: source.label }] : [] })
@@ -239,7 +204,7 @@ const Shape = (props: { shape: BriefShape; item: DeskItem }) =>
     <Match when={props.shape.kind === "compare" && compareOf(props.shape, props.item)}>{shape =>
       // Columns are the request's own options under their own labels; the recommended one comes from the request.
       <table class="desk-compare"><thead><tr><th scope="col"><span class="sr-only">Aspect</span></th><For each={shape().columns}>{column =>
-        <th scope="col" data-recommended={column.recommended ? "" : undefined}><bdi dir="auto">{column.label}</bdi><Show when={column.recommended}><span class="desk-compare-recommended">Recommended</span></Show></th>}</For></tr></thead>
+        <th scope="col" data-recommended={column.recommended ? "" : undefined}><bdi dir="auto">{column.label}</bdi><Show when={column.recommended}><span class="desk-compare-recommended">Agent recommends</span></Show></th>}</For></tr></thead>
         <tbody><For each={shape().rows}>{row => <tr><th scope="row" dir="auto">{row.label}</th><For each={row.cells}>{cell => <td dir="auto">{cell}</td>}</For></tr>}</For></tbody></table>}</Match>
     <Match when={props.shape.kind === "sequence" && props.shape}>{shape =>
       // With `approved`, a line under the last approved step says where this approval stops; later steps are muted.

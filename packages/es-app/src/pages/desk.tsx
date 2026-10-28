@@ -34,6 +34,8 @@ import "./home.css"
 /** Delay before the desk reads its chat's latest turn for memory changes. */
 const MEMORY_ABSORB_DELAY_MS = 1500
 import "./desk.css"
+// Brief rules come after the desk's, as they did inside desk.css.
+import "./brief.css"
 
 const receiptText = (item: HomeReplyReceipt) => item.result === "applied" ? (item.reply === "once" ? "Allowed once" : item.reply === "always" ? "Always allowed" : "Rejected") : item.result === "not-applied" ? "Not applied" : "Outcome uncertain"
 const stateLabel = (job: BriefJob) => ({ starting: "starting", unconfirmed: "start unconfirmed", running: "preparing", ready: "ready", failed: "failed", unknown: "stopped" })[job.state.state]
