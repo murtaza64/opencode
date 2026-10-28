@@ -44,7 +44,7 @@ describe("costSummary", () => {
     expect(summary?.partial).toBe(true)
   })
 
-  test("never sums an older Core's raw daily cost from another host", () => {
+  test("never combines an older Core's raw daily cost; lists it on its own and names it unsupported", () => {
     const raw = { ...originRollup(25), days: [{ day: "2026-10-28", cost: 25, models: [{ provider: "a", model: "m", cost: 25, tokens }] }] }
     const summary = costSummary([laptop, mini], {
       laptop: { value: originRollup(40), readAt: NOW },
@@ -52,7 +52,34 @@ describe("costSummary", () => {
     }, NOW)
     expect(summary?.total).toBe(40)
     expect(summary?.counted).toEqual(["laptop"])
-    expect(summary?.hosts[1]?.state).toBe("overlap")
+    expect(summary?.separate.map((item) => [item.id, item.cost])).toEqual([["mini", 25]])
+    expect(summary?.unsupported).toEqual(["Mini"])
+    expect(summary?.partial).toBe(true)
+  })
+
+  test("setup snapshot 2026-10-28T10:20:37Z: two older Cores show each host's cost and no combined total", () => {
+    // Real figures read from both hosts' Cores (offset -240); neither reports origin-only cost.
+    const older = (host: string, cost: number): UsageDaily => ({
+      estimate: true, basis: "", host, observedAt: "2026-10-28T10:20:37Z", offsetMinutes: -240,
+      coverage: { scope: "", backfilled: true },
+      days: [{ day: "2026-10-28", cost, complete: true, unpricedModels: 0, models: [{ provider: "a", model: "m", cost, coverage: "priced", tokens }] }],
+      rateLimits: { source: "headers", providers: [] },
+    })
+    const summary = costSummary([laptop, mini], {
+      laptop: { value: older("murtaza-macbook-pro", 594.78), readAt: NOW },
+      mini: { value: older("murtaza-mac-mini", 541.65), readAt: NOW },
+    }, NOW)
+    expect(summary?.total).toBeUndefined()
+    expect(summary?.separate.map((item) => [item.label, item.cost])).toEqual([["Laptop", 594.78], ["Mini", 541.65]])
+    expect(summary?.unsupported).toEqual(["Laptop", "Mini"])
+  })
+
+  test("a lone WORK host on an older Core is its own total", () => {
+    const raw = { ...originRollup(142), days: [{ day: "2026-10-28", cost: 142, models: [{ provider: "a", model: "m", cost: 142, tokens }] }] }
+    const summary = costSummary([laptop], { laptop: { value: raw, readAt: NOW } }, NOW)
+    expect(summary?.total).toBe(142)
+    expect(summary?.separate).toEqual([])
+    expect(summary?.unsupported).toEqual([])
   })
 
   test("hides the total rather than showing $0 when no host has a priced cost", () => {

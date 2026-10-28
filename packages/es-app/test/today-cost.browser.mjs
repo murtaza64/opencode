@@ -143,7 +143,7 @@ try {
   await page.reload({ waitUntil: "domcontentloaded" })
   // Rollups are always estimates, so the '~' stays; partial vs complete shows in the per-host tooltip.
   await expect(amount).toHaveText("~$65")
-  await expect(badge).toHaveAttribute("aria-label", "AI spend today: about 65 dollars, estimate")
+  await expect(badge).toHaveAttribute("aria-label", "AI spend today: about 65 dollars combined, estimate")
   await expect(badge).toHaveAttribute("data-partial", "false")
   await expect(badge).toHaveAttribute("title", /Laptop: \$40\.00/)
   await expect(badge).toHaveAttribute("title", /Mini: \$25\.00/)
@@ -157,8 +157,11 @@ try {
   mini = { mode: "raw", cost: 25 }
   await page.reload({ waitUntil: "domcontentloaded" })
   await expect(amount).toHaveText("~$40")
-  await expect(badge).toHaveAttribute("title", /Mini: \$25\.00 \(may overlap another host.*not in total/)
-  console.log("PASS older Core without origin-only cost: not summed (may overlap), partial")
+  await expect(badge.locator('.today-cost-host[data-host="mini"]')).toHaveText("Mini ~$25")
+  await expect(badge.locator(".today-cost-partial")).toHaveText("partial")
+  await expect(badge).toHaveAttribute("title", /Mini: \$25\.00 \(Core has no origin-only cost\).*not in total/)
+  await expect(badge).toHaveAttribute("title", /partial: Mini unsupported/)
+  console.log("PASS older Core without origin-only cost: shown on its own, not combined, partial: Mini unsupported")
   mini = { mode: "origin", cost: null }
   await page.reload({ waitUntil: "domcontentloaded" })
   await expect(amount).toHaveText("~$40")

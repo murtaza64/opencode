@@ -1,6 +1,8 @@
 .today-cost { display: inline-flex; align-items: baseline; gap: 5px; white-space: nowrap; flex-shrink: 0; cursor: default; }
 .today-cost-label { font-size: 11px; color: var(--subtext0); }
 .today-cost-amount { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.today-cost-host { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--subtext1); }
+.today-cost-partial { font-size: 10px; color: var(--subtext0); }
 .today-cost-approx { color: var(--subtext0); font-weight: 400; }
 .today-cost[data-band=low] .today-cost-amount { color: var(--green); }
 .today-cost[data-band=mid] .today-cost-amount { color: var(--text); }
