@@ -2,7 +2,7 @@
  * One desk session for the whole app, mounted once: closing the pane hides it without unmounting, so
  * the draft, caret, scroll position, pending sends and a dictation target survive. Whether it is open
  * is remembered separately beside work views (Decisions, map, surfaces) and beside a transcript. */
-import { createContext, createEffect, createResource, createSignal, For, Show, useContext, type Accessor, type ParentProps } from "solid-js"
+import { createContext, createEffect, createResource, createSignal, For, onCleanup, Show, useContext, type Accessor, type ParentProps } from "solid-js"
 import { A, useLocation } from "@solidjs/router"
 import { Icon } from "@opencode-ai/ui/icon"
 import { ago, sessionHref, useDashboard } from "./state"
@@ -12,6 +12,8 @@ import { getComposer } from "./composer"
 import { createDeskSession } from "./desk-session"
 import type { ContextPart } from "./api"
 import { SessionView } from "./pages/session"
+import { ResizeHandle } from "./components/resize-handle"
+import { companionWidth, setCompanionDocked } from "./ui"
 
 export type CompanionKind = "work" | "session"
 export const companionKind = (pathname: string): CompanionKind => pathname.startsWith("/session/") ? "session" : "work"
@@ -117,6 +119,10 @@ export const DeskCompanion = () => {
   const narrow = media(NARROW)
   const floating = media(FLOATING)
   createEffect(() => { if (section) section.inert = !chat.open() })
+  // Docked open: resizable from its inline-start edge, and the session info panel steps aside.
+  const docked = () => chat.open() && !floating()
+  createEffect(() => setCompanionDocked(docked()))
+  onCleanup(() => setCompanionDocked(false))
   // Background tasks appear only against a Core that records the question without answering it.
   const [supported] = createResource(() => target()?.directory, deskTasksSupported)
   const close = () => {
@@ -124,7 +130,10 @@ export const DeskCompanion = () => {
     chat.setOpen(false)
     if (focused) queueMicrotask(() => document.querySelector<HTMLElement>("[data-nav=front-desk]")?.focus())
   }
-  return <aside ref={section} class="desk-companion" classList={{ closed: !chat.open(), sheet: narrow(), overlay: floating() && !narrow() }} aria-label="Front desk chat" aria-hidden={!chat.open()}>
+  return <>
+  <Show when={docked()}><ResizeHandle side="companion" /></Show>
+  <aside ref={section} class="desk-companion" classList={{ closed: !chat.open(), sheet: narrow(), overlay: floating() && !narrow() }} aria-label="Front desk chat" aria-hidden={!chat.open()}
+    style={{ "--companion-width": floating() ? undefined : `${companionWidth()}px` }}>
     <div class="desk-companion-in desk-chat">
       <Show when={chat.desk.error()}><div class="home-warning" role="alert">{chat.desk.error()}</div></Show>
       <Show when={supported() ? target() : undefined}>{(current) => <DeskTasks tasks={chat.tasks} view={chat.view} session={current().session} directory={current().directory} />}</Show>
@@ -135,6 +144,7 @@ export const DeskCompanion = () => {
       </Show>
     </div>
   </aside>
+  </>
 }
 
 // Background tasks started from the chat: "Ask in background" takes what is typed in the composer, shows a

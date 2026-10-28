@@ -19,7 +19,7 @@ export const CloudNav = (props: { pin: CloudPin; mini?: boolean }) => {
       <span class="cloud-runtime-icon" aria-label="Cloud agent"><Icon name="cloud-upload" size="small" /></span>
       <Show when={!props.mini}><span class="nav-title"><bdi dir="auto">{props.pin.lane}</bdi></span><span class="session-project">{props.pin.editspace} · {status()}</span></Show>
     </A>
-    <Show when={!props.mini}><button type="button" class="pin-action" disabled={!pinned() && !cloudOwnerKnown(props.pin.owner)} classList={{ pinned: pinned() }} aria-label={`${pinned() ? "Unpin" : "Pin"} cloud agent ${props.pin.lane}`} title={pinned() ? "Unpin cloud agent" : "Pin cloud agent"} onClick={() => cloud.togglePin(props.pin)}>{pinned() ? "★" : "☆"}</button></Show>
+    <Show when={!props.mini}><button type="button" class="pin-action" disabled={!pinned() && !cloudOwnerKnown(props.pin.owner)} classList={{ pinned: pinned() }} aria-label={`${pinned() ? "Unpin" : "Pin"} cloud agent ${props.pin.lane}`} title={pinned() ? "Unpin cloud agent" : "Pin cloud agent"} onClick={() => cloud.togglePin(props.pin)}>{pinned() ? "\u2665\ufe0e" : "\u2661\ufe0e"}</button></Show>
   </div>
 }
 

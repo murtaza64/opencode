@@ -21,7 +21,7 @@ import { mentionQuery, sessionLane, tokenBefore } from "../session-mention"
 import { RelativeLines } from "../components/relative-lines"
 import SessionInfo from "../components/session-info"
 import { linkUrl, sessionHref, useDashboard } from "../state"
-import { rightOpen } from "../ui"
+import { companionDocked, rightOpen } from "../ui"
 import { createVim } from "../vim"
 import { contextLimit, contextUsage, latestCompletedTurn } from "../context-usage"
 import { ComposerMeta } from "../components/composer-meta"
@@ -2023,10 +2023,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       </Show>
 
       <Show when={!props.embedded}>
-        <Show when={rightOpen()}>
+        {/* One right-hand panel at a time: a docked Front desk chat replaces the info panel until it closes. */}
+        <Show when={rightOpen() && !companionDocked()}>
           <ResizeHandle side="right" />
         </Show>
-        <SessionInfo sessionID={sessionID} session={session()} messages={messages()} parts={live.data.part} providers={providers()} todos={live.data.todo} />
+        <Show when={!companionDocked()}><SessionInfo sessionID={sessionID} session={session()} messages={messages()} parts={live.data.part} providers={providers()} todos={live.data.todo} /></Show>
       </Show>
     </main>
   )

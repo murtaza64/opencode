@@ -11,8 +11,14 @@ const [leftOpen, setLeftOpen] = createSignal(localStorage.getItem("es-app-left-o
 const [rightOpen, setRightOpen] = createSignal(localStorage.getItem("es-app-right-open") !== "0")
 const [leftWidth, setLeftWidth] = createSignal(read("es-app-left-width", 240))
 const [rightWidth, setRightWidth] = createSignal(read("es-app-right-width", 280))
+const [companionWidth, setCompanionWidth] = createSignal(read("es-app-companion-width", 380))
+// Whether the Front desk chat is docked open beside the content; the session info panel steps aside then,
+// without changing its own remembered visibility or width.
+const [companionDocked, setCompanionDocked] = createSignal(false)
 
-export { leftOpen, leftWidth, rightOpen, rightWidth }
+export { leftOpen, leftWidth, rightOpen, rightWidth, companionWidth, companionDocked, setCompanionDocked }
+
+export type Side = "left" | "right" | "companion"
 
 export const toggleLeft = () => {
   setLeftOpen(!leftOpen())
@@ -24,33 +30,37 @@ export const toggleRight = () => {
   localStorage.setItem("es-app-right-open", rightOpen() ? "1" : "0")
 }
 
-const CLAMP: Record<"left" | "right", [number, number]> = {
+const CLAMP: Record<Side, [number, number]> = {
   left: [160, 480],
   right: [200, 560],
+  companion: [300, 720],
 }
+const WIDTH = { left: leftWidth, right: rightWidth, companion: companionWidth }
+const SET = { left: setLeftWidth, right: setRightWidth, companion: setCompanionWidth }
+const KEY = { left: "es-app-left-width", right: "es-app-right-width", companion: "es-app-companion-width" }
 
 /** The width bounds of each side panel, in CSS px. */
-export const panelBounds = (side: "left" | "right") => CLAMP[side]
+export const panelBounds = (side: Side) => CLAMP[side]
+export const panelWidth = (side: Side) => WIDTH[side]()
 
-// "left" is the nav at the inline start; "right" is the info panel at the inline end. A panel grows when
+// "left" is the nav at the inline start; "right" (info panel) and "companion" sit at the inline end. A panel grows when
 // its edge moves away from its own side, so the physical pointer delta flips with the document direction.
-const growth = (side: "left" | "right", physical: number) => {
+const growth = (side: Side, physical: number) => {
   const ltr = getComputedStyle(document.documentElement).direction !== "rtl"
   return physical * (side === "left" ? 1 : -1) * (ltr ? 1 : -1)
 }
-const resize = (side: "left" | "right", width: number) => {
+const resize = (side: Side, width: number) => {
   const [min, max] = CLAMP[side]
-  ;(side === "left" ? setLeftWidth : setRightWidth)(Math.round(Math.min(max, Math.max(min, width))))
+  SET[side](Math.round(Math.min(max, Math.max(min, width))))
 }
-const save = (side: "left" | "right") =>
-  localStorage.setItem(side === "left" ? "es-app-left-width" : "es-app-right-width", String(side === "left" ? leftWidth() : rightWidth()))
+const save = (side: Side) => localStorage.setItem(KEY[side], String(WIDTH[side]()))
 
-export function startDrag(side: "left" | "right", down: PointerEvent) {
+export function startDrag(side: Side, down: PointerEvent) {
   if (down.button !== 0) return
   down.preventDefault()
   const handle = down.currentTarget as HTMLElement
   const startX = down.clientX
-  const start = side === "left" ? leftWidth() : rightWidth()
+  const start = WIDTH[side]()
   handle.setPointerCapture(down.pointerId)
   handle.dataset.dragging = ""
   const move = (e: PointerEvent) => resize(side, start + growth(side, e.clientX - startX))
@@ -69,8 +79,8 @@ export function startDrag(side: "left" | "right", down: PointerEvent) {
 }
 
 /** Arrow keys move the edge the way they point (so they mirror in RTL); Home/End go to the bounds. */
-export function keyResize(side: "left" | "right", e: KeyboardEvent) {
-  const width = side === "left" ? leftWidth() : rightWidth()
+export function keyResize(side: Side, e: KeyboardEvent) {
+  const width = WIDTH[side]()
   const [min, max] = CLAMP[side]
   const step = e.shiftKey ? 64 : 16
   const next = e.key === "ArrowRight" ? width + growth(side, step) : e.key === "ArrowLeft" ? width + growth(side, -step)
