@@ -112,11 +112,11 @@ export const appRouteURL = (value: string, origin: string) => {
 }
 
 // Work view reads of another host through this laptop's listener (/hosts/<id>/...): its session
-// list, editspace names and open-decision list (which the dashboard serves without an operator).
+// list, daily usage rollup (the Today total), editspace names and open-decision list (which the dashboard serves without an operator).
 // Everything else about that host, answering and operator sessions included, stays on its own tab,
 // origin and operator cookie.
 export const hostApiAllowed = (method: string, pathname: string) =>
-  ["GET", "HEAD"].includes(method) && /^\/(?:oc\/experimental\/session|es\/api\/(?:editspaces|attention))$/.test(pathname)
+  ["GET", "HEAD"].includes(method) && /^\/(?:oc\/experimental\/(?:session|usage\/daily)|es\/api\/(?:editspaces|attention))$/.test(pathname)
 
 // Only expose the existing es-app surface, not daemon PTYs, shell, config, or file APIs.
 export const apiAllowed = (method: string, pathname: string) => {
