@@ -32,6 +32,7 @@ import type { Event } from "@opencode-ai/sdk/v2"
 
 /** How often other editspaces' handoff lineage (used for cross-project pins) is re-read. */
 const OTHER_LINEAGE_MS = 60_000
+const INDEX_MIN_GAP_MS = 120_000
 import { useLocation } from "@solidjs/router"
 export { linkUrl } from "./link-url"
 
@@ -201,6 +202,17 @@ export function DashboardProvider(props: ParentProps) {
       return merge(info.value ?? [], changed)
     }
   })
+  // The full index is large (~250 KB-1 MB) and costs Core a long read, so every background caller
+  // shares one reader: at most one read in flight, and background refreshes at most every
+  // INDEX_MIN_GAP_MS. Session rows follow session.* events in between. Explicit refreshes (the
+  // user, a known-missing successor) are not throttled but still join an in-flight read.
+  let indexRead: Promise<unknown> | undefined
+  let lastIndexRead = Date.now()
+  const refreshIndex = (background = true) => {
+    if (indexRead || (background && Date.now() - lastIndexRead < INDEX_MIN_GAP_MS)) return
+    lastIndexRead = Date.now()
+    indexRead = Promise.resolve(refetchGlobal()).finally(() => { indexRead = undefined })
+  }
   const [visibleSessions, setVisibleSessions] = createSignal(new Set<string>())
   const PIN_KEY = "es-app-sidebar-pins"
   const pinKey = (s: Pick<SessionRow, "id" | "directory">) => JSON.stringify([s.directory, s.id])
@@ -274,7 +286,7 @@ export function DashboardProvider(props: ParentProps) {
     clearInterval(failureInterval)
     failures.dispose()
   })
-  const activity = createSessionActivity(() => globalSessions() ?? [], refetchGlobal, {
+  const activity = createSessionActivity(() => globalSessions() ?? [], () => refreshIndex(), {
     directories: relevantDirectories,
     sessionEvent,
     // A finished turn may have added spend; the title-bar total re-reads (coalesced to once a minute).
@@ -455,11 +467,20 @@ export function DashboardProvider(props: ParentProps) {
     ...laneOwners().map((owner: { lane: string; owner: string }) => ({ ...owner, lane: JSON.stringify([currentEditspaceName(), owner.lane]) })),
     ...(otherLineages() ?? []).flatMap((item) => item.owners),
   ])
+  const sought = new Set<string>()
   createEffect(() => {
     const edges = [...(handoffs() ?? []), ...(otherLineages() ?? []).flatMap((item) => item.edges)]
     if (!edges.length || handoffs.loading || handoffsError()) return
-    // A new successor may not have reached the global index when the receipt arrives.
-    untrack(() => { void refetchGlobal() })
+    // A new successor may not have reached the global index when the receipt arrives; re-read only
+    // when one is actually missing (every lineage refresh used to re-read the whole index).
+    untrack(() => {
+      const known = new Set((globalSessions() ?? []).map((session) => session.id))
+      // Each missing successor is sought once: one on another host never appears here.
+      const missing = edges.filter((edge) => !known.has(edge.successor) && !sought.has(edge.successor))
+      if (!globalSessions() || !missing.length) return
+      missing.forEach((edge) => sought.add(edge.successor))
+      refreshIndex(false)
+    })
   })
   createEffect(() => {
     if (handoffs.loading || handoffsError()) return
@@ -479,7 +500,7 @@ export function DashboardProvider(props: ParentProps) {
     })
   })
   const unpinnedSessions = createMemo(() => sessions().filter((s) => !isPinned(s)))
-  const refetchArchived = () => { refetchGlobal() }
+  const refetchArchived = () => refreshIndex(false)
 
   const dotFor = (s: { id: string; live?: string; updated?: number; pending?: boolean }): DotState => {
     if (activity.pending(s.id).length) return "pending"
@@ -598,7 +619,7 @@ export function DashboardProvider(props: ParentProps) {
     stateError: () => [stateError(), metadataError(), notificationError()].filter(Boolean).join(" "),
     refetch: () => {
       refetch()
-      if (allProjects()) refetchGlobal()
+      if (allProjects()) refreshIndex()
     },
     refresh: async () => {
       await es.refresh(editspace())
