@@ -56,15 +56,21 @@ export const Filament = (props: {
   // so macOS rubber-band overscroll translates it together with the rows it annotates. A fixed
   // overlay would stay put while the content bounced.
   let holder!: HTMLDivElement
+  // The sticky holder sits at the scroller's content start, which the transcript's padding offsets
+  // from the scrollport edge until it sticks; the canvas cancels whatever offset the holder has now.
+  const align = (el: HTMLElement, r = el.getBoundingClientRect()) => {
+    const hr = holder.getBoundingClientRect()
+    const rtl = getComputedStyle(el).direction === "rtl"
+    canvas.style.top = `${r.top + el.clientTop - hr.top}px`
+    canvas.style.left = `${rtl ? r.right - el.clientLeft - el.clientWidth - hr.left : r.left + el.clientLeft - hr.left}px`
+  }
   const place = () => {
     const el = props.transcript()
     if (!el) return
     if (holder.parentElement !== el) el.prepend(holder)
     // Sticky offset cancels the scroller's top padding so the canvas origin is the scrollport's top edge.
-    const cs = getComputedStyle(el)
-    holder.style.insetBlockStart = `-${parseFloat(cs.paddingBlockStart) || 0}px`
-    canvas.style.insetInlineStart = `-${parseFloat(cs.paddingInlineStart) || 0}px`
     const r = el.getBoundingClientRect()
+    align(el, r)
     const scale = Math.min(devicePixelRatio, 1.5)
     box.x = r.left; box.y = r.top; box.w = el.clientWidth; box.h = el.clientHeight; box.scale = scale
     canvas.style.width = `${box.w}px`
@@ -89,7 +95,10 @@ export const Filament = (props: {
     if (lastTs) { intervals.push(ts - lastTs); if (intervals.length > 180) intervals.shift() }
     const wall = lastTs ? Math.min(100, ts - lastTs) : 16
     lastTs = ts
-    if (dirty || !layout) layout = measure(el, canvas, current.nodes, GUTTER)
+    // Layout can settle after the ResizeObserver's last report (footer/composer reflow): re-place
+    // whenever the scrollport size the canvas was sized for no longer matches.
+    if (el.clientWidth !== box.w || el.clientHeight !== box.h) place()
+    if (dirty || !layout) { align(el); layout = measure(el, canvas, current.nodes, GUTTER) }
     dirty = false
     if (pendingDeltas.length) { scene.absorb(pendingDeltas, layout, ts); pendingDeltas = [] }
     const moving = scene.render(current, layout, { now: ts, wall, reduced, hidden: document.hidden })
@@ -158,6 +167,8 @@ export const Filament = (props: {
       // Canvas vs the transcript's content column: both are scroll content, so overscroll moves them together.
       attached: () => { const c = canvas.getBoundingClientRect(); const el = props.transcript()!; const i = el.querySelector(".transcript-inner")!.getBoundingClientRect(); return { canvasTop: c.top, innerTop: i.top, scrollTop: el.scrollTop, transcriptTop: el.getBoundingClientRect().top } },
       energy: () => scene?.energyNow() ?? 0,
+      debug: () => { const el = props.transcript()!; const cs = getComputedStyle(el); const r = (x: Element) => { const b = x.getBoundingClientRect(); return [b.left, b.top, b.width, b.height].map(Math.round) }
+        return { transcript: r(el), holder: r(holder), canvas: r(canvas), client: [el.clientLeft, el.clientTop, el.clientWidth, el.clientHeight], scroll: el.scrollTop, pad: [cs.paddingInlineStart, cs.paddingBlockStart], display: cs.display, holderParent: holder.parentElement === el, canvasStyle: [canvas.style.left, canvas.style.top, canvas.style.width, canvas.style.height] } },
     }
   })
 

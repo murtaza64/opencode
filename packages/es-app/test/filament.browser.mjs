@@ -52,9 +52,11 @@ try {
   const canvas = page.locator(".filament-canvas")
   await expect(canvas).toHaveCount(1)
   await expect(page.locator(".transcript")).toHaveAttribute("data-filament", "1")
+  // The composer footer settles a frame or two after first paint; the canvas follows via ResizeObserver.
+  const boxGap = async () => { const t = await page.locator(".transcript").boundingBox(); const c = await canvas.boundingBox(); return Math.max(...["x", "y", "width", "height"].map((k) => Math.abs(c[k] - t[k]))) }
+  await expect.poll(boxGap, { timeout: 3000 }).toBeLessThan(1.5)
   const transcriptBox = await page.locator(".transcript").boundingBox()
-  const canvasBox = await canvas.boundingBox()
-  for (const k of ["x", "y", "width", "height"]) expect(Math.abs(canvasBox[k] - transcriptBox[k])).toBeLessThan(1.5)
+  console.log("boxes", JSON.stringify({ transcriptBox, debug: await page.evaluate(() => window.__filament.debug()) }))
   // The canvas is scroll content (sticky), so it stays glued to the scrollport after scrolling too.
   await page.locator(".transcript").evaluate((el) => { el.scrollTop = 120 })
   await page.waitForTimeout(100)
@@ -84,7 +86,7 @@ try {
   // Attachment: whenever the content visibly bounced, the canvas moved by the same amount.
   expect(detached.length).toBe(0)
   const composerBox = await page.locator(".prompt-box textarea, .float-editor textarea").first().boundingBox()
-  expect(canvasBox.y + canvasBox.height).toBeLessThanOrEqual(composerBox.y + 1)
+  expect(transcriptBox.y + transcriptBox.height).toBeLessThanOrEqual(composerBox.y + 1)
   expect(await page.evaluate(() => getComputedStyle(document.querySelector(".transcript")).paddingInlineStart)).toBe("28px")
   const backend = await page.evaluate(() => window.__filament.backend())
   console.log("backend", JSON.stringify(backend))
