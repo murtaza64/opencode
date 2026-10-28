@@ -10,7 +10,9 @@ import { useBriefs } from "./desk-briefs"
 import { createTasks, deskTasksSupported, type TaskJob } from "./desk-tasks"
 import { getComposer } from "./composer"
 import { createDeskSession } from "./desk-session"
-import type { ContextPart } from "./api"
+import { es, type ContextPart } from "./api"
+import { followUps, readCases, visibleFollowUps, type DeskCase, type FollowUp } from "./desk-followups"
+import "./desk-followups.css"
 import { SessionView } from "./pages/session"
 import { ResizeHandle } from "./components/resize-handle"
 import { companionWidth, setCompanionDocked } from "./ui"
@@ -136,6 +138,7 @@ export const DeskCompanion = () => {
     style={{ "--companion-width": floating() ? undefined : `${companionWidth()}px` }}>
     <div class="desk-companion-in desk-chat">
       <Show when={chat.desk.error()}><div class="home-warning" role="alert">{chat.desk.error()}</div></Show>
+      <Show when={target()}>{(current) => <DeskFollowUps session={current().session} open={chat.open} />}</Show>
       <Show when={target()}>{(current) => <DeskTasks tasks={chat.tasks} session={current().session} directory={current().directory} followUps={supported() === true} />}</Show>
       <Show when={target()} keyed fallback={<DeskStart desk={chat.desk} directory={chat.directory()} />}>
         {(current) => <SessionView sessionID={current.session} directory={current.directory} embedded context={chat.context} onSent={chat.desk.sent}
@@ -176,3 +179,52 @@ const DeskTasks = (props: { tasks: ReturnType<typeof createTasks>; session: stri
     </li>}</For></ul>
   </div></Show>
 }
+
+// What the desk is waiting on: questions this conversation asked owners by mail, with delivery and the owner's
+// answer, read from each project's mail timeline. Display only; the desk itself follows up when an answer wakes it.
+const DeskFollowUps = (props: { session: string; open: () => boolean }) => {
+  const dashboard = useDashboard()
+  const [now, setNow] = createSignal(Date.now())
+  const [tick, setTick] = createSignal(0)
+  // Mail events refresh the list; the 30 s fallback runs only while the chat is open.
+  createEffect(() => {
+    if (!props.open()) return
+    const timer = setInterval(() => { setNow(Date.now()); setTick(value => value + 1) }, 30_000)
+    onCleanup(() => clearInterval(timer))
+  })
+  const [items] = createResource(() => ({ session: props.session, names: dashboard.editspaces()?.editspaces.map(item => item.name) ?? [], tick: tick(), mail: dashboard.mailRevision() }),
+    async input => (await Promise.all(input.names.map(name => es.mail(name, { session: input.session }).then(timeline => followUps(timeline, input.session), () => [] as FollowUp[])))).flat())
+  const view = () => visibleFollowUps(items.latest ?? [], now())
+  const [cases] = createResource(() => [tick(), dashboard.mailRevision()] as const, () => readCases().catch(() => [] as DeskCase[]))
+  const open = () => (cases.latest ?? []).filter(item => item.intents.some(part => !["done", "withdrawn"].includes(part.state ?? "")))
+  const state = (item: FollowUp) => item.answer ? "answered" : ({ unknown: "delivery unknown", delivered: "delivered", seen: "seen by owner", failed: "not delivered" } as const)[item.delivery]
+  return <Show when={view().shown.length || view().earlier.length || open().length}><section class="desk-followups ds-section" aria-label="Waiting on">
+    <h3 class="ds-section-heading">Waiting on</h3>
+    {/* Each open case: its parts with their current owner and state, and deliverables that were read back. */}
+    <For each={open()}>{item => <div class="desk-case" data-case={item.case_id}>
+      <p class="desk-case-title"><bdi dir="auto">{item.title || item.case_id}</bdi></p>
+      <ul><For each={item.intents}>{part => <li data-state={part.state ?? "requested"}>
+        <span class="ds-status" data-tone={["delivered", "done"].includes(part.state ?? "") ? "ok" : part.state === "waiting" ? "warn" : "active"}>
+          <span class="ds-status-glyph" aria-hidden="true">{["delivered", "done"].includes(part.state ?? "") ? "✓" : "…"}</span>
+          <span><bdi dir="auto">{part.id}</bdi> · {part.state ?? "requested"}</span>
+        </span>
+        <span class="desk-followup-meta">{part.owner ? <bdi dir="ltr">{[part.owner.lane, part.owner.editspace, part.owner.host].filter(Boolean).join(" · ")}</bdi> : "no owner yet"}<Show when={part.next}> · next: <bdi dir="auto">{part.next}</bdi></Show></span>
+      </li>}</For></ul>
+      <Show when={item.deliverables.length}><p class="desk-followup-meta"><For each={item.deliverables}>{(deliverable, index) => <>{index() ? " · " : ""}<Show when={deliverable.ref && /^https?:\/\//.test(deliverable.ref)} fallback={<bdi dir="auto">{deliverable.label}</bdi>}>
+        <a href={deliverable.ref} target="_blank" rel="noopener noreferrer"><bdi dir="auto">{deliverable.label}</bdi></a></Show>{deliverable.read_back ? "" : " (not read back yet)"}</>}</For></p></Show>
+    </div>}</For>
+    <ul><For each={view().shown}>{item => <FollowUpRow item={item} state={state(item)} />}</For></ul>
+    {/* Older answers are counted and one tap away, never silently dropped. */}
+    <Show when={view().earlier.length}><details class="desk-followups-earlier"><summary>{view().earlier.length} earlier answered</summary>
+      <ul><For each={view().earlier}>{item => <FollowUpRow item={item} state={state(item)} />}</For></ul></details></Show>
+  </section></Show>
+}
+
+const FollowUpRow = (props: { item: FollowUp; state: string }) =>
+  <li data-state={props.item.answer ? "answered" : props.item.delivery}>
+    <span class="ds-status" data-tone={props.item.answer ? "ok" : props.item.delivery === "failed" ? "risk" : props.item.delivery === "unknown" ? "unknown" : "active"}>
+      <span class="ds-status-glyph" aria-hidden="true">{props.item.answer ? "✓" : props.item.delivery === "failed" ? "✕" : props.item.delivery === "unknown" ? "?" : "…"}</span>
+      <span><bdi dir="auto">{props.item.owner}</bdi> · <bdi dir="auto">{props.item.text.slice(0, 90)}</bdi></span>
+    </span>
+    <span class="desk-followup-meta">{props.state} · asked {ago(props.item.asked)}<Show when={props.item.answer}>{answer => <> · answered {ago(answer().at)}</>}</Show> · <bdi dir="ltr">{props.item.editspace}:{props.item.answer?.id ?? props.item.id}</bdi></span>
+  </li>

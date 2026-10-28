@@ -1,6 +1,7 @@
 /* Front desk: one conversation across connected projects, a read-only queue of
  * existing requests, and an evidence canvas only while an item is selected.
  * The chat is the ordinary session view; selection changes never remount it. */
+import { caseLines, readCases } from "../desk-followups"
 import { createEffect, createMemo, createResource, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
 import { A, Navigate, useSearchParams } from "@solidjs/router"
 import { ago, sessionHref, useDashboard } from "../state"
@@ -181,6 +182,11 @@ export default function Desk() {
     onCleanup(() => clearTimeout(timer))
   }))
   const jobsFor = (key: string) => briefs.jobs().filter(job => job.meta.source === key)
+  // The desk's durable cases go into its context on the next send that changes them; re-read on mail and every minute.
+  const [caseTick, setCaseTick] = createSignal(0)
+  const caseTimer = setInterval(() => setCaseTick(value => value + 1), 60_000)
+  onCleanup(() => clearInterval(caseTimer))
+  const [cases] = createResource(() => [caseTick(), dashboard.mailRevision()] as const, () => readCases().catch(() => []))
   const contextInput = () => ({
     now: Date.now(),
     scope: project(),
@@ -191,6 +197,7 @@ export default function Desk() {
       .flatMap(job => job.state.state === "starting" || job.state.state === "unconfirmed" ? [] : [{ meta: job.meta, state: job.state }]),
     memory: memory.document(),
     surface: (() => { const id = selectedSurface(); const surface = surfaces.list().find(item => item.id === id); return surface && { id: surface.id, title: surface.title, owner: surface.owner } })(),
+    cases: caseLines(cases.latest ?? []),
   })
   const context = () => desk.context(contextInput())
 
