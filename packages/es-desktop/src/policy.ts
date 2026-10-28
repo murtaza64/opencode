@@ -124,12 +124,13 @@ export const appRouteURL = (value: string, origin: string) => {
 }
 
 // Work view reads of another host through this laptop's listener (/hosts/<id>/...): its session
-// list and statuses, one session's record, messages and todos (read-only view in the Local window),
+// list and statuses, handoff lineage and lane owners (so a pin follows a handoff on that host), one
+// session's record, messages and todos (read-only view in the Local window),
 // daily usage rollup (the Today total), editspace names and open-decision list (which the dashboard serves without an operator).
 // Everything else about that host, answering and operator sessions included, stays on its own tab,
 // origin and operator cookie.
 export const hostApiAllowed = (method: string, pathname: string) =>
-  ["GET", "HEAD"].includes(method) && (/^\/es\/api\/handoffs\/self\/[A-Za-z0-9_-]{1,128}$/.test(pathname) || /^\/(?:oc\/experimental\/(?:session|usage\/daily|capabilities)|oc\/session\/status|oc\/session\/[\w-]+(?:\/todo|\/message(?:\/[\w-]+)?|\/input\/[\w-]+)?|oc\/(?:permission|question)|es\/api\/(?:editspaces|attention|attention\/session|attention\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|pins|pins\/events))$/.test(pathname))
+  ["GET", "HEAD"].includes(method) && (/^\/es\/api\/handoffs\/self\/[A-Za-z0-9_-]{1,128}$/.test(pathname) || /^\/(?:oc\/experimental\/(?:session|usage\/daily|capabilities)|oc\/session\/status|oc\/session\/[\w-]+(?:\/todo|\/message(?:\/[\w-]+)?|\/input\/[\w-]+)?|oc\/(?:permission|question)|es\/api\/(?:editspaces|state|handoffs|attention|attention\/session|attention\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|pins|pins\/events))$/.test(pathname))
 
 // One shared pin's ref in a single path segment, as the browser sends it (a lane's slash encoded once).
 const PIN_REF = "(?:session:[A-Za-z0-9_-]{1,128}|lane:[A-Za-z0-9._-]{1,64}%2[Ff][A-Za-z0-9._-]{1,64})"

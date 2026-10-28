@@ -273,6 +273,11 @@ test("the local listener reads another host's session list with no credential an
     expect(await (await get(`/hosts/mini${pathname}?directory=%2Fr`)).json()).toMatchObject({ host: "mini", path: pathname.slice(3) })
     expect(mini.seen.at(-1)).toEqual({ path: pathname.slice(3), cookie: null, authorization: null, origin: null })
   }
+  // Another host's handoff lineage and lane owners are read the same way, so a pin follows a handoff there.
+  for (const pathname of ["/es/api/handoffs", "/es/api/state"]) {
+    expect(await (await get(`/hosts/mini${pathname}?es=opencode`)).json()).toMatchObject({ host: "mini", path: pathname })
+    expect(mini.seen.at(-1)).toEqual({ path: pathname, cookie: null, authorization: null, origin: null })
+  }
   // Another host's pins are listed and followed read-only, never written, from this window.
   expect(await (await get("/hosts/mini/es/api/pins?since=3")).json()).toMatchObject({ host: "mini", path: "/es/api/pins" })
   expect(mini.seen.at(-1)).toEqual({ path: "/es/api/pins", cookie: null, authorization: null, origin: null })
@@ -299,6 +304,7 @@ test("host-qualified routes expose list reads only: writes, other routes and unk
   expect((await get("/hosts/mini/es/api/attention", { method: "POST", body: "{}" })).status).toBe(403)
   expect((await get("/hosts/mini/oc/experimental/usage/daily", { method: "POST", body: "{}" })).status).toBe(403)
   for (const method of ["PUT", "DELETE"]) expect((await get("/hosts/mini/es/api/pins/session:ses_a", { method, body: "{}" })).status).toBe(403)
+  expect((await get("/hosts/mini/es/api/handoffs", { method: "POST", body: "{}" })).status).toBe(403)
   expect((await get("/hosts/mini/es/api/pins/session:ses_a/order", { method: "PATCH", body: "{}" })).status).toBe(403)
   expect((await get("/hosts/mini/oc/experimental/usage")).status).toBe(403)
   expect((await get("/hosts/mini/oc/experimental/usage/daily/raw")).status).toBe(403)
