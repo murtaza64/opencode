@@ -518,7 +518,8 @@ const esQ = (es?: string) => (es ? `es=${encodeURIComponent(es)}` : "")
 
 // Every session open mounts the right panel, which reads the editspace's tracker issue
 // and doc lists for reference matching. Reuse a recent read instead of refetching per open.
-const LIST_REUSE_MS = 30_000
+// Reference matching tolerates a few minutes of staleness; a tracker read costs Core 250 ms-1 s.
+const LIST_REUSE_MS = 5 * 60_000
 const recentLists = new Map<string, { at: number; value: Promise<unknown> }>()
 const reuseRecent = <T>(key: string, read: () => Promise<T>): Promise<T> => {
   const hit = recentLists.get(key)
