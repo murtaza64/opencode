@@ -3,7 +3,7 @@ import { mkdtemp, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { serve } from "./server"
-import { apiAllowed, appRouteURL, externalURL, internalURL, serviceOrigins, serviceURL, startupMode, startupPlan, surfaceFrameURL } from "./policy"
+import { apiAllowed, appRouteURL, externalURL, hostApiAllowed, hostWriteAllowed, internalURL, serviceOrigins, serviceURL, startupMode, startupPlan, surfaceFrameURL } from "./policy"
 import { readFile } from "node:fs/promises"
 
 const cleanup: (() => Promise<unknown>)[] = []
@@ -36,6 +36,17 @@ const setup = async () => {
         originBound: request.headers.get("origin") === url.origin,
         operatorCookieOnly: request.headers.get("cookie") === "es_attention_operator=synthetic",
         keyForwarded: request.headers.has("x-editspace-key"),
+      })
+      if (url.pathname === "/api/handoffs/self" || /^\/api\/handoffs\/self\/[\w-]+$/.test(url.pathname)) return Response.json({
+        method: request.method,
+        path: url.pathname,
+        query: url.search,
+        body: text,
+        originBound: request.headers.get("origin") === url.origin,
+        operatorCookieOnly: request.headers.get("cookie") === "es_attention_operator=synthetic",
+        csrf: request.headers.get("x-attention-csrf"),
+        keyForwarded: request.headers.has("x-editspace-key"),
+        authForwarded: request.headers.has("authorization"),
       })
       if (url.pathname.startsWith("/api/secret-intake/sih_SLOW")) return Response.json({ error: "uncertain" }, { status: 502 })
       if (url.pathname.startsWith("/api/secret-intake/")) return Response.json({
@@ -164,6 +175,14 @@ test("API surface excludes direct shell, PTY, file, and config access", () => {
   expect(apiAllowed("POST", "/oc/session")).toBe(true)
   expect(apiAllowed("PUT", "/oc/session")).toBe(false)
   expect(apiAllowed("POST", "/oc/session/ses_a/input")).toBe(true)
+  expect(apiAllowed("POST", "/es/api/handoffs/self")).toBe(true)
+  expect(apiAllowed("GET", "/es/api/handoffs/self/req_1")).toBe(true)
+  expect(apiAllowed("DELETE", "/es/api/handoffs/self/req_1")).toBe(true)
+  expect(apiAllowed("POST", "/es/api/handoffs/self/req_1")).toBe(false)
+  expect(apiAllowed("DELETE", "/es/api/handoffs/self")).toBe(false)
+  expect(hostApiAllowed("GET", "/es/api/handoffs/self/req_1")).toBe(true)
+  expect(hostWriteAllowed("POST", "/es/api/handoffs/self")).toBe(false)
+  expect(hostWriteAllowed("DELETE", "/es/api/handoffs/self/req_1")).toBe(false)
   expect(apiAllowed("DELETE", "/oc/session/ses_a/aside/request-1")).toBe(true)
   for (const pathname of ["/oc/pty", "/oc/session/ses_a/shell", "/oc/config", "/oc/file/content", "/es/api/run"])
     expect(apiAllowed("POST", pathname)).toBe(false)
@@ -406,6 +425,21 @@ test("pin writes reach this host's dashboard as operator writes, the lane ref st
   // Without the native origin a pin write never leaves the listener.
   expect((await get("/es/api/pins/session:ses_a", { method: "PUT", body: "{}" })).status).toBe(403)
   expect((await get("/es/api/pins/session:ses_a", { method: "PUT", body: "{}", headers: { origin: "https://evil.test" } })).status).toBe(403)
+})
+
+test("self-handoff POST and DELETE reach only this host's dashboard with operator cookie and bound origin", async () => {
+  const { server, get } = await setup()
+  const headers = { origin: server.origin, cookie: "unrelated=private; es_attention_operator=synthetic", authorization: "not-forwarded", "x-attention-csrf": "1", "content-type": "application/json" }
+  const post = await get("/es/api/handoffs/self?es=proj", { method: "POST", body: '{"lane":"work"}', headers })
+  expect(post.status).toBe(200)
+  expect(await post.json()).toEqual({ method: "POST", path: "/api/handoffs/self", query: "?es=proj", body: '{"lane":"work"}', originBound: true, operatorCookieOnly: true, csrf: "1", keyForwarded: false, authForwarded: false })
+  const remove = await get("/es/api/handoffs/self/click-1?es=proj", { method: "DELETE", body: "{}", headers })
+  expect(remove.status).toBe(200)
+  expect(await remove.json()).toEqual({ method: "DELETE", path: "/api/handoffs/self/click-1", query: "?es=proj", body: "{}", originBound: true, operatorCookieOnly: true, csrf: "1", keyForwarded: false, authForwarded: false })
+  for (const [method, pathname] of [["POST", "/es/api/handoffs/self"], ["DELETE", "/es/api/handoffs/self/click-1"]]) {
+    expect((await get(pathname, { method, body: "{}", headers: { ...headers, origin: "https://evil.test" } })).status).toBe(403)
+    expect((await get(pathname, { method, body: "{}", headers: { cookie: headers.cookie, "content-type": "application/json" } })).status).toBe(403)
+  }
 })
 
 test("only exact pin routes are exposed", () => {

@@ -4,7 +4,7 @@ import { createReadStream } from "node:fs"
 import { readFile, realpath, stat } from "node:fs/promises"
 import path from "node:path"
 import { randomBytes } from "node:crypto"
-import { apiAllowed, hostApiAllowed, hostAttention, hostWriteAllowed, serviceURL } from "./policy"
+import { apiAllowed, hostApiAllowed, hostAttention, hostWriteAllowed, selfHandoffRoute, serviceURL } from "./policy"
 import { cookieName, cookieValid, issueCookie, loopbackHost, pairingCsp, pairingMatches, pairingPage, remoteListenHost } from "./pairing"
 import { eventMux } from "../../es-app/event-mux"
 import { eventProtocol, eventPaths } from "../../es-app/event-protocol"
@@ -269,7 +269,7 @@ export const serve = async (options: {
     // paired-device listener never does.
     const secret = SECRET_INTAKE.test(url.pathname)
     if (secret && (remote || pairing)) return finish(403, "Secure fields are answered on the computer that asked")
-    const attention = attentionRoute.test(url.pathname) || secret
+    const attention = attentionRoute.test(url.pathname) || selfHandoffRoute.test(url.pathname) || secret
     const attachment = api?.[1] === "oc" && ATTACHMENT.test(url.pathname)
     if (attention && req.method !== "GET" && !trusted(req.headers.origin))
       return finish(403, "Attention writes require the native origin")

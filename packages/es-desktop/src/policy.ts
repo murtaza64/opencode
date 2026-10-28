@@ -129,10 +129,13 @@ export const appRouteURL = (value: string, origin: string) => {
 // Everything else about that host, answering and operator sessions included, stays on its own tab,
 // origin and operator cookie.
 export const hostApiAllowed = (method: string, pathname: string) =>
-  ["GET", "HEAD"].includes(method) && /^\/(?:oc\/experimental\/(?:session|usage\/daily|capabilities)|oc\/session\/status|oc\/session\/[\w-]+(?:\/todo|\/message(?:\/[\w-]+)?|\/input\/[\w-]+)?|oc\/(?:permission|question)|es\/api\/(?:editspaces|attention|attention\/session|attention\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|pins|pins\/events))$/.test(pathname)
+  ["GET", "HEAD"].includes(method) && (/^\/es\/api\/handoffs\/self\/[A-Za-z0-9_-]{1,128}$/.test(pathname) || /^\/(?:oc\/experimental\/(?:session|usage\/daily|capabilities)|oc\/session\/status|oc\/session\/[\w-]+(?:\/todo|\/message(?:\/[\w-]+)?|\/input\/[\w-]+)?|oc\/(?:permission|question)|es\/api\/(?:editspaces|attention|attention\/session|attention\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|pins|pins\/events))$/.test(pathname))
 
 // One shared pin's ref in a single path segment, as the browser sends it (a lane's slash encoded once).
 const PIN_REF = "(?:session:[A-Za-z0-9_-]{1,128}|lane:[A-Za-z0-9._-]{1,64}%2[Ff][A-Za-z0-9._-]{1,64})"
+const SELF_HANDOFF = /^\/es\/api\/handoffs\/self\/[A-Za-z0-9_-]{1,128}$/
+// Same operator-cookie boundary as attention writes, but never through /hosts/<id>/ writes.
+export const selfHandoffRoute = /^\/es\/api\/handoffs\/self(?:\/[A-Za-z0-9_-]{1,128})?$/
 
 // Writes to another Work host from this laptop's window (/hosts/<id>/...), Slice W (contract v0.2.1 §4):
 // the same session writes this listener allows on its own host (prompt/input admission, pending-input
@@ -164,6 +167,7 @@ export const apiAllowed = (method: string, pathname: string) => {
       // This host's Front desk model and one request's linked conversation (read-only).
       /^\/es\/api\/frontdesk\/(model|conversation)$/,
       /^\/es\/api\/wingman(?:\/transcript)?$/,
+      SELF_HANDOFF,
     ],
     POST: [
       /^\/oc\/session$/,
@@ -174,6 +178,7 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/oc\/(permission|question)\/[\w-]+\/(reply|reject)$/,
       /^\/es\/api\/(refresh|frontdesk|curate|(?:digest|brief)\/[^/]+)$/,
       /^\/es\/api\/handoffs$/,
+      /^\/es\/api\/handoffs\/self$/,
       /^\/es\/api\/frontdesk\/ignored-failures$/,
       /^\/es\/api\/frontdesk\/deliverables\/seen$/,
       // One masked decision field's single submission; the dashboard checks handle, operator, origin and scope.
@@ -184,7 +189,7 @@ export const apiAllowed = (method: string, pathname: string) => {
     ],
     PATCH: [/^\/oc\/session\/[\w-]+$/, /^\/oc\/session\/[\w-]+\/input\/[\w-]+$/, new RegExp(`^/es/api/pins/${PIN_REF}/order$`)],
     PUT: [/^\/es\/api\/(subscriptions|frontdesk\/memory)$/, new RegExp(`^/es/api/pins/${PIN_REF}$`)],
-    DELETE: [/^\/oc\/session\/[\w-]+(?:\/(input|aside)\/[\w-]+)?$/, /^\/es\/api\/subscriptions$/, new RegExp(`^/es/api/pins/${PIN_REF}$`)],
+    DELETE: [/^\/oc\/session\/[\w-]+(?:\/(input|aside)\/[\w-]+)?$/, /^\/es\/api\/subscriptions$/, new RegExp(`^/es/api/pins/${PIN_REF}$`), SELF_HANDOFF],
   }
   return routes[method]?.some((route) => route.test(pathname)) ?? false
 }
