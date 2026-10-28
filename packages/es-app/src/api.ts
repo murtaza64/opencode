@@ -516,6 +516,19 @@ export type WingmanTranscript = { owner?: string; status?: string; turns?: Wingm
 
 const esQ = (es?: string) => (es ? `es=${encodeURIComponent(es)}` : "")
 
+// Every session open mounts the right panel, which reads the editspace's tracker issue
+// and doc lists for reference matching. Reuse a recent read instead of refetching per open.
+const LIST_REUSE_MS = 30_000
+const recentLists = new Map<string, { at: number; value: Promise<unknown> }>()
+const reuseRecent = <T>(key: string, read: () => Promise<T>): Promise<T> => {
+  const hit = recentLists.get(key)
+  if (hit && Date.now() - hit.at < LIST_REUSE_MS) return hit.value as Promise<T>
+  const value = read()
+  recentLists.set(key, { at: Date.now(), value })
+  value.catch(() => recentLists.get(key)?.value === value && recentLists.delete(key))
+  return value
+}
+
 export interface SessionSearchResult {
   id: string
   title: string
@@ -630,11 +643,13 @@ export const es = {
   brief: (ticket: string, esName?: string): Promise<any> =>
     fetch(`/es/api/brief/${ticket}?force=true&${esQ(esName)}`, { method: "POST" }).then(json),
   // tickets + docs browser (read-only)
-  issues: (esName?: string): Promise<IssueList> => fetch(`/es/api/issues?${esQ(esName)}`).then(json<IssueList>),
+  issues: (esName?: string): Promise<IssueList> =>
+    reuseRecent(`issues\u0000${esName ?? ""}`, () => fetch(`/es/api/issues?${esQ(esName)}`).then(json<IssueList>)),
   issue: async (ref: string, esName?: string): Promise<IssueDetail> => {
     const { classifyRef, ticketLookupRef } = await import("./ticket-url")
     const ticket = classifyRef(ref)
-    const tracker = ticket.repo ? await es.issues(esName) : undefined
+    // Read tracker metadata fresh: a ticket lookup must match the tracker as it is now.
+    const tracker = ticket.repo ? await fetch(`/es/api/issues?${esQ(esName)}`).then(json<IssueList>) : undefined
     if (tracker?.error) throw new Error(tracker.error)
     const lookup = ticketLookupRef(ticket, tracker?.backend === "gh" ? tracker.repo : undefined)
     if (lookup === undefined) {
@@ -642,7 +657,8 @@ export const es = {
     }
     return fetch(`/es/api/issue?ref=${encodeURIComponent(lookup)}&${esQ(esName)}`).then(json<IssueDetail>)
   },
-  docs: (esName?: string): Promise<DocList> => fetch(`/es/api/docs?${esQ(esName)}`).then(json<DocList>),
+  docs: (esName?: string): Promise<DocList> =>
+    reuseRecent(`docs\u0000${esName ?? ""}`, () => fetch(`/es/api/docs?${esQ(esName)}`).then(json<DocList>)),
   doc: (source: string, path: string, variant?: string, esName?: string): Promise<DocContent> =>
     fetch(
       `/es/api/doc?source=${encodeURIComponent(source)}&path=${encodeURIComponent(path)}` +

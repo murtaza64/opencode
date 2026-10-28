@@ -243,3 +243,14 @@ test("the clipboard line is left out for unsafe SSH hosts, unusual paths and Win
   expect(pairingPage("", "C:\\Users\\m\\code", "win32", "excalibur")).not.toContain("pbcopy")
   expect(pairingPage("", file, "linux", "excalibur")).toContain("ssh -- excalibur &#39;cat -- /home/m/.local/state/editspace/remote-pairing-code&#39; | pbcopy")
 })
+
+test("a paired device reads a tool attachment with its cookie; it is sandboxed and never gets the cookie upstream", async () => {
+  const { server, pair } = await setup()
+  const cookie = cookieOf(await pair(code))
+  const route = "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0"
+  expect((await fetch(`${server.origin}${route}`)).status).toBe(401)
+  const response = await fetch(`${server.origin}${route}`, { headers: { cookie, "sec-fetch-site": "same-origin" } })
+  expect(await response.json()).toEqual({ method: "GET", path: "/session/ses_a/message/msg_b/part/prt_c/attachment/0", cookieForwarded: false })
+  expect(response.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'")
+  expect((await fetch(`${server.origin}${route}`, { headers: { cookie, "sec-fetch-site": "cross-site" } })).status).toBe(401)
+})
