@@ -195,9 +195,24 @@ try {
       await expect(card.locator(".home-request-line")).toContainText("Request: Worker CPU: authorize the read-only storage comparison?")
       const frame = card.locator(".desk-visual iframe")
       await expect(frame).toHaveAttribute("sandbox", "")
-      // The drawing gets the app's colour tokens, so it matches es-app.
+      // The drawing gets the app's colour tokens, so it matches es-app: its accent is the app accent token, whatever the theme.
+      const appAccent = () => page.evaluate(() => { const probe = document.body.appendChild(document.createElement("i")); probe.style.color = "var(--ds-accent, var(--accent))"; const value = getComputedStyle(probe).color; probe.remove(); return value })
+      const frameAccent = () => frame.contentFrame().locator("html").evaluate(element => { const probe = element.ownerDocument.createElement("i"); element.ownerDocument.body.append(probe); probe.style.color = "var(--accent)"; const value = getComputedStyle(probe).color; probe.remove(); return value })
       const srcdoc = await frame.getAttribute("srcdoc")
-      assert(srcdoc.includes("--fg:") && srcdoc.includes("--accent:#89b4fa") && srcdoc.includes("--surface:"), srcdoc.slice(0, 400))
+      assert(srcdoc.includes("--fg:") && srcdoc.includes("--accent:") && srcdoc.includes("--surface:"), srcdoc.slice(0, 400))
+      assert.equal(await frameAccent(), await appAccent())
+      // Accent and text stay readable (4.5:1) on the ground the drawing sits on.
+      const contrastOf = await card.evaluate(element => {
+        const rgb = value => value.match(/[\d.]+/g).map(Number)
+        const lum = ([r, g, b]) => [r, g, b].map(c => c / 255).map(c => c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4).reduce((sum, c, i) => sum + c * [0.2126, 0.7152, 0.0722][i], 0)
+        let back = element.querySelector(".desk-visual")
+        while (back && (rgb(getComputedStyle(back).backgroundColor)[3] ?? 1) === 0) back = back.parentElement
+        const ground = lum(rgb(getComputedStyle(back ?? document.body).backgroundColor))
+        const probe = (css) => { const node = document.body.appendChild(document.createElement("i")); node.style.color = css; const value = lum(rgb(getComputedStyle(node).color)); node.remove(); return value }
+        const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+        return { accent: ratio(probe("var(--ds-accent, var(--accent))"), ground), text: ratio(probe("var(--ds-text, var(--text))"), ground) }
+      })
+      assert(contrastOf.accent >= 4.5 && contrastOf.text >= 4.5, JSON.stringify(contrastOf))
       // Sized by its viewBox, at most 400 px wide; described for screen readers.
       await expect(frame).toHaveAttribute("style", /aspect-ratio: 1 \/ 0\.9555/)
       await expect(frame).toHaveAttribute("title", /Read-only stage data feeds six build runs/)
@@ -250,7 +265,8 @@ try {
       const frameBox1 = await frame.boundingBox()
       assert(Math.abs(frameBox1.width - frameBox0.width) < 1 && Math.abs(frameBox1.height - frameBox0.height) < 1, JSON.stringify({ frameBox0, frameBox1 }))
       await page.evaluate(() => document.getElementById("wal-palette")?.remove())
-      await expect.poll(() => frame.getAttribute("srcdoc")).toContain("--accent:#89b4fa")
+      // Back to the app's own accent token once the palette is removed.
+      await expect.poll(async () => await frameAccent() === await appAccent()).toBe(true)
       assert.equal(preview.ledger.calls.length, jobsBefore, "a palette switch makes no ledger or brief requests")
       console.log("PALETTE switch recolours the open drawing in place (roles, highlights, CVD-gated status), same size, back to app colours when removed")
 

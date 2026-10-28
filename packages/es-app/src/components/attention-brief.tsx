@@ -264,10 +264,10 @@ const FRAME_MARGIN = 8
 // colour-blind readers (`--wal-ok-risk-cvd-safe: 1`). Highlights fall back to the accent. Legacy HTML briefs
 // (contract 3) used older names, mapped to the same colours.
 // `ds`: the design-system role (appearance.css, "Design system v1") each name reads first, so drawings follow the same
-// theme as the app; `app` is the base it aliases, for builds before that block.
+// theme as the app; `app` is the base it aliases, for builds before that block. One accent: the app's own (ux-feel).
 const TOKENS: Record<string, { wal?: string; ds?: string; app: string; status?: boolean }> = {
   fg: { wal: "--wal-fg", ds: "--ds-text", app: "--text" }, muted: { wal: "--wal-muted", ds: "--ds-muted", app: "--subtext0" }, line: { wal: "--wal-line", app: "--overlay1" },
-  surface: { wal: "--wal-surface", ds: "--ds-raised", app: "--surface0" }, accent: { wal: "--wal-accent", ds: "--ds-accent", app: "--blue" },
+  surface: { wal: "--wal-surface", ds: "--ds-raised", app: "--surface0" }, accent: { wal: "--wal-accent", ds: "--ds-accent", app: "--accent" },
   ok: { wal: "--wal-ok", ds: "--ds-ok", app: "--green", status: true }, warn: { wal: "--wal-warn", ds: "--ds-warn", app: "--yellow", status: true }, risk: { wal: "--wal-risk", ds: "--ds-risk", app: "--red", status: true },
   bg: { wal: "--wal-bg", ds: "--ds-surface", app: "--base" }, panel: { wal: "--wal-surface", ds: "--ds-raised", app: "--surface0" }, text: { wal: "--wal-fg", ds: "--ds-text", app: "--text" },
   good: { wal: "--wal-ok", ds: "--ds-ok", app: "--green", status: true }, bad: { wal: "--wal-risk", ds: "--ds-risk", app: "--red", status: true },
