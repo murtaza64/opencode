@@ -19,7 +19,7 @@ const browser = await chromium.launch({ channel: "chrome", headless: true })
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
 await context.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
 const page = await context.newPage()
-const queue = page.getByRole("complementary", { name: "Desk queue" })
+const queue = page.getByRole("complementary", { name: "Decisions and inbox" })
 const row = title => queue.locator(".desk-items").first().locator(".desk-item").filter({ hasText: title })
 const refresh = () => page.getByRole("button", { name: "Refresh", exact: true }).click()
 try {

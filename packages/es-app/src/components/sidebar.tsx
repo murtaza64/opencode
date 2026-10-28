@@ -15,7 +15,7 @@ import { failureLabel } from "../session-failures"
 import { ringOnChange } from "../motion"
 import { Glyph, HostGlyph } from "./icons"
 import { hostRowKey, hostSessionHref, workRows, type HostFeed } from "../host-feed"
-import { ModeSwitch } from "./mode-switch"
+import { NavEntries } from "./mode-switch"
 import { TodayCost } from "./today-cost"
 
 /** Project scope, shared by both modes' sidebars. */
@@ -332,7 +332,7 @@ export default function Sidebar() {
           <Show when={!nativeHeader}><button class="mini-btn" title="expand sidebar (^h)" onClick={toggleLeft}>
             ⟩
           </button></Show>
-          <ModeSwitch compact />
+          <NavEntries compact />
           <NewSession compact />
           <Show when={allPinned().length || cloud.pins().length}>
             <div class="mini-pinned-heading" title="Pinned sessions" aria-label="Pinned sessions" />
@@ -345,17 +345,7 @@ export default function Sidebar() {
     >
       <nav class="sidebar" ref={setNavEl} style={{ width: `${leftWidth()}px` }}>
         <Show when={!nativeHeader}><div class="sidebar-top">{projectControls()}<TodayCost /></div></Show>
-        <ModeSwitch />
-        {/* The map is Agents mode's default page; sessions open beneath it. */}
-        <nav class="sidebar-actions" aria-label="Agents">
-          <A href="/agents" end activeClass="active" class="nav-item board-link">
-            <Glyph name="graph" />Agent map
-          </A>
-          <A href="/usage" end activeClass="active" class="nav-item usage-link">
-            <Glyph name="zap" />Usage
-          </A>
-          <NewSession />
-        </nav>
+        {/* Persistent nav (dotfiles#240): pinned agents first, then the permanent entries, then running agents. */}
         <Show when={!query().trim() && (allPinned().length || cloud.pins().length)}>
           <section class="pinned-section" aria-label="Pinned sessions">
             <div class="nav-heading">Pinned</div>
@@ -363,6 +353,10 @@ export default function Sidebar() {
             <For each={cloud.pins()}>{pin => <CloudNav pin={pin} />}</For>
           </section>
         </Show>
+        <NavEntries />
+        <nav class="sidebar-actions" aria-label="Agents">
+          <NewSession />
+        </nav>
         <CloudDiscovery />
         <Show when={notifications().length}>
           <div class="notification-section">

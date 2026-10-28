@@ -1,4 +1,4 @@
-// Front desk mode tab: an unread-style count of actionable Needs-you items, visible from Agents mode.
+// Decisions & inbox nav entry: an unread-style count of actionable Needs-you items, the same on every view.
 // Disposable in-memory fixture only. Run from packages/es-app: node test/mode-badge.browser.mjs
 import { createRequire } from "node:module"
 import { startAttentionPreview } from "./attention-preview.mjs"
@@ -22,23 +22,25 @@ await context.route("**/*", (route) => new URL(route.request().url()).origin ===
 const page = await context.newPage()
 const errors = []
 page.on("pageerror", (error) => errors.push(error.message))
-const modes = page.getByRole("navigation", { name: "Mode" })
-const deskTab = modes.getByRole("link", { name: /^Front desk/ })
-const badge = deskTab.locator(".mode-count")
-const toAgents = () => modes.getByRole("link", { name: "Agents" }).click()
-const queue = page.getByRole("complementary", { name: "Desk queue" })
+const modes = page.getByRole("navigation", { name: "Main" })
+const deskTab = modes.getByRole("link", { name: /^Decisions & inbox/ })
+const badge = deskTab.locator(".nav-count")
+const toAgents = () => modes.getByRole("link", { name: "Agent map" }).click()
+const queue = page.getByRole("complementary", { name: "Decisions and inbox" })
 // The first list is Needs you; History rows below use the same row style.
 const needs = (title) => queue.locator(".desk-items").first().locator(".desk-item", { hasText: title })
 const expectCount = async (count) => {
   await expect(badge).toHaveText(String(count))
-  await expect(deskTab).toHaveAttribute("aria-label", `Front desk, ${count} need${count === 1 ? "s" : ""} you`)
+  await expect(deskTab).toHaveAttribute("aria-label", `Decisions & inbox, ${count} need${count === 1 ? "s" : ""} you`)
 }
 try {
   // Two open decisions (fixture and other project) and one failure.
   await page.goto(`${preview.url}/agents`, { waitUntil: "domcontentloaded", timeout: 90_000 })
   await expect(modes).toBeVisible({ timeout: 90_000 })
   await expectCount(3)
-  const box = await badge.boundingBox()
+  // Measure once layout has settled (late web fonts shift the row); a font swap is not the count changing.
+  let box
+  await expect.poll(async () => { const previous = box; await page.waitForTimeout(250); box = await badge.boundingBox(); return previous?.y === box?.y }, { timeout: 10_000 }).toBe(true)
 
   // A new pending permission is counted once it is confirmed pending.
   fixture.permissions = [permission]
@@ -51,7 +53,7 @@ try {
   // decisions instead of dropping the count.
   preview.ledger.status = 503
   await deskTab.click()
-  await expect(badge).toHaveCount(0)
+  await expectCount(4)
   await queue.getByRole("button", { name: "Refresh", exact: true }).click()
   await expect(queue.locator(".desk-source:not([data-state=current])", { hasText: "Attention ledger" })).toBeVisible()
   await expect(queue.getByRole("heading", { name: "Needs you 4", exact: true })).toBeVisible()
@@ -96,8 +98,8 @@ try {
   await toAgents()
   await expectCount(1)
   await page.getByRole("button", { name: "Collapse sidebar" }).click()
-  await expect(modes.getByRole("link", { name: "Front desk, 1 needs you" })).toBeVisible()
-  await expect(modes.locator(".mode-count")).toHaveText("1")
+  await expect(modes.getByRole("link", { name: "Decisions & inbox, 1 needs you" })).toBeVisible()
+  await expect(modes.locator(".nav-count")).toHaveText("1")
 
   expect(errors).toEqual([])
   console.log("mode-badge: PASS")

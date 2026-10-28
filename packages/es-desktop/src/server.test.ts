@@ -37,6 +37,18 @@ const setup = async () => {
         operatorCookieOnly: request.headers.get("cookie") === "es_attention_operator=synthetic",
         keyForwarded: request.headers.has("x-editspace-key"),
       })
+      if (url.pathname.startsWith("/api/secret-intake/sih_SLOW")) return Response.json({ error: "uncertain" }, { status: 502 })
+      if (url.pathname.startsWith("/api/secret-intake/")) return Response.json({
+        method: request.method,
+        path: url.pathname,
+        query: url.search,
+        body: text,
+        originBound: request.headers.get("origin") === url.origin,
+        operatorCookieOnly: request.headers.get("cookie") === "es_attention_operator=synthetic",
+        csrf: request.headers.get("x-attention-csrf"),
+        keyForwarded: request.headers.has("x-editspace-key"),
+        authForwarded: request.headers.has("authorization"),
+      })
       if (url.searchParams.has("redirect")) return Response.redirect("http://127.0.0.1:4096", 302)
       if (url.pathname === "/event")
         return new Response(
@@ -316,6 +328,55 @@ test("binds attention to the validated native origin and forwards only its opera
   expect((await fetch(`${server.origin}/es/api/attention/session`, { method: "POST", body: "{}", headers: { origin: server.origin } })).status).toBe(403)
 })
 
+test("a secure decision field's one POST reaches the dashboard bound to its origin with only the operator cookie", async () => {
+  const { server, get } = await setup()
+  const path = "/es/api/secret-intake/sih_AAAAAAAAAAAAAAAAAAAAAA?es=alpha&record=r&revision=2&choice=provide"
+  const body = JSON.stringify({ values: { issuer: "user:CANARY-ISSUER", secret: "CANARY-SECRET" } })
+  const response = await get(path, {
+    method: "POST", body, headers: { origin: server.origin, cookie: "unrelated=private; es_attention_operator=synthetic", authorization: "not-forwarded", "x-attention-csrf": "1", "content-type": "application/json" },
+  })
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({ method: "POST", path: "/api/secret-intake/sih_AAAAAAAAAAAAAAAAAAAAAA", query: "?es=alpha&record=r&revision=2&choice=provide", body,
+    originBound: true, operatorCookieOnly: true, csrf: "1", keyForwarded: false, authForwarded: false })
+  expect((await get(path, { method: "POST", body, headers: { "content-type": "application/json" } })).status).toBe(403)
+  expect((await get(path, { method: "POST", body, headers: { origin: "https://evil.test", "content-type": "application/json" } })).status).toBe(403)
+  expect((await get(path)).status).toBe(403)
+})
+
+test("a secure field's handle never reaches the performance journal", async () => {
+  const { root, upstream } = await setup()
+  const perfDir = await mkdtemp(path.join(tmpdir(), "es-desktop-perf-"))
+  cleanup.push(() => rm(perfDir, { recursive: true, force: true }))
+  const server = await serve({ root, opencode: upstream.url.origin, dashboard: upstream.url.origin, perfDir })
+  cleanup.push(server.close)
+  const handle = "sih_SLOWAAAAAAAAAAAAAAAAAA"
+  const response = await fetch(`${server.origin}/es/api/secret-intake/${handle}?es=alpha`, {
+    method: "POST", body: "{}", headers: { "x-editspace-key": server.key, origin: server.origin, cookie: "es_attention_operator=synthetic", "content-type": "application/json", "x-attention-csrf": "1" },
+  })
+  expect(response.status).toBe(502)
+  await response.text()
+  let journal = ""
+  for (let attempt = 0; attempt < 40 && !journal; attempt++) {
+    await Bun.sleep(25)
+    journal = (await Promise.all([...new Bun.Glob("*.jsonl").scanSync(perfDir)].map(file => readFile(path.join(perfDir, file), "utf8")))).join("")
+  }
+  expect(journal).toContain('"route":"es/api/secret-intake/:handle"')
+  expect(journal).not.toContain(handle)
+})
+
+test("a remote host's listener never forwards a secure decision field", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "es-desktop-test-"))
+  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  await Bun.write(path.join(root, "index.html"), "<title>Fixture renderer</title>")
+  const server = await serve({ root, remote: { id: "mini", origin: "https://mini.example.ts.net" } })
+  cleanup.push(server.close)
+  const response = await fetch(`${server.origin}/es/api/secret-intake/sih_AAAAAAAAAAAAAAAAAAAAAA?es=alpha`, {
+    method: "POST", body: "{}", headers: { "x-editspace-key": server.key, origin: server.origin, "content-type": "application/json", "x-attention-csrf": "1" },
+  })
+  expect(response.status).toBe(403)
+  expect(await response.text()).toContain("answered on the computer that asked")
+})
+
 test("Front desk ignored failures and memory reach the dashboard with only the operator cookie", async () => {
   const { server, get } = await setup()
   const cookie = "unrelated=private; es_attention_operator=synthetic"
@@ -330,6 +391,35 @@ test("Front desk ignored failures and memory reach the dashboard with only the o
   expect(await memory.json()).toMatchObject({ method: "PUT", operatorCookieOnly: true })
   expect((await get("/es/api/frontdesk/ignored-failures", { method: "POST", body: "{}" })).status).toBe(403)
   expect((await get("/es/api/frontdesk/ignored-failures", { method: "POST", body: "{}", headers: { origin: "https://evil.test" } })).status).toBe(403)
+})
+
+test("pin writes reach this host's dashboard as operator writes, the lane ref still encoded once", async () => {
+  const { server, get } = await setup()
+  const cookie = "unrelated=private; es_attention_operator=synthetic"
+  const headers = { origin: server.origin, cookie, "x-attention-csrf": "1", "content-type": "application/json" }
+  const lane = await get("/es/api/pins/lane:opencode%2Forchestrator", { method: "PUT", body: '{"at":1,"op":"op-12345678"}', headers })
+  expect(await lane.json()).toMatchObject({ method: "PUT", path: "/api/pins/lane:opencode%2Forchestrator", body: '{"at":1,"op":"op-12345678"}' })
+  const order = await get("/es/api/pins/session:ses_a/order", { method: "PATCH", body: "{}", headers })
+  expect(await order.json()).toMatchObject({ method: "PATCH", path: "/api/pins/session:ses_a/order" })
+  const unpin = await get("/es/api/pins/session:ses_a", { method: "DELETE", body: "{}", headers })
+  expect(await unpin.json()).toMatchObject({ method: "DELETE", path: "/api/pins/session:ses_a" })
+  // Without the native origin a pin write never leaves the listener.
+  expect((await get("/es/api/pins/session:ses_a", { method: "PUT", body: "{}" })).status).toBe(403)
+  expect((await get("/es/api/pins/session:ses_a", { method: "PUT", body: "{}", headers: { origin: "https://evil.test" } })).status).toBe(403)
+})
+
+test("only exact pin routes are exposed", () => {
+  expect(apiAllowed("GET", "/es/api/pins")).toBe(true)
+  expect(apiAllowed("GET", "/es/api/pins/events")).toBe(true)
+  for (const method of ["PUT", "DELETE"]) {
+    expect(apiAllowed(method, "/es/api/pins/session:ses_a")).toBe(true)
+    expect(apiAllowed(method, "/es/api/pins/lane:opencode%2Forchestrator")).toBe(true)
+  }
+  expect(apiAllowed("PATCH", "/es/api/pins/lane:opencode%2forchestrator/order")).toBe(true)
+  for (const [method, pathname] of [
+    ["POST", "/es/api/pins"], ["PUT", "/es/api/pins"], ["GET", "/es/api/pins/session:ses_a"], ["PUT", "/es/api/pins/lane:opencode/orchestrator"],
+    ["PUT", "/es/api/pins/lane:a%252Fb"], ["PUT", "/es/api/pins/other:x"], ["PATCH", "/es/api/pins/session:ses_a"], ["PUT", "/es/api/pins/session:ses_a/order"],
+  ]) expect(apiAllowed(method, pathname)).toBe(false)
 })
 
 test("marking a requested deliverable seen reaches the dashboard with only the operator cookie", async () => {

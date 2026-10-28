@@ -43,7 +43,11 @@ const CapabilitiesResponse = Schema.Struct({
     /** `POST /session/:id/input/:requestID/deliver` interrupts the running turn to deliver steers. */
     interrupt: Schema.Literal(true),
     images: Schema.optionalKey(SessionV1.ImageCapabilities),
+    /** Selected context on `POST /session/:id/input` (`context` items), promoted as synthetic text parts. */
+    context: Schema.optionalKey(Schema.Literal(true)),
   }),
+  /** `prompt_async` with `noReply` records the message only: no turn starts or continues to answer it, busy or idle. */
+  noReplyRecordOnly: Schema.optionalKey(Schema.Literal(true)),
 }).annotate({ identifier: "ExperimentalCapabilities" })
 
 const ConsoleOrgOption = Schema.Struct({
@@ -186,10 +190,12 @@ export const UsageSessionsResponse = Schema.Struct({
   observedAt: Schema.String,
   offsetMinutes: Schema.Number,
   coverage: Schema.Struct({ since: Schema.String, backfilled: Schema.Boolean, liveSince: Schema.optional(Schema.String) }),
+  totals: Schema.Struct({ sessions: Schema.Number, pricedCost: Schema.Number, unpricedTokens: Schema.Number }),
   sessions: Schema.Array(
     Schema.Struct({
       sessionID: Schema.String,
       parentID: Schema.optional(Schema.String),
+      projectID: Schema.optional(Schema.String),
       title: Schema.optional(Schema.String),
       directory: Schema.optional(Schema.String),
       cost: Schema.NullOr(Schema.Number),

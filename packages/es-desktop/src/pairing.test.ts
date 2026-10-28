@@ -254,3 +254,13 @@ test("a paired device reads a tool attachment with its cookie; it is sandboxed a
   expect(response.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'")
   expect((await fetch(`${server.origin}${route}`, { headers: { cookie, "sec-fetch-site": "cross-site" } })).status).toBe(401)
 })
+
+test("a paired device writes its pins to this host with its page origin; never cross-site", async () => {
+  const { server, pair } = await setup()
+  const cookie = cookieOf(await pair(code))
+  const route = `${server.origin}/es/api/pins/lane:opencode%2Forchestrator`
+  const write = await fetch(route, { method: "PUT", headers: { cookie, origin: server.origin, "content-type": "application/json" }, body: '{"at":1,"op":"op-12345678"}' })
+  expect(await write.json()).toEqual({ method: "PUT", path: "/api/pins/lane:opencode%2Forchestrator", cookieForwarded: false })
+  expect((await fetch(route, { method: "PUT", headers: { cookie }, body: "{}" })).status).toBe(401)
+  expect((await fetch(route, { method: "PUT", headers: { cookie, origin: server.origin, "sec-fetch-site": "cross-site" }, body: "{}" })).status).toBe(401)
+})

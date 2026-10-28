@@ -29,17 +29,17 @@ const emitSource = (type, properties) => {
 }
 const record = () => page.locator('[data-attention-id="decision_1"]')
 const refresh = () => page.getByRole("button", { name: "Refresh", exact: true }).click()
-const queue = page.getByRole("complementary", { name: "Desk queue" })
+const queue = page.getByRole("complementary", { name: "Decisions and inbox" })
 const item = title => queue.locator(".desk-item").filter({ hasText: title })
 const history = queue.locator(".desk-history")
-const modes = page.getByRole("navigation", { name: "Mode" })
+const nav = page.getByRole("navigation", { name: "Main" })
 try {
-  // Front desk is home: "/" lists what needs you, and its queue replaces the session sidebar.
+  // Decisions & inbox is home: "/" lists what needs you beside the persistent nav.
   await page.goto(preview.url)
-  await expect(page.getByRole("heading", { name: "Front desk", exact: true })).toBeAttached()
+  await expect(page.getByRole("heading", { name: "Decisions & inbox", exact: true })).toBeAttached()
   await expect(queue.getByRole("heading", { name: "Needs you 3", exact: true })).toBeVisible()
   await expect(item("per_home").or(item("bun test")).or(item("bash ·"))).toHaveCount(1)
-  await expect(page.locator(".sidebar")).toHaveCount(0)
+  await expect(page.locator(".sidebar")).toHaveCount(1)
   expect(preview.fixture.calls.filter(call => call.path === "/api/mail")).toHaveLength(0)
   dashboardOffline = true
   preview.fixture.emitDashboard("state")
@@ -123,21 +123,24 @@ try {
   await expect(item("قرار التنفيذ")).toHaveCount(1)
   await page.setViewportSize({ width: 760, height: 1000 })
   expect(await page.locator("main.desk").evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
-  // Two modes: Agents opens on the map with the session sidebar; each mode returns to where the reader left it.
+  // Persistent nav: Agent map and Decisions & inbox are always one click away; Decisions returns to the
+  // selected item, and a session draft survives the round trip. Narrow windows open the chat as a sheet;
+  // close it to reach the queue.
+  if (await page.locator(".desk-companion.sheet:not(.closed)").count()) await page.locator('[data-nav="front-desk"]').click()
+  await expect(page.locator(".desk-companion.sheet:not(.closed)")).toHaveCount(0)
   await item("قرار التنفيذ").click()
   const deskURL = page.url()
-  await modes.getByRole("link", { name: "Agents", exact: true }).click()
+  await nav.getByRole("link", { name: "Agent map", exact: true }).click()
   await expect(page).toHaveURL(`${preview.url}/agents`)
   await page.locator(".sidebar .pinned-section").getByRole("link", { name: /^Composer fixture/ }).first().click()
-  await page.getByRole("textbox", { name: "Message", exact: true }).fill("Draft survives mode switches; do not send")
-  await page.getByRole("navigation", { name: "Mode" }).first().getByRole("link", { name: /^Front desk/ }).click()
+  await page.getByRole("textbox", { name: "Message", exact: true }).fill("Draft survives navigation; do not send")
+  await nav.getByRole("link", { name: /^Decisions & inbox/ }).click()
   await expect(page).toHaveURL(deskURL)
-  await expect(page.getByRole("heading", { name: "Front desk", exact: true })).toBeAttached()
+  await expect(page.getByRole("heading", { name: "Decisions & inbox", exact: true })).toBeAttached()
   await expect(page.locator(".desk-evidence")).toContainText("قرار التنفيذ")
-  await modes.getByRole("link", { name: "Agents", exact: true }).click()
-  await expect(page.getByRole("textbox", { name: "Message", exact: true })).toHaveValue("Draft survives mode switches; do not send")
-  // In its own mode, the Agents tab goes home to the map.
-  await page.getByRole("navigation", { name: "Mode" }).first().getByRole("link", { name: "Agents", exact: true }).click()
+  await page.locator(".sidebar .pinned-section").getByRole("link", { name: /^Composer fixture/ }).first().click()
+  await expect(page.getByRole("textbox", { name: "Message", exact: true })).toHaveValue("Draft survives navigation; do not send")
+  await nav.getByRole("link", { name: "Agent map", exact: true }).click()
   await expect(page).toHaveURL(`${preview.url}/agents`)
   // Old links: /map and /?view=agents land on Agents; /desk lands on the Front desk.
   await page.goto(`${preview.url}/map`)
@@ -147,7 +150,7 @@ try {
   // Old /desk links land on the Front desk at "/".
   await page.goto(`${preview.url}/desk`)
   await expect(page).toHaveURL(`${preview.url}/`)
-  await expect(page.getByRole("heading", { name: "Front desk", exact: true })).toBeAttached()
+  await expect(page.getByRole("heading", { name: "Decisions & inbox", exact: true })).toBeAttached()
   expect(preview.fixture.calls.filter(call => !["GET", "HEAD", "OPTIONS"].includes(call.method))).toEqual([])
   expect(errors).toEqual([])
   preview.ledger.operator = false
@@ -160,5 +163,5 @@ try {
   await readOnly.locator(".desk-item").filter({ hasText: "قرار التنفيذ" }).click()
   await expect(readOnly.locator(".home-decision").first().getByRole("button", { name: "Send answer" })).toBeDisabled()
   await readOnly.close()
-  console.log("PASS attention on Front desk: explicit choices/CAS/ambiguous retry, not-sent/resolved/snoozed history, partial/offline sources, exact source disappearance, two modes with per-mode return, no generated fleet summaries, RTL/mixed text, session/draft navigation, /desk redirect, no runtime writes")
+  console.log("PASS attention on Front desk: explicit choices/CAS/ambiguous retry, not-sent/resolved/snoozed history, partial/offline sources, exact source disappearance, persistent nav with return to the selected item, no generated fleet summaries, RTL/mixed text, session/draft navigation, /desk redirect, no runtime writes")
 } finally { await browser.close(); await preview.close() }

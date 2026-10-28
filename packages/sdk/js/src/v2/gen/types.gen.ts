@@ -282,6 +282,7 @@ export type UserMessage = {
   tools?: {
     [key: string]: boolean
   }
+  noReply?: boolean
 }
 
 export type ProviderAuthError = {
@@ -2341,7 +2342,9 @@ export type ExperimentalCapabilities = {
       animated: false
       compressedMetadata: false
     }
+    context?: true
   }
+  noReplyRecordOnly?: true
 }
 
 export type UsageDaily = {
@@ -2435,9 +2438,15 @@ export type UsageSessions = {
     backfilled: boolean
     liveSince?: string
   }
+  totals: {
+    sessions: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    pricedCost: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    unpricedTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }
   sessions: Array<{
     sessionID: string
     parentID?: string
+    projectID?: string
     title?: string
     directory?: string
     cost: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"

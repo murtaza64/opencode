@@ -45,6 +45,8 @@ const attachmentHeaders = (headers: IncomingHttpHeaders) => {
   }
 }
 
+const SECRET_INTAKE = /^\/es\/api\/secret-intake\/[\w-]+$/
+
 const proxyHeaders = (headers: IncomingHttpHeaders) =>
   Object.fromEntries(
     Object.entries(headers).filter(
@@ -244,7 +246,12 @@ export const serve = async (options: {
     }
     const api = /^\/(oc|es)(\/|$)/.exec(url.pathname)
     if (api && !apiAllowed(req.method ?? "", url.pathname)) return finish(403, "API route not exposed")
-    const attention = attentionRoute.test(url.pathname)
+    // A secure decision field (dotfiles docs/es-secret-intake.md) is answered only on the computer that asked:
+    // the native Local listener forwards it like an attention write; a remote host's listener or a
+    // paired-device listener never does.
+    const secret = SECRET_INTAKE.test(url.pathname)
+    if (secret && (remote || pairing)) return finish(403, "Secure fields are answered on the computer that asked")
+    const attention = attentionRoute.test(url.pathname) || secret
     const attachment = api?.[1] === "oc" && ATTACHMENT.test(url.pathname)
     if (attention && req.method !== "GET" && !trusted(req.headers.origin))
       return finish(403, "Attention writes require the native origin")
@@ -287,7 +294,8 @@ export const serve = async (options: {
         const kept = values?.filter(value => value.startsWith("es_attention_operator="))
         return kept?.length ? kept : undefined
       }
-      const timing = api ? perf?.proxy(req, res, `${api[1]}${routeOf(url.pathname.slice(api[1].length + 1))}`) : undefined
+      // A secure field's handle stays out of the performance journal.
+      const timing = api ? perf?.proxy(req, res, secret ? "es/api/secret-intake/:handle" : `${api[1]}${routeOf(url.pathname.slice(api[1].length + 1))}`) : undefined
       if (timing) res.on("close", () => timing.done())
       // Concatenate the path rather than resolving it: //host must never switch upstreams.
       const upstream = (target.startsWith("https:") ? httpsRequest : httpRequest)(

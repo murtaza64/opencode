@@ -195,7 +195,7 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
   .desk-evidence .home-answer .home-actions { justify-content: flex-end; }
   .desk-evidence :is(p, li, dd, .desk-brief-why) { max-inline-size: 68ch; }
 }
-@container desk-content (min-width: 1100px) {
+@container desk-content (min-width: 800px) {
   /* The explainer (question, context, picture) at inline-start; the options and Send at inline-end. */
   .desk-evidence .home-decision { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); grid-template-rows: auto auto auto 1fr; column-gap: 28px; }
   .home-decision-head { grid-column: 1 / -1; }

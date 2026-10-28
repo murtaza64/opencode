@@ -152,16 +152,27 @@ try {
   await expect(page.getByRole("link", { name: "Open on Mac Mini to reply" })).toHaveAttribute("href", `${mini}/session/ses_a?directory=${encodeURIComponent(miniRoot)}`)
   await page.getByRole("link", { name: "Open on Mac Mini to reply" }).click()
   await expect.poll(() => opened.at(-1)).toBe(`${mini}/session/ses_a?directory=${encodeURIComponent(miniRoot)}`)
+  // The Mini is down when the page loads: its last-seen rows from this profile are listed, marked unreachable.
+  await page.goto(preview.url)
+  await expect(page.getByRole("link", { name: /^Mini copy of a, on Mac Mini$/ })).toBeVisible()
+  miniDown = true
+  await page.reload()
+  await expect(page.locator(".host-status", { hasText: "Mac Mini" })).toContainText(/unreachable since/)
+  await expect(page.getByRole("link", { name: /^Mini copy of a, on Mac Mini, unavailable$/ })).toBeVisible()
+  expect(await page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem("host:mini:es-app-work-rows")).rows[0]).sort())).toEqual(["directory", "id", "title", "updated"])
+  miniDown = false
   // This host's Core is down: it shows as unavailable (not empty), and the Mini's rows are unaffected.
   await page.route(/\/(oc|es)\//, (route) => new URL(route.request().url()).pathname.startsWith("/hosts/") ? route.fallback() : route.fulfill({ status: 503, body: "down" }))
   await page.goto(preview.url)
   await expect(page.locator(".host-status", { hasText: "Local" })).toContainText(/unavailable/, { timeout: 20000 })
   await expect(page.getByRole("link", { name: /^Mini copy of a, on Mac Mini$/ })).toBeVisible()
+  // ...and this host's own last-seen rows are listed instead of an empty list.
+  await expect(rows.filter({ hasText: "Composer fixture" })).toHaveCount(1)
   await page.unroute(/\/(oc|es)\//)
   // The only local write is Front desk's own operator sign-in on this host; nothing is written through /hosts/*.
   expect(preview.fixture.calls.filter((call) => !["GET", "HEAD", "OPTIONS"].includes(call.method) && call.path !== "/api/attention/session")).toEqual([])
   expect(hostWrites).toEqual([])
-  console.log(`PASS work view: two hosts listed apart (same id), offline host shown unreachable, Mini default create without fallback, draft carried to the Mini page, host-keyed pins, Mini decisions listed in Needs you and opened on the Mini desk, Mini row read-only here through /hosts/mini with reply on its own listener, Local Core down shows Local unavailable with Mini rows intact; host reads mini=${hostReads.mini} wing=${hostReads.wing}; zero host writes, no local mutations beyond this desk's operator sign-in`)
+  console.log(`PASS work view: two hosts listed apart (same id), offline host shown unreachable, Mini default create without fallback, draft carried to the Mini page, host-keyed pins, Mini decisions listed in Needs you and opened on the Mini desk, Mini row read-only here through /hosts/mini with reply on its own listener, reload with the Mini or Local down keeps their last-seen rows marked unavailable; host reads mini=${hostReads.mini} wing=${hostReads.wing}; zero host writes, no local mutations beyond this desk's operator sign-in`)
 } finally {
   await browser.close()
   await preview.close()

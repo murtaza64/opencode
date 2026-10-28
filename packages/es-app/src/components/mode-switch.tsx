@@ -8,6 +8,7 @@ import { Glyph } from "./icons"
 import { useDeskQueue } from "../desk-queue"
 import { BackendStatus } from "./backend-status"
 import { HostSwitch } from "./host-switch"
+import { useDeskChat } from "../desk-companion"
 import { useDashboard } from "../state"
 import { deskSessionID } from "../desk-session"
 
@@ -57,6 +58,46 @@ export const ModeSwitch = (props: { compact?: boolean }) => {
       <Show when={props.compact} fallback="Agents"><Glyph name="graph" /></Show>
     </A>
     {/* The mode switch is on every page, so it carries the one app-wide background-read status. */}
+    <BackendStatus />
+    <HostSwitch compact={props.compact} />
+  </nav>
+}
+
+/** Permanent entries of the persistent left nav: Decisions & inbox and Agent map open views; Front desk
+ * toggles the chat companion beside whatever is open. Replaces the two-mode switch. */
+export const NavEntries = (props: { compact?: boolean }) => {
+  const location = useLocation()
+  const queue = useDeskQueue()
+  const { activity } = useDashboard()
+  const chat = useDeskChat()
+  const deskBusy = () => {
+    const pointer = chat.desk.status() === "ready" ? chat.desk.pointer() : undefined
+    const status = pointer ? activity.status(pointer.session) : undefined
+    return status === "busy" || status === "retry"
+  }
+  const onDecisions = () => location.pathname === "/"
+  const href = () => { location.pathname; return onDecisions() ? HOME.desk : sessionStorage.getItem(KEY.desk) ?? HOME.desk }
+  const delivered = () => queue.surfaces.deliverables().fresh.length
+  const waiting = () => queue.items().length + delivered()
+  const label = () => [queue.items().length ? `${queue.items().length} need${queue.items().length === 1 ? "s" : ""} you` : "",
+    delivered() ? `${delivered()} new deliverable${delivered() === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ")
+  return <nav class="nav-entries" classList={{ compact: props.compact }} aria-label="Main">
+    <A href={href()} class="nav-item nav-entry" classList={{ active: onDecisions() }} aria-current={onDecisions() ? "page" : undefined} title="Decisions & inbox"
+      aria-label={waiting() ? `Decisions & inbox, ${label()}` : "Decisions & inbox"}>
+      <Glyph name="inbox" /><Show when={!props.compact}><span class="nav-title">Decisions & inbox</span></Show>
+      <Show when={waiting()}><span class="mode-count nav-count" aria-hidden="true">{waiting() > 99 ? "99+" : waiting()}</span></Show>
+    </A>
+    <A href="/agents" end class="nav-item nav-entry" activeClass="active" title="Agent map" aria-label="Agent map">
+      <Glyph name="graph" /><Show when={!props.compact}><span class="nav-title">Agent map</span></Show>
+    </A>
+    <A href="/usage" end class="nav-item nav-entry usage-link" activeClass="active" title="Usage" aria-label="Usage">
+      <Glyph name="zap" /><Show when={!props.compact}><span class="nav-title">Usage</span></Show>
+    </A>
+    <button type="button" class="nav-item nav-entry" data-nav="front-desk" aria-pressed={chat.open()} title={chat.open() ? "Hide Front desk chat" : "Show Front desk chat"}
+      aria-label="Front desk chat" onClick={() => chat.setOpen(!chat.open())}>
+      <Glyph name="comment-discussion" /><Show when={!props.compact}><span class="nav-title">Front desk</span></Show>
+      <Show when={deskBusy()}><span class="dot busy nav-busy" role="status" aria-label="Front desk is working" title="Front desk is working" /></Show>
+    </button>
     <BackendStatus />
     <HostSwitch compact={props.compact} />
   </nav>

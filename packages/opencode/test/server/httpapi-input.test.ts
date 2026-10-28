@@ -229,7 +229,8 @@ it.instance("admits an invisible durable input and reconciles retries and cancel
     const caps = yield* requestInDirectory("/experimental/capabilities", instance.directory)
     expect(yield* caps.json).toMatchObject({
       sessionAside: { version: 1, cancel: true },
-      sessionInput: { version: 1, delivery: ["queue", "steer"], list: true, cancel: true, interrupt: true },
+      sessionInput: { version: 1, delivery: ["queue", "steer"], list: true, cancel: true, interrupt: true, context: true },
+      noReplyRecordOnly: true,
     })
   }),
 )

@@ -36,7 +36,7 @@ await page.route(/\/(oc|es\/api)\//, route => {
   return route.continue()
 })
 
-const queue = page.getByRole("complementary", { name: "Desk queue" })
+const queue = page.getByRole("complementary", { name: "Decisions and inbox" })
 const indicator = page.locator(".backend-status")
 const warnings = page.locator(".home-warning, .err, [role=alert]")
 const box = async locator => { const value = await locator.boundingBox(); return value && [value.x, value.y, value.width, value.height].map(Math.round) }
@@ -49,7 +49,7 @@ try {
   const healthy = await heading.textContent()
   await expect(indicator.locator("button")).toHaveCount(0)
   await page.evaluate(() => document.fonts.ready)
-  const header = await box(page.locator(".mode-switch").first())
+  const header = await box(page.locator("nav.nav-entries"))
   const queueBox = await box(queue)
   const headingBox = await box(heading)
   const healthyWarnings = await warnings.count()
@@ -64,7 +64,7 @@ try {
   expect(await warnings.count()).toBe(healthyWarnings)
   await expect(page.locator("main")).not.toContainText(/https?:\/\/|\{"|HTTP 502/)
   await expect(heading).toHaveText(healthy)
-  expect(await box(page.locator(".mode-switch").first())).toEqual(header)
+  expect(await box(page.locator("nav.nav-entries"))).toEqual(header)
   expect(await box(queue)).toEqual(queueBox)
   expect(await box(heading)).toEqual(headingBox)
   // Detail is one click away, out of flow, sanitized.

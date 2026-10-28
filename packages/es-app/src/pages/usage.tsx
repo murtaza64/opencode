@@ -1,15 +1,22 @@
-/* Estimated spend on this host, per local day and model, from Core's usage rollup (COST-01 U1).
- * One read on open; re-read only when the tab returns after a minute away, or on Refresh. No polling.
+/* Estimated spend on this host, per local day and model, from Core's usage rollup (COST-01 U1, Usage v2).
+ * One 30-day read on open serves Today, the 7/30-day trend and the model table; re-read only when the tab
+ * returns after a minute away, or on Refresh. No polling.
  * Each host is its own origin, so this page covers this host only and says so: never a global total. */
-import { createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js"
-import { oc, type UsageDaily, type UsageLimit, type UsageTokens } from "../api"
+import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js"
+import { oc, type UsageDaily, type UsageLimit, type UsageSessions, type UsageTokens } from "../api"
+import { seriesColor, short, STATE_LABEL, UsageChart } from "../components/usage-chart"
+import { buildTrend, groupByDirectory, OTHER, unpricedModel, type Trend } from "../usage-trend"
 import { AppHeader } from "../components/native-header"
 import { host, readHost } from "../host"
 import { unpriced } from "../today-cost"
 import "./home.css"
 import "./usage.css"
 
-const DAYS = 7
+const DAYS = 30
+const WINDOWS = [7, 30] as const
+const SESSION_LIMIT = 200
+const SHOWN = 20
+const REVIEW = "Cost review: cost-report/index.html in lane sheep-review"
 const STALE_MS = 60_000
 
 export default function UsagePage() {
@@ -55,7 +62,7 @@ const Report = (props: { usage: UsageDaily; host: string; refresh: () => void; l
     <section aria-label="By model">
       <h3>By model, today</h3>
       <Show when={today()?.models.length} fallback={<p class="home-muted">No model usage recorded today.</p>}>
-        <table class="usage-table">
+        <table class="usage-table" data-usage-today-table>
           <thead><tr><th scope="col">Model</th><th scope="col">Tokens in / out</th><th scope="col">Estimate</th></tr></thead>
           <tbody>
             <For each={today()!.models.filter((model) => model.coverage !== "no-usage").toSorted((a, b) => (b.cost ?? 0) - (a.cost ?? 0))}>{(model) => <tr>
@@ -68,16 +75,7 @@ const Report = (props: { usage: UsageDaily; host: string; refresh: () => void; l
         </table>
       </Show>
     </section>
-    <section aria-label="Last 7 days">
-      <h3>Last {props.usage.days.length} days</h3>
-      <ol class="usage-days">
-        <For each={props.usage.days}>{(day, index) => <li>
-          <span>{index() === 0 ? "Today" : weekday(day.day)}</span>
-          <span>{day.cost == null ? (day.models.length ? "not priced" : "none") : money(day.cost)}{day.cost != null && day.models.some(missingPrice) ? " + unpriced" : ""}{day.complete === false ? " · incomplete" : ""}</span>
-        </li>}</For>
-      </ol>
-      <Show when={!props.usage.coverage.backfilled}><p class="home-muted">Days before {props.usage.coverage.liveSince ? clock(props.usage.coverage.liveSince) : "this Core started"} may be missing.</p></Show>
-    </section>
+    <TrendSection usage={props.usage} />
     <Show when={props.usage.rateLimits.providers.length}>
       <section aria-label="Rate limits">
         <h3>Provider rate limits</h3>
@@ -100,6 +98,132 @@ const inputTokens = (tokens: UsageTokens) => tokens.input + tokens.cache.read + 
 const money = (value: number) => value > 0 && value < 0.01 ? "<$0.01" : new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(value)
 const count = (value: number) => new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(value)
 const clock = (iso: string) => { const at = Date.parse(iso); return Number.isFinite(at) ? new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "unknown time" }
+const tick = (day: string, window: number) => new Date(`${day}T12:00:00`).toLocaleDateString([], window <= 7 ? { weekday: "short" } : { month: "short", day: "numeric" })
 const weekday = (day: string) => new Date(`${day}T12:00:00`).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })
 const limit = (name: string, value?: UsageLimit) => value?.remaining !== undefined
   ? `${value.remaining.toLocaleString()}${value.limit !== undefined ? ` of ${value.limit.toLocaleString()}` : ""} ${name} left${value.reset ? ` (resets ${value.reset})` : ""}` : undefined
+
+const TrendSection = (props: { usage: UsageDaily }) => {
+  const [window, setWindow] = createSignal<(typeof WINDOWS)[number]>(7)
+  const [selected, setSelected] = createSignal<string>()
+  const [table, setTable] = createSignal(false)
+  const today = () => props.usage.days[0]?.day ?? ""
+  const trend = createMemo(() => buildTrend(props.usage, window(), today()))
+  const day = () => trend().days.find((item) => item.day === selected()) ?? trend().days.at(-1)
+  const dayModels = () => props.usage.days.find((item) => item.day === day()?.day)?.models.filter((model) => model.coverage !== "no-usage").toSorted((a, b) => (b.cost ?? 0) - (a.cost ?? 0)) ?? []
+  // One sessions read per window per daily read: toggling back reuses it; Refresh (a new observedAt) re-reads.
+  const cache = new Map<string, Promise<UsageSessions | undefined>>()
+  const [sessions] = createResource(() => `${window()}|${props.usage.observedAt}`, (key) => {
+    if (!cache.has(key)) cache.set(key, oc.usageSessions(window(), SESSION_LIMIT).catch(() => undefined))
+    return cache.get(key)!
+  })
+  return <>
+    <section aria-label="Trend" class="usage-trend">
+      <div class="usage-trend-head">
+        <h3>Last {window()} days</h3>
+        <div class="usage-window" role="radiogroup" aria-label="Window">
+          <For each={WINDOWS}>{(value) => <button type="button" role="radio" aria-checked={window() === value} classList={{ selected: window() === value }} onClick={() => { setWindow(value); setSelected(undefined) }}><bdi dir="ltr">{value} days</bdi></button>}</For>
+        </div>
+      </div>
+      <Show when={props.usage.days.length >= window()} fallback={<p class="home-muted">This Core returned {props.usage.days.length} days.</p>}>
+        <p class="usage-window-total"><span data-usage-window-total>{money(trend().total)}</span>
+          <span class="home-muted">{trend().exact ? " estimated" : ` or more: ${trend().gaps} ${trend().gaps === 1 ? "day is" : "days are"} not fully counted or priced`}</span></p>
+        <UsageChart trend={trend()} selected={day()?.day} onSelect={setSelected} money={money} label={weekday} tick={tick} />
+        <ul class="usage-legend" aria-label="Models">
+          <For each={trend().series}>{(key) => <li><i style={{ background: seriesColor(trend().series, key) }} /><bdi dir="ltr">{short(key)}</bdi></li>}</For>
+          <li class="home-muted">? = cost unknown · faded = not fully counted</li>
+        </ul>
+        <Show when={day()}>{(value) => <div class="usage-day-detail" aria-live="polite">
+          <b>{weekday(value().day)}</b>{" "}
+          <span>{value().cost == null ? "cost unknown" : money(value().cost!)}</span>
+          <Show when={STATE_LABEL[value().state]}><span class="usage-incomplete"> · {STATE_LABEL[value().state]}</span></Show>
+          <span class="home-muted"> · {dayModels().map((model) => `${model.model} ${unpricedModel(model) ? "unpriced" : money(model.cost ?? 0)}`).join(" · ") || "no model usage"}</span>
+        </div>}</Show>
+        <button type="button" class="usage-link" aria-expanded={table()} onClick={() => setTable(!table())}>{table() ? "Hide table" : "Show as table"}</button>
+        <Show when={table()}>
+          <table class="usage-table" data-usage-day-table>
+            <thead><tr><th scope="col">Day</th><th scope="col">Estimate</th><th scope="col">Coverage</th></tr></thead>
+            <tbody><For each={trend().days.toReversed()}>{(item) => <tr>
+              <td>{weekday(item.day)}</td><td>{item.cost == null ? "unknown" : money(item.cost)}</td><td>{STATE_LABEL[item.state] || "counted"}</td>
+            </tr>}</For></tbody>
+          </table>
+        </Show>
+      </Show>
+    </section>
+    <ModelSection trend={trend()} window={window()} />
+    <Show when={trend().cuts.length}>
+      <section aria-label="Where to cut" class="usage-cuts">
+        <h3>Where to cut</h3>
+        <ul><For each={trend().cuts}>{(cut) => <li data-cut={cut.id}><b>{cut.title}</b><span class="home-muted">{cut.detail}</span></li>}</For></ul>
+        <p class="home-source">From this page's numbers only. Background: {REVIEW}.</p>
+      </section>
+    </Show>
+    <SessionSection sessions={sessions()} loading={sessions.loading} window={window()} />
+  </>
+}
+
+const ModelSection = (props: { trend: Trend; window: number }) =>
+  <section aria-label="By model">
+    <h3>By model, {props.window} days</h3>
+    <Show when={props.trend.models.length} fallback={<p class="home-muted">No model usage recorded in this window.</p>}>
+      <div class="usage-scroll"><table class="usage-table" data-usage-model-table>
+        <thead><tr><th scope="col">Model</th><th scope="col">Estimate</th><th scope="col">Share</th><th scope="col">Cache write</th><th scope="col">Cache read</th><th scope="col">Output</th></tr></thead>
+        <tbody><For each={props.trend.models}>{(model) => <tr>
+          <td><i class="usage-swatch" style={{ background: props.trend.series.includes(model.key) ? seriesColor(props.trend.series, model.key) : seriesColor(props.trend.series, OTHER) }} /><bdi dir="ltr">{model.key}</bdi></td>
+          <td>{model.local ? "local" : model.unpriced && !model.cost ? <span class="usage-unpriced">pricing missing</span> : <>{money(model.cost)}<Show when={model.unpriced}><span class="usage-unpriced"> + unpriced</span></Show></>}</td>
+          <td>{model.cost ? `${Math.round(model.share * 100)}%` : ""}</td>
+          <td>{count(model.tokens.cache.write)}</td>
+          <td>{count(model.tokens.cache.read)}</td>
+          <td>{count(model.tokens.output + model.tokens.reasoning)}</td>
+        </tr>}</For></tbody>
+      </table></div>
+      <p class="home-source">Cache writes cost far more per token than cache reads; output includes reasoning.</p>
+    </Show>
+  </section>
+
+const SessionSection = (props: { sessions?: UsageSessions; loading: boolean; window: number }) => {
+  const [view, setView] = createSignal<"sessions" | "directories">("sessions")
+  const grouped = () => props.sessions ? groupByDirectory(props.sessions.sessions, SESSION_LIMIT) : undefined
+  return <section aria-label="Top sessions">
+    <div class="usage-trend-head">
+      <h3>{view() === "sessions" ? "Most expensive sessions" : "By directory"}, {props.window} days</h3>
+      <Show when={props.sessions?.sessions.length}>
+        <div class="usage-window" role="radiogroup" aria-label="Group">
+          <button type="button" role="radio" aria-checked={view() === "sessions"} classList={{ selected: view() === "sessions" }} onClick={() => setView("sessions")}>Sessions</button>
+          <button type="button" role="radio" aria-checked={view() === "directories"} classList={{ selected: view() === "directories" }} onClick={() => setView("directories")}>Directories</button>
+        </div>
+      </Show>
+    </div>
+    <Show when={!props.loading} fallback={<p class="home-muted">Loading…</p>}>
+      <Show when={props.sessions} fallback={<p class="home-muted" data-usage-sessions-unavailable>Per-session spend needs a newer Core on this host.</p>}>
+        {(value) => <>
+          <Show when={value().sessions.length} fallback={<p class="home-muted">No session usage in this window.</p>}>
+            <Show when={view() === "directories"}>
+              <ol class="usage-sessions" data-usage-groups>
+                <For each={grouped()!.groups.slice(0, SHOWN)}>{(group) => <li>
+                  <bdi dir="ltr">{group.label}</bdi>
+                  <span class="home-muted">{group.kind === "lane" ? "lane" : group.kind === "directory" ? "directory" : ""} · {group.sessions} {group.sessions === 1 ? "session" : "sessions"}</span>
+                  <span>{!group.pricedCost && group.unpriced ? <span class="usage-unpriced">pricing missing</span> : money(group.pricedCost)}{group.pricedCost && group.unpriced ? <span class="usage-unpriced"> + unpriced</span> : ""}</span>
+                </li>}</For>
+              </ol>
+              <p class="home-source">Grouped by where each session ran: editspace lanes by their folder, anything else by directory. Not a project or workstream.{grouped()!.partial ? ` From the ${SESSION_LIMIT} most expensive sessions; smaller groups may be missing.` : ""}</p>
+            </Show>
+            <ol class="usage-sessions" hidden={view() !== "sessions"}>
+              <For each={value().sessions.slice(0, SHOWN)}>{(item) => <li>
+                <Show when={item.directory} fallback={<bdi>{item.title || item.sessionID}</bdi>}>
+                  <a href={`/session/${encodeURIComponent(item.sessionID)}?directory=${encodeURIComponent(item.directory!)}`}><bdi>{item.title || item.sessionID}</bdi></a>
+                </Show>
+                <span class="home-muted"><bdi dir="ltr">{item.directory ? lane(item.directory) : "unknown directory"}</bdi>{item.parentID ? " · subagent" : ""}</span>
+                <span>{item.cost == null && !item.pricedCost ? <span class="usage-unpriced">pricing missing</span> : money(item.cost ?? item.pricedCost)}{item.cost == null && item.pricedCost ? <span class="usage-unpriced"> + unpriced</span> : ""}</span>
+              </li>}</For>
+            </ol>
+          </Show>
+          <Show when={!value().coverage.backfilled}><p class="home-muted">Counted since {value().coverage.since ? weekday(value().coverage.since!.slice(0, 10)) : "this Core started"}; earlier sessions may be missing.</p></Show>
+        </>}
+      </Show>
+    </Show>
+  </section>
+}
+
+const lane = (directory: string) => directory.match(/\/lanes\/([^/]+)/)?.[1] ?? directory.split("/").filter(Boolean).at(-1) ?? directory
+

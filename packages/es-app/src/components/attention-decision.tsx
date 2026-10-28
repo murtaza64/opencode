@@ -11,6 +11,9 @@ import { Markdown } from "@opencode-ai/session-ui/markdown"
 import { requestHasSteps, requestMarkdown } from "../request-markdown"
 import { answerDraftKey, attentionPath, blockedReason, contentRevision, decisionLabel, deliveryLabel, inputPayload, inputProblem, inputText, INPUT_KINDS, type createAttention, type AttentionOption, type AttentionRecord, type InputValue } from "../attention"
 import { requestAgent, type AgentRef, type RequestAgent } from "../attention-agent"
+import { ariaShortcut } from "../shortcuts"
+import { secretInput } from "../secret-field"
+import { SecretField } from "./secret-field"
 
 type Attention = ReturnType<typeof createAttention>
 
@@ -67,6 +70,7 @@ const Answer = (props: { record: AttentionRecord; attention: Attention; options:
   // Input typed for each option is kept while switching; only the selected option's value is sent.
   const [values, setValues] = createSignal<Record<string, InputValue>>({})
   const selected = () => props.options ? props.record.options.find(option => option.id === choice()) : undefined
+  const secret = () => secretInput(selected())
   const problem = () => inputProblem(selected(), values()[choice()])
   const ready = () => canWrite() && (!!selected() || !!text().trim()) && !problem()
   const send = async () => {
@@ -107,16 +111,18 @@ const Answer = (props: { record: AttentionRecord; attention: Attention; options:
       {/* Not answering is shown as its own outcome only when no option already means it. */}
       <Show when={props.prepared?.ifWait}><div class="home-option-card home-option-wait" aria-hidden="true"><span class="home-option-body"><span class="home-option-label">No answer</span><span class="home-option-outcome" dir="auto">{props.prepared!.ifWait}</span></span></div></Show>
     </fieldset></Show>
-    <Show when={selected()?.input && selected()}>{option => <OptionField id={`${id}-input`} option={option()} value={values()[option().id]} disabled={!canWrite()} onChange={value => setValues(current => ({ ...current, [option().id]: value }))} />}</Show>
+    {/* A secret option gets masked fields with their own single submission; it never enters the answer or a draft. */}
+    <Show when={secret()} fallback={<Show when={selected()?.input && selected()}>{option => <OptionField id={`${id}-input`} option={option()} value={values()[option().id]} disabled={!canWrite()} onChange={value => setValues(current => ({ ...current, [option().id]: value }))} />}</Show>}>
+      {spec => <SecretField id={`${id}-secret`} record={props.record} option={selected()!} spec={spec()} disabled={!canWrite()} onDelivered={() => { void props.attention.refresh(); props.onView?.("answered") }} />}</Show>
     {props.afterChoices}
-    <label for={id}>{props.options ? "Note (optional)" : "Your answer"}</label>
+    <Show when={!secret()}><label for={id}>{props.options ? "Note (optional)" : "Your answer"}</label>
     <textarea id={id} dir="auto" rows={props.options ? 1 : 2} maxLength={8000} value={text()} disabled={!canWrite()}
-      onInput={event => { setText(event.currentTarget.value); localStorage.setItem(answerDraftKey(props.record), event.currentTarget.value) }} />
+      onInput={event => { setText(event.currentTarget.value); localStorage.setItem(answerDraftKey(props.record), event.currentTarget.value) }} /></Show>
     {/* What a publish decision would send, verbatim from the request, right above the action that approves it. */}
     <Show when={props.sends?.text ? props.sends : undefined}>{sends => <SendsPreview sends={sends()} />}</Show>
     <div class="home-actions">
       {/* On cards the selected card already shows the choice, so the button stays short; its name still says what is sent. */}
-      <button class="home-primary" dir="auto" disabled={!ready()} aria-keyshortcuts="Meta+Enter Control+Enter" onClick={() => void send()}
+      <button class="home-primary" dir="auto" disabled={!ready()} aria-keyshortcuts={ariaShortcut("submit")} onClick={() => void send()}
         aria-label={props.prepared && selected() ? `Send ${selected()!.label}` : undefined}>
         <Show when={selected()} fallback="Send answer">{option => <Show when={!props.prepared} fallback="Send">Send <bdi dir="auto">{option().label}</bdi></Show>}</Show>
       </button>

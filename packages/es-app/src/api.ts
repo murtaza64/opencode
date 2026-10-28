@@ -129,12 +129,20 @@ export type UsageDaily = {
     originOnly?: boolean
     originCost?: number | null
     unpricedModels?: number
-    models: { provider: string; model: string; cost: number | null; coverage?: "priced" | "missing-rate" | "no-usage"; tokens: UsageTokens }[]
+    models: { provider: string; model: string; cost: number | null; coverage?: "priced" | "missing-rate" | "local" | "no-usage"; tokens: UsageTokens }[]
   }[]
   rateLimits: {
     source: string
     providers: { provider: string; observedAt: string; requests?: UsageLimit; tokens?: UsageLimit; inputTokens?: UsageLimit; outputTokens?: UsageLimit }[]
   }
+}
+
+/** GET /experimental/usage/sessions (newer Cores): estimated spend per session over a window, most expensive first. */
+export type UsageSessions = {
+  estimate: true
+  coverage: { backfilled: boolean; since?: string; liveSince?: string }
+  /** Sorted by `pricedCost`, most expensive first. `cost` is null when some usage is on a billed model with no rate. */
+  sessions: { sessionID: string; parentID?: string; title?: string; directory?: string; cost: number | null; pricedCost: number; tokens: UsageTokens; unpricedTokens: number; lastActive: string }[]
 }
 
 export const oc = {
@@ -293,6 +301,13 @@ export const oc = {
   },
 
   // undefined = this Core predates the usage route (404 or the HTML app page); the page says so.
+  // undefined = this Core has no per-session usage yet; the section says so.
+  usageSessions: async (days: number, limit = 20, signal?: AbortSignal): Promise<UsageSessions | undefined> => {
+    const res = await fetch(`/oc/experimental/usage/sessions?days=${days}&limit=${limit}&offsetMinutes=${-new Date().getTimezoneOffset()}`, { signal })
+    if (res.status === 404 || !res.headers.get("content-type")?.includes("application/json")) return undefined
+    return json<UsageSessions>(res)
+  },
+
   /** `base`: "" for this page's host, or "/hosts/<id>" for another Work host through this listener. */
   usageDaily: async (days: number, signal?: AbortSignal, base = ""): Promise<UsageDaily | undefined> => {
     // Days are local: the offset is east-positive minutes, the inverse of getTimezoneOffset().
