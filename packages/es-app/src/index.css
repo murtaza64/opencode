@@ -1180,7 +1180,13 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   flex: 1;
   overflow-y: auto;
   overflow-anchor: none;
-  padding: 16px 4px 16px 0;
+  /* Overlay scrollbars (macOS) take no layout space, so the inline-end padding is the clearance that keeps
+   * row controls (tool disclosures, pending Interrupt/Edit/Cancel) out from under the scrollbar. */
+  padding-block: 16px;
+  padding-inline: 0 14px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text) 22%, transparent) transparent;
 }
 .transcript-older {
   display: block;

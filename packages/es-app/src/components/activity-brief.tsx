@@ -1,4 +1,4 @@
-import { createMemo, createSignal, onCleanup } from "solid-js"
+import { createMemo, createSignal, onCleanup, Show } from "solid-js"
 import { activityBrief, activityBriefLabel, type ActivityBriefInput } from "../activity-brief"
 import "./activity-brief.css"
 
@@ -20,13 +20,15 @@ export const ActivityBriefView = (props: { input: ActivityBriefInput }) => {
   const brief = createMemo(() => activityBrief(props.input, Math.max(now(), Date.now())))
   const label = () => activityBriefLabel(brief(), Math.max(now(), Date.now()))
   return (
-    <span class="activity-brief" data-source={brief().source} title={`${brief().text} — ${label()}`}>
+    <span class="activity-brief" data-source={brief().source} title={label() ? `${brief().text} — ${label()}` : brief().text}>
       <bdi class="activity-brief-text" dir="auto">
         {brief().text}
       </bdi>
-      <bdi class="activity-brief-source" dir="auto">
-        {label()}
-      </bdi>
+      <Show when={label()}>
+        <bdi class="activity-brief-source" dir="auto">
+          {label()}
+        </bdi>
+      </Show>
     </span>
   )
 }
