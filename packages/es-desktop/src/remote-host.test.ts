@@ -246,6 +246,11 @@ test("the local listener reads another host's session list with no credential an
   const decisions = await get("/hosts/mini/es/api/attention?view=open&limit=200", { headers: { cookie: "es_attention_operator=local-operator; es_attention_operator__mini=mini-operator" } })
   expect(await decisions.json()).toMatchObject({ host: "mini", path: "/es/api/attention" })
   expect(mini.seen.at(-1)).toEqual({ path: "/es/api/attention", cookie: null, authorization: null, origin: null })
+  // A Mini session opened read-only in the Local window: its record, messages, one message, todos, statuses.
+  for (const pathname of ["/oc/session/ses_m", "/oc/session/ses_m/message", "/oc/session/ses_m/message/msg_1", "/oc/session/ses_m/todo", "/oc/session/status"]) {
+    expect(await (await get(`/hosts/mini${pathname}?directory=%2Fr`)).json()).toMatchObject({ host: "mini", path: pathname.slice(3) })
+    expect(mini.seen.at(-1)).toEqual({ path: pathname.slice(3), cookie: null, authorization: null, origin: null })
+  }
   // The Today total reads each host's daily usage rollup the same way.
   expect(await (await get("/hosts/mini/oc/experimental/usage/daily?days=1")).json()).toMatchObject({ host: "mini", path: "/experimental/usage/daily" })
   expect(mini.seen.at(-1)).toEqual({ path: "/experimental/usage/daily", cookie: null, authorization: null, origin: null })
@@ -258,7 +263,13 @@ test("host-qualified routes expose list reads only: writes, other routes and unk
   const before = mini.seen.length
   expect((await get("/hosts/mini/oc/session", { method: "POST", body: "{}" })).status).toBe(403)
   expect((await get("/hosts/mini/oc/experimental/session", { method: "POST", body: "{}" })).status).toBe(403)
-  expect((await get("/hosts/mini/oc/session/ses_same/message")).status).toBe(403)
+  // Reads beyond the read-only session view, and every write, stay refused.
+  for (const [method, pathname] of [
+    ["POST", "/oc/session/ses_same/prompt_async"], ["POST", "/oc/session/ses_same/message"], ["PATCH", "/oc/session/ses_same"],
+    ["DELETE", "/oc/session/ses_same"], ["POST", "/oc/session/ses_same/abort"], ["POST", "/oc/permission/per_1/reply"],
+    ["GET", "/oc/session/ses_same/children"], ["GET", "/oc/session/ses_same/message/msg_1/part/prt_1/attachment/0"],
+    ["GET", "/oc/permission"], ["GET", "/oc/question"], ["GET", "/oc/session/ses_same/message/msg_1/x"],
+  ]) expect((await get(`/hosts/mini${pathname}`, { method, ...(method === "GET" ? {} : { body: "{}" }) })).status).toBe(403)
   expect((await get("/hosts/mini/es/api/attention/session")).status).toBe(403)
   expect((await get("/hosts/mini/es/api/attention/session", { method: "POST", headers: { "content-type": "application/json", "x-attention-csrf": "1" }, body: "{}" })).status).toBe(403)
   expect((await get("/hosts/mini/es/api/attention", { method: "POST", body: "{}" })).status).toBe(403)
