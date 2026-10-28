@@ -32,7 +32,7 @@ if (app) {
 await page.context().route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
 const errors = []
 page.on("pageerror", error => errors.push(error.message))
-const editor = () => page.locator(".float-editor textarea, .prompt-box:not([inert]) textarea")
+const editor = () => page.locator(".prompt-box textarea[aria-label='Message']")
 const selection = () => editor().evaluate(el => [el.selectionStart, el.selectionEnd])
 const tab = async (back = false) => {
   if (!app) return page.keyboard.press(back ? "Shift+Tab" : "Tab")
@@ -55,10 +55,10 @@ try {
   await expect(editor()).toHaveClass(/vim-insert/)
   await tab()
   await at("ses_b")
-  // One line per repeat overflows the inline box (up to 160px tall), which auto-opens the expanded editor.
+  // One line per repeat overflows the inline box (up to 160px tall), which auto-expands the editor in place.
   const expanded = "bravo expanded draft\n".repeat(24)
   await editor().fill(expanded)
-  await expect(page.locator(".float-editor textarea")).toBeFocused()
+  await expect(page.locator(".prompt-box.prompt-expanded textarea[aria-label='Message']")).toBeFocused()
   await editor().evaluate(el => el.setSelectionRange(10, 20))
   await tab(true)
   await at("ses_a")

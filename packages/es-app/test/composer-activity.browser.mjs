@@ -32,7 +32,7 @@ try {
   // The current checklist has one sidebar owner, independent of composer expansion.
   await expect(todos).toBeVisible()
   await expect(page.locator(".todo-panel")).toHaveCount(1)
-  await expect(page.locator(".session-main .todo-panel, .float-editor .todo-panel")).toHaveCount(0)
+  await expect(page.locator(".session-main .todo-panel")).toHaveCount(0)
   await expect(todos.locator("li")).toHaveCount(2)
   const head = todos.getByRole("button")
   await head.focus()
@@ -48,11 +48,11 @@ try {
   await head.press("Space")
   await expect(todos.locator('li[data-status="in_progress"]')).toHaveText("[•]Updated while collapsed")
   await page.getByRole("button", { name: "Expand editor", exact: true }).click()
-  await expect(page.locator(".float-editor .input-receipts li[data-request-id]")).toHaveCount(2)
-  await expect(page.locator(".float-editor .input-receipts")).not.toContainText("Peer")
+  // Expanding grows the composer in place; the outgoing bubbles stay where they were.
+  await expect(page.locator(".input-receipts li[data-request-id]")).toHaveCount(2)
+  await expect(page.locator(".input-receipts")).not.toContainText("Peer")
   await expect(page.locator(".todo-panel")).toHaveCount(1)
-  await expect(page.locator(".float-editor .todo-panel")).toHaveCount(0)
-  await page.locator(".float-head button").click()
+  await page.getByRole("button", { name: "Collapse editor", exact: true }).click()
 
   for (const [lang, dir] of [["en", "ltr"], ["en", "rtl"], ["ar", "rtl"]]) {
     await page.evaluate(({ lang, dir }) => { document.documentElement.lang = lang; document.documentElement.dir = dir }, { lang, dir })

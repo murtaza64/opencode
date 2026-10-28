@@ -3,7 +3,7 @@
 // ctx is a percent of the selected model's known window, cost is an estimate or unknown, never $0.
 // Primary (button and Cmd/Ctrl+Enter, one resolver): text or images send as before; an empty draft with
 // a Core-confirmed pending steer interrupts and delivers it; an empty draft with nothing pending nudges.
-// Send keeps its position and width whichever label it shows, LTR and RTL.
+// Send is content-sized and keeps its inline-end edge whichever label it shows, LTR and RTL.
 // Run from packages/es-app: node test/composer-footer.browser.mjs   (SCREENSHOT_DIR=<dir>)
 import { createRequire } from "node:module"
 import { mkdirSync } from "node:fs"
@@ -76,7 +76,8 @@ try {
 
     // With text, the busy primary is the keyboard target (Steer) as before.
     await expect(primary).toHaveAccessibleName("Steer")
-    const geometry = async () => { const rect = await primary.boundingBox(); return [Math.round(rect.x), Math.round(rect.width)] }
+    // Send is content-sized; what stays put is its inline-end edge (right in LTR, left in RTL).
+    const geometry = async () => { const rect = await primary.boundingBox(); return dir === "rtl" ? Math.round(rect.x) : Math.round(rect.x + rect.width) }
     const sendGeometry = await geometry()
 
     // Empty draft, nothing pending: Nudge, unavailable until Core ships explicit continuation (no no-op, no
@@ -139,7 +140,7 @@ try {
   await expect(cost).toHaveAttribute("title", "Session cost unknown: no reply has reported a cost yet.")
   await context.close()
   expect(errors).toEqual([])
-  console.log(`PASS composer footer: model button + glyph (no Change model text), ctx %, cost estimate/unknown, picker focus return, primary Send/Nudge(unavailable)/Interrupt & steer now with one resolver, Cmd/Ctrl+Enter delivers once, fixed Send geometry, narrow wrap, LTR/RTL; screenshots ${shots}`)
+  console.log(`PASS composer footer: model button + glyph (no Change model text), ctx %, cost estimate/unknown, picker focus return, primary Send/Nudge(unavailable)/Interrupt & steer now with one resolver, Cmd/Ctrl+Enter delivers once, Send inline-end edge fixed, narrow wrap, LTR/RTL; screenshots ${shots}`)
 } finally {
   await browser.close()
   await preview.close()

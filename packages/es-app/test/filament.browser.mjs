@@ -85,7 +85,7 @@ try {
   console.log(JSON.stringify({ overscroll: { samples: samples.length, atTop: atTop.length, bounceFrames: bounced.length, detachedFrames: detached.length, maxContentShift: Math.max(0, ...atTop.map((s) => Math.abs(s.innerTop - rest.innerTop))).toFixed(1) } }))
   // Attachment: whenever the content visibly bounced, the canvas moved by the same amount.
   expect(detached.length).toBe(0)
-  const composerBox = await page.locator(".prompt-box textarea, .float-editor textarea").first().boundingBox()
+  const composerBox = await page.locator(".prompt-box textarea").first().boundingBox()
   expect(transcriptBox.y + transcriptBox.height).toBeLessThanOrEqual(composerBox.y + 1)
   expect(await page.evaluate(() => getComputedStyle(document.querySelector(".transcript")).paddingInlineStart)).toBe("40px")
   const backend = await page.evaluate(() => window.__filament.backend())

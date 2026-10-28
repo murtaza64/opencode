@@ -1,9 +1,10 @@
-import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js"
+import { createEffect, createSignal, For, on, onCleanup, onMount, Show, type JSX } from "solid-js"
 import type { ContextPart } from "../api"
 import type { Composer, ComposerAction } from "../composer"
 import { ComposerImages } from "./composer-images"
 import { ariaShortcut, shortcutLabel } from "../shortcuts"
 import type { PrimaryResolution } from "../primary-action"
+import { Glyph } from "./icons"
 import "./direct-composer.css"
 
 // One primary action: with a draft, Send when idle and the keyboard target while busy; with an empty
@@ -22,7 +23,10 @@ export const DirectComposer = (props: {
   restoreDraft: () => void
   editor: JSX.Element
   attachments: JSX.Element
+  /** Frequent session actions, always in the row. */
   sessionActions: JSX.Element
+  /** Infrequent session actions: in the row while it is wide enough, otherwise behind "More session actions". */
+  moreActions?: JSX.Element
   sessionMetadata?: JSX.Element
   dictation?: JSX.Element
   children: JSX.Element
@@ -32,8 +36,30 @@ export const DirectComposer = (props: {
   const [menu, setMenu] = createSignal(false)
   createEffect(on(() => state.busy, () => setMenu(false), { defer: true }))
   const primary = () => (state.busy ? state.keyboardTarget : "steer")
-  // Every label the primary button can show, laid out in one cell so its width never changes.
-  const PRIMARY_LABELS = ["Send", "Steer", "Queue", "Aside", "Nudge", "Nudging…", "Steer now", "Interrupt & steer now", "Steering…"]
+  // The short labels share one cell, so Send, Steer, Queue, Aside and Nudge keep one width; a longer label
+  // ("Interrupt & steer now") widens the button only while it shows.
+  const SHORT_LABELS = ["Send", "Steer", "Queue", "Aside", "Nudge"]
+  // The composer's own width, not the viewport's: it may sit in a narrow pane of a wide window.
+  // wide: labelled actions; compact: icon actions (labels stay their accessible names); narrow: icons, and the
+  // infrequent actions move behind "More session actions".
+  const [width, setWidth] = createSignal<"wide" | "compact" | "narrow">("wide")
+  const [moreOpen, setMoreOpen] = createSignal(false)
+  let root: HTMLDivElement | undefined
+  let moreButton: HTMLButtonElement | undefined
+  let moreMenu: HTMLDivElement | undefined
+  onMount(() => {
+    const observer = new ResizeObserver(([entry]) => {
+      const size = entry!.contentRect.width
+      setWidth(size >= 760 ? "wide" : size >= 480 ? "compact" : "narrow")
+    })
+    observer.observe(root!)
+    onCleanup(() => observer.disconnect())
+  })
+  createEffect(on(width, (value) => { if (value !== "narrow") setMoreOpen(false) }, { defer: true }))
+  const closeMore = (refocus: boolean) => {
+    setMoreOpen(false)
+    if (refocus) moreButton?.focus()
+  }
   const secondary = () => (state.busy ? actions.filter((action) => action !== primary()) : [])
   const nextTarget = () => actions[(actions.indexOf(state.keyboardTarget) + 1) % actions.length]
   const label = (action: ComposerAction) => (state.busy ? action[0]!.toUpperCase() + action.slice(1) : "Send")
@@ -74,14 +100,16 @@ export const DirectComposer = (props: {
   let menuRoot: HTMLDivElement | undefined
   const dismiss = (e: Event) => {
     if (menu() && !(e.target instanceof Node && menuRoot?.contains(e.target))) setMenu(false)
+    if (moreOpen() && !(e.target instanceof Node && (moreMenu?.contains(e.target) || moreButton?.contains(e.target)))) setMoreOpen(false)
   }
   // Focus usually stays in the textarea while the menu is open, so Escape is
   // caught at the document and closes the menu before vim or the float see it.
   const escape = (e: KeyboardEvent) => {
-    if (e.key !== "Escape" || !menu()) return
+    if (e.key !== "Escape" || (!menu() && !moreOpen())) return
     e.preventDefault()
     e.stopPropagation()
     setMenu(false)
+    if (moreOpen()) closeMore(!!moreMenu?.contains(document.activeElement) || document.activeElement === moreButton)
   }
   document.addEventListener("pointerdown", dismiss, true)
   document.addEventListener("keydown", escape, true)
@@ -93,7 +121,14 @@ export const DirectComposer = (props: {
     const current = () => props.primary()
     const sendAction = () => { const value = current(); return value.kind === "send" ? value.action : undefined }
     const disabled = () => { const action = sendAction(); return action ? reason(action) : current().disabled }
-    const title = () => { const action = sendAction(); return action ? reason(action) || (state.busy ? hint(action) : undefined) : current().disabled || current().title }
+    // The tooltip always names the action and its chord, since the compact button may hide the chord.
+    const title = () => {
+      const action = sendAction()
+      const blocked = disabled()
+      if (blocked) return blocked
+      const about = action ? (state.busy ? hint(action) : "") : current().title
+      return [about, `${current().name ?? current().label} (${shortcutLabel("primaryAction")})`].filter(Boolean).join(" · ")
+    }
     return <button
       class="direct-primary"
       data-keyboard-target="true"
@@ -109,7 +144,8 @@ export const DirectComposer = (props: {
       }}
     >
       <span class="direct-primary-label">
-        <For each={PRIMARY_LABELS}>{(text) => <span aria-hidden="true" data-current={text === current().label ? "" : undefined}>{text}</span>}</For>
+        <For each={SHORT_LABELS}>{(text) => <span aria-hidden="true">{text}</span>}</For>
+        <span aria-hidden="true" data-current="">{current().label}</span>
       </span>
       {/* A disabled action has no chord (Cmd/Ctrl+Enter does nothing); the hint keeps its space so Send does not resize. */}
       <kbd class="direct-button-hint" aria-hidden="true" style={{ visibility: disabled() ? "hidden" : undefined }}>{shortcutLabel("primaryAction")}</kbd>
@@ -142,7 +178,7 @@ export const DirectComposer = (props: {
   // draft stays mounted but hidden, so its text, images and selection are untouched.
   const editing = () => props.composer.editingInput()
   return (
-    <div class="direct-composer" classList={{ editing: !!editing() }} data-composer-controls>
+    <div class="direct-composer" classList={{ editing: !!editing() }} data-composer-controls data-width={width()} ref={root}>
       <div class="direct-draft" hidden={!!editing()}>
         {props.attachments}
         {props.editor}
@@ -156,6 +192,28 @@ export const DirectComposer = (props: {
       <div class="direct-bar">
         <div class="direct-session-actions" role="group" aria-label="Session actions">
           {props.sessionActions}
+          <Show when={props.moreActions}>
+            <Show when={width() === "narrow"} fallback={props.moreActions}>
+              <span class="direct-session-more">
+                <button class="direct-session-more-button" ref={moreButton} aria-label="More session actions" title="More session actions"
+                  aria-haspopup="true" aria-expanded={moreOpen()}
+                  onClick={() => {
+                    const open = !moreOpen()
+                    setMoreOpen(open)
+                    if (open) queueMicrotask(() => moreMenu?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus())
+                  }}>
+                  <Glyph name="kebab-horizontal" />
+                </button>
+                <Show when={moreOpen()}>
+                  {/* Choosing an action closes the menu; Escape closes it and returns focus to its button. */}
+                  <div class="direct-session-more-menu" role="group" aria-label="More session actions" ref={moreMenu}
+                    onClick={(event) => { if ((event.target as Element).closest("button")) closeMore(true) }}>
+                    {props.moreActions}
+                  </div>
+                </Show>
+              </span>
+            </Show>
+          </Show>
         </div>
         <div class="direct-send" role="group" aria-label="Send" hidden={!!editing()}>
           {/* One line inside the existing bar, never a new row: the most important
