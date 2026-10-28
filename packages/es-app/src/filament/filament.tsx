@@ -52,17 +52,24 @@ export const Filament = (props: {
     wake()
   }))
 
+  // The canvas lives INSIDE the scroller as a sticky, zero-height first child: it is scroll content,
+  // so macOS rubber-band overscroll translates it together with the rows it annotates. A fixed
+  // overlay would stay put while the content bounced.
+  let holder!: HTMLDivElement
   const place = () => {
     const el = props.transcript()
     if (!el) return
+    if (holder.parentElement !== el) el.prepend(holder)
+    // Sticky offset cancels the scroller's top padding so the canvas origin is the scrollport's top edge.
+    const cs = getComputedStyle(el)
+    holder.style.insetBlockStart = `-${parseFloat(cs.paddingBlockStart) || 0}px`
+    canvas.style.insetInlineStart = `-${parseFloat(cs.paddingInlineStart) || 0}px`
     const r = el.getBoundingClientRect()
     const scale = Math.min(devicePixelRatio, 1.5)
-    box.x = r.left; box.y = r.top; box.w = r.width; box.h = r.height; box.scale = scale
-    canvas.style.left = `${r.left}px`
-    canvas.style.top = `${r.top}px`
-    canvas.style.width = `${r.width}px`
-    canvas.style.height = `${r.height}px`
-    const w = Math.round(r.width * scale), h = Math.round(r.height * scale)
+    box.x = r.left; box.y = r.top; box.w = el.clientWidth; box.h = el.clientHeight; box.scale = scale
+    canvas.style.width = `${box.w}px`
+    canvas.style.height = `${box.h}px`
+    const w = Math.round(box.w * scale), h = Math.round(box.h * scale)
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h }
     if (badge) { badge.style.top = `${r.top + 8}px`; badge.style.insetInlineEnd = `${Math.max(0, innerWidth - r.right + 12)}px` }
     dirty = true
@@ -82,7 +89,7 @@ export const Filament = (props: {
     if (lastTs) { intervals.push(ts - lastTs); if (intervals.length > 180) intervals.shift() }
     const wall = lastTs ? Math.min(100, ts - lastTs) : 16
     lastTs = ts
-    if (dirty || !layout) layout = measure(el, current.nodes, GUTTER)
+    if (dirty || !layout) layout = measure(el, canvas, current.nodes, GUTTER)
     dirty = false
     if (pendingDeltas.length) { scene.absorb(pendingDeltas, layout, ts); pendingDeltas = [] }
     const moving = scene.render(current, layout, { now: ts, wall, reduced, hidden: document.hidden })
@@ -136,6 +143,7 @@ export const Filament = (props: {
       removeEventListener("resize", place)
       document.removeEventListener("visibilitychange", vis)
       el?.removeEventListener("scroll", wake)
+      holder.remove()
       if (el) delete el.dataset.filament
       painter?.destroy()
     })
@@ -147,11 +155,14 @@ export const Filament = (props: {
       stats: () => ({ frames: intervals.length, p95: q(intervals, 0.95), long: intervals.filter((x) => x > 33.4).length, cpuP50: q(cpu, 0.5) }),
       measured: () => layout?.rects.size ?? 0,
       box: () => ({ ...box }),
+      // Canvas vs the transcript's content column: both are scroll content, so overscroll moves them together.
+      attached: () => { const c = canvas.getBoundingClientRect(); const el = props.transcript()!; const i = el.querySelector(".transcript-inner")!.getBoundingClientRect(); return { canvasTop: c.top, innerTop: i.top, scrollTop: el.scrollTop, transcriptTop: el.getBoundingClientRect().top } },
+      energy: () => scene?.energyNow() ?? 0,
     }
   })
 
   return <>
-    <canvas ref={canvas} class="filament-canvas" aria-hidden="true" data-backend={backend().backend} />
+    <div ref={holder} class="filament-holder" aria-hidden="true"><canvas ref={canvas} class="filament-canvas" data-backend={backend().backend} /></div>
     <Show when={reduced}>
       <div ref={(el) => (badge = el)} class="filament-static" data-phase={phase()} role="status" aria-live="polite">{label()}</div>
     </Show>

@@ -1,7 +1,8 @@
 /* Rects for the nodes the adapter produced, read from attributes the transcript already renders
  * (`data-find-message`, `data-timeline-part-id(s)`, the permission banner / question card, the
  * `.thinking` tail). All coordinates are CSS px relative to the transcript's border box, which
- * is also the canvas origin; the canvas covers exactly that box. */
+ * is also the canvas origin; the canvas covers exactly that box. The transcript's padding offsets
+ * the sticky holder, so the holder (not the transcript) is the origin. */
 import type { Node } from "./adapter"
 
 export type Rect = { x: number; y: number; w: number; h: number; cx: number; cy: number }
@@ -22,8 +23,11 @@ const sel = (node: Node) => node.anchor === "message" ? `[data-find-message="${C
   : node.anchor === "part" ? `[data-timeline-part-id="${CSS.escape(node.id)}"], [data-timeline-part-ids~="${CSS.escape(node.id)}"], [data-timeline-part-ids*="${CSS.escape(node.id)}"]`
   : `.question-round[data-question-request="${CSS.escape(node.id)}"], .banner.permission`
 
-export const measure = (transcript: HTMLElement, nodes: readonly Node[], gutter: number): Layout => {
-  const root = transcript.getBoundingClientRect()
+export const measure = (transcript: HTMLElement, origin: HTMLElement, nodes: readonly Node[], gutter: number): Layout => {
+  // Origin is the sticky holder (canvas top-left); its rect and the rows' rects share any overscroll translation.
+  const o = origin.getBoundingClientRect()
+  const t = transcript.getBoundingClientRect()
+  const root = new DOMRect(o.left, o.top, t.width, transcript.clientHeight)
   const rtl = getComputedStyle(transcript).direction === "rtl"
   const inner = transcript.querySelector<HTMLElement>(".transcript-inner")?.getBoundingClientRect() ?? root
   const rects = new Map<string, Rect>()

@@ -55,6 +55,34 @@ try {
   const transcriptBox = await page.locator(".transcript").boundingBox()
   const canvasBox = await canvas.boundingBox()
   for (const k of ["x", "y", "width", "height"]) expect(Math.abs(canvasBox[k] - transcriptBox[k])).toBeLessThan(1.5)
+  // The canvas is scroll content (sticky), so it stays glued to the scrollport after scrolling too.
+  await page.locator(".transcript").evaluate((el) => { el.scrollTop = 120 })
+  await page.waitForTimeout(100)
+  const after = await canvas.boundingBox()
+  for (const k of ["x", "y"]) expect(Math.abs(after[k] - transcriptBox[k])).toBeLessThan(1.5)
+  // Overscroll (synthetic touchpad gesture via CDP): rubber-band translates content and canvas together.
+  const cdp = await context.newCDPSession(page)
+  const centre = { x: transcriptBox.x + transcriptBox.width / 2, y: transcriptBox.y + transcriptBox.height / 2 }
+  await page.locator(".transcript").evaluate((el) => { el.scrollTop = 0 })
+  await page.waitForTimeout(100)
+  const rest = await page.evaluate(() => window.__filament.attached())
+  const samples = []
+  const sampler = setInterval(async () => { samples.push(await page.evaluate(() => window.__filament.attached()).catch(() => null)) }, 16)
+  // Pull down past the top, then the bottom: elastic overscroll on macOS translates the content.
+  await cdp.send("Input.synthesizeScrollGesture", { x: centre.x, y: centre.y, yDistance: 500, gestureSourceType: "mouse", speed: 3000 })
+  await page.waitForTimeout(250)
+  await page.locator(".transcript").evaluate((el) => { el.scrollTop = el.scrollHeight })
+  await page.waitForTimeout(60)
+  await cdp.send("Input.synthesizeScrollGesture", { x: centre.x, y: centre.y, yDistance: -500, gestureSourceType: "mouse", speed: 3000 })
+  await page.waitForTimeout(250)
+  clearInterval(sampler)
+  const restGap = rest.canvasTop - rest.innerTop
+  const atTop = samples.filter((s) => s && s.scrollTop <= 0)
+  const bounced = atTop.filter((s) => Math.abs(s.innerTop - rest.innerTop) > 2)
+  const detached = bounced.filter((s) => Math.abs((s.canvasTop - s.innerTop) - restGap) > 1.5)
+  console.log(JSON.stringify({ overscroll: { samples: samples.length, atTop: atTop.length, bounceFrames: bounced.length, detachedFrames: detached.length, maxContentShift: Math.max(0, ...atTop.map((s) => Math.abs(s.innerTop - rest.innerTop))).toFixed(1) } }))
+  // Attachment: whenever the content visibly bounced, the canvas moved by the same amount.
+  expect(detached.length).toBe(0)
   const composerBox = await page.locator(".prompt-box textarea, .float-editor textarea").first().boundingBox()
   expect(canvasBox.y + canvasBox.height).toBeLessThanOrEqual(composerBox.y + 1)
   expect(await page.evaluate(() => getComputedStyle(document.querySelector(".transcript")).paddingInlineStart)).toBe("28px")
