@@ -66,7 +66,7 @@ class AccessTokenInterceptorTest {
     private val token = AccessToken("client-id.access", "s3cr3t-value-never-shown")
 
     private fun client(origin: String?) = OkHttpClient.Builder()
-        .addInterceptor(Access.TokenInterceptor({ origin?.toHttpUrl() }, { token }))
+        .addInterceptor(Access.TokenInterceptor({ _ -> origin?.toHttpUrl() }, { _ -> token }))
         .followRedirects(false)
         .build()
 

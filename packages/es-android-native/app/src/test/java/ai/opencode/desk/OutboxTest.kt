@@ -17,8 +17,8 @@ class OutboxTest {
         assertEquals(SendState.Accepted, Outbox.fromReceipt(receipt("r", "promoted")))
         assertEquals(SendState.Presented, Outbox.fromReceipt(receipt("r", "presented")))
         assertEquals(SendState.Handled, Outbox.fromReceipt(receipt("r", "handled")))
-        assertTrue(mine("r", SendState.Accepted).label.startsWith("accepted"))
-        assertEquals("accepted · runs when idle", mine("r", SendState.Accepted).copy(delivery = "queue").label)
+        assertTrue(mine("r", SendState.Accepted).label.startsWith("registered"))
+        assertEquals("registered · runs when idle", mine("r", SendState.Accepted).copy(delivery = "queue").label)
     }
 
     @Test

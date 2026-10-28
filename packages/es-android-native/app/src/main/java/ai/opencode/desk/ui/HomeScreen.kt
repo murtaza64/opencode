@@ -60,6 +60,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ai.opencode.desk.DeskStore
 import ai.opencode.desk.Finder
+import ai.opencode.desk.Fleet
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import ai.opencode.desk.Link
 import ai.opencode.desk.Hosts
 import ai.opencode.desk.Pin
@@ -143,7 +146,7 @@ fun HomeScreen(store: DeskStore, nav: Nav) {
 
 @Composable
 private fun DeskTab(store: DeskStore, nav: Nav, onOpen: (AttentionRecord) -> Unit, onAll: () -> Unit) {
-    val open = store.filteredOpen
+    val open = store.fleetOpen.filter { store.filter.isEmpty() || it.editspace in store.filter }
     val agents = store.filteredAgents
     val working = agents.filter { it.busy }
     val recent = store.history.filter { store.filter.isEmpty() || it.editspace in store.filter }.take(3)
@@ -152,12 +155,12 @@ private fun DeskTab(store: DeskStore, nav: Nav, onOpen: (AttentionRecord) -> Uni
         item { ProjectChips(store) }
         if (open.isNotEmpty()) {
             item { SectionHeader("Needs you", if (open.size > 3) "All ${open.size}" else null, onAll) }
-            items(open.take(3), key = { it.id }) { AttentionRow(it, store.now, onClick = { onOpen(it) }, host = store.host) }
+            items(open.take(3), key = { it.id }) { AttentionRow(it, store.now, onClick = { onOpen(it) }, host = store.hostFor(it.origin)) }
         } else item {
             SectionHeader("Needs you")
             Text("Nothing waiting on you.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 20.dp))
         }
-        val pinned = store.pinViews.filter { store.filter.isEmpty() || it.pin.editspace in store.filter }
+        val pinned = store.fleetPinViews.filter { store.filter.isEmpty() || it.pin.editspace in store.filter }
         if (pinned.isNotEmpty()) {
             item { SectionHeader("Pinned") }
             items(pinned, key = { "pin-" + it.pin.key }) { view -> PinRow(store, view, nav) }
@@ -167,16 +170,16 @@ private fun DeskTab(store: DeskStore, nav: Nav, onOpen: (AttentionRecord) -> Uni
         val conversations = store.conversations
         if (conversations.agents.isNotEmpty()) {
             item { SectionHeader("Your conversations", if (conversations.fallback) "pinned + opened here" else "by your last message") }
-            items(conversations.agents, key = { "conv-" + it.key }) { AgentRow(it, store.now, onClick = { nav.push(Route.Agent(it.key)) }, host = store.host) }
+            items(conversations.agents, key = { "conv-" + it.key }) { AgentRow(it, store.now, onClick = { nav.push(Route.Agent(it.key)) }, host = store.hostFor(it.origin)) }
         }
         val idle = agents.filter { !it.busy && it.key !in conversations.agents.map { c -> c.key } }.take(if (working.isEmpty()) 6 else 3)
         if (working.isNotEmpty()) {
             item { SectionHeader("Working now", "${working.size}") }
-            items(working, key = { it.key }) { AgentRow(it, store.now, onClick = { nav.push(Route.Agent(it.key)) }, host = store.host) }
+            items(working, key = { it.key }) { AgentRow(it, store.now, onClick = { nav.push(Route.Agent(it.key)) }, host = store.hostFor(it.origin)) }
         }
         if (idle.isNotEmpty() && conversations.agents.isEmpty()) {
             item { SectionHeader("Agents") }
-            items(idle, key = { it.key }) { AgentRow(it, store.now, onClick = { nav.push(Route.Agent(it.key)) }, host = store.host) }
+            items(idle, key = { it.key }) { AgentRow(it, store.now, onClick = { nav.push(Route.Agent(it.key)) }, host = store.hostFor(it.origin)) }
         }
         val boards = store.surfaces.filter { store.filter.isEmpty() || it.editspace in store.filter }
         if (boards.isNotEmpty()) {
@@ -224,6 +227,7 @@ private fun Pulse(store: DeskStore, nav: Nav) {
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Ink.Raised) {
                     DropdownMenuItem(text = { Text("Refresh now") }, onClick = { menu = false; scope.launch { store.refresh() } })
                     DropdownMenuItem(text = { Text("Notifications") }, onClick = { menu = false; nav.push(Route.Settings) }, modifier = Modifier.testTag("settings"))
+                    DropdownMenuItem(text = { Text("Add a host") }, onClick = { menu = false; nav.push(Route.AddHost) }, modifier = Modifier.testTag("add-host"))
                     DropdownMenuItem(text = { Text(store.gateway.origin, style = MaterialTheme.typography.labelMedium) }, onClick = { menu = false }, enabled = false)
                     store.gateway.savedOrigins.filter { it != ai.opencode.desk.DeskPointers.normalize(store.gateway.origin) }.forEach { other ->
                         DropdownMenuItem(text = { Text("Switch to $other", style = MaterialTheme.typography.bodyMedium) }, onClick = { menu = false; store.switchOrigin(other) }, modifier = Modifier.testTag("switch-origin"))
@@ -234,11 +238,29 @@ private fun Pulse(store: DeskStore, nav: Nav) {
             }
         }
         Spacer(Modifier.height(10.dp))
+        val work = store.workToday
         Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
             Stat("${agents.count { it.busy }}", "working", Ink.Green)
             Stat("${open.size}", "need you", if (open.isEmpty()) Ink.Dim else Ink.Amber)
             if (blocked > 0) Stat("$blocked", "blocked", Ink.Red)
             Stat("${store.projects.count { it.available }}/${store.projects.size.coerceAtLeast(store.editspaces.size)}", "projects", Ink.Muted)
+            Stat("$%.2f".format(work.total) + if (work.partial) "+" else "", if (work.hosts > 1) "today · ${work.hosts} hosts" else "today", Ink.Muted)
+        }
+        // One row per saved host: verified id, reach and when it last answered. An unreachable
+        // host only dims its own row.
+        if (store.fleet.size > 1) {
+            Spacer(Modifier.height(8.dp))
+            store.fleet.forEach { h ->
+                val ok = h.reach == Fleet.Reach.Ok
+                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp).semantics(mergeDescendants = true) { contentDescription = "host ${h.label}, ${h.reach.label}" }.testTag("host-${Fleet.tag(h.origin)}"), verticalAlignment = Alignment.CenterVertically) {
+                    StatusDot(if (ok) "idle" else if (h.reach == Fleet.Reach.Unknown) "unknown" else "error", 6)
+                    Spacer(Modifier.width(8.dp))
+                    Hosts.glyph(h.id)?.let { HostGlyph(it); Spacer(Modifier.width(4.dp)) }
+                    Label(h.label, color = if (ok) Ink.Text else Ink.Muted, modifier = Modifier.weight(1f))
+                    Label(if (ok) "seen ${age(store.now, h.lastSeen)}" else "${h.reach.label}${h.lastSeen.takeIf { it > 0 }?.let { " · last seen ${age(store.now, it)}" } ?: ""}", color = if (ok) Ink.Muted else Ink.Amber)
+                }
+            }
+            if (work.partial && work.hosts > 1) Label("cost is a floor: a host did not answer", color = Ink.Amber)
         }
     }
 }
@@ -375,7 +397,7 @@ private fun AgentsTab(store: DeskStore, nav: Nav) {
             item(key = "h-$es") { SectionHeader(es, "${agents.count { it.busy }} live") }
             items(agents, key = { it.key }) { agent ->
                 val pin = agent.pin
-                AgentRow(agent, store.now, onClick = { nav.push(Route.Agent(agent.key)) }, trailing = { PinButton(store.pinned(pin)) { store.togglePin(pin) } }, host = store.host,
+                AgentRow(agent, store.now, onClick = { nav.push(Route.Agent(agent.key)) }, trailing = { PinButton(store.pinned(pin, agent.origin)) { store.togglePin(pin, agent.origin) } }, host = store.hostFor(agent.origin),
                     onOpenHistory = { id -> nav.push(Route.Agent("${agent.editspace}#$id")) })
             }
         }
@@ -462,7 +484,7 @@ private fun PinRow(store: DeskStore, view: PinView, nav: Nav) {
             Label(listOfNotNull(view.pin.editspace, view.status, view.activity.takeIf { it.isNotBlank() }).joinToString(" · "), color = if (unavailable) Ink.Dim else Ink.Muted)
         }
         if (view.updatedAt > 0) Label(age(store.now, view.updatedAt), color = Ink.Dim)
-        PinButton(true) { store.togglePin(view.pin) }
+        PinButton(true) { store.togglePin(view.pin, view.origin.ifBlank { store.gateway.origin }) }
     }
 }
 

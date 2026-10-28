@@ -31,7 +31,7 @@ class PinStore(private val store: KeyValue) {
 
 // What a pin looks like on Home, resolved from data the regular refresh already holds.
 // No network of its own: `agents` and `sessions` come from the last /es/api/state snapshot.
-data class PinView(val pin: Pin, val title: String, val status: String, val activity: String, val agentKey: String?, val updatedAt: Long)
+data class PinView(val pin: Pin, val title: String, val status: String, val activity: String, val agentKey: String?, val updatedAt: Long, val origin: String = "")
 
 object Pins {
     fun resolve(pins: List<Pin>, agents: List<Agent>, sessions: Map<String, List<DashSession>>): List<PinView> = pins.map { pin ->

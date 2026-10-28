@@ -30,7 +30,8 @@ data class Pending(
         get() = (if (images > 0) "$images image${if (images == 1) "" else "s"} · " else "") + when (state) {
             SendState.Sending -> "sending…"
             // "queued" and "promoted" both mean the runtime holds it; never say the model saw it.
-            SendState.Accepted -> if (delivery == "queue") "accepted · runs when idle" else "accepted · next safe boundary"
+            // "registered": the host holds it durably; nothing about a model having seen it.
+            SendState.Accepted -> if (delivery == "queue") "registered · runs when idle" else "registered · next safe boundary"
             SendState.Presented -> "seen by the agent"
             SendState.Handled -> "handled"
             SendState.Failed -> "failed · ${error ?: "rejected"}"

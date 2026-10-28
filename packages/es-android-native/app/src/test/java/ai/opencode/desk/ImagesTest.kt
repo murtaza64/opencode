@@ -162,7 +162,7 @@ class PendingLabelTest {
     @Test
     fun pending_label_shows_the_image_count() {
         val item = Pending("r", "s", "t", "steer", SendState.Accepted, createdAt = 1, images = 2)
-        assertEquals("2 images · accepted · next safe boundary", item.label)
+        assertEquals("2 images · registered · next safe boundary", item.label)
         assertEquals("1 image · sending…", item.copy(images = 1, state = SendState.Sending).label)
         assertEquals("sending…", item.copy(images = 0, state = SendState.Sending).label)
     }

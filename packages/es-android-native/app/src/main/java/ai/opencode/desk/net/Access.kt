@@ -45,7 +45,10 @@ object Access {
 
     // Reads origin and token at request time so a change on the Connect screen applies to the
     // next call without rebuilding the client (the SSE client is derived via newBuilder()).
-    class TokenInterceptor(private val origin: () -> HttpUrl?, private val token: () -> AccessToken?) : Interceptor {
-        override fun intercept(chain: Interceptor.Chain): Response = chain.proceed(authorize(chain.request(), origin(), token()))
+    class TokenInterceptor(private val origin: (HttpUrl) -> HttpUrl?, private val token: (HttpUrl) -> AccessToken?) : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val url = chain.request().url
+            return chain.proceed(authorize(chain.request(), origin(url), token(url)))
+        }
     }
 }

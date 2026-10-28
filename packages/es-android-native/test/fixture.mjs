@@ -2,6 +2,7 @@
 // paired gateway. Serves synthetic data in the verified live shapes and records every write
 // so emulator checks can assert exact bodies. Never points at real services.
 import http from "node:http"
+import { readFile } from "node:fs/promises"
 
 const now = Date.now()
 const minutes = (count) => now - count * 60_000
@@ -139,9 +140,16 @@ function tool(id, name, title, status) {
   return { id, type: "tool", tool: name, callID: `call_${id}`, state: { status, input: { command: title }, title, output: status === "completed" ? `ok: ${title}` : undefined, time: { start: now, end: now } } }
 }
 
-export const createFixture = () => new Promise((resolve) => {
+// `shape: "mini"` serves the real Mini dashboard state (bug05 sample) under es "opencode" with no
+// open attention: the second host of a multi-host Work Desk. Its writes land in `fixture.writes`
+// too, tagged with `host: "mini"`.
+export const createFixture = ({ shape = "default" } = {}) => new Promise(async (resolve) => {
   const streams = new Set()
+  const mini = shape === "mini" ? JSON.parse(await readFile(new URL("../app/src/test/resources/mini-state-full.json", import.meta.url), "utf8")) : null
+  let down = false
   const server = http.createServer(async (request, response) => {
+    // Simulated outage: every request fails at the server (the gateway relays the 5xx).
+    if (down) { response.writeHead(503, { "content-type": "application/json" }); return response.end(JSON.stringify({ error: "fixture: host down" })) }
     const url = new URL(request.url, "http://127.0.0.1")
     const chunks = []
     for await (const chunk of request) chunks.push(chunk)
@@ -149,7 +157,13 @@ export const createFixture = () => new Promise((resolve) => {
     const body = raw ? JSON.parse(raw) : undefined
     const json = (value, status = 200) => { response.writeHead(status, { "content-type": "application/json" }); response.end(JSON.stringify(value)) }
     const path = url.pathname
-    if (request.method !== "GET") fixture.writes.push({ method: request.method, path, query: Object.fromEntries(url.searchParams), body, headers: { origin: request.headers.origin, csrf: request.headers["x-attention-csrf"], cookie: request.headers.cookie } })
+    if (request.method !== "GET") fixture.writes.push({ method: request.method, path, query: Object.fromEntries(url.searchParams), body, host: shape, headers: { origin: request.headers.origin, csrf: request.headers["x-attention-csrf"], cookie: request.headers.cookie } })
+    if (mini) {
+      if (path === "/api/editspaces") return json({ editspaces: [{ name: "opencode", root: "/Users/murtaza/opencode/.editspace" }], default: "opencode" })
+      if (path === "/api/state") return json(mini)
+      if (path === "/api/attention") return json({ records: [], projects: [{ name: "opencode", available: true }] })
+      if (path === "/api/surfaces") return json({ surfaces: [] })
+    }
 
     // surfaces: registry + one static script-rendered board served at /api/surfaces/<id>/static/
     if (path === "/api/surfaces") return json({ surfaces: [{ id: "fixture-board", title: "Fixture board", summary: "Script-rendered status", kind: "path", owner: "Relay", lane: "orchestrator", editspace: "opencode", updated_at: minutes(30), revision: 2, health: { state: "ok", checked_at: now }, purpose: "board", upstream: "/api/surfaces/fixture-board/static/" }, { id: "fixture-deck", title: "Fixture deck", kind: "path", owner: "front-desk", editspace: "dotfiles", updated_at: minutes(90), revision: 1, health: { state: "error", detail: "index.html missing" }, purpose: "deliverable", seen: false, upstream: "/api/surfaces/fixture-deck/static/" }] })
@@ -243,7 +257,7 @@ export const createFixture = () => new Promise((resolve) => {
     fixture.unexpected = [...(fixture.unexpected ?? []), `${request.method} ${path}`]
     json({ error: "fixture: unknown route" }, 404)
   })
-  server.listen(0, "127.0.0.1", () => resolve({ url: `http://127.0.0.1:${server.address().port}`, close: () => { for (const stream of streams) stream.destroy(); server.closeAllConnections(); return new Promise((done) => server.close(done)) }, nudge: () => { for (const stream of streams) stream.write("data: nudge\n\n") }, streams: () => streams.size }))
+  server.listen(0, "127.0.0.1", () => resolve({ url: `http://127.0.0.1:${server.address().port}`, close: () => { for (const stream of streams) stream.destroy(); server.closeAllConnections(); return new Promise((done) => server.close(done)) }, nudge: () => { for (const stream of streams) stream.write("data: nudge\n\n") }, streams: () => streams.size, setDown: (value) => { down = value } }))
 })
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {

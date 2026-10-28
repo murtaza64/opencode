@@ -124,6 +124,8 @@ data class AttentionRecord(
     val context: String = "",
     val editspace: String = "",
     val lane: String? = null,
+    // Which saved host this record came from (set by the phone, never sent).
+    @kotlinx.serialization.Transient val origin: String = "",
     val gate_key: String = "",
     val options: List<AttentionOption> = emptyList(),
     val recommendation: String? = null,

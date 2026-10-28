@@ -39,9 +39,22 @@ await new Promise((resolve, reject) => {
   gateway.stdout.on("data", (chunk) => { if (String(chunk).includes("Editspace gateway")) resolve() })
 })
 gateway.once("exit", (status) => console.error(`gateway exited mid-run: ${status}`))
+// Second host of the Work Desk: a gateway in front of the Mini-shaped fixture, its own code.
+const miniServer = await createFixture({ shape: "mini" })
+const miniPort = await spare()
+const miniCode = "MINI2-PAIR3-CODE4-ONLY5"
+const miniGateway = spawn("bun", [path.join(root, "../es-android/src/gateway.ts"), "--port", String(miniPort), "--root", renderer], {
+  cwd: path.join(root, "../es-android"),
+  env: { ...process.env, OPENCODE_URL: miniServer.url, ES_DASHBOARD_URL: miniServer.url, ES_REMOTE_PAIRING_CODE: miniCode, OPENCODE_SERVER_PASSWORD: "" },
+  stdio: ["ignore", "pipe", "inherit"],
+})
+await new Promise((resolve, reject) => {
+  miniGateway.once("exit", (status) => reject(new Error(`Mini gateway exited ${status}`)))
+  miniGateway.stdout.on("data", (chunk) => { if (String(chunk).includes("Editspace gateway")) resolve() })
+})
 
 // The shared adb server occasionally drops reverse mappings while other lanes run; re-assert.
-const reverse = () => adb("reverse", `tcp:${port}`, `tcp:${port}`).catch(() => {})
+const reverse = async () => { await adb("reverse", `tcp:${port}`, `tcp:${port}`).catch(() => {}); await adb("reverse", `tcp:${miniPort}`, `tcp:${miniPort}`).catch(() => {}) }
 const nodes = async () => {
   await reverse()
   try { await adb("shell", "uiautomator", "dump", "/sdcard/desk-ui.xml") } catch { return [] }
@@ -299,7 +312,7 @@ try {
   await type("chat-text", "FAIL500-KEEP one")
   await tap(await waitFor(byId("chat-send"), "send keep"))
   // The receipt poll may confirm it before the node tree is read; either interim state is fine.
-  await waitFor((n) => n["resource-id"] === "pending-uncertain" || n["content-desc"]?.includes("FAIL500-KEEP one, accepted"), "keep bubble")
+  await waitFor((n) => n["resource-id"] === "pending-uncertain" || n["content-desc"]?.includes("FAIL500-KEEP one, registered"), "keep bubble")
   await screenshot("20-chat-keep")
   await waitFor((n) => n["content-desc"] === "Sent from this phone", "transcript message attributed to You (header)", 30_000)
   await waitFor((n) => n.text === "FAIL500-KEEP one", "transcript message text")
@@ -318,7 +331,7 @@ try {
   if (!(await nodes()).some(byId("pending-uncertain"))) throw new Error("DROP bubble was confirmed without a receipt")
   if (posts("FAIL500-DROP two").length !== 1) throw new Error("DROP must not be resent automatically")
   await tap(await waitFor((n) => n.text?.toLowerCase() === "retry", "retry"))
-  await waitFor((n) => n["content-desc"]?.includes("FAIL500-DROP two, accepted") || n["content-desc"]?.includes("FAIL500-DROP two, Accepted"), "accepted after retry", 30_000)
+  await waitFor((n) => n["content-desc"]?.includes("FAIL500-DROP two, registered"), "accepted after retry", 30_000)
   const drop = posts("FAIL500-DROP two")
   if (drop.length !== 2 || drop[0].body.requestID !== drop[1].body.requestID) throw new Error(`retry must reuse the request id: ${drop.map((w) => w.body.requestID).join(" vs ")}`)
   pass("POST 500 + no receipt -> not confirmed, no auto-resend; Retry reuses the same request id")
@@ -326,6 +339,54 @@ try {
   // Diagnostics lists the outbox with request ids.
   await adb("shell", "input", "keyevent", "KEYCODE_BACK")
   await waitFor(byId("desk"), "home after back")
+
+  // 5c. multi-host Work Desk (0.1.21): add the Mini-shaped host; both hosts aggregate; the
+  // Relay row from the Mini opens and sends with an explicit target; an unreachable host only
+  // dims its own row and never blocks the other.
+  const miniWrites = () => fixture.writes.filter((w) => w.host === "mini")
+  await tap(await waitFor(byId("link"), "link menu"))
+  await tap(await waitFor(byText("Add a host"), "add host entry"))
+  await waitFor(byId("origin"), "add host screen")
+  await tap(await waitFor(byId("origin"), "origin field"))
+  await typeText(`http://127.0.0.1:${miniPort}`)
+  await hideKeyboard()
+  await type("code", miniCode)
+  await tap(await waitFor(byId("pair"), "pair mini"))
+  await waitFor(byId("desk"), "home after adding host")
+  await waitFor(byId("host-127.0.0.1"), "host rows", 60_000)
+  const hostRows = (await nodes()).filter((n) => n["resource-id"] === "host-127.0.0.1")
+  if (hostRows.length !== 2) throw new Error(`expected 2 host rows, saw ${hostRows.length}`)
+  await until(async () => (await nodes()).filter((n) => n["content-desc"]?.startsWith("host ") && n["content-desc"]?.endsWith("reachable")).length === 2, "both hosts reachable")
+  await waitFor((n) => /today · 2 hosts/i.test(n.text ?? ""), "Work Today across 2 hosts")
+  pass("second host paired without leaving the first; two reach rows, both reachable; Work Today sums 2 hosts")
+  await screenshot("22-home-two-hosts")
+  await tap(await waitFor(byId("tab-agents"), "agents tab"))
+  await type("agent-search", "ses_7efac")
+  await hideKeyboard()
+  const miniRelay = await waitFor((n) => n["content-desc"]?.startsWith("Relay (Mini receiving orchestrator), orchestrator"), "Mini relay row via session id")
+  if ((await nodes()).filter((n) => n["content-desc"]?.startsWith("Relay (Mini receiving orchestrator)")).length !== 1) throw new Error("the Mini Relay row collided with the fixture Relay row")
+  await tap(miniRelay)
+  await waitFor(byId("agent"), "mini relay screen")
+  const target = await waitFor(byId("send-target"), "explicit send target")
+  if (!/127\.0\.0\.1/.test(target.text ?? "")) throw new Error(`send target should name the host: ${target.text}`)
+  await type("steer-text", "hello mini")
+  await tap(await waitFor(byId("steer-send"), "send to mini"))
+  await until(async () => miniWrites().some((w) => w.path.startsWith("/session/ses_7efac8ae") && w.path.endsWith("/input")), "input landed on the Mini fixture, not the laptop one")
+  if (fixture.writes.some((w) => w.host !== "mini" && w.path.startsWith("/session/ses_7efac8ae"))) throw new Error("send leaked to the wrong host")
+  pass("Mini Relay opens from the aggregated list and the send goes to its own host only")
+  await screenshot("23-mini-relay-send")
+  await adb("shell", "input", "keyevent", "KEYCODE_BACK")
+  await tap(await waitFor(byId("agent-search-clear"), "clear search"))
+  await tap(await waitFor(byId("tab-desk"), "desk tab"))
+  // Unreachable host: the Mini fixture answers 503 to everything; its row goes "server", the laptop stays reachable and Home keeps working.
+  miniServer.setDown(true)
+  await until(async () => (await nodes()).some((n) => n["content-desc"]?.startsWith("host ") && /, (network|server)$/.test(n["content-desc"])), "mini row unreachable", 90_000)
+  if (!(await nodes()).some((n) => n["content-desc"]?.startsWith("host ") && n["content-desc"]?.endsWith("reachable"))) throw new Error("laptop row should stay reachable")
+  await waitFor(byText("Delivery retry needs the lane owner stamp"), "laptop attention still shown")
+  await waitFor((n) => /cost is a floor/i.test(n.text ?? ""), "partial cost mark")
+  pass("unreachable host dims only its own row; the other host keeps serving")
+  await screenshot("24-home-host-down")
+  miniServer.setDown(false)
 
   // 6. inbox-push 2b: notifications opt-in + Stay connected foreground service.
   const permitted = async () => (await adb("shell", "dumpsys", "package", pkg)).toString().includes("android.permission.POST_NOTIFICATIONS: granted=true")
@@ -380,5 +441,7 @@ try {
 } finally {
   await adb("reverse", "--remove", `tcp:${port}`).catch(() => {})
   gateway.kill("SIGTERM")
+  miniGateway.kill("SIGTERM")
   await server.close()
+  await miniServer.close()
 }

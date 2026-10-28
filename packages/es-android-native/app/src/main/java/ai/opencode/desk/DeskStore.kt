@@ -58,6 +58,8 @@ data class Agent(
     val session: DashSession?,
     val sessions: List<DashSession>,
     val owner: String = "",
+    // The saved origin this row came from; every read and send for it goes there, explicitly.
+    val origin: String = "",
 ) {
     val busy get() = status == "busy"
     val directory get() = session?.directory.orEmpty()
@@ -105,6 +107,53 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         private set
     fun refreshProfiles() { profileSwitch = Profiles.decide(profiles.current, profiles.targets()) }
     val api = Api(gateway)
+    private val apis = HashMap<String, Api>()
+    // Reads and writes for a row go to the host it came from, never to "the current" origin.
+    fun apiFor(origin: String): Api = if (origin.isBlank() || DeskPointers.normalize(origin) == DeskPointers.normalize(gateway.origin)) api else apis.getOrPut(DeskPointers.normalize(origin)) { Api(gateway.at(origin)) }
+    fun originOf(sessionID: String): String = agents.firstOrNull { it.sessions.any { s -> s.id == sessionID } }?.origin?.ifBlank { null } ?: gateway.origin
+
+    // ---- multi-host Work Desk (android-lead#68) ----
+    // Every saved, paired origin of this profile besides the primary. Each is read on its own;
+    // an unreachable one only changes its reach row.
+    val secondaries: List<String> get() = gateway.savedOrigins.filter { DeskPointers.normalize(it) != DeskPointers.normalize(gateway.origin) && gateway.credentials.paired(it) }
+    val reach = mutableStateMapOf<String, Fleet.Host>()
+    val hostInfos = mutableStateMapOf<String, HostInfo>()
+    val remoteStates = mutableStateMapOf<String, Map<String, StateResponse>>()
+    val remoteOpen = mutableStateMapOf<String, List<AttentionRecord>>()
+    fun hostFor(origin: String): HostInfo? = if (origin.isBlank() || DeskPointers.normalize(origin) == DeskPointers.normalize(gateway.origin)) host else hostInfos[DeskPointers.normalize(origin)]
+    val fleet: List<Fleet.Host> get() = listOf(gateway.origin).plus(secondaries).map { o -> reach[DeskPointers.normalize(o)] ?: Fleet.Host(o) }
+    val workToday: Fleet.WorkToday get() = Fleet.workToday(
+        mapOf(gateway.origin to states.values.flatMap { st -> st.threads.flatMap { it.sessions } + st.sessions }.distinctBy { it.id }) +
+            remoteStates.mapValues { (_, m) -> m.values.flatMap { st -> st.threads.flatMap { it.sessions } + st.sessions }.distinctBy { it.id } },
+        fleet, System.currentTimeMillis(),
+    )
+
+    private suspend fun refreshSecondary(origin: String) {
+        val key = DeskPointers.normalize(origin)
+        val remote = apiFor(origin)
+        val before = reach[key] ?: Fleet.Host(origin)
+        try {
+            coroutineScope {
+                val info = async { runCatching { remote.host() }.getOrNull() }
+                val spaces = async { remote.editspaces() }
+                val openList = async { runCatching { remote.attention("open") }.getOrNull() }
+                val names = spaces.await().editspaces.map { it.name }
+                val loaded = names.map { name -> async { name to runCatching { remote.state(name) }.getOrNull() } }.awaitAll()
+                remoteStates[key] = loaded.mapNotNull { (n, st) -> st?.let { n to it } }.toMap()
+                openList.await()?.let { list -> remoteOpen[key] = list.records.map { it.copy(origin = origin) } }
+                info.await()?.let { hi ->
+                    val self = prefs.getString("host.self:$key", null) ?: hi.self
+                    hostInfos[key] = if (self != null) hi.copy(self = self) else hi
+                }
+                val now = System.currentTimeMillis()
+                reach[key] = before.copy(reach = Fleet.Reach.Ok, id = hostInfos[key]?.let { it.self ?: it.id }, lastSeen = now, checkedAt = now, error = null)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            reach[key] = before.copy(reach = Fleet.classify(error), checkedAt = System.currentTimeMillis(), error = error.message)
+        }
+    }
     private val prefs = app.getSharedPreferences("desk", Context.MODE_PRIVATE)
 
     var link by mutableStateOf(if (gateway.paired) Link.Connecting else Link.Unpaired)
@@ -183,11 +232,11 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     // (DraftStore); this map mirrors the current origin's entries for Compose.
     private val draftStore = DraftStore(kv)
     val drafts = mutableStateMapOf<String, Draft>()
-    private fun loadDrafts() { drafts.clear(); draftStore.list(gateway.origin).forEach { drafts[it.sessionID] = it } }
+    private fun loadDrafts() { drafts.clear(); (listOf(gateway.origin) + secondaries).forEach { o -> draftStore.list(o).forEach { drafts[it.sessionID] = it } } }
     private fun saveDraft(draft: Draft) { if (draft.empty) drafts.remove(draft.sessionID) else drafts[draft.sessionID] = draft; draftStore.put(draft) }
     fun draftText(sessionID: String): String = drafts[sessionID]?.text.orEmpty()
     fun setDraftText(sessionID: String, text: String) {
-        val current = drafts[sessionID] ?: Draft(gateway.origin, sessionID, UUID.randomUUID().toString())
+        val current = drafts[sessionID] ?: Draft(if (sessionID == DESK_DRAFT) gateway.origin else originOf(sessionID), sessionID, UUID.randomUUID().toString())
         if (current.text == text) return
         saveDraft(current.copy(text = text, updatedAt = System.currentTimeMillis()))
     }
@@ -256,7 +305,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     // Entries composed for this origin come back as Uncertain: the POST may or may not have
     // landed before the process died, and the same requestID makes the retry safe either way.
     private fun restoreOutbox() {
-        durable.list(gateway.origin).forEach { entry ->
+        (listOf(gateway.origin) + secondaries).flatMap { durable.list(it) }.forEach { entry ->
             val item = Pending(entry.requestID, entry.sessionID, entry.text, entry.delivery, SendState.Uncertain, error = "app restarted", createdAt = entry.createdAt, images = entry.images.size)
             outbox[entry.sessionID] = outbox[entry.sessionID].orEmpty().filter { it.requestID != entry.requestID } + item
         }
@@ -281,12 +330,26 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    // Pair one more host for this profile without leaving the current one (multi-host Work Desk).
+    suspend fun addHost(origin: String, code: String, access: AccessToken?): String? {
+        val view = gateway.at(origin)
+        if (access != null) view.saveAccessToken(access)
+        return runCatching { view.pair(code) }.fold(
+            onSuccess = { ok -> if (ok) { gateway.credentials.touch(origin); nudges.tryEmit(Unit); null } else "That code was not accepted." },
+            onFailure = {
+                if (it is AccessRequired) "This server is behind Cloudflare Access. Add the Access service token (client ID and secret) and pair again."
+                else it.message ?: "Could not reach the gateway."
+            },
+        )
+    }
+
     // Switch to another saved (already paired) origin without a code.
     fun switchOrigin(origin: String) {
         loop?.cancel(); events?.cancel()
         gateway.origin = origin
         gateway.credentials.touch(origin)
         states.clear(); open = emptyList(); agents = emptyList(); surfaces = emptyList(); host = null
+        reach.clear(); hostInfos.clear(); remoteStates.clear(); remoteOpen.clear(); remotePins.clear(); apis.clear(); operators.clear()
         desk = pointers.get(origin); deskBusy = false
         pins = pinStore.list(origin)
         outbox.clear(); loadDrafts()
@@ -334,6 +397,8 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     }
 
     suspend fun refresh() {
+        val others = viewModelScope.launch { secondaries.forEach { o -> launch { refreshSecondary(o) } } }
+        val primaryKey = DeskPointers.normalize(gateway.origin)
         try {
             coroutineScope {
                 val spaces = async { api.editspaces() }
@@ -369,19 +434,25 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
             updatedAt = System.currentTimeMillis()
             lastError = null
             link = Link.Online
+            reach[primaryKey] = (reach[primaryKey] ?: Fleet.Host(gateway.origin)).copy(reach = Fleet.Reach.Ok, id = host?.let { it.self ?: it.id }, lastSeen = updatedAt, checkedAt = updatedAt, error = null)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: PairingRequired) {
             link = Link.Unpaired
+            reach[primaryKey] = (reach[primaryKey] ?: Fleet.Host(gateway.origin)).copy(reach = Fleet.Reach.Profile, checkedAt = System.currentTimeMillis(), error = error.message)
         } catch (error: AccessRequired) {
             lastError = error.message
             link = Link.Access
+            reach[primaryKey] = (reach[primaryKey] ?: Fleet.Host(gateway.origin)).copy(reach = Fleet.Reach.Auth, checkedAt = System.currentTimeMillis(), error = error.message)
         } catch (error: Exception) {
             Log.w("Desk", "refresh failed: ${error.javaClass.simpleName}: ${error.message}")
             lastError = error.message
             if (link != Link.Offline) offlineSince = System.currentTimeMillis()
             link = Link.Offline
+            reach[primaryKey] = (reach[primaryKey] ?: Fleet.Host(gateway.origin)).copy(reach = Fleet.classify(error), checkedAt = System.currentTimeMillis(), error = error.message)
         }
+        others.join()
+        agents = deriveAgents()
     }
 
     private var baselined = false
@@ -412,22 +483,37 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         return true
     }
 
-    private fun deriveAgents(): List<Agent> = states.flatMap { (es, state) -> Agents.derive(es, state) }.sortedWith(compareBy({ !it.busy }, { -it.activityAt }))
+    private fun deriveAgents(): List<Agent> {
+        val primary = states.flatMap { (es, state) -> Agents.derive(es, state).map { it.copy(origin = gateway.origin) } }
+        val remote = secondaries.flatMap { o ->
+            val prefix = Fleet.keyPrefix(o, gateway.origin)
+            remoteStates[DeskPointers.normalize(o)].orEmpty().flatMap { (es, state) -> Agents.derive(es, state).map { it.copy(key = prefix + it.key, origin = o) } }
+        }
+        return (primary + remote).sortedWith(compareBy({ !it.busy }, { -it.activityAt }))
+    }
+    // Needs you across every reachable host; each record remembers its origin for actions.
+    val fleetOpen: List<AttentionRecord> get() = (open.map { it.copy(origin = gateway.origin) } + secondaries.flatMap { remoteOpen[DeskPointers.normalize(it)].orEmpty() }).sortedWith(compareBy({ it.kind != "blocker" }, { -it.updated_at }))
 
     // ---- attention actions ----
     // Every write goes through the operator session; a 401 means the 8 h cookie lapsed.
-    private suspend fun <T> asOperator(block: suspend () -> T): T {
-        if (!operator) { api.bootstrapOperator(); operator = true }
+    private val operators = HashSet<String>()
+    private suspend fun <T> asOperator(origin: String = gateway.origin, block: suspend () -> T): T {
+        val remote = apiFor(origin)
+        val key = DeskPointers.normalize(origin)
+        val have = if (key == DeskPointers.normalize(gateway.origin)) operator else key in operators
+        if (!have) { remote.bootstrapOperator(); if (key == DeskPointers.normalize(gateway.origin)) operator = true else operators.add(key) }
         return try { block() } catch (error: GatewayError) {
             if (error.code != 401) throw error
-            api.bootstrapOperator(); operator = true
+            remote.bootstrapOperator(); if (key == DeskPointers.normalize(gateway.origin)) operator = true else operators.add(key)
             block()
         }
     }
 
     suspend fun act(record: AttentionRecord, action: suspend Api.(AttentionRecord) -> AttentionRecord): Result<AttentionRecord> =
-        runCatching { asOperator { api.action(record) } }.onSuccess { updated ->
+        runCatching { asOperator(record.origin.ifBlank { gateway.origin }) { apiFor(record.origin).action(record) } }.onSuccess { updated ->
             open = open.map { if (it.id == updated.id) updated else it }.filter { it.status == "open" }
+            val key = DeskPointers.normalize(record.origin)
+            remoteOpen[key]?.let { list -> remoteOpen[key] = list.map { if (it.id == updated.id) updated.copy(origin = record.origin) else it }.filter { it.status == "open" } }
             nudges.tryEmit(Unit)
         }.onFailure { nudges.tryEmit(Unit) }
 
@@ -438,12 +524,13 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
             val previous = details[agent.key]
             val detail = runCatching {
                 coroutineScope {
-                    val page = async { api.page(session.id, session.directory, 30, null) }
-                    val todos = async { runCatching { api.todos(session.id, session.directory) }.getOrDefault(emptyList()) }
-                    val receipts = async { runCatching { api.receipts(session.id, session.directory).items }.getOrNull() }
-                    val work = async { runCatching { api.currentWork(session.id, session.directory) }.getOrNull() }
-                    val mail = async { runCatching { api.mail(agent.editspace, agent.lane, session.id).messages }.getOrDefault(emptyList()) }
-                    val wakes = async { runCatching { api.wakeEvents(agent.editspace, session.id).events }.getOrDefault(emptyList()) }
+                    val remote = apiFor(agent.origin)
+                    val page = async { remote.page(session.id, session.directory, 30, null) }
+                    val todos = async { runCatching { remote.todos(session.id, session.directory) }.getOrDefault(emptyList()) }
+                    val receipts = async { runCatching { remote.receipts(session.id, session.directory).items }.getOrNull() }
+                    val work = async { runCatching { remote.currentWork(session.id, session.directory) }.getOrNull() }
+                    val mail = async { runCatching { remote.mail(agent.editspace, agent.lane, session.id).messages }.getOrDefault(emptyList()) }
+                    val wakes = async { runCatching { remote.wakeEvents(agent.editspace, session.id).events }.getOrDefault(emptyList()) }
                     val newest = page.await()
                     val older = previous?.messages.orEmpty()
                     AgentDetail(
@@ -472,7 +559,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         if (detail.loadingOlder) return
         details[agent.key] = detail.copy(loadingOlder = true)
         viewModelScope.launch {
-            val page = runCatching { api.page(session.id, session.directory, 40, cursor) }.getOrNull()
+            val page = runCatching { apiFor(agent.origin).page(session.id, session.directory, 40, cursor) }.getOrNull()
             val current = details[agent.key] ?: return@launch
             details[agent.key] = if (page == null) current.copy(loadingOlder = false)
             else current.copy(messages = page.items + current.messages.filter { m -> page.items.none { it.info.id == m.info.id } }, cursor = page.cursor, loadingOlder = false)
@@ -481,8 +568,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
 
     // Local echo first, then the durable POST. The requestID is fixed at tap time so a retry
     // after a timeout cannot double-admit: Core returns the original receipt for the same ID.
-    private suspend fun send(sessionID: String, directory: String, text: String, delivery: String, requestID: String = UUID.randomUUID().toString(), after: () -> Unit = {}): Pending {
-        val origin = gateway.origin
+    private suspend fun send(sessionID: String, directory: String, text: String, delivery: String, requestID: String = UUID.randomUUID().toString(), origin: String = originOf(sessionID), after: () -> Unit = {}): Pending {
         // The durable entry is written before the first attempt and reused verbatim by retries.
         val entry = durable.get(origin, requestID) ?: OutboxEntry(
             requestID, origin, sessionID, directory, text, delivery,
@@ -494,7 +580,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         outbox[sessionID] = outbox[sessionID].orEmpty().filter { it.requestID != requestID } + item
         val result = runCatching {
             val images = withContext(Dispatchers.IO) { durable.payload(entry) }
-            api.input(sessionID, entry.directory, entry.text, entry.delivery, requestID = requestID, images = images)
+            apiFor(origin).input(sessionID, entry.directory, entry.text, entry.delivery, requestID = requestID, images = images)
         }
         val settled = result.fold(
             onSuccess = { item.copy(state = Outbox.fromReceipt(it), messageID = it.messageID) },
@@ -525,25 +611,26 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
 
     suspend fun retry(item: Pending): Pending {
         // Retry only what was composed for this gateway; an entry from another host is never replayed here.
-        val entry = durable.get(gateway.origin, item.requestID)
+        val origin = originOf(item.sessionID)
+        val entry = durable.get(origin, item.requestID)
         val directory = entry?.directory ?: agents.firstOrNull { it.session?.id == item.sessionID }?.session?.directory ?: desk?.takeIf { it.id == item.sessionID }?.directory
             ?: return item.copy(state = SendState.Failed, error = "session not found")
         // Reconcile by requestID before any second POST: a receipt means the first one landed.
-        val receipts = runCatching { api.receipts(item.sessionID, directory).items }.getOrNull()
+        val receipts = runCatching { apiFor(origin).receipts(item.sessionID, directory).items }.getOrNull()
         if (receipts != null) when (val plan = Outbox.retryPlan(item, receipts)) {
             is Outbox.Plan.Confirm -> {
                 val confirmed = item.copy(state = Outbox.fromReceipt(plan.receipt), messageID = plan.receipt.messageID, error = null)
                 outbox[item.sessionID] = outbox[item.sessionID].orEmpty().map { if (it.requestID == item.requestID) confirmed else it }
                 remember(item.sessionID, listOf(confirmed))
                 markSent(item.sessionID)
-                draftStore.clear(gateway.origin, item.sessionID, item.requestID)
+                draftStore.clear(origin, item.sessionID, item.requestID)
                 drafts[item.sessionID]?.takeIf { it.requestID == item.requestID }?.let { drafts.remove(item.sessionID) }
                 agents.firstOrNull { it.session?.id == item.sessionID }?.let(::load) ?: loadDesk()
                 return confirmed
             }
             is Outbox.Plan.Resend -> Unit
         }
-        return send(item.sessionID, directory, item.text, item.delivery, item.requestID) {
+        return send(item.sessionID, directory, item.text, item.delivery, item.requestID, origin) {
             agents.firstOrNull { it.session?.id == item.sessionID }?.let(::load) ?: loadDesk()
         }
     }
@@ -601,18 +688,33 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         outbox[sessionID].orEmpty().firstOrNull { it.messageID == messageID }?.let { storedImages(it.requestID) }.orEmpty()
 
     // ---- pins ----
-    fun togglePin(pin: Pin) { pins = pinStore.toggle(gateway.origin, pin) }
-    fun pinned(pin: Pin) = pins.any { it.key == pin.key }
+    fun togglePin(pin: Pin, origin: String = gateway.origin) {
+        val key = DeskPointers.normalize(origin)
+        if (key == DeskPointers.normalize(gateway.origin)) { pins = pinStore.toggle(origin, pin); return }
+        remotePins[key] = pinStore.toggle(origin, pin)
+    }
+    fun pinned(pin: Pin, origin: String = gateway.origin): Boolean {
+        val key = DeskPointers.normalize(origin)
+        val list = if (key == DeskPointers.normalize(gateway.origin)) pins else remotePins[key] ?: pinStore.list(origin).also { remotePins[key] = it }
+        return list.any { it.key == pin.key }
+    }
+    val remotePins = mutableStateMapOf<String, List<Pin>>()
+    // Pinned rows of every saved host; each host's pins resolve against that host's rows only.
+    val fleetPinViews: List<PinView> get() = pinViews + secondaries.flatMap { o ->
+        val key = DeskPointers.normalize(o)
+        val list = remotePins[key] ?: pinStore.list(o).also { remotePins[key] = it }
+        Pins.resolve(list, agents.filter { it.origin == o }, remoteStates[key].orEmpty().mapValues { it.value.sessions }).map { it.copy(origin = o) }
+    }
     val pinViews: List<PinView> get() = Pins.resolve(pins, agents, states.mapValues { it.value.sessions })
 
     suspend fun stop(agent: Agent): Result<Boolean> {
         val session = agent.session ?: return Result.failure(IllegalStateException("No session"))
-        return runCatching { api.abort(session.id, session.directory) }.onSuccess { nudges.tryEmit(Unit) }
+        return runCatching { apiFor(agent.origin).abort(session.id, session.directory) }.onSuccess { nudges.tryEmit(Unit) }
     }
 
     suspend fun cancel(agent: Agent, requestID: String): Result<Unit> {
         val session = agent.session ?: return Result.failure(IllegalStateException("No session"))
-        return runCatching { api.cancelInput(session.id, session.directory, requestID) }.onSuccess { durable.remove(gateway.origin, requestID); load(agent) }
+        return runCatching { apiFor(agent.origin).cancelInput(session.id, session.directory, requestID) }.onSuccess { durable.remove(agent.origin.ifBlank { gateway.origin }, requestID); load(agent) }
     }
 
     // ---- front desk ----

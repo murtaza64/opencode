@@ -9,7 +9,8 @@ import okhttp3.HttpUrl
 // (scheme://host:port of the request), so two gateways on one host with different ports,
 // or the same port on different hosts, never share a cookie. Values are credentials: never
 // logged, never shown.
-class CookieStore(private val credentials: Credentials, private val current: () -> String) : CookieJar {
+// Cookies are keyed by the exact origin of each request URL, never by a "current" host.
+class CookieStore(private val credentials: Credentials) : CookieJar {
     private fun originOf(url: HttpUrl) = "${url.scheme}://${url.host}:${url.port}"
 
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {

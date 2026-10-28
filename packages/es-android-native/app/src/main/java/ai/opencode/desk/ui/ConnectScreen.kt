@@ -34,8 +34,8 @@ import ai.opencode.desk.net.AccessToken
 import kotlinx.coroutines.launch
 
 @Composable
-fun ConnectScreen(store: DeskStore) {
-    var origin by rememberSaveable { mutableStateOf(store.gateway.origin) }
+fun ConnectScreen(store: DeskStore, add: Boolean = false, onDone: () -> Unit = {}) {
+    var origin by rememberSaveable { mutableStateOf(if (add) "" else store.gateway.origin) }
     var code by rememberSaveable { mutableStateOf("") }
     var accessID by rememberSaveable { mutableStateOf("") }
     var accessSecret by rememberSaveable { mutableStateOf("") }
@@ -54,11 +54,12 @@ fun ConnectScreen(store: DeskStore) {
             ProfileSwitchAction(store)
         }
         Spacer(Modifier.height(4.dp))
-        Text("Pair this phone with the gateway running on your Mac.", style = MaterialTheme.typography.bodyMedium)
+        Text(if (add) "Add another host to this profile. Its agents and decisions join the same Desk; each send names its host." else "Pair this phone with the gateway running on your Mac.", style = MaterialTheme.typography.bodyMedium)
+        if (add) Label("← back", color = Ink.Blue, modifier = Modifier.clickable(onClick = onDone).padding(vertical = 4.dp).testTag("back"))
         Spacer(Modifier.height(28.dp))
         // Hosts this phone is already paired to: one tap switches without a code.
         val saved = store.gateway.savedOrigins.filter { store.gateway.credentials.paired(it) }
-        if (saved.isNotEmpty()) {
+        if (saved.isNotEmpty() && !add) {
             Label("paired hosts")
             saved.forEach { host ->
                 Text(host, style = MaterialTheme.typography.bodyLarge, color = Ink.Blue, modifier = Modifier.fillMaxWidth().clickable { store.switchOrigin(host) }.padding(vertical = 8.dp).testTag("saved-origin"))
@@ -109,8 +110,8 @@ fun ConnectScreen(store: DeskStore) {
                 busy = true; error = null
                 val token = if (accessID.isNotBlank()) AccessToken(accessID.trim(), accessSecret.trim()) else null
                 scope.launch {
-                    error = store.pair(origin.trim(), code, token)
-                    if (error == null) { accessID = ""; accessSecret = "" }
+                    error = if (add) store.addHost(origin.trim(), code, token) else store.pair(origin.trim(), code, token)
+                    if (error == null) { accessID = ""; accessSecret = ""; if (add) onDone() }
                     busy = false
                 }
             },

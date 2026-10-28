@@ -12,6 +12,7 @@ sealed interface Route {
     data class Agent(val key: String) : Route
     data object Chat : Route
     data object Settings : Route
+    data object AddHost : Route
     data class Surface(val id: String) : Route
 }
 

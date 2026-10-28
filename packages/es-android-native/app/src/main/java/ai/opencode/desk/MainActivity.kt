@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -80,8 +81,12 @@ class MainActivity : ComponentActivity() {
 private fun App(openAgent: String? = null) {
     val store: DeskStore = DeskApp.store(LocalContext.current)
     val nav = remember { Nav() }
+    // The debug deep link opens its agent once, as soon as the row exists; never again on later list changes.
+    val opened = remember(openAgent) { mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(openAgent, store.agents.size) {
-        if (openAgent != null && nav.current == Route.Home && store.agents.any { it.key == openAgent }) nav.push(Route.Agent(openAgent))
+        if (opened.value || openAgent == null || nav.current != Route.Home || store.agents.none { it.key == openAgent }) return@LaunchedEffect
+        opened.value = true
+        nav.push(Route.Agent(openAgent))
     }
     BackHandler(enabled = nav.stack.size > 1) { nav.pop() }
     // testTags surface as resource-ids so headless uiautomator checks can find Compose nodes.
@@ -105,6 +110,7 @@ private fun App(openAgent: String? = null) {
                 is Route.Agent -> AgentScreen(store, nav, route.key)
                 Route.Chat -> ChatScreen(store, nav)
                 Route.Settings -> ai.opencode.desk.ui.SettingsScreen(store, nav)
+                Route.AddHost -> ConnectScreen(store, add = true, onDone = { nav.pop() })
                 is Route.Surface -> SurfaceScreen(store, nav, route.id)
             }
         }

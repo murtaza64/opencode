@@ -12,8 +12,8 @@ android {
         applicationId = "ai.opencode.desk"
         minSdk = 28
         targetSdk = 35
-        versionCode = 23
-        versionName = "0.1.20"
+        versionCode = 24
+        versionName = "0.1.21"
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }

@@ -39,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import ai.opencode.desk.Fleet
 import ai.opencode.desk.Follow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -128,11 +129,11 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         val pin = agent.pin
-        val glyph = Hosts.forLane(agent.owner, store.host)
-        TopBar(agent.title, onBack = { nav.pop() }, trailing = { PinButton(store.pinned(pin)) { store.togglePin(pin) } }, glyph = glyph, onLongPress = { diagnostics = true }) {
+        val glyph = Hosts.forLane(agent.owner, store.hostFor(agent.origin))
+        TopBar(agent.title, onBack = { nav.pop() }, trailing = { PinButton(store.pinned(pin, agent.origin)) { store.togglePin(pin, agent.origin) } }, glyph = glyph, onLongPress = { diagnostics = true }) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatusDot(agent.status, 7, animate = true)
-                Label(listOfNotNull(Hosts.resolve(store.host)?.takeIf { glyph != null }?.let { "on ${it.label}" }, agent.editspace, agent.lane.takeIf { it.isNotBlank() }, agent.status, agent.session?.cost?.takeIf { it > 0 }?.let { "$%.2f".format(it) }).joinToString(" · "))
+                Label(listOfNotNull(Hosts.resolve(store.hostFor(agent.origin))?.takeIf { glyph != null }?.let { "on ${it.label}" }, agent.editspace, agent.lane.takeIf { it.isNotBlank() }, agent.status, agent.session?.cost?.takeIf { it > 0 }?.let { "$%.2f".format(it) }).joinToString(" · "))
             }
         }
         // Follow-scroll: newest is index 0 in the reversed list. Follow new output unless the
@@ -405,6 +406,9 @@ private fun SteerBar(store: DeskStore, agent: Agent, onSent: () -> Unit) {
                 colors = TextFieldDefaults.colors(focusedContainerColor = Ink.Panel, unfocusedContainerColor = Ink.Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = Ink.Blue),
             )
             val hasImages = store.drafts[sessionID]?.images?.isNotEmpty() == true
+            // Explicit target: every send names the host it goes to.
+            val target = Hosts.resolve(store.hostFor(agent.origin))?.label ?: Fleet.tag(agent.origin.ifBlank { store.gateway.origin })
+            Label("→ $target", modifier = Modifier.padding(start = 6.dp).testTag("send-target"))
             IconButton(enabled = (text.isNotBlank() || hasImages) && !busy && agent.session != null, modifier = Modifier.testTag("steer-send"), onClick = {
                 val message = text.trim(); busy = true; error = null
                 scope.launch {

@@ -26,46 +26,62 @@ val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues 
 // Rules it enforces that this class owns: Host must equal the gateway origin, every
 // non-GET request carries Origin = gateway origin, writes to the dashboard attention API
 // add X-Attention-CSRF, and the es_remote / es_attention_operator cookies ride along.
-class Gateway(context: Context) {
-    private val prefs = context.getSharedPreferences("gateway", Context.MODE_PRIVATE)
-    // Cloudflare Access service tokens: app-private, encrypted at rest with a Keystore master
-    // key. Read on demand; never logged or surfaced after save.
-    private val secrets = EncryptedSharedPreferences.create(
-        context, "gateway-secrets",
-        MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-    )
-    private fun kv(p: android.content.SharedPreferences) = object : KeyValueWithKeys {
-        override fun get(key: String) = p.getString(key, null)
-        override fun put(key: String, value: String?) { p.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply() }
-        override fun keys() = p.all.keys.toList()
-    }
-    // Every credential is scoped to the exact origin it was issued for.
-    val credentials = Credentials(kv(prefs), kv(secrets))
-    private val jar = CookieStore(credentials) { origin }
-    val diagnostics = ai.opencode.desk.Diagnostics()
-    val client: OkHttpClient = OkHttpClient.Builder()
-        .cookieJar(jar)
-        .eventListenerFactory(diagnostics.factory)
-        .addInterceptor(Access.TokenInterceptor({ origin.toHttpUrlOrNull() }, { accessToken }))
-        .followRedirects(false)
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .build()
+class Gateway private constructor(private val prefs: android.content.SharedPreferences, val credentials: Credentials, val client: OkHttpClient, val diagnostics: ai.opencode.desk.Diagnostics, private val fixed: String?) {
+    constructor(context: Context) : this(build(context), null)
+    private constructor(parts: Triple<android.content.SharedPreferences, Credentials, Pair<OkHttpClient, ai.opencode.desk.Diagnostics>>, fixed: String?) :
+        this(parts.first, parts.second, parts.third.first, parts.third.second, fixed)
 
-    init {
-        // Pre-0.1.13 layouts keyed cookies by bare host and kept one global token; attach them
-        // to the current origin once so the existing pairing survives the upgrade.
-        if (!prefs.getBoolean("credentials.v2", false)) {
-            origin.toHttpUrlOrNull()?.host?.let { credentials.migrate(origin, it) }
-            prefs.edit().putBoolean("credentials.v2", true).apply()
+    companion object {
+        val JSON = "application/json".toMediaType()
+        // The surface proxy forwards only these; the WebView's own cookie/referer never reach the gateway.
+        val SAFE_REQUEST_HEADERS = setOf("accept", "accept-language", "if-none-match", "if-modified-since", "last-event-id", "range")
+
+        private fun build(context: Context): Triple<android.content.SharedPreferences, Credentials, Pair<OkHttpClient, ai.opencode.desk.Diagnostics>> {
+            val prefs = context.getSharedPreferences("gateway", Context.MODE_PRIVATE)
+            // Cloudflare Access service tokens: app-private, encrypted at rest with a Keystore master
+            // key. Read on demand; never logged or surfaced after save.
+            val secrets = EncryptedSharedPreferences.create(
+                context, "gateway-secrets",
+                MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+            fun kv(p: android.content.SharedPreferences) = object : KeyValueWithKeys {
+                override fun get(key: String) = p.getString(key, null)
+                override fun put(key: String, value: String?) { p.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply() }
+                override fun keys() = p.all.keys.toList()
+            }
+            // Every credential is scoped to the exact origin it was issued for.
+            val credentials = Credentials(kv(prefs), kv(secrets))
+            val diagnostics = ai.opencode.desk.Diagnostics()
+            val client = OkHttpClient.Builder()
+                .cookieJar(CookieStore(credentials))
+                .eventListenerFactory(diagnostics.factory)
+                // The token is chosen by the request's own origin, so a multi-host fleet never sends one host's secret to another.
+                .addInterceptor(Access.TokenInterceptor({ url -> url }, { url -> credentials.token("${url.scheme}://${url.host}:${url.port}") }))
+                .followRedirects(false)
+                .connectTimeout(5, TimeUnit.SECONDS)
+                .readTimeout(20, TimeUnit.SECONDS)
+                .build()
+            // Pre-0.1.13 layouts keyed cookies by bare host and kept one global token; attach them
+            // to the current origin once so the existing pairing survives the upgrade.
+            if (!prefs.getBoolean("credentials.v2", false)) {
+                val origin = prefs.getString("origin", "http://127.0.0.1:47120") ?: "http://127.0.0.1:47120"
+                origin.toHttpUrlOrNull()?.host?.let { credentials.migrate(origin, it) }
+                prefs.edit().putBoolean("credentials.v2", true).apply()
+            }
+            return Triple(prefs, credentials, client to diagnostics)
         }
     }
 
+    // A view of this gateway bound to one saved origin (multi-host Work Desk): same client,
+    // cookies, tokens and diagnostics; only the target differs. Never changes the primary.
+    fun at(target: String): Gateway = if (target == origin) this else Gateway(prefs, credentials, client, diagnostics, target.trimEnd('/'))
+    val isPrimary get() = fixed == null
+
     var origin: String
-        get() = prefs.getString("origin", "http://127.0.0.1:47120") ?: "http://127.0.0.1:47120"
-        set(value) { prefs.edit().putString("origin", value.trimEnd('/')).apply() }
+        get() = fixed ?: prefs.getString("origin", "http://127.0.0.1:47120") ?: "http://127.0.0.1:47120"
+        set(value) { check(fixed == null) { "origin views are fixed" }; prefs.edit().putString("origin", value.trimEnd('/')).apply() }
 
     val paired: Boolean get() = credentials.paired(origin)
     val savedOrigins: List<String> get() = credentials.saved()
@@ -174,9 +190,4 @@ class Gateway(context: Context) {
         }
     }
 
-    companion object {
-        val JSON = "application/json".toMediaType()
-        // The surface proxy forwards only these; the WebView's own cookie/referer never reach the gateway.
-        val SAFE_REQUEST_HEADERS = setOf("accept", "accept-language", "if-none-match", "if-modified-since", "last-event-id", "range")
-    }
 }
