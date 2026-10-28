@@ -14,8 +14,8 @@ import { background } from "./startup"
 const MIN_GAP_MS = 60_000
 export const STALE_MS = 15 * 60_000
 
-type Target = { id: string; label: string; base: string; current: boolean }
-type Reading = { value?: UsageDaily; error?: string; readAt: number }
+export type Target = { id: string; label: string; base: string; current: boolean }
+export type Reading = { value?: UsageDaily; error?: string; readAt: number }
 
 const [readings, setReadings] = createSignal<Record<string, Reading>>({})
 const [targets, setTargets] = createSignal<Target[]>([])
@@ -75,11 +75,20 @@ export const touchTodayCost = () => {
   }, Math.max(0, due - Date.now()))
 }
 
-export type HostCost = { id: string; label: string; current: boolean; state: "ok" | "unreachable" | "unpriced" | "overlap" | "pending"; cost?: number; observedAt?: number; note?: string }
+/** Per-host coverage: ok (origin-only, complete, fresh read), partial (origin-only but some usage unpriced or
+ * not yet counted), offline (last read failed; showing the last value), unpriced (no priced usage), unsupported
+ * (older Core without origin-only cost: its raw daily cost may include history moved from another host, so it is
+ * shown on its own and never combined), unreachable (no value yet), pending (first read in flight). */
+export type HostCost = { id: string; label: string; current: boolean; state: "ok" | "partial" | "offline" | "unpriced" | "unsupported" | "unreachable" | "pending"; cost?: number; observedAt?: number; note?: string }
 
-export const todayCost = (now = Date.now()) => {
-  const hosts: HostCost[] = targets().map((target) => {
-    const reading = readings()[target.id]
+export const todayCost = (now = Date.now()) => costSummary(targets(), readings(), now)
+
+/** Each WORK host's daily cost, plus a combined total over hosts whose Core reports origin-only cost.
+ * A lone WORK host's raw cost is its total (nothing to overlap); with several hosts, a host without
+ * origin-only cost is listed separately and makes the result partial. Undefined when no host has a cost. */
+export const costSummary = (targets: Target[], readings: Record<string, Reading>, now: number) => {
+  const hosts: HostCost[] = targets.map((target) => {
+    const reading = readings[target.id]
     const value = reading?.value
     const today = value?.days[0]
     if (!reading) return { id: target.id, label: target.label, current: target.current, state: "pending" }
@@ -88,21 +97,26 @@ export const todayCost = (now = Date.now()) => {
     const used = today.models.filter((model) => model.coverage !== "no-usage")
     const priced = used.filter((model) => !unpriced(model))
     const base = { id: target.id, label: target.label, current: target.current, observedAt }
-    if (today.cost === null || (used.length && !priced.length)) return { ...base, state: "unpriced", note: "no priced usage" }
+    const failed = reading.error ? `last read failed: ${reading.error}` : undefined
+    if (today.cost === null || (used.length && !priced.length)) return { ...base, state: "unpriced", note: failed ?? "no priced usage" }
     const partial = !value.coverage.backfilled || today.complete === false || priced.length < used.length || (today.unpricedModels ?? 0) > 0
     // Origin-only when the Core says so; otherwise the raw daily cost, which may overlap another host.
-    if (today.originOnly === true && typeof today.originCost === "number")
-      return { ...base, state: partial || reading.error ? "unpriced" : "ok", cost: today.originCost, note: reading.error ? `last read failed: ${reading.error}` : partial ? "some usage unpriced or not yet counted" : undefined }
-    return { ...base, state: "overlap", cost: today.cost, note: "may overlap another host (not origin-attributed)" }
+    if (today.originOnly === true && typeof today.originCost === "number") {
+      const notes = [failed, partial ? "some usage unpriced or not yet counted" : undefined].filter(Boolean).join("; ")
+      return { ...base, state: failed ? "offline" : partial ? "partial" : "ok", cost: today.originCost, note: notes || undefined }
+    }
+    return { ...base, state: "unsupported", cost: today.cost, note: ["Core has no origin-only cost", failed].filter(Boolean).join("; ") }
   })
-  // Sum origin-only costs. If none is available (older Cores), fall back to this host's own cost.
-  const summed = hosts.filter((item) => (item.state === "ok" || item.state === "unpriced") && item.cost !== undefined)
-  const counted = summed.length ? summed : hosts.filter((item) => item.current && item.cost !== undefined)
-  if (!counted.length) return undefined
-  const observedAt = Math.min(...counted.map((item) => item.observedAt ?? now))
+  const counted = hosts.filter((item) => item.cost !== undefined && (item.state !== "unsupported" || hosts.length === 1))
+  const separate = hosts.filter((item) => item.cost !== undefined && !counted.includes(item))
+  if (!counted.length && !separate.length) return undefined
+  const observedAt = Math.min(...[...counted, ...separate].map((item) => item.observedAt ?? now))
   const exact = hosts.every((item) => item.state === "ok" && now - (item.observedAt ?? 0) <= STALE_MS)
   return {
-    total: counted.reduce((sum, item) => sum + (item.cost ?? 0), 0),
+    /** Combined origin-only cost; undefined when no host can be combined. */
+    total: counted.length ? counted.reduce((sum, item) => sum + (item.cost ?? 0), 0) : undefined,
+    separate,
+    unsupported: hosts.filter((item) => item.state === "unsupported" && !counted.includes(item)).map((item) => item.label),
     estimate: true,
     partial: !exact,
     observedAt,
