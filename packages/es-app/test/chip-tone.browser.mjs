@@ -1,6 +1,7 @@
-// Chip tone (dotfiles#240): mail chips, coalesced tool runs and your own messages sit darker than the raised
-// surface level (fields, hover), still a visible step above the page, with readable text; geometry is
-// unchanged. Checked in the default theme and the wallpaper palette, wide and narrow RTL.
+// Chip tone (dotfiles#240): mail chips and coalesced tool runs read as lines (icon + text on the page, no
+// box at rest; the chip fill shows only on hover/focus or behind an opened run); your own messages sit
+// darker than raised surfaces, a step above the page. Text stays readable, heights are unchanged.
+// Default theme and wallpaper palette, wide and narrow RTL.
 // Disposable fixture. Run from packages/es-app: node test/chip-tone.browser.mjs [--shots DIR]
 import assert from "node:assert/strict"
 import { createRequire } from "node:module"
@@ -41,7 +42,7 @@ const check = async (name, { width, height, wallpaper = false, rtl = false }) =>
     const probe = document.createElement("div")
     document.body.append(probe)
     const color = value => { probe.style.background = value; return getComputedStyle(probe).backgroundColor }
-    const fill = el => { const style = getComputedStyle(el); return { bg: style.backgroundColor, fg: style.color, box: (r => [Math.round(r.width), Math.round(r.height)])(el.getBoundingClientRect()) } }
+    const fill = el => { const style = getComputedStyle(el); return { bg: style.backgroundColor, fg: style.color, border: style.borderTopWidth, box: (r => [Math.round(r.width), Math.round(r.height)])(el.getBoundingClientRect()) } }
     const first = selector => document.querySelector(selector)
     const result = {
       page: color("var(--mantle)"), raised: color("var(--surface0)"),
@@ -57,12 +58,24 @@ const check = async (name, { width, height, wallpaper = false, rtl = false }) =>
     await page.screenshot({ path: path.join(shots, `${name}.png`) })
   }
   console.log(`${name} ${JSON.stringify(tones)}`)
-  for (const part of ["mail", "run", "user"]) {
+  const transparent = bg => /rgba\([^)]*,\s*0\)$|transparent/.test(bg) || /\/ 0\)$/.test(bg)
+  for (const part of ["mail", "run"]) {
     const tone = tones[part]
-    assert(luminance(tone.bg) < luminance(tones.raised), `${name}: ${part} is darker than raised surfaces ${JSON.stringify(tones)}`)
-    assert(luminance(tone.bg) > luminance(tones.page), `${name}: ${part} still a step above the page ${JSON.stringify(tones)}`)
-    assert(contrast(tone.bg, tone.fg) >= 4.5, `${name}: ${part} text contrast ${contrast(tone.bg, tone.fg).toFixed(2)} >= 4.5`)
+    assert(transparent(tone.bg), `${name}: ${part} has no box at rest ${JSON.stringify(tone)}`)
+    assert(tone.border === "0px", `${name}: ${part} has no outline at rest ${JSON.stringify(tone)}`)
+    assert(contrast(tones.page, tone.fg) >= 4.5, `${name}: ${part} text on the page contrast ${contrast(tones.page, tone.fg).toFixed(2)} >= 4.5`)
   }
+  assert.equal(tones.mail.box[1], 28, `${name}: mail chip height unchanged`)
+  const user = tones.user
+  assert(luminance(user.bg) < luminance(tones.raised) && luminance(user.bg) > luminance(tones.page), `${name}: your message sits between page and raised ${JSON.stringify(tones)}`)
+  assert(contrast(user.bg, user.fg) >= 4.5, `${name}: your message contrast ${contrast(user.bg, user.fg).toFixed(2)} >= 4.5`)
+  // The chip fill returns under the pointer and behind an opened run, so the target stays visible.
+  await page.locator(".mail-activity-summary").first().hover()
+  const hovered = await page.locator(".mail-activity-summary").first().evaluate(el => getComputedStyle(el).backgroundColor)
+  assert(!transparent(hovered), `${name}: mail chip shows a fill on hover (${hovered})`)
+  await page.locator(".tool-run-summary").first().focus()
+  const ring = await page.locator(".tool-run-summary").first().evaluate(el => getComputedStyle(el).outlineStyle)
+  assert.notEqual(ring, "none", `${name}: tool run keeps a visible focus ring`)
   await context.close()
   return tones
 }
