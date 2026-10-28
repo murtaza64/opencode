@@ -337,6 +337,8 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
   const reusable = (item: DeskItem) => jobs().find(job => job.meta.source === item.key && job.meta.revision === item.revision && (job.meta.contract ?? 1) === BRIEF_CONTRACT && job.state.state !== "failed" && job.state.state !== "unknown")
   /** One read-only pass per exact source revision. An existing check for it is reused, not rerun. */
   const start = async (item: DeskItem) => {
+    // A series question gets no brief of its own: one model call per question would fan out (attention S7).
+    if (item.series || item.record?.series) return
     if (pending() || preparing() || inflight()) return
     const existing = reusable(item)
     if (existing) return existing
