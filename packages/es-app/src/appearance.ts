@@ -4,8 +4,12 @@
  * missing or partial palette leaves the default theme in place. */
 import { createSignal } from "solid-js"
 
+/** The viewing device's wal-palette/1 artifact roles (pywal docs/wal-palette.md), as served by its desktop app. */
+export type WalPalette = { revision: string; scheme: "dark" | "light"; roles: Record<string, string>; highlights: string[]; okRiskCvdSafe: boolean }
+
 export type Appearance = {
   palette: Record<string, string>
+  wal?: WalPalette
   // Same-origin URL of a small pre-blurred image, or absent.
   wallpaper?: string
   updatedAt?: number
@@ -102,6 +106,34 @@ const apply = () => {
   }
 }
 
+/** The `<style id="wal-palette">` text for a palette: `--wal-<role>` (underscores as hyphens), `--wal-hl1..8`,
+ * `--wal-revision`, and `--wal-ok-risk-cvd-safe: 1` only when the palette says ok and risk stay apart.
+ * Undefined for anything that is not a usable palette. Values are re-checked here: they reach CSS text. */
+export const walStyle = (value: unknown) => {
+  if (!value || typeof value !== "object") return undefined
+  const wal = value as Partial<WalPalette>
+  if (typeof wal.revision !== "string" || !/^[A-Za-z0-9._-]{1,64}$/.test(wal.revision)) return undefined
+  const color = (item: unknown): item is string => typeof item === "string" && /^#[0-9a-f]{3,8}$/i.test(item)
+  const roles = Object.entries(wal.roles && typeof wal.roles === "object" ? wal.roles : {})
+    .filter(([key, item]) => /^[a-z0-9_]{1,24}$/.test(key) && color(item))
+    .map(([key, item]) => `--wal-${key.replaceAll("_", "-")}:${item}`)
+  if (!roles.length) return undefined
+  const highlights = (Array.isArray(wal.highlights) ? wal.highlights : []).filter(color).slice(0, 8).map((item, index) => `--wal-hl${index + 1}:${item}`)
+  return `:root{--wal-revision:"${wal.revision}";${[...roles, ...highlights, ...(wal.okRiskCvdSafe === true ? ["--wal-ok-risk-cvd-safe:1"] : [])].join(";")}}`
+}
+
+// One stylesheet for the artifact palette. It colours artifacts (brief drawings read it through the
+// page), not the app's own theme, so it applies whether or not the wallpaper theme is on.
+const applyWal = (value: unknown) => {
+  const css = walStyle(value)
+  const existing = document.getElementById("wal-palette")
+  if (!css) return existing?.remove()
+  if (existing?.textContent === css) return
+  const style = existing ?? Object.assign(document.createElement("style"), { id: "wal-palette" })
+  style.textContent = css
+  if (!existing) document.head.append(style)
+}
+
 // Loads the laptop's appearance once and follows its change events. A missing route (web,
 // remote browser, older desktop) is silent and keeps the default theme.
 export const installAppearance = () => {
@@ -111,7 +143,8 @@ export const installAppearance = () => {
     if (stopped || !response?.ok) return
     const body = await response.json().catch(() => undefined)
     if (!body || typeof body.palette !== "object" || !body.palette) return
-    setCurrent({ palette: body.palette, wallpaper: typeof body.wallpaper === "string" ? body.wallpaper : undefined, updatedAt: body.updatedAt })
+    setCurrent({ palette: body.palette, wallpaper: typeof body.wallpaper === "string" ? body.wallpaper : undefined, wal: body.wal, updatedAt: body.updatedAt })
+    applyWal(body.wal)
     apply()
   }
   void load()

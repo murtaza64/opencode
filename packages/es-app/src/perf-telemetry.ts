@@ -11,6 +11,7 @@ const RING = 500
 // Resource timings under this are routine and not journaled.
 const SLOW_RESOURCE_MS = 250
 const LONG_TASK_MS = 100
+const LONG_FRAME_MS = 200
 const STALL_MS = 250
 
 const ring: PerfEvent[] = []
@@ -97,6 +98,31 @@ export const startPerfTelemetry = () => {
   }
   observe("longtask", (entry) => {
     if (entry.duration >= LONG_TASK_MS) perfEvent("longtask", { ms: Math.round(entry.duration) })
+  })
+  // Long tasks carry no attribution; animation frames name the scripts and split out style/layout.
+  observe("long-animation-frame", (entry) => {
+    if (entry.duration < LONG_FRAME_MS) return
+    const frame = entry as PerformanceEntry & {
+      blockingDuration?: number
+      styleAndLayoutStart?: number
+      scripts?: { duration: number; invoker?: string; sourceURL?: string; sourceFunctionName?: string; sourceCharPosition?: number }[]
+    }
+    perfEvent("longframe", {
+      ms: Math.round(frame.duration),
+      blockingMs: frame.blockingDuration === undefined ? undefined : Math.round(frame.blockingDuration),
+      styleLayoutMs: frame.styleAndLayoutStart
+        ? Math.round(frame.startTime + frame.duration - frame.styleAndLayoutStart)
+        : undefined,
+      scripts: [...(frame.scripts ?? [])]
+        .sort((a, b) => b.duration - a.duration)
+        .slice(0, 3)
+        .map((script) => ({
+          ms: Math.round(script.duration),
+          fn: script.sourceFunctionName?.slice(0, 80) || undefined,
+          src: script.sourceURL ? `${script.sourceURL.split("/").pop()?.slice(0, 80)}:${script.sourceCharPosition ?? ""}` : undefined,
+          invoker: script.invoker?.slice(0, 80) || undefined,
+        })),
+    })
   })
   observe("resource", (entry) => {
     const timing = entry as PerformanceResourceTiming

@@ -107,3 +107,63 @@ test("a remote host's tab gets this laptop's appearance without asking the remot
   expect(body).toEqual(appearance.body())
   expect(seen).toEqual([])
 })
+
+// pywal's wal-palette/1 export (docs/wal-palette.md), trimmed.
+const contract = (revision: string, extra: Record<string, unknown> = {}) =>
+  JSON.stringify({
+    schema: "wal-palette/1",
+    revision,
+    scheme: "dark",
+    roles: { bg: "#000001", surface: "#10151f", fg: "#c4dee5", accent: "#8496cb", ok: "#6dc188", risk: "#b26d81", on_accent: "#000000", "bad role": "#ffffff", line: "var(--x)" },
+    highlights: ["#3b61ad", "#3763c9", "url(x)", "#59bee7", "#4464a2", "#a5526c", "#42b76b", "#815e46", "#2c47ff", "#000000"],
+    terminal: { black: "#000001" },
+    checks: { ok_risk_cvd_safe: true, text_min: 4.7 },
+    ...extra,
+  })
+
+test("the wal-palette/1 roles beside colors.json are served with the appearance, colours only", async () => {
+  const { directory, appearance, get } = await setup()
+  const events = await get("/__es/appearance/events")
+  const reader = events.body!.getReader()
+  await reader.read()
+  await writeFile(path.join(directory, "palette.json"), contract("cb3d9b633c08"))
+  expect(new TextDecoder().decode((await reader.read()).value)).toBe("data: changed\n\n")
+  const body = await (await get("/__es/appearance")).json()
+  expect(body.palette.background).toBe("#101014")
+  expect(body.wal).toEqual({
+    revision: "cb3d9b633c08",
+    scheme: "dark",
+    roles: { bg: "#000001", surface: "#10151f", fg: "#c4dee5", accent: "#8496cb", ok: "#6dc188", risk: "#b26d81", on_accent: "#000000" },
+    highlights: ["#3b61ad", "#3763c9", "#59bee7", "#4464a2", "#a5526c", "#42b76b", "#815e46", "#2c47ff"],
+    okRiskCvdSafe: true,
+  })
+  expect(JSON.stringify(appearance.body())).not.toContain("terminal")
+  await reader.cancel()
+})
+
+test("a partial palette.json keeps the last roles; another schema or a bad revision is ignored; removing it withdraws them", async () => {
+  const { directory, appearance } = await setup()
+  const wait = async (check: () => boolean) => { for (let i = 0; i < 50 && !check(); i++) await Bun.sleep(20) }
+  await writeFile(path.join(directory, "palette.json"), contract("rev1"))
+  await wait(() => appearance.body()?.wal?.revision === "rev1")
+  for (const text of ['{"schema": "wal-pal', contract("rev2", { schema: "wal-palette/2" }), contract("rev 3"), contract("rev4", { roles: {} })]) {
+    await writeFile(path.join(directory, "palette.json"), text)
+    await Bun.sleep(120)
+    expect(appearance.body()?.wal?.revision).toBe("rev1")
+  }
+  await rm(path.join(directory, "palette.json"))
+  await wait(() => appearance.body()?.wal === undefined)
+  expect(appearance.body()?.wal).toBeUndefined()
+  expect(appearance.body()?.palette.background).toBe("#101014")
+})
+
+test("a device with palette.json and no colors.json serves the roles with no app theme", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "es-appearance-contract-only-"))
+  cleanup.push(() => rm(directory, { recursive: true, force: true }))
+  await writeFile(path.join(directory, "palette.json"), contract("only"))
+  const appearance = createAppearance({ directory, blur: async () => Buffer.alloc(0) })
+  cleanup.push(() => appearance.close())
+  await appearance.ready
+  expect(appearance.body()).toMatchObject({ palette: {}, wal: { revision: "only", okRiskCvdSafe: true } })
+  expect(appearance.body()?.wallpaper).toBeUndefined()
+})

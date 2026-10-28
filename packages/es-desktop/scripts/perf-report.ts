@@ -73,6 +73,11 @@ const report = {
     longTasksMs: quantiles(of("longtask").map((row) => num(row, "ms"))),
     stallsMs: quantiles(of("stall").map((row) => num(row, "ms"))),
     slowFetchQueueMs: quantiles(of("fetch").map((row) => num(row, "queueMs"))),
+    longFramesMs: quantiles(of("longframe").map((row) => num(row, "ms"))),
+    worstFrames: of("longframe")
+      .sort((a, b) => num(b, "ms") - num(a, "ms"))
+      .slice(0, 5)
+      .map((row) => ({ at: row.at, route: row.route, ms: row.ms, styleLayoutMs: row.styleLayoutMs, scripts: row.scripts })),
   },
   streamCloses: count(of("events.closed"), "code"),
   trouble: count(of("session.trouble"), "trouble"),
@@ -92,6 +97,8 @@ else {
   line("renderer long tasks", report.renderer.longTasksMs)
   line("renderer stalls", report.renderer.stallsMs)
   line("slow fetch queueing", report.renderer.slowFetchQueueMs)
+  line("long animation frames", report.renderer.longFramesMs)
+  for (const frame of report.renderer.worstFrames) console.log(`  ${JSON.stringify(frame)}`)
   line("event stream closes", report.streamCloses)
   line("shown daemon trouble", report.trouble)
   line("input not confirmed", report.inputUnconfirmed)
