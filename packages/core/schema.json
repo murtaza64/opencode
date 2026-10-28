@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "c99fe5e6-e14e-45ca-a071-ec703f2f5199",
+  "id": "d6abe54d-bfa4-46f3-87d4-6859521ed32d",
   "prevIds": [
-    "712bfe82-1989-4698-a1a9-6fe9a76f4444"
+    "c99fe5e6-e14e-45ca-a071-ec703f2f5199"
   ],
   "ddl": [
     {
@@ -68,6 +68,10 @@
     },
     {
       "name": "session_message",
+      "entityType": "tables"
+    },
+    {
+      "name": "session_nudge",
       "entityType": "tables"
     },
     {
@@ -1118,6 +1122,56 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
+      "name": "request_id",
+      "entityType": "columns",
+      "table": "session_nudge"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "session_nudge"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "observed_message_id",
+      "entityType": "columns",
+      "table": "session_nudge"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "result",
+      "entityType": "columns",
+      "table": "session_nudge"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "session_nudge"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
       "name": "session_id",
       "entityType": "columns",
       "table": "session_supersession"
@@ -1993,6 +2047,21 @@
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "nameExplicit": false,
+      "name": "fk_session_nudge_session_id_session_id_fk",
+      "entityType": "fks",
+      "table": "session_nudge"
+    },
+    {
+      "columns": [
+        "session_id"
+      ],
+      "tableTo": "session",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
       "name": "fk_session_supersession_session_id_session_id_fk",
       "entityType": "fks",
       "table": "session_supersession"
@@ -2238,6 +2307,15 @@
       "nameExplicit": false,
       "name": "session_message_pk",
       "table": "session_message",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "request_id"
+      ],
+      "nameExplicit": false,
+      "name": "session_nudge_pk",
+      "table": "session_nudge",
       "entityType": "pks"
     },
     {

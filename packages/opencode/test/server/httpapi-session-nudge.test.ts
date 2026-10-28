@@ -323,3 +323,107 @@ it.live(
     ),
   90_000,
 )
+
+it.live(
+  "a reused request ID is refused with 409 however far the session has moved on",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.text("resumed once")
+          const session = yield* Session.use.create({ title: "Reuse far" })
+          const tail = yield* seed(session, { finish: "tool-calls", tool: "completed" })
+          expect((yield* nudge(dir, session.id, "req-far", tail.id)).outcome).toBe("started")
+          yield* idleWithReply(dir, session.id, "resumed once")
+          // Far more than any recent-message window: the record, not the transcript, holds the identity.
+          const newest = yield* Effect.forEach(Array.from({ length: 25 }), () => seed(session, { finish: "tool-calls", tool: "completed" })).pipe(
+            Effect.map((items) => items.at(-1)!),
+          )
+          const reused = yield* post(dir, `/session/${session.id}/nudge`, { requestID: "req-far", observedMessageID: newest.id })
+          expect(reused.status).toBe(409)
+          expect(yield* llm.inputs).toHaveLength(1)
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+it.live(
+  "a refused request keeps its first outcome on an exact retry even after the session becomes nudgeable",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          const session = yield* Session.use.create({ title: "Refusal replay" })
+          const tail = yield* seed(session, { finish: "tool-calls", tool: "completed" })
+          const inputs = yield* SessionInput.Service
+          yield* inputs.admit(session.id, { requestID: "queued-replay", delivery: "queue", text: "later" })
+          const refused = yield* nudge(dir, session.id, "req-replay", tail.id)
+          expect(refused).toEqual({ outcome: "pending-input", requestID: "req-replay", requestIDs: ["queued-replay"] })
+          yield* inputs.cancel(session.id, "queued-replay")
+          expect(yield* nudge(dir, session.id, "req-replay", tail.id)).toEqual(refused)
+          expect(yield* llm.inputs).toHaveLength(0)
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+it.live(
+  "a Nudge input already promoted by another wake is reported as started, not stale",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          const session = yield* Session.use.create({ title: "Promoted elsewhere" })
+          const tail = yield* seed(session, { finish: "stop", text: "done" })
+          // What a wake from another request leaves when it promotes this request's input before its guard.
+          const inputs = yield* SessionInput.Service
+          yield* inputs.admit(session.id, {
+            requestID: "nudge:req-raced",
+            delivery: "steer",
+            text: SessionNudge.TEXT,
+            source: { type: "editspace-mail", id: "nudge:req-raced", sender: SessionNudge.SENDER, recipient: session.id, kind: SessionNudge.KIND },
+          })
+          expect(yield* inputs.promote(session.id, false)).toBe(true)
+          const receipt = yield* inputs.get(session.id, "nudge:req-raced")
+          const messageID = receipt.state === "promoted" ? receipt.messageID : undefined
+          expect(yield* nudge(dir, session.id, "req-raced", tail.id)).toEqual({ outcome: "started", requestID: "req-raced", messageID })
+          expect(yield* llm.inputs).toHaveLength(0)
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+it.live(
+  "peer mail that only carries kind nudge is not auto-acknowledged on presentation",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.text("read the mail")
+          const session = yield* Session.use.create({ title: "Peer nudge mail" })
+          yield* seed(session, { finish: "stop", text: "done" })
+          expect((yield* post(dir, `/session/${session.id}/input`, {
+            requestID: "peer-nudge",
+            delivery: "steer",
+            text: "please continue",
+            source: { type: "editspace-mail", id: "peer#1", sender: "peer-lane", recipient: session.id, kind: "nudge" },
+          })).status).toBe(200)
+          yield* idleWithReply(dir, session.id, "read the mail")
+          const receipt = yield* pollWithTimeout(
+            requestInDirectory(`/session/${session.id}/input/peer-nudge`, dir).pipe(
+              Effect.flatMap((response) => response.json),
+              Effect.map((body) => body as { state: string }),
+              Effect.map((body) => (body.state === "presented" || body.state === "handled" ? body : undefined)),
+            ),
+            "peer mail was not presented",
+            "20 seconds",
+          )
+          expect(receipt.state).toBe("presented")
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)

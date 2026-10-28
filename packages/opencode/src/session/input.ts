@@ -15,6 +15,7 @@ import { SessionInputMedia } from "./input-media"
 import { Session } from "./session"
 import { SessionRunState } from "./run-state"
 import { SessionSupersession } from "./supersession"
+import { SessionNudge } from "./nudge"
 import { MessageID, PartID, SessionID } from "./schema"
 
 export class Conflict extends Schema.TaggedErrorClass<Conflict>()("InputConflict", { message: Schema.String }) {}
@@ -450,12 +451,12 @@ const make = Effect.gen(function* () {
     // The planner would otherwise pick v1_session_input_pending_idx and parse every promoted receipt.
     const wanted = new Set<string>(messageIDs)
     const rows = (yield* db
-      .all<{ request_id: string; receipt: string; kind: string | null }>(
-        sql`SELECT request_id, receipt, json_extract(payload, '$.source.kind') AS kind FROM v1_session_input INDEXED BY v1_session_input_unpresented_mail_idx
+      .all<{ request_id: string; receipt: string; kind: string | null; sender: string | null }>(
+        sql`SELECT request_id, receipt, json_extract(payload, '$.source.kind') AS kind, json_extract(payload, '$.source.sender') AS sender FROM v1_session_input INDEXED BY v1_session_input_unpresented_mail_idx
           WHERE session_id = ${sessionID} AND state = 'promoted' AND json_extract(receipt, '$.timePresented') IS NULL
             AND json_extract(payload, '$.source.type') = 'editspace-mail'`,
       )
-      .pipe(Effect.orDie)).map((row) => ({ request_id: row.request_id, kind: row.kind, receipt: JSON.parse(row.receipt) as SessionV1.InputReceipt }))
+      .pipe(Effect.orDie)).map((row) => ({ request_id: row.request_id, kind: row.kind, sender: row.sender, receipt: JSON.parse(row.receipt) as SessionV1.InputReceipt }))
     for (const row of rows) {
       if (row.receipt.state !== "promoted" || !wanted.has(row.receipt.messageID)) continue
       yield* reconcile(
@@ -466,9 +467,10 @@ const make = Effect.gen(function* () {
           time: yield* Clock.currentTimeMillis,
         }),
       )
-      // A Nudge is UI control, not mail: no worker ever acknowledges it, so presenting it settles it and
-      // it never holds the Session against retention or shows as unanswered mail.
-      if (row.kind === "nudge")
+      // A Core-admitted Nudge is UI control, not mail: no worker ever acknowledges it, so presenting it
+      // settles it and it never holds the Session against retention or shows as unanswered mail. Peer mail
+      // that merely carries kind "nudge" stays outstanding until its recipient handles it.
+      if (row.kind === SessionNudge.KIND && row.sender === SessionNudge.SENDER && row.request_id.startsWith(SessionNudge.inputRequestID("")))
         yield* reconcile(
           events.publish(SessionV1.Event.InputHandled, {
             sessionID,
