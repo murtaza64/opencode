@@ -1,3 +1,5 @@
+import { asc, eq } from "drizzle-orm"
+import { MessageTable } from "@opencode-ai/core/session/sql"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Agent } from "@/agent/agent"
 import { Provider } from "@/provider/provider"
@@ -153,10 +155,34 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       }
       yield* requireSession(ctx.params.sessionID)
       if (ctx.query.limit === undefined || ctx.query.limit === 0) {
-        // Whole-history reads page on reader workers: cold pages of a large session would block every request.
-        // `stream` yields newest first; the route returns oldest first.
-        return project(
-          (yield* MessageV2.stream(ctx.params.sessionID).pipe(Effect.provideService(Database.Service, reader))).reverse(),
+        // Whole-history reads run on reader workers (cold pages would block every request) and stream oldest
+        // first in chunks, so a multi-megabyte history holds one chunk in memory at a time, not the whole
+        // response several times over.
+        const ids = yield* reader.db
+          .select({ id: MessageTable.id })
+          .from(MessageTable)
+          .where(eq(MessageTable.session_id, ctx.params.sessionID))
+          .orderBy(asc(MessageTable.time_created), asc(MessageTable.id))
+          .all()
+          .pipe(Effect.orDie)
+        const chunks = Array.from({ length: Math.ceil(ids.length / HISTORY_CHUNK) }, (_, index) =>
+          ids.slice(index * HISTORY_CHUNK, (index + 1) * HISTORY_CHUNK).map((row) => row.id),
+        )
+        const encoder = new TextEncoder()
+        const body = Stream.fromIterable(chunks).pipe(
+          Stream.mapEffect((chunk, index) =>
+            MessageV2.byIDs({ sessionID: ctx.params.sessionID, ids: chunk }).pipe(
+              Effect.provideService(Database.Service, reader),
+              Effect.map((items) => {
+                const text = project(items).map((item) => JSON.stringify(item)).join(",")
+                return encoder.encode((index === 0 ? "" : ",") + text)
+              }),
+            ),
+          ),
+        )
+        return HttpServerResponse.stream(
+          Stream.concat(Stream.make(encoder.encode("[")), Stream.concat(body, Stream.make(encoder.encode("]")))),
+          { contentType: "application/json" },
         )
       }
 
@@ -703,6 +729,8 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
 )
 
 const PAGE_OUTPUT_LIMIT = 8 * 1024
+// Messages per chunk of a streamed whole-history read.
+const HISTORY_CHUNK = 50
 // Data URLs up to this length stay inline in compact pages (icons, tiny previews).
 const PAGE_ATTACHMENT_INLINE = 2 * 1024
 
