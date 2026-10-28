@@ -17,6 +17,8 @@ export type AttentionRecord = {
   producer_session: string
   origin_session: string
   gate_key: string
+  /** A question in a series from one producer origin (attention S5): stable index, gaps allowed. */
+  series?: { id: string; index: number; title?: string } | null
   source_ref: { session_id: string; directory: string }
   decision: { choice_id: string; label?: string } | string | null
   delivery_state: DeliveryState

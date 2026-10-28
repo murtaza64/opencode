@@ -22,6 +22,10 @@ export type DeskItem = {
   record?: AttentionRecord
   request?: HomeRequestRow
   failure?: SessionFailure
+  /** A series listed once: its members by index (every status the desk was given), the current question being
+   * the lowest-index open member (`record`). Progress counts live (not withdrawn) members; answered means a
+   * recorded answer, never a recommendation. */
+  series?: { id: string; title: string; members: AttentionRecord[]; live: number; answered: number }
 }
 
 /** The desk item for one attention record at a given content revision (default: its current one). */
@@ -45,7 +49,8 @@ export const deskItems = (input: {
   title: (sessionID: string) => string | undefined
   project: (directory: string) => string | undefined
 }): DeskItem[] => [
-  ...input.records.filter(record => record.status === "open").map(record => attentionItem(record, input.attentionChecked)),
+  ...input.records.filter(record => record.status === "open" && !record.series).map(record => attentionItem(record, input.attentionChecked)),
+  ...seriesItems(input.records, input.attentionChecked),
   // A request whose source is briefly unreadable keeps its row at its last confirmed time.
   ...input.requests.filter(request => request.state === "pending" || (request.state === "unavailable" && request.lastPending)).map(request => ({
     key: `${request.kind}:${request.directory}:${request.id}`,
@@ -70,6 +75,31 @@ export const deskItems = (input: {
     failure,
   })),
 ]
+
+/** One entry per series with an open member, grouped by (editspace, producer origin, series id). */
+const seriesItems = (records: AttentionRecord[], checked: number): DeskItem[] => {
+  const groups = new Map<string, AttentionRecord[]>()
+  for (const record of records) if (record.series) {
+    const key = JSON.stringify([record.editspace, record.origin_session, record.series.id])
+    groups.set(key, [...groups.get(key) ?? [], record])
+  }
+  return [...groups.values()].flatMap(group => {
+    const members = group.toSorted((a, b) => a.series!.index - b.series!.index)
+    const current = members.find(record => record.status === "open")
+    if (!current) return []
+    const series = current.series!
+    return [{
+      ...attentionItem(current, checked),
+      key: `series:${current.editspace}:${current.origin_session}:${series.id}`,
+      title: series.title || current.title,
+      // Any member's content change, or the current question moving on, is a new revision of the entry.
+      revision: members.map(record => `${record.id}@${contentRevision(record)}:${record.status}`).join(","),
+      series: { id: series.id, title: series.title || current.title, members,
+        live: members.filter(record => record.status !== "withdrawn").length,
+        answered: members.filter(record => record.status !== "withdrawn" && record.answer).length },
+    }]
+  })
+}
 
 export type DeskSource = {
   name: string
