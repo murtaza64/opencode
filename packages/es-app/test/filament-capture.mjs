@@ -11,10 +11,11 @@ const preview = await startPanelPreview()
 const fixture = preview.fixture
 const browser = await chromium.launch({ headless: false, ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : { channel: "chrome" }) })
 const text = (id, body, end) => ({ id, messageID: "msg_2", sessionID: "ses_a", type: "text", text: body, time: { start: 10, ...(end ? { end } : {}) } })
-const tool = (id, status, name = "bash") => ({ id, messageID: "msg_2", sessionID: "ses_a", type: "tool", callID: `call_${id}`, tool: name,
-  state: status === "running" ? { status, input: {}, title: `${name} step`, time: { start: Date.now() - 1500 }, metadata: {} }
-    : status === "error" ? { status, input: {}, error: "exit 1", time: { start: Date.now() - 1500, end: Date.now() }, metadata: {} }
-    : { status, input: {}, output: "", title: `${name} step`, time: { start: Date.now() - 1500, end: Date.now() }, metadata: {} } })
+const tool = (id, status, name = "bash", input = {}, output = "") => ({ id, messageID: "msg_2", sessionID: "ses_a", type: "tool", callID: `call_${id}`, tool: name,
+  state: status === "running" ? { status, input, title: `${name} step`, time: { start: Date.now() - 1500 }, metadata: {} }
+    : status === "error" ? { status, input, error: "exit 1", time: { start: Date.now() - 1500, end: Date.now() }, metadata: {} }
+    : { status, input, output, title: `${name} step`, time: { start: Date.now() - 1500, end: Date.now() }, metadata: {} } })
+const big = (n) => "x".repeat(n)
 const report = []
 const run = async (name, options, query, steps) => {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, ...options })
@@ -44,6 +45,9 @@ const steps = [
   ["tool-error", () => fixture.emit("message.part.updated", { part: tool("part_t2", "error", "bash") }), 400],
   ["retry", () => fixture.setStatus("retry"), 800],
   ["complete", () => { fixture.emit("message.part.updated", { part: text("part_ftext", "Done.", 99) }); fixture.setStatus("idle") }, 1500],
+  // v4: per-command glyphs while running, then split sizes (input ring vs output core) on completion.
+  ["glyphs-running", () => { fixture.setStatus("busy"); for (const [id, cmd] of [["part_g1", "git status"], ["part_g2", "jj log -r @"], ["part_g3", "gh pr create"], ["part_g4", "es mail check"], ["part_g5", "aws s3 ls"], ["part_g6", "bun test src"], ["part_g7", "curl -s http://x"], ["part_g8", "docker ps"]]) fixture.emit("message.part.updated", { part: tool(id, "running", "bash", { command: cmd }) }) }, 1200],
+  ["sizes-done", () => { fixture.emit("message.part.updated", { part: tool("part_g1", "completed", "bash", { command: "git status" }, big(40)) }); fixture.emit("message.part.updated", { part: tool("part_g2", "completed", "bash", { command: "jj log -r @" }, big(40000)) }); fixture.emit("message.part.updated", { part: tool("part_g3", "completed", "bash", { command: "gh pr create " + big(5000) }, big(100)) }); fixture.emit("message.part.updated", { part: tool("part_g4", "error", "bash", { command: "es mail check" }) }); for (const id of ["part_g5", "part_g6", "part_g7", "part_g8"]) fixture.emit("message.part.updated", { part: tool(id, "completed", "bash", { command: "x" }, big(2000)) }); fixture.setStatus("idle") }, 1500],
 ]
 try {
   await run("chrome", {}, "", steps)

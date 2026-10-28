@@ -11,7 +11,7 @@ import { createScene } from "./scene"
 import { filamentHud, reducedMotion } from "./flag"
 import "./filament.css"
 
-const GUTTER = 28
+const GUTTER = 40
 
 export const Filament = (props: {
   messages: () => readonly Message[]

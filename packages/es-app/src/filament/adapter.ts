@@ -3,6 +3,8 @@
  * phase, and the deltas between two snapshots (text growth, tool completion). No fetches, no
  * timers; the component feeds it the store on each reactive update. */
 import type { Message, Part } from "@opencode-ai/sdk/v2"
+import { sizeClass, toolMagnitude } from "../tool-magnitude"
+import { commandKind, type CommandKind } from "./command-kind"
 
 export type Phase = "idle" | "thinking" | "streaming" | "tool" | "waiting" | "error" | "complete"
 export type Node = {
@@ -18,6 +20,11 @@ export type Node = {
   ended?: number
   length: number
   askKind?: "permission" | "question"
+  // Tools: program family for bash and size ranks (0..4 = XS..XL) from tool-magnitude.
+  tool?: string
+  command?: CommandKind
+  inputRank?: number
+  outputRank?: number
 }
 export type Snapshot = {
   phase: Phase
@@ -68,7 +75,14 @@ export const snapshot = (input: Input): Snapshot => {
         const started = "time" in part.state ? part.state.time.start : undefined
         const ended = "time" in part.state && "end" in part.state.time ? part.state.time.end : undefined
         const kind = part.tool === "task" ? "task" : "tool"
-        nodes.push({ id: part.id, anchor: "part", kind, messageID: message.id, status, started, ended, length: 0 })
+        const mag = toolMagnitude(part)
+        const input = part.state.status === "pending" ? undefined : (part.state.input as { command?: string } | undefined)
+        nodes.push({
+          id: part.id, anchor: "part", kind, messageID: message.id, status, started, ended, length: 0, tool: part.tool,
+          command: part.tool === "bash" ? commandKind(input?.command) : undefined,
+          inputRank: mag.kind === "sized" ? sizeClass(mag.input) : input ? sizeClass(JSON.stringify(input).length) : undefined,
+          outputRank: mag.kind === "sized" ? sizeClass(mag.output) : undefined,
+        })
         if (kind === "task") branches.set(part.id, { id: part.id, alive: status === "running", first: part.id, last: part.id })
       }
     }

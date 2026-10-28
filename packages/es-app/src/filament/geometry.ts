@@ -7,6 +7,8 @@ import type { Node } from "./adapter"
 
 export type Rect = { x: number; y: number; w: number; h: number; cx: number; cy: number }
 export type Layout = {
+  // Part ids whose anchor is a compact tool-run strip (members share one row; draw one ring per run).
+  compact: Map<string, string>
   w: number
   h: number
   sign: 1 | -1
@@ -20,7 +22,8 @@ export type Layout = {
 const rel = (root: DOMRect, r: DOMRect): Rect => ({ x: r.left - root.left, y: r.top - root.top, w: r.width, h: r.height, cx: r.left - root.left + r.width / 2, cy: r.top - root.top + r.height / 2 })
 
 const sel = (node: Node) => node.anchor === "message" ? `[data-find-message="${CSS.escape(node.id)}"] [data-component="user-message"], [data-find-message="${CSS.escape(node.id)}"]`
-  : node.anchor === "part" ? `[data-timeline-part-id="${CSS.escape(node.id)}"], [data-timeline-part-ids~="${CSS.escape(node.id)}"], [data-timeline-part-ids*="${CSS.escape(node.id)}"]`
+  // A tool run (compact icon strip or readable rows) anchors by its run attribute; a lone part by its id.
+  : node.anchor === "part" ? `[data-timeline-part-id="${CSS.escape(node.id)}"], .tool-run[data-filament-anchor][data-timeline-part-ids*="${CSS.escape(node.id)}"], [data-timeline-part-ids*="${CSS.escape(node.id)}"]`
   : `.question-round[data-question-request="${CSS.escape(node.id)}"], .banner.permission`
 
 export const measure = (transcript: HTMLElement, origin: HTMLElement, nodes: readonly Node[], gutter: number): Layout => {
@@ -31,16 +34,19 @@ export const measure = (transcript: HTMLElement, origin: HTMLElement, nodes: rea
   const rtl = getComputedStyle(transcript).direction === "rtl"
   const inner = transcript.querySelector<HTMLElement>(".transcript-inner")?.getBoundingClientRect() ?? root
   const rects = new Map<string, Rect>()
+  const compact = new Map<string, string>()
   // Only what is near the viewport is measured; offscreen nodes are skipped by the scene anyway.
   for (const node of nodes) {
     const el = transcript.querySelector<HTMLElement>(sel(node))
     if (!el) continue
+    if (el.classList.contains("tool-run") && el.dataset.compact === "true") compact.set(node.id, el.dataset.filamentAnchor ?? el.dataset.toolRun ?? el.dataset.timelinePartIds ?? node.id)
     const r = el.getBoundingClientRect()
     if (r.bottom < root.top - 200 || r.top > root.bottom + 200) continue
     rects.set(node.id, rel(root, r))
   }
   const thinking = transcript.querySelector<HTMLElement>(".thinking")?.getBoundingClientRect()
   return {
+    compact,
     w: root.width,
     h: root.height,
     sign: rtl ? -1 : 1,

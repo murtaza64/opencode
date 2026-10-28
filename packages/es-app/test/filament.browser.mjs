@@ -87,7 +87,7 @@ try {
   expect(detached.length).toBe(0)
   const composerBox = await page.locator(".prompt-box textarea, .float-editor textarea").first().boundingBox()
   expect(transcriptBox.y + transcriptBox.height).toBeLessThanOrEqual(composerBox.y + 1)
-  expect(await page.evaluate(() => getComputedStyle(document.querySelector(".transcript")).paddingInlineStart)).toBe("28px")
+  expect(await page.evaluate(() => getComputedStyle(document.querySelector(".transcript")).paddingInlineStart)).toBe("40px")
   const backend = await page.evaluate(() => window.__filament.backend())
   console.log("backend", JSON.stringify(backend))
 
@@ -167,7 +167,7 @@ try {
     const c = await page.locator(".filament-canvas").boundingBox()
     expect(Math.abs(c.x - t.x)).toBeLessThan(1.5)
     expect(Math.abs(c.width - t.width)).toBeLessThan(1.5)
-    expect(await page.evaluate(() => getComputedStyle(document.querySelector(".transcript")).paddingRight)).toBe("28px")
+    expect(await page.evaluate(() => getComputedStyle(document.querySelector(".transcript")).paddingRight)).toBe("40px")
     await context.close()
   }
   expect(errors).toEqual([])

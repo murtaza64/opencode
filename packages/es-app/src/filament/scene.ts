@@ -3,6 +3,7 @@
  * the snapshot is in (thinking wave, running arc, waiting ring, retry fracture). Nothing here
  * reads the store or the DOM; it receives a snapshot, deltas and measured rects. */
 import type { Delta, Node, Phase, Snapshot } from "./adapter"
+import type { CommandKind } from "./command-kind"
 import type { Layout, Rect } from "./geometry"
 import type { Painter, RGBA } from "./paint"
 
@@ -130,10 +131,20 @@ export const createScene = (paint: Painter) => {
       else paint.dot(bx, r.y + r.h - 6, 2.2, bc, 1)
     }
 
-    // ---- nodes ----
+    // ---- nodes (a compact tool-run strip draws once, as its worst member) ----
+    const seenRuns = new Set<string>()
     for (const n of live) {
       const r = layout.rects.get(n.id)!
       if (r.y < -40 || r.y > bottom + 40) continue
+      const run = layout.compact.get(n.id)
+      if (run) {
+        if (seenRuns.has(run)) continue
+        seenRuns.add(run)
+        const members = live.filter((m) => layout.compact.get(m.id) === run)
+        const worst = members.find((m) => m.status === "error") ?? members.find((m) => m.status === "running") ?? members[members.length - 1]!
+        drawNode({ ...worst, inputRank: Math.max(...members.map((m) => m.inputRank ?? 0)), outputRank: Math.max(...members.map((m) => m.outputRank ?? 0)) }, r, gx, layout.sign, { ...f, activity }, clock, members.length)
+        continue
+      }
       drawNode(n, r, gx, layout.sign, { ...f, activity }, clock)
     }
 
@@ -203,7 +214,11 @@ export const createScene = (paint: Painter) => {
   }
   const energyNow = () => energy
 
-  const drawNode = (n: Node, r: Rect, gx: number, sign: number, f: Frame, t: number) => {
+  // Size vocabulary (ranks 0..4 = XS..XL): input sets the ring radius, output fills the core.
+  const RING = [3.2, 4, 5, 6.2, 7.6]
+  const CORE = [0.8, 1.4, 2.2, 3.2, 4.4]
+
+  const drawNode = (n: Node, r: Rect, gx: number, sign: number, f: Frame, t: number, count = 1) => {
     switch (n.kind) {
       case "user":
         paint.capsule(gx - 3.5 * sign, r.y + 12, gx + 3.5 * sign, r.y + 12, 2.6, rgba(ACCENT, 0.95), 2)
@@ -216,13 +231,17 @@ export const createScene = (paint: Painter) => {
         return
       case "tool": {
         const c = n.status === "running" ? ACCENT : n.status === "done" ? GREEN : RED
+        const ring = RING[n.inputRank ?? 1]!
+        const core = n.status === "done" ? Math.min(CORE[n.outputRank ?? 0]!, ring - 1.6) : 0
         if (n.status === "running" && !f.reduced) {
           const a = (t * 0.005) % 6.283
-          paint.ring(gx, r.cy, 5, 1.4, rgba(c, 0.95), 5, a, a + 3.6)
-          paint.ring(gx, r.cy, 5, 0.7, rgba(c, 0.25), 0)
-        } else paint.ring(gx, r.cy, 5, 1.4, rgba(c, 0.8), n.status === "running" ? 3 : 0.8)
-        if (n.status === "done") paint.dot(gx, r.cy, 1.8, rgba(GREEN, 0.9), 0)
-        if (n.status === "error") { paint.capsule(gx - 2.5, r.cy - 2.5, gx + 2.5, r.cy + 2.5, 1.2, rgba(RED, 0.95), 1.5); paint.capsule(gx - 2.5, r.cy + 2.5, gx + 2.5, r.cy - 2.5, 1.2, rgba(RED, 0.95), 1.5) }
+          paint.ring(gx, r.cy, ring, 1.4, rgba(c, 0.95), 5, a, a + 3.6)
+          paint.ring(gx, r.cy, ring, 0.7, rgba(c, 0.25), 0)
+        } else paint.ring(gx, r.cy, ring, 1.4, rgba(c, 0.8), n.status === "running" ? 3 : 0.8)
+        if (n.status === "done") paint.dot(gx, r.cy, core, rgba(GREEN, 0.9), core > 2.5 ? 1.5 : 0)
+        if (n.status === "error") { const e = Math.max(2.5, ring * 0.5); paint.capsule(gx - e, r.cy - e, gx + e, r.cy + e, 1.2, rgba(RED, 0.95), 1.5); paint.capsule(gx - e, r.cy + e, gx + e, r.cy - e, 1.2, rgba(RED, 0.95), 1.5) }
+        if (count > 1) { const tx = gx - sign * (ring + 5); paint.capsule(tx, r.cy - 2.5, tx, r.cy + 2.5, 1.2, rgba(c, 0.6), 0); for (let i = 1; i < Math.min(count, 4); i++) paint.capsule(tx - sign * i * 2.4, r.cy - 2.5 + i * 0.4, tx - sign * i * 2.4, r.cy + 2.5 - i * 0.4, 1.2, rgba(c, 0.6 - i * 0.12), 0) }
+        if (n.command && n.command !== "shell") drawGlyph(n.command, gx, r.cy, ring, c, n.status === "running" && !f.reduced ? t : 0, sign)
         return
       }
       case "task":
@@ -233,6 +252,81 @@ export const createScene = (paint: Painter) => {
         paint.ring(gx, r.y + 14, 6 * br, 1.5, rgba(YELLOW, 0.95), 6)
         return
       }
+    }
+  }
+
+  // Program glyphs ride just outside the ring on the content side; `t` > 0 animates (running), 0 = static.
+  const drawGlyph = (kind: CommandKind, gx: number, cy0: number, ring: number, c: readonly [number, number, number], t: number, sign0: number) => {
+    // Glyphs sit on the gutter side of the ring (away from the chip), drawn at 1.8x so the shapes read.
+    const G = 1.8
+    const sign = -sign0
+    const ox0 = gx + sign * (ring + 4 + 4 * G)
+    const col = rgba(c, 0.85)
+    const ph = t ? (t * 0.004) % 6.283 : 0
+    // Scale helpers: local coordinates around (ox0, cy0) in glyph units.
+    const X = (dx: number) => ox0 + dx * G
+    const Y = (dy: number) => cy0 + dy * G
+    const cap = (x0: number, y0: number, x1: number, y1: number, w: number, col2: RGBA, glow = 0) => paint.capsule(X(x0), Y(y0), X(x1), Y(y1), w * G, col2, glow)
+    const dot = (x: number, y: number, r: number, col2: RGBA, glow = 0) => paint.dot(X(x), Y(y), r * G, col2, glow)
+    const rng = (x: number, y: number, r: number, w: number, col2: RGBA, glow = 0, a0 = 0, a1 = Math.PI * 2) => paint.ring(X(x), Y(y), r * G, w * G, col2, glow, a0, a1)
+    switch (kind) {
+      case "git":
+      case "jj": {
+        // Two commits on a short DAG; running = the newer one orbits in. jj adds the working-copy ring.
+        const k = t ? (Math.sin(ph) + 1) / 2 : 1
+        cap(0, 3, 0, -3, 1, rgba(c, 0.5))
+        dot(0, 3, 1.3, col)
+        dot(sign * 3 * (1 - k), -3 * k, 1.3, col, t ? 2 : 0)
+        if (kind === "jj") rng(0, -3, 2.2, 0.8, rgba(c, 0.6))
+        return
+      }
+      case "gh": {
+        cap(0, -3.5, 0, 3.5, 1, rgba(c, 0.5))
+        rng(sign * 2.5, 0, 2.5, 1, rgba(c, 0.6), 0, sign > 0 ? Math.PI / 2 : -Math.PI / 2, sign > 0 ? Math.PI * 1.5 : Math.PI / 2)
+        const k = t ? (Math.sin(ph) + 1) / 2 : 0.5
+        dot(0, -3.5 + 7 * k, 1.4, col, t ? 2 : 0)
+        return
+      }
+      case "es": {
+        for (let i = 0; i < 3; i++) { const lit = t ? ((Math.floor(t / 180) + i) % 3 === 0) : true; cap(sign * (i - 1) * 2.4, -3, sign * (i - 1) * 2.4, 3, 1.1, rgba(c, lit ? 0.9 : 0.3), lit && t ? 2 : 0) }
+        return
+      }
+      case "aws": {
+        rng(0, 1, 3, 1, rgba(c, 0.6), 0, Math.PI, Math.PI * 2)
+        cap(-3, 1, 3, 1, 1, rgba(c, 0.6))
+        const k = t ? ((t / 500) % 1) : 0.5
+        dot(0, 3 - 5 * k, 1.1, rgba(c, 0.9 * (1 - k * 0.6)), t ? 1.5 : 0)
+        return
+      }
+      case "test": {
+        for (let i = 0; i < 4; i++) { const on = t ? (Math.floor(t / 220) % 4) >= i : true; dot((i - 1.5) * 2.6, 0, 1, rgba(c, on ? 0.9 : 0.3)) }
+        return
+      }
+      case "http": {
+        cap(-3.5, -2, 3.5, -2, 0.8, rgba(c, 0.35))
+        cap(-3.5, 2, 3.5, 2, 0.8, rgba(c, 0.35))
+        const k = t ? ((t / 600) % 1) : 0.5
+        dot(-3.5 + 7 * k, -2, 1.1, col, t ? 1.5 : 0)
+        dot(3.5 - 7 * k, 2, 1.1, col, t ? 1.5 : 0)
+        return
+      }
+      case "container": {
+        for (let i = 0; i < 3; i++) { const lift = t ? Math.max(0, Math.sin(ph + i * 1.2)) * 1.5 : 0; cap(-2.5, 2.4 - i * 2.4 - lift, 2.5, 2.4 - i * 2.4 - lift, 1.6, rgba(c, 0.5 + i * 0.15)) }
+        return
+      }
+      case "search": {
+        const sx = (t ? Math.sin(ph) * 1.2 : 0)
+        rng(sx - 0.5, -1, 2.2, 1, col)
+        cap(sx + 1.1, 0.6, sx + 3.1, 2.6, 1.1, col)
+        return
+      }
+      case "build": {
+        rng(0, 0, 2.4, 1, col)
+        for (let i = 0; i < 4; i++) { const a = ph + (i * Math.PI) / 2; cap(Math.cos(a) * 2.4, Math.sin(a) * 2.4, Math.cos(a) * 3.8, Math.sin(a) * 3.8, 1, col) }
+        return
+      }
+      default:
+        return
     }
   }
 
