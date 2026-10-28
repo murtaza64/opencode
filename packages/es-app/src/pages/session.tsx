@@ -634,7 +634,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     return tool ? { name: tool.name, at: tool.at } : undefined
   }, undefined, { equals: (a, b) => a?.name === b?.name && a?.at === b?.at })
   // The work line already animates while busy, so the transcript tail shows the same dot static.
-  const Thinking = () => <div class="thinking" title="agent is thinking"><span class="busy-dot" aria-hidden="true" /></div>
+  const Thinking = () => <div class="thinking" title="agent is thinking"><span class="busy-dot" data-animate aria-hidden="true" /></div>
   const WorkStatus = () => (
     <div class="session-work-status" role="status" data-state={workState()} title={backendError() || undefined}>
       <Show when={workState() === "working" || workState() === "idle"} fallback={<>
