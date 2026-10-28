@@ -703,6 +703,8 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
 )
 
 const PAGE_OUTPUT_LIMIT = 8 * 1024
+// Data URLs up to this length stay inline in compact pages (icons, tiny previews).
+const PAGE_ATTACHMENT_INLINE = 2 * 1024
 
 /** The compact page shape: bounded tool part sizes, full data still available from the single-message route. */
 function compactMessage(message: SessionV1.WithParts): SessionV1.WithParts {
@@ -714,7 +716,9 @@ function compactMessage(message: SessionV1.WithParts): SessionV1.WithParts {
       const metadata = part.state.metadata ?? {}
       const output = part.state.status === "completed" ? part.state.output : undefined
       const long = output !== undefined && output.length > PAGE_OUTPUT_LIMIT
-      if (!long && !("output" in metadata)) return part
+      const attachments = part.state.status === "completed" ? part.state.attachments : undefined
+      const inline = attachments?.some((file) => file.url.startsWith("data:") && file.url.length > PAGE_ATTACHMENT_INLINE) ?? false
+      if (!long && !inline && !("output" in metadata)) return part
       const { output: _, ...rest } = metadata
       const half = PAGE_OUTPUT_LIMIT / 2
       return {
@@ -722,9 +726,38 @@ function compactMessage(message: SessionV1.WithParts): SessionV1.WithParts {
         state: {
           ...part.state,
           ...(long ? { output: `${output.slice(0, half)}\n… [${output.length - PAGE_OUTPUT_LIMIT} characters omitted] …\n${output.slice(-half)}` } : {}),
-          metadata: { ...rest, pageTruncated: { output: output?.length ?? 0 } },
+          // Large inline attachments become a reference to the authorized attachment route; history is unchanged.
+          ...(inline && attachments
+            ? {
+                attachments: attachments.map((file, index) =>
+                  file.url.startsWith("data:") && file.url.length > PAGE_ATTACHMENT_INLINE
+                    ? { ...file, url: attachmentPath(part.sessionID, part.messageID, part.id, index) }
+                    : file,
+                ),
+              }
+            : {}),
+          metadata: {
+            ...rest,
+            pageTruncated: {
+              output: output?.length ?? 0,
+              ...(inline && attachments
+                ? {
+                    attachments: attachments.flatMap((file, index) =>
+                      file.url.startsWith("data:") && file.url.length > PAGE_ATTACHMENT_INLINE
+                        ? [{ index, urlLength: file.url.length }]
+                        : [],
+                    ),
+                  }
+                : {}),
+            },
+          },
         },
       } as SessionV1.WithParts["parts"][number]
     }),
   }
+}
+
+/** Relative route serving one tool attachment of a part; see `attachmentRoute`. */
+export function attachmentPath(sessionID: string, messageID: string, partID: string, index: number) {
+  return `/session/${sessionID}/message/${messageID}/part/${partID}/attachment/${index}`
 }
