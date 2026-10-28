@@ -2,6 +2,7 @@ import { Show, type JSX } from "solid-js"
 import type { MailWakeState } from "../api"
 import type { MailDirection } from "../mail-timeline"
 import { Glyph } from "./icons"
+import { iconChips } from "../chip-preview"
 import { MailParty } from "./mail-party"
 import type { MailNamer } from "../mail-names"
 import { mailOrigin, originLabel, squadronSender, type MailOrigin, type SquadronMeta } from "../mail-origin"
@@ -50,7 +51,15 @@ export const MailSummary = (props: {
   wake?: { state: MailWakeState; label: string }
 }) => {
   const preposition = () => props.direction === "out" ? " to" : props.direction === "in" ? " from" : ""
-  return <summary class="mail-activity-summary" data-wake={props.wake?.state}
+  // Icon-chip preview: a settled mail is one content-width line, glyph first, party and kind always visible. A status
+  // the person may need to act on, an unknown direction or an unknown wake keeps the full-width row.
+  const compact = () => iconChips && !props.status && props.direction !== "unknown" && props.wake?.state !== "unknown"
+  const line = () => <>
+    <span class="mail-activity-party">{props.party}</span>
+    <span class="mail-activity-sep" aria-hidden="true">·</span>
+    <span class="mail-activity-purpose" dir="auto">{props.purpose}</span>
+  </>
+  return <summary class="mail-activity-summary" data-wake={props.wake?.state} data-compact={compact() ? "true" : undefined}
     title={[relativeTime(props.sentAt), props.wake?.label].filter(Boolean).join(" · ") || undefined}
     aria-label={`Mail${preposition()} ${props.partyText}: ${props.purpose}${props.status ? `, ${props.status}` : ""}${props.wake ? `, ${props.wake.label}` : ""}`}>
     <span class="mail-activity-kind" data-direction={props.direction} aria-hidden="true">
@@ -61,9 +70,8 @@ export const MailSummary = (props: {
         <Glyph name={state() === "caused" ? "zap-fill" : "dot"} size={12} />
       </span>}
     </Show>
-    <span class="mail-activity-party">{props.party}</span>
-    <span class="mail-activity-sep" aria-hidden="true">·</span>
-    <span class="mail-activity-purpose" dir="auto">{props.purpose}</span>
+    {/* The preview slot keeps compact mail's line together; otherwise party and purpose are direct children, as before. */}
+    <Show when={compact()} fallback={line()}><span class="mail-activity-preview">{line()}</span></Show>
     <Show when={props.status}>{(status) => <>
       <span class="mail-activity-sep" aria-hidden="true">·</span>
       <span class="mail-activity-status" data-status={status()}>{status()}</span>

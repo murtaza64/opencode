@@ -4,8 +4,25 @@ import { directory } from "./composer-fixture.mjs"
 
 // Disposable fixture for tool size badges, coalesced tool runs and prompt
 // navigation. Nothing here talks to a real daemon.
+// `options.defaultOn`: this disposable preview origin opens with the icon chips and Filament on and "/" goes to the
+// session, so a reviewer sees the treatment without flags. It writes only this origin's localStorage.
+const defaultOnPlugin = (sessionPath) => ({
+  name: "preview-default-on",
+  transformIndexHtml: () => [{ tag: "script", injectTo: "head-prepend",
+    children: 'try{localStorage.setItem("es-app:chips","icons");localStorage.setItem("es-app:filament","1")}catch{}' }],
+  // Returns nothing: a function returned from configureServer would run as a post middleware hook.
+  configureServer: (server) => {
+    server.middlewares.use((request, response, next) => {
+      if (request.url !== "/") return next()
+      response.statusCode = 302
+      response.setHeader("location", sessionPath)
+      response.end()
+    })
+  },
+})
+
 export const startToolRunsPreview = async (portHint = 0, options = {}) => {
-  const preview = await startPanelPreview([], portHint)
+  const preview = await startPanelPreview(options.defaultOn ? [defaultOnPlugin(`/session/ses_a?directory=${encodeURIComponent(directory)}`)] : [], portHint)
   const fixture = preview.fixture
   fixture.status = "idle"
   let clock = 1_000
@@ -74,6 +91,36 @@ export const startToolRunsPreview = async (portHint = 0, options = {}) => {
       tool("p63_lc", "bash", { command: "sleep 1" }, "", { status: "running" }),
     ], { open: true }),
   ]
+  // Additive icon-chip cases (human #420 preview; ICON_CASES=1 or options.iconCases). Appended after every existing
+  // message, so existing IDs and expectations are unchanged. Real tool parts in their real states, nothing special-cased.
+  if (options.iconCases) fixture.messages.push(
+    user("msg_2000", "Icon chip cases (preview fixture): groups, single calls, a failure, mail and a running call."),
+    assistant("msg_2001", "msg_2000", [
+      tool("p71_ra", "read", { filePath: "/workspace/README.md" }, "readme", { end: 90 }),
+      tool("p72_rb", "grep", { pattern: "iconChips", path: "/workspace" }, "src/chip-preview.ts:2", { end: 140 }),
+      tool("p73_rc", "glob", { pattern: "src/**/*.css" }, "a.css\nb.css", { end: 60 }),
+    ]),
+    assistant("msg_2002", "msg_2000", [
+      text("p74_then", "Checks, one of which failed:"),
+      tool("p74_sa", "bash", { command: "bun typecheck", description: "Typecheck" }, "ok", { metadata: { exit: 0 }, end: 4_010 }),
+      tool("p75_sb", "bash", { command: "bun test", description: "Unit tests" }, "2 fail", { metadata: { exit: 1 }, end: 2_010 }),
+    ]),
+    assistant("msg_2003", "msg_2000", [
+      text("p80_single", "Single calls:"),
+      tool("p81_one", "read", { filePath: path }, "export default function SessionPage() {}"),
+      text("p82_then", "and an edit:"),
+      tool("p83_edit", "edit", { filePath: "/workspace/src/a.ts", oldString: "a", newString: "b" }, "Edited", { metadata: { diff: "-a\n+b" } }),
+      text("p90_fail", "A failed call:"),
+      tool("p91_err", "bash", { command: "make lint" }, "Error: lint failed in src/a.ts", { status: "error" }),
+      text("p91_then", "Unknown exit:"),
+      tool("p92_exit", "bash", { command: "./deploy.sh" }, "", { metadata: { exit: "?" } }),
+    ]),
+    user("msg_2006", "", { info: { source: { type: "editspace-mail", id: "mail_icon_1", sender: "ux-feel", recipient: "transcript-scan", kind: "notice" } },
+      parts: [{ id: "msg_2006_text", messageID: "msg_2006", sessionID: "ses_a", type: "text", text: "Icon chip CSS review notes." }] }),
+    assistant("msg_2007", "msg_2006", [
+      tool("p95_run", "bash", { command: "bun run build", description: "Build" }, "", { status: "running" }),
+    ], { open: true }),
+  )
   // Lane-scoped URL: enables the header mail menu with lane mail and subscriptions.
   const laneDirectory = `${fixture.editspaces[0].root}/lanes/transcript-scan/repos/org/repo`
   fixture.subscriptions = new Map()
@@ -82,11 +129,20 @@ export const startToolRunsPreview = async (portHint = 0, options = {}) => {
     text: `Lane mail ${index}`, deliveries: [],
   })) })
   if (options.title) fixture.sessionTitles.set("ses_a", options.title)
+  // The icon-chip cases' mail input is shown only with its mail record, as in a real session.
+  if (options.iconCases) {
+    const laneMail = fixture.mail
+    const sent = fixture.messages.find((message) => message.info.id === "msg_2006").info.time.created
+    fixture.mail = (es, recipient) => recipient !== "ses_a" ? laneMail(es, recipient) : { editspace: es, lane: "", messages: [{
+      id: "mail_icon_1", ts: new Date(sent).toISOString(), created_ms: sent, from: "ux-feel", to: "transcript-scan", direction: "received",
+      kind: "notice", text: "Icon chip CSS review notes.", deliveries: [] }] }
+  }
   return { ...preview, tool, assistant, text, laneUrl: `${preview.origin}/session/ses_a?directory=${encodeURIComponent(laneDirectory)}` }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const preview = await startToolRunsPreview(Number(process.env.PORT ?? 0), { filler: Number(process.env.FILLER ?? 60), title: process.env.TITLE })
+  const preview = await startToolRunsPreview(Number(process.env.PORT ?? 0), { filler: Number(process.env.FILLER ?? 60), title: process.env.TITLE,
+    iconCases: process.env.ICON_CASES === "1", defaultOn: process.env.ICON_CASES === "1" })
   console.log(`PREVIEW ${preview.url}\nLANE ${preview.laneUrl}\nFIXTURE ${preview.fixture.url}\nSTOP kill ${process.pid}`)
   let closing = false
   const close = async () => {

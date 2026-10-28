@@ -53,6 +53,7 @@ import { FindExcerpt, TranscriptFind } from "../components/transcript-find"
 import type { FindHit } from "../transcript-find"
 import { ToolSize } from "../components/tool-size"
 import { ToolRun } from "../components/tool-run"
+import { iconChips } from "../chip-preview"
 import { HeaderMenu } from "../components/header-menu"
 import { FailureRetry } from "../components/session-failure"
 import { blockTime } from "../recorded-time"
@@ -1741,7 +1742,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     const hit = () => findHit() && run().members.some((member) => member.partID === findHit()!.partID) ? findHit() : undefined
     return <ToolRun run={run()} message={(id) => messageByID().get(id)} parts={(id) => live.data.part[id] ?? []}
       open={runOpen(key)} onToggle={(open) => toggleRun(key, open)} renderTools={renderTools}
-      selectedPart={hit()?.partID}
+      selectedPart={hit()?.partID} compact={iconChips}
       excerpt={<Show when={hit()}>{(selected) => <div class="find-jump" role="region" aria-label="Selected transcript match"><FindExcerpt hit={selected()} /></div>}</Show>} />
   }}</Show>
 
