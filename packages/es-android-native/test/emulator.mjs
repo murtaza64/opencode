@@ -65,6 +65,16 @@ const until = async (check, label, timeout = 30_000) => {
     await sleep(delay)
   }
 }
+// Scroll a list until the node is on screen (Home grew sections below the fold).
+const scrollTo = async (predicate, label, tries = 6) => {
+  for (let i = 0; i < tries; i++) {
+    const found = (await nodes()).find(predicate)
+    if (found) return found
+    await adb("shell", "input", "swipe", "540", "1600", "540", "700", "300")
+    await sleep(500)
+  }
+  throw new Error(`Could not scroll to ${label}`)
+}
 const waitWrite = async (predicate, label, timeout = 15_000) => {
   const deadline = Date.now() + timeout
   while (!fixture.writes.find(predicate)) { if (Date.now() > deadline) throw new Error(`Timed out waiting for write: ${label}`); await sleep(250) }
@@ -157,6 +167,30 @@ try {
   await waitFor(byText("Composer float and steer timing"), "list restored after clear")
   pass("Agents search by lane, session id prefix, empty state, clear")
   await screenshot("17-agents-search")
+  // Findability acceptance: search 'relay' -> one lane row (old root only under Earlier sessions)
+  // -> open the current root -> pin -> visible on Home under Pinned.
+  await type("agent-search", "relay")
+  await hideKeyboard()
+  const relayRow = await waitFor((n) => n["content-desc"]?.startsWith("Relay (Mini receiving orchestrator), orchestrator"), "relay row")
+  if ((await nodes()).some(byText("Composer float and steer timing"))) throw new Error("'relay' matched unrelated rows")
+  await tap(await waitFor(byId("lineage-opencode/orchestrator"), "Earlier sessions expander"))
+  await waitFor(byId("history-ses_relay_old"), "old root under Earlier sessions")
+  await waitFor(byText("HISTORY"), "history marker")
+  await screenshot("18-relay-lineage")
+  await tap(relayRow)
+  await waitFor(byId("agent"), "relay agent screen")
+  await waitFor((n) => n.text?.toLowerCase().includes("orchestrator"), "lane in header")
+  await tap(await waitFor(byId("pin"), "pin button"))
+  await adb("shell", "input", "keyevent", "KEYCODE_BACK")
+  await waitFor(byId("agents"), "back to agents")
+  await tap(await waitFor(byId("agent-search-clear"), "clear relay search"))
+  await tap(await waitFor(byId("tab-desk"), "desk tab"))
+  await waitFor(byText("Pinned"), "Pinned section on Home")
+  await waitFor(byText("Relay (Mini receiving orchestrator)"), "relay pinned on Home")
+  await waitFor(byText("Your conversations"), "Your conversations section")
+  pass("search 'relay' -> open current root -> pin -> visible on Home")
+  await screenshot("19-home-relay-pinned")
+  await tap(await waitFor(byId("tab-agents"), "agents tab"))
   await tap(await waitFor(byText("Composer float and steer timing"), "agent row"))
   await waitFor(byId("agent"), "agent screen")
   await waitFor(byText("Composer is pinned"), "transcript tail")
@@ -221,7 +255,7 @@ try {
   // 4b. boards & reports: list on Home, open in the sandboxed WebView, script-rendered text visible,
   // same-prefix navigation allowed, Back walks history then closes.
   await tap(await waitFor(byId("tab-desk"), "desk tab"))
-  await tap(await waitFor(byId("surface-fixture-board"), "surface row"))
+  await tap(await scrollTo(byId("surface-fixture-board"), "surface row"))
   await waitFor(byId("surface"), "surface screen")
   await waitFor(byText("SCRIPT RENDERED 21"), "script output in WebView", 60_000)
   pass("surface opened through /__es/surface + /__surface capability prefix; script executed")

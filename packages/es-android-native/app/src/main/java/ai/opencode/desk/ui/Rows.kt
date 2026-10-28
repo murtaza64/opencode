@@ -17,6 +17,11 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -92,12 +97,14 @@ fun AttentionRow(record: AttentionRecord, now: Long, onClick: () -> Unit, host: 
 }
 
 @Composable
-fun AgentRow(agent: Agent, now: Long, onClick: () -> Unit, trailing: (@Composable () -> Unit)? = null, host: HostInfo? = null) {
+fun AgentRow(agent: Agent, now: Long, onClick: () -> Unit, trailing: (@Composable () -> Unit)? = null, host: HostInfo? = null, onOpenHistory: ((String) -> Unit)? = null) {
     val glyph = Hosts.forLane(agent.owner, host)
     val suffix = if (glyph == Hosts.Glyph.Wingman) "on Wingman" else Hosts.accessibleSuffix(host)
+    val hostLabel = if (glyph == Hosts.Glyph.Wingman) "Wingman" else Hosts.resolve(host)?.takeIf { glyph != null }?.label
+    var lineage by remember(agent.key) { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 20.dp, end = if (trailing != null) 4.dp else 20.dp, top = 12.dp, bottom = 12.dp)
-            .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(agent.title, agent.laneLabel, suffix, agent.status).joinToString(", ") },
+            .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(agent.title, agent.laneLabel, agent.editspace, suffix, agent.status).joinToString(", ") },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StatusDot(agent.status, 7)
@@ -105,10 +112,20 @@ fun AgentRow(agent: Agent, now: Long, onClick: () -> Unit, trailing: (@Composabl
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (glyph != null) { HostGlyph(glyph); Spacer(Modifier.width(6.dp)) }
-                Text(agent.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                agent.laneLabel?.let { Spacer(Modifier.width(8.dp)); Label(it) }
+                Text(agent.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+            // Secondary line: lane · project · host, so a row is findable by any of them.
+            Label(listOfNotNull(agent.lane.takeIf { it.isNotBlank() }, agent.editspace, hostLabel).joinToString(" · "))
             if (agent.activity.isNotBlank()) Text(agent.activity, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (onOpenHistory != null && agent.history.isNotEmpty()) {
+                Label(if (lineage) "Earlier sessions ▾" else "Earlier sessions · ${agent.history.size} ▸", color = Ink.Blue, modifier = Modifier.clickable { lineage = !lineage }.padding(top = 4.dp, bottom = 2.dp).testTag("lineage-${agent.key}"))
+                if (lineage) agent.history.forEach { old ->
+                    Row(Modifier.clickable { onOpenHistory(old.id) }.padding(vertical = 3.dp).testTag("history-${old.id}"), verticalAlignment = Alignment.CenterVertically) {
+                        Text(old.title.ifBlank { old.id }, style = MaterialTheme.typography.bodyMedium, color = Ink.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                        Spacer(Modifier.width(8.dp)); Label("history")
+                    }
+                }
+            }
         }
         Spacer(Modifier.width(12.dp))
         Column(horizontalAlignment = Alignment.End) {

@@ -59,6 +59,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ai.opencode.desk.DeskStore
+import ai.opencode.desk.Finder
 import ai.opencode.desk.Link
 import ai.opencode.desk.Hosts
 import ai.opencode.desk.Pin
@@ -161,19 +162,26 @@ private fun DeskTab(store: DeskStore, nav: Nav, onOpen: (AttentionRecord) -> Uni
             item { SectionHeader("Pinned") }
             items(pinned, key = { "pin-" + it.pin.key }) { view -> PinRow(store, view, nav) }
         }
-        val boards = store.surfaces.filter { store.filter.isEmpty() || it.editspace in store.filter }
-        if (boards.isNotEmpty()) {
-            item { SectionHeader("Boards & reports", "${boards.size}") }
-            items(boards.take(6), key = { "surf-" + it.id }) { SurfaceRow(it, store.now, { nav.push(Route.Surface(it.id)) }, store) }
+        // "Your conversations": ranked by my last human message; until there is one, pinned +
+        // opened on this device, said plainly.
+        val conversations = store.conversations
+        if (conversations.agents.isNotEmpty()) {
+            item { SectionHeader("Your conversations", if (conversations.fallback) "pinned + opened here" else "by your last message") }
+            items(conversations.agents, key = { "conv-" + it.key }) { AgentRow(it, store.now, onClick = { nav.push(Route.Agent(it.key)) }, host = store.host) }
         }
+        val idle = agents.filter { !it.busy && it.key !in conversations.agents.map { c -> c.key } }.take(if (working.isEmpty()) 6 else 3)
         if (working.isNotEmpty()) {
             item { SectionHeader("Working now", "${working.size}") }
             items(working, key = { it.key }) { AgentRow(it, store.now, onClick = { nav.push(Route.Agent(it.key)) }, host = store.host) }
         }
-        val idle = agents.filter { !it.busy }.take(if (working.isEmpty()) 6 else 3)
-        if (idle.isNotEmpty()) {
-            item { SectionHeader(if (working.isEmpty()) "Agents" else "Recently active") }
+        if (idle.isNotEmpty() && conversations.agents.isEmpty()) {
+            item { SectionHeader("Agents") }
             items(idle, key = { it.key }) { AgentRow(it, store.now, onClick = { nav.push(Route.Agent(it.key)) }, host = store.host) }
+        }
+        val boards = store.surfaces.filter { store.filter.isEmpty() || it.editspace in store.filter }
+        if (boards.isNotEmpty()) {
+            item { SectionHeader("Boards & reports", "${boards.size}") }
+            items(boards.take(6), key = { "surf-" + it.id }) { SurfaceRow(it, store.now, { nav.push(Route.Surface(it.id)) }, store) }
         }
         if (recent.isNotEmpty()) {
             item { SectionHeader("Decided") }
@@ -335,6 +343,7 @@ private fun AgentsTab(store: DeskStore, nav: Nav) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextField(
                         value = store.agentQuery, onValueChange = { store.agentQuery = it },
+                        label = { Label("Search") },
                         placeholder = { Text("Search title, lane, project, session id", style = MaterialTheme.typography.bodyMedium, color = Ink.Dim) },
                         singleLine = true,
                         modifier = Modifier.weight(1f).padding(top = 8.dp).testTag("agent-search"),
@@ -343,18 +352,36 @@ private fun AgentsTab(store: DeskStore, nav: Nav) {
                     )
                     if (store.agentQuery.isNotEmpty()) Label("clear", color = Ink.Blue, modifier = Modifier.clickable { store.agentQuery = "" }.padding(start = 8.dp, top = 8.dp).testTag("agent-search-clear"))
                 }
+                // Sort menu + chips (only chips that some row matches).
+                val chips = Finder.availableChips(store.filteredAgents, store.signals)
+                LazyRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item {
+                        var menu by rememberSaveable { mutableStateOf(false) }
+                        Box {
+                            FilterChip("↕ ${store.agentSort.label}", false) { menu = true }
+                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Ink.Raised) {
+                                Finder.Sort.entries.forEach { sort -> DropdownMenuItem(text = { Text(sort.label, color = if (sort == store.agentSort) Ink.Blue else Ink.Text) }, onClick = { menu = false; store.agentSort = sort }) }
+                            }
+                        }
+                    }
+                    items(chips, key = { it.name }) { chip ->
+                        FilterChip(chip.label, chip in store.agentChips) { store.agentChips = if (chip in store.agentChips) store.agentChips - chip else store.agentChips + chip }
+                    }
+                }
+                if (store.link == Link.Offline && store.offlineSince > 0L) Label("offline since ${age(store.now, store.offlineSince)} · showing the last snapshot", color = Ink.Amber, modifier = Modifier.padding(top = 6.dp).testTag("agents-offline"))
             }
         }
         groups.forEach { (es, agents) ->
             item(key = "h-$es") { SectionHeader(es, "${agents.count { it.busy }} live") }
             items(agents, key = { it.key }) { agent ->
                 val pin = agent.pin
-                AgentRow(agent, store.now, onClick = { nav.push(Route.Agent(agent.key)) }, trailing = { PinButton(store.pinned(pin)) { store.togglePin(pin) } }, host = store.host)
+                AgentRow(agent, store.now, onClick = { nav.push(Route.Agent(agent.key)) }, trailing = { PinButton(store.pinned(pin)) { store.togglePin(pin) } }, host = store.host,
+                    onOpenHistory = { id -> nav.push(Route.Agent("${agent.editspace}#$id")) })
             }
         }
         if (groups.isEmpty()) item {
             val text = when {
-                store.agentQuery.isNotBlank() && store.filteredAgents.isNotEmpty() -> "No agents match “${store.agentQuery.trim()}”."
+                (store.agentQuery.isNotBlank() || store.agentChips.isNotEmpty()) && store.filteredAgents.isNotEmpty() -> "No agents match ${store.agentQuery.trim().takeIf { it.isNotBlank() }?.let { "“$it”" } ?: "these chips"}."
                 store.link == Link.Offline || store.link == Link.Connecting -> "Offline: the list refreshes once the gateway answers."
                 else -> "No lanes yet."
             }

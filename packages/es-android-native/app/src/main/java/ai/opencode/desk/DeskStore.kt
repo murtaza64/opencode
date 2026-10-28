@@ -215,9 +215,37 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
 
     val filteredOpen get() = open.filter { filter.isEmpty() || it.editspace in filter }
     val filteredAgents get() = agents.filter { filter.isEmpty() || it.editspace in filter }
-    // Agents search (AND-W5): a view over the list only; the open conversation and drafts are untouched.
+    // Findability (SPEC-0.1.19): query/sort/chips are a view over the list only; the open
+    // conversation and drafts are untouched.
     var agentQuery by mutableStateOf("")
-    val searchedAgents get() = Agents.search(filteredAgents, agentQuery)
+    var agentSort by mutableStateOf(Finder.Sort.Recent)
+    var agentChips by mutableStateOf<Set<Finder.Chip>>(emptySet())
+    private val stampSerializer = MapSerializer(String.serializer(), Long.serializer())
+    private fun stamps(key: String): Map<String, Long> = prefs.getString(key, null)?.let { runCatching { ai.opencode.desk.net.json.decodeFromString(stampSerializer, it) }.getOrNull() }.orEmpty()
+    // Session id -> ms of my last human message (from this device's sends); agent key -> ms last opened here.
+    var lastSent by mutableStateOf(stamps("finder.lastSent"))
+        private set
+    var opened by mutableStateOf(stamps("finder.opened"))
+        private set
+    fun markOpened(key: String) {
+        opened = (opened + (key to System.currentTimeMillis())).entries.sortedByDescending { it.value }.take(50).associate { it.key to it.value }
+        prefs.edit().putString("finder.opened", ai.opencode.desk.net.json.encodeToString(stampSerializer, opened)).apply()
+    }
+    private fun markSent(sessionID: String) {
+        lastSent = (lastSent + (sessionID to System.currentTimeMillis())).entries.sortedByDescending { it.value }.take(200).associate { it.key to it.value }
+        prefs.edit().putString("finder.lastSent", ai.opencode.desk.net.json.encodeToString(stampSerializer, lastSent)).apply()
+    }
+    val signals: Finder.Signals get() = Finder.Signals(
+        pinned = pins.mapNotNull { pin -> agents.firstOrNull { it.pin == pin }?.key }.toSet(),
+        needsYou = open.mapNotNull { rec -> agents.firstOrNull { it.editspace == rec.editspace && it.lane == rec.lane }?.key }.toSet(),
+        lastSent = lastSent,
+        opened = opened,
+    )
+    val searchedAgents get() = Finder.apply(filteredAgents, agentQuery, agentSort, agentChips, signals)
+    val conversations get() = Finder.conversations(filteredAgents, signals)
+    // When the last refresh failed: the list is the last snapshot, shown with "offline since".
+    var offlineSince by mutableStateOf(0L)
+        private set
 
     // A row by key, or a synthetic row for an older session of a lane ("<es>#<sessionID>",
     // rollover history) so it is openable without being listed twice.
@@ -349,6 +377,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         } catch (error: Exception) {
             Log.w("Desk", "refresh failed: ${error.javaClass.simpleName}: ${error.message}")
             lastError = error.message
+            if (link != Link.Offline) offlineSince = System.currentTimeMillis()
             link = Link.Offline
         }
     }
@@ -479,6 +508,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         remember(sessionID, listOf(settled))
         // The draft survives a failed or unconfirmed send; only a confirmed accept clears it.
         if (settled.state == SendState.Accepted || settled.state == SendState.Presented || settled.state == SendState.Handled) {
+            markSent(sessionID)
             draftStore.clear(origin, sessionID, requestID)
             drafts[sessionID]?.takeIf { it.requestID == requestID }?.let { drafts.remove(sessionID) }
         }

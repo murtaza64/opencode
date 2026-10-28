@@ -87,6 +87,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
     val agent = store.agent(key)
+    LaunchedEffect(key) { if (!key.contains('#')) store.markOpened(key) }
     if (agent == null) {
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(20.dp)) {
             TopBar("Agent", onBack = { nav.pop() })

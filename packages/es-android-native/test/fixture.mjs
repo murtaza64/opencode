@@ -27,6 +27,11 @@ export const state = {
       thread("th-front-desk", "Front desk briefs", "Automatic readable briefs for attention items.",
         [lane("front-desk", "verifying brief fixture on 3181", "active", "ses_desk_lane")],
         [session("ses_desk_lane", "Front desk briefs", "busy", minutes(3), "/fixture/opencode/lanes/front-desk")]),
+      // Mini Relay rollover: owner moved to ses_relay_new; ses_relay_old stays as history only.
+      thread("ses_relay_old", "Relay (Mini receiving orchestrator)", "Relays attention to the Mini.",
+        [{ ...lane("orchestrator", "Relay rollover: continuing from ses_relay_old", "active", "ses_relay_new"), activity_session: "ses_relay_new" }],
+        [session("ses_relay_new", "Relay (Mini receiving orchestrator)", "busy", minutes(2), "/fixture/opencode/.editspace/lanes/orchestrator/repos/murtaza64/opencode"),
+         session("ses_relay_old", "Relay (Mini receiving orchestrator)", "idle", minutes(400), "/fixture/opencode/.editspace/lanes/orchestrator/repos/murtaza64/opencode")]),
     ],
     sessions: [session("ses_composer", "Composer float", "busy", minutes(1), directory), session("ses_handoff", "Handoff progress", "idle", minutes(38), "/fixture/opencode/lanes/handoff-reliability")],
     frontier: [], drift: [], digesting: [], briefing: [], wingman: [], curating: false, curated_at: now / 1000, wingman_error: "",
