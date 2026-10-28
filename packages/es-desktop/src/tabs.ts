@@ -16,6 +16,10 @@ export type HostTab = {
   kind: "app" | "page"
   // Applies that host's navigation policy to its view.
   guard: (contents: WebContents) => void
+  // The strip tab whose view already shows this host's rows (the Work view for a proxied Work host).
+  // Such a host is opened from the Hosts menu; it joins the strip only while shown, and its decision
+  // count rides on that tab.
+  within?: string
 }
 
 /** A host's decision count for its inactive tab: a number, or unavailable when it cannot be read. */
@@ -61,6 +65,18 @@ export const createTabs = (
     if (badge === "unavailable") return " · Needs you unavailable"
     return badge.count || badge.partial ? ` · ${badge.count}${badge.partial ? "+" : ""} need you` : ""
   }
+  // Strip tabs: hosts without a containing tab, plus the shown host so the strip always names it.
+  const strip = () => tabs.filter((tab) => !tab.within || tab.id === state.selected)
+  // A strip tab's count covers itself and the hosts it contains, except whichever host is shown.
+  const shownBadge = (id: string): Badge | undefined => {
+    const group = tabs
+      .filter((tab) => (tab.id === id || tab.within === id) && tab.id !== state.selected)
+      .flatMap((tab) => { const badge = badges.get(tab.id); return badge ? [badge] : [] })
+    if (!group.length) return undefined
+    const read = group.filter((badge) => badge !== "unavailable")
+    if (read.length < group.length) return "unavailable"
+    return { count: read.reduce((sum, badge) => sum + badge.count, 0), partial: read.some((badge) => badge.partial) }
+  }
   const menu = () =>
     Menu.buildFromTemplate(tabs.map((tab) => ({
       label: `${tab.label}${describe(tab.id)}`,
@@ -72,7 +88,7 @@ export const createTabs = (
   // names in the system font; the estimate leaves slack rather than clipping.
   const stripWidth = () => narrow()
     ? CONTROLS_INSET + 8 + 20 + Math.min(150, Math.ceil(current().label.length * 7.4)) + 16 + (summary() ? 24 : 0)
-    : CONTROLS_INSET + 8 + tabs.reduce((sum, tab) => sum + 20 + Math.min(150, Math.ceil(tab.label.length * 7.4)) + (badgeText(tab.id) ? 24 : 0), 0)
+    : CONTROLS_INSET + 8 + strip().reduce((sum, tab) => sum + 20 + Math.min(150, Math.ceil(tab.label.length * 7.4)) + (badgeText(tab.id) ? 24 : 0), 0)
   // The app's header starts after the strip, in the same row, keeping its own drag area.
   const inset = async (tab: HostTab, contents: WebContents) => {
     if (tab.kind !== "app" || contents.isLoading()) return
@@ -125,7 +141,7 @@ export const createTabs = (
   const badgeText = (id: string) => {
     // Only inactive tabs carry a badge: the shown host already displays its own queue.
     if (id === state.selected) return ""
-    const badge = badges.get(id)
+    const badge = shownBadge(id)
     if (!badge) return ""
     if (badge === "unavailable") return " "
     if (!badge.count && !badge.partial) return ""
@@ -142,7 +158,7 @@ export const createTabs = (
   const paint = () => {
     const html = narrow()
       ? collapsedHTML(current(), current().kind === "page", summary())
-      : barHTML(tabs, state.selected, current().kind === "page", badgeText, badges)
+      : barHTML(strip(), state.selected, current().kind === "page", badgeText, shownBadge)
     if (html === state.painted) return
     state.painted = html
     void bar.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
@@ -198,11 +214,11 @@ const collapsedHTML = (tab: HostTab, full: boolean, summary: string) => {
   return `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Hosts</title>${style(full)}<nav aria-label="Hosts"><a href="${TAB_URL}${MENU}" aria-current="page" aria-haspopup="menu" title="${escape(`Host: ${tab.label}${label ? ` · ${label}` : ""}`)}"><bdi dir="auto">${escape(tab.label)}</bdi><span aria-hidden="true">▾</span>${mark}</a></nav></html>`
 }
 
-const barHTML = (tabs: HostTab[], selected: string, full: boolean, badge: (id: string) => string, badges: Map<string, Badge>) =>
+const barHTML = (tabs: HostTab[], selected: string, full: boolean, badge: (id: string) => string, shown: (id: string) => Badge | undefined) =>
   `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Hosts</title>${style(full)}<nav aria-label="Hosts">${tabs
     .map((tab) => {
       const text = badge(tab.id)
-      const value = badges.get(tab.id)
+      const value = shown(tab.id)
       const label = value === "unavailable" ? "Needs you unavailable" : `${text.trim()} need${text === "1" ? "s" : ""} you`
       const mark = text ? `<b${value === "unavailable" ? ' class="unknown"' : ""} aria-label="${label}">${value === "unavailable" ? "" : text}</b>` : ""
       const tip = escape(text ? `${tab.label} · ${label}` : tab.label)
