@@ -1,14 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { filamentEnabled, FLAG_KEY } from "./flag"
 
-// Minimal location/localStorage stand-ins: the flag reads only these two globals.
-const setURL = (search: string) => { (globalThis as { location?: unknown }).location = { search } }
+// Minimal location/localStorage stand-ins: the flag reads only these two globals. Under the
+// browser-conditions suite both exist as readonly globals, so define rather than assign.
+const define = (name: string, value: unknown) => Object.defineProperty(globalThis, name, { value, configurable: true, writable: true })
+const setURL = (search: string) => define("location", { search })
 const store = new Map<string, string>()
-;(globalThis as { localStorage?: unknown }).localStorage = {
+define("localStorage", {
   getItem: (k: string) => store.get(k) ?? null,
   setItem: (k: string, v: string) => store.set(k, v),
   removeItem: (k: string) => store.delete(k),
-}
+})
 afterEach(() => { store.clear(); setURL("") })
 
 describe("filament flag", () => {
