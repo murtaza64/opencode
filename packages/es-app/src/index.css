@@ -1301,6 +1301,13 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 }
 .restart-marker::before { content: "↻ "; color: var(--overlay0); }
 .restart-marker[data-state="uncertain"] { color: var(--yellow); }
+/* Wake markers (CHAT-PARTS §4): a thin agent-side row above the input that woke the session; never restyles the mail it covers. */
+.wake-marker { display: flex; align-items: baseline; gap: 8px; color: var(--overlay1); font-size: 11px; font-family: var(--font-mono); margin: 0 0 6px; }
+.wake-marker::before { content: "○"; color: var(--overlay0); }
+.wake-marker[data-state="woke"]::before { content: "ϟ"; color: var(--accent, var(--lavender)); }
+.wake-marker[data-state="joined"]::before { content: "·"; }
+.wake-marker-covers { padding: 0; border: 0; background: none; color: var(--overlay1); font: inherit; text-decoration: underline; cursor: pointer; }
+.wake-marker-covers:hover, .wake-marker-covers:focus-visible { color: var(--text); }
 /* Linked message anchor: a brief tint and an inline-start bar that fade out. */
 .transcript-inner [data-find-message] { scroll-margin-top: 8px; transition: background-color 0.6s cubic-bezier(.2,0,0,1); }
 .transcript-inner [data-anchored] { position: relative; background-color: color-mix(in srgb, var(--yellow) 10%, transparent); }

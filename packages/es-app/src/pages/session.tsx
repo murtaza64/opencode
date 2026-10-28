@@ -55,6 +55,7 @@ import { blockTime } from "../recorded-time"
 import { completedTurns, groupableTurns, messageSegments, planToolRuns, samePlan, sameSegments } from "../transcript-groups"
 import { isUserPrompt, promptPosition, promptTarget } from "../transcript-nav"
 import { restartMarkers } from "../restart-marker"
+import { wakeMarker, type WakeEvent } from "../wake-marker"
 import { anchorNote, anchorRange, parseAnchor, type MessageAnchor } from "../message-anchor"
 import { perfEvent, perfReady, perfSpan } from "../perf-telemetry"
 
@@ -733,6 +734,16 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   }
 
   // "forked from …" breadcrumb target (child sessions carry parentID)
+  // Passive-review wake records (frozen covered mail); refreshed with mail. Without them markers still
+  // render from the transcript, only without a mail count.
+  const [wakeEvents] = createResource(
+    () => { const scope = location(); return scope ? { name: scope.name, revision: mailRevision() } : undefined },
+    (scope) => es.wakeEvents(scope.name, sessionID).then((result) => new Map(result.events.map((event): [string, WakeEvent] => [event.id, event])), () => new Map<string, WakeEvent>()),
+  )
+  const scrollToMail = (id: string) => {
+    mountAll()
+    requestAnimationFrame(() => document.querySelector(`[data-mail-id="${CSS.escape(id)}"], #${CSS.escape(`mail-${id}`)}`)?.scrollIntoView({ block: "center" }))
+  }
   const [parent] = createResource(
     () => (session() as any)?.parentID as string | undefined,
     (pid) => oc.session(pid, directory).catch(() => null),
@@ -1887,6 +1898,14 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                   }</Show>
                   <Show when={m.role === "user"} fallback={<TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} renderTools={renderTools}
                     segments={segments()} renderRun={renderRun} />}>
+                    <Show when={wakeMarker(m, messages(), wakeEvents() ?? new Map())}>{(marker) =>
+                      <div class="wake-marker" data-state={marker().state} role="note" title={marker().title}>
+                        <span>{marker().label}</span>
+                        <Show when={marker().covers.length}>
+                          <button type="button" class="wake-marker-covers" onClick={() => scrollToMail(marker().covers[0]!)}
+                            aria-label={`Show the ${marker().covers.length} mail this review covered`}>show mail</button>
+                        </Show>
+                      </div>}</Show>
                     <div class="msg-wrap" id={promptIDs().has(m.id) ? `prompt-${m.id}` : undefined} data-user-prompt={promptIDs().has(m.id) ? m.id : undefined}>
                       <TranscriptMessage message={m} parts={live.data.part[m.id] ?? []}
                         renderTools={renderTools}

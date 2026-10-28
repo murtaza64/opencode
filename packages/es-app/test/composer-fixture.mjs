@@ -237,6 +237,8 @@ export const createFixture = async () => {
     if (url.pathname === "/api/attention") return json({ records: fixture.attention ?? [], projects: fixture.attention ? [{ editspace: "fixture", available: true }] : [], partial: false })
     // The shared Front desk queue reads ignored failures app-wide for the mode tab count.
     if (url.pathname === "/api/frontdesk/ignored-failures" && request.method === "GET") return json({ format: "front-desk-ignored-failures/1", entries: [] })
+    // Passive-review wake records; none unless a test sets fixture.wakeEvents.
+    if (url.pathname === "/api/wake-events") return json({ events: fixture.wakeEvents?.(url.searchParams.get("session")) ?? [] })
     if (url.pathname === "/api/mail") return fixture.mail
       ? json(fixture.mail(url.searchParams.get("es"), url.searchParams.get("lane") ?? url.searchParams.get("session")))
       : json({ detail: "Not Found" }, 404)
