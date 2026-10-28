@@ -132,7 +132,8 @@ export const startPerfTelemetry = () => {
     const url = new URL(timing.name, location.href)
     if (url.origin !== location.origin || !/^\/(oc|es)\//.test(url.pathname)) return
     perfEvent("fetch", {
-      path: url.pathname.slice(0, 200),
+      // A secure field's handle never leaves in a beacon.
+      path: url.pathname.replace(/^(\/es\/api\/secret-intake\/)[^/]+$/, "$1:handle").slice(0, 200),
       ms: Math.round(timing.duration),
       // Time before the request left the browser: connection-pool queueing or a stalled main thread.
       queueMs: timing.requestStart ? Math.round(timing.requestStart - timing.startTime) : undefined,

@@ -158,6 +158,8 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/es\/api\/handoffs$/,
       /^\/es\/api\/frontdesk\/ignored-failures$/,
       /^\/es\/api\/frontdesk\/deliverables\/seen$/,
+      // One masked decision field's single submission; the dashboard checks handle, operator, origin and scope.
+      /^\/es\/api\/secret-intake\/[\w-]+$/,
       /^\/es\/api\/attention\/(?:session|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(?:commands|delivery))$/,
       // The operator asks for a fresh brief of one open request.
       /^\/es\/api\/frontdesk\/briefs\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/regenerate$/,
