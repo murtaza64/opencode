@@ -4,6 +4,7 @@
 // Run from packages/es-app: node test/brief-kit.browser.mjs [--shots DIR] [--report-only] [--serve]
 //   --report-only  prints the checklist table without failing (for "before" screenshots on an older build)
 //   --serve        leaves the preview running after the checks and prints its URL
+//   --serve-only   starts the preview without any checks or browser (a review server, e.g. for a frozen baseline)
 import assert from "node:assert/strict"
 import { createRequire } from "node:module"
 import path from "node:path"
@@ -76,6 +77,10 @@ const preview = await startAttentionPreview([{
 }])
 preview.fixture.editspaces = [{ name: "fixture", root: directory }]
 preview.ledger.records.splice(0, preview.ledger.records.length, ...Object.values(CASES).flatMap(value => value.records ?? [value.record]))
+if (arg("--serve-only")) {
+  console.log(`SERVING ${preview.origin}/?item=${encodeURIComponent("attention:fixture:single")} (pid ${process.pid}); stop with kill ${process.pid}`)
+  await new Promise(() => {})
+}
 const browser = await chromium.launch({ channel: "chrome", headless: true })
 const VIEWS = [["desktop", { width: 1440, height: 1000 }, false], ["390", { width: 390, height: 844 }, false], ["rtl", { width: 390, height: 844 }, true]]
 const keyOf = name => name === "series" ? "series:fixture:ses_a:grill" : `attention:fixture:${CASES[name].record.id}`
@@ -105,8 +110,13 @@ const check = async (page, card, name) => card.evaluate((element, [name, missing
     "6 steps copyable": name !== "steps" || element.querySelectorAll(".desk-steps .desk-command-copy").length === 2 && /Check: shows as Active/.test(text),
     "7 visual earns place": name === "visual" ? !!iframe && !!iframe.title && !!window && window.getBoundingClientRect().height <= innerHeight * 0.45 + 2 && !!element.querySelector(".desk-visual-expand") : !iframe,
     "8 no duplicate request": !(element.querySelector(".home-request-text") && visible(element.querySelector(".home-request-text")) && element.querySelector("details.home-original")) && !/This brief explains|several/.test(text),
+    "8 no empty Approved or Question labels": !/Approved/.test(text) && ![...element.querySelectorAll(".desk-brief-item-label")].some(node => node.textContent === "Question"),
+    "8 missing styled alike": name !== "items" || !!element.querySelector(".desk-brief-item:nth-child(5) .brief-missing"),
+    "8 one failure line": name !== "error" || /The model provider refused sign-in\./.test(text) && !visible([...element.querySelectorAll("p")].find(node => /Briefs unavailable/.test(node.textContent))),
     "9 type sizes": sizes.size,
-    "10 state honest": name === "error" ? /Brief failed: ProviderAuthError/.test(text)
+    "9 brief type sizes": new Set([...element.querySelectorAll(".desk-brief *")].filter(node => visible(node) && [...node.childNodes].some(child => child.nodeType === 3 && child.textContent.trim()))
+      .map(node => getComputedStyle(node).fontSize)).size,
+    "10 state honest": name === "error" ? /ProviderAuthError/.test(text) && /The model provider refused sign-in/.test(text)
       : name === "absent" ? !!element.querySelector(".home-request-text") && element.querySelectorAll('input[type="radio"]').length >= 2
       : name === "series" ? element.querySelectorAll('input[type="radio"]').length >= 2 : true,
     "11 no overflow": element.scrollWidth <= element.clientWidth + 1,
@@ -132,7 +142,7 @@ try {
       await expect(card.locator("h3, h4").first()).toBeVisible({ timeout: 120_000 })
       // Ready briefs settle before checking; failed and absent ones are checked as they stand.
       if (CASES[name].brief !== "none" && CASES[name].brief !== "error") await expect(card.locator(".desk-brief-body, .home-question").first()).toBeVisible()
-      if (name === "error") await expect(card).toContainText("Brief failed")
+      if (name === "error") await expect(card.locator('.desk-brief[data-part="lead"]')).toContainText("ProviderAuthError")
       const result = await check(page, card, name)
       table[`${name} ${view}`] = result
       if (shots) await card.screenshot({ path: path.join(shots, `${name}-${view}.png`) }).catch(() => page.screenshot({ path: path.join(shots, `${name}-${view}.png`), fullPage: true }))

@@ -94,7 +94,7 @@ try {
   await card.locator(".home-request-text pre").hover()
   await card.locator('.home-request-text [data-slot="markdown-copy-button"] button').first().click()
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), LONG)
-  await expect(card).toContainText("Brief failed: ")
+  await expect(card).toContainText("The model provider refused sign-in. (ProviderAuthError)")
   await expect(card).toContainText("Briefs unavailable on this host: duolingo-openai is not signed in on this host.")
   await expect(card.getByRole("button", { name: "Prepare again" })).toBeDisabled()
   await card.getByRole("radio", { name: "Small scope", exact: true }).check()

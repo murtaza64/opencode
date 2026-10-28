@@ -1,17 +1,18 @@
-/* Brief styles: every rule for a prepared brief's parts (attention-brief.tsx, brief-kit.tsx). Moved from desk.css,
+/* Type scale inside a brief: 13px for content, 11px for labels and meta; the card's 16px question is the third.
+ * Brief styles: every rule for a prepared brief's parts (attention-brief.tsx, brief-kit.tsx). Moved from desk.css,
  * which keeps the queue, chat and page layout; brief rules change here only. */
 .desk-brief { margin-block-start: 22px; padding: 14px 16px; border-inline-start: 2px solid var(--blue); background: var(--mantle); }
 .desk-brief-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .desk-brief h2 { margin: 0; }
-.desk-brief h3 { font-size: 12px; margin-block: 12px 4px; }
+.desk-brief h3 { font-size: 11px; margin-block: 12px 4px; }
 .desk-brief ul, .desk-brief ol { margin: 0; padding-inline-start: 18px; line-height: 1.6; }
 .desk-flow { display: flex; flex-wrap: wrap; gap: 6px 22px; list-style: none; padding: 0 !important; margin-block: 10px !important; }
-.desk-flow li { position: relative; padding: 4px 9px; border: 1px solid var(--surface1); background: var(--base); font-size: 12px; }
+.desk-flow li { position: relative; padding: 4px 9px; border: 1px solid var(--surface1); background: var(--base); font-size: 13px; }
 .desk-flow li + li::before { content: "→"; position: absolute; inset-inline-start: -17px; color: var(--subtext0); }
 .desk-flow li + li:dir(rtl)::before { content: "←"; }
-.desk-ref { display: inline-block; margin-inline-start: 4px; padding: 0 4px; font-size: 10px; border: 1px solid var(--surface1); color: var(--subtext0); text-decoration: none; }
+.desk-ref { display: inline-block; margin-inline-start: 4px; padding: 0 4px; font-size: 11px; border: 1px solid var(--surface1); color: var(--subtext0); text-decoration: none; }
 .home-decision .desk-brief { margin-block: 10px; padding: 10px 14px; }
-.desk-brief h3, .attention-home .desk-brief h3 { font-size: 12px; font-weight: 400; color: var(--subtext0); margin-block: 10px 2px; }
+.desk-brief h3, .attention-home .desk-brief h3 { font-size: 11px; font-weight: 400; color: var(--subtext0); margin-block: 10px 2px; }
 .desk-visual { margin: 8px 0; }
 .desk-visual iframe { inline-size: 100%; block-size: 280px; border: 1px solid var(--surface1); background: var(--mantle); }
 /* Card type scale: title (from the card), 13px body, 11px muted meta. */
@@ -50,7 +51,7 @@
 .desk-subject-name { font-weight: 600; }
 .desk-subject-detail { color: var(--subtext0); }
 .desk-subject-links { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-inline-start: auto; }
-.desk-subject-links a { font-size: 12px; color: var(--blue); }
+.desk-subject-links a { font-size: 11px; color: var(--blue); }
 /* Options side by side under their own labels; the recommended column carries the request's own marker. */
 .desk-compare { border-collapse: collapse; font-size: 13px; margin: 8px 0; inline-size: 100%; }
 .desk-compare th, .desk-compare td { text-align: start; vertical-align: top; padding: 4px 8px; border-block-end: 1px solid var(--surface0); }
@@ -68,15 +69,15 @@
 .desk-change tbody th { font-weight: 400; color: var(--subtext0); white-space: nowrap; }
 .desk-change tr:not([data-same]) td:last-child { color: var(--text); font-weight: 600; }
 .desk-change-same { color: var(--subtext0); font-size: 11px; }
-.desk-brief-regenerate { margin: 2px 0 0; font-size: 12px; }
+.desk-brief-regenerate { margin: 2px 0 0; font-size: 11px; }
 .desk-brief .desk-link-button { padding: 0; min-block-size: 0; border: 0; background: none; color: var(--subtext0); text-decoration: underline; font: inherit; cursor: pointer; }
 /* Commands to run: exact text in a scrollable block, where to run it above, Copy beside. */
 /* The track may shrink below a command's one-line width, so a long command scrolls in its block instead of widening the column. */
 .desk-brief .desk-commands { list-style: none; margin: 8px 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
-.desk-command-label { display: block; font-size: 12px; margin-block-end: 2px; }
+.desk-command-label { display: block; font-size: 13px; margin-block-end: 2px; }
 /* Copy sits beside the command, not over it: the block scrolls, so a padding gap would scroll away with the text. */
 .desk-command { display: flex; align-items: flex-start; gap: 6px; }
-.desk-command pre { flex: 1; min-inline-size: 0; margin: 0; padding: 8px 10px; overflow-x: auto; background: var(--mantle); border: 1px solid var(--surface0); font-size: 12px; line-height: 1.5; white-space: pre; text-align: left; }
+.desk-command pre { flex: 1; min-inline-size: 0; margin: 0; padding: 8px 10px; overflow-x: auto; background: var(--mantle); border: 1px solid var(--surface0); font-size: 13px; line-height: 1.5; white-space: pre; text-align: left; }
 .desk-command-copy { flex: none; margin-block-start: 4px; padding: 2px 8px; border: 1px solid var(--surface1); background: var(--base); color: var(--subtext0); font-size: 11px; cursor: pointer; }
 /* Numbered source items remain separate even when the brief also has subjects or an option shape. */
 .desk-brief-items { margin-block: 10px; container-type: inline-size; min-inline-size: 0; }
@@ -87,6 +88,8 @@
 .desk-brief-item { padding-block: 5px; border-block-end: 1px solid var(--surface0); line-height: 1.4; }
 .desk-brief-item-id { white-space: nowrap; }
 .desk-brief-item-number { color: var(--subtext0); }
+/* Without a recorded answer there is no Approved column. */
+.desk-brief-items:not([data-answered]) :is(.desk-brief-item-head, .desk-brief-item) { grid-template-columns: minmax(58px, .55fr) minmax(0, 2fr) repeat(2, minmax(0, 1fr)); }
 .desk-brief-item-cell { min-inline-size: 0; overflow-wrap: anywhere; }
 .desk-brief-item-label { display: none; color: var(--subtext0); font-size: 11px; }
 @container (max-width: 680px) {
@@ -106,3 +109,8 @@
 .desk-visual-expand { padding: 2px 0; border: 0; background: none; color: var(--subtext0); text-decoration: underline; font: inherit; font-size: 11px; cursor: pointer; }
 /* A value the request does not state: visibly missing, never styled as a value. */
 .brief-missing { color: var(--yellow); font-style: italic; }
+/* Muted lines inside a brief use the meta size, not the page's 12px muted size. */
+.desk-brief .home-muted, .desk-brief .home-warning, .desk-brief .home-source { font-size: 11px; }
+.brief-failure { margin: 0; font-size: 13px; color: var(--subtext1); }
+.brief-failure-detail { color: var(--subtext0); font-size: 11px; }
+.brief-why > summary { font-size: 11px; color: var(--subtext0); cursor: pointer; }

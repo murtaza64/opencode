@@ -78,7 +78,10 @@ try {
   assert.deepEqual(await rows.locator(".desk-brief-item-number").allTextContents(), ["1.", "2.", "3.", "4.", "5.", "6.", "7."])
   await expect(rows.nth(2)).toContainText("Not given in the request")
   await expect(rows.nth(4)).toContainText("Not given in the request")
-  await expect(rows.nth(0).locator(".desk-brief-item-cell").last()).toContainText("—")
+  // Unanswered: no Approved label, value or column.
+  await expect(normal.card.locator(".desk-brief-item-head")).not.toContainText("Approved")
+  await expect(rows.locator(".desk-brief-item-label", { hasText: "Approved" })).toHaveCount(0)
+  await expect(rows.locator(".desk-brief-item-label", { hasText: "Question" })).toHaveCount(0)
   const frame = normal.card.locator(".desk-visual iframe")
   const box = await frame.boundingBox()
   assert(box && box.width <= 360.5 && Math.abs(box.height / box.width - 480 / 360) < .02, JSON.stringify(box))
