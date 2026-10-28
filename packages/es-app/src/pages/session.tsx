@@ -55,6 +55,7 @@ import { isUserPrompt, promptPosition, promptTarget } from "../transcript-nav"
 import { restartMarkers } from "../restart-marker"
 import { anchorNote, anchorRange, parseAnchor, type MessageAnchor } from "../message-anchor"
 import { perfEvent, perfReady, perfSpan } from "../perf-telemetry"
+import { targetReady } from "../startup"
 
 // The provider catalog per directory, shared by session views for a few minutes so switching
 // sessions does not refetch it each time.
@@ -267,6 +268,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     }
     if (connected()) {
       perfReady("target", { sessionID, openMs: Math.round(opened.elapsed()) })
+      targetReady()
       opened.end("ok", { transcriptMs })
     }
   })

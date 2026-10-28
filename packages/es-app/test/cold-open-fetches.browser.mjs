@@ -15,20 +15,44 @@ const browser = await chromium.launch({ channel: "chrome", headless: true })
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
 await context.route("**/*", (route) => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
 const counts = {}
+// Background reads: not needed by the open session. Their start times and overlap are tracked.
+// (Other editspaces' lineage, the session index, the failure scan, the cost rollup. Per-directory status
+// is excluded here: in this fixture every session shares the open session's directory.)
+const BACKGROUND = /^GET \/(es\/api\/(state|handoffs)\?es=other-|oc\/experimental\/(session|session\/failed|usage\/daily)$)/
+const timeline = []
+let recordAt
+let inFlight = 0, maxInFlight = 0
 const page = await context.newPage()
 page.on("request", (request) => {
   const url = new URL(request.url())
   if (!/^\/(oc|es)\//.test(url.pathname)) return
   const key = `${request.method()} ${url.pathname.replace(/ses_[\w-]+/g, ":id").replace(/^\/es\/api\/attention\/[0-9a-f-]{36}$/, "/es/api/attention/:id")}`
   counts[key] = (counts[key] ?? 0) + 1
+  const full = `${key}${url.search}`
+  if (BACKGROUND.test(full)) {
+    timeline.push({ at: Date.now(), key })
+    inFlight++
+    maxInFlight = Math.max(maxInFlight, inFlight)
+  }
+  if (key === "GET /oc/session/:id") recordAt ??= Date.now()
 })
+const settle = (request) => {
+  const url = new URL(request.url())
+  if (BACKGROUND.test(`${request.method()} ${url.pathname}${url.search}`)) inFlight--
+}
+page.on("requestfinished", settle)
+page.on("requestfailed", settle)
 try {
   await page.goto(`${preview.url}/session/ses_a?directory=${encodeURIComponent(directory)}`, { timeout: 300_000 })
   await page.waitForTimeout(8000)
   const total = Object.values(counts).reduce((sum, value) => sum + value, 0)
-  console.log(JSON.stringify({ total, counts: Object.fromEntries(Object.entries(counts).sort((a, b) => b[1] - a[1])) }))
+  // Session record answered = target ready (Send enabled); background reads before that compete with it.
+  const early = timeline.filter((item) => item.at < recordAt).length
+  console.log(JSON.stringify({ total, background_before_target: early, background_max_in_flight: maxInFlight, counts: Object.fromEntries(Object.entries(counts).sort((a, b) => b[1] - a[1])) }))
   if (ASSERT) {
     expect(counts["GET /oc/experimental/session"] ?? 0, "session index read once on cold open").toBeLessThanOrEqual(1)
+    expect(early, "no background read starts before the session record is requested").toBe(0)
+    expect(maxInFlight, "at most 4 background reads in flight").toBeLessThanOrEqual(4)
     console.log("PASS cold open fetches")
   }
 } finally {
