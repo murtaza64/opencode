@@ -60,7 +60,9 @@ export const watchNotifications = (hosts: NotifyHost[], options: NotifierOptions
       if (action.op === "cancel" || baseline || fresh(action) || options.focused(host.id)) continue
       shown.set(action.tag, options.show({ ...action, host: host.id, route: route(action) }))
     }
-    known.set(host.id, new Set([...seen, ...read.available]))
+    // A dashboard without a projects list cannot report availability; the editspaces in a
+    // successfully read ledger are known from then on, so their new decisions notify.
+    known.set(host.id, new Set([...seen, ...read.available, ...(read.listed ? [] : read.attention.map((item) => item.editspace))]))
     return true
   }
 
@@ -196,6 +198,7 @@ const readHost = async (host: NotifyHost) => {
     attention: views.flatMap((view) => (view as { records: unknown[] }).records).filter(isAttention),
     unavailable: projects(views, false),
     available: projects(views, true),
+    listed: views.some((view) => Array.isArray((view as { projects?: unknown }).projects)),
   }
 }
 

@@ -14,7 +14,7 @@ type Record = { id: string; editspace: string; status: string; revision: number;
 
 // A host dashboard with an attention ledger, pending requests and the nudge stream.
 const dashboard = () => {
-  const state = { records: [] as Record[], notifications: [] as unknown[], unavailable: false, failing: false }
+  const state = { records: [] as Record[], notifications: [] as unknown[], unavailable: false, failing: false, legacy: false }
   const reads: string[] = []
   const streams = new Set<ReadableStreamDefaultController<Uint8Array>>()
   const server = Bun.serve({
@@ -40,11 +40,10 @@ const dashboard = () => {
       if (state.failing) return new Response("bad gateway", { status: 502 })
       if (url.pathname === "/api/attention") {
         const statuses = { open: ["open"], answered: ["answered"], recorded: ["decided"] }[url.searchParams.get("view") ?? "open"] ?? []
-        return Response.json({
-          records: state.unavailable ? [] : state.records.filter((item) => statuses.includes(item.status)),
-          projects: [{ editspace: "opencode", available: !state.unavailable }],
-          partial: state.unavailable,
-        })
+        const records = state.unavailable ? [] : state.records.filter((item) => statuses.includes(item.status))
+        // Dashboards older than per-project availability send records only.
+        if (state.legacy) return Response.json({ records })
+        return Response.json({ records, projects: [{ editspace: "opencode", available: !state.unavailable }], partial: state.unavailable })
       }
       if (url.pathname === "/api/notifications") return Response.json({ notifications: state.notifications })
       if (url.pathname === "/api/editspaces") return Response.json({ editspaces: [] })
@@ -255,4 +254,17 @@ test("a focused window still notifies for a host whose tab is not shown", async 
   mini.nudge("attention")
   await settle()
   expect(notices.open().map((item) => item.host)).toEqual(["mini"])
+})
+
+test("a dashboard without a projects list still notifies a new decision after the launch baseline", async () => {
+  const mini = dashboard()
+  mini.state.legacy = true
+  mini.state.records.push(decision("00000000-0000-4000-8000-00000000000e"))
+  const notices = watch([await host("mini", mini.origin)])
+  await settle()
+  expect(notices.shown).toEqual([])
+  mini.state.records.push(decision("00000000-0000-4000-8000-00000000000f"))
+  mini.nudge("attention")
+  await settle()
+  expect(notices.open().map((item) => item.tag)).toEqual(["mini|opencode|att:00000000-0000-4000-8000-00000000000f"])
 })
