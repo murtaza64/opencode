@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { handoffChain, handoffNext, successorFor, transferPins, reconcilePins } from "./handoffs"
+import { handoffChain, handoffNext, successorFor, transferPins, reconcilePins, reconcileHostPins } from "./handoffs"
 
 describe("handoff lineage", () => {
   const edges = [
@@ -43,5 +43,29 @@ describe("handoff lineage", () => {
     expect(reconcilePins(pins, edges, [{ lane: "work", owner: "ses_new" }], [])).toEqual(pins)
     expect(successorFor("ses_old", edges, [{ lane: "work", owner: "ses_new" }, { lane: "work", owner: "ses_other" }])).toBeUndefined()
     expect(successorFor("ses_old", [...edges, { lane: "work", predecessor: "ses_new", successor: "ses_old" }], [{ lane: "work", owner: "ses_old" }])).toBeUndefined()
+  })
+})
+
+describe("Work host pins", () => {
+  const pin = '["/mini","P"]'
+  const rows = [{ host: "mini", id: "P", directory: "/mini" }, { host: "mini", id: "S", directory: "/mini" }]
+  const edge = { lane: "orchestrator", predecessor: "P", successor: "S" }
+  test("follows a verified handoff using only that host's rows", () => {
+    expect(reconcileHostPins("mini", [pin], { edges: [edge], owners: [{ lane: "orchestrator", owner: "S" }] }, rows))
+      .toEqual(['["/mini","S"]'])
+    expect(reconcileHostPins("mini", [pin], { edges: [edge], owners: [{ lane: "orchestrator", owner: "S" }] },
+      [{ host: "mini", id: "P", directory: "/mini" }, { host: "local", id: "S", directory: "/mini" }])).toEqual([pin])
+  })
+  test("retains the pin if the owner is not the tip", () => {
+    expect(reconcileHostPins("mini", [pin], { edges: [edge], owners: [{ lane: "orchestrator", owner: "P" }] }, rows)).toEqual([pin])
+  })
+  test("retains the pin if the successor is absent or appears twice", () => {
+    const lineage = { edges: [edge], owners: [{ lane: "orchestrator", owner: "S" }] }
+    expect(reconcileHostPins("mini", [pin], lineage, rows.slice(0, 1))).toEqual([pin])
+    expect(reconcileHostPins("mini", [pin], lineage, [...rows, rows[1]!])).toEqual([pin])
+  })
+  test("retains the pin if the predecessor has two outgoing edges or the read failed", () => {
+    expect(reconcileHostPins("mini", [pin], { edges: [edge, { ...edge, successor: "T" }], owners: [{ lane: "orchestrator", owner: "S" }] }, rows)).toEqual([pin])
+    expect(reconcileHostPins("mini", [pin], undefined, rows)).toEqual([pin])
   })
 })

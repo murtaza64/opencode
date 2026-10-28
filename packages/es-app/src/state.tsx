@@ -18,7 +18,7 @@ import { es, oc, type AttentionNotification } from "./api"
 import { createSessionActivity } from "./session-activity"
 import { createServerEvents } from "./event-source"
 import { resolveProjectName } from "./project-name"
-import { reconcilePins, transferPins, type Handoff, type PendingHandoff } from "./handoffs"
+import { reconcileHostPins, reconcilePins, transferPins, type Handoff, type PendingHandoff } from "./handoffs"
 import { pinSessionID } from "./session-pins"
 import { createCloudAgents } from "./cloud-agents"
 import { createSessionFailures } from "./session-failures"
@@ -601,6 +601,20 @@ export function DashboardProvider(props: ParentProps) {
       return [feed.host.id, []]
     }
   }))))
+  createEffect(() => {
+    for (const feed of feeds()) {
+      const state = feed.state()
+      const lineage = feed.lineage()
+      if (state.status !== "ready" || !state.scoped || lineage?.project !== workProject()) continue
+      const current = hostPins()[feed.host.id] ?? []
+      const next = reconcileHostPins(feed.host.id, current, lineage, state.rows)
+      if (next.length === current.length && next.every((key, index) => key === current[index])) continue
+      setHostPins((previous) => ({ ...previous, [feed.host.id]: next }))
+      try { localStorage.setItem(hostPinKey(feed.host.id), JSON.stringify(next)) } catch {
+        // Keep the reconciled pin in this window when browser storage is unavailable.
+      }
+    }
+  })
   const workPinned = (row: Pick<HostedRow, "id" | "directory" | "host">) =>
     !!row.host && (hostPins()[row.host] ?? []).some((key) => pinSessionID(key) === row.id)
   const work: WorkCtx = {

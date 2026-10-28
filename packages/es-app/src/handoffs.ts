@@ -68,3 +68,11 @@ export const reconcilePins = (pins: string[], handoffs: Handoff[], owners: LaneO
       return key
     }
   }))]
+
+/** Reconcile only identities read from the pinned session's own Work host. */
+export const reconcileHostPins = (
+  host: string,
+  pins: string[],
+  lineage: { edges: Handoff[]; owners: LaneOwner[] } | undefined,
+  rows: { id: string; directory: string; host?: string }[],
+) => lineage ? reconcilePins(pins, lineage.edges, lineage.owners, rows.filter((row) => row.host === host)) : pins

@@ -9,6 +9,7 @@ import { createServerEvents } from "./event-source"
 import type { WorkHost } from "./host"
 import type { AttentionList, AttentionRecord } from "./attention"
 import { loadSeen, saveSeen } from "./last-seen"
+import type { Handoff, LaneOwner } from "./handoffs"
 
 /** A session row; `host` names a Work view host other than this page's, undefined for this page's. */
 export type HostedRow = {
@@ -98,6 +99,7 @@ export const reachOf = (state: HostFeedState) => ({
 
 const LIST_MS = 5000
 const DECISIONS_MS = 30_000
+const LINEAGE_MS = 60_000
 const SESSION_EVENTS = ["session.created", "session.updated", "session.deleted", "session.status"]
 
 /** `project`: the selected project name, undefined for all projects, null while not yet known. */
@@ -116,6 +118,9 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     ...(seen ? { cachedAt: seen.cachedAt } : {}),
   })
   const [live, setLive] = createSignal<Record<string, string>>({})
+  const [lineage, setLineage] = createSignal<{ project: string; edges: Handoff[]; owners: LaneOwner[] }>()
+  let lastLineageRead = 0
+  let lineageRead: Promise<void> | undefined
   let loading: Promise<void> | undefined
   const read = async <T,>(path: string) => {
     const response = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(15_000) })
@@ -136,6 +141,34 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
       .then((list) => Array.isArray(list.records) ? list.records.filter((record) => record.status === "open") : undefined)
       .catch(() => undefined)
   }
+  const refreshLineage = () => {
+    const current = scope
+    const es = current?.es
+    if (!es || state().status !== "ready" || lineageRead || Date.now() - lastLineageRead < LINEAGE_MS) return
+    lastLineageRead = Date.now()
+    setLineage(undefined)
+    lineageRead = (async () => {
+      try {
+        const [handoffs, dashboard] = await Promise.all([
+          read<{ handoffs: Handoff[] }>(`/es/api/handoffs?es=${encodeURIComponent(es)}`),
+          read<{ editspace: string; threads: { lanes?: { lane: string; owner?: string }[] }[] }>(`/es/api/state?es=${encodeURIComponent(es)}`),
+        ])
+        if (dashboard.editspace !== es || !Array.isArray(handoffs.handoffs) || !Array.isArray(dashboard.threads)) throw new Error("Invalid host lineage")
+        if (scope?.es !== es || state().status !== "ready") return
+        setLineage({
+          project: es,
+          edges: handoffs.handoffs,
+          owners: dashboard.threads.flatMap((thread) => (thread.lanes ?? []).flatMap((lane): LaneOwner[] =>
+            lane.owner ? [{ lane: lane.lane, owner: lane.owner }] : [])),
+        })
+      } catch {
+        if (scope?.es === es) setLineage(undefined)
+      }
+    })().finally(() => {
+      lineageRead = undefined
+      if (scope?.es !== es) refreshLineage()
+    })
+  }
   const run = async () => {
     const name = project()
     if (name === null) return
@@ -148,6 +181,10 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
       const root = name ? editspaces?.editspaces?.find((item) => item.name === name)?.root : undefined
       const same = scope?.project === name
       scope = { project: name, ...(root ? { es: name } : {}), ...(name && !root ? { none: true } : {}) }
+      if (!same) {
+        setLineage(undefined)
+        lastLineageRead = 0
+      }
       // A decision list that fails to read keeps the last one for this project, marked stale.
       const decisions = await readDecisions()
       const rows = name && !root ? [] : hostRows(host.id, sessions, root)
@@ -160,7 +197,9 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
         decisions: decisions ?? (same ? previous.decisions : []),
         decisionsStale: !decisions,
       }))
+      refreshLineage()
     } catch (error) {
+      setLineage(undefined)
       const reason = error instanceof ReachError ? error.reason : "network"
       // Nothing listed yet in this page (the host was down at load): show its last-seen rows for this project.
       const fallback = !state().rows.length && !state().checkedAt ? loadSeen(host.id, name) : undefined
@@ -173,6 +212,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
   }
   // Decisions have no event on the session stream: between list reads, read only the decision list.
   const refreshDecisions = async () => {
+    refreshLineage()
     const current = scope
     if (loading || state().status !== "ready" || document.visibilityState !== "visible") return
     const decisions = await readDecisions()
@@ -217,6 +257,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
   return {
     host,
     state,
+    lineage,
     /** Live status from that host's events since load ("busy", "retry", "idle"); undefined if unseen. */
     live: (id: string) => live()[id],
     /** Reload this host's list now (project change, retry). */
