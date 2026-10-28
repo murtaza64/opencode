@@ -83,6 +83,7 @@ const start = async () => {
   })
   const appearance = createAppearance({
     directory: process.env.ES_APPEARANCE_DIR ?? path.join(app.getPath("home"), ".cache/wal"),
+    receipt: path.join(app.getPath("userData"), "appearance-receipt.json"),
     // Shrinking to a few dozen pixels and scaling back up gives a soft blur without an image library.
     blur: async (file) => {
       const image = nativeImage.createFromPath(file)

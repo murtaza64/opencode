@@ -167,3 +167,51 @@ test("a device with palette.json and no colors.json serves the roles with no app
   expect(appearance.body()).toMatchObject({ palette: {}, wal: { revision: "only", okRiskCvdSafe: true } })
   expect(appearance.body()?.wallpaper).toBeUndefined()
 })
+
+test("the receipt records what the app shows after each palette change, colours only", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "es-appearance-"))
+  cleanup.push(() => rm(directory, { recursive: true, force: true }))
+  await writeFile(path.join(directory, "colors.json"), palette(path.join(directory, "missing.png")))
+  const receipt = path.join(directory, "receipt.json")
+  const appearance = createAppearance({ directory, receipt, debounce: 30, poll: 20, blur: async () => Buffer.from("x") })
+  cleanup.push(() => appearance.close())
+  await appearance.ready
+  const first = JSON.parse(await Bun.file(receipt).text())
+  expect(first).toEqual({ schema: "es-appearance-receipt/1", background: "#101014", foreground: "#e0e0e0", updatedAt: appearance.body()!.updatedAt, applied: [] })
+  await writeFile(path.join(directory, "colors.json"), palette(path.join(directory, "missing.png"), "#202024"))
+  for (const delay of [50, 100, 200, 400, 800]) {
+    if (JSON.parse(await Bun.file(receipt).text()).background === "#202024") break
+    await Bun.sleep(delay)
+  }
+  expect(JSON.parse(await Bun.file(receipt).text()).background).toBe("#202024")
+})
+
+test("the receipt adds what each tab's page confirmed it applied; only this app's own pages may confirm", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "es-appearance-ack-"))
+  cleanup.push(() => rm(directory, { recursive: true, force: true }))
+  await writeFile(path.join(directory, "colors.json"), palette(path.join(directory, "missing.png")))
+  await writeFile(path.join(directory, "palette.json"), JSON.stringify({ schema: "wal-palette/1", revision: "rev1", scheme: "dark", roles: { bg: "#000001" } }))
+  const receipt = path.join(directory, "receipt.json")
+  const appearance = createAppearance({ directory, receipt, debounce: 30, poll: 20, blur: async () => Buffer.from("x") })
+  cleanup.push(() => appearance.close())
+  await appearance.ready
+  const root = await mkdtemp(path.join(tmpdir(), "es-appearance-ack-root-"))
+  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  await writeFile(path.join(root, "index.html"), "<title>Fixture</title>")
+  const server = await serve({ root, appearance })
+  cleanup.push(() => Promise.race([server.close(), Bun.sleep(500)]))
+  const post = (body: string, headers: Record<string, string> = { "x-editspace-key": server.key, origin: server.origin }) =>
+    fetch(`${server.origin}/__es/appearance/applied`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body })
+  expect((await post('{"walRevision":"rev1","theme":"wallpaper"}')).status).toBe(204)
+  const written = JSON.parse(await Bun.file(receipt).text())
+  expect(written.walRevision).toBe("rev1")
+  expect(written.applied).toEqual([{ host: "local", walRevision: "rev1", theme: "wallpaper", appliedAt: expect.any(Number) }])
+  expect((await post('{"walRevision":null,"theme":"default"}')).status).toBe(204)
+  expect(JSON.parse(await Bun.file(receipt).text()).applied).toEqual([{ host: "local", walRevision: null, theme: "default", appliedAt: expect.any(Number) }])
+  expect((await post('{"walRevision":"rev 1","theme":"wallpaper"}')).status).toBe(400)
+  expect((await post('{"walRevision":"rev1","theme":"neon"}')).status).toBe(400)
+  expect((await post('{"walRevision":"rev1","theme":"wallpaper"}', { "x-editspace-key": server.key })).status).toBe(403)
+  expect((await post('{"walRevision":"rev1","theme":"wallpaper"}', { origin: server.origin })).status).toBe(403)
+  const paired = await setup({ pairing: true })
+  expect((await fetch(`${paired.server.origin}/__es/appearance/applied`, { method: "POST", body: "{}" })).status).toBe(401)
+})

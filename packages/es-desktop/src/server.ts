@@ -217,6 +217,12 @@ export const serve = async (options: {
       if (req.method !== "GET" || url.search) return finish(403, "Forbidden")
       return finish(200, JSON.stringify({ protocol: eventProtocol }), "application/json")
     }
+    if (url.pathname === "/__es/appearance/applied") {
+      // The page's acknowledgement of what it applied: this app's own pages only (key + native origin).
+      if (!options.appearance || pairing || req.method !== "POST" || url.search) return finish(404, "Not found")
+      if (!trusted(req.headers.origin)) return finish(403, "Forbidden")
+      return appliedRoute(options.appearance, req, remote?.id ?? "local", finish)
+    }
     if (/^\/__es\/appearance(\/|$)/.test(url.pathname)) {
       if (!options.appearance || pairing || req.method !== "GET") return finish(404, "Not found")
       return appearanceRoute(options.appearance, req, res, url, finish)
@@ -491,6 +497,26 @@ const escape = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.
 const remoteOffline = (host: HostInfo | undefined) => {
   const local = host?.hosts.find((item) => item.id === "local")
   return `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="refresh" content="5"><title>${escape(host?.label ?? "Remote host")} unavailable</title><style>body{font:16px system-ui;background:#171819;color:#ececec;margin:0;padding:10vh 8vw}main{max-inline-size:42rem}h1{font-size:28px}p{line-height:1.6;color:#bbb}a{color:#9ac9ff}</style><main><h1>${escape(host?.label ?? "Remote host")} unavailable</h1><p>Its OpenCode or dashboard did not answer through the tailnet gate. Nothing on this machine changed.</p><p>Retrying every 5 seconds. <a href="/">Retry now</a>${local ? ` or <a href="${escape(local.origin)}/">return to ${escape(local.label)}</a>` : ""}.</p></main></html>`
+}
+
+const appliedRoute = async (appearance: Appearance, req: IncomingMessage, host: string, finish: (status: number, body: string, type?: string) => void) => {
+  const chunks: Buffer[] = []
+  for await (const chunk of req) {
+    chunks.push(chunk)
+    if (chunks.reduce((sum, item) => sum + item.length, 0) > 512) return finish(413, "Payload too large")
+  }
+  const body = (() => {
+    try {
+      return JSON.parse(Buffer.concat(chunks).toString()) as unknown
+    } catch {
+      return undefined
+    }
+  })()
+  const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {}
+  const revision = record.walRevision === null ? null : typeof record.walRevision === "string" && /^[A-Za-z0-9._-]{1,64}$/.test(record.walRevision) ? record.walRevision : undefined
+  if (revision === undefined || (record.theme !== "wallpaper" && record.theme !== "default")) return finish(400, "Invalid acknowledgement")
+  await appearance.applied(host, { walRevision: revision, theme: record.theme })
+  return finish(204, "")
 }
 
 const appearanceRoute = (
