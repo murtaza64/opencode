@@ -18,6 +18,7 @@ import { Glyph, HostGlyph } from "./icons"
 import { hostRowKey, hostSessionHref, workRows, type HostFeed } from "../host-feed"
 import { NavEntries } from "./mode-switch"
 import { TodayCost } from "./today-cost"
+import { NavTabs, NeedsYouBand } from "./nav-tabs"
 
 /** Project scope, shared by both modes' sidebars. */
 export const ProjectSelect = (props: { onChange?: () => void }) => {
@@ -354,22 +355,15 @@ export default function Sidebar() {
     >
       <nav class="sidebar" ref={setNavEl} style={{ width: `${leftWidth()}px` }}>
         <Show when={!nativeHeader}><div class="sidebar-top">{projectControls()}<TodayCost /></div></Show>
-        {/* Persistent nav (dotfiles#240): pinned agents first, then the permanent entries, then running agents. */}
-        <Show when={!query().trim() && (allPinned().length || cloud.pins().length)}>
-          <section class="pinned-section" aria-label="Pinned sessions">
-            <div class="nav-heading">Pinned</div>
-            <For each={allPinned()}>{(s) => item(s)}</For>
-            <For each={cloud.pins()}>{pin => <CloudNav pin={pin} />}</For>
-          </section>
-        </Show>
+        {/* Unified nav (dotfiles#240): primary entries, then what needs you (never filtered by a tab), then
+          * Pinned (any kind), then four browse tabs with their own filters. */}
         <NavEntries />
         <nav class="sidebar-actions" aria-label="Agents">
           <NewSession />
         </nav>
-        <Show when={notifications().length}>
-          <div class="notification-section">
-            <div class="nav-heading">needs you</div>
-            <For each={notifications()}>
+        {/* Permission and question notifications are already queue items; only finished-session notices add rows. */}
+        <NeedsYouBand extra={notifications().some((item) => item.kind === "idle") ? <>
+            <For each={notifications().filter((item) => item.kind === "idle")}>
               {(notification) => {
                 const dot = createMemo(() => dotFor({
                   id: notification.session,
@@ -394,8 +388,15 @@ export default function Sidebar() {
                 )
               }}
             </For>
-          </div>
+        </> : undefined} />
+        <Show when={!query().trim() && (allPinned().length || cloud.pins().length)}>
+          <section class="pinned-section" aria-label="Pinned sessions">
+            <div class="nav-heading">Pinned</div>
+            <For each={allPinned()}>{(s) => item(s)}</For>
+            <For each={cloud.pins()}>{pin => <CloudNav pin={pin} />}</For>
+          </section>
         </Show>
+        <NavTabs agents={<>
         <div class="search-box">
           <input
             class="search-input"
@@ -467,6 +468,7 @@ export default function Sidebar() {
             </Show>
           </Show>
         </Show>
+        </>} />
       </nav>
     </Show>
     <SessionPeek container={navEl} />

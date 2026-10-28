@@ -28,7 +28,8 @@ await page.route("**/es/api/state?*", (route) => route.fulfill({ json: {
     : state.threads.filter((thread) => thread.key !== "ses_else" && !preview.fixture.deleted.has(thread.key)),
 } }))
 const pinned = page.locator(".sidebar .pinned-section .nav-item")
-const active = page.locator(".sidebar > .session-entry .nav-item")
+// The session list lives in the Agents tab of the unified nav.
+const active = page.locator(".sidebar [role=tabpanel] > .session-entry .nav-item")
 const pin = (title) => page.getByRole("button", { name: `Pin ${title}`, exact: true })
 const unpin = (title) => page.getByRole("button", { name: `Unpin ${title}`, exact: true })
 try {
