@@ -123,6 +123,9 @@ export function fromRow(row: SessionRow): Info {
       updated: row.time_updated,
       compacting: row.time_compacting ?? undefined,
       archived: row.time_archived ?? undefined,
+      ...(row.time_turn_started === null && row.time_turn_ended === null
+        ? {}
+        : { turn: { started: row.time_turn_started ?? undefined, ended: row.time_turn_ended ?? undefined } }),
     },
   }
 }
@@ -165,6 +168,8 @@ export function toRow(info: Info) {
     time_updated: info.time.updated,
     time_compacting: info.time.compacting,
     time_archived: info.time.archived ?? null,
+    time_turn_started: info.time.turn?.started ?? null,
+    time_turn_ended: info.time.turn?.ended ?? null,
   }
 }
 
@@ -209,11 +214,17 @@ const Share = Schema.Struct({
 // while excluding non-finite values that cannot round-trip through JSON.
 export const ArchivedTimestamp = Schema.Finite
 
+// A turn is one runner run that calls the provider. `started` is strictly increasing per Session and an
+// end is written only for the start it settles, so `ended >= started` means the latest turn settled and
+// anything else means it is running or was cut off (a crash leaves no end).
+const Turn = Schema.Struct({ started: optional(NonNegativeInt), ended: optional(NonNegativeInt) })
+
 const Time = Schema.Struct({
   created: NonNegativeInt,
   updated: NonNegativeInt,
   compacting: optional(NonNegativeInt),
   archived: optional(ArchivedTimestamp),
+  turn: optional(Turn),
 })
 
 const Revert = Schema.Struct({
@@ -448,6 +459,10 @@ export interface Interface {
   }) => Effect.Effect<Info>
   readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info, NotFound>
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
+  /** Record a turn start; returns the start time to pass to `turnEnded`. Leaves `time.updated` alone. */
+  readonly turnStarted: (sessionID: SessionID) => Effect.Effect<number>
+  /** Settle the turn begun at `started`; a no-op when a newer turn has started since. */
+  readonly turnEnded: (sessionID: SessionID, started: number) => Effect.Effect<void>
   readonly get: (id: SessionID) => Effect.Effect<Info, NotFound>
   readonly setTitle: (input: { sessionID: SessionID; title: string }) => Effect.Effect<void>
   readonly setArchived: (input: { sessionID: SessionID; time?: number }) => Effect.Effect<void>
@@ -823,6 +838,23 @@ const layer: Layer.Layer<
       yield* patch(sessionID, { time: { updated: Date.now() } }).pipe(Effect.orDie)
     })
 
+    // Turn boundaries are not activity: they keep `time.updated`, so list order by activity is unchanged.
+    const turnStarted = Effect.fn("Session.turnStarted")(function* (sessionID: SessionID) {
+      const current = yield* get(sessionID).pipe(Effect.orDie)
+      const previous = current.time.turn
+      // Strictly after the previous start and end, so a same-millisecond end can never settle this start.
+      const started = Math.max(Date.now(), (previous?.started ?? -1) + 1, (previous?.ended ?? -1) + 1)
+      yield* patch(sessionID, { time: { turn: { started } } }).pipe(Effect.orDie)
+      return started
+    })
+
+    const turnEnded = Effect.fn("Session.turnEnded")(function* (sessionID: SessionID, started: number) {
+      const current = yield* get(sessionID).pipe(Effect.orDie)
+      // A newer start, or this start already settled (a duplicate end), leaves the record alone.
+      if (current.time.turn?.started !== started || current.time.turn.ended !== undefined) return
+      yield* patch(sessionID, { time: { turn: { started, ended: Math.max(Date.now(), started) } } }).pipe(Effect.orDie)
+    })
+
     const setTitle = Effect.fn("Session.setTitle")(function* (input: { sessionID: SessionID; title: string }) {
       yield* patch(input.sessionID, { title: input.title }).pipe(Effect.orDie)
     })
@@ -996,6 +1028,8 @@ const layer: Layer.Layer<
       create,
       fork,
       touch,
+      turnStarted,
+      turnEnded,
       get,
       setTitle,
       setArchived,

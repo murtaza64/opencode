@@ -52,5 +52,6 @@ export const migrations = (
     import("./migration/20261027205556_usage_rollup_state"),
     import("./migration/20261028064500_usage_rollup_session"),
     import("./migration/20261028083343_session_nudge"),
+    import("./migration/20261028170044_session_turn_time"),
   ])
 ).map((module) => module.default) satisfies DatabaseMigration.Migration[]

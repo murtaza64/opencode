@@ -66,6 +66,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
           nudge: true as const,
         },
         noReplyRecordOnly: true as const,
+        session: { turnTime: true as const },
       }
     })
 

@@ -50,6 +50,8 @@ const CapabilitiesResponse = Schema.Struct({
   }),
   /** `prompt_async` with `noReply` records the message only: no turn starts or continues to answer it, busy or idle. */
   noReplyRecordOnly: Schema.optionalKey(Schema.Literal(true)),
+  /** Sessions carry `time.turn {started?, ended?}`, written only at turn boundaries. */
+  session: Schema.optionalKey(Schema.Struct({ turnTime: Schema.Literal(true) })),
 }).annotate({ identifier: "ExperimentalCapabilities" })
 
 const ConsoleOrgOption = Schema.Struct({

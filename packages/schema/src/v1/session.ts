@@ -592,6 +592,8 @@ export const SessionInfo = Schema.Struct({
     updated: NonNegativeInt,
     compacting: optional(NonNegativeInt),
     archived: optional(Schema.Finite),
+    /** Server times of the latest turn's start and, once it settled, its end. Absent until a turn boundary. */
+    turn: optional(Schema.Struct({ started: optional(NonNegativeInt), ended: optional(NonNegativeInt) })),
   }),
   permission: optional(PermissionV1.Ruleset),
   revert: optional(SessionRevert),

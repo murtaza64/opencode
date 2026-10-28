@@ -76,6 +76,8 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     time_compacting: info.time.compacting,
     // Session updates carry the full info, so an absent archive time clears the column on restore.
     time_archived: info.time.archived ?? null,
+    time_turn_started: info.time.turn?.started ?? null,
+    time_turn_ended: info.time.turn?.ended ?? null,
   }
 }
 

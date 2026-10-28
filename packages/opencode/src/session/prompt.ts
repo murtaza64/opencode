@@ -1146,8 +1146,21 @@ const layer = Layer.effect(
       throw new Error("Impossible")
     })
 
-    const runLoop: (sessionID: SessionID) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.run")(
-      function* (sessionID: SessionID) {
+    // A turn is one runner run that reaches the provider. Its start is recorded at the first provider step
+    // (an advisory wake with nothing to do, compaction alone and shell never start one) and its end when the
+    // run exits for any reason, inside the run and so before the runner can start another.
+    const runLoop = (sessionID: SessionID) =>
+      Effect.suspend(() => {
+        const turn: { started?: number } = {}
+        return runTurns(sessionID, turn).pipe(
+          Effect.ensuring(
+            Effect.suspend(() => (turn.started === undefined ? Effect.void : sessions.turnEnded(sessionID, turn.started))),
+          ),
+        )
+      })
+
+    const runTurns: (sessionID: SessionID, turn: { started?: number }) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.run")(
+      function* (sessionID: SessionID, turn: { started?: number }) {
         const ctx = yield* InstanceState.context
         let structured: unknown
         let step = 0
@@ -1211,6 +1224,7 @@ const layer = Layer.effect(
           const task = tasks.pop()
 
           if (task?.type === "subtask") {
+            turn.started ??= yield* sessions.turnStarted(sessionID)
             yield* handleSubtask({ task, model, lastUser, sessionID, session, msgs })
             boundary = true
             continue
@@ -1352,6 +1366,7 @@ const layer = Layer.effect(
                   ),
               )
               .map((m) => m.info.id)
+            turn.started ??= yield* sessions.turnStarted(sessionID)
             const result = yield* handle.process(
               {
                 user: lastUser,

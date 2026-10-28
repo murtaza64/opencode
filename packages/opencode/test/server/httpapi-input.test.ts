@@ -230,6 +230,7 @@ it.instance("admits an invisible durable input and reconciles retries and cancel
     expect(yield* caps.json).toMatchObject({
       sessionAside: { version: 1, cancel: true },
       sessionInput: { version: 1, delivery: ["queue", "steer"], list: true, cancel: true, interrupt: true, context: true, nudge: true },
+      session: { turnTime: true },
       noReplyRecordOnly: true,
     })
   }),
