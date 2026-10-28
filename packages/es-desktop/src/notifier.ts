@@ -20,10 +20,13 @@ export type Shown = { close: () => void }
 /** In-app path a click opens, or undefined when the item's IDs are not well formed. */
 export type Route = string | undefined
 
+/** Stands in for the items of a burst past the first few, so a backlog never floods the screen. */
+export type Summary = { kind: "summary"; title: string }
+
 export type NotifierOptions = {
   /** True while the user is looking at this host: window focused and its tab shown. */
   focused: (host: string) => boolean
-  show: (notice: Notice & { tag: string; host: string; route: Route }) => Shown
+  show: (notice: (Notice | Summary) & { tag: string; host: string; route: Route }) => Shown
   now?: () => number
   /** Reconnect delay after a stream ends; doubles to 30 s. */
   retry?: number
@@ -32,6 +35,10 @@ export type NotifierOptions = {
 // Views holding records the reconcile can alert on: open decisions, plus answered/decided ones
 // that may be stalled or blocked in delivery.
 const VIEWS = ["open", "answered", "recorded"]
+// Records per editspace per view; the dashboard returns at most this many, oldest first.
+const LIMIT = 200
+// Individual notifications one read may post; the rest of a burst collapses into one summary.
+const BURST = 3
 
 export const watchNotifications = (hosts: NotifyHost[], options: NotifierOptions) => {
   const state = { ledger: {} as Ledger, stopped: false }
@@ -41,6 +48,8 @@ export const watchNotifications = (hosts: NotifyHost[], options: NotifierOptions
   // Projects whose ledger this device has read at least once, per host. Items of a project first
   // read later (unavailable at launch, or newly registered) are a baseline too, never a backlog.
   const known = new Map<string, Set<string>>()
+  // Per host, tags whose items were folded into the summary instead of posted.
+  const folded = new Map<string, Set<string>>()
 
   /** True when the host was read and reconciled; an unreadable host changes nothing. */
   const check = async (host: NotifyHost, baseline: boolean) => {
@@ -48,21 +57,38 @@ export const watchNotifications = (hosts: NotifyHost[], options: NotifierOptions
     // An unreadable host keeps its notifications: absence is not evidence of resolution.
     if (!read || state.stopped) return false
     const result = reconcile({ origin: host.id, attention: read.attention, requests: read.requests, ledger: state.ledger, now: (options.now ?? Date.now)() })
-    // A project whose ledger could not be read keeps its notifications until it reads again.
-    const kept = (tag: string) => read.unavailable.has(tag.slice(host.id.length + 1).split("|")[0]!)
+    // A project whose ledger could not be read, or was cut off at the page limit, keeps its
+    // notifications: an item missing from it may still be waiting.
+    const kept = (tag: string) => {
+      const editspace = tag.slice(host.id.length + 1).split("|")[0]!
+      return read.unavailable.has(editspace) || read.truncated.has(editspace)
+    }
     const actions = result.actions.filter((action) => action.op !== "cancel" || !kept(action.tag))
     state.ledger = { ...result.ledger, ...Object.fromEntries(Object.entries(state.ledger).filter(([tag]) => tag.startsWith(`${host.id}|`) && kept(tag) && !(tag in result.ledger))) }
     const seen = known.get(host.id) ?? new Set<string>()
-    const fresh = (action: NotifyAction) => action.op !== "cancel" && action.tag.includes("|att:") && !seen.has(action.editspace)
-    for (const action of actions) {
+    // A dashboard without a projects list cannot report availability, so after the launch
+    // baseline every new item notifies; the burst cap bounds a recovered project's backlog.
+    const fresh = (action: NotifyAction) => read.listed && action.op !== "cancel" && action.tag.includes("|att:") && !seen.has(action.editspace)
+    const skipped = folded.get(host.id) ?? new Set<string>()
+    const posts = actions.flatMap((action) => {
       shown.get(action.tag)?.close()
       shown.delete(action.tag)
-      if (action.op === "cancel" || baseline || fresh(action) || options.focused(host.id)) continue
-      shown.set(action.tag, options.show({ ...action, host: host.id, route: route(action) }))
+      skipped.delete(action.tag)
+      if (action.op === "cancel" || baseline || fresh(action) || options.focused(host.id)) return []
+      return [action]
+    })
+    for (const action of posts.slice(0, BURST)) shown.set(action.tag, options.show({ ...action, host: host.id, route: route(action) }))
+    for (const action of posts.slice(BURST)) skipped.add(action.tag)
+    folded.set(host.id, skipped)
+    const summary = `${host.id}|summary`
+    // The summary counts folded items still waiting and closes once none are.
+    if (posts.length > BURST || skipped.size === 0) {
+      shown.get(summary)?.close()
+      shown.delete(summary)
     }
-    // A dashboard without a projects list cannot report availability; the editspaces in a
-    // successfully read ledger are known from then on, so their new decisions notify.
-    known.set(host.id, new Set([...seen, ...read.available, ...(read.listed ? [] : read.attention.map((item) => item.editspace))]))
+    if (posts.length > BURST)
+      shown.set(summary, options.show({ kind: "summary", title: `${skipped.size} more items need you`, tag: summary, host: host.id, route: undefined }))
+    known.set(host.id, new Set([...seen, ...read.available]))
     return true
   }
 
@@ -189,13 +215,15 @@ const parse = (text: string): { type?: unknown; id?: unknown } | undefined => {
 const readHost = async (host: NotifyHost) => {
   const [requests, ...views] = await Promise.all([
     json(host, "/es/api/notifications"),
-    ...VIEWS.map((view) => json(host, `/es/api/attention?view=${view}&limit=200`)),
+    ...VIEWS.map((view) => json(host, `/es/api/attention?view=${view}&limit=${LIMIT}`)),
   ])
   if (!record(requests) || !Array.isArray(requests.notifications)) return undefined
   if (!views.every((view) => record(view) && Array.isArray(view.records))) return undefined
+  const pages = views.map((view) => (view as { records: unknown[] }).records.filter(isAttention))
   return {
     requests: requests.notifications.filter(isRequest),
-    attention: views.flatMap((view) => (view as { records: unknown[] }).records).filter(isAttention),
+    attention: pages.flat(),
+    truncated: new Set(pages.flatMap((page) => [...Map.groupBy(page, (item) => item.editspace)].filter(([, items]) => items.length >= LIMIT).map(([editspace]) => editspace))),
     unavailable: projects(views, false),
     available: projects(views, true),
     listed: views.some((view) => Array.isArray((view as { projects?: unknown }).projects)),

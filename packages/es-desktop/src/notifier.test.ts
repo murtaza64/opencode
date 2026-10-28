@@ -40,7 +40,8 @@ const dashboard = () => {
       if (state.failing) return new Response("bad gateway", { status: 502 })
       if (url.pathname === "/api/attention") {
         const statuses = { open: ["open"], answered: ["answered"], recorded: ["decided"] }[url.searchParams.get("view") ?? "open"] ?? []
-        const records = state.unavailable ? [] : state.records.filter((item) => statuses.includes(item.status))
+        // Like the real dashboard, each editspace returns at most `limit` records per view, oldest first.
+        const records = state.unavailable ? [] : state.records.filter((item) => statuses.includes(item.status)).slice(0, Number(url.searchParams.get("limit") ?? 100))
         // Dashboards older than per-project availability send records only.
         if (state.legacy) return Response.json({ records })
         return Response.json({ records, projects: [{ editspace: "opencode", available: !state.unavailable }], partial: state.unavailable })
@@ -267,4 +268,51 @@ test("a dashboard without a projects list still notifies a new decision after th
   mini.nudge("attention")
   await settle()
   expect(notices.open().map((item) => item.tag)).toEqual(["mini|opencode|att:00000000-0000-4000-8000-00000000000f"])
+})
+
+test("on a dashboard without a projects list, the first decision of an editspace empty at launch notifies", async () => {
+  const mini = dashboard()
+  mini.state.legacy = true
+  const notices = watch([await host("mini", mini.origin)])
+  await settle()
+  mini.state.records.push(decision("00000000-0000-4000-8000-000000000010"))
+  mini.nudge("attention")
+  await settle()
+  expect(notices.open().map((item) => item.tag)).toEqual(["mini|opencode|att:00000000-0000-4000-8000-000000000010"])
+})
+
+test("a burst of new items posts three notifications and one summary, and never replays the rest", async () => {
+  const mini = dashboard()
+  const notices = watch([await host("mini", mini.origin)])
+  await settle()
+  const ids = Array.from({ length: 10 }, (_, index) => `00000000-0000-4000-8000-0000000001${String(index).padStart(2, "0")}`)
+  mini.state.records.push(...ids.map((id) => decision(id)))
+  mini.nudge("attention")
+  await settle()
+  expect(notices.open().map((item) => [item.tag, item.title])).toEqual([
+    ...ids.slice(0, 3).map((id) => [`mini|opencode|att:${id}`, "Pick a reviewer"]),
+    ["mini|summary", "7 more items need you"],
+  ])
+  mini.nudge("attention")
+  await settle()
+  expect(notices.shown.length).toBe(4)
+  mini.state.records.length = 0
+  mini.nudge("attention")
+  await settle()
+  expect(notices.open()).toEqual([])
+})
+
+test("records past a view's limit are not taken as resolved", async () => {
+  const mini = dashboard()
+  const notices = watch([await host("mini", mini.origin)])
+  await settle()
+  mini.state.records.push(decision("00000000-0000-4000-8000-000000000020"))
+  mini.nudge("attention")
+  await settle()
+  expect(notices.open().map((item) => item.tag)).toEqual(["mini|opencode|att:00000000-0000-4000-8000-000000000020"])
+  // 200 older open decisions push the posted one past the 200-record page.
+  mini.state.records.unshift(...Array.from({ length: 200 }, (_, index) => decision(`10000000-0000-4000-8000-${String(index).padStart(12, "0")}`)))
+  mini.nudge("attention")
+  await settle()
+  expect(notices.open().map((item) => item.tag)).toContain("mini|opencode|att:00000000-0000-4000-8000-000000000020")
 })
