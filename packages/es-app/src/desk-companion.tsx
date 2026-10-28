@@ -123,7 +123,7 @@ export const DeskCompanion = () => {
   const docked = () => chat.open() && !floating()
   createEffect(() => setCompanionDocked(docked()))
   onCleanup(() => setCompanionDocked(false))
-  // Background tasks appear only against a Core that records the question without answering it.
+  // Follow-ups to a running task need a Core that records them without answering them in the chat.
   const [supported] = createResource(() => target()?.directory, deskTasksSupported)
   const close = () => {
     const focused = !!section?.contains(document.activeElement)
@@ -136,7 +136,7 @@ export const DeskCompanion = () => {
     style={{ "--companion-width": floating() ? undefined : `${companionWidth()}px` }}>
     <div class="desk-companion-in desk-chat">
       <Show when={chat.desk.error()}><div class="home-warning" role="alert">{chat.desk.error()}</div></Show>
-      <Show when={supported() ? target() : undefined}>{(current) => <DeskTasks tasks={chat.tasks} view={chat.view} session={current().session} directory={current().directory} />}</Show>
+      <Show when={target()}>{(current) => <DeskTasks tasks={chat.tasks} session={current().session} directory={current().directory} followUps={supported() === true} />}</Show>
       <Show when={target()} keyed fallback={<DeskStart desk={chat.desk} directory={chat.directory()} />}>
         {(current) => <SessionView sessionID={current.session} directory={current.directory} embedded context={chat.context} onSent={chat.desk.sent}
           headerStart={<button class="header-icon desk-chat-hide" aria-label="Close Front desk chat" title="Close Front desk chat" onClick={close}>
@@ -147,21 +147,12 @@ export const DeskCompanion = () => {
   </>
 }
 
-// Background tasks started from the chat: "Ask in background" takes what is typed in the composer, shows a
-// receipt at once and leaves the chat free; each finished result is added to the asking conversation once.
-const DeskTasks = (props: { tasks: ReturnType<typeof createTasks>; view: () => string; session: string; directory: string }) => {
+// Background tasks that already exist (started by an earlier build, another client or the dashboard). The chat
+// has one Send; nothing here starts a task. Rows show each task's state, its thread, a confirm for a start whose
+// answer was lost, and an explicit follow-up for a running task. Results reach the asking conversation once.
+const DeskTasks = (props: { tasks: ReturnType<typeof createTasks>; session: string; directory: string; followUps: boolean }) => {
   const composer = () => getComposer(props.session, props.directory)
   const [notice, setNotice] = createSignal("")
-  const ask = async (again?: string) => {
-    const asked = Date.now()
-    const text = again ?? composer().state.task.text
-    if (!text.trim()) return setNotice("Type a question in the chat box first.")
-    const started = await props.tasks.start(text, props.view())
-    if ("error" in started) return setNotice(started.error ?? "")
-    if (again === undefined) composer().setText("")
-    setNotice("")
-    requestAnimationFrame(() => props.tasks.rendered(started.id!, asked, started.packetBytes!))
-  }
   // Task track only (sending, registered, working, outcome); the question itself is a chat message with its own state.
   const label = (job: TaskJob) => job.state.state === "ready"
     ? props.tasks.outcome(job.id) ? "outcome · result added to the chat" : "finished · adding the result to the chat"
@@ -173,17 +164,15 @@ const DeskTasks = (props: { tasks: ReturnType<typeof createTasks>; view: () => s
     composer().setText("")
     setNotice("")
   }
-  return <div class="desk-tasks" aria-label="Background tasks">
-    <button type="button" class="desk-button" title="Run what you typed as a background check; keep chatting meanwhile" onClick={() => void ask()}>Ask in background</button>
+  return <Show when={props.tasks.jobs().length}><div class="desk-tasks" aria-label="Background tasks">
     <Show when={props.tasks.jobs().some(job => job.state.state === "unconfirmed")}><button type="button" class="desk-button" onClick={() => void props.tasks.confirm()}>Confirm task start</button></Show>
     <Show when={notice() || props.tasks.error()}><span class="home-muted" role="status">{notice() || props.tasks.error()}</span></Show>
     <ul><For each={props.tasks.jobs().slice(0, 5)}>{job => <li class="desk-task home-source" data-state={job.state.state}>
       <span>Background · <bdi dir="auto">{job.meta.question.slice(0, 80)}</bdi> · {ago(job.meta.asked)} · {label(job)}<Show when={job.meta.initiatingSession !== props.session}> · asked in an earlier conversation</Show></span>
       <Show when={!job.id.startsWith("local:") && job.state.state !== "starting" && job.state.state !== "unconfirmed"}> <A href={sessionHref(job.id, job.directory)}>Task thread</A></Show>
-      {/* Adds what is typed to this running task; it reaches the task at its next safe step. */}
-      <Show when={job.state.state === "running" || job.state.state === "delegated"}> <button type="button" class="desk-link-button" title="Send what you typed to this task as a follow-up" onClick={() => void follow(job)}>Add to this task</button></Show>
-      {/* A stopped or failed task is never rerun on its own; asking again starts a new task. */}
-      <Show when={job.state.state === "failed" || job.state.state === "unknown"}> <button type="button" class="desk-link-button" onClick={() => void ask(job.meta.question)}>Ask again</button></Show>
+      {/* Adds what is typed to this running task; it reaches the task at its next safe step. Needs a Core that records
+        * the follow-up in the chat without answering it there. */}
+      <Show when={props.followUps && (job.state.state === "running" || job.state.state === "delegated")}> <button type="button" class="desk-link-button" title="Send what you typed to this task as a follow-up" onClick={() => void follow(job)}>Add to this task</button></Show>
     </li>}</For></ul>
-  </div>
+  </div></Show>
 }
