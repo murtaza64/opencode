@@ -13,6 +13,7 @@ import type { Event, SessionFailure } from "@opencode-ai/sdk/v2"
 import { oc } from "./api"
 import { clearBackend, reportBackend } from "./backend-status"
 import { unresolvedSend } from "./composer"
+import { background } from "./startup"
 
 export type RetryResult = Awaited<ReturnType<typeof oc.retrySession>> | { outcome: "blocked"; detail: string }
 export type RetryState =
@@ -83,7 +84,8 @@ export const createSessionFailures = (deps: {
 } = {}) => {
   const gap = deps.gap ?? 30_000
   const blocked = deps.blocked ?? ((failure: SessionFailure) => unresolvedSend(failure.sessionID, failure.directory))
-  const list = deps.list ?? oc.failedSessions
+  // A full scan of every session is background work: it waits for the open target (startup.ts).
+  const list = deps.list ?? (() => background(oc.failedSessions))
   const send = deps.send ?? oc.retrySession
   const [items, setItems] = createSignal<SessionFailure[]>([])
   const [supported, setSupported] = createSignal<boolean>()

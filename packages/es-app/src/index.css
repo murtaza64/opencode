@@ -1103,6 +1103,12 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .mail-activity[data-direction=unknown] .mail-activity-summary { color: var(--subtext0); }
 .mail-activity-party { display: flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; }
 .mail-activity-party .mail-party { min-width: 3ch; overflow: hidden; text-overflow: ellipsis; }
+.mail-activity-wake { display: inline-flex; flex: none; margin-inline-end: -2px; }
+.mail-activity-wake[data-wake=caused] { color: var(--accent, var(--lavender)); }
+.mail-activity-wake[data-wake=unknown] { color: var(--overlay1); }
+.mail-activity-summary[data-wake=caused] .mail-activity-party { font-weight: 600; }
+.mail-activity-summary[data-wake=none] .mail-activity-party, .mail-activity-summary[data-wake=none] .mail-activity-purpose,
+.mail-activity-summary[data-wake=unknown] .mail-activity-party, .mail-activity-summary[data-wake=unknown] .mail-activity-purpose { color: var(--overlay1); }
 .mail-activity-sep { flex: none; color: var(--overlay1); }
 .mail-activity-purpose { flex: none; }
 .mail-activity-status { flex: none; color: var(--peach); }
@@ -1295,6 +1301,13 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 }
 .restart-marker::before { content: "↻ "; color: var(--overlay0); }
 .restart-marker[data-state="uncertain"] { color: var(--yellow); }
+/* Wake markers (CHAT-PARTS §4): a thin agent-side row above the input that woke the session; never restyles the mail it covers. */
+.wake-marker { display: flex; align-items: baseline; gap: 8px; color: var(--overlay1); font-size: 11px; font-family: var(--font-mono); margin: 0 0 6px; }
+.wake-marker::before { content: "○"; color: var(--overlay0); }
+.wake-marker[data-state="woke"]::before { content: "ϟ"; color: var(--accent, var(--lavender)); }
+.wake-marker[data-state="joined"]::before { content: "·"; }
+.wake-marker-covers { padding: 0; border: 0; background: none; color: var(--overlay1); font: inherit; text-decoration: underline; cursor: pointer; }
+.wake-marker-covers:hover, .wake-marker-covers:focus-visible { color: var(--text); }
 /* Linked message anchor: a brief tint and an inline-start bar that fade out. */
 .transcript-inner [data-find-message] { scroll-margin-top: 8px; transition: background-color 0.6s cubic-bezier(.2,0,0,1); }
 .transcript-inner [data-anchored] { position: relative; background-color: color-mix(in srgb, var(--yellow) 10%, transparent); }
@@ -1579,14 +1592,35 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .session-chip[data-unknown] .session-chip-pill { color: var(--subtext0); background: var(--surface0); border-color: var(--surface1); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; }
 .session-chip[data-unknown] .session-chip-dot { background: var(--surface1); }
 .session-chip[data-unknown] .session-chip-title { font-weight: 400; }
-.session-picker { position: absolute; inset-inline: 0; bottom: 100%; z-index: 55; max-height: min(320px, 40vh); overflow-y: auto; background: var(--crust); border: 1px solid var(--surface1); box-shadow: 0 4px 18px rgba(0,0,0,0.5); font-size: 12px; }
-.session-picker-head { padding: 5px 10px; color: var(--subtext0); border-bottom: 1px solid var(--surface0); }
-.session-picker-row { padding: 5px 10px; cursor: pointer; }
-.session-picker-row[aria-selected="true"], .session-picker-row:hover { background: var(--surface0); }
-.session-picker-meta, .session-picker-empty { color: var(--subtext0); font-size: 11px; }
-.session-picker-empty { padding: 8px 10px; }
-.session-picker-live { display: inline-block; width: 6px; height: 6px; margin-inline-end: 5px; border-radius: 50%; background: var(--green); }
-.prompt-box:has(.session-picker), .float-editor > .direct-composer:has(.session-picker) { overflow: visible; }
+.prompt-box:has(.context-picker), .float-editor > .direct-composer:has(.context-picker) { overflow: visible; }
+.context-picker { position: absolute; inset-inline-start: 0; bottom: 100%; z-index: 55; inline-size: min(560px, 100%); max-block-size: min(340px, 45vh);
+  display: grid; grid-template-columns: minmax(0, 1fr) 210px; grid-template-rows: minmax(0, 1fr) auto; background: var(--crust);
+  border: 1px solid var(--surface1); border-radius: 2px; box-shadow: 0 12px 30px -10px rgba(0,0,0,0.7); font-size: 12px; overflow: hidden; }
+.context-picker-list { overflow-y: auto; padding-block: 4px; border-inline-end: 1px solid var(--surface0); }
+.context-picker-group { padding: 6px 10px 2px; color: var(--overlay1); font-size: 11px; }
+.context-picker-row { display: flex; align-items: center; gap: 8px; padding: 5px 10px; cursor: pointer; min-inline-size: 0; }
+.context-picker-row[aria-selected="true"] { background: color-mix(in srgb, var(--accent, var(--lavender)) 18%, transparent); }
+.context-picker-dot { flex: none; inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--overlay1); }
+.context-picker-row[data-kind=session] .context-picker-dot { border-radius: 1px; }
+.context-picker-row[data-kind=decision] .context-picker-dot { border-radius: 1px; transform: rotate(45deg); background: var(--peach); }
+.context-picker-row[data-kind=surface] .context-picker-dot { border-radius: 1px; background: none; box-shadow: inset 0 0 0 1.5px var(--overlay1); }
+.context-picker-dot[data-busy] { background: var(--accent, var(--lavender)); }
+.context-picker-label { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.context-picker-meta { margin-inline-start: auto; flex: none; color: var(--overlay1); font-size: 11px; }
+.context-picker-empty { padding: 8px 10px; color: var(--subtext0); }
+.context-picker-preview { padding: 10px; color: var(--subtext0); overflow-y: auto; overflow-wrap: anywhere; display: flex; flex-direction: column; gap: 4px; }
+.context-picker-preview-title { color: var(--text); font-weight: 600; }
+.context-picker-preview .context-picker-activity { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; overflow: hidden; white-space: pre-line; }
+.context-picker-options { margin: 0; padding-inline-start: 18px; }
+.context-picker-bound { margin-block-start: 6px; color: var(--overlay1); }
+.context-picker-hint { grid-column: 1 / -1; padding: 6px 10px; border-block-start: 1px solid var(--surface0); color: var(--overlay1); font-size: 11px; }
+.context-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-block-end: 6px; }
+.context-chip { display: inline-flex; align-items: center; gap: 6px; max-inline-size: 100%; padding: 2px 4px 2px 8px; border-radius: 2px; background: var(--surface0); font-size: 12px; }
+.context-chip-kind, .context-chip-host, .context-chip-rev { flex: none; color: var(--overlay1); font-size: 11px; }
+.context-chip-label { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.context-chip-remove { flex: none; padding: 0 4px; border: 0; background: none; color: var(--overlay1); cursor: pointer; }
+.context-chip-remove:hover, .context-chip-remove:focus-visible { color: var(--text); }
+.context-chips-note { color: var(--peach); font-size: 11px; }
 .vim-caret {
   position: absolute;
   background: var(--lavender);

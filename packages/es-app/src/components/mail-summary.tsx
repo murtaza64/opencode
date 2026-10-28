@@ -1,4 +1,5 @@
 import { Show, type JSX } from "solid-js"
+import type { MailWakeState } from "../api"
 import type { MailDirection } from "../mail-timeline"
 import { Glyph } from "./icons"
 import { MailParty } from "./mail-party"
@@ -42,16 +43,24 @@ export const MailRoute = (props: { from: string; fromEvidence?: string | null; t
   </span>
 
 /** One-line mail chip: glyph, the other party, purpose, and a status only when the person may need to act.
- * Incoming sits on the person's side, outgoing on the agent's; timestamps and delivery detail live in the expansion. */
+ * Incoming sits on the person's side, outgoing on the agent's; timestamps and delivery detail live in the expansion.
+ * Wake is a wordless cue: only a caused wake draws attention; its words live in the tooltip and accessible label. */
 export const MailSummary = (props: {
   direction: MailDirection; party: JSX.Element; partyText: string; purpose: string; status?: string; sentAt?: number
+  wake?: { state: MailWakeState; label: string }
 }) => {
   const preposition = () => props.direction === "out" ? " to" : props.direction === "in" ? " from" : ""
-  return <summary class="mail-activity-summary" title={relativeTime(props.sentAt)}
-    aria-label={`Mail${preposition()} ${props.partyText}: ${props.purpose}${props.status ? `, ${props.status}` : ""}`}>
+  return <summary class="mail-activity-summary" data-wake={props.wake?.state}
+    title={[relativeTime(props.sentAt), props.wake?.label].filter(Boolean).join(" · ") || undefined}
+    aria-label={`Mail${preposition()} ${props.partyText}: ${props.purpose}${props.status ? `, ${props.status}` : ""}${props.wake ? `, ${props.wake.label}` : ""}`}>
     <span class="mail-activity-kind" data-direction={props.direction} aria-hidden="true">
       <Glyph name={props.direction === "out" ? "paper-airplane" : "inbox"} />
     </span>
+    <Show when={props.wake?.state === "caused" || props.wake?.state === "unknown" ? props.wake.state : undefined}>{(state) =>
+      <span class="mail-activity-wake" data-wake={state()} aria-hidden="true">
+        <Glyph name={state() === "caused" ? "zap-fill" : "dot"} size={12} />
+      </span>}
+    </Show>
     <span class="mail-activity-party">{props.party}</span>
     <span class="mail-activity-sep" aria-hidden="true">·</span>
     <span class="mail-activity-purpose" dir="auto">{props.purpose}</span>

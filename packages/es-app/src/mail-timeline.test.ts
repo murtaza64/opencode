@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { Message } from "@opencode-ai/sdk/v2"
 import type { MailMessage, MailTimeline } from "./api"
-import { canonicalMail, mailActionableStatus, mailActivityLabel, mailDirection, mailCauses, mailForSession, mailLocation, mailRows, mailSourceID, mailWake } from "./mail-timeline"
+import { canonicalMail, mailActionableStatus, mailActivityLabel, mailChipWake, mailDirection, mailCauses, mailForSession, mailLocation, mailRows, mailSourceID, mailWake } from "./mail-timeline"
 
 test("selects the matching editspace and lane from the session directory", () => {
   const roots = [
@@ -271,4 +271,14 @@ test("collapsed mail status shows only actionable states", () => {
   expect(mailActionableStatus({ deliveries: [], kind: "question", direction: "out" })).toBe("Waiting for reply")
   expect(mailActionableStatus({ deliveries: [], kind: "question", direction: "out", replied: true })).toBeUndefined()
   expect(mailActionableStatus({ deliveries: [], kind: "question", direction: "in" })).toBeUndefined()
+})
+
+test("chip wake cue comes only from typed evidence on the relevant deliveries", () => {
+  expect(mailChipWake([delivery({ session: "ses_a", wake: "caused" }), delivery({ session: "ses_b", wake: "none" })], "in", "ses_a")).toBe("caused")
+  expect(mailChipWake([delivery({ wake: "joined" }), delivery({ wake: "joined" })], "out")).toBe("joined")
+  // Scheduling without typed evidence is not a wake; mixed recipients and unknown direction draw no cue.
+  expect(mailChipWake([delivery({ session: "ses_a", wake_observations: [{ outcome: "scheduled", observedAt: 1 }] })], "in", "ses_a")).toBeUndefined()
+  expect(mailChipWake([delivery({ wake: "caused" }), delivery({ wake: "none" })], "out")).toBeUndefined()
+  expect(mailChipWake([delivery({ wake: "caused" })], "unknown")).toBeUndefined()
+  expect(mailChipWake([delivery({ session: "ses_b", wake: "caused" })], "in", "ses_a")).toBeUndefined()
 })

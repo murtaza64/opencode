@@ -2,6 +2,7 @@ import { batch, createEffect, createMemo, createSignal, onCleanup, untrack } fro
 import type { Event, GlobalSession, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2"
 import { oc, type AttentionNotification } from "./api"
 import { createServerEvents } from "./event-source"
+import { background } from "./startup"
 import { createSessionTodos } from "./session-todos"
 
 type Snapshot = {
@@ -181,9 +182,9 @@ export const createSessionActivity = (
     const events: Event[] = []
     const promise = (async () => {
       const [status, permissions, questions] = await Promise.allSettled([
-        oc.status(directory),
-        oc.permissions(directory),
-        oc.questions(directory),
+        background(() => oc.status(directory)),
+        background(() => oc.permissions(directory)),
+        background(() => oc.questions(directory)),
       ])
       if (disposed) return
       batch(() => {

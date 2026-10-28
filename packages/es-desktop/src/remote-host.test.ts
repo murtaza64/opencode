@@ -246,6 +246,9 @@ test("the local listener reads another host's session list with no credential an
   const decisions = await get("/hosts/mini/es/api/attention?view=open&limit=200", { headers: { cookie: "es_attention_operator=local-operator; es_attention_operator__mini=mini-operator" } })
   expect(await decisions.json()).toMatchObject({ host: "mini", path: "/es/api/attention" })
   expect(mini.seen.at(-1)).toEqual({ path: "/es/api/attention", cookie: null, authorization: null, origin: null })
+  // The Today total reads each host's daily usage rollup the same way.
+  expect(await (await get("/hosts/mini/oc/experimental/usage/daily?days=1")).json()).toMatchObject({ host: "mini", path: "/experimental/usage/daily" })
+  expect(mini.seen.at(-1)).toEqual({ path: "/experimental/usage/daily", cookie: null, authorization: null, origin: null })
   expect(await (await get("/oc/experimental/session")).json()).toMatchObject({ host: "local" })
 })
 
@@ -259,6 +262,9 @@ test("host-qualified routes expose list reads only: writes, other routes and unk
   expect((await get("/hosts/mini/es/api/attention/session")).status).toBe(403)
   expect((await get("/hosts/mini/es/api/attention/session", { method: "POST", headers: { "content-type": "application/json", "x-attention-csrf": "1" }, body: "{}" })).status).toBe(403)
   expect((await get("/hosts/mini/es/api/attention", { method: "POST", body: "{}" })).status).toBe(403)
+  expect((await get("/hosts/mini/oc/experimental/usage/daily", { method: "POST", body: "{}" })).status).toBe(403)
+  expect((await get("/hosts/mini/oc/experimental/usage")).status).toBe(403)
+  expect((await get("/hosts/mini/oc/experimental/usage/daily/raw")).status).toBe(403)
   expect((await get("/hosts/mini/es/api/attention/00000000-0000-4000-8000-000000000000")).status).toBe(403)
   expect((await get("/hosts/mini/es/api/attention/00000000-0000-4000-8000-000000000000/commands", { method: "POST", body: "{}" })).status).toBe(403)
   expect((await get("/hosts/other/oc/experimental/session")).status).toBe(404)

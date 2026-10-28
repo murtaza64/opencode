@@ -4,6 +4,7 @@ import type { Agent, GlobalSession, Message, Part, PermissionRequest, QuestionRe
 import { httpError } from "./api-error"
 import type { PendingHandoff } from "./handoffs"
 import type { SquadronMeta } from "./mail-origin"
+import type { WakeEvent } from "./wake-marker"
 
 export type MessageWithParts = { info: Message; parts: Part[] }
 /** Generated text attached to a human's own message; marked synthetic and with its producer. */
@@ -471,7 +472,13 @@ export type MailDelivery = {
   presented_at: string | number | null
   handled_at: string | number | null
   wake_observations?: readonly { outcome: "scheduled" | "coalesced"; observedAt: number }[]
+  /** Typed wake evidence from es-dashboard (absent on older dashboards). */
+  wake?: MailWakeState
+  wake_observed_at?: number | null
+  presented_ms?: number | null
+  handled_ms?: number | null
 }
+export type MailWakeState = "caused" | "joined" | "none" | "unknown"
 export type MailTimeline = { editspace: string; lane: string; messages: MailMessage[] }
 export type Handoff = { lane: string; predecessor: string; successor: string; reason?: string; kickoff?: "skipped"; context?: string }
 export type LaneProvenance = {
@@ -620,6 +627,8 @@ export const es = {
   mail: (name: string, recipient: { lane: string } | { session: string }, signal?: AbortSignal): Promise<MailTimeline> =>
     fetch(`/es/api/mail?es=${encodeURIComponent(name)}&${"lane" in recipient
       ? `lane=${encodeURIComponent(recipient.lane)}` : `session=${encodeURIComponent(recipient.session)}`}`, { signal }).then(statusJson<MailTimeline>),
+  wakeEvents: (name: string, session: string, signal?: AbortSignal): Promise<{ events: WakeEvent[] }> =>
+    fetch(`/es/api/wake-events?es=${encodeURIComponent(name)}&session=${encodeURIComponent(session)}`, { signal }).then(statusJson<{ events: WakeEvent[] }>),
   sessionInsights: (sessionID: string, directory: string, signal?: AbortSignal): Promise<SessionInsights> =>
     fetch(`/es/api/session-insights?session_id=${encodeURIComponent(sessionID)}&${q(directory)}`, { signal })
       .then(statusJson<SessionInsights>),

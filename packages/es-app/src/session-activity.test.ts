@@ -409,8 +409,9 @@ test("reconnect repairs missed requests and statuses without clearing disconnect
   snapshots[grandchildDirectory].status = { ses_grandchild: { type: "retry" } }
   const calls = fetchSpy.mock.calls.length
   ActivityEvents.current.onopen?.()
-  expect(fetchSpy.mock.calls.length).toBe(calls + 12)
+  // Directory reads go through the background limiter, so they start over a few ticks, not synchronously.
   await load(activity)
+  expect(fetchSpy.mock.calls.length).toBe(calls + 12)
   expect(refreshes).toHaveLength(1)
   expect(activity.pending("ses_parent")).toEqual([
     { kind: "question", request: question("que_missed"), directory: grandchildDirectory },

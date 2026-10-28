@@ -311,6 +311,30 @@ describe("session messages endpoint", () => {
   )
 
   it.instance(
+    "full history spanning several streamed chunks is complete, ordered and equal to the paged history",
+    withoutWatcher(
+      Effect.gen(function* () {
+        const session = yield* sessionScoped
+        const ids = yield* fill(session.id, 123)
+
+        const full = yield* request(`/session/${session.id}/message?summaryPatches=false`).pipe(Effect.flatMap(json<SessionV1.WithParts[]>))
+        expect(full.map((item) => item.info.id)).toEqual(ids)
+        expect(full.map((item) => item.parts[0]?.type === "text" && item.parts[0].text)).toEqual(ids.map((_, i) => `m${i}`))
+
+        const pages: SessionV1.WithParts[][] = []
+        let before: string | undefined
+        do {
+          const response = yield* request(`/session/${session.id}/message?limit=40${before ? `&before=${encodeURIComponent(before)}` : ""}`)
+          pages.unshift(yield* json<SessionV1.WithParts[]>(response))
+          before = response.headers["x-next-cursor"]
+        } while (before)
+        expect(pages.flat()).toEqual(full)
+      }),
+    ),
+    { git: true },
+  )
+
+  it.instance(
     "rejects invalid cursors and missing sessions",
     withoutWatcher(
       Effect.gen(function* () {

@@ -23,6 +23,7 @@ import { pinSessionID } from "./session-pins"
 import { createCloudAgents } from "./cloud-agents"
 import { createSessionFailures } from "./session-failures"
 import { coalesced } from "./coalesced"
+import { background } from "./startup"
 import { touchTodayCost } from "./today-cost"
 import { clearBackend, describeFailure, reportBackend } from "./backend-status"
 import { readHost, type WorkHost } from "./host"
@@ -191,7 +192,7 @@ export function DashboardProvider(props: ParentProps) {
     setSessionsError("")
     const before = revision
     try {
-      const sessions = await oc.allSessions(false)
+      const sessions = await background(() => oc.allSessions(false))
       const updates = [...changed].filter(([, item]) => item.revision > before)
       for (const [id, item] of changed) if (item.revision <= before) changed.delete(id)
       clearBackend("Sessions")
@@ -444,7 +445,7 @@ export function DashboardProvider(props: ParentProps) {
     () => ({ names: (editspaces()?.editspaces.map((item) => item.name) ?? []).join("\n"), selected: currentEditspaceName(), tick: otherTick() }),
     async ({ names, selected }) => Promise.all(names.split("\n").filter((name) => name && name !== selected).map(async (name) => {
       try {
-        const [lineage, dashboard] = await Promise.all([es.handoffs(name), es.state(name)])
+        const [lineage, dashboard] = await Promise.all([background(() => es.handoffs(name)), background(() => es.state(name))])
         if (dashboard.editspace !== name) return { edges: [], owners: [], pending: [] }
         const scope = (lane: string) => JSON.stringify([name, lane])
         return {

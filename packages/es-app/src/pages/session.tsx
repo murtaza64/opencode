@@ -12,11 +12,13 @@ import { errorText } from "../live-session"
 import { useLiveSession } from "../live-session-cache"
 import FakeCaret from "../components/fake-caret"
 import { SessionChips } from "../components/session-chips"
-import { SessionPicker } from "../components/session-picker"
-import { insertMention, mentionQuery, rankSessions, sessionLane, tokenBefore } from "../session-mention"
+import { ContextChips, ContextPicker } from "../components/context-picker"
+import { contextGroups, contextKey, contextPart, insertContextLabel, MAX_CONTEXT, type AgentCandidate, type ContextRef } from "../context-mention"
+import { useDeskQueue } from "../desk-queue"
+import { mentionQuery, sessionLane, tokenBefore } from "../session-mention"
 import { RelativeLines } from "../components/relative-lines"
 import SessionInfo from "../components/session-info"
-import { sessionHref, useDashboard, type SessionRow } from "../state"
+import { linkUrl, sessionHref, useDashboard } from "../state"
 import { rightOpen, startDrag } from "../ui"
 import { createVim } from "../vim"
 import { contextUsage, latestCompletedTurn, tokenCount } from "../context-usage"
@@ -53,8 +55,10 @@ import { blockTime } from "../recorded-time"
 import { completedTurns, groupableTurns, messageSegments, planToolRuns, samePlan, sameSegments } from "../transcript-groups"
 import { isUserPrompt, promptPosition, promptTarget } from "../transcript-nav"
 import { restartMarkers } from "../restart-marker"
+import { wakeMarker, type WakeEvent } from "../wake-marker"
 import { anchorNote, anchorRange, parseAnchor, type MessageAnchor } from "../message-anchor"
 import { perfEvent, perfReady, perfSpan } from "../perf-telemetry"
+import { targetReady } from "../startup"
 
 // The provider catalog per directory, shared by session views for a few minutes so switching
 // sessions does not refetch it each time.
@@ -267,6 +271,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     }
     if (connected()) {
       perfReady("target", { sessionID, openMs: Math.round(opened.elapsed()) })
+      targetReady()
       opened.end("ok", { transcriptMs })
     }
   })
@@ -731,6 +736,16 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   }
 
   // "forked from …" breadcrumb target (child sessions carry parentID)
+  // Passive-review wake records (frozen covered mail); refreshed with mail. Without them markers still
+  // render from the transcript, only without a mail count.
+  const [wakeEvents] = createResource(
+    () => { const scope = location(); return scope ? { name: scope.name, revision: mailRevision() } : undefined },
+    (scope) => es.wakeEvents(scope.name, sessionID).then((result) => new Map(result.events.map((event): [string, WakeEvent] => [event.id, event])), () => new Map<string, WakeEvent>()),
+  )
+  const scrollToMail = (id: string) => {
+    mountAll()
+    requestAnimationFrame(() => document.querySelector(`[data-mail-id="${CSS.escape(id)}"], #${CSS.escape(`mail-${id}`)}`)?.scrollIntoView({ block: "center" }))
+  }
   const [parent] = createResource(
     () => (session() as any)?.parentID as string | undefined,
     (pid) => oc.session(pid, directory).catch(() => null),
@@ -918,10 +933,16 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     stick = true
     queueMicrotask(pin)
     const chosen = action ?? (composer.state.busy ? composer.state.keyboardTarget : "steer")
-    // Context accompanies only a plain send to an idle session, never a steer or queued input.
-    const context = chosen === "steer" && !composer.state.busy ? props.context?.() ?? [] : []
+    // The composer owns which actions carry context to Core; chips follow it rather than guessing.
+    const plain = composer.contextAttaches(chosen)
+    const attached = plain ? contextParts() : []
+    const context = plain ? [...props.context?.() ?? [], ...attached] : []
     await composer.submitVisible(chosen, s, nextModel(), messages().at(-1)?.id, context)
-    if (context.length) props.onSent?.(context, composer.state.normalSubmission?.status === "accepted")
+    const accepted = composer.state.normalSubmission?.status === "accepted"
+    if (context.length) props.onSent?.(context, accepted)
+    if (attached.length && accepted) setContextRefs([])
+    // Steer and queue carry text only; the chips stay for the next plain send rather than vanish silently.
+    if (!plain && contextRefs().length) setContextNote("Not attached: this send carries text only. Chips go with your next message to an idle agent.")
   }
 
 
@@ -1427,12 +1448,53 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     })
   }
 
+  // @ Add context: chips belong to this session's draft and survive reloads until a send carries them.
+  const contextStore = `es-app:context-refs:${sessionID}`
+  const [contextRefs, setContextRefsSignal] = createSignal<ContextRef[]>((() => {
+    try { return JSON.parse(localStorage.getItem(contextStore) ?? "[]") as ContextRef[] } catch { return [] }
+  })())
+  const [contextNote, setContextNote] = createSignal("")
+  const setContextRefs = (refs: ContextRef[]) => {
+    setContextRefsSignal(refs)
+    setContextNote("")
+    if (refs.length) localStorage.setItem(contextStore, JSON.stringify(refs))
+    else localStorage.removeItem(contextStore)
+  }
+  const contextHost = window.location.host
+  // Agents are this editspace's lanes; without a known editspace name there is no stable agent ID to offer.
+  const contextAgents = createMemo(() => {
+    const name: string | undefined = state()?.editspace ?? editspace()
+    if (!name) return []
+    return (state()?.threads ?? []).flatMap((thread: { lanes?: { lane: string; owner?: string; status?: string; activity?: string }[] }) =>
+      (thread.lanes ?? []).map((lane): AgentCandidate => {
+        const owner = lane.owner ? sessionRows().find((row) => row.id === lane.owner) : undefined
+        return { editspace: name, lane: lane.lane, owner: lane.owner, status: lane.status, activity: lane.activity, title: owner?.title, live: owner?.live }
+      }))
+  })
+  // Decisions and surfaces come from the shell's shared desk reads, so the picker adds no requests.
+  const deskQueue = useDeskQueue()
+  const contextHref = (ref: ContextRef) => {
+    if (ref.kind === "session") return sessionHref(ref.id, ref.directory)
+    // Same keys the desk opens with `/?item=` and `/?surface=`.
+    if (ref.kind === "decision") return `/?item=${encodeURIComponent(`attention:${ref.editspace}:${ref.id}`)}`
+    if (ref.kind === "surface") return `/?surface=${encodeURIComponent(ref.id)}`
+    const owner = sessionRows().find((row) => row.id === ref.owner)
+    return owner ? sessionHref(owner.id, owner.directory) : "/"
+  }
+  // Absolute so the receiving agent can re-fetch from the attaching host.
+  const contextParts = () => contextRefs().map((ref) => contextPart(ref, linkUrl(new URL(contextHref(ref), window.location.origin).href), Date.now()))
+
   const Editor = (props: { expanded?: boolean }) => {
     const [query, setQuery] = createSignal<ReturnType<typeof mentionQuery>>()
     const [selected, setSelected] = createSignal(0)
     let composing = false
     const target = () => props.expanded ? floatEl : promptEl
-    const rows = () => query() ? rankSessions(sessionRows().filter((row) => !archivedIds().has(row.id)), query()!.query, sessionID) : []
+    const groups = createMemo(() => query() ? contextGroups({
+      query: query()!.query, host: contextHost, agents: contextAgents(), currentID: sessionID, added: contextRefs(),
+      sessions: sessionRows().filter((row) => !archivedIds().has(row.id)), laneOf: (id) => sessionLane(id, lineage(), lineageOwners()),
+      decisions: deskQueue.attention.snapshot()?.value.records ?? [], surfaces: deskQueue.surfaces.list(),
+    }) : [])
+    const rows = () => groups().flatMap((group) => group.items)
     const update = (el: HTMLTextAreaElement, isComposing = false) => {
       saveSelection(el)
       if (composing || isComposing || vim.mode() === "normal" || document.activeElement !== el || el.selectionStart !== el.selectionEnd) return setQuery(undefined)
@@ -1448,16 +1510,27 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       vim.refresh(el)
       setQuery(undefined)
     }
-    const insert = (row: SessionRow) => {
+    const insert = (ref: ContextRef) => {
       const el = target()
       const active = query()
       if (!el || !active) return
-      const next = insertMention(el.value, active.start, el.selectionStart, row.id, { title: row.title, lane: sessionLane(row.id, lineage(), lineageOwners()) })
+      if (!contextRefs().some((item) => contextKey(item) === contextKey(ref))) {
+        if (contextRefs().length >= MAX_CONTEXT) return setContextNote(`At most ${MAX_CONTEXT} context items per message. Remove one to add another.`)
+        setContextRefs([...contextRefs(), ref])
+      }
+      const next = insertContextLabel(el.value, active.start, el.selectionStart, ref.label)
       apply(el, next.text, next.caret)
     }
     const keyDown = (event: KeyboardEvent) => {
       const el = event.currentTarget as HTMLTextAreaElement
       if (event.isComposing || composing || vim.mode() === "normal" || dialog.active) return
+      if (!event.metaKey && !event.altKey && !event.ctrlKey && event.key === "Backspace" && !el.value && contextRefs().length) {
+        // Backspace on an empty editor removes the last chip.
+        event.preventDefault()
+        event.stopPropagation()
+        setContextRefs(contextRefs().slice(0, -1))
+        return
+      }
       if (!event.metaKey && !event.altKey && !event.ctrlKey && event.key === "Backspace" && el.selectionStart === el.selectionEnd) {
         const token = tokenBefore(el.value, el.selectionStart)
         if (token) {
@@ -1471,12 +1544,19 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       const count = rows().length
       const down = !event.metaKey && !event.altKey && (event.key === "ArrowDown" && !event.ctrlKey || event.ctrlKey && event.key.toLowerCase() === "n")
       const up = !event.metaKey && !event.altKey && (event.key === "ArrowUp" && !event.ctrlKey || event.ctrlKey && event.key.toLowerCase() === "p")
-      const choose = (event.key === "Enter" || event.key === "Tab") && !event.ctrlKey && !event.metaKey && !event.altKey
-      if (!down && !up && !choose && event.key !== "Escape") return
+      const choose = event.key === "Enter" && !event.ctrlKey && !event.metaKey && !event.altKey
+      const jump = event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey
+      if (!down && !up && !choose && !jump && event.key !== "Escape") return
       if (event.key === "Escape") setQuery(undefined)
       if (down && count) setSelected((selected() + 1) % count)
       if (up && count) setSelected((selected() + count - 1) % count)
       if (choose && count) insert(rows()[selected()] ?? rows()[0]!)
+      if (jump && count) {
+        // Tab moves to the first row of the next group (Shift+Tab: previous), wrapping.
+        const starts = groups().reduce<number[]>((list, group, index) => [...list, index ? list[index - 1]! + groups()[index - 1]!.items.length : 0], [])
+        const at = starts.findLastIndex((start) => start <= selected())
+        setSelected(starts[(at + (event.shiftKey ? starts.length - 1 : 1)) % starts.length]!)
+      }
       event.preventDefault()
       event.stopPropagation()
     }
@@ -1499,7 +1579,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         onFocus={focusInsert} onClick={(e) => { focusInsert(); update(e.currentTarget) }}
         onBlur={(e) => { saveSelection(e.currentTarget); setQuery(undefined) }} />
       <SessionChips target={target()} text={draft()} selection={activeDraft().selection} />
-      <Show when={query() && vim.mode() !== "normal" && !composing}><SessionPicker rows={rows()} selected={selected()} select={setSelected} insert={insert} /></Show>
+      <Show when={query() && vim.mode() !== "normal" && !composing}><ContextPicker groups={groups()} selected={selected()} select={setSelected} add={insert} /></Show>
       <Show when={props.expanded}><RelativeLines target={floatEl!} value={draft()} /></Show>
       <FakeCaret target={target()} caret={caret()} mode={vim.mode()} />
     </div>
@@ -1511,7 +1591,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   )}</For></div></Show>
   const ComposerPanel = (props: { expanded?: boolean }) => (
     <DirectComposer composer={composer} connected={connected() && !nudgePhase() && !aborting()} submit={send} restoreDraft={restoreDraft}
-      editor={<Editor expanded={props.expanded} />} attachments={<Attachments />}
+      editor={<Editor expanded={props.expanded} />} attachments={<><ContextChips refs={contextRefs()} note={contextNote()}
+        remove={(ref) => setContextRefs(contextRefs().filter((item) => contextKey(item) !== contextKey(ref)))} /><Attachments /></>}
       dictation={<DictationButton composer={composer} sessionID={sessionID} directory={directory}
         editor={() => floating() ? floatEl : promptEl} normalMode={() => vim.mode() === "normal"}
         checkpoint={(el) => activeVim().checkpoint(el)} refresh={(el) => vim.refresh(el)} />}
@@ -1819,6 +1900,14 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                   }</Show>
                   <Show when={m.role === "user"} fallback={<TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} renderTools={renderTools}
                     segments={segments()} renderRun={renderRun} />}>
+                    <Show when={wakeMarker(m, messages(), wakeEvents() ?? new Map())}>{(marker) =>
+                      <div class="wake-marker" data-state={marker().state} role="note" title={marker().title}>
+                        <span>{marker().label}</span>
+                        <Show when={marker().covers.length}>
+                          <button type="button" class="wake-marker-covers" onClick={() => scrollToMail(marker().covers[0]!)}
+                            aria-label={`Show the ${marker().covers.length} mail this review covered`}>show mail</button>
+                        </Show>
+                      </div>}</Show>
                     <div class="msg-wrap" id={promptIDs().has(m.id) ? `prompt-${m.id}` : undefined} data-user-prompt={promptIDs().has(m.id) ? m.id : undefined}>
                       <TranscriptMessage message={m} parts={live.data.part[m.id] ?? []}
                         renderTools={renderTools}

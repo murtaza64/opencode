@@ -4,6 +4,7 @@
  * No polling. */
 import { createSignal } from "solid-js"
 import { oc, type UsageDaily } from "./api"
+import { background } from "./startup"
 
 const MIN_GAP_MS = 60_000
 
@@ -17,7 +18,7 @@ let timer: ReturnType<typeof setTimeout> | undefined
 const read = () => (inflight ??= (async () => {
   lastRead = Date.now()
   try {
-    const value = await oc.usageDaily(1, AbortSignal.timeout(15_000))
+    const value = await background(() => oc.usageDaily(1, AbortSignal.timeout(15_000)))
     setUsage(value)
     setState(value ? "ready" : "unavailable")
   } catch {
