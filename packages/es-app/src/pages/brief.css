@@ -1,34 +1,36 @@
-/* Type scale inside a brief: 13px for content, 11px for labels and meta; the card's 16px question is the third.
+/* Design system v1 (ux-feel, appearance.css): colours only through --ds-* roles, each falling back to its base until
+ * the token block lands; type roles title/body 13px, mono values 12px, meta 11px.
+ * Type scale inside a brief: 13px for content, 11px for labels and meta; the card's 16px question is the third.
  * Brief styles: every rule for a prepared brief's parts (attention-brief.tsx, brief-kit.tsx). Moved from desk.css,
  * which keeps the queue, chat and page layout; brief rules change here only. */
-.desk-brief { margin-block-start: 22px; padding: 14px 16px; border-inline-start: 2px solid var(--blue); background: var(--mantle); }
+.desk-brief { margin-block-start: 22px; padding: 14px 16px; border-inline-start: 2px solid var(--ds-accent, var(--accent)); background: var(--ds-page, var(--mantle)); }
 .desk-brief-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .desk-brief h2 { margin: 0; }
 .desk-brief h3 { font-size: 11px; margin-block: 12px 4px; }
 .desk-brief ul, .desk-brief ol { margin: 0; padding-inline-start: 18px; line-height: 1.6; }
 .desk-flow { display: flex; flex-wrap: wrap; gap: 6px 22px; list-style: none; padding: 0 !important; margin-block: 10px !important; }
-.desk-flow li { position: relative; padding: 4px 9px; border: 1px solid var(--surface1); background: var(--base); font-size: 13px; }
-.desk-flow li + li::before { content: "→"; position: absolute; inset-inline-start: -17px; color: var(--subtext0); }
+.desk-flow li { position: relative; padding: 4px 9px; border: 1px solid var(--ds-line, var(--surface1)); background: var(--ds-surface, var(--base)); font-size: 13px; }
+.desk-flow li + li::before { content: "→"; position: absolute; inset-inline-start: -17px; color: var(--ds-muted, var(--subtext0)); }
 .desk-flow li + li:dir(rtl)::before { content: "←"; }
-.desk-ref { display: inline-block; margin-inline-start: 4px; padding: 0 4px; font-size: 11px; border: 1px solid var(--surface1); color: var(--subtext0); text-decoration: none; }
+.desk-ref { display: inline-block; margin-inline-start: 4px; padding: 0 4px; font-size: 11px; border: 1px solid var(--ds-line, var(--surface1)); color: var(--ds-muted, var(--subtext0)); text-decoration: none; }
 .home-decision .desk-brief { margin-block: 10px; padding: 10px 14px; }
-.desk-brief h3, .attention-home .desk-brief h3 { font-size: 11px; font-weight: 400; color: var(--subtext0); margin-block: 10px 2px; }
+.desk-brief h3, .attention-home .desk-brief h3 { font-size: 11px; font-weight: 400; color: var(--ds-muted, var(--subtext0)); margin-block: 10px 2px; }
 .desk-visual { margin: 8px 0; }
-.desk-visual iframe { inline-size: 100%; block-size: 280px; border: 1px solid var(--surface1); background: var(--mantle); }
+.desk-visual iframe { inline-size: 100%; block-size: 280px; border: 1px solid var(--ds-line, var(--surface1)); background: var(--ds-page, var(--mantle)); }
 /* Card type scale: title (from the card), 13px body, 11px muted meta. */
-.desk-brief-chip { display: inline-block; font-size: 11px; color: var(--blue); border: 1px solid var(--surface1); padding: 0 6px; margin-block-end: 4px; }
+.desk-brief-chip { display: inline-block; font-size: 11px; color: var(--ds-accent, var(--accent)); border: 1px solid var(--ds-line, var(--surface1)); padding: 0 6px; margin-block-end: 4px; }
 .desk-brief .desk-button { border-color: transparent; padding-inline: 4px; text-decoration: underline; }
 @media (max-width: 600px) {
   .desk-flow { flex-direction: column; gap: 6px; }
   .desk-flow li + li::before { content: "↓"; inset-inline-start: 4px; inset-block-start: -15px; }
   .desk-visual iframe { block-size: 220px; }
 }
-.desk-brief-ask { color: var(--text); margin-block: 0 6px !important; }
+.desk-brief-ask { color: var(--ds-text, var(--text)); margin-block: 0 6px !important; }
 .home-decision .desk-brief { margin-block: 12px 4px; padding-block: 2px; padding-inline: 12px 0; background: none; }
 .attention-home details.desk-brief-detail { font-size: 13px; }
 .desk-brief-detail > summary { font-size: 11px; }
 .desk-brief-detail ul, .desk-brief-detail ol { margin: 6px 0; padding-inline-start: 18px; line-height: 1.6; }
-.desk-brief-detail h3 { font-size: 11px !important; font-weight: 400 !important; color: var(--subtext0); margin-block: 8px 2px !important; }
+.desk-brief-detail h3 { font-size: 11px !important; font-weight: 400 !important; color: var(--ds-muted, var(--subtext0)); margin-block: 8px 2px !important; }
 .desk-visual iframe { block-size: 220px; resize: vertical; overflow: auto; }
 /* Until a brief is ready, its slot is a status line or one button, not an empty panel. */
 .desk-brief:not(:has(.desk-brief-body)) { padding: 0; background: none; border: 0; margin-block-start: 10px; }
@@ -38,63 +40,63 @@
 .desk-brief-sources { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 11px; margin: 0 !important; }
 .desk-brief-after .desk-flow { margin-block: 0 !important; }
 .desk-scope { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; font-size: 13px; }
-.desk-scope > div { padding: 4px 10px; border-inline-start: 2px solid var(--surface1); }
+.desk-scope > div { padding: 4px 10px; border-inline-start: 2px solid var(--ds-line, var(--surface1)); }
 .desk-scope ul { list-style: none; padding: 0 !important; margin: 2px 0 0 !important; line-height: 1.5; }
 .desk-impact { list-style: none; padding: 0 !important; margin: 0 !important; font-size: 13px; line-height: 1.5; }
 .desk-brief:focus { outline: none; }
-.desk-brief:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
+.desk-brief:focus-visible { outline: 2px solid var(--ds-accent, var(--accent)); outline-offset: 2px; }
 .desk-brief-context { font-size: 13px !important; line-height: 1.5; margin-block: 4px 8px !important; }
-.desk-visual iframe { inline-size: 100%; border: 0; background: #181825; display: block; resize: none; }
+.desk-visual iframe { inline-size: 100%; border: 0; background: transparent; display: block; resize: none; }
 /* What the decision acts on: one row per thing, links as compact chips; wraps on a phone. */
 .desk-brief .desk-subjects { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
-.desk-subjects li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding-block: 3px; border-block-end: 1px solid var(--surface0); }
+.desk-subjects li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding-block: 3px; border-block-end: 1px solid var(--ds-raised, var(--surface0)); }
 .desk-subject-name { font-weight: 600; }
-.desk-subject-detail { color: var(--subtext0); }
+.desk-subject-detail { color: var(--ds-muted, var(--subtext0)); }
 .desk-subject-links { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-inline-start: auto; }
-.desk-subject-links a { font-size: 11px; color: var(--blue); }
+.desk-subject-links a { font-size: 11px; color: var(--ds-accent, var(--accent)); }
 /* Options side by side under their own labels; the recommended column carries the request's own marker. */
 .desk-compare { border-collapse: collapse; font-size: 13px; margin: 8px 0; inline-size: 100%; }
-.desk-compare th, .desk-compare td { text-align: start; vertical-align: top; padding: 4px 8px; border-block-end: 1px solid var(--surface0); }
+.desk-compare th, .desk-compare td { text-align: start; vertical-align: top; padding: 4px 8px; border-block-end: 1px solid var(--ds-raised, var(--surface0)); }
 .desk-compare thead th { font-weight: 600; }
-.desk-compare-recommended { display: block; font-size: 11px; font-weight: 400; color: var(--green); }
+.desk-compare-recommended { display: block; font-size: 11px; font-weight: 400; color: var(--ds-ok, var(--green)); }
 .desk-visual[data-kind="svg"] iframe { border: 0; background: transparent; resize: none; }
 /* Approval scope on a sequence: covered steps solid, later ones dashed and muted. */
-.desk-flow li[data-later] { border-style: dashed; color: var(--subtext0); }
-.desk-flow-later { display: block; font-size: 11px; color: var(--subtext0); }
-.desk-flow li[data-stop] { border-block-end: 2px solid var(--text); }
-.desk-flow-stop { display: block; font-size: 11px; color: var(--text); }
+.desk-flow li[data-later] { border-style: dashed; color: var(--ds-muted, var(--subtext0)); }
+.desk-flow-later { display: block; font-size: 11px; color: var(--ds-muted, var(--subtext0)); }
+.desk-flow li[data-stop] { border-block-end: 2px solid var(--ds-text, var(--text)); }
+.desk-flow-stop { display: block; font-size: 11px; color: var(--ds-text, var(--text)); }
 /* What changes and what stays. */
 .desk-change { border-collapse: collapse; font-size: 13px; margin-block: 4px 8px; inline-size: 100%; max-inline-size: 560px; }
-.desk-change thead th { font-size: 11px; font-weight: 400; color: var(--subtext0); }
-.desk-change tbody th { font-weight: 400; color: var(--subtext0); white-space: nowrap; }
-.desk-change tr:not([data-same]) td:last-child { color: var(--text); font-weight: 600; }
-.desk-change-same { color: var(--subtext0); font-size: 11px; }
+.desk-change thead th { font-size: 11px; font-weight: 400; color: var(--ds-muted, var(--subtext0)); }
+.desk-change tbody th { font-weight: 400; color: var(--ds-muted, var(--subtext0)); white-space: nowrap; }
+.desk-change tr:not([data-same]) td:last-child { color: var(--ds-text, var(--text)); font-weight: 600; }
+.desk-change-same { color: var(--ds-muted, var(--subtext0)); font-size: 11px; }
 .desk-brief-regenerate { margin: 2px 0 0; font-size: 11px; }
-.desk-brief .desk-link-button { padding: 0; min-block-size: 0; border: 0; background: none; color: var(--subtext0); text-decoration: underline; font: inherit; cursor: pointer; }
+.desk-brief .desk-link-button { padding: 0; min-block-size: 0; border: 0; background: none; color: var(--ds-muted, var(--subtext0)); text-decoration: underline; font: inherit; cursor: pointer; }
 /* Commands to run: exact text in a scrollable block, where to run it above, Copy beside. */
 /* The track may shrink below a command's one-line width, so a long command scrolls in its block instead of widening the column. */
 .desk-brief .desk-commands { list-style: none; margin: 8px 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .desk-command-label { display: block; font-size: 13px; margin-block-end: 2px; }
 /* Copy sits beside the command, not over it: the block scrolls, so a padding gap would scroll away with the text. */
 .desk-command { display: flex; align-items: flex-start; gap: 6px; }
-.desk-command pre { flex: 1; min-inline-size: 0; margin: 0; padding: 8px 10px; overflow-x: auto; background: var(--mantle); border: 1px solid var(--surface0); font-size: 13px; line-height: 1.5; white-space: pre; text-align: left; }
-.desk-command-copy { flex: none; margin-block-start: 4px; padding: 2px 8px; border: 1px solid var(--surface1); background: var(--base); color: var(--subtext0); font-size: 11px; cursor: pointer; }
+.desk-command pre { flex: 1; min-inline-size: 0; margin: 0; padding: 8px 10px; overflow-x: auto; background: var(--ds-page, var(--mantle)); border: 1px solid var(--ds-raised, var(--surface0)); font-size: 13px; line-height: 1.5; white-space: pre; text-align: left; }
+.desk-command-copy { flex: none; margin-block-start: 4px; padding: 2px 8px; border: 1px solid var(--ds-line, var(--surface1)); background: var(--ds-surface, var(--base)); color: var(--ds-muted, var(--subtext0)); font-size: 11px; cursor: pointer; }
 /* Numbered source items remain separate even when the brief also has subjects or an option shape. */
 .desk-brief-items { margin-block: 10px; container-type: inline-size; min-inline-size: 0; }
 .desk-brief-ledger { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .desk-brief-item-head, .desk-brief-item { display: grid; grid-template-columns: minmax(58px, .55fr) minmax(0, 2fr) repeat(3, minmax(0, 1fr)); gap: 8px; align-items: start; }
-.desk-brief-item-head { color: var(--subtext0); font-size: 11px; padding-block: 3px; border-block-end: 1px solid var(--surface1); }
+.desk-brief-item-head { color: var(--ds-muted, var(--subtext0)); font-size: 11px; padding-block: 3px; border-block-end: 1px solid var(--ds-line, var(--surface1)); }
 .desk-brief .desk-brief-item-list { list-style: none; padding: 0; margin: 0; }
-.desk-brief-item { padding-block: 5px; border-block-end: 1px solid var(--surface0); line-height: 1.4; }
+.desk-brief-item { padding-block: 5px; border-block-end: 1px solid var(--ds-raised, var(--surface0)); line-height: 1.4; }
 .desk-brief-item-id { white-space: nowrap; }
-.desk-brief-item-number { color: var(--subtext0); }
+.desk-brief-item-number { color: var(--ds-muted, var(--subtext0)); }
 /* Without a recorded answer there is no Approved column. */
 /* Lowest specificity, so the narrow layouts below still stack the row. */
 :where(.desk-brief-items:not([data-answered])) :is(.desk-brief-item-head, .desk-brief-item) { grid-template-columns: minmax(58px, .55fr) minmax(0, 2fr) repeat(2, minmax(0, 1fr)); }
 /* Labels never break inside a word; only long values wrap. */
 .desk-brief-item-label, .desk-brief-item-head span { overflow-wrap: normal; white-space: nowrap; }
 .desk-brief-item-cell { min-inline-size: 0; overflow-wrap: anywhere; }
-.desk-brief-item-label { display: none; color: var(--subtext0); font-size: 11px; }
+.desk-brief-item-label { display: none; color: var(--ds-muted, var(--subtext0)); font-size: 11px; }
 @container (max-width: 680px) {
   .desk-brief-item-head { display: none; }
   .desk-brief-item { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 3px 10px; }
@@ -109,44 +111,54 @@
 }
 .desk-visual-window { max-block-size: 45vh; overflow-y: auto; }
 .desk-visual-window[data-expanded] { max-block-size: none; overflow: visible; }
-.desk-visual-expand { padding: 2px 0; border: 0; background: none; color: var(--subtext0); text-decoration: underline; font: inherit; font-size: 11px; cursor: pointer; }
+.desk-visual-expand { padding: 2px 0; border: 0; background: none; color: var(--ds-muted, var(--subtext0)); text-decoration: underline; font: inherit; font-size: 11px; cursor: pointer; }
 /* A value the request does not state: visibly missing, never styled as a value. */
-.brief-missing { color: var(--yellow); }
+.brief-missing { color: var(--ds-warn, var(--yellow)); }
 /* Muted lines inside a brief use the meta size, not the page's 12px muted size. */
 .desk-brief .home-muted, .desk-brief .home-warning, .desk-brief .home-source { font-size: 11px; }
-.brief-failure { margin: 0; font-size: 13px; color: var(--subtext1); }
-.brief-failure-detail { color: var(--subtext0); font-size: 11px; }
-.brief-why > summary { font-size: 11px; color: var(--subtext0); cursor: pointer; }
+.brief-failure { margin: 0; font-size: 13px; color: var(--ds-muted, var(--subtext0)); }
+.brief-failure-detail { color: var(--ds-muted, var(--subtext0)); font-size: 11px; }
+.brief-why > summary { font-size: 11px; color: var(--ds-muted, var(--subtext0)); cursor: pointer; }
 
 /* Composition (ux-feel vocabulary): grouping comes from type, spacing and one start edge, not boxes. Accent marks
  * the next action, green the agent's recommendation; 13px content, 12px mono values, 11px muted meta. */
 .desk-brief-body { animation: brief-in var(--motion-arrive, 160ms) var(--ease-standard, cubic-bezier(.2, 0, 0, 1)); }
 @keyframes brief-in { from { opacity: 0; transform: translateY(2px); } }
 @media (prefers-reduced-motion: reduce) { .desk-brief-body { animation: none; } }
-.desk-brief-context { color: var(--subtext1); }
+.desk-brief-context { color: var(--ds-muted, var(--subtext0)); }
 /* Steps: an accent number, the action, then its fields and values aligned in two columns. */
 .desk-brief .desk-steps { gap: 14px; padding-inline-start: 22px; list-style: decimal; }
-.desk-steps > li::marker { color: var(--blue); font-weight: 600; font-variant-numeric: tabular-nums; }
+.desk-steps > li::marker { color: var(--ds-accent, var(--accent)); font-weight: 600; font-variant-numeric: tabular-nums; }
 .desk-steps p { margin: 2px 0; }
 .brief-settings { display: grid; grid-template-columns: minmax(72px, max-content) minmax(0, 1fr); gap: 4px 14px; margin: 6px 0; align-items: baseline; }
-.brief-settings dt { color: var(--subtext0); font-size: 11px; }
+.brief-settings dt { color: var(--ds-muted, var(--subtext0)); font-size: 11px; }
 .brief-settings dd { margin: 0; min-inline-size: 0; }
 /* A copyable value is a line of mono text; its fill shows only on hover or focus, like other chips. */
 .desk-command-inline { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; max-inline-size: 100%; }
 .desk-command-inline code { font-size: 12px; padding: 1px 4px; border-radius: var(--radius-control, 2px); overflow-wrap: anywhere; }
-.desk-command-inline:is(:hover, :focus-within) code { background: var(--chip-fill, var(--surface0)); }
+.desk-command-inline:is(:hover, :focus-within) code { background: var(--chip-fill, var(--ds-raised, var(--surface0))); }
 /* Commands keep a scrolling block, without a border; Copy is a quiet text action beside it. */
 .desk-command pre { border: 0; border-radius: var(--radius-control, 2px); font-size: 12px; }
 .desk-brief .desk-command-copy { border: 0; background: none; min-block-size: 0; padding: 2px 4px; text-decoration: underline; text-underline-offset: 2px; }
-.desk-command-copy:hover { color: var(--text); }
+.desk-command-copy:hover { color: var(--ds-text, var(--text)); }
 /* Compare: columns aligned, no rules; the agent's pick is marked in green text. */
 .desk-compare th, .desk-compare td { border: 0; padding: 3px 12px 3px 0; }
-.desk-compare tbody th { color: var(--subtext0); font-weight: 400; font-size: 11px; }
-.desk-compare-recommended { color: var(--green); }
+.desk-compare tbody th { color: var(--ds-muted, var(--subtext0)); font-weight: 400; font-size: 11px; }
+.desk-compare-recommended { color: var(--ds-ok, var(--green)); }
 /* A sequence reads as a line of steps joined by arrows, not a row of boxes. */
 .desk-flow li { border: 0; background: none; padding: 2px 0; }
 .desk-flow li[data-later] { border: 0; }
-.desk-flow li[data-stop] { border: 0; color: var(--text); font-weight: 600; }
+.desk-flow li[data-stop] { border: 0; color: var(--ds-text, var(--text)); font-weight: 600; }
 /* Subjects: one line each, separated by space rather than rules. */
 .desk-subjects li { border: 0; padding-block: 2px; }
 .desk-brief-regenerate { margin: 6px 0 0; }
+
+/* Shared parts (ux-feel .ds-*): until the token block lands these local rules give the same result. */
+.ds-section { margin-block: var(--ds-space-4, 12px) 0; }
+.ds-section-heading { margin: 0 0 var(--ds-space-2, 4px); font-size: 11px; font-weight: 400; color: var(--ds-muted, var(--subtext0)); }
+.ds-status { display: flex; gap: var(--ds-space-2, 4px); align-items: baseline; margin: 0; font-size: 13px; color: var(--ds-text, var(--text)); }
+.ds-status[data-tone=risk] .ds-status-glyph { color: var(--ds-risk, var(--red)); }
+.ds-status[data-tone=warn] .ds-status-glyph { color: var(--ds-warn, var(--yellow)); }
+.ds-status[data-tone=unknown] { color: var(--ds-muted, var(--subtext0)); }
+.ds-status[data-tone=active] .ds-status-glyph { color: var(--ds-accent, var(--accent)); }
+.ds-links { display: flex; flex-wrap: wrap; gap: var(--ds-space-1, 2px) var(--ds-space-4, 12px); margin: 0; font-size: 11px; }

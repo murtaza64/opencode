@@ -52,8 +52,8 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
         <Show when={job().state.state === "starting" || job().state.state === "running"}><p class="home-muted" role="status">Preparing brief…</p></Show>
         {/* A brief that did not finish is one quiet line: the request below stays readable as written. */}
         {/* One failure line in plain words; the error's own name is secondary detail. */}
-        <Show when={job().state.state === "failed"}><p class="brief-failure">{failureText((job().state as { error: string }).error)} <span class="brief-failure-detail">(<bdi dir="ltr">{(job().state as { error: string }).error}</bdi>)</span></p></Show>
-        <Show when={job().state.state === "unknown"}><p class="brief-failure">{(job().state as { reason: string }).reason}</p></Show>
+        <Show when={job().state.state === "failed"}><p class="brief-failure ds-status" data-tone="risk"><span class="ds-status-glyph" aria-hidden="true">✕</span><span>{failureText((job().state as { error: string }).error)} <span class="brief-failure-detail">(<bdi dir="ltr">{(job().state as { error: string }).error}</bdi>)</span></span></p></Show>
+        <Show when={job().state.state === "unknown"}><p class="brief-failure ds-status" data-tone="unknown"><span class="ds-status-glyph" aria-hidden="true">?</span><span>{(job().state as { reason: string }).reason}</span></p></Show>
         {/* Confirm resends the identical request; Core returns the same brief if the first start landed. */}
         <Show when={job().state.state === "unconfirmed"}><p class="home-warning">Brief start not confirmed.</p>
           <button class="desk-button" disabled={props.confirming} onClick={props.confirm}>Confirm start</button></Show>
@@ -136,7 +136,7 @@ const Commands = (props: { commands: BriefResult; item: DeskItem }) => {
   const commands = () => briefCommands(props.commands, props.item, found()?.documents)
   const option = (id: string) => props.item.record?.options.find(entry => entry.id === id)?.label
   return <Show when={commands().length}>
-    <ul class="desk-commands" aria-label="Commands to run"><For each={commands()}>{entry => <li>
+    <ul class="desk-commands ds-section" aria-label="Commands to run"><For each={commands()}>{entry => <li>
       <span class="desk-command-label" dir="auto">{entry.label}<Show when={entry.where}> · <span class="home-muted">{entry.where}</span></Show>
         <Show when={option(entry.option)}>{label => <span class="home-muted"> · for “<bdi dir="auto">{label()}</bdi>”</span>}</Show></span>
       <CopyCode text={entry.command} />
@@ -153,13 +153,13 @@ const Steps = (props: { result: BriefResult; refs: EvidenceRef[]; item: DeskItem
   const option = (id: string) => props.item.record?.options.find(entry => entry.id === id)?.label
   const url = (refs: string[]) => refs.flatMap(id => props.refs.find(ref => ref.id === id)?.url ?? [])[0]
   return <Show when={steps().length}>
-    <ol class="desk-commands desk-steps" aria-label="Steps to do"><For each={steps()}>{step => <li>
+    <ol class="desk-commands desk-steps ds-section" aria-label="Steps to do"><For each={steps()}>{step => <li>
       <span class="desk-command-label" dir="auto">{step.title}
         <Show when={option(step.option)}>{label => <span class="home-muted"> · for “<bdi dir="auto">{label()}</bdi>”</span>}</Show></span>
       <Show when={step.where}>{where => <p dir="auto">Open: <Show when={url(where().refs)} fallback={<bdi dir="auto">{where().label}</bdi>}>{href =>
         <a href={href()} target="_blank" rel="noopener noreferrer">↗ <bdi dir="auto">{where().label}</bdi></a>}</Show></p>}</Show>
       {/* Field and value side by side; a long value wraps inside its column. */}
-      <Show when={step.settings.length}><dl class="brief-settings" aria-label="Settings"><For each={step.settings}>{setting => <>
+      <Show when={step.settings.length}><dl class="brief-settings ds-values" aria-label="Settings"><For each={step.settings}>{setting => <>
         <dt dir="auto">{setting.field}</dt>
         <dd><Show when={setting.value} fallback={<span class="brief-missing">{MISSING}</span>}><CopyCode text={setting.value} inline /></Show></dd>
       </>}</For></dl></Show>
@@ -171,7 +171,7 @@ const Steps = (props: { result: BriefResult; refs: EvidenceRef[]; item: DeskItem
 // The things a decision acts on, one compact row each with its links, readable on a phone; never a picture.
 const Subjects = (props: { subjects: BriefResult["subjects"]; refs: EvidenceRef[] }) =>
   <Show when={props.subjects.length}>
-    <ul class="desk-subjects" aria-label="What this covers"><For each={props.subjects}>{subject => {
+    <ul class="desk-subjects ds-section" aria-label="What this covers"><For each={props.subjects}>{subject => {
       const links = () => [...new Set(subject.refs.flatMap(id => props.refs.find(ref => ref.id === id)?.url ?? []))]
       return <li>
         <bdi dir="auto" class="desk-subject-name">{subject.name}</bdi>
@@ -187,7 +187,7 @@ const Items = (props: { result: BriefResult; item: DeskItem; job: BriefJob }) =>
   const approval = () => briefApproval(rows(), props.item, { id: props.job.id, revision: props.job.meta.revision })
   // Approved exists only once the ledger has an answer for this brief: unanswered rows carry no empty column.
   return <Show when={rows().length}>
-    <section class="desk-brief-items" aria-label="Request items" data-answered={approval().answered ? "" : undefined}>
+    <section class="desk-brief-items ds-section" aria-label="Request items" data-answered={approval().answered ? "" : undefined}>
       <Show when={approval().verbatim}><p class="desk-brief-ledger">Recorded answer: <bdi dir="auto">{approval().verbatim}</bdi></p></Show>
       <div class="desk-brief-item-head" aria-hidden="true"><span>ID</span><span>Question</span><span>Agent recommends</span><span>Alternative(s)</span><Show when={approval().answered}><span>Approved</span></Show></div>
       <ol class="desk-brief-item-list"><For each={rows()}>{(row, index) => <li class="desk-brief-item">
@@ -208,7 +208,7 @@ const ItemCell = (props: { label: string; children: JSX.Element }) =>
 
 const SourceLinks = (props: { sources: BriefSource[]; refs: EvidenceRef[]; item: DeskItem }) => {
   const links = () => props.sources.flatMap(source => { const link = sourceLink(source, props.refs, props.item); return link ? [{ ...link, label: source.label }] : [] })
-  return <Show when={links().length}><p class="desk-brief-sources"><For each={links()}>{link =>
+  return <Show when={links().length}><p class="desk-brief-sources ds-links"><For each={links()}>{link =>
     <A href={link.href}>↗ {link.kind} · <bdi dir="auto">{link.label}</bdi></A>}</For></p></Show>
 }
 
@@ -263,12 +263,14 @@ const FRAME_MARGIN = 8
 // else es-app's own token. Status colours come from the palette only when it reports ok and risk stay apart for
 // colour-blind readers (`--wal-ok-risk-cvd-safe: 1`). Highlights fall back to the accent. Legacy HTML briefs
 // (contract 3) used older names, mapped to the same colours.
-const TOKENS: Record<string, { wal?: string; app: string; status?: boolean }> = {
-  fg: { wal: "--wal-fg", app: "--text" }, muted: { wal: "--wal-muted", app: "--subtext0" }, line: { wal: "--wal-line", app: "--overlay1" },
-  surface: { wal: "--wal-surface", app: "--surface0" }, accent: { wal: "--wal-accent", app: "--blue" },
-  ok: { wal: "--wal-ok", app: "--green", status: true }, warn: { wal: "--wal-warn", app: "--yellow", status: true }, risk: { wal: "--wal-risk", app: "--red", status: true },
-  bg: { wal: "--wal-bg", app: "--base" }, panel: { wal: "--wal-surface", app: "--surface0" }, text: { wal: "--wal-fg", app: "--text" },
-  good: { wal: "--wal-ok", app: "--green", status: true }, bad: { wal: "--wal-risk", app: "--red", status: true },
+// `ds`: the design-system role (appearance.css, "Design system v1") each name reads first, so drawings follow the same
+// theme as the app; `app` is the base it aliases, for builds before that block.
+const TOKENS: Record<string, { wal?: string; ds?: string; app: string; status?: boolean }> = {
+  fg: { wal: "--wal-fg", ds: "--ds-text", app: "--text" }, muted: { wal: "--wal-muted", ds: "--ds-muted", app: "--subtext0" }, line: { wal: "--wal-line", app: "--overlay1" },
+  surface: { wal: "--wal-surface", ds: "--ds-raised", app: "--surface0" }, accent: { wal: "--wal-accent", ds: "--ds-accent", app: "--blue" },
+  ok: { wal: "--wal-ok", ds: "--ds-ok", app: "--green", status: true }, warn: { wal: "--wal-warn", ds: "--ds-warn", app: "--yellow", status: true }, risk: { wal: "--wal-risk", ds: "--ds-risk", app: "--red", status: true },
+  bg: { wal: "--wal-bg", ds: "--ds-surface", app: "--base" }, panel: { wal: "--wal-surface", ds: "--ds-raised", app: "--surface0" }, text: { wal: "--wal-fg", ds: "--ds-text", app: "--text" },
+  good: { wal: "--wal-ok", ds: "--ds-ok", app: "--green", status: true }, bad: { wal: "--wal-risk", ds: "--ds-risk", app: "--red", status: true },
 }
 // es-app's line fallback is overlay1, not surface1: strokes and arrows need 3:1 against the drawing's boxes
 // (surface0), which surface1 does not reach (about 1.1-1.6:1).
@@ -278,7 +280,7 @@ export const frameColours = (root: CSSStyleDeclaration) => {
   const read = (name?: string) => name ? root.getPropertyValue(name).trim() : ""
   const statusSafe = read("--wal-ok-risk-cvd-safe") === "1"
   const colours = Object.fromEntries(Object.entries(TOKENS).map(([name, token]) =>
-    [name, (token.status && !statusSafe ? "" : read(token.wal)) || read(token.app) || "initial"]))
+    [name, (token.status && !statusSafe ? "" : read(token.wal)) || read(token.ds) || read(token.app) || "initial"]))
   for (const name of HIGHLIGHTS) colours[name] = read(`--wal-${name}`) || colours.accent!
   return colours
 }
