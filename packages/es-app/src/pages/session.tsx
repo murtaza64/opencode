@@ -1653,7 +1653,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       {/* Changing model mid-conversation is rare and costly, so the picker opens on request. */}
       <Show when={changingModel()} fallback={<>
         {/* The model name is the picker's button; the small glyph marks it as changeable. */}
-        <button class="direct-change-model composer-model" ref={modelButton}
+        {/* A model name is never a ticket key, even when it looks like one. */}
+        <button class="direct-change-model composer-model" ref={modelButton} data-ticket-refs="off"
           disabled={!!composer.state.modelSelection && composer.state.modelSelection.status !== "unknown"}
           aria-label={`Change model, current ${shownModelName()}`}
           title={`${composer.state.visibleBuffer === "aside" ? "Aside model" : "Session model"} · ${shownModel() ? `${shownModel()!.providerID} · ${shownModel()!.modelID}` : "default"} · Change model`}

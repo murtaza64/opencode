@@ -25,7 +25,8 @@ export function wrapTicketRefs(root: HTMLElement) {
       REF_RE.lastIndex = 0
       if (!REF_RE.test(node.nodeValue ?? "")) return NodeFilter.FILTER_SKIP
       const p = node.parentElement
-      return !p || p.closest(".ticket-ref, .ticket-tip, textarea, select, script, style") ? NodeFilter.FILTER_SKIP : NodeFilter.FILTER_ACCEPT
+      // [data-ticket-refs="off"] marks names that only look like keys (a model named "GPT-6.1 Sol" reads as GPT-6).
+      return !p || p.closest('.ticket-ref, .ticket-tip, textarea, select, script, style, [data-ticket-refs="off"]') ? NodeFilter.FILTER_SKIP : NodeFilter.FILTER_ACCEPT
     },
   })
   const targets: Text[] = []
