@@ -9,7 +9,8 @@ import { cookieName, cookieValid, issueCookie, loopbackHost, pairingCsp, pairing
 import { eventMux } from "../../es-app/event-mux"
 import { eventProtocol, eventPaths } from "../../es-app/event-protocol"
 import { surfaceProxy } from "../../es-app/surface-proxy"
-import { attentionRoute, hostPath, localHost, remoteCookie, remoteSetCookie, remoteTargets, type HostInfo } from "../../es-app/remote-host"
+import { attentionRoute, bridgedTargets, hostPath, localHost, remoteCookie, remoteSetCookie, remoteTargets, type HostInfo } from "../../es-app/remote-host"
+import type { Bridge } from "./bridge"
 import type { Voice } from "./voice"
 import type { Appearance } from "./appearance"
 import type { ReleaseNotesStore } from "./release-notes"
@@ -101,7 +102,8 @@ export const serve = async (options: {
   // paired remote clients.
   releaseNotes?: ReleaseNotesStore
   // A remote execution host (validated tailnet origin) in place of the loopback services.
-  remote?: { id: string; origin: string }
+  // `bridge`: the host is reached through its paired gateway behind Cloudflare Access (bridge.ts).
+  remote?: { id: string; origin: string; bridge?: Bridge }
   // Local performance journal directory (renderer reports + slow proxied requests); off when unset.
   perfDir?: string
   // The hosts this listener reports to the app, read per request once every listener is up.
@@ -124,8 +126,10 @@ export const serve = async (options: {
   // text only reaches that tab's draft, never the remote host.
   if (remote && (options.opencode || options.dashboard || options.opencodeAuth))
     throw new Error("A remote host listener attaches to that host only")
-  const targets = remote
-    ? { oc: remoteTargets(remote.origin).opencode, es: remoteTargets(remote.origin).dashboard }
+  const bridge = remote?.bridge
+  const remoteUpstreams = remote && (bridge ? bridgedTargets(remote.origin) : remoteTargets(remote.origin))
+  const targets = remote && remoteUpstreams
+    ? { oc: remoteUpstreams.opencode, es: remoteUpstreams.dashboard }
     : { oc: serviceURL(options.opencode), es: serviceURL(options.dashboard) }
   const renderer = serviceURL(options.renderer)
   const root = await realpath(options.root)
@@ -295,6 +299,10 @@ export const serve = async (options: {
       if (write) return peerWrite(req, res, upstream, new URL(peer.opencode).origin, finish)
       return peerRead(req, res, upstream, finish)
     }
+    if (bridge && url.pathname === "/__es/bridge/pair") {
+      if (req.method !== "POST" || url.search || !trusted(req.headers.origin)) return finish(403, "Forbidden")
+      return bridgePair(bridge, req, res, finish)
+    }
     const api = /^\/(oc|es)(\/|$)/.exec(url.pathname)
     if (api && !apiAllowed(req.method ?? "", url.pathname)) return finish(403, "API route not exposed")
     // A secure decision field (dotfiles docs/es-secret-intake.md) is answered only on the computer that asked:
@@ -309,6 +317,15 @@ export const serve = async (options: {
     const target = api ? targets[api[1] as keyof typeof targets] : renderer
     if (api && !target) return finish(503, '{"error":"Service not configured"}', "application/json")
     if (!api && !["GET", "HEAD"].includes(req.method ?? "")) return finish(405, "Method not allowed")
+    // A bridged host not yet paired (or without its service token): its API answers 401 and the page
+    // offers pairing; nothing goes upstream without both credentials.
+    if (bridge && !bridge.headers()) {
+      if (api) return finish(401, JSON.stringify({ error: bridge.configured() ? "Pairing required" : "Sign-in needed" }), "application/json")
+      if (req.headers["sec-fetch-dest"] === "document" || url.pathname === "/") {
+        res.setHeader("Content-Security-Policy", pairingCsp)
+        return finish(401, bridgePage(options.hostInfo?.().label ?? "This host", bridge.configured(), ""), "text/html; charset=utf-8")
+      }
+    }
     if (!api && (req.headers["sec-fetch-dest"] === "document" || url.pathname === "/")) {
       const ready = await Promise.all(
         [targets.oc && `${targets.oc}/experimental/capabilities`, targets.es && `${targets.es}/api/editspaces`].map(
@@ -318,7 +335,7 @@ export const serve = async (options: {
                   // A loaded Core can take seconds to answer; a stopped one refuses at once.
                   signal: AbortSignal.timeout(10_000),
                   redirect: "error",
-                  headers: index === 0 && options.opencodeAuth ? { authorization: options.opencodeAuth } : {},
+                  headers: bridge ? { ...bridge.headers(), origin: remote!.origin } : index === 0 && options.opencodeAuth ? { authorization: options.opencodeAuth } : {},
                 })
                   .then(async (response) => {
                     await response.body?.cancel()
@@ -362,11 +379,19 @@ export const serve = async (options: {
               ...(operatorCookie ? { cookie: operatorCookie } : {}),
             } : {}),
             ...(api?.[1] === "oc" && options.opencodeAuth ? { authorization: options.opencodeAuth } : {}),
+            // A bridged gateway checks its own public origin on every request, and needs the Access token
+            // and its pairing cookie (with the operator cookie for attention routes).
+            ...(bridge && api ? (() => {
+              const credentials = bridge.headers()!
+              return { ...credentials, origin: remote!.origin, cookie: [credentials.cookie, operatorCookie].filter(Boolean).join("; ") }
+            })() : {}),
           },
         },
         (response) => {
           if ([301, 302, 303, 307, 308].includes(response.statusCode ?? 0)) {
             response.resume()
+            // Behind Access a redirect is the sign-in page: the token was not accepted. Never followed.
+            if (bridge) return finish(401, '{"error":"Sign-in needed"}', "application/json")
             return finish(502, '{"error":"Upstream redirect blocked"}', "application/json")
           }
           timing?.headers(response.statusCode)
@@ -432,6 +457,11 @@ export const serve = async (options: {
       const target = targets[prefix === "/oc" ? "oc" : "es"]
       if (!target) throw new Error("Event service not configured")
       const url = `${target}${requested.pathname.slice(prefix.length)}${requested.search}`
+      if (bridge) {
+        const credentials = bridge.headers()
+        if (!credentials) throw new Error("Bridged host not paired")
+        return { url, headers: { ...credentials, origin: remote!.origin } as HeadersInit }
+      }
       // A remote dashboard trusts only its own public origin.
       if (remote) return { url, headers: { origin: remote.origin } as HeadersInit }
       return { url, headers: prefix === "/oc" && options.opencodeAuth ? { authorization: options.opencodeAuth } : undefined }
@@ -657,4 +687,38 @@ const appearanceRoute = (
     return
   }
   finish(404, "Not found")
+}
+
+// The local pairing step for a bridged host: the code goes from this page to this listener, and from
+// here only to that host's gateway (never back to the page).
+const bridgePair = async (bridge: Bridge, req: IncomingMessage, res: ServerResponse, finish: (status: number, body: string, type?: string) => void) => {
+  const chunks: Buffer[] = []
+  for await (const chunk of req) {
+    chunks.push(chunk)
+    if (chunks.reduce((sum, item) => sum + item.length, 0) > 1024) return finish(413, "Payload too large")
+  }
+  const code = new URLSearchParams(Buffer.concat(chunks).toString()).get("code") ?? ""
+  const result = await bridge.pair(code)
+  if (result === "paired") {
+    res.writeHead(303, { location: "/" })
+    return res.end()
+  }
+  res.setHeader("Content-Security-Policy", pairingCsp)
+  const message = {
+    "wrong-code": "That code does not match. Check it on the host and try again.",
+    throttled: "Too many attempts. Wait a minute and try again.",
+    "sign-in-needed": "This computer's access to the host was not accepted. Its service token may be missing or revoked.",
+    unreachable: "The host did not answer. Try again when it is online.",
+  }[result]
+  return finish(result === "wrong-code" ? 401 : 503, bridgePage("This host", true, message), "text/html; charset=utf-8")
+}
+
+const bridgePage = (label: string, configured: boolean, error: string) => {
+  const html = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`)
+  return `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta name="color-scheme" content="dark light"><title>Pair ${html(label)}</title>
+<style>body{font:16px/1.5 system-ui;margin:0;padding:10vh 8vw;background:Canvas;color:CanvasText}main{max-inline-size:34rem}input{font:18px ui-monospace,monospace;inline-size:100%;padding:10px;box-sizing:border-box}button{margin-block-start:12px;padding:10px 16px;font:inherit}.error{color:#d9534f}</style>
+<main><h1>Pair ${html(label)}</h1>${configured
+    ? `<p>Enter this host's pairing code (Pair a Phone on the host, or its code file). It is sent only to the host.</p>
+<form method="post" action="/__es/bridge/pair"><input name="code" dir="ltr" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required autofocus>${error ? `<p class="error" role="alert">${html(error)}</p>` : ""}<button type="submit">Pair</button></form>`
+    : `<p class="error" role="alert">Sign-in needed: this computer has no access token for the host yet. Nothing was sent to it.</p>`}</main></html>`
 }

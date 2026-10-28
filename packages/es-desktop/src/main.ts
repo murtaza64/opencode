@@ -1,4 +1,4 @@
-import { app, BaseWindow, BrowserWindow, dialog, Menu, nativeImage, screen, session, shell, systemPreferences } from "electron"
+import { app, BaseWindow, BrowserWindow, dialog, Menu, nativeImage, safeStorage, screen, session, shell, systemPreferences } from "electron"
 import path from "node:path"
 import { readFile, writeFile } from "node:fs/promises"
 import { serve } from "./server"
@@ -12,6 +12,7 @@ import { muxEvents, sseEvents, watchNotifications } from "./notifier"
 import { notificationsSupported, postNotice } from "./desktop-notice"
 import { blurPlan, createAppearance } from "./appearance"
 import { blurOffMain } from "./blur-worker"
+import { createBridge, encryptedCookie, keychainAccess } from "./bridge"
 import { createReleaseNotes } from "./release-notes"
 import { keepSessionCookies } from "./page-cookies"
 import { localStateDir, pairingSources, type PairingSource } from "./pair-phone"
@@ -144,14 +145,29 @@ const start = async () => {
   // Each remote execution host gets its own keyed loopback listener on a stable saved port, so its
   // origin (and with it storage, drafts and receipts) stays separate from local work across launches.
   const started = await Promise.all(
-    configured.filter((host) => host.mode === "proxy").map(async (host) => {
+    configured.filter((host) => host.mode === "proxy" || host.mode === "bridged").map(async (host) => {
       const file = path.join(app.getPath("userData"), `loopback-port-${host.id}`)
+      // A bridged host's credentials stay in this process: its Access token from the Keychain item the
+      // config names, and its gateway pairing cookie encrypted with the OS key store.
+      const bridge = host.mode === "bridged" && host.access
+        ? createBridge({
+            origin: host.origin,
+            store: {
+              access: keychainAccess(host.access.keychain),
+              ...encryptedCookie(path.join(app.getPath("userData"), `bridge-${host.id}.cookie`), {
+                encrypt: (value) => safeStorage.encryptString(value),
+                decrypt: (value) => safeStorage.decryptString(value),
+              }),
+            },
+          })
+        : undefined
+      await bridge?.ready
       const value = Number(await readFile(file, "utf8").catch(() => "0"))
       const listener = await serve({
         port: Number.isInteger(value) && value >= 1024 && value <= 65535 && ![4096, 7777, port].includes(value) ? value : 0,
         root: path.join(app.getAppPath(), "dist/renderer"),
         renderer: app.isPackaged ? undefined : process.env.ES_DESKTOP_RENDERER,
-        remote: { id: host.id, origin: host.origin },
+        remote: { id: host.id, origin: host.origin, ...(bridge ? { bridge } : {}) },
         // Dictation uses this laptop's microphone and Whisper, whichever host a tab shows.
         voice,
         // The look belongs to this laptop, whichever host a tab shows.
@@ -172,7 +188,8 @@ const start = async () => {
   const remotes = started.filter((item) => item !== undefined)
   work.push(
     { id: selfInfo.id, label: selfInfo.label, origin: server.origin, ...(selfInfo.profile ? { profile: selfInfo.profile } : {}), ...(selfInfo.kind ? { kind: selfInfo.kind } : {}), ...(workDefault ? {} : { default: true }) },
-    ...remotes.map((host) => ({ id: host.id, label: host.label, origin: host.server.origin, profile: host.profile, ...(host.kind ? { kind: host.kind } : {}), ...(host.id === workDefault ? { default: true } : {}) })),
+    // Only Work hosts join the Work view; a bridged Personal host keeps its own tab.
+    ...remotes.filter((host) => host.profile === "work" && host.mode === "proxy").map((host) => ({ id: host.id, label: host.label, origin: host.server.origin, profile: host.profile, ...(host.kind ? { kind: host.kind } : {}), ...(host.id === workDefault ? { default: true } : {}) })),
   )
   const pages = configured.filter((host) => host.mode === "page")
   // The Local-origin listener is the Work view: it shows every Work host's rows (this machine and each

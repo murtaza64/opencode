@@ -62,8 +62,13 @@ export const pageOrigin = (value: unknown) => {
 }
 
 /** How a host is reached: "proxy" serves this machine's app against its Core and dashboard through a
- * laptop listener; "page" shows the host's own served page in an unprivileged, isolated view. */
-export type RemoteHost = HostLink & { mode: "proxy" | "page"; default?: boolean; profile: Profile; kind?: HostKind }
+ * laptop listener; "page" shows the host's own served page in an unprivileged, isolated view;
+ * "bridged" serves this machine's app against the host's paired gateway behind Cloudflare Access,
+ * with the Access service token named by `access.keychain` (read from this machine's Keychain). */
+export type RemoteHost = HostLink & { mode: "proxy" | "page" | "bridged"; default?: boolean; profile: Profile; kind?: HostKind; access?: { keychain: string } }
+
+/** Upstreams for a bridged host's listener: the gateway serves Core at /oc and the dashboard at /es. */
+export const bridgedTargets = (origin: string) => ({ opencode: `${origin}/oc`, dashboard: `${origin}/es` })
 
 /** Configured remote hosts: [{ id, label, origin, mode?, default? }] with distinct ids other than "local";
  * at most one proxied host is the default for new work. */
@@ -74,14 +79,16 @@ export const remoteHosts = (value: unknown): RemoteHost[] => {
     const record = item && typeof item === "object" ? (item as Record<string, unknown>) : {}
     if (typeof record.id !== "string" || !ID.test(record.id) || record.id === "local") throw new Error("Invalid remote host id")
     const label = typeof record.label === "string" && record.label.trim() ? record.label.trim().slice(0, 40) : record.id
-    const mode = record.mode === "page" ? "page" : "proxy"
+    const mode = record.mode === "page" ? "page" : record.mode === "bridged" ? "bridged" : "proxy"
+    const access = record.access && typeof record.access === "object" ? (record.access as Record<string, unknown>).keychain : undefined
+    if (mode === "bridged" && (typeof access !== "string" || !/^[A-Za-z0-9._-]{1,64}$/.test(access))) throw new Error("Bridged hosts need access.keychain")
     if (record.profile !== undefined && !PROFILES.includes(record.profile as string)) throw new Error("Invalid remote host profile")
     if (record.kind !== undefined && !KINDS.includes(record.kind as string)) throw new Error("Invalid remote host kind")
-    // Proxied app hosts are Work and page hosts (their own served page, e.g. behind Access) are
-    // Personal, unless configured otherwise.
-    const profile = (record.profile ?? (mode === "page" ? "personal" : "work")) as Profile
+    // Proxied app hosts are Work; page and bridged hosts (behind Access) are Personal, unless configured otherwise.
+    const profile = (record.profile ?? (mode === "proxy" ? "work" : "personal")) as Profile
     return {
-      id: record.id, label, origin: mode === "page" ? pageOrigin(record.origin) : remoteOrigin(record.origin), mode, profile,
+      id: record.id, label, origin: mode === "proxy" ? remoteOrigin(record.origin) : pageOrigin(record.origin), mode, profile,
+      ...(mode === "bridged" ? { access: { keychain: access as string } } : {}),
       ...(record.kind ? { kind: record.kind as HostKind } : {}),
       ...(record.default === true && mode === "proxy" ? { default: true } : {}),
     } as RemoteHost
