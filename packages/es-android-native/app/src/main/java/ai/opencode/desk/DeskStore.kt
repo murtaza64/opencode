@@ -214,9 +214,10 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     val details = mutableStateMapOf<String, AgentDetail>()
     // Inputs this phone sent, by session, from tap to handled (see Outbox).
     val outbox = mutableStateMapOf<String, List<Pending>>()
-    private val kv = object : KeyValue {
+    private val kv = object : KeyValueWithKeys {
         override fun get(key: String) = prefs.getString(key, null)
         override fun put(key: String, value: String?) { prefs.edit().apply { if (value == null) remove(key) else putString(key, value) }.apply() }
+        override fun keys() = prefs.all.keys.toList()
     }
     // Message ids of this phone's own sends, persisted so "you" survives a restart.
     private val sent = SentLedger(kv)
@@ -224,7 +225,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     val blobs = FileBlobStore(app.filesDir)
     private val durable = OutboxStore(kv, blobs)
     private val pinStore = PinStore(kv)
-    var pins by mutableStateOf(pinStore.list(gateway.origin))
+    var pins by mutableStateOf(pinStore.adopt(gateway.origin))
         private set
     // Images picked for the next send, per session, already normalised and stored under a
     // reserved requestID so the send can be retried byte-for-byte.
@@ -317,7 +318,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     suspend fun pair(origin: String, code: String, access: AccessToken?): String? {
         gateway.origin = origin
         desk = pointers.get(origin)
-        pins = pinStore.list(origin)
+        pins = pinStore.adopt(origin)
         outbox.clear(); loadDrafts()
         restoreOutbox()
         if (access != null) gateway.saveAccessToken(access)
@@ -351,7 +352,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         states.clear(); open = emptyList(); agents = emptyList(); surfaces = emptyList(); host = null
         reach.clear(); hostInfos.clear(); remoteStates.clear(); remoteOpen.clear(); remotePins.clear(); apis.clear(); operators.clear()
         desk = pointers.get(origin); deskBusy = false
-        pins = pinStore.list(origin)
+        pins = pinStore.adopt(origin)
         outbox.clear(); loadDrafts()
         restoreOutbox()
         if (gateway.paired) connect() else link = Link.Unpaired
@@ -706,6 +707,8 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         Pins.resolve(list, agents.filter { it.origin == o }, remoteStates[key].orEmpty().mapValues { it.value.sessions }).map { it.copy(origin = o) }
     }
     val pinViews: List<PinView> get() = Pins.resolve(pins, agents, states.mapValues { it.value.sessions })
+    // Every stored pin list on this phone, for Diagnostics: a pin that "vanished" is usually under another origin spelling.
+    val storedPins: Map<String, List<Pin>> get() = pinStore.all()
 
     suspend fun stop(agent: Agent): Result<Boolean> {
         val session = agent.session ?: return Result.failure(IllegalStateException("No session"))

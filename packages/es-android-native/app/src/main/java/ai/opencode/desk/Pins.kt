@@ -27,6 +27,21 @@ class PinStore(private val store: KeyValue) {
     }
 
     fun has(origin: String, pin: Pin) = list(origin).any { it.key == pin.key }
+
+    fun all(): Map<String, List<Pin>> = store.keys().filter { it.startsWith("pins:") }.associate { it.removePrefix("pins:") to list(it.removePrefix("pins:")) }
+
+    // Pins for `origin`, adopting any list stored under another spelling of the SAME host
+    // (http vs https, another port, trailing slash, case) when `origin` has none yet. A pin
+    // made on 0.1.16 against http://host:47130 survives re-pairing as https://host:8443.
+    // Pins of a different host are never adopted.
+    fun adopt(origin: String): List<Pin> {
+        val own = list(origin)
+        if (own.isNotEmpty()) return own
+        val host = Pins.hostOf(origin) ?: return own
+        val donor = all().entries.firstOrNull { (o, pins) -> pins.isNotEmpty() && Pins.hostOf(o) == host && DeskPointers.normalize(o) != DeskPointers.normalize(origin) } ?: return own
+        store.put(key(origin), json.encodeToString(ListSerializer(Pin.serializer()), donor.value))
+        return donor.value
+    }
 }
 
 // What a pin looks like on Home, resolved from data the regular refresh already holds.
@@ -34,6 +49,8 @@ class PinStore(private val store: KeyValue) {
 data class PinView(val pin: Pin, val title: String, val status: String, val activity: String, val agentKey: String?, val updatedAt: Long, val origin: String = "")
 
 object Pins {
+    fun hostOf(origin: String): String? = origin.trim().lowercase().removePrefix("https://").removePrefix("http://").substringBefore('/').substringBefore(':').ifBlank { null }
+
     fun resolve(pins: List<Pin>, agents: List<Agent>, sessions: Map<String, List<DashSession>>): List<PinView> = pins.map { pin ->
         if (pin.lane != null) {
             val agent = agents.firstOrNull { it.editspace == pin.editspace && it.lane == pin.lane }

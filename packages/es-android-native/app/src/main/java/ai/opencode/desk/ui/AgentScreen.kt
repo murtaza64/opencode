@@ -225,6 +225,12 @@ fun DiagnosticsSheet(store: DeskStore, onDismiss: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             if (rows.isEmpty()) Text("No requests yet.", style = MaterialTheme.typography.bodyMedium)
             rows.forEach { t -> Mono(ai.opencode.desk.Diagnostics.line(t), color = if (t.error != null) Ink.Red else Ink.Muted, modifier = Modifier.padding(vertical = 3.dp), lines = 2) }
+            val stored = store.storedPins
+            if (stored.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Label("pins stored on this phone, by origin")
+                stored.forEach { (o, list) -> Mono("$o: ${list.joinToString { it.key }}", color = Ink.Muted, modifier = Modifier.padding(vertical = 3.dp).testTag("diag-pins"), lines = 3) }
+            }
             val sends = store.outbox.values.flatten().filter { it.author == null && !it.done }.sortedByDescending { it.createdAt }
             if (sends.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
