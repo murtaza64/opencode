@@ -58,6 +58,34 @@ const count = <T extends string>(list: Row[], key: string) =>
     return acc
   }, {})
 
+// Startup: rows after each page.start (until the next) belong to that page; the native app
+// runs one renderer window, so this grouping holds there. Journals older than page.ready fall
+// back to the first successful session.open.
+const pages = rows.flatMap((row, index) => {
+  if (row.kind !== "page.start") return []
+  const next = rows.findIndex((other, at) => at > index && other.kind === "page.start")
+  const own = rows.slice(index + 1, next === -1 ? undefined : next)
+  const ready = own.find((other) => other.kind === "page.ready")
+  const open = own.find((other) => other.kind === "session.open" && other.outcome === "ok")
+  const early = own.filter((other) => num(other, "t") <= 30_000)
+  const fetches = early.filter((other) => other.kind === "fetch").sort((a, b) => num(b, "ms") - num(a, "ms"))
+  return [{
+    at: row.at,
+    route: row.route,
+    navType: row.navType,
+    domContentLoadedMs: row.domContentLoadedMs,
+    ready: ready
+      ? { t: ready.t, direct: ready.route === row.route, openMs: ready.openMs, connectedMs: ready.connectedMs, transcriptMs: ready.transcriptMs }
+      : open && { t: open.t, direct: open.route === row.route, openMs: open.ms, transcriptMs: open.transcriptMs, legacy: true },
+    first30s: {
+      longTaskMs: early.filter((other) => other.kind === "longtask").reduce((sum, other) => sum + num(other, "ms"), 0),
+      stallMs: early.filter((other) => other.kind === "stall").reduce((sum, other) => sum + num(other, "ms"), 0),
+      slowFetches: fetches.length,
+      worstFetches: fetches.slice(0, 3).map((other) => ({ path: other.path, ms: other.ms, queueMs: other.queueMs, waitMs: other.waitMs })),
+    },
+  }]
+})
+
 const report = {
   window: { since: new Date(since).toISOString(), rows: rows.length, dir },
   sessionOpen: {
@@ -79,6 +107,7 @@ const report = {
       .slice(0, 5)
       .map((row) => ({ at: row.at, route: row.route, ms: row.ms, styleLayoutMs: row.styleLayoutMs, scripts: row.scripts })),
   },
+  startup: pages.slice(-10),
   streamCloses: count(of("events.closed"), "code"),
   trouble: count(of("session.trouble"), "trouble"),
   inputUnconfirmed: count(of("input.unconfirmed"), "path"),
@@ -102,6 +131,8 @@ else {
   line("event stream closes", report.streamCloses)
   line("shown daemon trouble", report.trouble)
   line("input not confirmed", report.inputUnconfirmed)
+  console.log("startup (last 10 pages; ready.t = ms from navigation, direct = opened straight into the session):")
+  for (const page of report.startup) console.log(`  ${JSON.stringify(page)}`)
   console.log("slowest proxied routes:")
   for (const route of report.slowProxyRoutes) console.log(`  ${route.route}  ${JSON.stringify({ n: route.n, p50: route.p50, p95: route.p95, max: route.max })}`)
 }

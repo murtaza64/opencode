@@ -153,5 +153,23 @@ export const startPerfTelemetry = () => {
     last = performance.now()
     if (document.visibilityState === "hidden") void flush()
   })
-  perfEvent("page.start", { ua: navigator.userAgent.slice(0, 120) })
+  // Navigation stages split bundle load/eval from app work on a cold first open.
+  const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined
+  perfEvent("page.start", {
+    ua: navigator.userAgent.slice(0, 120),
+    navType: nav?.type,
+    responseEndMs: nav ? Math.round(nav.responseEnd) : undefined,
+    domInteractiveMs: nav ? Math.round(nav.domInteractive) : undefined,
+    domContentLoadedMs: nav ? Math.round(nav.domContentLoadedEventEnd) : undefined,
+  })
+}
+
+let ready = false
+
+/** Records once per page the first moment a session is usable: transcript shown and input wired.
+ * `t` counts from navigation, so it measures cold app first-open, not just the session mount. */
+export const perfPageReady = (fields: { sessionID: string; openMs: number; transcriptMs?: number; connectedMs?: number }) => {
+  if (ready) return
+  ready = true
+  perfEvent("page.ready", fields)
 }

@@ -54,7 +54,7 @@ import { completedTurns, groupableTurns, messageSegments, planToolRuns, samePlan
 import { isUserPrompt, promptPosition, promptTarget } from "../transcript-nav"
 import { restartMarkers } from "../restart-marker"
 import { anchorNote, anchorRange, parseAnchor, type MessageAnchor } from "../message-anchor"
-import { perfEvent, perfSpan } from "../perf-telemetry"
+import { perfEvent, perfPageReady, perfSpan } from "../perf-telemetry"
 
 // The provider catalog per directory, shared by session views for a few minutes so switching
 // sessions does not refetch it each time.
@@ -260,9 +260,12 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   // Journal what opening this session costs: transcript shown, then input usable.
   const opened = perfSpan("session.open", { sessionID, cached: live.loaded() })
   let transcriptMs: number | undefined
+  let connectedMs: number | undefined
   createEffect(() => {
     if (live.loaded() && transcriptMs === undefined) transcriptMs = Math.round(opened.elapsed())
+    if (connected() && connectedMs === undefined) connectedMs = Math.round(opened.elapsed())
     if (connected()) opened.end("ok", { transcriptMs })
+    if (connected() && live.loaded()) perfPageReady({ sessionID, openMs: Math.round(opened.elapsed()), transcriptMs, connectedMs })
   })
   onCleanup(() => opened.end("left", { transcriptMs }))
   createEffect(() => {
