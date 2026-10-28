@@ -31,7 +31,7 @@ export type ComposerDraft = {
 }
 export type ComposerCapabilities = {
   sessionAside?: { version: number; cancel: boolean; images?: ImageCapability }
-  sessionInput?: { version: number; delivery: string[]; list: boolean; cancel: boolean; update?: boolean; interrupt?: boolean; images?: ImageCapability }
+  sessionInput?: { version: number; delivery: string[]; list: boolean; cancel: boolean; update?: boolean; interrupt?: boolean; context?: boolean; nudge?: boolean; images?: ImageCapability }
 }
 export type ImageCapability = NonNullable<ExperimentalCapabilities["sessionInput"]["images"]> & {
   compressedMetadata: false
@@ -615,7 +615,8 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       setState("task", "images", task.images as ComposerImage[])
       setState("aside", "images", aside.images as ComposerImage[])
       if (state.superseded) setState("superseded", "draft", "images", supersededImages as ComposerImage[])
-      if (admission && state.admission) setState("admission", "payload", copyPayload(admission.payload as unknown as InputPayload))
+      // Replace the frozen payload whole; merging into it would write to a frozen object.
+      if (admission && state.admission) setState("admission", { payload: copyPayload(admission.payload as unknown as InputPayload) })
       if (admission?.draft && state.admission) setState("admission", "draft", copyDraft(admission.draft as ComposerDraft))
       setState("recoveries", recoveries as ComposerRecovery[])
       if (state.asideRequest && requestImages.length) setState("asideRequest", "images", inputImages(requestImages as unknown as InputImage[]))
@@ -654,7 +655,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       if (!imageEdits.task && taskImages.missing) setMissingImages("task", true)
       if (!imageEdits.aside && asideImages.missing) setMissingImages("aside", true)
       if (admission && state.admission?.payload.requestID === admission.payload.requestID) {
-        setState("admission", "payload", copyPayload({ ...admission.payload, ...(admission.payload.images ? { images: admittedImages.images.map((image) => ({ ...image, type: "file" as const })) as InputImage[] } : {}) } as InputPayload))
+        setState("admission", { payload: copyPayload({ ...admission.payload, ...(admission.payload.images ? { images: admittedImages.images.map((image) => ({ ...image, type: "file" as const })) as InputImage[] } : {}) } as InputPayload) })
         if (admission.draft) setState("admission", "draft", { ...admission.draft, images: draftImages.images as ComposerImage[] })
         if (admittedImages.missing || draftImages.missing) {
           missingAdmission = true
@@ -779,12 +780,31 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       ? ""
       : `This server does not support ${mode} inputs with listing and cancellation.`
   }
+  // A retry resends its admitted context unchanged or not at all; stripping it would change the request.
+  const retryContextReason = (payload: InputPayload) =>
+    payload.context?.length && state.capabilities?.sessionInput?.context !== true
+      ? "This runtime does not accept @context on inputs, and this input carries some. No retry sent; cancel it and send again."
+      : ""
   const imageCapabilityReason = (mode: ComposerMode, images: readonly { mime: string; url: string }[]) => {
     if (!images.length || mode === "send") return ""
     const capability =
       mode === "aside" ? state.capabilities?.sessionAside?.images : state.capabilities?.sessionInput?.images
     if (!capability) return `This server does not support images for ${mode}. The draft is kept.`
     return imageReason(images, capability)
+  }
+  /** Context rides with a plain send, or with /input when Core advertises sessionInput.context. */
+  const contextAttaches = (action: ComposerAction) =>
+    action !== "aside" && ((action === "steer" && !state.busy) || state.capabilities?.sessionInput?.context === true)
+  /** Why selected context cannot go with this action. Context is never dropped or truncated: the action
+   * is blocked until the human removes chips. Limits mirror Core's InputPayload.context schema. */
+  const contextReason = (action: ComposerAction, context: readonly ContextPart[] = []) => {
+    if (!context.length || action === "aside" || (action === "steer" && !state.busy)) return ""
+    const name = action === "queue" ? "queued inputs" : "steers to a busy agent"
+    if (!contextAttaches(action)) return `This runtime does not attach @context to ${name}. Remove the chips, or send when the agent is idle.`
+    if (context.length > 8) return `At most 8 @context items go with one input (${context.length} selected). Remove some chips.`
+    if (context.some((part) => !part.text.length || part.text.length > 4096 || !part.metadata.source.length || part.metadata.source.length > 100 || !part.metadata.key.length || part.metadata.key.length > 500))
+      return "An @context item is empty or too large for an input (text up to 4096 characters). Remove it or send when the agent is idle."
+    return ""
   }
   const blockedReason = (mode: ComposerMode = state.mode, buffer: ComposerBuffer = draftKey()) => {
     if (restoreError) return restoreError
@@ -914,6 +934,8 @@ export const createComposer = (sessionID: string, directory: string, dependencie
           cancel: input.cancel,
           update: input.update === true,
           interrupt: input.interrupt === true,
+          context: input.context === true,
+          nudge: input.nudge === true,
           images: imageCapability(input.images),
         }
       }
@@ -1127,6 +1149,11 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       if (!direct) setState("error", media)
       return
     }
+    const unattached = mode === "queue" || mode === "steer" ? contextReason(mode, context) : ""
+    if (unattached) {
+      setState("error", unattached)
+      return
+    }
     if (mode !== "aside" && (state.modelSelection || state[buffer].model)) {
       if (state.modelSelection) await selectionChain
       if (state.modelSelection && !(await reconcileModel())) return
@@ -1260,6 +1287,8 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         delivery: mode,
         text,
         ...(images ? { images } : {}),
+        // Stored with the frozen payload: an exact retry must resend the identical array (Core 409s otherwise).
+        ...(context?.length ? { context: context.map((part) => ({ text: part.text, source: part.metadata.source, key: part.metadata.key })) } : {}),
       }),
       revision: draft.revision,
       agent: session.agent,
@@ -1296,7 +1325,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     }
     const admission = { ...state.admission, payload: copyPayload(state.admission.payload),
       ...(state.admission.draft ? { draft: copyDraft(state.admission.draft) } : {}) }
-    const reason = capabilityReason(admission.payload.delivery)
+    const reason = capabilityReason(admission.payload.delivery) || retryContextReason(admission.payload)
     if (reason) {
       setState("error", reason)
       return
@@ -1383,7 +1412,8 @@ export const createComposer = (sessionID: string, directory: string, dependencie
         return
       }
       if (entry.admission.fence) throw new Error("Session was superseded; retry is unavailable")
-      const reason = capabilityReason(entry.admission.payload.delivery) || imageCapabilityReason(entry.admission.payload.delivery, entry.admission.payload.images ?? [])
+      const reason = capabilityReason(entry.admission.payload.delivery) || imageCapabilityReason(entry.admission.payload.delivery, entry.admission.payload.images ?? []) ||
+        retryContextReason(entry.admission.payload)
       if (reason) throw new Error(reason)
       if (!entry.model) throw new Error("Original model is unknown. No retry sent; check the original input instead.")
       const session = await json<Session>(await request(url("")))
@@ -1725,16 +1755,15 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     },
     setVisibleSelection: (start: number, end: number) =>
       updateDraft({ selection: [start, end] }, false, state.visibleBuffer),
-    reasonForAction: (action: ComposerAction) =>
-      blockedReason(action === "steer" && !state.busy ? "send" : action, state.visibleBuffer),
+    /** Pass the selected context so an action that cannot carry it is blocked, not sent without it. */
+    reasonForAction: (action: ComposerAction, context?: readonly ContextPart[]) =>
+      blockedReason(action === "steer" && !state.busy ? "send" : action, state.visibleBuffer) || contextReason(action, context),
     outgoingReason: (action: ComposerAction) => outgoingReason(action === "steer" && !state.busy ? "send" : action),
-    /**
-     * Whether context parts reach Core with this action. Only a plain send (Steer while idle) carries
-     * them: a busy steer and a queue go through /input, which takes none yet, so the UI must say
-     * context is not attached.
-     */
-    contextAttaches: (action: ComposerAction) => action === "steer" && !state.busy,
-    // `context` rides only on a plain send, inside the same message as the human's text.
+    /** Whether context parts reach Core with this action: a plain send always; a busy steer or a queue
+     * only when Core advertises sessionInput.context. Aside never carries them. */
+    contextAttaches,
+    contextReason,
+    // `context` rides inside the same message as the human's text (plain send) or the same input (/input).
     submitVisible: (action: ComposerAction, session: Session, nextModel?: ComposerModel | null, latestMessageID?: string, context?: readonly ContextPart[]) =>
       submit(session, nextModel, {
         action,
@@ -1871,6 +1900,7 @@ const copyPayload = (payload: InputPayload): InputPayload =>
   Object.freeze({
     ...payload,
     ...(payload.images ? { images: inputImages(payload.images) } : {}),
+    ...(payload.context ? { context: Object.freeze(payload.context.map((item) => Object.freeze({ text: item.text, source: item.source, key: item.key }))) } : {}),
   })
 const imageMimeTypes = defaultImageCapability.mimeTypes
 const requireImageMime = (mime: string) => {
@@ -1949,6 +1979,11 @@ const isRecovery = (value: unknown): value is SavedRecovery =>
   record(value) && isAdmission(value.admission) && (value.model === null || isModel(value.model)) &&
   (value.reconciled === undefined || typeof value.reconciled === "boolean") &&
   (value.agent === null || typeof value.agent === "string")
+// A saved admission whose context is not exactly Core's shape fails restore (fenced), never repaired.
+const isWireContext = (value: unknown) =>
+  Array.isArray(value) && value.length >= 1 && value.length <= 8 &&
+  value.every((item) => record(item) && Object.keys(item).length === 3 && typeof item.text === "string" &&
+    typeof item.source === "string" && typeof item.key === "string")
 const isSavedImages = (value: unknown): value is SavedImage[] =>
   Array.isArray(value) && value.every((image) =>
     record(image) &&
@@ -2019,6 +2054,7 @@ const isAdmission = (value: unknown): value is Omit<ComposerAdmission, "payload"
   (value.payload.delivery === "queue" || value.payload.delivery === "steer") &&
   typeof value.payload.text === "string" &&
   (value.payload.images === undefined || isSavedImages(value.payload.images)) &&
+  (value.payload.context === undefined || isWireContext(value.payload.context)) &&
   (value.draft === undefined || isDraft(value.draft)) &&
   (/\S/.test(value.payload.text) || (isSavedImages(value.payload.images) && value.payload.images.length > 0)) &&
   (value.payload.agent === undefined || typeof value.payload.agent === "string") &&
