@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test"
-import { contrast, themeVars } from "./appearance"
+import { describe, expect, test } from "bun:test"
+import { contrast, themeVars, walStyle } from "./appearance"
 
 // The viewing laptop's pywal output for hades-2-mel.png (abridged).
 const hades = {
@@ -38,4 +38,30 @@ test("a light palette keeps the default theme", () => {
 
 test("low-contrast foreground falls back to a readable text colour", () => {
   expect(themeVars({ background: "#101010", foreground: "#303030" })!["--text"]).toBe("#e6e9ef")
+})
+
+describe("wal-palette/1 stylesheet", () => {
+  const wal = {
+    revision: "cb3d9b633c08",
+    scheme: "dark",
+    roles: { bg: "#000001", fg: "#c4dee5", ok: "#6dc188", risk: "#b26d81", on_accent: "#000000" },
+    highlights: ["#3b61ad", "#3763c9"],
+    okRiskCvdSafe: true,
+  }
+
+  test("maps roles, highlights and the revision to the --wal-* names brief frames read", () => {
+    expect(walStyle(wal)).toBe(':root{--wal-revision:"cb3d9b633c08";--wal-bg:#000001;--wal-fg:#c4dee5;--wal-ok:#6dc188;--wal-risk:#b26d81;--wal-on-accent:#000000;--wal-hl1:#3b61ad;--wal-hl2:#3763c9;--wal-ok-risk-cvd-safe:1}')
+  })
+
+  test("status colours are marked colour-blind safe only when the palette says so", () => {
+    expect(walStyle({ ...wal, okRiskCvdSafe: false })).not.toContain("cvd-safe")
+  })
+
+  test("anything that could escape CSS text, or no usable role, gives no stylesheet", () => {
+    expect(walStyle({ ...wal, revision: 'x";}body{display:none' })).toBeUndefined()
+    expect(walStyle({ ...wal, roles: { bg: "red;}body{display:none" } })).toBeUndefined()
+    expect(walStyle({ ...wal, roles: { "bg;x": "#000000", fg: "#ffffff" } })).toBe(':root{--wal-revision:"cb3d9b633c08";--wal-fg:#ffffff;--wal-hl1:#3b61ad;--wal-hl2:#3763c9;--wal-ok-risk-cvd-safe:1}')
+    expect(walStyle(undefined)).toBeUndefined()
+    expect(walStyle({ revision: "r", roles: {} })).toBeUndefined()
+  })
 })
