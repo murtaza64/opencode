@@ -79,7 +79,7 @@ describe("UsageRollup", () => {
       yield* events.publish(SessionV1.Event.PartUpdated, { sessionID: sessionID as never, part: step(sessionID, "msg_a", "prt_1", 0.5), time: created })
       yield* events.publish(SessionV1.Event.PartUpdated, { sessionID: sessionID as never, part: step(sessionID, "msg_a", "prt_2", 0.25), time: created })
       expect(yield* hourly()).toMatchObject([
-        { hour: Math.floor(created / HOUR), provider_id: "anthropic", model_id: "opus", cost: 0.75, tokens_input: 200, tokens_cache_read: 2000 },
+        { hour: Math.floor(created / HOUR), session_id: "ses_usage_live", provider_id: "anthropic", model_id: "opus", cost: 0.75, tokens_input: 200, tokens_cache_read: 2000 },
       ])
 
       yield* events.publish(SessionV1.Event.PartUpdated, { sessionID: sessionID as never, part: step(sessionID, "msg_a", "prt_2", 0.5, 300), time: created })
@@ -177,8 +177,8 @@ describe("UsageRollup", () => {
       yield* db
         .insert(UsageHourlyTable)
         .values([
-          { hour, provider_id: "anthropic", model_id: "opus", cost: 3, tokens_input: 1 },
-          { hour: hour - 48, provider_id: "openai", model_id: "gpt", cost: 1, tokens_input: 1 },
+          { hour, session_id: "ses_t", provider_id: "anthropic", model_id: "opus", cost: 3, tokens_input: 1 },
+          { hour: hour - 48, session_id: "ses_t", provider_id: "openai", model_id: "gpt", cost: 1, tokens_input: 1 },
         ])
         .run()
       const utc = yield* UsageRollup.daily(db, { days: 7, offsetMinutes: 0, now })
@@ -218,10 +218,10 @@ describe("UsageRollup", () => {
       yield* db
         .insert(UsageHourlyTable)
         .values([
-          { hour, provider_id: "gateway", model_id: "priced", cost: 2, tokens_input: 10 },
-          { hour, provider_id: "gateway", model_id: "no-card", cost: 0, tokens_input: 500, tokens_output: 50 },
-          { hour, provider_id: "gateway", model_id: "aborted", cost: 0 },
-          { hour, provider_id: "lmstudio", model_id: "qwen", cost: 0, tokens_input: 900 },
+          { hour, session_id: "ses_t", provider_id: "gateway", model_id: "priced", cost: 2, tokens_input: 10 },
+          { hour, session_id: "ses_t", provider_id: "gateway", model_id: "no-card", cost: 0, tokens_input: 500, tokens_output: 50 },
+          { hour, session_id: "ses_t", provider_id: "gateway", model_id: "aborted", cost: 0 },
+          { hour, session_id: "ses_t", provider_id: "lmstudio", model_id: "qwen", cost: 0, tokens_input: 900 },
         ])
         .run()
       const [today] = (yield* UsageRollup.daily(db, {
@@ -292,8 +292,8 @@ describe("UsageRollup", () => {
       yield* db
         .insert(UsageHourlyTable)
         .values([
-          { hour: Date.UTC(2026, 9, 28, 3) / HOUR, provider_id: "p", model_id: "m", cost: 4, tokens_input: 1 },
-          { hour: Date.UTC(2026, 9, 27, 3) / HOUR, provider_id: "p", model_id: "m", cost: 2, tokens_input: 1 },
+          { hour: Date.UTC(2026, 9, 28, 3) / HOUR, session_id: "ses_t", provider_id: "p", model_id: "m", cost: 4, tokens_input: 1 },
+          { hour: Date.UTC(2026, 9, 27, 3) / HOUR, session_id: "ses_t", provider_id: "p", model_id: "m", cost: 2, tokens_input: 1 },
         ])
         .run()
       const result = yield* UsageRollup.daily(db, { days: 2, offsetMinutes: 0, now: Date.UTC(2026, 9, 28, 12) })
@@ -302,6 +302,33 @@ describe("UsageRollup", () => {
         ["2026-10-27", 2, false, null],
       ])
       expect(result.coverage.origin).toMatchObject({ originSince: new Date(cutoff).toISOString() })
+    }),
+  )
+
+  it.effect("top sessions rank by priced cost and show unknown cost as null", () =>
+    Effect.gen(function* () {
+      const db = (yield* Database.Service).db
+      yield* setUp("ses_top_a")
+      yield* setUp("ses_top_b")
+      const now = Date.UTC(2026, 9, 28, 12)
+      const hour = Date.UTC(2026, 9, 28, 9) / HOUR
+      yield* db
+        .insert(UsageHourlyTable)
+        .values([
+          { hour, session_id: "ses_top_a", provider_id: "p", model_id: "priced", cost: 2, tokens_input: 5 },
+          { hour: hour - 1, session_id: "ses_top_a", provider_id: "p", model_id: "priced", cost: 1, tokens_input: 5 },
+          { hour, session_id: "ses_top_b", provider_id: "p", model_id: "priced", cost: 1.5, tokens_input: 5 },
+          { hour, session_id: "ses_top_b", provider_id: "p", model_id: "no-card", cost: 0, tokens_input: 70 },
+          { hour: hour - 72, session_id: "ses_top_b", provider_id: "p", model_id: "priced", cost: 100, tokens_input: 5 },
+        ])
+        .run()
+      const result = yield* UsageRollup.sessions(db, { days: 1, offsetMinutes: 0, limit: 10, now, hasRate: (_p, model) => model === "priced" })
+      expect(result.sessions.map((row) => [row.sessionID, row.cost, row.pricedCost, row.unpricedTokens, row.title])).toEqual([
+        ["ses_top_a", 3, 3, 0, "t"],
+        ["ses_top_b", null, 1.5, 70, "t"],
+      ])
+      expect(result.sessions[0]?.lastActive).toBe(new Date(Date.UTC(2026, 9, 28, 10) - 1).toISOString())
+      expect((yield* UsageRollup.sessions(db, { days: 1, offsetMinutes: 0, limit: 1, now })).sessions).toHaveLength(1)
     }),
   )
 })

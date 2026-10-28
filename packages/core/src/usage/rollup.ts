@@ -1,13 +1,13 @@
 export * as UsageRollup from "./rollup"
 
 import os from "node:os"
-import { and, eq, gte, isNull, lt, sql } from "drizzle-orm"
+import { and, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm"
 import { Cause, Context, Effect, Layer } from "effect"
 import { Database } from "../database/database"
 import { DatabaseReader } from "../database/reader"
 import { makeGlobalNode } from "../effect/app-node"
 import { EventV2 } from "../event"
-import { MessageTable } from "../session/sql"
+import { MessageTable, SessionTable } from "../session/sql"
 import { UsageHourlyTable, UsageRollupStateTable } from "./sql"
 
 /**
@@ -34,6 +34,7 @@ export const apply = Effect.fnUntraced(function* (db: Db, messageID: string, usa
   const message = yield* db
     .select({
       time: MessageTable.time_created,
+      session: MessageTable.session_id,
       role: sql<string | null>`json_extract(${MessageTable.data}, '$.role')`,
       provider: sql<string | null>`json_extract(${MessageTable.data}, '$.providerID')`,
       model: sql<string | null>`json_extract(${MessageTable.data}, '$.modelID')`,
@@ -49,6 +50,7 @@ export const apply = Effect.fnUntraced(function* (db: Db, messageID: string, usa
   yield* add(db, [
     {
       hour: Math.floor(message.time / HOUR),
+      session_id: message.session,
       provider_id: message.provider ?? "unknown",
       model_id: message.model ?? "unknown",
       cost: usage.cost * sign,
@@ -87,6 +89,7 @@ export const backfill = Effect.fn("UsageRollup.backfill")(function* (writer: Db,
     const chunk = yield* reader
       .select({
         hour: sql<number>`${MessageTable.time_created} / ${HOUR}`,
+        session_id: MessageTable.session_id,
         provider_id: sql<string>`coalesce(json_extract(${MessageTable.data}, '$.providerID'), 'unknown')`,
         model_id: sql<string>`coalesce(json_extract(${MessageTable.data}, '$.modelID'), 'unknown')`,
         cost: sql<number>`coalesce(sum(json_extract(${MessageTable.data}, '$.cost')), 0)`,
@@ -104,11 +107,11 @@ export const backfill = Effect.fn("UsageRollup.backfill")(function* (writer: Db,
           sql`json_extract(${MessageTable.data}, '$.role') = 'assistant'`,
         ),
       )
-      .groupBy(sql`1`, sql`2`, sql`3`)
+      .groupBy(sql`1`, sql`2`, sql`3`, sql`4`)
       .all()
       .pipe(Effect.orDie)
     for (const row of chunk) {
-      const key = `${row.hour}\u0000${row.provider_id}\u0000${row.model_id}`
+      const key = `${row.hour}\u0000${row.session_id}\u0000${row.provider_id}\u0000${row.model_id}`
       const total = totals.get(key)
       if (!total) {
         totals.set(key, row)
@@ -247,6 +250,104 @@ export const daily = Effect.fn("UsageRollup.daily")(function* (
   }
 })
 
+/**
+ * Sessions by estimated spend over the last `days` local days (today included). A session's cost is null when any
+ * of its usage in the window is on a billed model with no known rate (unknown, not partially summed).
+ */
+export const sessions = Effect.fn("UsageRollup.sessions")(function* (
+  db: Db,
+  input: { days: number; offsetMinutes: number; limit: number; now?: number; hasRate?: RateLookup; isLocal?: (provider: string) => boolean },
+) {
+  const now = input.now ?? Date.now()
+  const shift = Math.round(input.offsetMinutes / 60)
+  const today = Math.floor((now / HOUR + shift) / 24)
+  const since = (today - input.days + 1) * 24 - shift
+  const rows = yield* db
+    .select({
+      sessionID: UsageHourlyTable.session_id,
+      provider: UsageHourlyTable.provider_id,
+      model: UsageHourlyTable.model_id,
+      cost: sql<number>`sum(${UsageHourlyTable.cost})`,
+      input: sql<number>`sum(${UsageHourlyTable.tokens_input})`,
+      output: sql<number>`sum(${UsageHourlyTable.tokens_output})`,
+      reasoning: sql<number>`sum(${UsageHourlyTable.tokens_reasoning})`,
+      cacheRead: sql<number>`sum(${UsageHourlyTable.tokens_cache_read})`,
+      cacheWrite: sql<number>`sum(${UsageHourlyTable.tokens_cache_write})`,
+      lastHour: sql<number>`max(${UsageHourlyTable.hour})`,
+    })
+    .from(UsageHourlyTable)
+    .where(gte(UsageHourlyTable.hour, since))
+    .groupBy(UsageHourlyTable.session_id, UsageHourlyTable.provider_id, UsageHourlyTable.model_id)
+    .all()
+    .pipe(Effect.orDie)
+  const totals = new Map<string, { cost: number; unknown: boolean; unpricedTokens: number; tokens: Usage["tokens"]; lastHour: number }>()
+  for (const row of rows) {
+    const tokens = row.input + row.output + row.reasoning + row.cacheRead + row.cacheWrite
+    const priced = input.hasRate ? input.hasRate(row.provider, row.model) : row.cost !== 0
+    const missing = tokens > 0 && !priced && !input.isLocal?.(row.provider)
+    const total = totals.get(row.sessionID) ?? {
+      cost: 0,
+      unknown: false,
+      unpricedTokens: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      lastHour: 0,
+    }
+    if (missing) {
+      total.unknown = true
+      total.unpricedTokens += tokens
+    }
+    if (priced) total.cost += row.cost
+    total.tokens.input += row.input
+    total.tokens.output += row.output
+    total.tokens.reasoning += row.reasoning
+    total.tokens.cache.read += row.cacheRead
+    total.tokens.cache.write += row.cacheWrite
+    total.lastHour = Math.max(total.lastHour, row.lastHour)
+    totals.set(row.sessionID, total)
+  }
+  const top = [...totals]
+    .filter(([, total]) => total.cost !== 0 || total.unpricedTokens !== 0 || totalTokens(total.tokens) !== 0)
+    .toSorted((a, b) => b[1].cost - a[1].cost || b[1].unpricedTokens - a[1].unpricedTokens)
+    .slice(0, input.limit)
+  const info = top.length
+    ? yield* db
+        .select({ id: SessionTable.id, title: SessionTable.title, directory: SessionTable.directory, parentID: SessionTable.parent_id, updated: SessionTable.time_updated })
+        .from(SessionTable)
+        .where(inArray(SessionTable.id, top.map(([id]) => id) as never[]))
+        .all()
+        .pipe(Effect.orDie)
+    : []
+  const byID = new Map(info.map((row) => [row.id as string, row]))
+  const state = yield* db.select().from(UsageRollupStateTable).where(eq(UsageRollupStateTable.id, 1)).get().pipe(Effect.orDie)
+  return {
+    estimate: true as const,
+    basis: "local estimate: stored token counts priced by the local model catalog; not provider billing",
+    host: os.hostname(),
+    observedAt: new Date(now).toISOString(),
+    offsetMinutes: shift * 60,
+    coverage: {
+      since: new Date(since * HOUR).toISOString(),
+      backfilled: state?.time_backfilled !== null && state?.time_backfilled !== undefined,
+      liveSince: state ? new Date(state.cutoff).toISOString() : undefined,
+    },
+    sessions: top.map(([sessionID, total]) => {
+      const row = byID.get(sessionID)
+      return {
+        sessionID,
+        parentID: row?.parentID ?? undefined,
+        title: row?.title ?? undefined,
+        directory: row?.directory ?? undefined,
+        cost: total.unknown ? null : round(total.cost),
+        pricedCost: round(total.cost),
+        unpricedTokens: total.unpricedTokens,
+        tokens: total.tokens,
+        // Hour of the session's most recent counted usage.
+        lastActive: new Date((total.lastHour + 1) * HOUR - 1).toISOString(),
+      }
+    }),
+  }
+})
+
 const add = (db: Db, rows: (typeof UsageHourlyTable.$inferInsert)[]) =>
   Effect.forEach(
     rows,
@@ -255,7 +356,7 @@ const add = (db: Db, rows: (typeof UsageHourlyTable.$inferInsert)[]) =>
         .insert(UsageHourlyTable)
         .values(row)
         .onConflictDoUpdate({
-          target: [UsageHourlyTable.hour, UsageHourlyTable.provider_id, UsageHourlyTable.model_id],
+          target: [UsageHourlyTable.hour, UsageHourlyTable.session_id, UsageHourlyTable.provider_id, UsageHourlyTable.model_id],
           set: {
             cost: sql`${UsageHourlyTable.cost} + excluded.cost`,
             tokens_input: sql`${UsageHourlyTable.tokens_input} + excluded.tokens_input`,
@@ -270,6 +371,10 @@ const add = (db: Db, rows: (typeof UsageHourlyTable.$inferInsert)[]) =>
     { discard: true },
   )
 
+function totalTokens(tokens: Usage["tokens"]) {
+  return tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write
+}
+
 function round(value: number) {
   return Math.round(value * 1e6) / 1e6
 }
@@ -281,7 +386,10 @@ export interface Interface {
     hasRate?: RateLookup
     isLocal?: (provider: string) => boolean
   }) => Effect.Effect<Effect.Success<ReturnType<typeof daily>>>
+  readonly sessions: (input: SessionsInput) => Effect.Effect<Effect.Success<ReturnType<typeof sessions>>>
 }
+
+export type SessionsInput = { days: number; offsetMinutes: number; limit: number; hasRate?: RateLookup; isLocal?: (provider: string) => boolean }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/UsageRollup") {}
 
@@ -299,7 +407,7 @@ const layer = Layer.effect(
       Effect.delay(BACKFILL_DELAY),
       Effect.forkScoped,
     )
-    return Service.of({ daily: (input) => daily(reader.db, input) })
+    return Service.of({ daily: (input) => daily(reader.db, input), sessions: (input) => sessions(reader.db, input) })
   }),
 )
 

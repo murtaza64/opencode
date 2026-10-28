@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "712bfe82-1989-4698-a1a9-6fe9a76f4444",
+  "id": "c99fe5e6-e14e-45ca-a071-ec703f2f5199",
   "prevIds": [
-    "3afb2e81-ed47-4b48-9a68-6dbb270ea623"
+    "712bfe82-1989-4698-a1a9-6fe9a76f4444"
   ],
   "ddl": [
     {
@@ -1718,6 +1718,16 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "usage_hourly"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
       "name": "provider_id",
       "entityType": "columns",
       "table": "usage_hourly"
@@ -2095,6 +2105,7 @@
     {
       "columns": [
         "hour",
+        "session_id",
         "provider_id",
         "model_id"
       ],

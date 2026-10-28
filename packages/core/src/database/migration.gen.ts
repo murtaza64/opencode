@@ -50,5 +50,6 @@ export const migrations = (
     import("./migration/20261027020612_v1_input_unpresented_mail"),
     import("./migration/20261027205555_usage_rollup"),
     import("./migration/20261027205556_usage_rollup_state"),
+    import("./migration/20261028064500_usage_rollup_session"),
   ])
 ).map((module) => module.default) satisfies DatabaseMigration.Migration[]

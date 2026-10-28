@@ -1,13 +1,14 @@
 import { sqliteTable, text, integer, real, primaryKey } from "drizzle-orm/sqlite-core"
 
 /**
- * Estimated model spend per UTC hour, provider and model, for messages that ran on this host. Hour buckets let
+ * Estimated model spend per UTC hour, session, provider and model, for messages that ran on this host. Hour buckets let
  * readers aggregate by any local day. Maintained by the session projector; see `UsageRollup`.
  */
 export const UsageHourlyTable = sqliteTable(
   "usage_hourly",
   {
     hour: integer().notNull(),
+    session_id: text().notNull(),
     provider_id: text().notNull(),
     model_id: text().notNull(),
     cost: real().notNull().default(0),
@@ -17,7 +18,7 @@ export const UsageHourlyTable = sqliteTable(
     tokens_cache_read: integer().notNull().default(0),
     tokens_cache_write: integer().notNull().default(0),
   },
-  (table) => [primaryKey({ columns: [table.hour, table.provider_id, table.model_id] })],
+  (table) => [primaryKey({ columns: [table.hour, table.session_id, table.provider_id, table.model_id] })],
 )
 
 /**

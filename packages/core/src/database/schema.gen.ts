@@ -274,6 +274,7 @@ export default {
       yield* tx.run(`
         CREATE TABLE \`usage_hourly\` (
           \`hour\` integer NOT NULL,
+          \`session_id\` text NOT NULL,
           \`provider_id\` text NOT NULL,
           \`model_id\` text NOT NULL,
           \`cost\` real DEFAULT 0 NOT NULL,
@@ -282,7 +283,7 @@ export default {
           \`tokens_reasoning\` integer DEFAULT 0 NOT NULL,
           \`tokens_cache_read\` integer DEFAULT 0 NOT NULL,
           \`tokens_cache_write\` integer DEFAULT 0 NOT NULL,
-          CONSTRAINT \`usage_hourly_pk\` PRIMARY KEY(\`hour\`, \`provider_id\`, \`model_id\`)
+          CONSTRAINT \`usage_hourly_pk\` PRIMARY KEY(\`hour\`, \`session_id\`, \`provider_id\`, \`model_id\`)
         );
       `)
       yield* tx.run(`
