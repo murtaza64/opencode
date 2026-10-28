@@ -12,6 +12,8 @@ import { NewSession } from "./new-session"
 import { peekAttrs, SessionPeek } from "./session-peek"
 import { CloudNav, CloudSource } from "./cloud-sidebar"
 import { cloudRows, mergeAgentRows } from "../cloud-rows"
+import { cloudKey, type CloudPin } from "../cloud-agents"
+import { rankSearch, type Searchable } from "../search-rank"
 import { failureLabel } from "../session-failures"
 import { ringOnChange } from "../motion"
 import { Glyph, HostGlyph } from "./icons"
@@ -129,40 +131,35 @@ export default function Sidebar() {
   // Titles filter immediately; transcript search starts at three characters.
   const [query, setQuery] = createSignal("")
   const [results, setResults] = createSignal<SessionSearchResult[] | null>(null)
-  const searchResults = () => {
-    const titleMatches = sessionRows().filter((s) => s.title.toLocaleLowerCase().includes(query().trim().toLocaleLowerCase()))
-      .map((s) => ({ id: s.id, title: s.title, directory: s.directory, parent_id: null,
-        updated: s.updated, snippet: "", matches: 0 }))
+  // Transcript hits from the server, kept to this view's scope.
+  const transcriptHits = () => {
     const root = editspaces()?.editspaces.find((s) => s.name === current())?.root.replace(/\/\.editspace\/?$/, "")
     const rows = sessionRows()
     const directories = new Set(rows.map((s) => s.directory))
-    const remote = (results() ?? []).filter((s) =>
+    return (results() ?? []).filter((s) =>
       (!allProjects() || !s.parent_id) && (allProjects() || directories.has(s.directory) ||
         (s.parent_id !== null && rows.some((row) => row.id === s.parent_id)) ||
         (root !== undefined && (s.directory === root || s.directory.startsWith(`${root}/`)))))
-    const byID = new Map<string, SessionSearchResult>(titleMatches.map((s) => [JSON.stringify([s.directory, s.id]), s]))
-    remote.forEach((s) => byID.set(JSON.stringify([s.directory, s.id]), s))
-    return [...byID.values()]
   }
-  // Work view: other hosts' rows (pinned or not, reachable or last-known) filter by the same title query,
-  // keep their host-qualified identity, and sort with this host's results by one rule (pinned, then
-  // working, then most recent). Transcript search covers this host only.
-  type Found = { local: SessionSearchResult; host?: undefined } | { host: SessionRow; local?: undefined }
-  const foundRows = createMemo((): Found[] => {
-    const needle = query().trim().toLocaleLowerCase()
-    const hostMatches = [...work.pinned(), ...work.unpinned()].filter((s) => (s.title || s.id).toLocaleLowerCase().includes(needle))
-    const localRow = (r: SessionSearchResult) => sessionRows().find((s) => s.id === r.id && s.directory === r.directory)
-    const rank = (found: Found) => {
-      if (found.host) return [work.isPinned(found.host) ? 0 : 1, work.dot(found.host) === "busy" ? 0 : 1, -found.host.updated]
-      const row = localRow(found.local)
-      return [row && isPinned(row) ? 0 : 1, row && dotFor(row) === "busy" ? 0 : 1, -(found.local.updated ?? 0)]
-    }
-    const order = (a: Found, b: Found) => { const x = rank(a), y = rank(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2] }
-    return [...searchResults().map((local): Found => ({ local })), ...hostMatches.map((host): Found => ({ host }))].sort(order)
-  })
-  const cloudFound = createMemo(() => [...cloud.pins(), ...cloud.other()].filter((pin, index, all) =>
-    all.findIndex((other) => other.editspace === pin.editspace && other.lane === pin.lane && other.owner === pin.owner) === index &&
-    pin.lane.toLocaleLowerCase().includes(query().trim().toLocaleLowerCase())))
+  // One ranking (search-rank.ts): pins stay in Pinned for any query; title/lane matches from every row this page
+  // knows (this host, other Work hosts, cloud) come before transcript-only hits, also when those arrive late.
+  // Within a bucket: working first, then most recent. Rows keep their host- or runtime-qualified key.
+  type Found = Searchable & { updated: number; working: boolean } & ({ local: SessionSearchResult; host?: undefined; cloud?: undefined } | { host: SessionRow; local?: undefined; cloud?: undefined } | { cloud: CloudPin; local?: undefined; host?: undefined })
+  const localFound = (r: SessionSearchResult): Found => {
+    const row = sessionRows().find((s) => s.id === r.id && s.directory === r.directory)
+    return { key: `local:${r.directory}:${r.id}`, title: r.title || r.id, updated: r.updated ?? 0, working: !!row && dotFor(row) === "busy", local: r }
+  }
+  const asResult = (s: SessionRow): SessionSearchResult => ({ id: s.id, title: s.title, directory: s.directory, parent_id: null, updated: s.updated, snippet: "", matches: 0 })
+  const hostFound = (s: SessionRow): Found => ({ key: hostRowKey(s), title: s.title || s.id, updated: s.updated, working: work.dot(s) === "busy", host: s })
+  const cloudFound = (pin: CloudPin): Found => ({ key: `cloud:${cloudKey(pin)}`, title: pin.lane, lane: pin.lane, updated: 0, working: false, cloud: pin })
+  const ranked = createMemo(() => rankSearch<Found>({
+    query: query(),
+    pinned: [...pinnedSessions().map((s) => localFound(asResult(s))), ...work.pinned().map(hostFound), ...cloud.pins().map(cloudFound)],
+    known: [...sessionRows().map((s) => localFound(asResult(s))), ...work.unpinned().map(hostFound), ...cloud.other().map(cloudFound)],
+    transcriptHits: transcriptHits().map(localFound),
+    order: (a, b) => Number(b.working) - Number(a.working) || b.updated - a.updated,
+  }))
+  const foundRows = createMemo(() => [...ranked().metadata, ...ranked().transcript])
   const [searching, setSearching] = createSignal(false)
   const [allTime, setAllTime] = createSignal(false)
   const [searchError, setSearchError] = createSignal("")
@@ -389,7 +386,7 @@ export default function Sidebar() {
               }}
             </For>
         </> : undefined} />
-        <Show when={!query().trim() && (allPinned().length || cloud.pins().length)}>
+        <Show when={allPinned().length || cloud.pins().length}>
           <section class="pinned-section" aria-label="Pinned sessions">
             <div class="nav-heading">Pinned</div>
             <For each={allPinned()}>{(s) => item(s)}</For>
@@ -412,18 +409,16 @@ export default function Sidebar() {
           fallback={
             <>
               <div class="nav-heading">
-                results ({foundRows().length + cloudFound().length})
+                results ({foundRows().length})
               </div>
               <Show when={searching()}><div class="dim nav-empty">searching transcripts…</div></Show>
               <Show when={searchError()}>
                 <div class="dim nav-empty">{searchError()}</div>
               </Show>
-              <Show when={!searching() && !searchError() && !foundRows().length && !cloudFound().length}>
+              <Show when={!searching() && !searchError() && !foundRows().length}>
                 <div class="dim nav-empty">no matches</div>
               </Show>
-              <For each={foundRows()}>{(found) => found.host ? hostItem(found.host) : resultItem(found.local)}</For>
-              {/* Cloud agents match the same title query (pinned and listed ones). */}
-              <For each={cloudFound()}>{(pin) => <CloudNav pin={pin} />}</For>
+              <For each={foundRows()}>{(found) => found.host ? hostItem(found.host) : found.cloud ? <CloudNav pin={found.cloud} /> : resultItem(found.local)}</For>
               <Show when={query().trim().length >= 3 && !allTime() && !searching() && !searchError()}>
                 <button class="archived-toggle" onClick={searchAllTime}>
                   ⌕ all time (slow)

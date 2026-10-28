@@ -44,7 +44,9 @@ const reread = async () => {
 }
 const input = page.locator(".sidebar .search-input")
 const titles = () => page.locator(".sidebar .search-box ~ .session-entry .nav-title, .sidebar .search-box ~ .search-result .nav-title").allTextContents()
-const miniRow = name => page.getByRole("link", { name: new RegExp(`^${name}, on Mac Mini(, unavailable)?$`) })
+const miniRow = name => page.locator(".sidebar [role=tabpanel]").getByRole("link", { name: new RegExp(`^${name}, on Mac Mini(, unavailable)?$`) })
+// Pinned rows stay in the Pinned section for any query.
+const pinnedRow = name => page.locator(".sidebar .pinned-section").getByRole("link", { name: new RegExp(`^${name}, on Mac Mini(, unavailable)?$`) })
 try {
   await page.goto(preview.url)
   await expect(miniRow("Ledger migration")).toBeVisible({ timeout: 90_000 })
@@ -65,9 +67,10 @@ try {
   await expect(miniRow("Composer copy on the Mini")).toHaveCount(1)
   await expect(page.locator(".sidebar [data-host-key='mini:ses_a']")).toHaveCount(1)
 
-  // A pinned Mini row matches too, keeps its pin, and sorts first.
+  // A pinned Mini row stays in Pinned (with its pin) while searching and is not repeated in the results.
   await input.fill("o")
-  await expect(miniRow("Pinned scoring work")).toBeVisible()
+  await expect(pinnedRow("Pinned scoring work")).toBeVisible()
+  await expect(miniRow("Pinned scoring work")).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Unpin Pinned scoring work on Mac Mini" })).toBeVisible()
   const order = await page.locator(".sidebar .nav-heading", { hasText: /^results/ }).evaluate(heading => {
     const names = []
@@ -77,7 +80,8 @@ try {
     }
     return names
   })
-  expect(order[0], `pinned first: ${JSON.stringify(order)}`).toBe("Pinned scoring work")
+  // Title matches order working first, then most recent.
+  expect(order.includes("Pinned scoring work"), `pins are not repeated: ${JSON.stringify(order)}`).toBe(false)
 
   // Clearing restores the full list, in its original order.
   await input.press("Escape")
@@ -106,7 +110,7 @@ try {
 
   expect(hostWrites).toEqual([])
   expect(preview.fixture.calls.filter(call => !["GET", "HEAD", "OPTIONS"].includes(call.method))).toEqual([])
-  console.log("PASS work search: Mini rows filter with Local (case-insensitive), same id kept apart, pinned first, clear restores, new Mini row searchable, last-known rows filter; zero writes")
+  console.log("PASS work search: Mini rows filter with Local (case-insensitive), same id kept apart, Pinned kept visible, clear restores, new Mini row searchable, last-known rows filter; zero writes")
 } finally {
   await browser.close()
   await preview.close()

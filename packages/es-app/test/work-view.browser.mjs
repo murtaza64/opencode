@@ -71,12 +71,12 @@ await page.route(`${mini}/**`, (route) => {
 })
 try {
   await page.goto(preview.url)
-  const rows = page.locator(".sidebar > .session-entry .nav-item")
+  const rows = page.locator(".sidebar [role=tabpanel] > .session-entry .nav-item")
   // Both copies of ses_a are listed, each on its host; the Mini's other project is not in this project's view.
   await expect(page.getByRole("link", { name: /^Mini copy of a, on Mac Mini$/ })).toBeVisible()
   await expect(page.getByRole("link", { name: /^Mini only, on Mac Mini$/ })).toBeVisible()
   await expect(page.locator(".sidebar .nav-item", { hasText: "Mini other project" })).toHaveCount(0)
-  await expect(page.locator(".sidebar > .session-entry .nav-item[data-host-key='mini:ses_a']")).toHaveCount(1)
+  await expect(page.locator(".sidebar [role=tabpanel] > .session-entry .nav-item[data-host-key='mini:ses_a']")).toHaveCount(1)
   await expect(rows.filter({ hasText: "Composer fixture" })).toHaveCount(1)
   await expect(rows.filter({ hasText: "Composer fixture" }).locator(".sr-only")).toHaveText(", on Local")
   await expect(page.locator(".host-glyph").first()).toBeVisible()

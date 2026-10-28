@@ -61,9 +61,10 @@ try {
   await expect(pinned).toHaveText([/Other project/])
   await page.locator(".es-switcher").selectOption("fixture")
   await expect(pinned).toHaveText([/Other session/, /Composer fixture/])
+  // Pins stay in view, in their order, for any query, and are not repeated in the results.
   await page.locator(".search-input").fill("Other")
-  await expect(pinned).toHaveCount(0)
-  await expect(page.locator(".search-result", { hasText: "Other session" })).toHaveCount(1)
+  await expect(pinned).toHaveText([/Other session/, /Composer fixture/])
+  await expect(page.locator(".search-result", { hasText: "Other session" })).toHaveCount(0)
   await page.locator(".search-input").press("Escape")
   await expect(pinned).toHaveText([/Other session/, /Composer fixture/])
   preview.fixture.archived.add("ses_b")
