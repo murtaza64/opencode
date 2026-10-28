@@ -123,8 +123,8 @@ try {
     await expect(link).toHaveAttribute("href", CONSOLE)
     await expect(link).toHaveAttribute("target", "_blank")
     // Fields in order; values copyable exactly as the request states them.
-    const settings = steps.nth(1).locator('ul[aria-label="Settings"] > li')
-    await expect(settings.locator(".desk-command-label")).toHaveText(["Operator", "Value", "Limit", "Counting window"])
+    const settings = steps.nth(1).locator('dl[aria-label="Settings"] > dd')
+    await expect(steps.nth(1).locator('dl[aria-label="Settings"] > dt')).toHaveText(["Operator", "Value", "Limit", "Counting window"])
     await expect(settings.locator("code")).toHaveText(["starts with", "/api/", "100 requests per 10 seconds"])
     // A value the request never gives is shown as missing, never as the brief's guess.
     await expect(settings.nth(3)).toContainText("Not given in the request")

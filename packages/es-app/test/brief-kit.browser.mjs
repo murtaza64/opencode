@@ -4,6 +4,8 @@
 // Run from packages/es-app: node test/brief-kit.browser.mjs [--shots DIR] [--report-only] [--serve]
 //   --report-only  prints the checklist table without failing (for "before" screenshots on an older build)
 //   --serve        leaves the preview running after the checks and prints its URL
+//   --reduced-motion  adds a desktop pass with prefers-reduced-motion: reduce (asserts the brief does not animate)
+//   --serve-only   starts the preview without any checks or browser (a review server, e.g. for a frozen baseline)
 import assert from "node:assert/strict"
 import { createRequire } from "node:module"
 import path from "node:path"
@@ -44,7 +46,7 @@ const CASES = {
     brief: { question: "Roll out in ten daily stages?", choices: [{ id: "go", outcome: "Ten days to full rollout" }, { id: "wait", outcome: "Nothing changes for a week" }],
       visual: { title: "Stages", alt: "Ten stacked stages from 10% to 100% rollout.", svg: tall } } },
   plain: { record: { ...base, id: "plain", gate_key: "plain", title: "Rename the ledger table?", context: "The name collides with a new view.", options: two, recommendation: "wait" },
-    brief: { question: "Rename the ledger table now?", context: "Its name collides with a new view.", choices: [{ id: "go", outcome: "Renamed today" }, { id: "wait", outcome: "Renamed after the migration" }] } },
+    brief: { question: "rename the ledger  table?", context: "Its name collides with a new view.", choices: [{ id: "go", outcome: "Renamed today" }, { id: "wait", outcome: "Renamed after the migration" }] } },
   error: { record: { ...base, id: "error", gate_key: "error", title: "Archive the old dashboards?", context: "Twelve dashboards unused since June.", options: two, recommendation: "go" }, brief: "error" },
   absent: { record: { ...base, id: "absent", gate_key: "absent", title: "Close the stale tickets?", context: "Nine tickets untouched for 90 days.", options: two, recommendation: "go" }, brief: "none" },
 }
@@ -76,8 +78,13 @@ const preview = await startAttentionPreview([{
 }])
 preview.fixture.editspaces = [{ name: "fixture", root: directory }]
 preview.ledger.records.splice(0, preview.ledger.records.length, ...Object.values(CASES).flatMap(value => value.records ?? [value.record]))
+if (arg("--serve-only")) {
+  console.log(`SERVING ${preview.origin}/?item=${encodeURIComponent("attention:fixture:single")} (pid ${process.pid}); stop with kill ${process.pid}`)
+  await new Promise(() => {})
+}
 const browser = await chromium.launch({ channel: "chrome", headless: true })
-const VIEWS = [["desktop", { width: 1440, height: 1000 }, false], ["390", { width: 390, height: 844 }, false], ["rtl", { width: 390, height: 844 }, true]]
+const VIEWS = [["desktop", { width: 1440, height: 1000 }, false], ["390", { width: 390, height: 844 }, false], ["rtl", { width: 390, height: 844 }, true],
+  ...arg("--reduced-motion") ? [["reduced", { width: 1440, height: 1000 }, false, "reduce"]] : []]
 const keyOf = name => name === "series" ? "series:fixture:ses_a:grill" : `attention:fixture:${CASES[name].record.id}`
 // A series renders as one series card (data-series-id) holding each question.
 const cardOf = (page, name) => page.locator(name === "series" ? '[data-series-id="grill"]' : `[data-attention-id="${CASES[name].record.id}"]`)
@@ -104,9 +111,23 @@ const check = async (page, card, name) => card.evaluate((element, [name, missing
     "5 gaps kept": name !== "single" || element.innerHTML.includes("Cost at full traffic is not measured."),
     "6 steps copyable": name !== "steps" || element.querySelectorAll(".desk-steps .desk-command-copy").length === 2 && /Check: shows as Active/.test(text),
     "7 visual earns place": name === "visual" ? !!iframe && !!iframe.title && !!window && window.getBoundingClientRect().height <= innerHeight * 0.45 + 2 && !!element.querySelector(".desk-visual-expand") : !iframe,
+    "8 no title repeat": name !== "plain" || !element.querySelector(".home-request-line"),
     "8 no duplicate request": !(element.querySelector(".home-request-text") && visible(element.querySelector(".home-request-text")) && element.querySelector("details.home-original")) && !/This brief explains|several/.test(text),
+    "8 no empty Approved or Question labels": !/Approved/.test(text) && ![...element.querySelectorAll(".desk-brief-item-label")].some(node => node.textContent === "Question"),
+    "8 missing styled alike": name !== "items" || !!element.querySelector(".desk-brief-item:nth-child(5) .brief-missing"),
+    "8 one failure line": name !== "error" || /The model provider refused sign-in\./.test(text) && !visible([...element.querySelectorAll("p")].find(node => /Briefs unavailable/.test(node.textContent))),
+    "9 labels one line, value columns wide": name !== "items" || [...element.querySelectorAll(".desk-brief-item")].every(row => {
+      const width = row.getBoundingClientRect().width
+      const labels = [...row.querySelectorAll(".desk-brief-item-label")].filter(label => getComputedStyle(label).display !== "none")
+      const oneLine = labels.every(label => { const style = getComputedStyle(label); return label.getBoundingClientRect().height <= (parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.4) * 1.5 + 1 })
+      const values = [...row.querySelectorAll(".desk-brief-item-cell")].slice(1, 3)
+      return oneLine && values.every(cell => cell.getBoundingClientRect().width >= width * (labels.length ? 0.35 : 0.2))
+    }),
+    "reduced motion static": !matchMedia("(prefers-reduced-motion: reduce)").matches || [...element.querySelectorAll(".desk-brief-body")].every(node => getComputedStyle(node).animationName === "none"),
     "9 type sizes": sizes.size,
-    "10 state honest": name === "error" ? /Brief failed: ProviderAuthError/.test(text)
+    "9 brief type sizes": new Set([...element.querySelectorAll(".desk-brief *")].filter(node => visible(node) && [...node.childNodes].some(child => child.nodeType === 3 && child.textContent.trim()))
+      .map(node => getComputedStyle(node).fontSize)).size,
+    "10 state honest": name === "error" ? /ProviderAuthError/.test(text) && /The model provider refused sign-in/.test(text)
       : name === "absent" ? !!element.querySelector(".home-request-text") && element.querySelectorAll('input[type="radio"]').length >= 2
       : name === "series" ? element.querySelectorAll('input[type="radio"]').length >= 2 : true,
     "11 no overflow": element.scrollWidth <= element.clientWidth + 1,
@@ -116,8 +137,8 @@ const check = async (page, card, name) => card.evaluate((element, [name, missing
 const table = {}
 let failed = false
 try {
-  for (const [view, viewport, rtl] of VIEWS) {
-    const context = await browser.newContext({ viewport })
+  for (const [view, viewport, rtl, reducedMotion] of VIEWS) {
+    const context = await browser.newContext({ viewport, ...(reducedMotion ? { reducedMotion } : {}) })
     await context.addInitScript(() => { try { localStorage.setItem("es-app-all-projects", "true"); localStorage.setItem("es-app:front-desk:auto-prepare", "off") } catch {} })
     await context.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
     for (const name of Object.keys(CASES)) {
@@ -132,7 +153,7 @@ try {
       await expect(card.locator("h3, h4").first()).toBeVisible({ timeout: 120_000 })
       // Ready briefs settle before checking; failed and absent ones are checked as they stand.
       if (CASES[name].brief !== "none" && CASES[name].brief !== "error") await expect(card.locator(".desk-brief-body, .home-question").first()).toBeVisible()
-      if (name === "error") await expect(card).toContainText("Brief failed")
+      if (name === "error") await expect(card.locator('.desk-brief[data-part="lead"]')).toContainText("ProviderAuthError")
       const result = await check(page, card, name)
       table[`${name} ${view}`] = result
       if (shots) await card.screenshot({ path: path.join(shots, `${name}-${view}.png`) }).catch(() => page.screenshot({ path: path.join(shots, `${name}-${view}.png`), fullPage: true }))

@@ -189,6 +189,9 @@ const copyBySelection = (text: string) => {
 
 // The request as its agent wrote it, with Markdown formatting (lists, links, code with copy) and no raw HTML;
 // the options and actions stay native controls outside it. No brief or model is needed to read it.
+/** Title and question compared as a reader would: case and spacing ignored. */
+const same = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase()
+
 const RequestText = (props: { record: AttentionRecord }) =>
   <div class="home-request-text" dir="auto"><Markdown text={requestMarkdown(props.record.context)} cacheKey={`attention-request:${props.record.editspace}:${props.record.id}:${props.record.revision}`} /></div>
 
@@ -241,7 +244,8 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
     <div class="home-decision-explain">
       <Show when={props.prepared}>{prepared => <div class="home-decision-question">
         <h3 class="home-question"><bdi dir="auto">{prepared().question}</bdi></h3>
-        <p class="home-request-line"><bdi>Request:</bdi> <bdi dir="auto">{props.record.title}</bdi></p>
+        {/* The request's own title only when it says something the question does not; Record & history keeps it. */}
+        <Show when={same(props.record.title) !== same(prepared().question)}><p class="home-request-line"><bdi>Request:</bdi> <bdi dir="auto">{props.record.title}</bdi></p></Show>
         {props.brief}
         {/* Steps the human must perform stay in the producer's exact words, unfolded, above the answer. */}
         <Show when={requestHasSteps(props.record)}><RequestText record={props.record} /></Show>

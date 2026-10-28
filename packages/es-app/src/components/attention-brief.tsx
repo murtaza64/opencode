@@ -1,7 +1,7 @@
 /* Derived, source-revision-bound brief for one queue item. The canonical request it explains is
  * rendered separately and stays the authority; this only makes it decidable at a glance. The UI does
  * not caption it as derived: the binding is enforced in code and provenance sits in Details. */
-import { createResource, createSignal, For, Match, Show, Switch } from "solid-js"
+import { createResource, createSignal, For, Match, Show, Switch, type JSX } from "solid-js"
 import { useBriefs } from "../desk-briefs"
 import { A } from "@solidjs/router"
 import { sessionHref } from "../state"
@@ -23,6 +23,15 @@ const sourceLink = (source: BriefSource, refs: EvidenceRef[], item: DeskItem) =>
   if (target) return { kind: "Agent thread", href: anchorHref(item.source.session, item.source.directory, target.message, target.to) }
 }
 
+/** A brief's failure in plain words, from the error Core recorded on its turn. */
+const failureText = (error: string) => ({
+  ProviderAuthError: "The model provider refused sign-in.",
+  APIError: "The model provider returned an error.",
+  MessageAbortedError: "The brief was stopped before it finished.",
+  MessageOutputLengthError: "The brief ran out of room before it finished.",
+  ContextOverflowError: "The request was too long for the model.",
+} as Record<string, string>)[error] ?? (error === "no readable reply." ? "The brief's reply could not be read." : "The brief could not finish.")
+
 type Part = "lead" | "visual" | "after" | "details"
 /** `part` renders one slot of a brief inside a decision card; without it the whole brief renders in one place. */
 /** `pinned`: show exactly this job (an answered decision's brief), whatever the item's current revision. */
@@ -42,14 +51,16 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
       </Show>}>{job => <>
         <Show when={job().state.state === "starting" || job().state.state === "running"}><p class="home-muted" role="status">Preparing brief…</p></Show>
         {/* A brief that did not finish is one quiet line: the request below stays readable as written. */}
-        {/* The reason is part of the line: a failure is never shown without why. */}
-        <Show when={job().state.state === "failed"}><p class="home-muted">Brief failed: <bdi dir="ltr">{(job().state as { error: string }).error}</bdi></p></Show>
-        <Show when={job().state.state === "unknown"}><p class="home-muted">{(job().state as { reason: string }).reason}</p></Show>
+        {/* One failure line in plain words; the error's own name is secondary detail. */}
+        <Show when={job().state.state === "failed"}><p class="brief-failure">{failureText((job().state as { error: string }).error)} <span class="brief-failure-detail">(<bdi dir="ltr">{(job().state as { error: string }).error}</bdi>)</span></p></Show>
+        <Show when={job().state.state === "unknown"}><p class="brief-failure">{(job().state as { reason: string }).reason}</p></Show>
         {/* Confirm resends the identical request; Core returns the same brief if the first start landed. */}
         <Show when={job().state.state === "unconfirmed"}><p class="home-warning">Brief start not confirmed.</p>
           <button class="desk-button" disabled={props.confirming} onClick={props.confirm}>Confirm start</button></Show>
         <Show when={(job().state.state === "failed" || job().state.state === "unknown") && props.live}><button class="desk-button" disabled={!props.canStart} onClick={props.start}>Prepare again</button></Show>
-        <Show when={(job().state.state === "failed" || job().state.state === "unknown") && props.unavailable}><span class="home-source" title={props.unavailableDetail}> {props.unavailable}</span></Show>
+        {/* Why it cannot be prepared again here is detail under the one failure line, not a second failure. */}
+        <Show when={(job().state.state === "failed" || job().state.state === "unknown") && props.unavailable}><details class="brief-why"><summary>Why can't it be prepared again here?</summary>
+          <p class="home-source" title={props.unavailableDetail}>{props.unavailable}</p></details></Show>
       </>}</Show>
       <Show when={!current() && discarded().length}><p class="home-source">The request changed since the last brief.</p></Show>
       {/* The question itself is the card's heading; the lead adds only context and the picture. */}
@@ -60,10 +71,6 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
         <Items result={value().result} item={props.item} job={value().job} />
         <Steps result={value().result} refs={value().job.meta.refs} item={props.item} />
         <Commands commands={value().result} item={props.item} />
-        {/* A fresh brief of the same request, made by the host that owns it; this one stays until the new one is ready. */}
-        <Show when={props.live && !props.pinned && props.item.record && props.regenerate}><p class="desk-brief-regenerate">
-        <Show when={!props.regenerating && !regeneratingJob(props.jobs, props.item)} fallback={<span class="home-muted" role="status">Regenerating brief…</span>}>
-          <button type="button" class="desk-link-button" onClick={() => props.regenerate!()}>Regenerate brief</button></Show></p></Show>
         <Show when={!props.item.record?.options.length && value().result.ifWait}><p class="home-muted" dir="auto">If you wait: <LinkedText text={value().result.ifWait} /></p></Show>
       </div>}</Show>
     </Show>
@@ -81,6 +88,10 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
       <Show when={!complete()}><SourceLinks sources={value().result.sources} refs={value().job.meta.refs} item={props.item} /></Show>
       <p class="home-source">Brief for revision {value().job.meta.revision}<Show when={value().omitted}> · {value().omitted} uncited statement(s) omitted</Show> · <A href={sessionHref(value().job.id, value().job.directory)}>Brief thread</A>
 </p>
+      {/* Upkeep, not reading: a fresh brief of the same request, made by the host that owns it; this one stays until the new one is ready. */}
+      <Show when={props.live && !props.pinned && props.item.record && props.regenerate}><p class="desk-brief-regenerate">
+        <Show when={!props.regenerating && !regeneratingJob(props.jobs, props.item)} fallback={<span class="home-muted" role="status">Regenerating brief…</span>}>
+          <button type="button" class="desk-link-button" onClick={() => props.regenerate!()}>Regenerate brief</button></Show></p></Show>
       {/* Keyed to the brief shown, so a newer brief never inherits this one's rating. */}
       <Show when={value().job} keyed>{job => <BriefFeedbackControls job={job} />}</Show>
     </details>}</Show>
@@ -147,11 +158,11 @@ const Steps = (props: { result: BriefResult; refs: EvidenceRef[]; item: DeskItem
         <Show when={option(step.option)}>{label => <span class="home-muted"> · for “<bdi dir="auto">{label()}</bdi>”</span>}</Show></span>
       <Show when={step.where}>{where => <p dir="auto">Open: <Show when={url(where().refs)} fallback={<bdi dir="auto">{where().label}</bdi>}>{href =>
         <a href={href()} target="_blank" rel="noopener noreferrer">↗ <bdi dir="auto">{where().label}</bdi></a>}</Show></p>}</Show>
-      {/* Laid out like commands (label, then the exact value to copy), so long values stay inside the column. */}
-      <Show when={step.settings.length}><ul class="desk-commands" aria-label="Settings"><For each={step.settings}>{setting => <li>
-        <span class="desk-command-label" dir="auto">{setting.field}</span>
-        <Show when={setting.value} fallback={<span class="brief-missing">{MISSING}</span>}><CopyCode text={setting.value} /></Show>
-      </li>}</For></ul></Show>
+      {/* Field and value side by side; a long value wraps inside its column. */}
+      <Show when={step.settings.length}><dl class="brief-settings" aria-label="Settings"><For each={step.settings}>{setting => <>
+        <dt dir="auto">{setting.field}</dt>
+        <dd><Show when={setting.value} fallback={<span class="brief-missing">{MISSING}</span>}><CopyCode text={setting.value} inline /></Show></dd>
+      </>}</For></dl></Show>
       <Show when={step.verify}><p class="home-muted" dir="auto">Check: {step.verify}</p></Show>
     </li>}</For></ol>
   </Show>
@@ -174,23 +185,26 @@ const Items = (props: { result: BriefResult; item: DeskItem; job: BriefJob }) =>
   const [found] = createResource(() => props.item.record, readConversation)
   const rows = () => briefItems(props.result, props.item, found()?.documents)
   const approval = () => briefApproval(rows(), props.item, { id: props.job.id, revision: props.job.meta.revision })
+  // Approved exists only once the ledger has an answer for this brief: unanswered rows carry no empty column.
   return <Show when={rows().length}>
-    <section class="desk-brief-items" aria-label="Request items">
+    <section class="desk-brief-items" aria-label="Request items" data-answered={approval().answered ? "" : undefined}>
       <Show when={approval().verbatim}><p class="desk-brief-ledger">Recorded answer: <bdi dir="auto">{approval().verbatim}</bdi></p></Show>
-      <div class="desk-brief-item-head" aria-hidden="true"><span>ID</span><span>Question</span><span>Agent recommends</span><span>Alternative(s)</span><span>Approved</span></div>
+      <div class="desk-brief-item-head" aria-hidden="true"><span>ID</span><span>Question</span><span>Agent recommends</span><span>Alternative(s)</span><Show when={approval().answered}><span>Approved</span></Show></div>
       <ol class="desk-brief-item-list"><For each={rows()}>{(row, index) => <li class="desk-brief-item">
         <span class="desk-brief-item-id"><span class="desk-brief-item-number">{index() + 1}.</span> <bdi dir="ltr">{row.id}</bdi></span>
-        <ItemCell label="Question" value={row.question} />
-        <ItemCell label="Agent recommends" value={row.recommended} />
-        <div class="desk-brief-item-cell"><span class="desk-brief-item-label">Alternative(s)</span><span dir="auto">{row.alternatives.length ? row.alternatives.map(value => value || MISSING).join(" · ") : MISSING}</span></div>
-        <ItemCell label="Approved" value={approval().answered ? approval().values[index()] : "—"} missing={false} />
+        {/* The question is the row's primary line, so it carries no label. */}
+        <div class="desk-brief-item-cell desk-brief-item-question"><Value value={row.question} /></div>
+        <ItemCell label="Agent recommends"><Value value={row.recommended} /></ItemCell>
+        <ItemCell label="Alternative(s)"><Show when={row.alternatives.length} fallback={<Value value="" />}>
+          <For each={row.alternatives}>{(value, at) => <>{at() ? " · " : ""}<Value value={value} /></>}</For></Show></ItemCell>
+        <Show when={approval().answered}><ItemCell label="Approved"><span dir="auto">{approval().values[index()]}</span></ItemCell></Show>
       </li>}</For></ol>
     </section>
   </Show>
 }
 
-const ItemCell = (props: { label: string; value: string; missing?: boolean }) =>
-  <div class="desk-brief-item-cell"><span class="desk-brief-item-label">{props.label}</span><Show when={props.missing !== false} fallback={<span dir="auto">{props.value || "—"}</span>}><Value value={props.value} /></Show></div>
+const ItemCell = (props: { label: string; children: JSX.Element }) =>
+  <div class="desk-brief-item-cell"><span class="desk-brief-item-label">{props.label}</span>{props.children}</div>
 
 const SourceLinks = (props: { sources: BriefSource[]; refs: EvidenceRef[]; item: DeskItem }) => {
   const links = () => props.sources.flatMap(source => { const link = sourceLink(source, props.refs, props.item); return link ? [{ ...link, label: source.label }] : [] })

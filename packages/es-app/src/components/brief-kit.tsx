@@ -29,13 +29,16 @@ export const linkName = (url: string) => {
 }
 
 // An exact value to copy (a command, a setting). Display only: nothing here runs or applies anything.
-export const CopyCode = (props: { text: string }) => {
+export const CopyCode = (props: { text: string; inline?: boolean }) => {
   const [copied, setCopied] = createSignal<"Copied" | "Copy failed">()
   const copy = async () => {
     const ok = await navigator.clipboard?.writeText(props.text).then(() => true, () => false) || copyBySelection(props.text)
     setCopied(ok ? "Copied" : "Copy failed")
     setTimeout(() => setCopied(), 2000)
   }
+  // A short value sits in the text flow; a command keeps its own scrolling block.
+  if (props.inline) return <span class="desk-command desk-command-inline"><code dir="ltr">{props.text}</code>
+    <button type="button" class="desk-command-copy" aria-label="Copy value" onClick={() => void copy()}>{copied() ?? "Copy"}</button></span>
   return <div class="desk-command"><pre dir="ltr"><code>{props.text}</code></pre>
     <button type="button" class="desk-command-copy" aria-label="Copy command" onClick={() => void copy()}>{copied() ?? "Copy"}</button></div>
 }
