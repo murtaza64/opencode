@@ -215,6 +215,7 @@ private fun Pulse(store: DeskStore, nav: Nav) {
                 Label(text, color = color, modifier = Modifier.clickable { menu = true }.padding(4.dp).testTag("link"))
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Ink.Raised) {
                     DropdownMenuItem(text = { Text("Refresh now") }, onClick = { menu = false; scope.launch { store.refresh() } })
+                    DropdownMenuItem(text = { Text("Notifications") }, onClick = { menu = false; nav.push(Route.Settings) }, modifier = Modifier.testTag("settings"))
                     DropdownMenuItem(text = { Text(store.gateway.origin, style = MaterialTheme.typography.labelMedium) }, onClick = { menu = false }, enabled = false)
                     store.gateway.savedOrigins.filter { it != ai.opencode.desk.DeskPointers.normalize(store.gateway.origin) }.forEach { other ->
                         DropdownMenuItem(text = { Text("Switch to $other", style = MaterialTheme.typography.bodyMedium) }, onClick = { menu = false; store.switchOrigin(other) }, modifier = Modifier.testTag("switch-origin"))

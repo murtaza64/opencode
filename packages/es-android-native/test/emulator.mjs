@@ -57,6 +57,14 @@ const waitFor = async (predicate, label, timeout = 60_000) => {
     await sleep(delay)
   }
 }
+const until = async (check, label, timeout = 30_000) => {
+  const deadline = Date.now() + timeout
+  for (let delay = 300; ; delay = Math.min(delay * 2, 2000)) {
+    if (await check()) return
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${label}`)
+    await sleep(delay)
+  }
+}
 const waitWrite = async (predicate, label, timeout = 15_000) => {
   const deadline = Date.now() + timeout
   while (!fixture.writes.find(predicate)) { if (Date.now() > deadline) throw new Error(`Timed out waiting for write: ${label}`); await sleep(250) }
@@ -225,6 +233,47 @@ try {
   await screenshot("09-chat")
   await adb("shell", "input", "keyevent", "KEYCODE_BACK")
   await waitFor(byId("desk"), "home after back")
+
+  // 6. inbox-push 2b: notifications opt-in + Stay connected foreground service.
+  const permitted = async () => (await adb("shell", "dumpsys", "package", pkg)).toString().includes("android.permission.POST_NOTIFICATIONS: granted=true")
+  const serviceUp = async () => (await adb("shell", "dumpsys", "activity", "services", pkg)).toString().includes("StayConnectedService")
+  if (await permitted()) throw new Error("POST_NOTIFICATIONS was granted before the user tapped the Notifications switch")
+  if (await serviceUp()) throw new Error("Stay connected service running before opt-in")
+  await tap(await waitFor(byId("link"), "link menu"))
+  await tap(await waitFor(byText("Notifications"), "Notifications menu entry"))
+  await waitFor(byId("toggle-notifications"), "settings screen")
+  await screenshot("15-settings")
+  await tap(await waitFor(byId("toggle-notifications"), "notifications switch"))
+  // The OS permission dialog appears only now; allow it.
+  await tap(await waitFor(byId("com.android.permissioncontroller:id/permission_allow_button"), "OS permission dialog", 30_000))
+  await until(permitted, "permission granted after tap")
+  pass("POST_NOTIFICATIONS requested only on the Notifications tap, never at launch")
+  if (await serviceUp()) throw new Error("service started with only Notifications on")
+  // Earlier force-stops leave half-open streams at the fixture; the service must not add one.
+  await sleep(1_500)
+  const streamsBefore = server.streams()
+  await tap(await waitFor(byId("toggle-stay"), "stay connected switch"))
+  await until(serviceUp, "foreground service")
+  await until(async () => (await adb("shell", "dumpsys", "notification", "--noredact")).toString().includes("Connected to"), "ongoing Connected notification")
+  pass("Stay connected starts the specialUse foreground service with the ongoing notification")
+  await screenshot("16-stay-connected")
+  await sleep(2_000)
+  if (server.streams() !== streamsBefore) throw new Error(`service opened its own stream: ${streamsBefore} -> ${server.streams()}`)
+  pass("one SSE stream shared by UI and service (service opened none)")
+  // Swipe-away: the task is removed, the process and service stay.
+  await adb("shell", "input", "keyevent", "KEYCODE_HOME")
+  await sleep(3_000)
+  if (!(await serviceUp())) throw new Error("service died when the activity went to background")
+  pass("service survives leaving the app")
+  await adb("shell", "am", "start", "-W", "-n", `${pkg}/.MainActivity`)
+  await reverse()
+  await waitFor(byId("back"), "settings still open", 60_000)
+  await adb("shell", "input", "keyevent", "KEYCODE_BACK")
+  await waitFor(byId("desk"), "home after settings")
+  await tap(await waitFor(byId("link"), "link menu again"))
+  await tap(await waitFor(byText("Forget this host"), "forget"))
+  await until(async () => !(await serviceUp()), "service stopped on forget")
+  pass("Forget this host stops the service")
 
   if (fixture.unexpected?.length) throw new Error(`Fixture saw unknown routes: ${fixture.unexpected.join(", ")}`)
   console.info(`writes: ${fixture.writes.map((w) => `${w.method} ${w.path}`).join(" | ")}`)

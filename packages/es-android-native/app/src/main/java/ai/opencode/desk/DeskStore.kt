@@ -256,11 +256,15 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
     fun unpair() {
         loop?.cancel(); events?.cancel()
         gateway.forget()
+        Settings.setStayConnected(getApplication(), false)
+        StayConnectedService.sync(getApplication())
         states.clear(); open = emptyList(); agents = emptyList(); surfaces = emptyList(); host = null
         desk = null; deskBusy = false
         outbox.clear(); drafts.clear(); pins = emptyList()
         link = Link.Unpaired
     }
+
+    val connected: Boolean get() = loop?.isActive == true
 
     fun connect() {
         link = Link.Connecting
@@ -277,7 +281,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
             var backoff = 1_000L
             while (isActive) {
                 runCatching {
-                    gateway.stream("/es/api/notification-events") { data -> if (data != "connected") nudges.tryEmit(Unit) }
+                    gateway.stream("/es/api/notification-events") { data -> if (Push.refetchOn(data)) nudges.tryEmit(Unit) }
                 }.onFailure {
                     if (it is PairingRequired) { link = Link.Unpaired; return@launch }
                     if (it is AccessRequired) link = Link.Access
@@ -338,8 +342,13 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private var baselined = false
+
     private fun reconcileNotifications(records: List<AttentionRecord>, requests: List<ai.opencode.desk.model.Notification>) {
         val origin = DeskPointers.normalize(gateway.origin)
+        // First read after process start is the baseline: the ledger catches up, nothing posts.
+        val quiet = !baselined
+        baselined = true
         val result = Reconciler.reconcile(
             origin,
             records.map { Reconciler.Record(it.editspace, it.id, it.revision, it.title, it.status, it.content_revision, it.delivery_state, it.answer?.answered_at) },
@@ -348,7 +357,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         )
         ledger = result.ledger
         prefs.edit().putString("notify.ledger", ai.opencode.desk.net.json.encodeToString(MapSerializer(String.serializer(), Int.serializer()), ledger)).apply()
-        notifier.apply(result.actions)
+        if (Push.shouldPost(quiet, Settings.notifications(getApplication()))) notifier.apply(result.actions)
     }
 
     // A notification tap. Refused when the tag's origin is not this instance's pairing

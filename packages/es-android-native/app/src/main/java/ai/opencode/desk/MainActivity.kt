@@ -23,7 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.platform.LocalContext
 import ai.opencode.desk.ui.AgentScreen
 import ai.opencode.desk.ui.ChatScreen
 import ai.opencode.desk.ui.ConnectScreen
@@ -37,7 +37,7 @@ import ai.opencode.desk.ui.SurfaceScreen
 class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
-        (androidx.lifecycle.ViewModelProvider(this)[DeskStore::class.java]).refreshProfiles()
+        DeskApp.store(this).refreshProfiles()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -49,7 +49,7 @@ class MainActivity : ComponentActivity() {
     private fun handleDeepLink(intent: Intent?) {
         if (intent?.action != Notifier.ACTION_OPEN) return
         val target = Reconciler.Target(intent.getStringExtra("desk.origin").orEmpty(), intent.getStringExtra("desk.editspace").orEmpty(), intent.getStringExtra("desk.kind").orEmpty(), intent.getStringExtra("desk.id").orEmpty())
-        val store = androidx.lifecycle.ViewModelProvider(this)[DeskStore::class.java]
+        val store = DeskApp.store(this)
         if (!store.openDeepLink(target, intent.getIntExtra("desk.revision", 0)))
             android.widget.Toast.makeText(this, "That decision belongs to the other profile's Desk", android.widget.Toast.LENGTH_LONG).show()
     }
@@ -78,7 +78,7 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun App(openAgent: String? = null) {
-    val store: DeskStore = viewModel()
+    val store: DeskStore = DeskApp.store(LocalContext.current)
     val nav = remember { Nav() }
     androidx.compose.runtime.LaunchedEffect(openAgent, store.agents.size) {
         if (openAgent != null && nav.current == Route.Home && store.agents.any { it.key == openAgent }) nav.push(Route.Agent(openAgent))
@@ -104,6 +104,7 @@ private fun App(openAgent: String? = null) {
                 Route.Home -> HomeScreen(store, nav)
                 is Route.Agent -> AgentScreen(store, nav, route.key)
                 Route.Chat -> ChatScreen(store, nav)
+                Route.Settings -> ai.opencode.desk.ui.SettingsScreen(store, nav)
                 is Route.Surface -> SurfaceScreen(store, nav, route.id)
             }
         }

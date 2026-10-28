@@ -229,7 +229,7 @@ export const createFixture = () => new Promise((resolve) => {
     fixture.unexpected = [...(fixture.unexpected ?? []), `${request.method} ${path}`]
     json({ error: "fixture: unknown route" }, 404)
   })
-  server.listen(0, "127.0.0.1", () => resolve({ url: `http://127.0.0.1:${server.address().port}`, close: () => { for (const stream of streams) stream.destroy(); server.closeAllConnections(); return new Promise((done) => server.close(done)) }, nudge: () => { for (const stream of streams) stream.write("data: nudge\n\n") } }))
+  server.listen(0, "127.0.0.1", () => resolve({ url: `http://127.0.0.1:${server.address().port}`, close: () => { for (const stream of streams) stream.destroy(); server.closeAllConnections(); return new Promise((done) => server.close(done)) }, nudge: () => { for (const stream of streams) stream.write("data: nudge\n\n") }, streams: () => streams.size }))
 })
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
