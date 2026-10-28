@@ -61,6 +61,7 @@ import { wakeMarker, type WakeEvent } from "../wake-marker"
 import { anchorNote, anchorRange, parseAnchor, type MessageAnchor } from "../message-anchor"
 import { perfEvent, perfReady, perfSpan } from "../perf-telemetry"
 import { targetReady } from "../startup"
+import { ariaShortcut, shortcutLabel } from "../shortcuts"
 
 // The provider catalog per directory, shared by session views for a few minutes so switching
 // sessions does not refetch it each time.
@@ -1611,7 +1612,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         )}
       </Show>}
       sessionActions={<>
-        <Show when={!props.expanded}><button aria-label="Expand editor" title="Ctrl+E" onClick={toggleFloat}><Glyph name="screen-full" />Expand editor</button></Show>
+        <Show when={!props.expanded}><button aria-label="Expand editor" aria-keyshortcuts={ariaShortcut("expandEditor")} title={shortcutLabel("expandEditor")} onClick={toggleFloat}><Glyph name="screen-full" />Expand editor</button></Show>
         <button class="act-fork" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
           <Glyph name="repo-forked" />{forking() ? "Forking…" : "Fork"}
         </button>
@@ -1767,15 +1768,15 @@ export function SessionView(props: { sessionID: string; directory: string; embed
           {/* Icon controls keep the title primary; names, shortcuts and prompt scope stay accessible. */}
           <div class="session-header-tools">
             <span class="sr-only" id={`prompt-scope-${sessionID}`}>{promptScope()}</span>
-            <button class="header-icon" aria-label="Find" aria-keyshortcuts="Meta+F Control+F" title="Find in transcript (Cmd/Ctrl+F)"
+            <button class="header-icon" aria-label="Find" aria-keyshortcuts={ariaShortcut("find")} title={`Find in transcript (${shortcutLabel("find")})`}
               onPointerDown={(event) => event.preventDefault()} onClick={openFind}><Icon name="magnifying-glass" size="small" /></button>
-            <button class="header-icon" aria-label="Previous prompt" aria-keyshortcuts="Control+P" aria-describedby={`prompt-scope-${sessionID}`}
-              title={`Previous prompt (Ctrl+P) · ${promptScope()}`} onPointerDown={(event) => event.preventDefault()}
+            <button class="header-icon" aria-label="Previous prompt" aria-keyshortcuts={ariaShortcut("previousPrompt")} aria-describedby={`prompt-scope-${sessionID}`}
+              title={`Previous prompt (${shortcutLabel("previousPrompt")}) · ${promptScope()}`} onPointerDown={(event) => event.preventDefault()}
               disabled={!promptState().previous && !live.hasOlder()} onClick={() => jumpUserMessage(-1)}>
               <span class="header-icon-up"><Icon name="chevron-down" size="small" /></span>
             </button>
-            <button class="header-icon" aria-label="Next prompt" aria-keyshortcuts="Control+N" aria-describedby={`prompt-scope-${sessionID}`}
-              title={`Next prompt (Ctrl+N) · ${promptScope()}`} onPointerDown={(event) => event.preventDefault()}
+            <button class="header-icon" aria-label="Next prompt" aria-keyshortcuts={ariaShortcut("nextPrompt")} aria-describedby={`prompt-scope-${sessionID}`}
+              title={`Next prompt (${shortcutLabel("nextPrompt")}) · ${promptScope()}`} onPointerDown={(event) => event.preventDefault()}
               disabled={!promptState().next} onClick={() => jumpUserMessage(1)}><Icon name="chevron-down" size="small" /></button>
             {/* Mail routing tools are for debugging delivery, not daily use: only with localStorage es-app:debug=1. */}
             <Show when={location() && localStorage.getItem("es-app:debug") === "1" ? location() : undefined}>{(scope) =>
@@ -1996,7 +1997,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         <div class="float-editor">
           <div class="float-head">
             <span style="flex:1" />
-            <button onClick={closeFloat}>⤡ collapse <kbd class="composer-key">Ctrl+E</kbd></button>
+            <button onClick={closeFloat}>⤡ collapse <kbd class="composer-key">{shortcutLabel("expandEditor")}</kbd></button>
           </div>
           <WorkStatus />
           {/* The expanded editor covers the transcript, so its outgoing bubbles show here too. */}

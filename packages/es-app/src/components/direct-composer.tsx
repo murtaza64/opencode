@@ -1,6 +1,7 @@
 import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js"
 import type { Composer, ComposerAction } from "../composer"
 import { ComposerImages } from "./composer-images"
+import { ariaShortcut, shortcutLabel } from "../shortcuts"
 import "./direct-composer.css"
 
 // One primary action (Send when idle, Steer while busy); Queue and Aside sit in
@@ -83,7 +84,7 @@ export const DirectComposer = (props: {
       class={p.class}
       data-keyboard-target={primary() === p.action}
       aria-label={label(p.action)}
-      aria-keyshortcuts={primary() === p.action ? "Meta+Enter Control+Enter" : undefined}
+      aria-keyshortcuts={primary() === p.action ? ariaShortcut("primaryAction") : undefined}
       title={reason(p.action) || (state.busy ? hint(p.action) : undefined)}
       disabled={!!reason(p.action) || empty()}
       onPointerDown={keepFocus}
@@ -97,7 +98,7 @@ export const DirectComposer = (props: {
         <span class="direct-action-hint">{hint(p.action)}</span>
       </Show>
       <kbd class="direct-button-hint" aria-hidden="true">
-        {primary() === p.action ? "⌘↵" : nextTarget() === p.action ? "⌘M" : ""}
+        {primary() === p.action ? shortcutLabel("primaryAction") : nextTarget() === p.action ? shortcutLabel("cycleTarget") : ""}
       </kbd>
     </button>
   )
@@ -220,7 +221,7 @@ const PendingEdit = (props: { composer: Composer; connected: boolean; id: string
         <button class="direct-primary" aria-label={edit().status === "unknown" ? "Retry same update" : "Save pending input"}
           disabled={!props.connected || edit().status === "saving" || edit().status === "conflict"} onClick={save}>
           <span>{edit().status === "unknown" ? "Retry update" : "Save"}</span>
-          <kbd class="direct-button-hint" aria-hidden="true">⌘↵</kbd>
+          <kbd class="direct-button-hint" aria-hidden="true">{shortcutLabel("submit")}</kbd>
         </button>
       </div>
     </section>

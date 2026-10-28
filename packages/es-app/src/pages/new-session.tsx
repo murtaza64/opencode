@@ -15,6 +15,7 @@ import { sendFirstMessage } from "../composer"
 import { sessionHref, useDashboard } from "../state"
 import { AppHeader } from "../components/native-header"
 import type { Session } from "@opencode-ai/sdk/v2"
+import { shortcutLabel } from "../shortcuts"
 import "./new-session.css"
 
 const DRAFT = "es-app:new-session:draft:1"
@@ -246,14 +247,14 @@ export default function NewSessionPage() {
               <span class="err" role="alert">{target()?.label} is unreachable. Choose {host()?.label} or try again.</span>
               <button type="button" onClick={() => void targetFeed()?.load()}>Try again</button>
             </Show>
-            <button type="button" class="primary" disabled={targetDown()} onClick={handOff}>Start on {target()?.label} <kbd aria-hidden="true">⌘/Ctrl↵</kbd></button>
+            <button type="button" class="primary" disabled={targetDown()} onClick={handOff}>Start on {target()?.label} <kbd aria-hidden="true">{shortcutLabel("submit")}</kbd></button>
           </div>
         }>
         <div class="new-session-submit">
           <Show when={error()}><span class="err" role="alert">{error()}</span></Show>
           <Show when={attempt() && !pending()}><button type="button" onClick={() => void reconcile()}>Check again</button></Show>
           <button type="submit" class="primary" disabled={attempt() ? !retryable() : locked() || !directory() || !text().trim()}>
-            {pending() ? "Creating…" : workHosts().length > 1 ? `Start on ${host()?.label}` : "Send"} <kbd aria-hidden="true">⌘/Ctrl↵</kbd>
+            {pending() ? "Creating…" : workHosts().length > 1 ? `Start on ${host()?.label}` : "Send"} <kbd aria-hidden="true">{shortcutLabel("submit")}</kbd>
           </button>
         </div>
         </Show>

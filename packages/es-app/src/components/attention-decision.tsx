@@ -11,6 +11,7 @@ import { Markdown } from "@opencode-ai/session-ui/markdown"
 import { requestHasSteps, requestMarkdown } from "../request-markdown"
 import { answerDraftKey, attentionPath, blockedReason, contentRevision, decisionLabel, deliveryLabel, inputPayload, inputProblem, inputText, INPUT_KINDS, type createAttention, type AttentionOption, type AttentionRecord, type InputValue } from "../attention"
 import { requestAgent, type AgentRef, type RequestAgent } from "../attention-agent"
+import { ariaShortcut } from "../shortcuts"
 
 type Attention = ReturnType<typeof createAttention>
 
@@ -116,7 +117,7 @@ const Answer = (props: { record: AttentionRecord; attention: Attention; options:
     <Show when={props.sends?.text ? props.sends : undefined}>{sends => <SendsPreview sends={sends()} />}</Show>
     <div class="home-actions">
       {/* On cards the selected card already shows the choice, so the button stays short; its name still says what is sent. */}
-      <button class="home-primary" dir="auto" disabled={!ready()} aria-keyshortcuts="Meta+Enter Control+Enter" onClick={() => void send()}
+      <button class="home-primary" dir="auto" disabled={!ready()} aria-keyshortcuts={ariaShortcut("submit")} onClick={() => void send()}
         aria-label={props.prepared && selected() ? `Send ${selected()!.label}` : undefined}>
         <Show when={selected()} fallback="Send answer">{option => <Show when={!props.prepared} fallback="Send">Send <bdi dir="auto">{option().label}</bdi></Show>}</Show>
       </button>
