@@ -338,10 +338,21 @@ export const RestartContinuation = Schema.Struct({
 }).annotate({ identifier: "RestartContinuation" })
 export type RestartContinuation = Types.DeepMutable<Schema.Schema.Type<typeof RestartContinuation>>
 
+// UI control provenance for an explicit Nudge, carried by the newest message the human observed. It is
+// never model history and never user intent; it is the idempotency record for the Nudge request ID.
+// `resume` started a turn with no message added; `input` admitted one sourced Nudge input.
+export const NudgeMarker = Schema.Struct({
+  requestID: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+  mode: Schema.Literals(["resume", "input"]),
+  time: NonNegativeInt,
+}).annotate({ identifier: "NudgeMarker" })
+export type NudgeMarker = Types.DeepMutable<Schema.Schema.Type<typeof NudgeMarker>>
+
 const messageBase = {
   id: MessageID,
   sessionID: partBase.sessionID,
   restarts: Schema.optional(Schema.Array(RestartContinuation)),
+  nudges: Schema.optional(Schema.Array(NudgeMarker)),
 }
 
 export const User = Schema.Struct({

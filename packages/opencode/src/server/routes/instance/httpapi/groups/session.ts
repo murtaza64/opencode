@@ -8,6 +8,7 @@ import { SessionAside } from "@/session/aside"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionFailure } from "@/session/failure"
+import { SessionNudge } from "@/session/nudge"
 import { SessionRestart } from "@/session/restart"
 import { SessionInput } from "@/session/input"
 import { SessionRevert } from "@/session/revert"
@@ -140,6 +141,7 @@ export const SessionPaths = {
   fork: `${root}/:sessionID/fork`,
   abort: `${root}/:sessionID/abort`,
   retry: `${root}/:sessionID/retry`,
+  nudge: `${root}/:sessionID/nudge`,
   restart: `${root}/:sessionID/restart`,
   recover: `${root}/:sessionID/recover`,
   supersede: `${root}/:sessionID/supersede`,
@@ -429,6 +431,20 @@ export const SessionApi = HttpApi.make("session")
             summary: "Retry a failed turn",
             description:
               "Continue a root session whose newest message is the given failed assistant step, without adding a user message. Starts only while the session is idle and that step is still newest; otherwise reports why it did not start. Steps that ran tools are never retried.",
+          }),
+        ),
+        HttpApiEndpoint.post("nudge", SessionPaths.nudge, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: SessionNudge.Payload,
+          success: described(SessionNudge.Result, "Nudge decision"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError, ConflictError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.nudge",
+            summary: "Continue an idle session on an explicit Nudge",
+            description:
+              "Explicit UI control for an idle root session whose newest message is still `observedMessageID`. A tail ending in tool results whose effects are durable resumes with no message added. A naturally finished turn continues through one sourced Nudge input (`editspace-mail`, kind `nudge`, text `Continue.`), settled once presented. Refused without writing: `busy`, `waiting` (permission or question), `pending-input` (with `requestIDs`; nothing is promoted or re-routed), `failed` (use retry), `uncertain` (a pending, running, interrupted or abandoned tool, an aborted or unfinished step; use recover), `unanswered`, `stale` (re-read the tail), `child`, `archived`, `superseded`, `mismatch`. A marker on the observed message records the decision: the same body returns the same outcome, the same requestID with a different body answers 409. Interrupted tools are never re-run.",
           }),
         ),
         HttpApiEndpoint.post("restartContinue", SessionPaths.restart, {

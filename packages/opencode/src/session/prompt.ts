@@ -36,6 +36,7 @@ import { Permission } from "@/permission"
 import { Question } from "@/question"
 import { SessionFailure } from "./failure"
 import { SessionRestart } from "./restart"
+import { SessionNudge } from "./nudge"
 import { SessionStatus } from "./status"
 import { LLM } from "./llm"
 import { Shell } from "@opencode-ai/core/shell"
@@ -120,6 +121,9 @@ export interface Interface {
   readonly recover: (
     input: { sessionID: SessionID } & SessionRestart.RecoverPayload,
   ) => Effect.Effect<SessionRestart.RecoverResult, Session.NotFound>
+  readonly nudge: (
+    input: { sessionID: SessionID } & SessionNudge.Payload,
+  ) => Effect.Effect<SessionNudge.Result, Session.NotFound | SessionInput.Conflict>
   readonly restartStatus: (input: {
     sessionID: SessionID
     restartID: string
@@ -1677,6 +1681,129 @@ const layer = Layer.effect(
       return decision.reason
     })
 
+    // An explicit Nudge from the UI on an idle Session, decided from its newest durable message (see
+    // SessionNudge.decide). Same lock and freshness rules as retry. A resumed turn adds no message; a
+    // finished turn continues through one sourced Nudge input. The marker on the observed message is the
+    // idempotency record, so a lost acknowledgment re-sent with the same body gets its real outcome.
+    const nudge = Effect.fn("SessionPrompt.nudge")(function* (input: { sessionID: SessionID } & SessionNudge.Payload) {
+      const ctx = yield* InstanceState.context
+      const session = yield* sessions.get(input.sessionID)
+      const requestID = SessionNudge.inputRequestID(input.requestID)
+      const result = (outcome: SessionNudge.Outcome, extra?: { messageID?: MessageID; requestIDs?: readonly string[] }) =>
+        ({ outcome, requestID: input.requestID, ...extra }) satisfies SessionNudge.Result
+      const promotedMessage = inputs.get(input.sessionID, requestID).pipe(
+        Effect.option,
+        Effect.map((receipt) => (Option.isSome(receipt) && "messageID" in receipt.value ? receipt.value.messageID : undefined)),
+      )
+      const recorded = Effect.gen(function* () {
+        const marker = (yield* restartAnchor(input.sessionID, input.observedMessageID))?.info.nudges?.find(
+          (item) => item.requestID === input.requestID,
+        )
+        if (marker) {
+          const messageID = marker.mode === "input" ? yield* promotedMessage : undefined
+          return result("started", messageID ? { messageID } : undefined)
+        }
+        // A request is decided on the tail it observed, so a reused ID shows up among the newest messages.
+        const recent = yield* sessions.messages({ sessionID: input.sessionID, limit: 20 }).pipe(Effect.orDie)
+        if (recent.some((message) => message.info.nudges?.some((item) => item.requestID === input.requestID)))
+          return yield* new SessionInput.Conflict({ message: "Nudge request ID already used for a different message" })
+        return undefined
+      })
+      const evaluate = Effect.gen(function* () {
+        if (!FSUtil.sameDirectory(session.directory, ctx.directory)) return { outcome: "mismatch" as const }
+        const fresh = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+        if (fresh.parentID) return { outcome: "child" as const }
+        if (fresh.time.archived) return { outcome: "archived" as const }
+        // A pending revert hides the newest messages; the next prompt resolves it.
+        if (fresh.revert) return { outcome: "stale" as const }
+        const waiting =
+          (yield* permission.list()).some((item) => item.sessionID === input.sessionID) ||
+          (yield* questions.list()).some((item) => item.sessionID === input.sessionID)
+        if (waiting) return { outcome: "waiting" as const }
+        const pending = yield* inputs.list(input.sessionID, { state: "pending", limit: 50 })
+        return SessionNudge.decide({
+          observedMessageID: input.observedMessageID,
+          now: Date.now(),
+          tail: (yield* sessions.messages({ sessionID: input.sessionID, limit: 1 }).pipe(Effect.orDie)).at(-1),
+          newestByInsertion: yield* SessionFailure.lastInserted(input.sessionID).pipe(Effect.provideService(Database.Service, database)),
+          pendingRequestIDs: pending.items.map((item) => item.requestID).filter((id) => id !== requestID),
+        })
+      })
+      const refusal = (decision: SessionNudge.Decision) =>
+        decision.outcome === "pending-input" ? result("pending-input", { requestIDs: decision.requestIDs }) : result(decision.outcome)
+
+      const repeated = yield* recorded
+      if (repeated) return repeated
+      // The Nudge input exists only once its request was decided on this observed message; without the
+      // marker there, the same request ID was used with a different body.
+      const existing = yield* inputs.get(input.sessionID, requestID).pipe(Effect.option)
+      const prior = Option.isSome(existing) ? existing.value.state : undefined
+      if (prior && prior !== "cancelled" && prior !== "pending")
+        return yield* new SessionInput.Conflict({ message: "Nudge request ID already used for a different message" })
+      // A running turn rewrites the tail, so busy is answered before any tail evidence is read.
+      const busy = yield* state.assertNotBusy(input.sessionID).pipe(
+        Effect.as(false),
+        Effect.catchTag("SessionBusyError", () => Effect.succeed(true)),
+      )
+      if (busy) return result("busy")
+      const first = yield* evaluate
+      // A Nudge input left pending by an interrupted earlier attempt must not be promoted by a later wake.
+      if (prior === "pending" && (first.outcome !== "started" || first.mode !== "input"))
+        yield* inputs.cancel(input.sessionID, requestID).pipe(Effect.ignore)
+      if (first.outcome !== "started") return refusal(first)
+      // Admission takes the Session's run lock, so the Nudge input is admitted before the locked guard,
+      // which re-checks, promotes it itself, and withdraws it if declined. A wake from another request
+      // in between may promote it first; the guard then sees a newer tail and reports stale.
+      if (first.mode === "input" && !prior) {
+        const admitted = yield* inputs
+          .admit(input.sessionID, {
+            requestID,
+            delivery: "steer",
+            text: SessionNudge.TEXT,
+            source: { type: "editspace-mail", id: requestID, sender: SessionNudge.SENDER, recipient: input.sessionID, kind: SessionNudge.KIND },
+          })
+          .pipe(Effect.option)
+        if (Option.isNone(admitted)) return result("superseded")
+      }
+      // A cancelled Nudge input from a declined earlier attempt cannot be re-admitted under the same ID.
+      if (first.mode === "input" && prior === "cancelled") return result("stale")
+      let declined: SessionNudge.Result | undefined
+      let promoted: MessageID | undefined
+      const guard = Effect.gen(function* () {
+        const again = yield* recorded
+        if (again) {
+          declined = again
+          return { outcome: "recorded" as const }
+        }
+        const decision = yield* evaluate
+        if (decision.outcome !== "started" || decision.mode !== first.mode) {
+          declined = decision.outcome === "started" ? result("stale") : refusal(decision)
+          return { outcome: "declined" as const }
+        }
+        const tail = (yield* sessions.messages({ sessionID: input.sessionID, limit: 1 }).pipe(Effect.orDie)).at(-1)!
+        if (decision.mode === "input") {
+          if (!(yield* inputs.promote(input.sessionID, false))) {
+            declined = result("stale")
+            return { outcome: "declined" as const }
+          }
+          promoted = yield* promotedMessage
+        }
+        // Recorded only once the turn is certain to start, so a repeated request never reports a turn
+        // that a declined attempt did not run.
+        const marker: SessionV1.NudgeMarker = { requestID: input.requestID, mode: decision.mode, time: Date.now() }
+        yield* sessions.updateMessage({ ...tail.info, nudges: [...(tail.info.nudges ?? []), marker] })
+        return undefined
+      })
+      const decision = yield* state.startIdle(input.sessionID, runLoop(input.sessionID), guard).pipe(
+        Effect.catchTag("SessionSuperseded", () => Effect.succeed({ outcome: "superseded" as const })),
+      )
+      if (decision.outcome === "started") return result("started", promoted ? { messageID: promoted } : undefined)
+      if (first.mode === "input" && !promoted) yield* inputs.cancel(input.sessionID, requestID).pipe(Effect.ignore)
+      if (decision.outcome === "busy") return (yield* recorded) ?? result("busy")
+      if (decision.outcome === "superseded") return result("superseded")
+      return declined ?? result("stale")
+    })
+
     const restartStatus = Effect.fn("SessionPrompt.restartStatus")(function* (input: {
       sessionID: SessionID
       restartID: string
@@ -1833,6 +1960,7 @@ const layer = Layer.effect(
       deliverSteer,
       restartContinue,
       recover,
+      nudge,
       restartStatus,
       cancel,
       prompt,

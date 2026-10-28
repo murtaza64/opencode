@@ -241,6 +241,12 @@ export type RestartContinuation = {
   time: number
 }
 
+export type NudgeMarker = {
+  requestID: string
+  mode: "resume" | "input"
+  time: number
+}
+
 export type OutputFormatText = {
   type: "text"
 }
@@ -261,6 +267,7 @@ export type UserMessage = {
   id: string
   sessionID: string
   restarts?: Array<RestartContinuation>
+  nudges?: Array<NudgeMarker>
   role: "user"
   source?: SessionInputMailSource
   time: {
@@ -358,6 +365,7 @@ export type AssistantMessage = {
   id: string
   sessionID: string
   restarts?: Array<RestartContinuation>
+  nudges?: Array<NudgeMarker>
   role: "assistant"
   time: {
     created: number
@@ -2343,6 +2351,7 @@ export type ExperimentalCapabilities = {
       compressedMetadata: false
     }
     context?: true
+    nudge?: true
   }
   noReplyRecordOnly?: true
 }
@@ -2924,6 +2933,30 @@ export type SessionRetryResult = {
     | "superseded"
     | "mismatch"
   failed?: SessionFailure
+}
+
+export type SessionNudgeInput = {
+  requestID: string
+  observedMessageID: string
+}
+
+export type SessionNudgeResult = {
+  outcome:
+    | "started"
+    | "busy"
+    | "waiting"
+    | "pending-input"
+    | "failed"
+    | "uncertain"
+    | "unanswered"
+    | "stale"
+    | "archived"
+    | "child"
+    | "superseded"
+    | "mismatch"
+  requestID: string
+  messageID?: string
+  requestIDs?: Array<string>
 }
 
 export type SessionRestartContinueInput = {
@@ -11629,6 +11662,44 @@ export type SessionRetryResponses = {
 }
 
 export type SessionRetryResponse = SessionRetryResponses[keyof SessionRetryResponses]
+
+export type SessionNudgeData = {
+  body?: SessionNudgeInput
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/nudge"
+}
+
+export type SessionNudgeErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type SessionNudgeError = SessionNudgeErrors[keyof SessionNudgeErrors]
+
+export type SessionNudgeResponses = {
+  /**
+   * Nudge decision
+   */
+  200: SessionNudgeResult
+}
+
+export type SessionNudgeResponse = SessionNudgeResponses[keyof SessionNudgeResponses]
 
 export type SessionRestartStatusData = {
   body?: never
