@@ -12,6 +12,7 @@ import { briefApproval } from "../brief-approval"
 import { currentJob, readConversation, regeneratingJob, type BriefJob } from "../desk-session"
 import { LinkedText } from "./linked-text"
 import contract from "../brief-contract.json"
+import { readBriefFeedback, sendBriefFeedback, type BriefRating } from "../brief-feedback"
 
 const Refs = (props: { refs: string[]; known: EvidenceRef[]; item: DeskItem }) =>
   <For each={props.refs}>{id => {
@@ -86,8 +87,41 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
       <Show when={!complete()}><SourceLinks sources={value().result.sources} refs={value().job.meta.refs} item={props.item} /></Show>
       <p class="home-source">Brief for revision {value().job.meta.revision}<Show when={value().omitted}> · {value().omitted} uncited statement(s) omitted</Show> · <A href={sessionHref(value().job.id, value().job.directory)}>Brief thread</A>
 </p>
+      {/* Keyed to the brief shown, so a newer brief never inherits this one's rating. */}
+      <Show when={value().job} keyed>{job => <BriefFeedbackControls job={job} />}</Show>
     </details>}</Show>
   </section>
+}
+
+const RATINGS: { value: BriefRating; label: string }[] = [{ value: "good", label: "Good" }, { value: "neutral", label: "Neutral" }, { value: "bad", label: "Bad" }]
+
+// How useful this brief was, for the people improving briefs. It is about the brief shown (its job), never the
+// decision: nothing here touches the answer, its draft or Send. Unrated stays unrated; pressing the chosen rating
+// again clears it. The note is optional and saved with the rating.
+const BriefFeedbackControls = (props: { job: BriefJob }) => {
+  const [saved, { mutate }] = createResource(() => props.job.id, job => readBriefFeedback(job).catch(() => undefined))
+  const [note, setNote] = createSignal<string>()
+  const [status, setStatus] = createSignal("")
+  const text = () => note() ?? saved()?.text ?? ""
+  const send = async (rating: BriefRating | null) => {
+    setStatus("")
+    try {
+      mutate(await sendBriefFeedback(props.job, rating, text()))
+      setNote(undefined)
+      setStatus("Saved")
+    } catch (cause) {
+      setStatus(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+  return <div class="desk-brief-feedback" role="group" aria-label="Rate this brief">
+    <span class="home-source">Was this brief useful?</span>
+    <For each={RATINGS}>{option => <button type="button" class="desk-link-button" aria-pressed={saved()?.rating === option.value}
+      onClick={() => void send(saved()?.rating === option.value ? null : option.value)}>{option.label}</button>}</For>
+    <Show when={saved()?.rating}><textarea aria-label="What would have made this brief better? (optional)" rows={2} maxLength={2000} dir="auto"
+      placeholder="What would have made it better? (optional)" value={text()} onInput={event => setNote(event.currentTarget.value)} />
+      <Show when={note() !== undefined && note() !== (saved()?.text ?? "")}><button type="button" class="desk-link-button" onClick={() => void send(saved()!.rating)}>Save note</button></Show></Show>
+    <Show when={status()}><span class="home-muted" role="status">{status()}</span></Show>
+  </div>
 }
 
 /** A short name for a link: owner/repo#123 becomes repo#123; otherwise the host. */

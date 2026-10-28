@@ -16,7 +16,7 @@ await context.route("**/*", (route) =>
 const page = await context.newPage()
 const errors = []
 page.on("pageerror", (error) => errors.push(error.message))
-const active = () => page.locator(".float-editor").or(page.locator(".prompt-box:not([inert])"))
+const active = () => page.locator(".prompt-box")
 const editor = () => active().getByRole("textbox", { name: "Message", exact: true })
 const button = (name) => active().getByRole("button", { name, exact: true })
 const more = () => active().getByRole("button", { name: "More send options", exact: true })
@@ -195,7 +195,7 @@ try {
   expect(menuBox.x >= 0 && menuBox.x + menuBox.width <= 390).toBe(true)
   await page.screenshot({ path: "artifacts/direct-composer/rtl.png", fullPage: true })
   await page.keyboard.press("Escape")
-  await page.getByRole("button", { name: /collapse/ }).click()
+  await button("Collapse editor").click()
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.evaluate(() => {
     document.documentElement.dir = "ltr"

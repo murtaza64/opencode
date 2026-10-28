@@ -25,7 +25,7 @@ await page.route("**/*", (route) =>
 )
 const artifacts = fileURLToPath(new URL("../artifacts/vim/", import.meta.url))
 await mkdir(artifacts, { recursive: true })
-const editor = () => page.locator(".float-editor textarea, .prompt-box:not([inert]) textarea")
+const editor = () => page.locator(".prompt-box textarea[aria-label='Message']")
 const position = () => editor().evaluate((el) => el.selectionStart)
 const normal = async (pos) => {
   await editor().focus()

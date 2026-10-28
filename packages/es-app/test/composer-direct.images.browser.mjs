@@ -19,7 +19,7 @@ await context.route("**/*", (route) => {
 })
 const page = await context.newPage()
 page.on("pageerror", (error) => errors.push(error.message))
-const active = () => page.locator(".float-editor").or(page.locator(".prompt-box:not([inert])"))
+const active = () => page.locator(".prompt-box")
 const editor = () => active().getByRole("textbox", { name: "Message", exact: true })
 const action = (name) => active().getByRole("button", { name, exact: true })
 const posts = (path) => fixture.calls.filter((call) => call.method === "POST" && call.path.endsWith(path))

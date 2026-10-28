@@ -1,10 +1,8 @@
-// Desk chat background tasks (Dot slice 1): "Ask in background" records the question as the human's own
-// message, shows a receipt at once and leaves the chat free; a second exchange is admitted while the task
-// works; a follow-up reaches the running task as steer input; the result reaches the asking conversation
-// once (queue), across a selection change, a reload and a second client; a newer desk conversation lists
-// the task without receiving its result. Disposable in-memory Core stand-in; no model, no real content.
-// The UI appears only when Core advertises noReplyRecordOnly (no reply to a no-reply message, even mid-turn);
-// the stand-in Core advertises it.
+// Desk chat background tasks that already exist (Dot slice 1; starting new ones from the chat was removed): the
+// chat has one ordinary Send and no strip without tasks; an existing task keeps its row and thread link; a
+// follow-up reaches the running task as steer input (only on a Core with noReplyRecordOnly); its result reaches
+// the asking conversation once (queue) across a selection change, a compaction, a reload and a second tab; a
+// newer desk conversation lists it without receiving the result. In-memory Core stand-in; no model, no real content.
 // Run from packages/es-app: node test/desk-tasks.browser.mjs [--shots DIR]
 import assert from "node:assert/strict"
 import { createRequire } from "node:module"
@@ -82,7 +80,7 @@ preview.fixture.editspaces = [{ name: "fixture", root: directory }]
 const browser = await chromium.launch({ channel: "chrome", headless: true })
 const open = async (desk = "ses_a", context) => {
   context ??= await browser.newContext({ viewport: { width: 1440, height: 1000 } })
-  await context.addInitScript(value => { if (window === window.top) { localStorage.setItem("es-app:front-desk:1", JSON.stringify(value)); localStorage.setItem("es-app:front-desk:auto-prepare", "off") } }, { session: desk, directory })
+  await context.addInitScript(value => { if (window === window.top) { localStorage.setItem("es-app:front-desk:1", JSON.stringify(value)); localStorage.setItem("es-app:front-desk:auto-prepare", "off"); localStorage.setItem("es-app:front-desk:tasks-used:1", "1") } }, { session: desk, directory })
   await context.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
   const page = await context.newPage()
   page.setDefaultTimeout(90_000)
@@ -92,43 +90,45 @@ const open = async (desk = "ses_a", context) => {
   return { page, context }
 }
 const results = () => core.deskInputs.filter(item => item.body.requestID.startsWith("fdtask-result:"))
-const metrics = page => page.evaluate(() => JSON.parse(localStorage.getItem("es-app:front-desk:task-metrics:1") ?? "[]"))
 // An earlier ordinary exchange: a desk with only no-reply messages would be answered on its next wake.
 deskTurn("user", "msg_desk_q1", "Morning, anything new?")
 deskTurn("assistant", "msg_desk_a1", "Nothing new since yesterday.")
 let failed = false
 try {
+  // 0. No tasks: no strip and no way to start one; the chat has one Send.
+  {
+    const empty = await open()
+    await expect(empty.page.locator(".desk-tasks")).toHaveCount(0)
+    await expect(empty.page.getByRole("button", { name: "Ask in background" })).toHaveCount(0)
+    await expect(empty.page.locator(".desk-chat textarea")).toHaveCount(1)
+    await empty.context.close()
+    console.log("NO TASKS: no strip, no Ask in background, one chat composer")
+  }
+  // A task that already exists (started by an earlier build) and is still working.
+  const asked = { body: { messageID: "msg_seed_ask" } }
+  const task = { session: { id: "ses_fdtask_" + "5".repeat(24), slug: "t", projectID: "fixture", directory, title: "Task: Which build is on the Mini?", version: "1",
+    parentID: "ses_fdbrief_x", time: { created: now, updated: now },
+    metadata: { frontDesk: { kind: "task", requestID: "msg_seed_ask", initiatingSession: "ses_a", initiatingDirectory: directory, packetSha256: "0".repeat(64), contract: 1,
+      question: "Which build is on the Mini?", asked: now, packetBytes: 120 } }, permission: [{ permission: "*", pattern: "*", action: "deny" }] } }
+  core.tasks.set(task.session.id, task)
   const { page, context } = await open()
   const composer = page.locator(".desk-chat textarea")
   const chip = page.locator(".desk-task")
 
-  // 1. Receipt: the question becomes the human's message and a task with that identity; the chat box empties.
-  await composer.fill("Which build is on the Mini?")
-  await page.getByRole("button", { name: "Ask in background" }).click()
-  // The echo is on screen before Core answers anything.
+  // 1. The existing task keeps its row; nothing offers to start or restart a task.
   await expect(chip).toHaveCount(1)
-  await expect(chip).toContainText(/sending|registered|working/)
-  await expect(composer).toHaveValue("")
-  await expect.poll(() => core.taskPrompts.length).toBe(1)
-  const [asked] = core.deskMessages
-  assert.equal(asked.id, "ses_a")
-  assert.equal(asked.body.noReply, true)
-  assert.match(asked.body.messageID, /^msg_/)
-  assert.equal(asked.body.parts[0].text, "Background check: Which build is on the Mini?")
-  const [task] = [...core.tasks.values()]
-  const meta = task.session.metadata.frontDesk
-  assert.deepEqual([meta.kind, meta.requestID, meta.initiatingSession, meta.contract], ["task", asked.body.messageID, "ses_a", 1])
-  assert.match(meta.packetSha256, /^[0-9a-f]{64}$/)
-  assert.equal(task.session.permission[0].permission, "*")
-  assert.equal(task.session.permission[0].action, "deny")
-  // The packet is the question plus the desk's view, not the conversation.
-  assert.match(core.taskPrompts[0].body.parts[0].text, /^Question: Which build is on the Mini\?\n/)
   await expect(chip).toContainText("working")
-  await expect.poll(async () => (await metrics(page)).find(item => item.task === task.session.id)?.ackMs).toBeLessThan(5000)
-  const ack = (await metrics(page)).find(item => item.task === task.session.id)
-  console.log(`RECEIPT shown ${ack.ackMs} ms after Ask; packet ${ack.packetBytes} bytes; question recorded as a no-reply desk message`)
+  await expect(chip.getByRole("link", { name: "Task thread" })).toHaveCount(1)
+  await expect(page.getByRole("button", { name: "Ask in background" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Ask again" })).toHaveCount(0)
+  // A draft survives a reload.
+  await composer.fill("draft kept")
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(page.locator(".desk-chat textarea")).toHaveValue("draft kept", { timeout: 120_000 })
+  await expect(chip).toContainText("working")
+  console.log("EXISTING TASK: row, thread link and state kept; no Ask in background / Ask again; draft survives reload")
 
-  // 2. Second exchange while the task works: an ordinary send is admitted to the desk at once.
+  // 2. Second exchange while the task works: Send is the ordinary chat send (never a no-reply or a task).
   const sentAt = Date.now()
   await composer.fill("Meanwhile, what is waiting for me?")
   await page.locator(".desk-chat").getByRole("button", { name: "Send", exact: true }).click()
@@ -138,6 +138,8 @@ try {
   await expect.poll(() => !!sentSecond(), { timeout: 15_000 }).toBe(true)
   const second = sentSecond()
   assert.equal(results().length, 0)
+  assert.equal(second.body.noReply, undefined)
+  assert.equal(core.tasks.size, 1)
   // The desk answers it while the task is still held working: the reply is in the transcript and the task is untouched.
   deskTurn("user", "msg_desk_q2", "Meanwhile, what is waiting for me?")
   deskTurn("assistant", "msg_desk_a2", "One decision is waiting: the bounded implementation scope.")
@@ -145,7 +147,7 @@ try {
   const answeredAt = Date.now()
   await expect(chip).toContainText("working")
   assert.equal(core.finished, false)
-  assert.equal(core.taskPrompts.length, 1)
+  assert.equal(core.taskPrompts.length, 0)
   console.log(`SECOND EXCHANGE admitted ${second.at - sentAt} ms after Send and its desk reply shown ${answeredAt - sentAt} ms after Send, while the task stayed working (stand-in desk reply)`)
 
   // 3. Follow-up to the running task: recorded in the chat, then steer input to the same task session.
@@ -179,8 +181,7 @@ try {
     senderSession: task.session.id, relationship: "front-desk-task", in_reply_to: asked.body.messageID })
   await expect(chip).toContainText("outcome")
   if (shots) await page.screenshot({ path: path.join(shots, "tasks-outcome.png") })
-  const delivered = (await metrics(page)).find(item => item.task === task.session.id)
-  console.log(`RESULT one queue input to ses_a after a selection change and a desk compaction; completion to delivered ${delivered.deliveredMs} ms`)
+  console.log("RESULT one queue input to ses_a after a selection change and a desk compaction")
 
   // 5. Reload, and a second tab that has no record of the delivery: still one input, never a conflicting one.
   // (A device that never started a task does not read them; its delivery is the headless dashboard's, not built yet.)
@@ -212,8 +213,9 @@ try {
   preview.fixture.noReplyRecordOnly = false
   const old = await open("ses_a")
   await old.page.waitForTimeout(2000)
-  await expect(old.page.getByRole("button", { name: "Ask in background" })).toHaveCount(0)
-  console.log("OLD CORE: no noReplyRecordOnly capability, so Ask in background is not offered")
+  await expect(old.page.locator(".desk-task")).toHaveCount(1)
+  await expect(old.page.getByRole("button", { name: "Add to this task" })).toHaveCount(0)
+  console.log("OLD CORE: the task row shows; no follow-up is offered without noReplyRecordOnly")
   await old.context.close()
 } catch (error) {
   failed = true

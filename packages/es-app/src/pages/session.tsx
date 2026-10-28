@@ -319,7 +319,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     if (requested) sessionStorage.removeItem("es-app-focus-session")
     const focused = document.activeElement
     if (requested || !(focused instanceof HTMLElement && focused.closest("input, textarea, select, button, [contenteditable]"))) {
-      (floating() ? floatEl : promptEl)?.focus({ preventScroll: true })
+      promptEl?.focus({ preventScroll: true })
     }
   })
 
@@ -413,6 +413,17 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     })
     if (inner) observer.observe(inner)
     onCleanup(() => observer.disconnect())
+    // The composer growing or shrinking resizes the transcript's viewport, not its content. A view that was at the
+    // bottom stays there; a reader scrolled up keeps the same messages in view (scrollTop is unchanged).
+    let viewportHeight = transcriptEl?.clientHeight ?? 0
+    const viewport = new ResizeObserver(() => {
+      if (!transcriptEl) return
+      const wasBottom = transcriptEl.scrollHeight - transcriptEl.scrollTop - viewportHeight < 4
+      viewportHeight = transcriptEl.clientHeight
+      if (stick && wasBottom) pin()
+    })
+    if (transcriptEl) viewport.observe(transcriptEl)
+    onCleanup(() => viewport.disconnect())
   })
   const [error, setError] = createSignal("")
 
@@ -916,7 +927,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     const s = session()
     // While a pending input is open for editing, the composer saves that input and never sends.
     if (!s || !connected() || nudgePhase() || aborting() || composer.editingInput()) return
-    const editor = floating() ? floatEl : promptEl
+    const editor = promptEl
     if (editor) saveSelection(editor)
     setError("")
     if (nextHandoff()) {
@@ -976,7 +987,6 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   let transcriptEl: HTMLDivElement | undefined
   let inner: HTMLDivElement | undefined
   let promptEl: HTMLTextAreaElement | undefined
-  let floatEl: HTMLTextAreaElement | undefined
   const [findOpen, setFindOpen] = createSignal(false)
   const [findHit, setFindHit] = createSignal<FindHit>()
   let findAnchor: HTMLDivElement | undefined
@@ -1121,7 +1131,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     following = true
     let prompted = false
     let cancelled = false
-    const editor = floating() ? floatEl : promptEl
+    const editor = promptEl
     if (editor) saveSelection(editor)
     setRecovering(true)
     setRecoveryError("")
@@ -1205,7 +1215,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     const i = list.findIndex((s: any) => s.id === sessionID)
     const next = list[(i + (back ? -1 : 1) + list.length) % list.length]
     if (!next || next.id === sessionID) return
-    const editor = floating() ? floatEl : promptEl
+    const editor = promptEl
     if (editor) saveSelection(editor)
     navigate(sessionHref(next.id, next.directory ?? directory))
   }
@@ -1232,7 +1242,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const restoreDraft = () => {
     lastEsc = 0
     const inputMode = vim.mode()
-    const el = floating() ? floatEl : promptEl
+    const el = promptEl
     if (el) saveSelection(el)
     composer.restoreDraft(composer.state.visibleBuffer === "task" ? "aside" : "task")
     vim.setMode(inputMode)
@@ -1243,7 +1253,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     // Restore after the pointer's default selection update, without undoing newer typing.
     requestAnimationFrame(() => {
       if (composer.state.visibleBuffer !== buffer || activeDraft().revision !== revision || document.activeElement !== focused) return
-      const target = floating() ? floatEl : promptEl
+      const target = promptEl
       if (!target?.isConnected) return
       target?.setSelectionRange(selection[0], selection[1])
       setCaret(null)
@@ -1261,7 +1271,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     const inputMode = vim.mode()
     composer.selectTarget(composer.state.keyboardTarget === "steer" ? "queue" : composer.state.keyboardTarget === "queue" ? "aside" : "steer")
     if (e.target instanceof HTMLSelectElement && e.target.disabled) {
-      const editor = floating() ? floatEl : promptEl
+      const editor = promptEl
       editor?.focus()
       vim.setMode(inputMode)
       editor?.setSelectionRange(...activeDraft().selection)
@@ -1379,7 +1389,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     const handler = (e: KeyboardEvent) => {
       if (dialog.active || e.defaultPrevented) return
       const target = e.target as HTMLElement
-      if (target.closest(".prompt-box, .float-editor") && cycleMode(e)) return
+      if (target.closest(".prompt-box") && cycleMode(e)) return
       if (e.isComposing || target.closest("textarea, input, select, button, a, [contenteditable], [data-composer-controls], .generated-input")) return
       if (navKeys(e)) return
       if (e.key === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey && vim.mode() === "normal") {
@@ -1394,7 +1404,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       }
       if (e.key === "i" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault()
-        const t = floating() ? floatEl : promptEl
+        const t = promptEl
         t?.focus()
         vim.setMode("insert")
       }
@@ -1403,25 +1413,29 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     onCleanup(() => window.removeEventListener("keydown", handler))
   })
 
-  // --- floating editor ---------------------------------------------------
-
+  // --- expanded editor ---------------------------------------------------
+  // Expanding grows the one composer textarea upward in place: the same element keeps its draft, undo
+  // history, caret, focus and IME composition. Long input expands it automatically; the Expand editor
+  // button and shortcut toggle it. Both paths only flip this state; CSS animates the height (none with
+  // reduced motion) and bounds it to the pane, scrolling inside past that.
   const [floating, setFloating] = createSignal(false)
   let floatDismissed = false
-  // "Approaching full": the inline textarea has a fixed visible height, so open once its
-  // content fills ~90% of that box, just before it starts scrolling. scrollHeight never
-  // drops below clientHeight, so collapse the box briefly to measure the content itself.
+  // "Approaching full": open once the collapsed textarea's content fills ~90% of its box, just before it
+  // starts scrolling. scrollHeight never drops below clientHeight, so collapse the box briefly to measure.
   const nearFull = (el: HTMLTextAreaElement) => {
     const box = el.clientHeight
     // A hidden draft (a pending-input edit is open) has no box to fill.
     if (!box) return false
     if (el.scrollHeight > box) return true
-    const style = [el.style.height, el.style.minHeight] as const
+    const style = [el.style.height, el.style.minHeight, el.style.transition] as const
     const top = el.scrollTop
+    el.style.transition = "none"
     el.style.minHeight = "0"
     el.style.height = "0"
     const content = el.scrollHeight
     el.style.height = style[0]
     el.style.minHeight = style[1]
+    el.style.transition = style[2]
     el.scrollTop = top
     return content >= 0.9 * box
   }
@@ -1432,47 +1446,39 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       setFloating(false)
       return
     }
-    if (floating() || floatDismissed || !promptEl || !nearFull(promptEl)) return
-    // This runs inside setDraft from onInput, before the handler saves the new selection,
-    // so the stored selection is one keystroke stale; read the live caret instead.
-    const source = document.activeElement === promptEl ? promptEl : undefined
-    const selection = source ? ([source.selectionStart, source.selectionEnd] as const) : untrack(() => [...activeDraft().selection] as const)
-    const inputMode = untrack(vim.mode)
+    if (untrack(floating) || floatDismissed || !promptEl || !nearFull(promptEl)) return
     setFloating(true)
-    queueMicrotask(() => {
-      if (!floatEl) return
-      floatEl.focus()
-      vim.setMode(inputMode)
-      floatEl.setSelectionRange(selection[0], selection[1])
-      saveSelection(floatEl)
-      vim.refresh(floatEl)
-    })
+  })
+  // Expanded height: up to 60% of the window, and never more than the pane allows while keeping a strip of
+  // transcript (120px) in view; the textarea scrolls inside beyond that. Measured from the pane, so a narrow or
+  // short embedded pane bounds it too.
+  const [expandedHeight, setExpandedHeight] = createSignal(320)
+  // The transcript and the textarea share the pane's free height, so their sum does not depend on how far the
+  // editor has grown (or is mid-animation).
+  const measureExpanded = () => {
+    if (!promptEl || !transcriptEl) return
+    const room = transcriptEl.getBoundingClientRect().height + promptEl.getBoundingClientRect().height - 120
+    setExpandedHeight(Math.max(120, Math.min(Math.round(window.innerHeight * 0.6), Math.round(room))))
+  }
+  createEffect(() => {
+    if (!floating()) return
+    untrack(measureExpanded)
+    const pane = transcriptEl?.parentElement
+    if (!pane) return
+    const observer = new ResizeObserver(measureExpanded)
+    observer.observe(pane)
+    onCleanup(() => observer.disconnect())
   })
   const closeFloat = () => {
-    const inputMode = vim.mode()
-    if (floatEl) saveSelection(floatEl)
     floatDismissed = true
     setFloating(false)
-    promptEl?.focus()
-    vim.setMode(inputMode)
-    promptEl?.setSelectionRange(...activeDraft().selection)
-    vim.refresh(promptEl)
   }
   const toggleFloat = () => {
-    if (floating()) {
-      closeFloat()
-      return
-    }
+    if (floating()) return closeFloat()
     floatDismissed = false
-    const inputMode = vim.mode()
-    if (promptEl) saveSelection(promptEl)
     setFloating(true)
-    queueMicrotask(() => {
-      floatEl?.focus()
-      vim.setMode(inputMode)
-      floatEl?.setSelectionRange(...activeDraft().selection)
-      vim.refresh(floatEl)
-    })
+    // Opening from the button leaves focus where the person was typing.
+    if (document.activeElement !== promptEl) promptEl?.focus({ preventScroll: true })
   }
 
   // @ Add context: chips belong to this session's draft and survive reloads until a send carries them.
@@ -1511,11 +1517,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   // Absolute so the receiving agent can re-fetch from the attaching host.
   const contextParts = () => contextRefs().map((ref) => contextPart(ref, linkUrl(new URL(contextHref(ref), window.location.origin).href), Date.now()))
 
-  const Editor = (props: { expanded?: boolean }) => {
+  const Editor = () => {
     const [query, setQuery] = createSignal<ReturnType<typeof mentionQuery>>()
     const [selected, setSelected] = createSignal(0)
     let composing = false
-    const target = () => props.expanded ? floatEl : promptEl
+    const target = () => promptEl
     const groups = createMemo(() => query() ? contextGroups({
       query: query()!.query, host: contextHost, agents: contextAgents(), currentID: sessionID, added: contextRefs(),
       sessions: sessionRows().filter((row) => !archivedIds().has(row.id)), laneOf: (id) => sessionLane(id, lineage(), lineageOwners()),
@@ -1587,10 +1593,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       event.preventDefault()
       event.stopPropagation()
     }
-    return <div class="ta-wrap" classList={{ "numbered-editor": props.expanded }}>
+    return <div class="ta-wrap" classList={{ "numbered-editor": floating() }}>
       <textarea ref={(el) => {
-        if (props.expanded) floatEl = el
-        if (!props.expanded) promptEl = el
+        promptEl = el
         el.addEventListener("keydown", keyDown, true)
         onCleanup(() => el.removeEventListener("keydown", keyDown, true))
       }}
@@ -1607,7 +1612,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         onBlur={(e) => { saveSelection(e.currentTarget); setQuery(undefined) }} />
       <SessionChips target={target()} text={draft()} selection={activeDraft().selection} />
       <Show when={query() && vim.mode() !== "normal" && !composing}><ContextPicker groups={groups()} selected={selected()} select={setSelected} add={insert} /></Show>
-      <Show when={props.expanded}><RelativeLines target={floatEl!} value={draft()} /></Show>
+      <Show when={floating()}><RelativeLines target={promptEl!} value={draft()} /></Show>
       <FakeCaret target={target()} caret={caret()} mode={vim.mode()} />
     </div>
   }
@@ -1616,44 +1621,51 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       <button aria-label={`Remove ${image.filename}`} onClick={() => composer.setImages(images().filter((item) => item.id !== image.id), composer.state.visibleBuffer)}>×</button>
     </span>
   )}</For></div></Show>
-  const ComposerPanel = (props: { expanded?: boolean }) => (
+  const ComposerPanel = () => (
     <DirectComposer composer={composer} connected={connected() && !nudgePhase() && !aborting()} submit={send} restoreDraft={restoreDraft}
-      editor={<Editor expanded={props.expanded} />} attachments={<><ContextChips refs={contextRefs()} note={contextNote()}
+      editor={<Editor />} attachments={<><ContextChips refs={contextRefs()} note={contextNote()}
         remove={(ref) => setContextRefs(contextRefs().filter((item) => contextKey(item) !== contextKey(ref)))} /><Attachments /></>}
       dictation={<DictationButton composer={composer} sessionID={sessionID} directory={directory}
-        editor={() => floating() ? floatEl : promptEl} normalMode={() => vim.mode() === "normal"}
+        editor={() => promptEl} normalMode={() => vim.mode() === "normal"}
         checkpoint={(el) => activeVim().checkpoint(el)} refresh={(el) => vim.refresh(el)} />}
       sessionMetadata={<ComposerMeta context={footerMeta().context} cost={footerMeta().cost} />}
       primary={primary} activate={activatePrimary} context={contextParts}
       sessionActions={<>
-        <Show when={!props.expanded}><button aria-label="Expand editor" aria-keyshortcuts={ariaShortcut("expandEditor")} title={shortcutLabel("expandEditor")} onClick={toggleFloat}><Glyph name="screen-full" />Expand editor</button></Show>
-        <button class="act-fork" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
-          <Glyph name="repo-forked" />{forking() ? "Forking…" : "Fork"}
-        </button>
-        <Show when={ownedLane()}><button class="act-handoff" disabled={handingOff()} onClick={() => setHandoffOpen(!handoffOpen())}><Glyph name="arrow-switch" />Hand off</button></Show>
-        <Show when={!session()?.time?.archived} fallback={<>
-          <span class="archived-chip">Archived</span>
-          <button onClick={() => setArchived(false)}>Restore</button>
-        </>}>
-          <button disabled={!!nudgePhase()} onClick={() => setArchived(true)}><Glyph name="archive" />Archive</button>
-        </Show>
-        <button class="danger" disabled={!!nudgePhase()} onClick={remove}><Glyph name="trash" />Delete</button>
-        <Show when={busy()} fallback={<button onClick={() => { stick = true; pin() }}>↓ Bottom</button>}>
-          <button class="stop" aria-label="Stop session" disabled={aborting() || !!nudgePhase() || sending()} onClick={abort}>
-            <Glyph name="square-fill" />Stop
+        {/* Every label is a .action-label: a narrow composer shows the icon only, the label stays the accessible name. */}
+        <button class="act-expand" aria-expanded={floating()} aria-keyshortcuts={ariaShortcut("expandEditor")}
+          title={`${floating() ? "Collapse editor" : "Expand editor"} (${shortcutLabel("expandEditor")})`} onClick={toggleFloat}>
+          <Glyph name="screen-full" /><span class="action-label">{floating() ? "Collapse editor" : "Expand editor"}</span></button>
+        <Show when={busy()} fallback={<button title="Scroll to the latest message" onClick={() => { stick = true; pin() }}><Glyph name="arrow-down" /><span class="action-label">Bottom</span></button>}>
+          <button class="stop" title="Stop session" disabled={aborting() || !!nudgePhase() || sending()} onClick={abort}>
+            <Glyph name="square-fill" /><span class="action-label">Stop<span class="sr-only"> session</span></span>
           </button>
         </Show>
         <button
           class="act-nudge" title={nudgeAvailable() ? "Continue the agent from where it stopped" : "Nudge is not available on this agent runtime yet."}
           disabled={!nudgeAvailable() || !session() || !!nudgePhase() || aborting() || sending()}
         >
-          <Glyph name="zap" />{nudgePhase() === "stopping" ? "Stopping…" : nudgePhase() === "resuming" ? "Sending resume…" : "Nudge"}
+          <Glyph name="zap" /><span class="action-label">{nudgePhase() === "stopping" ? "Stopping…" : nudgePhase() === "resuming" ? "Sending resume…" : "Nudge"}</span>
         </button>
+      </>}
+      moreActions={<>
+        <button class="act-fork" title="Fork this session" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
+          <Glyph name="repo-forked" /><span class="action-label">{forking() ? "Forking…" : "Fork"}</span>
+        </button>
+        <Show when={ownedLane()}><button class="act-handoff" title="Hand off this lane" disabled={handingOff()} onClick={() => setHandoffOpen(!handoffOpen())}>
+          <Glyph name="arrow-switch" /><span class="action-label">Hand off</span></button></Show>
+        <Show when={!session()?.time?.archived} fallback={<>
+          <span class="archived-chip">Archived</span>
+          <button title="Restore this session" onClick={() => setArchived(false)}><Glyph name="archive" /><span class="action-label">Restore</span></button>
+        </>}>
+          <button title="Archive this session" disabled={!!nudgePhase()} onClick={() => setArchived(true)}><Glyph name="archive" /><span class="action-label">Archive</span></button>
+        </Show>
+        <button class="danger" title="Delete this session" disabled={!!nudgePhase()} onClick={remove}><Glyph name="trash" /><span class="action-label">Delete</span></button>
       </>}>
       {/* Changing model mid-conversation is rare and costly, so the picker opens on request. */}
       <Show when={changingModel()} fallback={<>
         {/* The model name is the picker's button; the small glyph marks it as changeable. */}
-        <button class="direct-change-model composer-model" ref={modelButton}
+        {/* A model name is never a ticket key, even when it looks like one. */}
+        <button class="direct-change-model composer-model" ref={modelButton} data-ticket-refs="off"
           disabled={!!composer.state.modelSelection && composer.state.modelSelection.status !== "unknown"}
           aria-label={`Change model, current ${shownModelName()}`}
           title={`${composer.state.visibleBuffer === "aside" ? "Aside model" : "Session model"} · ${shownModel() ? `${shownModel()!.providerID} · ${shownModel()!.modelID}` : "default"} · Change model`}
@@ -2010,25 +2022,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
           </div>
         </div>
 
-        <Show when={!floating()}><WorkStatus /><ComposerResults composer={composer} connected={connected()} /></Show>
-        <div class="prompt-box" inert={floating()}>
+        <WorkStatus /><ComposerResults composer={composer} connected={connected()} />
+        <div class="prompt-box" classList={{ "prompt-expanded": floating() }} style={{ "--editor-expanded": `${expandedHeight()}px` }}>
           <ComposerPanel />
         </div>
       </div>
-
-      <Show when={floating()}>
-        <div class="float-editor">
-          <div class="float-head">
-            <span style="flex:1" />
-            <button onClick={closeFloat}>⤡ collapse <kbd class="composer-key">{shortcutLabel("expandEditor")}</kbd></button>
-          </div>
-          <WorkStatus />
-          {/* The expanded editor covers the transcript, so its outgoing bubbles show here too. */}
-          <div class="float-outgoing"><OutgoingMessages composer={composer} connected={connected()} session={session()} busy={busy()} running={runningTool()} echo={echo() || (composer.state.normalSubmission?.status === "unknown" && !composer.state.normalSubmission.messageID)} /></div>
-          <ComposerResults composer={composer} connected={connected()} />
-          <ComposerPanel expanded />
-        </div>
-      </Show>
 
       <Show when={!props.embedded}>
         {/* One right-hand panel at a time: a docked Front desk chat replaces the info panel until it closes. */}

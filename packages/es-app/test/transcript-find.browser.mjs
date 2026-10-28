@@ -126,7 +126,7 @@ try {
 
   // Expanded composer stays mounted, including images and vim mode/selection.
   await page.getByRole("button", { name: "Expand editor", exact: true }).click()
-  const expanded = page.locator(".float-editor textarea")
+  const expanded = page.locator(".prompt-box.prompt-expanded textarea[aria-label='Message']")
   await expanded.fill("Expanded draft with image")
   await expanded.evaluate((element) => {
     const data = new DataTransfer()
@@ -134,7 +134,7 @@ try {
     data.items.add(new File([Uint8Array.from(atob(png), (character) => character.charCodeAt(0))], "kept.png", { type: "image/png" }))
     element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }))
   })
-  await expect(page.locator(".float-editor").getByRole("button", { name: "Remove kept.png", exact: true })).toBeVisible()
+  await expect(page.locator(".prompt-box").getByRole("button", { name: "Remove kept.png", exact: true })).toBeVisible()
   await expanded.evaluate((element) => element.setSelectionRange(4, 11))
   await expanded.press("Escape")
   const expandedSelection = await expanded.evaluate((element) => [element.selectionStart, element.selectionEnd])
@@ -145,8 +145,8 @@ try {
   await expect(expanded).toHaveValue("Expanded draft with image")
   await expect(expanded).toHaveClass(/vim-normal/)
   expect(await expanded.evaluate((element) => [element.selectionStart, element.selectionEnd])).toEqual(expandedSelection)
-  await expect(page.locator(".float-editor").getByRole("button", { name: "Remove kept.png", exact: true })).toBeVisible()
-  await page.getByRole("button", { name: /collapse/ }).click()
+  await expect(page.locator(".prompt-box").getByRole("button", { name: "Remove kept.png", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Collapse editor", exact: true }).click()
   console.log("Find: title/expanded editor checks passed")
 
   // Live text updates replace the search snapshot, not append stale hits.
