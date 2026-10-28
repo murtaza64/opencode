@@ -232,20 +232,21 @@
 .outgoing-action.receipt-cancel:hover:not(:disabled) { color: var(--red); }
 .outgoing-action:disabled { opacity: 0.5; cursor: default; }
 
-/* One busy idiom: an accent dot with a soft halo. List and nav indicators show it static; the open
- * session's work line and its transcript thinking dot set data-animate. The halo animates opacity and scale on a pseudo-element only,
- * so the one running animation stays on the compositor with no JS clock and no layout. */
+/* One busy idiom: an accent dot with a soft halo. Sidebar session rows, the open session's work line and
+ * its transcript thinking dot pulse; other list and nav indicators show it static. The halo animates
+ * opacity and scale on a pseudo-element only, so it stays on the compositor with no JS clock and no
+ * layout; idle dots have no halo, and reduced motion holds it static. */
 .busy-dot { position: relative; display: inline-block; flex: none; inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--accent, var(--lavender)); }
 .busy-dot::after, .dot.busy::after {
   content: ""; position: absolute; inset: 0; border-radius: 50%;
   background: var(--accent, var(--lavender)); opacity: 0.3; transform: scale(2);
 }
-.busy-dot[data-animate]::after { animation: busy-halo 1.6s ease-in-out infinite; will-change: opacity, transform; }
+.busy-dot[data-animate]::after, .sidebar .dot.busy::after { animation: busy-halo 1.6s ease-in-out infinite; will-change: opacity, transform; }
 @keyframes busy-halo {
   0%, 100% { opacity: 0.15; transform: scale(1.2); }
   50% { opacity: 0.45; transform: scale(2.2); }
 }
-@media (prefers-reduced-motion: reduce) { .busy-dot[data-animate]::after { animation: none; opacity: 0.5; will-change: auto; } }
+@media (prefers-reduced-motion: reduce) { .busy-dot[data-animate]::after, .sidebar .dot.busy::after { animation: none; opacity: 0.5; will-change: auto; } }
 /* transcript tail while waiting for first output */
 .thinking { display: flex; padding: 10px 4px; }
 

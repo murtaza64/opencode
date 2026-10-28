@@ -51,7 +51,7 @@ const dayLabel = (time: number) => {
 const StatusDot = (props: { state: DotState; label?: string }) => {
   let el: HTMLElement | undefined
   ringOnChange(() => el, () => props.state)
-  // Busy rows show the static halo; only the open session's work line animates.
+  // Busy rows pulse their halo in CSS (index.css busy idiom); no JS clock.
   return <span ref={(node) => el = node} class={`dot ${props.state}`}
     {...(props.state === "failed" ? { role: "img", "aria-label": props.label ?? "Failed" } : {})} />
 }

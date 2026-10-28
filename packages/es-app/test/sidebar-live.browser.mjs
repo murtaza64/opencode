@@ -58,11 +58,10 @@ const publish = (type) => {
     } })}\n\n`)
   }
 }
-// Sidebar rows never animate: a busy row shows the static halo, with no animation and no JS clock.
-const staticHalo = async () => {
+// A busy row pulses its halo with the CSS busy-halo animation on ::after, no JS clock.
+const pulsingHalo = async () => {
   const dot = row("ses_a").locator(".dot")
-  expect(await dot.evaluate((el) => ({ opacity: getComputedStyle(el, "::after").opacity, animation: getComputedStyle(el, "::after").animationName })))
-    .toEqual({ opacity: "0.3", animation: "none" })
+  expect(await dot.evaluate((el) => getComputedStyle(el, "::after").animationName)).toBe("busy-halo")
 }
 try {
   await page.goto(url)
@@ -85,7 +84,7 @@ try {
       await expect(row("ses_a").locator(".dot")).not.toHaveClass(/busy/)
       publish("busy")
       await expect(row("ses_a").locator(".dot")).toHaveClass("dot busy")
-      if (!stateOnly) await staticHalo()
+      if (!stateOnly) await pulsingHalo()
       await page.getByRole("button", { name: "Pin Other session", exact: true }).click()
       await expect(pinned()).toHaveCount(1)
       await expect(page.getByRole("button", { name: "Unpin Other session", exact: true })).toHaveText("◆")
@@ -141,11 +140,11 @@ try {
   await expect(row("ses_a").locator(".dot")).not.toHaveClass(/busy/)
   publish("busy")
   await expect(row("ses_a").locator(".dot")).toHaveClass("dot busy")
-  if (!stateOnly) await staticHalo()
+  if (!stateOnly) await pulsingHalo()
   if (!stateOnly) {
     await page.locator(".sidebar").evaluate((el) => { el.style.transform = "translateY(-200vh)" })
     await page.locator(".sidebar").evaluate((el) => { el.style.transform = "" })
-    await staticHalo()
+    await pulsingHalo()
   }
   await page.getByRole("button", { name: "Pin Other session", exact: true }).click()
   const saved = await context.storageState()
@@ -157,14 +156,15 @@ try {
     await expect(restoredPage.locator(".pinned-section .nav-item")).toHaveText([/Other session/])
     const dot = restoredPage.locator('.sidebar a[href*="/session/ses_a?"] .dot.busy')
     await expect(dot).toBeVisible()
-    await expect.poll(() => dot.evaluate((el) => getComputedStyle(el, "::after").opacity)).toBe("0.3")
+    // Reduced motion: the halo holds static.
+    await expect.poll(() => dot.evaluate((el) => [getComputedStyle(el, "::after").animationName, getComputedStyle(el, "::after").opacity])).toEqual(["none", "0.5"])
   } finally {
     await restored.close()
   }
   expect(await page.evaluate(() => window.sidebarDocument), "same document throughout live checks").toBe(document)
   expect(errors).toEqual([])
   expect(site.fixture.calls.filter((call) => !["GET", "HEAD", "OPTIONS"].includes(call.method))).toEqual([])
-  console.log(`PASS sidebar live (${deployed ? "deployed3181" : built ? "built" : "dev"}${stateOnly ? ", state-only" : ""}): LTR/RTL expanded/compact navigation, busy/idle/busy${stateOnly ? "" : " pulse"}, pin/unpin order/icons/persistence, concurrent session.updated, idle hydration, global reconnect, reduced motion; no reload or mutations`)
+  console.log(`PASS sidebar live (${deployed ? "deployed3181" : built ? "built" : "dev"}${stateOnly ? ", state-only" : ""}): LTR/RTL expanded/compact navigation, busy/idle/busy${stateOnly ? "" : " pulse"}, pin/unpin order/icons/persistence, concurrent session.updated, idle hydration, global reconnect, reduced motion static halo; no reload or mutations`)
 } finally {
   await browser.close()
   if (built) await new Promise((resolve) => { built.httpServer.closeAllConnections(); built.httpServer.close(resolve) })
