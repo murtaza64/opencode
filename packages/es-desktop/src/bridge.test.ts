@@ -145,10 +145,54 @@ test("the pairing cookie is stored only encrypted, owner-only", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "es-bridge-cookie-"))
   cleanup.push(() => rm(dir, { recursive: true, force: true }))
   const file = path.join(dir, "personal.cookie")
-  const crypto = { encrypt: (value: string) => Buffer.from(value).reverse(), decrypt: (value: Buffer) => Buffer.from(value).reverse().toString() }
+  const crypto = { available: () => true, encrypt: (value: string) => Buffer.from(value).reverse(), decrypt: (value: Buffer) => Buffer.from(value).reverse().toString() }
   const store = encryptedCookie(file, crypto)
   await store.saveCookie(PAIRED)
   expect((await Bun.file(file).text()).includes(PAIRED)).toBe(false)
   expect(await store.cookie()).toBe(PAIRED)
   expect((await import("node:fs/promises").then((fs) => fs.stat(file))).mode & 0o777).toBe(0o600)
+})
+
+test("without OS encryption pairing is refused as 'unavailable' and nothing is written, plaintext or otherwise", async () => {
+  const host = gateway()
+  const dir = await mkdtemp(path.join(tmpdir(), "es-bridge-noenc-"))
+  cleanup.push(() => rm(dir, { recursive: true, force: true }))
+  const file = path.join(dir, "personal.cookie")
+  const cookie = encryptedCookie(file, { available: () => false, encrypt: () => { throw new Error("unexpected") }, decrypt: () => { throw new Error("unexpected") } })
+  const { server, get, bridge } = await listener(host.origin, { access: async () => ACCESS, ...cookie })
+  const page = await get("/__es/bridge/pair", { method: "POST", headers: { origin: server.origin, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code: CODE }).toString() })
+  expect(page.status).toBe(503)
+  expect(await page.text()).toContain("cannot store the pairing securely")
+  expect(bridge.paired()).toBe(false)
+  expect(await Bun.file(file).exists()).toBe(false)
+  expect(await Bun.file(`${file}.tmp`).exists()).toBe(false)
+})
+
+test("an unreadable pairing cookie means 'pair again', and the service token is kept", async () => {
+  const host = gateway()
+  const { get, bridge } = await listener(host.origin, { access: async () => ACCESS, cookie: async () => { throw new Error("decrypt failed") }, saveCookie: async () => {} })
+  expect(bridge.configured()).toBe(true)
+  expect(await (await get("/oc/session/status")).json()).toEqual({ error: "Pairing required" })
+  expect(host.seen).toEqual([])
+})
+
+test("a page can never supply Access credentials: they are stripped on every listener", async () => {
+  const host = gateway()
+  const store = memory(ACCESS)
+  store.saved.push(PAIRED)
+  const { get } = await listener(host.origin, store)
+  const injected = { "cf-access-client-id": "attacker-id", "cf-access-client-secret": "attacker-secret", "cf-access-token": "t", "cf-authorization": "a", "cf-access-jwt-assertion": "j" }
+  await get("/oc/session/status", { headers: injected })
+  expect(host.seen.at(-1)).toMatchObject({ id: ACCESS.clientId, secret: ACCESS.clientSecret })
+  // A plain local listener forwards none of them either.
+  const upstream: Record<string, string | null>[] = []
+  const core = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (request) => (upstream.push(Object.fromEntries(Object.keys(injected).map((name) => [name, request.headers.get(name)]))), Response.json({})) })
+  cleanup.push(async () => void (await core.stop(true)))
+  const root = await mkdtemp(path.join(tmpdir(), "es-bridge-local-"))
+  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  await writeFile(path.join(root, "index.html"), "<title>x</title>")
+  const local = await serve({ root, opencode: core.url.origin, dashboard: core.url.origin })
+  cleanup.push(() => Promise.race([local.close(), Bun.sleep(500)]))
+  await fetch(`${local.origin}/oc/session/status`, { headers: { "x-editspace-key": local.key, ...injected } })
+  expect(upstream.at(-1)).toEqual({ "cf-access-client-id": null, "cf-access-client-secret": null, "cf-access-token": null, "cf-authorization": null, "cf-access-jwt-assertion": null })
 })

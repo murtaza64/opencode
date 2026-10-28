@@ -155,6 +155,7 @@ const start = async () => {
             store: {
               access: keychainAccess(host.access.keychain),
               ...encryptedCookie(path.join(app.getPath("userData"), `bridge-${host.id}.cookie`), {
+                available: () => safeStorage.isEncryptionAvailable(),
                 encrypt: (value) => safeStorage.encryptString(value),
                 decrypt: (value) => safeStorage.decryptString(value),
               }),

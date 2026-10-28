@@ -68,6 +68,12 @@ const proxyHeaders = (headers: IncomingHttpHeaders) =>
           "origin",
           "referer",
           "x-editspace-key",
+          // Access credentials come only from this process (bridge.ts), never from a page.
+          "cf-access-client-id",
+          "cf-access-client-secret",
+          "cf-access-token",
+          "cf-access-jwt-assertion",
+          "cf-authorization",
           "set-cookie",
           "access-control-allow-origin",
           "content-security-policy",
@@ -709,6 +715,7 @@ const bridgePair = async (bridge: Bridge, req: IncomingMessage, res: ServerRespo
     throttled: "Too many attempts. Wait a minute and try again.",
     "sign-in-needed": "This computer's access to the host was not accepted. Its service token may be missing or revoked.",
     unreachable: "The host did not answer. Try again when it is online.",
+    unavailable: "This computer cannot store the pairing securely (no OS encryption), so it was not kept. Nothing was saved.",
   }[result]
   return finish(result === "wrong-code" ? 401 : 503, bridgePage("This host", true, message), "text/html; charset=utf-8")
 }

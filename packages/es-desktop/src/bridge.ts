@@ -9,19 +9,21 @@ export type Access = { clientId: string; clientSecret: string }
 export type BridgeStore = {
   access: () => Promise<Access | undefined>
   cookie: () => Promise<string | undefined>
+  /** Throws when the cookie cannot be kept safely (no OS encryption); never stores plaintext. */
   saveCookie: (value: string) => Promise<void>
 }
-export type PairResult = "paired" | "wrong-code" | "throttled" | "sign-in-needed" | "unreachable"
+export type PairResult = "paired" | "wrong-code" | "throttled" | "sign-in-needed" | "unreachable" | "unavailable"
 
 const COOKIE = /^[A-Za-z0-9._~-]{16,512}$/
 
 export const createBridge = (options: { origin: string; store: BridgeStore; fetch?: typeof fetch }) => {
   const request = options.fetch ?? fetch
   const state: { access?: Access; cookie?: string } = {}
-  const ready = Promise.all([options.store.access(), options.store.cookie()]).then(([access, cookie]) => {
-    state.access = access
-    state.cookie = cookie && COOKIE.test(cookie) ? cookie : undefined
-  }, () => undefined)
+  // The token and the cookie load independently: an unreadable cookie means "pair again", never a lost token.
+  const ready = Promise.all([
+    options.store.access().then((access) => (state.access = access), () => undefined),
+    options.store.cookie().then((cookie) => (state.cookie = cookie && COOKIE.test(cookie) ? cookie : undefined), () => undefined),
+  ]).then(() => undefined)
   const accessHeaders = () => (state.access ? { "cf-access-client-id": state.access.clientId, "cf-access-client-secret": state.access.clientSecret } : undefined)
   return {
     ready,
@@ -50,7 +52,9 @@ export const createBridge = (options: { origin: string; store: BridgeStore; fetc
       if (response.status === 429) return "throttled"
       const value = response.status === 303 ? cookieOf(response.headers.getSetCookie?.() ?? [response.headers.get("set-cookie") ?? ""]) : undefined
       if (value) {
-        await options.store.saveCookie(value)
+        // Paired upstream but not storable safely here: not paired on this machine.
+        const saved = await options.store.saveCookie(value).then(() => true, () => false)
+        if (!saved) return "unavailable"
         state.cookie = value
         return "paired"
       }
@@ -77,10 +81,12 @@ export const keychainAccess = (item: string) => async (): Promise<Access | undef
   return clientId && clientSecret ? { clientId, clientSecret } : undefined
 }
 
-/** The pairing cookie, encrypted with the OS key store (Electron safeStorage) in one owner-only file. */
-export const encryptedCookie = (file: string, crypto: { encrypt: (value: string) => Buffer; decrypt: (value: Buffer) => string }) => ({
-  cookie: async () => readFile(file).then((data) => crypto.decrypt(data), () => undefined),
+/** The pairing cookie, encrypted with the OS key store (Electron safeStorage) in one owner-only file.
+ * Without OS encryption nothing is read or written: the host stays unpaired. */
+export const encryptedCookie = (file: string, crypto: { available: () => boolean; encrypt: (value: string) => Buffer; decrypt: (value: Buffer) => string }) => ({
+  cookie: async () => (crypto.available() ? readFile(file).then((data) => crypto.decrypt(data), () => undefined) : undefined),
   saveCookie: async (value: string) => {
+    if (!crypto.available()) throw new Error("OS encryption unavailable")
     await writeFile(`${file}.tmp`, crypto.encrypt(value), { mode: 0o600 })
     await rename(`${file}.tmp`, file)
   },
