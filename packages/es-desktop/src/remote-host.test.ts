@@ -271,9 +271,8 @@ test("host-qualified routes expose list reads only: writes, other routes and unk
     ["POST", "/oc/session/ses_same/prompt_async"], ["POST", "/oc/session/ses_same/message"], ["PATCH", "/oc/session/ses_same"],
     ["DELETE", "/oc/session/ses_same"], ["POST", "/oc/session/ses_same/abort"], ["POST", "/oc/permission/per_1/reply"],
     ["GET", "/oc/session/ses_same/children"], ["GET", "/oc/session/ses_same/message/msg_1/part/prt_1/attachment/0"],
-    ["GET", "/oc/permission"], ["GET", "/oc/question"], ["GET", "/oc/session/ses_same/message/msg_1/x"],
+    ["GET", "/oc/session/ses_same/message/msg_1/x"],
   ]) expect((await get(`/hosts/mini${pathname}`, { method, ...(method === "GET" ? {} : { body: "{}" }) })).status).toBe(403)
-  expect((await get("/hosts/mini/es/api/attention/session")).status).toBe(403)
   expect((await get("/hosts/mini/es/api/attention/session", { method: "POST", headers: { "content-type": "application/json", "x-attention-csrf": "1" }, body: "{}" })).status).toBe(403)
   expect((await get("/hosts/mini/es/api/attention", { method: "POST", body: "{}" })).status).toBe(403)
   expect((await get("/hosts/mini/oc/experimental/usage/daily", { method: "POST", body: "{}" })).status).toBe(403)
@@ -281,12 +280,118 @@ test("host-qualified routes expose list reads only: writes, other routes and unk
   expect((await get("/hosts/mini/es/api/pins/session:ses_a/order", { method: "PATCH", body: "{}" })).status).toBe(403)
   expect((await get("/hosts/mini/oc/experimental/usage")).status).toBe(403)
   expect((await get("/hosts/mini/oc/experimental/usage/daily/raw")).status).toBe(403)
-  expect((await get("/hosts/mini/es/api/attention/00000000-0000-4000-8000-000000000000")).status).toBe(403)
   expect((await get("/hosts/mini/es/api/attention/00000000-0000-4000-8000-000000000000/commands", { method: "POST", body: "{}" })).status).toBe(403)
   expect((await get("/hosts/other/oc/experimental/session")).status).toBe(404)
   expect((await get("/hosts/local/oc/experimental/session")).status).toBe(404)
   expect((await get("/hosts/mini//oc/experimental/session")).status).toBe(404)
   expect(mini.seen.length).toBe(before)
+})
+
+test("this window sends input to, and stops, a run on another host: native origin only, that host's origin upstream, no credential", async () => {
+  const mini = fakeHost("mini")
+  const { server, get } = await workListener(mini)
+  const body = JSON.stringify({ requestID: "11111111-2222-4333-8444-555555555555", delivery: "steer", text: "Use the staging bucket" })
+  const sent = await get("/hosts/mini/oc/session/ses_m/input?directory=%2Fr", {
+    method: "POST", body, headers: { origin: server.origin, "content-type": "application/json", cookie: "es_attention_operator=local; es_attention_operator__mini=mini", authorization: "Basic bG9jYWw6c2VjcmV0" },
+  })
+  expect(sent.status).toBe(200)
+  expect(mini.seen.at(-1)).toEqual({ path: "/session/ses_m/input", cookie: null, authorization: null, origin: mini.origin })
+  // The same request ID is checked on that host, never elsewhere.
+  expect((await get("/hosts/mini/oc/session/ses_m/input/11111111-2222-4333-8444-555555555555")).status).toBe(200)
+  expect(mini.seen.at(-1)).toMatchObject({ path: "/session/ses_m/input/11111111-2222-4333-8444-555555555555", cookie: null })
+  const stopped = await get("/hosts/mini/oc/session/ses_m/abort", { method: "POST", headers: { origin: server.origin } })
+  expect(stopped.status).toBe(200)
+  const replied = await get("/hosts/mini/oc/permission/per_1/reply", { method: "POST", body: '{"reply":"once"}', headers: { origin: server.origin, "content-type": "application/json" } })
+  expect(replied.status).toBe(200)
+  expect(mini.seen.at(-1)).toMatchObject({ path: "/permission/per_1/reply", origin: mini.origin, cookie: null })
+  const before = mini.seen.length
+  expect((await get("/hosts/mini/oc/session/ses_m/input", { method: "POST", body })).status).toBe(403)
+  expect((await get("/hosts/mini/oc/session/ses_m/input", { method: "POST", body, headers: { origin: "https://evil.test" } })).status).toBe(403)
+  for (const pathname of ["/oc/session/ses_m/message", "/oc/session/ses_m/fork", "/es/api/pins/session:ses_m", "/es/api/frontdesk/memory"])
+    expect((await get(`/hosts/mini${pathname}`, { method: "POST", body, headers: { origin: server.origin } })).status).toBe(403)
+  expect(mini.seen.length).toBe(before)
+})
+
+test("another host's attention carries only that host's operator cookie, minted by its dashboard and scoped to /hosts/<id>/", async () => {
+  const minted: string[] = []
+  const seen: { path: string; cookie: string | null; origin: string | null }[] = []
+  const dashboard = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: async (request) => {
+      const url = new URL(request.url)
+      await request.text()
+      seen.push({ path: url.pathname, cookie: request.headers.get("cookie"), origin: request.headers.get("origin") })
+      if (url.pathname === "/es/api/attention/session" && request.method === "POST") {
+        minted.push("op-mini")
+        return Response.json({ ok: true }, { headers: { "set-cookie": "es_attention_operator=op-mini; HttpOnly; SameSite=Strict; Path=/" } })
+      }
+      return Response.json({ ok: true })
+    },
+  })
+  cleanup.push(async () => void (await dashboard.stop(true)))
+  const { server, get } = await workListener({ origin: dashboard.url.origin } as ReturnType<typeof fakeHost>)
+  const headers = { origin: server.origin, "content-type": "application/json", "x-attention-csrf": "1" }
+  const signIn = await get("/hosts/mini/es/api/attention/session", { method: "POST", body: "{}", headers: { ...headers, cookie: "es_attention_operator=local-op; es_attention_operator__wing=wing-op" } })
+  expect(signIn.headers.get("set-cookie")).toBe("es_attention_operator__mini=op-mini; HttpOnly; SameSite=Strict; Path=/hosts/mini/")
+  expect(seen.at(-1)).toEqual({ path: "/es/api/attention/session", cookie: null, origin: dashboard.url.origin })
+  const command = await get("/hosts/mini/es/api/attention/00000000-0000-4000-8000-000000000000/commands", {
+    method: "POST", body: "{}", headers: { ...headers, cookie: "es_attention_operator=local-op; es_attention_operator__wing=wing-op; es_attention_operator__mini=op-mini" },
+  })
+  expect(command.status).toBe(200)
+  expect(seen.at(-1)).toEqual({ path: "/es/api/attention/00000000-0000-4000-8000-000000000000/commands", cookie: "es_attention_operator=op-mini", origin: dashboard.url.origin })
+})
+
+test("host writes are exactly the own-host session, reply and attention writes; encoded or other paths are refused", async () => {
+  const { hostWriteAllowed } = await import("./policy")
+  const uuid = "00000000-0000-4000-8000-000000000000"
+  for (const [method, pathname] of [
+    ["POST", "/oc/session/ses_m/prompt_async"], ["POST", "/oc/session/ses_m/input"], ["PATCH", "/oc/session/ses_m/input/req_1"], ["DELETE", "/oc/session/ses_m/input/req_1"],
+    ["POST", "/oc/session/ses_m/input/req_1/deliver"], ["POST", "/oc/session/ses_m/recover"], ["POST", "/oc/session/ses_m/abort"],
+    ["POST", "/oc/permission/per_1/reply"], ["POST", "/oc/question/que_1/reject"], ["POST", "/es/api/attention/session"],
+    ["POST", `/es/api/attention/${uuid}/commands`], ["POST", `/es/api/attention/${uuid}/delivery`],
+  ]) expect(hostWriteAllowed(method, pathname)).toBe(true)
+  for (const [method, pathname] of [
+    ["PUT", "/oc/session/ses_m/input"], ["POST", "/oc/session/ses_m%2F..%2Fx/input"], ["POST", "/oc/session/ses_m/input/req_1"], ["DELETE", "/oc/session/ses_m"],
+    ["PATCH", "/oc/session/ses_m"], ["POST", "/oc/session/ses_m/fork"], ["POST", "/oc/session/ses_m/aside"], ["POST", "/oc/session"],
+    ["POST", "/es/api/pins/session:ses_m"], ["PUT", "/es/api/pins/session:ses_m"], ["POST", "/es/api/attention/publish"], ["POST", `/es/api/attention/${uuid}`],
+    ["POST", "/es/api/secret-intake/h1"], ["POST", "/es/api/frontdesk"], ["POST", "/oc/permission/per_1/reply/x"],
+  ]) expect(hostWriteAllowed(method, pathname)).toBe(false)
+})
+
+test("writes reach only a configured Work host; an unknown id, a Personal host or a stopped host never falls back to this one", async () => {
+  const mini = fakeHost("mini")
+  const local = fakeHost("local")
+  const { server, get } = await workListener(mini, local)
+  const body = JSON.stringify({ requestID: "11111111-2222-4333-8444-555555555555", delivery: "steer", text: "x" })
+  const write = (host: string) => get(`/hosts/${host}/oc/session/ses_m/input`, { method: "POST", body, headers: { origin: server.origin, "content-type": "application/json" } })
+  const before = { mini: mini.seen.length, local: local.seen.length }
+  expect((await write("personal")).status).toBe(404)
+  expect((await write("local")).status).toBe(404)
+  expect((await write("Mini")).status).toBe(404)
+  expect(mini.seen.length).toBe(before.mini)
+  await mini.stop()
+  expect(await (await write("mini")).json()).toEqual({ error: "Host unavailable" })
+  expect(local.seen.length).toBe(before.local)
+})
+
+test("two hosts' operator cookies never cross", async () => {
+  const seen: Record<string, (string | null)[]> = { mini: [], wing: [] }
+  const host = (name: string) => {
+    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: async (request) => { await request.text(); seen[name]!.push(request.headers.get("cookie")); return Response.json({}) } })
+    cleanup.push(async () => void (await server.stop(true)))
+    return server.url.origin
+  }
+  const root = await renderer()
+  const server = await serve({ root, opencode: fakeHost("local").origin, dashboard: fakeHost("local").origin, peers: [{ id: "mini", origin: host("mini") }, { id: "wing", origin: host("wing") }] })
+  cleanup.push(() => Promise.race([server.close(), Bun.sleep(500)]))
+  const cookie = "es_attention_operator=local; es_attention_operator__mini=m-op; es_attention_operator__wing=w-op"
+  const command = (id: string) => fetch(`${server.origin}/hosts/${id}/es/api/attention/00000000-0000-4000-8000-000000000000/commands`, {
+    method: "POST", body: "{}", headers: { "x-editspace-key": server.key, origin: server.origin, cookie, "content-type": "application/json", "x-attention-csrf": "1" },
+  })
+  await command("mini")
+  await command("wing")
+  expect(seen).toEqual({ mini: ["es_attention_operator=m-op"], wing: ["es_attention_operator=w-op"] })
 })
 
 test("a remote or paired listener never offers host-qualified routes", async () => {

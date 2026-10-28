@@ -129,10 +129,25 @@ export const appRouteURL = (value: string, origin: string) => {
 // Everything else about that host, answering and operator sessions included, stays on its own tab,
 // origin and operator cookie.
 export const hostApiAllowed = (method: string, pathname: string) =>
-  ["GET", "HEAD"].includes(method) && /^\/(?:oc\/experimental\/(?:session|usage\/daily)|oc\/session\/status|oc\/session\/[\w-]+(?:\/todo|\/message(?:\/[\w-]+)?)?|es\/api\/(?:editspaces|attention|pins|pins\/events))$/.test(pathname)
+  ["GET", "HEAD"].includes(method) && /^\/(?:oc\/experimental\/(?:session|usage\/daily|capabilities)|oc\/session\/status|oc\/session\/[\w-]+(?:\/todo|\/message(?:\/[\w-]+)?|\/input\/[\w-]+)?|oc\/(?:permission|question)|es\/api\/(?:editspaces|attention|attention\/session|attention\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|pins|pins\/events))$/.test(pathname)
 
 // One shared pin's ref in a single path segment, as the browser sends it (a lane's slash encoded once).
 const PIN_REF = "(?:session:[A-Za-z0-9_-]{1,128}|lane:[A-Za-z0-9._-]{1,64}%2[Ff][A-Za-z0-9._-]{1,64})"
+
+// Writes to another Work host from this laptop's window (/hosts/<id>/...), Slice W (contract v0.2.1 §4):
+// the same session writes this listener allows on its own host (prompt/input admission, pending-input
+// edit/withdraw/deliver, recovery nudge, stop), permission and question replies, and attention operator
+// sign-in, answers and delivery checks. Pin writes stay on each pin's own host (contract §3).
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+const HOST_WRITES: Record<string, RegExp> = {
+  POST: new RegExp(`^/(?:oc/session/[\\w-]+/(?:prompt_async|input|abort|recover)|oc/session/[\\w-]+/input/[\\w-]+/deliver|oc/(?:permission|question)/[\\w-]+/(?:reply|reject)|es/api/attention/(?:session|${UUID}/(?:commands|delivery)))$`),
+  PATCH: /^\/oc\/session\/[\w-]+\/input\/[\w-]+$/,
+  DELETE: /^\/oc\/session\/[\w-]+\/input\/[\w-]+$/,
+}
+export const hostWriteAllowed = (method: string, pathname: string) => HOST_WRITES[method]?.test(pathname) ?? false
+
+/** Another host's attention routes, which its dashboard authorizes with that host's operator cookie. */
+export const hostAttention = (pathname: string) => new RegExp(`^/es/api/attention/(?:session|${UUID}(?:/commands|/delivery)?)$`).test(pathname)
 
 // Only expose the existing es-app surface, not daemon PTYs, shell, config, or file APIs.
 export const apiAllowed = (method: string, pathname: string) => {

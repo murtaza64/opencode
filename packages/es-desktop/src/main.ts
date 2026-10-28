@@ -107,7 +107,8 @@ const start = async () => {
   const work: WorkHost[] = []
   const workDefault = configured.find((host) => host.mode === "proxy" && host.default)?.id ?? configured.find((host) => host.mode === "proxy")?.id
   const server = await serve({
-    peers: configured.filter((host) => host.mode === "proxy").map((host) => ({ id: host.id, origin: host.origin })),
+    // Only proxied Work hosts are reachable through /hosts/<id>; Personal (page or bridged) never is.
+    peers: configured.filter((host) => host.mode === "proxy" && host.profile === "work").map((host) => ({ id: host.id, origin: host.origin })),
     hostInfo: () => ({ ...selfInfo, work }),
     appearance,
     port,

@@ -4,7 +4,7 @@ import { createReadStream } from "node:fs"
 import { readFile, realpath, stat } from "node:fs/promises"
 import path from "node:path"
 import { randomBytes } from "node:crypto"
-import { apiAllowed, hostApiAllowed, serviceURL } from "./policy"
+import { apiAllowed, hostApiAllowed, hostAttention, hostWriteAllowed, serviceURL } from "./policy"
 import { cookieName, cookieValid, issueCookie, loopbackHost, pairingCsp, pairingMatches, pairingPage, remoteListenHost } from "./pairing"
 import { eventMux } from "../../es-app/event-mux"
 import { eventProtocol, eventPaths } from "../../es-app/event-protocol"
@@ -247,8 +247,20 @@ export const serve = async (options: {
       const qualified = hostPath(url.pathname)
       const peer = qualified && peers.get(qualified.host)
       if (!qualified || !peer) return finish(404, "Not found")
-      if (!hostApiAllowed(req.method ?? "", qualified.path)) return finish(403, "Host route not exposed")
-      return peerRead(req, res, `${qualified.path.startsWith("/oc") ? peer.opencode : peer.dashboard}${qualified.path.slice(3) || "/"}${url.search}`, finish)
+      const upstream = `${qualified.path.startsWith("/oc") ? peer.opencode : peer.dashboard}${qualified.path.slice(3) || "/"}${url.search}`
+      const write = hostWriteAllowed(req.method ?? "", qualified.path)
+      if (!write && !hostApiAllowed(req.method ?? "", qualified.path)) return finish(403, "Host route not exposed")
+      // A write to another host: only from this window (native origin), only the exact write routes.
+      if (write && !trusted(req.headers.origin)) return finish(403, "Host writes require the native origin")
+      // That host's attention routes carry only that host's operator cookie (minted by its own dashboard,
+      // renamed per host and scoped to /hosts/<id>/ here); nothing else of this machine's goes upstream.
+      if (hostAttention(qualified.path))
+        return peerWrite(req, res, upstream, new URL(peer.dashboard).origin, finish, {
+          cookie: remoteCookie(req.headers.cookie, qualified.host),
+          setCookie: (values) => remoteSetCookie(values, qualified.host)?.map((value) => scopeCookie(value, qualified.host)),
+        })
+      if (write) return peerWrite(req, res, upstream, new URL(peer.opencode).origin, finish)
+      return peerRead(req, res, upstream, finish)
     }
     const api = /^\/(oc|es)(\/|$)/.exec(url.pathname)
     if (api && !apiAllowed(req.method ?? "", url.pathname)) return finish(403, "API route not exposed")
@@ -439,6 +451,33 @@ const peerRead = (req: IncomingMessage, res: ServerResponse, target: string, fin
   })
   res.on("close", () => upstream.destroy())
   upstream.end()
+}
+
+// An operator cookie for another host is sent only on that host's /hosts/<id>/ paths of this listener.
+const scopeCookie = (value: string, host: string) => `${value.replace(/;\s*Path=[^;]*/i, "")}; Path=/hosts/${host}/`
+
+const peerWrite = (
+  req: IncomingMessage, res: ServerResponse, target: string, origin: string, finish: (status: number, body: string, type?: string) => void,
+  attention?: { cookie?: string; setCookie: (values: string[] | undefined) => string[] | undefined },
+) => {
+  const upstream = (target.startsWith("https:") ? httpsRequest : httpRequest)(target, { method: req.method, headers: { ...proxyHeaders(req.headers), origin, ...(attention?.cookie ? { cookie: attention.cookie } : {}) } }, (response) => {
+    if ([301, 302, 303, 307, 308].includes(response.statusCode ?? 0)) {
+      response.resume()
+      return finish(502, '{"error":"Upstream redirect blocked"}', "application/json")
+    }
+    const cookies = attention?.setCookie(response.headers["set-cookie"])
+    res.writeHead(response.statusCode ?? 502, { ...proxyHeaders(response.headers), ...(cookies ? { "set-cookie": cookies } : {}) })
+    response.on("error", () => res.destroy())
+    response.pipe(res)
+  })
+  upstream.setTimeout(60_000, () => upstream.destroy(new Error("Upstream idle timeout")))
+  // The outcome of a write that fails in flight is unknown: the client checks by its message ID.
+  upstream.on("error", () => {
+    if (res.headersSent) return res.destroy()
+    finish(502, '{"error":"Host unavailable"}', "application/json")
+  })
+  res.on("close", () => upstream.destroy())
+  req.pipe(upstream)
 }
 
 const voiceID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/

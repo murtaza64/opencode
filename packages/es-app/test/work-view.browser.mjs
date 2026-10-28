@@ -15,6 +15,7 @@ const mini = "http://127.0.0.1:65001"
 const miniRoot = "/Users/mini/fixture"
 const hostReads = { mini: 0, wing: 0 }
 const hostWrites = []
+const miniInputs = []
 const miniSessions = [
   { id: "ses_a", title: "Mini copy of a", directory: miniRoot, time: { created: 1, updated: Date.now() } },
   { id: "ses_mini", title: "Mini only", directory: `${miniRoot}/.editspace/lanes/x/repos/o/r`, time: { created: 1, updated: Date.now() - 1000 } },
@@ -36,6 +37,15 @@ await page.route("**/hosts/mini/**", (route) => {
   if (miniDown) return route.abort("connectionrefused")
   const url = new URL(route.request().url())
   if (url.pathname === "/hosts/mini/oc/experimental/session") return route.fulfill({ json: miniSessions })
+  if (url.pathname === "/hosts/mini/oc/experimental/capabilities") return route.fulfill({ json: { sessionInput: { create: true } } })
+  if (url.pathname === "/hosts/mini/oc/session/ses_a/input" && route.request().method() === "POST") {
+    const body = JSON.parse(route.request().postData())
+    miniInputs.push(body)
+    // That host's exact-retry rule: one request ID, one body.
+    const first = miniInputs.find((item) => item.requestID === body.requestID)
+    if (first.text !== body.text) return route.fulfill({ status: 409, json: { error: "requestID reused with a different body" } })
+    return route.fulfill({ json: { requestID: body.requestID, state: "pending", delivery: body.delivery } })
+  }
   if (url.pathname === "/hosts/mini/oc/session/ses_a") return route.fulfill({ json: { ...miniSessions[0], slug: "a", projectID: "p", version: "1" } })
   if (url.pathname === "/hosts/mini/oc/session/ses_a/message") {
     miniMessageReads.push(url.search)
@@ -140,18 +150,33 @@ try {
   await expect(page.locator(".desk-queue h2 span")).toHaveText(/\+$/)
   miniDown = false
   await page.goto(preview.url)
-  // Opening a Mini row reads it here, read-only, through /hosts/mini; replying opens the same session on
-  // the Mini's own listener. No composer exists, so no draft can be typed for the wrong host.
+  // Opening a Mini row reads it here through /hosts/mini, and sends to the Mini only (Slice W).
   await page.getByRole("link", { name: /^Mini copy of a, on Mac Mini$/ }).click()
   await expect.poll(() => new URL(page.url()).search).toBe(`?directory=${encodeURIComponent(miniRoot)}&host=mini`)
   await expect(page.locator(".host-session[data-host='mini']")).toBeVisible()
   await expect(page.locator(".host-session")).toContainText("Hello from the Mini transcript")
-  await expect(page.locator(".host-session-bar")).toContainText("Read-only, on Mac Mini")
+  await expect(page.locator(".host-session-bar")).toContainText("On Mac Mini")
   expect(miniMessageReads.at(-1)).toBe(`?directory=${encodeURIComponent(miniRoot)}`)
-  await expect(page.locator(".host-session textarea, .host-session [contenteditable]")).toHaveCount(0)
-  await expect(page.getByRole("link", { name: "Open on Mac Mini to reply" })).toHaveAttribute("href", `${mini}/session/ses_a?directory=${encodeURIComponent(miniRoot)}`)
-  await page.getByRole("link", { name: "Open on Mac Mini to reply" }).click()
-  await expect.poll(() => opened.at(-1)).toBe(`${mini}/session/ses_a?directory=${encodeURIComponent(miniRoot)}`)
+  await expect(page.locator(".host-session-provenance")).toContainText("to Mac Mini")
+  const message = page.getByLabel("Message to Mac Mini")
+  await message.fill("Use the staging bucket")
+  await page.getByRole("button", { name: /Send to Mac Mini/ }).click()
+  await expect(page.locator(".host-session-receipt")).toHaveCount(0)
+  expect(miniInputs).toEqual([{ requestID: expect.stringMatching(/^[0-9a-f-]{36}$/), delivery: "steer", text: "Use the staging bucket" }])
+  // Reusing that request ID with other text is refused by the Mini and nothing new is sent.
+  await page.evaluate(([key, id]) => localStorage.setItem(key, JSON.stringify({ requestID: id, text: "Different text", state: "absent" })), [`host:mini:es-app-host-pending:ses_a`, miniInputs[0].requestID])
+  await page.reload()
+  await page.getByRole("button", { name: "Send again" }).click()
+  await expect(page.getByRole("alert")).toContainText("already used for different text")
+  expect(miniInputs.length).toBe(2)
+  // The Mini goes away: Send is off with the reason, and nothing is written anywhere.
+  miniDown = true
+  await page.reload()
+  await message.fill("While the Mini is down")
+  await expect(page.locator(".host-session-blocked")).toContainText(/Mac Mini is unreachable/)
+  await expect(page.getByRole("button", { name: /Send to Mac Mini/ })).toBeDisabled()
+  miniDown = false
+  await expect(page.getByRole("link", { name: "Open on Mac Mini for answers and permissions" })).toHaveAttribute("href", `${mini}/session/ses_a?directory=${encodeURIComponent(miniRoot)}`)
   // The Mini is down when the page loads: its last-seen rows from this profile are listed, marked unreachable.
   await page.goto(preview.url)
   await expect(page.getByRole("link", { name: /^Mini copy of a, on Mac Mini$/ })).toBeVisible()
@@ -171,8 +196,9 @@ try {
   await page.unroute(/\/(oc|es)\//)
   // The only local write is Front desk's own operator sign-in on this host; nothing is written through /hosts/*.
   expect(preview.fixture.calls.filter((call) => !["GET", "HEAD", "OPTIONS"].includes(call.method) && call.path !== "/api/attention/session")).toEqual([])
-  expect(hostWrites).toEqual([])
-  console.log(`PASS work view: two hosts listed apart (same id), offline host shown unreachable, Mini default create without fallback, draft carried to the Mini page, host-keyed pins, Mini decisions listed in Needs you and opened on the Mini desk, Mini row read-only here through /hosts/mini with reply on its own listener, reload with the Mini or Local down keeps their last-seen rows marked unavailable; host reads mini=${hostReads.mini} wing=${hostReads.wing}; zero host writes, no local mutations beyond this desk's operator sign-in`)
+  // The only writes through /hosts are the two Mini inputs above (the second refused by the Mini).
+  expect(hostWrites.map((url) => new URL(url).pathname)).toEqual(["/hosts/mini/oc/session/ses_a/input", "/hosts/mini/oc/session/ses_a/input"])
+  console.log(`PASS work view: two hosts listed apart (same id), offline host shown unreachable, Mini default create without fallback, draft carried to the Mini page, host-keyed pins, Mini decisions listed in Needs you and opened on the Mini desk, Mini session read and sent to here (one input, 409 on a changed body, off while the Mini is down), reload with the Mini or Local down keeps their last-seen rows marked unavailable; host reads mini=${hostReads.mini} wing=${hostReads.wing}; zero host writes, no local mutations beyond this desk's operator sign-in`)
 } finally {
   await browser.close()
   await preview.close()
