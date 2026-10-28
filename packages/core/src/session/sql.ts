@@ -19,6 +19,7 @@ import type { Revert } from "@opencode-ai/schema/revert"
 type SessionMessageData = Omit<(typeof SessionMessage.Message)["Encoded"], "type" | "id">
 type V1MessageData = Omit<SessionV1.Info, "id" | "sessionID">
 type V1PartData = Omit<SessionV1.Part, "id" | "sessionID" | "messageID">
+type NudgeResult = { outcome: string; requestID: string; messageID?: MessageID; requestIDs?: readonly string[] }
 
 export const SessionTable = sqliteTable(
   "session",
@@ -76,6 +77,19 @@ export const SessionSupersessionTable = sqliteTable("session_supersession", {
   successor_id: text().$type<SessionSchema.ID>().notNull(),
   state: text().$type<"pending" | "committed">().notNull(),
   time_committed: integer(),
+})
+
+// One row per explicit Nudge request: the idempotency record. The same body returns `result`; the same
+// request ID with a different session or observed message is refused.
+export const SessionNudgeTable = sqliteTable("session_nudge", {
+  request_id: text().primaryKey(),
+  session_id: text()
+    .$type<SessionSchema.ID>()
+    .notNull()
+    .references(() => SessionTable.id, { onDelete: "cascade" }),
+  observed_message_id: text().$type<MessageID>().notNull(),
+  result: text({ mode: "json" }).$type<NudgeResult>().notNull(),
+  time_created: integer().notNull(),
 })
 
 export const MessageTable = sqliteTable(
