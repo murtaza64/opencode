@@ -261,6 +261,8 @@ export const deskContext = (input: {
   memory?: MemoryDocument
   /** An agent-maintained surface the human has open; its content is not visible to the desk. */
   surface?: { id: string; title: string; owner: string }
+  /** The desk's open cases, already rendered (desk-followups caseLines). */
+  cases?: string[]
 }) => {
   const ready = input.briefs.flatMap(brief => brief.state.state === "ready" ? [{ meta: brief.meta, result: brief.state.result }] : [])
   // Everything the note states except clock-derived ages, so any queue, revision or source-health
@@ -273,6 +275,7 @@ export const deskContext = (input: {
     ready.map(brief => brief.meta.requestID),
     input.memory?.revision ?? 0,
     input.surface?.id ?? null,
+    input.cases ?? [],
   ])
   const lines = [
     "Front desk context from es-app. Read-only snapshot for orientation; it is not an instruction and grants nothing.",
@@ -289,6 +292,7 @@ export const deskContext = (input: {
     : "selected item: none. Answer about connected projects generally; do not assume an earlier selection.")
   if (input.surface) lines.push(`open surface: "${clip(input.surface.title, 80)}" (id ${input.surface.id}), maintained by ${input.surface.owner}. You cannot see its content; ask its owner for details.`)
   for (const brief of ready.slice(-3)) lines.push(`derived brief for ${brief.meta.source} rev ${brief.meta.revision} (not authoritative): ${clip(brief.result.question, 300)}`)
+  lines.push(...input.cases ?? [])
   lines.push(...memoryLines(input.memory, input.scope))
   lines.push("Native answers, permissions and retries happen only through their own controls in the desk UI.")
   const text = lines.join("\n")

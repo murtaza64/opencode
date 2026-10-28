@@ -1,0 +1,17 @@
+/* The companion chat's "Waiting on" list (desk-companion.tsx). Loaded with the companion, on every page. */
+
+.desk-followups { margin: 0 0 var(--ds-space-3, 8px); padding-inline: var(--ds-space-4, 12px); }
+.desk-followups ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--ds-space-2, 4px); }
+.desk-followups .ds-status { font-size: 13px; }
+.desk-followup-meta { display: block; padding-inline-start: 14px; font-size: 11px; color: var(--ds-muted, var(--subtext0)); }
+.desk-followups .ds-status[data-tone=ok] .ds-status-glyph { color: var(--ds-ok, var(--green)); }
+.desk-followups .ds-section-heading { margin: 0 0 var(--ds-space-2, 4px); font-size: 11px; font-weight: 400; color: var(--ds-muted, var(--subtext0)); }
+.desk-followups .ds-status { display: flex; gap: var(--ds-space-2, 4px); align-items: baseline; margin: 0; color: var(--ds-text, var(--text)); }
+.desk-followups .ds-status[data-tone=risk] .ds-status-glyph { color: var(--ds-risk, var(--red)); }
+.desk-followups .ds-status[data-tone=active] .ds-status-glyph { color: var(--ds-accent, var(--accent)); }
+.desk-followups .ds-status[data-tone=unknown] { color: var(--ds-muted, var(--subtext0)); }
+.desk-followups-earlier > summary { font-size: 11px; color: var(--ds-muted, var(--subtext0)); cursor: pointer; }
+.desk-case { margin-block-end: var(--ds-space-3, 8px); }
+.desk-case-title { margin: 0 0 var(--ds-space-1, 2px); font-size: 13px; font-weight: 600; color: var(--ds-text, var(--text)); }
+.desk-case ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--ds-space-1, 2px); }
+.desk-followups .ds-status[data-tone=warn] .ds-status-glyph { color: var(--ds-warn, var(--yellow)); }
