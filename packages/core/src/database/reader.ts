@@ -88,12 +88,12 @@ export const make = Effect.fn("DatabaseReader.make")(function* (options: Options
   let nextID = 0
   let closed = false
 
-  const fail = (slot: Slot, message: string) => {
+  const fail = (slot: Slot, message: string, retry = false) => {
     slot.dead = true
     for (const [id, entry] of pending) {
       if (entry.worker !== slot) continue
       pending.delete(id)
-      Deferred.doneUnsafe(entry.deferred, Effect.fail(readerError(new Error(message))))
+      Deferred.doneUnsafe(entry.deferred, Effect.fail(readerError(Object.assign(new Error(message), retry ? { retry } : {}))))
     }
   }
 
@@ -104,6 +104,15 @@ export const make = Effect.fn("DatabaseReader.make")(function* (options: Options
       if (!entry) return
       pending.delete(event.data.id)
       slot.inflight--
+      if ("error" in event.data && BROKEN.test(String(event.data.error.code ?? ""))) {
+        // A long-lived read-only connection can keep failing on a file a fresh connection reads fine. Retire
+        // this worker and retry its statements once on a new connection.
+        pending.set(event.data.id, entry)
+        slot.inflight++
+        fail(slot, `database reader connection reported ${event.data.error.code}`, true)
+        slot.worker.terminate()
+        return
+      }
       if ("error" in event.data)
         return Deferred.doneUnsafe(entry.deferred, Effect.fail(readerError(Object.assign(new Error(event.data.error.message), event.data.error))))
       Deferred.doneUnsafe(entry.deferred, Effect.succeed(event.data.rows))
@@ -134,7 +143,16 @@ export const make = Effect.fn("DatabaseReader.make")(function* (options: Options
     return slots.reduce((best, slot) => (slot.inflight < best.inflight ? slot : best))
   }
 
-  const run = (sql: string, params: ReadonlyArray<unknown>, values: boolean) =>
+  const run = (sql: string, params: ReadonlyArray<unknown>, values: boolean): Effect.Effect<Array<any>, SqlError> =>
+    attempt(sql, params, values).pipe(
+      Effect.catchIf(retryable, (error) =>
+        Effect.logWarning("database reader reopened its connection", { reason: error.message }).pipe(
+          Effect.andThen(attempt(sql, params, values)),
+        ),
+      ),
+    )
+
+  const attempt = (sql: string, params: ReadonlyArray<unknown>, values: boolean) =>
     Effect.withFiber<Array<any>, SqlError>((fiber) => {
       if (closed) return Effect.fail(readerError(new Error("database reader closed")))
       if (Option.isSome(Context.getOption(fiber.context, writerTransaction)))
@@ -180,6 +198,13 @@ export const make = Effect.fn("DatabaseReader.make")(function* (options: Options
   const db = yield* EffectDrizzleSqlite.makeWithDefaults().pipe(Effect.provideService(Client.SqlClient, client))
   return { db } satisfies Interface
 })
+
+// File-level SQLite failures: the connection, not the statement, is broken.
+const BROKEN = /^SQLITE_(NOTADB|CORRUPT|IOERR|CANTOPEN)/
+
+function retryable(error: SqlError) {
+  return (error.reason as { cause?: { retry?: boolean } }).cause?.retry === true
+}
 
 function readerError(cause: unknown) {
   return new SqlError({ reason: classifySqliteError(cause, { message: "Failed to execute read", operation: "execute" }) })
