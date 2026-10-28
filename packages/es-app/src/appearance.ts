@@ -17,10 +17,13 @@ export type Appearance = {
 
 const ROUTE = "/__es/appearance"
 const KEY = "es.appearance"
+export const LIVING_ACTIVITY_KEY = "es.appearance.livingActivity"
 const HEX = /^#[0-9a-f]{6}$/i
 
 const [enabled, setEnabledSignal] = createSignal(read())
 export { enabled }
+const [livingActivity, setLivingActivitySignal] = createSignal(readLivingActivity())
+export { livingActivity }
 const [current, setCurrent] = createSignal<Appearance>()
 export { current }
 
@@ -31,6 +34,25 @@ function read() {
   } catch {
     return false
   }
+}
+
+function readLivingActivity() {
+  if (typeof location !== "undefined" && new URLSearchParams(location.search).get("filament") === "1") return true
+  try {
+    return globalThis.localStorage?.getItem(LIVING_ACTIVITY_KEY) === "1"
+  } catch {
+    return false
+  }
+}
+
+export const setLivingActivity = (on: boolean) => {
+  try {
+    globalThis.localStorage?.setItem(LIVING_ACTIVITY_KEY, on ? "1" : "0")
+  } catch {
+    // Storage may be unavailable; keep the choice for this page.
+  }
+  setLivingActivitySignal(on)
+  if (typeof document !== "undefined") document.documentElement.toggleAttribute("data-living-activity", on)
 }
 
 export const setEnabled = (on: boolean) => {
@@ -152,6 +174,7 @@ const acknowledge = () => {
 // Loads the laptop's appearance once and follows its change events. A missing route (web,
 // remote browser, older desktop) is silent and keeps the default theme.
 export const installAppearance = () => {
+  document.documentElement.toggleAttribute("data-living-activity", livingActivity())
   let stopped = false
   const load = async () => {
     const response = await fetch(ROUTE, { cache: "no-store" }).catch(() => undefined)

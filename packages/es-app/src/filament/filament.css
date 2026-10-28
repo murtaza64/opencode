@@ -1,0 +1,20 @@
+/* Filament (opt-in). The transcript reserves a gutter at its logical start while the overlay is
+ * mounted; the canvas sits fixed over the transcript box, never over the composer. Only
+ * filament-prefixed classes and the [data-filament] transcript hook are styled here. */
+.transcript[data-filament] { padding-inline-start: var(--filament-gutter, 40px); }
+/* Sticky zero-height holder at the scroller's top; the canvas overflows it to cover the viewport. */
+.filament-holder { position: sticky; inset-block-start: 0; block-size: 0; overflow: visible; z-index: 2; pointer-events: none; margin: 0; padding: 0; }
+/* Physical top/left are set by the component from measured rects (canvas geometry is physical). */
+.filament-canvas { position: absolute; display: block; pointer-events: none; }
+.filament-static {
+  position: fixed; z-index: 2; pointer-events: none; font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  background: var(--surface0); border: 1px solid var(--surface1); color: var(--subtext1);
+}
+.filament-static[data-phase="waiting"] { border-color: var(--yellow); color: var(--yellow); }
+.filament-static[data-phase="error"] { border-color: var(--red); color: var(--red); }
+.filament-static:is([data-phase="thinking"], [data-phase="streaming"], [data-phase="tool"]) { border-color: var(--accent); color: var(--accent); }
+.filament-hud {
+  position: fixed; inset-block-end: 8px; inset-inline-end: 8px; z-index: 50; width: 280px; pointer-events: none;
+  background: rgb(10 10 14 / .9); border: 1px solid var(--surface1); border-radius: 4px; padding: 6px 8px;
+  font: 11px/1.4 var(--font-mono, ui-monospace, monospace); color: var(--subtext1); direction: ltr; text-align: left; white-space: pre-wrap;
+}

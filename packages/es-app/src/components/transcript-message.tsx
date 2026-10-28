@@ -8,6 +8,8 @@ import { ChatImages } from "./chat-images"
 import type { Segment } from "../transcript-groups"
 import type { MailNamer } from "../mail-names"
 import { MailOriginDetail, MailRoute, MailSender, MailSummary, mailPurpose, originOf, senderText } from "./mail-summary"
+import { iconEligible, ToolChip } from "./tool-run"
+import { livingActivity } from "../appearance"
 
 type MailSource = { type: "editspace-mail"; id: string; sender: string; recipient: string; senderSession?: string }
 const mailTime = (value: string | number | null) => value == null ? "" : new Date(value).toLocaleString()
@@ -82,7 +84,7 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
       <Index each={segments()}>{(segment) => {
         const parts = createMemo(() => { const value = segment(); return value.kind === "parts" ? value.parts : [] })
         return <Show when={(() => { const value = segment(); return value.kind === "run" ? value.key : undefined })()} keyed
-          fallback={<Message {...props} parts={parts()} activityRows />}>{(key) => props.renderRun?.(key)}</Show>
+          fallback={<Parts {...props} parts={parts()} />}>{(key) => props.renderRun?.(key)}</Show>
       }}</Index>
     }</Show>
     <Show when={messageError()}>{(error) =>
@@ -150,4 +152,24 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
       </div>
     </details>}
   </Show>
+}
+
+// With living activity each tool call renders icon-first (ToolChip states failures and running calls in words);
+// text and other parts render as before, in order. Splitting is per part, so nothing regroups while a turn runs.
+const Parts = (props: ComponentProps<typeof Message>) => {
+  const groups = createMemo(() => {
+    if (!livingActivity()) return [{ key: "all", parts: props.parts }]
+    return props.parts.reduce<{ key: string; parts: typeof props.parts; tool?: true }[]>((all, part) => {
+      if (iconEligible(part, props.renderTools)) return [...all, { key: part.id, parts: [part], tool: true }]
+      const last = all.at(-1)
+      if (last && !last.tool) return [...all.slice(0, -1), { ...last, parts: [...last.parts, part] }]
+      return [...all, { key: part.id, parts: [part] }]
+    }, [])
+  })
+  return <For each={groups().map((group) => group.key)}>{(key) => {
+    const group = createMemo(() => groups().find((item) => item.key === key))
+    return <Show when={group()}>{(value) => value().tool
+      ? <ToolChip message={props.message} part={value().parts[0] as Parameters<typeof ToolChip>[0]["part"]} renderTools={props.renderTools} />
+      : <Message {...props} parts={value().parts} activityRows />}</Show>
+  }}</For>
 }

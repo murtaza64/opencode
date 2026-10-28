@@ -39,6 +39,8 @@ import { Glyph } from "../components/icons"
 import { AppHeader } from "../components/native-header"
 import { SessionTitle } from "../components/session-title"
 import { SubagentTranscript } from "../components/subagent-transcript"
+import { Filament } from "../filament/filament"
+import { livingActivity, setLivingActivity } from "../appearance"
 import { TranscriptMessage } from "../components/transcript-message"
 import { MailCauseRow } from "../components/mail-cause"
 import { InlineQuestion } from "../components/inline-question"
@@ -1754,7 +1756,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     const hit = () => findHit() && run().members.some((member) => member.partID === findHit()!.partID) ? findHit() : undefined
     return <ToolRun run={run()} message={(id) => messageByID().get(id)} parts={(id) => live.data.part[id] ?? []}
       open={runOpen(key)} onToggle={(open) => toggleRun(key, open)} renderTools={renderTools}
-      selectedPart={hit()?.partID}
+      selectedPart={hit()?.partID} compact={livingActivity()}
       excerpt={<Show when={hit()}>{(selected) => <div class="find-jump" role="region" aria-label="Selected transcript match"><FindExcerpt hit={selected()} /></div>}</Show>} />
   }}</Show>
 
@@ -1782,6 +1784,10 @@ export function SessionView(props: { sessionID: string; directory: string; embed
           </Show>
           {/* Icon controls keep the title primary; names, shortcuts and prompt scope stay accessible. */}
           <div class="session-header-tools">
+            <button class="header-icon" aria-label="Living activity (Filament + icon rows)" aria-pressed={livingActivity()}
+              title="Living activity (Filament + icon rows)" onClick={() => setLivingActivity(!livingActivity())}>
+              <Icon name="brain" size="small" />
+            </button>
             <span class="sr-only" id={`prompt-scope-${sessionID}`}>{promptScope()}</span>
             <button class="header-icon" aria-label="Find" aria-keyshortcuts={ariaShortcut("find")} title={`Find in transcript (${shortcutLabel("find")})`}
               onPointerDown={(event) => event.preventDefault()} onClick={openFind}><Icon name="magnifying-glass" size="small" /></button>
@@ -1855,6 +1861,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
           </For>
         </div>
 
+        <Show when={livingActivity()}><Filament messages={messages} parts={(id) => live.data.part[id] ?? []} status={status}
+          pending={pending} subagents={subagentsRunning} transcript={() => transcriptEl} /></Show>
         <div class="transcript" ref={transcriptEl}>
           <div ref={inner} class="transcript-inner" classList={{ "transcript-arrive": arrived() }}
             onPointerOver={stampBlock} onFocusIn={stampBlock} onClick={(event) => {
