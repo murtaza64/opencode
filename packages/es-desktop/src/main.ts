@@ -8,6 +8,8 @@ import { createVoice, voiceTools } from "./voice"
 import { appRouteURL, externalURL, internalURL, pageArrivedCrossSite, pageNavigation, serviceHosts, serviceOrigins, serviceSelf, startupMode, startupPlan, surfaceFrameURL } from "./policy"
 import { createTabs, TITLE_BAR_HEIGHT } from "./tabs"
 import { watchBadges } from "./badges"
+import { muxEvents, sseEvents, watchNotifications } from "./notifier"
+import { notificationsSupported, postNotice } from "./desktop-notice"
 import { createAppearance } from "./appearance"
 import { localStateDir, pairingSources, type PairingSource } from "./pair-phone"
 import { openPairPhone } from "./pair-phone-window"
@@ -360,6 +362,38 @@ const start = async () => {
     ], (id, badge) => tabs.setBadge(id, badge), undefined, () => window.isVisible() && !window.isMinimized())
     for (const event of ["show", "restore", "focus"] as const) window.on(event as "show", badges.refresh)
     app.on("before-quit", badges.stop)
+  }
+  // OS notifications for decisions and permission/question requests, while Editspace runs and its
+  // window is not focused. Off unless ES_DESKTOP_NOTIFY=1 until the macOS permission prompt is tested.
+  if (process.env.ES_DESKTOP_NOTIFY === "1" && notificationsSupported()) {
+    // The listener key stays in the main process: never in the renderer or a notification.
+    const listen = (id: string, listener: typeof server) => {
+      const read = (path: string, signal?: AbortSignal) => fetch(`${listener.origin}${path}`, { headers: { "x-editspace-key": listener.key, origin: listener.origin }, redirect: "error", signal })
+      return { id, base: listener.origin, read, events: muxEvents(listener.origin, listener.key) }
+    }
+    const hosts = [
+      listen("local", server),
+      ...remotes.map((host) => listen(host.id, host.server)),
+      // A page host is read with its own partition (its own sign-in), on its own origin. A sign-in
+      // redirect or refusal leaves it unavailable; a notification never follows or opens sign-in.
+      ...pages.map((host) => {
+        const read = (path: string, signal?: AbortSignal) => session.fromPartition(`persist:editspace-host-${host.id}`).fetch(`${host.origin}${path}`, { credentials: "include", redirect: "manual", signal })
+        return { id: host.id, base: host.origin, read, events: sseEvents(read) }
+      }),
+    ]
+    const notifications = watchNotifications(hosts, {
+      focused: (host) => window.isFocused() && (!tabs || tabs.selected() === host),
+      show: (notice) =>
+        postNotice(notice, () => {
+          const base = hosts.find((host) => host.id === notice.host)?.base
+          if (!base) return
+          reveal()
+          tabs?.select(notice.host)
+          const target = notice.route ? new URL(notice.route, base) : undefined
+          if (target?.origin === new URL(base).origin) void (tabs ? tabs.contents(notice.host) : localContents).loadURL(target.href)
+        }),
+    })
+    app.on("before-quit", notifications.stop)
   }
   await (tabs ? new Promise<void>((resolve) => localContents.once("did-finish-load", () => resolve())) : localContents.loadURL(server.origin))
   opened.ready = true
