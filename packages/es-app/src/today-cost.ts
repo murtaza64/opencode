@@ -83,9 +83,10 @@ export type HostCost = { id: string; label: string; current: boolean; state: "ok
 
 export const todayCost = (now = Date.now()) => costSummary(targets(), readings(), now)
 
-/** Each WORK host's daily cost, plus a combined total over hosts whose Core reports origin-only cost.
- * A lone WORK host's raw cost is its total (nothing to overlap); with several hosts, a host without
- * origin-only cost is listed separately and makes the result partial. Undefined when no host has a cost. */
+/** One Work Today summary. With several WORK hosts the total is the sum of origin-only costs and exists
+ * only when every host reports one, so history copied between hosts is counted once; otherwise the summary
+ * is partial with no amount, never a guessed sum. A lone WORK host's own cost is its total (nothing to
+ * overlap). Per-host figures and coverage are for the details. Undefined when no host has a cost. */
 export const costSummary = (targets: Target[], readings: Record<string, Reading>, now: number) => {
   const hosts: HostCost[] = targets.map((target) => {
     const reading = readings[target.id]
@@ -107,16 +108,17 @@ export const costSummary = (targets: Target[], readings: Record<string, Reading>
     }
     return { ...base, state: "unsupported", cost: today.cost, note: ["Core has no origin-only cost", failed].filter(Boolean).join("; ") }
   })
-  const counted = hosts.filter((item) => item.cost !== undefined && (item.state !== "unsupported" || hosts.length === 1))
-  const separate = hosts.filter((item) => item.cost !== undefined && !counted.includes(item))
-  if (!counted.length && !separate.length) return undefined
-  const observedAt = Math.min(...[...counted, ...separate].map((item) => item.observedAt ?? now))
+  const known = hosts.filter((item) => item.cost !== undefined)
+  if (!known.length) return undefined
+  const combinable = (item: HostCost) => item.state === "ok" || item.state === "partial" || item.state === "offline"
+  const counted = hosts.length === 1 ? known : hosts.every(combinable) ? hosts : []
+  const observedAt = Math.min(...known.map((item) => item.observedAt ?? now))
   const exact = hosts.every((item) => item.state === "ok" && now - (item.observedAt ?? 0) <= STALE_MS)
   return {
-    /** Combined origin-only cost; undefined when no host can be combined. */
+    /** Deduplicated Work total; undefined when some host cannot be combined. */
     total: counted.length ? counted.reduce((sum, item) => sum + (item.cost ?? 0), 0) : undefined,
-    separate,
-    unsupported: hosts.filter((item) => item.state === "unsupported" && !counted.includes(item)).map((item) => item.label),
+    /** Hosts that keep the summary partial, for the details. */
+    gaps: hosts.filter((item) => item.state !== "ok"),
     estimate: true,
     partial: !exact,
     observedAt,
