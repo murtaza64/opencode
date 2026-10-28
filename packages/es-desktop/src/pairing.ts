@@ -68,10 +68,23 @@ export const codeCommand = (file: string, platform: string = process.platform) =
 const html = (value: string) =>
   value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;")
 
+/** An operator-configured SSH destination for the copy line (alias, host or user@host), never an option. */
+export const pairingSshHost = (value: string | undefined) =>
+  value && /^[A-Za-z0-9_][A-Za-z0-9_.-]*(@[A-Za-z0-9_][A-Za-z0-9_.-]*)?$/.test(value) && value.length <= 128 ? value : undefined
+
+/** One line, run on another Mac, that copies the code to its clipboard without showing it. Only for a
+ * path every shell passes through unchanged inside single quotes. */
+export const sshCopyCommand = (file: string, host: string) =>
+  /^[A-Za-z0-9._/~-]+$/.test(file) ? `ssh -- ${host} 'cat -- ${file}' | pbcopy` : undefined
+
 // The page names where the code comes from, never the code. A path with control characters cannot be
-// shown as one copyable command, so it gets the generic wording.
-export const pairingPage = (error = "", codeFile?: string, platform: string = process.platform) => {
+// shown as one copyable command, so it gets the generic wording. `sshHost` (ES_GATEWAY_PAIRING_SSH)
+// adds the clipboard line for another computer; it is wrapped in email_off because Cloudflare's email
+// obfuscation would otherwise turn user@host into a script-decoded link this page's CSP never runs.
+export const pairingPage = (error = "", codeFile?: string, platform: string = process.platform, sshHost?: string) => {
   const command = codeFile && !/[\u0000-\u001f\u007f]/.test(codeFile) ? html(codeCommand(codeFile, platform)) : undefined
+  const host = pairingSshHost(sshHost)
+  const copy = command && codeFile && host && platform !== "win32" ? sshCopyCommand(codeFile, host) : undefined
   return `<!doctype html>
 <html lang="en" dir="ltr">
 <meta charset="utf-8">
@@ -91,12 +104,12 @@ button{margin-block-start:16px;inline-size:100%;padding:12px;font:inherit;font-w
 </style>
 <main>
 <h1>Pair this device</h1>
-<p>Get the code from <strong>the PC hosting this gateway</strong>, then enter it below.</p>
+<p>Get the code from <strong>the PC hosting this gateway</strong>, then enter it below. On a computer running the Editspace app for this host, <strong>Pair a Phone</strong> (Editspace menu) shows the code and a QR the Desk app scans.</p>
 ${command ? `<ol>
 <li>On the host PC, open a terminal locally or connect to that PC over SSH. Do not run this on the device you are pairing.</li>
 <li>Run this exact command:<pre><code>${command}</code></pre></li>
 <li>Copy the code it prints, paste it below, and press <strong>Pair</strong>.</li>
-</ol>` : `<p>This gateway's code was set when it was started (for example in <code>ES_REMOTE_PAIRING_CODE</code>). Ask the person who started it for that code.</p>`}
+</ol>${copy ? `<p>From a Mac that can SSH to the host, this copies the code to your clipboard without showing it:</p><pre><code><!--email_off-->${html(copy)}<!--/email_off--></code></pre>` : ""}` : `<p>This gateway's code was set when it was started (for example in <code>ES_REMOTE_PAIRING_CODE</code>). Ask the person who started it for that code.</p>`}
 <p>If you cannot reach the host PC, ask its owner for the code. Pairing applies to this browser or app only; signing in through a separate browser does not pair the desktop app.</p>
 <form method="post" action="/__es/pair">
 <label for="code">Pairing code</label>

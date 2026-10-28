@@ -9,6 +9,8 @@ import { appRouteURL, externalURL, internalURL, pageArrivedCrossSite, pageNaviga
 import { createTabs, TITLE_BAR_HEIGHT } from "./tabs"
 import { watchBadges } from "./badges"
 import { createAppearance } from "./appearance"
+import { localStateDir, pairingSources, type PairingSource } from "./pair-phone"
+import { openPairPhone } from "./pair-phone-window"
 
 app.setName("Editspace")
 app.setPath("userData", process.env.ES_DESKTOP_USER_DATA ?? path.join(app.getPath("appData"), "Editspace"))
@@ -271,6 +273,15 @@ const start = async () => {
     })
   }
   if (window instanceof BrowserWindow) guardListener(window.webContents, server.origin, true)
+  // Pair a Phone: this machine's gateway, plus each host with an owner SSH destination in
+  // service-origins.json "pairing". Read once at startup, like the host list.
+  const pairable: { id: string; label: string; source: PairingSource }[] = await readFile(path.join(app.getPath("userData"), "service-origins.json"), "utf8")
+    .then((text) => pairingSources(JSON.parse(text)), () => new Map<string, PairingSource>())
+    .then((sources) => [
+      { id: "local", label: "Local", source: { kind: "local" as const, dir: localStateDir({ XDG_STATE_HOME: process.env.XDG_STATE_HOME }, app.getPath("home")) } },
+      ...configured.flatMap((host) => { const source = sources.get(host.id); return source ? [{ id: host.id, label: host.label, source }] : [] }),
+    ])
+  const pairMenu = { label: "Pair a Phone", submenu: pairable.map((host) => ({ label: `${host.label}…`, click: () => openPairPhone(host, host.source, window) })) }
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       { role: "appMenu" },
@@ -296,16 +307,20 @@ const start = async () => {
         ],
       },
       // Host tabs: Cmd+Ctrl+1..9 selects a host; the native menu also reads hosts to VoiceOver.
-      ...(tabs
-        ? [{
-            label: "Hosts",
-            submenu: tabs.hosts().slice(0, 9).map((host, index) => ({
-              label: host.label,
-              accelerator: `${process.platform === "darwin" ? "Command+Control" : "Control+Alt"}+${index + 1}`,
-              click: () => tabs.select(host.id),
-            })),
-          }]
-        : []),
+      {
+        label: "Hosts",
+        submenu: [
+          ...(tabs
+            ? tabs.hosts().slice(0, 9).map((host, index) => ({
+                label: host.label,
+                accelerator: `${process.platform === "darwin" ? "Command+Control" : "Control+Alt"}+${index + 1}`,
+                click: () => tabs.select(host.id),
+              }))
+            : []),
+          ...(tabs ? [{ type: "separator" as const }] : []),
+          pairMenu,
+        ],
+      },
       {
         role: "windowMenu",
         // Reserve Command+M for the composer's target cycle, retaining the menu action.

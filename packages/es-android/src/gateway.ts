@@ -1,4 +1,5 @@
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises"
+import { chmodSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
 import { parseArgs } from "node:util"
@@ -10,7 +11,7 @@ import { createPairingCode, normalizePairingCode } from "../../es-desktop/src/pa
 export const startGateway = async (options: {
   host: string
   port: number
-  code: string
+  code: string | (() => string)
   codeFile?: string
   root: string
   opencode?: string
@@ -25,7 +26,7 @@ export const startGateway = async (options: {
     opencode: options.opencode,
     dashboard: options.dashboard,
     opencodeAuth: options.opencodeAuth,
-    pairing: { code: options.code, codeFile: options.codeFile },
+    pairing: { code: options.code, codeFile: options.codeFile, sshHost: process.env.ES_GATEWAY_PAIRING_SSH || undefined },
     publicOrigin: options.publicOrigin,
   })
 
@@ -36,13 +37,45 @@ export const pairingCode = async (file: string) => {
   return storePairingCode(file, createPairingCode())
 }
 
-// The code is a credential: it lives only in an owner-only file and is never logged.
+// The code is a credential: it lives only in an owner-only file and is never logged. Written to a
+// temporary file and renamed, so a reader never sees a partial code.
 export const storePairingCode = async (file: string, code: string) => {
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 })
-  await writeFile(file, `${code}\n`, { mode: 0o600 })
-  await chmod(file, 0o600)
+  await writeFile(`${file}.tmp`, `${code}\n`, { mode: 0o600 })
+  await chmod(`${file}.tmp`, 0o600)
+  await rename(`${file}.tmp`, file)
   return code
 }
+
+/** The code in `file`, re-read when the file changes (checked at most once a second), so writing a new
+ * code (Pair a Phone > Rotate) revokes paired devices without a restart. A deleted file gets a new
+ * code, as deleting it always revoked devices. An unreadable or short file keeps the last code. */
+export const watchedPairingCode = (file: string, initial: string, now = Date.now) => {
+  const last = { code: initial, mtime: statSync(file, { throwIfNoEntry: false })?.mtimeMs ?? 0, checked: now() }
+  return () => {
+    if (now() - last.checked < 1000) return last.code
+    last.checked = now()
+    const stat = statSync(file, { throwIfNoEntry: false })
+    if (!stat) {
+      const code = createPairingCode()
+      mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
+      writeFileSync(`${file}.tmp`, `${code}\n`, { mode: 0o600 })
+      chmodSync(`${file}.tmp`, 0o600)
+      renameSync(`${file}.tmp`, file)
+      last.code = code
+      last.mtime = statSync(file).mtimeMs
+      return code
+    }
+    if (stat.mtimeMs === last.mtime) return last.code
+    last.mtime = stat.mtimeMs
+    const text = readFileSync(file, "utf8")
+    if (normalizePairingCode(text).length >= 16) last.code = text.trim()
+    return last.code
+  }
+}
+
+/** Where the desktop app's Pair a Phone reads this gateway's phone-facing origin: beside the code file. */
+export const gatewayDescriptor = (codeFile: string) => path.join(path.dirname(codeFile), "gateway.json")
 
 if (import.meta.main) {
   const args = parseArgs({
@@ -58,11 +91,12 @@ if (import.meta.main) {
   })
   const fromEnvironment = !!process.env.ES_REMOTE_PAIRING_CODE
   const code = process.env.ES_REMOTE_PAIRING_CODE || (await pairingCode(args.values["code-file"]))
+  const codeFile = path.resolve(args.values["code-file"])
   const gateway = await startGateway({
     host: args.values.host,
     port: Number(args.values.port),
-    code,
-    codeFile: fromEnvironment ? undefined : path.resolve(args.values["code-file"]),
+    code: fromEnvironment ? code : watchedPairingCode(codeFile, code),
+    codeFile: fromEnvironment ? undefined : codeFile,
     root: args.values.root,
     // serve() accepts only explicit http://127.0.0.1:PORT service origins.
     opencode: process.env.OPENCODE_URL,
@@ -74,6 +108,10 @@ if (import.meta.main) {
     publicOrigin: process.env.ES_GATEWAY_PUBLIC_ORIGIN || undefined,
   })
   const port = new URL(gateway.origin).port
+  // The phone-facing origin for Pair a Phone (owner-only, no secret): the public origin when an HTTPS
+  // proxy fronts this gateway, else its own loopback origin (adb reverse).
+  if (!fromEnvironment)
+    await writeFile(gatewayDescriptor(codeFile), `${JSON.stringify({ v: 1, origin: process.env.ES_GATEWAY_PUBLIC_ORIGIN || gateway.origin })}\n`, { mode: 0o600 })
   console.info(`Editspace gateway ${gateway.origin}`)
   console.info(
     fromEnvironment

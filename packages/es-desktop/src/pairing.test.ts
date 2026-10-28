@@ -211,3 +211,35 @@ test("a code from the environment or an unshowable path gets the generic wording
     expect(page).toContain("set when it was started")
   }
 })
+
+test("a rotated code takes effect without a restart: old cookies stop working, the new code pairs", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "es-pairing-rotate-"))
+  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  await Bun.write(path.join(root, "index.html"), "<title>Fixture renderer</title>")
+  const current = { code }
+  const server = await serve({ root, host: "127.0.0.1", pairing: { code: () => current.code } })
+  cleanup.push(server.close)
+  const cookie = `es_remote=${issueCookie(code)}`
+  expect((await fetch(`${server.origin}/__es/events`, { headers: { cookie } })).status).toBe(200)
+  current.code = "ZZZZZ-YYYYY-XXXXX-WWWWW"
+  expect((await fetch(`${server.origin}/__es/events`, { headers: { cookie } })).status).toBe(401)
+  const paired = await fetch(`${server.origin}/__es/pair`, { method: "POST", redirect: "manual", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code: current.code }) })
+  expect(paired.status).toBe(303)
+})
+
+test("the pairing page points at Pair a Phone and offers a clipboard line for a configured SSH host", () => {
+  const file = "/home/m/.local/state/editspace/remote-pairing-code"
+  const page = pairingPage("", file, "linux", "murtaza@excalibur")
+  expect(page).toContain("<strong>Pair a Phone</strong>")
+  // email_off keeps Cloudflare's email obfuscation from rewriting user@host into a script link.
+  expect(page).toContain("<code><!--email_off-->ssh -- murtaza@excalibur &#39;cat -- /home/m/.local/state/editspace/remote-pairing-code&#39; | pbcopy<!--/email_off--></code>")
+  expect(page).not.toContain(code)
+})
+
+test("the clipboard line is left out for unsafe SSH hosts, unusual paths and Windows", () => {
+  const file = "/home/m/.local/state/editspace/remote-pairing-code"
+  for (const host of ["-oProxyCommand=evil", "a b", "a;b", "a@b@c", "$(id)", ""]) expect(pairingPage("", file, "linux", host)).not.toContain("pbcopy")
+  expect(pairingPage("", "/home/m/it's $HOME/code", "linux", "excalibur")).not.toContain("pbcopy")
+  expect(pairingPage("", "C:\\Users\\m\\code", "win32", "excalibur")).not.toContain("pbcopy")
+  expect(pairingPage("", file, "linux", "excalibur")).toContain("ssh -- excalibur &#39;cat -- /home/m/.local/state/editspace/remote-pairing-code&#39; | pbcopy")
+})

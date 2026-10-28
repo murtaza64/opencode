@@ -35,6 +35,7 @@
   },
   "dependencies": {
     "eventsource": "3.0.7",
+    "uqr": "0.1.2",
     "ws": "8.21.0"
   },
   "build": {
