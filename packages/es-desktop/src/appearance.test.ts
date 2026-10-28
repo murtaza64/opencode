@@ -167,3 +167,21 @@ test("a device with palette.json and no colors.json serves the roles with no app
   expect(appearance.body()).toMatchObject({ palette: {}, wal: { revision: "only", okRiskCvdSafe: true } })
   expect(appearance.body()?.wallpaper).toBeUndefined()
 })
+
+test("the receipt records what the app shows after each palette change, colours only", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "es-appearance-"))
+  cleanup.push(() => rm(directory, { recursive: true, force: true }))
+  await writeFile(path.join(directory, "colors.json"), palette(path.join(directory, "missing.png")))
+  const receipt = path.join(directory, "receipt.json")
+  const appearance = createAppearance({ directory, receipt, debounce: 30, poll: 20, blur: async () => Buffer.from("x") })
+  cleanup.push(() => appearance.close())
+  await appearance.ready
+  const first = JSON.parse(await Bun.file(receipt).text())
+  expect(first).toEqual({ schema: "es-appearance-receipt/1", background: "#101014", foreground: "#e0e0e0", updatedAt: appearance.body()!.updatedAt })
+  await writeFile(path.join(directory, "colors.json"), palette(path.join(directory, "missing.png"), "#202024"))
+  for (const delay of [50, 100, 200, 400, 800]) {
+    if (JSON.parse(await Bun.file(receipt).text()).background === "#202024") break
+    await Bun.sleep(delay)
+  }
+  expect(JSON.parse(await Bun.file(receipt).text()).background).toBe("#202024")
+})
