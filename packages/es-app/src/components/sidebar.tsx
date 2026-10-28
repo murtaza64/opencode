@@ -137,6 +137,22 @@ export default function Sidebar() {
     remote.forEach((s) => byID.set(JSON.stringify([s.directory, s.id]), s))
     return [...byID.values()]
   }
+  // Work view: other hosts' rows (pinned or not, reachable or last-known) filter by the same title query,
+  // keep their host-qualified identity, and sort with this host's results by one rule (pinned, then
+  // working, then most recent). Transcript search covers this host only.
+  type Found = { local: SessionSearchResult; host?: undefined } | { host: SessionRow; local?: undefined }
+  const foundRows = createMemo((): Found[] => {
+    const needle = query().trim().toLocaleLowerCase()
+    const hostMatches = [...work.pinned(), ...work.unpinned()].filter((s) => (s.title || s.id).toLocaleLowerCase().includes(needle))
+    const localRow = (r: SessionSearchResult) => sessionRows().find((s) => s.id === r.id && s.directory === r.directory)
+    const rank = (found: Found) => {
+      if (found.host) return [work.isPinned(found.host) ? 0 : 1, work.dot(found.host) === "busy" ? 0 : 1, -found.host.updated]
+      const row = localRow(found.local)
+      return [row && isPinned(row) ? 0 : 1, row && dotFor(row) === "busy" ? 0 : 1, -(found.local.updated ?? 0)]
+    }
+    const order = (a: Found, b: Found) => { const x = rank(a), y = rank(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2] }
+    return [...searchResults().map((local): Found => ({ local })), ...hostMatches.map((host): Found => ({ host }))].sort(order)
+  })
   const [searching, setSearching] = createSignal(false)
   const [allTime, setAllTime] = createSignal(false)
   const [searchError, setSearchError] = createSignal("")
@@ -393,16 +409,16 @@ export default function Sidebar() {
           fallback={
             <>
               <div class="nav-heading">
-                results ({searchResults().length})
+                results ({foundRows().length})
               </div>
               <Show when={searching()}><div class="dim nav-empty">searching transcripts…</div></Show>
               <Show when={searchError()}>
                 <div class="dim nav-empty">{searchError()}</div>
               </Show>
-              <Show when={!searching() && !searchError() && !searchResults().length}>
+              <Show when={!searching() && !searchError() && !foundRows().length}>
                 <div class="dim nav-empty">no matches</div>
               </Show>
-              <For each={searchResults()}>{resultItem}</For>
+              <For each={foundRows()}>{(found) => found.host ? hostItem(found.host) : resultItem(found.local)}</For>
               <Show when={query().trim().length >= 3 && !allTime() && !searching() && !searchError()}>
                 <button class="archived-toggle" onClick={searchAllTime}>
                   ⌕ all time (slow)
