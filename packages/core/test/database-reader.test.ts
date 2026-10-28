@@ -114,4 +114,32 @@ describe("DatabaseReader", () => {
     expect(Exit.isFailure(inflight)).toBe(true)
     expect(Cause.pretty(Exit.isFailure(inflight) ? inflight.cause : Cause.empty)).toContain("database reader closed")
   })
+
+  test("a worker whose connection reports a broken file reopens and the read succeeds", async () => {
+    await using tmp = await tmpdir()
+    const filename = path.join(tmp.path, "reader.sqlite")
+    const fs = await import("fs/promises")
+    const writer = Database.layerFromPath(filename)
+    const layer = Layer.merge(writer, DatabaseReader.layerFromPath({ filename, workers: 1 }).pipe(Layer.provide(writer)))
+    const exit = await Effect.runPromiseExit(
+      Effect.gen(function* () {
+        const db = yield* setup
+        yield* db.run(sql`INSERT INTO reader_fixture (value) VALUES ('kept')`)
+        yield* db.run(sql`PRAGMA wal_checkpoint(TRUNCATE)`)
+        const reader = (yield* DatabaseReader.Service).db
+        expect((yield* reader.all<{ value: string }>(sql`SELECT value FROM reader_fixture`)).map((row) => row.value)).toEqual(["kept"])
+        // The worker's open connection keeps the old file, now unreadable; the path holds an intact copy.
+        yield* Effect.promise(async () => {
+          await fs.copyFile(filename, `${filename}.copy`)
+          const handle = await fs.open(filename, "r+")
+          await handle.write(Buffer.alloc(16, 0), 0, 16, 0)
+          await handle.close()
+          await fs.rename(`${filename}.copy`, filename)
+        })
+        return (yield* reader.all<{ value: string }>(sql`SELECT value FROM reader_fixture`)).map((row) => row.value)
+      }).pipe(Effect.provide(layer), Effect.scoped),
+    )
+    if (Exit.isFailure(exit)) console.log(Cause.pretty(exit.cause))
+    expect(Exit.isSuccess(exit) && exit.value).toEqual(["kept"])
+  })
 })
