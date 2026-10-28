@@ -36,7 +36,8 @@ const CASES = {
     brief: { question: "Approve the seven keyboard choices?", choices: [{ id: "accept", outcome: "All seven recommendations apply" }, { id: "change", outcome: "You name what changes" }],
       items: ITEMS.map(([id, question, recommended, alternative]) => ({ id, question, recommended, alternatives: alternative ? [alternative] : [], refs: ["C1"] })) } },
   series: { records: [1, 2, 3].map(index => ({ ...base, id: `series${index}`, gate_key: `grill:${index}`, title: `Question ${index}: which default?`, context: `Grilling question ${index}.`,
-      options: [{ id: "rec", label: "Suggested default" }, { id: "alt", label: "Alternative" }], recommendation: "rec", series: { id: "grill", index, title: "Grilling: workspace defaults" } })), brief: "none" },
+      options: [{ id: "rec", label: "Suggested default" }, { id: "alt", label: "Alternative" }, { id: "other", label: "Something else", input: { kind: "text", label: "Your answer", required: true } }],
+      recommendation: "rec", series: { id: "grill", index, title: "Grilling: workspace defaults" } })), brief: "none" },
   steps: { record: { ...base, id: "steps", gate_key: "steps", title: "Add the rate-limit rule?", options: two, recommendation: "go",
       context: [`1. Open ${CONSOLE} and choose Create rule.`, "2. Set operator starts with, value /api/, limit 100 requests per 10 seconds.", "3. Confirm it shows as Active."].join("\n") },
     brief: { question: "Add a rate limit for the API?", choices: [{ id: "go", outcome: "API bursts are limited" }, { id: "wait", outcome: "Unlimited for a week" }],
@@ -101,7 +102,7 @@ const check = async (page, card, name) => card.evaluate((element, [name, missing
   const window = element.querySelector(".desk-visual-window")
   const sizes = new Set([...element.querySelectorAll("*")].filter(node => visible(node) && [...node.childNodes].some(child => child.nodeType === 3 && child.textContent.trim()))
     .map(node => getComputedStyle(node).fontSize))
-  const rows = [...element.querySelectorAll(".desk-brief-item-id bdi")].map(node => node.textContent)
+  const rows = [...element.querySelectorAll(".desk-brief-item-id bdi:not(.desk-brief-item-number)")].map(node => node.textContent)
   return {
     "1 question first": !!question && firstHeading === question,
     "2 request one tap": !!request,
@@ -129,8 +130,13 @@ const check = async (page, card, name) => card.evaluate((element, [name, missing
       .map(node => getComputedStyle(node).fontSize)).size,
     "10 state honest": name === "error" ? /ProviderAuthError/.test(text) && /The model provider refused sign-in/.test(text)
       : name === "absent" ? !!element.querySelector(".home-request-text") && element.querySelectorAll('input[type="radio"]').length >= 2
-      : name === "series" ? element.querySelectorAll('input[type="radio"]').length >= 2 : true,
+      // Every series question offers its free-form "Something else" answer.
+      : name === "series" ? element.querySelectorAll('input[type="radio"]').length >= 9 && (text.match(/Something else/g) ?? []).length === 3 : true,
     "11 no overflow": element.scrollWidth <= element.clientWidth + 1,
+    // The answer's target line keeps "To <lane>" in reading order in an RTL page.
+    "11 To label in order": ![...element.querySelectorAll(".home-actions .home-muted, .home-answer .home-muted")].some(node => /^To /.test(node.textContent) && node.querySelector("bdi bdi") === null),
+    "8 series progress neutral, indexes only": name !== "series" || getComputedStyle(element.querySelector(".attention-series-progress")).color !== (() => { const probe = document.body.appendChild(document.createElement("span")); probe.style.color = "var(--green)"; const value = getComputedStyle(probe).color; probe.remove(); return value })()
+      && /Unanswered: Q1, Q2, Q3/.test(text) && !/revision 1/.test(text),
   }
 }, [name, "Not given in the request"])
 

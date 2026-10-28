@@ -31,6 +31,9 @@ try {
   await expect(page.locator(`[data-desk-item="${key}"]`)).toHaveCount(1)
   await expect(card.locator(".attention-series-question")).toHaveCount(7)
   await expect(card.locator(".attention-series-progress")).toHaveText("0/7 answered")
+  // Progress is neutral text, not the green that means recommended.
+  const green = await page.evaluate(() => { const probe = document.body.appendChild(document.createElement("span")); probe.style.color = "var(--green)"; const value = getComputedStyle(probe).color; probe.remove(); return value })
+  if (await card.locator(".attention-series-progress").evaluate(element => getComputedStyle(element).color) === green) throw new Error("series progress is green")
   await expect(card.locator(".attention-series-question h4 .home-source")).toHaveText([1, 2, 3, 4, 5, 6, 7].map(index => `Question ${index} · revision ${index + 2}`))
   await expect(row(1).getByRole("radio")).toHaveCount(3)
   await expect(row(1).locator(".home-options [data-recommended]")).toHaveCount(1)
@@ -51,7 +54,7 @@ try {
   if (posts.some(call => call.csrf !== "1" || !call.body.command_id)) throw Error("missing command identity or CSRF")
   await page.reload()
   await expect(card.locator(".attention-series-progress")).toHaveText("3/7 answered")
-  await expect(card.locator(".attention-series-head .home-muted")).toContainText("4. Question 4: choose a path, 5. Question 5: choose a path, 6. Question 6: choose a path, 7. Question 7: choose a path")
+  await expect(card.locator(".attention-series-head .home-muted")).toHaveText("Unanswered: Q4, Q5, Q6, Q7")
   await expect(row(2).locator(".attention-series-recorded")).toContainText("Alternative 2")
   await expect(row(2).locator(".attention-series-recorded")).not.toContainText("Suggested 2")
   await expect(row(2).locator(".attention-series-recommended")).toHaveText("Recommended")
@@ -62,7 +65,7 @@ try {
   await expect(card.locator(".attention-series-progress")).toHaveText("3/6 answered")
   await expect(row(4)).toContainText("Withdrawn")
   await expect(row(4)).toContainText("revision 7")
-  await expect(card.locator(".attention-series-head .home-muted")).not.toContainText("Question 4")
+  await expect(card.locator(".attention-series-head .home-muted")).not.toContainText("Q4")
   // A producer update replaces an open question's content, with a new revision and no inherited draft/answer.
   members[4].revision++
   members[4].content_revision++
@@ -102,7 +105,7 @@ try {
   await expect(row(2)).toContainText("revision 6")
   await expect(row(2)).toContainText("revised after answer")
   await expect(row(2).locator(".attention-series-recorded")).toHaveCount(0)
-  await expect(card.locator(".attention-series-head .home-muted")).toContainText("2. Question 2: revised after answer")
+  await expect(card.locator(".attention-series-head .home-muted")).toContainText("Q2")
   if (errors.length) throw Error(errors.join("\n"))
   if (preview.fixture.calls.some(call => !["GET", "HEAD", "OPTIONS"].includes(call.method))) throw Error("unexpected runtime writes")
   console.log("PASS grilling series: 7 ordered questions, 3 exact per-record revision POSTs (recommended, alternative, Other text), reload 3/7, withdrawn 3/6, updated answered question clears old answer, recorded answer distinct from recommendation, 360px and RTL screenshots, no runtime writes")

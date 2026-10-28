@@ -74,7 +74,7 @@ const open = async (width, height, rtl = false) => {
 try {
   const normal = await open(1440, 800)
   const rows = normal.card.locator(".desk-brief-item")
-  assert.deepEqual(await rows.locator(".desk-brief-item-id bdi").allTextContents(), data.map(row => row[0]))
+  assert.deepEqual(await rows.locator(".desk-brief-item-id bdi:not(.desk-brief-item-number)").allTextContents(), data.map(row => row[0]))
   assert.deepEqual(await rows.locator(".desk-brief-item-number").allTextContents(), ["1.", "2.", "3.", "4.", "5.", "6.", "7."])
   await expect(rows.nth(2)).toContainText("Not given in the request")
   await expect(rows.nth(4)).toContainText("Not given in the request")
@@ -98,15 +98,15 @@ try {
 
   const narrow = await open(360, 800)
   assert(await narrow.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "360px horizontal overflow")
-  assert.deepEqual(await narrow.card.locator(".desk-brief-item-id bdi").allTextContents(), data.map(row => row[0]))
+  assert.deepEqual(await narrow.card.locator(".desk-brief-item-id bdi:not(.desk-brief-item-number)").allTextContents(), data.map(row => row[0]))
   await expect(narrow.card.locator(".desk-brief-item-label").first()).toBeVisible()
   await narrow.card.screenshot({ path: path.join(shots, "items-360.png") })
   console.log("ITEMS 360px stacked, no horizontal overflow: PASS")
 
   const rtl = await open(360, 800, true)
   assert(await rtl.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "RTL horizontal overflow")
-  assert.equal(await rtl.card.locator(".desk-brief-item-id bdi").first().getAttribute("dir"), "ltr")
-  assert.deepEqual(await rtl.card.locator(".desk-brief-item-id bdi").allTextContents(), data.map(row => row[0]))
+  assert.equal(await rtl.card.locator(".desk-brief-item-id bdi:not(.desk-brief-item-number)").first().getAttribute("dir"), "ltr")
+  assert.deepEqual(await rtl.card.locator(".desk-brief-item-id bdi:not(.desk-brief-item-number)").allTextContents(), data.map(row => row[0]))
   await rtl.card.screenshot({ path: path.join(shots, "items-360-rtl.png") })
   console.log("ITEMS RTL 360px ordered IDs, no horizontal overflow: PASS")
 

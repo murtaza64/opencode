@@ -127,7 +127,8 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
         <Show when={selected()} fallback="Send answer">{option => <Show when={!props.prepared} fallback="Send">Send <bdi dir="auto">{option().label}</bdi></Show>}</Show>
       </button>
       {props.extra}
-      <span class="home-muted"><bdi>To</bdi> {target()}</span>
+      {/* One label run ("To …") that keeps its order in an RTL page; the target name stays isolated inside it. */}
+      <span class="home-muted"><bdi>To <bdi dir="auto">{target()}</bdi></bdi></span>
     </div>
     <Show when={selected() && problem()}><p class="home-input-problem" id={`${id}-input-problem`} role="status" dir="auto">{problem()}</p></Show>
   </div>
@@ -248,7 +249,8 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
         <Show when={same(props.record.title) !== same(prepared().question)}><p class="home-request-line"><bdi>Request:</bdi> <bdi dir="auto">{props.record.title}</bdi></p></Show>
         {props.brief}
         {/* Steps the human must perform stay in the producer's exact words, unfolded, above the answer. */}
-        <Show when={requestHasSteps(props.record)}><RequestText record={props.record} /></Show>
+        {/* Labelled as the request's own text, so its numbering is not read as the brief's steps. */}
+        <Show when={requestHasSteps(props.record)}><p class="home-source home-request-from">From the request</p><RequestText record={props.record} /></Show>
       </div>}</Show>
       <Show when={!props.prepared}><RequestText record={props.record} />{props.brief}</Show>
       {/* The picture tells the story; the original conversation it came from follows. */}
