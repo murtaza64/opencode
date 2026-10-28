@@ -12,6 +12,11 @@
   --dur-sheet: 260ms;
   --ease-standard: cubic-bezier(.2, 0, 0, 1);
   --ease-exit: cubic-bezier(.4, 0, 1, 1);
+  /* Chat item motion (shared with living-chat's gutter): an arrival settles in 160ms; an anticipation
+   * cue lasts at most 180ms. One easing for both. */
+  --motion-arrive: 160ms;
+  --motion-anticipate: 180ms;
+  --motion-ease: var(--ease-standard);
   /* two shades darker than the baymax originals */
   --base: #111113;
   --mantle: #0a0a0c;
@@ -1711,7 +1716,7 @@ textarea.vim-normal::selection { background: var(--lavender); color: var(--crust
 .transcript-skeleton, .transcript-arrive { animation: transcript-fade var(--dur-fast) var(--ease-standard) both; }
 @keyframes transcript-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  :root { --dur-fast: 0ms; --dur-base: 0ms; --dur-sheet: 0ms; }
+  :root { --dur-fast: 0ms; --dur-base: 0ms; --dur-sheet: 0ms; --motion-arrive: 0ms; --motion-anticipate: 0ms; }
   .transcript-skeleton, .transcript-arrive { animation: none; }
 }
 .transcript-skeleton-line { block-size: 14px; border-radius: 4px; background: var(--surface0); opacity: 0.6; }
