@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test"
 import { cloudRows, mergeAgentRows } from "./cloud-rows"
 
-const lane = (lane: string, owner: string, status: string, synced?: string) => ({ editspace: "opencode", lane, owner, record: { lane, owner, "wingman-status": status, ...(synced ? { "wingman-synced": synced } : {}) } as never })
+const lane = (lane: string, owner: string, status: string, activity?: string, synced?: string) =>
+  ({ editspace: "opencode", lane, owner, record: { lane, owner, "wingman-status": status, ...(activity ? { "wingman-activity": activity } : {}), ...(synced ? { "wingman-synced": synced } : {}) } as never })
 
 test("pinned cloud agents are always rows; unpinned ones come from the view's own discovery", () => {
   const working = lane("fix-auth", "wingman:abc", "processing", "2026-10-28T10:00:00Z")
@@ -21,4 +22,21 @@ test("one list newest first; a cloud row never replaces a session with the same 
   const sessions = [{ id: "ses_a", title: "fix-auth", updated: 5 }, { id: "ses_b", title: "old", updated: 1 }]
   const cloud = cloudRows({ pins: [], observed: [], other: [lane("fix-auth", "wingman:abc", "processing", new Date(3).toISOString())], snapshots: {} })
   expect(mergeAgentRows(sessions, cloud).map((row) => [row.kind, row.kind === "session" ? row.item.id : row.item.title])).toEqual([["session", "ses_a"], ["cloud", "fix-auth"], ["session", "ses_b"]])
+})
+
+test("an old agent fetched just now orders by its real last activity, below a genuinely active session", () => {
+  const now = Date.parse("2026-10-28T12:00:00Z")
+  const old = lane("old-task", "wingman:old", "ended", "2026-10-20T09:00:00Z", "2026-10-28T11:59:59Z")
+  const fresh = lane("new-task", "wingman:new", "processing", "2026-10-28T11:58:00Z", "2026-10-28T11:59:59Z")
+  const cloud = cloudRows({ pins: [], observed: [old, fresh], other: [old, fresh], snapshots: {} })
+  expect(cloud.find((row) => row.title === "old-task")!.updated).toBe(Date.parse("2026-10-20T09:00:00Z"))
+  const merged = mergeAgentRows([{ id: "ses_local", title: "Local work", updated: now - 60_000 }], cloud)
+  expect(merged.map((row) => row.kind === "session" ? row.item.id : row.item.title)).toEqual(["ses_local", "new-task", "old-task"])
+})
+
+test("an agent whose activity was never seen is undated (last), never dated by its fetch time", () => {
+  const unknown = lane("unknown", "wingman:u", "ended", undefined, "2026-10-28T11:59:59Z")
+  const [row] = cloudRows({ pins: [], observed: [unknown], other: [unknown], snapshots: {} })
+  expect(row!.updated).toBeUndefined()
+  expect(row!.status.label).toBe("ended")
 })

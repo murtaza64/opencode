@@ -50,8 +50,10 @@ export const createCloudAgents = (options: {
     record: observed().find(item => cloudKey(item) === cloudKey(pin))?.record,
     snapshot: snapshots()[pin.editspace], inScope: scopes().includes(pin.editspace),
   })))
+  // Every agent the view's projects list, finished ones included: finished agents sort by their real last
+  // activity like any other row instead of being hidden. `includeFinished` no longer filters (kept for
+  // callers until the drawer is removed).
   const other = createMemo(() => observed().filter(item => discovery().includes(item.editspace) &&
-    (includeFinished() || item.record["wingman-status"] === "processing" || item.record["wingman-status"] === "waiting") &&
     !pins().some(pin => cloudKey(pin) === cloudKey(item))))
 
   const togglePin = (pin: CloudPin) => {
