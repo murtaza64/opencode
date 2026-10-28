@@ -42,8 +42,11 @@ describe("snapshot phase", () => {
     const done = { ...assistant("a1"), time: { created: 2, completed: 3 } } as Message
     expect(build([user("u1"), done], { a1: [text("t1", "a1", "old")] }).phase).toBe("thinking")
   })
-  test("subagents running keep the session busy when its own status is idle", () => {
-    expect(build([user("u1"), assistant("a1")], { a1: [tool("k1", "a1", "running", "task")] }, "idle", [], 1).phase).toBe("thinking")
+  test("a running task tool is delegated, not thinking, even while the session itself is idle", () => {
+    expect(build([user("u1"), assistant("a1")], { a1: [tool("k1", "a1", "running", "task")] }, "idle", [], 1).phase).toBe("delegated")
+  })
+  test("a lost daemon link reads as disconnected whatever the last status said", () => {
+    expect(snapshot({ messages: [user("u1")], parts: () => [], status: "busy", pending: [], subagents: 0, connected: false }).phase).toBe("disconnected")
   })
 })
 
@@ -126,5 +129,14 @@ describe("provider turns per step", () => {
     const s = build([user("u1"), assistant("a1")], { a1: [text("prt_1", "a1", "first", 5), tool("prt_2", "a1", "completed"), text("prt_4", "a1", "second", 9)] }, "idle", [], 0,
       { a1: [{ id: "prt_0", type: "step-start" }, { id: "prt_1b", type: "step-finish", tokens: { input: 0, cache: { read: 500, write: 0 } } }, { id: "prt_1c", type: "step-start" }, { id: "prt_3", type: "step-finish", tokens: { input: 0, cache: { read: 500, write: 80 } } }] })
     expect(s.turns.map((t) => [t.anchor, t.cache])).toEqual([["prt_1", "warm"], ["prt_2", "mixed"]])
+  })
+})
+
+describe("step pairing is robust to id ordering", () => {
+  test("a finish whose id sorts before its start (fixture-style suffixes) still fills that step", () => {
+    // Store order is by id: "p1_finish" < "p1_start" < "p1_text".
+    const s = build([user("u1"), assistant("a1")], { a1: [text("p1_text", "a1", "hi", 5)] }, "idle", [], 0,
+      { a1: [{ id: "p1_finish", type: "step-finish", tokens: { input: 0, cache: { read: 900, write: 0 } } }, { id: "p1_start", type: "step-start" }] })
+    expect(s.turns.map((t) => [t.anchor, t.cache])).toEqual([["p1_text", "warm"]])
   })
 })

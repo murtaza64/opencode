@@ -35,7 +35,7 @@ export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?
     return state && { state, label: mailWakeLabel(state, direction() === "out" ? party().text : "this agent") }
   }
   return <details class="mail-activity" id={`${anchor()}-${props.message.id}`} data-mail-id={props.message.id} data-direction={direction()}>
-    <MailSummary direction={direction()} party={party().element} partyText={party().text}
+    <MailSummary id={props.message.id} direction={direction()} party={party().element} partyText={party().text}
       purpose={mailPurpose(undefined, props.message.kind)} sentAt={mailSentAt(props.message)} wake={wake()}
       status={mailActionableStatus({ deliveries: props.message.deliveries, kind: props.message.kind, direction: direction(), replied: props.replied })} />
     <div class="mail-activity-details">
