@@ -11,7 +11,8 @@ import { nativeHeader, NativeHeader } from "./native-header"
 import { NewSession } from "./new-session"
 import { peekAttrs, SessionPeek } from "./session-peek"
 import { CloudNav, CloudSource } from "./cloud-sidebar"
-import { cloudRows, mergeAgentRows } from "../cloud-rows"
+import { cloudRows } from "../cloud-rows"
+import { byBoundary, dateGroup, type DateGroup } from "../turn-order"
 import { cloudKey, type CloudPin } from "../cloud-agents"
 import { rankSearch, type Searchable } from "../search-rank"
 import { failureLabel } from "../session-failures"
@@ -41,16 +42,8 @@ export const ProjectSelect = (props: { onChange?: () => void }) => {
   </select>
 }
 
-// Day separators: a quiet local-format label; rows without a usable time group as Undated.
-const dayKey = (time: number) => Number.isFinite(time) && time > 0 ? new Date(time).toDateString() : "undated"
-const dayLabel = (time: number) => {
-  if (dayKey(time) === "undated") return "Undated"
-  const date = new Date(time)
-  const today = new Date()
-  if (date.toDateString() === today.toDateString()) return "Today"
-  if (date.toDateString() === new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1).toDateString()) return "Yesterday"
-  return new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short", ...(date.getFullYear() === today.getFullYear() ? {} : { year: "numeric" }) }).format(date)
-}
+// Day headings come from the row's last turn boundary only (turn-order.ts); unknown is Undated, never Today.
+const GROUP_LABEL: Record<DateGroup, string> = { today: "Today", yesterday: "Yesterday", week: "This week", older: "Older", undated: "Undated" }
 
 const StatusDot = (props: { state: DotState; label?: string }) => {
   let el: HTMLElement | undefined
@@ -74,7 +67,32 @@ export default function Sidebar() {
   // Cloud agents the view already discovers sit in the ordinary list beside sessions, newest first; pinned
   // ones stay in Pinned. Same entries, account scope and pins as before; no separate drawer.
   const cloudUnpinned = createMemo(() => cloudRows({ pins: [], observed: cloud.observed(), other: cloud.other(), snapshots: cloud.snapshots() }))
-  const agentRows = createMemo(() => mergeAgentRows(allUnpinned(), cloudUnpinned()))
+  // One order for every Work row: its last turn boundary (byBoundary); rows without one are undated, in a stable
+  // order by host-qualified key. The boundary comes from Core's turn time once it exists; never time.updated.
+  const boundaryOf = (_row: { kind: "session" | "cloud" }): number | undefined => undefined
+  // Row wrappers are reused while their item and boundary are unchanged, so streamed updates never remount a row
+  // (its DOM, focus and busy-halo phase stay put); only a boundary change can move it.
+  type AgentRow = ({ kind: "session"; item: SessionRow } | { kind: "cloud"; item: ReturnType<typeof cloudRows>[number] }) & { key: string; boundary?: number }
+  // What a row renders (activity time excluded): a session.updated that only bumps time keeps the same row.
+  const sameShown = (a: AgentRow, b: AgentRow) => a.item === b.item || (a.kind === "session" && b.kind === "session"
+    ? a.item.title === b.item.title && a.item.directory === b.item.directory && a.item.archived === b.item.archived && a.item.project === b.item.project && a.item.host === b.item.host
+    : a.kind === "cloud" && b.kind === "cloud" && JSON.stringify({ ...a.item, changedAt: 0 }) === JSON.stringify({ ...b.item, changedAt: 0 }))
+  let previousRows = new Map<string, AgentRow>()
+  const agentRows = createMemo(() => {
+    const next = new Map<string, AgentRow>()
+    const keep = (row: AgentRow) => {
+      const old = previousRows.get(row.key)
+      const kept = old && old.boundary === row.boundary && sameShown(old, row) ? old : row
+      next.set(row.key, kept)
+      return kept
+    }
+    const rows = [
+      ...allUnpinned().map((item): AgentRow => ({ kind: "session", key: hostRowKey(item), item })),
+      ...cloudUnpinned().map((item): AgentRow => ({ kind: "cloud", key: `wingman:${item.key}`, item })),
+    ].map((row) => keep({ ...row, boundary: boundaryOf(row) })).sort(byBoundary)
+    previousRows = next
+    return rows
+  })
   const cloudPin = (row: { project: string; title: string; owner: string }) => cloud.other().find((item) => item.editspace === row.project && item.lane === row.title && item.owner === row.owner)
   const feedOf = (s: SessionRow) => work.feeds().find((feed) => feed.host.id === s.host)
   const localUnavailable = () => hosted() && !!(allProjects() ? sessionsError() : stateError())
@@ -157,7 +175,8 @@ export default function Sidebar() {
     pinned: [...pinnedSessions().map((s) => localFound(asResult(s))), ...work.pinned().map(hostFound), ...cloud.pins().map(cloudFound)],
     known: [...sessionRows().map((s) => localFound(asResult(s))), ...work.unpinned().map(hostFound), ...cloud.other().map(cloudFound)],
     transcriptHits: transcriptHits().map(localFound),
-    order: (a, b) => Number(b.working) - Number(a.working) || b.updated - a.updated,
+    // Within a bucket: the same turn-boundary order as the list (unknown: stable by key).
+    order: (a, b) => byBoundary({ key: a.key }, { key: b.key }),
   }))
   const foundRows = createMemo(() => [...ranked().metadata, ...ranked().transcript])
   const [searching, setSearching] = createSignal(false)
@@ -441,12 +460,14 @@ export default function Sidebar() {
           }>
             <For each={agentRows()}>
               {(row, index) => {
-                const day = () => dayKey(row.updated)
+                const group = () => dateGroup(row.boundary, Date.now())
                 const before = () => index() > 0 ? agentRows()[index() - 1] : undefined
+                // A heading marks each change of group; a list that is all undated needs none.
+                const heading = () => index() === 0 ? group() !== "undated" : group() !== dateGroup(before()!.boundary, Date.now())
                 return (
                   <>
-                    <Show when={row.updated >= 0 && (index() === 0 || day() !== dayKey(before()!.updated))}>
-                      <div class="nav-heading nav-day">{dayLabel(row.updated)}</div>
+                    <Show when={heading()}>
+                      <div class="nav-heading nav-day">{GROUP_LABEL[group()]}</div>
                     </Show>
                     {row.kind === "session" ? item(row.item) : <Show when={cloudPin(row.item)}>{(pin) => <CloudNav pin={pin()} />}</Show>}
                   </>

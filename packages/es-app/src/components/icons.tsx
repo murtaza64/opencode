@@ -70,6 +70,8 @@ const HOST_GLYPHS: Record<string, () => JSX.Element> = {
   mini: () => <><g fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.75" y="5.5" width="12.5" height="5.5" rx="2" /></g><circle cx="11.3" cy="8.25" r=".9" fill="currentColor" /></>,
 }
 HOST_GLYPHS.laptop = HOST_GLYPHS.local!
+// Wingman (cloud runtime): a bird wing; its stepped trailing edge reads as feathers at 14px.
+HOST_GLYPHS.wingman = () => <path fill="currentColor" d="M1.5 12.5C4 6.5 9 3 14.5 2.5c-1 2.5-2.5 4-4.5 5 1.5.1 2.3.4 3 1-2.2 1.1-4.4 1.5-6.2 1.4 1 .7 1.6 1.2 2 1.9-2.8.8-5.2 1-7.3.7z" />
 
 export const hostGlyphKnown = (id: string) => id in HOST_GLYPHS
 

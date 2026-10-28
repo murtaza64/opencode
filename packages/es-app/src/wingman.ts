@@ -14,7 +14,13 @@ export const wingmanStatus = (status?: string) => {
 export const wingmanPrs = (value?: string) =>
   (value ?? "").split(/\s+/).filter((url) => URL.parse(url)?.protocol === "https:")
 
-/** Epoch ms of the lane's last successful sync, if the dashboard recorded one. */
+/** Epoch ms of the lane's last activity (the last change sync saw), or undefined when unknown. */
+export const wingmanActivityAt = (lane: WingmanLane) => {
+  const value = Date.parse(lane["wingman-activity"] ?? "")
+  return Number.isNaN(value) ? undefined : value
+}
+
+/** Epoch ms of the lane's last successful sync, if the dashboard recorded one (freshness, not activity). */
 export const wingmanSyncedAt = (lane: WingmanLane) => {
   const value = Date.parse(lane["wingman-synced"] ?? "")
   return Number.isNaN(value) ? undefined : value
