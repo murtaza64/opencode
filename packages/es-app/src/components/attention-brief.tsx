@@ -7,7 +7,8 @@ import { A } from "@solidjs/router"
 import { sessionHref } from "../state"
 import { docHref } from "../pages/doc"
 import { anchorHref } from "../message-anchor"
-import { briefCommands, briefComplete, briefSteps, safeSvg, sourceTarget, type BriefResult, type BriefShape, type BriefSource, type DeskItem, type EvidenceRef } from "../desk"
+import { briefCommands, briefComplete, briefItems, briefSteps, safeSvg, sourceTarget, type BriefResult, type BriefShape, type BriefSource, type DeskItem, type EvidenceRef } from "../desk"
+import { briefApproval } from "../brief-approval"
 import { currentJob, readConversation, regeneratingJob, type BriefJob } from "../desk-session"
 import { LinkedText } from "./linked-text"
 import contract from "../brief-contract.json"
@@ -61,6 +62,7 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
         <Show when={!props.item.record}><p class="desk-brief-question" dir="auto">{value().result.question}</p></Show>
         <Show when={value().result.context}><p class="desk-brief-context" dir="auto"><LinkedText text={value().result.context} /></p></Show>
         <Subjects subjects={value().result.subjects} refs={value().job.meta.refs} />
+        <Items result={value().result} item={props.item} job={value().job} />
         <Steps result={value().result} refs={value().job.meta.refs} item={props.item} />
         <Commands commands={value().result} item={props.item} />
         {/* A fresh brief of the same request, made by the host that owns it; this one stays until the new one is ready. */}
@@ -169,6 +171,28 @@ const Subjects = (props: { subjects: BriefResult["subjects"]; refs: EvidenceRef[
     }}</For></ul>
   </Show>
 
+const Items = (props: { result: BriefResult; item: DeskItem; job: BriefJob }) => {
+  const [found] = createResource(() => props.item.record, readConversation)
+  const rows = () => briefItems(props.result, props.item, found()?.documents)
+  const approval = () => briefApproval(rows(), props.item, { id: props.job.id, revision: props.job.meta.revision })
+  return <Show when={rows().length}>
+    <section class="desk-brief-items" aria-label="Request items">
+      <Show when={approval().verbatim}><p class="desk-brief-ledger">Recorded answer: <bdi dir="auto">{approval().verbatim}</bdi></p></Show>
+      <div class="desk-brief-item-head" aria-hidden="true"><span>ID</span><span>Question</span><span>Recommended</span><span>Alternative(s)</span><span>Approved</span></div>
+      <ol class="desk-brief-item-list"><For each={rows()}>{(row, index) => <li class="desk-brief-item">
+        <span class="desk-brief-item-id"><span class="desk-brief-item-number">{index() + 1}.</span> <bdi dir="ltr">{row.id}</bdi></span>
+        <ItemCell label="Question" value={row.question} />
+        <ItemCell label="Recommended" value={row.recommended} />
+        <div class="desk-brief-item-cell"><span class="desk-brief-item-label">Alternative(s)</span><span dir="auto">{row.alternatives.length ? row.alternatives.map(value => value || "Not given in the request").join(" · ") : "Not given in the request"}</span></div>
+        <ItemCell label="Approved" value={approval().answered ? approval().values[index()] : "—"} missing={false} />
+      </li>}</For></ol>
+    </section>
+  </Show>
+}
+
+const ItemCell = (props: { label: string; value: string; missing?: boolean }) =>
+  <div class="desk-brief-item-cell"><span class="desk-brief-item-label">{props.label}</span><span dir="auto">{props.value || (props.missing === false ? "—" : "Not given in the request")}</span></div>
+
 const SourceLinks = (props: { sources: BriefSource[]; refs: EvidenceRef[]; item: DeskItem }) => {
   const links = () => props.sources.flatMap(source => { const link = sourceLink(source, props.refs, props.item); return link ? [{ ...link, label: source.label }] : [] })
   return <Show when={links().length}><p class="desk-brief-sources"><For each={links()}>{link =>
@@ -265,21 +289,28 @@ const frameStyle = (svg: boolean) => {
   return `:root{${vars}}html{color-scheme:dark;color:var(--fg);background:${svg ? "transparent" : "var(--bg)"};font:13px system-ui,sans-serif}`
     + (svg ? "body{margin:0}svg{display:block;inline-size:100%;block-size:auto}" : "body{margin:8px}svg{display:block;max-inline-size:min(100%,640px);block-size:auto}")
 }
-/** A brief's drawing in a sandboxed frame. SVG (contract 4) is sized by its viewBox and shown at most 400 px
- * wide so its text never outsizes the card's; legacy HTML keeps its stated height. `alt` names it for screen readers. */
+/** A brief's drawing in a sandboxed frame. SVG stays at or below its viewBox width; legacy HTML keeps its height. */
 export const Visual = (props: { title: string; alt?: string; svg?: string; aspect?: number; html?: string; height?: number; class?: string; maxWidth?: number }) =>
-  <figure class={props.class ?? "desk-visual"} data-kind={props.svg ? "svg" : "html"}>
+  <VisualFrame {...props} />
+
+const VisualFrame = (props: { title: string; alt?: string; svg?: string; aspect?: number; html?: string; height?: number; class?: string; maxWidth?: number }) => {
+  const [expanded, setExpanded] = createSignal(false)
+  return <figure class={props.class ?? "desk-visual"} data-kind={props.svg ? "svg" : "html"}>
+    <div class={props.svg ? "desk-visual-window" : undefined} data-expanded={expanded() ? "" : undefined}>
     <iframe title={props.alt || props.title || "Brief visual"} sandbox="" referrerpolicy="no-referrer" loading="lazy"
-      style={props.svg ? { "inline-size": "100%", "max-inline-size": `${props.maxWidth ?? contract.visual.displayMaxWidth}px`, "aspect-ratio": `1 / ${props.aspect}`, "block-size": "auto" } : { "block-size": `${(props.height ?? 280) + FRAME_MARGIN * 2}px` }}
+      style={props.svg ? { "inline-size": "100%", "max-inline-size": `${props.maxWidth ?? contract.visual.width}px`, "aspect-ratio": `1 / ${props.aspect}`, "block-size": "auto" } : { "block-size": `${(props.height ?? 280) + FRAME_MARGIN * 2}px` }}
       srcdoc={`<!doctype html><meta http-equiv="Content-Security-Policy" content="${CSP}"><style>${frameStyle(!!props.svg)}</style>${props.svg ?? props.html ?? ""}`} />
+    </div>
+    <Show when={props.svg}><button type="button" class="desk-visual-expand" aria-expanded={expanded()} onClick={() => setExpanded(!expanded())}>{expanded() ? "Collapse visual" : "Expand visual to full"}</button></Show>
     <Show when={props.alt}><figcaption class="sr-only">{props.alt}</figcaption></Show>
   </figure>
+}
 
 /** An option's small mockup: contract-4 SVG by its viewBox, or a legacy HTML sketch at a fixed height. */
 export const Sketch = (props: { title: string; sketch: string }) => {
   const aspect = () => safeSvg(props.sketch, contract.visual.sketch.width, contract.visual.sketch.height, contract.visual.sketch.maxBytes)
   return <Show when={aspect()} fallback={<Visual class="home-option-sketch" title={props.title} html={props.sketch} height={180} />}>{value =>
-    <Visual class="home-option-sketch" title={props.title} svg={props.sketch} aspect={value()} maxWidth={Math.round(contract.visual.sketch.width * 1.2)} />}</Show>
+    <Visual class="home-option-sketch" title={props.title} svg={props.sketch} aspect={value()} maxWidth={contract.visual.sketch.width} />}</Show>
 }
 
 /** Asks the desk conversation to explain this item further, with an optional question. Only an explicit

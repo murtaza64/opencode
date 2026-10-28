@@ -279,3 +279,31 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
 .desk-command { display: flex; align-items: flex-start; gap: 6px; }
 .desk-command pre { flex: 1; min-inline-size: 0; margin: 0; padding: 8px 10px; overflow-x: auto; background: var(--mantle); border: 1px solid var(--surface0); font-size: 12px; line-height: 1.5; white-space: pre; text-align: left; }
 .desk-command-copy { flex: none; margin-block-start: 4px; padding: 2px 8px; border: 1px solid var(--surface1); background: var(--base); color: var(--subtext0); font-size: 11px; cursor: pointer; }
+
+/* Numbered source items remain separate even when the brief also has subjects or an option shape. */
+.desk-brief-items { margin-block: 10px; container-type: inline-size; min-inline-size: 0; }
+.desk-brief-ledger { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.desk-brief-item-head, .desk-brief-item { display: grid; grid-template-columns: minmax(58px, .55fr) minmax(0, 2fr) repeat(3, minmax(0, 1fr)); gap: 8px; align-items: start; }
+.desk-brief-item-head { color: var(--subtext0); font-size: 11px; padding-block: 3px; border-block-end: 1px solid var(--surface1); }
+.desk-brief .desk-brief-item-list { list-style: none; padding: 0; margin: 0; }
+.desk-brief-item { padding-block: 5px; border-block-end: 1px solid var(--surface0); line-height: 1.4; }
+.desk-brief-item-id { white-space: nowrap; }
+.desk-brief-item-number { color: var(--subtext0); }
+.desk-brief-item-cell { min-inline-size: 0; overflow-wrap: anywhere; }
+.desk-brief-item-label { display: none; color: var(--subtext0); font-size: 11px; }
+@container (max-width: 680px) {
+  .desk-brief-item-head { display: none; }
+  .desk-brief-item { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 3px 10px; }
+  .desk-brief-item-id { grid-column: 1 / -1; font-weight: 600; }
+  .desk-brief-item-cell:nth-child(2) { grid-column: 1 / -1; }
+  .desk-brief-item-cell:nth-child(5) { grid-column: 1 / -1; }
+  .desk-brief-item-label { display: block; }
+}
+@container (max-width: 300px) {
+  .desk-brief-item { grid-template-columns: minmax(0, 1fr); }
+  .desk-brief-item-id, .desk-brief-item-cell:nth-child(2), .desk-brief-item-cell:nth-child(5) { grid-column: 1; }
+}
+
+.desk-visual-window { max-block-size: 45vh; overflow-y: auto; }
+.desk-visual-window[data-expanded] { max-block-size: none; overflow: visible; }
+.desk-visual-expand { padding: 2px 0; border: 0; background: none; color: var(--subtext0); text-decoration: underline; font: inherit; font-size: 11px; cursor: pointer; }
