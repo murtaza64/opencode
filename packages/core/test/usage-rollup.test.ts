@@ -253,4 +253,55 @@ describe("UsageRollup", () => {
       ])
     }),
   )
+
+  it.effect("a session moved between hosts is counted once across both rollups", () =>
+    Effect.gen(function* () {
+      const db = (yield* Database.Service).db
+      const events = yield* EventV2.Service
+      const created = Date.now()
+      // Host A: the original session runs one priced step live.
+      yield* setUp("ses_move_a")
+      yield* events.publish(SessionV1.Event.MessageUpdated, { sessionID: "ses_move_a" as never, info: assistant("ses_move_a", "msg_move_1", created) })
+      yield* events.publish(SessionV1.Event.PartUpdated, { sessionID: "ses_move_a" as never, part: step("ses_move_a", "msg_move_1", "prt_move_1", 1), time: created })
+      const hostA = (yield* hourly()).reduce((total, row) => total + row.cost, 0)
+
+      // Host B receives the history by replay, then runs one more step itself.
+      yield* db.delete(UsageHourlyTable).run()
+      yield* setUp("ses_move_b")
+      const rows = yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, "ses_move_a")).orderBy(asc(EventTable.seq)).all()
+      const moved = (text: string) => text.replaceAll("ses_move_a", "ses_move_b").replaceAll("prt_move_1", "prt_move_b1").replaceAll("msg_move_1", "msg_move_b1")
+      yield* events.replayAll(
+        rows.map((row) => ({ id: EventV2.ID.make(moved(row.id) + "b"), type: row.type, seq: row.seq, aggregateID: "ses_move_b", data: JSON.parse(moved(JSON.stringify(row.data))) })),
+      )
+      yield* events.publish(SessionV1.Event.MessageUpdated, { sessionID: "ses_move_b" as never, info: assistant("ses_move_b", "msg_move_2", created + 1) })
+      yield* events.publish(SessionV1.Event.PartUpdated, { sessionID: "ses_move_b" as never, part: step("ses_move_b", "msg_move_2", "prt_move_2", 0.5), time: created + 1 })
+      const hostB = (yield* hourly()).reduce((total, row) => total + row.cost, 0)
+
+      expect([hostA, hostB, hostA + hostB]).toEqual([1, 0.5, 1.5])
+      const [today] = (yield* UsageRollup.daily(db, { days: 1, offsetMinutes: 0 })).days
+      // Today began before this test database's cutoff, so it is not origin-only.
+      expect(today).toMatchObject({ originOnly: false, originCost: null })
+    }),
+  )
+
+  it.effect("only days wholly after originSince carry an origin-only cost", () =>
+    Effect.gen(function* () {
+      const db = (yield* Database.Service).db
+      const cutoff = Date.UTC(2026, 9, 27, 6)
+      yield* db.update(UsageRollupStateTable).set({ cutoff, time_backfilled: 1 }).run()
+      yield* db
+        .insert(UsageHourlyTable)
+        .values([
+          { hour: Date.UTC(2026, 9, 28, 3) / HOUR, provider_id: "p", model_id: "m", cost: 4, tokens_input: 1 },
+          { hour: Date.UTC(2026, 9, 27, 3) / HOUR, provider_id: "p", model_id: "m", cost: 2, tokens_input: 1 },
+        ])
+        .run()
+      const result = yield* UsageRollup.daily(db, { days: 2, offsetMinutes: 0, now: Date.UTC(2026, 9, 28, 12) })
+      expect(result.days.map((day) => [day.day, day.cost, day.originOnly, day.originCost])).toEqual([
+        ["2026-10-28", 4, true, 4],
+        ["2026-10-27", 2, false, null],
+      ])
+      expect(result.coverage.origin).toMatchObject({ originSince: new Date(cutoff).toISOString() })
+    }),
+  )
 })

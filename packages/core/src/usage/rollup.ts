@@ -197,12 +197,19 @@ export const daily = Effect.fn("UsageRollup.daily")(function* (
       .toSorted((a, b) => (b.cost ?? -1) - (a.cost ?? -1))
     const unpriced = models.filter((model) => model.coverage === "missing-rate")
     // Days before the live cutoff are only known once the backfill has run.
-    const complete = backfilled || (day * 24 - shift) * HOUR >= (state?.cutoff ?? Infinity)
+    const live = (day * 24 - shift) * HOUR >= (state?.cutoff ?? Infinity)
+    const complete = backfilled || live
+    // Sum of priced models only; unpriced usage is reported beside it, never folded in as $0.
+    const cost = complete ? round(models.reduce((total, model) => total + (model.cost ?? 0), 0)) : null
     return {
       day: new Date(day * 24 * HOUR).toISOString().slice(0, 10),
       complete,
-      // Sum of priced models only; unpriced usage is reported beside it, never folded in as $0.
-      cost: complete ? round(models.reduce((total, model) => total + (model.cost ?? 0), 0)) : null,
+      cost,
+      // The whole day is after originSince: every step counted here ran on this host and no other host counts it,
+      // so originCost from several hosts can be summed. Earlier days include backfilled history that may also
+      // be counted on the host it was moved from.
+      originOnly: live,
+      originCost: live ? cost : null,
       unpricedModels: unpriced.length,
       unpricedTokens: unpriced.reduce(
         (total, model) =>
@@ -222,12 +229,18 @@ export const daily = Effect.fn("UsageRollup.daily")(function* (
       scope: "assistant messages that ran on this host (all sessions and directories in this database)",
       liveSince: state ? new Date(state.cutoff).toISOString() : undefined,
       backfilled,
+      origin: {
+        basis: "originating-host-only from originSince: a step counts on the host whose runner produced it; replayed, synced and moved sessions are not counted",
+        hostID: os.hostname(),
+        originSince: state ? new Date(state.cutoff).toISOString() : undefined,
+      },
     },
     notes: [
       "cost is null for days not yet covered (history before liveSince until the one-time backfill finishes)",
       "models with coverage=missing-rate used tokens the price source has no rate for: cost null (unknown, not zero); day cost sums priced models only and unpricedModels/unpricedTokens report the rest. coverage=local: a provider served from this machine (loopback endpoint), no API bill",
       "steps that ran on this host count; synced or moved sessions are skipped from liveSince on, but history before liveSince is counted from every local message, so history moved from another host can also count there",
       "local days are built from UTC hours: zones with a 30 or 45 minute offset are rounded to the hour",
+      "to total several hosts, sum days[].originCost and treat any day with originOnly=false (or an unreachable host) as partial; the sum is still an estimate, not billing",
       "not provider billing",
     ],
     days,
