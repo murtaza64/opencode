@@ -20,7 +20,8 @@ layout(location=3) in vec3 par; layout(location=4) in vec3 arc;
 uniform vec2 res;
 out vec2 p; flat out vec4 vcol; flat out vec3 vpar; flat out vec4 vseg; flat out vec3 varc;
 void main(){
-  vec2 a = seg.xy, b = seg.zw; float pad = par.x*0.5 + par.y*3.0 + 2.0; vec2 lo, hi;
+  // The glow kernel is windowed to zero at 4.6*glow (see frag), so the quad pads exactly that far.
+  vec2 a = seg.xy, b = seg.zw; float pad = par.x*0.5 + par.y*4.6 + 2.0; vec2 lo, hi;
   if (par.z < 0.5) { lo = min(a,b) - pad; hi = max(a,b) + pad; } else { float r = arc.x + pad; lo = a - r; hi = a + r; }
   vec2 pos = mix(lo, hi, corner); p = pos; vcol = col; vpar = par; vseg = seg; varc = arc;
   vec2 clip = pos / res * 2.0 - 1.0; gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
@@ -41,7 +42,11 @@ void main(){
     }
   }
   float core = 1.0 - smoothstep(-0.75, 0.75, d);
-  float glow = vpar.y > 0.0 ? exp(-max(d,0.0)/vpar.y) * 0.55 : 0.0;
+  // Exponential falloff multiplied by a smooth window that reaches exactly zero before the quad
+  // edge, so no glow is clipped into a visible rectangle.
+  float reach = vpar.y * 4.6;
+  float window = vpar.y > 0.0 ? 1.0 - smoothstep(reach * 0.55, reach, max(d, 0.0)) : 0.0;
+  float glow = vpar.y > 0.0 ? exp(-max(d,0.0)/vpar.y) * 0.55 * window : 0.0;
   float a = clamp(core + glow, 0.0, 1.0) * vcol.a; o = vec4(vcol.rgb * a, a);
 }`
 
@@ -144,7 +149,7 @@ export const createPainter = (canvas: HTMLCanvasElement, backend: "webgl2" | "ca
           } else ctx.arc(x0, y0, r, a0, a1)
           ctx.stroke()
         }
-        if (glow > 0) { stroke(width + glow * 4, alpha * 0.08); stroke(width + glow * 2, alpha * 0.14); stroke(width + glow, alpha * 0.22) }
+        if (glow > 0) { stroke(width + glow * 4.6, alpha * 0.04); stroke(width + glow * 3, alpha * 0.08); stroke(width + glow * 1.6, alpha * 0.14); stroke(width + glow * 0.8, alpha * 0.2) }
         stroke(width, alpha)
       }
     },

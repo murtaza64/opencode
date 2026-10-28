@@ -53,9 +53,11 @@ try {
   await expect(canvas).toHaveCount(1)
   await expect(page.locator(".transcript")).toHaveAttribute("data-filament", "1")
   // The composer footer settles a frame or two after first paint; the canvas follows via ResizeObserver.
-  const boxGap = async () => { const t = await page.locator(".transcript").boundingBox(); const c = await canvas.boundingBox(); return Math.max(...["x", "y", "width", "height"].map((k) => Math.abs(c[k] - t[k]))) }
+  // The canvas covers the scrollport (client box), which excludes a classic scrollbar when one shows.
+  const clientBox = () => page.locator(".transcript").evaluate((el) => { const r = el.getBoundingClientRect(); return { x: r.left + el.clientLeft, y: r.top + el.clientTop, width: el.clientWidth, height: el.clientHeight } })
+  const boxGap = async () => { const t = await clientBox(); const c = await canvas.boundingBox(); return Math.max(...["x", "y", "width", "height"].map((k) => Math.abs(c[k] - t[k]))) }
   await expect.poll(boxGap, { timeout: 3000 }).toBeLessThan(1.5)
-  const transcriptBox = await page.locator(".transcript").boundingBox()
+  const transcriptBox = await clientBox()
   console.log("boxes", JSON.stringify({ transcriptBox, debug: await page.evaluate(() => window.__filament.debug()) }))
   // The canvas is scroll content (sticky), so it stays glued to the scrollport after scrolling too.
   await page.locator(".transcript").evaluate((el) => { el.scrollTop = 120 })
@@ -115,6 +117,23 @@ try {
   expect(await page.evaluate(() => window.__filament.stats().frames)).toBe(stats.frames)
   expect(fixture.calls.slice(calls).filter((call) => !/\/session\/ses_a\/(message|todo|part)|\/event|\/api\//.test(call.path))).toEqual([])
 
+  // ---- R2: scrolling does not re-measure anchors; content-locked rects reuse the cache ----
+  {
+    const before = await page.evaluate(() => ({ cached: window.__filament.cached(), measured: window.__filament.measured() }))
+    await page.locator(".transcript").evaluate((el) => { el.scrollTop = 0 })
+    await page.waitForTimeout(80)
+    for (const top of [40, 120, 200, 60]) { await page.locator(".transcript").evaluate((el, t) => { el.scrollTop = t }, top); await page.waitForTimeout(40) }
+    const after = await page.evaluate(() => ({ cached: window.__filament.cached(), measured: window.__filament.measured() }))
+    expect(after.cached).toBe(before.cached)
+    console.log("anchor cache", JSON.stringify({ before, after }))
+  }
+  // ---- R4: a running task tool reads as delegated, never as thinking ----
+  fixture.setStatus("busy")
+  fixture.emit("message.part.updated", { part: { ...tool("running"), id: "part_task", callID: "call_task", tool: "task" } })
+  await expect.poll(() => page.evaluate(() => window.__filament.phase())).toBe("delegated")
+  fixture.emit("message.part.updated", { part: { ...tool("completed"), id: "part_task", callID: "call_task", tool: "task" } })
+  fixture.setStatus("idle")
+  await expect.poll(() => page.evaluate(() => window.__filament.phase())).toBe("complete")
   // ---- scroll and selection are untouched; composer input works through the overlay ----
   await page.locator(".transcript").evaluate((el) => { el.scrollTop = 0 })
   const beforeScroll = await page.locator(".transcript").evaluate((el) => el.scrollTop)
@@ -168,7 +187,8 @@ try {
     const { context, page } = await open({ viewport: { width: 480, height: 820 } }, "&filament=1")
     await page.evaluate(() => { document.documentElement.dir = "rtl" })
     await page.waitForTimeout(300)
-    const t = await page.locator(".transcript").boundingBox()
+    // RTL: a classic scrollbar sits at the physical left, so the scrollport starts after it.
+    const t = await page.locator(".transcript").evaluate((el) => { const r = el.getBoundingClientRect(); return { x: r.right - el.clientLeft - el.clientWidth, width: el.clientWidth } })
     const c = await page.locator(".filament-canvas").boundingBox()
     expect(Math.abs(c.x - t.x)).toBeLessThan(1.5)
     expect(Math.abs(c.width - t.width)).toBeLessThan(1.5)

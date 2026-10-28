@@ -5,7 +5,7 @@
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show } from "solid-js"
 import type { Message, Part } from "@opencode-ai/sdk/v2"
 import { describe, diff, snapshot, type Snapshot, type StepPart } from "./adapter"
-import { measure, type Layout } from "./geometry"
+import { createMeasurer, type Layout } from "./geometry"
 import { chooseBackend, createPainter, type Painter } from "./paint"
 import { createScene } from "./scene"
 import { filamentHud, reducedMotion } from "./flag"
@@ -18,6 +18,8 @@ export const Filament = (props: {
   parts: (messageID: string) => readonly Part[]
   // Provider-step parts (live.data.step) once the store keeps them; omitted = no cache seams.
   steps?: (messageID: string) => readonly StepPart[]
+  // Live daemon link (session.tsx `connected()`); false = disconnected/stale, drawn as such.
+  connected?: () => boolean
   status: () => string
   pending: () => readonly { kind: "permission" | "question"; request: { id: string } }[]
   subagents: () => number
@@ -44,7 +46,7 @@ export const Filament = (props: {
   const box = { x: 0, y: 0, w: 0, h: 0, scale: 1 }
 
   // Reactive part of the pipeline: a new snapshot per store update, deltas queued for the loop.
-  const snap = createMemo(() => snapshot({ messages: props.messages(), parts: props.parts, steps: props.steps, status: props.status(), pending: props.pending(), subagents: props.subagents() }))
+  const snap = createMemo(() => snapshot({ messages: props.messages(), parts: props.parts, steps: props.steps, status: props.status(), pending: props.pending(), subagents: props.subagents(), connected: props.connected?.() }))
   createEffect(on(snap, (next) => {
     previous = current
     current = next
@@ -64,7 +66,9 @@ export const Filament = (props: {
     const hr = holder.getBoundingClientRect()
     const rtl = getComputedStyle(el).direction === "rtl"
     canvas.style.top = `${r.top + el.clientTop - hr.top}px`
-    canvas.style.left = `${rtl ? r.right - el.clientLeft - el.clientWidth - hr.left : r.left + el.clientLeft - hr.left}px`
+    // Scrollport left edge: in RTL a classic scrollbar sits at the inline start (physical left), so the
+    // scrollport begins after it; `r.right - clientWidth` lands there regardless of scrollbar side.
+    canvas.style.left = `${(rtl ? r.right - el.clientLeft - el.clientWidth : r.left + el.clientLeft) - hr.left}px`
   }
   const place = () => {
     const el = props.transcript()
@@ -84,10 +88,15 @@ export const Filament = (props: {
     wake()
   }
 
+  // Three wake reasons with different costs: content changed (re-read touched anchors), scrolled
+  // (reuse rects, new offset), or a store update / transient (just render).
+  let measurer: ReturnType<typeof createMeasurer> | undefined
+  let scrolledOnly = false
   const wake = () => {
-    dirty = true
     if (!raf && !document.hidden) raf = requestAnimationFrame(frame)
   }
+  const wakeDirty = () => { dirty = true; wake() }
+  const wakeScroll = () => { scrolledOnly = true; wake() }
 
   const frame = (ts: number) => {
     raf = 0
@@ -99,9 +108,12 @@ export const Filament = (props: {
     lastTs = ts
     // Layout can settle after the ResizeObserver's last report (footer/composer reflow): re-place
     // whenever the scrollport size the canvas was sized for no longer matches.
-    if (el.clientWidth !== box.w || el.clientHeight !== box.h) place()
-    if (dirty || !layout) { align(el); layout = measure(el, canvas, current.nodes, GUTTER) }
+    if (el.clientWidth !== box.w || el.clientHeight !== box.h) { place(); measurer?.resized() }
+    // Reads first (measure), writes after (canvas draw): never a style write followed by a layout read.
+    if (dirty || !layout) { layout = measurer!.measure(current.nodes); align(el) }
+    else if (scrolledOnly) layout = measurer!.scrolled(layout)
     dirty = false
+    scrolledOnly = false
     if (pendingDeltas.length) { scene.absorb(pendingDeltas, layout, ts); pendingDeltas = [] }
     const moving = scene.render(current, layout, { now: ts, wall, reduced, hidden: document.hidden })
     cpu.push(performance.now() - start); if (cpu.length > 180) cpu.shift()
@@ -117,7 +129,7 @@ export const Filament = (props: {
     return [
       `filament · ${current?.phase} · ${label()}`,
       `backend ${backend().backend} · ${backend().renderer.slice(0, 48)}`,
-      `nodes ${current?.nodes.length ?? 0} measured ${layout?.rects.size ?? 0} prims ${painter?.count() ?? 0}`,
+      `nodes ${current?.nodes.length ?? 0} measured ${layout?.rects.size ?? 0} cached ${measurer?.size() ?? 0} prims ${painter?.count() ?? 0}`,
       `rAF p50 ${q(intervals, 0.5).toFixed(1)} p95 ${q(intervals, 0.95).toFixed(1)} max ${q(intervals, 1).toFixed(1)}ms long ${long}/${intervals.length}`,
       `js/frame p50 ${q(cpu, 0.5).toFixed(2)} p95 ${q(cpu, 0.95).toFixed(2)}ms · loop ${raf ? "running" : "resting"} · ${reduced ? "reduced" : "full"} · dpr ${devicePixelRatio}`,
     ].join("\n")
@@ -135,15 +147,17 @@ export const Filament = (props: {
       painter = createPainter(canvas, "canvas2d")
     }
     scene = createScene(painter)
-    const ro = new ResizeObserver(place)
     const el = props.transcript()
+    if (el) measurer = createMeasurer(el, GUTTER)
+    const ro = new ResizeObserver(() => { measurer?.resized(); place(); dirty = true })
     const inner = el?.querySelector(".transcript-inner")
-    if (el) { ro.observe(el); el.dataset.filament = "1"; el.addEventListener("scroll", wake, { passive: true }) }
+    if (el) { ro.observe(el); el.dataset.filament = "1"; el.addEventListener("scroll", wakeScroll, { passive: true }) }
     if (inner) ro.observe(inner)
-    // Content changes that move rects without a store update (markdown settling, chips opening).
-    const mo = new MutationObserver(wake)
-    if (el) mo.observe(el, { childList: true, subtree: true, attributes: true, attributeFilter: ["aria-expanded", "data-status", "data-open"] })
-    addEventListener("resize", place)
+    // Content changes that move rects without a store update (markdown settling, chips opening):
+    // only the touched anchors are re-read, and only on the next frame.
+    const mo = new MutationObserver((records) => { for (const r of records) measurer?.invalidate(r.target); wakeDirty() })
+    if (el) mo.observe(el, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["aria-expanded", "data-status", "data-open", "data-compact", "class"] })
+    addEventListener("resize", () => { measurer?.resized(); place() })
     const vis = () => { if (document.hidden) { cancelAnimationFrame(raf); raf = 0; lastTs = 0 } else { place() } }
     document.addEventListener("visibilitychange", vis)
     place()
@@ -151,9 +165,8 @@ export const Filament = (props: {
       cancelAnimationFrame(raf)
       ro.disconnect()
       mo.disconnect()
-      removeEventListener("resize", place)
       document.removeEventListener("visibilitychange", vis)
-      el?.removeEventListener("scroll", wake)
+      el?.removeEventListener("scroll", wakeScroll)
       holder.remove()
       if (el) delete el.dataset.filament
       painter?.destroy()
@@ -165,6 +178,7 @@ export const Filament = (props: {
       backend: () => backend(),
       stats: () => ({ frames: intervals.length, p95: q(intervals, 0.95), long: intervals.filter((x) => x > 33.4).length, cpuP50: q(cpu, 0.5) }),
       measured: () => layout?.rects.size ?? 0,
+      cached: () => measurer?.size() ?? 0,
       box: () => ({ ...box }),
       // Canvas vs the transcript's content column: both are scroll content, so overscroll moves them together.
       attached: () => { const c = canvas.getBoundingClientRect(); const el = props.transcript()!; const i = el.querySelector(".transcript-inner")!.getBoundingClientRect(); return { canvasTop: c.top, innerTop: i.top, scrollTop: el.scrollTop, transcriptTop: el.getBoundingClientRect().top } },
