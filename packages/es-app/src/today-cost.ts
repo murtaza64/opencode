@@ -76,10 +76,12 @@ export const touchTodayCost = () => {
 }
 
 /** Per-host coverage: ok (origin-only, complete, fresh read), partial (origin-only but some usage unpriced or
- * not yet counted), offline (last read failed; showing the last value), unpriced (no priced usage), unsupported
+ * not yet counted), offline (last read failed; showing the last value), unpriced (no priced usage), tracking (Core
+ * tracks origin, coverage.origin present, but this local day began before originSince, so it cannot yet be
+ * split by host and is not combined), unsupported
  * (older Core without origin-only cost: its raw daily cost may include history moved from another host, so it is
  * shown on its own and never combined), unreachable (no value yet), pending (first read in flight). */
-export type HostCost = { id: string; label: string; current: boolean; state: "ok" | "partial" | "offline" | "unpriced" | "unsupported" | "unreachable" | "pending"; cost?: number; observedAt?: number; note?: string }
+export type HostCost = { id: string; label: string; current: boolean; state: "ok" | "partial" | "offline" | "unpriced" | "tracking" | "unsupported" | "unreachable" | "pending"; cost?: number; observedAt?: number; note?: string }
 
 export const todayCost = (now = Date.now()) => costSummary(targets(), readings(), now)
 
@@ -106,6 +108,9 @@ export const costSummary = (targets: Target[], readings: Record<string, Reading>
       const notes = [failed, partial ? "some usage unpriced or not yet counted" : undefined].filter(Boolean).join("; ")
       return { ...base, state: failed ? "offline" : partial ? "partial" : "ok", cost: today.originCost, note: notes || undefined }
     }
+    // A Core that tracks origin says so in coverage.origin even on a day it cannot split yet.
+    const since = value.coverage.origin?.originSince
+    if (since) return { ...base, state: "tracking", cost: today.cost, note: [`origin tracked since ${clock(since)}; today began before that, so it is not split by host yet`, failed].filter(Boolean).join("; ") }
     return { ...base, state: "unsupported", cost: today.cost, note: ["Core has no origin-only cost", failed].filter(Boolean).join("; ") }
   })
   const known = hosts.filter((item) => item.cost !== undefined)
@@ -125,6 +130,11 @@ export const costSummary = (targets: Target[], readings: Record<string, Reading>
     hosts,
     counted: counted.map((item) => item.id),
   }
+}
+
+const clock = (iso: string) => {
+  const at = new Date(iso)
+  return Number.isNaN(at.getTime()) ? iso : at.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
 }
 
 /** A model with tokens but no price: older Cores report it as cost 0, newer ones as missing-rate. */

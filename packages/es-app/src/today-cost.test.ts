@@ -63,6 +63,28 @@ describe("costSummary", () => {
     expect(summary?.hosts.map((item) => [item.label, item.state, item.cost])).toEqual([["Laptop", "unsupported", 594.78], ["Mini", "unsupported", 541.65]])
   })
 
+  test("activated Core on a cutoff day (coverage.origin, originOnly false, originCost null) is tracking, not unsupported", () => {
+    const cutoff = (cost: number): UsageDaily => ({ ...originRollup(cost, { originOnly: false, originCost: null }),
+      coverage: { scope: "", backfilled: true, origin: { basis: "step", hostID: "h", originSince: "2026-10-28T14:10:00Z" } } })
+    const summary = costSummary([laptop, mini], {
+      laptop: { value: cutoff(594.78), readAt: NOW },
+      mini: { value: cutoff(541.65), readAt: NOW },
+    }, NOW)
+    expect(summary?.total).toBeUndefined()
+    expect(summary?.partial).toBe(true)
+    expect(summary?.hosts.map((item) => item.state)).toEqual(["tracking", "tracking"])
+    expect(summary?.hosts[0]?.note).toContain("origin tracked since")
+    expect(summary?.hosts[0]?.note).not.toContain("Core has no origin-only cost")
+  })
+
+  test("an older Core without origin fields or coverage.origin stays unsupported", () => {
+    const summary = costSummary([laptop, mini], {
+      laptop: { value: originRollup(40), readAt: NOW },
+      mini: { value: olderRollup(25), readAt: NOW },
+    }, NOW)
+    expect(summary?.hosts[1]).toMatchObject({ state: "unsupported", note: "Core has no origin-only cost" })
+  })
+
   test("a host whose last read failed keeps its last origin value, still combines, and marks the summary partial", () => {
     const summary = costSummary([laptop, mini], {
       laptop: { value: originRollup(40), readAt: NOW },
