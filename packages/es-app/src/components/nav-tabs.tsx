@@ -7,7 +7,8 @@ import { A, useLocation } from "@solidjs/router"
 import { useDeskQueue } from "../desk-queue"
 import { useDashboard } from "../state"
 import { surfaceKey, surfaceProblem, type Surface } from "../surfaces"
-import type { DeskItem } from "../desk"
+import { workCountLabel, workQueue, type WorkEntry } from "../work-queue"
+import { HostGlyph } from "./icons"
 import { PrList, sortPrs } from "./pr"
 
 export type NavTab = "surfaces" | "agents" | "decisions" | "prs"
@@ -38,14 +39,27 @@ const useOpenItem = () => {
   const location = useLocation()
   return (key: string) => location.pathname === "/" && new URLSearchParams(location.search).get("item") === key
 }
-const DecisionRow = (props: { item: DeskItem }) => {
+// This host's decisions open on its own desk; another Work host's open on that host's Front desk (its tab).
+const DecisionRow = (props: { entry: WorkEntry }) => {
   const open = useOpenItem()
-  return <A href={itemHref(props.item.key)} activeClass="" classList={{ active: open(props.item.key) }} aria-current={open(props.item.key) ? "page" : undefined} class="nav-item nav-decision" data-kind={props.item.kind} data-nav-item={props.item.key}>
-    <span class="nav-kind" aria-hidden="true">{props.item.kind === "permission" ? "!" : props.item.kind === "failure" ? "×" : "?"}</span>
-    <span class="nav-title" dir="auto">{props.item.series ? `${props.item.series.title} (${props.item.series.answered}/${props.item.series.live})` : props.item.title}</span>
-    <span class="sr-only">, {props.item.kind}</span>
-    <Show when={props.item.project}><span class="session-project">{props.item.project}</span></Show>
-  </A>
+  const series = () => props.entry.item?.series
+  const glyph = () => props.entry.kind === "permission" ? "!" : props.entry.kind === "failure" ? "×" : "?"
+  return <Show when={props.entry.host} fallback={
+    <A href={props.entry.href} activeClass="" classList={{ active: open(props.entry.key) }} aria-current={open(props.entry.key) ? "page" : undefined} class="nav-item nav-decision" data-kind={props.entry.kind} data-nav-item={props.entry.key}>
+      <span class="nav-kind" aria-hidden="true">{glyph()}</span>
+      <span class="nav-title" dir="auto">{series() ? `${series()!.title} (${series()!.answered}/${series()!.live})` : props.entry.title}</span>
+      <span class="sr-only">, {props.entry.kind}</span>
+      <Show when={props.entry.project}><span class="session-project">{props.entry.project}</span></Show>
+    </A>}>
+    <a href={props.entry.href} class="nav-item nav-decision host-decision" classList={{ stale: props.entry.stale }} data-kind={props.entry.kind} data-nav-item={props.entry.key}
+      aria-label={`${props.entry.title}, ${props.entry.kind}, on ${props.entry.hostLabel}${props.entry.stale ? ", last known" : ""}`}
+      title={props.entry.stale ? `${props.entry.hostLabel} not current; last-known decision` : `${props.entry.title} — on ${props.entry.hostLabel}`}>
+      <span class="nav-kind" aria-hidden="true">{glyph()}</span>
+      <HostGlyph host={props.entry.host!} />
+      <span class="nav-title" dir="auto">{props.entry.title}</span>
+      <span class="session-project">{props.entry.hostLabel}</span>
+    </a>
+  </Show>
 }
 const SurfaceRow = (props: { surface: Surface; fresh?: boolean }) => {
   const open = useOpenItem()
@@ -58,15 +72,23 @@ const SurfaceRow = (props: { surface: Surface; fresh?: boolean }) => {
 }
 
 /** New decisions, permissions, failures and fresh requested deliverables, newest work first, bounded. */
+const useWork = () => {
+  const queue = useDeskQueue()
+  const { work } = useDashboard()
+  return createMemo(() => workQueue(queue.items(), work.feeds()))
+}
 export const NeedsYouBand = (props: { extra?: JSX.Element }) => {
   const queue = useDeskQueue()
+  const all = useWork()
   const fresh = () => queue.surfaces.deliverables().fresh
-  const shown = () => queue.items().slice(0, BAND_LIMIT)
-  const more = () => Math.max(0, queue.items().length - BAND_LIMIT)
-  return <Show when={queue.items().length || fresh().length || props.extra}>
+  const shown = () => all().entries.slice(0, BAND_LIMIT)
+  const more = () => Math.max(0, all().entries.length - BAND_LIMIT)
+  // "N+" with the hosts behind named, never a falsely complete count.
+  const label = () => workCountLabel({ ...all(), count: all().count + fresh().length })
+  return <Show when={all().entries.length || fresh().length || props.extra}>
     <section class="needs-you-band" aria-label="Needs you">
-      <div class="nav-heading">Needs you <span class="nav-heading-count">{queue.items().length + fresh().length || ""}</span></div>
-      <For each={shown()}>{item => <DecisionRow item={item} />}</For>
+      <div class="nav-heading">Needs you <span class="nav-heading-count" title={label().title}>{all().count + fresh().length ? label().text : ""}</span></div>
+      <For each={shown()}>{entry => <DecisionRow entry={entry} />}</For>
       <For each={fresh()}>{surface => <SurfaceRow surface={surface} fresh />}</For>
       <Show when={more()}><button type="button" class="link-button nav-more" onClick={() => setTab("decisions")}>{more()} more in Decisions</button></Show>
       {props.extra}
@@ -82,7 +104,8 @@ export const NavTabs = (props: { agents: JSX.Element }) => {
   const [filters, setFilters] = createSignal<Record<Exclude<NavTab, "agents">, string>>({ surfaces: "", decisions: "", prs: "" })
   const filter = (id: Exclude<NavTab, "agents">) => filters()[id]
   const setFilter = (id: Exclude<NavTab, "agents">, value: string) => setFilters(previous => ({ ...previous, [id]: value }))
-  const decisions = createMemo(() => queue.items().filter(item => matches(item.series?.title ?? item.title, filter("decisions"))))
+  const all = useWork()
+  const decisions = createMemo(() => all().entries.filter(entry => matches(`${entry.title} ${entry.hostLabel ?? ""}`, filter("decisions"))))
   const surfaces = createMemo(() => {
     const split = queue.surfaces.deliverables()
     return [...split.fresh.map(surface => ({ surface, fresh: true })), ...split.earlier.map(surface => ({ surface, fresh: false })),
@@ -94,7 +117,7 @@ export const NavTabs = (props: { agents: JSX.Element }) => {
       .filter((pr: { url: string }) => !seen.has(pr.url) && (seen.add(pr.url), true))
       .filter((pr: { url: string; title?: string }) => matches(`${pr.title ?? ""} ${pr.url}`, filter("prs"))))
   })
-  const count = (id: NavTab) => id === "decisions" ? queue.items().length : id === "surfaces" ? queue.surfaces.list().length : id === "prs" ? prs().length : undefined
+  const count = (id: NavTab) => id === "decisions" ? workCountLabel(all()).text.replace(/^0$/, "") : id === "surfaces" ? queue.surfaces.list().length : id === "prs" ? prs().length : undefined
   const tabId = (id: NavTab) => `nav-tab-${id}`
   const FilterBox = (p: { id: Exclude<NavTab, "agents">; label: string }) =>
     <div class="search-box"><input class="search-input" type="search" placeholder={`filter ${p.label.toLowerCase()}…`} aria-label={`Filter ${p.label}`}
@@ -121,7 +144,7 @@ export const NavTabs = (props: { agents: JSX.Element }) => {
       <Show when={tab() === "agents"}>{props.agents}</Show>
       <Show when={tab() === "decisions"}>
         <FilterBox id="decisions" label="Decisions" />
-        <For each={decisions()} fallback={<div class="dim nav-empty">{filter("decisions") ? "no matches" : "Nothing needs you."}</div>}>{item => <DecisionRow item={item} />}</For>
+        <For each={decisions()} fallback={<div class="dim nav-empty">{filter("decisions") ? "no matches" : "Nothing needs you."}</div>}>{entry => <DecisionRow entry={entry} />}</For>
       </Show>
       <Show when={tab() === "surfaces"}>
         <FilterBox id="surfaces" label="Surfaces" />

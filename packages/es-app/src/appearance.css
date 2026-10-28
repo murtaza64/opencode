@@ -292,3 +292,5 @@
 .nav-tabs [role=tab]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .nav-tab-count { margin-inline-start: 4px; font-size: 10px; color: var(--overlay1); font-variant-numeric: tabular-nums; }
 .nav-prs { padding-inline: 10px; display: grid; gap: 4px; }
+.host-decision .host-glyph { margin: 0; }
+.host-decision.stale { opacity: 0.6; }
