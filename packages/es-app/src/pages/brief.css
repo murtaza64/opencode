@@ -111,7 +111,7 @@
 .desk-visual-window[data-expanded] { max-block-size: none; overflow: visible; }
 .desk-visual-expand { padding: 2px 0; border: 0; background: none; color: var(--subtext0); text-decoration: underline; font: inherit; font-size: 11px; cursor: pointer; }
 /* A value the request does not state: visibly missing, never styled as a value. */
-.brief-missing { color: var(--yellow); font-style: italic; }
+.brief-missing { color: var(--yellow); }
 /* Muted lines inside a brief use the meta size, not the page's 12px muted size. */
 .desk-brief .home-muted, .desk-brief .home-warning, .desk-brief .home-source { font-size: 11px; }
 .brief-failure { margin: 0; font-size: 13px; color: var(--subtext1); }

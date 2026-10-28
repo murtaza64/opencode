@@ -110,7 +110,10 @@
 @media (max-width: 650px) { .home-answer .home-actions .home-muted { margin-inline-start: 0; flex-basis: 100%; } }
 /* An agent's request rendered as Markdown: compact, wraps long words, long commands scroll inside their block.
  * The markdown component reads its text colour from session-ui variables; map them to the app palette. */
-.home-request-text { --v2-text-text-base: var(--text); --text-strong: var(--text); --text-base: var(--subtext1); color: var(--text); min-inline-size: 0; max-inline-size: 90ch; overflow-wrap: anywhere; font-size: 13px; line-height: 1.55; }
+.home-request-text { --font-size-base: 13px; --v2-text-text-base: var(--text); --text-strong: var(--text); --text-base: var(--subtext1); color: var(--text); min-inline-size: 0; max-inline-size: 90ch; overflow-wrap: anywhere; font-size: 13px; line-height: 1.55; }
 .home-request-text [data-component="markdown"] > :first-child { margin-block-start: 0; }
 .home-request-text pre { max-inline-size: 100%; overflow-x: auto; white-space: pre; }
 .home-request-text :not(pre) > code { overflow-wrap: anywhere; }
+/* On the card's type scale: request text and its headings at 13px, code at 12px like a brief's mono values. */
+.home-request-text [data-component="markdown"] :is(h1, h2, h3, h4, h5, h6) { font-size: 13px; }
+.home-request-text [data-component="markdown"] :is(code, pre, .shiki) { font-size: 12px; }

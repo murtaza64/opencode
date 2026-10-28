@@ -168,7 +168,8 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
 
 .attention-series { padding: 18px 17px; background: var(--mantle); border-inline-start: 2px solid var(--yellow); min-inline-size: 0; overflow-wrap: anywhere; }
 .attention-series-head h3 { margin-block: 5px; }
-.attention-series-progress { color: var(--green); font-weight: 600; font-variant-numeric: tabular-nums; }
+/* Progress is neutral: green means recommended in this palette. */
+.attention-series-progress { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .attention-series-questions { list-style: none; padding: 0; margin: 14px 0 0; }
 .attention-series-question { border-block-start: 1px solid var(--surface1); padding-block: 14px; min-inline-size: 0; }
 .attention-series-question-head { display: flex; align-items: baseline; gap: 10px; justify-content: space-between; }

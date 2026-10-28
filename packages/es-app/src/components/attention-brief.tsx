@@ -191,7 +191,7 @@ const Items = (props: { result: BriefResult; item: DeskItem; job: BriefJob }) =>
       <Show when={approval().verbatim}><p class="desk-brief-ledger">Recorded answer: <bdi dir="auto">{approval().verbatim}</bdi></p></Show>
       <div class="desk-brief-item-head" aria-hidden="true"><span>ID</span><span>Question</span><span>Agent recommends</span><span>Alternative(s)</span><Show when={approval().answered}><span>Approved</span></Show></div>
       <ol class="desk-brief-item-list"><For each={rows()}>{(row, index) => <li class="desk-brief-item">
-        <span class="desk-brief-item-id"><span class="desk-brief-item-number">{index() + 1}.</span> <bdi dir="ltr">{row.id}</bdi></span>
+        <span class="desk-brief-item-id"><bdi dir="ltr" class="desk-brief-item-number">{index() + 1}.</bdi> <bdi dir="ltr">{row.id}</bdi></span>
         {/* The question is the row's primary line, so it carries no label. */}
         <div class="desk-brief-item-cell desk-brief-item-question"><Value value={row.question} /></div>
         <ItemCell label="Agent recommends"><Value value={row.recommended} /></ItemCell>

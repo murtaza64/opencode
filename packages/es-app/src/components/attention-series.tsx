@@ -22,11 +22,12 @@ export const AttentionSeries = (props: { item: DeskItem; attention: ReturnType<t
       <p class="attention-series-progress" aria-label={`Answered ${progress().answered} of ${progress().live} live questions`}>
         {progress().answered}/{progress().live} answered
       </p>
-      <Show when={progress().unanswered.length}><p class="home-muted">Unanswered: <For each={progress().unanswered}>{(record, index) => <>{index() ? ", " : ""}<bdi dir="auto">{record.series!.index}. {record.title}</bdi></>}</For></p></Show>
+      {/* Question numbers only: the titles are listed right below. */}
+      <Show when={progress().unanswered.length}><p class="home-muted">Unanswered: <bdi dir="ltr">{progress().unanswered.map(record => `Q${record.series!.index}`).join(", ")}</bdi></p></Show>
     </header>
     <ol class="attention-series-questions" aria-label="Series questions">
       <For each={progress().ordered}>{record => <li class="attention-series-question" data-attention-id={record.id} data-status={record.status}>
-        <div class="attention-series-question-head"><h4><span class="home-source">Question {record.series!.index} · revision {record.revision}</span><br /><bdi dir="auto">{record.title}</bdi></h4>
+        <div class="attention-series-question-head"><h4><span class="home-source">Question {record.series!.index}<Show when={record.revision > 1}> · revision {record.revision}</Show></span><br /><bdi dir="auto">{record.title}</bdi></h4>
           <Show when={record.status === "withdrawn"}><span class="attention-series-withdrawn">Withdrawn</span></Show>
         </div>
         <Show when={record.status !== "withdrawn"}>
