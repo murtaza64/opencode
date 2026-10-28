@@ -12,7 +12,6 @@ try {
   await context.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
   const page = await context.newPage()
   await page.goto(`${preview.url}/agents`)
-  await page.locator(".sidebar .cloud-discovery summary").click()
   await page.getByRole("button", { name: "Pin cloud agent cloud-review", exact: true }).click()
   await page.getByRole("button", { name: "Pin cloud agent cloud-second", exact: true }).click()
   const open = owner => page.locator(`.pinned-section [data-cloud-owner="${owner}"] a`)
