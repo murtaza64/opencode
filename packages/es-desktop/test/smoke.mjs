@@ -49,13 +49,13 @@ try {
   await page.waitForURL("http://127.0.0.1:*/")
   const origin = new URL(page.url()).origin
   await page.goto(`${origin}/session/ses_a?directory=${encodeURIComponent(directory)}`)
-  const active = page.locator(".float-editor").or(page.locator(".prompt-box:not([inert])"))
-  const queue = active.getByRole("button", { name: "Queue", exact: true })
-  const queueAgent = active.getByRole("combobox", { name: "Queue agent", exact: true })
+  const active = page.locator(".prompt-box")
+  const editor = active.getByRole("textbox", { name: "Message", exact: true })
+  const primary = active.locator(".direct-primary")
   await expect(active.locator(".direct-composer")).toBeVisible()
-  await expect(active.getByRole("button", { name: "Steer", exact: true })).toHaveAttribute("data-keyboard-target", "true")
-  await expect(queue).toBeDisabled()
-  await expect(queueAgent).toBeDisabled()
+  // An empty draft offers Nudge (unavailable without Core's capability), never an empty send.
+  await expect(primary).toHaveAccessibleName("Nudge the agent (empty message)")
+  await expect(primary).toBeDisabled()
   expect(
     await app.evaluate(({ BrowserWindow }) => {
       const prefs = BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences()
@@ -75,25 +75,24 @@ try {
   ])
   expect((await fetch(origin)).status).toBe(403)
   expect(await page.evaluate(() => fetch("/oc/pty", { method: "POST" }).then((res) => res.status))).toBe(403)
-  await active.locator("textarea").press("Meta+m")
-  await expect(queue).toHaveAttribute("data-keyboard-target", "true")
-  await expect(queueAgent).toBeEnabled()
-  await queueAgent.selectOption("plan")
-  await active.locator("textarea").fill("Electron fixture queue")
-  await expect(queue).toBeEnabled()
-  await queue.click()
+  // Busy with a draft: Steer is the primary; Cmd+M makes it Queue, which keeps the session agent.
+  await editor.fill("Electron fixture queue")
+  await expect(primary).toHaveAccessibleName("Steer")
+  await editor.press("Meta+m")
+  await expect(primary).toHaveAccessibleName("Queue")
+  await primary.click()
   await expect(page.locator(".input-receipts")).toContainText("Electron fixture queue")
   expect(fixture.receipts).toHaveLength(1)
-  expect(fixture.receipts[0].agent).toBe("plan")
   expect(fixture.calls.filter((call) => call.method === "POST" && call.path.endsWith("/input"))).toMatchObject([
-    { directory, body: { delivery: "queue", agent: "plan", text: "Electron fixture queue" } },
+    { directory, body: { delivery: "queue", text: "Electron fixture queue" } },
   ])
+  expect(fixture.calls.filter((call) => call.method === "POST" && call.path.endsWith("/input"))[0].body.agent).toBeUndefined()
   expect(fixture.calls.filter((call) => call.method === "POST" && call.path.endsWith("/prompt_async"))).toEqual([])
   await page.screenshot({ path: path.join(artifacts, "native-session.png") })
   fixture.setStatus("idle")
-  await expect(active.getByRole("button", { name: "Send", exact: true })).toBeVisible()
-  await expect(queue).toHaveCount(0)
-  await expect(queueAgent).toBeDisabled()
+  await editor.fill("idle draft")
+  await expect(primary).toHaveAccessibleName("Send")
+  await expect(active.getByRole("button", { name: "More send options", exact: true })).toHaveCount(0)
   expect(fixture.receipts).toHaveLength(1)
 
   await checkExternalLinks(app, page, origin)
@@ -164,7 +163,7 @@ try {
   await fixture.close()
   await page.reload()
   await expect(page.getByRole("heading", { name: "Services unavailable" })).toBeVisible()
-  await expect(page.getByRole("link", { name: "retry connection" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Retry now" })).toBeVisible()
   await page.screenshot({ path: path.join(artifacts, "native-offline.png") })
   await app.close()
   await expect

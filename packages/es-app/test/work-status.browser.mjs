@@ -43,8 +43,9 @@ try {
   fixture.emit("message.part.updated", { part: { id: "part_tool", messageID: assistant.id, sessionID: "ses_a", type: "tool", callID: "call_fixture", tool: "bash", state: { status: "running", input: { command: "fixture-only" }, time: { start: 1 } } } })
   await expect(bar()).toHaveAttribute("data-state", "working")
   // Cmd+M cycles the keyboard target shown on the primary button (steer -> queue -> aside -> steer).
-  const editor = page.locator(".prompt-box:not([inert]) textarea")
-  await editor.focus()
+  const editor = page.locator(".prompt-box textarea[aria-label='Message']")
+  // The primary shows the keyboard target once there is a draft (an empty draft offers Nudge).
+  await editor.fill("draft for the mode cycle")
   for (const mode of ["Queue", "Aside", "Steer"]) {
     await editor.press("Meta+m")
     await expect(page.locator(".prompt-box .direct-primary")).toHaveAccessibleName(mode)
