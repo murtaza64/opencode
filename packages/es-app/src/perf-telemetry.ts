@@ -96,6 +96,8 @@ export const startPerfTelemetry = () => {
       // Unsupported entry type in this runtime.
     }
   }
+  // L0 shell: first paint/contentful paint since navigation.
+  observe("paint", (entry) => perfEvent("ready.paint", { name: entry.name, ms: Math.round(entry.startTime) }))
   observe("longtask", (entry) => {
     if (entry.duration >= LONG_TASK_MS) perfEvent("longtask", { ms: Math.round(entry.duration) })
   })
@@ -164,12 +166,13 @@ export const startPerfTelemetry = () => {
   })
 }
 
-let ready = false
+const levels = new Set<string>()
 
-/** Records once per page the first moment a session is usable: transcript shown and input wired.
- * `t` counts from navigation, so it measures cold app first-open, not just the session mount. */
-export const perfPageReady = (fields: { sessionID: string; openMs: number; transcriptMs?: number; connectedMs?: number }) => {
-  if (ready) return
-  ready = true
-  perfEvent("page.ready", fields)
+/** Records once per page when a readiness level first completes (ux-feel readiness contract:
+ * L1 target = session record known, which also enables Send; L2 history = transcript tail loaded).
+ * `t` counts from navigation, so a page opened straight into a session measures cold first-open. */
+export const perfReady = (level: "target" | "history", fields: { sessionID: string; openMs: number }) => {
+  if (levels.has(level)) return
+  levels.add(level)
+  perfEvent(`ready.${level}`, fields)
 }

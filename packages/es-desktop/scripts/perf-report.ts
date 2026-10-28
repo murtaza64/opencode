@@ -59,13 +59,16 @@ const count = <T extends string>(list: Row[], key: string) =>
   }, {})
 
 // Startup: rows after each page.start (until the next) belong to that page; the native app
-// runs one renderer window, so this grouping holds there. Journals older than page.ready fall
-// back to the first successful session.open.
+// runs one renderer window, so this grouping holds there. Journals older than ready.* events fall
+// back to the first successful session.open (ends at the session record, i.e. target).
 const pages = rows.flatMap((row, index) => {
   if (row.kind !== "page.start") return []
   const next = rows.findIndex((other, at) => at > index && other.kind === "page.start")
   const own = rows.slice(index + 1, next === -1 ? undefined : next)
-  const ready = own.find((other) => other.kind === "page.ready")
+  const level = (kind: string) => own.find((other) => other.kind === kind)
+  const target = level("ready.target")
+  const history = level("ready.history")
+  const paint = own.find((other) => other.kind === "ready.paint" && other.name === "first-contentful-paint")
   const open = own.find((other) => other.kind === "session.open" && other.outcome === "ok")
   const early = own.filter((other) => num(other, "t") <= 30_000)
   const fetches = early.filter((other) => other.kind === "fetch").sort((a, b) => num(b, "ms") - num(a, "ms"))
@@ -74,9 +77,12 @@ const pages = rows.flatMap((row, index) => {
     route: row.route,
     navType: row.navType,
     domContentLoadedMs: row.domContentLoadedMs,
-    ready: ready
-      ? { t: ready.t, direct: ready.route === row.route, openMs: ready.openMs, connectedMs: ready.connectedMs, transcriptMs: ready.transcriptMs }
-      : open && { t: open.t, direct: open.route === row.route, openMs: open.ms, transcriptMs: open.transcriptMs, legacy: true },
+    // L0 paint, L1 target (Send enabled), L2 history; t = ms from navigation.
+    paintMs: paint?.ms,
+    target: target
+      ? { t: target.t, direct: target.route === row.route, openMs: target.openMs }
+      : open && { t: open.t, direct: open.route === row.route, openMs: open.ms, legacy: true },
+    history: history ? { t: history.t, openMs: history.openMs } : open?.transcriptMs !== undefined ? { openMs: open.transcriptMs, legacy: true } : undefined,
     first30s: {
       longTaskMs: early.filter((other) => other.kind === "longtask").reduce((sum, other) => sum + num(other, "ms"), 0),
       stallMs: early.filter((other) => other.kind === "stall").reduce((sum, other) => sum + num(other, "ms"), 0),
@@ -131,7 +137,7 @@ else {
   line("event stream closes", report.streamCloses)
   line("shown daemon trouble", report.trouble)
   line("input not confirmed", report.inputUnconfirmed)
-  console.log("startup (last 10 pages; ready.t = ms from navigation, direct = opened straight into the session):")
+  console.log("startup (last 10 pages; t = ms from navigation; direct = opened straight into the session; target = Send enabled):")
   for (const page of report.startup) console.log(`  ${JSON.stringify(page)}`)
   console.log("slowest proxied routes:")
   for (const route of report.slowProxyRoutes) console.log(`  ${route.route}  ${JSON.stringify({ n: route.n, p50: route.p50, p95: route.p95, max: route.max })}`)
