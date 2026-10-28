@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { GlobalSession } from "@opencode-ai/sdk/v2"
-import { hostDecisionHref, hostRowKey, hostRows, hostSessionHref, workRows } from "./host-feed"
+import { hostDecisionHref, hostRowKey, hostRows, hostSessionHref, hostTabHref, workRows } from "./host-feed"
 import { hostInfo } from "./host"
 
 const session = (id: string, directory: string, updated: number, extra: Partial<GlobalSession> = {}) =>
@@ -38,9 +38,10 @@ describe("Work view rows", () => {
     expect(hostRows("mini", sessions).every((row) => row.host === "mini")).toBe(true)
   })
 
-  test("opening another host's row targets that host's own listener", () => {
-    expect(hostSessionHref({ id: "mini", label: "Mac Mini", origin: "http://127.0.0.1:60310" }, { id: "ses_a", directory: "/a b" }))
-      .toBe("http://127.0.0.1:60310/session/ses_a?directory=%2Fa%20b")
+  test("opening another host's row reads it here; replying targets that host's own listener", () => {
+    const mini = { id: "mini", label: "Mac Mini", origin: "http://127.0.0.1:60310" }
+    expect(hostSessionHref(mini, { id: "ses_a", directory: "/a b" })).toBe("/session/ses_a?directory=%2Fa%20b&host=mini")
+    expect(hostTabHref(mini, { id: "ses_a", directory: "/a b" })).toBe("http://127.0.0.1:60310/session/ses_a?directory=%2Fa%20b")
   })
 })
 

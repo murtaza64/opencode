@@ -1,5 +1,6 @@
 /* Conversation view: live transcript (session-ui renderer over an SSE-fed
  * store), prompt input, and inline permission/question replies. */
+import { HostSession } from "../components/host-session"
 import { createEffect, createMemo, createResource, createSignal, For, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js"
 import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router"
 import { DataProvider } from "@opencode-ai/session-ui/context"
@@ -172,11 +173,14 @@ export default function SessionPage() {
   const [search] = useSearchParams()
   // the router reuses this component across /session/:id navigations; key the
   // view on id+directory so the live store, SSE feed, and info panel remount
-  const key = () => `${params.id}\u0000${(search.directory as string) || ""}`
+  const key = () => `${params.id}\u0000${(search.directory as string) || ""}\u0000${(search.host as string) || ""}`
   return (
     <Show when={key()} keyed>
       {(k) => {
         const [id, dir] = k.split("\u0000")
+        // Another Work host's session (`?host=mini`): read-only here; replies happen on its own tab.
+        const other = typeof search.host === "string" && search.host && search.host !== "local" ? search.host : undefined
+        if (other) return <HostSession host={other} sessionID={id!} directory={dir ?? ""} />
         return <SessionView sessionID={id!} directory={dir ?? ""} anchor={() => parseAnchor(search)} />
       }}
     </Show>

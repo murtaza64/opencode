@@ -2079,3 +2079,8 @@ a.mini-item > .glyph { margin: 0; }
 .mode-switch.compact .mode-busy { position: absolute; inset-block-start: 4px; inset-inline-start: 4px; margin: 0; }
 /* A mail chip sits at inline-end; its fork action moves to the free side so it never covers the chip. */
 .msg-wrap:has(> .mail-activity) .fork-here { inset-inline-end: auto; inset-inline-start: 4px; }
+
+/* Another Work host's session, read-only (Slice R). */
+.host-session-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 16px; font-size: 12px; color: var(--subtext0); border-block-end: 1px solid var(--surface0); }
+.host-session-bar .button { margin-inline-start: auto; }
+.host-session-messages { overflow: auto; padding: 12px 16px; }

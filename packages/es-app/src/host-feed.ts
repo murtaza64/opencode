@@ -60,8 +60,13 @@ export const workRows = (...lists: HostedRow[][]) => {
 export const hostDecisionHref = (host: WorkHost, record: Pick<AttentionRecord, "editspace" | "id">) =>
   `${host.origin}/desk?item=${encodeURIComponent(`attention:${record.editspace}:${record.id}`)}`
 
-/** The opening URL of another host's session: its own listener's session route. */
+/** The opening URL of another host's session: read-only in this window (Slice R); replying happens on
+ * that host's own tab (`hostTabHref`). */
 export const hostSessionHref = (host: WorkHost, row: Pick<HostedRow, "id" | "directory">) =>
+  `/session/${encodeURIComponent(row.id)}?directory=${encodeURIComponent(row.directory)}&host=${encodeURIComponent(host.id)}`
+
+/** The same session on that host's own tab (its listener origin, auth, drafts and receipts). */
+export const hostTabHref = (host: WorkHost, row: Pick<HostedRow, "id" | "directory">) =>
   `${host.origin}/session/${encodeURIComponent(row.id)}?directory=${encodeURIComponent(row.directory)}`
 
 const LIST_MS = 5000

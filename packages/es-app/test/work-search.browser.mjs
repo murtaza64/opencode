@@ -57,7 +57,7 @@ try {
   await expect(miniRow("Composer copy on the Mini")).toHaveCount(0)
   await expect(page.locator(".sidebar .search-result", { hasText: "Composer fixture" })).toHaveCount(0)
   // The Mini row still opens on the Mini's own listener.
-  await expect(miniRow("Ledger migration")).toHaveAttribute("href", `${mini}/session/ses_ledger?directory=${encodeURIComponent(miniRoot)}`)
+  await expect(miniRow("Ledger migration")).toHaveAttribute("href", `/session/ses_ledger?directory=${encodeURIComponent(miniRoot)}&host=mini`)
 
   // Same ID on both hosts: one query matching both keeps two rows, each with its own host.
   await input.fill("composer")
