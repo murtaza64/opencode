@@ -124,12 +124,12 @@ fun AgentScreen(store: DeskStore, nav: Nav, key: String) {
     LaunchedEffect(atTop, detail?.cursor) { if (atTop) store.loadOlder(agent) }
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        val pin = Pin(agent.editspace, agent.lane)
+        val pin = agent.pin
         val glyph = Hosts.forLane(agent.owner, store.host)
         TopBar(agent.title, onBack = { nav.pop() }, trailing = { PinButton(store.pinned(pin)) { store.togglePin(pin) } }, glyph = glyph, onLongPress = { diagnostics = true }) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatusDot(agent.status, 7, animate = true)
-                Label(listOfNotNull(Hosts.resolve(store.host)?.takeIf { glyph != null }?.let { "on ${it.label}" }, agent.editspace, agent.lane, agent.status, agent.session?.cost?.takeIf { it > 0 }?.let { "$%.2f".format(it) }).joinToString(" · "))
+                Label(listOfNotNull(Hosts.resolve(store.host)?.takeIf { glyph != null }?.let { "on ${it.label}" }, agent.editspace, agent.lane.takeIf { it.isNotBlank() }, agent.status, agent.session?.cost?.takeIf { it > 0 }?.let { "$%.2f".format(it) }).joinToString(" · "))
             }
         }
         CompositionLocalProvider(LocalExpanded provides expandedIds) {
@@ -367,7 +367,7 @@ private fun SteerBar(store: DeskStore, agent: Agent) {
             if (sessionID.isNotEmpty()) AttachButton(store, sessionID) { error = it }
             TextField(
                 value = text, onValueChange = setText, maxLines = 4,
-                placeholder = { Text(if (agent.session == null) "No session yet" else "Tell ${agent.lane}…", color = Ink.Dim) },
+                placeholder = { Text(if (agent.session == null) "No session yet" else "Tell ${agent.lane.ifBlank { "this session" }}…", color = Ink.Dim) },
                 modifier = Modifier.weight(1f).testTag("steer-text"), shape = RoundedCornerShape(4.dp),
                 colors = TextFieldDefaults.colors(focusedContainerColor = Ink.Panel, unfocusedContainerColor = Ink.Panel, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = Ink.Blue),
             )

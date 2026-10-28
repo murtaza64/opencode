@@ -336,7 +336,7 @@ private fun AgentsTab(store: DeskStore, nav: Nav) {
         groups.forEach { (es, agents) ->
             item(key = "h-$es") { SectionHeader(es, "${agents.count { it.busy }} live") }
             items(agents, key = { it.key }) { agent ->
-                val pin = Pin(agent.editspace, agent.lane)
+                val pin = agent.pin
                 AgentRow(agent, store.now, onClick = { nav.push(Route.Agent(agent.key)) }, trailing = { PinButton(store.pinned(pin)) { store.togglePin(pin) } }, host = store.host)
             }
         }

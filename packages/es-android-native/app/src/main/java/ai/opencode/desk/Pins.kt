@@ -40,9 +40,10 @@ object Pins {
             if (agent == null) PinView(pin, pin.lane, "unavailable", "lane not in ${pin.editspace} right now", null, 0)
             else PinView(pin, agent.title, agent.status, agent.activity, agent.key, agent.activityAt)
         } else {
-            val session = sessions[pin.editspace].orEmpty().firstOrNull { it.id == pin.sessionID }
+            val agent = agents.firstOrNull { it.editspace == pin.editspace && it.lane.isBlank() && it.session?.id == pin.sessionID }
+            val session = agent?.session ?: sessions[pin.editspace].orEmpty().firstOrNull { it.id == pin.sessionID }
             if (session == null) PinView(pin, pin.sessionID.orEmpty(), "unavailable", "session not in ${pin.editspace} right now", null, 0)
-            else PinView(pin, session.title, if (session.live == "busy") "busy" else "idle", session.title, null, session.updated.toLong())
+            else PinView(pin, session.title, if (session.live == "busy") "busy" else "idle", agent?.activity ?: session.title, agent?.key, session.updated.toLong())
         }
     }
 }

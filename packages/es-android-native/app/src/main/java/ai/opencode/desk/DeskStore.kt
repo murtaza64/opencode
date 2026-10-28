@@ -61,6 +61,8 @@ data class Agent(
 ) {
     val busy get() = status == "busy"
     val directory get() = session?.directory.orEmpty()
+    // Pin identity: lane rows pin by lane name, lane-less rows by session id.
+    val pin get() = if (lane.isNotBlank()) Pin(editspace, lane) else Pin(editspace, sessionID = session?.id)
 }
 
 data class AgentDetail(
@@ -359,34 +361,7 @@ class DeskStore(app: Application) : AndroidViewModel(app) {
         return true
     }
 
-    private fun deriveAgents(): List<Agent> = states.flatMap { (es, state) ->
-        val fromLanes = state.threads.flatMap { thread ->
-            thread.lanes.map { lane ->
-                // Only sessions anchored in the lane directory count; a parent session that
-                // holds the lane record while the worker starts is never shown as the lane.
-                // Join by the lane's recorded session id across the whole editspace page (threads may
-                // not list every session), then by normalised directory.
-                val head = Anchors.pick(lane, thread.sessions + state.sessions)
-                val sessions = Anchors.anchored(lane, thread.sessions + state.sessions, head).sortedByDescending { it.updated }
-                Agent(
-                    key = "$es/${lane.lane}",
-                    editspace = es,
-                    lane = lane.lane,
-                    title = thread.title.ifBlank { lane.lane },
-                    description = thread.description,
-                    status = Anchors.status(lane, head, sessions),
-                    // The session title usually repeats the thread title; fall back to the lane name instead.
-                    activity = lane.activity.ifBlank { head?.title?.takeIf { it != thread.title } ?: lane.lane },
-                    activityAt = parseIso(lane.activity_at) ?: head?.updated?.toLong() ?: 0L,
-                    issue = lane.issue,
-                    session = head,
-                    sessions = sessions,
-                    owner = lane.owner,
-                )
-            }
-        }
-        fromLanes
-    }.sortedWith(compareBy({ !it.busy }, { -it.activityAt }))
+    private fun deriveAgents(): List<Agent> = states.flatMap { (es, state) -> Agents.derive(es, state) }.sortedWith(compareBy({ !it.busy }, { -it.activityAt }))
 
     // ---- attention actions ----
     // Every write goes through the operator session; a 401 means the 8 h cookie lapsed.
