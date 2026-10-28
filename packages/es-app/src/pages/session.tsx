@@ -36,6 +36,8 @@ import { Glyph } from "../components/icons"
 import { AppHeader } from "../components/native-header"
 import { SessionTitle } from "../components/session-title"
 import { SubagentTranscript } from "../components/subagent-transcript"
+import { Filament } from "../filament/filament"
+import { filamentEnabled } from "../filament/flag"
 import { TranscriptMessage } from "../components/transcript-message"
 import { MailCauseRow } from "../components/mail-cause"
 import { InlineQuestion } from "../components/inline-question"
@@ -1840,6 +1842,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
           </For>
         </div>
 
+        {/* Opt-in living-transcript overlay (src/filament): reads the signals above, adds no requests. */}
+        <Show when={filamentEnabled()}><Filament messages={messages} parts={(id) => live.data.part[id] ?? []} status={status}
+          pending={pending} subagents={subagentsRunning} transcript={() => transcriptEl} /></Show>
         <div class="transcript" ref={transcriptEl}>
           <div ref={inner} class="transcript-inner" classList={{ "transcript-arrive": arrived() }}
             onPointerOver={stampBlock} onFocusIn={stampBlock} onClick={(event) => {
