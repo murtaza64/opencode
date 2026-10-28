@@ -14,9 +14,12 @@ export type CloudRow = {
   project: string
   owner: string
   href: string
-  /** The lane's real last activity (wingman-activity: the last change sync saw), or undefined when unknown.
-   * Never the fetch time, so an old agent fetched just now never looks new. */
-  updated?: number
+  /** Ordering time: always undefined (unknown) until Wingman reports real turn boundaries; such rows sit in
+   * the undated group in a stable order. Never the fetch time. */
+  updated?: undefined
+  /** When sync last saw this agent's status or turn count change (wingman-activity), for display only
+   * ("changed 2 h ago"); not a turn boundary and never used for order. */
+  changedAt?: number
   status: { label: string; chip: string }
   pinned: boolean
   /** The source for this project could not be read: the row is its last-known state. */
@@ -41,7 +44,8 @@ export const cloudRows = (input: {
     project: pin.editspace,
     owner: pin.owner,
     href: cloudHref(pin),
-    updated: record ? wingmanActivityAt(record) : undefined,
+    updated: undefined,
+    changedAt: record ? wingmanActivityAt(record) : undefined,
     // A pin whose owner the source no longer lists is shown as such, never as finished.
     status: record ? wingmanStatus(record["wingman-status"]) : { label: "owner not observed", chip: "plain" },
     pinned,
