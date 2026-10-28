@@ -32,7 +32,8 @@ const preview = await startAttentionPreview([{
   name: "today-cost-fixture",
   configureServer(server) {
     server.middlewares.use("/oc/experimental/usage/daily", (req, res) => {
-      reads.push(req.url)
+      // Count only the page under test: the preview's warm-up page also loads the app (and its badge).
+      if (req.headers["x-under-test"]) reads.push(req.url)
       if (mode === "html") {
         res.writeHead(200, { "content-type": "text/html" })
         return res.end("<!doctype html><html><body>app</body></html>")
@@ -44,6 +45,7 @@ const preview = await startAttentionPreview([{
 }])
 const browser = await chromium.launch({ channel: "chrome", headless: true })
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+await context.setExtraHTTPHeaders({ "x-under-test": "1" })
 await context.route("**/*", (route) => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
 const page = await context.newPage()
 const errors = []
