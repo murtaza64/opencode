@@ -922,3 +922,53 @@ test("concurrent removals and retry metadata survive hydration", async () => {
   expect(live.data.part.msg_002).toEqual([])
   expect(live.retry()).toEqual(retry)
 })
+
+const stepStart = (id: string, messageID = "msg_002") => ({ id, sessionID: "ses_current", messageID, type: "step-start" })
+const stepFinish = (id: string, read: number, write: number, messageID = "msg_002") => ({
+  id, sessionID: "ses_current", messageID, type: "step-finish", reason: "stop", cost: 0,
+  tokens: { input: 10, output: 5, reasoning: 0, cache: { read, write } },
+})
+
+test("step parts load into step, never into rendered parts, on the initial snapshot", async () => {
+  snapshot = [
+    { info: user(), parts: [] },
+    { info: assistant("msg_002", undefined), parts: [stepStart("prt_001"), text("hi"), stepFinish("prt_003", 9000, 0)].map((part, index) => ({ ...part, id: `prt_00${index + 1}` })) },
+  ]
+  const live = start()
+  await live.load()
+  expect(live.data.part.msg_002?.map((part) => part.type)).toEqual(["text"])
+  expect(live.data.step.msg_002).toEqual([
+    { id: "prt_001", type: "step-start" },
+    { id: "prt_003", type: "step-finish", tokens: { input: 10, output: 5, reasoning: 0, cache: { read: 9000, write: 0 } } },
+  ])
+})
+
+test("streamed step parts go to step; a late step-finish lands after its step-start; removal drops it", async () => {
+  snapshot = [{ info: user(), parts: [] }, { info: assistant("msg_002", undefined), parts: [] }]
+  const live = start()
+  await live.load()
+  SessionEvents.current.send("message.part.updated", { part: stepStart("prt_010") })
+  SessionEvents.current.send("message.part.updated", { part: { ...text("working"), id: "prt_011" } })
+  expect(live.data.step.msg_002?.map((part) => part.type)).toEqual(["step-start"])
+  SessionEvents.current.send("message.part.updated", { part: stepFinish("prt_012", 0, 700) })
+  expect(live.data.step.msg_002?.map((part) => [part.id, part.type, part.tokens?.cache.write])).toEqual([
+    ["prt_010", "step-start", undefined], ["prt_012", "step-finish", 700],
+  ])
+  expect(live.data.part.msg_002?.map((part) => part.type)).toEqual(["text"])
+  SessionEvents.current.send("message.part.removed", { sessionID: "ses_current", messageID: "msg_002", partID: "prt_012" })
+  expect(live.data.step.msg_002?.map((part) => part.id)).toEqual(["prt_010"])
+})
+
+test("older pages carry their step parts; message.removed drops them", async () => {
+  snapshot = Array.from({ length: 100 }, (_, index) => {
+    const id = `msg_${String(index).padStart(3, "0")}`
+    return { info: user(id), parts: [stepStart(`prt_${id}`, id)] }
+  })
+  const live = start()
+  await live.load()
+  expect(live.data.step.msg_005).toBeUndefined()
+  await live.older()
+  expect(live.data.step.msg_005).toEqual([{ id: "prt_msg_005", type: "step-start" }])
+  SessionEvents.current.send("message.removed", { sessionID: "ses_current", messageID: "msg_005" })
+  expect(live.data.step.msg_005).toBeUndefined()
+})
