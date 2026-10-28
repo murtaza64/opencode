@@ -4,6 +4,7 @@
 // Run from packages/es-app: node test/brief-kit.browser.mjs [--shots DIR] [--report-only] [--serve]
 //   --report-only  prints the checklist table without failing (for "before" screenshots on an older build)
 //   --serve        leaves the preview running after the checks and prints its URL
+//   --reduced-motion  adds a desktop pass with prefers-reduced-motion: reduce (asserts the brief does not animate)
 //   --serve-only   starts the preview without any checks or browser (a review server, e.g. for a frozen baseline)
 import assert from "node:assert/strict"
 import { createRequire } from "node:module"
@@ -82,7 +83,8 @@ if (arg("--serve-only")) {
   await new Promise(() => {})
 }
 const browser = await chromium.launch({ channel: "chrome", headless: true })
-const VIEWS = [["desktop", { width: 1440, height: 1000 }, false], ["390", { width: 390, height: 844 }, false], ["rtl", { width: 390, height: 844 }, true]]
+const VIEWS = [["desktop", { width: 1440, height: 1000 }, false], ["390", { width: 390, height: 844 }, false], ["rtl", { width: 390, height: 844 }, true],
+  ...arg("--reduced-motion") ? [["reduced", { width: 1440, height: 1000 }, false, "reduce"]] : []]
 const keyOf = name => name === "series" ? "series:fixture:ses_a:grill" : `attention:fixture:${CASES[name].record.id}`
 // A series renders as one series card (data-series-id) holding each question.
 const cardOf = (page, name) => page.locator(name === "series" ? '[data-series-id="grill"]' : `[data-attention-id="${CASES[name].record.id}"]`)
@@ -121,6 +123,7 @@ const check = async (page, card, name) => card.evaluate((element, [name, missing
       const values = [...row.querySelectorAll(".desk-brief-item-cell")].slice(1, 3)
       return oneLine && values.every(cell => cell.getBoundingClientRect().width >= width * (labels.length ? 0.35 : 0.2))
     }),
+    "reduced motion static": !matchMedia("(prefers-reduced-motion: reduce)").matches || [...element.querySelectorAll(".desk-brief-body")].every(node => getComputedStyle(node).animationName === "none"),
     "9 type sizes": sizes.size,
     "9 brief type sizes": new Set([...element.querySelectorAll(".desk-brief *")].filter(node => visible(node) && [...node.childNodes].some(child => child.nodeType === 3 && child.textContent.trim()))
       .map(node => getComputedStyle(node).fontSize)).size,
@@ -134,8 +137,8 @@ const check = async (page, card, name) => card.evaluate((element, [name, missing
 const table = {}
 let failed = false
 try {
-  for (const [view, viewport, rtl] of VIEWS) {
-    const context = await browser.newContext({ viewport })
+  for (const [view, viewport, rtl, reducedMotion] of VIEWS) {
+    const context = await browser.newContext({ viewport, ...(reducedMotion ? { reducedMotion } : {}) })
     await context.addInitScript(() => { try { localStorage.setItem("es-app-all-projects", "true"); localStorage.setItem("es-app:front-desk:auto-prepare", "off") } catch {} })
     await context.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
     for (const name of Object.keys(CASES)) {

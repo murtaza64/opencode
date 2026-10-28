@@ -117,3 +117,36 @@
 .brief-failure { margin: 0; font-size: 13px; color: var(--subtext1); }
 .brief-failure-detail { color: var(--subtext0); font-size: 11px; }
 .brief-why > summary { font-size: 11px; color: var(--subtext0); cursor: pointer; }
+
+/* Composition (ux-feel vocabulary): grouping comes from type, spacing and one start edge, not boxes. Accent marks
+ * the next action, green the agent's recommendation; 13px content, 12px mono values, 11px muted meta. */
+.desk-brief-body { animation: brief-in var(--motion-arrive, 160ms) var(--ease-standard, cubic-bezier(.2, 0, 0, 1)); }
+@keyframes brief-in { from { opacity: 0; transform: translateY(2px); } }
+@media (prefers-reduced-motion: reduce) { .desk-brief-body { animation: none; } }
+.desk-brief-context { color: var(--subtext1); }
+/* Steps: an accent number, the action, then its fields and values aligned in two columns. */
+.desk-brief .desk-steps { gap: 14px; padding-inline-start: 22px; list-style: decimal; }
+.desk-steps > li::marker { color: var(--blue); font-weight: 600; font-variant-numeric: tabular-nums; }
+.desk-steps p { margin: 2px 0; }
+.brief-settings { display: grid; grid-template-columns: minmax(72px, max-content) minmax(0, 1fr); gap: 4px 14px; margin: 6px 0; align-items: baseline; }
+.brief-settings dt { color: var(--subtext0); font-size: 11px; }
+.brief-settings dd { margin: 0; min-inline-size: 0; }
+/* A copyable value is a line of mono text; its fill shows only on hover or focus, like other chips. */
+.desk-command-inline { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; max-inline-size: 100%; }
+.desk-command-inline code { font-size: 12px; padding: 1px 4px; border-radius: var(--radius-control, 2px); overflow-wrap: anywhere; }
+.desk-command-inline:is(:hover, :focus-within) code { background: var(--chip-fill, var(--surface0)); }
+/* Commands keep a scrolling block, without a border; Copy is a quiet text action beside it. */
+.desk-command pre { border: 0; border-radius: var(--radius-control, 2px); font-size: 12px; }
+.desk-brief .desk-command-copy { border: 0; background: none; min-block-size: 0; padding: 2px 4px; text-decoration: underline; text-underline-offset: 2px; }
+.desk-command-copy:hover { color: var(--text); }
+/* Compare: columns aligned, no rules; the agent's pick is marked in green text. */
+.desk-compare th, .desk-compare td { border: 0; padding: 3px 12px 3px 0; }
+.desk-compare tbody th { color: var(--subtext0); font-weight: 400; font-size: 11px; }
+.desk-compare-recommended { color: var(--green); }
+/* A sequence reads as a line of steps joined by arrows, not a row of boxes. */
+.desk-flow li { border: 0; background: none; padding: 2px 0; }
+.desk-flow li[data-later] { border: 0; }
+.desk-flow li[data-stop] { border: 0; color: var(--text); font-weight: 600; }
+/* Subjects: one line each, separated by space rather than rules. */
+.desk-subjects li { border: 0; padding-block: 2px; }
+.desk-brief-regenerate { margin: 6px 0 0; }

@@ -71,10 +71,6 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
         <Items result={value().result} item={props.item} job={value().job} />
         <Steps result={value().result} refs={value().job.meta.refs} item={props.item} />
         <Commands commands={value().result} item={props.item} />
-        {/* A fresh brief of the same request, made by the host that owns it; this one stays until the new one is ready. */}
-        <Show when={props.live && !props.pinned && props.item.record && props.regenerate}><p class="desk-brief-regenerate">
-        <Show when={!props.regenerating && !regeneratingJob(props.jobs, props.item)} fallback={<span class="home-muted" role="status">Regenerating brief…</span>}>
-          <button type="button" class="desk-link-button" onClick={() => props.regenerate!()}>Regenerate brief</button></Show></p></Show>
         <Show when={!props.item.record?.options.length && value().result.ifWait}><p class="home-muted" dir="auto">If you wait: <LinkedText text={value().result.ifWait} /></p></Show>
       </div>}</Show>
     </Show>
@@ -92,6 +88,10 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
       <Show when={!complete()}><SourceLinks sources={value().result.sources} refs={value().job.meta.refs} item={props.item} /></Show>
       <p class="home-source">Brief for revision {value().job.meta.revision}<Show when={value().omitted}> · {value().omitted} uncited statement(s) omitted</Show> · <A href={sessionHref(value().job.id, value().job.directory)}>Brief thread</A>
 </p>
+      {/* Upkeep, not reading: a fresh brief of the same request, made by the host that owns it; this one stays until the new one is ready. */}
+      <Show when={props.live && !props.pinned && props.item.record && props.regenerate}><p class="desk-brief-regenerate">
+        <Show when={!props.regenerating && !regeneratingJob(props.jobs, props.item)} fallback={<span class="home-muted" role="status">Regenerating brief…</span>}>
+          <button type="button" class="desk-link-button" onClick={() => props.regenerate!()}>Regenerate brief</button></Show></p></Show>
       {/* Keyed to the brief shown, so a newer brief never inherits this one's rating. */}
       <Show when={value().job} keyed>{job => <BriefFeedbackControls job={job} />}</Show>
     </details>}</Show>
@@ -158,11 +158,11 @@ const Steps = (props: { result: BriefResult; refs: EvidenceRef[]; item: DeskItem
         <Show when={option(step.option)}>{label => <span class="home-muted"> · for “<bdi dir="auto">{label()}</bdi>”</span>}</Show></span>
       <Show when={step.where}>{where => <p dir="auto">Open: <Show when={url(where().refs)} fallback={<bdi dir="auto">{where().label}</bdi>}>{href =>
         <a href={href()} target="_blank" rel="noopener noreferrer">↗ <bdi dir="auto">{where().label}</bdi></a>}</Show></p>}</Show>
-      {/* Laid out like commands (label, then the exact value to copy), so long values stay inside the column. */}
-      <Show when={step.settings.length}><ul class="desk-commands" aria-label="Settings"><For each={step.settings}>{setting => <li>
-        <span class="desk-command-label" dir="auto">{setting.field}</span>
-        <Show when={setting.value} fallback={<span class="brief-missing">{MISSING}</span>}><CopyCode text={setting.value} /></Show>
-      </li>}</For></ul></Show>
+      {/* Field and value side by side; a long value wraps inside its column. */}
+      <Show when={step.settings.length}><dl class="brief-settings" aria-label="Settings"><For each={step.settings}>{setting => <>
+        <dt dir="auto">{setting.field}</dt>
+        <dd><Show when={setting.value} fallback={<span class="brief-missing">{MISSING}</span>}><CopyCode text={setting.value} inline /></Show></dd>
+      </>}</For></dl></Show>
       <Show when={step.verify}><p class="home-muted" dir="auto">Check: {step.verify}</p></Show>
     </li>}</For></ol>
   </Show>
