@@ -931,8 +931,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     stick = true
     queueMicrotask(pin)
     const chosen = action ?? (composer.state.busy ? composer.state.keyboardTarget : "steer")
-    // Context accompanies only a plain send to an idle session, never a steer or queued input.
-    const plain = chosen === "steer" && !composer.state.busy
+    // The composer owns which actions carry context to Core; chips follow it rather than guessing.
+    const plain = composer.contextAttaches(chosen)
     const attached = plain ? contextParts() : []
     const context = plain ? [...props.context?.() ?? [], ...attached] : []
     await composer.submitVisible(chosen, s, nextModel(), messages().at(-1)?.id, context)
@@ -940,7 +940,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     if (context.length) props.onSent?.(context, accepted)
     if (attached.length && accepted) setContextRefs([])
     // Steer and queue carry text only; the chips stay for the next plain send rather than vanish silently.
-    if (!plain && contextRefs().length) setContextNote("Not attached: steer and queue carry text only. Chips go with your next message to an idle agent.")
+    if (!plain && contextRefs().length) setContextNote("Not attached: this send carries text only. Chips go with your next message to an idle agent.")
   }
 
 
