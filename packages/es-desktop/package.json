@@ -17,6 +17,7 @@
     "test:core-writes": "node test/core-writes.mjs",
     "test:inspector-writes": "node test/inspector-core-writes.mjs",
     "test:links": "node test/external-links.mjs",
+    "test:nested-commit": "node test/nested-commit.real.mjs",
     "test:header": "node test/native-header.mjs",
     "test:draft-restart": "node test/draft-restart.mjs",
     "test:voice": "node test/voice.mjs",

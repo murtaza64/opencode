@@ -40,7 +40,7 @@ export const createTabs = (
   preferences: (partition: Session) => Electron.WebPreferences,
 ) => {
   const views = new Map<string, WebContentsView>()
-  const state = { selected: tabs[0].id, painted: "" }
+  const state = { selected: tabs[0].id, painted: "", queued: false }
   const badges = new Map<string, Badge>()
   const css = new Map<string, { key: string; width: number }>()
   const barSession = session.fromPartition("editspace-tab-bar")
@@ -161,7 +161,15 @@ export const createTabs = (
       : barHTML(strip(), state.selected, current().kind === "page", badgeText, shownBadge)
     if (html === state.painted) return
     state.painted = html
-    void bar.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+    // Load on a later task, coalesced to the latest strip: a selection can run inside another
+    // navigation's callbacks (e.g. "blur" while a commit swaps frames), and starting the strip's
+    // navigation there crashes Chromium (null read creating the NavigationRequest).
+    if (state.queued) return
+    state.queued = true
+    setImmediate(() => {
+      state.queued = false
+      if (!bar.webContents.isDestroyed()) void bar.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(state.painted)}`)
+    })
   }
   const select = (id: string) => {
     if (!tabs.some((item) => item.id === id)) return
