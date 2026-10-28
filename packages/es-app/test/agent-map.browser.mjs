@@ -124,9 +124,11 @@ try {
   await lane.click()
   await expect(lane).toHaveAttribute("aria-pressed", "true")
   // Selection fades unrelated agents and keeps the lane's lineage and children.
-  const host = (name) => page.locator("foreignObject").filter({ has: node(name) })
-  await expect(host("Squadron V2 design")).toHaveAttribute("data-faded", "true")
-  for (const name of ["home-agents", "orchestrator", "explore subagent", "nested reviewer"]) await expect(host(name)).not.toHaveAttribute("data-faded", "true")
+  // Faded = inside a faded layer; related agents sit in the full-opacity front layer.
+  const faded = (name) => page.locator('.map-layer[data-faded="true"] foreignObject').filter({ has: node(name) })
+  const front = (name) => page.locator(".map-front foreignObject").filter({ has: node(name) })
+  await expect(faded("Squadron V2 design")).toHaveCount(1)
+  for (const name of ["home-agents", "orchestrator", "explore subagent", "nested reviewer"]) await expect(front(name)).toHaveCount(1)
   await expect(detail()).toContainText("ses_a · from lane record")
   await expect(page.locator(".map-mail-edge")).toHaveCount(0)
   await expect(page.getByRole("region", { name: "Directed mail" })).toHaveCount(0)
@@ -269,7 +271,7 @@ try {
   await reduced.route("**/*", (route) => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
   const still = await reduced.newPage()
   await still.goto(`${preview.url}/map?select=${encodeURIComponent(JSON.stringify(["lane", "fixture", "home-agents"]))}`, { waitUntil: "domcontentloaded", timeout: 90_000 })
-  await expect(still.locator("foreignObject[data-faded=true]").first()).toBeAttached({ timeout: 90_000 })
+  await expect(still.locator('.map-layer[data-faded="true"] foreignObject').first()).toBeAttached({ timeout: 90_000 })
   // Changing the selection fades without running any transition.
   await still.locator(".map-node-box").filter({ has: still.locator(".map-node-name", { hasText: /^Squadron V2 design$/ }) }).click()
   expect(await still.evaluate(() => document.getAnimations().filter((animation) => animation instanceof CSSTransition).length)).toBe(0)

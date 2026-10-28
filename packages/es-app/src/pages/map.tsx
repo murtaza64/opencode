@@ -6,7 +6,7 @@ import { A, useSearchParams } from "@solidjs/router"
 import { es } from "../api"
 import {
   buildAgentMap, flattenAgents, layoutMap, linkOrigins, mailEdges, mailParty, stateEvents,
-  type AgentStatus, type ClusterBox, type MapAgent, type MapCluster, type MapMail, type ProvenanceRecord, type SessionRef,
+  type AgentStatus, type ClusterBox, type MapAgent, type MapCluster, type MapMail, type PlacedAgent, type ProvenanceRecord, type SessionRef, type TreeEdge,
 } from "../agent-map"
 import { cloudHref } from "../cloud-agents"
 import { AppHeader } from "../components/native-header"
@@ -177,7 +177,12 @@ export default function AgentMap() {
     for (const edge of [...layout().hierarchy, ...edges()]) if (edge.from === key || edge.to === key) { keys.add(edge.from); keys.add(edge.to) }
     return keys
   })
-  const faded = (...keys: string[]) => { const set = related(); return set && !keys.every((key) => set.has(key)) ? "true" : undefined }
+  // Fading is one opacity on a layer, never an attribute per node: a selection moves the few related
+  // nodes and edges into the full-opacity layer, so a 2,700-node map restyles a handful of elements.
+  const inFront = (...keys: string[]) => { const set = related(); return !!set && keys.every((key) => set.has(key)) }
+  const backEdges = createMemo(() => layout().hierarchy.filter((edge) => !inFront(edge.from, edge.to)))
+  const frontEdges = createMemo(() => layout().hierarchy.filter((edge) => inFront(edge.from, edge.to)))
+  const frontAgents = createMemo(() => layout().agents.filter((agent) => inFront(agent.key)))
   const Node = (props: { agent: MapAgent }) => {
     let dot: HTMLElement | undefined
     // Ring a node's dot when it newly needs input or fails, like the sidebar.
@@ -190,6 +195,11 @@ export default function AgentMap() {
       <span class="map-runtime">{props.agent.runtime === "cloud" ? "W" : "L"}</span>
     </button>
   }
+  const Edge = (props: { edge: TreeEdge }) => <path class="map-hierarchy" data-kind={props.edge.kind} data-cross={props.edge.cross ? "true" : undefined}
+    data-earlier={props.edge.earlier ? "true" : undefined} d={props.edge.path} marker-end={props.edge.kind === "subagent" ? undefined : "url(#map-org-arrow)"} />
+  // A 4px margin keeps the selection ring and focus ring inside the foreignObject.
+  const Place = (props: { agent: PlacedAgent }) => <foreignObject x={props.agent.x - 4} y={props.agent.y - 4} width={props.agent.width + 8} height={props.agent.height + 8}>
+    <div class="map-node-host" dir={direction()}><Node agent={props.agent} /></div></foreignObject>
   const Route = (props: { message: MapMail }) => <span class="map-route">
     <Party editspace={props.message.editspace} name={props.message.from} /><span class="map-arrow" aria-label="to">→</span><Party editspace={props.message.editspace} name={props.message.to} />
   </span>
@@ -235,17 +245,24 @@ export default function AgentMap() {
                     <text class="map-divider-title" x={cluster.x + 22} y={y() - 6}>not owning a lane</text>
                   </>}</Show>
                 </>}</For>
-                <For each={layout().hierarchy}>{(edge) => <path class="map-hierarchy" data-faded={faded(edge.from, edge.to)} data-kind={edge.kind} data-cross={edge.cross ? "true" : undefined} data-earlier={edge.earlier ? "true" : undefined} d={edge.path} marker-end={edge.kind === "subagent" ? undefined : "url(#map-org-arrow)"} />}</For>
+                <g class="map-layer" data-faded={related() ? "true" : undefined}>
+                  <For each={backEdges()}>{(edge) => <Edge edge={edge} />}</For>
+                </g>
                 <For each={edges()}>{(edge) => <g class="map-mail-edge" classList={{ emphasized: edge.messages.some((message) => mailKey(message) === selectedMail()) }} data-from={edge.from} data-to={edge.to}>
                   <path d={edge.path} marker-end="url(#map-arrow)" />
                   <path class="map-edge-hit" d={edge.path} onClick={() => setSelectedMail(mailKey(edge.messages.at(-1)!))}><title>{edge.messages.length} observed message{edge.messages.length === 1 ? "" : "s"}: {name(edge.messages[0]!.editspace, edge.messages[0]!.from)} → {name(edge.messages[0]!.editspace, edge.messages[0]!.to)}</title></path>
                 </g>}</For>
                 <For each={layout().clusters}>{(cluster) => <g role="region" aria-label={`Project ${cluster.project}${cluster.cloud ? " cloud" : ""}`}>
                   <text class="map-cluster-title" x={cluster.x + 18} y={cluster.y + 24}>{title(cluster)}</text>
-                  <For each={layout().agents.filter((agent) => agent.project === cluster.project && (agent.runtime === "cloud") === cluster.cloud)}>{(agent) =>
-                    // A 4px margin keeps the selection ring and focus ring inside the foreignObject.
-                    <foreignObject x={agent.x - 4} y={agent.y - 4} width={agent.width + 8} height={agent.height + 8} data-faded={faded(agent.key)}><div class="map-node-host" dir={direction()}><Node agent={agent} /></div></foreignObject>}</For>
+                  <g class="map-layer" data-faded={related() ? "true" : undefined}>
+                    <For each={layout().agents.filter((agent) => agent.project === cluster.project && (agent.runtime === "cloud") === cluster.cloud && !inFront(agent.key))}>{(agent) => <Place agent={agent} />}</For>
+                  </g>
                 </g>}</For>
+                {/* The selection's lineage, children and edges, at full opacity above the faded layers. */}
+                <g class="map-front" aria-label="Selected agent and related agents" role="group">
+                  <For each={frontEdges()}>{(edge) => <Edge edge={edge} />}</For>
+                  <For each={frontAgents()}>{(agent) => <Place agent={agent} />}</For>
+                </g>
               </svg>
             </Show>
         </div>
