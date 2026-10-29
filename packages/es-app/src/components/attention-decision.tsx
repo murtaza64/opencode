@@ -36,9 +36,11 @@ export const AgentName = (props: { agent: AgentRef; class?: string }) => {
 }
 
 // Requester first, project second. Who updated it and where answers go now are listed only when they differ.
-const Requester = (props: { record: AttentionRecord }) => {
+const Requester = (props: { record: AttentionRecord; remote?: boolean }) => {
   const agentFor = useRequestAgent()
-  const agent = () => agentFor(props.record)
+  // Another host's record: this host's sessions and lane lineage describe a different machine (a moved lane's
+  // stale copy), so the requester comes from the record alone and no hand-off is inferred.
+  const agent = () => props.remote ? requestAgent(props.record, { session: () => undefined, handoffs: [], owners: [] }) : agentFor(props.record)
   return <>
     <span class="attention-requester"><Glyph name={props.record.kind === "blocker" ? "question" : "comment-discussion"} />
       <AgentName agent={agent()} class="attention-agent" /><span class="attention-project"> · <bdi dir="auto">{props.record.editspace}</bdi></span></span>
@@ -233,7 +235,7 @@ const Delivery = (props: { record: AttentionRecord; attention: Attention }) => {
  * choices (picture, unknown, sources) and `briefDetails` before the original request. With a complete
  * `prepared` brief the producer's raw context moves behind a disclosure and each option becomes a card
  * saying what choosing it leads to. */
-export const AttentionDecision = (props: { record: AttentionRecord; attention: Attention; onView?: (view: AttentionView) => void; brief?: JSX.Element; briefVisual?: JSX.Element; briefAfter?: JSX.Element; briefDetails?: JSX.Element; prepared?: BriefResult; sends?: Sends; copy?: BriefCopy; conversation?: JSX.Element; more?: JSX.Element; briefJob?: { job: string; revision: string } }) => {
+export const AttentionDecision = (props: { record: AttentionRecord; attention: Attention; remote?: boolean; onView?: (view: AttentionView) => void; brief?: JSX.Element; briefVisual?: JSX.Element; briefAfter?: JSX.Element; briefDetails?: JSX.Element; prepared?: BriefResult; sends?: Sends; copy?: BriefCopy; conversation?: JSX.Element; more?: JSX.Element; briefJob?: { job: string; revision: string } }) => {
   // A review asks the human to try one thing and say Done; it is not decided, so no brief explains or replaces it.
   const review = () => props.record.kind === "review"
   const prepared = () => review() ? undefined : props.prepared
@@ -256,7 +258,7 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
   createEffect(() => { if (historyOpen() && history()?.version !== historyVersion(props.record)) void loadHistory(props.record) })
   // Grouped so a wide pane can set the explanation beside the answer; narrow panes stack the groups in this order.
   return <article class="home-decision" data-attention-id={props.record.id}>
-    <header class="home-decision-head"><div class="home-eyebrow"><Requester record={props.record} /><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Agent thread</A></div>
+    <header class="home-decision-head"><div class="home-eyebrow"><Requester record={props.record} remote={props.remote} /><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Agent thread</A></div>
       <Show when={!prepared()}><h3><bdi dir="auto">{props.record.title}</bdi></h3></Show></header>
     {/* A prepared brief is one explainer: the human-level question heads it, with its context, the original
       * conversation and the picture beneath; the answer controls sit beside it (wide) or below it (narrow). */}

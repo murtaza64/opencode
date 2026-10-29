@@ -40,7 +40,7 @@ const RemoteDecision = (props: { host: string; record: NonNullable<Extract<WorkE
   const current = () => attention.snapshot()?.value.records.find(record => record.id === props.record.id) ?? fresh() ?? props.record
   return <Show when={!fresh.error || attention.snapshot()} fallback={<p class="desk-surface-state" role="alert">{String(fresh.error?.message ?? fresh.error)}</p>}>
     <Show when={fresh.loading || fresh() !== undefined || attention.snapshot()} fallback={<p class="desk-surface-state">This decision is no longer on that host.</p>}>
-      <AttentionDecision record={current()} attention={attention} />
+      <AttentionDecision record={current()} attention={attention} remote />
     </Show>
   </Show>
 }

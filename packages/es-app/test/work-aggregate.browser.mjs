@@ -8,6 +8,11 @@ import { startAttentionPreview } from "./attention-preview.mjs"
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const preview = await startAttentionPreview()
 preview.ledger.operator = true
+// This host's own lineage has a stale copy of the Mini's lane handed to a local session (a lane that moved to the
+// Mini): it must not label the Mini's decision as handed off.
+const staleOwner = preview.fixture.sessionIDs[0]
+preview.fixture.handoffs = [{ lane: "work", predecessor: "ses_m", successor: staleOwner, status: "completed" }]
+preview.fixture.laneOwners.push({ lane: "work", owner: staleOwner })
 const browser = await chromium.launch({ headless: true,
   ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : { channel: "chrome" }) })
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
@@ -20,7 +25,7 @@ let miniDown = false
 const now = Date.now()
 // Same record ID as the local fixture decision ("decision_1"): two entries, one per host.
 const miniDecision = { id: "decision_1", editspace: "fixture", revision: 2, status: "open", kind: "decision", title: "Rotate the Mini certs?", context: "The Mini's TLS certs expire Friday.",
-  options: [{ id: "now", label: "Rotate now" }, { id: "later", label: "Next week" }], producer_session: "ses_m", origin_session: "ses_m", gate_key: "mini:certs", source_ref: { session_id: "ses_m", directory: miniDir },
+  options: [{ id: "now", label: "Rotate now" }, { id: "later", label: "Next week" }], producer_session: "ses_m", origin_session: "ses_m", lane: "work", gate_key: "mini:certs", source_ref: { session_id: "ses_m", directory: miniDir },
   decision: null, delivery_state: "not-requested", created_at: now - 60_000, updated_at: now - 60_000, snoozed_until: null }
 const permission = { id: "per_mini", sessionID: "ses_m", permission: "bash", patterns: ["make deploy"], metadata: { command: "make deploy" }, always: [] }
 const request = { kind: "permission", id: "per_mini", session: "ses_m", directory: miniDir, title: "Mini deploy", project: "fixture", state: "pending", checked: now, permission }
@@ -77,6 +82,7 @@ try {
   await expect(detail).toHaveAttribute("data-work-key", "mini~attention:fixture:decision_1")
   await expect(detail.locator(".work-remote-host")).toContainText("on Mac Mini")
   await expect(detail.getByText("The Mini's TLS certs expire Friday.")).toBeVisible()
+  await expect(detail.locator(".attention-routing")).toHaveCount(0)
   await expect(miniRow).toHaveAttribute("aria-current", "page")
   await detail.getByRole("radio", { name: "Rotate now" }).check()
   await detail.getByRole("button", { name: "Send Rotate now" }).click()
