@@ -67,7 +67,7 @@ const StatusDot = (props: { state: DotState; label?: string }) => {
 export default function Sidebar() {
   const { state, dotFor, editspace, setEditspace, editspaces, archivedIds,
     allProjects, sessionRows, sessions, pinnedSessions, unpinnedSessions, isPinned, togglePin,
-    sessionsLoading, sessionsError, setVisibleSessions, cloud, failures, work, stateError } =
+    sessionsLoading, sessionsError, setVisibleSessions, cloud, failures, work, stateError, pinnedUnion } =
     useDashboard()
   // Work view: this host's rows and every other Work view host's rows in one list. Other hosts' rows
   // carry their host and open on that host's own tab; a host that stops answering keeps its last
@@ -109,7 +109,7 @@ export default function Sidebar() {
   }
   const hostCount = (id: string) => id === ownHost().id ? unpinnedSessions().length + pinnedSessions().length
     : (work.feeds().find((feed) => feed.host.id === id)?.state().rows.length ?? 0)
-  const allPinned = createMemo(() => [...pinnedSessions(), ...work.pinned()])
+  const allPinned = pinnedUnion
   // Agents tab controls (NAV-16): an explicit sort beside the default activity order, and an active-only filter.
   const SORT_KEY = "es-app:agents-sort"
   const ACTIVE_KEY = "es-app:agents-active-only"
@@ -244,7 +244,7 @@ export default function Sidebar() {
   const cloudFound = (pin: CloudPin): Found => ({ key: `cloud:${cloudKey(pin)}`, title: pin.lane, lane: pin.lane, updated: 0, working: false, cloud: pin })
   const ranked = createMemo(() => rankSearch<Found>({
     query: query(),
-    pinned: [...pinnedSessions().map((s) => localFound(asResult(s))), ...work.pinned().map(hostFound), ...cloud.pins().map(cloudFound)],
+    pinned: [...allPinned().map((s) => s.host ? hostFound(s) : localFound(asResult(s))), ...cloud.pins().map(cloudFound)],
     known: [...sessionRows().map((s) => localFound(asResult(s))), ...work.unpinned().map(hostFound), ...cloud.other().map(cloudFound)],
     transcriptHits: transcriptHits().map(localFound),
     // Within a bucket: the same turn-boundary order as the list (unknown: stable by key).

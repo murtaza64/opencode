@@ -20,6 +20,8 @@ import { createServerEvents } from "./event-source"
 import { resolveProjectName } from "./project-name"
 import { reconcileHostPins, reconcilePins, transferPins, type Handoff, type PendingHandoff } from "./handoffs"
 import { pinSessionID } from "./session-pins"
+import { createPinsClient, syncableHost, type PinsClient } from "./pins-sync"
+import { isRowPinned, migrateReadyPins, movePinnedRow, pinnedRows, pinnedUnionRows, rowPinRef, type PinOwner } from "./pin-view"
 import { createCloudAgents } from "./cloud-agents"
 import { createSessionFailures } from "./session-failures"
 import { coalesced } from "./coalesced"
@@ -50,6 +52,7 @@ export type SessionRow = {
   archived?: number
   /** A Work view host other than this page's; its rows open on that host's own tab. */
   host?: string
+  pinnedAt?: number
 }
 
 /** Other hosts' sessions in this page's Work view (only the laptop listener aggregates). */
@@ -107,6 +110,9 @@ type DashboardCtx = {
   cloud: ReturnType<typeof createCloudAgents>
   setVisibleSessions: (ids: Set<string>) => void
   work: WorkCtx
+  pinSync: () => { host: string; status: string; notSynced: number }[]
+  pinnedUnion: () => SessionRow[]
+  movePin: (row: Pick<SessionRow, "id" | "directory" | "host">, before?: Pick<SessionRow, "id" | "directory" | "host">, after?: Pick<SessionRow, "id" | "directory" | "host">) => boolean
 }
 
 const Ctx = createContext<DashboardCtx>()
@@ -227,6 +233,15 @@ export function DashboardProvider(props: ParentProps) {
     }
   }
   const [pins, setPins] = createSignal<string[]>(loadPins())
+  const [pinClients, setPinClients] = createSignal<Record<string, PinsClient>>({})
+  const [ownPinHost, setOwnPinHost] = createSignal<string>()
+  const [migratedHosts, setMigratedHosts] = createSignal<string[]>([])
+  const migratingHosts = new Set<string>()
+  const localClient = () => pinClients()[ownPinHost() ?? ""]
+  const usableClient = (host: string) => {
+    const client = pinClients()[host]
+    return client?.state().status === "ready" && migratedHosts().includes(host) ? client : undefined
+  }
   // One pass over the session index per index change, not per caller per event.
   const sessionIndex = createMemo(() => {
     const directory = new Map<string, string>()
@@ -431,13 +446,38 @@ export function DashboardProvider(props: ParentProps) {
     .filter((s) => !archivedIds().has(s.id))
     .sort((a, b) => b.updated - a.updated),
   )
-  const isPinned = (s: Pick<SessionRow, "id" | "directory">) => pins().some((key) => pinSessionID(key) === s.id)
+  const localPinOwners = () => lineageOwners().flatMap((item): PinOwner[] => {
+    try {
+      const value: unknown = JSON.parse(item.lane)
+      return Array.isArray(value) && typeof value[0] === "string" && typeof value[1] === "string"
+        ? [{ editspace: value[0], lane: value[1], owner: item.owner }] : []
+    } catch { return [] }
+  })
+  const isPinned = (s: Pick<SessionRow, "id" | "directory">) => {
+    const client = localClient()
+    return isRowPinned(s, pins(), localPinOwners(), client && usableClient(client.host) ? client : undefined)
+  }
   const togglePin = (s: Pick<SessionRow, "id" | "directory">) => {
-    const next = isPinned(s) ? pins().filter((key) => pinSessionID(key) !== s.id) : [...pins(), pinKey(s)]
+    const client = localClient()
+    if (client && usableClient(client.host)) {
+      const refs = [rowPinRef(s, localPinOwners()), `session:${s.id}`]
+      const existing = client.state().pins.filter((pin) => refs.includes(pin.ref))
+      void (existing.length ? Promise.all(existing.map((pin) => client.unpin(pin.ref))) : client.pin(refs[0]!))
+      return
+    }
+    const wasPinned = isPinned(s)
+    const next = wasPinned ? pins().filter((key) => pinSessionID(key) !== s.id) : [...pins(), pinKey(s)]
     localStorage.setItem(PIN_KEY, JSON.stringify(next))
     setPins(next)
+    if (client && migratedHosts().includes(client.host)) {
+      const ref = rowPinRef(s, localPinOwners())
+      const existing = client.state().pins.filter((pin) => pin.ref === ref || pin.ref === `session:${s.id}`)
+      void (wasPinned ? Promise.all((existing.length ? existing.map((pin) => pin.ref) : [ref]).map((item) => client.unpin(item))) : client.pin(ref))
+    }
   }
   const transferPin = (from: string, to: string, directory: string, targetDirectory = directory) => {
+    const client = localClient()
+    if (client && usableClient(client.host)) return
     const next = transferPins(pins().map((key) => pinSessionID(key) === from ? pinKey({ id: from, directory }) : key), from, to, directory, targetDirectory)
     if (next.every((key, index) => key === pins()[index])) return
     setPins(next)
@@ -495,6 +535,8 @@ export function DashboardProvider(props: ParentProps) {
     })
   })
   createEffect(() => {
+    const client = localClient()
+    if (client && usableClient(client.host)) return
     if (handoffs.loading || handoffsError()) return
     const current = pins()
     const next = reconcilePins(current, lineage(), lineageOwners(), globalSessions() ?? [])
@@ -505,6 +547,8 @@ export function DashboardProvider(props: ParentProps) {
     }
   })
   const pinnedSessions = createMemo(() => {
+    const client = localClient()
+    if (client && usableClient(client.host)) return pinnedRows(sessions(), localPinOwners(), client)
     const byID = new Map(sessions().map((s) => [s.id, s]))
     return [...new Set(pins().flatMap((key) => pinSessionID(key) ?? []))].flatMap((id) => {
       const row = byID.get(id)
@@ -573,19 +617,32 @@ export function DashboardProvider(props: ParentProps) {
   })
 
   // Work view: other hosts listed beside this one, each read independently, so one host being
-  // unreachable never blocks or empties another. Pins of another host's sessions live under that
-  // host's storage prefix; this host's pin keys are unchanged.
+  // unreachable never blocks or empties another. Each host's pins belong to its own dashboard.
   const owner = getOwner()
   const [feeds, setFeeds] = createSignal<HostFeed[]>([])
   // null until the project is known, so a host is not first read for the wrong scope.
   const workProject = () => allProjects() ? undefined : editspace() ?? editspaces()?.default ?? (editspaces() ? undefined : null)
   void readHost().then((info) => {
+    if (syncableHost(info.id) && info.profile) {
+      const work = info.remote ? [] : workFeedHosts(info).filter((item) => item.profile === info.profile && syncableHost(item.id))
+      const clients = [createPinsClient({ host: info.id, prefix: "", profile: info.profile }),
+        ...work.map((item) => createPinsClient({ host: item.id, prefix: `/hosts/${item.id}`, profile: info.profile! }))]
+      runWithOwner(owner, () => {
+        setOwnPinHost(info.id)
+        setPinClients(Object.fromEntries(clients.map((client) => [client.host, client])))
+      })
+      clients.forEach((client) => void client.refresh())
+    }
     if (info.remote) return
     // A host removed from the Work view (or unpaired) leaves no cached rows behind.
     forgetSeen(info.work.map((item) => item.id))
-    runWithOwner(owner, () => setFeeds(workFeedHosts(info).map((item) => createHostFeed(item, workProject, () => (hostPins()[item.id] ?? []).flatMap((key) => {
-      try { const value: unknown = JSON.parse(key); return Array.isArray(value) && typeof value[0] === "string" ? [value[0]] : [] } catch { return [] }
-    })))))
+    runWithOwner(owner, () => setFeeds(workFeedHosts(info).map((item) => createHostFeed(item, workProject, () => [
+      ...(hostPins()[item.id] ?? []).flatMap((key) => {
+        try { const value: unknown = JSON.parse(key); return Array.isArray(value) && typeof value[0] === "string" ? [value[0]] : [] } catch { return [] }
+      }),
+      ...(pinClients()[item.id]?.state().pins.some((pin) => pin.ref.startsWith("lane:"))
+        ? feeds().find((feed) => feed.host.id === item.id)?.state().rows.map((row) => row.directory) ?? [] : []),
+    ]))))
   })
   createEffect((previous: string | null | undefined) => {
     const project = workProject()
@@ -595,6 +652,56 @@ export function DashboardProvider(props: ParentProps) {
   })
   const hostPinKey = (host: string) => `host:${host}:${PIN_KEY}`
   const [hostPins, setHostPins] = createSignal<Record<string, string[]>>({})
+  const workOwners = (feed: HostFeed): PinOwner[] => Object.entries(feed.lineage()?.byEditspace ?? {}).flatMap(([editspace, value]) =>
+    value.owners.map((item) => ({ editspace, lane: item.lane, owner: item.owner })))
+  createEffect(() => {
+    for (const client of Object.values(pinClients())) {
+      if (client.state().status !== "ready" || migratingHosts.has(client.host) || migratedHosts().includes(client.host)) continue
+      const own = client.host === ownPinHost()
+      const feed = own ? undefined : feeds().find((item) => item.host.id === client.host)
+      if (!own && !feed) continue
+      const keys = own ? pins() : hostPins()[client.host] ?? []
+      const source = own ? { kind: "local" as const, dashboard: !!state() && !stateError() && !!editspaces(),
+          handoffs: handoffs() !== undefined && !handoffs.loading && !handoffsError(),
+          sessions: globalSessions() !== undefined && !globalSessions.loading && !sessionsError(),
+          otherLineages: otherLineages() !== undefined && !otherLineages.loading }
+        : { kind: "work" as const, feed: feed?.state().status === "ready", lineage: feed?.lineage()?.project === (workProject() ?? "*"), legacyPins: keys.length > 0 }
+      const rows = feed ? feed.state().rows : globalSessions() ?? []
+      const owners = feed ? workOwners(feed) : localPinOwners()
+      const migration = migrateReadyPins(client, source, keys, rows, owners)
+      if (!migration) continue
+      migratingHosts.add(client.host)
+      void migration.then(() => {
+        if (localStorage.getItem(`es-pins-migrated:${client.host}`))
+          setMigratedHosts((previous) => [...previous, client.host])
+        migratingHosts.delete(client.host)
+      })
+    }
+  })
+  // Local storage remains a last-known cache if the pin endpoint later becomes unavailable.
+  createEffect(() => {
+    for (const client of Object.values(pinClients())) {
+      if (!usableClient(client.host)) continue
+      const feed = feeds().find((item) => item.host.id === client.host)
+      if (feed ? feed.state().status !== "ready" : (allProjects() ? !globalSessions() : !state()) || !!stateError() || !!sessionsError()) continue
+      const rows = feed ? feed.state().rows : sessionRows()
+      const owners = feed ? workOwners(feed) : localPinOwners()
+      const next = pinnedRows(rows, owners, client).map(pinKey)
+      const key = feed ? hostPinKey(client.host) : PIN_KEY
+      const current = feed ? hostPins()[client.host] ?? [] : pins()
+      if (next.length === current.length && next.every((item, index) => item === current[index])) continue
+      try { localStorage.setItem(key, JSON.stringify(next)) } catch { /* Cache remains in this window. */ }
+      if (feed) setHostPins((previous) => ({ ...previous, [client.host]: next }))
+      else setPins(next)
+    }
+  })
+  const refreshPins = () => {
+    if (document.visibilityState !== "visible") return
+    Object.values(pinClients()).forEach((client) => void client.refresh())
+  }
+  window.addEventListener("focus", refreshPins)
+  const pinInterval = setInterval(refreshPins, 60_000)
+  onCleanup(() => { window.removeEventListener("focus", refreshPins); clearInterval(pinInterval) })
   createEffect(() => setHostPins(Object.fromEntries(feeds().map((feed) => {
     try {
       const value: unknown = JSON.parse(localStorage.getItem(hostPinKey(feed.host.id)) ?? "[]")
@@ -605,6 +712,7 @@ export function DashboardProvider(props: ParentProps) {
   }))))
   createEffect(() => {
     for (const feed of feeds()) {
+      if (usableClient(feed.host.id)) continue
       const state = feed.state()
       const lineage = feed.lineage()
       const project = workProject()
@@ -618,12 +726,18 @@ export function DashboardProvider(props: ParentProps) {
       }
     }
   })
-  const workPinned = (row: Pick<HostedRow, "id" | "directory" | "host">) =>
-    !!row.host && (hostPins()[row.host] ?? []).some((key) => pinSessionID(key) === row.id)
+  const workPinned = (row: Pick<HostedRow, "id" | "directory" | "host">) => {
+    if (!row.host) return false
+    const client = usableClient(row.host)
+    const feed = feeds().find((item) => item.host.id === row.host)
+    return isRowPinned(row, hostPins()[row.host] ?? [], feed ? workOwners(feed) : [], client)
+  }
   const work: WorkCtx = {
     feeds,
     host: (id) => feeds().find((feed) => feed.host.id === id)?.host,
     pinned: createMemo(() => feeds().flatMap((feed) => {
+      const client = usableClient(feed.host.id)
+      if (client) return pinnedRows(feed.state().rows, workOwners(feed), client)
       const rows = new Map(feed.state().rows.map((row) => [row.id, row]))
       return (hostPins()[feed.host.id] ?? []).flatMap((key) => rows.get(pinSessionID(key) ?? "") ?? [])
     })),
@@ -631,12 +745,29 @@ export function DashboardProvider(props: ParentProps) {
     isPinned: workPinned,
     togglePin: (row) => {
       if (!row.host) return
+      const client = usableClient(row.host)
+      if (client) {
+        const feed = feeds().find((item) => item.host.id === row.host)
+        const refs = [rowPinRef(row, feed ? workOwners(feed) : []), `session:${row.id}`]
+        const existing = client.state().pins.filter((pin) => refs.includes(pin.ref))
+        void (existing.length ? Promise.all(existing.map((pin) => client.unpin(pin.ref))) : client.pin(refs[0]!))
+        return
+      }
       const current = hostPins()[row.host] ?? []
       const next = workPinned(row) ? current.filter((key) => pinSessionID(key) !== row.id) : [...current, pinKey(row)]
       try { localStorage.setItem(hostPinKey(row.host), JSON.stringify(next)) } catch {
         // Keep the pin for this window when browser storage is unavailable.
       }
       setHostPins((previous) => ({ ...previous, [row.host!]: next }))
+      const offline = pinClients()[row.host]
+      if (offline && migratedHosts().includes(row.host)) {
+        const feed = feeds().find((item) => item.host.id === row.host)
+        const ref = rowPinRef(row, feed ? workOwners(feed) : [])
+        const existing = offline.state().pins.filter((pin) => pin.ref === ref || pin.ref === `session:${row.id}`)
+        void (next.length < current.length
+          ? Promise.all((existing.length ? existing.map((pin) => pin.ref) : [ref]).map((item) => offline.unpin(item)))
+          : offline.pin(ref))
+      }
     },
     dot: (row) => {
       const feed = feeds().find((item) => item.host.id === row.host)
@@ -644,6 +775,22 @@ export function DashboardProvider(props: ParentProps) {
       return status === "busy" || status === "retry" ? "busy" : "idle"
     },
   }
+
+  const pinGroups = () => {
+    const client = localClient()
+    return [
+      { host: ownPinHost() ?? "local", rows: pinnedSessions(), owners: localPinOwners(), client: client && usableClient(client.host) },
+      ...feeds().map((feed) => ({
+        host: feed.host.id,
+        rows: work.pinned().filter((row) => row.host === feed.host.id),
+        owners: workOwners(feed),
+        client: feed.state().status === "ready" ? usableClient(feed.host.id) : undefined,
+      })),
+    ]
+  }
+  const pinnedUnion = createMemo(() => pinnedUnionRows(pinGroups()))
+  const movePin: DashboardCtx["movePin"] = (row, before, after) =>
+    movePinnedRow(ownPinHost() ?? "local", pinGroups(), row, before, after)
 
   const value: DashboardCtx = {
     state,
@@ -714,6 +861,9 @@ export function DashboardProvider(props: ParentProps) {
     cloud,
     setVisibleSessions,
     work,
+    pinSync: () => Object.values(pinClients()).map((client) => ({ host: client.host, status: client.state().status, notSynced: client.state().notSynced.length })),
+    pinnedUnion,
+    movePin,
   }
   return <Ctx.Provider value={value}>{props.children}</Ctx.Provider>
 }

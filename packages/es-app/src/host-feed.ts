@@ -24,6 +24,7 @@ export type HostedRow = {
   project?: string
   archived?: number
   host?: string
+  pinnedAt?: number
 }
 
 /** Why a host is unavailable: sign-in needed (401/403/sign-in redirect) is shown apart from unreachable. */
