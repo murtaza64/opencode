@@ -37,6 +37,8 @@ export const HomePermission = (props: {
   stale: boolean
   onReceipt: (receipt: HomeReplyReceipt) => void
   onRecheck: (directory: string) => Promise<void>
+  /** Another Work host's Core (host-items.ts `hostCore`): the reply goes to that host. Default: this page's. */
+  core?: Pick<typeof oc, "permissionReply">
 }) => {
   const [outcome, setOutcome] = createSignal<Outcome>()
   const [checking, setChecking] = createSignal(false)
@@ -62,7 +64,7 @@ export const HomePermission = (props: {
     const receipt = (result: HomeReplyReceipt["result"]) => props.onReceipt({ key: id, reply, result, permission: item.permission!.permission, title: item.title, session: item.session, directory: item.directory, at: Date.now() })
     const recheck = props.onRecheck
     try {
-      await oc.permissionReply(item.id, item.directory, reply)
+      await (props.core ?? oc).permissionReply(item.id, item.directory, reply)
       setOutcome({ kind: "applied", reply })
       receipt("applied")
     } catch (error) {

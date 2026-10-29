@@ -8,7 +8,7 @@ import { useDeskQueue } from "../desk-queue"
 import { useDashboard } from "../state"
 import { surfaceKey, surfaceProblem, type Surface } from "../surfaces"
 import { needsYou } from "../needs-you"
-import type { WorkEntry } from "../work-queue"
+import { workCountLabel, workSurfaces, type WorkEntry } from "../work-queue"
 import { HostGlyph } from "./icons"
 import { PrList, sortPrs } from "./pr"
 
@@ -40,7 +40,7 @@ const useOpenItem = () => {
   const location = useLocation()
   return (key: string) => location.pathname === "/" && new URLSearchParams(location.search).get("item") === key
 }
-// This host's decisions open on its own desk; another Work host's open on that host's Front desk (its tab).
+// Every entry opens in this window; another Work host's detail and actions go through that host (work-remote.tsx).
 const DecisionRow = (props: { entry: WorkEntry }) => {
   const open = useOpenItem()
   const series = () => props.entry.item?.series
@@ -54,15 +54,29 @@ const DecisionRow = (props: { entry: WorkEntry }) => {
       <span class="sr-only">, {spoken()}</span>
       <Show when={props.entry.project}><span class="session-project">{props.entry.project}</span></Show>
     </A>}>
-    <a href={props.entry.href} class="nav-item nav-decision host-decision" classList={{ stale: props.entry.stale }} data-kind={props.entry.kind} data-nav-item={props.entry.key}
+    <A href={props.entry.href} activeClass="" class="nav-item nav-decision host-decision" classList={{ stale: props.entry.stale, active: open(props.entry.key) }} aria-current={open(props.entry.key) ? "page" : undefined} data-kind={props.entry.kind} data-nav-item={props.entry.key}
       aria-label={`${props.entry.title}, ${spoken()}, on ${props.entry.hostLabel}${props.entry.stale ? ", last known" : ""}`}
       title={props.entry.stale ? `${props.entry.hostLabel} not current; last-known decision` : `${props.entry.title} — on ${props.entry.hostLabel}`}>
       <span class="nav-kind" aria-hidden="true">{glyph()}</span>
       <HostGlyph host={props.entry.host!} />
       <span class="nav-title" dir="auto">{props.entry.title}</span>
       <span class="session-project">{props.entry.hostLabel}</span>
-    </a>
+    </A>
   </Show>
+}
+// Another Work host's Surface, opened in this window and framed through that host; a link Surface says it is served there only.
+const HostSurfaceRow = (props: { entry: WorkEntry }) => {
+  const open = useOpenItem()
+  const ownOnly = () => props.entry.remote?.kind === "surface" && props.entry.remote.frame === "own-host-only"
+  return <A href={props.entry.href} activeClass="" class="nav-item nav-surface host-surface" classList={{ stale: props.entry.stale, active: open(props.entry.key) }}
+    aria-current={open(props.entry.key) ? "page" : undefined} data-nav-item={props.entry.key}
+    aria-label={`${props.entry.title}, surface, on ${props.entry.hostLabel}${props.entry.stale ? ", last known" : ""}${ownOnly() ? ", opens on that computer only" : ""}`}
+    title={props.entry.stale ? `${props.entry.hostLabel} not current; last-known surface` : `${props.entry.title} — on ${props.entry.hostLabel}`}>
+    <span class="nav-kind" aria-hidden="true">▢</span>
+    <HostGlyph host={props.entry.host!} />
+    <span class="nav-title" dir="auto">{props.entry.title}</span>
+    <span class="session-project">{props.entry.hostLabel}</span>
+  </A>
 }
 const SurfaceRow = (props: { surface: Surface; fresh?: boolean }) => {
   const open = useOpenItem()
@@ -98,7 +112,8 @@ export const NeedsYouBand = () => {
 /** The tab row and the Surfaces, Decisions and PRs panels; the Agents panel is the existing session list. */
 export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: string; title: string } }) => {
   const queue = useDeskQueue()
-  const { state } = useDashboard()
+  const dashboard = useDashboard()
+  const state = dashboard.state
   // Each tab keeps its own filter; switching tabs never changes another tab's filter.
   const [filters, setFilters] = createSignal<Record<Exclude<NavTab, "agents">, string>>({ surfaces: "", decisions: "", prs: "" })
   const filter = (id: Exclude<NavTab, "agents">) => filters()[id]
@@ -110,13 +125,16 @@ export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: stri
     return [...split.fresh.map(surface => ({ surface, fresh: true })), ...split.earlier.map(surface => ({ surface, fresh: false })),
       ...queue.surfaces.boards().map(surface => ({ surface, fresh: false }))].filter(row => matches(row.surface.title, filter("surfaces")))
   })
+  // Other Work hosts' Surfaces after this host's, each with its host; a host not current makes the count "N+".
+  const hostSurfaces = createMemo(() => workSurfaces([], dashboard.work.feeds()))
+  const hostSurfaceRows = createMemo(() => hostSurfaces().entries.filter(entry => matches(`${entry.title} ${entry.hostLabel ?? ""}`, filter("surfaces"))))
   const prs = createMemo(() => {
     const seen = new Set<string>()
     return sortPrs((state()?.threads ?? []).flatMap((thread: { prs?: { url: string; title?: string }[] }) => thread.prs ?? [])
       .filter((pr: { url: string }) => !seen.has(pr.url) && (seen.add(pr.url), true))
       .filter((pr: { url: string; title?: string }) => matches(`${pr.title ?? ""} ${pr.url}`, filter("prs"))))
   })
-  const count = (id: NavTab) => id === "agents" ? props.agentsCount?.text : id === "decisions" ? all().decisions.text.replace(/^0$/, "") : id === "surfaces" ? queue.surfaces.list().length : id === "prs" ? prs().length : undefined
+  const count = (id: NavTab) => id === "agents" ? props.agentsCount?.text : id === "decisions" ? all().decisions.text.replace(/^0$/, "") : id === "surfaces" ? workCountLabel({ ...hostSurfaces(), count: queue.surfaces.list().length + hostSurfaces().count }).text.replace(/^0$/, "") : id === "prs" ? prs().length : undefined
   const tabId = (id: NavTab) => `nav-tab-${id}`
   const FilterBox = (p: { id: Exclude<NavTab, "agents">; label: string }) =>
     <div class="search-box"><input class="search-input" type="search" placeholder={`filter ${p.label.toLowerCase()}…`} aria-label={`Filter ${p.label}`}
@@ -148,7 +166,8 @@ export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: stri
       </Show>
       <Show when={tab() === "surfaces"}>
         <FilterBox id="surfaces" label="Surfaces" />
-        <For each={surfaces()} fallback={<div class="dim nav-empty">{filter("surfaces") ? "no matches" : queue.surfaces.error() ?? "No surfaces."}</div>}>{row => <SurfaceRow surface={row.surface} fresh={row.fresh} />}</For>
+        <For each={surfaces()} fallback={<Show when={!hostSurfaceRows().length}><div class="dim nav-empty">{filter("surfaces") ? "no matches" : queue.surfaces.error() ?? "No surfaces."}</div></Show>}>{row => <SurfaceRow surface={row.surface} fresh={row.fresh} />}</For>
+        <For each={hostSurfaceRows()}>{entry => <HostSurfaceRow entry={entry} />}</For>
       </Show>
       <Show when={tab() === "prs"}>
         <FilterBox id="prs" label="PRs" />

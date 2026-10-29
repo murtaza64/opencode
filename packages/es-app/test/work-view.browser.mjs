@@ -23,7 +23,8 @@ const miniSessions = [
 let miniDown = false
 const miniMessageReads = []
 const attentionQueries = []
-const decision = (id, title, extra = {}) => ({ id, editspace: "fixture", revision: 1, status: "open", kind: "decision", title, options: [], delivery_state: "not-requested", created_at: Date.now() - 60_000, ...extra })
+const decision = (id, title, extra = {}) => ({ id, editspace: "fixture", revision: 1, status: "open", kind: "decision", title, context: "", options: [], delivery_state: "not-requested",
+  producer_session: "ses_mini", origin_session: "ses_mini", gate_key: `g:${id}`, source_ref: { session_id: "ses_mini", directory: "/Users/mini/fixture" }, decision: null, created_at: Date.now() - 60_000, updated_at: Date.now() - 60_000, ...extra })
 const miniDecisions = [decision("11111111-1111-4111-8111-111111111111", "Rename the ledger table?"), decision("22222222-2222-4222-8222-222222222222", "Already answered", { status: "answered" })]
 await page.route("**/__es/host", (route) => route.fulfill({ json: { id: "local", label: "Local", remote: false, hosts: [], work: [
   { id: "local", label: "Local", origin: preview.fixture.url },
@@ -127,17 +128,20 @@ try {
   miniDown = false
   await page.locator(".host-status", { hasText: "Mac Mini" }).getByRole("button", { name: "Retry" }).click()
   await expect(page.locator(".host-status", { hasText: "Mac Mini" })).toHaveCount(0)
-  // Needs you lists the Mini's open decisions after this host's, each named with its host; opening one
-  // goes to the Mini's own Front desk with that record selected (answered there, with its operator).
+  // Needs you lists the Mini's open decisions after this host's, each named with its host; opening one shows it
+  // here in Work (read and answered through /hosts/mini, Main1555), never by switching to the Mini's tab.
   await page.goto(new URL("/desk", preview.url).href)
-  const miniDecision = page.getByRole("link", { name: /^Rename the ledger table\?, on Mac Mini$/ })
+  const miniDecision = page.getByRole("button", { name: /^Rename the ledger table\?, on Mac Mini$/ })
   await expect(miniDecision).toBeVisible()
   await expect(page.locator(".desk-host-item")).toHaveCount(1)
   // Wingman never answers, so the count is already marked incomplete for it, by name.
   await expect(page.locator(".desk-queue h2 span")).toHaveAttribute("title", "Wingman: not current")
-  expect(attentionQueries.at(-1)).toBe("?view=open&limit=200&es=fixture")
+  expect(attentionQueries.at(-1)).toBe("?view=open&limit=200&include=needs-you-inputs&es=fixture")
+  const openedBefore = opened.length
   await miniDecision.click()
-  await expect.poll(() => opened.at(-1)).toBe(`${mini}/desk?item=${encodeURIComponent("attention:fixture:11111111-1111-4111-8111-111111111111")}`)
+  await expect(page.locator(".work-remote")).toHaveAttribute("data-work-key", "mini~attention:fixture:11111111-1111-4111-8111-111111111111")
+  await expect(page).toHaveURL(/item=mini(~|%7E)attention/)
+  expect(opened.length).toBe(openedBefore)
   // With the Mini away its decisions are not shown as none: the count is marked incomplete and names it.
   miniDown = true
   await page.goto(new URL("/desk", preview.url).href)

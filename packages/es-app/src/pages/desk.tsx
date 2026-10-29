@@ -27,7 +27,8 @@ import { peekLiveSession } from "../live-session-cache"
 import { flash } from "../motion"
 import type { MemoryEntry, MemoryRevision } from "../desk-memory"
 import { HostGlyph } from "../components/icons"
-import { hostDecisionHref } from "../host-feed"
+import { parseWorkKey, workQueue, workSurfaces, type WorkEntry } from "../work-queue"
+import { WorkRemoteDetail } from "../components/work-remote"
 import { DeliverableList, SurfaceList, SurfaceView } from "../components/desk-surfaces"
 import { surfaceFromKey, surfaceKey } from "../surfaces"
 import "./home.css"
@@ -66,6 +67,9 @@ export default function Desk() {
   // predates the Agents mode and redirects there.
   const [params, setParams] = useSearchParams()
   const [selectedKey, setSelectedKey] = createSignal<string | undefined>(typeof params.surface === "string" ? surfaceKey(params.surface) : typeof params.item === "string" ? params.item : undefined)
+  // A sidebar link to another item (`/?item=`) changes the URL without remounting this page: follow it.
+  createEffect(on(() => [params.item, params.surface] as const, ([item, surface]) =>
+    setSelectedKey(typeof surface === "string" ? surfaceKey(surface) : typeof item === "string" ? item : undefined), { defer: true }))
   const surfaces = queue.surfaces
   const [receipts, setReceipts] = createSignal<HomeReplyReceipt[]>([])
   const [now, setNow] = createSignal(Date.now())
@@ -119,9 +123,19 @@ export default function Desk() {
   // Keep the last-seen item so an answered request does not vanish from under the reader.
   // An answered decision keeps its key and stays selected with its delivery status.
   const lastSeen = new Map<string, DeskItem>()
+  // Another Work host's entry (`<host>~<key>`): its detail opens here, acted on through that host (work-remote.tsx).
+  const remoteEntries = createMemo(() => [...workQueue([], dashboard.work.feeds()).entries, ...workSurfaces([], dashboard.work.feeds()).entries])
+  const lastRemote = new Map<string, WorkEntry>()
+  const selectedRemote = createMemo(() => {
+    const key = selectedKey()
+    if (!key || !parseWorkKey(key).host) return
+    const entry = remoteEntries().find(candidate => candidate.key === key)
+    if (entry) lastRemote.set(key, entry)
+    return entry ?? lastRemote.get(key)
+  })
   const selected = createMemo((): { surface: string } | { item: DeskItem; live: boolean } | { record: AttentionRecord } | undefined => {
     const key = selectedKey()
-    if (!key) return
+    if (!key || parseWorkKey(key).host) return
     const surface = surfaceFromKey(key)
     if (surface) return { surface }
     const live = items().find(item => item.key === key)
@@ -243,13 +257,13 @@ export default function Desk() {
             const down = () => entry.feed.state().status === "unavailable"
             const behind = () => down() ? `unreachable since ${timeOfDay(entry.feed.state().since ?? Date.now())}` : entry.feed.state().decisionsStale ? "not current" : ""
             return <li class="desk-host-item" classList={{ unavailable: down() }}>
-              <a class="desk-item" href={hostDecisionHref(entry.feed.host, entry.record)} data-host-key={`${entry.feed.host.id}~${entry.record.editspace}:${entry.record.id}`}
-                aria-label={`${entry.record.title}, on ${label}${behind() ? `, ${behind()}` : ""}`} aria-disabled={down() || undefined}
-                title={down() ? `${label} is unreachable; answer it there when it is back` : `Answer on ${label}`} onClick={event => { if (down()) event.preventDefault() }}>
+              <button class="desk-item" aria-pressed={selectedKey() === `${entry.feed.host.id}~attention:${entry.record.editspace}:${entry.record.id}`} data-host-key={`${entry.feed.host.id}~${entry.record.editspace}:${entry.record.id}`}
+                aria-label={`${entry.record.title}, on ${label}${behind() ? `, ${behind()}` : ""}`}
+                title={down() ? `${label} is unreachable; last-known decision` : `On ${label}`} onClick={() => select(`${entry.feed.host.id}~attention:${entry.record.editspace}:${entry.record.id}`)}>
                 <bdi dir="auto" class="desk-item-title"><HostGlyph host={entry.feed.host.id} size={12} />{entry.record.title}</bdi>
                 <span class="home-source"><span class="desk-item-kind" data-kind={entry.record.kind}>{entry.record.kind}</span> · <bdi dir="auto">{entry.record.editspace}</bdi> · on {label}
                   <Show when={behind()}> · <span class="home-blocked">{behind()}</span></Show></span>
-              </a>
+              </button>
             </li>
           }}</For>
         </ul>
@@ -326,7 +340,9 @@ export default function Desk() {
         </>}</Show>
       </section>}</Show>}</Show>
 
-      <Show when={!selected()}><section class="desk-idle home-muted" aria-label="Selected item">Select a decision, document or surface.</section></Show>
+      {/* Keyed by the entry key: list polls replace entry objects, and the detail (its answer draft, its host ledger) stays mounted. */}
+      <Show when={selectedRemote()?.key} keyed>{_key => <WorkRemoteDetail entry={selectedRemote()!} onClose={() => select()} />}</Show>
+      <Show when={!selected() && !selectedRemote()}><section class="desk-idle home-muted" aria-label="Selected item">Select a decision, document or surface.</section></Show>
     </div>
   </main>
 }
