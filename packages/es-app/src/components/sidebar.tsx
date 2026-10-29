@@ -170,9 +170,13 @@ export default function Sidebar() {
   // Agents tab controls (NAV-16): an explicit sort beside the default activity order, and an active-only filter.
   const SORT_KEY = "es-app:agents-sort"
   const ACTIVE_KEY = "es-app:agents-active-only"
-  const [sortBy, setSortByRaw] = createSignal<"activity" | "name">(localStorage.getItem(SORT_KEY) === "name" ? "name" : "activity")
+  type SortBy = "activity" | "name" | "created"
+  const SORTS: SortBy[] = ["activity", "name", "created"]
+  const SORT_LABEL: Record<SortBy, string> = { activity: "Activity", name: "Name", created: "Created" }
+  const SORT_TITLE: Record<SortBy, string> = { activity: "Sorted by activity: working first, then latest turn", name: "Sorted by name", created: "Sorted by when the session was created, newest first; unknown creation time last" }
+  const [sortBy, setSortByRaw] = createSignal<SortBy>(SORTS.find((value) => value === localStorage.getItem(SORT_KEY)) ?? "activity")
   const [activeOnly, setActiveOnlyRaw] = createSignal(localStorage.getItem(ACTIVE_KEY) === "on")
-  const setSortBy = (value: "activity" | "name") => { setSortByRaw(value); try { localStorage.setItem(SORT_KEY, value) } catch { /* kept for this page */ } }
+  const setSortBy = (value: SortBy) => { setSortByRaw(value); try { localStorage.setItem(SORT_KEY, value) } catch { /* kept for this page */ } }
   const setActiveOnly = (value: boolean) => { setActiveOnlyRaw(value); try { localStorage.setItem(ACTIVE_KEY, value ? "on" : "off") } catch { /* kept for this page */ } }
   const allUnpinned = createMemo(() => workRows(unpinnedSessions(), work.unpinned()))
   // Cloud agents the view already discovers sit in the ordinary list beside sessions, newest first; pinned
@@ -212,9 +216,18 @@ export default function Sidebar() {
     return rows
   })
   // Shown rows: the activity order above, or by name (stable ties by key); active-only keeps the live bucket.
+  const createdOf = (row: { kind: string; item: unknown }) => row.kind === "session" ? (row.item as SessionRow).created : undefined
   const shownRows = createMemo(() => {
     const rows = activeOnly() ? agentRows().filter((row) => row.live) : agentRows()
-    return sortBy() === "name" ? [...rows].sort((a, b) => (a.item.title || "").localeCompare(b.item.title || "") || a.key.localeCompare(b.key)) : rows
+    if (sortBy() === "name") return [...rows].sort((a, b) => (a.item.title || "").localeCompare(b.item.title || "") || a.key.localeCompare(b.key))
+    // Created: the session's own creation time, newest first; rows that do not carry it (cloud agents, cached rows) last, by name.
+    if (sortBy() === "created") return [...rows].sort((a, b) => {
+      const x = createdOf(a)
+      const y = createdOf(b)
+      if (x === undefined || y === undefined) return x === y ? (a.item.title || "").localeCompare(b.item.title || "") || a.key.localeCompare(b.key) : x === undefined ? 1 : -1
+      return y - x || a.key.localeCompare(b.key)
+    })
+    return rows
   })
   const cloudPin = (row: { project: string; title: string; owner: string }) => cloud.other().find((item) => item.editspace === row.project && item.lane === row.title && item.owner === row.owner)
   const feedOf = (s: SessionRow) => work.feeds().find((feed) => feed.host.id === s.host)
@@ -538,9 +551,9 @@ export default function Sidebar() {
           <div class="agent-filters" role="group" aria-label="Agents view">
             <ProjectScope onChange={clearSearch} />
             <button type="button" class="agent-filter" aria-pressed={activeOnly()} title="Show only agents working now" onClick={() => setActiveOnly(!activeOnly())}>Active</button>
-            <button type="button" class="agent-filter agent-sort" title={sortBy() === "activity" ? "Sorted by activity: working first, then latest turn. Click for name." : "Sorted by name. Click for activity."}
-              aria-label={`Sort: ${sortBy() === "activity" ? "activity" : "name"}`} onClick={() => setSortBy(sortBy() === "activity" ? "name" : "activity")}>
-              <span aria-hidden="true">⇅</span> {sortBy() === "activity" ? "Activity" : "Name"}
+            <button type="button" class="agent-filter agent-sort" title={`${SORT_TITLE[sortBy()]}. Click for ${SORT_LABEL[SORTS[(SORTS.indexOf(sortBy()) + 1) % SORTS.length]].toLowerCase()}.`}
+              aria-label={`Sort: ${SORT_LABEL[sortBy()].toLowerCase()}`} onClick={() => setSortBy(SORTS[(SORTS.indexOf(sortBy()) + 1) % SORTS.length])}>
+              <span aria-hidden="true">⇅</span> {SORT_LABEL[sortBy()]}
             </button>
             <NewSession inline />
           </div>
@@ -605,10 +618,15 @@ export default function Sidebar() {
                 const before = () => index() > 0 ? shownRows()[index() - 1] : undefined
                 // A heading marks each change of group; a list that is all undated needs none.
                 const heading = () => sortBy() !== "activity" ? false : index() === 0 ? group() !== "undated" : group() !== dateGroup(before()!.boundary, Date.now())
+                // Created order: one marker where rows without a known creation time begin.
+                const unknownCreated = () => sortBy() === "created" && createdOf(row) === undefined && (index() === 0 || createdOf(before()!) !== undefined)
                 return (
                   <>
                     <Show when={heading()}>
                       <div class="nav-heading nav-day">{GROUP_LABEL[group()]}</div>
+                    </Show>
+                    <Show when={unknownCreated()}>
+                      <div class="nav-heading nav-day">Created: unknown</div>
                     </Show>
                     {row.kind === "session" ? item(row.item) : <Show when={cloudPin(row.item)}>{(pin) => <CloudNav pin={pin()} />}</Show>}
                   </>

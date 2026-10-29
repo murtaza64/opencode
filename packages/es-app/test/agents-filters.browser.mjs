@@ -18,8 +18,8 @@ page.on("pageerror", (error) => errors.push(error.message))
 const miniRoot = "/Users/mini/fixture"
 let miniDown = false
 const miniSessions = [
-  { id: "ses_a", title: "Mini copy of a", directory: miniRoot, time: { created: 1, updated: Date.now() } },
-  { id: "ses_m", title: "Alpha mini idle", directory: miniRoot, time: { created: 1, updated: Date.now() - 1000 } },
+  { id: "ses_a", title: "Mini copy of a", directory: miniRoot, time: { created: Date.now() - 5000, updated: Date.now() } },
+  { id: "ses_m", title: "Alpha mini idle", directory: miniRoot, time: { created: Date.now() - 1000, updated: Date.now() - 1000 } },
 ]
 await page.addInitScript(() => localStorage.setItem("es-app:nav-tab", "agents"))
 await page.route("**/__es/host", (route) => route.fulfill({ json: { id: "local", label: "Local", remote: false, hosts: [], work: [
@@ -72,7 +72,12 @@ try {
   // Reload keeps the sort.
   await page.reload({ waitUntil: "domcontentloaded" })
   await expect(sidebar.getByRole("button", { name: /^Sort: name/ })).toBeVisible({ timeout: 120_000 })
+  // Created: newest first by the session's own creation time (the Mini's two, then Local's older ones).
   await sidebar.getByRole("button", { name: /^Sort: name/ }).click()
+  await expect(sidebar.getByRole("button", { name: /^Sort: created/ })).toBeVisible()
+  await expect.poll(async () => (await list.allTextContents()).slice(0, 2)).toEqual(["Alpha mini idle", "Mini copy of a"])
+  await sidebar.getByRole("button", { name: /^Sort: created/ }).click()
+  await expect(sidebar.getByRole("button", { name: /^Sort: activity/ })).toBeVisible()
 
   // Scope chip: choose a project, then All; Escape closes and returns focus.
   await selectScope(page, "fixture")
