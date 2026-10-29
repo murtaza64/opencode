@@ -12,6 +12,7 @@ import { surfaceProxy } from "../../es-app/surface-proxy"
 import { attentionRoute, hostPath, localHost, remoteCookie, remoteSetCookie, remoteTargets, type HostInfo } from "../../es-app/remote-host"
 import type { Voice } from "./voice"
 import type { Appearance } from "./appearance"
+import type { ReleaseNotesStore } from "./release-notes"
 import { createPerfLog, routeOf } from "./perf-log"
 
 const csp =
@@ -96,6 +97,9 @@ export const serve = async (options: {
   voice?: Voice
   // This laptop's palette and blurred wallpaper; never offered to paired remote clients.
   appearance?: Appearance
+  // This app release's notes and whether they were seen; one store for every listener of this app, never offered to
+  // paired remote clients.
+  releaseNotes?: ReleaseNotesStore
   // A remote execution host (validated tailnet origin) in place of the loopback services.
   remote?: { id: string; origin: string }
   // Local performance journal directory (renderer reports + slow proxied requests); off when unset.
@@ -231,6 +235,16 @@ export const serve = async (options: {
       if (!options.appearance || pairing || req.method !== "POST" || url.search) return finish(404, "Not found")
       if (!trusted(req.headers.origin)) return finish(403, "Forbidden")
       return appliedRoute(options.appearance, req, remote?.id ?? "local", finish)
+    }
+    if (url.pathname === "/__es/release-notes") {
+      if (!options.releaseNotes || pairing || req.method !== "GET" || url.search) return finish(404, "Not found")
+      return finish(200, JSON.stringify(options.releaseNotes.read()), "application/json")
+    }
+    if (url.pathname === "/__es/release-notes/seen") {
+      // The operator closed this release's notes: this app's own pages only (key + native origin).
+      if (!options.releaseNotes || pairing || req.method !== "POST" || url.search) return finish(404, "Not found")
+      if (!trusted(req.headers.origin)) return finish(403, "Forbidden")
+      return seenRoute(options.releaseNotes, req, finish)
     }
     if (/^\/__es\/appearance(\/|$)/.test(url.pathname)) {
       if (!options.appearance || pairing || req.method !== "GET") return finish(404, "Not found")
@@ -549,6 +563,25 @@ const escape = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.
 const remoteOffline = (host: HostInfo | undefined) => {
   const local = host?.hosts.find((item) => item.id === "local")
   return `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="refresh" content="5"><title>${escape(host?.label ?? "Remote host")} unavailable</title><style>body{font:16px system-ui;background:#171819;color:#ececec;margin:0;padding:10vh 8vw}main{max-inline-size:42rem}h1{font-size:28px}p{line-height:1.6;color:#bbb}a{color:#9ac9ff}</style><main><h1>${escape(host?.label ?? "Remote host")} unavailable</h1><p>Its OpenCode or dashboard did not answer through the tailnet gate. Nothing on this machine changed.</p><p>Retrying every 5 seconds. <a href="/">Retry now</a>${local ? ` or <a href="${escape(local.origin)}/">return to ${escape(local.label)}</a>` : ""}.</p></main></html>`
+}
+
+const seenRoute = async (notes: ReleaseNotesStore, req: IncomingMessage, finish: (status: number, body: string, type?: string) => void) => {
+  const chunks: Buffer[] = []
+  for await (const chunk of req) {
+    chunks.push(chunk)
+    if (chunks.reduce((sum, item) => sum + item.length, 0) > 512) return finish(413, "Payload too large")
+  }
+  const release = (() => {
+    try {
+      const value = (JSON.parse(Buffer.concat(chunks).toString()) as { release?: unknown } | null)?.release
+      return typeof value === "string" ? value : undefined
+    } catch {
+      return undefined
+    }
+  })()
+  if (!release) return finish(400, "Invalid release")
+  // Another release (a page loaded before an update) is refused, never recorded.
+  return (await notes.markSeen(release)) ? finish(204, "") : finish(409, "Not this release")
 }
 
 const appliedRoute = async (appearance: Appearance, req: IncomingMessage, host: string, finish: (status: number, body: string, type?: string) => void) => {

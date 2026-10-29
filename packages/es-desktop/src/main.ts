@@ -11,6 +11,7 @@ import { watchBadges } from "./badges"
 import { muxEvents, sseEvents, watchNotifications } from "./notifier"
 import { notificationsSupported, postNotice } from "./desktop-notice"
 import { createAppearance } from "./appearance"
+import { createReleaseNotes } from "./release-notes"
 import { localStateDir, pairingSources, type PairingSource } from "./pair-phone"
 import { openPairPhone } from "./pair-phone-window"
 
@@ -108,11 +109,18 @@ const start = async () => {
   // their listener origins once started. New work goes to the configured default, else the first.
   const work: WorkHost[] = []
   const workDefault = configured.find((host) => host.mode === "proxy" && host.default)?.id ?? configured.find((host) => host.mode === "proxy")?.id
+  // Bundled by the build (scripts/build.ts).
+  const releaseNotes = await createReleaseNotes({
+    notes: path.join(app.getAppPath(), "dist/release-notes.json"),
+    buildInfo: path.join(app.getAppPath(), "dist/build-info.json"),
+    seen: path.join(app.getPath("userData"), "release-notes-seen.json"),
+  })
   const server = await serve({
     // Only proxied Work hosts are reachable through /hosts/<id>; Personal (page or bridged) never is.
     peers: configured.filter((host) => host.mode === "proxy" && host.profile === "work").map((host) => ({ id: host.id, origin: host.origin })),
     hostInfo: () => ({ ...selfInfo, work }),
     appearance,
+    releaseNotes,
     port,
     root: path.join(app.getAppPath(), "dist/renderer"),
     opencode: origins.opencode,
@@ -140,6 +148,8 @@ const start = async () => {
         voice,
         // The look belongs to this laptop, whichever host a tab shows.
         appearance,
+        // One app release, whichever host a tab shows: seen once, not per tab.
+        releaseNotes,
         // Host tabs show placement natively, so the page needs no switcher of its own.
         hostInfo: () => ({ id: host.id, label: host.label, remote: true, hosts: [], work, profile: host.profile, ...(host.kind ? { kind: host.kind } : {}) }),
         perfDir: PERF_DIR,
