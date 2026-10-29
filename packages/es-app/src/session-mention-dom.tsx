@@ -7,10 +7,11 @@ const REF = /@?ses_[A-Za-z0-9]{26}(?![A-Za-z0-9])/g
 export const wrapSessionRefs = (root: HTMLElement) => {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
-      // The regex first; closest() runs only for the rare text node that has a session ID.
+      // The regex first; closest() runs only for the rare text node that has a session ID. A session's own header
+      // title is plain text, never a chip pointing at itself.
       REF.lastIndex = 0
       if (!REF.test(node.nodeValue ?? "")) return NodeFilter.FILTER_SKIP
-      return !node.parentElement || node.parentElement.closest("pre, code, textarea, select, script, style, .session-ref, .ticket-ref, .context-picker, .context-chips, .session-chip")
+      return !node.parentElement || node.parentElement.closest("pre, code, textarea, select, script, style, .session-ref, .ticket-ref, .context-picker, .context-chips, .session-chip, .session-title")
         ? NodeFilter.FILTER_SKIP : NodeFilter.FILTER_ACCEPT
     },
   })

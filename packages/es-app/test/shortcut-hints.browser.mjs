@@ -12,9 +12,12 @@ try {
     await context.route("**/*", (route) => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
     const page = await context.newPage()
     await page.goto(preview.url, { waitUntil: "domcontentloaded", timeout: 180_000 })
-    const steer = page.locator(".prompt-box:not([inert])").getByRole("button", { name: "Steer", exact: true })
-    await expect(steer.locator("kbd")).toHaveText(send)
-    await expect(steer).toHaveAttribute("aria-keyshortcuts", "Meta+Enter Control+Enter")
+    // The contextual primary button changes its label with the draft; its chord does not.
+    const primary = page.locator(".prompt-box:not([inert]) button.direct-primary")
+    // A draft makes the primary action enabled; disabled actions carry no chord.
+    await page.locator(".prompt-box:not([inert]) textarea").fill("hello")
+    await expect(primary.locator("kbd")).toHaveText(send)
+    await expect(primary).toHaveAttribute("aria-keyshortcuts", "Meta+Enter Control+Enter")
     const find = page.getByRole("button", { name: "Find", exact: true })
     await expect(find).toHaveAttribute("title", `Find in transcript (${platform === "MacIntel" ? "⌘F" : "Ctrl+F"})`)
     await expect(page.getByRole("button", { name: "Previous prompt", exact: true })).toHaveAttribute("aria-keyshortcuts", "Control+P")

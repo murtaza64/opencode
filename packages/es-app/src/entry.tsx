@@ -28,6 +28,7 @@ import { installAppLinks, installInkLinks } from "./link-url"
 import { trackModes } from "./components/mode-switch"
 import { DeskChatProvider, DeskCompanion } from "./desk-companion"
 import { installAppearance } from "./appearance"
+import { KeyboardLayer } from "./components/keyboard-layer"
 import { startPerfTelemetry } from "./perf-telemetry"
 
 startPerfTelemetry()
@@ -101,6 +102,7 @@ function Providers(props: ParentProps) {
                 <DeskCompanion />
                 <TicketTip container={() => shellEl} />
                 <SessionRefs container={() => shellEl} />
+                <KeyboardLayer />
               </div>
               </DeskChatProvider>
               </DeskQueueProvider>

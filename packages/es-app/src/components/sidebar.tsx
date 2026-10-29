@@ -23,6 +23,7 @@ import { hostRowKey, hostSessionHref, workRows, type HostFeed } from "../host-fe
 import { host } from "../host"
 import { NavEntries } from "./mode-switch"
 import { TodayCost } from "./today-cost"
+import { waveStart } from "../wave"
 import { NavTabs, NeedsYouBand } from "./nav-tabs"
 
 /** Project scope, shared by both modes' sidebars. */
@@ -50,8 +51,10 @@ const GROUP_LABEL: Record<DateGroup, string> = { today: "Today", yesterday: "Yes
 const StatusDot = (props: { state: DotState; label?: string }) => {
   let el: HTMLElement | undefined
   ringOnChange(() => el, () => props.state)
-  // Busy rows pulse their halo in CSS (index.css busy idiom); no JS clock.
-  return <span ref={(node) => el = node} class={`dot ${props.state}`}
+  // Busy rows pulse their halo in CSS (index.css busy idiom); no JS clock. The shared-clock wave start is read once
+  // when the row becomes busy (appearance.css busy wave).
+  const start = createMemo<number | undefined>((previous) => props.state === "busy" ? previous ?? waveStart() : undefined)
+  return <span ref={(node) => el = node} class={`dot ${props.state}`} style={start() === undefined ? undefined : { "--wave-start": String(start()) }}
     {...(props.state === "failed" ? { role: "img", "aria-label": props.label ?? "Failed" } : {})} />
 }
 
