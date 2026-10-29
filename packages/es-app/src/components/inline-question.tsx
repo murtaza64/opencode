@@ -1,7 +1,7 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js"
 import type { QuestionInfo, QuestionRequest, ToolPart } from "@opencode-ai/sdk/v2"
 import { Markdown } from "@opencode-ai/session-ui/markdown"
-import { oc } from "../api"
+import { useOc } from "../session-host"
 import { assembleQuestionAnswers, questionOptionLabel } from "../question-answer"
 
 export function InlineQuestion(props: {
@@ -11,6 +11,7 @@ export function InlineQuestion(props: {
   owner?: string
   onDone: () => Promise<void>
 }) {
+  const oc = useOc()
   const questions = createMemo(() => props.request?.questions ?? (props.part?.state.input.questions as QuestionInfo[] | undefined) ?? [])
   const answers = createMemo(() => {
     if (!props.part || !("metadata" in props.part.state)) return []

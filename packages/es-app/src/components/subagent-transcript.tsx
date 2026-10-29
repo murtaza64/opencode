@@ -4,12 +4,13 @@ import { DataProvider } from "@opencode-ai/session-ui/context"
 import { TranscriptMessage } from "./transcript-message"
 import { TodoPart } from "./todos"
 import { Dialog } from "@opencode-ai/ui/dialog"
-import { oc } from "../api"
+import { useOc, useSessionHost } from "../session-host"
 import { createLiveSession, errorText } from "../live-session"
 
 const renderTools = { todowrite: TodoPart }
 
 export const SubagentTranscript = (props: { sessionID: string; directory: string; onDispose: () => void }) => {
+  const oc = useOc()
   const controller = new AbortController()
   onCleanup(() => {
     controller.abort()
@@ -40,7 +41,7 @@ export const SubagentTranscript = (props: { sessionID: string; directory: string
 }
 
 const Transcript = (props: { session: Session }) => {
-  const live = createLiveSession(props.session.id, props.session.directory)
+  const live = createLiveSession(props.session.id, props.session.directory, undefined, useSessionHost())
   const messages = () => live.data.message[props.session.id] ?? []
   const topError = () => {
     const value = live.error()

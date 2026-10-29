@@ -130,7 +130,7 @@ export const appRouteURL = (value: string, origin: string) => {
 // Everything else about that host, answering and operator sessions included, stays on its own tab,
 // origin and operator cookie.
 export const hostApiAllowed = (method: string, pathname: string) =>
-  ["GET", "HEAD"].includes(method) && (/^\/es\/api\/handoffs\/self\/[A-Za-z0-9_-]{1,128}$/.test(pathname) || /^\/(?:oc\/experimental\/(?:session|usage\/daily|capabilities)|oc\/session\/status|oc\/session\/[\w-]+(?:\/todo|\/message(?:\/[\w-]+)?|\/input\/[\w-]+)?|oc\/(?:permission|question)|es\/api\/(?:editspaces|state|handoffs|attention|attention\/session|attention\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|pins|pins\/events))$/.test(pathname))
+  ["GET", "HEAD"].includes(method) && (/^\/es\/api\/handoffs\/self\/[A-Za-z0-9_-]{1,128}$/.test(pathname) || /^\/(?:oc\/experimental\/(?:session|usage\/daily|capabilities)|oc\/session\/status|oc\/session\/[\w-]+(?:\/todo|\/children|\/message(?:\/[\w-]+)?|\/input(?:\/[\w-]+)?)?|oc\/(?:permission|question)|oc\/config\/providers|es\/api\/(?:editspaces|state|handoffs|attention|attention\/session|attention\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|pins|pins\/events))$/.test(pathname))
 
 // One shared pin's ref in a single path segment, as the browser sends it (a lane's slash encoded once).
 const PIN_REF = "(?:session:[A-Za-z0-9_-]{1,128}|lane:[A-Za-z0-9._-]{1,64}%2[Ff][A-Za-z0-9._-]{1,64})"
@@ -140,13 +140,14 @@ export const selfHandoffRoute = /^\/es\/api\/handoffs\/self(?:\/[A-Za-z0-9_-]{1,
 
 // Writes to another Work host from this laptop's window (/hosts/<id>/...), Slice W (contract v0.2.1 §4):
 // the same session writes this listener allows on its own host (prompt/input admission, pending-input
-// edit/withdraw/deliver, recovery nudge, stop), permission and question replies, and attention operator
-// sign-in, answers and delivery checks. Pin writes stay on each pin's own host (contract §3).
+// edit/withdraw/deliver, recovery nudge, stop, Aside ask/cancel, the session model preference), permission
+// and question replies, and attention operator sign-in, answers and delivery checks. Fork, create and delete
+// stay on that host's own window. Pin writes stay on each pin's own host (contract §3).
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 const HOST_WRITES: Record<string, RegExp> = {
-  POST: new RegExp(`^/(?:oc/session/[\\w-]+/(?:prompt_async|input|abort|recover)|oc/session/[\\w-]+/input/[\\w-]+/deliver|oc/(?:permission|question)/[\\w-]+/(?:reply|reject)|es/api/attention/(?:session|${UUID}/(?:commands|delivery)))$`),
-  PATCH: /^\/oc\/session\/[\w-]+\/input\/[\w-]+$/,
-  DELETE: /^\/oc\/session\/[\w-]+\/input\/[\w-]+$/,
+  POST: new RegExp(`^/(?:oc/session/[\\w-]+/(?:prompt_async|input|abort|recover|aside)|oc/session/[\\w-]+/input/[\\w-]+/deliver|oc/(?:permission|question)/[\\w-]+/(?:reply|reject)|es/api/attention/(?:session|${UUID}/(?:commands|delivery)))$`),
+  PATCH: /^\/oc\/session\/[\w-]+(?:\/input\/[\w-]+)?$/,
+  DELETE: /^\/oc\/session\/[\w-]+\/(?:input|aside)\/[\w-]+$/,
 }
 export const hostWriteAllowed = (method: string, pathname: string) => HOST_WRITES[method]?.test(pathname) ?? false
 

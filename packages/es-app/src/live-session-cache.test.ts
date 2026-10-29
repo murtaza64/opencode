@@ -99,3 +99,39 @@ test("leaving a session aborts its in-flight snapshot quietly and reloads on ret
   expect(signals).toHaveLength(2)
   expect(signals[1]!.aborted).toBe(false)
 })
+
+test("the same session ID on another Work host is its own store, read and streamed from that host's directory only", async () => {
+  const paths: string[] = []
+  fetchSpy.mockImplementation(async (input) => {
+    const path = String(input).split("?")[0]!
+    paths.push(path)
+    const host = path.startsWith("/hosts/mini/") ? "mini" : "local"
+    if (path.endsWith("/message")) return Response.json([{ info: { id: `msg_${host}`, sessionID: "ses_a", role: "user", time: { created: 1 } }, parts: [] }])
+    if (path.endsWith("/session/status")) return Response.json({})
+    if (path.endsWith("/todo")) return Response.json([])
+    return Response.json({ id: "ses_a", title: host })
+  })
+  const local = mount("ses_a")
+  const seen: string[] = []
+  const mini = createRoot((dispose) => {
+    mounts.push(dispose)
+    return useLiveSession("ses_a", "/repo", (event) => { seen.push(event.type) }, { id: "mini", label: "Mac Mini", base: "/hosts/mini/oc" })
+  })
+  expect(mini).not.toBe(local.live)
+  await Promise.all([local.live.load(), mini.load()])
+  expect(local.live.data.message.ses_a?.map((message) => message.id)).toEqual(["msg_local"])
+  expect(mini.data.message.ses_a?.map((message) => message.id)).toEqual(["msg_mini"])
+  expect(paths.filter((path) => path.startsWith("/hosts/mini/")).sort()).toEqual([
+    "/hosts/mini/oc/session/ses_a", "/hosts/mini/oc/session/ses_a/message", "/hosts/mini/oc/session/ses_a/todo", "/hosts/mini/oc/session/status",
+  ])
+  const stream = Events.all.find((source) => source.url.startsWith("/hosts/mini/"))!
+  expect(stream.url).toBe("/hosts/mini/oc/global/event")
+  const part = (text: string) => ({ id: "prt_1", sessionID: "ses_a", messageID: "msg_mini", type: "text", text })
+  // That host's other directories are skipped; this directory's events arrive unwrapped.
+  stream.onmessage?.({ data: JSON.stringify({ directory: "/elsewhere", payload: { type: "message.part.updated", properties: { part: part("wrong") } } }) })
+  stream.onmessage?.({ data: JSON.stringify({ directory: "/repo", payload: { type: "message.part.updated", properties: { part: part("right") } } }) })
+  await Promise.resolve()
+  expect(seen).toEqual(["message.part.updated"])
+  expect((mini.data.part.msg_mini?.[0] as { text?: string } | undefined)?.text).toBe("right")
+  expect(local.live.data.part.msg_mini).toBeUndefined()
+})

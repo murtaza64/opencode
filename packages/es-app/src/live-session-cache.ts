@@ -4,6 +4,7 @@
  * so it stays current while hidden. */
 import { createRoot, getOwner, onCleanup } from "solid-js"
 import { createLiveSession } from "./live-session"
+import type { SessionHost } from "./session-host"
 
 type LiveEvent = { type: string; properties?: any }
 type Listener = (event: LiveEvent) => unknown
@@ -17,10 +18,14 @@ type Entry = {
 export const LIVE_SESSION_CACHE = 8
 const entries = new Map<string, Entry>()
 
-/** Store for one session, shared while mounted and retained (LRU) after unmount. */
-export function useLiveSession(sessionID: string, directory: string, onEvent?: Listener) {
-  const key = `${sessionID}\u0000${directory}`
-  const entry = entries.get(key) ?? open(sessionID, directory)
+// Another Work host's store is keyed by that host too: the same session ID on two hosts is two sessions.
+const keyOf = (sessionID: string, directory: string, host?: SessionHost) =>
+  host?.id ? `${sessionID}\u0000${directory}\u0000${host.id}` : `${sessionID}\u0000${directory}`
+
+/** Store for one session, shared while mounted and retained (LRU) after unmount. `host`: the session's Work host, if not this page's. */
+export function useLiveSession(sessionID: string, directory: string, onEvent?: Listener, host?: SessionHost) {
+  const key = keyOf(sessionID, directory, host)
+  const entry = entries.get(key) ?? open(sessionID, directory, host)
   // Re-insert to mark most recently used.
   entries.delete(key)
   entries.set(key, entry)
@@ -36,11 +41,11 @@ export function useLiveSession(sessionID: string, directory: string, onEvent?: L
   return entry.live
 }
 
-function open(sessionID: string, directory: string): Entry {
+function open(sessionID: string, directory: string, host?: SessionHost): Entry {
   const listeners = new Set<Listener>()
   return createRoot((dispose) => ({
     live: createLiveSession(sessionID, directory, (event) =>
-      Promise.all([...listeners].map((listener) => listener(event)))),
+      Promise.all([...listeners].map((listener) => listener(event))), host),
     listeners,
     users: 0,
     dispose,
@@ -58,7 +63,7 @@ function evict() {
 }
 
 /** The cached store for a session if one exists, without mounting or retaining it. */
-export const peekLiveSession = (sessionID: string, directory: string) => entries.get(`${sessionID}\u0000${directory}`)?.live
+export const peekLiveSession = (sessionID: string, directory: string, host?: SessionHost) => entries.get(keyOf(sessionID, directory, host))?.live
 
 /** Test seam: drop every unmounted store. */
 export function clearLiveSessions() {
