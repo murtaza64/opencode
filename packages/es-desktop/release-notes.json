@@ -2,9 +2,22 @@
   "schema": "release-notes/1",
   "release": "2026-10-29.3",
   "items": [
-    { "title": "Surfaces show what they are", "detail": "Each Surface row's icon shows whether it is a document, dashboard or prototype, with a mark when it is interactive or keeps itself live. Untagged Surfaces keep the plain square." },
-    { "title": "Text keys stay text keys while you type", "detail": "In the composer's insert mode Ctrl+H, D, U, N and P edit text instead of triggering app shortcuts. Off macOS, Ctrl+M switches mode." },
-    { "title": "Move between regions with Ctrl+Alt+H/J/K/L", "detail": "Focus jumps to the nearest visible region in that direction. Press ? to see every shortcut." }
+    {
+      "title": "Surfaces show what they are",
+      "detail": "Each Surface row's icon shows whether it is a document, dashboard or prototype, with a mark when it is interactive or keeps itself live. Untagged Surfaces keep the plain square."
+    },
+    {
+      "title": "Text keys stay text keys while you type",
+      "detail": "In the composer's insert mode Ctrl+H, D, U, N and P edit text instead of triggering app shortcuts. Off macOS, Ctrl+M switches mode."
+    },
+    {
+      "title": "Move between regions with Ctrl+Alt+H/J/K/L",
+      "detail": "Focus jumps to the nearest visible region in that direction. Press ? to see every shortcut."
+    },
+    {
+      "title": "The Front desk editor changes size only by whole lines",
+      "detail": "While collapsed it no longer animates through in-between heights as you type, wrap or delete. Expanding still animates."
+    }
   ],
   "limits": [
     "Surface icons appear only for Surfaces whose author says what they are.",
