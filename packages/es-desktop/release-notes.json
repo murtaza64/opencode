@@ -1,0 +1,15 @@
+{
+  "schema": "release-notes/1",
+  "release": "2026-10-29.2",
+  "items": [
+    { "title": "What's new", "detail": "This window appears once for each new desktop release. Reopen it any time from What's new at the bottom of the sidebar." },
+    { "title": "New session lives in the Agents tab", "detail": "Use + New at the end of the Agents tab controls. It still targets the project and host in scope, and /new and its shortcut work as before.", "try": { "label": "Start a new session", "href": "/new" } },
+    { "title": "The Front desk editor no longer jumps while you type", "detail": "It starts at one line, grows as lines wrap up to its limit, scrolls inside after that, and shrinks back when you delete. Expand still works when you ask for it." },
+    { "title": "The wallpaper follows WalStudio's blur and dim", "detail": "A blur change in WalStudio re-blurs the app's wallpaper; a dim change only darkens it, without re-blurring." }
+  ],
+  "limits": [
+    "WalStudio blur and dim are verified on a test profile and test wallpaper only, not yet on your own wallpaper.",
+    "Sorting agents by creation time is not in this release.",
+    "Surfaces served from a URL on another host still open only on that host."
+  ]
+}
