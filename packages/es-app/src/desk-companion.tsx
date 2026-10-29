@@ -11,7 +11,7 @@ import { createTasks, deskTasksSupported, type TaskJob } from "./desk-tasks"
 import { getComposer } from "./composer"
 import { createDeskSession } from "./desk-session"
 import { es, type ContextPart } from "./api"
-import { followUps, progressRows, readCases, type DeskCase, type FollowUp, type ProgressRow } from "./desk-followups"
+import { caseLines, followUps, progressRows, readCases, type DeskCase, type FollowUp, type ProgressRow } from "./desk-followups"
 import "./desk-followups.css"
 import { SessionView } from "./pages/session"
 import { ResizeHandle } from "./components/resize-handle"
@@ -48,6 +48,8 @@ type DeskChat = {
   // The Decisions view supplies its queue/selection context while mounted; other views send none.
   setContext: (context: (() => ContextPart[]) | undefined) => void
   context: () => ContextPart[]
+  /** The desk's open cases (dashboard, metadata only), shared by every view so off-Decisions sends carry them too. */
+  cases: () => DeskCase[]
   /** Background tasks started from the chat; their packet is the current view's text (empty elsewhere). */
   tasks: ReturnType<typeof createTasks>
   setView: (view: (() => string) | undefined) => void
@@ -69,6 +71,11 @@ export const DeskChatProvider = (props: ParentProps) => {
   const prepared = useBriefs()
   const tasks = createTasks(prepared.anchor.pointer, prepared.anchor.ensure, () => desk.status() === "ready" ? desk.pointer() : undefined,
     async () => { prepared.activate(); await prepared.waitReady() })
+  // Cases are read once for the app, refreshed on mail and every minute.
+  const [caseTick, setCaseTick] = createSignal(0)
+  const caseTimer = setInterval(() => setCaseTick(value => value + 1), 60_000)
+  onCleanup(() => clearInterval(caseTimer))
+  const [cases] = createResource(() => [caseTick(), dashboard.mailRevision()] as const, () => readCases().catch(() => [] as DeskCase[]))
   const kind = () => companionKind(location.pathname)
   const directory = () => {
     const name = dashboard.editspace() ?? dashboard.editspaces()?.default
@@ -85,7 +92,9 @@ export const DeskChatProvider = (props: ParentProps) => {
       try { localStorage.setItem(KEY[current], next ? "1" : "0") } catch { /* stays for this page */ }
     },
     setContext: (getter) => setContextGetter(() => getter),
-    context: () => contextGetter()?.() ?? [],
+    // The Decisions page sends its full view (cases included); every other view sends the cases alone.
+    context: () => contextGetter()?.() ?? desk.caseContext(caseLines(cases.latest ?? [])),
+    cases: () => cases.latest ?? [],
     tasks,
     setView: (getter) => setViewGetter(() => getter),
     view: () => viewGetter()?.() ?? "",
@@ -195,8 +204,8 @@ const DeskFollowUps = (props: { session: string; open: () => boolean }) => {
   })
   const [items] = createResource(() => ({ session: props.session, names: dashboard.editspaces()?.editspaces.map(item => item.name) ?? [], tick: tick(), mail: dashboard.mailRevision() }),
     async input => (await Promise.all(input.names.map(name => es.mail(name, { session: input.session }).then(timeline => followUps(timeline, input.session), () => [] as FollowUp[])))).flat())
-  const [cases] = createResource(() => [tick(), dashboard.mailRevision()] as const, () => readCases().catch(() => [] as DeskCase[]))
-  const rows = () => progressRows(cases.latest ?? [], items.latest ?? [], now())
+  const chat = useDeskChat()
+  const rows = () => progressRows(chat.cases(), items.latest ?? [], now())
   const counts = () => ({ needs: rows().filter(row => row.group === "needs").length, progress: rows().filter(row => row.group === "progress").length, result: rows().filter(row => row.group === "result").length })
   // Folded: one summary line plus whatever needs the human. The conversation keeps the space.
   const shown = () => expanded() ? rows() : rows().filter(row => row.group === "needs")

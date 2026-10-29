@@ -86,6 +86,30 @@ try {
     console.log(`PROGRESS ${view}: folded to one summary line (<=40px) above the chat; opened: 3 in progress + 2 done with human labels, owners/ids only in Details; one results link; no send controls`)
     await context.close()
   }
+  // Off Decisions (a session page, Decisions never mounted): a companion send still carries the desk's cases.
+  // The desk context goes only with an idle send, so the desk session is idle here.
+  {
+    preview.fixture.status = "idle"
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+    await context.addInitScript(value => { if (window === window.top) { localStorage.setItem("es-app:front-desk:1", JSON.stringify(value)); localStorage.setItem("es-app:companion:session", "1") } }, { session: "ses_a", directory })
+    await context.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
+    const page = await context.newPage()
+    page.setDefaultTimeout(90_000)
+    const sent = []
+    page.on("request", request => { if (request.method() === "POST" && /\/oc\/session\/ses_a\/(prompt_async|input)/.test(request.url())) sent.push(request.postData() ?? "") })
+    await page.goto(`${preview.origin}/session/ses_b?directory=${encodeURIComponent(directory)}`, { waitUntil: "domcontentloaded", timeout: 300_000 })
+    const companion = page.locator(".desk-companion")
+    await expect(companion.locator("textarea")).toBeVisible({ timeout: 300_000 })
+    assert.equal(await page.locator(".desk-evidence, [data-desk-item]").count(), 0, "Decisions queue is mounted")
+    await companion.locator("textarea").fill("Where does the directions work stand?")
+    await companion.getByRole("button", { name: "Send", exact: true }).click()
+    await expect.poll(() => sent.length, { timeout: 30_000 }).toBeGreaterThan(0)
+    const body = sent.join("\n")
+    assert(body.includes("open cases (durable, metadata only") && body.includes("case two-parts") && body.includes("private-read [working]"), body.slice(0, 600))
+    assert(body.includes("cases only; no queue view is open"), "cases-only note")
+    console.log("OFF DECISIONS: a companion send from a session page carries the case lines (Decisions never mounted)")
+    await context.close()
+  }
   assert(reads.some(([name, session]) => name === "fixture" && session === "ses_a") && reads.some(([name, session]) => name === "other" && session === "ses_a"))
   assert.equal(preview.fixture.calls.filter(call => !["GET", "HEAD", "OPTIONS"].includes(call.method) && call.path?.includes("mail")).length, 0)
   console.log("READS: one per project for the desk session; no mail writes")
