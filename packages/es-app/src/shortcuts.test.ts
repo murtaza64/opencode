@@ -100,7 +100,7 @@ test.each(["mac", "other"] as const)("no two chords collide on %s except the sha
 })
 
 test("no sequence is a prefix of another", () => {
-  const all = Object.values(SEQUENCES).map((keys) => keys.join(" "))
+  const all = Object.values(SEQUENCES).map((entry) => entry.keys.join(" "))
   const prefixed = all.filter((a) => all.some((b) => b !== a && b.startsWith(a + " ")))
   expect(prefixed).toEqual([])
   expect(new Set(all).size).toBe(all.length)

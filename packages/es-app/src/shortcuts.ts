@@ -1,7 +1,7 @@
 /* Keyboard registry (dotfiles#254, proposal v1.2). Each entry states the modifiers
  * its handler accepts, so a hint never names a key that does nothing on this
- * platform. Only `dispatched` entries may be shown as hints; `planned` entries are
- * approved bindings whose handlers have not landed yet. */
+ * platform. Only `dispatched` entries may be shown as hints or in the shortcut
+ * overlay; `planned` entries are approved bindings whose handlers have not landed. */
 
 export type Platform = "mac" | "other"
 
@@ -9,59 +9,65 @@ export type Platform = "mac" | "other"
 // Ctrl elsewhere). "Mod" is the app-chord modifier: Cmd on macOS, Alt elsewhere
 // (D1, kitty mirror). "Meta" is literal: Cmd on macOS, Super/Windows elsewhere.
 type Modifier = "Primary" | "Mod" | "Meta" | "Control" | "Alt" | "Shift"
-type Binding = { modifiers: Modifier[]; key: string; status: "dispatched" | "planned" }
+type Status = "dispatched" | "planned"
+// `where` names the surface whose handler owns the key; the overlay groups by it.
+type Where = "app" | "composer" | "session" | "decision"
+type Binding = { modifiers: Modifier[]; key: string; status: Status; title: string; where: Where }
 
-const dispatched = (key: string, ...modifiers: Modifier[]): Binding => ({ modifiers, key, status: "dispatched" })
-const planned = (key: string, ...modifiers: Modifier[]): Binding => ({ modifiers, key, status: "planned" })
+const dispatched = (title: string, where: Where, key: string, ...modifiers: Modifier[]): Binding => ({ modifiers, key, status: "dispatched", title, where })
+const planned = (title: string, where: Where, key: string, ...modifiers: Modifier[]): Binding => ({ modifiers, key, status: "planned", title, where })
 
 export const SHORTCUTS = {
   // Composer primary action: label follows draft and pending state (send, steer, nudge).
-  primaryAction: dispatched("Enter", "Primary"),
+  primaryAction: dispatched("Primary action (send, steer, nudge)", "composer", "Enter", "Primary"),
   // Submit outside the composer: decisions, new session, pending-input edit.
-  submit: dispatched("Enter", "Primary"),
+  submit: dispatched("Submit decision, new session or edit", "decision", "Enter", "Primary"),
   // session.tsx cycleMode checks metaKey only (D4 adds Ctrl+M off macOS with its handler).
-  cycleTarget: dispatched("M", "Meta"),
-  find: dispatched("F", "Primary"),
-  previousPrompt: dispatched("P", "Control"),
-  nextPrompt: dispatched("N", "Control"),
-  expandEditor: dispatched("E", "Control"),
-  toggleSessions: dispatched("H", "Control"),
-  sessionFinder: planned("S", "Mod"),
-  mruBack: planned("Tab", "Control"),
-  mruForward: planned("Tab", "Control", "Shift"),
-  lastSession: planned("`", "Mod"),
-  pinnedSession: planned("1-9", "Mod"),
-  needsYou: planned("N", "Mod", "Shift"),
-  commandPalette: planned("P", "Mod"),
-  nextRegion: planned("F6"),
-  previousRegion: planned("F6", "Shift"),
-  focusLeft: planned("H", "Control", "Alt"),
-  focusDown: planned("J", "Control", "Alt"),
-  focusUp: planned("K", "Control", "Alt"),
-  focusRight: planned("L", "Control", "Alt"),
+  cycleTarget: dispatched("Cycle steer, queue, aside", "composer", "M", "Meta"),
+  find: dispatched("Find in transcript", "session", "F", "Primary"),
+  previousPrompt: dispatched("Previous prompt", "session", "P", "Control"),
+  nextPrompt: dispatched("Next prompt", "session", "N", "Control"),
+  expandEditor: dispatched("Float editor", "composer", "E", "Control"),
+  toggleSessions: dispatched("Toggle sessions panel", "app", "H", "Control"),
+  nextRegion: dispatched("Next region", "app", "F6"),
+  previousRegion: dispatched("Previous region", "app", "F6", "Shift"),
+  sessionFinder: planned("Session finder", "app", "S", "Mod"),
+  mruBack: planned("Recent session (back)", "app", "Tab", "Control"),
+  mruForward: planned("Recent session (forward)", "app", "Tab", "Control", "Shift"),
+  lastSession: planned("Last session", "app", "`", "Mod"),
+  pinnedSession: planned("Pinned session", "app", "1-9", "Mod"),
+  needsYou: planned("Needs you", "app", "N", "Mod", "Shift"),
+  commandPalette: planned("Command palette", "app", "P", "Mod"),
+  focusLeft: planned("Focus region left", "app", "H", "Control", "Alt"),
+  focusDown: planned("Focus region down", "app", "J", "Control", "Alt"),
+  focusUp: planned("Focus region up", "app", "K", "Control", "Alt"),
+  focusRight: planned("Focus region right", "app", "L", "Control", "Alt"),
 } satisfies Record<string, Binding>
 
 export type ShortcutID = keyof typeof SHORTCUTS
 
-// Normal-scope key sequences (leader = Space, g table, ]x/[x pairs). Planned until
-// the dispatcher lands.
+// Normal-scope key sequences (leader = Space, g table, ]x/[x pairs), active only
+// when focus is outside text entry.
+type Sequence = { keys: string[]; status: Status; title: string }
+const sequence = (status: Status, title: string, ...keys: string[]): Sequence => ({ keys, status, title })
+
 export const SEQUENCES = {
-  pinToggle: ["Space", "m"],
-  needsYouLeader: ["Space", "n"],
-  referenceLeader: ["Space", "?"],
-  reference: ["?"],
-  parentSession: ["g", "p"],
-  childSession: ["g", "c"],
-  goDesk: ["g", "d"],
-  goAgents: ["g", "a"],
-  goUsage: ["g", "u"],
-  goCloud: ["g", "C"],
-  goNewSession: ["g", "o"],
-  nextPromptPair: ["]", "p"],
-  previousPromptPair: ["[", "p"],
-  nextDecision: ["]", "n"],
-  previousDecision: ["[", "n"],
-} satisfies Record<string, string[]>
+  reference: sequence("dispatched", "Keyboard shortcuts", "?"),
+  referenceLeader: sequence("dispatched", "Keyboard shortcuts", "Space", "?"),
+  goDesk: sequence("dispatched", "Go to Front desk", "g", "d"),
+  goAgents: sequence("dispatched", "Go to Agents", "g", "a"),
+  goUsage: sequence("dispatched", "Go to Usage", "g", "u"),
+  goCloud: sequence("dispatched", "Go to Cloud", "g", "C"),
+  goNewSession: sequence("dispatched", "New session", "g", "o"),
+  pinToggle: sequence("planned", "Pin or unpin session", "Space", "m"),
+  needsYouLeader: sequence("planned", "Needs you", "Space", "n"),
+  parentSession: sequence("planned", "Parent session", "g", "p"),
+  childSession: sequence("planned", "First child session", "g", "c"),
+  nextPromptPair: sequence("planned", "Next prompt", "]", "p"),
+  previousPromptPair: sequence("planned", "Previous prompt", "[", "p"),
+  nextDecision: sequence("planned", "Next decision", "]", "n"),
+  previousDecision: sequence("planned", "Previous decision", "[", "n"),
+} satisfies Record<string, Sequence>
 
 export type SequenceID = keyof typeof SEQUENCES
 
@@ -87,7 +93,7 @@ export const shortcutLabel = (id: ShortcutID, platform = currentPlatform()) => {
 }
 
 /** Visible hint for a key sequence, e.g. "Space m" or "g C". */
-export const sequenceLabel = (id: SequenceID) => SEQUENCES[id].join(" ")
+export const sequenceLabel = (id: SequenceID) => SEQUENCES[id].keys.join(" ")
 
 /** `aria-keyshortcuts` value listing every chord the handler accepts. */
 export const ariaShortcut = (id: ShortcutID, platform = currentPlatform()) => {
