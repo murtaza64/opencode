@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { deskItems } from "./desk"
 import type { HostFeed } from "./host-feed"
-import { needsYou } from "./needs-you"
+import { needsYou, needsYouFromInputs } from "./needs-you"
 import { deliverables, type Surface } from "./surfaces"
 import { workCountLabel, workQueue } from "./work-queue"
 
@@ -61,4 +61,87 @@ test("a host whose decisions are not current keeps its last entries and makes th
 
 test("nothing waiting anywhere is zero only when every host is current", () => {
   expect(needsYou({ items: [], feeds: [feed("mini", "Mac Mini", {})], fresh: [] }).label).toEqual({ text: "0", title: undefined })
+})
+
+// --- needs-you-inputs/1 (the dashboard read a non-page client uses) at parity with the app's own reads
+
+const ok = { checked_at: 1, ok: true }
+const failed = (sessionID: string, messageID = "msg_1") => ({ sessionID, messageID, directory: "/r", error: { name: "ProviderError" } })
+const brief = "ses_fdjob_0123456789abcdef01234567"
+const task = "ses_fdtask_0123456789abcdef01234567"
+const records = [
+  attention("11111111-1111-4111-8111-111111111111"),
+  // A snoozed decision whose time came: the dashboard store wakes it to open before serving it.
+  attention("55555555-5555-4555-8555-555555555555", { snoozed_until: null, revision: 3 }),
+  attention("66666666-6666-4666-8666-666666666666", { kind: "review", artifact: { title: "Week review", url: "https://x.test/", revision: 2 } }),
+]
+const requestRows = [{ kind: "permission", id: "per_1", session: "ses_b", directory: "/r", project: "opencode", title: "Edit", state: "pending", checked: 1 }] as never[]
+const surfaces = [surface("new"), surface("seen", { seen: true })]
+const inputs = (overrides: Record<string, unknown> = {}) => ({
+  records, projects: [{ editspace: "opencode", available: true }], partial: false, limit: 200,
+  inputs: {
+    schema: "needs-you-inputs/1", boot: "b1", rev: 4,
+    requests: requestRows,
+    failures: [failed(brief), failed(task), failed("ses_ignored"), failed("ses_plain")],
+    ignores: [{ sessionID: "ses_ignored", messageID: "msg_1" }],
+    deliverables: surfaces,
+    sources: { requests: ok, failures: ok, ignores: ok, deliverables: ok },
+    ...overrides,
+  },
+}) as never
+
+// The app's path over the same data: desk-queue.tsx drops brief-job sessions and ignored failures
+// before deskItems, and the band adds fresh deliverables.
+const appPath = (feeds: HostFeed[], ignoredSessions = ["ses_ignored"]) => {
+  const briefJobs = new Set([brief])
+  const local = deskItems({
+    records: records as never,
+    attentionChecked: 0,
+    requests: requestRows,
+    failures: [failed(brief), failed(task), failed("ses_ignored"), failed("ses_plain")].filter((item) => !briefJobs.has(item.sessionID) && !ignoredSessions.includes(item.sessionID)) as never,
+    failuresChecked: 0,
+    title: () => undefined,
+    project: () => undefined,
+  })
+  return needsYou({ items: local, feeds, fresh: deliverables(surfaces, new Set()).fresh })
+}
+
+test("the dashboard inputs give the app's entries and count: brief jobs out, desk tasks in, ignored out, review in", () => {
+  const feeds = [feed("mini", "Mac Mini", { decisions: [attention("77777777-7777-4777-8777-777777777777")] })]
+  const result = needsYouFromInputs(inputs(), feeds)!
+  expect(result.entries.map((entry) => entry.key)).toEqual(appPath(feeds).entries.map((entry) => entry.key))
+  expect(result.entries.map((entry) => entry.key)).toEqual([
+    "attention:opencode:11111111-1111-4111-8111-111111111111",
+    "attention:opencode:55555555-5555-4555-8555-555555555555",
+    "attention:opencode:66666666-6666-4666-8666-666666666666",
+    "permission:/r:per_1",
+    `failure:${task}`,
+    "failure:ses_plain",
+    "mini~attention:opencode:77777777-7777-4777-8777-777777777777",
+  ])
+  expect(result.fresh.map((item) => item.id)).toEqual(["new"])
+  expect(result.label).toEqual(appPath(feeds).label)
+  expect(result.label).toEqual({ text: "8", title: undefined })
+})
+
+test("an ignore added after hydration leaves the count at the next read", () => {
+  const before = needsYouFromInputs(inputs(), [])!
+  const after = needsYouFromInputs(inputs({ ignores: [{ sessionID: "ses_ignored", messageID: "msg_1" }, { sessionID: "ses_plain", messageID: "msg_1" }] }), [])!
+  expect([before.count, after.count]).toEqual([7, 6])
+  expect(after.count).toBe(appPath([], ["ses_ignored", "ses_plain"]).count)
+})
+
+test("a deliverable marked seen on the dashboard is no longer fresh", () => {
+  const result = needsYouFromInputs(inputs({ deliverables: [surface("new", { seen: true })] }), [])!
+  expect(result.fresh).toEqual([])
+})
+
+test("a source never read gives no number; a source not current or a stale host gives N+", () => {
+  expect(needsYouFromInputs(inputs({ sources: { requests: ok, failures: { checked_at: null, ok: false }, ignores: ok, deliverables: ok } }), [])).toBeUndefined()
+  expect(needsYouFromInputs(inputs({ sources: { requests: ok, failures: { checked_at: 1, ok: false }, ignores: ok, deliverables: ok } }), [])!.label.text).toBe("7+")
+  expect(needsYouFromInputs(inputs(), [feed("mini", "Mac Mini", { status: "unavailable" })])!.label).toEqual({ text: "7+", title: "Mac Mini: not current" })
+})
+
+test("an editspace at the page limit makes the count partial", () => {
+  expect(needsYouFromInputs({ ...(inputs() as object), limit: 3 } as never, [])!.label.text).toBe("7+")
 })
