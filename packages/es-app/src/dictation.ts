@@ -1,5 +1,6 @@
 import { createStore } from "solid-js/store"
 import { getComposer, type ComposerBuffer, type ComposerDraft } from "./composer"
+import type { SessionHost } from "./session-host"
 
 /**
  * Operator dictation into a composer draft. The native shell owns capture and local
@@ -9,6 +10,7 @@ import { getComposer, type ComposerBuffer, type ComposerDraft } from "./composer
 export type DictationTarget = {
   sessionID: string
   directory: string
+  host?: SessionHost
   buffer: ComposerBuffer
   // Draft state when dictation started: where the text goes if the draft is untouched.
   revision: number
@@ -47,7 +49,7 @@ export const createDictation = (dependencies: DictationDependencies = {}) => {
   const insert =
     dependencies.insert ??
     ((target: DictationTarget, text: string) =>
-      getComposer(target.sessionID, target.directory).insertDictation(target.buffer, target, text))
+      getComposer(target.sessionID, target.directory, target.host).insertDictation(target.buffer, target, text))
   const [state, setState] = createStore<DictationState>({
     availability: "unknown",
     setup: "",
@@ -90,7 +92,7 @@ export const createDictation = (dependencies: DictationDependencies = {}) => {
     if (state.phase !== "idle" || state.availability !== "ready") return
     const current = id()
     run.id = current
-    setState({ phase: "starting", target: { ...target, selection: [...target.selection] }, startedAt: now(), error: null })
+    setState({ phase: "starting", target: { ...target, host: target.host ? { ...target.host } : undefined, selection: [...target.selection] }, startedAt: now(), error: null })
     const response = await post("start", { id: current }).catch(() => undefined)
     // Cancelled while starting: the cancel may have reached the shell first, so repeat it.
     if (run.id !== current) {
@@ -150,7 +152,7 @@ export const createDictation = (dependencies: DictationDependencies = {}) => {
     owns,
     settings: () => post("settings").catch(() => undefined),
     /** A mounted composer editor that can take the text as one undoable edit. */
-    attach: (draft: Pick<DictationTarget, "sessionID" | "directory">, editor: DictationEditor) => {
+    attach: (draft: Pick<DictationTarget, "sessionID" | "directory" | "host">, editor: DictationEditor) => {
       editors.set(key(draft), editor)
       return () => {
         if (editors.get(key(draft)) === editor) editors.delete(key(draft))
@@ -159,16 +161,18 @@ export const createDictation = (dependencies: DictationDependencies = {}) => {
   }
 }
 
-const key = (draft: Pick<DictationTarget, "sessionID" | "directory">) => JSON.stringify([draft.sessionID, draft.directory])
+const key = (draft: Pick<DictationTarget, "sessionID" | "directory" | "host">) =>
+  JSON.stringify([draft.sessionID, draft.directory, draft.host?.id ?? null])
 
-const owns = (target: DictationTarget | null | undefined, draft: Pick<DictationTarget, "sessionID" | "directory">) =>
-  !!target && target.sessionID === draft.sessionID && target.directory === draft.directory
+const owns = (target: DictationTarget | null | undefined, draft: Pick<DictationTarget, "sessionID" | "directory" | "host">) =>
+  !!target && key(target) === key(draft)
 
 export const dictationTarget = (
   sessionID: string,
   directory: string,
   buffer: ComposerBuffer,
   draft: Pick<ComposerDraft, "revision" | "selection">,
-): DictationTarget => ({ sessionID, directory, buffer, revision: draft.revision, selection: [...draft.selection] })
+  host?: SessionHost,
+): DictationTarget => ({ sessionID, directory, host: host ? { ...host } : undefined, buffer, revision: draft.revision, selection: [...draft.selection] })
 
 export const dictation = createDictation()
