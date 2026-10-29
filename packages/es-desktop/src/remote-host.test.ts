@@ -172,13 +172,55 @@ test("a gate rejection reaches the app as that status, not as local data", async
   expect(await response.text()).toBe("deny unlisted-login")
 })
 
-test("each listener reports its host and the switch targets; Front Desk surfaces stay local", async () => {
+test("each listener reports its host and the switch targets", async () => {
   const { localServer, miniServer, localGet, miniGet } = await twoHosts(fakeHost("mini"))
   const hosts = [{ id: "local", label: "Local", origin: localServer.origin }, { id: "mini", label: "Mac Mini", origin: miniServer.origin }]
   expect(await (await miniGet("/__es/host")).json()).toEqual({ id: "mini", label: "Mac Mini", remote: true, hosts })
   expect(await (await localGet("/__es/host")).json()).toEqual({ id: "local", label: "Local", remote: false, hosts })
   expect((await fetch(`${miniServer.origin}/__es/host`)).status).toBe(403)
-  expect((await miniGet("/__es/surface/board")).status).toBe(503)
+})
+
+test("a remote host's listener opens that host's file surface through its dashboard, in this listener's sandbox", async () => {
+  const seen: { path: string; cookie: string | null; authorization: string | null }[] = []
+  const report = "<!doctype html><style>body{color:#e4eaef}</style><h1>API tests: where things stand</h1>"
+  const gate = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: (request) => {
+      const url = new URL(request.url)
+      seen.push({ path: url.pathname, cookie: request.headers.get("cookie"), authorization: request.headers.get("authorization") })
+      if (url.pathname === "/es/api/surfaces") return Response.json({ surfaces: [
+        { id: "api-tests", upstream: "/api/surfaces/api-tests/static/" },
+        { id: "board", upstream: "http://127.0.0.1:9/" },
+      ] })
+      if (url.pathname === "/es/api/surfaces/api-tests/static/") return new Response(report, { headers: { "content-type": "text/html; charset=utf-8", "set-cookie": "leak=1" } })
+      return new Response("not found", { status: 404 })
+    },
+  })
+  cleanup.push(async () => void (await gate.stop(true)))
+  const { miniServer, miniGet } = await twoHosts({ origin: gate.url.origin, seen: [], stop: () => gate.stop(true) } as ReturnType<typeof fakeHost>)
+  // Minted by this listener only behind its own key, like the local host's surfaces.
+  expect((await fetch(`${miniServer.origin}/__es/surface/api-tests`)).status).toBe(403)
+  const minted = await miniGet("/__es/surface/api-tests", { headers: { cookie: "es_attention_operator=local-op" } })
+  expect(minted.status).toBe(200)
+  const { src } = await minted.json()
+  expect(src).toMatch(/^\/__cap\/surface\/api-tests\/[0-9a-z]+-[0-9a-f]{32}\/$/)
+  const frame = await fetch(`${miniServer.origin}${src}`)
+  expect(frame.status).toBe(200)
+  expect(await frame.text()).toBe(report)
+  expect(frame.headers.get("content-security-policy")).toContain(`script-src ${miniServer.origin}${src} 'unsafe-inline'`)
+  expect(frame.headers.get("content-security-policy")).toContain("sandbox allow-scripts")
+  expect(frame.headers.get("set-cookie")).toBeNull()
+  // Only that host's dashboard file route is read, with no credential of this machine.
+  expect(seen.map((item) => item.path)).toEqual(["/es/api/surfaces", "/es/api/surfaces/api-tests/static/"])
+  expect(seen.every((item) => !item.cookie && !item.authorization)).toBe(true)
+  // A surface at a loopback address on that host is not reachable from here: an explicit refusal, never a local read.
+  const { src: board } = await (await miniGet("/__es/surface/board")).json()
+  const refused = await fetch(`${miniServer.origin}${board}`)
+  expect([refused.status, await refused.text()]).toEqual([502, "This surface is served only on its own host"])
+  expect(seen).toHaveLength(2)
+  // Climbing out of the surface's file route is refused before any read.
+  expect((await fetch(`${miniServer.origin}${src}..%2F..%2Fattention`)).status).toBeGreaterThanOrEqual(400)
 })
 
 test("a listener without configured hosts reports the local host and no switch", async () => {

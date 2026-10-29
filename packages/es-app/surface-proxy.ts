@@ -13,7 +13,8 @@
  * leaked URL stops working. Other capability-served content (e.g. shared files) belongs under
  * the same prefix so one edge rule covers it. */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
-import { request, type IncomingMessage, type ServerResponse } from "node:http"
+import { request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http"
+import { request as httpsRequest } from "node:https"
 
 export type SurfaceEntry = { id: string; upstream: string }
 
@@ -52,6 +53,10 @@ export const surfaceCsp = (prefix: string) =>
 // gateway; the Host reaching us is then loopback, so the frame needs the public prefix too.
 export const surfaceProxy = (options: {
   dashboard: string | undefined
+  /** A remote host's dashboard (`https://<name>.ts.net/es`, reached through that host's tailnet identity gate):
+   * a remote host's listener serves only its file surfaces (the dashboard's own /api/surfaces/<id>/static/),
+   * since a surface at a loopback address on that host is not reachable from here. */
+  remote?: string
   registry?: () => Promise<SurfaceEntry[]>
   publicOrigin?: string
   /** Lifetime of a minted frame address; the desk remounts the frame before it lapses. */
@@ -72,7 +77,7 @@ export const surfaceProxy = (options: {
     options.registry ??
     (() => {
       if (cached && Date.now() - cached.at < REGISTRY_TTL) return cached.value
-      const value = fetch(`${options.dashboard}/api/surfaces`, { signal: AbortSignal.timeout(5000), redirect: "error" })
+      const value = fetch(`${options.remote ?? options.dashboard}/api/surfaces`, { signal: AbortSignal.timeout(5000), redirect: "error" })
         .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`registry ${response.status}`))))
         .then((body: { surfaces: SurfaceEntry[] }) => body.surfaces)
       value.catch(() => (cached = undefined))
@@ -80,6 +85,10 @@ export const surfaceProxy = (options: {
       return value
     })
   const upstreamURL = (entry: SurfaceEntry, rest: string, search: string) => {
+    if (options.remote) {
+      if (!/^\/api\/surfaces\/[a-z0-9][a-z0-9-]{0,39}\/static\/$/.test(entry.upstream) || rest.split("/").includes("..")) return undefined
+      return `${options.remote}${entry.upstream.slice(0, -1)}${rest}${search}`
+    }
     const base = entry.upstream.startsWith("/") ? new URL(entry.upstream, options.dashboard) : new URL(entry.upstream)
     if (base.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(base.hostname)) return undefined
     // Concatenate rather than resolve: the surface may not climb out of its upstream base.
@@ -120,10 +129,11 @@ export const surfaceProxy = (options: {
     if (entry === null) return finish(res, 502, "Surface registry unavailable")
     if (!entry) return finish(res, 404, "Surface withdrawn")
     const target = upstreamURL(entry, rest, url.search)
+    if (!target && options.remote) return finish(res, 502, "This surface is served only on its own host")
     if (!target) return finish(res, 400, "Invalid surface path")
     const path = `/__cap/surface/${id}/${presented}/`
     const prefix = [`http://${req.headers.host}${path}`, ...(options.publicOrigin ? [`${options.publicOrigin}${path}`] : [])].join(" ")
-    const upstream = request(
+    const upstream = (target.startsWith("https:") ? httpsRequest : httpRequest)(
       target,
       {
         method: req.method,

@@ -128,8 +128,9 @@ export const serve = async (options: {
   const index = renderer ? undefined : await readFile(path.join(root, "index.html"))
   const key = randomBytes(32).toString("hex")
   const upstreams = new Set<ReturnType<typeof httpRequest>>()
-  // Surface upstreams are loopback addresses on the dashboard's machine; never resolve a remote host's here.
-  const surfaces = surfaceProxy({ dashboard: remote ? undefined : targets.es, publicOrigin })
+  // Surface upstreams are loopback addresses on the dashboard's machine; never resolve a remote host's here. A remote
+  // host's listener serves that host's file surfaces through its dashboard (same identity gate as its /es reads).
+  const surfaces = surfaceProxy({ dashboard: remote ? undefined : targets.es, remote: remote ? targets.es : undefined, publicOrigin })
   // Paired remote clients never write this machine's performance journal.
   const perf = pairing || !options.perfDir ? undefined : createPerfLog({ dir: options.perfDir, host: remote?.id ?? "local" })
   const sameHost = (req: { headers: IncomingHttpHeaders }) =>
@@ -201,7 +202,7 @@ export const serve = async (options: {
     // cookie or key, and outside the edge's sign-in. The path's capability is the only credential;
     // anything under /__cap/ that is not a valid surface capability gets a plain 404.
     if (sameHost(req) && req.url?.startsWith("/__cap/")) {
-      if (!targets.es || remote) return finish(503, "Service not configured")
+      if (!targets.es) return finish(503, "Service not configured")
       res.removeHeader("Content-Security-Policy")
       return void surfaces.serve(req, res)
     }
@@ -232,7 +233,6 @@ export const serve = async (options: {
       return finish(200, JSON.stringify(options.hostInfo?.() ?? localHost), "application/json")
     }
     if (url.pathname.startsWith("/__es/surface/")) {
-      if (remote) return finish(503, "Surfaces are not available on a remote host")
       return surfaces.address(req, res)
     }
     if (url.pathname === "/__es/perf") {
