@@ -44,8 +44,26 @@ export const applyListing = (pins: Pin[], listing: Pick<PinListing, "reset" | "p
   return [...pins.filter((pin) => !changed.has(pin.ref)), ...listing.pins]
 }
 
-/** One host's pins in display order: explicit order first (ascending), then most recently pinned. */
-export const orderedPins = (pins: Pin[]) => pins.toSorted((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity) || b.pinnedAt - a.pinnedAt)
+/** A pin's place in the one user order shared by every host of a profile (ascending). A pin never moved ranks by
+ * its pin time, newest first; a moved pin keeps the rank written into its own host's `order`. Ranks of different hosts
+ * compare directly, so the union over hosts is one interleaved order and moving a pin writes only that pin's host. */
+export const pinRank = (pin: Pin) => pin.order ?? -pin.pinnedAt
+
+/** Pins in the shared user order; equal ranks fall back to newest pin, then a fixed key so every client agrees. */
+export const orderedPins = <T extends Pin & { host?: string }>(pins: T[]) =>
+  pins.toSorted((a, b) => pinRank(a) - pinRank(b) || b.pinnedAt - a.pinnedAt || pinUnionKey(a.host ?? "", a.ref).localeCompare(pinUnionKey(b.host ?? "", b.ref)))
+
+/** The union of every reachable host's pins in the shared user order, each tagged with its host. */
+export const unionPins = (hosts: { host: string; pins: Pin[] }[]) => orderedPins(hosts.flatMap((item) => item.pins.map((pin) => ({ ...pin, host: item.host }))))
+
+/** The rank that places a moved pin between its new neighbours in the shared order (`before` above it, `after` below
+ * it; either absent at an end). Only the moved pin's host is written: `reorder(ref, moveRank(...))` on its own client. */
+export const moveRank = (before: Pin | undefined, after: Pin | undefined) => {
+  if (before && after) return (pinRank(before) + pinRank(after)) / 2
+  if (before) return pinRank(before) + 1
+  if (after) return pinRank(after) - 1
+  return 0
+}
 
 /** The one-time import of this device's local pins into a host's store: the stored pin time or 0 (never now), and an op
  * derived from (host, ref, time) so a repeated import is an exact retry, not a second change. A migrate PUT cannot
