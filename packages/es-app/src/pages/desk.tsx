@@ -15,7 +15,7 @@ import type { IgnoredFailure } from "../failure-ignores"
 import { useDeskQueue } from "../desk-queue"
 import { failureAge, failureLabel, failureWhen, OLD_FAILURE_MS } from "../session-failures"
 import type { SessionFailure } from "@opencode-ai/sdk/v2"
-import { attentionItem, briefBinding, briefPacket, briefSends, deskContext, deskSources, detailRequest, type DeskItem, type DeskSource, SOURCE_TAIL } from "../desk"
+import { attentionItem, briefBinding, briefCopy, briefPacket, briefSends, deskContext, deskSources, detailRequest, type DeskItem, type DeskSource, SOURCE_TAIL } from "../desk"
 import { answeredJob, createMemory, readConversation, type BriefJob } from "../desk-session"
 import { useDeskChat } from "../desk-companion"
 import { anchorHref } from "../message-anchor"
@@ -370,8 +370,9 @@ const Answered = (props: { record: AttentionRecord; attention: ReturnType<typeof
   const item = () => attentionItem(props.record, 0, String(props.record.content_revision ?? props.record.answer?.revision ?? props.record.revision))
   const pinned = () => answeredJob(prepared.briefs.jobs(), item(), props.record.answer)?.id
   const brief = useCompleteBrief(item, pinned)
+  const copyOf = () => { const value = brief(); return value ? briefCopy(value, item()) : undefined }
   return <Show when={pinned()} keyed fallback={<AttentionDecision record={props.record} attention={props.attention} onView={props.onView} conversation={<RecordConversation record={props.record} />} />}>{job =>
-    <AttentionDecision record={props.record} attention={props.attention} onView={props.onView} prepared={brief()} conversation={<RecordConversation record={props.record} />}
+    <AttentionDecision record={props.record} attention={props.attention} onView={props.onView} prepared={brief()} copy={copyOf()} conversation={<RecordConversation record={props.record} />}
       brief={<PreparedBrief item={item()} live={false} part="lead" pinned={job} />} briefVisual={<PreparedBrief item={item()} live={false} part="visual" pinned={job} />}
       briefAfter={<PreparedBrief item={item()} live={false} part="after" pinned={job} />} briefDetails={<PreparedBrief item={item()} live={false} part="details" pinned={job} />} />}</Show>
 }
@@ -387,9 +388,10 @@ const Canonical = (props: { item: DeskItem; live: boolean; detail: (question: st
   // re-reads this card's item while it unmounts (after an answer) and aborts that update.
   const briefJob = () => { const value = job(); return value ? { job: value.id, revision: value.meta.revision } : undefined }
   const sends = () => { const value = brief(); return value ? { text: briefSends(value, props.item, found()?.documents), to: value.sendsTo, as: value.sendsAs } : undefined }
+  const copy = () => { const value = brief(); return value ? briefCopy(value, props.item, found()?.documents) : undefined }
   return <div class="desk-canonical">
     <Show when={props.item.series} fallback={<Show when={props.item.record}>{record => <AttentionDecision record={record()} attention={props.attention} prepared={brief()}
-      briefJob={briefJob()} sends={sends()} conversation={<RecordConversation record={record()} />}
+      briefJob={briefJob()} sends={sends()} copy={copy()} conversation={<RecordConversation record={record()} />}
       brief={<PreparedBrief item={props.item} live={props.live} part="lead" />} briefVisual={<PreparedBrief item={props.item} live={props.live} part="visual" />} briefAfter={<PreparedBrief item={props.item} live={props.live} part="after" />}
       briefDetails={<PreparedBrief item={props.item} live={props.live} part="details" />} more={<MoreDetail ask={props.detail} />} />}</Show>}><AttentionSeries item={props.item} attention={props.attention} /></Show>
     <Show when={props.item.request?.kind === "permission" ? props.item.request : undefined}>{request =>

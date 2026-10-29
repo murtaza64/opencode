@@ -63,7 +63,7 @@ const historyVersion = (record: AttentionRecord) => `${record.revision}:${record
 
 // One answer: a selected option, a written note, or both. Either alone is a complete answer unless the
 // option declares required input; nothing is written on the human's behalf. Secondary actions sit beside the single primary one.
-export const Answer = (props: { record: AttentionRecord; attention: Attention; options: boolean; hideTarget?: boolean; onView?: (view: AttentionView) => void; extra?: JSX.Element; prepared?: BriefResult; afterChoices?: JSX.Element; sends?: Sends; briefJob?: { job: string; revision: string } }) => {
+export const Answer = (props: { record: AttentionRecord; attention: Attention; options: boolean; hideTarget?: boolean; onView?: (view: AttentionView) => void; extra?: JSX.Element; prepared?: BriefResult; afterChoices?: JSX.Element; sends?: Sends; copy?: BriefCopy; briefJob?: { job: string; revision: string } }) => {
   const [text, setText] = createSignal(localStorage.getItem(answerDraftKey(props.record)) ?? "")
   const [choice, setChoice] = createSignal("")
   const canWrite = () => canWriteAttention(props.attention, props.record)
@@ -120,6 +120,8 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
       onInput={event => { setText(event.currentTarget.value); localStorage.setItem(answerDraftKey(props.record), event.currentTarget.value) }} /></Show>
     {/* What a publish decision would send, verbatim from the request, right above the action that approves it. */}
     <Show when={props.sends?.text ? props.sends : undefined}>{sends => <SendsPreview sends={sends()} />}</Show>
+    <For each={props.copy?.blocks ?? []}>{block => <CopyPreview block={block} />}</For>
+    <Show when={props.copy?.quoteFailed}><p class="home-quote-failed">The brief couldn't quote this exactly; the original request below has the full text.</p></Show>
     <div class="home-actions">
       {/* On cards the selected card already shows the choice, so the button stays short; its name still says what is sent. */}
       <button class="home-primary" dir="auto" disabled={!ready()} aria-keyshortcuts={ariaShortcut("submit")} onClick={() => void send()}
@@ -163,20 +165,33 @@ const OptionField = (props: { id: string; option: AttentionOption; value?: Input
 /** What approving would publish: the exact text, where it goes and who posts it, as the request and its evidence state. */
 export type Sends = { text: string; to: string; as: string }
 
+/** Text the human posts themselves, quoted from the request's own bytes (desk.ts briefCopy), with a failure flag. */
+export type BriefCopy = { blocks: { label: string; to?: string; text: string }[]; quoteFailed: boolean }
+
 // The quoted text is the request's own; Copy takes exactly it, with its line breaks and nothing around it.
-const SendsPreview = (props: { sends: Sends }) => {
+const QuoteCopy = (props: { text: string; caption: JSX.Element; label: string }) => {
   const [copied, setCopied] = createSignal<"Copied" | "Copy failed">()
   const copy = async () => {
-    const ok = await navigator.clipboard?.writeText(props.sends.text).then(() => true, () => false) || copyBySelection(props.sends.text)
+    const ok = await navigator.clipboard?.writeText(props.text).then(() => true, () => false) || copyBySelection(props.text)
     setCopied(ok ? "Copied" : "Copy failed")
     setTimeout(() => setCopied(), 2000)
   }
   return <figure class="home-sends">
-    <figcaption class="home-source">Would post<Show when={props.sends.as}> as <bdi dir="auto">{props.sends.as}</bdi></Show><Show when={props.sends.to}> · to <bdi dir="auto">{props.sends.to}</bdi></Show></figcaption>
-    <blockquote dir="auto"><LinkedText text={props.sends.text} /></blockquote>
-    <button type="button" class="home-sends-copy" aria-label="Copy the text it would post" onClick={() => void copy()}>{copied() ?? "Copy"}</button>
+    <figcaption class="home-source">{props.caption}</figcaption>
+    <blockquote dir="auto"><LinkedText text={props.text} /></blockquote>
+    <button type="button" class="home-sends-copy" aria-label={props.label} onClick={() => void copy()}>{copied() ?? "Copy"}</button>
   </figure>
 }
+
+// The system sends this text when the human chooses; "Would post" is reserved for that.
+const SendsPreview = (props: { sends: Sends }) =>
+  <QuoteCopy text={props.sends.text} label="Copy the text it would post"
+    caption={<>Would post<Show when={props.sends.as}> as <bdi dir="auto">{props.sends.as}</bdi></Show><Show when={props.sends.to}> · to <bdi dir="auto">{props.sends.to}</bdi></Show></>} />
+
+// The human posts this text themselves: one block and one Copy per post, nothing implies the system posts it.
+const CopyPreview = (props: { block: BriefCopy["blocks"][number] }) =>
+  <QuoteCopy text={props.block.text} label={`Copy ${props.block.label}`}
+    caption={<>To post<Show when={props.block.to}> · <bdi dir="auto">{props.block.to}</bdi></Show> · <bdi dir="auto">{props.block.label}</bdi></>} />
 
 // The async Clipboard API is unavailable outside secure contexts; a selection copy inside the click still works.
 const copyBySelection = (text: string) => {
@@ -218,7 +233,7 @@ const Delivery = (props: { record: AttentionRecord; attention: Attention }) => {
  * choices (picture, unknown, sources) and `briefDetails` before the original request. With a complete
  * `prepared` brief the producer's raw context moves behind a disclosure and each option becomes a card
  * saying what choosing it leads to. */
-export const AttentionDecision = (props: { record: AttentionRecord; attention: Attention; onView?: (view: AttentionView) => void; brief?: JSX.Element; briefVisual?: JSX.Element; briefAfter?: JSX.Element; briefDetails?: JSX.Element; prepared?: BriefResult; sends?: Sends; conversation?: JSX.Element; more?: JSX.Element; briefJob?: { job: string; revision: string } }) => {
+export const AttentionDecision = (props: { record: AttentionRecord; attention: Attention; onView?: (view: AttentionView) => void; brief?: JSX.Element; briefVisual?: JSX.Element; briefAfter?: JSX.Element; briefDetails?: JSX.Element; prepared?: BriefResult; sends?: Sends; copy?: BriefCopy; conversation?: JSX.Element; more?: JSX.Element; briefJob?: { job: string; revision: string } }) => {
   // A review asks the human to try one thing and say Done; it is not decided, so no brief explains or replaces it.
   const review = () => props.record.kind === "review"
   const prepared = () => review() ? undefined : props.prepared
@@ -269,7 +284,7 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
     <Show when={props.record.status === "open" && !review()}>
       {/* A recommendation that names an option is tagged on that option; free text stays visible. */}
       <Show when={props.record.recommendation && !props.record.options.some(option => option.id === props.record.recommendation)}><p class="home-muted">Recommended: <bdi dir="auto"><LinkedText text={props.record.recommendation ?? ""} /></bdi></p></Show>
-      <Answer record={props.record} attention={props.attention} options={props.record.options.length > 0} onView={props.onView} prepared={prepared()} afterChoices={review() ? undefined : props.briefAfter} sends={review() ? undefined : props.sends} briefJob={review() ? undefined : props.briefJob}
+      <Answer record={props.record} attention={props.attention} options={props.record.options.length > 0} onView={props.onView} prepared={prepared()} afterChoices={review() ? undefined : props.briefAfter} sends={review() ? undefined : props.sends} copy={review() ? undefined : props.copy} briefJob={review() ? undefined : props.briefJob}
         extra={<><button class="home-quiet" disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "snooze", snoozed_until: Date.now() + 3600_000 })}>Snooze 1h</button><button class="home-quiet" disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "resolve", reason: "Human marked no longer needed" })}>No longer needed</button></>} />
     </Show>
     <Show when={props.record.status === "decided"}><p class="home-recorded">Saved: <bdi dir="auto">{decisionLabel(props.record)}</bdi> · not sent</p><Answer record={props.record} attention={props.attention} options={props.record.options.length > 0} onView={props.onView} /><div class="home-actions"><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open agent thread">Open thread</A><button disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "resolve", reason: "Human marked resolved" })}>Mark resolved</button></div></Show>
@@ -295,7 +310,8 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
     {review() ? undefined : props.briefDetails}
     {/* With a brief leading, the producer's exact request comes last, after the native controls. */}
     <Show when={prepared() && !requestHasSteps(props.record)}>
-      <details class="home-original"><summary>Original request</summary><RequestText record={props.record} /></details>
+      {/* A quote that failed verification leaves the full request open instead of hiding the text. */}
+      <details class="home-original" open={!!props.copy?.quoteFailed}><summary>Original request</summary><RequestText record={props.record} /></details>
     </Show>
     <details onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>Record &amp; history</summary><div class="home-source"><bdi dir="ltr">{props.record.id} · {props.record.gate_key} · revision {props.record.revision}</bdi></div><Show when={history()?.version === historyVersion(props.record) ? history() : undefined} fallback={<p>Loading history…</p>}>{item => <Show when={!item().error} fallback={<p>{item().error}</p>}><pre dir="ltr">{JSON.stringify(item().events, null, 2)}</pre></Show>}</Show></details>
     </div>
