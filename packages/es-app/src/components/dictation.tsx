@@ -2,11 +2,13 @@ import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { dictationInsert, type Composer } from "../composer"
 import { dictation, dictationTarget, type Dictation } from "../dictation"
 import { Glyph } from "./icons"
+import type { SessionHost } from "../session-host"
 
 type Props = {
   composer: Composer
   sessionID: string
   directory: string
+  host?: SessionHost
   // The visible draft editor; read when dictation starts and when text lands.
   editor: () => HTMLTextAreaElement | undefined
   // Vim normal mode shows the caret as a one-character selection.
@@ -29,7 +31,7 @@ const SHORTCUT = (event: KeyboardEvent) =>
 export const DictationButton = (props: Props) => {
   const voice = props.dictation ?? dictation
   const state = voice.state
-  const draft = { sessionID: props.sessionID, directory: props.directory }
+  const draft = { sessionID: props.sessionID, directory: props.directory, host: props.host }
   const mine = () => voice.owns(state.target, draft)
   const elsewhere = () => state.phase !== "idle" && !mine()
   const phase = () => (mine() ? state.phase : "idle")
@@ -46,7 +48,7 @@ export const DictationButton = (props: Props) => {
     const buffer = props.composer.state.visibleBuffer
     const el = props.editor()
     const current = props.composer.state[buffer]
-    return dictationTarget(props.sessionID, props.directory, buffer, el?.isConnected ? { revision: current.revision, selection: range(el) } : current)
+    return dictationTarget(props.sessionID, props.directory, buffer, el?.isConnected ? { revision: current.revision, selection: range(el) } : current, props.host)
   }
   const toggle = () => {
     if (elsewhere() || state.availability !== "ready") return

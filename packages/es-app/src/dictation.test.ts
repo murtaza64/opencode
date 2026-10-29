@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { createComposer, dictationInsert } from "./composer"
+import { createComposer, dictationInsert, getComposer } from "./composer"
 import { createDictation, dictationTarget, type DictationTarget } from "./dictation"
 
 const deferred = <T>() => {
@@ -48,6 +48,81 @@ const setup = (status?: object) => {
     dictationTarget(`ses_${key}`, "/repo", composers[key].state.visibleBuffer, composers[key].state[composers[key].state.visibleBuffer])
   return { net, composers, voice, target }
 }
+
+test("a remote transcript falls back to its host's draft after switching hosts with the same session and directory", async () => {
+  const net = bridge()
+  const session = `ses_${crypto.randomUUID()}`
+  const host = { id: "mini", base: "/hosts/mini/oc" }
+  const local = getComposer(session, "/repo")
+  const remote = getComposer(session, "/repo", host)
+  const other = getComposer(session, "/repo", { id: "other", base: "/hosts/other/oc" })
+  const voice = createDictation({ fetch: net.fetch })
+  local.setText("local draft")
+  other.setText("other host draft")
+  remote.setText("Please review")
+  remote.setSelection(13, 13)
+  remote.setImages([{ id: "image", mime: "image/png", url: "data:image/png;base64,AA==", filename: "shot.png" }])
+  remote.setModel({ providerID: "fixture", modelID: "test" })
+  const target = dictationTarget(session, "/repo", "task", remote.state.task, host)
+  await voice.refresh()
+  const starting = voice.start(target)
+  await net.release("start", Response.json({ ok: true }))
+  await starting
+  const stopping = voice.stop()
+  // An editor for this same session on Local must not receive the remote result.
+  const localEdits: string[] = []
+  const detach = voice.attach({ sessionID: session, directory: "/repo" }, (_target, text) => {
+    localEdits.push(text)
+    return true
+  })
+  remote.setText("Please review this")
+  remote.setSelection(18, 18)
+  await net.release("stop", Response.json({ ok: true, text: "carefully" }))
+  await stopping
+  detach()
+  expect(remote.state.task.text).toBe("Please review this carefully")
+  expect(remote.state.task.images.map((image) => image.id)).toEqual(["image"])
+  expect(remote.state.task.model).toEqual({ providerID: "fixture", modelID: "test" })
+  expect(remote.state.normalSubmission).toBeNull()
+  expect(local.state.task.text).toBe("local draft")
+  expect(other.state.task.text).toBe("other host draft")
+  expect(localEdits).toEqual([])
+  expect(net.calls.map((call) => call.action)).toEqual(["start", "stop"])
+})
+
+test("focused dictation editors, ownership and errors are isolated by host, not only session and directory", async () => {
+  const net = bridge()
+  const voice = createDictation({ fetch: net.fetch })
+  const remote = { sessionID: "ses_same", directory: "/repo", host: { id: "mini", base: "/hosts/mini/oc" } }
+  const local = { sessionID: "ses_same", directory: "/repo" }
+  const remoteEdits: string[] = []
+  const localEdits: string[] = []
+  voice.attach(remote, (_target, text) => { remoteEdits.push(text); return true })
+  const detachLocal = voice.attach(local, (_target, text) => { localEdits.push(text); return true })
+  const target = dictationTarget(remote.sessionID, remote.directory, "task", { revision: 0, selection: [0, 0] }, remote.host)
+  await voice.refresh()
+  const starting = voice.start(target)
+  await net.release("start", Response.json({ ok: true }))
+  await starting
+  expect(voice.owns(voice.state.target, remote)).toBe(true)
+  expect(voice.owns(voice.state.target, local)).toBe(false)
+  await voice.toggle({ ...target, host: undefined })
+  expect(voice.state.phase).toBe("recording")
+  // Cleaning up a different host's editor must not detach the remote editor.
+  detachLocal()
+  const stopping = voice.stop()
+  await net.release("stop", Response.json({ ok: true, text: "remote text" }))
+  await stopping
+  expect(remoteEdits).toEqual(["remote text"])
+  expect(localEdits).toEqual([])
+
+  const denied = voice.start(target)
+  await net.release("start", Response.json({ ok: false, code: "permission", message: "Microphone access denied" }, { status: 403 }))
+  await denied
+  expect(voice.owns(voice.state.error?.target, remote)).toBe(true)
+  expect(voice.owns(voice.state.error?.target, local)).toBe(false)
+  expect(voice.state.error?.action).toBe("settings")
+})
 
 test("stop transcribes into the draft at the captured selection, keeping images and model, and never sends", async () => {
   const { net, composers, voice, target } = setup()

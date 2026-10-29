@@ -1664,8 +1664,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     <DirectComposer composer={composer} connected={connected() && !nudgePhase() && !aborting()} submit={send} restoreDraft={restoreDraft}
       editor={<Editor />} attachments={<><ContextChips refs={contextRefs()} note={contextNote()}
         remove={(ref) => setContextRefs(contextRefs().filter((item) => contextKey(item) !== contextKey(ref)))} /><Attachments /></>}
-      // Dictation's fallback writes the saved draft by session and directory only, so it stays off for another host.
-      dictation={remote ? undefined : <DictationButton composer={composer} sessionID={sessionID} directory={directory}
+      dictation={<DictationButton composer={composer} sessionID={sessionID} directory={directory} host={props.host}
         editor={() => promptEl} normalMode={() => vim.mode() === "normal"}
         checkpoint={(el) => activeVim().checkpoint(el)} refresh={(el) => vim.refresh(el)} />}
       sessionMetadata={<ComposerMeta context={footerMeta().context} cost={footerMeta().cost} />}
