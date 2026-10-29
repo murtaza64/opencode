@@ -438,3 +438,9 @@
 .agent-new { margin-inline-start: auto; color: var(--text); text-decoration: none; }
 .agent-new svg { inline-size: 11px; block-size: 11px; }
 .agent-new.active { border-color: var(--accent); }
+
+/* NAV-19 Surface glyphs: base in the row's kind colour, accents in the accent colour over a page-coloured knockout. */
+.surface-glyph { inline-size: var(--surface-glyph-size, 14px); block-size: var(--surface-glyph-size, 14px); flex: none; overflow: visible; }
+.surface-glyph-knockout { fill: var(--mantle); }
+.nav-item:hover .surface-glyph-knockout, .nav-item.active .surface-glyph-knockout { fill: var(--selected, var(--surface0)); }
+.surface-glyph-accent { stroke: var(--accent); }

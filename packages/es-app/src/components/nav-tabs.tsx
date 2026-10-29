@@ -10,6 +10,8 @@ import { surfaceKey, surfaceProblem, type Surface } from "../surfaces"
 import { needsYou } from "../needs-you"
 import { workCountLabel, workSurfaces, type WorkEntry } from "../work-queue"
 import { HostGlyph } from "./icons"
+import { SurfaceGlyph } from "./surface-glyph"
+import { surfaceKindLabel } from "../surface-tags"
 import { PrList, sortPrs } from "./pr"
 
 export type NavTab = "surfaces" | "agents" | "decisions" | "prs"
@@ -70,9 +72,9 @@ const HostSurfaceRow = (props: { entry: WorkEntry }) => {
   const ownOnly = () => props.entry.remote?.kind === "surface" && props.entry.remote.frame === "own-host-only"
   return <A href={props.entry.href} activeClass="" class="nav-item nav-surface host-surface" classList={{ stale: props.entry.stale, active: open(props.entry.key) }}
     aria-current={open(props.entry.key) ? "page" : undefined} data-nav-item={props.entry.key}
-    aria-label={`${props.entry.title}, surface, on ${props.entry.hostLabel}${props.entry.stale ? ", last known" : ""}${ownOnly() ? ", opens on that computer only" : ""}`}
+    aria-label={`${props.entry.title}, ${props.entry.remote?.kind === "surface" ? surfaceKindLabel(props.entry.remote.surface) : "surface"}, on ${props.entry.hostLabel}${props.entry.stale ? ", last known" : ""}${ownOnly() ? ", opens on that computer only" : ""}`}
     title={props.entry.stale ? `${props.entry.hostLabel} not current; last-known surface` : `${props.entry.title} — on ${props.entry.hostLabel}`}>
-    <span class="nav-kind" aria-hidden="true">▢</span>
+    <Show when={props.entry.remote?.kind === "surface" ? props.entry.remote.surface : undefined} fallback={<span class="nav-kind" aria-hidden="true">▢</span>}>{surface => <SurfaceGlyph surface={surface()} />}</Show>
     <HostGlyph host={props.entry.host!} />
     <span class="nav-title" dir="auto">{props.entry.title}</span>
     <span class="session-project">{props.entry.hostLabel}</span>
@@ -80,9 +82,11 @@ const HostSurfaceRow = (props: { entry: WorkEntry }) => {
 }
 const SurfaceRow = (props: { surface: Surface; fresh?: boolean }) => {
   const open = useOpenItem()
-  return <A href={itemHref(surfaceKey(props.surface.id))} activeClass="" classList={{ active: open(surfaceKey(props.surface.id)), fresh: !!props.fresh }} aria-current={open(surfaceKey(props.surface.id)) ? "page" : undefined} class="nav-item nav-surface" data-nav-item={surfaceKey(props.surface.id)}>
-    <span class="nav-kind" aria-hidden="true">▢</span>
+  return <A href={itemHref(surfaceKey(props.surface.id))} activeClass="" classList={{ active: open(surfaceKey(props.surface.id)), fresh: !!props.fresh }} aria-current={open(surfaceKey(props.surface.id)) ? "page" : undefined} class="nav-item nav-surface" data-nav-item={surfaceKey(props.surface.id)}
+    title={`${props.surface.title} — ${surfaceKindLabel(props.surface)}`}>
+    <SurfaceGlyph surface={props.surface} />
     <span class="nav-title" dir="auto">{props.surface.title}</span>
+    <span class="sr-only">, {surfaceKindLabel(props.surface)}</span>
     <Show when={props.fresh}><span class="sr-only">, new delivery</span></Show>
     <span class="session-project">{surfaceProblem(props.surface.health) ?? props.surface.owner}</span>
   </A>
