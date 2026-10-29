@@ -47,6 +47,8 @@ export type SessionRow = {
   title: string
   directory: string
   updated: number
+  /** Creation time when the session index knows it; absent = unknown (sorted last). */
+  created?: number
   live?: string
   project?: string
   archived?: number
@@ -415,18 +417,22 @@ export function DashboardProvider(props: ParentProps) {
   }
   const localProject = () => allProjects() ? undefined : editspace() ?? editspaces()?.default ?? undefined
   const sessionRows = createMemo<SessionRow[]>(() => {
+    const created = new Map((globalSessions() ?? []).map((s) => [s.id, s.time.created]))
     const rows: SessionRow[] = allProjects()
       ? (globalSessions() ?? []).filter((s) => !s.parentID).map((s) => ({
           id: s.id,
           title: s.title,
           directory: s.directory,
           updated: s.time.updated,
+          created: s.time.created,
           archived: s.time.archived,
           project: resolveProjectName(s, editspaces()?.editspaces ?? []),
         }))
       : (state()?.threads ?? [])
           .filter((t: any) => t.kind === "session" && t.sessions[0])
           .map((t: any) => t.sessions[0])
+          // Dashboard thread rows carry no creation time; the global index supplies it when loaded.
+          .map((row: SessionRow) => row.created !== undefined || !created.has(row.id) ? row : { ...row, created: created.get(row.id) })
     // This host unreachable on load: its last-seen rows for this project, not an empty list.
     // When the project list itself is down, the project is unknown: take the last list, whatever its project.
     const known = allProjects() || !!editspace() || !!editspaces()?.default
