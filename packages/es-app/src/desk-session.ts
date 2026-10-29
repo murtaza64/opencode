@@ -363,6 +363,8 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
   const start = async (item: DeskItem) => {
     // A series question gets no brief of its own: one model call per question would fan out (attention S7).
     if (item.series || item.record?.series) return
+    // A review item's artifact is its own explanation: no model call (attention ATTN-15).
+    if (item.kind === "review") return
     if (pending() || preparing() || inflight()) return
     const existing = reusable(item)
     if (existing) return existing
@@ -422,7 +424,7 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
    * the phone uses). The previous brief stays shown until the new one is ready. */
   const [regenerating, setRegenerating] = createSignal(false)
   const regenerate = async (item: DeskItem) => {
-    if (!item.record || regenerating()) return
+    if (!item.record || item.kind === "review" || regenerating()) return
     setRegenerating(true)
     try {
       const response = await fetch(`/es/api/frontdesk/briefs/${encodeURIComponent(item.record.id)}/regenerate?es=${encodeURIComponent(item.record.editspace)}`, {

@@ -375,6 +375,8 @@ export const useCompleteJob = (item: () => DeskItem, pinned?: () => string | und
 
 /** The app-wide prepared brief for one item, as Home and the desk show it. */
 export const PreparedBrief = (props: { item: DeskItem; live: boolean; part?: Part; pinned?: string }) => {
+  // A review item's artifact is its own explanation: no brief panel, prepare control or brief reads (attention ATTN-15).
+  if (props.item.kind === "review") return null
   const prepared = useBriefs()
   prepared.view()
   const briefs = prepared.briefs

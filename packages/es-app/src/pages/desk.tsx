@@ -235,7 +235,7 @@ export default function Desk() {
                 <Show when={item.failure} fallback={<><Show when={item.record}>{record => <> · <RowAgent record={record()} /></>}</Show><Show when={item.project}> · <bdi dir="auto">{item.project}</bdi></Show>
                   <Show when={now() - item.checked > STALE_MS}> · <span class="home-blocked">checked {ago(item.checked) || "never"}</span></Show></>}>
                   {failure => <> · {failureLabel(failure())} · <span data-failure-age>{failureAge(failure().time, now())}</span></>}</Show>
-                <Show when={rowBrief(job())}>{label => <> · {label()}</>}</Show></span>
+                <Show when={item.kind !== "review" && rowBrief(job())}>{label => <> · {label()}</>}</Show></span>
             </button></li>
           }}</For>
           <For each={hostDecisions()}>{entry => {
