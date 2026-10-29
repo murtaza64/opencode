@@ -117,7 +117,7 @@ export const createTabs = (
     })
   }
   // Views load on first selection, so an unopened host's page never runs in the background.
-  const view = (id: string) => {
+  const view = (id: string, url?: string) => {
     const existing = views.get(id)
     if (existing) return existing
     const tab = tabs.find((item) => item.id === id)
@@ -135,7 +135,7 @@ export const createTabs = (
     // Keep the strip above every host view.
     window.contentView.addChildView(bar)
     layout()
-    void created.webContents.loadURL(tab.url)
+    void created.webContents.loadURL(url ?? tab.url)
     return created
   }
   const badgeText = (id: string) => {
@@ -192,6 +192,12 @@ export const createTabs = (
     shownContents: () => view(state.selected).webContents,
     hosts: () => tabs.map((tab) => ({ id: tab.id, label: tab.label, badge: badges.get(tab.id) })),
     contents: (id: string) => view(id).webContents,
+    /** Creates a host's view on `url` (a validated app route on its listener) instead of its start page. */
+    open: (id: string, url: string) => {
+      const existing = views.get(id)
+      if (existing) void existing.webContents.loadURL(url)
+      else view(id, url)
+    },
     sessions: () => [...new Set(tabs.map((tab) => tab.session))],
     setBadge: (id: string, badge: Badge) => {
       badges.set(id, badge)

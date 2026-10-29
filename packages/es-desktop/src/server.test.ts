@@ -757,3 +757,23 @@ test("every es-app API route is exposed by the native allowlist", async () => {
   const missing = concrete.filter((route) => !["GET", "POST", "PUT", "PATCH", "DELETE"].some((method) => apiAllowed(method, route)))
   expect(missing).toEqual([])
 })
+
+test("a launch restore reopens only app routes on each view's own listener, all or nothing", async () => {
+  const { restorePlan } = await import("./policy")
+  const tabs = [{ id: "local", origin: "http://127.0.0.1:60302" }, { id: "mini", origin: "http://127.0.0.1:53935" }]
+  const work = "http://127.0.0.1:60302/desk?item=attention%3Afixture%3A1"
+  const mini = "http://127.0.0.1:53935/session/ses_a?directory=%2Frepo#prompt-msg_1"
+  expect(restorePlan({ version: 1, selected: "mini", views: [{ id: "local", url: work }, { id: "mini", url: mini }] }, tabs))
+    .toEqual({ selected: "mini", views: [{ id: "local", url: work }, { id: "mini", url: mini }] })
+  for (const bad of [
+    { version: 2, selected: "local", views: [{ id: "local", url: work }] },
+    { version: 1, selected: "mini", views: [{ id: "local", url: work }] },
+    { version: 1, selected: "local", views: [{ id: "local", url: mini }] },
+    { version: 1, selected: "local", views: [{ id: "local", url: "http://127.0.0.1:60302/oc/session" }] },
+    { version: 1, selected: "local", views: [{ id: "local", url: "https://example.com/desk" }] },
+    { version: 1, selected: "local", views: [{ id: "local", url: work }, { id: "local", url: work }] },
+    { version: 1, selected: "wing", views: [{ id: "wing", url: work }] },
+    { version: 1, selected: "local", views: [{ id: "local", url: work }, { id: "mini", url: "http://127.0.0.1:53935/__cap/x" }] },
+    "not json", null,
+  ]) expect(restorePlan(bad, tabs)).toBeUndefined()
+})
