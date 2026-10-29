@@ -154,6 +154,7 @@ export const UsageDailyResponse = Schema.Struct({
       cost: Schema.NullOr(Schema.Number),
       originOnly: Schema.Boolean,
       originCost: Schema.NullOr(Schema.Number),
+      originPartial: Schema.NullOr(Schema.Struct({ since: Schema.String, cost: Schema.Number, unpricedModels: Schema.Number })),
       unpricedModels: Schema.Number,
       unpricedTokens: Schema.Number,
       models: Schema.Array(

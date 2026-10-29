@@ -305,6 +305,41 @@ describe("UsageRollup", () => {
     }),
   )
 
+  it.effect("the day the cutoff falls in reports an origin-only subtotal from the first whole hour after it", () =>
+    Effect.gen(function* () {
+      const db = (yield* Database.Service).db
+      // A cutoff at 15:37Z: the 15:00 hour mixes backfilled history and live steps, so origin starts at 16:00Z.
+      const cutoff = Date.UTC(2026, 9, 28, 15, 37)
+      yield* db.update(UsageRollupStateTable).set({ cutoff, time_backfilled: 1 }).run()
+      const row = (h: number, model: string, cost: number) => ({
+        hour: Date.UTC(2026, 9, 28, h) / HOUR, session_id: "ses_p", provider_id: "p", model_id: model, cost, tokens_input: 1,
+      })
+      yield* db.insert(UsageHourlyTable).values([row(10, "m", 5), row(15, "m", 3), row(16, "m", 2), row(20, "m", 1), row(21, "unpriced", 0)]).run()
+      const result = yield* UsageRollup.daily(db, {
+        days: 2, offsetMinutes: -240, now: Date.UTC(2026, 9, 28, 22), hasRate: (_, model) => model === "m",
+      })
+      // 10-28 EDT runs 04:00Z to 04:00Z next day: full day 11, origin part from 16:00Z is 2 + 1.
+      expect(result.days[0]).toMatchObject({
+        day: "2026-10-28",
+        cost: 11,
+        originOnly: false,
+        originCost: null,
+        originPartial: { since: "2026-10-28T16:00:00.000Z", cost: 3, unpricedModels: 1 },
+      })
+      expect(result.days[1]).toMatchObject({ day: "2026-10-27", originPartial: null })
+    }),
+  )
+
+  it.effect("days wholly after the cutoff carry originCost and no partial", () =>
+    Effect.gen(function* () {
+      const db = (yield* Database.Service).db
+      yield* db.update(UsageRollupStateTable).set({ cutoff: Date.UTC(2026, 9, 27, 15, 37), time_backfilled: 1 }).run()
+      yield* db.insert(UsageHourlyTable).values([{ hour: Date.UTC(2026, 9, 28, 12) / HOUR, session_id: "ses_q", provider_id: "p", model_id: "m", cost: 4, tokens_input: 1 }]).run()
+      const [day] = (yield* UsageRollup.daily(db, { days: 1, offsetMinutes: -240, now: Date.UTC(2026, 9, 28, 22) })).days
+      expect(day).toMatchObject({ originOnly: true, originCost: 4, originPartial: null })
+    }),
+  )
+
   it.effect("top sessions rank by priced cost and show unknown cost as null", () =>
     Effect.gen(function* () {
       const db = (yield* Database.Service).db
