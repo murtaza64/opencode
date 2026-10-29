@@ -58,6 +58,35 @@ try {
     await page.keyboard.press("F6")
     const inComposer = await page.evaluate(() => !!document.activeElement?.closest(".prompt-box"))
     expect(inComposer).toBe(false)
+
+    // Ctrl+Alt+H from the composer focuses the sidebar (physical left in LTR).
+    await page.locator(".prompt-box textarea").focus()
+    await page.keyboard.press("Control+Alt+KeyH")
+    expect(await page.evaluate(() => !!document.activeElement?.closest("nav.sidebar"))).toBe(true)
+    await page.keyboard.press("Control+Alt+KeyL")
+    expect(await page.evaluate(() => !!document.activeElement?.closest("nav.sidebar"))).toBe(false)
+
+    // D6: in insert mode Ctrl+H/N stay text keys (not prevented, sidebar stays open).
+    await page.locator(".prompt-box textarea").focus()
+    await page.keyboard.press("i")
+    await page.evaluate(() => { window.kbdEvents = []; document.addEventListener("keydown", (event) => window.kbdEvents.push(event), true) })
+    await page.keyboard.press("Control+KeyH")
+    await page.keyboard.press("Control+KeyN")
+    expect(await page.evaluate(() => window.kbdEvents.filter((event) => event.key !== "Control").map((event) => event.defaultPrevented))).toEqual([false, false])
+    await expect(page.locator("nav.sidebar:not(.sidebar-mini)")).toBeVisible()
+    // Normal mode keeps Ctrl+H as the panel toggle.
+    await page.keyboard.press("Escape")
+    await page.keyboard.press("Control+KeyH")
+    await expect(page.locator("nav.sidebar:not(.sidebar-mini)")).toHaveCount(0)
+    await page.keyboard.press("Control+KeyH")
+
+    // Overlay shows D4 and region chords with platform labels.
+    await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur())
+    await page.keyboard.press("Shift+Slash")
+    const labels = page.getByRole("dialog", { name: "Keyboard shortcuts" })
+    await expect(labels.getByText(platform === "MacIntel" ? "⌘M" : "Ctrl+M", { exact: true })).toBeVisible()
+    await expect(labels.getByText(platform === "MacIntel" ? "⌃⌥H" : "Ctrl+Alt+H", { exact: true })).toBeVisible()
+    await page.keyboard.press("Escape")
     expect(errors).toEqual([])
     console.log(`ok ${platform}`)
     await context.close()

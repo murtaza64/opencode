@@ -3,7 +3,7 @@
  * key that works on this platform today. */
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { useNavigate } from "@solidjs/router"
-import { cycleRegion, installKeyboard, whichKey } from "../keyboard"
+import { cycleRegion, installKeyboard, moveRegion, whichKey } from "../keyboard"
 import { SEQUENCES, sequenceLabel, SHORTCUTS, shortcutLabel, type SequenceID, type ShortcutID } from "../shortcuts"
 import "./keyboard-layer.css"
 
@@ -38,6 +38,10 @@ export function KeyboardLayer() {
         goNewSession: () => navigate("/new"),
         nextRegion: () => cycleRegion(1),
         previousRegion: () => cycleRegion(-1),
+        focusLeft: () => moveRegion("left"),
+        focusDown: () => moveRegion("down"),
+        focusUp: () => moveRegion("up"),
+        focusRight: () => moveRegion("right"),
       }),
     ),
   )

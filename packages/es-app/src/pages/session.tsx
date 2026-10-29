@@ -70,7 +70,7 @@ import { wakeMarker, type WakeEvent } from "../wake-marker"
 import { anchorNote, anchorRange, parseAnchor, type MessageAnchor } from "../message-anchor"
 import { perfEvent, perfReady, perfSpan } from "../perf-telemetry"
 import { targetReady } from "../startup"
-import { ariaShortcut, shortcutLabel } from "../shortcuts"
+import { ariaShortcut, matchShortcut, shortcutLabel } from "../shortcuts"
 
 // The provider catalog per directory, shared by session views for a few minutes so switching
 // sessions does not refetch it each time.
@@ -1291,7 +1291,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
 
   const focusInsert = () => vim.setMode("insert")
   const cycleMode = (e: KeyboardEvent) => {
-    if (e.isComposing || !e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.code !== "KeyM") return false
+    if (!matchShortcut(e, "cycleTarget")) return false
     e.preventDefault()
     e.stopPropagation()
     if (!composer.state.busy) return true
@@ -1409,6 +1409,13 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       return
     }
     if (e.key === "Escape" && vim.mode() === "normal" && composer.state.keyboardTarget !== "aside") escTap()
+    // D6: while typing, Ctrl+H/D/U/N/P keep their text-editing meaning (macOS delete,
+    // forward delete, line moves). Stop propagation so the window-level panel and
+    // nav handlers skip them too; Ctrl+E stays the float-editor key.
+    if (vim.mode() === "insert" && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && TEXT_KEYS.has(e.key)) {
+      e.stopPropagation()
+      return
+    }
     if (navKeys(e)) return
     vim.handleKeyDown(e)
   }
@@ -2077,3 +2084,5 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     </SessionHostProvider>
   )
 }
+
+const TEXT_KEYS = new Set(["h", "d", "u", "n", "p"])

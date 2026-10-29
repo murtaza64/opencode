@@ -12,7 +12,8 @@ type Modifier = "Primary" | "Mod" | "Meta" | "Control" | "Alt" | "Shift"
 type Status = "dispatched" | "planned"
 // `where` names the surface whose handler owns the key; the overlay groups by it.
 type Where = "app" | "composer" | "session" | "decision"
-type Binding = { modifiers: Modifier[]; key: string; status: Status; title: string; where: Where }
+// `otherModifiers`: an extra chord accepted off macOS, shown as the label there.
+type Binding = { modifiers: Modifier[]; key: string; status: Status; title: string; where: Where; otherModifiers?: Modifier[] }
 
 const dispatched = (title: string, where: Where, key: string, ...modifiers: Modifier[]): Binding => ({ modifiers, key, status: "dispatched", title, where })
 const planned = (title: string, where: Where, key: string, ...modifiers: Modifier[]): Binding => ({ modifiers, key, status: "planned", title, where })
@@ -22,8 +23,8 @@ export const SHORTCUTS = {
   primaryAction: dispatched("Primary action (send, steer, nudge)", "composer", "Enter", "Primary"),
   // Submit outside the composer: decisions, new session, pending-input edit.
   submit: dispatched("Submit decision, new session or edit", "decision", "Enter", "Primary"),
-  // session.tsx cycleMode checks metaKey only (D4 adds Ctrl+M off macOS with its handler).
-  cycleTarget: dispatched("Cycle steer, queue, aside", "composer", "M", "Meta"),
+  // D4: Super+M exits Hyprland, so off macOS Ctrl+M is the shown chord (Super+M still works).
+  cycleTarget: { ...dispatched("Cycle steer, queue, aside", "composer", "M", "Meta"), otherModifiers: ["Control"] },
   find: dispatched("Find in transcript", "session", "F", "Primary"),
   previousPrompt: dispatched("Previous prompt", "session", "P", "Control"),
   nextPrompt: dispatched("Next prompt", "session", "N", "Control"),
@@ -38,10 +39,10 @@ export const SHORTCUTS = {
   pinnedSession: planned("Pinned session", "app", "1-9", "Mod"),
   needsYou: planned("Needs you", "app", "N", "Mod", "Shift"),
   commandPalette: planned("Command palette", "app", "P", "Mod"),
-  focusLeft: planned("Focus region left", "app", "H", "Control", "Alt"),
-  focusDown: planned("Focus region down", "app", "J", "Control", "Alt"),
-  focusUp: planned("Focus region up", "app", "K", "Control", "Alt"),
-  focusRight: planned("Focus region right", "app", "L", "Control", "Alt"),
+  focusLeft: dispatched("Focus region left", "app", "H", "Control", "Alt"),
+  focusDown: dispatched("Focus region down", "app", "J", "Control", "Alt"),
+  focusUp: dispatched("Focus region up", "app", "K", "Control", "Alt"),
+  focusRight: dispatched("Focus region right", "app", "L", "Control", "Alt"),
 } satisfies Record<string, Binding>
 
 export type ShortcutID = keyof typeof SHORTCUTS
@@ -89,7 +90,8 @@ export const shortcutLabel = (id: ShortcutID, platform = currentPlatform()) => {
   const binding: Binding = SHORTCUTS[id]
   if (platform === "mac")
     return ordered(binding.modifiers, MAC_ORDER).map((modifier) => MAC_GLYPH[modifier]).join("") + (MAC_KEY[binding.key] ?? binding.key)
-  return [...ordered(binding.modifiers, OTHER_ORDER).map((modifier) => OTHER_NAME[modifier]), OTHER_KEY[binding.key] ?? binding.key].join("+")
+  const modifiers = binding.otherModifiers ?? binding.modifiers
+  return [...ordered(modifiers, OTHER_ORDER).map((modifier) => OTHER_NAME[modifier]), OTHER_KEY[binding.key] ?? binding.key].join("+")
 }
 
 /** Visible hint for a key sequence, e.g. "Space m" or "g C". */
@@ -98,15 +100,20 @@ export const sequenceLabel = (id: SequenceID) => SEQUENCES[id].keys.join(" ")
 /** `aria-keyshortcuts` value listing every chord the handler accepts. */
 export const ariaShortcut = (id: ShortcutID, platform = currentPlatform()) => {
   const binding: Binding = SHORTCUTS[id]
-  const literal = binding.modifiers.flatMap((modifier) => {
+  const sets = platform === "other" && binding.otherModifiers ? [binding.otherModifiers, binding.modifiers] : [binding.modifiers]
+  return sets.flatMap((modifiers) => ariaChords(modifiers, binding.key, platform)).join(" ")
+}
+
+const ariaChords = (modifiers: Modifier[], key: string, platform: Platform) => {
+  const literal = modifiers.flatMap((modifier) => {
     if (modifier === "Primary") return []
     if (modifier === "Mod") return [platform === "mac" ? "Meta" : "Alt"]
     return [modifier]
   })
-  const keys = binding.key === "1-9" ? ["1", "2", "3", "4", "5", "6", "7", "8", "9"] : [binding.key]
-  const chords = (first: string[]) => keys.map((key) => [...first, ...literal, key].join("+"))
-  if (!binding.modifiers.includes("Primary")) return chords([]).join(" ")
-  return [...chords(["Meta"]), ...chords(["Control"])].join(" ")
+  const keys = key === "1-9" ? ["1", "2", "3", "4", "5", "6", "7", "8", "9"] : [key]
+  const chords = (first: string[]) => keys.map((each) => [...first, ...literal, each].join("+"))
+  if (!modifiers.includes("Primary")) return chords([])
+  return [...chords(["Meta"]), ...chords(["Control"])]
 }
 
 type KeyEventLike = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey" | "isComposing" | "keyCode">
@@ -115,7 +122,12 @@ type KeyEventLike = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" |
 export const matchShortcut = (event: KeyEventLike, id: ShortcutID, platform = currentPlatform()) => {
   if (event.isComposing || event.keyCode === 229) return false
   const binding: Binding = SHORTCUTS[id]
-  const has = (modifier: Modifier) => binding.modifiers.includes(modifier)
+  if (platform === "other" && binding.otherModifiers && modifiersMatch(event, binding.otherModifiers, platform)) return keyMatches(binding.key, event)
+  return modifiersMatch(event, binding.modifiers, platform) && keyMatches(binding.key, event)
+}
+
+const modifiersMatch = (event: KeyEventLike, modifiers: Modifier[], platform: Platform) => {
+  const has = (modifier: Modifier) => modifiers.includes(modifier)
   const mod = has("Mod")
   const primary = has("Primary") && event.metaKey !== event.ctrlKey
   const meta = has("Meta") || (mod && platform === "mac")
@@ -123,8 +135,7 @@ export const matchShortcut = (event: KeyEventLike, id: ShortcutID, platform = cu
   const alt = has("Alt") || (mod && platform === "other")
   if (!primary && (event.metaKey !== meta || event.ctrlKey !== control)) return false
   if (has("Primary") && !primary) return false
-  if (event.altKey !== alt || event.shiftKey !== has("Shift")) return false
-  return keyMatches(binding.key, event)
+  return event.altKey === alt && event.shiftKey === has("Shift")
 }
 
 /** 1–9 for a pinnedSession chord, otherwise undefined. */

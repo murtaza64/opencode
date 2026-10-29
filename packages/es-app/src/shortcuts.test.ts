@@ -4,7 +4,7 @@ import { ariaShortcut, matchShortcut, pinnedSlot, SEQUENCES, sequenceLabel, SHOR
 test.each([
   ["primaryAction", "⌘↵", "Ctrl+Enter"],
   ["submit", "⌘↵", "Ctrl+Enter"],
-  ["cycleTarget", "⌘M", "Super+M"],
+  ["cycleTarget", "⌘M", "Ctrl+M"],
   ["find", "⌘F", "Ctrl+F"],
   ["previousPrompt", "⌃P", "Ctrl+P"],
   ["nextPrompt", "⌃N", "Ctrl+N"],
@@ -35,7 +35,7 @@ test("lists both chords when the handler accepts Cmd or Ctrl", () => {
 })
 
 test("lists only the literal chord for single-modifier handlers", () => {
-  expect(ariaShortcut("cycleTarget")).toBe("Meta+M")
+  expect(ariaShortcut("cycleTarget", "mac")).toBe("Meta+M")
   expect(ariaShortcut("previousPrompt")).toBe("Control+P")
   expect(ariaShortcut("expandEditor")).toBe("Control+E")
 })
@@ -106,3 +106,11 @@ test("no sequence is a prefix of another", () => {
   expect(new Set(all).size).toBe(all.length)
   expect(sequenceLabel("goCloud")).toBe("g C")
 })
+
+test("D4: off macOS cycle target accepts Ctrl+M and still Super+M", () => {
+  expect(ariaShortcut("cycleTarget", "other")).toBe("Control+M Meta+M")
+  expect(matchShortcut(key({ key: "m", code: "KeyM", ctrlKey: true }), "cycleTarget", "other")).toBe(true)
+  expect(matchShortcut(key({ key: "m", code: "KeyM", metaKey: true }), "cycleTarget", "other")).toBe(true)
+  expect(matchShortcut(key({ key: "m", code: "KeyM", ctrlKey: true }), "cycleTarget", "mac")).toBe(false)
+})
+

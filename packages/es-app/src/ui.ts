@@ -1,6 +1,7 @@
 /* Sidebar visibility + widths: module-level signals, persisted, with drag
  * resizing and ^h/^l toggles (installed once from the shell). */
 import { createSignal } from "solid-js"
+import { isTypingTarget } from "./shortcuts"
 
 const read = (key: string, fallback: number) => {
   const v = Number(localStorage.getItem(key))
@@ -91,11 +92,14 @@ export function keyResize(side: Side, e: KeyboardEvent) {
   save(side)
 }
 
-/** window-level ^h/^l toggles; safe inside textareas (no browser default) */
+/** window-level ^h/^l panel toggles. In text fields ^h keeps its text meaning (D6,
+ * delete backward on macOS); the composer stops it itself in insert mode so normal
+ * mode can still toggle. */
 export function installSidebarKeys(): () => void {
   const handler = (e: KeyboardEvent) => {
     if (e.defaultPrevented || (e.target instanceof Element && e.target.closest('[role="dialog"]'))) return
-    if (!e.ctrlKey || e.metaKey || e.altKey) return
+    if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+    if (e.key === "h" && isTypingTarget(e.target) && !(e.target as Element).closest(".prompt-box")) return
     if (e.key === "h") {
       e.preventDefault()
       toggleLeft()

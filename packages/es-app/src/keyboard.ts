@@ -36,7 +36,7 @@ export const createSequenceMatcher = (enabled: (id: SequenceID) => boolean) => {
 const [whichKey, setWhichKey] = createSignal<{ prefix: string[]; next: { key: string; id: SequenceID }[] }>()
 export { whichKey }
 
-const CHORDS: ShortcutID[] = ["nextRegion", "previousRegion"]
+const CHORDS: ShortcutID[] = ["nextRegion", "previousRegion", "focusLeft", "focusDown", "focusUp", "focusRight"]
 
 /** Installs the capture-phase listener; returns cleanup. */
 export const installKeyboard = (actions: KeyboardActions) => {
@@ -94,15 +94,46 @@ export const installKeyboard = (actions: KeyboardActions) => {
 
 /** F6 order: sidebar, page content, composer, Front desk chat. Skips hidden regions. */
 export const cycleRegion = (step: 1 | -1) => {
-  const regions = REGIONS.map((selector) => document.querySelector<HTMLElement>(selector)).filter(
+  const regions = visibleRegions()
+  if (!regions.length) return
+  const current = currentRegion(regions)
+  focusRegion(regions[(current + step + regions.length) % regions.length])
+}
+
+/** Ctrl+Alt+H/J/K/L: nearest visible region in that physical direction (RTL mirrors by layout). */
+export const moveRegion = (direction: "left" | "down" | "up" | "right") => {
+  const regions = visibleRegions()
+  const index = currentRegion(regions)
+  if (index < 0) return regions[0] && focusRegion(regions[0])
+  const from = regions[index].getBoundingClientRect()
+  // The composer sits inside .content; compare against the transcript part above it.
+  const origin = regions[index].matches(".content") ? contentAbovePrompt(from) : from
+  const [x, y] = [origin.left + origin.width / 2, origin.top + origin.height / 2]
+  const ahead = regions
+    .map((el, at) => ({ el, at, rect: el.matches(".content") ? contentAbovePrompt(el.getBoundingClientRect()) : el.getBoundingClientRect() }))
+    .filter((entry) => entry.at !== index)
+    .map((entry) => ({ ...entry, dx: entry.rect.left + entry.rect.width / 2 - x, dy: entry.rect.top + entry.rect.height / 2 - y }))
+    .filter((entry) => (direction === "left" ? entry.dx < -1 : direction === "right" ? entry.dx > 1 : direction === "up" ? entry.dy < -1 : entry.dy > 1))
+  const along = (entry: { dx: number; dy: number }) => (direction === "left" || direction === "right" ? Math.abs(entry.dx) + 2 * Math.abs(entry.dy) : Math.abs(entry.dy) + 2 * Math.abs(entry.dx))
+  const target = ahead.sort((a, b) => along(a) - along(b))[0]
+  if (target) focusRegion(target.el)
+}
+
+const visibleRegions = () =>
+  REGIONS.map((selector) => document.querySelector<HTMLElement>(selector)).filter(
     (el): el is HTMLElement => !!el && el.getClientRects().length > 0 && el.getAttribute("aria-hidden") !== "true",
   )
-  if (!regions.length) return
+
+// The composer lives inside .content; the innermost containing region wins.
+const currentRegion = (regions: HTMLElement[]) => {
   const active = document.activeElement
-  // The composer lives inside .content; the innermost containing region wins.
-  const current = regions.reduce((found, el, index) => (active && el.contains(active) ? index : found), -1)
-  const next = regions[(current + step + regions.length) % regions.length]
-  focusRegion(next)
+  return regions.reduce((found, el, index) => (active && el.contains(active) ? index : found), -1)
+}
+
+const contentAbovePrompt = (rect: DOMRect) => {
+  const prompt = document.querySelector(".prompt-box")?.getBoundingClientRect()
+  if (!prompt || prompt.top <= rect.top || prompt.top >= rect.bottom) return rect
+  return new DOMRect(rect.left, rect.top, rect.width, prompt.top - rect.top)
 }
 
 const REGIONS = ["nav.sidebar", ".content", ".prompt-box textarea", ".desk-companion:not(.closed)"]
