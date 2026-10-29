@@ -4,6 +4,7 @@
 import { createMemo, createSignal, For, Show } from "solid-js"
 import type { Todo, ToolPart } from "@opencode-ai/sdk/v2"
 import type { MessagePartProps } from "@opencode-ai/session-ui/message-part"
+import { Icon } from "@opencode-ai/ui/icon"
 
 const glyph = (status: string) =>
   status === "completed" ? "✓" : status === "in_progress" ? "•" : status === "cancelled" ? "-" : " "
@@ -33,8 +34,9 @@ export function TodoList(props: { todos: readonly Todo[] }) {
   )
 }
 
-/* Inline transcript row for one todowrite call. Agents rewrite the list often,
- * so rows stay collapsed and render their checklist only when opened. */
+/* Inline transcript row for one todowrite call, on the icon-first activity line: the checklist icon (the Filament
+ * anchor, like every tool row), done/total, and the item being worked on in words. Agents rewrite the list often,
+ * so rows stay collapsed and render their checklist only when opened; Escape closes and returns focus. */
 export function TodoPart(props: MessagePartProps) {
   const todos = createMemo((): Todo[] => {
     const state = (props.part as ToolPart).state
@@ -42,19 +44,35 @@ export function TodoPart(props: MessagePartProps) {
     return Array.isArray(value) ? value : []
   })
   const summary = createMemo(() => todoSummary(todos()))
+  // The current item in words, so progress reads without colour or the glyph.
+  const current = createMemo(() => {
+    const active = summary().active
+    if (!summary().total) return "empty list"
+    if (!active) return "all cancelled"
+    const word = active.status === "in_progress" ? "in progress" : active.status === "pending" ? "next" : "all done"
+    return word === "all done" ? word : `${word}: ${active.content}`
+  })
+  const status = () => summary().total && !summary().open ? "ok" : "unfinished"
   const [open, setOpen] = createSignal(false)
+  let summaryEl: HTMLElement | undefined
   return (
-    <details class="todo-activity" data-tool="todowrite" onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary class="activity-row">
-        <span class="activity-kind">Todos</span>
-        <span class="activity-description" dir="auto">
-          <span class="todo-count">{summary().done}/{summary().total}</span>
-          <Show when={summary().active}>{(active) => <> · {active().content}</>}</Show>
+    <details class="todo-activity" data-tool="todowrite" data-status={status()} data-timeline-part-id={props.part.id}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || !open() || event.defaultPrevented) return
+        event.preventDefault()
+        event.currentTarget.open = false
+        summaryEl?.focus()
+      }}>
+      <summary class="todo-summary" ref={summaryEl} aria-label={`Todos ${summary().done} of ${summary().total} done, ${current()}`}>
+        <span class="tool-run-icon" data-tool="todowrite" data-status={status()} data-filament-icon={props.part.id} aria-hidden="true">
+          <Icon name="checklist" size="normal" />
         </span>
-        <span class="activity-disclosure" aria-hidden="true">›</span>
+        <span class="todo-count" aria-hidden="true">{summary().done}/{summary().total}</span>
+        <span class="todo-current" dir="auto" aria-hidden="true">{current()}</span>
       </summary>
       <Show when={open()}>
-        <div class="activity-details"><TodoList todos={todos()} /></div>
+        <div class="todo-details"><TodoList todos={todos()} /></div>
       </Show>
     </details>
   )

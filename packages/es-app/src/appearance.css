@@ -258,6 +258,17 @@
    * an unknown size stays at the neutral 16px. */
   .tool-chip-files { margin: 2px 0 4px; padding-inline-start: 28px; list-style: none; font: 400 12px/18px var(--font-mono); color: var(--subtext0); }
   .tool-chip-counts { color: var(--overlay1); }
+  /* Todo rows (dotfiles#262) use the same line: icon box, count, current item; chip fill only on hover/focus/open. */
+  .todo-activity { display: block; margin-block: 2px; border: 0; background: transparent; color: var(--subtext0); font: 400 13px/20px var(--font-sans); }
+  .todo-activity > .todo-summary { display: inline-flex; align-items: center; gap: 6px; max-inline-size: 100%; padding: 2px 6px; border-radius: var(--radius-control, 6px);
+    list-style: none; cursor: pointer; }
+  .todo-activity > .todo-summary::-webkit-details-marker { display: none; }
+  .todo-activity > .todo-summary:is(:hover, :focus-visible), .todo-activity[open] > .todo-summary { background: var(--chip-fill, var(--surface0)); color: var(--text); }
+  .todo-activity > .todo-summary:focus-visible { outline: 1px solid var(--lavender); }
+  .todo-activity .todo-current { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+  .todo-activity[data-status="unfinished"] .todo-current { color: var(--subtext1); }
+  .todo-activity .todo-details { padding-block: 4px 6px; padding-inline-start: 34px; }
+  .tool-run-icon[data-tool="todowrite"][data-status="unfinished"] { color: var(--yellow); }
   .tool-run-icon { --tool-icon: 16px; display: inline-grid; place-items: center; flex: none; inline-size: 20px; block-size: 20px; color: var(--subtext0); }
   .tool-run-icon[data-size="XS"] { --tool-icon: 12px; }
   .tool-run-icon[data-size="S"] { --tool-icon: 14px; }
