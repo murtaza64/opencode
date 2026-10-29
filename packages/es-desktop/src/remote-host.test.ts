@@ -320,7 +320,7 @@ test("the local listener reads another host's session list with no credential an
     expect(await (await get(`/hosts/mini${pathname}?es=opencode`)).json()).toMatchObject({ host: "mini", path: pathname })
     expect(mini.seen.at(-1)).toEqual({ path: pathname, cookie: null, authorization: null, origin: null })
   }
-  // Another host's pins are listed and followed read-only, never written, from this window.
+  // Another host's pins are listed and followed with no credential (writes: the pin-write test below).
   expect(await (await get("/hosts/mini/es/api/pins?since=3")).json()).toMatchObject({ host: "mini", path: "/es/api/pins" })
   expect(mini.seen.at(-1)).toEqual({ path: "/es/api/pins", cookie: null, authorization: null, origin: null })
   // The Today total reads each host's daily usage rollup the same way.
@@ -421,13 +421,58 @@ test("host writes are exactly the own-host session, Aside, model, reply and atte
     ["POST", "/oc/permission/per_1/reply"], ["POST", "/oc/question/que_1/reject"], ["POST", "/es/api/attention/session"],
     ["POST", `/es/api/attention/${uuid}/commands`], ["POST", `/es/api/attention/${uuid}/delivery`],
     ["PATCH", "/oc/session/ses_m"], ["POST", "/oc/session/ses_m/aside"], ["DELETE", "/oc/session/ses_m/aside/req_1"],
+    ["PUT", "/es/api/pins/session:ses_m"], ["DELETE", "/es/api/pins/lane:opencode%2Forchestrator"], ["PATCH", "/es/api/pins/lane:opencode%2Forchestrator/order"],
   ]) expect(hostWriteAllowed(method, pathname)).toBe(true)
   for (const [method, pathname] of [
     ["PUT", "/oc/session/ses_m/input"], ["POST", "/oc/session/ses_m%2F..%2Fx/input"], ["POST", "/oc/session/ses_m/input/req_1"], ["DELETE", "/oc/session/ses_m"],
     ["POST", "/oc/session/ses_m/fork"], ["POST", "/oc/session"], ["PATCH", "/oc/session/ses_m/aside/req_1"], ["DELETE", "/oc/session/ses_m/aside"],
-    ["POST", "/es/api/pins/session:ses_m"], ["PUT", "/es/api/pins/session:ses_m"], ["POST", "/es/api/attention/publish"], ["POST", `/es/api/attention/${uuid}`],
+    ["POST", "/es/api/pins/session:ses_m"], ["PATCH", "/es/api/pins/session:ses_m"], ["PUT", "/es/api/pins/lane:opencode/x"], ["PUT", "/es/api/pins/lane:opencode%2Fx%2Fy"],
+    ["DELETE", "/es/api/pins/session:ses_m/order"], ["PUT", "/es/api/pins/other:ses_m"], ["GET", "/es/api/pins/session:ses_m"], ["POST", "/es/api/attention/publish"], ["POST", `/es/api/attention/${uuid}`],
     ["POST", "/es/api/secret-intake/h1"], ["POST", "/es/api/frontdesk"], ["POST", "/oc/permission/per_1/reply/x"],
   ]) expect(hostWriteAllowed(method, pathname)).toBe(false)
+})
+
+test("pin, unpin and reorder reach only that Work host's own store, with only its operator cookie, from the native origin", async () => {
+  const seen: Record<string, { method: string; path: string; cookie: string | null; origin: string | null; csrf: string | null; body: string }[]> = { mini: [], wing: [], local: [] }
+  const host = (name: string) => {
+    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: async (request) => {
+      const url = new URL(request.url)
+      seen[name]!.push({ method: request.method, path: url.pathname, cookie: request.headers.get("cookie"), origin: request.headers.get("origin"), csrf: request.headers.get("x-attention-csrf"), body: await request.text() })
+      return Response.json({ rev: 1, applied: true, host: name })
+    } })
+    cleanup.push(async () => void (await server.stop(true)))
+    return server.url.origin
+  }
+  const peers = { mini: host("mini"), wing: host("wing") }
+  const server = await serve({ root: await renderer(), opencode: host("local"), dashboard: host("local"), peers: [{ id: "mini", origin: peers.mini }, { id: "wing", origin: peers.wing }] })
+  cleanup.push(() => Promise.race([server.close(), Bun.sleep(500)]))
+  const cookie = "es_attention_operator=local-op; es_attention_operator__mini=m-op; es_attention_operator__wing=w-op"
+  const write = (pathname: string, method: string, headers: Record<string, string> = {}) => fetch(`${server.origin}${pathname}`, {
+    method, body: '{"at":1,"op":"op-12345678"}', headers: { "x-editspace-key": server.key, origin: server.origin, cookie, "content-type": "application/json", "x-attention-csrf": "1", ...headers },
+  })
+  // The same lane ref on two hosts is two pins: each write reaches only its own host, with only its own operator cookie.
+  expect(await (await write("/hosts/mini/es/api/pins/lane:opencode%2Forchestrator", "PUT")).json()).toMatchObject({ host: "mini", applied: true })
+  expect(await (await write("/hosts/wing/es/api/pins/lane:opencode%2Forchestrator", "PUT")).json()).toMatchObject({ host: "wing" })
+  expect((await write("/hosts/mini/es/api/pins/lane:opencode%2Forchestrator/order", "PATCH")).status).toBe(200)
+  expect((await write("/hosts/mini/es/api/pins/session:ses_same", "DELETE")).status).toBe(200)
+  const mini = { origin: new URL(peers.mini).origin, csrf: "1", body: '{"at":1,"op":"op-12345678"}' }
+  expect(seen.mini).toEqual([
+    { method: "PUT", path: "/es/api/pins/lane:opencode%2Forchestrator", cookie: "es_attention_operator=m-op", ...mini },
+    { method: "PATCH", path: "/es/api/pins/lane:opencode%2Forchestrator/order", cookie: "es_attention_operator=m-op", ...mini },
+    { method: "DELETE", path: "/es/api/pins/session:ses_same", cookie: "es_attention_operator=m-op", ...mini },
+  ])
+  expect(seen.wing).toEqual([{ method: "PUT", path: "/es/api/pins/lane:opencode%2Forchestrator", cookie: "es_attention_operator=w-op", origin: new URL(peers.wing).origin, csrf: "1", body: '{"at":1,"op":"op-12345678"}' }])
+  // Refused before any upstream: another page origin, no origin, a wrong ref, method or path, an unknown, Personal or local host, no key.
+  const before = { mini: seen.mini.length, wing: seen.wing.length, local: seen.local.length }
+  expect((await write("/hosts/mini/es/api/pins/session:ses_a", "PUT", { origin: "http://127.0.0.1:1" })).status).toBe(403)
+  expect((await fetch(`${server.origin}/hosts/mini/es/api/pins/session:ses_a`, { method: "PUT", body: "{}", headers: { "x-editspace-key": server.key } })).status).toBe(403)
+  for (const [method, pathname] of [
+    ["PUT", "/es/api/pins/lane:opencode/orchestrator"], ["PUT", "/es/api/pins/lane:opencode%2F..%2Fx"], ["PUT", "/es/api/pins/other:x"],
+    ["POST", "/es/api/pins/session:ses_a"], ["PATCH", "/es/api/pins/session:ses_a"], ["DELETE", "/es/api/pins/session:ses_a/order"], ["PUT", "/es/api/pins"],
+  ]) expect((await write(`/hosts/mini${pathname}`, method)).status).toBe(403)
+  for (const id of ["personal", "local", "Mini", "other"]) expect((await write(`/hosts/${id}/es/api/pins/session:ses_a`, "PUT")).status).toBe(404)
+  expect((await fetch(`${server.origin}/hosts/mini/es/api/pins/session:ses_a`, { method: "PUT", body: "{}", headers: { origin: server.origin } })).status).toBe(403)
+  expect({ mini: seen.mini.length, wing: seen.wing.length, local: seen.local.length }).toEqual(before)
 })
 
 test("host reads add exactly what the session view reads: pending inputs, subagents and providers", async () => {

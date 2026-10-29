@@ -168,14 +168,23 @@ export const selfHandoffRoute = /^\/es\/api\/handoffs\/self(?:\/[A-Za-z0-9_-]{1,
 // the same session writes this listener allows on its own host (prompt/input admission, pending-input
 // edit/withdraw/deliver, recovery nudge, stop, Aside ask/cancel, the session model preference), permission
 // and question replies, and attention operator sign-in, answers and delivery checks. Fork, create and delete
-// stay on that host's own window. Pin writes stay on each pin's own host (contract §3).
+// stay on that host's own window. Pin writes (`hostPinWrite`) reach only that host's own store.
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 const HOST_WRITES: Record<string, RegExp> = {
   POST: new RegExp(`^/(?:oc/session/[\\w-]+/(?:prompt_async|input|abort|recover|aside)|oc/session/[\\w-]+/input/[\\w-]+/deliver|oc/(?:permission|question)/[\\w-]+/(?:reply|reject)|es/api/attention/(?:session|${UUID}/(?:commands|delivery)))$`),
   PATCH: /^\/oc\/session\/[\w-]+(?:\/input\/[\w-]+)?$/,
   DELETE: /^\/oc\/session\/[\w-]+\/(?:input|aside)\/[\w-]+$/,
 }
-export const hostWriteAllowed = (method: string, pathname: string) => HOST_WRITES[method]?.test(pathname) ?? false
+// Pin writes to another Work host's own store (contract v0.2.2 §3): pin, unpin and reorder of one encoded ref, so the
+// Work view changes that host's pin in place. Same operator-cookie, CSRF and native-origin boundary as attention answers.
+const HOST_PIN_WRITES: Record<string, RegExp> = {
+  PUT: new RegExp(`^/es/api/pins/${PIN_REF}$`),
+  DELETE: new RegExp(`^/es/api/pins/${PIN_REF}$`),
+  PATCH: new RegExp(`^/es/api/pins/${PIN_REF}/order$`),
+}
+export const hostPinWrite = (method: string, pathname: string) => HOST_PIN_WRITES[method]?.test(pathname) ?? false
+
+export const hostWriteAllowed = (method: string, pathname: string) => (HOST_WRITES[method]?.test(pathname) ?? false) || hostPinWrite(method, pathname)
 
 /** Another host's attention routes, which its dashboard authorizes with that host's operator cookie. */
 export const hostAttention = (pathname: string) => new RegExp(`^/es/api/attention/(?:session|${UUID}(?:/commands|/delivery)?)$`).test(pathname)

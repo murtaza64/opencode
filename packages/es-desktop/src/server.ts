@@ -4,7 +4,7 @@ import { createReadStream } from "node:fs"
 import { readFile, realpath, stat } from "node:fs/promises"
 import path from "node:path"
 import { randomBytes } from "node:crypto"
-import { apiAllowed, hostApiAllowed, hostAttention, hostWriteAllowed, selfHandoffRoute, serviceURL } from "./policy"
+import { apiAllowed, hostApiAllowed, hostAttention, hostPinWrite, hostWriteAllowed, selfHandoffRoute, serviceURL } from "./policy"
 import { cookieName, cookieValid, issueCookie, loopbackHost, pairingCsp, pairingMatches, pairingPage, remoteListenHost } from "./pairing"
 import { eventMux } from "../../es-app/event-mux"
 import { eventProtocol, eventPaths } from "../../es-app/event-protocol"
@@ -254,7 +254,7 @@ export const serve = async (options: {
       if (write && !trusted(req.headers.origin)) return finish(403, "Host writes require the native origin")
       // That host's attention routes carry only that host's operator cookie (minted by its own dashboard,
       // renamed per host and scoped to /hosts/<id>/ here); nothing else of this machine's goes upstream.
-      if (hostAttention(qualified.path))
+      if (hostAttention(qualified.path) || hostPinWrite(req.method ?? "", qualified.path))
         return peerWrite(req, res, upstream, new URL(peer.dashboard).origin, finish, {
           cookie: remoteCookie(req.headers.cookie, qualified.host),
           setCookie: (values) => remoteSetCookie(values, qualified.host)?.map((value) => scopeCookie(value, qualified.host)),
