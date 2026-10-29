@@ -1,6 +1,6 @@
 import { batch, createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import type { Message, Part } from "@opencode-ai/sdk/v2"
-import { oc } from "../api"
+import { useOc } from "../session-host"
 import { errorText } from "../live-session"
 import { createFindHistory, FIND_LIMITS, scanDocuments, type FindDocument, type FindHit } from "../transcript-find"
 import "./transcript-find.css"
@@ -23,6 +23,7 @@ export const TranscriptFind = (props: {
   close: () => void
   clear: () => void
 }) => {
+  const oc = useOc()
   const history = createFindHistory((before, signal) => {
     if (!props.sessionID || props.directory === undefined) throw new Error("No earlier history interface for this transcript.")
     return oc.messagesPage(props.sessionID, props.directory, 80, before, signal)

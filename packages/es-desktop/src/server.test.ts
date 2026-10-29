@@ -742,6 +742,8 @@ test("every es-app API route is exposed by the native allowlist", async () => {
   for (const file of files) {
     const source = await Bun.file(path.join(root, file)).text()
     for (const match of source.matchAll(/[`"](\/(?:oc|es)\/[^`"?]*)/g)) routes.add(match[1])
+    // The Core client (api.ts ocAt) builds routes on a host base: `/oc` here, `/hosts/<id>/oc` for another Work host.
+    if (file === "api.ts") for (const match of source.matchAll(/`\$\{base\}(\/[^`?]*)/g)) routes.add(`/oc${match[1]}`)
     // The composer builds session routes from a relative path.
     for (const match of source.matchAll(/url\(`(\/[^`?]*)/g)) routes.add(`/oc/session/ses_a${match[1]}`)
   }

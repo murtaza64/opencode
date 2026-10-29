@@ -9,13 +9,14 @@ import type {
   SessionV1InputReceipt,
   SessionV1InputUpdatePayload,
 } from "@opencode-ai/sdk/v2"
-import { oc, inputImages, type InputImage } from "./api"
+import { oc, ocAt, inputImages, type InputImage } from "./api"
 import { HttpError, httpError, supersededError } from "./api-error"
 import { composerStorage } from "./composer-storage"
 import type { ContextPart } from "./api"
 import { defaultImageCapability } from "./image-fit"
 import { createImageStore, type ImageStore } from "./image-store"
 import { perfEvent } from "./perf-telemetry"
+import type { SessionHost } from "./session-host"
 
 export type ComposerMode = "send" | "aside" | "queue" | "steer"
 export type ComposerAction = Exclude<ComposerMode, "send">
@@ -165,14 +166,17 @@ export type ComposerDependencies = {
 export type Composer = ReturnType<typeof createComposer>
 
 const controllers = new Map<string, Composer>()
-const storageKey = (sessionID: string, directory: string) =>
-  `es-app:composer:1:${JSON.stringify([sessionID, directory])}`
+// This host's key is unchanged so saved drafts survive; another Work host's adds its id, so the same
+// session ID on two hosts keeps independent drafts, receipts and admissions.
+const storageKey = (sessionID: string, directory: string, host?: SessionHost) =>
+  `es-app:composer:1:${JSON.stringify(host?.id ? [sessionID, directory, host.id] : [sessionID, directory])}`
 
-export const getComposer = (sessionID: string, directory: string): Composer => {
-  const key = storageKey(sessionID, directory)
+/** `host`: the session's Work host when it is not this page's; every composer request goes to that host only. */
+export const getComposer = (sessionID: string, directory: string, host?: SessionHost): Composer => {
+  const key = storageKey(sessionID, directory, host)
   const cached = controllers.get(key)
   if (cached) return cached
-  const composer = createComposer(sessionID, directory)
+  const composer = createComposer(sessionID, directory, {}, host)
   controllers.set(key, composer)
   return composer
 }
@@ -247,14 +251,16 @@ const isContextPart = (value: unknown): value is ContextPart => {
 export const SEND_DEADLINE_MS = 25_000
 export const READBACK_WINDOW_MS = 30_000
 
-export const createComposer = (sessionID: string, directory: string, dependencies: ComposerDependencies = {}) => {
+export const createComposer = (sessionID: string, directory: string, dependencies: ComposerDependencies = {}, host?: SessionHost) => {
+  const base = host?.base ?? "/oc"
   const request = dependencies.fetch ?? ((url, init) => fetch(url, init))
-  const prompt = dependencies.prompt ?? oc.prompt
+  const prompt = dependencies.prompt ?? ocAt(base).prompt
   const requestID = dependencies.requestID ?? (() => crypto.randomUUID())
   const imageStore = dependencies.images ?? createImageStore()
-  const key = storageKey(sessionID, directory)
+  const key = storageKey(sessionID, directory, host)
+  const backendSource = host?.id ? `Session inputs on ${host.label ?? host.id}` : "Session inputs"
   const url = (path: string, query = "") =>
-    `/oc/session/${encodeURIComponent(sessionID)}${path}?directory=${encodeURIComponent(directory)}${query}`
+    `${base}/session/${encodeURIComponent(sessionID)}${path}?directory=${encodeURIComponent(directory)}${query}`
   const [state, setState] = createStore<ComposerState>({
     visibleBuffer: "task",
     keyboardTarget: "steer",
@@ -906,7 +912,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     try {
       const value = await json<unknown>(
         // A hung read must fail (and show a retry) rather than leave Steer/Queue disabled forever.
-        await request(`/oc/experimental/capabilities?directory=${encodeURIComponent(directory)}`, { signal: AbortSignal.timeout(dependencies.sendDeadlineMs ?? SEND_DEADLINE_MS) }),
+        await request(`${base}/experimental/capabilities?directory=${encodeURIComponent(directory)}`, { signal: AbortSignal.timeout(dependencies.sendDeadlineMs ?? SEND_DEADLINE_MS) }),
       )
       if (!record(value)) throw new Error("Invalid server capabilities")
       const aside = value.sessionAside
@@ -1046,14 +1052,14 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       if (state.error.startsWith("Cannot refresh inputs:")) setState("error", "")
       endReadbacks()
       refreshFailures = 0
-      clearBackend("Session inputs")
+      clearBackend(backendSource)
     } catch (error) {
       // A failed receipt read is background trouble, not a composer error: drafts, request IDs and
       // unknown receipts stay as they are, nothing is re-POSTed, and the read retries with backoff.
       endReadbacks()
       refreshFailures++
       refreshRetryAt = Date.now() + Math.min(60_000, 2_000 * 2 ** Math.min(refreshFailures, 5))
-      reportBackend("Session inputs", error)
+      reportBackend(backendSource, error)
     } finally {
       setState("inputLoading", false)
       persist()
@@ -1773,6 +1779,18 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       }, latestMessageID, context),
     setText: (text: string) => updateDraft({ text }),
     /**
+     * Holds an input sent earlier without this composer (the retired Work host view) as an unknown admission:
+     * the next input refresh reads it back by request ID on this composer's host, and only an explicit Retry
+     * re-sends that exact payload. False, holding nothing, if another admission is already unresolved.
+     */
+    adoptInput: (payload: { requestID: string; delivery: "steer" | "queue"; text: string }) => {
+      if (state.admission || !payload.requestID || !/\S/.test(payload.text)) return false
+      // A revision no draft has: settling it never clears what the person is typing now.
+      setState("admission", { payload: copyPayload(payload as InputPayload), revision: -1, status: "unknown", buffer: "task" })
+      tracked.add(payload.requestID)
+      return persist()
+    },
+    /**
      * Inserts dictated text into the draft that was visible when dictation started, without
      * touching images or model. Returns the caret after the insertion.
      */
@@ -2066,4 +2084,38 @@ const isAdmission = (value: unknown): value is Omit<ComposerAdmission, "payload"
 const json = async <T>(response: Response): Promise<T> => {
   if (!response.ok) throw await httpError(response)
   return response.json()
+}
+
+/**
+ * Moves what the retired Work host view (host-session.tsx) saved for `host`'s session into that session's
+ * host-qualified composer: its draft when the composer's task draft is empty, and an unconfirmed send as an
+ * unknown admission that is read back on that host and never re-sent automatically. Each old record is removed
+ * only once the composer holds it; an accepted send needs nothing carried.
+ */
+export const adoptHostSessionState = (
+  composer: Composer,
+  host: string,
+  sessionID: string,
+  storage: Pick<Storage, "getItem" | "removeItem"> | null = typeof window === "undefined" ? null : window.localStorage,
+) => {
+  if (!storage) return
+  const draftKey = `host:${host}:es-app-host-draft:${sessionID}`
+  const pendingKey = `host:${host}:es-app-host-pending:${sessionID}`
+  const draft = storage.getItem(draftKey)
+  const task = composer.state.task
+  if (draft && !task.text && !task.images.length) {
+    composer.setText(draft)
+    if (composer.state.task.text === draft) storage.removeItem(draftKey)
+  }
+  const pending = (() => {
+    try {
+      const value: unknown = JSON.parse(storage.getItem(pendingKey) ?? "null")
+      return record(value) && typeof value.requestID === "string" && typeof value.text === "string" && typeof value.state === "string" ? value : undefined
+    } catch {
+      return undefined
+    }
+  })()
+  if (!pending) return
+  if (pending.state === "accepted") return storage.removeItem(pendingKey)
+  if (composer.adoptInput({ requestID: pending.requestID as string, delivery: "steer", text: pending.text as string })) storage.removeItem(pendingKey)
 }

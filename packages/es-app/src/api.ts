@@ -61,9 +61,9 @@ type Page = { items: MessageWithParts[]; cursor?: string }
 const RECENT_PAGE_MS = 2000
 type Shared = { limit: number; value: Promise<Page>; consumers: number; waiting: number; abort: AbortController; done?: boolean }
 const pages = new Map<string, Shared>()
-const readPage = async (id: string, directory: string, limit: number, before: string | undefined, signal: AbortSignal): Promise<Page> => {
+const readPage = async (base: string, id: string, directory: string, limit: number, before: string | undefined, signal: AbortSignal): Promise<Page> => {
   const res = await fetch(
-    `/oc/session/${id}/message?${q(directory)}&summaryPatches=false&limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ""}`,
+    `${base}/session/${id}/message?${q(directory)}&summaryPatches=false&limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ""}`,
     { signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]) },
   )
   const items = await json<MessageWithParts[]>(res)
@@ -71,14 +71,14 @@ const readPage = async (id: string, directory: string, limit: number, before: st
 }
 // `exact`: the caller pages with the cursor, so only a read of the same size can serve it.
 // The shared request is cancelled only when every caller waiting on it has cancelled.
-const sharedPage = async (id: string, directory: string, limit: number, before: string | undefined, signal: AbortSignal | undefined, exact = false): Promise<Page> => {
+const sharedPage = async (base: string, id: string, directory: string, limit: number, before: string | undefined, signal: AbortSignal | undefined, exact = false): Promise<Page> => {
   signal?.throwIfAborted()
-  const key = `${id}\u0000${directory}\u0000${before ?? ""}`
+  const key = `${base}\u0000${id}\u0000${directory}\u0000${before ?? ""}`
   let entry = pages.get(key)
   // Snapshots and paging (exact) never take a completed result: they must see current history.
   if (!entry || (exact ? entry.limit !== limit || entry.done : entry.limit < limit)) {
     const abort = new AbortController()
-    const created: Shared = { limit, value: readPage(id, directory, limit, before, abort.signal), consumers: 0, waiting: 0, abort }
+    const created: Shared = { limit, value: readPage(base, id, directory, limit, before, abort.signal), consumers: 0, waiting: 0, abort }
     entry = created
     pages.set(key, created)
     // A completed read keeps serving smaller tails briefly: the desk asks for its last 20 messages
@@ -145,12 +145,12 @@ export type UsageSessions = {
   sessions: { sessionID: string; parentID?: string; title?: string; directory?: string; cost: number | null; pricedCost: number; tokens: UsageTokens; unpricedTokens: number; lastActive: string }[]
 }
 
-export const oc = {
+const ocFor = (base: string) => ({
   // The body is Core's create body. A client-chosen id makes a lost response reconcilable.
   createSession: async (directory: string, body: SessionCreateBody = {}): Promise<Session> => {
     let res: Response
     try {
-      res = await fetch(`/oc/session?${q(directory)}`, {
+      res = await fetch(`${base}/session?${q(directory)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -175,7 +175,7 @@ export const oc = {
     // Grow the window until it contains every row instead, starting from the
     // last window that sufficed (re-growing from 200 cost 4 serial reads).
     for (let limit = sessionWindow; ; limit *= 2) {
-      const res = await fetch(`/oc/experimental/session?roots=${roots}&archived=true&limit=${limit}`)
+      const res = await fetch(`${base}/experimental/session?roots=${roots}&archived=true&limit=${limit}`)
       const sessions = await json<GlobalSession[]>(res)
       if (res.headers.get("x-next-cursor")) continue
       sessionWindow = limit
@@ -184,13 +184,13 @@ export const oc = {
   },
 
   umbrellaSessions: (directory: string): Promise<Session[]> =>
-    fetch(`/oc/umbrella/session?${q(directory)}`).then(json<Session[]>),
+    fetch(`${base}/umbrella/session?${q(directory)}`).then(json<Session[]>),
 
   session: (id: string, directory: string, signal?: AbortSignal): Promise<Session> =>
-    fetch(`/oc/session/${id}?${q(directory)}`, { signal }).then(json<Session>),
+    fetch(`${base}/session/${id}?${q(directory)}`, { signal }).then(json<Session>),
 
   messages: (id: string, directory: string, signal?: AbortSignal): Promise<MessageWithParts[]> =>
-    fetch(`/oc/session/${id}/message?${q(directory)}&summaryPatches=false`, { signal }).then(json<MessageWithParts[]>),
+    fetch(`${base}/session/${id}/message?${q(directory)}&summaryPatches=false`, { signal }).then(json<MessageWithParts[]>),
 
   // bounded tail: the newest `limit` messages only (hover insights fallback)
   // Message page reads are single-flight per (session, directory, cursor): opening the Front Desk
@@ -198,24 +198,24 @@ export const oc = {
   // the browser's six-connection pool for 150-420 ms each. A tail is served from an in-flight
   // page of at least that size; every caller gets its own copy (stores mutate what they hold).
   messagesTail: async (id: string, directory: string, limit: number, signal?: AbortSignal): Promise<MessageWithParts[]> =>
-    (await sharedPage(id, directory, limit, undefined, signal)).items,
+    (await sharedPage(base, id, directory, limit, undefined, signal)).items,
 
   messagesPage: (id: string, directory: string, limit: number, before?: string, signal?: AbortSignal) =>
-    sharedPage(id, directory, limit, before, signal, true),
+    sharedPage(base, id, directory, limit, before, signal, true),
 
   /** Undefined when the session has no such message (404, or 400 for a malformed ID). */
   message: async (id: string, directory: string, messageID: string, signal?: AbortSignal) => {
-    const res = await fetch(`/oc/session/${id}/message/${encodeURIComponent(messageID)}?${q(directory)}`, { signal })
+    const res = await fetch(`${base}/session/${id}/message/${encodeURIComponent(messageID)}?${q(directory)}`, { signal })
     if (res.status === 404 || res.status === 400) return undefined
     return json<MessageWithParts>(res)
   },
 
   children: (id: string, directory: string, signal?: AbortSignal): Promise<Session[]> =>
-    fetch(`/oc/session/${id}/children?${q(directory)}`, { signal }).then(json<Session[]>),
+    fetch(`${base}/session/${id}/children?${q(directory)}`, { signal }).then(json<Session[]>),
 
   // Raw prompt admission for callers that own their parts (generated context, structured briefs).
   promptBody: async (id: string, directory: string, body: Record<string, unknown>) => {
-    const res = await fetch(`/oc/session/${id}/prompt_async?${q(directory)}`, {
+    const res = await fetch(`${base}/session/${id}/prompt_async?${q(directory)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -224,25 +224,25 @@ export const oc = {
   },
 
   todos: (id: string, directory: string, signal?: AbortSignal): Promise<Todo[]> =>
-    fetch(`/oc/session/${id}/todo?${q(directory)}`, { signal }).then(json<Todo[]>),
+    fetch(`${base}/session/${id}/todo?${q(directory)}`, { signal }).then(json<Todo[]>),
 
   status: (directory: string, signal?: AbortSignal): Promise<Record<string, { type: string }>> =>
-    fetch(`/oc/session/status?${q(directory)}`, { signal }).then(json<Record<string, { type: string }>>),
+    fetch(`${base}/session/status?${q(directory)}`, { signal }).then(json<Record<string, { type: string }>>),
 
   permissions: (directory: string): Promise<PermissionRequest[]> =>
-    fetch(`/oc/permission?${q(directory)}`).then(json<PermissionRequest[]>),
+    fetch(`${base}/permission?${q(directory)}`).then(json<PermissionRequest[]>),
 
   questions: (directory: string): Promise<QuestionRequest[]> =>
-    fetch(`/oc/question?${q(directory)}`).then(json<QuestionRequest[]>),
+    fetch(`${base}/question?${q(directory)}`).then(json<QuestionRequest[]>),
 
   providers: (directory: string): Promise<{ providers: any[]; default: Record<string, string> }> =>
-    fetch(`/oc/config/providers?${q(directory)}`).then(json<{ providers: any[]; default: Record<string, string> }>),
+    fetch(`${base}/config/providers?${q(directory)}`).then(json<{ providers: any[]; default: Record<string, string> }>),
 
-  agents: (directory: string): Promise<Agent[]> => fetch(`/oc/agent?${q(directory)}`).then(json<Agent[]>),
+  agents: (directory: string): Promise<Agent[]> => fetch(`${base}/agent?${q(directory)}`).then(json<Agent[]>),
 
   /** Reviewed recovery of an interrupted step (Core `POST /session/:id/recover`); typed system provenance, no fake user turn. */
   recover: async (id: string, directory: string, body: { recoveryID: string; anchorMessageID: string; text: string; reason: string; sender: string }) => {
-    const res = await fetch(`/oc/session/${id}/recover?${q(directory)}`, {
+    const res = await fetch(`${base}/session/${id}/recover?${q(directory)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -254,14 +254,14 @@ export const oc = {
   /** Durable sourced input (Core `POST /session/:id/input`): labelled by kind, never shown as the human typing. */
   /** Durable input with a caller-built body, posted byte for byte (callers whose retries must be exactly identical). */
   admitInput: async (id: string, directory: string, body: Record<string, unknown>) => {
-    const res = await fetch(`/oc/session/${id}/input?${q(directory)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+    const res = await fetch(`${base}/session/${id}/input?${q(directory)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
     if (!res.ok) throw await httpError(res)
   },
 
   /** `origin`: the real producing session and the message it answers, for inputs one session sends another. */
   sourcedInput: async (id: string, directory: string, input: { requestID: string; text: string; kind: string; sender: string; delivery?: "queue" | "steer"
     origin?: { senderSession: string; relationship: string; inReplyTo: string } }) => {
-    const res = await fetch(`/oc/session/${id}/input?${q(directory)}`, {
+    const res = await fetch(`${base}/session/${id}/input?${q(directory)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ requestID: input.requestID, delivery: input.delivery ?? "queue", text: input.text,
@@ -294,7 +294,7 @@ export const oc = {
       opts.model ??
       (session.preferredModel ? undefined : session.model ? { providerID: session.model.providerID, modelID: session.model.id } : undefined)
     if (model) body.model = model
-    const res = await fetch(`/oc/session/${session.id}/prompt_async?${q(directory)}`, {
+    const res = await fetch(`${base}/session/${session.id}/prompt_async?${q(directory)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -305,29 +305,29 @@ export const oc = {
 
   // The response waits for runner interruption and cleanup.
   abort: async (id: string, directory: string) => {
-    const res = await fetch(`/oc/session/${id}/abort?${q(directory)}`, { method: "POST" })
+    const res = await fetch(`${base}/session/${id}/abort?${q(directory)}`, { method: "POST" })
     if (!res.ok) throw new Error(`abort failed: HTTP ${res.status} ${await res.text()}`)
   },
 
   // undefined = this Core predates the usage route (404 or the HTML app page); the page says so.
   // undefined = this Core has no per-session usage yet; the section says so.
   usageSessions: async (days: number, limit = 20, signal?: AbortSignal): Promise<UsageSessions | undefined> => {
-    const res = await fetch(`/oc/experimental/usage/sessions?days=${days}&limit=${limit}&offsetMinutes=${-new Date().getTimezoneOffset()}`, { signal })
+    const res = await fetch(`${base}/experimental/usage/sessions?days=${days}&limit=${limit}&offsetMinutes=${-new Date().getTimezoneOffset()}`, { signal })
     if (res.status === 404 || !res.headers.get("content-type")?.includes("application/json")) return undefined
     return json<UsageSessions>(res)
   },
 
-  /** `base`: "" for this page's host, or "/hosts/<id>" for another Work host through this listener. */
-  usageDaily: async (days: number, signal?: AbortSignal, base = ""): Promise<UsageDaily | undefined> => {
+  /** `prefix`: "" for this page's host, or "/hosts/<id>" for another Work host through this listener. */
+  usageDaily: async (days: number, signal?: AbortSignal, prefix = ""): Promise<UsageDaily | undefined> => {
     // Days are local: the offset is east-positive minutes, the inverse of getTimezoneOffset().
-    const res = await fetch(`${base}/oc/experimental/usage/daily?days=${days}&offsetMinutes=${-new Date().getTimezoneOffset()}`, { signal })
+    const res = await fetch(`${prefix}/oc/experimental/usage/daily?days=${days}&offsetMinutes=${-new Date().getTimezoneOffset()}`, { signal })
     if (res.status === 404 || !res.headers.get("content-type")?.includes("application/json")) return undefined
     return json<UsageDaily>(res)
   },
 
   // undefined = this Core predates failure tracking; the feature stays hidden.
   failedSessions: async (): Promise<SessionFailure[] | undefined> => {
-    const res = await fetch("/oc/experimental/session/failed")
+    const res = await fetch(`${base}/experimental/session/failed`)
     if (res.status === 404) return undefined
     return json<SessionFailure[]>(res)
   },
@@ -337,7 +337,7 @@ export const oc = {
     Promise<SessionRetryResult | { outcome: "unknown" | "unavailable" | "rejected"; detail: string }> => {
     let res: Response
     try {
-      res = await fetch(`/oc/session/${failure.sessionID}/retry?${q(failure.directory)}`, {
+      res = await fetch(`${base}/session/${failure.sessionID}/retry?${q(failure.directory)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ messageID: failure.messageID }),
@@ -358,14 +358,14 @@ export const oc = {
   // messageID = fork point: the new session copies history strictly before it;
   // omitted = fork at tip (full history)
   fork: (id: string, directory: string, messageID?: string): Promise<Session> =>
-    fetch(`/oc/session/${id}/fork?${q(directory)}`, {
+    fetch(`${base}/session/${id}/fork?${q(directory)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(messageID ? { messageID } : {}),
     }).then(json<Session>),
 
   rename: (id: string, directory: string, title: string): Promise<Session> =>
-    fetch(`/oc/session/${id}?${q(directory)}`, {
+    fetch(`${base}/session/${id}?${q(directory)}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title }),
@@ -373,33 +373,33 @@ export const oc = {
 
   // Sets the session's model preference, used from its next turn; the running turn and history are unchanged.
   preferModel: (id: string, directory: string, model: { providerID: string; modelID: string }): Promise<Session> =>
-    fetch(`/oc/session/${id}?${q(directory)}`, {
+    fetch(`${base}/session/${id}?${q(directory)}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model }),
     }).then(json<Session>),
 
   archive: (id: string, directory: string): Promise<Session> =>
-    fetch(`/oc/session/${id}?${q(directory)}`, {
+    fetch(`${base}/session/${id}?${q(directory)}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ time: { archived: Date.now() } }),
     }).then(json<Session>),
 
   unarchive: (id: string, directory: string): Promise<Session> =>
-    fetch(`/oc/session/${id}?${q(directory)}`, {
+    fetch(`${base}/session/${id}?${q(directory)}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ time: { archived: null } }),
     }).then(json<Session>),
 
   remove: async (id: string, directory: string) => {
-    const res = await fetch(`/oc/session/${id}?${q(directory)}`, { method: "DELETE" })
+    const res = await fetch(`${base}/session/${id}?${q(directory)}`, { method: "DELETE" })
     if (!res.ok) throw new Error(`delete failed: HTTP ${res.status} ${await res.text()}`)
   },
 
   permissionReply: async (requestID: string, directory: string, reply: "once" | "always" | "reject") => {
-    const res = await fetch(`/oc/permission/${requestID}/reply?${q(directory)}`, {
+    const res = await fetch(`${base}/permission/${requestID}/reply?${q(directory)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ reply }),
@@ -409,7 +409,7 @@ export const oc = {
   },
 
   questionReply: async (requestID: string, directory: string, answers: string[][]) => {
-    const res = await fetch(`/oc/question/${requestID}/reply?${q(directory)}`, {
+    const res = await fetch(`${base}/question/${requestID}/reply?${q(directory)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ answers }),
@@ -418,10 +418,21 @@ export const oc = {
   },
 
   questionReject: async (requestID: string, directory: string) => {
-    const res = await fetch(`/oc/question/${requestID}/reject?${q(directory)}`, { method: "POST" })
+    const res = await fetch(`${base}/question/${requestID}/reject?${q(directory)}`, { method: "POST" })
     if (!res.ok) throw new Error(`question reject failed: HTTP ${res.status}`)
   },
+})
+
+const bases = new Map<string, ReturnType<typeof ocFor>>()
+/** Core client for one Work host: `base` is `/oc` for this page's host, `/hosts/<id>/oc` for another (host-base.ts). */
+export const ocAt = (base: string) => {
+  const hit = bases.get(base)
+  if (hit) return hit
+  const value = ocFor(base)
+  bases.set(base, value)
+  return value
 }
+export const oc = ocAt("/oc")
 
 export type IssueRow = {
   ref: string

@@ -5,7 +5,7 @@
 import { createStore, produce, reconcile } from "solid-js/store"
 import { batch, createSignal, onCleanup } from "solid-js"
 import type { Message, Part, Session, SessionStatus, Todo } from "@opencode-ai/sdk/v2"
-import { oc } from "./api"
+import { ocAt } from "./api"
 import { createServerEvents, type ServerEvents } from "./event-source"
 import { anchorValid } from "./message-anchor"
 import { perfSpan, perfTimed } from "./perf-telemetry"
@@ -82,7 +82,9 @@ export function createLiveSession(
   sessionID: string,
   directory: string,
   onEvent?: (event: { type: string; properties?: any }) => void,
+  host: { id?: string; base: string } = { base: "/oc" },
 ) {
+  const oc = ocAt(host.base)
   const [data, setData] = createStore<LiveData>({
     session: [],
     session_status: {},
@@ -506,7 +508,9 @@ export function createLiveSession(
   }
   let source: ServerEvents | undefined
   try {
-    source = createServerEvents(`/oc/event?directory=${encodeURIComponent(directory)}`, {
+    // Another Work host streams only its global events through the Local listener: keep this
+    // directory's and unwrap them to the instance event shape.
+    source = createServerEvents(host.id ? `${host.base}/global/event` : `${host.base}/event?directory=${encodeURIComponent(directory)}`, {
       types: ["session.", "message.", "todo.", "permission.", "question."],
     })
     source.onopen = () => {
@@ -533,7 +537,8 @@ export function createLiveSession(
     source.onmessage = (e) => {
       if (disposed) return
       try {
-        const event = JSON.parse(e.data)
+        const event = host.id ? globalEvent(JSON.parse(e.data), directory) : JSON.parse(e.data)
+        if (event === null) return
         if (!event || typeof event.type !== "string") throw new Error("Invalid session event")
         setConnection("event", "")
         apply(event)
@@ -554,4 +559,12 @@ export function createLiveSession(
   })
 
   return { data, load, suspend, older, reveal, hasOlder, loadingOlder, apply, error, connectionError, loading, loaded, retry }
+}
+
+/** A global stream event as an instance event of `directory`; null for another directory's. */
+export const globalEvent = (value: unknown, directory: string): LiveEvent | null | undefined => {
+  if (!value || typeof value !== "object") return undefined
+  const record = value as { directory?: unknown; payload?: unknown }
+  if (typeof record.directory === "string" && record.directory !== directory) return null
+  return record.payload as LiveEvent | undefined
 }

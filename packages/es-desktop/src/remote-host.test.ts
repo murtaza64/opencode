@@ -297,7 +297,7 @@ test("host-qualified routes expose list reads only: writes, other routes and unk
   for (const [method, pathname] of [
     ["POST", "/oc/session/ses_same/prompt_async"], ["POST", "/oc/session/ses_same/message"], ["PATCH", "/oc/session/ses_same"],
     ["DELETE", "/oc/session/ses_same"], ["POST", "/oc/session/ses_same/abort"], ["POST", "/oc/permission/per_1/reply"],
-    ["GET", "/oc/session/ses_same/children"], ["GET", "/oc/session/ses_same/message/msg_1/part/prt_1/attachment/0"],
+    ["GET", "/oc/session/ses_same/children/x"], ["GET", "/oc/session/ses_same/message/msg_1/part/prt_1/attachment/0"],
     ["GET", "/oc/session/ses_same/message/msg_1/x"],
   ]) expect((await get(`/hosts/mini${pathname}`, { method, ...(method === "GET" ? {} : { body: "{}" }) })).status).toBe(403)
   expect((await get("/hosts/mini/es/api/attention/session", { method: "POST", headers: { "content-type": "application/json", "x-attention-csrf": "1" }, body: "{}" })).status).toBe(403)
@@ -370,7 +370,7 @@ test("another host's attention carries only that host's operator cookie, minted 
   expect(seen.at(-1)).toEqual({ path: "/es/api/attention/00000000-0000-4000-8000-000000000000/commands", cookie: "es_attention_operator=op-mini", origin: dashboard.url.origin })
 })
 
-test("host writes are exactly the own-host session, reply and attention writes; encoded or other paths are refused", async () => {
+test("host writes are exactly the own-host session, Aside, model, reply and attention writes; encoded or other paths are refused", async () => {
   const { hostWriteAllowed } = await import("./policy")
   const uuid = "00000000-0000-4000-8000-000000000000"
   for (const [method, pathname] of [
@@ -378,13 +378,23 @@ test("host writes are exactly the own-host session, reply and attention writes; 
     ["POST", "/oc/session/ses_m/input/req_1/deliver"], ["POST", "/oc/session/ses_m/recover"], ["POST", "/oc/session/ses_m/abort"],
     ["POST", "/oc/permission/per_1/reply"], ["POST", "/oc/question/que_1/reject"], ["POST", "/es/api/attention/session"],
     ["POST", `/es/api/attention/${uuid}/commands`], ["POST", `/es/api/attention/${uuid}/delivery`],
+    ["PATCH", "/oc/session/ses_m"], ["POST", "/oc/session/ses_m/aside"], ["DELETE", "/oc/session/ses_m/aside/req_1"],
   ]) expect(hostWriteAllowed(method, pathname)).toBe(true)
   for (const [method, pathname] of [
     ["PUT", "/oc/session/ses_m/input"], ["POST", "/oc/session/ses_m%2F..%2Fx/input"], ["POST", "/oc/session/ses_m/input/req_1"], ["DELETE", "/oc/session/ses_m"],
-    ["PATCH", "/oc/session/ses_m"], ["POST", "/oc/session/ses_m/fork"], ["POST", "/oc/session/ses_m/aside"], ["POST", "/oc/session"],
+    ["POST", "/oc/session/ses_m/fork"], ["POST", "/oc/session"], ["PATCH", "/oc/session/ses_m/aside/req_1"], ["DELETE", "/oc/session/ses_m/aside"],
     ["POST", "/es/api/pins/session:ses_m"], ["PUT", "/es/api/pins/session:ses_m"], ["POST", "/es/api/attention/publish"], ["POST", `/es/api/attention/${uuid}`],
     ["POST", "/es/api/secret-intake/h1"], ["POST", "/es/api/frontdesk"], ["POST", "/oc/permission/per_1/reply/x"],
   ]) expect(hostWriteAllowed(method, pathname)).toBe(false)
+})
+
+test("host reads add exactly what the session view reads: pending inputs, subagents and providers", async () => {
+  const { hostApiAllowed } = await import("./policy")
+  for (const pathname of ["/oc/session/ses_m/input", "/oc/session/ses_m/input/req_1", "/oc/session/ses_m/children", "/oc/config/providers"])
+    expect(hostApiAllowed("GET", pathname)).toBe(true)
+  for (const pathname of ["/oc/config", "/oc/session/ses_m/aside", "/oc/session/ses_m/children/x", "/oc/agent", "/oc/session/ses_m/input/req_1/deliver"])
+    expect(hostApiAllowed("GET", pathname)).toBe(false)
+  expect(hostApiAllowed("POST", "/oc/session/ses_m/input")).toBe(false)
 })
 
 test("writes reach only a configured Work host; an unknown id, a Personal host or a stopped host never falls back to this one", async () => {
