@@ -30,6 +30,7 @@ import { contextLimit, contextUsage, latestCompletedTurn } from "../context-usag
 import { ComposerMeta } from "../components/composer-meta"
 import { footerContext, footerCost } from "../composer-meta"
 import { primaryAction } from "../primary-action"
+import { sendContext } from "../input-context"
 import { adoptHostSessionState, getComposer, type ComposerAction } from "../composer"
 import { pendingEcho } from "../pending-echo"
 import { defaultImageCapability, prepareImageFile } from "../image-fit"
@@ -973,10 +974,10 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     queueMicrotask(pin)
     const chosen = action ?? (composer.state.busy ? composer.state.keyboardTarget : "steer")
     // Chips always go to the composer: it attaches them or refuses the send with a reason (never sends without
-    // them). Generated page context (props.context) rides only where the composer can attach it.
+    // them). Generated page context (props.context) rides only where it can be attached and fits (input-context.ts).
     const chips = contextParts()
-    const context = [...composer.contextAttaches(chosen) ? props.context?.() ?? [] : [], ...chips]
     const plain = chosen === "steer" && !composer.state.busy
+    const context = sendContext({ input: !plain, attaches: composer.contextAttaches(chosen), generated: props.context?.() ?? [], chips })
     await composer.submitVisible(chosen, s, nextModel(), messages().at(-1)?.id, context)
     // A plain send is accepted by its message; a steer or queue once its input is admitted (no admission left
     // pending or unknown, and no refusal).
