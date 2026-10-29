@@ -2,6 +2,7 @@ import { Show, type JSX } from "solid-js"
 import type { MailWakeState } from "../api"
 import type { MailDirection } from "../mail-timeline"
 import { Glyph } from "./icons"
+import { livingActivity } from "../appearance"
 import { MailParty } from "./mail-party"
 import type { MailNamer } from "../mail-names"
 import { mailOrigin, originLabel, squadronSender, type MailOrigin, type SquadronMeta } from "../mail-origin"
@@ -48,13 +49,11 @@ export const MailRoute = (props: { from: string; fromEvidence?: string | null; t
 export const MailSummary = (props: {
   direction: MailDirection; party: JSX.Element; partyText: string; purpose: string; status?: string; sentAt?: number
   wake?: { state: MailWakeState; label: string }
-  /** The mail's ID: Filament lights this chip's glyph (data-filament-icon). */
-  id?: string
 }) => {
   const preposition = () => props.direction === "out" ? " to" : props.direction === "in" ? " from" : ""
-  // A settled mail is one content-width line, glyph first, party and kind always visible. A status
+  // In living activity a settled mail is one content-width line, glyph first, party and kind always visible. A status
   // the person may need to act on, an unknown direction or an unknown wake keeps the full-width row.
-  const compact = () => !props.status && props.direction !== "unknown" && props.wake?.state !== "unknown"
+  const compact = () => livingActivity() && !props.status && props.direction !== "unknown" && props.wake?.state !== "unknown"
   const line = () => <>
     <span class="mail-activity-party">{props.party}</span>
     <span class="mail-activity-sep" aria-hidden="true">·</span>
@@ -63,7 +62,7 @@ export const MailSummary = (props: {
   return <summary class="mail-activity-summary" data-wake={props.wake?.state} data-compact={compact() ? "true" : undefined}
     title={[relativeTime(props.sentAt), props.wake?.label].filter(Boolean).join(" · ") || undefined}
     aria-label={`Mail${preposition()} ${props.partyText}: ${props.purpose}${props.status ? `, ${props.status}` : ""}${props.wake ? `, ${props.wake.label}` : ""}`}>
-    <span class="mail-activity-kind" data-direction={props.direction} data-filament-icon={props.id} aria-hidden="true">
+    <span class="mail-activity-kind" data-direction={props.direction} aria-hidden="true">
       <Glyph name={props.direction === "out" ? "paper-airplane" : "inbox"} />
     </span>
     <Show when={props.wake?.state === "caused" || props.wake?.state === "unknown" ? props.wake.state : undefined}>{(state) =>

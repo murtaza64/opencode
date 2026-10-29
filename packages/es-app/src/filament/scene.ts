@@ -21,6 +21,7 @@ type Flash = { born: number; x: number; y: number; status: "done" | "error" }
 type Knit = { born: number; messageID: string; to: "warm" | "cold" | "mixed" }
 
 export type Frame = { now: number; wall: number; reduced: boolean; hidden: boolean; activity?: number }
+const hash = (n: number) => { const x = Math.sin(n * 12.9898) * 43758.5453; return x - Math.floor(x) }
 
 export const createScene = (paint: Painter) => {
   const pulses: Pulse[] = []
@@ -29,27 +30,23 @@ export const createScene = (paint: Painter) => {
   let energy = 0
   let clock = 0
   let lastJet = 0
-  // Observed work in a sliding window: characters that arrived (text/reasoning) and tool events,
-  // with timestamps. Energy derives from chars/second, so the same text split into 3 or 300
-  // deltas yields the same energy; delivery granularity is not evidence of more work.
-  const recent: { at: number; chars: number }[] = []
+  // Recent evidence: timestamps of text/tool deltas in the last 600ms; drives electricity intensity.
+  const recent: number[] = []
 
   // Feeds one update's deltas into transients. Geometry decides where each lands.
-  // Transients are born in content space (so they ride with the rows through scrolling).
   const absorb = (deltas: readonly Delta[], layout: Layout, now: number) => {
     for (const d of deltas) {
       if (d.type === "text") {
         const r = layout.rects.get(d.id)
         if (!r) continue
         // One packet per update, sized by how much arrived; bursts stay one packet, not a storm.
-        // One packet per update capped so a chunky stream and a fine one look alike in motion count.
-        if (!pulses.some((p) => now - p.born < 120)) pulses.push({ born: now, from: Math.max(0, r.y - 120), to: r.y + r.h - 6, x: layout.gx, kind: d.kind })
-        if (pulses.length > 12) pulses.shift()
-        recent.push({ at: now, chars: d.grew })
+        pulses.push({ born: now, from: Math.max(0, r.y - 120), to: r.y + r.h - 6, x: layout.gx, kind: d.kind })
+        if (pulses.length > 24) pulses.shift()
+        recent.push(now)
       } else if (d.type === "tool.end") {
         const r = layout.rects.get(d.id)
         if (r) flashes.push({ born: now, x: layout.gx, y: r.cy, status: d.status })
-        recent.push({ at: now, chars: 120 })
+        recent.push(now)
       } else if (d.type === "cache" && d.to !== "unknown") {
         // Late usage: the seam re-knits (or cuts) when the evidence lands, not when the turn began.
         knits.push({ born: now, messageID: d.messageID, to: d.to })
@@ -58,16 +55,11 @@ export const createScene = (paint: Painter) => {
     }
   }
 
-  const render = (s: Snapshot, content: Layout, f: Frame) => {
-    // Project content-space rects into the viewport once per frame; the thread is drawn in viewport px.
-    const dy = content.scrollTop
-    const shift = (r: Rect): Rect => ({ x: r.x, y: r.y - dy, w: r.w, h: r.h, cx: r.cx, cy: r.cy - dy })
-    const layout: Layout = { ...content, rects: new Map([...content.rects].map(([id, r]) => [id, shift(r)])), icons: new Map([...content.icons].map(([id, r]) => [id, shift(r)])), thinking: content.thinking ? shift(content.thinking) : undefined }
+  const render = (s: Snapshot, layout: Layout, f: Frame) => {
     const gx = layout.gx
     const top = 0, bottom = layout.h
-    const active = s.phase === "thinking" || s.phase === "streaming" || s.phase === "tool" || s.phase === "error" || s.phase === "waiting"
-    // Delegated (a subagent is working, not this session) and disconnected (no evidence at all) stay calm.
-    const target = active ? 1 : s.phase === "delegated" ? 0.4 : s.phase === "disconnected" ? 0.08 : s.phase === "complete" ? 0.25 : 0.12
+    const active = s.phase !== "idle" && s.phase !== "complete"
+    const target = active ? 1 : s.phase === "complete" ? 0.25 : 0.12
     energy += (target - energy) * clamp01(f.wall / 400)
     clock += f.wall
 
@@ -77,11 +69,8 @@ export const createScene = (paint: Painter) => {
     const first = layout.rects.get(live[0]!.id)!
     const lastNode = live[live.length - 1]!
     const lastR = layout.rects.get(lastNode.id)!
-    while (recent.length && f.now - recent[0]!.at > 1500) recent.shift()
-    // ~60 chars/s (a slow model) reads as 0.25; ~240 chars/s saturates. Tool events count as 120 chars.
-    const rate = recent.reduce((sum, r) => sum + r.chars, 0) / 1.5
-    const liveWork = s.phase === "streaming" || s.phase === "tool" || s.phase === "thinking"
-    const activity = f.reduced || !liveWork ? 0 : Math.min(1, rate / 240)
+    while (recent.length && f.now - recent[0]! > 600) recent.shift()
+    const activity = f.reduced ? 0 : Math.min(1, recent.length / 6)
     const headY = s.waiting ? Math.min(bottom - 14, lastR.y + lastR.h + 18) : layout.thinking ? layout.thinking.cy : lastR.y + lastR.h + 2
     // Orb: fuller when active; the thread stops at its leading edge, never under it.
     const orbR = s.waiting ? 7 : 3 + energy * 4 + activity * 1.5
@@ -131,27 +120,22 @@ export const createScene = (paint: Painter) => {
       if (sy < top - 10 || sy > bottom + 10) continue
       const knit = knits.find((k) => k.messageID === turn.messageID)
       const k = knit ? Math.min(1, (f.now - knit.born) / 700) : 1
-      const span = 26
       if (turn.cache === "warm") {
-        // Warm: the thread dims to a thin ember over the seam but never breaks; a fresh knit fades it in.
-        const dim = f.reduced ? 0.35 : 0.35 + 0.65 * (knit ? 1 - ease(k) : 0)
-        paint.capsule(gx, sy - span, gx, sy, width + 1.2, rgba([0.02, 0.03, 0.05], 0.97), 0)
-        paint.capsule(gx, sy - span, gx, sy, Math.max(0.8, width * 0.55), rgba(ACCENT, 0.25 + 0.6 * dim), 0.5)
-        paint.dot(gx, sy - span / 2, 1.2, rgba(ACCENT, 0.9), 2)
+        // Dim stretch above the turn: continuity kept; a fresh knit fades the dim in.
+        const dim = f.reduced ? 1 : 0.55 + 0.45 * (1 - ease(k)) * (knit ? 1 : 0)
+        paint.capsule(gx, sy - 18, gx, sy, width + 0.4, rgba([0.02, 0.03, 0.05], 0.9 * (1 - dim) * 0.6), 0)
+        paint.capsule(gx, sy - 18, gx, sy, width, rgba(ACCENT, (0.3 + energy * 0.5) * dim), glow * dim)
       } else if (turn.cache === "cold") {
-        // Write/rebuild: a hard gap with cut ends; the bridge grows back over 700ms on a fresh knit.
-        const gap = f.reduced ? 6 : knit ? 10 * (1 - ease(k)) + 6 : 6
-        const mid = sy - span / 2
-        paint.capsule(gx, sy - span, gx, sy, width + 1.2, rgba([0.02, 0.03, 0.05], 0.97), 0)
-        paint.capsule(gx, sy - span, gx, mid - gap / 2, width, rgba(ACCENT, 0.3 + energy * 0.5), glow)
-        paint.capsule(gx, mid + gap / 2, gx, sy, width, rgba(ACCENT, 0.3 + energy * 0.5), glow)
-        paint.capsule(gx - 4 * layout.sign, mid - gap / 2, gx + 4 * layout.sign, mid - gap / 2, 1.4, rgba([1, 0.72, 0.4], 0.95), 2)
-        paint.capsule(gx - 4 * layout.sign, mid + gap / 2, gx + 4 * layout.sign, mid + gap / 2, 1.4, rgba([1, 0.72, 0.4], 0.95), 2)
+        // Hard seam: a gap with two cut ends, re-knitting as the bridge grows back.
+        const gap = f.reduced ? 0 : 7 * (knit ? 1 - ease(k) : 0.35)
+        paint.capsule(gx, sy - 18, gx, sy - 2 - gap, width, rgba([0.02, 0.03, 0.05], 0.95), 0)
+        paint.capsule(gx - 3 * layout.sign, sy - 2 - gap, gx + 3 * layout.sign, sy - 2 - gap, 1.2, rgba(ACCENT, 0.8), 1.5)
+        paint.capsule(gx - 3 * layout.sign, sy + 1, gx + 3 * layout.sign, sy + 1, 1.2, rgba(ACCENT, 0.8), 1.5)
+        if (!knit || k >= 1) paint.capsule(gx, sy - 2 - gap, gx, sy + 1, width, rgba(ACCENT, 0.3 + energy * 0.5), glow)
       } else if (turn.cache === "mixed") {
-        // Mixed: continuity kept plus an extension sleeve, brighter and wider than the thread.
+        // Continuity kept plus an extension pulse: a short bright sleeve widening past the seam.
         const p = f.reduced ? 1 : knit ? ease(k) : 1
-        paint.capsule(gx, sy - span * p, gx, sy, width + 2.2, rgba([0.7, 0.86, 1.0], 0.55 + (knit ? (1 - k) * 0.35 : 0)), 5 + (knit ? (1 - k) * 4 : 0))
-        paint.capsule(gx - 3.5 * layout.sign, sy - span * p, gx + 3.5 * layout.sign, sy - span * p, 1.2, rgba([0.7, 0.86, 1.0], 0.9), 2)
+        paint.capsule(gx, sy - 14 * p, gx, sy + 2, width + 1.2, rgba([0.7, 0.86, 1.0], 0.35 + (knit ? (1 - k) * 0.4 : 0)), 3 + (knit ? (1 - k) * 4 : 0))
       }
       // Unknown: plain thread (provisional until usage arrives).
     }
@@ -159,7 +143,7 @@ export const createScene = (paint: Painter) => {
 
     // Energetic active stretch: a brightness wave travels down the last 160px toward the orb; its
     // speed and brightness follow evidence rate, so a quiet model turn reads calmer than a burst.
-    if (liveWork && !f.reduced && segs.length) {
+    if (active && !f.reduced && segs.length) {
       const yStart = Math.max(endY - 160, Math.max(first.y, top))
       const span = endY - yStart
       if (span > 20) {
@@ -187,8 +171,6 @@ export const createScene = (paint: Painter) => {
     for (const n of live) {
       const r = layout.rects.get(n.id)!
       if (r.y < -40 || r.y > bottom + 40) continue
-      const icon = n.kind === "tool" || n.kind === "task" ? layout.icons.get(n.id) : undefined
-      if (icon) { lightIcon(n, icon, gx, layout.sign, { ...f, activity }, clock); continue }
       const run = layout.compact.get(n.id)
       if (run) {
         if (seenRuns.has(run)) continue
@@ -207,12 +189,6 @@ export const createScene = (paint: Painter) => {
       paint.ring(gx, headY, orbR * br, 1.6, rgba(YELLOW, 0.95), 8)
     } else if (s.phase === "error") {
       paint.dot(gx, headY, orbR, rgba(RED, 0.9), 6)
-    } else if (s.phase === "delegated") {
-      // Handed off: hollow orb with a slow, faint ring; the work is elsewhere.
-      paint.ring(gx, headY, orbR, 1.4, rgba(BRANCH, 0.8), 3)
-      if (!f.reduced) { const a = (clock * 0.0015) % 6.283; paint.ring(gx, headY, orbR + 3, 0.9, rgba(BRANCH, 0.4), 1.5, a, a + 2.2) }
-    } else if (s.phase === "disconnected") {
-      paint.ring(gx, headY, orbR, 1.2, rgba([0.5, 0.52, 0.6], 0.6), 0)
     } else if (!active) {
       paint.dot(gx, headY, orbR, rgba(ACCENT, 0.85), 1.5)
     } else {
@@ -221,24 +197,34 @@ export const createScene = (paint: Painter) => {
       paint.dot(gx, headY, orbR * 0.62 * breathe, rgba([0.75, 0.88, 1.0], 0.95), 3)
       if (!f.reduced) { const a = (clock * 0.004) % 6.283; paint.ring(gx, headY, orbR + 2.5, 1.1, rgba(ACCENT, 0.5 + activity * 0.4), 3, a, a + 3.8) }
     }
-    // ---- shimmer: a continuous, slowly wandering filament off the active node; brightness and
-    // reach follow the observed work rate, phase moves smoothly (no random regeneration). ----
+    // ---- electricity: short bounded arcs off the active node while evidence is arriving ----
     if (activity > 0 && !f.reduced) {
       const writing = live.findLast((n) => (n.kind === "text" || n.kind === "reasoning") && n.status === "running")
       const tool = live.findLast((n) => n.kind === "tool" && n.status === "running")
       const src = tool ? layout.rects.get(tool.id)! : writing ? layout.rects.get(writing.id)! : undefined
       if (src) {
         const sy = tool ? src.cy : Math.min(src.y + src.h - 8, bottom - 4)
-        const reach = (8 + activity * 12) * layout.sign
-        const t1 = clock * 0.0019, t2 = clock * 0.0031
-        let x = gx, yy = sy
-        for (let k = 0; k < 4; k++) {
-          const nx = x + reach / 4
-          const ny = sy + Math.sin(t1 + k * 1.7) * (1.5 + activity * 2.5) + Math.sin(t2 + k * 0.9) * 1.2
-          paint.capsule(x, yy, nx, ny, 0.9, rgba([0.8, 0.9, 1.0], (0.55 - k * 0.11) * activity), 2.5)
-          x = nx; yy = ny
+        const seed = Math.floor(clock / 55)
+        const count = 1 + Math.round(activity * 3)
+        for (let i = 0; i < count; i++) {
+          let x = gx, yy = sy + (hash(seed * 7 + i * 13) - 0.5) * 10
+          const reach = 10 + activity * 14
+          for (let k = 0; k < 4; k++) {
+            const nx = x + layout.sign * (reach / 4) * (0.6 + hash(seed + i * 31 + k * 3) * 0.8)
+            const ny = yy + (hash(seed * 3 + i * 17 + k * 5) - 0.5) * 7
+            paint.capsule(x, yy, nx, ny, 0.9, rgba([0.8, 0.9, 1.0], (0.7 - k * 0.14) * activity), 3)
+            x = nx; yy = ny
+          }
         }
       }
+    }
+
+    // ---- Stage micro-effect: a jet feeds the running tool while nothing else moves ----
+    const running = live.findLast((n) => n.kind === "tool" && n.status === "running")
+    if (running && !f.reduced && f.now - lastJet > 420) {
+      const r = layout.rects.get(running.id)!
+      lastJet = f.now
+      pulses.push({ born: f.now, from: Math.max(0, r.cy - 70), to: r.cy - 7, x: gx, kind: "jet" })
     }
 
     // ---- transients ----
@@ -247,50 +233,25 @@ export const createScene = (paint: Painter) => {
         const p = pulses[i]!
         const k = (f.now - p.born) / 420
         if (k > 1 || k < 0) { pulses.splice(i, 1); continue }
-        const y1 = p.from + (p.to - p.from) * ease(k) - (p.kind === "jet" ? 0 : dy)
+        const y1 = p.from + (p.to - p.from) * ease(k)
         const len = (p.kind === "jet" ? 14 : 22) * (1 - k * 0.5)
-        paint.capsule(p.x, Math.max(p.from - (p.kind === "jet" ? 0 : dy), y1 - len), p.x, y1, p.kind === "text" ? 2 : 1.2, rgba(ACCENT, (1 - k) * (p.kind === "text" ? 0.95 : 0.5)), 5)
+        paint.capsule(p.x, Math.max(p.from, y1 - len), p.x, y1, p.kind === "text" ? 2 : 1.2, rgba(ACCENT, (1 - k) * (p.kind === "text" ? 0.95 : 0.5)), 5)
       }
       for (let i = flashes.length - 1; i >= 0; i--) {
         const fl = flashes[i]!
         const k = (f.now - fl.born) / 650
         if (k > 1 || k < 0) { flashes.splice(i, 1); continue }
-        paint.ring(fl.x, fl.y - dy, 5 + ease(k) * 14, 1.1, rgba(fl.status === "done" ? GREEN : RED, (1 - k) * 0.8), 5)
+        paint.ring(fl.x, fl.y, 5 + ease(k) * 14, 1.1, rgba(fl.status === "done" ? GREEN : RED, (1 - k) * 0.8), 5)
       }
     } else { pulses.length = 0; flashes.length = 0 }
     paint.flush()
-    // Rest: delegated/disconnected keep a slow ring only while energy settles, then stop.
-    return pulses.length > 0 || flashes.length > 0 || knits.length > 0 || active || activity > 0 || Math.abs(energy - target) > 0.01
+    return pulses.length > 0 || flashes.length > 0 || knits.length > 0 || active || Math.abs(energy - target) > 0.01
   }
-  // Test hook: current activity level (0..1) from observed work rate.
-  const activityNow = () => { const now = recent[recent.length - 1]?.at ?? 0; const r = recent.filter((x) => now - x.at <= 1500).reduce((sum, x) => sum + x.chars, 0) / 1.5; return Math.min(1, r / 240) }
   const energyNow = () => energy
 
   // Size vocabulary (ranks 0..4 = XS..XL): input sets the ring radius, output fills the core.
   const RING = [3.2, 4, 5, 6.2, 7.6]
   const CORE = [0.8, 1.4, 2.2, 3.2, 4.4]
-
-  // Icon-first rows (composer's base grammar) expose the real tool/mail icon via data-filament-icon.
-  // The filament then lights THAT icon: a branch from the spine into the icon and a halo on it,
-  // sized by the same ranks; no separate ring, count tick or command glyph beside the spine.
-  const lightIcon = (n: Node, icon: Rect, gx: number, sign: number, f: Frame, t: number) => {
-    const c = n.status === "running" ? ACCENT : n.status === "done" ? GREEN : n.status === "error" ? RED : [0.5, 0.52, 0.6] as const
-    const edgeX = sign > 0 ? icon.x : icon.x + icon.w
-    const halo = Math.max(icon.w, icon.h) / 2 + 2
-    const live = n.status === "running" && !f.reduced
-    // Branch: spine -> icon leading edge; carries a packet while running.
-    paint.capsule(gx, icon.cy, edgeX, icon.cy, 1.1, rgba(c, live ? 0.85 : 0.45), live ? 2 : 0.6)
-    if (live) {
-      const k = ((t * 0.0022) % 1)
-      paint.dot(gx + (edgeX - gx) * k, icon.cy, 1.6, rgba([0.8, 0.9, 1.0], 0.9), 3)
-      const a = (t * 0.004) % 6.283
-      paint.ring(icon.cx, icon.cy, halo + 1.5, 1.1, rgba(c, 0.8), 4, a, a + 3.6)
-    }
-    // Halo on the icon: glow weight by output rank when done, steady while running, muted otherwise.
-    const weight = n.status === "done" ? 1.5 + (n.outputRank ?? 0) * 0.9 : live ? 3 : 0.8
-    paint.dot(icon.cx, icon.cy, halo, rgba(c, live ? 0.18 : 0.14), weight)
-    if (n.status === "error") paint.ring(icon.cx, icon.cy, halo + 1, 1.2, rgba(RED, 0.85), 1.5)
-  }
 
   const drawNode = (n: Node, r: Rect, gx: number, sign: number, f: Frame, t: number, count = 1) => {
     switch (n.kind) {
@@ -404,5 +365,5 @@ export const createScene = (paint: Painter) => {
     }
   }
 
-  return { absorb, render, energyNow, activityNow, phaseOf: (p: Phase) => p }
+  return { absorb, render, energyNow, phaseOf: (p: Phase) => p }
 }

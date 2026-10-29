@@ -6,7 +6,7 @@ import type { Message, Part } from "@opencode-ai/sdk/v2"
 import { sizeClass, toolMagnitude } from "../tool-magnitude"
 import { commandKind, type CommandKind } from "./command-kind"
 
-export type Phase = "idle" | "thinking" | "streaming" | "tool" | "delegated" | "waiting" | "error" | "complete" | "disconnected"
+export type Phase = "idle" | "thinking" | "streaming" | "tool" | "waiting" | "error" | "complete"
 export type Node = {
   id: string
   // DOM lookup: user/assistant messages by message id, parts by part id, asks by request id.
@@ -60,8 +60,6 @@ export type Input = {
   status: string
   pending: readonly { kind: "permission" | "question"; request: { id: string } }[]
   subagents: number
-  // Live link to the daemon; false = disconnected/stale: the picture must not claim work is happening.
-  connected?: boolean
 }
 
 const toolStatus = (part: Extract<Part, { type: "tool" }>): Node["status"] =>
@@ -109,31 +107,20 @@ export const snapshot = (input: Input): Snapshot => {
     // no boundary (message.tokens holds only the last step).
     const mine = nodes.slice(first)
     let pendingStep: Turn | undefined
-    // Pair by order of arrival rather than id: the store sorts step parts by id, and fixture ids
-    // (or any non-ULID scheme) can sort a finish before its start.
-    const stepParts = [...(input.steps?.(message.id) ?? [])]
-    const starts = stepParts.filter((p) => p.type === "step-start")
-    const finishes = stepParts.filter((p) => p.type === "step-finish")
-    const ordered = starts.flatMap((start, i) => (finishes[i] ? [start, finishes[i]!] : [start]))
-    for (const sp of ordered) {
-      if (sp.type === "step-start") { pendingStep = { messageID: message.id, anchor: mine.find((n) => n.id > sp.id)?.id ?? mine[turns.filter((t) => t.messageID === message.id).length]?.id, cache: "unknown", read: 0, write: 0, input: 0, settled: false }; turns.push(pendingStep); continue }
+    for (const sp of input.steps?.(message.id) ?? []) {
+      if (sp.type === "step-start") { pendingStep = { messageID: message.id, anchor: mine.find((n) => n.id > sp.id)?.id, cache: "unknown", read: 0, write: 0, input: 0, settled: false }; turns.push(pendingStep); continue }
       if (pendingStep) { Object.assign(pendingStep, cacheFrom(sp.tokens, true)); pendingStep = undefined }
     }
   }
   const waiting = input.pending[0]
   if (waiting) nodes.push({ id: waiting.request.id, anchor: "ask", kind: "ask", messageID: "", status: "open", length: 0, askKind: waiting.kind })
-  const running = nodes.some((node) => node.kind === "tool" && node.status === "running")
-  const delegated = nodes.some((node) => node.kind === "task" && node.status === "running")
+  const running = nodes.some((node) => node.kind !== "task" && node.kind === "tool" && node.status === "running")
   const streaming = nodes.some((node) => (node.kind === "text" || node.kind === "reasoning") && node.status === "running")
   const last = nodes[nodes.length - 1]
-  // Order: a human request outranks everything; a lost link outranks any claim of activity; then the
-  // most specific evidence (tool > delegated subagent > streaming text) before the catch-all thinking.
   const phase: Phase = waiting ? "waiting"
-    : input.connected === false ? "disconnected"
     : input.status === "retry" ? "error"
     : !busy ? (last && last.kind !== "user" ? "complete" : "idle")
     : running ? "tool"
-    : delegated ? "delegated"
     : streaming ? "streaming"
     : "thinking"
   return {
@@ -180,8 +167,6 @@ export const diff = (previous: Snapshot | undefined, next: Snapshot): Delta[] =>
 // Human label for the static (reduced-motion) treatment and the HUD.
 export const describe = (s: Snapshot, now: number) => {
   if (s.waiting) return s.waiting.kind === "permission" ? "Permission needed" : "Question for you"
-  if (s.phase === "disconnected") return "Disconnected"
-  if (s.phase === "delegated") return "Waiting on subagent"
   if (s.phase === "error") return "Retrying"
   const tool = s.nodes.findLast((node) => node.kind === "tool" && node.status === "running")
   if (tool) return `Running ${tool.id ? "tool" : ""}${tool.started ? ` · ${Math.round((now - tool.started) / 1000)}s` : ""}`

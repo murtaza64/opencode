@@ -9,6 +9,7 @@ import type { Segment } from "../transcript-groups"
 import type { MailNamer } from "../mail-names"
 import { MailOriginDetail, MailRoute, MailSender, MailSummary, mailPurpose, originOf, senderText } from "./mail-summary"
 import { iconEligible, ToolChip } from "./tool-run"
+import { livingActivity } from "../appearance"
 
 type MailSource = { type: "editspace-mail"; id: string; sender: string; recipient: string; senderSession?: string }
 const mailTime = (value: string | number | null) => value == null ? "" : new Date(value).toLocaleString()
@@ -106,7 +107,7 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
   </Show>}>
     {(metadata) => <details class="mail-activity" id={`mail-${metadata().mail.id}`} data-mail-message-id={props.message.id} data-direction="in">
       {/* Mail that reached this session as input is incoming, whoever sent it. */}
-      <MailSummary id={metadata().mail.id} direction="in"
+      <MailSummary direction="in"
         party={<MailSender from={metadata().mail.sender} evidence={props.mailRecord?.sender_session ?? metadata().mail.senderSession}
           name={props.mailName} origin={origin()} />}
         partyText={senderText(metadata().mail.sender, props.mailRecord?.sender_session ?? metadata().mail.senderSession, props.mailName, origin())}
@@ -153,16 +154,18 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
   </Show>
 }
 
-// Each tool call renders icon-first, with or without Living activity, which controls Filament only (ToolChip states failures and running calls in words);
+// With living activity each tool call renders icon-first (ToolChip states failures and running calls in words);
 // text and other parts render as before, in order. Splitting is per part, so nothing regroups while a turn runs.
 const Parts = (props: ComponentProps<typeof Message>) => {
-  const groups = createMemo(() =>
-    props.parts.reduce<{ key: string; parts: typeof props.parts; tool?: true }[]>((all, part) => {
+  const groups = createMemo(() => {
+    if (!livingActivity()) return [{ key: "all", parts: props.parts }]
+    return props.parts.reduce<{ key: string; parts: typeof props.parts; tool?: true }[]>((all, part) => {
       if (iconEligible(part, props.renderTools)) return [...all, { key: part.id, parts: [part], tool: true }]
       const last = all.at(-1)
       if (last && !last.tool) return [...all.slice(0, -1), { ...last, parts: [...last.parts, part] }]
       return [...all, { key: part.id, parts: [part] }]
-    }, []))
+    }, [])
+  })
   return <For each={groups().map((group) => group.key)}>{(key) => {
     const group = createMemo(() => groups().find((item) => item.key === key))
     return <Show when={group()}>{(value) => value().tool

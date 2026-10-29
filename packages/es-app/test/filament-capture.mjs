@@ -67,13 +67,12 @@ const steps = [
       // Message ids sort lexicographically in the store; `msg_9…` keeps these after the fixture's rows.
       fixture.emit("message.updated", { info: usr(`msg_9u_${id}`) })
       fixture.emit("message.updated", { info: info(`msg_9a_${id}`, `msg_9u_${id}`) })
-      // Fixture-style ids (as on 52410): "_finish" sorts before "_start"; pairing must not depend on id order.
-      fixture.emit("message.part.updated", { part: stepStart(`p_${id}_start`, `msg_9a_${id}`) })
-      fixture.emit("message.part.updated", { part: txt(`p_${id}_text`, `msg_9a_${id}`, body) })
-      if (tokens) fixture.emit("message.part.updated", { part: stepFinish(`p_${id}_finish`, `msg_9a_${id}`, tokens) })
+      fixture.emit("message.part.updated", { part: stepStart(`ss_${id}`, `msg_9a_${id}`) })
+      fixture.emit("message.part.updated", { part: txt(`t_${id}`, `msg_9a_${id}`, body) })
+      if (tokens) fixture.emit("message.part.updated", { part: stepFinish(`sf_${id}`, `msg_9a_${id}`, tokens) })
     }
   }, 1200],
-  ["cache-late-usage", () => fixture.emit("message.part.updated", { part: { id: "p_c4_finish", messageID: "msg_9a_c4", sessionID: "ses_a", type: "step-finish", reason: "stop", cost: 0, tokens: { input: 0, output: 40, reasoning: 0, cache: { read: 2000, write: 0 } } } }), 500],
+  ["cache-late-usage", () => fixture.emit("message.part.updated", { part: { id: "sf_c4", messageID: "msg_9a_c4", sessionID: "ses_a", type: "step-finish", reason: "stop", cost: 0, tokens: { input: 0, output: 40, reasoning: 0, cache: { read: 2000, write: 0 } } } }), 500],
   ["sizes-done", () => { fixture.emit("message.part.updated", { part: tool("part_g1", "completed", "bash", { command: "git status" }, big(40)) }); fixture.emit("message.part.updated", { part: tool("part_g2", "completed", "bash", { command: "jj log -r @" }, big(40000)) }); fixture.emit("message.part.updated", { part: tool("part_g3", "completed", "bash", { command: "gh pr create " + big(5000) }, big(100)) }); fixture.emit("message.part.updated", { part: tool("part_g4", "error", "bash", { command: "es mail check" }) }); for (const id of ["part_g5", "part_g6", "part_g7", "part_g8"]) fixture.emit("message.part.updated", { part: tool(id, "completed", "bash", { command: "x" }, big(2000)) }); fixture.setStatus("idle") }, 1500],
 ]
 try {
