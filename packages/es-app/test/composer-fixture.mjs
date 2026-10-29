@@ -164,6 +164,8 @@ export const createFixture = async () => {
       return complete()
     }
     if (["/event", "/global/event", "/api/events", "/api/notification-events"].includes(url.pathname)) {
+      // A dropped stream that stays down: reconnects are refused while set (preview phase replay, "offline").
+      if (fixture.refuseEvents && url.pathname === "/event") return json({ error: "event stream unavailable" }, 503)
       if (fixture.eventAuthorization && request.headers.authorization !== fixture.eventAuthorization) {
         response.writeHead(401, { "www-authenticate": 'Basic realm="fixture"', "content-type": "application/json" })
         response.end(JSON.stringify({ error: "Authentication required" }))

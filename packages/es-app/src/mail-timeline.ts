@@ -122,14 +122,26 @@ export const mailWakeLabel = (state: MailWakeState, agent: string) => ({
 
 type TimelineRow = { type: "transcript"; message: Message; timestamp: number } | { type: "mail"; message: MailMessage; timestamp: number }
 
-export const mailRows = (messages: Message[], timeline: MailTimeline | undefined,
+export const mailRows = (messages: Message[], timeline: (MailTimeline & { error?: string }) | undefined,
   previous: TimelineRow[] = [], interval?: MailInterval): TimelineRow[] => {
   const scoped = interval ? mailForSession(timeline?.messages ?? [], interval) : timeline?.messages ?? []
   const records = new Map(scoped.map(message => [message.id, message]))
-  // Keep raw history intact. Mail with unavailable/old source time is not transcript content.
+  // A mail input stored in this session is transcript content. It is hidden only on positive evidence that it is
+  // historical mail carried into this session (a handoff catch-up): this session's feed loaded without error, holds
+  // its record, and the record was sent outside the session's known interval. A missing feed, a failed read, an
+  // unknown session time or a feed without the record is not evidence; the input stays and renders from its source.
+  const loaded = !!timeline && !timeline.error
+  const all = new Map((timeline?.messages ?? []).map(message => [message.id, message]))
+  const historical = (id: string) => {
+    if (!interval || !loaded || interval.from === undefined || !Number.isFinite(interval.from)) return false
+    const record = all.get(id)
+    const at = record ? mailSentAt(record) : Number.NaN
+    if (!Number.isFinite(at)) return false
+    return at < interval.from || (interval.to !== undefined && Number.isFinite(interval.to) && at >= interval.to)
+  }
   const visible = interval ? messages.filter(message => {
     const id = mailSourceID(message)
-    return !id || records.has(id) || agentInput(message)
+    return !id || records.has(id) || agentInput(message) || !historical(id)
   }) : messages
   const existing = new Map(previous.map((row) => [`${row.type}:${row.message.id}`, row]))
   const promoted = new Set(visible.flatMap((message) => {

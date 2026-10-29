@@ -129,7 +129,11 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
           // This transcript's session received the mail.
           to={metadata().mail.recipient} toEvidence={props.message.sessionID} name={props.mailName} origin={origin()} /></div>
         <Show when={[metadata().delivery, metadata().state].filter(Boolean).join(" · ")}>{(input) => <div>Input: {input()}</div>}</Show>
-        <Show when={!props.mailDeliveries?.length}><div>{mailWake()}</div></Show>
+        {/* Without its record (no mail scope on this host, a failed read, or a feed without it) the chip shows only
+            what the stored input says: sender and kind. Wake and delivery are not claimed. */}
+        <Show when={props.mailRecord} fallback={<div class="mail-record-unavailable">Mail record not available on this host. Sender and kind are from the stored input.</div>}>
+          <Show when={!props.mailDeliveries?.length}><div>{mailWake()}</div></Show>
+        </Show>
         <MailOriginDetail origin={origin()} id={metadata().mail.id} />
         <Show when={props.mailRecord}>{(record) => <>
           <div>Sent: {mailTime(mailSentAt(record()))}</div>

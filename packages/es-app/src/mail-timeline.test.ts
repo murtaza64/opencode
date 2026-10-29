@@ -99,7 +99,37 @@ test("hides historical promoted mail without rewriting raw history or giving it 
   ] }
   expect(mailRows(messages, timeline, [], { sessionID: "ses_first", from: 2000 })).toEqual([])
   expect(messages).toHaveLength(1)
-  expect(mailRows(messages, undefined, [], { sessionID: "ses_first", from: 2000 })).toEqual([])
+  // Without a loaded feed there is no evidence the input is historical: it stays.
+  expect(mailRows(messages, undefined, [], { sessionID: "ses_first", from: 2000 }).map(row => row.message.id)).toEqual(["promoted"])
+})
+
+test("a mail input stays visible whenever its record cannot prove it historical (CHAT07)", () => {
+  const input = { id: "msg_mail", sessionID: "ses_tether", role: "user", time: { created: 5000 }, source: {
+    type: "editspace-mail", id: "squadron-v2#85", sender: "designer", recipient: "squadron-v2", kind: "task",
+  } } as unknown as Message
+  const record: MailMessage = { id: "squadron-v2#85", ts: 4900, created_ms: 4900, from: "designer", to: "squadron-v2", direction: "received", kind: "task", text: "kit PR",
+    deliveries: [{ message_id: "squadron-v2#85", recipient: "squadron-v2", session: "ses_tether", mode: "actionable", state: "handled", request_id: null, error: null,
+      presented_at: null, handled_at: null }] }
+  const interval = { sessionID: "ses_tether", lane: "squadron-v2", from: 1000 }
+  const ids = (rows: ReturnType<typeof mailRows>) => rows.map(row => row.message.id)
+  // No editspace for this directory on the viewing host: no feed at all.
+  expect(ids(mailRows([input], undefined, [], interval))).toEqual(["msg_mail"])
+  // The mail read failed.
+  expect(ids(mailRows([input], { editspace: "squadron", lane: "squadron-v2", messages: [], error: "Unable to load mail" }, [], interval))).toEqual(["msg_mail"])
+  // The session's start time is unknown (session metadata not loaded).
+  expect(ids(mailRows([input], { editspace: "squadron", lane: "squadron-v2", messages: [record] }, [], { ...interval, from: Number.POSITIVE_INFINITY }))).toEqual(["msg_mail"])
+  // The feed loaded but does not hold this record.
+  expect(ids(mailRows([input], { editspace: "squadron", lane: "squadron-v2", messages: [] }, [], interval))).toEqual(["msg_mail"])
+  // A record whose send time is unknown is no evidence either.
+  expect(ids(mailRows([input], { editspace: "squadron", lane: "squadron-v2", messages: [{ ...record, ts: "not a time", created_ms: undefined }] }, [], interval))).toEqual(["msg_mail"])
+  // The record present and in the interval: one row, the input itself, never a second standalone mail row.
+  expect(ids(mailRows([input], { editspace: "squadron", lane: "squadron-v2", messages: [record] }, [], interval))).toEqual(["msg_mail"])
+  // Positive evidence of a catch-up: a loaded feed holds the record and it was sent before this session began, or
+  // after its successor began.
+  expect(ids(mailRows([input], { editspace: "squadron", lane: "squadron-v2", messages: [record] }, [], { ...interval, from: 6000 }))).toEqual([])
+  expect(ids(mailRows([input], { editspace: "squadron", lane: "squadron-v2", messages: [record] }, [], { ...interval, from: 1000, to: 4000 }))).toEqual([])
+  // The same failed read cannot hide an otherwise historical record.
+  expect(ids(mailRows([input], { editspace: "squadron", lane: "squadron-v2", messages: [record], error: "partial" }, [], { ...interval, from: 6000 }))).toEqual(["msg_mail"])
 })
 
 test("precise new source time includes first-second mail but never rounds legacy time forward", () => {
@@ -208,8 +238,9 @@ test("keeps an agent resume in the session transcript although no mail record ex
   const resume = { id: "msg_resume", sessionID: "ses_first", role: "user", time: { created: 3000 }, source } as unknown as Message
   const stale = { id: "msg_mail", sessionID: "ses_first", role: "user", time: { created: 3000 },
     source: { ...source, id: "gone", kind: "task" } } as unknown as Message
+  // Neither has a record; without evidence that the task mail is historical, both stay.
   expect(mailRows([resume, stale], undefined, [], { sessionID: "ses_first", from: 2000 }).map(row => row.message.id))
-    .toEqual(["msg_resume"])
+    .toEqual(["msg_resume", "msg_mail"])
 })
 
 test("a mail cause keeps each sender's recorded session only when its records agree", () => {
