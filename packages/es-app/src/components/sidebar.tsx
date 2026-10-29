@@ -505,9 +505,6 @@ export default function Sidebar() {
         {/* Unified nav (dotfiles#240): primary entries, then what needs you (never filtered by a tab), then
           * Pinned (any kind), then four browse tabs with their own filters. */}
         <NavEntries />
-        <nav class="sidebar-actions" aria-label="Agents">
-          <NewSession />
-        </nav>
         {/* Explicit requests only (attention records, permissions, questions, delivered requests). A finished or idle
           * agent is activity: its row's status dot and order in Agents show it, never a Needs you row. */}
         <NeedsYouBand />
@@ -544,6 +541,7 @@ export default function Sidebar() {
               aria-label={`Sort: ${sortBy() === "activity" ? "activity" : "name"}`} onClick={() => setSortBy(sortBy() === "activity" ? "name" : "activity")}>
               <span aria-hidden="true">⇅</span> {sortBy() === "activity" ? "Activity" : "Name"}
             </button>
+            <NewSession inline />
           </div>
           <Show when={hosted() && host()?.profile !== "personal"}>
             <div class="work-hosts" role="group" aria-label="Work hosts">

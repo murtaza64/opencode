@@ -45,6 +45,10 @@ try {
   await expect(page.locator("select.es-switcher")).toHaveCount(0)
   const scope = sidebar.locator(".scope-menu summary")
   await expect(scope).toBeVisible()
+  // New session is a contextual action in this row (NAV-17), the only one in the expanded sidebar.
+  await expect(sidebar.locator(".agent-filters").getByRole("link", { name: "New session", exact: true })).toHaveAttribute("href", "/new")
+  await expect(sidebar.getByRole("link", { name: "New session", exact: true })).toHaveCount(1)
+  await expect(sidebar.locator(".sidebar-actions")).toHaveCount(0)
 
   // Count = working now in scope, from the same live bucket the rows show: it equals the busy dots in Agents
   // and Pinned (at least Local's busy ses_a), never the total.

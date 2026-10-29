@@ -431,3 +431,8 @@
 .pin-slot.drop-before::before { position: absolute; inset-inline: 0; inset-block-start: -1px; }
 .pin-sync { margin-inline-start: 6px; font-size: 10px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--yellow); }
 .pin-note { padding-block: 2px; }
+
+/* NAV-17/STYLE-09: New session sits at the end of the Agents control row. */
+.agent-new { margin-inline-start: auto; color: var(--text); text-decoration: none; }
+.agent-new svg { inline-size: 11px; block-size: 11px; }
+.agent-new.active { border-color: var(--accent); }
