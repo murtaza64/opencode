@@ -156,15 +156,32 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
 // Each tool call renders icon-first, with or without Living activity, which controls Filament only (ToolChip states failures and running calls in words);
 // text and other parts render as before, in order. Splitting is per part, so nothing regroups while a turn runs.
 const Parts = (props: ComponentProps<typeof Message>) => {
-  const groups = createMemo(() =>
-    props.parts.reduce<{ key: string; parts: typeof props.parts; tool?: true }[]>((all, part) => {
-      if (iconEligible(part, props.renderTools)) return [...all, { key: part.id, parts: [part], tool: true }]
-      const last = all.at(-1)
-      if (last && !last.tool) return [...all.slice(0, -1), { ...last, parts: [...last.parts, part] }]
-      return [...all, { key: part.id, parts: [part] }]
-    }, []))
-  return <For each={groups().map((group) => group.key)}>{(key) => {
-    const group = createMemo(() => groups().find((item) => item.key === key))
+  type Group = { key: string; parts: typeof props.parts; tool?: true }
+  // A streaming message replaces one part per delta. Groups are rebuilt in one linear pass, and a group whose
+  // parts are unchanged keeps its previous object, so its row is not touched; only the changed group updates.
+  const groups = createMemo<Map<string, Group>>((previous) => {
+    const next = new Map<string, Group>()
+    let open: Group | undefined
+    for (const part of props.parts) {
+      if (iconEligible(part, props.renderTools)) {
+        next.set(part.id, { key: part.id, parts: [part], tool: true })
+        open = undefined
+        continue
+      }
+      if (open) open.parts = [...open.parts, part]
+      else next.set(part.id, open = { key: part.id, parts: [part] })
+    }
+    for (const [key, group] of next) {
+      const old = previous?.get(key)
+      if (old && old.tool === group.tool && old.parts.length === group.parts.length && old.parts.every((part, index) => part === group.parts[index]))
+        next.set(key, old)
+    }
+    return next
+  })
+  const keys = createMemo(() => [...groups().keys()], undefined,
+    { equals: (a, b) => a.length === b.length && a.every((key, index) => key === b[index]) })
+  return <For each={keys()}>{(key) => {
+    const group = createMemo(() => groups().get(key))
     return <Show when={group()}>{(value) => value().tool
       ? <ToolChip message={props.message} part={value().parts[0] as Parameters<typeof ToolChip>[0]["part"]} renderTools={props.renderTools} />
       : <Message {...props} parts={value().parts} activityRows />}</Show>
