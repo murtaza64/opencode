@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url"
 import { startPanelPreview } from "./composer-panel-preview.mjs"
 import { directory } from "./composer-fixture.mjs"
-import { createMotion, createReplay, replayPlugin } from "./preview-replay.mjs"
+import { createMotion, createPhases, createReplay, replayPlugin } from "./preview-replay.mjs"
 
 // Disposable fixture for tool size badges, coalesced tool runs and prompt
 // navigation. Nothing here talks to a real daemon.
@@ -141,7 +141,9 @@ export const startToolRunsPreview = async (portHint = 0, options = {}) => {
     }
     const motion = createMotion(fixture, { directory, addMail: (record) => motionMail.push(record) })
     const replay = createReplay(fixture, { firstCase: "msg_2000", mailRecords: [] })
-    replayState.replay = (scope) => scope === "motion" ? motion() : replay(scope)
+    const phases = createPhases(fixture, { directory })
+    replayState.replay = (scope) => scope === "motion" ? motion() : scope === "phases" ? phases() : replay(scope)
+    replayState.phase = () => fixture.phase ?? null
   }
   return { ...preview, tool, assistant, text, laneUrl: `${preview.origin}/session/ses_a?directory=${encodeURIComponent(laneDirectory)}` }
 }

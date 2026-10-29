@@ -5,7 +5,8 @@
 //
 // Controls (preview origin only): the "Replay" buttons fixed at the bottom-left corner, or a page URL with
 // `?replay=cases` (icon-chip and mail cases), `?replay=cache` (cache continuity cases, then the rest), `?replay=all`
-// (the whole fixture) or `?replay=motion` (the 20 s motion scenario below), which starts once on load.
+// (the whole fixture), `?replay=motion` (the 20 s motion scenario) or `?replay=phases` (the ten assistant phases),
+// which starts once on load.
 
 const CLIENT = `(() => {
   const start = (scope) => fetch("/__preview/replay?scope=" + scope, { method: "POST" })
@@ -16,7 +17,7 @@ const CLIENT = `(() => {
   // Sits in the sidebar's bottom corner, clear of the composer controls.
   bar.style.cssText = "position:fixed;inset-block-end:10px;inset-inline-start:10px;z-index:2147483647;display:flex;flex-wrap:wrap;gap:4px;" +
     "max-inline-size:220px;padding:6px;border-radius:8px;background:rgba(20,22,30,.92);border:1px solid rgba(255,255,255,.15);font:12px system-ui"
-  for (const [scope, label] of [["motion", "Replay motion"], ["cases", "Replay mail + tool cases"], ["cache", "Replay cache cases"], ["all", "Replay all"]]) {
+  for (const [scope, label] of [["phases", "Replay phases"], ["motion", "Replay motion"], ["cases", "Replay mail + tool cases"], ["cache", "Replay cache cases"], ["all", "Replay all"]]) {
     const button = document.createElement("button")
     button.type = "button"
     button.textContent = label
@@ -28,19 +29,23 @@ const CLIENT = `(() => {
   const mount = () => document.body.append(bar)
   document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", mount) : mount()
   const auto = new URLSearchParams(location.search).get("replay")
-  if (["motion", "cases", "cache", "all"].includes(auto)) setTimeout(() => start(auto), 1500)
+  if (["phases", "motion", "cases", "cache", "all"].includes(auto)) setTimeout(() => start(auto), 1500)
 })()`
 
-/** Vite plugin: the replay buttons and the `POST /__preview/replay?scope=motion|cases|cache|all` endpoint. */
+/** Vite plugin: the replay buttons and the `POST /__preview/replay?scope=phases|motion|cases|cache|all` endpoint. */
 export const replayPlugin = (state) => ({
   name: "preview-replay",
   transformIndexHtml: () => [{ tag: "script", injectTo: "body", children: CLIENT }],
   // Returns nothing: a function returned from configureServer would run as a post middleware hook.
   configureServer: (server) => {
     server.middlewares.use((request, response, next) => {
+      if (request.url === "/__preview/phase") {
+        response.setHeader("content-type", "application/json")
+        return response.end(JSON.stringify({ phase: state.phase?.() ?? null }))
+      }
       if (!request.url?.startsWith("/__preview/replay") || request.method !== "POST") return next()
       const requested = new URL(request.url, "http://preview").searchParams.get("scope")
-      const scope = ["all", "cache", "motion"].includes(requested) ? requested : "cases"
+      const scope = ["all", "cache", "motion", "phases"].includes(requested) ? requested : "cases"
       void state.replay?.(scope)
       response.statusCode = 204
       response.end()
@@ -215,5 +220,128 @@ export const createMotion = (fixture, options) => {
       [{ id: `${ids.next}_text`, messageID: ids.next, sessionID: "ses_a", type: "text", text: "Thanks, that is all for now." }])
     await wait(800)
     fixture.setStatus("idle")
+  }
+}
+
+/**
+ * The ten assistant phases (living-chat CHAT10, composer PHASE-MAP), in order, each held ~3 s and announced through
+ * the page's own signals only: 1. working: busy with an empty assistant message; 2. thinking: a reasoning part with
+ * time.start and no end, growing, then ended; 3. writing: an open text part growing, then ended; 4. tool: bash
+ * running, then done; 5. delegated: a task tool running, then done; 6. blocked: a permission request, then answered;
+ * 7. retry: session.status retry with `next`; 8. offline: the event stream drops and reconnects are refused;
+ * 9. complete: the message finishes and the session goes idle; 10. idle. `GET /__preview/phase` names the current
+ * step for capture tooling. Reasoning text is filler; fixture data only.
+ */
+export const createPhases = (fixture, options) => {
+  let run = 0
+  return async () => {
+    const token = ++run
+    const live = () => token === run
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+    const hold = options.holdMs ?? 3000
+    const base = Date.now()
+    const ids = { user: `msg_p${base}u`, reply: `msg_p${base}a` }
+    const step = (name) => { fixture.phase = name }
+    const user = { id: ids.user, sessionID: "ses_a", role: "user", agent: "build", model: { providerID: "fixture", modelID: "test" }, time: { created: base } }
+    const reply = { id: ids.reply, parentID: ids.user, sessionID: "ses_a", role: "assistant", agent: "build", mode: "build", providerID: "fixture",
+      modelID: "test", path: { cwd: options.directory, root: options.directory }, time: { created: base + 1 }, cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }
+    const part = (extra) => ({ messageID: ids.reply, sessionID: "ses_a", ...extra })
+    const message = { info: reply, parts: [] }
+    const put = (value) => {
+      const index = message.parts.findIndex((item) => item.id === value.id)
+      if (index < 0) message.parts.push(value)
+      else message.parts[index] = value
+      fixture.emit("message.part.updated", { part: value })
+    }
+    fixture.refuseEvents = false
+    fixture.permissions = []
+    // 1. working
+    step("working")
+    fixture.setStatus("busy")
+    fixture.messages.push({ info: user, parts: [{ id: `${ids.user}_text`, messageID: ids.user, sessionID: "ses_a", type: "text", text: "Phase replay: walk every head state." }] })
+    fixture.emit("message.updated", { info: user })
+    fixture.emit("message.part.updated", { part: fixture.messages.at(-1).parts[0] })
+    fixture.messages.push(message)
+    fixture.emit("message.updated", { info: reply })
+    await wait(hold)
+    if (!live()) return
+    // 2. thinking: an open reasoning part that grows, then ends.
+    step("thinking")
+    const thoughtStart = Date.now()
+    let thought = ""
+    for (let index = 0; index < 20; index++) {
+      thought += "considering the next step "
+      put(part({ id: `${ids.reply}_r`, type: "reasoning", text: thought, time: { start: thoughtStart } }))
+      await wait(200)
+      if (!live()) return
+    }
+    put(part({ id: `${ids.reply}_r`, type: "reasoning", text: thought, time: { start: thoughtStart, end: Date.now() } }))
+    // 3. writing: an open text part that grows, then ends.
+    step("writing")
+    const textStart = Date.now()
+    let text = ""
+    for (let index = 0; index < 15; index++) {
+      text += "Writing the answer one clause at a time. "
+      put(part({ id: `${ids.reply}_t`, type: "text", text, time: { start: textStart } }))
+      await wait(200)
+      if (!live()) return
+    }
+    put(part({ id: `${ids.reply}_t`, type: "text", text, time: { start: textStart, end: Date.now() } }))
+    // 4. tool
+    step("tool")
+    const tool = (id, name, input, state) => put(part({ id: `${ids.reply}_${id}`, type: "tool", tool: name, callID: `${ids.reply}_${id}`, state: { input, title: name, metadata: {}, ...state } }))
+    const shellStart = Date.now()
+    tool("bash", "bash", { command: "bun test", description: "Unit tests" }, { status: "running", time: { start: shellStart } })
+    await wait(hold)
+    if (!live()) return
+    tool("bash", "bash", { command: "bun test", description: "Unit tests" }, { status: "completed", output: "42 pass", metadata: { exit: 0 }, time: { start: shellStart, end: Date.now() } })
+    // 5. delegated
+    step("delegated")
+    const taskStart = Date.now()
+    tool("task", "task", { description: "Review the diff", subagent_type: "review", prompt: "Review." }, { status: "running", time: { start: taskStart } })
+    await wait(hold)
+    if (!live()) return
+    tool("task", "task", { description: "Review the diff", subagent_type: "review", prompt: "Review." }, { status: "completed", output: "No findings.", time: { start: taskStart, end: Date.now() } })
+    // 6. blocked: a permission request, then answered.
+    step("blocked")
+    const permission = { id: `per_${base}`, sessionID: "ses_a", permission: "bash", patterns: ["rm -rf build"], metadata: {} }
+    // Permission events reach the page's activity store through the global stream, wrapped with their directory.
+    const global = (type, properties) => {
+      for (const [response, entry] of fixture.eventStreams)
+        if (entry.path === "/global/event") response.write(`data: ${JSON.stringify({ directory: options.directory, payload: { type, properties } })}\n\n`)
+    }
+    fixture.permissions = [permission]
+    global("permission.asked", permission)
+    await wait(hold)
+    if (!live()) return
+    fixture.permissions = []
+    global("permission.replied", { sessionID: "ses_a", requestID: permission.id, reply: "once" })
+    // 7. retry
+    step("retry")
+    fixture.status = "retry"
+    fixture.emit("session.status", { sessionID: "ses_a", status: { type: "retry", attempt: 1, message: "Fixture provider overloaded", next: Date.now() + hold } })
+    await wait(hold)
+    if (!live()) return
+    fixture.setStatus("busy")
+    // 8. offline: the stream drops and stays down.
+    step("offline")
+    fixture.refuseEvents = true
+    fixture.disconnect()
+    await wait(hold)
+    fixture.refuseEvents = false
+    if (!live()) return
+    await wait(1500)
+    // 9. complete
+    step("complete")
+    message.info = { ...reply, time: { created: reply.time.created, completed: Date.now() }, finish: "stop" }
+    fixture.emit("message.updated", { info: message.info })
+    fixture.setStatus("idle")
+    await wait(hold)
+    if (!live()) return
+    // 10. idle
+    step("idle")
+    await wait(hold)
+    if (live()) step("done")
   }
 }
