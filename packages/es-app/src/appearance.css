@@ -419,3 +419,15 @@
 .nav-tabs [role=tab][aria-selected=true] .nav-tab-count { color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .nav-tabs [role=tab], .nav-tabs [role=tab]::after { transition: none; } .nav-tabs [role=tab]:active { transform: none; } }
 
+
+/* NAV18 Pinned reorder: a grip on hover/focus; the drop line is the only motion-free cue (no animation). */
+.pin-slot { position: relative; }
+.pin-grip { position: absolute; inset-inline-start: 0; inset-block: 0; z-index: 1; display: flex; align-items: center; inline-size: 10px; font-size: 9px; letter-spacing: -2px; color: var(--overlay1); cursor: grab; opacity: 0; touch-action: none; user-select: none; }
+.pin-slot:hover .pin-grip, .pin-slot:focus-within .pin-grip, .pin-slot.dragging .pin-grip { opacity: 1; }
+@media (hover: none) { .pin-grip { opacity: .6; } }
+.pin-slot.dragging { opacity: .5; }
+.pin-slot.dragging .pin-grip { cursor: grabbing; }
+.pin-slot.drop-before::before, .pin-drop-end { content: ""; display: block; block-size: 2px; margin-inline: 8px; border-radius: 1px; background: var(--accent); }
+.pin-slot.drop-before::before { position: absolute; inset-inline: 0; inset-block-start: -1px; }
+.pin-sync { margin-inline-start: 6px; font-size: 10px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--yellow); }
+.pin-note { padding-block: 2px; }

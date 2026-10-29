@@ -67,7 +67,7 @@ const StatusDot = (props: { state: DotState; label?: string }) => {
 export default function Sidebar() {
   const { state, dotFor, editspace, setEditspace, editspaces, archivedIds,
     allProjects, sessionRows, sessions, pinnedSessions, unpinnedSessions, isPinned, togglePin,
-    sessionsLoading, sessionsError, setVisibleSessions, cloud, failures, work, stateError, pinnedUnion } =
+    sessionsLoading, sessionsError, setVisibleSessions, cloud, failures, work, stateError, pinnedUnion, movePin, pinSync } =
     useDashboard()
   // Work view: this host's rows and every other Work view host's rows in one list. Other hosts' rows
   // carry their host and open on that host's own tab; a host that stops answering keeps its last
@@ -110,6 +110,62 @@ export default function Sidebar() {
   const hostCount = (id: string) => id === ownHost().id ? unpinnedSessions().length + pinnedSessions().length
     : (work.feeds().find((feed) => feed.host.id === id)?.state().rows.length ?? 0)
   const allPinned = pinnedUnion
+  // Reordering Pinned (NAV18): drag a row by its grip (pointer: mouse at once, touch after a short press) or press
+  // Alt+ArrowUp/ArrowDown on a focused row. The order is the shared pins order (movePin); a move the owning host
+  // cannot take now is refused, and nothing changes but a short note.
+  const [dragging, setDragging] = createSignal<string>()
+  const [dropAt, setDropAt] = createSignal<number>()
+  const [pinNote, setPinNote] = createSignal("")
+  let noteTimer: ReturnType<typeof setTimeout> | undefined
+  const note = (text: string) => { setPinNote(text); clearTimeout(noteTimer); noteTimer = setTimeout(() => setPinNote(""), 4000) }
+  // Place `row` at index `to` of the list without it: its neighbours there are the anchors.
+  const placePin = (row: SessionRow, to: number) => {
+    const rest = allPinned().filter((other) => hostRowKey(other) !== hostRowKey(row))
+    const from = allPinned().findIndex((other) => hostRowKey(other) === hostRowKey(row))
+    if (from === to) return
+    if (!movePin(row, rest[to - 1], rest[to])) note(`Can't reorder ${row.title || row.id} now: ${feedOf(row)?.host.label ?? "its host"} is not synced. Nothing changed.`)
+  }
+  // Rows may be rebuilt when the order changes (the move lands when the owning host answers): for a few seconds after
+  // a keyboard move, a rebuilt row gets its focus back, unless focus has moved elsewhere meanwhile.
+  let refocus: { key: string; until: number } | undefined
+  createEffect(() => {
+    allPinned()
+    if (!refocus) return
+    requestAnimationFrame(() => {
+      if (!refocus || Date.now() > refocus.until) { refocus = undefined; return }
+      const active = document.activeElement
+      if (active && active !== document.body && !navEl()?.querySelector(".pinned-section")?.contains(active)) { refocus = undefined; return }
+      navEl()?.querySelector<HTMLElement>(`.pin-slot[data-pin-key="${CSS.escape(refocus.key)}"] a.nav-item`)?.focus()
+    })
+  })
+  const unsynced = () => pinSync().filter((item) => item.status !== "ready" || item.notSynced > 0)
+  const startPinDrag = (event: PointerEvent, row: SessionRow) => {
+    if (event.button !== 0) return
+    const list = (event.currentTarget as HTMLElement).closest(".pinned-section")!
+    const startY = event.clientY
+    const touch = event.pointerType !== "mouse"
+    let active = false
+    const press = touch ? setTimeout(() => { active = true; setDragging(hostRowKey(row)) }, 300) : undefined
+    const slots = () => [...list.querySelectorAll<HTMLElement>(".pin-slot")].filter((slot) => slot.dataset.pinKey !== hostRowKey(row))
+    const move = (next: PointerEvent) => {
+      if (!active && !touch && Math.abs(next.clientY - startY) > 4) { active = true; setDragging(hostRowKey(row)) }
+      if (!active) { if (touch && Math.abs(next.clientY - startY) > 8) end(); return }
+      next.preventDefault()
+      const index = slots().findIndex((slot) => { const box = slot.getBoundingClientRect(); return next.clientY < box.top + box.height / 2 })
+      setDropAt(index < 0 ? slots().length : index)
+    }
+    const end = () => {
+      clearTimeout(press)
+      window.removeEventListener("pointermove", move)
+      window.removeEventListener("pointerup", drop)
+      window.removeEventListener("pointercancel", end)
+      setDragging(); setDropAt()
+    }
+    const drop = () => { const to = dropAt(); const was = active; end(); if (was && to !== undefined) placePin(row, to) }
+    window.addEventListener("pointermove", move, { passive: false })
+    window.addEventListener("pointerup", drop)
+    window.addEventListener("pointercancel", end)
+  }
   // Agents tab controls (NAV-16): an explicit sort beside the default activity order, and an active-only filter.
   const SORT_KEY = "es-app:agents-sort"
   const ACTIVE_KEY = "es-app:agents-active-only"
@@ -457,8 +513,26 @@ export default function Sidebar() {
         <NeedsYouBand />
         <Show when={allPinned().length || cloud.pins().length}>
           <section class="pinned-section" aria-label="Pinned sessions">
-            <div class="nav-heading">Pinned</div>
-            <For each={allPinned()}>{(s) => item(s)}</For>
+            <div class="nav-heading">Pinned<span class="sr-only">; reorder a row with Alt+Up or Alt+Down</span>
+              <Show when={unsynced().length}><span class="pin-sync" title={`Not synced: ${unsynced().map((item) => `${item.host} (${item.status}${item.notSynced ? `, ${item.notSynced} pending` : ""})`).join(", ")}`}>not synced</span></Show></div>
+            <For each={allPinned()}>{(s, index) => {
+              const key = hostRowKey(s)
+              return <div class="pin-slot" data-pin-key={key} classList={{ dragging: dragging() === key, "drop-before": dragging() !== undefined && dragging() !== key && dropAt() === allPinned().filter((other) => hostRowKey(other) !== dragging()).findIndex((other) => hostRowKey(other) === key) }}
+                onKeyDown={(event) => {
+                  if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return
+                  event.preventDefault()
+                  const target = index() + (event.key === "ArrowUp" ? -1 : 1)
+                  if (target < 0 || target >= allPinned().length) return
+                  refocus = { key, until: Date.now() + 3000 }
+                  placePin(s, target)
+                }}>
+                <span class="pin-grip" aria-hidden="true" onPointerDown={(event) => startPinDrag(event, s)}>⋮⋮</span>
+                {item(s)}
+              </div>
+            }}</For>
+            <Show when={dragging() !== undefined && dropAt() === allPinned().length - 1}><div class="pin-drop-end" aria-hidden="true" /></Show>
+            <div class="sr-only" role="status" aria-live="polite">{pinNote()}</div>
+            <Show when={pinNote()}><div class="dim nav-empty pin-note">{pinNote()}</div></Show>
             <For each={cloud.pins()}>{pin => <CloudNav pin={pin} />}</For>
           </section>
         </Show>
