@@ -160,9 +160,13 @@ export const daily = Effect.fn("UsageRollup.daily")(function* (
   const shift = Math.round(input.offsetMinutes / 60)
   const today = Math.floor((now / HOUR + shift) / 24)
   const first = today - input.days + 1
-  const rows = yield* db
+  const state = yield* db.select().from(UsageRollupStateTable).where(eq(UsageRollupStateTable.id, 1)).get().pipe(Effect.orDie)
+  // Hours from here on hold only steps that ran on this host; the hour holding the cutoff also holds backfilled history.
+  const originHour = state ? Math.ceil(state.cutoff / HOUR) : Infinity
+  const grouped = yield* db
     .select({
       day: sql<number>`(${UsageHourlyTable.hour} + ${shift}) / 24`,
+      origin: sql<number>`${UsageHourlyTable.hour} >= ${Number.isFinite(originHour) ? originHour : Number.MAX_SAFE_INTEGER}`,
       provider: UsageHourlyTable.provider_id,
       model: UsageHourlyTable.model_id,
       cost: sql<number>`sum(${UsageHourlyTable.cost})`,
@@ -174,14 +178,28 @@ export const daily = Effect.fn("UsageRollup.daily")(function* (
     })
     .from(UsageHourlyTable)
     .where(gte(UsageHourlyTable.hour, first * 24 - shift))
-    .groupBy(sql`1`, UsageHourlyTable.provider_id, UsageHourlyTable.model_id)
+    .groupBy(sql`1`, sql`2`, UsageHourlyTable.provider_id, UsageHourlyTable.model_id)
     .all()
     .pipe(Effect.orDie)
-  const state = yield* db.select().from(UsageRollupStateTable).where(eq(UsageRollupStateTable.id, 1)).get().pipe(Effect.orDie)
+  const merge = (items: typeof grouped) =>
+    Object.values(
+      Object.groupBy(items, (row) => `${row.day}\u0000${row.provider}\u0000${row.model}`),
+    ).map((same) =>
+      same!.reduce((total, row) => ({
+        ...total,
+        cost: total.cost + row.cost,
+        input: total.input + row.input,
+        output: total.output + row.output,
+        reasoning: total.reasoning + row.reasoning,
+        cacheRead: total.cacheRead + row.cacheRead,
+        cacheWrite: total.cacheWrite + row.cacheWrite,
+      })),
+    )
+  const rows = merge(grouped)
+  const originRows = grouped.filter((row) => row.origin === 1)
   const backfilled = state?.time_backfilled !== null && state?.time_backfilled !== undefined
-  const days = Array.from({ length: input.days }, (_, index) => today - index).map((day) => {
-    const models = rows
-      .filter((row) => row.day === day)
+  const price = (dayRows: typeof rows) =>
+    dayRows
       .map((row) => {
         const tokens = row.input + row.output + row.reasoning + row.cacheRead + row.cacheWrite
         const priced = input.hasRate ? input.hasRate(row.provider, row.model) : row.cost !== 0
@@ -198,12 +216,20 @@ export const daily = Effect.fn("UsageRollup.daily")(function* (
         }
       })
       .toSorted((a, b) => (b.cost ?? -1) - (a.cost ?? -1))
-    const unpriced = models.filter((model) => model.coverage === "missing-rate")
+  const unpricedOf = (models: ReturnType<typeof price>) => models.filter((model) => model.coverage === "missing-rate")
+  const priced = (models: ReturnType<typeof price>) => round(models.reduce((total, model) => total + (model.cost ?? 0), 0))
+  const days = Array.from({ length: input.days }, (_, index) => today - index).map((day) => {
+    const models = price(rows.filter((row) => row.day === day))
+    const unpriced = unpricedOf(models)
     // Days before the live cutoff are only known once the backfill has run.
     const live = (day * 24 - shift) * HOUR >= (state?.cutoff ?? Infinity)
     const complete = backfilled || live
     // Sum of priced models only; unpriced usage is reported beside it, never folded in as $0.
-    const cost = complete ? round(models.reduce((total, model) => total + (model.cost ?? 0), 0)) : null
+    const cost = complete ? priced(models) : null
+    // The day the cutoff falls in: whole hours after it ran only on this host, so that part is summable.
+    const dayStart = day * 24 - shift
+    const partial = !live && originHour > dayStart && originHour < dayStart + 24
+    const originModels = partial ? price(merge(originRows.filter((row) => row.day === day))) : []
     return {
       day: new Date(day * 24 * HOUR).toISOString().slice(0, 10),
       complete,
@@ -213,6 +239,13 @@ export const daily = Effect.fn("UsageRollup.daily")(function* (
       // be counted on the host it was moved from.
       originOnly: live,
       originCost: live ? cost : null,
+      originPartial: partial
+        ? {
+            since: new Date(originHour * HOUR).toISOString(),
+            cost: priced(originModels),
+            unpricedModels: unpricedOf(originModels).length,
+          }
+        : null,
       unpricedModels: unpriced.length,
       unpricedTokens: unpriced.reduce(
         (total, model) =>
@@ -244,6 +277,7 @@ export const daily = Effect.fn("UsageRollup.daily")(function* (
       "steps that ran on this host count; synced or moved sessions are skipped from liveSince on, but history before liveSince is counted from every local message, so history moved from another host can also count there",
       "local days are built from UTC hours: zones with a 30 or 45 minute offset are rounded to the hour",
       "to total several hosts, sum days[].originCost and treat any day with originOnly=false (or an unreachable host) as partial; the sum is still an estimate, not billing",
+      "on the day the cutoff falls in, originPartial.cost covers only whole hours from originPartial.since (UTC) to the end of the local day; it is summable across hosts only over the same since, and spend before it is not included",
       "not provider billing",
     ],
     days,
