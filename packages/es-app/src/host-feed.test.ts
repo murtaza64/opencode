@@ -38,6 +38,11 @@ describe("Work view rows", () => {
     expect(hostRows("mini", sessions).every((row) => row.host === "mini")).toBe(true)
   })
 
+  test("another host's row carries when that host created the session", () => {
+    expect(hostRows("mini", [session("ses_a", "/r", 9)]).map((row) => [row.id, row.created, row.updated])).toEqual([["ses_a", 1, 9]])
+    expect(hostRows("mini", [session("ses_b", "/r", 9, { time: { updated: 9 } as GlobalSession["time"] })])[0]!.created).toBeUndefined()
+  })
+
   test("opening another host's row reads it here; replying targets that host's own listener", () => {
     const mini = { id: "mini", label: "Mac Mini", origin: "http://127.0.0.1:60310" }
     expect(hostSessionHref(mini, { id: "ses_a", directory: "/a b" })).toBe("/session/ses_a?directory=%2Fa%20b&host=mini")

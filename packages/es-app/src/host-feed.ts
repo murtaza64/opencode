@@ -20,6 +20,8 @@ export type HostedRow = {
   title: string
   directory: string
   updated: number
+  /** When that host created the session; absent when unknown (e.g. a last-seen row cached before it was recorded). */
+  created?: number
   live?: string
   project?: string
   archived?: number
@@ -71,7 +73,7 @@ export const hostRows = (host: string, sessions: GlobalSession[], root?: string)
   return sessions
     .filter((session) => !session.parentID && !session.time.archived)
     .filter((session) => base === undefined || session.directory === base || session.directory.startsWith(`${base}/`))
-    .map((session): HostedRow => ({ id: session.id, title: session.title, directory: session.directory, updated: session.time.updated, host }))
+    .map((session): HostedRow => ({ id: session.id, title: session.title, directory: session.directory, updated: session.time.updated, ...(typeof session.time.created === "number" ? { created: session.time.created } : {}), host }))
 }
 
 /** One list across hosts, newest first; each row stays distinct by its host-qualified key. */
