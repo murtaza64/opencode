@@ -39,8 +39,13 @@ const check = async (reducedMotion) => {
   for (const id of ["ses_a", "ses_b", "ses_c"]) publish(id, "busy")
   await expect(list.locator(".dot.busy")).toHaveCount(3)
   const halos = () => list.locator(".session-entry").evaluateAll(rows => rows.map(row => {
-    const style = getComputedStyle(row.querySelector(".dot"), "::after")
-    return { name: style.animationName, delay: style.animationDelay }
+    const dot = row.querySelector(".dot")
+    const style = getComputedStyle(dot, "::after")
+    // Current phase of the halo in the shared 1.6s cycle, read from the running animation.
+    const animation = dot.getAnimations({ subtree: true }).find(a => a.animationName === "busy-halo")
+    const timing = animation?.effect?.getComputedTiming()
+    const phase = timing && timing.progress !== null ? timing.progress * 1600 : undefined
+    return { name: style.animationName, delay: style.animationDelay, phase }
   }))
   const before = await halos()
   const order = await list.locator(".session-entry .nav-title").allTextContents()
@@ -56,10 +61,14 @@ const check = async (reducedMotion) => {
 try {
   const moving = await check("no-preference")
   assert(moving.every(h => h.name === "busy-halo"), `busy rows animate: ${JSON.stringify(moving)}`)
-  assert.equal(new Set(moving.map(h => h.delay)).size, moving.length, `each row has its own phase: ${JSON.stringify(moving)}`)
+  // DOWN: each lower row lags the one above by 200ms of the shared cycle, so the peak reaches upper rows first.
+  for (let i = 1; i < moving.length; i++) {
+    const lag = (moving[i - 1].phase - moving[i].phase + 1600) % 1600
+    assert(Math.abs(lag - 200) <= 40, `row ${i} lags row ${i - 1} by ~200ms (got ${lag}): ${JSON.stringify(moving)}`)
+  }
   const still = await check("reduce")
   assert(still.every(h => h.name === "none"), `reduced motion is static: ${JSON.stringify(still)}`)
-  console.log("PASS sidebar wave: active rows above idle (NAV-11), busy halos offset per row, no reorder or remount on time bumps, reduced motion static")
+  console.log("PASS sidebar wave: active rows above idle (NAV-11), busy wave runs down by row position on one shared clock, no reorder or remount on time bumps, reduced motion static")
 } finally {
   await browser.close()
   await preview.close()

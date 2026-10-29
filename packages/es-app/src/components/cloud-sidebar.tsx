@@ -1,4 +1,5 @@
-import { Show } from "solid-js"
+import { createMemo, Show } from "solid-js"
+import { waveStart } from "../wave"
 import { A, useLocation } from "@solidjs/router"
 import { HostGlyph } from "./icons"
 import { cloudHref, cloudKey, cloudOwnerKnown, type CloudPin } from "../cloud-agents"
@@ -21,9 +22,11 @@ export const CloudNav = (props: { pin: CloudPin; mini?: boolean }) => {
     const chip = wingmanStatus(record()?.["wingman-status"]).chip
     return chip === "busy" ? "busy" : chip === "failing" ? "failed" : "idle"
   }
+  const start = createMemo<number | undefined>((previous) => dot() === "busy" ? previous ?? waveStart() : undefined)
+
   return <div class={props.mini ? "cloud-mini-entry" : "session-entry cloud-nav-entry"} data-cloud-owner={props.pin.owner}>
     <A href={cloudHref(props.pin)} activeClass="" class={props.mini ? "mini-item" : "nav-item cloud-nav"} classList={{ active: active() }} title={`Cloud · ${props.pin.lane} · ${props.pin.editspace} · ${status()}`}>
-      <span class={`dot ${dot()}`} {...(dot() === "failed" || dot() === "unknown" ? { role: "img", "aria-label": status() } : {})} />
+      <span class={`dot ${dot()}`} style={start() === undefined ? undefined : { "--wave-start": String(start()) }} {...(dot() === "failed" || dot() === "unknown" ? { role: "img", "aria-label": status() } : {})} />
       <span class="cloud-runtime-icon" aria-label="Cloud agent"><HostGlyph host="wingman" size={props.mini ? 12 : 14} /></span>
       <Show when={!props.mini}>
         <span class="nav-title"><bdi dir="auto">{props.pin.lane}</bdi></span><span class="session-project">{props.pin.editspace} · {status()}</span></Show>

@@ -316,16 +316,19 @@
 .host-decision .host-glyph { margin: 0; }
 .host-decision.stale { opacity: 0.6; }
 
-/* Busy rows pulse as a wave down the list, not in unison: each row's halo is offset by its position (8 steps of
- * 200ms across the 1.6s cycle). CSS only, so streamed updates to a row keep its phase; reduced motion stays static. */
-:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+1) .dot.busy::after { animation-delay: 0ms; }
-:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+2) .dot.busy::after { animation-delay: -200ms; }
-:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+3) .dot.busy::after { animation-delay: -400ms; }
-:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+4) .dot.busy::after { animation-delay: -600ms; }
-:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+5) .dot.busy::after { animation-delay: -800ms; }
-:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+6) .dot.busy::after { animation-delay: -1000ms; }
-:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+7) .dot.busy::after { animation-delay: -1200ms; }
-:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+8) .dot.busy::after { animation-delay: -1400ms; }
+/* Busy rows pulse as a wave that runs DOWN the list. Each row's lag comes from its visible position among session rows
+ * (idle rows count as slots; day headings do not), 200ms per row over the 1.6s cycle; the dot's --wave-start (when it
+ * became busy, on one shared wall clock) makes the phase now - lag for every row, so a newly busy, reordered or
+ * re-shown row joins the same wave instead of starting its own. Idle rows do not animate; reduced motion is static. */
+:root .sidebar .dot.busy::after { animation-delay: calc(mod(var(--wave-start, 0) - var(--wave-lag, 0), 1600) * -1ms); }
+:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+1 of .session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry) { --wave-lag: 0; }
+:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+2 of .session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry) { --wave-lag: 200; }
+:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+3 of .session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry) { --wave-lag: 400; }
+:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+4 of .session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry) { --wave-lag: 600; }
+:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+5 of .session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry) { --wave-lag: 800; }
+:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+6 of .session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry) { --wave-lag: 1000; }
+:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+7 of .session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry) { --wave-lag: 1200; }
+:root .sidebar :is(.session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry):nth-child(8n+8 of .session-entry, .cloud-nav-entry, .mini-session, .cloud-mini-entry) { --wave-lag: 1400; }
 
 /* Unified Work: the profile name and its hosts as toggles above the agent list (all on by default). */
 .work-hosts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 6px 14px 4px; }
