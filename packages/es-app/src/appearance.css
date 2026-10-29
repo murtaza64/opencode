@@ -92,6 +92,8 @@
   z-index: -1;
   background:
     linear-gradient(color-mix(in srgb, var(--base) 48%, transparent), color-mix(in srgb, var(--base) 78%, transparent)),
+    /* WalStudio's Dim darkens the wallpaper itself, under the same scrim. */
+    linear-gradient(rgb(0 0 0 / var(--wallpaper-dim, 0)), rgb(0 0 0 / var(--wallpaper-dim, 0))),
     var(--wallpaper, none) center / cover no-repeat;
   pointer-events: none;
 }

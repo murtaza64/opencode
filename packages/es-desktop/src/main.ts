@@ -84,11 +84,13 @@ const start = async () => {
   const appearance = createAppearance({
     directory: process.env.ES_APPEARANCE_DIR ?? path.join(app.getPath("home"), ".cache/wal"),
     receipt: path.join(app.getPath("userData"), "appearance-receipt.json"),
-    // Shrinking to a few dozen pixels and scaling back up gives a soft blur without an image library.
-    blur: async (file) => {
+    // Shrinking and scaling back up gives a soft blur without an image library. Studio's Gaussian sigma (pixels of the
+    // full image) keeps detail about 2 sigma wide, i.e. width / (2 sigma) samples; without a Studio look, 24.
+    blur: async (file, sigma) => {
       const image = nativeImage.createFromPath(file)
       if (image.isEmpty()) throw new Error("Not an image")
-      return image.resize({ width: 24, quality: "good" }).resize({ width: 640, quality: "best" }).toJPEG(70)
+      const width = sigma === undefined ? 24 : sigma === 0 ? 640 : Math.max(8, Math.min(640, Math.round(image.getSize().width / (2 * sigma))))
+      return image.resize({ width, quality: "good" }).resize({ width: 640, quality: "best" }).toJPEG(70)
     },
   })
   // Remote host problems never stop local startup: that host is left out and the reason logged.

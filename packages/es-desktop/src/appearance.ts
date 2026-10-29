@@ -1,5 +1,5 @@
 /* This laptop's desktop appearance (pywal): the palette from ~/.cache/wal/colors.json, a small
- * pre-blurred copy of its wallpaper, and the wal-palette/1 artifact roles from palette.json beside
+ * pre-blurred copy of its wallpaper (WalStudio's `studio` blur and dim when colors.json names them), and the wal-palette/1 artifact roles from palette.json beside
  * it, served to app pages at fixed routes. Only the file pywal names is read, only as an image, and
  * only on this machine; host tabs show the same local look, never an execution host's palette. */
 import { unwatchFile, watchFile } from "node:fs"
@@ -8,15 +8,19 @@ import path from "node:path"
 
 /** wal-palette/1 (pywal docs/wal-palette.md): role colours artifacts use as `--wal-<role>`. */
 export type WalPalette = { revision: string; scheme: "dark" | "light"; roles: Record<string, string>; highlights: string[]; okRiskCvdSafe: boolean }
-export type AppearanceState = { palette: Record<string, string>; wallpaper?: string; wal?: WalPalette; updatedAt: number }
+/** WalStudio's wallpaper look from colors.json `studio`: blur sigma in pixels of the full image (0-64) and dim toward
+ * black (0-0.8), the ranges Studio writes. */
+export type StudioLook = { blur: number; dim: number }
+export type AppearanceState = { palette: Record<string, string>; wallpaper?: string; wal?: WalPalette; look?: StudioLook; updatedAt: number }
 
 const IMAGE = /\.(png|jpe?g|webp|heic|tiff?|gif|bmp)$/i
 const COLOR = /^#[0-9a-f]{3,8}$/i
 
 export const createAppearance = (options: {
   directory: string
-  // Downscaled, blurred JPEG of an image file; the desktop app uses Electron's image decoder.
-  blur: (file: string) => Promise<Buffer>
+  // Downscaled, blurred JPEG of an image file; the desktop app uses Electron's image decoder. `sigma`: Studio's blur
+  // (undefined: this app's own default blur).
+  blur: (file: string, sigma?: number) => Promise<Buffer>
   debounce?: number
   poll?: number
   // Where to record what the app now shows, so Palette Studio can prove an Apply landed without the
@@ -42,15 +46,16 @@ export const createAppearance = (options: {
     const palette = state.palette ?? (state.wal || state.body ? {} : undefined)
     if (!palette) return
     const wallpaper = typeof state.colors?.wallpaper === "string" ? state.colors.wallpaper : undefined
+    const look = lookOf(state.colors?.studio)
     const info = wallpaper && path.isAbsolute(wallpaper) && IMAGE.test(wallpaper) ? await stat(wallpaper).catch(() => undefined) : undefined
-    const source = info?.isFile() ? `${wallpaper}:${info.mtimeMs}:${info.size}` : undefined
+    const source = info?.isFile() ? `${wallpaper}:${info.mtimeMs}:${info.size}:${look?.blur ?? "default"}` : undefined
     if (source && source !== state.source) {
-      const image = await options.blur(wallpaper!).catch(() => undefined)
+      const image = await options.blur(wallpaper!, look?.blur).catch(() => undefined)
       if (image) Object.assign(state, { image, source })
     }
     const version = state.source ? encodeURIComponent(String(hash(state.source))) : undefined
-    const next = { palette, wallpaper: version && source ? `/__es/appearance/wallpaper?v=${version}` : undefined, wal: state.wal }
-    if (state.body && JSON.stringify({ palette: state.body.palette, wallpaper: state.body.wallpaper, wal: state.body.wal }) === JSON.stringify(next)) return
+    const next = { palette, wallpaper: version && source ? `/__es/appearance/wallpaper?v=${version}` : undefined, wal: state.wal, look }
+    if (state.body && JSON.stringify({ palette: state.body.palette, wallpaper: state.body.wallpaper, wal: state.body.wal, look: state.body.look }) === JSON.stringify(next)) return
     state.body = { ...next, updatedAt: Date.now() }
     listeners.forEach((listener) => listener())
     if (options.receipt) await writeReceipt(options.receipt, state.body, applied).catch(() => undefined)
@@ -116,6 +121,7 @@ const writeReceipt = async (file: string, body: AppearanceState, applied: Map<st
     background: body.palette.background,
     foreground: body.palette.foreground,
     walRevision: body.wal?.revision,
+    look: body.look,
     updatedAt: body.updatedAt,
     applied: [...applied].map(([host, value]) => ({ host, ...value })),
   }
@@ -133,6 +139,16 @@ const paletteOf = (raw: unknown) => {
     Object.entries(merged).filter(([key, value]) => /^[a-z0-9_]{1,32}$/i.test(key) && typeof value === "string" && COLOR.test(value)),
   ) as Record<string, string>
   return palette.background && palette.foreground ? palette : undefined
+}
+
+// Studio's look, numbers only and clamped to Studio's own ranges; anything else is no look (this app's default).
+const lookOf = (raw: unknown): StudioLook | undefined => {
+  if (!raw || typeof raw !== "object") return undefined
+  const record = raw as Record<string, unknown>
+  const number = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : undefined
+  const blur = number(record.blur)
+  if (blur === undefined) return undefined
+  return { blur: Math.max(0, Math.min(blur, 64)), dim: Math.max(0, Math.min(number(record.dim) ?? 0, 0.8)) }
 }
 
 // wal-palette/1, colour values only: anything else in the file (terminal, checks, prose) is dropped.

@@ -63,6 +63,37 @@ test("a partial write keeps the last good palette; a real change notifies once a
   await reader.cancel()
 })
 
+test("WalStudio's blur and dim in colors.json shape the served wallpaper; without them the app's own blur stays", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "es-appearance-look-"))
+  cleanup.push(() => rm(directory, { recursive: true, force: true }))
+  const wallpaper = path.join(directory, "wall.png")
+  await writeFile(wallpaper, "png bytes")
+  const withLook = (studio: unknown) => JSON.stringify({ ...JSON.parse(palette(wallpaper)), studio })
+  await writeFile(path.join(directory, "colors.json"), palette(wallpaper))
+  const calls: (number | undefined)[] = []
+  const appearance = createAppearance({ directory, debounce: 30, poll: 20, blur: async (_file, sigma) => (calls.push(sigma), Buffer.from(`sigma:${sigma}`)) })
+  cleanup.push(() => appearance.close())
+  await appearance.ready
+  expect([calls, appearance.body()?.look]).toEqual([[undefined], undefined])
+  // Writes colors.json and waits until the served look is `look`.
+  const settle = async (studio: unknown, look: unknown) => {
+    await writeFile(path.join(directory, "colors.json"), withLook(studio))
+    for (let wait = 20; JSON.stringify(appearance.body()?.look) !== JSON.stringify(look); wait *= 2) await Bun.sleep(wait)
+  }
+  await settle({ blur: 8, tint: 0.95, dim: 0.3 }, { blur: 8, dim: 0.3 })
+  expect(calls).toEqual([undefined, 8])
+  const first = appearance.body()?.wallpaper
+  // Only a new blur reblurs (and gets a new image version); dim alone is applied by the page over the same image.
+  await settle({ blur: 8, dim: 0.5 }, { blur: 8, dim: 0.5 })
+  expect([calls, appearance.body()?.wallpaper]).toEqual([[undefined, 8], first])
+  // Out-of-range values are held to Studio's own ranges.
+  await settle({ blur: 200, dim: 3 }, { blur: 64, dim: 0.8 })
+  expect(appearance.body()?.wallpaper).not.toBe(first)
+  // A look that is not numbers is no look: the app's own blur again.
+  await settle({ blur: "16", dim: 0.2 }, undefined)
+  expect(calls.at(-1)).toBeUndefined()
+})
+
 test("only an existing image file named by pywal is read", async () => {
   const { directory, get, blurred } = await setup()
   await writeFile(path.join(directory, "colors.json"), palette(path.join(directory, "secret.txt")))

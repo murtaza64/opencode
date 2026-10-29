@@ -13,6 +13,8 @@ export type Appearance = {
   wal?: WalPalette
   // Same-origin URL of a small pre-blurred image, or absent.
   wallpaper?: string
+  // WalStudio's dim of that image toward black (0-0.8); absent: none.
+  dim?: number
   updatedAt?: number
 }
 
@@ -128,7 +130,18 @@ const apply = () => {
   if (value?.wallpaper) {
     root.style.setProperty("--wallpaper", `url("${value.wallpaper.replace(/"/g, "")}")`)
     applied.push("--wallpaper")
+    if (value.dim) {
+      root.style.setProperty("--wallpaper-dim", String(value.dim))
+      applied.push("--wallpaper-dim")
+    }
   }
+}
+
+/** WalStudio's wallpaper dim from the served look: a number held to Studio's 0-0.8; anything else is no dim. It reaches
+ * CSS text, so it is re-checked here. */
+export const wallpaperDim = (look: unknown) => {
+  const dim = look && typeof look === "object" ? (look as { dim?: unknown }).dim : undefined
+  return typeof dim === "number" && Number.isFinite(dim) && dim > 0 ? Math.min(dim, 0.8) : undefined
 }
 
 /** The `<style id="wal-palette">` text for a palette: `--wal-<role>` (underscores as hyphens), `--wal-hl1..8`,
@@ -183,7 +196,7 @@ export const installAppearance = () => {
     if (stopped || !response?.ok) return
     const body = await response.json().catch(() => undefined)
     if (!body || typeof body.palette !== "object" || !body.palette) return
-    setCurrent({ palette: body.palette, wallpaper: typeof body.wallpaper === "string" ? body.wallpaper : undefined, wal: body.wal, updatedAt: body.updatedAt })
+    setCurrent({ palette: body.palette, wallpaper: typeof body.wallpaper === "string" ? body.wallpaper : undefined, dim: wallpaperDim(body.look), wal: body.wal, updatedAt: body.updatedAt })
     applyWal(body.wal)
     apply()
     acknowledge()
