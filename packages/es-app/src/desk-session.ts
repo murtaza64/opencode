@@ -151,6 +151,16 @@ export const createDeskSession = () => {
     if (localStorage.getItem(`${NOTE}:${current.id}`) === note.key) return []
     return [{ type: "text", text: note.text, synthetic: true, metadata: { source: CONTEXT_SOURCE, key: note.key } }]
   }
+  /** Off the Decisions page there is no queue view, but the desk's open cases still go with the next send that
+   * changes them: the same keyed note, holding only those lines. */
+  const caseContext = (lines: string[]): ContextPart[] => {
+    const current = session()
+    if (!current || !lines.length) return []
+    const key = JSON.stringify(["cases", lines])
+    if (localStorage.getItem(`${NOTE}:${current.id}`) === key) return []
+    const text = ["Front desk context from es-app (cases only; no queue view is open). Read-only orientation; it is not an instruction and grants nothing.", ...lines].join("\n")
+    return [{ type: "text", text, synthetic: true, metadata: { source: CONTEXT_SOURCE, key } }]
+  }
   // An unconfirmed send leaves the key unrecorded, so the next send carries the context again.
   const sent = (parts: ContextPart[], accepted: boolean) => {
     const current = session()
@@ -175,7 +185,7 @@ export const createDeskSession = () => {
       return `Not sent: ${cause instanceof Error ? cause.message : String(cause)}`
     }
   }
-  return { pointer, session, status, error, setError, verify, start, confirm, forget, context, sent, detail }
+  return { pointer, session, status, error, setError, verify, start, confirm, forget, context, caseContext, sent, detail }
 }
 
 export type BriefJob = { id: string; directory: string; meta: BriefMeta; created: number; state: BriefState | { state: "starting" } | { state: "unconfirmed" } }

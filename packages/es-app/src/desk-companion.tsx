@@ -11,7 +11,7 @@ import { createTasks, deskTasksSupported, type TaskJob } from "./desk-tasks"
 import { getComposer } from "./composer"
 import { createDeskSession } from "./desk-session"
 import { es, type ContextPart } from "./api"
-import { followUps, readCases, visibleFollowUps, type DeskCase, type FollowUp } from "./desk-followups"
+import { caseLines, followUps, progressRows, readCases, type DeskCase, type FollowUp, type ProgressRow } from "./desk-followups"
 import "./desk-followups.css"
 import { SessionView } from "./pages/session"
 import { ResizeHandle } from "./components/resize-handle"
@@ -48,6 +48,8 @@ type DeskChat = {
   // The Decisions view supplies its queue/selection context while mounted; other views send none.
   setContext: (context: (() => ContextPart[]) | undefined) => void
   context: () => ContextPart[]
+  /** The desk's open cases (dashboard, metadata only), shared by every view so off-Decisions sends carry them too. */
+  cases: () => DeskCase[]
   /** Background tasks started from the chat; their packet is the current view's text (empty elsewhere). */
   tasks: ReturnType<typeof createTasks>
   setView: (view: (() => string) | undefined) => void
@@ -69,6 +71,11 @@ export const DeskChatProvider = (props: ParentProps) => {
   const prepared = useBriefs()
   const tasks = createTasks(prepared.anchor.pointer, prepared.anchor.ensure, () => desk.status() === "ready" ? desk.pointer() : undefined,
     async () => { prepared.activate(); await prepared.waitReady() })
+  // Cases are read once for the app, refreshed on mail and every minute.
+  const [caseTick, setCaseTick] = createSignal(0)
+  const caseTimer = setInterval(() => setCaseTick(value => value + 1), 60_000)
+  onCleanup(() => clearInterval(caseTimer))
+  const [cases] = createResource(() => [caseTick(), dashboard.mailRevision()] as const, () => readCases().catch(() => [] as DeskCase[]))
   const kind = () => companionKind(location.pathname)
   const directory = () => {
     const name = dashboard.editspace() ?? dashboard.editspaces()?.default
@@ -85,7 +92,9 @@ export const DeskChatProvider = (props: ParentProps) => {
       try { localStorage.setItem(KEY[current], next ? "1" : "0") } catch { /* stays for this page */ }
     },
     setContext: (getter) => setContextGetter(() => getter),
-    context: () => contextGetter()?.() ?? [],
+    // The Decisions page sends its full view (cases included); every other view sends the cases alone.
+    context: () => contextGetter()?.() ?? desk.caseContext(caseLines(cases.latest ?? [])),
+    cases: () => cases.latest ?? [],
     tasks,
     setView: (getter) => setViewGetter(() => getter),
     view: () => viewGetter()?.() ?? "",
@@ -186,7 +195,8 @@ const DeskFollowUps = (props: { session: string; open: () => boolean }) => {
   const dashboard = useDashboard()
   const [now, setNow] = createSignal(Date.now())
   const [tick, setTick] = createSignal(0)
-  // Mail events refresh the list; the 30 s fallback runs only while the chat is open.
+  const [expanded, setExpanded] = createSignal(false)
+  // Mail events refresh the strip; the 30 s fallback runs only while the chat is open.
   createEffect(() => {
     if (!props.open()) return
     const timer = setInterval(() => { setNow(Date.now()); setTick(value => value + 1) }, 30_000)
@@ -194,37 +204,29 @@ const DeskFollowUps = (props: { session: string; open: () => boolean }) => {
   })
   const [items] = createResource(() => ({ session: props.session, names: dashboard.editspaces()?.editspaces.map(item => item.name) ?? [], tick: tick(), mail: dashboard.mailRevision() }),
     async input => (await Promise.all(input.names.map(name => es.mail(name, { session: input.session }).then(timeline => followUps(timeline, input.session), () => [] as FollowUp[])))).flat())
-  const view = () => visibleFollowUps(items.latest ?? [], now())
-  const [cases] = createResource(() => [tick(), dashboard.mailRevision()] as const, () => readCases().catch(() => [] as DeskCase[]))
-  const open = () => (cases.latest ?? []).filter(item => item.intents.some(part => !["done", "withdrawn"].includes(part.state ?? "")))
-  const state = (item: FollowUp) => item.answer ? "answered" : ({ unknown: "delivery unknown", delivered: "delivered", seen: "seen by owner", failed: "not delivered" } as const)[item.delivery]
-  return <Show when={view().shown.length || view().earlier.length || open().length}><section class="desk-followups ds-section" aria-label="Waiting on">
-    <h3 class="ds-section-heading">Waiting on</h3>
-    {/* Each open case: its parts with their current owner and state, and deliverables that were read back. */}
-    <For each={open()}>{item => <div class="desk-case" data-case={item.case_id}>
-      <p class="desk-case-title"><bdi dir="auto">{item.title || item.case_id}</bdi></p>
-      <ul><For each={item.intents}>{part => <li data-state={part.state ?? "requested"}>
-        <span class="ds-status" data-tone={["delivered", "done"].includes(part.state ?? "") ? "ok" : part.state === "waiting" ? "warn" : "active"}>
-          <span class="ds-status-glyph" aria-hidden="true">{["delivered", "done"].includes(part.state ?? "") ? "✓" : "…"}</span>
-          <span><bdi dir="auto">{part.id}</bdi> · {part.state ?? "requested"}</span>
-        </span>
-        <span class="desk-followup-meta">{part.owner ? <bdi dir="ltr">{[part.owner.lane, part.owner.editspace, part.owner.host].filter(Boolean).join(" · ")}</bdi> : "no owner yet"}<Show when={part.next}> · next: <bdi dir="auto">{part.next}</bdi></Show></span>
-      </li>}</For></ul>
-      <Show when={item.deliverables.length}><p class="desk-followup-meta"><For each={item.deliverables}>{(deliverable, index) => <>{index() ? " · " : ""}<Show when={deliverable.ref && /^https?:\/\//.test(deliverable.ref)} fallback={<bdi dir="auto">{deliverable.label}</bdi>}>
-        <a href={deliverable.ref} target="_blank" rel="noopener noreferrer"><bdi dir="auto">{deliverable.label}</bdi></a></Show>{deliverable.read_back ? "" : " (not read back yet)"}</>}</For></p></Show>
-    </div>}</For>
-    <ul><For each={view().shown}>{item => <FollowUpRow item={item} state={state(item)} />}</For></ul>
-    {/* Older answers are counted and one tap away, never silently dropped. */}
-    <Show when={view().earlier.length}><details class="desk-followups-earlier"><summary>{view().earlier.length} earlier answered</summary>
-      <ul><For each={view().earlier}>{item => <FollowUpRow item={item} state={state(item)} />}</For></ul></details></Show>
+  const chat = useDeskChat()
+  const rows = () => progressRows(chat.cases(), items.latest ?? [], now())
+  const counts = () => ({ needs: rows().filter(row => row.group === "needs").length, progress: rows().filter(row => row.group === "progress").length, result: rows().filter(row => row.group === "result").length })
+  // Folded: one summary line plus whatever needs the human. The conversation keeps the space.
+  const shown = () => expanded() ? rows() : rows().filter(row => row.group === "needs")
+  const summary = () => [counts().needs && `${counts().needs} need you`, counts().progress && `${counts().progress} in progress`, counts().result && `${counts().result} done`].filter(Boolean).join(" · ")
+  return <Show when={rows().length}><section class="desk-progress" aria-label="Desk progress" data-expanded={expanded() ? "" : undefined}>
+    <button type="button" class="desk-progress-summary" aria-expanded={expanded()} onClick={() => setExpanded(!expanded())}>
+      <span class="ds-status-glyph" aria-hidden="true">{counts().needs ? "!" : counts().progress ? "…" : "✓"}</span><span>{summary()}</span>
+    </button>
+    <Show when={shown().length}><ul class="desk-progress-rows"><For each={shown()}>{row => <ProgressItem row={row} />}</For></ul></Show>
   </section></Show>
 }
 
-const FollowUpRow = (props: { item: FollowUp; state: string }) =>
-  <li data-state={props.item.answer ? "answered" : props.item.delivery}>
-    <span class="ds-status" data-tone={props.item.answer ? "ok" : props.item.delivery === "failed" ? "risk" : props.item.delivery === "unknown" ? "unknown" : "active"}>
-      <span class="ds-status-glyph" aria-hidden="true">{props.item.answer ? "✓" : props.item.delivery === "failed" ? "✕" : props.item.delivery === "unknown" ? "?" : "…"}</span>
-      <span><bdi dir="auto">{props.item.owner}</bdi> · <bdi dir="auto">{props.item.text.slice(0, 90)}</bdi></span>
+const ProgressItem = (props: { row: ProgressRow }) =>
+  <li class="desk-progress-row" data-group={props.row.group}>
+    <span class="desk-progress-line">
+      <Show when={props.row.link} fallback={<bdi dir="auto" class="desk-progress-label">{props.row.label}</bdi>}>{link =>
+        <a class="desk-progress-label" href={link().href} target="_blank" rel="noopener noreferrer"><bdi dir="auto">{props.row.label}</bdi></a>}</Show>
+      <span class="desk-progress-status" dir="auto">{props.row.status}<Show when={props.row.at}>{at => <> · {ago(at())}</>}</Show></span>
     </span>
-    <span class="desk-followup-meta">{props.state} · asked {ago(props.item.asked)}<Show when={props.item.answer}>{answer => <> · answered {ago(answer().at)}</>}</Show> · <bdi dir="ltr">{props.item.editspace}:{props.item.answer?.id ?? props.item.id}</bdi></span>
+    {/* Owners, sessions and mail ids are for tracing, one tap away. */}
+    <details class="desk-progress-detail"><summary aria-label={`Details for ${props.row.label}`}>Details</summary>
+      <Show when={props.row.context}><p dir="auto">{props.row.context}</p></Show>
+      <p><For each={props.row.detail}>{(line, index) => <>{index() ? " · " : ""}<bdi dir="ltr">{line}</bdi></>}</For></p></details>
   </li>
