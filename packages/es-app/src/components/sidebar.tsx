@@ -9,6 +9,7 @@ import { sessionHref, useDashboard, type DotState, type SessionRow } from "../st
 import { leftOpen, leftWidth, toggleLeft } from "../ui"
 import { nativeHeader, NativeHeader } from "./native-header"
 import { NewSession } from "./new-session"
+import { WhatsNew } from "./whats-new"
 import { peekAttrs, SessionPeek } from "./session-peek"
 import { CloudNav, CloudSource } from "./cloud-sidebar"
 import { cloudRows } from "../cloud-rows"
@@ -625,6 +626,7 @@ export default function Sidebar() {
           </Show>
         </Show>
         </>} />
+        <WhatsNew />
       </nav>
     </Show>
     <SessionPeek container={navEl} />

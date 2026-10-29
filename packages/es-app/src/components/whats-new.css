@@ -1,0 +1,16 @@
+.whats-new-entry { display: block; margin: 8px 10px 10px; font-size: 11px; color: var(--subtext0); }
+.whats-new { position: fixed; inset: 0; margin: auto; block-size: fit-content; inline-size: min(460px, calc(100vw - 32px)); max-block-size: min(80vh, 640px); padding: 18px 20px 14px; color: var(--text); background: var(--base); border: 1px solid var(--surface1); border-radius: 8px; box-shadow: 0 16px 40px rgb(0 0 0 / .35); overflow: auto; }
+.whats-new::backdrop { background: rgb(0 0 0 / .35); }
+.whats-new-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-block-end: 10px; }
+.whats-new-head h2 { margin: 0; font-size: 15px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--text); }
+.whats-new-release { font-size: 11px; color: var(--subtext0); font-family: var(--font-mono, monospace); }
+.whats-new-items, .whats-new-limits { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; }
+.whats-new-items li { display: grid; gap: 3px; }
+.whats-new-items strong { font-size: 13px; font-weight: 600; }
+.whats-new-items p { margin: 0; font-size: 13px; color: var(--subtext1, var(--text)); }
+.whats-new-try { justify-self: start; font-size: 12px; }
+.whats-new h3 { margin: 16px 0 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--subtext0); }
+.whats-new-limits { gap: 4px; font-size: 12px; color: var(--subtext0); }
+.whats-new-limits li::before { content: "– "; }
+.whats-new-empty { margin: 0; color: var(--subtext0); font-size: 13px; }
+.whats-new-actions { display: flex; justify-content: flex-end; margin-block-start: 16px; }
