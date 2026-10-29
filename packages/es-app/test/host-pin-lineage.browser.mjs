@@ -9,7 +9,7 @@ const dir = "/Users/mini/fixture/.editspace/lanes/orchestrator/repos/o/r"
 const pin = (id) => JSON.stringify([dir, id])
 const key = "host:mini:es-app-sidebar-pins"
 const rows = ["P", "S"].map((id) => ({ id, title: `Mini ${id}`, directory: dir, time: { created: 1, updated: Date.now() } }))
-await page.addInitScript(([storage, value]) => localStorage.setItem(storage, JSON.stringify([value])), [key, pin("P")])
+await page.addInitScript(([storage, value]) => { if (!sessionStorage.getItem("seeded")) { sessionStorage.setItem("seeded", "1"); localStorage.setItem(storage, JSON.stringify([value])) } }, [key, pin("P")])
 await page.route("**/__es/host", (route) => route.fulfill({ json: { id: "local", label: "Local", remote: false, hosts: [], work: [
   { id: "local", label: "Local", origin: preview.fixture.url },
   { id: "mini", label: "Mac Mini", origin: "http://127.0.0.1:65001", profile: "work" },
@@ -33,7 +33,12 @@ try {
   await page.goto(preview.url)
   await expect(page.locator(".sidebar .pinned-section .nav-item[data-host-key='mini:S']")).toBeVisible()
   expect(JSON.parse(await page.evaluate((storage) => localStorage.getItem(storage), key))).toEqual([pin("S")])
-  console.log("PASS host pin lineage: Mini P pin follows verified handoff to S")
+  // All projects view (BUG-08 rollover): the pin still follows, reading lineage for the editspace that holds it.
+  await page.evaluate(([storage, value]) => { localStorage.setItem(storage, JSON.stringify([value])); localStorage.setItem("es-app-all-projects", "true") }, [key, pin("P")])
+  await page.reload()
+  await expect(page.locator(".sidebar .pinned-section .nav-item[data-host-key='mini:S']")).toBeVisible()
+  expect(JSON.parse(await page.evaluate((storage) => localStorage.getItem(storage), key))).toEqual([pin("S")])
+  console.log("PASS host pin lineage: Mini P pin follows verified handoff to S, in one project and in All projects")
 } finally {
   await browser.close()
   await preview.close()

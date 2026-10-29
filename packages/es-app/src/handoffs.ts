@@ -73,6 +73,15 @@ export const reconcilePins = (pins: string[], handoffs: Handoff[], owners: LaneO
 export const reconcileHostPins = (
   host: string,
   pins: string[],
-  lineage: { edges: Handoff[]; owners: LaneOwner[] } | undefined,
+  lineage: { byEditspace: Record<string, { edges: Handoff[]; owners: LaneOwner[] }>; editspaceOf: (directory: string) => string | undefined } | undefined,
   rows: { id: string; directory: string; host?: string }[],
-) => lineage ? reconcilePins(pins, lineage.edges, lineage.owners, rows.filter((row) => row.host === host)) : pins
+) => {
+  if (!lineage) return pins
+  const own = rows.filter((row) => row.host === host)
+  // Each pin follows only the lineage of the editspace that holds its directory.
+  return [...new Set(pins.flatMap((key) => {
+    const directory = (() => { try { const value: unknown = JSON.parse(key); return Array.isArray(value) && typeof value[0] === "string" ? value[0] : undefined } catch { return undefined } })()
+    const scope = directory === undefined ? undefined : lineage.byEditspace[lineage.editspaceOf(directory) ?? ""]
+    return scope ? reconcilePins([key], scope.edges, scope.owners, own) : [key]
+  }))]
+}

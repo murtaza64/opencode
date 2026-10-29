@@ -777,3 +777,17 @@ test("a launch restore reopens only app routes on each view's own listener, all 
     "not json", null,
   ]) expect(restorePlan(bad, tabs)).toBeUndefined()
 })
+
+test("a launch restore reopens a page view on its own site verbatim, or on its start page when created only", async () => {
+  const { restorePlan } = await import("./policy")
+  const tabs = [{ id: "local", origin: "http://127.0.0.1:60302", kind: "app" as const, start: "http://127.0.0.1:60302" },
+    { id: "personal", origin: "https://agents.example.earth", kind: "page" as const, start: "https://agents.example.earth/" }]
+  const page = "https://agents.example.earth/?view=x#y"
+  expect(restorePlan({ version: 1, selected: "personal", views: [{ id: "local", created: true }, { id: "personal", url: page }] }, tabs))
+    .toEqual({ selected: "personal", views: [{ id: "local", url: "http://127.0.0.1:60302" }, { id: "personal", url: page }] })
+  expect(restorePlan({ version: 1, selected: "personal", views: [{ id: "personal", created: true }] }, tabs))
+    .toEqual({ selected: "personal", views: [{ id: "personal", url: "https://agents.example.earth/" }] })
+  for (const url of ["https://sign-in.cloudflareaccess.com/x", "https://u:p@agents.example.earth/", "http://agents.example.earth/", "https://other.example.earth/"])
+    expect(restorePlan({ version: 1, selected: "personal", views: [{ id: "personal", url }] }, tabs)).toBeUndefined()
+  expect(restorePlan({ version: 1, selected: "personal", views: [{ id: "personal", created: true, url: page }] }, tabs)).toBeUndefined()
+})
