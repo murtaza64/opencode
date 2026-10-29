@@ -185,26 +185,30 @@ const Items = (props: { result: BriefResult; item: DeskItem; job: BriefJob }) =>
   const [found] = createResource(() => props.item.record, readConversation)
   const rows = () => briefItems(props.result, props.item, found()?.documents)
   const approval = () => briefApproval(rows(), props.item, { id: props.job.id, revision: props.job.meta.revision })
-  // Approved exists only once the ledger has an answer for this brief: unanswered rows carry no empty column.
+  // A column shows only when some row has a value for it: Approved once the ledger has an answer for this brief,
+  // the recommendation and alternatives once any item gives one. A row missing a shown value keeps its marker.
+  const recommends = () => rows().some(row => row.recommended)
+  const alternatives = () => rows().some(row => row.alternatives.length)
+  const tracks = () => ["minmax(58px, .55fr)", "minmax(0, 2fr)", ...[recommends(), alternatives(), approval().answered].filter(Boolean).map(() => "minmax(0, 1fr)")].join(" ")
   return <Show when={rows().length}>
-    <section class="desk-brief-items ds-section" aria-label="Request items" data-answered={approval().answered ? "" : undefined}>
+    <section class="desk-brief-items ds-section" aria-label="Request items" data-answered={approval().answered ? "" : undefined} style={{ "--desk-item-tracks": tracks() }}>
       <Show when={approval().verbatim}><p class="desk-brief-ledger">Recorded answer: <bdi dir="auto">{approval().verbatim}</bdi></p></Show>
-      <div class="desk-brief-item-head" aria-hidden="true"><span>ID</span><span>Question</span><span>Agent recommends</span><span>Alternative(s)</span><Show when={approval().answered}><span>Approved</span></Show></div>
+      <div class="desk-brief-item-head" aria-hidden="true"><span>ID</span><span>Question</span><Show when={recommends()}><span>Agent recommends</span></Show><Show when={alternatives()}><span>Alternative(s)</span></Show><Show when={approval().answered}><span>Approved</span></Show></div>
       <ol class="desk-brief-item-list"><For each={rows()}>{(row, index) => <li class="desk-brief-item">
         <span class="desk-brief-item-id"><bdi dir="ltr" class="desk-brief-item-number">{index() + 1}.</bdi> <bdi dir="ltr">{row.id}</bdi></span>
         {/* The question is the row's primary line, so it carries no label. */}
         <div class="desk-brief-item-cell desk-brief-item-question"><Value value={row.question} /></div>
-        <ItemCell label="Agent recommends"><Value value={row.recommended} /></ItemCell>
-        <ItemCell label="Alternative(s)"><Show when={row.alternatives.length} fallback={<Value value="" />}>
-          <For each={row.alternatives}>{(value, at) => <>{at() ? " · " : ""}<Value value={value} /></>}</For></Show></ItemCell>
-        <Show when={approval().answered}><ItemCell label="Approved"><span dir="auto">{approval().values[index()]}</span></ItemCell></Show>
+        <Show when={recommends()}><ItemCell label="Agent recommends"><Value value={row.recommended} /></ItemCell></Show>
+        <Show when={alternatives()}><ItemCell label="Alternative(s)"><Show when={row.alternatives.length} fallback={<Value value="" />}>
+          <For each={row.alternatives}>{(value, at) => <>{at() ? " · " : ""}<Value value={value} /></>}</For></Show></ItemCell></Show>
+        <Show when={approval().answered}><ItemCell label="Approved" class="desk-brief-item-approved"><span dir="auto">{approval().values[index()]}</span></ItemCell></Show>
       </li>}</For></ol>
     </section>
   </Show>
 }
 
-const ItemCell = (props: { label: string; children: JSX.Element }) =>
-  <div class="desk-brief-item-cell"><span class="desk-brief-item-label">{props.label}</span>{props.children}</div>
+const ItemCell = (props: { label: string; class?: string; children: JSX.Element }) =>
+  <div class={props.class ? `desk-brief-item-cell ${props.class}` : "desk-brief-item-cell"}><span class="desk-brief-item-label">{props.label}</span>{props.children}</div>
 
 const SourceLinks = (props: { sources: BriefSource[]; refs: EvidenceRef[]; item: DeskItem }) => {
   const links = () => props.sources.flatMap(source => { const link = sourceLink(source, props.refs, props.item); return link ? [{ ...link, label: source.label }] : [] })
@@ -219,14 +223,15 @@ const Shape = (props: { shape: BriefShape; item: DeskItem }) =>
       // Columns are the request's own options under their own labels; the recommended one comes from the request.
       <table class="desk-compare"><thead><tr><th scope="col"><span class="sr-only">Aspect</span></th><For each={shape().columns}>{column =>
         <th scope="col" data-recommended={column.recommended ? "" : undefined}><bdi dir="auto">{column.label}</bdi><Show when={column.recommended}><span class="desk-compare-recommended">Agent recommends</span></Show></th>}</For></tr></thead>
-        <tbody><For each={shape().rows}>{row => <tr><th scope="row" dir="auto">{row.label}</th><For each={row.cells}>{cell => <td dir="auto">{cell}</td>}</For></tr>}</For></tbody></table>}</Match>
+        <tbody><For each={shape().rows}>{row => <tr><th scope="row"><bdi dir="auto">{row.label}</bdi></th><For each={row.cells}>{cell => <td><bdi dir="auto">{cell}</bdi></td>}</For></tr>}</For></tbody></table>}</Match>
     <Match when={props.shape.kind === "sequence" && props.shape}>{shape =>
-      // With `approved`, a line under the last approved step says where this approval stops; later steps are muted.
+      // `approved` is the request's scope (how many steps an approval would cover), not a recorded answer, so it reads as
+      // a description: one line after the last covered step and one before the first later step; later steps are muted.
       <ol class="desk-flow" aria-label="Sequence" data-approved={shape().approved ? "" : undefined}><For each={shape().steps}>{(step, index) =>
         <li data-later={shape().approved && index() >= shape().approved! ? "" : undefined} data-stop={shape().approved && index() === shape().approved! - 1 ? "" : undefined}>
           <bdi dir="auto">{step}</bdi>
-          <Show when={shape().approved && index() === shape().approved! - 1}><span class="desk-flow-stop">This approval stops here</span></Show>
-          <Show when={shape().approved && index() >= shape().approved!}><span class="desk-flow-later">needs a later decision</span></Show>
+          <Show when={shape().approved && index() === shape().approved! - 1}><span class="desk-flow-scope">Approving covers {shape().approved === 1 ? "step 1" : `steps 1–${shape().approved}`}</span></Show>
+          <Show when={shape().approved && index() === shape().approved!}><span class="desk-flow-scope">Later steps need their own decision</span></Show>
         </li>}</For></ol>}</Match>
     <Match when={props.shape.kind === "change" && props.shape}>{shape => {
       // Rows that stay the same are muted; more than two of them fold into one line so the changes stand out.

@@ -48,6 +48,15 @@ const CASES = {
       visual: { title: "Stages", alt: "Ten stacked stages from 10% to 100% rollout.", svg: tall } } },
   plain: { record: { ...base, id: "plain", gate_key: "plain", title: "Rename the ledger table?", context: "The name collides with a new view.", options: two, recommendation: "wait" },
     brief: { question: "rename the ledger  table?", context: "Its name collides with a new view.", choices: [{ id: "go", outcome: "Renamed today" }, { id: "wait", outcome: "Renamed after the migration" }] } },
+  // Every alternative missing: no Alternative(s) column, not a column of "Not given" (feedback M2).
+  noalt: { record: { ...base, id: "noalt", gate_key: "noalt", title: "Approve the three naming decisions?", options: [{ id: "accept", label: "Accept all recommendations" }, { id: "change", label: "Change some" }], recommendation: "accept",
+      context: ["Three decisions.", "N1. Table prefix? Recommended: es_.", "N2. Column case? Recommended: snake_case.", "N3. Index suffix? Recommended: _idx."].join("\n") },
+    brief: { question: "Approve the three naming choices?", choices: [{ id: "accept", outcome: "All three recommendations apply" }, { id: "change", outcome: "You name what changes" }],
+      items: [["N1", "Table prefix?", "es_"], ["N2", "Column case?", "snake_case"], ["N3", "Index suffix?", "_idx"]].map(([id, question, recommended]) => ({ id, question, recommended, alternatives: [], refs: ["C1"] })) } },
+  // A sequence whose request scopes approval to its first two steps (feedback M1).
+  sequence: { record: { ...base, id: "sequence", gate_key: "sequence", title: "Migrate the ledger?", context: "Step 1 copies, step 2 verifies; switching reads and dropping the old table come later.", options: two, recommendation: "go" },
+    brief: { question: "Copy and verify the ledger now?", choices: [{ id: "go", outcome: "Copied and verified today" }, { id: "wait", outcome: "Nothing moves this week" }],
+      shape: { kind: "sequence", steps: ["Copy rows", "Verify counts", "Switch reads", "Drop old table"], approved: 2 } } },
   error: { record: { ...base, id: "error", gate_key: "error", title: "Archive the old dashboards?", context: "Twelve dashboards unused since June.", options: two, recommendation: "go" }, brief: "error" },
   absent: { record: { ...base, id: "absent", gate_key: "absent", title: "Close the stale tickets?", context: "Nine tickets untouched for 90 days.", options: two, recommendation: "go" }, brief: "none" },
 }
@@ -107,6 +116,26 @@ const check = async (page, card, name) => card.evaluate((element, [name, missing
     "1 question first": !!question && firstHeading === question,
     "2 request one tap": !!request,
     "3 rec labelled, no answer shown": !/Recorded answer|You chose/.test(text) && (!element.querySelector(".desk-compare-recommended, .desk-brief-item-head") || /Agent recommends/.test(text)),
+    // M2: a value column shows only when some row has a value for it.
+    "M2 no empty column": [...element.querySelectorAll(".desk-brief-items")].every(section => {
+      const heads = [...section.querySelectorAll(".desk-brief-item-head span")].map(node => node.textContent)
+      const rows = [...section.querySelectorAll(".desk-brief-item")]
+      const column = label => rows.map(row => [...row.querySelectorAll(".desk-brief-item-cell")].find(cell => cell.querySelector(".desk-brief-item-label")?.textContent === label))
+      return ["Agent recommends", "Alternative(s)"].every(label => {
+        const cells = column(label)
+        return cells.every(cell => !cell) === !heads.includes(label) && !(heads.includes(label) && cells.every(cell => cell?.querySelector(".brief-missing")))
+      })
+    }) && (name !== "noalt" || !/Alternative/.test(text)),
+    // M1: a sequence's approval scope is described, never shown as an approval or answer.
+    "M1 scope wording": name !== "sequence" || /Approving covers steps 1–2/.test(text) && /Later steps need their own decision/.test(text) && !/approval stops here|needs a later decision/.test(text)
+      && [...element.querySelectorAll(".desk-flow-scope")].every(node => getComputedStyle(node).fontWeight === "400" && getComputedStyle(node).color === getComputedStyle(element.querySelector(".desk-flow li[data-later]")).color),
+    // M5: each compare value starts at its column head's start edge (inline-start in the page's direction).
+    "M5 compare cells under heads": [...element.querySelectorAll(".desk-compare")].every(table => {
+      const rtl = getComputedStyle(table).direction === "rtl"
+      const edge = node => { const rect = node.getBoundingClientRect(); return rtl ? rect.right : rect.left }
+      const heads = [...table.querySelectorAll("thead th")].slice(1).map(th => th.querySelector("bdi"))
+      return [...table.querySelectorAll("tbody tr")].every(row => [...row.querySelectorAll("td bdi")].every((cell, index) => Math.abs(edge(cell) - edge(heads[index])) <= 2))
+    }),
     "4 items lossless": name !== "items" || JSON.stringify(rows) === JSON.stringify(["D1", "D2", "D3", "D4", "D5", "D6", "D7"]),
     "4 missing shown": name !== "items" && name !== "steps" || text.includes(missing),
     "5 gaps kept": name !== "single" || element.innerHTML.includes("Cost at full traffic is not measured."),

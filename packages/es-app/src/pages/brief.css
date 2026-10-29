@@ -62,9 +62,9 @@
 .desk-visual[data-kind="svg"] iframe { border: 0; background: transparent; resize: none; }
 /* Approval scope on a sequence: covered steps solid, later ones dashed and muted. */
 .desk-flow li[data-later] { border-style: dashed; color: var(--ds-muted, var(--subtext0)); }
-.desk-flow-later { display: block; font-size: 11px; color: var(--ds-muted, var(--subtext0)); }
 .desk-flow li[data-stop] { border-block-end: 2px solid var(--ds-text, var(--text)); }
-.desk-flow-stop { display: block; font-size: 11px; color: var(--ds-text, var(--text)); }
+/* The request's scope, in description styling: never answer or approval styling. */
+.desk-flow-scope { display: block; font-size: 11px; font-weight: 400; color: var(--ds-muted, var(--subtext0)); }
 /* What changes and what stays. */
 .desk-change { border-collapse: collapse; font-size: 13px; margin-block: 4px 8px; inline-size: 100%; max-inline-size: 560px; }
 .desk-change thead th { font-size: 11px; font-weight: 400; color: var(--ds-muted, var(--subtext0)); }
@@ -84,15 +84,13 @@
 /* Numbered source items remain separate even when the brief also has subjects or an option shape. */
 .desk-brief-items { margin-block: 10px; container-type: inline-size; min-inline-size: 0; }
 .desk-brief-ledger { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.desk-brief-item-head, .desk-brief-item { display: grid; grid-template-columns: minmax(58px, .55fr) minmax(0, 2fr) repeat(3, minmax(0, 1fr)); gap: 8px; align-items: start; }
+/* Head and rows share one track list, set by the renderer from the columns that have values. */
+.desk-brief-item-head, .desk-brief-item { display: grid; grid-template-columns: var(--desk-item-tracks, minmax(58px, .55fr) minmax(0, 2fr) repeat(2, minmax(0, 1fr))); gap: 8px; align-items: start; }
 .desk-brief-item-head { color: var(--ds-muted, var(--subtext0)); font-size: 11px; padding-block: 3px; border-block-end: 1px solid var(--ds-line, var(--surface1)); }
 .desk-brief .desk-brief-item-list { list-style: none; padding: 0; margin: 0; }
 .desk-brief-item { padding-block: 5px; border-block-end: 1px solid var(--ds-raised, var(--surface0)); line-height: 1.4; }
 .desk-brief-item-id { white-space: nowrap; }
 .desk-brief-item-number { color: var(--ds-muted, var(--subtext0)); }
-/* Without a recorded answer there is no Approved column. */
-/* Lowest specificity, so the narrow layouts below still stack the row. */
-:where(.desk-brief-items:not([data-answered])) :is(.desk-brief-item-head, .desk-brief-item) { grid-template-columns: minmax(58px, .55fr) minmax(0, 2fr) repeat(2, minmax(0, 1fr)); }
 /* Labels never break inside a word; only long values wrap. */
 .desk-brief-item-label, .desk-brief-item-head span { overflow-wrap: normal; white-space: nowrap; }
 .desk-brief-item-cell { min-inline-size: 0; overflow-wrap: anywhere; }
@@ -102,12 +100,12 @@
   .desk-brief-item { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 3px 10px; }
   .desk-brief-item-id { grid-column: 1 / -1; font-weight: 600; }
   .desk-brief-item-cell:nth-child(2) { grid-column: 1 / -1; }
-  .desk-brief-item-cell:nth-child(5) { grid-column: 1 / -1; }
+  .desk-brief-item-approved { grid-column: 1 / -1; }
   .desk-brief-item-label { display: block; }
 }
 @container (max-width: 300px) {
   .desk-brief-item { grid-template-columns: minmax(0, 1fr); }
-  .desk-brief-item-id, .desk-brief-item-cell:nth-child(2), .desk-brief-item-cell:nth-child(5) { grid-column: 1; }
+  .desk-brief-item-id, .desk-brief-item-cell:nth-child(2), .desk-brief-item-approved { grid-column: 1; }
 }
 .desk-visual-window { max-block-size: 45vh; overflow-y: auto; }
 .desk-visual-window[data-expanded] { max-block-size: none; overflow: visible; }
@@ -142,7 +140,7 @@
 .desk-brief .desk-command-copy { border: 0; background: none; min-block-size: 0; padding: 2px 4px; text-decoration: underline; text-underline-offset: 2px; }
 .desk-command-copy:hover { color: var(--ds-text, var(--text)); }
 /* Compare: columns aligned, no rules; the agent's pick is marked in green text. */
-.desk-compare th, .desk-compare td { border: 0; padding: 3px 12px 3px 0; }
+.desk-compare th, .desk-compare td { border: 0; padding-block: 3px; padding-inline: 0 12px; }
 .desk-compare tbody th { color: var(--ds-muted, var(--subtext0)); font-weight: 400; font-size: 11px; }
 .desk-compare-recommended { color: var(--ds-ok, var(--green)); }
 /* A sequence reads as a line of steps joined by arrows, not a row of boxes. */
