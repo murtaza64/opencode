@@ -361,7 +361,8 @@ const start = async () => {
   // one is selected. Drafts, receipts and preferences come back on their own (persistent partitions, stable ports).
   const restore = process.env.ES_DESKTOP_RESTORE
     ? restorePlan(await readFile(process.env.ES_DESKTOP_RESTORE, "utf8").then((text) => JSON.parse(text) as unknown).catch(() => undefined),
-        listeners.map((item) => ({ id: item.id, origin: item.server.origin })))
+        [...listeners.map((item) => ({ id: item.id, origin: item.server.origin, kind: "app" as const, start: item.server.origin })),
+          ...pages.map((host) => ({ id: host.id, origin: new URL(host.origin).origin, kind: "page" as const, start: `${host.origin}/` }))])
     : undefined
   if (process.env.ES_DESKTOP_RESTORE && !restore) console.error("Editspace restore ignored: invalid or unreadable record")
   if (restore && !tabs) void localContents.loadURL(restore.views.find((item) => item.id === "local")?.url ?? server.origin)

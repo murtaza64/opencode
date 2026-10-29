@@ -124,19 +124,24 @@ export const appRouteURL = (value: string, origin: string) => {
 }
 
 /**
- * A launch restore (ES_DESKTOP_RESTORE): which host views were open, on which app route, and which was shown, as a
- * publisher captured them before a graceful quit. Each route must be an app route on that view's own listener
- * origin (stable saved ports), so a restore never opens another host or a non-app page. Undefined, restoring
- * nothing, unless the whole record is valid.
+ * A launch restore (ES_DESKTOP_RESTORE): which host views were open, where, and which was shown, as a publisher
+ * captured them before a graceful quit. An app view reopens on an app route of its own listener origin (stable saved
+ * ports); a page view (another site, e.g. Personal) on a URL of its own configured origin, the navigation its guard
+ * already allows, kept verbatim. `created: true` reopens a view on its start page without recording a URL. Nothing
+ * opens another host or a non-app route. Undefined, restoring nothing, unless the whole record is valid.
  */
-export const restorePlan = (value: unknown, tabs: readonly { id: string; origin: string }[]) => {
+export const restorePlan = (value: unknown, tabs: readonly { id: string; origin: string; kind?: "app" | "page"; start?: string }[]) => {
   if (!value || typeof value !== "object") return undefined
   const record = value as { version?: unknown; selected?: unknown; views?: unknown }
   if (record.version !== 1 || !Array.isArray(record.views) || !record.views.length || record.views.length > tabs.length) return undefined
-  const views = record.views.map((item: { id?: unknown; url?: unknown }) => {
+  const views = record.views.map((item: { id?: unknown; url?: unknown; created?: unknown }) => {
     const tab = tabs.find((candidate) => candidate.id === item?.id)
-    if (!tab || typeof item.url !== "string" || URL.parse(item.url)?.origin !== tab.origin) return undefined
-    const url = appRouteURL(item.url, tab.origin)
+    if (!tab) return undefined
+    if (item.created !== undefined) return item.created === true && item.url === undefined ? { id: tab.id, url: tab.start ?? `${tab.origin}/` } : undefined
+    if (typeof item.url !== "string") return undefined
+    const parsed = URL.parse(item.url)
+    if (!parsed || parsed.origin !== tab.origin || parsed.username || parsed.password) return undefined
+    const url = tab.kind === "page" ? parsed.href : appRouteURL(item.url, tab.origin)
     return url ? { id: tab.id, url } : undefined
   })
   if (views.some((item) => !item) || new Set(views.map((item) => item!.id)).size !== views.length) return undefined
