@@ -219,7 +219,6 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     const key = all ? "*" : current?.es
     if (!key || (all && !pinned().length) || state().status !== "ready" || lineageRead || Date.now() - lastLineageRead < LINEAGE_MS) return
     lastLineageRead = Date.now()
-    setLineage(undefined)
     const same = () => (scope?.project === undefined ? "*" : scope?.es) === key && state().status === "ready"
     lineageRead = (async () => {
       try {
@@ -235,7 +234,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
         if (!same()) return
         setLineage({ project: key, byEditspace: Object.fromEntries(lineages), editspaceOf })
       } catch {
-        if (same()) setLineage(undefined)
+        // Retain this project's last-known owners so lane pins keep their place during a host outage.
       }
     })().finally(() => {
       lineageRead = undefined
@@ -270,7 +269,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
       }))
       refreshLineage()
     } catch (error) {
-      setLineage(undefined)
+      if (scope?.project !== name) setLineage(undefined)
       const reason = error instanceof ReachError ? error.reason : "network"
       // Nothing listed yet in this page (the host was down at load): show its last-seen rows for this project.
       const fallback = !state().rows.length && !state().checkedAt ? loadSeen(host.id, name) : undefined

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { isRowPinned, migrateReadyPins, migrationRefs, movePinnedRow, pinnedRows, pinnedUnionRows, pinMigrationReady, rowPinRef } from "./pin-view"
+import { isRowPinned, legacyPinsCovered, migrateReadyPins, migrationRefs, movePinnedRow, orderingPinsClient, pinnedRows, pinnedUnionRows, pinMigrationReady, rowPinRef } from "./pin-view"
 import { createPinsClient, syncableHost, type Pin } from "./pins-sync"
 
 const storage = () => {
@@ -18,10 +18,10 @@ const hostStore = () => {
   const pins = new Map<string, Pin>()
   const writes: string[] = []
   const orders: number[] = []
-  const state = { down: false }
+  const state = { down: false, profile: "work" }
   const send = async (url: string, init?: RequestInit) => {
     if (state.down) throw new TypeError("host unreachable")
-    if (!init?.method) return Response.json({ rev: 1, profile: "work", pins: [...pins.values()], tombstones: [], reset: true })
+    if (!init?.method) return Response.json({ rev: 1, profile: state.profile, pins: [...pins.values()], tombstones: [], reset: true })
     writes.push(`${init.method} ${url}`)
     const ref = decodeURIComponent(url.split("/pins/")[1]!.replace(/\/order$/, ""))
     const body = JSON.parse(String(init.body)) as { at: number; order?: number }
@@ -127,6 +127,13 @@ describe("dashboard pin wiring", () => {
     expect(localStore.writes).toEqual(["PUT /es/api/pins/lane:opencode%2Forchestrator"])
   })
 
+  test("single-project Work import waits until all legacy session owners are covered", () => {
+    const keys = ['["/one","ses_one"]', '["/two","ses_two"]']
+    expect(legacyPinsCovered(keys, [{ id: "ses_one", directory: "/one" }])).toBe(false)
+    expect(legacyPinsCovered(keys, [{ id: "ses_one", directory: "/one" }, { id: "ses_two", directory: "/one" }])).toBe(false)
+    expect(legacyPinsCovered(keys, [{ id: "ses_one", directory: "/one" }, { id: "ses_two", directory: "/two" }])).toBe(true)
+  })
+
   test("never-moved pins of two hosts interleave newest first", async () => {
     const laptop = hostStore()
     const mini = hostStore()
@@ -155,6 +162,43 @@ describe("dashboard pin wiring", () => {
       { host: "mini", client, owners: [], rows: [{ id: "ses_synced", directory: "/b", host: "mini" }] },
       { host: "other", owners: [], rows: [{ id: "ses_other", directory: "/c", host: "other" }] },
     ]).map((row) => row.id)).toEqual(["ses_synced", "ses_local_a", "ses_local_b", "ses_other"])
+  })
+
+  test("Mini pins hold their interleaved place through pin and feed outages, then recover; profile mismatch removes them", async () => {
+    const laptop = hostStore()
+    const mini = hostStore()
+    const time = { now: 300 }
+    const own = createPinsClient({ host: "laptop", prefix: "", profile: "work", fetch: laptop.send, storage: storage(), now: () => time.now })
+    const remote = createPinsClient({ host: "mini", prefix: "/hosts/mini", profile: "work", fetch: mini.send, storage: storage(), now: () => time.now })
+    const feed = { status: "ready", rows: [{ id: "ses_mini", directory: "/mini", host: "mini" }] }
+    const owners = [{ editspace: "opencode", lane: "worker", owner: "ses_mini" }]
+    const groups = () => [
+      { host: "laptop", client: orderingPinsClient(own, true), owners: [], rows: [{ id: "ses_new", directory: "/local" }, { id: "ses_old", directory: "/local" }] },
+      { host: "mini", client: orderingPinsClient(remote, true), owners, rows: remote.state().reason === "profile" ? [] : feed.rows },
+    ]
+    await Promise.all([own.refresh(), remote.refresh()])
+    await own.pin("session:ses_new")
+    time.now = 200
+    await remote.pin("lane:opencode/worker")
+    time.now = 100
+    await own.pin("session:ses_old")
+    expect(pinnedUnionRows(groups()).map((row) => row.id)).toEqual(["ses_new", "ses_mini", "ses_old"])
+    mini.state.down = true
+    await remote.refresh()
+    expect(remote.state()).toMatchObject({ status: "unavailable", reason: "network" })
+    expect(pinnedUnionRows(groups()).map((row) => row.id)).toEqual(["ses_new", "ses_mini", "ses_old"])
+    feed.status = "unavailable"
+    expect(feed.status).toBe("unavailable")
+    expect(pinnedUnionRows(groups()).map((row) => row.id)).toEqual(["ses_new", "ses_mini", "ses_old"])
+    mini.state.down = false
+    await remote.refresh()
+    feed.status = "ready"
+    expect(pinnedUnionRows(groups()).map((row) => row.id)).toEqual(["ses_new", "ses_mini", "ses_old"])
+    mini.state.profile = "personal"
+    await remote.refresh()
+    expect(remote.state()).toMatchObject({ status: "unavailable", reason: "profile", pins: [] })
+    expect(orderingPinsClient(remote, true)).toBeUndefined()
+    expect(pinnedUnionRows(groups()).map((row) => row.id)).toEqual(["ses_new", "ses_old"])
   })
 
   test("moving a Work pin between two Local pins changes only Work and survives a fresh read", async () => {

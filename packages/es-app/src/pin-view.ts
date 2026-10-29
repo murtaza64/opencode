@@ -5,6 +5,13 @@ export type PinRow = { id: string; directory: string }
 export type PinOwner = { editspace: string; lane: string; owner: string }
 export type PinGroup<T extends PinRow> = { host: string; rows: T[]; owners: PinOwner[]; client?: PinsClient }
 
+export const orderingPinsClient = (client: PinsClient | undefined, migrated: boolean) => {
+  if (!client || !migrated) return
+  const state = client.state()
+  if (state.reason === "profile") return
+  return state.status === "ready" || (state.status === "unavailable" && state.pins.length > 0) ? client : undefined
+}
+
 type MigrationSource =
   | { kind: "local"; dashboard: boolean; handoffs: boolean; sessions: boolean; otherLineages: boolean }
   | { kind: "work"; feed: boolean; lineage: boolean; legacyPins: boolean }
@@ -17,6 +24,15 @@ export const migrateReadyPins = (client: PinsClient, source: MigrationSource, ke
   if (client.state().status !== "ready" || !pinMigrationReady(source)) return
   return client.migrate(migrationRefs(keys, rows, owners))
 }
+
+export const legacyPinsCovered = (keys: string[], rows: PinRow[]) => keys.every((key) => {
+  const id = pinSessionID(key)
+  if (!id) return true
+  try {
+    const value: unknown = JSON.parse(key)
+    return Array.isArray(value) && rows.some((row) => row.id === id && row.directory === value[0])
+  } catch { return false }
+})
 
 // Rows do not carry lane identity. Only a confirmed current owner can be assigned a lane ref.
 export const rowPinRef = (row: PinRow, owners: PinOwner[]) => {

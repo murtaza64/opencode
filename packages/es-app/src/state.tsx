@@ -21,7 +21,7 @@ import { resolveProjectName } from "./project-name"
 import { reconcileHostPins, reconcilePins, transferPins, type Handoff, type PendingHandoff } from "./handoffs"
 import { pinSessionID } from "./session-pins"
 import { createPinsClient, syncableHost, type PinsClient } from "./pins-sync"
-import { isRowPinned, migrateReadyPins, movePinnedRow, pinnedRows, pinnedUnionRows, rowPinRef, type PinOwner } from "./pin-view"
+import { isRowPinned, legacyPinsCovered, migrateReadyPins, movePinnedRow, orderingPinsClient, pinnedRows, pinnedUnionRows, rowPinRef, type PinOwner } from "./pin-view"
 import { createCloudAgents } from "./cloud-agents"
 import { createSessionFailures } from "./session-failures"
 import { coalesced } from "./coalesced"
@@ -455,10 +455,12 @@ export function DashboardProvider(props: ParentProps) {
   })
   const isPinned = (s: Pick<SessionRow, "id" | "directory">) => {
     const client = localClient()
+    if (client?.state().reason === "profile") return false
     return isRowPinned(s, pins(), localPinOwners(), client && usableClient(client.host) ? client : undefined)
   }
   const togglePin = (s: Pick<SessionRow, "id" | "directory">) => {
     const client = localClient()
+    if (client?.state().reason === "profile") return
     if (client && usableClient(client.host)) {
       const refs = [rowPinRef(s, localPinOwners()), `session:${s.id}`]
       const existing = client.state().pins.filter((pin) => refs.includes(pin.ref))
@@ -548,6 +550,7 @@ export function DashboardProvider(props: ParentProps) {
   })
   const pinnedSessions = createMemo(() => {
     const client = localClient()
+    if (client?.state().reason === "profile") return []
     if (client && usableClient(client.host)) return pinnedRows(sessions(), localPinOwners(), client)
     const byID = new Map(sessions().map((s) => [s.id, s]))
     return [...new Set(pins().flatMap((key) => pinSessionID(key) ?? []))].flatMap((id) => {
@@ -665,7 +668,9 @@ export function DashboardProvider(props: ParentProps) {
           handoffs: handoffs() !== undefined && !handoffs.loading && !handoffsError(),
           sessions: globalSessions() !== undefined && !globalSessions.loading && !sessionsError(),
           otherLineages: otherLineages() !== undefined && !otherLineages.loading }
-        : { kind: "work" as const, feed: feed?.state().status === "ready", lineage: feed?.lineage()?.project === (workProject() ?? "*"), legacyPins: keys.length > 0 }
+        : { kind: "work" as const, feed: feed?.state().status === "ready" &&
+            (workProject() === undefined || legacyPinsCovered(keys, feed.state().rows)),
+          lineage: feed?.lineage()?.project === (workProject() ?? "*"), legacyPins: keys.length > 0 }
       const rows = feed ? feed.state().rows : globalSessions() ?? []
       const owners = feed ? workOwners(feed) : localPinOwners()
       const migration = migrateReadyPins(client, source, keys, rows, owners)
@@ -728,6 +733,7 @@ export function DashboardProvider(props: ParentProps) {
   })
   const workPinned = (row: Pick<HostedRow, "id" | "directory" | "host">) => {
     if (!row.host) return false
+    if (pinClients()[row.host]?.state().reason === "profile") return false
     const client = usableClient(row.host)
     const feed = feeds().find((item) => item.host.id === row.host)
     return isRowPinned(row, hostPins()[row.host] ?? [], feed ? workOwners(feed) : [], client)
@@ -736,6 +742,7 @@ export function DashboardProvider(props: ParentProps) {
     feeds,
     host: (id) => feeds().find((feed) => feed.host.id === id)?.host,
     pinned: createMemo(() => feeds().flatMap((feed) => {
+      if (pinClients()[feed.host.id]?.state().reason === "profile") return []
       const client = usableClient(feed.host.id)
       if (client) return pinnedRows(feed.state().rows, workOwners(feed), client)
       const rows = new Map(feed.state().rows.map((row) => [row.id, row]))
@@ -745,6 +752,7 @@ export function DashboardProvider(props: ParentProps) {
     isPinned: workPinned,
     togglePin: (row) => {
       if (!row.host) return
+      if (pinClients()[row.host]?.state().reason === "profile") return
       const client = usableClient(row.host)
       if (client) {
         const feed = feeds().find((item) => item.host.id === row.host)
@@ -776,21 +784,26 @@ export function DashboardProvider(props: ParentProps) {
     },
   }
 
-  const pinGroups = () => {
-    const client = localClient()
+  const pinGroups = (writable = false) => {
+    const host = ownPinHost() ?? "local"
+    const client = writable ? usableClient(host) : orderingPinsClient(localClient(), migratedHosts().includes(host))
     return [
-      { host: ownPinHost() ?? "local", rows: pinnedSessions(), owners: localPinOwners(), client: client && usableClient(client.host) },
-      ...feeds().map((feed) => ({
-        host: feed.host.id,
-        rows: work.pinned().filter((row) => row.host === feed.host.id),
-        owners: workOwners(feed),
-        client: feed.state().status === "ready" ? usableClient(feed.host.id) : undefined,
-      })),
+      { host, rows: client ? sessions() : localClient()?.state().reason === "profile" ? [] : pinnedSessions(), owners: localPinOwners(), client },
+      ...feeds().map((feed) => {
+        const remote = writable ? feed.state().status === "ready" ? usableClient(feed.host.id) : undefined
+          : orderingPinsClient(pinClients()[feed.host.id], migratedHosts().includes(feed.host.id))
+        return {
+          host: feed.host.id,
+          rows: remote ? feed.state().rows : pinClients()[feed.host.id]?.state().reason === "profile" ? [] : work.pinned().filter((row) => row.host === feed.host.id),
+          owners: workOwners(feed),
+          client: remote,
+        }
+      }),
     ]
   }
   const pinnedUnion = createMemo(() => pinnedUnionRows(pinGroups()))
   const movePin: DashboardCtx["movePin"] = (row, before, after) =>
-    movePinnedRow(ownPinHost() ?? "local", pinGroups(), row, before, after)
+    movePinnedRow(ownPinHost() ?? "local", pinGroups(true), row, before, after)
 
   const value: DashboardCtx = {
     state,
