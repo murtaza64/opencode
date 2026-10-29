@@ -384,7 +384,7 @@
 
 /* Front desk companion (#265): the conversation keeps the space. One growing composer (two lines to start), no idle
  * status line, and one meta line per reply (the transcript's turn line; session-ui's duplicate copy-row meta hidden). */
-.desk-companion .prompt-box:not(.prompt-expanded) .direct-draft > .ta-wrap > textarea { block-size: auto; min-height: 3.2em; field-sizing: content; max-height: 40vh; }
+.desk-companion .prompt-box:not(.prompt-expanded) .direct-draft > .ta-wrap > textarea { block-size: auto; min-height: 0; field-sizing: content; max-height: 40vh; }
 .desk-companion .prompt-box:not(.prompt-expanded) .direct-draft > .ta-wrap { min-height: 0; }
 .desk-companion .session-work-status[data-state=idle] { display: none; }
 .desk-companion [data-slot=text-part-meta] { display: none; }

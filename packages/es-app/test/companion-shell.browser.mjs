@@ -1,5 +1,5 @@
 // Front desk companion shell (#265): the conversation keeps the space. The header title is plain text even when it
-// contains the session's own ID (no self-referencing chip); the composer starts small (about two lines) and grows with
+// contains the session's own ID (no self-referencing chip); the composer starts at one line and grows with
 // what is typed; an idle status line is not shown; each reply carries one meta line. Disposable fixture.
 // Run from packages/es-app: node test/companion-shell.browser.mjs [--shots DIR]
 import assert from "node:assert/strict"
@@ -36,7 +36,8 @@ try {
   await expect(companion.locator(".session-title .session-ref, .session-title .session-chip")).toHaveCount(0)
   // Small composer that grows.
   const small = await editor.evaluate(el => el.getBoundingClientRect().height)
-  assert(small <= 64, `composer starts about two lines high (${small}px)`)
+  const oneLine = await editor.evaluate(el => { const style = getComputedStyle(el); return parseFloat(style.lineHeight) + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth) })
+  assert(small <= oneLine + 2, `composer starts one line high (${small}px, one line ${oneLine}px)`)
   await editor.fill(Array.from({ length: 8 }, (_, i) => `line ${i + 1}`).join("\n"))
   const grown = await editor.evaluate(el => el.getBoundingClientRect().height)
   assert(grown > small + 40, `composer grows with its text (${small} -> ${grown})`)
@@ -47,7 +48,7 @@ try {
   await expect(companion.locator("[data-slot=text-part-meta]:visible")).toHaveCount(0)
   if (shots) await page.screenshot({ path: path.join(shots, "companion-shell.png") })
   assert.deepEqual(errors, [])
-  console.log("PASS companion shell: header title without self chip, two-line growing composer, no idle status line, single reply meta")
+  console.log("PASS companion shell: header title without self chip, one-line growing composer, no idle status line, single reply meta")
 } finally {
   await browser.close()
   await preview.close()
