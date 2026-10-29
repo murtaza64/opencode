@@ -241,8 +241,8 @@
   .composer-meta { flex-basis: 100%; justify-content: flex-end; }
 }
 
-/* Icon-first rows share the persisted appearance setting with Filament. */
-:root[data-living-activity] {
+/* Icon-first tool and mail rows are the base design; the Living activity setting controls Filament only. */
+:root {
   .tool-run[data-compact], .tool-chip { display: inline-block; vertical-align: top; max-inline-size: 100%; margin-block: 2px; margin-inline-end: 6px; border: 0; background: transparent; }
   .tool-chip[data-open] { display: block; margin-inline-end: 0; }
   :is(.tool-run[data-compact] .tool-run-summary, .tool-chip-summary) {
@@ -254,11 +254,21 @@
   :is(.tool-run[data-compact] .tool-run-summary, .tool-chip-summary):focus-visible { outline: 1px solid var(--lavender); }
   .tool-run[data-compact] .tool-run-disclosure { display: none; }
   .tool-run[data-compact] .tool-run-icons { display: inline-flex; flex-wrap: wrap; gap: 4px; }
-  .tool-run-icon { display: inline-grid; place-items: center; inline-size: 16px; block-size: 16px; color: var(--subtext0); }
-  .tool-run-icon [data-component="icon"], .tool-run-icon svg { inline-size: 16px; block-size: 16px; color: inherit; }
+  /* A fixed 20px box: the glyph scales with the call's known size (XS 12px .. XL 20px) without moving the row;
+   * an unknown size stays at the neutral 16px. */
+  .tool-chip-files { margin: 2px 0 4px; padding-inline-start: 28px; list-style: none; font: 400 12px/18px var(--font-mono); color: var(--subtext0); }
+  .tool-chip-counts { color: var(--overlay1); }
+  .tool-run-icon { --tool-icon: 16px; display: inline-grid; place-items: center; flex: none; inline-size: 20px; block-size: 20px; color: var(--subtext0); }
+  .tool-run-icon[data-size="XS"] { --tool-icon: 12px; }
+  .tool-run-icon[data-size="S"] { --tool-icon: 14px; }
+  .tool-run-icon[data-size="M"] { --tool-icon: 16px; }
+  .tool-run-icon[data-size="L"] { --tool-icon: 18px; }
+  .tool-run-icon[data-size="XL"] { --tool-icon: 20px; }
+  .tool-run-icon [data-component="icon"], .tool-run-icon svg { inline-size: var(--tool-icon); block-size: var(--tool-icon); color: inherit; }
   .tool-run-icon[data-status="unfinished"] { color: var(--accent, var(--blue)); }
   .tool-run-icon[data-status="failed"] { color: var(--red); }
   .tool-run-icon:is([data-status="interrupted"], [data-status="unknown-exit"], [data-status="unknown"]) { color: var(--overlay1); }
+  .tool-run-more { align-self: center; padding-inline: 2px; font-size: 12px; color: var(--subtext0); font-variant-numeric: tabular-nums; }
   .tool-run-count { color: var(--subtext0); font-size: 12px; font-variant-numeric: tabular-nums; }
   :is(.tool-run-state, .tool-chip-state) { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 12px/20px var(--font-mono); color: var(--overlay1); }
   .tool-run-state, .tool-chip-state[data-status="failed"] { color: var(--red); }

@@ -3,7 +3,25 @@ import type { Part, ToolPart } from "@opencode-ai/sdk/v2"
 import { getToolInfo, Message, type ToolRenderers } from "@opencode-ai/session-ui/message-part"
 import { Icon } from "@opencode-ai/ui/icon"
 import { runSummary, toolOutcome, type ToolRunGroup } from "../transcript-groups"
-import { SIZE_LEGEND, sizeDistribution, toolMagnitude } from "../tool-magnitude"
+import { SIZE_LEGEND, sizeDistribution, toolMagnitude, type ToolMagnitude } from "../tool-magnitude"
+import { editSummary, fileName, isEditTool, type EditSummary } from "../tool-edit"
+
+const STRIP_ICONS = 12
+
+// The one icon of a call: Filament lights this element (data-filament-icon), never a glyph beside it. Its box is
+// fixed, so a tier change while a call streams never moves the row; the glyph inside scales with the call's known
+// input + output size (data-size), and an unknown size stays neutral rather than reading as small.
+const ToolIcon = (props: { partID: string; tool: string; status: string; icon: string; magnitude?: ToolMagnitude }) =>
+  <span class="tool-run-icon" data-tool={props.tool} data-status={props.status} data-filament-icon={props.partID}
+    data-size={props.magnitude?.kind === "sized" ? props.magnitude.size : "unknown"} aria-hidden="true">
+    <Icon name={(isEditTool(props.tool) ? "pencil-line" : props.icon) as never} size="normal" />
+  </span>
+
+/** "a.ts +3 −1", "3 files +12 −4", or just the file name(s) when the tool reported no counts. */
+export const editText = (edit: EditSummary) => {
+  const name = edit.files.length === 1 ? fileName(edit.files[0]!.path) : `${edit.files.length} files`
+  return edit.additions === undefined ? name : `${name} +${edit.additions} −${edit.deletions}`
+}
 
 // Collapsed by default. Members mount only while open, as their original chips.
 // The summary is deterministic: tool names and counts, wall-clock span and
@@ -17,7 +35,7 @@ export const ToolRun = (props: {
   renderTools?: ToolRenderers
   selectedPart?: string
   excerpt?: JSX.Element
-  /** Icon-first while closed (human #420 preview): one icon per call, the call count, and any failure or uncertainty in words. */
+  /** Icon-first while closed: one icon per call, the call count, and any failure or uncertainty in words. */
   compact?: boolean
 }) => {
   // Index each member message's parts once per update so large runs stay linear.
@@ -47,9 +65,17 @@ export const ToolRun = (props: {
   const icons = createMemo(() => props.run.members.map((member) => {
     const part = members().get(member.partID)?.part
     return part
-      ? { key: member.partID, tool: part.tool, status: toolOutcome(part), icon: getToolInfo(part.tool, part.state.input).icon }
-      : { key: member.partID, tool: "unknown", status: "unknown" as const, icon: "help" }
+      ? { key: member.partID, tool: part.tool, status: toolOutcome(part), icon: getToolInfo(part.tool, part.state.input).icon, magnitude: toolMagnitude(part) }
+      : { key: member.partID, tool: "unknown", status: "unknown" as const, icon: "help", magnitude: undefined }
   }))
+  // At most STRIP_ICONS icons, failures and unfinished calls first so they are never the ones hidden; the rest
+  // are counted ("+N") and every call is listed when the group opens.
+  const shown = createMemo(() => {
+    const all = icons()
+    if (all.length <= STRIP_ICONS) return all
+    const keep = new Set([...all.filter((item) => item.status !== "ok"), ...all].slice(0, STRIP_ICONS).map((item) => item.key))
+    return all.filter((item) => keep.has(item.key))
+  })
   const compact = () => !!props.compact && !props.open && !props.selectedPart
   let summaryButton: HTMLButtonElement | undefined
   // The deterministic facts: the closed row, or the compact strip's preview.
@@ -77,7 +103,10 @@ export const ToolRun = (props: {
       <span class="tool-run-disclosure" aria-hidden="true">›</span>
       <Show when={compact()} fallback={facts()}>
         <span class="tool-run-icons" aria-hidden="true">
-          <For each={icons()}>{(item) => <span class="tool-run-icon" data-tool={item.tool} data-status={item.status}><Icon name={item.icon as never} size="normal" /></span>}</For>
+          <For each={shown()}>{(item) => <ToolIcon partID={item.key} tool={item.tool} status={item.status} icon={item.icon} magnitude={item.magnitude} />}</For>
+          {/* Hidden calls light this count instead of an icon (Filament anchors on data-filament-icons). */}
+          <Show when={icons().length - shown().length}>{(more) => <span class="tool-run-more"
+            data-filament-icons={icons().filter((item) => !shown().includes(item)).map((item) => item.key).join(",")}>+{more()}</span>}</Show>
         </span>
         <span class="tool-run-count" aria-hidden="true">{props.run.members.length} calls</span>
         {/* Failure and uncertainty stay in words beside the icons, never only in colour or on hover. */}
@@ -104,7 +133,7 @@ export const ToolRun = (props: {
   </section>
 }
 
-/** Any tool call without its own renderer (question, todo) renders icon-first in the human #420 preview. */
+/** Any tool call without its own renderer (question, todo) renders icon-first. */
 export const iconEligible = (part: Part, renderTools?: ToolRenderers): part is ToolPart =>
   part.type === "tool" && !renderTools?.[part.tool]
 
@@ -116,8 +145,12 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
   const [open, setOpen] = createSignal(false)
   const info = createMemo(() => getToolInfo(props.part.tool, props.part.state.input))
   const summary = createMemo(() => runSummary([props.part]))
-  const size = createMemo(() => sizeDistribution([toolMagnitude(props.part)]).bins[0]?.size ?? "?")
+  const magnitude = createMemo(() => toolMagnitude(props.part))
+  const size = createMemo(() => sizeDistribution([magnitude()]).bins[0]?.size ?? "?")
   const status = createMemo(() => toolOutcome(props.part))
+  const edit = createMemo(() => editSummary(props.part))
+  // An edit names its file and confirmed line counts in place of the generic subtitle.
+  const what = () => { const value = edit(); return value ? editText(value) : info().subtitle }
   // A short reason in words, so a failure reads without colour: the tool's error line or its exit code.
   const reason = createMemo(() => {
     const state = props.part.state
@@ -125,7 +158,7 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
     const exit = state.status === "completed" ? state.metadata?.exit : undefined
     return typeof exit === "number" && exit !== 0 ? `exit ${exit}` : undefined
   })
-  const label = () => [info().title, STATE_WORDS[status()], info().subtitle, reason(), `size ${size()}`, summary().spanLabel].filter(Boolean).join(", ")
+  const label = () => [info().title, STATE_WORDS[status()], what(), reason(), `size ${size()}`, summary().spanLabel].filter(Boolean).join(", ")
   let button: HTMLButtonElement | undefined
   return <span class="tool-chip" data-compact={open() ? undefined : "true"} data-open={open() ? "true" : undefined} data-status={status()}
     data-timeline-part-id={props.part.id} data-filament-anchor={props.part.id}
@@ -137,22 +170,31 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
     }}>
     <button class="tool-chip-summary" ref={button} aria-expanded={open()} aria-label={label()} aria-busy={status() === "unfinished" ? "true" : undefined}
       onClick={() => setOpen(!open())}>
-      <span class="tool-run-icon" data-tool={props.part.tool} data-status={status()} aria-hidden="true"><Icon name={info().icon as never} size="normal" /></span>
+      <ToolIcon partID={props.part.id} tool={props.part.tool} status={status()} icon={info().icon} magnitude={magnitude()} />
       {/* What ran stays legible beside the icon; a failure, uncertainty or running call leads with that word. */}
       <span class="tool-chip-state" data-status={status()} aria-hidden="true">
-        {[STATE_WORDS[status()], info().subtitle, reason()].filter(Boolean).join(" · ")}
+        {[STATE_WORDS[status()], what(), reason()].filter(Boolean).join(" · ")}
       </span>
       <Show when={!open()}>
         <span class="tool-run-preview" aria-hidden="true">
           <span class="tool-run-kind"><bdi dir="auto">{info().title}</bdi></span>
-          <Show when={info().subtitle}><span class="tool-run-tools" dir="auto">{info().subtitle}</span></Show>
+          <Show when={what()}><span class="tool-run-tools" dir="auto">{what()}</span></Show>
           <span class="tool-run-sizes" dir="ltr">{size()}</span>
           <Show when={summary().span}>{(span) => <span class="tool-run-span" dir="ltr">{span()}</span>}</Show>
         </span>
       </Show>
     </button>
     <Show when={open()}>
-      <div class="tool-chip-member"><Message message={props.message} parts={[props.part]} activityRows renderTools={props.renderTools} /></div>
+      <div class="tool-chip-member">
+        {/* Every file an edit touched, with its own confirmed counts; the original chip follows with the diff. */}
+        <Show when={(edit()?.files.length ?? 0) > 1}>
+          <ul class="tool-chip-files" aria-label="Files changed">
+            <For each={edit()!.files}>{(file) => <li><bdi dir="ltr">{file.path}</bdi>
+              <Show when={file.additions !== undefined}><span class="tool-chip-counts" dir="ltr"> +{file.additions} −{file.deletions}</span></Show></li>}</For>
+          </ul>
+        </Show>
+        <Message message={props.message} parts={[props.part]} activityRows renderTools={props.renderTools} />
+      </div>
     </Show>
   </span>
 }

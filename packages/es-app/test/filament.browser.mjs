@@ -46,7 +46,7 @@ try {
   }
   // ---- deliberate opt-in through the appearance control ----
   const { context, page } = await open({}, "&filamentHud=1")
-  await page.getByRole("button", { name: "Living activity (Filament + icon rows)" }).click()
+  await page.getByRole("button", { name: "Living activity (Filament)" }).click()
   await page.reload()
   await expect(page.locator(".transcript")).toBeVisible()
   const canvas = page.locator(".filament-canvas")

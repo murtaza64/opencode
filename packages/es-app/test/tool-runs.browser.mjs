@@ -67,7 +67,8 @@ const run = async (viewport, label) => {
   for (const id of ["p11_read", "p12_grep", "p13_glob", "p14_bash", "p21_big", "p22_fail", "p43_fail"]) await expect(chip(id)).toHaveCount(0)
   // The live turn keeps every call visible, finished or not, and has no footer yet.
   for (const id of ["p61_la", "p62_lb", "p63_lc"]) await expect(chip(id)).toHaveCount(1)
-  await expect(chip("p63_lc").locator(".tool-size")).toHaveAttribute("data-size", "running")
+  // A running call has no size yet: its icon stays at the neutral tier.
+  await expect(chip("p63_lc").locator(".tool-run-icon")).toHaveAttribute("data-size", "unknown")
   await expect(page.locator('[data-find-message="msg_1011"] .turn-summary')).toHaveCount(0)
   await expect(page.locator('[data-find-message="msg_1003"] .turn-summary')).toHaveCount(1)
   // The run renders where its first member was: after the prose that preceded it, before the next message.
@@ -94,11 +95,11 @@ const run = async (viewport, label) => {
 
   // Desktop: the reader leaves a live call open. Mobile: the reader opens it, clicks inside, then closes it.
   const engaged = label === "desktop"
-  const liveTrigger = chip("p61_la").locator('[data-slot="collapsible-trigger"]').first()
+  const liveTrigger = chip("p61_la").locator(".tool-chip-summary").first()
   await liveTrigger.click()
   await expect(liveTrigger).toHaveAttribute("aria-expanded", "true")
   if (!engaged) {
-    await chip("p61_la").locator('[data-component="context-tool-group-list"]').first().click()
+    await chip("p61_la").locator(".tool-chip-member").first().click()
     await liveTrigger.click()
     await expect(liveTrigger).toHaveAttribute("aria-expanded", "false")
   }
@@ -149,12 +150,15 @@ const run = async (viewport, label) => {
   await expect(first.locator(".tool-run-summary")).toHaveAttribute("aria-expanded", "false")
   await expect(tail.locator(".tool-run-summary")).toHaveAttribute("aria-expanded", "false")
 
-  // RTL: the disclosure follows direction; tool names stay isolated LTR.
+  // RTL: the icon strip starts at the inline start; tool names stay isolated LTR.
+  // Measured at rest: hover or focus would show the strip's facts preview above it.
+  await page.mouse.move(0, 0)
+  await page.evaluate(() => document.activeElement?.blur())
   for (const dir of ["ltr", "rtl"]) {
     await page.evaluate((value) => { document.documentElement.dir = value }, dir)
     const geometry = await first.locator(".tool-run-summary").evaluate((element) => {
       const box = element.getBoundingClientRect()
-      const disclosure = element.querySelector(".tool-run-disclosure").getBoundingClientRect()
+      const disclosure = element.querySelector(".tool-run-icons").getBoundingClientRect()
       return { start: disclosure.left - box.left, end: box.right - disclosure.right, overflow: element.scrollWidth - element.clientWidth }
     })
     if (dir === "ltr") expect(geometry.start).toBeLessThan(geometry.end)
@@ -353,6 +357,9 @@ const narrow = async () => {
     await expect(runs.first().locator(".tool-run-sizes")).toHaveText("XS×1 · S×1 · M×1 · L×1 · XL×1 · ?×1")
     await expect(runs.first().locator(".tool-run-sizes")).toHaveAttribute("title", /1 not sized \(lower bound only: input walk capped or output truncated ×1\)/)
     await expect(runs.first().locator(".tool-run-span")).toHaveText(/^≥/)
+    // At rest the strip states the failures and uncertainty in words beside its icons.
+    await expect(runs.first().locator(".tool-run-state")).toHaveText("1 failed · 1 interrupted · 1 exit unknown · 1 untimed")
+    await expect(runs.first().locator(".tool-run-state")).toBeVisible()
     for (const dir of ["ltr", "rtl"]) {
       await page.evaluate((value) => { document.documentElement.dir = value }, dir)
       await runs.first().scrollIntoViewIfNeeded()
@@ -362,7 +369,8 @@ const narrow = async () => {
         const sizes = element.querySelector(".tool-run-sizes")
         return { left: rect.left, right: rect.right, overflow: element.scrollWidth - element.clientWidth,
           notesClipped: notes.scrollWidth - notes.clientWidth, sizesClipped: sizes.scrollWidth - sizes.clientWidth, width: document.documentElement.clientWidth,
-          children: [...element.children].map((child) => { const r = child.getBoundingClientRect(); return [r.left, r.right] }) }
+          // Hidden parts (the facts preview at rest, the compact strip's disclosure) take no space.
+          children: [...element.children].flatMap((child) => { const r = child.getBoundingClientRect(); return r.width ? [[r.left, r.right]] : [] }) }
       })
       expect(box.overflow).toBeLessThanOrEqual(0)
       expect(box.notesClipped).toBeLessThanOrEqual(0)
@@ -389,6 +397,8 @@ const narrowDistribution = async () => {
   const calls = Array.from({ length: 600 }, (_, index) => {
     const id = `prt_w${String(index).padStart(3, "0")}`
     const bin = index % 6
+    // The last call failed: the capped strip must still show it.
+    if (index === 599) return wide.tool(id, "bash", { command: "false" }, "y", { metadata: { exit: 1 } })
     return bin === 5 ? wide.tool(id, "bash", { command: "yes" }, "y", { metadata: { exit: 0, truncated: true } })
       : wide.tool(id, "read", { filePath: `/w/${index}` }, "x".repeat(outputs[bin]))
   })
@@ -405,11 +415,21 @@ const narrowDistribution = async () => {
   try {
     await page.goto(wide.url, { waitUntil: "domcontentloaded" })
     const sizes = page.locator(".tool-run .tool-run-sizes")
-    await expect(sizes).toHaveText("XS×100 · S×100 · M×100 · L×100 · XL×100 · ?×100", { timeout: 60_000 })
+    await expect(sizes).toHaveText("XS×101 · S×100 · M×100 · L×100 · XL×100 · ?×99", { timeout: 60_000 })
+    // The strip shows at most 12 icons and counts the rest; the group still names all 600 calls.
+    await expect(page.locator(".tool-run .tool-run-icon")).toHaveCount(12)
+    await expect(page.locator(".tool-run .tool-run-more")).toHaveText("+588")
+    expect((await page.locator(".tool-run .tool-run-more").getAttribute("data-filament-icons")).split(",")).toHaveLength(588)
+    await expect(page.locator(".tool-run .tool-run-count")).toHaveText("600 calls")
+    await expect(page.locator('.tool-run .tool-run-icon[data-status="failed"]')).toHaveCount(1)
+    await expect(page.locator(".tool-run .tool-run-state")).toHaveText("1 failed")
     for (const dir of ["ltr", "rtl"]) {
       await page.evaluate((value) => { document.documentElement.dir = value }, dir)
-      await sizes.scrollIntoViewIfNeeded()
-      const box = await page.locator(".tool-run .tool-run-summary").evaluate((element) => {
+      // The distribution shows in the strip's facts preview on keyboard focus; it must wrap inside that box.
+      await page.locator(".tool-run .tool-run-summary").scrollIntoViewIfNeeded()
+      await page.locator(".tool-run .tool-run-summary").focus()
+      await expect(sizes).toBeVisible()
+      const box = await page.locator(".tool-run .tool-run-preview").evaluate((element) => {
         const rect = element.getBoundingClientRect()
         const field = element.querySelector(".tool-run-sizes")
         const range = document.createRange()
