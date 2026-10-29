@@ -5,7 +5,7 @@ import { serve } from "./server"
 import { localHost, type WorkHost } from "../../es-app/remote-host"
 import { PERF_DIR } from "./perf-log"
 import { createVoice, voiceTools } from "./voice"
-import { appRouteURL, externalURL, internalURL, pageArrivedCrossSite, pageNavigation, serviceHosts, serviceOrigins, serviceSelf, startupMode, startupPlan, surfaceFrameURL } from "./policy"
+import { appRouteURL, externalURL, internalURL, pageArrivedCrossSite, pageNavigation, restorePlan, serviceHosts, serviceOrigins, serviceSelf, startupMode, startupPlan, surfaceFrameURL } from "./policy"
 import { createTabs, TITLE_BAR_HEIGHT } from "./tabs"
 import { watchBadges } from "./badges"
 import { muxEvents, sseEvents, watchNotifications } from "./notifier"
@@ -357,8 +357,17 @@ const start = async () => {
   app.on("window-all-closed", () => app.quit())
   process.on("SIGTERM", () => app.quit())
   process.on("SIGINT", () => app.quit())
+  // A publisher's capture of the views open before a graceful quit: those views reopen on their routes, and the shown
+  // one is selected. Drafts, receipts and preferences come back on their own (persistent partitions, stable ports).
+  const restore = process.env.ES_DESKTOP_RESTORE
+    ? restorePlan(await readFile(process.env.ES_DESKTOP_RESTORE, "utf8").then((text) => JSON.parse(text) as unknown).catch(() => undefined),
+        listeners.map((item) => ({ id: item.id, origin: item.server.origin })))
+    : undefined
+  if (process.env.ES_DESKTOP_RESTORE && !restore) console.error("Editspace restore ignored: invalid or unreadable record")
+  if (restore && !tabs) void localContents.loadURL(restore.views.find((item) => item.id === "local")?.url ?? server.origin)
   if (tabs) {
-    tabs.select("local")
+    restore?.views.forEach((item) => tabs.open(item.id, item.url))
+    tabs.select(restore?.selected ?? "local")
     // Inactive tabs show each host's open decisions from a small summary read, never a hidden page.
     const badges = watchBadges([
       { id: "local", read: (path) => fetch(`${server.origin}${path}`, { headers: { "x-editspace-key": server.key, origin: server.origin }, redirect: "error", signal: AbortSignal.timeout(10_000) }) },

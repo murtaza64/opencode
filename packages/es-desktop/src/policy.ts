@@ -123,6 +123,27 @@ export const appRouteURL = (value: string, origin: string) => {
   return new URL(url.pathname + url.search + url.hash, origin).href
 }
 
+/**
+ * A launch restore (ES_DESKTOP_RESTORE): which host views were open, on which app route, and which was shown, as a
+ * publisher captured them before a graceful quit. Each route must be an app route on that view's own listener
+ * origin (stable saved ports), so a restore never opens another host or a non-app page. Undefined, restoring
+ * nothing, unless the whole record is valid.
+ */
+export const restorePlan = (value: unknown, tabs: readonly { id: string; origin: string }[]) => {
+  if (!value || typeof value !== "object") return undefined
+  const record = value as { version?: unknown; selected?: unknown; views?: unknown }
+  if (record.version !== 1 || !Array.isArray(record.views) || !record.views.length || record.views.length > tabs.length) return undefined
+  const views = record.views.map((item: { id?: unknown; url?: unknown }) => {
+    const tab = tabs.find((candidate) => candidate.id === item?.id)
+    if (!tab || typeof item.url !== "string" || URL.parse(item.url)?.origin !== tab.origin) return undefined
+    const url = appRouteURL(item.url, tab.origin)
+    return url ? { id: tab.id, url } : undefined
+  })
+  if (views.some((item) => !item) || new Set(views.map((item) => item!.id)).size !== views.length) return undefined
+  if (typeof record.selected !== "string" || !views.some((item) => item!.id === record.selected)) return undefined
+  return { selected: record.selected, views: views as { id: string; url: string }[] }
+}
+
 // Work view reads of another host through this laptop's listener (/hosts/<id>/...): its session
 // list and statuses, handoff lineage and lane owners (so a pin follows a handoff on that host), one
 // session's record, messages and todos (read-only view in the Local window),
