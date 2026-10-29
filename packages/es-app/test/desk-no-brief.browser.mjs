@@ -2,6 +2,7 @@
 // Decisions never depend on a brief: with automatic briefs on, a host that reports no usable desk model,
 // and one item whose brief job failed, every Needs-you row opens its decision and the decision can be
 // answered as written. Also: no brief job is started on such a host. No runtime writes.
+import { overview } from "./desk-lists.mjs"
 import assert from "node:assert/strict"
 import { createRequire } from "node:module"
 import { startAttentionPreview } from "./attention-preview.mjs"
@@ -74,19 +75,19 @@ try {
   await page.goto(preview.url)
   // Each open row opens its decision, whatever its brief state.
   for (const [key, id, title] of [["attention:fixture:decision_1", "decision_1", "Choose the bounded implementation scope"], ["attention:other:other_decision", "other_decision", "Other project decision"]]) {
-    await page.locator(`.desk-item[data-desk-item="${key}"]`).click()
+    await page.locator(`nav.sidebar [data-nav-item="${key}"]`).click()
     const card = page.locator(`[data-attention-id="${id}"]`)
     await expect(card).toBeVisible()
     await expect(card).toContainText(title)
     await expect(card.getByRole("radio").first()).toBeEnabled()
   }
-  await page.locator('.desk-item[data-desk-item="attention:other:other_decision"]').click()
+  await page.locator('nav.sidebar [data-nav-item="attention:other:other_decision"]').click()
   await checkMarkdown(page, page.locator('[data-attention-id="other_decision"]'), "model unavailable")
-  await page.locator('.desk-item[data-desk-item="attention:fixture:pending"]').click()
+  await page.locator('nav.sidebar [data-nav-item="attention:fixture:pending"]').click()
   await expect(page.locator('[data-attention-id="pending"]')).toContainText("Preparing brief…")
   await checkMarkdown(page, page.locator('[data-attention-id="pending"]'), "brief pending")
   // The failed brief is one quiet line; briefs say why they are unavailable here; the decision is answerable.
-  await page.locator('.desk-item[data-desk-item="attention:fixture:decision_1"]').click()
+  await page.locator('nav.sidebar [data-nav-item="attention:fixture:decision_1"]').click()
   const card = page.locator('[data-attention-id="decision_1"]')
   await checkMarkdown(page, card, "brief failed")
   // Copy takes the command exactly.
@@ -102,6 +103,7 @@ try {
   await expect(page.locator(".home-notice")).toContainText("Answer saved")
   // History: the answered request reopens with the same rendering.
   await page.reload()
+  await overview(page)
   await page.locator(".desk-history summary").click()
   await page.locator(".desk-history .desk-item", { hasText: "Choose the bounded implementation scope" }).click()
   await checkMarkdown(page, page.locator('[data-attention-id="decision_1"]'), "history")

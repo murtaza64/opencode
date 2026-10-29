@@ -320,7 +320,7 @@ try {
 
   // 1. Expanded chat with nothing selected; the queue aggregates the ledger with freshness.
   await page.goto(`${origin}/`)
-  await expect(page.locator(".desk-item")).toHaveCount(1, { timeout: 20000 })
+  await expect(page.locator("nav.sidebar .needs-you-band .nav-decision")).toHaveCount(1, { timeout: 20000 })
   await expect(page.locator(".desk-evidence")).toHaveCount(0)
   await expect(page.locator(".desk-source", { hasText: "Attention ledger" })).toContainText("read-only: operator connection unavailable")
   // Root conversation identity: a lost create never yields a second conversation.
@@ -402,7 +402,7 @@ try {
   const draft = "unsent ✓ draft — keep me\nsecond line"
   await editor().fill(draft)
   await page.evaluate(() => { document.querySelector(".desk-chat .prompt-box textarea").dataset.mountProbe = "kept" })
-  await page.locator(".desk-item").first().click()
+  await page.locator("nav.sidebar .needs-you-band .nav-decision").first().click()
   await expect(page.locator(".desk-evidence")).toContainText("Pick a rollout")
   await expect(page.locator(".desk-evidence .home-answer textarea")).toBeDisabled()
   await expect(editor()).toHaveValue(draft)
@@ -421,7 +421,7 @@ try {
 
   // 3. A held brief runs while another exchange completes; the second turn sees the selection.
   // A slow source-thread read plus a double click still starts exactly one check.
-  await page.locator(".desk-item").first().click()
+  await page.locator("nav.sidebar .needs-you-band .nav-decision").first().click()
   const tailRoute = (url) => url.pathname === `/oc/session/${source.id}/message`
   let tailReads = 0
   await page.route(tailRoute, async (route) => { tailReads++; await new Promise((resolve) => setTimeout(resolve, 1500)); return route.fallback() })
@@ -506,7 +506,7 @@ try {
   const lost = JSON.parse(await page.evaluate(() => localStorage.getItem("es-app:front-desk:brief-create:1")))
   assert.equal((await call("GET", `/session/${briefAnchor}/children`)).body.some((item) => item.id === lost.id), false)
   await page.reload()
-  await page.locator(".desk-item").first().click()
+  await page.locator("nav.sidebar .needs-you-band .nav-decision").first().click()
   await expect(page.locator('.desk-evidence .desk-brief[data-part="lead"]')).toContainText("Brief start not confirmed", { timeout: 20000 })
   await expect(page.getByRole("button", { name: "Prepare brief" })).toHaveCount(0)
   await page.unroute(sessionRoute)
@@ -561,7 +561,7 @@ try {
   await expect(page.locator(".desk-job")).toHaveCount(5)
   await page.getByRole("button", { name: "Close and return to chat" }).click()
   await page.locator(".desk-job", { hasText: "Extra" }).first().waitFor({ state: "attached" })
-  await page.locator(".desk-item").first().click()
+  await page.locator("nav.sidebar .needs-you-band .nav-decision").first().click()
   await page.getByRole("button", { name: "Refresh", exact: true }).click()
   await poll("explicit refresh reread", () => new Set(briefReads).size === childIDs.size)
   await new Promise((resolve) => setTimeout(resolve, 1000))
@@ -648,14 +648,14 @@ try {
   // 9. Interrupted pass: Core restarts mid-brief; the desk reports unknown and does not rerun it.
   const briefBase = hits.brief
   const metadataBefore = (await call("GET", `/session/${briefAnchor}/children`)).body.map((item) => [item.id, item.metadata])
-  await page.locator(".desk-item").first().click()
+  await page.locator("nav.sidebar .needs-you-band .nav-decision").first().click()
   await page.getByRole("button", { name: "Prepare again" }).click()
   await poll("second brief reached provider", () => hits.brief === briefBase + 1)
   await stopCore()
   holds.splice(0)
   await startCore("restarted")
   await page.reload()
-  await page.locator(".desk-item").first().click()
+  await page.locator("nav.sidebar .needs-you-band .nav-decision").first().click()
   await expect(page.locator('.desk-evidence .desk-brief[data-part="lead"]')).toContainText("stopped before finishing", { timeout: 20000 })
   const metadataAfter = new Map((await call("GET", `/session/${briefAnchor}/children`)).body.map((item) => [item.id, item.metadata]))
   for (const [id, metadata] of metadataBefore) assert.deepEqual(metadataAfter.get(id), metadata, `metadata of ${id} survives restart`)
@@ -726,7 +726,7 @@ try {
   await page.reload()
   await expect(card.locator("h3.home-question")).toContainText("Choose whether", { timeout: 20000 })
   await page.goto(`${origin}/`)
-  await page.locator(".desk-item").first().click()
+  await page.locator("nav.sidebar .needs-you-band .nav-decision").first().click()
   await expect(page.locator(".desk-evidence h3.home-question")).toContainText("Choose whether to stay at the canary", { timeout: 20000 })
   await new Promise((resolve) => setTimeout(resolve, 3000))
   assert.equal(hits.brief, autoHits + 2, "reload and the desk reuse the job")
@@ -815,7 +815,7 @@ try {
 
   // 13. Narrow width keeps both views reachable.
   await page.goto(`${origin}/`)
-  await page.locator(".desk-item").first().click()
+  await page.locator("nav.sidebar .needs-you-band .nav-decision").first().click()
   await page.setViewportSize({ width: 760, height: 900 })
   await expect(page.locator(".desk-evidence")).toBeVisible()
   await expect(editor()).toBeVisible()

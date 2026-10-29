@@ -1,4 +1,5 @@
 import { createRequire } from "node:module"
+import { needsRow } from "./desk-lists.mjs"
 import { startAttentionPreview } from "./attention-preview.mjs"
 import { directory, session } from "./composer-fixture.mjs"
 
@@ -31,20 +32,19 @@ try {
     if (rtl) await context.addInitScript(() => document.addEventListener("DOMContentLoaded", () => { document.documentElement.dir = "rtl" }))
     const page = await context.newPage()
     page.on("pageerror", error => errors.push(error.message))
-    const queue = page.getByRole("complementary", { name: "Decisions and inbox" })
-    const row = title => queue.locator(".desk-item").filter({ hasText: title })
+    const row = title => needsRow(page, title)
     // A fresh preview optimizes dependencies on first load; allow for a cold start.
     await page.goto(preview.url, { timeout: 120_000 })
 
     // Agents sharing one project are told apart; the project stays secondary.
     await expect(row("Pick a worker").locator(".desk-item-agent")).toHaveText("Joiner")
-    await expect(row("Pick a worker").locator(".home-source")).toContainText("decision · Joiner · fixture")
+    await expect(row("Pick a worker").locator(".session-project")).toContainText("Joiner · fixture")
     await expect(row("Approve the squadron").locator(".desk-item-agent")).toHaveText("Tether")
     await expect(row("Approve the squadron").locator(".desk-item-agent")).toHaveAttribute("title", "ses_b")
     // Unknown identity: an explicit fallback, raw id only in the tooltip.
     await expect(row("Legacy request").locator(".desk-item-agent")).toHaveText("Unknown agent")
     await expect(row("Legacy request").locator(".desk-item-agent")).toHaveAttribute("title", "ses_gone")
-    // A handed-off requester is still the requester in the queue.
+    // A handed-off requester is still the requester in the list.
     await expect(row("Confirm the release").locator(".desk-item-agent")).toHaveText("Relay")
 
     // The selected header links the agent's conversation and names project second.

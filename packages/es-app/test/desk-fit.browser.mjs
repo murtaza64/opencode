@@ -22,7 +22,7 @@ const openDesk = async ({ width, height, userAgent, rtl = false }) => {
   await page.goto(preview.url, { waitUntil: "domcontentloaded", timeout: 90_000 })
   // A cold Vite dependency optimization can delay the first render.
   // Below the docked width the chat floats over the view and starts closed; open it once the item is selected.
-  await page.locator('.desk-item[data-desk-item="attention:fixture:decision_1"]').click({ timeout: 90_000 })
+  await page.locator('nav.sidebar [data-nav-item="attention:fixture:decision_1"]').click({ timeout: 90_000 })
   if (await page.locator(".desk-companion.closed").count()) await page.locator('[data-nav="front-desk"]').click()
   await expect(page.locator(".desk-chat textarea")).toBeVisible()
   if (rtl) await page.evaluate(() => { document.documentElement.dir = "rtl" })
@@ -40,12 +40,12 @@ const expectFits = async (name, page) => {
   const desk = await page.locator(".desk").evaluate(el => ({ bottom: Math.round(el.getBoundingClientRect().bottom), viewport: innerHeight }))
   expect(desk.bottom, `${name}: desk ends inside the window`).toBeLessThanOrEqual(desk.viewport)
   for (const [part, locator] of [
-    ["queue", page.locator(".desk-queue .desk-sources-all > summary")],
+    ["list", page.locator("nav.sidebar .needs-you-band .nav-item").last()],
     ["selected item", page.locator(".desk-evidence :is(button, summary, a)").last()],
     ["composer", page.locator(".desk-companion textarea")],
     ["composer actions", page.locator(".desk-companion .prompt-box button").last()],
   ]) {
-    if (part === "queue" || part === "selected item") {
+    if (part === "list" || part === "selected item") {
       // A full-screen sheet covers the nav; it closes from its own header.
       if (await page.locator(".desk-companion.sheet:not(.closed)").count()) await page.getByRole("button", { name: "Close Front desk chat" }).click()
       else if (await page.locator(".desk-companion.overlay:not(.closed)").count()) await page.locator('[data-nav="front-desk"]').click()

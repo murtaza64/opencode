@@ -166,7 +166,7 @@ try {
   console.log("FOLLOW-UP steer input to the running task, keyed by its own desk message")
 
   // 4. Selection change, then the task finishes: one queue input to the asking conversation.
-  await page.locator('[data-attention-id], .desk-queue button, .desk-item').first().click().catch(() => undefined)
+  await page.locator('[data-attention-id], nav.sidebar .needs-you-band .nav-item').first().click().catch(() => undefined)
   // Manual compaction of the desk conversation before the task ends: the result still goes to the same session.
   deskTurn("assistant", "msg_desk_compaction", "", { mode: "compaction" })
   core.finishedAt = Date.now()

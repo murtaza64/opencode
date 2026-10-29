@@ -2,6 +2,7 @@
 // never answers. Same session ID on both hosts stays two rows; Mini rows open on the Mini's own
 // listener; the offline host is shown as unreachable (never empty, never merged); New session
 // defaults to the Mini and only uses Local by explicit choice; pins of Mini rows are host-keyed.
+import { needsCount, needsYou } from "./desk-lists.mjs"
 import { createRequire } from "node:module"
 import { startPanelPreview } from "./composer-panel-preview.mjs"
 import { directory } from "./composer-fixture.mjs"
@@ -131,11 +132,11 @@ try {
   // Needs you lists the Mini's open decisions after this host's, each named with its host; opening one shows it
   // here in Work (read and answered through /hosts/mini, Main1555), never by switching to the Mini's tab.
   await page.goto(new URL("/desk", preview.url).href)
-  const miniDecision = page.getByRole("button", { name: /^Rename the ledger table\?, on Mac Mini$/ })
+  const miniDecision = needsYou(page).getByRole("link", { name: /^Rename the ledger table\?, decision, on Mac Mini$/ })
   await expect(miniDecision).toBeVisible()
-  await expect(page.locator(".desk-host-item")).toHaveCount(1)
+  await expect(needsYou(page).locator(".host-decision")).toHaveCount(1)
   // Wingman never answers, so the count is already marked incomplete for it, by name.
-  await expect(page.locator(".desk-queue h2 span")).toHaveAttribute("title", "Wingman: not current")
+  await expect(needsCount(page)).toHaveAttribute("title", /Wingman/)
   expect(attentionQueries.at(-1)).toBe("?view=open&limit=200&include=needs-you-inputs&es=fixture")
   const openedBefore = opened.length
   await miniDecision.click()
@@ -145,8 +146,8 @@ try {
   // With the Mini away its decisions are not shown as none: the count is marked incomplete and names it.
   miniDown = true
   await page.goto(new URL("/desk", preview.url).href)
-  await expect(page.locator(".desk-queue h2 span")).toHaveAttribute("title", "Mac Mini, Wingman: not current")
-  await expect(page.locator(".desk-queue h2 span")).toHaveText(/\+$/)
+  await expect(needsCount(page)).toHaveAttribute("title", /Mac Mini.*Wingman|Wingman.*Mac Mini/)
+  await expect(needsCount(page)).toHaveText(/\+$/)
   miniDown = false
   await page.goto(preview.url)
   // Opening a Mini row opens it here in the normal session view, read through /hosts/mini (#261; writes are

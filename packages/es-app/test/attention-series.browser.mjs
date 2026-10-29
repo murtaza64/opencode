@@ -28,7 +28,7 @@ const card = page.locator('[data-series-id="keyboard-plan"]')
 const row = index => card.locator(`[data-attention-id="grill_${index}"]`)
 try {
   await page.goto(url, { timeout: 300_000 })
-  await expect(page.locator(`[data-desk-item="${key}"]`)).toHaveCount(1)
+  await expect(page.locator(`nav.sidebar [data-nav-item="${key}"]`)).toHaveCount(1)
   await expect(card.locator(".attention-series-question")).toHaveCount(7)
   await expect(card.locator(".attention-series-progress")).toHaveText("0/7 answered")
   // Progress is neutral text, not the green that means recommended.

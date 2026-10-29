@@ -211,7 +211,16 @@
 .desk-companion.overlay:not(.closed) { position: fixed; inset-block: var(--native-header-height, 0px) 0; inset-inline-end: 0; z-index: 30; inline-size: 380px; --companion-width: 380px; box-shadow: 0 0 24px color-mix(in srgb, var(--crust) 60%, transparent); }
 .desk-companion.overlay.closed { position: fixed; }
 /* Decisions & inbox: queue column + selected item. */
-:root .desk-grid, :root .desk-has-selection .desk-grid { grid-template-columns: clamp(220px, 20vw, 320px) minmax(0, 1fr); }
+:root .desk-grid, :root .desk-has-selection .desk-grid { display: flex; flex-direction: column; overflow-y: auto; }
+/* NAV-01/02: one main pane. Notices on top; the open item or, with nothing open, the inbox overview. */
+.desk-notices { display: grid; gap: 6px; padding: 8px 16px 0; }
+.desk-notices:empty { display: none; }
+.desk-overview { display: flex; flex-direction: column; gap: 12px; inline-size: min(100%, 720px); margin-inline: auto; padding: 20px 16px 24px; }
+.desk-title { inline-size: min(100%, 720px); margin: 20px auto 0; padding-inline: 16px; font-size: 15px; font-weight: 600; }
+.desk-title ~ .desk-overview { padding-block-start: 8px; }
+.desk-overview-hint { margin: -6px 0 0; font-size: 12px; }
+.desk-overview > details > summary { cursor: pointer; font-size: 12px; font-weight: 600; padding-block: 4px; }
+.desk-overview > .desk-sources { margin-block-start: 8px; padding-block-start: 12px; border-block-start: 1px solid var(--surface0); }
 .desk-idle { display: grid; place-items: center; font-size: 12px; }
 /* The app-wide background-read status sits at the nav block's corner, not on its own row. */
 :root .nav-entries { position: relative; }
@@ -446,3 +455,4 @@
 .surface-glyph-knockout { fill: var(--mantle); }
 .nav-item:hover .surface-glyph-knockout, .nav-item.active .surface-glyph-knockout { fill: var(--selected, var(--surface0)); }
 .surface-glyph-accent { stroke: var(--accent); }
+.nav-decision.nav-old .nav-title { color: var(--subtext0); }

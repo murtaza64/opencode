@@ -4,6 +4,7 @@
 // header indicator carries the detail behind a disclosure. Then a held session send: the
 // composer controls do not move.
 // Run from packages/es-app: node test/backend-status.browser.mjs
+import { needsCount, needsYou } from "./desk-lists.mjs"
 import { createRequire } from "node:module"
 import { startAttentionPreview } from "./attention-preview.mjs"
 import { directory } from "./composer-fixture.mjs"
@@ -36,16 +37,17 @@ await page.route(/\/(oc|es\/api)\//, route => {
   return route.continue()
 })
 
-const queue = page.getByRole("complementary", { name: "Decisions and inbox" })
+// The list that must keep its geometry: the sidebar's Needs you band.
+const queue = needsYou(page)
 const indicator = page.locator(".backend-status")
 const warnings = page.locator(".home-warning, .err, [role=alert]")
 const box = async locator => { const value = await locator.boundingBox(); return value && [value.x, value.y, value.width, value.height].map(Math.round) }
 const refresh = () => page.getByRole("button", { name: "Refresh", exact: true }).click()
 try {
   await page.goto(preview.url, { timeout: 90_000 })
-  const heading = queue.getByRole("heading", { name: /^Needs you \d+$/ })
+  const heading = needsCount(page)
   // The request check lands after the first paint; wait for a settled count.
-  await expect(heading).toHaveText("Needs you 4")
+  await expect(heading).toHaveText("4")
   const healthy = await heading.textContent()
   await expect(indicator.locator("button")).toHaveCount(0)
   await page.evaluate(() => document.fonts.ready)

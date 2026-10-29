@@ -1,6 +1,7 @@
 // Front desk: the Sources fold "Show" control brings its brief into view and focus, whatever was
 // selected before. Disposable in-memory fixture only; no writes leave the page.
 // Run from packages/es-app: node test/desk-show-brief.browser.mjs
+import { overview } from "./desk-lists.mjs"
 import { createRequire } from "node:module"
 import { startAttentionPreview } from "./attention-preview.mjs"
 import { directory } from "./composer-fixture.mjs"
@@ -55,13 +56,14 @@ page.on("pageerror", (error) => errors.push(error.message))
 const writes = []
 page.on("request", (request) => { if (request.method() !== "GET" && !request.url().includes("/es/api/attention/session")) writes.push(`${request.method()} ${request.url()}`) })
 
-const queue = page.getByRole("complementary", { name: "Decisions and inbox" })
-const decision = page.locator('.desk-item[data-desk-item="attention:fixture:decision_1"]')
-const permission = page.locator(`.desk-item[data-desk-item="permission:${directory}:per_tests"]`)
+// Briefs are listed under the overview's sources, shown when nothing is open.
+const queue = page.locator(".desk-overview")
+const decision = page.locator('nav.sidebar [data-nav-item="attention:fixture:decision_1"]')
+const permission = page.locator(`nav.sidebar [data-nav-item="permission:${directory}:per_tests"]`)
 const show = queue.getByRole("button", { name: "Show brief: Choose the bounded implementation scope" })
 const evidence = page.getByRole("region", { name: "Selected item" })
 const brief = evidence.getByRole("region", { name: "Brief" }).first()
-const openSources = async () => { if (!await show.isVisible()) await queue.locator(".desk-sources-all > summary").click() }
+const openSources = async () => { await overview(page); if (!await show.isVisible()) await queue.locator(".desk-sources-all > summary").click() }
 // The brief's heading line sits inside the visible part of the evidence pane and holds focus.
 const expectRevealed = async () => {
   await expect(brief).toBeFocused()
@@ -84,32 +86,22 @@ try {
   await expect(stale).toContainText("Item changed (revision 0 → 1).")
   await expect(stale.getByRole("button")).toHaveCount(0)
 
-  // No selection: Show selects the item and reveals its brief.
+  // Show opens the brief's item and reveals its brief.
   await show.click()
-  await expect(decision).toHaveAttribute("aria-pressed", "true")
+  await expect(decision).toHaveAttribute("aria-current", "page")
   await expectRevealed()
 
-  // Same item, scrolled away: Show brings the brief back instead of doing nothing.
-  // A shorter window guarantees the decision card is taller than its pane.
-  await page.setViewportSize({ width: 1280, height: 420 })
-  await page.locator(".desk-evidence").evaluate((el) => { el.scrollTop = el.scrollHeight })
-  await queue.evaluate((el) => el.focus?.())
-  await expect(brief).not.toBeFocused()
-  await expect.poll(() => brief.evaluate((el) => el.getBoundingClientRect().top < el.closest(".desk-evidence").getBoundingClientRect().top)).toBe(true)
-  await show.click()
-  await expectRevealed()
-
-  // Another item selected: Show switches the selection to the brief's item.
+  // From another item: back to the overview, Show switches to the brief's item.
   await permission.click()
-  await expect(permission).toHaveAttribute("aria-pressed", "true")
+  await expect(permission).toHaveAttribute("aria-current", "page")
   await expect(evidence).not.toContainText("Ship the homepage as decisions-only now")
   await openSources()
   await show.click()
-  await expect(decision).toHaveAttribute("aria-pressed", "true")
-  await expect(permission).toHaveAttribute("aria-pressed", "false")
+  await expect(decision).toHaveAttribute("aria-current", "page")
+  await expect(permission).not.toHaveAttribute("aria-current", "page")
   await expectRevealed()
 
-  // Narrow window: the evidence stacks below the queue and Show scrolls the page to the brief.
+  // Narrow window: Show still reveals the brief.
   await page.setViewportSize({ width: 800, height: 600 })
   await page.locator(".desk-grid").evaluate((el) => { el.scrollTop = 0 })
   await openSources()

@@ -47,7 +47,7 @@ page.on("request", (request) => {
   if (match && request.method() === "POST") replies.push(match[1])
 })
 const card = (id) => page.locator(`.home-permission[data-request-id="${id}"]`)
-const queued = (id) => page.locator(`.desk-item[data-desk-item="permission:${directory}:${id}"]`)
+const queued = (id) => page.locator(`nav.sidebar [data-nav-item="permission:${directory}:${id}"]`)
 const select = async (id) => { await queued(id).click(); await expect(card(id)).toBeVisible() }
 const refresh = () => page.getByRole("button", { name: "Refresh", exact: true }).click()
 const top = async (locator) => (await locator.boundingBox()).y
@@ -148,7 +148,7 @@ try {
   await page.setViewportSize({ width: 1280, height: 640 })
 
   // Links in request bodies: an external URL opens outside the app, an es-app session link navigates in place.
-  await page.locator('.desk-item[data-desk-item="attention:fixture:decision_1"]').click()
+  await page.locator('nav.sidebar [data-nav-item="attention:fixture:decision_1"]').click()
   const body = page.locator(".home-decision[data-attention-id=decision_1]")
   const link = body.getByRole("link", { name: easel })
   await expect(link).toHaveAttribute("href", easel)

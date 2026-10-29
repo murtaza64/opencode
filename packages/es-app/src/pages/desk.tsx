@@ -13,7 +13,7 @@ import { HomePermission, type HomeReplyReceipt } from "../components/home-permis
 import { FailureRetry } from "../components/session-failure"
 import type { IgnoredFailure } from "../failure-ignores"
 import { useDeskQueue } from "../desk-queue"
-import { failureAge, failureLabel, failureWhen, OLD_FAILURE_MS } from "../session-failures"
+import { failureAge, failureLabel, failureWhen } from "../session-failures"
 import type { SessionFailure } from "@opencode-ai/sdk/v2"
 import { attentionItem, briefBinding, briefCopy, briefPacket, briefSends, deskContext, deskSources, detailRequest, type DeskItem, type DeskSource, SOURCE_TAIL } from "../desk"
 import { answeredJob, createMemory, readConversation, type BriefJob } from "../desk-session"
@@ -26,10 +26,9 @@ import { oc } from "../api"
 import { peekLiveSession } from "../live-session-cache"
 import { flash } from "../motion"
 import type { MemoryEntry, MemoryRevision } from "../desk-memory"
-import { HostGlyph } from "../components/icons"
 import { parseWorkKey, workQueue, workSurfaces, type WorkEntry } from "../work-queue"
 import { WorkRemoteDetail } from "../components/work-remote"
-import { DeliverableList, SurfaceList, SurfaceView } from "../components/desk-surfaces"
+import { SurfaceView } from "../components/desk-surfaces"
 import { surfaceFromKey, surfaceKey } from "../surfaces"
 import "./home.css"
 
@@ -42,8 +41,6 @@ import "./brief.css"
 const receiptText = (item: HomeReplyReceipt) => item.result === "applied" ? (item.reply === "once" ? "Allowed once" : item.reply === "always" ? "Always allowed" : "Rejected") : item.result === "not-applied" ? "Not applied" : "Outcome uncertain"
 const stateLabel = (job: BriefJob) => ({ starting: "starting", unconfirmed: "start unconfirmed", running: "preparing", ready: "ready", failed: "failed", unknown: "stopped" })[job.state.state]
 // Queue rows show a brief only while it is in progress or needs a retry; a ready brief is visible on selection.
-const rowBrief = (job?: BriefJob) => job && job.state.state !== "ready" ? (job.state.state === "running" || job.state.state === "starting" ? "preparing brief" : `brief ${stateLabel(job)}`) : undefined
-const STALE_MS = 45_000
 // An answered decision its agent has not resolved within this long is shown as stalled.
 const WAITING_STALE_MS = 4 * 3600_000
 const WAITING_DELIVERY: Record<string, string> = { handled: "agent read it", presented: "delivered", admitted: "delivered", queued: "sending", pending: "sending" }
@@ -104,9 +101,6 @@ export default function Desk() {
   // Other Work view hosts' open decisions, listed after this host's items. Each opens on its own
   // host's Front desk (its tab, operator session and answer route); an unreachable host's last-known
   // decisions stay listed, marked, with opening disabled, and the count says it may be incomplete.
-  const hostDecisions = createMemo(() => dashboard.work.feeds().flatMap(feed => feed.state().decisions.map(record => ({ feed, record }))))
-  const hostsBehind = createMemo(() => dashboard.work.feeds().filter(feed => feed.state().status === "unavailable" || feed.state().decisionsStale).map(feed => feed.host.label))
-  const timeOfDay = (time: number) => new Date(time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
   const [historyView, setHistoryView] = createSignal<Exclude<AttentionView, "open"> | "ignored">("answered")
   const inView = (record: AttentionRecord, view: AttentionView) => view === "history" ? ["resolved", "withdrawn"].includes(record.status) : view === "recorded" ? record.status === "decided" : record.status === view
   const historyCount = (view: AttentionView | "ignored") => view === "ignored" ? ignoredFailures().length : records().filter(record => inView(record, view)).length
@@ -195,7 +189,6 @@ export default function Desk() {
     const timer = setTimeout(absorb, MEMORY_ABSORB_DELAY_MS)
     onCleanup(() => clearTimeout(timer))
   }))
-  const jobsFor = (key: string) => briefs.jobs().filter(job => job.meta.source === key)
   const contextInput = () => ({
     now: Date.now(),
     scope: project(),
@@ -230,104 +223,23 @@ export default function Desk() {
   // No page header: the queue is this mode's sidebar, and the chat or selected item fills the rest.
   return <main class="desk" classList={{ "desk-has-selection": !!selected() }}>
     <div class="desk-grid">
-      <aside class="desk-queue" aria-label="Decisions and inbox">
-        <h1 class="sr-only">Decisions & inbox</h1>
+      {/* Status notices stay visible whatever is open: read-only answers, an unconfirmed answer to retry, brief or ignore trouble. */}
+      {/* One page heading: shown above the overview, read-only for assistive tech while an item is open. */}
+      <h1 class="desk-title" classList={{ "sr-only": !!(selected() || selectedRemote()) }}>Decisions &amp; inbox</h1>
+      <div class="desk-notices">
         <Show when={!attention.operator()}><div class="home-login home-muted">Read-only: answers are off <button class="desk-button" title="This UI origin must be allowed by the attention server" onClick={() => attention.checkOperator().catch(() => undefined)}>Reconnect</button></div></Show>
         <Show when={attention.notice()}><div class="home-notice" role="status">{attention.notice()}<Show when={attention.pending()}><button class="desk-button" disabled={attention.writing()} onClick={() => void attention.retry()}>Retry same action</button></Show></div></Show>
         <Show when={briefs.error()}><div class="home-muted desk-background" role="status" title={briefs.detail()}>{briefs.error()}</div></Show>
         <Show when={ignores.notice()}><div class={ignores.quiet() ? "home-muted desk-background" : "home-warning desk-background"} role="status" title={ignores.quiet()}>{ignores.notice()}</div></Show>
-        <SurfaceList surfaces={surfaces} selected={selectedKey()} onSelect={select} />
-        <DeliverableList surfaces={surfaces} selected={selectedKey()} onSelect={select} />
-        <h2>Needs you <span title={hostsBehind().length ? `${hostsBehind().join(", ")}: not current` : undefined}>{items().length + hostDecisions().length}{hostsBehind().length ? "+" : ""}</span></h2>
-        <ul class="desk-items">
-          <For each={items()} fallback={<Show when={!hostDecisions().length}><li class="home-muted desk-empty">{problems().length || hostsBehind().length ? "Nothing listed, but some sources could not be checked." : "Nothing needs you."}</li></Show>}>{item => {
-            const job = () => jobsFor(item.key).find(candidate => candidate.meta.revision === item.revision)
-            return <li><button class="desk-item" aria-pressed={selectedKey() === item.key} data-desk-item={item.key} onClick={() => select(item.key)}>
-              <bdi dir="auto" class="desk-item-title">{item.title}</bdi>
-              <Show when={item.series}><span class="home-source">{item.series!.answered}/{item.series!.live} answered</span></Show>
-              <span class="home-source" classList={{ "desk-item-old": !!item.failure && !(now() - item.failure.time < OLD_FAILURE_MS) }}><span class="desk-item-kind" data-kind={item.kind}>{item.kind}</span>
-                <Show when={item.failure} fallback={<><Show when={item.record}>{record => <> · <RowAgent record={record()} /></>}</Show><Show when={item.project}> · <bdi dir="auto">{item.project}</bdi></Show>
-                  <Show when={now() - item.checked > STALE_MS}> · <span class="home-blocked">checked {ago(item.checked) || "never"}</span></Show></>}>
-                  {failure => <> · {failureLabel(failure())} · <span data-failure-age>{failureAge(failure().time, now())}</span></>}</Show>
-                <Show when={item.kind !== "review" && rowBrief(job())}>{label => <> · {label()}</>}</Show></span>
-            </button></li>
-          }}</For>
-          <For each={hostDecisions()}>{entry => {
-            const label = entry.feed.host.label
-            const down = () => entry.feed.state().status === "unavailable"
-            const behind = () => down() ? `unreachable since ${timeOfDay(entry.feed.state().since ?? Date.now())}` : entry.feed.state().decisionsStale ? "not current" : ""
-            return <li class="desk-host-item" classList={{ unavailable: down() }}>
-              <button class="desk-item" aria-pressed={selectedKey() === `${entry.feed.host.id}~attention:${entry.record.editspace}:${entry.record.id}`} data-host-key={`${entry.feed.host.id}~${entry.record.editspace}:${entry.record.id}`}
-                aria-label={`${entry.record.title}, on ${label}${behind() ? `, ${behind()}` : ""}`}
-                title={down() ? `${label} is unreachable; last-known decision` : `On ${label}`} onClick={() => select(`${entry.feed.host.id}~attention:${entry.record.editspace}:${entry.record.id}`)}>
-                <bdi dir="auto" class="desk-item-title"><HostGlyph host={entry.feed.host.id} size={12} />{entry.record.title}</bdi>
-                <span class="home-source"><span class="desk-item-kind" data-kind={entry.record.kind}>{entry.record.kind}</span> · <bdi dir="auto">{entry.record.editspace}</bdi> · on {label}
-                  <Show when={behind()}> · <span class="home-blocked">{behind()}</span></Show></span>
-              </button>
-            </li>
-          }}</For>
-        </ul>
-        <Show when={uncertainRequests().length}><details class="home-unknown"><summary>Unknown outcome ({uncertainRequests().length})</summary><For each={uncertainRequests()}>{item => <div class="home-source"><bdi dir="auto">{item.title}</bdi> · {item.state === "unavailable" ? "source unavailable" : "no longer pending; outcome unknown"} · <A href={sessionHref(item.session, item.directory)}>Open thread</A></div>}</For></details></Show>
-        <Show when={waiting().length}>
-          <details class="desk-waiting">
-            <summary>Waiting on agents <span class="home-muted">{waiting().length}</span><Show when={waiting().filter(stalled).length}>{count => <span class="home-blocked"> · {count()} stalled</span>}</Show></summary>
-            <ul class="desk-items" aria-label="Answered, waiting on agents"><For each={waiting()}>{record =>
-              <li><button class="desk-item" aria-pressed={selectedKey() === recordKey(record)} data-desk-waiting={recordKey(record)} onClick={() => select(recordKey(record))}>
-                <bdi dir="auto" class="desk-item-title">{record.title}</bdi>
-                <span class="home-source"><RowAgent record={record} /> · <span classList={{ "home-blocked": stalled(record) }}>answered {ago(record.answer?.answered_at ?? record.updated_at)}</span> · {WAITING_DELIVERY[record.delivery_state] ?? record.delivery_state}</span>
-              </button></li>}</For></ul>
-          </details>
-        </Show>
-        <details class="desk-history" open={historyOpen()} onToggle={event => setHistoryOpen(event.currentTarget.open)}>
-          <summary>History <span class="home-muted">{historyCount("answered")}</span><Show when={historyCount("recorded")}> <span class="home-blocked">· {historyCount("recorded")} not sent</span></Show><Show when={blockedDeliveries()}> <span class="home-blocked">· {blockedDeliveries()} blocked</span></Show><Show when={historyCount("ignored")}> <span class="home-muted">· Ignored {historyCount("ignored")}</span></Show></summary>
-          <div class="home-tabs" role="group" aria-label="Attention status"><For each={[["answered", "Answered"], ["recorded", "Not sent"], ["snoozed", "Snoozed"], ["history", "Resolved"], ["ignored", "Ignored"]] as const}>{([view, label]) => <button aria-pressed={historyView() === view} data-empty={historyCount(view) === 0 ? "" : undefined} onClick={() => setHistoryView(view)}>{label} <span>{historyCount(view)}</span></button>}</For></div>
-          <Show when={historyView() === "ignored"}><ul class="desk-items" aria-label="Ignored failures"><For each={ignoredFailures()} fallback={<li class="home-muted desk-empty">None.</li>}>{failure =>
-            <li class="desk-ignored" data-ignored={failure.messageID}><div class="desk-item">
-              <bdi dir="auto" class="desk-item-title">{dashboard.activity.session(failure.sessionID)?.title ?? failure.sessionID}</bdi>
-              <span class="home-source"><span class="desk-item-kind" data-kind="failure">failure</span> · {failureLabel(failure)} · {failureAge(failure.time, now())}</span>
-              <span class="desk-ignored-actions"><button class="desk-button" disabled={ignores.busy(failure)} onClick={() => void unignore(failure)}>Unignore</button><A href={sessionHref(failure.sessionID, failure.directory)}>Open thread</A></span>
-            </div></li>}</For></ul></Show>
-          <Show when={historyView() !== "ignored" ? historyView() as AttentionView : undefined}>{view => <ul class="desk-items"><For each={records().filter(record => inView(record, view()))} fallback={<li class="home-muted desk-empty">None.</li>}>{record =>
-            <li><button class="desk-item" aria-pressed={selectedKey() === recordKey(record)} onClick={() => select(recordKey(record))}>
-              <bdi dir="auto" class="desk-item-title">{record.title}</bdi>
-              {/* What was decided and when, before where it came from: History is scanned by outcome. */}
-              <Show when={record.answer}>{answer => <span class="desk-item-answer"><bdi dir="auto">{record.options.find(option => option.id === answer().choice_id)?.label ?? (answer().text ? `“${answer().text.length > 60 ? `${answer().text.slice(0, 60).replace(/\s+\S*$/, "")}…` : answer().text}”` : "Answered")}</bdi> · {ago(answer().answered_at)}</span>}</Show>
-              <span class="home-source"><span class="desk-item-kind" data-kind={record.kind}>{record.kind}</span> · <RowAgent record={record} /> · <bdi dir="auto">{record.editspace}</bdi><Show when={record.status === "answered"}> · <span classList={{ "home-blocked": record.delivery_state === "blocked" }}>{record.delivery_state}</span></Show></span>
-            </button></li>}</For></ul>}</Show>
-        </details>
-        <button class="desk-chat-tab" aria-expanded={memoryOpen()} title="Personal notes the desk reads; never used as permission. ~/.local/share/opencode/front-desk/memory.json" onClick={() => setMemoryOpen(!memoryOpen())}>Memory <span class="home-muted" title="Notes">{memory.document().entries.length}</span></button>
-        <Show when={memoryOpen()}><MemoryPanel memory={memory} /></Show>
-        {/* A source that is not current shows as one compact row (name and state); its error
-            detail is the row's tooltip and the shared status's diagnostics, never stacked text. */}
-        <section class="desk-sources" aria-label="Connected sources">
-          <For each={problems()}>{source => <Source source={source} compact />}</For>
-          <div class="desk-sources-bar">
-            <details class="desk-sources-all"><summary>{problems().length ? "All sources" : "Sources up to date"}</summary>
-            <For each={sources().filter(source => source.state === "current")}>{source => <Source source={source} />}</For>
-            <p class="home-source">Not included: cloud agents, mail.</p>
-            <Show when={briefs.jobs().length}><div class="desk-jobs" aria-label="Briefs">
-              <For each={briefs.jobs()}>{job => {
-                const binding = () => briefBinding(job.meta, items())
-                return <div class="desk-job home-source" data-state={job.state.state} data-current={binding().current ? "true" : "false"}>
-                  <span>Brief · <bdi dir="auto">{job.meta.title}</bdi> · rev {job.meta.revision} · {binding().current ? stateLabel(job) : "not current"}</span>
-                  <Show when={binding().current} fallback={<span>{binding().reason}</span>}>
-                    <button class="desk-button" aria-label={`Show brief: ${job.meta.title}`} onClick={() => showBrief(job.meta.source)}>Show</button>
-                  </Show>
-                </div>
-              }}</For>
-            </div></Show>
-            </details>
-            <button class="desk-button" disabled={attention.loading()} onClick={refresh}>Refresh</button>
-          </div>
-          <label class="desk-auto home-muted" title="Prepare a brief for each new item in the background"><input type="checkbox" checked={prepared.auto()} onChange={event => prepared.setAuto(event.currentTarget.checked)} /> Auto briefs</label>
-        </section>
-      </aside>
+      </div>
 
       {/* Remount per selection so one item's reply outcome or draft never carries into the next. */}
       <Show when={selectedSurface()} keyed>{id => <SurfaceView id={id} surface={surfaces.list().find(item => item.id === id)} checked={surfaces.checked()} onOpen={surface => void surfaces.markSeen(surface)} onRetry={() => void surfaces.refresh()} onClose={() => select()} />}</Show>
       <Show when={selected() && !selectedSurface() ? selectedKey() : undefined} keyed>{_key => <Show when={selected()}>{current => <section ref={setEvidence} class="desk-evidence attention-home" aria-label="Selected item">
         <div class="desk-evidence-head">
           <button class="desk-button" aria-label="Close" onClick={() => select()}>Close</button>
+          {/* Re-read the sources without leaving the open item (the overview has the same button when nothing is open). */}
+          <button class="desk-button" disabled={attention.loading()} onClick={refresh}>Refresh</button>
         </div>
         <Show when={"record" in current() ? current() as { record: AttentionRecord } : undefined}>{entry => <Answered record={entry().record} attention={attention} onView={view => view !== "open" && setHistoryView(view)} />}</Show>
         <Show when={selectedItem()}>{entry => <>
@@ -342,7 +254,67 @@ export default function Desk() {
 
       {/* Keyed by the entry key: list polls replace entry objects, and the detail (its answer draft, its host ledger) stays mounted. */}
       <Show when={selectedRemote()?.key} keyed>{_key => <WorkRemoteDetail entry={selectedRemote()!} onClose={() => select()} />}</Show>
-      <Show when={!selected() && !selectedRemote()}><section class="desk-idle home-muted" aria-label="Selected item">Select a decision, document or surface.</section></Show>
+      {/* Nothing open: what is not already in the sidebar (Needs you and the Decisions and Surfaces tabs list the open
+        * items): answers waiting on agents, history, ignored failures, memory and the desk's sources. */}
+      <Show when={!selected() && !selectedRemote() && !selectedSurface()}>
+        <section class="desk-overview" aria-label="Decisions and inbox">
+          <p class="home-muted desk-overview-hint">Open something from Needs you or the Decisions tab; answered and older items are here.</p>
+          <Show when={uncertainRequests().length}><details class="home-unknown"><summary>Unknown outcome ({uncertainRequests().length})</summary><For each={uncertainRequests()}>{item => <div class="home-source"><bdi dir="auto">{item.title}</bdi> · {item.state === "unavailable" ? "source unavailable" : "no longer pending; outcome unknown"} · <A href={sessionHref(item.session, item.directory)}>Open thread</A></div>}</For></details></Show>
+          <Show when={waiting().length}>
+            <details class="desk-waiting">
+              <summary>Waiting on agents <span class="home-muted">{waiting().length}</span><Show when={waiting().filter(stalled).length}>{count => <span class="home-blocked"> · {count()} stalled</span>}</Show></summary>
+              <ul class="desk-items" aria-label="Answered, waiting on agents"><For each={waiting()}>{record =>
+                <li><button class="desk-item" aria-pressed={selectedKey() === recordKey(record)} data-desk-waiting={recordKey(record)} onClick={() => select(recordKey(record))}>
+                  <bdi dir="auto" class="desk-item-title">{record.title}</bdi>
+                  <span class="home-source"><RowAgent record={record} /> · <span classList={{ "home-blocked": stalled(record) }}>answered {ago(record.answer?.answered_at ?? record.updated_at)}</span> · {WAITING_DELIVERY[record.delivery_state] ?? record.delivery_state}</span>
+                </button></li>}</For></ul>
+            </details>
+          </Show>
+          <details class="desk-history" open={historyOpen()} onToggle={event => setHistoryOpen(event.currentTarget.open)}>
+            <summary>History <span class="home-muted">{historyCount("answered")}</span><Show when={historyCount("recorded")}> <span class="home-blocked">· {historyCount("recorded")} not sent</span></Show><Show when={blockedDeliveries()}> <span class="home-blocked">· {blockedDeliveries()} blocked</span></Show><Show when={historyCount("ignored")}> <span class="home-muted">· Ignored {historyCount("ignored")}</span></Show></summary>
+            <div class="home-tabs" role="group" aria-label="Attention status"><For each={[["answered", "Answered"], ["recorded", "Not sent"], ["snoozed", "Snoozed"], ["history", "Resolved"], ["ignored", "Ignored"]] as const}>{([view, label]) => <button aria-pressed={historyView() === view} data-empty={historyCount(view) === 0 ? "" : undefined} onClick={() => setHistoryView(view)}>{label} <span>{historyCount(view)}</span></button>}</For></div>
+            <Show when={historyView() === "ignored"}><ul class="desk-items" aria-label="Ignored failures"><For each={ignoredFailures()} fallback={<li class="home-muted desk-empty">None.</li>}>{failure =>
+              <li class="desk-ignored" data-ignored={failure.messageID}><div class="desk-item">
+                <bdi dir="auto" class="desk-item-title">{dashboard.activity.session(failure.sessionID)?.title ?? failure.sessionID}</bdi>
+                <span class="home-source"><span class="desk-item-kind" data-kind="failure">failure</span> · {failureLabel(failure)} · {failureAge(failure.time, now())}</span>
+                <span class="desk-ignored-actions"><button class="desk-button" disabled={ignores.busy(failure)} onClick={() => void unignore(failure)}>Unignore</button><A href={sessionHref(failure.sessionID, failure.directory)}>Open thread</A></span>
+              </div></li>}</For></ul></Show>
+            <Show when={historyView() !== "ignored" ? historyView() as AttentionView : undefined}>{view => <ul class="desk-items"><For each={records().filter(record => inView(record, view()))} fallback={<li class="home-muted desk-empty">None.</li>}>{record =>
+              <li><button class="desk-item" aria-pressed={selectedKey() === recordKey(record)} onClick={() => select(recordKey(record))}>
+                <bdi dir="auto" class="desk-item-title">{record.title}</bdi>
+                {/* What was decided and when, before where it came from: History is scanned by outcome. */}
+                <Show when={record.answer}>{answer => <span class="desk-item-answer"><bdi dir="auto">{record.options.find(option => option.id === answer().choice_id)?.label ?? (answer().text ? `“${answer().text.length > 60 ? `${answer().text.slice(0, 60).replace(/\s+\S*$/, "")}…` : answer().text}”` : "Answered")}</bdi> · {ago(answer().answered_at)}</span>}</Show>
+                <span class="home-source"><span class="desk-item-kind" data-kind={record.kind}>{record.kind}</span> · <RowAgent record={record} /> · <bdi dir="auto">{record.editspace}</bdi><Show when={record.status === "answered"}> · <span classList={{ "home-blocked": record.delivery_state === "blocked" }}>{record.delivery_state}</span></Show></span>
+              </button></li>}</For></ul>}</Show>
+          </details>
+          <button class="desk-chat-tab" aria-expanded={memoryOpen()} title="Personal notes the desk reads; never used as permission. ~/.local/share/opencode/front-desk/memory.json" onClick={() => setMemoryOpen(!memoryOpen())}>Memory <span class="home-muted" title="Notes">{memory.document().entries.length}</span></button>
+          <Show when={memoryOpen()}><MemoryPanel memory={memory} /></Show>
+          {/* A source that is not current shows as one compact row (name and state); its error
+              detail is the row's tooltip and the shared status's diagnostics, never stacked text. */}
+          <section class="desk-sources" aria-label="Connected sources">
+            <For each={problems()}>{source => <Source source={source} compact />}</For>
+            <div class="desk-sources-bar">
+              <details class="desk-sources-all"><summary>{problems().length ? "All sources" : "Sources up to date"}</summary>
+              <For each={sources().filter(source => source.state === "current")}>{source => <Source source={source} />}</For>
+              <p class="home-source">Not included: cloud agents, mail.</p>
+              <Show when={briefs.jobs().length}><div class="desk-jobs" aria-label="Briefs">
+                <For each={briefs.jobs()}>{job => {
+                  const binding = () => briefBinding(job.meta, items())
+                  return <div class="desk-job home-source" data-state={job.state.state} data-current={binding().current ? "true" : "false"}>
+                    <span>Brief · <bdi dir="auto">{job.meta.title}</bdi> · rev {job.meta.revision} · {binding().current ? stateLabel(job) : "not current"}</span>
+                    <Show when={binding().current} fallback={<span>{binding().reason}</span>}>
+                      <button class="desk-button" aria-label={`Show brief: ${job.meta.title}`} onClick={() => showBrief(job.meta.source)}>Show</button>
+                    </Show>
+                  </div>
+                }}</For>
+              </div></Show>
+              </details>
+              <button class="desk-button" disabled={attention.loading()} onClick={refresh}>Refresh</button>
+            </div>
+            <label class="desk-auto home-muted" title="Prepare a brief for each new item in the background"><input type="checkbox" checked={prepared.auto()} onChange={event => prepared.setAuto(event.currentTarget.checked)} /> Auto briefs</label>
+          </section>
+        </section>
+      </Show>
     </div>
   </main>
 }

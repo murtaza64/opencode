@@ -76,7 +76,7 @@ const measure = page => page.evaluate(() => {
   const scrolled = [...document.querySelectorAll("*")].filter(el => el.scrollLeft !== 0 && !el.closest(".desk-command")).map(el => `${el.tagName.toLowerCase()}.${[...el.classList].join(".")} scrollLeft=${el.scrollLeft}`)
   const wide = [document.documentElement, document.body, document.querySelector(".content"), document.querySelector(".desk"), document.querySelector(".desk-evidence")]
     .filter(el => el && el.scrollWidth > el.clientWidth + 1).map(el => `${el.tagName.toLowerCase()}.${[...el.classList].join(".")} ${el.scrollWidth}>${el.clientWidth}`)
-  return { width: innerWidth, desk: rect(".desk"), queue: rect(".desk-queue"), evidence: rect(".desk-evidence"), chat: rect(".desk-companion:not(.closed) .desk-chat"), question: rect(".home-question"),
+  return { width: innerWidth, desk: rect(".desk"), queue: rect("nav.sidebar"), evidence: rect(".desk-evidence"), chat: rect(".desk-companion:not(.closed) .desk-chat"), question: rect(".home-question"),
     pre: rect(".desk-command pre"), copy: rect(".desk-command-copy"), answer: rect(".home-answer textarea"), send: rect(".home-answer button.home-primary"), scrolled, wide }
 })
 const expectBounded = (name, box, { columns = true } = {}) => {
@@ -89,7 +89,7 @@ const expectBounded = (name, box, { columns = true } = {}) => {
   // Below the docked width the chat floats and starts closed; only a docked chat is a column.
   if (!columns || !box.chat) return
   const [start, end] = box.queue.left < box.chat.left ? [box.queue, box.chat] : [box.chat, box.queue]
-  assert(start.right <= box.evidence.left + 1 && box.evidence.right <= end.left + 1, `${name}: queue, decision and chat do not overlap ${JSON.stringify(box)}`)
+  assert(start.right <= box.evidence.left + 1 && box.evidence.right <= end.left + 1, `${name}: sidebar, decision and chat do not overlap ${JSON.stringify(box)}`)
   assert(box.chat.left >= 0 && box.chat.right <= box.width, `${name}: chat inside the window ${JSON.stringify(box)}`)
 }
 

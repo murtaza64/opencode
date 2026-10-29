@@ -3,13 +3,15 @@
  * filtered by a tab. Everything here reuses existing reads (the desk queue, surfaces, dashboard PRs);
  * opening a decision or surface goes to the Front desk with it selected. */
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js"
-import { A, useLocation } from "@solidjs/router"
+import { useLocation } from "@solidjs/router"
 import { useDeskQueue } from "../desk-queue"
 import { useDashboard } from "../state"
 import { surfaceKey, surfaceProblem, type Surface } from "../surfaces"
 import { needsYou } from "../needs-you"
 import { workCountLabel, workSurfaces, type WorkEntry } from "../work-queue"
 import { HostGlyph } from "./icons"
+import { useRequestAgent } from "./attention-decision"
+import { failureAge, failureLabel, OLD_FAILURE_MS } from "../session-failures"
 import { SurfaceGlyph } from "./surface-glyph"
 import { surfaceKindLabel } from "../surface-tags"
 import { PrList, sortPrs } from "./pr"
@@ -37,7 +39,7 @@ const setTab = (next: NavTab) => {
 const itemHref = (key: string) => `/?item=${encodeURIComponent(key)}`
 const matches = (text: string, needle: string) => text.toLocaleLowerCase().includes(needle.trim().toLocaleLowerCase())
 
-// Router prefix matching would mark every "/?item=" link active; only the open item is.
+// Plain links (the router still handles them): its <A> marks every "/?item=" link current; only the open item is.
 const useOpenItem = () => {
   const location = useLocation()
   return (key: string) => location.pathname === "/" && new URLSearchParams(location.search).get("item") === key
@@ -49,28 +51,38 @@ const DecisionRow = (props: { entry: WorkEntry }) => {
   const glyph = () => props.entry.kind === "permission" ? "!" : props.entry.kind === "failure" ? "×" : props.entry.kind === "review" ? "Try" : "?"
   // Read out as what it asks: a review is something ready to try.
   const spoken = () => props.entry.kind === "review" ? "ready to try" : props.entry.kind
+  const agentFor = useRequestAgent()
+  // A failure older than the recent window is dimmed, as it was in the desk queue.
+  const old = () => !!props.entry.item?.failure && Date.now() - props.entry.item.failure.time >= OLD_FAILURE_MS
   return <Show when={props.entry.host} fallback={
-    <A href={props.entry.href} activeClass="" classList={{ active: open(props.entry.key) }} aria-current={open(props.entry.key) ? "page" : undefined} class="nav-item nav-decision" data-kind={props.entry.kind} data-nav-item={props.entry.key}>
+    <a href={props.entry.href} classList={{ active: open(props.entry.key), "nav-old": old() }} aria-current={open(props.entry.key) ? "page" : undefined} class="nav-item nav-decision" data-kind={props.entry.kind} data-nav-item={props.entry.key}>
       <span class="nav-kind" aria-hidden="true">{glyph()}</span>
       <span class="nav-title" dir="auto">{series() ? `${series()!.title} (${series()!.answered}/${series()!.live})` : props.entry.title}</span>
       <span class="sr-only">, {spoken()}</span>
-      <Show when={props.entry.project}><span class="session-project">{props.entry.project}</span></Show>
-    </A>}>
-    <A href={props.entry.href} activeClass="" class="nav-item nav-decision host-decision" classList={{ stale: props.entry.stale, active: open(props.entry.key) }} aria-current={open(props.entry.key) ? "page" : undefined} data-kind={props.entry.kind} data-nav-item={props.entry.key}
+      {/* Who asks, so agents sharing a project are told apart; the project stays secondary. */}
+      {/* A failed step says when it failed, so an old one reads as old; its error label is the tooltip. */}
+      <Show when={props.entry.item?.failure}>{failure => <span class="session-project" title={failureLabel(failure())}>{failureAge(failure().time, Date.now())}</span>}</Show>
+      <Show when={!props.entry.item?.failure && props.entry.item?.record} fallback={<Show when={!props.entry.item?.failure && props.entry.project}><span class="session-project">{props.entry.project}</span></Show>}>{record => {
+        const agent = () => agentFor(record()!)
+        return <span class="session-project"><bdi dir="auto" class="desk-item-agent" data-named={agent().named ? "true" : undefined} title={agent().session}>{agent().label}</bdi>
+          <Show when={props.entry.project}> · <bdi dir="auto">{props.entry.project}</bdi></Show></span>
+      }}</Show>
+    </a>}>
+    <a href={props.entry.href} class="nav-item nav-decision host-decision" classList={{ stale: props.entry.stale, active: open(props.entry.key) }} aria-current={open(props.entry.key) ? "page" : undefined} data-kind={props.entry.kind} data-nav-item={props.entry.key}
       aria-label={`${props.entry.title}, ${spoken()}, on ${props.entry.hostLabel}${props.entry.stale ? ", last known" : ""}`}
       title={props.entry.stale ? `${props.entry.hostLabel} not current; last-known decision` : `${props.entry.title} — on ${props.entry.hostLabel}`}>
       <span class="nav-kind" aria-hidden="true">{glyph()}</span>
       <HostGlyph host={props.entry.host!} />
       <span class="nav-title" dir="auto">{props.entry.title}</span>
       <span class="session-project">{props.entry.hostLabel}</span>
-    </A>
+    </a>
   </Show>
 }
 // Another Work host's Surface, opened in this window and framed through that host; a link Surface says it is served there only.
 const HostSurfaceRow = (props: { entry: WorkEntry }) => {
   const open = useOpenItem()
   const ownOnly = () => props.entry.remote?.kind === "surface" && props.entry.remote.frame === "own-host-only"
-  return <A href={props.entry.href} activeClass="" class="nav-item nav-surface host-surface" classList={{ stale: props.entry.stale, active: open(props.entry.key) }}
+  return <a href={props.entry.href} class="nav-item nav-surface host-surface" classList={{ stale: props.entry.stale, active: open(props.entry.key) }}
     aria-current={open(props.entry.key) ? "page" : undefined} data-nav-item={props.entry.key}
     aria-label={`${props.entry.title}, ${props.entry.remote?.kind === "surface" ? surfaceKindLabel(props.entry.remote.surface) : "surface"}, on ${props.entry.hostLabel}${props.entry.stale ? ", last known" : ""}${ownOnly() ? ", opens on that computer only" : ""}`}
     title={props.entry.stale ? `${props.entry.hostLabel} not current; last-known surface` : `${props.entry.title} — on ${props.entry.hostLabel}`}>
@@ -78,18 +90,18 @@ const HostSurfaceRow = (props: { entry: WorkEntry }) => {
     <HostGlyph host={props.entry.host!} />
     <span class="nav-title" dir="auto">{props.entry.title}</span>
     <span class="session-project">{props.entry.hostLabel}</span>
-  </A>
+  </a>
 }
 const SurfaceRow = (props: { surface: Surface; fresh?: boolean }) => {
   const open = useOpenItem()
-  return <A href={itemHref(surfaceKey(props.surface.id))} activeClass="" classList={{ active: open(surfaceKey(props.surface.id)), fresh: !!props.fresh }} aria-current={open(surfaceKey(props.surface.id)) ? "page" : undefined} class="nav-item nav-surface" data-nav-item={surfaceKey(props.surface.id)}
+  return <a href={itemHref(surfaceKey(props.surface.id))} classList={{ active: open(surfaceKey(props.surface.id)), fresh: !!props.fresh }} aria-current={open(surfaceKey(props.surface.id)) ? "page" : undefined} class="nav-item nav-surface" data-nav-item={surfaceKey(props.surface.id)}
     title={`${props.surface.title} — ${surfaceKindLabel(props.surface)}`}>
     <SurfaceGlyph surface={props.surface} />
     <span class="nav-title" dir="auto">{props.surface.title}</span>
     <span class="sr-only">, {surfaceKindLabel(props.surface)}</span>
     <Show when={props.fresh}><span class="sr-only">, new delivery</span></Show>
     <span class="session-project">{surfaceProblem(props.surface.health) ?? props.surface.owner}</span>
-  </A>
+  </a>
 }
 
 /** New decisions, permissions, failures and fresh requested deliverables, newest work first, bounded. */
@@ -103,9 +115,10 @@ export const NeedsYouBand = () => {
   const shown = () => all().entries.slice(0, BAND_LIMIT)
   const more = () => Math.max(0, all().entries.length - BAND_LIMIT)
   // "N+" with the hosts behind named, never a falsely complete count.
-  return <Show when={all().entries.length || all().fresh.length}>
+  // A host that is not current keeps the band (as "0+"), so an empty list never reads as "nothing needs you".
+  return <Show when={all().entries.length || all().fresh.length || all().partial}>
     <section class="needs-you-band" aria-label="Needs you">
-      <div class="nav-heading">Needs you <span class="nav-heading-count" title={all().label.title}>{all().count ? all().label.text : ""}</span></div>
+      <div class="nav-heading">Needs you <span class="nav-heading-count" title={all().label.title}>{all().count || all().partial ? all().label.text : ""}</span></div>
       <For each={shown()}>{entry => <DecisionRow entry={entry} />}</For>
       <For each={all().fresh}>{surface => <SurfaceRow surface={surface} fresh />}</For>
       <Show when={more()}><button type="button" class="link-button nav-more" onClick={() => setTab("decisions")}>{more()} more in Decisions</button></Show>

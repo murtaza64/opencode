@@ -1,4 +1,5 @@
 import { createRequire } from "node:module"
+import { needsCount, needsRow, needsYou, notices, overview } from "./desk-lists.mjs"
 import { startAttentionPreview } from "./attention-preview.mjs"
 import { directory } from "./composer-fixture.mjs"
 
@@ -28,16 +29,16 @@ const emitSource = (type, properties) => {
   for (const [response, stream] of preview.fixture.eventStreams) if (stream.path === "/global/event") response.write(`data: ${JSON.stringify({ directory, payload: { type, properties } })}\n\n`)
 }
 const record = () => page.locator('[data-attention-id="decision_1"]')
-const refresh = () => page.getByRole("button", { name: "Refresh", exact: true }).click()
-const queue = page.getByRole("complementary", { name: "Decisions and inbox" })
-const item = title => queue.locator(".desk-item").filter({ hasText: title })
-const history = queue.locator(".desk-history")
+// Reading again: a reload re-reads every source and keeps the open item (the overview's Refresh needs nothing open).
+const refresh = () => page.reload()
+const item = title => needsRow(page, title)
+const history = page.locator(".desk-overview .desk-history")
 const nav = page.getByRole("navigation", { name: "Main" })
 try {
-  // Decisions & inbox is home: "/" lists what needs you beside the persistent nav.
+  // Decisions & inbox is home: "/" with the sidebar's Needs you list beside the persistent nav.
   await page.goto(preview.url)
   await expect(page.getByRole("heading", { name: "Decisions & inbox", exact: true })).toBeAttached()
-  await expect(queue.getByRole("heading", { name: "Needs you 3", exact: true })).toBeVisible()
+  await expect(needsCount(page)).toHaveText("3")
   await expect(item("per_home").or(item("bun test")).or(item("bash ·"))).toHaveCount(1)
   await expect(page.locator(".sidebar")).toHaveCount(1)
   expect(preview.fixture.calls.filter(call => call.path === "/api/mail")).toHaveLength(0)
@@ -56,7 +57,7 @@ try {
   await record().getByRole("radio", { name: "Small scope", exact: true }).check()
   preview.ledger.records[0].revision++
   await record().getByRole("button", { name: "Send Small scope", exact: true }).click()
-  await expect(queue.locator(".home-notice")).toContainText("record changed")
+  await expect(notices(page).locator(".home-notice")).toContainText("record changed")
   await record().getByRole("radio", { name: "Small scope", exact: true }).check()
   preview.ledger.operator = false
   let dropResponse = true
@@ -66,9 +67,9 @@ try {
     await route.fulfill({ response })
   })
   await record().getByRole("button", { name: "Send Small scope", exact: true }).click()
-  await expect(queue.locator(".home-notice")).toContainText("Outcome unknown")
-  await queue.getByRole("button", { name: "Retry same action", exact: true }).click()
-  await expect(queue.locator(".home-notice")).toContainText("Answer saved")
+  await expect(notices(page).locator(".home-notice")).toContainText("Outcome unknown")
+  await notices(page).getByRole("button", { name: "Retry same action", exact: true }).click()
+  await expect(notices(page).locator(".home-notice")).toContainText("Answer saved")
   const posts = preview.ledger.calls.filter(call => call.path.endsWith("/commands"))
   expect(posts.at(-1).body.command_id).toBe(posts.at(-2).body.command_id)
   expect(posts.at(-1).body).toMatchObject({ action: "answer", choice_id: "small" })
@@ -76,6 +77,7 @@ try {
   expect(posts.every(call => call.csrf === "1")).toBe(true)
   // The answered decision stays selected with its delivery status, and is listed under Answered.
   await expect(record().locator(".home-delivery")).toContainText("Small scope")
+  await overview(page)
   await expect(history.locator("summary")).toContainText("History 1")
   await page.reload()
   await history.locator("summary").click()
@@ -83,6 +85,7 @@ try {
   await history.locator(".desk-item").filter({ hasText: "Choose the bounded implementation scope" }).click()
   await expect(record()).toContainText("Small scope")
   await record().getByRole("button", { name: "Mark resolved" }).click()
+  await overview(page)
   await history.getByRole("button", { name: "Resolved 1", exact: true }).click()
   await history.locator(".desk-item").filter({ hasText: "Choose the bounded implementation scope" }).click()
   await record().getByText("Record & history", { exact: true }).click()
@@ -90,10 +93,14 @@ try {
   await item("Other project decision").click()
   await page.locator('[data-attention-id="other_decision"]').getByRole("button", { name: "Snooze 1h" }).click()
   await expect(page.locator('[data-attention-id="other_decision"]')).toContainText("Snoozed until")
+  const inboxNow = await overview(page)
   await expect(history.getByRole("button", { name: "Snoozed 1", exact: true })).toBeVisible()
+  // The other project's ledger goes partial: its last-known records stay, with answers off.
   preview.ledger.partial = true
-  await refresh()
-  await expect(queue.locator(".desk-source").filter({ hasText: "Attention ledger" })).not.toHaveAttribute("data-state", "current")
+  await inboxNow.getByRole("button", { name: "Refresh", exact: true }).click()
+  await expect(inboxNow.locator(".desk-source").filter({ hasText: "Attention ledger" })).not.toHaveAttribute("data-state", "current")
+  await history.getByRole("button", { name: "Snoozed 1", exact: true }).click()
+  await history.locator(".desk-item").filter({ hasText: "Other project decision" }).click()
   await expect(page.locator('[data-attention-id="other_decision"]')).toBeVisible()
   await expect(page.getByRole("button", { name: "Return to Needs you" })).toBeDisabled()
   preview.ledger.partial = false
@@ -103,29 +110,30 @@ try {
   const question = { id: "que_home", sessionID: "ses_b", questions: [{ header: "Scope", question: "A healthy source question", options: [{ label: "Continue", description: "Continue" }] }] }
   preview.fixture.questions = [question]
   emitSource("question.asked", question)
-  await expect(queue.locator(".desk-item-kind[data-kind=question]")).toHaveCount(1)
+  await expect(needsYou(page).locator(".nav-decision[data-kind=question]")).toHaveCount(1)
   await context.route("**/oc/permission?*", route => route.abort("failed"))
-  await refresh()
-  await queue.getByText("Unknown outcome (1)", { exact: true }).click()
-  await expect(queue.locator(".home-unknown")).toContainText("source unavailable")
+  const inbox = await overview(page)
+  await inbox.getByRole("button", { name: "Refresh", exact: true }).click()
+  await inbox.getByText("Unknown outcome (1)", { exact: true }).click()
+  await expect(inbox.locator(".home-unknown")).toContainText("source unavailable")
   preview.fixture.questions = []
   emitSource("question.replied", { sessionID: "ses_b", requestID: "que_home", answers: [["Continue"]] })
-  await expect(queue.locator(".desk-item-kind[data-kind=question]")).toHaveCount(0)
+  await expect(needsYou(page).locator(".nav-decision[data-kind=question]")).toHaveCount(0)
   await context.unroute("**/oc/permission?*")
   preview.fixture.permissions = []
-  await refresh()
-  await queue.locator(".home-unknown summary").click()
-  await expect(queue.locator(".home-unknown")).toContainText("no longer pending; outcome unknown")
+  await inbox.getByRole("button", { name: "Refresh", exact: true }).click()
+  await inbox.locator(".home-unknown summary").click()
+  await expect(inbox.locator(".home-unknown")).toContainText("no longer pending; outcome unknown")
   // RTL/mixed text; no horizontal clipping at narrow widths.
-  await page.evaluate(() => { document.documentElement.dir = "rtl" })
   preview.ledger.records[1].title = "قرار التنفيذ — OpenCode v2"
   await refresh()
+  await page.evaluate(() => { document.documentElement.dir = "rtl" })
   await expect(item("قرار التنفيذ")).toHaveCount(1)
   await page.setViewportSize({ width: 760, height: 1000 })
   expect(await page.locator("main.desk").evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
   // Persistent nav: Agent map and Decisions & inbox are always one click away; Decisions returns to the
   // selected item, and a session draft survives the round trip. Narrow windows open the chat as a sheet;
-  // close it to reach the queue.
+  // close it to reach the list.
   if (await page.locator(".desk-companion.sheet:not(.closed)").count()) await page.locator('[data-nav="front-desk"]').click()
   await expect(page.locator(".desk-companion.sheet:not(.closed)")).toHaveCount(0)
   await item("قرار التنفيذ").click()
@@ -159,8 +167,8 @@ try {
   await readOnly.addInitScript(() => localStorage.setItem("es-app-all-projects", "true"))
   await readOnly.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
   await readOnly.goto(preview.url)
-  await expect(readOnly.locator(".desk-queue .home-login")).toContainText("Read-only")
-  await readOnly.locator(".desk-item").filter({ hasText: "قرار التنفيذ" }).click()
+  await expect(notices(readOnly).locator(".home-login")).toContainText("Read-only")
+  await needsRow(readOnly, "قرار التنفيذ").click()
   await expect(readOnly.locator(".home-decision").first().getByRole("button", { name: "Send answer" })).toBeDisabled()
   await readOnly.close()
   console.log("PASS attention on Front desk: explicit choices/CAS/ambiguous retry, not-sent/resolved/snoozed history, partial/offline sources, exact source disappearance, persistent nav with return to the selected item, no generated fleet summaries, RTL/mixed text, session/draft navigation, /desk redirect, no runtime writes")

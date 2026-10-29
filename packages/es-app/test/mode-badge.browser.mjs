@@ -1,5 +1,6 @@
 // Decisions & inbox nav entry: an unread-style count of actionable Needs-you items, the same on every view.
 // Disposable in-memory fixture only. Run from packages/es-app: node test/mode-badge.browser.mjs
+import { needsCount, needsRow, needsYou, overview } from "./desk-lists.mjs"
 import { createRequire } from "node:module"
 import { startAttentionPreview } from "./attention-preview.mjs"
 import { directory } from "./composer-fixture.mjs"
@@ -26,9 +27,9 @@ const modes = page.getByRole("navigation", { name: "Main" })
 const deskTab = modes.getByRole("link", { name: /^Decisions & inbox/ })
 const badge = deskTab.locator(".nav-count")
 const toAgents = () => modes.getByRole("link", { name: "Agent map" }).click()
-const queue = page.getByRole("complementary", { name: "Decisions and inbox" })
-// The first list is Needs you; History rows below use the same row style.
-const needs = (title) => queue.locator(".desk-items").first().locator(".desk-item", { hasText: title })
+const needs = (title) => needsRow(page, title)
+// Refresh sits in the overview, or beside Close when an item is open.
+const refresh = () => page.getByRole("button", { name: "Refresh", exact: true }).click()
 const expectCount = async (count) => {
   await expect(badge).toHaveText(String(count))
   await expect(deskTab).toHaveAttribute("aria-label", `Decisions & inbox, ${count} need${count === 1 ? "s" : ""} you`)
@@ -54,9 +55,10 @@ try {
   preview.ledger.status = 503
   await deskTab.click()
   await expectCount(4)
-  await queue.getByRole("button", { name: "Refresh", exact: true }).click()
-  await expect(queue.locator(".desk-source:not([data-state=current])", { hasText: "Attention ledger" })).toBeVisible()
-  await expect(queue.getByRole("heading", { name: "Needs you 4", exact: true })).toBeVisible()
+  const inbox = await overview(page)
+  await inbox.getByRole("button", { name: "Refresh", exact: true }).click()
+  await expect(inbox.locator(".desk-source:not([data-state=current])", { hasText: "Attention ledger" })).toBeVisible()
+  await expect(needsCount(page)).toHaveText("4")
   await toAgents()
   await expectCount(4)
   preview.ledger.status = 200
@@ -77,7 +79,7 @@ try {
   // Answered elsewhere: the next ledger read drops it; one item reads in the singular.
   preview.ledger.records.find((record) => record.id === "other_decision").status = "answered"
   await deskTab.click()
-  await queue.getByRole("button", { name: "Refresh", exact: true }).click()
+  await refresh()
   await expect(needs("Other project decision")).toHaveCount(0)
   await toAgents()
   await expectCount(1)
@@ -85,8 +87,8 @@ try {
   // Nothing waiting: no badge, and the tab name has no count.
   preview.ledger.records.find((record) => record.id === "decision_1").status = "answered"
   await deskTab.click()
-  await queue.getByRole("button", { name: "Refresh", exact: true }).click()
-  await expect(queue.getByRole("heading", { name: "Needs you 0", exact: true })).toBeVisible()
+  await refresh()
+  await expect(needsYou(page)).toHaveCount(0)
   await toAgents()
   await expect(badge).toHaveCount(0)
   await expect(deskTab).not.toHaveAttribute("aria-label", /need/)
@@ -94,7 +96,7 @@ try {
   // The collapsed rail carries the same count.
   preview.ledger.records.find((record) => record.id === "decision_1").status = "open"
   await deskTab.click()
-  await queue.getByRole("button", { name: "Refresh", exact: true }).click()
+  await refresh()
   await toAgents()
   await expectCount(1)
   await page.getByRole("button", { name: "Collapse sidebar" }).click()

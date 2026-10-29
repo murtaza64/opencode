@@ -1,5 +1,6 @@
 // Written answers on the Front desk against the disposable attention fixture: keyboard send, lost response,
 // legacy record-only choice, delivery evidence/recovery, drafts, mobile and RTL. No runtime writes.
+import { needsCount, overview } from "./desk-lists.mjs"
 import { createRequire } from "node:module"
 import { startAttentionPreview } from "./attention-preview.mjs"
 
@@ -54,12 +55,15 @@ try {
   if (posts.length !== 2 || posts[0].body.command_id !== posts[1].body.command_id) throw Error("lost response must retry the same command identity")
   if (JSON.stringify(posts[1].body) !== JSON.stringify({ action: "answer", text: FLEET, expected_revision: 1, command_id: posts[0].body.command_id })) throw Error(`unexpected answer body ${JSON.stringify(posts[1].body)}`)
   // The answered decision stays open with its delivery status and is filed under Answered.
-  await page.locator(".desk-history summary").click()
-  await expect(page.locator(".desk-history").getByRole("button", { name: "Answered 1", exact: true })).toHaveAttribute("aria-pressed", "true")
   await expect(record.locator("pre.home-answer-text")).toHaveText(FLEET)
   await expect(record.locator(".home-delivery")).toContainText("Saved · delivery not yet attempted")
-  await expect(page.getByRole("heading", { name: "Needs you 4", exact: true })).toBeVisible()
-  const select = (key) => page.locator(`.desk-item[data-desk-item="${key}"]`).click()
+  await expect(needsCount(page)).toHaveText("4")
+  const answeredURL = page.url()
+  await overview(page)
+  await page.locator(".desk-history summary").click()
+  await expect(page.locator(".desk-history").getByRole("button", { name: "Answered 1", exact: true })).toHaveAttribute("aria-pressed", "true")
+  await page.goto(answeredURL)
+  const select = (key) => page.locator(`nav.sidebar [data-nav-item="${key}"]`).click()
 
   const fixtureRecord = preview.ledger.records[0]
   fixtureRecord.delivery_state = "blocked"

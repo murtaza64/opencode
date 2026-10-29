@@ -23,7 +23,7 @@ const openDesk = async ({ width, height, rtl = false }) => {
   page.on("pageerror", error => errors.push(error.message))
   await page.goto(preview.url, { waitUntil: "domcontentloaded", timeout: 90_000 })
   // A floating chat starts closed; wait for the app either way.
-  await expect(page.locator(width >= 1200 ? ".desk-companion textarea" : ".desk-queue")).toBeVisible({ timeout: 90_000 })
+  await expect(page.locator(width >= 1200 ? ".desk-companion textarea" : ".desk-grid")).toBeVisible({ timeout: 90_000 })
   if (rtl) await page.evaluate(() => { document.documentElement.dir = "rtl" })
   return { page, errors, context }
 }
@@ -33,12 +33,12 @@ const chatScroll = page => page.evaluate(() => [...document.querySelectorAll(".d
 
 try {
   const { page, errors, context } = await openDesk({ width: 1440, height: 1000 })
-  const decision = page.locator('.desk-item[data-desk-item="attention:fixture:decision_1"]')
+  const decision = page.locator('nav.sidebar [data-nav-item="attention:fixture:decision_1"]')
   const composer = page.locator(".desk-companion textarea")
   const companion = page.locator(".desk-companion")
   const nav = page.locator('[data-nav="front-desk"]')
   await expect(nav).toHaveAttribute("aria-pressed", "true")
-  await expect(page.locator(".desk-idle")).toContainText("Select a decision, document or surface.")
+  await expect(page.locator(".desk-overview")).toBeVisible()
   await composer.fill("draft kept across the close")
   await decision.click()
   await expect(page.getByRole("region", { name: "Selected item" })).toBeVisible()
@@ -56,7 +56,7 @@ try {
   await expect(companion).toHaveAttribute("aria-hidden", "true")
   expect(await companion.evaluate(el => el.inert)).toBe(true)
   await expect(composer).toHaveValue("draft kept across the close")
-  await expect(decision).toHaveAttribute("aria-pressed", "true")
+  await expect(decision).toHaveAttribute("aria-current", "page")
   expect(Math.round((await companion.locator(".desk-companion-in").boundingBox()).width)).toBe(Math.round(before.width))
   await shot(page, "1440-closed")
 
@@ -78,7 +78,7 @@ try {
 
   // Closing evidence does not reopen the chat. The preference persists on other work routes and reload.
   await page.locator('.desk-evidence-head button[aria-label="Close"]').click()
-  await expect(page.locator(".desk-idle")).toBeVisible()
+  await expect(page.locator(".desk-overview")).toBeVisible()
   await expect(companion).toHaveClass(/closed/)
   await decision.click()
   await expect(companion).toHaveClass(/closed/)
@@ -127,8 +127,8 @@ try {
   await sheet.getByRole("button", { name: "Close Front desk chat" }).click()
   await expect(sheet).toHaveClass(/closed/)
   expect(await sheet.evaluate(el => el.inert)).toBe(true)
-  await narrow.page.locator('.desk-item[data-desk-item="attention:fixture:decision_1"]').click()
-  await expect(narrow.page.locator('.desk-item[data-desk-item="attention:fixture:decision_1"]')).toHaveAttribute("aria-pressed", "true")
+  await narrow.page.locator('nav.sidebar [data-nav-item="attention:fixture:decision_1"]').click()
+  await expect(narrow.page.locator('nav.sidebar [data-nav-item="attention:fixture:decision_1"]')).toHaveAttribute("aria-current", "page")
   await narrow.page.locator('[data-nav="front-desk"]').click()
   await expect(sheet).toBeVisible()
   await shot(narrow.page, "390-closed")

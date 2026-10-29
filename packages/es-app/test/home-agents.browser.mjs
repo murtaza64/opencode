@@ -34,7 +34,7 @@ const emit = (type, properties) => {
   for (const [response, stream] of fixture.eventStreams) if (stream.path === "/global/event") response.write(`data: ${JSON.stringify({ directory, payload: { type, properties } })}\n\n`)
 }
 const card = (id) => page.locator(`.home-permission[data-request-id="${id}"]`)
-const queued = (id) => page.locator(`.desk-item[data-desk-item="permission:${directory}:${id}"]`)
+const queued = (id) => page.locator(`nav.sidebar [data-nav-item="permission:${directory}:${id}"]`)
 const select = async (id) => { await queued(id).click(); await expect(card(id)).toBeVisible() }
 const refresh = () => page.getByRole("button", { name: "Refresh", exact: true }).click()
 try {

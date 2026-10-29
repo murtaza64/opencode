@@ -77,7 +77,7 @@ try {
     const desk = await openDesk(options)
     await expectContained(`${name}, nothing selected`, desk.page)
     if (options.width <= 900) await desk.page.getByRole("button", { name: "Close Front desk chat" }).click()
-    await desk.page.locator('.desk-item[data-desk-item="attention:fixture:decision_1"]').click()
+    await desk.page.locator('nav.sidebar [data-nav-item="attention:fixture:decision_1"]').click()
     await expect(desk.page.getByRole("region", { name: "Selected item" })).toBeVisible()
     if (options.width <= 900) await desk.page.locator('[data-nav="front-desk"]').click()
     await expectContained(`${name}, item selected`, desk.page)

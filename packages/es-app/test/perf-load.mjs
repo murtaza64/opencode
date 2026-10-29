@@ -164,7 +164,7 @@ try {
   await measure("desk-idle-clicks", `${origin}/`, async (page) => {
     // The desk without a chat has no composer; exercise its queue and mode tabs instead.
     for (let index = 0; index < 8; index++) {
-      await page.locator(".desk-item").nth(index % 2).click().catch(() => {})
+      await page.locator("nav.sidebar .needs-you-band .nav-decision").nth(index % 2).click().catch(() => {})
       await page.waitForTimeout(800)
     }
   })
