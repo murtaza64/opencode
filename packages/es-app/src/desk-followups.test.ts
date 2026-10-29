@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { MailDelivery, MailMessage, MailTimeline } from "./api"
-import { caseLines, followUps, visibleFollowUps } from "./desk-followups"
+import { caseLines, followUps, progressRows, visibleFollowUps } from "./desk-followups"
 
 const delivery = (state: string): MailDelivery => ({ message_id: "x", recipient: "alpha", session: "ses_alpha", mode: "actionable", state, request_id: "r", error: null, presented_at: null, handled_at: null })
 const mail = (id: string, extra: Partial<MailMessage>): MailMessage =>
@@ -49,4 +49,22 @@ test("a case reaches the desk's context as owners, limits and read-back state, w
   expect(lines).toContain("  - deliverable Explainer deck http://127.0.0.1:64924/ · read back")
   expect(lines).toContain("  - deliverable Private report · not read back yet")
   expect(caseLines([])).toEqual([])
+})
+
+test("the strip puts what needs the human first, then work in progress, then recent results, with ids only in detail", () => {
+  const now = 10 * 86_400_000
+  const cases = [{ case_id: "reports-and-streams", title: "Directions and streams", updated: now - 1_000,
+    intents: [{ id: "private-project-directions", state: "delivered", owner: { lane: "exploration", editspace: "directions", host: "mini", session: "ses_private000001" } },
+      { id: "diff-streams-discovery", state: "working", next: "native views" }, { id: "choose-scope", state: "waiting", next: "Pick the first workspace" }, { id: "dropped", state: "withdrawn" }],
+    deliverables: [{ id: "report", intent: "private-project-directions", label: "Directions report", ref: "http://127.0.0.1:1/report", read_back: true }] },
+    { case_id: "old-case", updated: now - 3 * 86_400_000, intents: [{ id: "done-part", state: "done" }], deliverables: [] }]
+  const rows = progressRows(cases, [{ editspace: "p", id: "a#1", owner: "alpha", text: "Which build?", asked: now - 5_000, delivery: "delivered" }], now)
+  expect(rows.map(row => [row.group, row.label, row.status])).toEqual([
+    ["needs", "Choose scope", "Pick the first workspace"],
+    ["progress", "Diff streams discovery", "native views"],
+    ["progress", "Which build?", "Asked alpha"],
+    ["result", "Private project directions", "Delivered"]])
+  expect(rows[3]!.link).toEqual({ label: "Directions report", href: "http://127.0.0.1:1/report" })
+  expect(rows[3]!.detail).toContain("ses_private000001")
+  expect(rows.map(row => row.label).join(" ")).not.toContain("ses_")
 })

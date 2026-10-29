@@ -73,3 +73,41 @@ export const caseLines = (cases: DeskCase[]) => cases.length ? [
     ...item.deliverables.map(deliverable => `  - deliverable ${deliverable.label}${deliverable.ref ? ` ${deliverable.ref}` : ""} · ${deliverable.read_back ? "read back" : "not read back yet"}`),
   ]),
 ] : []
+
+/** A part's label for people: its id with separators as spaces ("diff-streams-discovery" → "Diff streams discovery"). */
+export const partLabel = (id: string) => { const words = id.replace(/[-_.]+/g, " ").trim(); return words.charAt(0).toUpperCase() + words.slice(1) }
+
+/** One row of the desk's progress strip. `detail` carries owners and ids, shown only on request. */
+export type ProgressRow = { key: string; group: "needs" | "progress" | "result"; label: string; context?: string; status: string; at?: number; link?: { label: string; href: string }; detail: string[] }
+
+const OPEN = new Set(["requested", "routed", "acknowledged", "working"])
+const DONE = new Set(["delivered", "done"])
+
+/** The strip's rows: what needs the human, what is in progress, and recent results. A case whose parts are all
+ * delivered or withdrawn shows only as results; withdrawn parts and older answers leave the strip. */
+export const progressRows = (cases: DeskCase[], items: FollowUp[], now: number): ProgressRow[] => {
+  const rows: ProgressRow[] = []
+  for (const item of cases) {
+    const title = item.title || partLabel(item.case_id)
+    for (const part of item.intents) {
+      const state = part.state ?? "requested"
+      if (state === "withdrawn") continue
+      const owner = [part.owner?.lane, part.owner?.editspace, part.owner?.host].filter(Boolean).join(" · ")
+      const detail = [`case ${item.case_id}`, `part ${part.id}`, ...(owner ? [`owner ${owner}`] : []), ...(part.owner?.session ? [part.owner.session] : []), ...(part.next ? [`next: ${part.next}`] : [])]
+      const deliverable = item.deliverables.find(entry => entry.intent === part.id && entry.read_back && entry.ref && /^https?:\/\//.test(entry.ref))
+      const group = state === "waiting" ? "needs" : DONE.has(state) ? "result" : OPEN.has(state) ? "progress" : "progress"
+      // Results are older work: kept only for the case's last day of changes.
+      if (group === "result" && now - item.updated > 86_400_000) continue
+      rows.push({ key: `${item.case_id}/${part.id}`, group, label: partLabel(part.id), context: title, at: item.updated,
+        status: group === "needs" ? part.next || "Waiting for you" : group === "result" ? "Delivered" : part.next || "In progress",
+        ...(deliverable ? { link: { label: deliverable.label, href: deliverable.ref! } } : {}), detail })
+    }
+  }
+  for (const item of visibleFollowUps(items, now).shown) rows.push({
+    key: `${item.editspace}:${item.id}`, group: item.answer ? "result" : "progress", label: item.text.slice(0, 80), at: item.answer?.at ?? item.asked,
+    status: item.answer ? `Answered by ${item.owner}` : `Asked ${item.owner}${item.delivery === "failed" ? " · not delivered" : item.delivery === "unknown" ? " · delivery unknown" : ""}`,
+    detail: [`${item.editspace}:${item.id}`, ...(item.answer ? [`answer ${item.editspace}:${item.answer.id}`] : [])],
+  })
+  const order = { needs: 0, progress: 1, result: 2 }
+  return rows.sort((a, b) => order[a.group] - order[b.group] || (b.at ?? 0) - (a.at ?? 0))
+}

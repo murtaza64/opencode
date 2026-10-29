@@ -1,4 +1,5 @@
-// The Front desk chat shows what it is waiting on: questions its conversation asked owners by es mail, in two
+// The Front desk chat keeps the conversation primary: a one-line progress summary above it opens to what is in
+// progress and recent results: questions its conversation asked owners by es mail, in two
 // projects, with delivery and the owner's answer, from the dashboard's per-session mail timeline (GET /api/mail
 // ?es=&session=). Display only: no button, no send, Send unchanged. Stand-in dashboard; no real mail.
 // Run from packages/es-app: node test/desk-followups.browser.mjs [--shots DIR]
@@ -51,41 +52,38 @@ try {
     // Narrow windows float the companion; open it the way a person would.
     if (viewport.width < 1200) await page.locator("[data-nav=front-desk]").first().click().catch(() => undefined)
     if (rtl) await page.evaluate(() => { document.documentElement.dir = "rtl" })
-    const list = page.getByRole("region", { name: "Waiting on" })
-    await expect(list).toBeVisible({ timeout: 300_000 })
-    // The case: both parts with owner and state, deliverables with read-back state.
-    const theCase = list.locator('[data-case="two-parts"]')
-    await expect(theCase).toContainText("Directions and a workspace")
-    await expect(theCase.locator("li")).toHaveCount(2)
-    await expect(theCase.locator("li").nth(0)).toContainText("private-read · working")
-    await expect(theCase.locator("li").nth(0)).toContainText("exploration · directions · mini")
-    await expect(theCase.locator("li").nth(0)).toContainText("next: meeting synthesis")
-    await expect(theCase.locator("li").nth(1)).toContainText("workspace · delivered")
-    await expect(theCase.getByRole("link", { name: "Explainer deck" })).toHaveAttribute("href", "http://127.0.0.1:64924/")
-    await expect(theCase).toContainText("Private report (not read back yet)")
-    const rows = list.locator(":scope > ul > li")
-    await expect(rows).toHaveCount(3)
-    // Open questions first (newest first), then the recent answer; the desk's own notice is not a follow-up.
-    await expect(rows.nth(0)).toContainText("gamma · No receipt yet")
-    await expect(rows.nth(0)).toContainText("delivery unknown")
-    await expect(rows.nth(1)).toContainText("beta · Is the nightly green?")
-    await expect(rows.nth(1)).toContainText("delivered")
-    await expect(rows.nth(1)).toContainText("other:beta#2")
-    await expect(rows.nth(2)).toContainText("alpha · Which build is on the Mini?")
-    await expect(rows.nth(2)).toContainText("answered")
-    await expect(rows.nth(2)).toContainText("fixture:alpha#5")
-    // An answer older than a day is counted and one tap away.
-    await expect(list.locator("details > summary")).toHaveText("1 earlier answered")
-    await list.locator("details > summary").click()
-    await expect(list.locator("details li")).toContainText("Old question")
-    await expect(list).not.toContainText("Thanks")
-    // Display only: no controls in the list; the chat keeps one composer.
-    await expect(list.locator("button, input, textarea")).toHaveCount(0)
-    await expect(list.locator("details")).toHaveCount(1)
+    // One summary line above the chat; nothing else until the human opens it (no case needs them here).
+    const strip = page.getByRole("region", { name: "Desk progress" })
+    const summary = strip.getByRole("button", { name: /in progress/ })
+    await expect(summary).toHaveText(/3 in progress · 2 done/, { timeout: 300_000 })
+    await expect(summary).toHaveAttribute("aria-expanded", "false")
+    await expect(strip.locator(".desk-progress-row")).toHaveCount(0)
+    const stripHeight = (await strip.boundingBox()).height
+    assert(stripHeight <= 40, `${view}: folded strip is ${stripHeight}px tall`)
+    // The conversation sits right under it.
+    const chatTop = await page.locator(".desk-chat textarea").evaluate(element => element.getBoundingClientRect().top)
+    assert(chatTop > (await strip.boundingBox()).y, `${view}: chat above the strip`)
+    // Opened: in progress first (newest first), then results; labels are human, owners and ids only in Details.
+    await summary.click()
+    const rows = strip.locator(".desk-progress-row")
+    await expect(rows.locator(".desk-progress-label")).toHaveText(["Private read", "No receipt yet", "Is the nightly green?", "Workspace", "Which build is on the Mini?"])
+    await expect(rows.nth(0)).toContainText("meeting synthesis")
+    await expect(rows.nth(1)).toContainText("Asked gamma · delivery unknown")
+    await expect(rows.nth(3)).toContainText("Delivered")
+    await expect(rows.nth(3).getByRole("link", { name: "Workspace" })).toHaveAttribute("href", "http://127.0.0.1:64924/")
+    await expect(rows.nth(4)).toContainText("Answered by alpha")
+    await expect(strip).not.toContainText("Thanks")
+    for (const text of ["ses_", "exploration · directions", "two-parts", "alpha#"]) await expect(strip.locator(".desk-progress-line")).not.toContainText([text])
+    await rows.nth(0).getByText("Details").click()
+    await expect(rows.nth(0).locator(".desk-progress-detail")).toContainText("owner exploration · directions · mini")
+    // No send or answer controls: only the summary toggle and Details disclosures.
+    await expect(strip.locator("input, textarea")).toHaveCount(0)
+    await expect(strip.locator("button")).toHaveCount(1)
     await expect(page.getByRole("button", { name: "Ask in background" })).toHaveCount(0)
-    assert(await list.evaluate(element => element.scrollWidth <= element.clientWidth + 1), `${view}: list overflows`)
+    assert(await strip.evaluate(element => element.scrollWidth <= element.clientWidth + 1), `${view}: strip overflows`)
+    const list = strip
     if (shots) await list.screenshot({ path: path.join(shots, `followups-${view}.png`) })
-    console.log(`WAITING ON ${view}: case with 2 owned parts + deliverables; 2 open (unknown, delivered) + 1 answered across two projects; 1 earlier answered disclosed; notice excluded; no controls`)
+    console.log(`PROGRESS ${view}: folded to one summary line (<=40px) above the chat; opened: 3 in progress + 2 done with human labels, owners/ids only in Details; one results link; no send controls`)
     await context.close()
   }
   assert(reads.some(([name, session]) => name === "fixture" && session === "ses_a") && reads.some(([name, session]) => name === "other" && session === "ses_a"))
