@@ -36,7 +36,7 @@ export type ContextRef =
   | { kind: "session"; id: string; host: string; label: string; directory: string; updated: number; lane?: string; live?: string }
   // Decision and surface refs hold the snapshot captured when the chip was added, at its revision.
   | { kind: "decision"; id: string; host: string; label: string; editspace: string; revision: number; status: string; lane?: string
-      ask: "decision" | "blocker"; question: string; options: string[]; recommendation?: string; updated: number }
+      ask: "decision" | "blocker" | "review"; question: string; options: string[]; recommendation?: string; updated: number }
   | { kind: "surface"; id: string; host: string; label: string; editspace: string; revision: number; owner: string; lane?: string
       summary?: string; purpose: "board" | "deliverable"; updated: number; health: string }
 

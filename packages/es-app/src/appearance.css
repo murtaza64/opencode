@@ -388,3 +388,9 @@
 .desk-companion .prompt-box:not(.prompt-expanded) .direct-draft > .ta-wrap { min-height: 0; }
 .desk-companion .session-work-status[data-state=idle] { display: none; }
 .desk-companion [data-slot=text-part-meta] { display: none; }
+
+/* Review items (ATTN-15): "Try" tag in Needs you; the artifact link leads the review view. */
+.nav-decision[data-kind=review] .nav-kind { inline-size: auto; padding-inline: 4px; border-radius: 4px; font-size: 10px; font-weight: 600; color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
+.review-artifact { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0 0 8px; }
+.review-link { display: inline-flex; align-items: center; gap: 6px; min-inline-size: 0; font-weight: 600; overflow-wrap: anywhere; }
+.review-link svg { flex: none; }

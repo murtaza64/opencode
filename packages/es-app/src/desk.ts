@@ -12,7 +12,7 @@ import { memoryLines, type MemoryDocument } from "./desk-memory"
 
 export type DeskItem = {
   key: string
-  kind: "decision" | "blocker" | "permission" | "question" | "failure"
+  kind: "decision" | "blocker" | "review" | "permission" | "question" | "failure"
   title: string
   project?: string
   /** What a derived brief binds to; a change discards briefs prepared for an earlier value. */

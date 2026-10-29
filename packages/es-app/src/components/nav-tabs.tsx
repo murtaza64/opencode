@@ -44,16 +44,18 @@ const useOpenItem = () => {
 const DecisionRow = (props: { entry: WorkEntry }) => {
   const open = useOpenItem()
   const series = () => props.entry.item?.series
-  const glyph = () => props.entry.kind === "permission" ? "!" : props.entry.kind === "failure" ? "×" : "?"
+  const glyph = () => props.entry.kind === "permission" ? "!" : props.entry.kind === "failure" ? "×" : props.entry.kind === "review" ? "Try" : "?"
+  // Read out as what it asks: a review is something ready to try.
+  const spoken = () => props.entry.kind === "review" ? "ready to try" : props.entry.kind
   return <Show when={props.entry.host} fallback={
     <A href={props.entry.href} activeClass="" classList={{ active: open(props.entry.key) }} aria-current={open(props.entry.key) ? "page" : undefined} class="nav-item nav-decision" data-kind={props.entry.kind} data-nav-item={props.entry.key}>
       <span class="nav-kind" aria-hidden="true">{glyph()}</span>
       <span class="nav-title" dir="auto">{series() ? `${series()!.title} (${series()!.answered}/${series()!.live})` : props.entry.title}</span>
-      <span class="sr-only">, {props.entry.kind}</span>
+      <span class="sr-only">, {spoken()}</span>
       <Show when={props.entry.project}><span class="session-project">{props.entry.project}</span></Show>
     </A>}>
     <a href={props.entry.href} class="nav-item nav-decision host-decision" classList={{ stale: props.entry.stale }} data-kind={props.entry.kind} data-nav-item={props.entry.key}
-      aria-label={`${props.entry.title}, ${props.entry.kind}, on ${props.entry.hostLabel}${props.entry.stale ? ", last known" : ""}`}
+      aria-label={`${props.entry.title}, ${spoken()}, on ${props.entry.hostLabel}${props.entry.stale ? ", last known" : ""}`}
       title={props.entry.stale ? `${props.entry.hostLabel} not current; last-known decision` : `${props.entry.title} — on ${props.entry.hostLabel}`}>
       <span class="nav-kind" aria-hidden="true">{glyph()}</span>
       <HostGlyph host={props.entry.host!} />

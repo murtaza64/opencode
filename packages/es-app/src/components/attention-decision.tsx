@@ -219,6 +219,9 @@ const Delivery = (props: { record: AttentionRecord; attention: Attention }) => {
  * `prepared` brief the producer's raw context moves behind a disclosure and each option becomes a card
  * saying what choosing it leads to. */
 export const AttentionDecision = (props: { record: AttentionRecord; attention: Attention; onView?: (view: AttentionView) => void; brief?: JSX.Element; briefVisual?: JSX.Element; briefAfter?: JSX.Element; briefDetails?: JSX.Element; prepared?: BriefResult; sends?: Sends; conversation?: JSX.Element; more?: JSX.Element; briefJob?: { job: string; revision: string } }) => {
+  // A review asks the human to try one thing and say Done; it is not decided, so no brief explains or replaces it.
+  const review = () => props.record.kind === "review"
+  const prepared = () => review() ? undefined : props.prepared
   const [historyOpen, setHistoryOpen] = createSignal(false)
   const [history, setHistory] = createSignal<{ version: string; events?: unknown[]; error?: string }>()
   const canWrite = () => canWriteAttention(props.attention, props.record)
@@ -239,34 +242,39 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
   // Grouped so a wide pane can set the explanation beside the answer; narrow panes stack the groups in this order.
   return <article class="home-decision" data-attention-id={props.record.id}>
     <header class="home-decision-head"><div class="home-eyebrow"><Requester record={props.record} /><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Agent thread</A></div>
-      <Show when={!props.prepared}><h3><bdi dir="auto">{props.record.title}</bdi></h3></Show></header>
+      <Show when={!prepared()}><h3><bdi dir="auto">{props.record.title}</bdi></h3></Show></header>
     {/* A prepared brief is one explainer: the human-level question heads it, with its context, the original
       * conversation and the picture beneath; the answer controls sit beside it (wide) or below it (narrow). */}
     <div class="home-decision-explain">
-      <Show when={props.prepared}>{prepared => <div class="home-decision-question">
+      <Show when={props.record.artifact}>{artifact => <ReviewArtifact artifact={artifact()} />}</Show>
+      <Show when={prepared()}>{prepared => <div class="home-decision-question">
         <h3 class="home-question"><bdi dir="auto">{prepared().question}</bdi></h3>
         {/* The request's own title only when it says something the question does not; Record & history keeps it. */}
         <Show when={same(props.record.title) !== same(prepared().question)}><p class="home-request-line"><bdi>Request:</bdi> <bdi dir="auto">{props.record.title}</bdi></p></Show>
-        {props.brief}
+        {review() ? undefined : props.brief}
         {/* Steps the human must perform stay in the producer's exact words, unfolded, above the answer. */}
         {/* Labelled as the request's own text, so its numbering is not read as the brief's steps. */}
         <Show when={requestHasSteps(props.record)}><p class="home-source home-request-from">From the request</p><RequestText record={props.record} /></Show>
       </div>}</Show>
-      <Show when={!props.prepared}><RequestText record={props.record} />{props.brief}</Show>
+      <Show when={!prepared()}><RequestText record={props.record} />{review() ? undefined : props.brief}</Show>
       {/* The picture tells the story; the original conversation it came from follows. */}
-      {props.briefVisual}
+      {review() ? undefined : props.briefVisual}
       {props.conversation}
     </div>
     <div class="home-decision-act">
-    <Show when={props.record.status === "open"}>
+    <Show when={props.record.status === "open" && review()}>
+      <ReviewAnswer record={props.record} attention={props.attention} onView={props.onView}
+        extra={<button class="home-quiet" disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "snooze", snoozed_until: Date.now() + 3600_000 })}>Snooze 1h</button>} />
+    </Show>
+    <Show when={props.record.status === "open" && !review()}>
       {/* A recommendation that names an option is tagged on that option; free text stays visible. */}
       <Show when={props.record.recommendation && !props.record.options.some(option => option.id === props.record.recommendation)}><p class="home-muted">Recommended: <bdi dir="auto"><LinkedText text={props.record.recommendation ?? ""} /></bdi></p></Show>
-      <Answer record={props.record} attention={props.attention} options={props.record.options.length > 0} onView={props.onView} prepared={props.prepared} afterChoices={props.briefAfter} sends={props.sends} briefJob={props.briefJob}
+      <Answer record={props.record} attention={props.attention} options={props.record.options.length > 0} onView={props.onView} prepared={prepared()} afterChoices={review() ? undefined : props.briefAfter} sends={review() ? undefined : props.sends} briefJob={review() ? undefined : props.briefJob}
         extra={<><button class="home-quiet" disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "snooze", snoozed_until: Date.now() + 3600_000 })}>Snooze 1h</button><button class="home-quiet" disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "resolve", reason: "Human marked no longer needed" })}>No longer needed</button></>} />
     </Show>
     <Show when={props.record.status === "decided"}><p class="home-recorded">Saved: <bdi dir="auto">{decisionLabel(props.record)}</bdi> · not sent</p><Answer record={props.record} attention={props.attention} options={props.record.options.length > 0} onView={props.onView} /><div class="home-actions"><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open agent thread">Open thread</A><button disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "resolve", reason: "Human marked resolved" })}>Mark resolved</button></div></Show>
     {/* A completed decision keeps its explainer: the options as they were shown, the chosen one marked, read-only. */}
-    <Show when={props.prepared && props.record.answer && ["answered", "resolved", "withdrawn"].includes(props.record.status) ? props.prepared : undefined}>{prepared =>
+    <Show when={prepared() && props.record.answer && ["answered", "resolved", "withdrawn"].includes(props.record.status) ? prepared() : undefined}>{prepared =>
       <ul class="home-options home-option-cards home-chosen" aria-label="Options as shown when you answered"><For each={props.record.options}>{option => {
         const outcome = () => prepared().choices.find(choice => choice.id === option.id)
         return <li class="home-option-card" data-chosen={props.record.answer?.choice_id === option.id ? "" : undefined}>
@@ -284,12 +292,51 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
     </div>
     <div class="home-decision-more">
     {props.more}
-    {props.briefDetails}
+    {review() ? undefined : props.briefDetails}
     {/* With a brief leading, the producer's exact request comes last, after the native controls. */}
-    <Show when={props.prepared && !requestHasSteps(props.record)}>
+    <Show when={prepared() && !requestHasSteps(props.record)}>
       <details class="home-original"><summary>Original request</summary><RequestText record={props.record} /></details>
     </Show>
     <details onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>Record &amp; history</summary><div class="home-source"><bdi dir="ltr">{props.record.id} · {props.record.gate_key} · revision {props.record.revision}</bdi></div><Show when={history()?.version === historyVersion(props.record) ? history() : undefined} fallback={<p>Loading history…</p>}>{item => <Show when={!item().error} fallback={<p>{item().error}</p>}><pre dir="ltr">{JSON.stringify(item().events, null, 2)}</pre></Show>}</Show></details>
     </div>
   </article>
+}
+
+// What to try, as a plain link: opening it records nothing, so the item stays in Needs you until Done.
+const ReviewArtifact = (props: { artifact: NonNullable<AttentionRecord["artifact"]> }) =>
+  <p class="review-artifact">
+    <a class="review-link" href={props.artifact.url} target="_blank" rel="noopener noreferrer" title={props.artifact.url}>
+      <bdi dir="auto">{props.artifact.title}</bdi><Glyph name="link-external" />
+    </a>
+    <span class="home-source">revision <bdi dir="ltr">{props.artifact.revision}</bdi></span>
+  </p>
+
+// A review is answered only by choosing: Done, or its one problem option with what went wrong. A note alone is refused by the ledger.
+const ReviewAnswer = (props: { record: AttentionRecord; attention: Attention; onView?: (view: AttentionView) => void; extra?: JSX.Element }) => {
+  const canWrite = () => canWriteAttention(props.attention, props.record)
+  const done = () => props.record.options.find(option => option.id === "done")
+  const problem = () => props.record.options.find(option => option.id !== "done")
+  const [reporting, setReporting] = createSignal(false)
+  const [value, setValue] = createSignal<InputValue>()
+  const issue = () => inputProblem(problem(), value())
+  const answer = async (option: AttentionOption, input?: InputValue) => {
+    if (await props.attention.act(props.record, { action: "answer", choice_id: option.id, ...inputPayload(option, input) })) props.onView?.("answered")
+  }
+  const id = `review-${props.record.id}`
+  return <div class="home-answer review-answer">
+    <Show when={reporting() ? problem() : undefined}>{option =>
+      <OptionField id={`${id}-problem`} option={option()} value={value()} disabled={!canWrite()} onChange={setValue} />}</Show>
+    <div class="home-actions">
+      <Show when={reporting() ? problem() : undefined} fallback={<>
+        <Show when={done()}>{option => <button class="home-primary" dir="auto" disabled={!canWrite()} onClick={() => void answer(option())}>{option().label}</button>}</Show>
+        <Show when={problem()}>{option => <button dir="auto" disabled={!canWrite()} onClick={() => setReporting(true)}>{option().label}</button>}</Show>
+      </>}>{option => <>
+        <button class="home-primary" dir="auto" disabled={!canWrite() || !!issue()} aria-describedby={issue() ? `${id}-issue` : undefined}
+          onClick={() => void answer(option(), value())}>Send <bdi dir="auto">{option().label}</bdi></button>
+        <button class="home-quiet" onClick={() => setReporting(false)}>Cancel</button>
+      </>}</Show>
+      {props.extra}
+    </div>
+    <Show when={reporting() && issue()}><p class="home-input-problem" id={`${id}-issue`} role="status" dir="auto">{issue()}</p></Show>
+  </div>
 }

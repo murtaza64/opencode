@@ -9,10 +9,12 @@ export type AttentionRecord = {
   content_revision?: number
   status: "open" | "snoozed" | "decided" | "answered" | "resolved" | "withdrawn"
   lane?: string | null
-  kind: "decision" | "blocker"
+  kind: "decision" | "blocker" | "review"
   title: string
   context: string
   options: AttentionOption[]
+  /** Review items only: the one thing to try, at its exact revision. */
+  artifact?: { title: string; url: string; revision: string } | null
   recommendation?: string | null
   producer_session: string
   origin_session: string
