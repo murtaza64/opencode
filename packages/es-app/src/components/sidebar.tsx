@@ -59,7 +59,7 @@ const StatusDot = (props: { state: DotState; label?: string }) => {
 }
 
 export default function Sidebar() {
-  const { state, dotFor, editspace, setEditspace, editspaces, archivedIds, notifications, markViewed,
+  const { state, dotFor, editspace, setEditspace, editspaces, archivedIds,
     allProjects, sessionRows, sessions, pinnedSessions, unpinnedSessions, isPinned, togglePin,
     sessionsLoading, sessionsError, setVisibleSessions, cloud, failures, work, stateError } =
     useDashboard()
@@ -189,10 +189,6 @@ export default function Sidebar() {
   // hover/focus insight card delegates from whichever nav is mounted
   const [navEl, setNavEl] = createSignal<HTMLElement>()
   const current = () => editspace() ?? editspaces()?.default ?? state()?.editspace ?? ""
-  const openNotification = (item: ReturnType<typeof notifications>[number]) => {
-    if (item.editspace && !allProjects()) setEditspace(item.editspace)
-    markViewed(item.session, true)
-  }
 
   // Titles filter immediately; transcript search starts at three characters.
   const [query, setQuery] = createSignal("")
@@ -429,34 +425,9 @@ export default function Sidebar() {
         <nav class="sidebar-actions" aria-label="Agents">
           <NewSession />
         </nav>
-        {/* Permission and question notifications are already queue items; only finished-session notices add rows. */}
-        <NeedsYouBand extra={notifications().some((item) => item.kind === "idle") ? <>
-            <For each={notifications().filter((item) => item.kind === "idle")}>
-              {(notification) => {
-                const dot = createMemo(() => dotFor({
-                  id: notification.session,
-                  updated: notification.updated,
-                  pending: notification.kind !== "idle",
-                }))
-                return (
-                <A
-                  href={sessionHref(notification.session, notification.directory)}
-                  class="nav-item notification-item"
-                  title={`${notification.kind} · ${notification.editspace}`}
-                  onClick={() => openNotification(notification)}
-                >
-                  <StatusDot state={dot()} />
-                  <span class="notification-copy">
-                    <span class="nav-title" dir="auto">{notification.title}</span>
-                    <span class="notification-meta">
-                      {notification.editspace ? `${notification.editspace} · ` : ""}{notification.kind}
-                    </span>
-                  </span>
-                </A>
-                )
-              }}
-            </For>
-        </> : undefined} />
+        {/* Explicit requests only (attention records, permissions, questions, delivered requests). A finished or idle
+          * agent is activity: its row's status dot and order in Agents show it, never a Needs you row. */}
+        <NeedsYouBand />
         <Show when={allPinned().length || cloud.pins().length}>
           <section class="pinned-section" aria-label="Pinned sessions">
             <div class="nav-heading">Pinned</div>
