@@ -77,6 +77,68 @@ describe("costSummary", () => {
     expect(summary?.hosts[0]?.note).not.toContain("Core has no origin-only cost")
   })
 
+  // dotfiles#264 real cutoff-day reads, 2026-10-29T02:39:5xZ, offset -240.
+  const cutoffDay = (host: string, raw: number, originSince: string, partial: UsageDaily["days"][number]["originPartial"]): UsageDaily => ({
+    estimate: true, basis: "", host, observedAt: new Date(NOW).toISOString(), offsetMinutes: -240,
+    coverage: { scope: "", backfilled: true, origin: { basis: "step", hostID: host, originSince } },
+    days: [{ day: "2026-10-28", cost: raw, complete: true, originOnly: false, originCost: null, unpricedModels: 0, originPartial: partial,
+      models: [{ provider: "a", model: "m", cost: raw, coverage: "priced", tokens }] }],
+    rateLimits: { source: "headers", providers: [] },
+  })
+
+  test("cutoff day with the same origin start on both hosts: one subtotal since that hour, raw daily never summed", () => {
+    const summary = costSummary([laptop, mini], {
+      laptop: { value: cutoffDay("laptop", 932.407715, "2026-10-28T15:37:35.803Z", { since: "2026-10-28T16:00:00Z", cost: 310.5, unpricedModels: 0 }), readAt: NOW },
+      mini: { value: cutoffDay("mini", 1660.150433, "2026-10-28T15:48:32.651Z", { since: "2026-10-28T16:00:00Z", cost: 420.25, unpricedModels: 0 }), readAt: NOW },
+    }, NOW)
+    expect(summary?.total).toBeUndefined()
+    expect(summary?.subtotal).toEqual({ since: Date.parse("2026-10-28T16:00:00Z"), cost: 730.75, unpriced: false,
+      hosts: [{ id: "laptop", cost: 310.5, unpriced: false }, { id: "mini", cost: 420.25, unpriced: false }] })
+    expect(summary?.partial).toBe(true)
+    expect(summary?.subtotal?.cost).not.toBe(932.407715 + 1660.150433)
+  })
+
+  test("different origin starts are not comparable: no subtotal", () => {
+    const summary = costSummary([laptop, mini], {
+      laptop: { value: cutoffDay("laptop", 932, "2026-10-28T15:37:35Z", { since: "2026-10-28T16:00:00Z", cost: 300, unpricedModels: 0 }), readAt: NOW },
+      mini: { value: cutoffDay("mini", 1660, "2026-10-28T16:10:00Z", { since: "2026-10-28T17:00:00Z", cost: 400, unpricedModels: 0 }), readAt: NOW },
+    }, NOW)
+    expect(summary?.subtotal).toBeUndefined()
+  })
+
+  test("a host without the partial field (pre-#264 Core) blocks the subtotal", () => {
+    const summary = costSummary([laptop, mini], {
+      laptop: { value: cutoffDay("laptop", 932, "2026-10-28T15:37:35Z", { since: "2026-10-28T16:00:00Z", cost: 300, unpricedModels: 0 }), readAt: NOW },
+      mini: { value: cutoffDay("mini", 1660, "2026-10-28T15:48:32Z", undefined), readAt: NOW },
+    }, NOW)
+    expect(summary?.subtotal).toBeUndefined()
+    expect(summary?.gaps.map((item) => item.state)).toEqual(["tracking", "tracking"])
+  })
+
+  test("unpriced usage inside the window is reported, and a zero subtotal stays a measured zero", () => {
+    const summary = costSummary([laptop, mini], {
+      laptop: { value: cutoffDay("laptop", 10, "2026-10-28T15:37:35Z", { since: "2026-10-28T16:00:00Z", cost: 0, unpricedModels: 1 }), readAt: NOW },
+      mini: { value: cutoffDay("mini", 10, "2026-10-28T15:48:32Z", { since: "2026-10-28T16:00:00Z", cost: 0, unpricedModels: 0 }), readAt: NOW },
+    }, NOW)
+    expect(summary?.subtotal).toMatchObject({ cost: 0, unpriced: true })
+  })
+
+  test("an unreachable host blocks the subtotal", () => {
+    const summary = costSummary([laptop, mini], {
+      laptop: { value: cutoffDay("laptop", 932, "2026-10-28T15:37:35Z", { since: "2026-10-28T16:00:00Z", cost: 300, unpricedModels: 0 }), readAt: NOW },
+      mini: { error: "HTTP 503", readAt: NOW },
+    }, NOW)
+    expect(summary?.subtotal).toBeUndefined()
+  })
+
+  test("the next local day: both hosts whole-day origin-only give the complete total and no subtotal", () => {
+    const summary = costSummary([laptop, mini], {
+      laptop: { value: originRollup(120), readAt: NOW },
+      mini: { value: originRollup(80), readAt: NOW },
+    }, NOW)
+    expect([summary?.total, summary?.subtotal]).toEqual([200, undefined])
+  })
+
   test("an older Core without origin fields or coverage.origin stays unsupported", () => {
     const summary = costSummary([laptop, mini], {
       laptop: { value: originRollup(40), readAt: NOW },

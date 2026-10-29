@@ -1,11 +1,14 @@
 import { pathToFileURL } from "node:url"
 import { startPanelPreview } from "./composer-panel-preview.mjs"
 import { directory } from "./composer-fixture.mjs"
+import { createMotion, createReplay, replayPlugin } from "./preview-replay.mjs"
 
 // Disposable fixture for tool size badges, coalesced tool runs and prompt
 // navigation. Nothing here talks to a real daemon.
+// `options.replay`: adds the preview replay control (test/preview-replay.mjs): Replay motion / cases / all.
 export const startToolRunsPreview = async (portHint = 0, options = {}) => {
-  const preview = await startPanelPreview([], portHint)
+  const replayState = {}
+  const preview = await startPanelPreview(options.replay ? [replayPlugin(replayState)] : [], portHint)
   const fixture = preview.fixture
   fixture.status = "idle"
   let clock = 1_000
@@ -128,12 +131,24 @@ export const startToolRunsPreview = async (portHint = 0, options = {}) => {
       id: "mail_icon_1", ts: new Date(sent).toISOString(), created_ms: sent, from: "ux-feel", to: "transcript-scan", direction: "received",
       kind: "notice", text: "Icon chip CSS review notes.", deliveries: [] }] }
   }
+  if (options.replay) {
+    // Mail the motion scenario sends to this session is served with the session's other records.
+    const motionMail = []
+    const sessionMail = fixture.mail
+    fixture.mail = (es, recipient) => {
+      const base = sessionMail(es, recipient)
+      return recipient === "ses_a" ? { ...base, messages: [...base.messages, ...motionMail] } : base
+    }
+    const motion = createMotion(fixture, { directory, addMail: (record) => motionMail.push(record) })
+    const replay = createReplay(fixture, { firstCase: "msg_2000", mailRecords: [] })
+    replayState.replay = (scope) => scope === "motion" ? motion() : replay(scope)
+  }
   return { ...preview, tool, assistant, text, laneUrl: `${preview.origin}/session/ses_a?directory=${encodeURIComponent(laneDirectory)}` }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const preview = await startToolRunsPreview(Number(process.env.PORT ?? 0), { filler: Number(process.env.FILLER ?? 60), title: process.env.TITLE,
-    iconCases: process.env.ICON_CASES === "1" })
+    iconCases: process.env.ICON_CASES === "1", replay: process.env.REPLAY === "1" })
   console.log(`PREVIEW ${preview.url}\nLANE ${preview.laneUrl}\nFIXTURE ${preview.fixture.url}\nSTOP kill ${process.pid}`)
   let closing = false
   const close = async () => {

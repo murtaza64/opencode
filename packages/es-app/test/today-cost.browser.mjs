@@ -21,11 +21,17 @@ let hostInfo
 let mini = { mode: "fail" }
 const originDay = (cost) => ({ day: new Date().toLocaleDateString("en-CA"), complete: true, cost, originOnly: true, originCost: cost, unpricedModels: cost === null ? 1 : 0, unpricedTokens: 0,
   models: [{ provider: "anthropic", model: "claude-opus", cost, coverage: cost === null ? "missing-rate" : "priced", tokens: tokens(1_000, 100) }] })
+// dotfiles#264 cutoff day: origin tracking began this morning; origin-only spend from one common whole hour.
+const SINCE = (() => { const at = new Date(); at.setMinutes(0, 0, 0); at.setHours(Math.max(0, at.getHours() - 2)); return at.toISOString() })()
+const cutoffDay = (raw, partial) => ({ day: new Date().toLocaleDateString("en-CA"), complete: true, cost: raw, originOnly: false, originCost: null, unpricedModels: 0, unpricedTokens: 0,
+  originPartial: partial, models: [{ provider: "anthropic", model: "claude-opus", cost: raw, coverage: "priced", tokens: tokens(1_000, 100) }] })
+const originCoverage = { scope: "", backfilled: true, origin: { basis: "step", hostID: "h", originSince: new Date(Date.parse(SINCE) - 20 * 60_000).toISOString() } }
 const reads = []
 const rollup = () => ({
   estimate: true, basis: "Estimated; not provider billing.", host: "local", observedAt: new Date().toISOString(), offsetMinutes: -new Date().getTimezoneOffset(),
   coverage: { scope: "API-billed work agents on this host", liveSince: new Date(Date.now() - 3_600_000).toISOString(), backfilled: shape === "origin" },
-  days: shape === "origin" ? [originDay(total)] : [shape === "old"
+  ...(shape === "cutoff" ? { coverage: originCoverage } : {}),
+  days: shape === "cutoff" ? [cutoffDay(932.41, { since: SINCE, cost: total, unpricedModels: 0 })] : shape === "origin" ? [originDay(total)] : [shape === "old"
     ? { day: new Date().toLocaleDateString("en-CA"), cost: total, models: [{ provider: "anthropic", model: "claude-opus", cost: total, tokens: tokens(1_000_000, 50_000) }] }
     : { day: new Date().toLocaleDateString("en-CA"), complete: true, cost: total, unpricedModels: total === null ? 1 : 0, unpricedTokens: 0, models: [
       { provider: "gateway", model: "internal", cost: null, coverage: "missing-rate", tokens: tokens(10_000, 1_000) },
@@ -45,6 +51,10 @@ const preview = await startAttentionPreview([{
     })
     server.middlewares.use("/hosts/mini/oc/experimental/usage/daily", (_req, res) => {
       if (mini.mode === "fail") { res.writeHead(503); return res.end("{}") }
+      if (mini.mode === "cutoff") {
+        res.writeHead(200, { "content-type": "application/json" })
+        return res.end(JSON.stringify({ ...rollup(), days: [cutoffDay(1660.15, mini.partial)], coverage: originCoverage }))
+      }
       const day = mini.mode === "origin" ? originDay(mini.cost) : { day: new Date().toLocaleDateString("en-CA"), cost: mini.cost, models: [{ provider: "a", model: "m", cost: mini.cost, tokens: tokens(1_000, 100) }] }
       res.writeHead(200, { "content-type": "application/json" })
       res.end(JSON.stringify({ ...rollup(), days: [day], coverage: { scope: "Mini", backfilled: true } }))
@@ -188,6 +198,32 @@ try {
   await page.evaluate(() => document.documentElement.setAttribute("dir", "ltr"))
   if (shots) await page.screenshot({ path: `${shots}/partial.png`, clip: { x: 0, y: 0, width: 1440, height: 200 } })
   console.log("PASS mixed capability: one partial summary, no amount, no host chips; details list hosts + coverage, LTR/RTL")
+  // Cutoff day, same origin start on both hosts: one visible subtotal, scoped "since", never the raw sum.
+  shape = "cutoff"
+  total = 310.5
+  mini = { mode: "cutoff", partial: { since: SINCE, cost: 420.25, unpricedModels: 0 } }
+  await page.reload({ waitUntil: "domcontentloaded" })
+  const sinceLabel = new Date(SINCE).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  await expect(amount).toHaveText("~$731")
+  await expect(badge.locator(".today-cost-label")).toHaveText(`Work since ${sinceLabel}`)
+  await expect(badge).toHaveAttribute("data-scope", "since")
+  await expect(badge).toHaveAttribute("data-band", "high")
+  await expect(badge).toHaveAttribute("aria-label", `AI spend today: about 731 dollars since ${sinceLabel}, combined, partial estimate`)
+  await expect(page.locator(".native-header, .sidebar-top").getByText(/2,593|2593/)).toHaveCount(0)
+  await badge.locator(".today-cost-chip").click()
+  await expect(details.locator(".today-cost-coverage")).toHaveText(`partial: origin-only spend since ${sinceLabel}, summed across hosts; earlier today is not split by host yet`)
+  await expect(details.locator('.today-cost-host[data-host="mini"] .today-cost-host-since')).toHaveText(`since ${sinceLabel}: $420.25 (in total)`)
+  await expect(details.locator('.today-cost-host[data-host="mini"]')).toContainText("$1660.15")
+  await expect(details.locator('.today-cost-host[data-host="mini"]')).toContainText("full day not in total")
+  await page.keyboard.press("Escape")
+  if (shots) await page.screenshot({ path: `${shots}/since.png`, clip: { x: 0, y: 0, width: 1440, height: 200 } })
+  // A host on a pre-#264 Core (no originPartial) cannot be matched: back to one partial summary.
+  mini = { mode: "cutoff", partial: undefined }
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(amount).toHaveText("partial")
+  console.log("PASS cutoff day: one 'Work since' subtotal from a common hour, per-host since/full-day in details; missing field -> partial")
+  shape = "origin"
+  total = 40
   mini = { mode: "origin", cost: null }
   await page.reload({ waitUntil: "domcontentloaded" })
   await expect(amount).toHaveText("partial")

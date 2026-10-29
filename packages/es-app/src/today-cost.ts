@@ -81,7 +81,9 @@ export const touchTodayCost = () => {
  * split by host and is not combined), unsupported
  * (older Core without origin-only cost: its raw daily cost may include history moved from another host, so it is
  * shown on its own and never combined), unreachable (no value yet), pending (first read in flight). */
-export type HostCost = { id: string; label: string; current: boolean; state: "ok" | "partial" | "offline" | "unpriced" | "tracking" | "unsupported" | "unreachable" | "pending"; cost?: number; observedAt?: number; note?: string }
+export type HostCost = { id: string; label: string; current: boolean; state: "ok" | "partial" | "offline" | "unpriced" | "tracking" | "unsupported" | "unreachable" | "pending"; cost?: number; observedAt?: number; note?: string
+  /** Origin-only cost from a whole hour after originSince, on the day tracking began. */
+  since?: { at: number; cost: number; unpriced: boolean } }
 
 export const todayCost = (now = Date.now()) => costSummary(targets(), readings(), now)
 
@@ -110,7 +112,10 @@ export const costSummary = (targets: Target[], readings: Record<string, Reading>
     }
     // A Core that tracks origin says so in coverage.origin even on a day it cannot split yet.
     const since = value.coverage.origin?.originSince
-    if (since) return { ...base, state: "tracking", cost: today.cost, note: [`origin tracked since ${clock(since)}; today began before that, so it is not split by host yet`, failed].filter(Boolean).join("; ") }
+    const at = today.originPartial ? Date.parse(today.originPartial.since) : NaN
+    const part = today.originPartial && Number.isFinite(at) && typeof today.originPartial.cost === "number"
+      ? { at, cost: today.originPartial.cost, unpriced: today.originPartial.unpricedModels > 0 } : undefined
+    if (since) return { ...base, state: "tracking", cost: today.cost, ...(part ? { since: part } : {}), note: [`origin tracked since ${clock(since)}; today began before that, so it is not split by host yet`, failed].filter(Boolean).join("; ") }
     return { ...base, state: "unsupported", cost: today.cost, note: ["Core has no origin-only cost", failed].filter(Boolean).join("; ") }
   })
   const known = hosts.filter((item) => item.cost !== undefined)
@@ -118,10 +123,13 @@ export const costSummary = (targets: Target[], readings: Record<string, Reading>
   const combinable = (item: HostCost) => item.state === "ok" || item.state === "partial" || item.state === "offline"
   const counted = hosts.length === 1 ? known : hosts.every(combinable) ? hosts : []
   const observedAt = Math.min(...known.map((item) => item.observedAt ?? now))
+  const subtotal = counted.length ? undefined : originSubtotal(hosts)
   const exact = hosts.every((item) => item.state === "ok" && now - (item.observedAt ?? 0) <= STALE_MS)
   return {
     /** Deduplicated Work total; undefined when some host cannot be combined. */
     total: counted.length ? counted.reduce((sum, item) => sum + (item.cost ?? 0), 0) : undefined,
+    /** When no whole-day total exists: every host's origin-only cost from one common hour, summed. */
+    subtotal,
     /** Hosts that keep the summary partial, for the details. */
     gaps: hosts.filter((item) => item.state !== "ok"),
     estimate: true,
@@ -130,6 +138,16 @@ export const costSummary = (targets: Target[], readings: Record<string, Reading>
     hosts,
     counted: counted.map((item) => item.id),
   }
+}
+
+/** Every host's origin-only cost from the same whole hour, summed: no host's pre-tracking (possibly copied)
+ * history is included and every host covers the same span. Undefined unless all hosts report the same start;
+ * different starts are not comparable without hourly data. */
+const originSubtotal = (hosts: HostCost[]) => {
+  const since = hosts[0]?.since?.at
+  if (since === undefined || !hosts.every((item) => item.since?.at === since)) return undefined
+  const parts = hosts.map((item) => ({ id: item.id, cost: item.since!.cost, unpriced: item.since!.unpriced }))
+  return { since, cost: parts.reduce((sum, part) => sum + part.cost, 0), hosts: parts, unpriced: parts.some((part) => part.unpriced) }
 }
 
 const clock = (iso: string) => {
