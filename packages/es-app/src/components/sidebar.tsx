@@ -3,7 +3,7 @@
  * icon, then one status dot per session, still navigable. Archived sessions
  * drop to a collapsed section at the bottom of the expanded view. */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
-import { A } from "@solidjs/router"
+import { A, useLocation } from "@solidjs/router"
 import { es, type SessionSearchResult } from "../api"
 import { sessionHref, useDashboard, type DotState, type SessionRow } from "../state"
 import { leftOpen, leftWidth, toggleLeft } from "../ui"
@@ -67,6 +67,17 @@ export default function Sidebar() {
   // carry their host and open on that host's own tab; a host that stops answering keeps its last
   // rows, dimmed and disabled, never emptied or merged into this host's.
   const hosted = () => work.feeds().length > 0
+  // The open session's host-qualified key. The same session ID can exist on Local and on another host, so the
+  // path alone cannot say which row is open; `?host=` (absent or "local": this page's Core) decides, as the
+  // session page does.
+  const location = useLocation()
+  const openKey = createMemo(() => {
+    const match = /^\/session\/([^/]+)/.exec(location.pathname)
+    if (!match) return undefined
+    const host = location.query.host
+    return hostRowKey({ id: decodeURIComponent(match[1]), host: typeof host === "string" && host && host !== "local" ? host : undefined })
+  })
+  const isOpen = (s: SessionRow) => openKey() === hostRowKey(s)
   // Unified Work: this machine and every other Work host, all shown by default. Hiding a host is a per-page
   // choice stored as the hidden set, so a host added later is shown; Personal pages have no Work strip.
   const ownHost = () => host()?.work.find((item) => item.id === host()?.id) ?? { id: host()?.id ?? "local", label: "Local" }
@@ -282,31 +293,33 @@ export default function Sidebar() {
     if (s.host) return hostItem(s)
     const dot = createMemo(() => dotFor(s))
     return cls === "archived" ? (
-    <A
+    <a
       href={sessionHref(s.id, s.directory)}
-      activeClass="active"
       class="nav-item archived"
+      classList={{ active: isOpen(s) }}
+      aria-current={isOpen(s) ? "page" : undefined}
       {...peekAttrs(s)}
     >
       <StatusDot state={dot()} label={dotText(s, dot())} />
       <span class="nav-title" dir="auto">{s.title || s.id}</span>
       {/* All scope: the project lives in the hover/focus card; screen readers still hear it here. */}
       <Show when={allProjects() && s.project}><span class="sr-only">, {s.project}</span></Show>
-    </A>
+    </a>
   ) : (
     <div class="session-entry" {...peekAttrs(s)}>
-      <A
+      <a
         ref={(el) => observeSession(el, s.id)}
         href={sessionHref(s.id, s.directory)}
-        activeClass="active"
         class="nav-item"
+        classList={{ active: isOpen(s) }}
+        aria-current={isOpen(s) ? "page" : undefined}
       >
         <StatusDot state={dot()} label={dotText(s, dot())} />
         <Show when={hosted()}><HostGlyph host="local" /></Show>
         <span class="nav-title" dir="auto">{s.title || s.id}</span>
         <Show when={allProjects() && s.project}><span class="sr-only">, {s.project}</span></Show>
         <Show when={hosted()}><span class="sr-only">, on Local</span></Show>
-      </A>
+      </a>
       <button type="button" class="pin-action" classList={{ pinned: isPinned(s) }}
         aria-label={`${isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
         title={`${isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
@@ -324,7 +337,8 @@ export default function Sidebar() {
     const name = () => `${s.title || s.id}, on ${label()}${down() ? ", unavailable" : ""}`
     return (
     <div class="session-entry host-entry" classList={{ unavailable: down() }}>
-      <a href={feed ? hostSessionHref(feed.host, s) : undefined} class="nav-item" aria-label={name()} aria-disabled={down() || undefined}
+      <a href={feed ? hostSessionHref(feed.host, s) : undefined} class="nav-item" classList={{ active: isOpen(s) }}
+        aria-current={isOpen(s) ? "page" : undefined} aria-label={name()} aria-disabled={down() || undefined}
         title={down() ? `${label()} · unreachable since ${clock(feed?.state().since ?? Date.now())}; last-known list, actions disabled` : `${s.title || s.id} — on ${label()}`}
         data-host-key={hostRowKey(s)} onClick={(event) => { if (down()) event.preventDefault() }}>
         <StatusDot state={dot()} label={`${label()}: ${dot()}`} />
@@ -356,7 +370,8 @@ export default function Sidebar() {
     if (s.host) {
       const feed = feedOf(s)
       return <div class="mini-session" classList={{ unavailable: feed?.state().status === "unavailable" }}>
-        <a href={feed ? hostSessionHref(feed.host, s) : undefined} class="mini-item" title={`${s.title} — on ${feed?.host.label ?? s.host}`}
+        <a href={feed ? hostSessionHref(feed.host, s) : undefined} class="mini-item" classList={{ active: isOpen(s) }}
+          aria-current={isOpen(s) ? "page" : undefined} title={`${s.title} — on ${feed?.host.label ?? s.host}`}
           aria-label={`${s.title || s.id}, on ${feed?.host.label ?? s.host}`}>
           <StatusDot state={work.dot(s)} />
         </a>
@@ -365,11 +380,11 @@ export default function Sidebar() {
     const dot = createMemo(() => dotFor(s))
     return (
     <div class="mini-session" {...peekAttrs(s)}>
-      <A ref={(el) => observeSession(el, s.id)} href={sessionHref(s.id, s.directory)}
-        activeClass="active" class="mini-item"
+      <a ref={(el) => observeSession(el, s.id)} href={sessionHref(s.id, s.directory)}
+        class="mini-item" classList={{ active: isOpen(s) }} aria-current={isOpen(s) ? "page" : undefined}
         title={`${s.title} (${dotText(s, dot())})${allProjects() ? ` · ${s.project}` : ""}`}>
         <StatusDot state={dot()} label={`${s.title || s.id}: ${dotText(s, dot())}`} />
-      </A>
+      </a>
       <button type="button" class="mini-pin" classList={{ pinned: isPinned(s) }}
         aria-label={`${isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
         title={`${isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
