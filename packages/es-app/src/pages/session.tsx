@@ -1455,6 +1455,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     const box = el.clientHeight
     // A hidden draft (a pending-input edit is open) has no box to fill.
     if (!box) return false
+    // A content-sized editor (the Front desk) grows with its wrapped lines to its own max-height and then scrolls
+    // inside; its box always equals its content, so it is never "nearly full" and never expands on its own.
+    if (getComputedStyle(el).getPropertyValue("field-sizing") === "content") return false
     if (el.scrollHeight > box) return true
     const style = [el.style.height, el.style.minHeight, el.style.transition] as const
     const top = el.scrollTop
