@@ -1,34 +1,13 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-10-29.2",
+  "release": "2026-10-29.3",
   "items": [
-    {
-      "title": "What's new",
-      "detail": "This window appears once for each new desktop release. Reopen it any time from What's new at the bottom of the sidebar."
-    },
-    {
-      "title": "New session lives in the Agents tab",
-      "detail": "Use + New at the end of the Agents tab controls. It still targets the project and host in scope, and /new and its shortcut work as before.",
-      "try": {
-        "label": "Start a new session",
-        "href": "/new"
-      }
-    },
-    {
-      "title": "Sort agents by when they were created",
-      "detail": "The Agents sort control now cycles Activity, Name and Created. Created lists the newest first; agents whose creation time is unknown come last, by name."
-    },
-    {
-      "title": "The Front desk editor no longer jumps while you type",
-      "detail": "It starts at one line, grows as lines wrap up to its limit, scrolls inside after that, and shrinks back when you delete. Expand still works when you ask for it."
-    },
-    {
-      "title": "The wallpaper follows WalStudio's blur and dim",
-      "detail": "A blur change in WalStudio re-blurs the app's wallpaper; a dim change only darkens it, without re-blurring."
-    }
+    { "title": "Surfaces show what they are", "detail": "Each Surface row's icon shows whether it is a document, dashboard or prototype, with a mark when it is interactive or keeps itself live. Untagged Surfaces keep the plain square." },
+    { "title": "Text keys stay text keys while you type", "detail": "In the composer's insert mode Ctrl+H, D, U, N and P edit text instead of triggering app shortcuts. Off macOS, Ctrl+M switches mode." },
+    { "title": "Move between regions with Ctrl+Alt+H/J/K/L", "detail": "Focus jumps to the nearest visible region in that direction. Press ? to see every shortcut." }
   ],
   "limits": [
-    "WalStudio blur and dim are verified on a test profile and test wallpaper only, not yet on your own wallpaper.",
-    "Surfaces served from a URL on another host still open only on that host."
+    "Surface icons appear only for Surfaces whose author says what they are.",
+    "WalStudio blur and dim are verified on a test profile and test wallpaper only, not yet on your own wallpaper."
   ]
 }
