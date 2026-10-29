@@ -8,7 +8,7 @@ import { workCountLabel, workQueue } from "./work-queue"
 const attention = (id: string, extra = {}) =>
   ({ id, editspace: "opencode", revision: 1, status: "open", kind: "decision", title: `Decision ${id}`, options: [], delivery_state: "not-requested", created_at: 1, source_ref: { session_id: "ses_a", directory: "/r" }, ...extra }) as never
 const feed = (id: string, label: string, state: Record<string, unknown>) =>
-  ({ host: { id, label, origin: `http://127.0.0.1:${id === "mini" ? 1 : 2}` }, state: () => ({ status: "ready", rows: [], scoped: true, decisions: [], ...state }) }) as unknown as HostFeed
+  ({ host: { id, label, origin: `http://127.0.0.1:${id === "mini" ? 1 : 2}` }, state: () => ({ status: "ready", rows: [], scoped: true, decisions: [], requests: [], surfaces: [], ...state }) }) as unknown as HostFeed
 const surface = (id: string, extra: Partial<Surface> = {}) =>
   ({ id, title: id, summary: null, kind: "url", owner: "lane", lane: null, editspace: "opencode", updated_at: 1, revision: 1, health: { state: "ok" }, purpose: "deliverable", ...extra }) as Surface
 

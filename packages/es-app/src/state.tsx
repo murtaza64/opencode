@@ -26,7 +26,7 @@ import { coalesced } from "./coalesced"
 import { background } from "./startup"
 import { touchTodayCost } from "./today-cost"
 import { clearBackend, describeFailure, reportBackend } from "./backend-status"
-import { readHost, type WorkHost } from "./host"
+import { readHost, workFeedHosts, type WorkHost } from "./host"
 import { createHostFeed, type HostFeed, type HostedRow } from "./host-feed"
 import { forgetSeen, loadSeen, saveSeen } from "./last-seen"
 import type { GlobalSession, SessionFailure } from "@opencode-ai/sdk/v2"
@@ -583,7 +583,7 @@ export function DashboardProvider(props: ParentProps) {
     if (info.remote) return
     // A host removed from the Work view (or unpaired) leaves no cached rows behind.
     forgetSeen(info.work.map((item) => item.id))
-    runWithOwner(owner, () => setFeeds(info.work.filter((item) => item.id !== info.id).map((item) => createHostFeed(item, workProject, () => (hostPins()[item.id] ?? []).flatMap((key) => {
+    runWithOwner(owner, () => setFeeds(workFeedHosts(info).map((item) => createHostFeed(item, workProject, () => (hostPins()[item.id] ?? []).flatMap((key) => {
       try { const value: unknown = JSON.parse(key); return Array.isArray(value) && typeof value[0] === "string" ? [value[0]] : [] } catch { return [] }
     })))))
   })

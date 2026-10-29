@@ -19,7 +19,9 @@ import { request as httpsRequest } from "node:https"
 export type SurfaceEntry = { id: string; upstream: string }
 
 const CAPABILITY = /^\/__es\/surface\/([a-z0-9][a-z0-9-]{0,39})$/
-const SURFACE = /^\/__cap\/surface\/([a-z0-9][a-z0-9-]{0,39})\/([0-9a-z]{1,12})-([0-9a-f]{32})(\/.*)$/
+// The address route as the listener receives it: this host's (`/__es/surface/<id>`) or a Work host's (`/hosts/<host>/__es/surface/<id>`).
+const ADDRESS = /^(?:\/hosts\/[a-z][a-z0-9-]{0,31})?\/__es\/surface\/([a-z0-9][a-z0-9-]{0,39})$/
+const SURFACE_TAIL = "\\/([a-z0-9][a-z0-9-]{0,39})\\/([0-9a-z]{1,12})-([0-9a-f]{32})(\\/.*)$"
 const CAPABILITY_TTL = 3600_000
 const METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])
 // Forward only content negotiation and payload shape; never cookies, auth, origin or app keys.
@@ -59,11 +61,16 @@ export const surfaceProxy = (options: {
   remote?: string
   registry?: () => Promise<SurfaceEntry[]>
   publicOrigin?: string
+  /** Frame path prefix: `/__cap/surface` for this host's surfaces, `/__cap/host/<id>/surface` for a Work host's, so
+   * each host's capabilities (signed with its own key) only ever open that host's surfaces. */
+  base?: string
   /** Lifetime of a minted frame address; the desk remounts the frame before it lapses. */
   capabilityTtl?: number
   now?: () => number
 }) => {
   const key = randomBytes(32)
+  const framePath = options.base ?? "/__cap/surface"
+  const SURFACE = new RegExp(`^${framePath.replace(/[/]/g, "\\/")}${SURFACE_TAIL}`)
   const now = options.now ?? Date.now
   const ttl = options.capabilityTtl ?? CAPABILITY_TTL
   // The expiry is part of the signed message, so it cannot be extended by editing the path.
@@ -98,11 +105,11 @@ export const surfaceProxy = (options: {
 
   /** The iframe address for a surface. Callers must authenticate the request as the app first. */
   const address = (req: IncomingMessage, res: ServerResponse) => {
-    const match = CAPABILITY.exec(new URL(req.url ?? "/", "http://surface").pathname)
+    const match = ADDRESS.exec(new URL(req.url ?? "/", "http://surface").pathname)
     if (!match || req.method !== "GET" || req.headers["sec-fetch-site"] === "cross-site") return finish(res, 403, "Forbidden")
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" })
     const minted = capability(match[1])
-    res.end(JSON.stringify({ src: `/__cap/surface/${match[1]}/${minted.token}/`, expires_at: minted.expiresAt }))
+    res.end(JSON.stringify({ src: `${framePath}/${match[1]}/${minted.token}/`, expires_at: minted.expiresAt }))
   }
 
   const serve = async (req: IncomingMessage, res: ServerResponse) => {
@@ -131,7 +138,7 @@ export const surfaceProxy = (options: {
     const target = upstreamURL(entry, rest, url.search)
     if (!target && options.remote) return finish(res, 502, "This surface is served only on its own host")
     if (!target) return finish(res, 400, "Invalid surface path")
-    const path = `/__cap/surface/${id}/${presented}/`
+    const path = `${framePath}/${id}/${presented}/`
     const prefix = [`http://${req.headers.host}${path}`, ...(options.publicOrigin ? [`${options.publicOrigin}${path}`] : [])].join(" ")
     const upstream = (target.startsWith("https:") ? httpsRequest : httpRequest)(
       target,

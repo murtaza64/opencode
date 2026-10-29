@@ -1,6 +1,6 @@
 // Unified nav slice 2 (dotfiles#240): the Needs you band and the Decisions tab list every Work host's open
-// decisions after this host's, each with its host glyph and name; another host's decision opens on that
-// host's own Front desk. A host that stops answering keeps its last-known decisions, dimmed, and the count
+// decisions after this host's, each with its host glyph and name; another host's decision opens in this
+// window's Work view (Main1555: never that host's tab). A host that stops answering keeps its last-known decisions, dimmed, and the count
 // reads "N+" naming it. Disposable fixture; no writes. Run from packages/es-app: node test/nav-work-decisions.browser.mjs
 import { selectScope } from "./scope.mjs"
 import { createRequire } from "node:module"
@@ -22,7 +22,10 @@ await page.route("**/hosts/mini/**", route => {
   const url = new URL(route.request().url())
   if (url.pathname === "/hosts/mini/oc/experimental/session") return route.fulfill({ json: [] })
   if (url.pathname === "/hosts/mini/es/api/editspaces") return route.fulfill({ json: { editspaces: [{ name: "fixture", root: "/Users/mini/fixture/.editspace" }], default: "fixture" } })
-  if (url.pathname === "/hosts/mini/es/api/attention") return route.fulfill({ json: { records: [decision("33333333-3333-4333-8333-333333333333", "Rotate the Mini certs?")], projects: [], partial: false } })
+  // The Mini's open decisions with its needs-you inputs (no pending requests), as its dashboard answers include=needs-you-inputs.
+  if (url.pathname === "/hosts/mini/es/api/attention") return route.fulfill({ json: { records: [decision("33333333-3333-4333-8333-333333333333", "Rotate the Mini certs?")], projects: [], partial: false, limit: 200,
+    inputs: { schema: "needs-you-inputs/1", boot: "b", rev: 1, requests: [], failures: [], ignores: [], deliverables: [], sources: { requests: { checked_at: 1, ok: true }, failures: { checked_at: 1, ok: true }, ignores: { checked_at: 1, ok: true }, deliverables: { checked_at: 1, ok: true } } } } })
+  if (url.pathname === "/hosts/mini/es/api/surfaces") return route.fulfill({ json: { surfaces: [] } })
   return route.fulfill({ status: 403, body: "not exposed" })
 })
 const opened = []
@@ -43,9 +46,10 @@ try {
   await panel.getByRole("searchbox", { name: "Filter Decisions" }).fill("mac mini")
   await expect(panel.locator(".nav-decision")).toHaveCount(1)
   await panel.getByRole("searchbox", { name: "Filter Decisions" }).fill("")
-  // Opening it goes to the Mini's own Front desk with the record selected.
+  // Opening it stays in this window's Work view with the host-qualified item selected; the Mini's origin is never opened.
   await miniRow.click()
-  await expect.poll(() => opened.at(-1)).toBe(`${mini}/desk?item=${encodeURIComponent("attention:fixture:33333333-3333-4333-8333-333333333333")}`)
+  await expect(page).toHaveURL(`${preview.url}/?item=${encodeURIComponent("mini~attention:fixture:33333333-3333-4333-8333-333333333333")}`)
+  if (opened.length) throw new Error(`opened another host's origin: ${opened}`)
   await page.goto(`${preview.url}/agents`)
   await expect(miniRow).toBeVisible({ timeout: 60_000 })
   // The Mini stops answering: its decision stays, dimmed, and the count is partial and names it.
@@ -56,7 +60,7 @@ try {
   await expect(stale).toBeVisible({ timeout: 60_000 })
   await expect(band.locator(".nav-heading-count")).toHaveText(/\+$/)
   await expect(band.locator(".nav-heading-count")).toHaveAttribute("title", "Mac Mini: not current")
-  console.log("PASS nav work decisions: Mini decision in band + Decisions tab with host glyph, local first, host filter, opens on the Mini desk, unreachable host kept dimmed with N+ naming it")
+  console.log("PASS nav work decisions: Mini decision in band + Decisions tab with host glyph, local first, host filter, opens in this window (no native flip), unreachable host kept dimmed with N+ naming it")
 } finally {
   await browser.close()
   await preview.close()

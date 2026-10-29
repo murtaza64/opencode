@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { GlobalSession } from "@opencode-ai/sdk/v2"
 import { hostDecisionHref, hostRowKey, hostRows, hostSessionHref, hostTabHref, reachOf, reasonFor, workRows } from "./host-feed"
-import { hostInfo } from "./host"
+import { hostInfo, workFeedHosts } from "./host"
 
 const session = (id: string, directory: string, updated: number, extra: Partial<GlobalSession> = {}) =>
   ({ id, title: `${id} title`, directory, time: { created: 1, updated }, ...extra }) as GlobalSession
@@ -72,10 +72,22 @@ describe("host reach", () => {
   })
 
   test("a feed's state maps to the registry reach, keeping when the outage began and the last check", () => {
-    expect(reachOf({ status: "loading", rows: [], scoped: false, decisions: [] })).toEqual({ state: "unknown" })
-    expect(reachOf({ status: "ready", rows: [], scoped: false, decisions: [], checkedAt: 5 })).toEqual({ state: "reachable", checkedAt: 5 })
-    expect(reachOf({ status: "unavailable", reason: "auth", since: 3, checkedAt: 9, rows: [], scoped: false, decisions: [] }))
+    expect(reachOf({ status: "loading" })).toEqual({ state: "unknown" })
+    expect(reachOf({ status: "ready", checkedAt: 5 })).toEqual({ state: "reachable", checkedAt: 5 })
+    expect(reachOf({ status: "unavailable", reason: "auth", since: 3, checkedAt: 9 }))
       .toEqual({ state: "unreachable", reason: "auth", since: 3, checkedAt: 9 })
+  })
+})
+
+describe("Work feeds", () => {
+  test("another Work host is a feed; this host and a Personal host never are", () => {
+    const work = [
+      { id: "laptop", label: "Laptop", origin: "http://127.0.0.1:1", profile: "work" as const },
+      { id: "mini", label: "Mac Mini", origin: "http://127.0.0.1:2", profile: "work" as const },
+      { id: "wing", label: "Wingman", origin: "http://127.0.0.1:3" },
+      { id: "personal", label: "Personal", origin: "http://127.0.0.1:4", profile: "personal" as const },
+    ]
+    expect(workFeedHosts({ id: "laptop", work }).map((host) => host.id)).toEqual(["mini", "wing"])
   })
 })
 

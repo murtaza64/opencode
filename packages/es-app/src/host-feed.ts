@@ -10,6 +10,9 @@ import type { WorkHost } from "./host"
 import type { AttentionList, AttentionRecord } from "./attention"
 import { loadSeen, saveSeen } from "./last-seen"
 import type { Handoff, LaneOwner } from "./handoffs"
+import type { HomeRequestRow } from "./home-requests"
+import type { NeedsYouInputs } from "./needs-you"
+import type { Surface } from "./surfaces"
 
 /** A session row; `host` names a Work view host other than this page's, undefined for this page's. */
 export type HostedRow = {
@@ -44,6 +47,17 @@ export type HostFeedState = {
   decisions: AttentionRecord[]
   /** The decision list could not be read on the last attempt, so `decisions` may be out of date. */
   decisionsStale?: boolean
+  /** That host's pending permission and question pointers (its own dashboard's list; same project scope); last-known
+   * while unavailable. The detail validates one against that host's Core before answering. */
+  requests: HomeRequestRow[]
+  /** The request list could not be read on the last attempt, or that host's dashboard does not serve it. */
+  requestsStale?: boolean
+  /** That host's Surfaces (boards and deliverables, same project scope); last-known while unavailable. */
+  surfaces: Surface[]
+  /** The Surface list could not be read on the last attempt. */
+  surfacesStale?: boolean
+  /** That host's dashboard serves no Surfaces (404/501): a plain fact, not an outage. */
+  surfacesUnsupported?: boolean
 }
 
 /** Key of a row across hosts: this page's rows keep their plain session ID (existing pins, drafts and
@@ -66,8 +80,8 @@ export const workRows = (...lists: HostedRow[][]) => {
   return [...rows.values()].sort((a, b) => b.updated - a.updated)
 }
 
-/** The opening URL of another host's decision: its own listener's Front desk, with the record selected,
- * so it is answered there with that host's operator session. */
+/** @deprecated The native-flip opening of another host's decision (its own listener's Front desk); being replaced by
+ * the in-Work `WorkEntry.href` (Main1555). */
 export const hostDecisionHref = (host: WorkHost, record: Pick<AttentionRecord, "editspace" | "id">) =>
   `${host.origin}/desk?item=${encodeURIComponent(`attention:${record.editspace}:${record.id}`)}`
 
@@ -90,7 +104,7 @@ class ReachError extends Error {
 export const reasonFor = (status: number): ReachReason => (status === 401 || status === 403 || (status >= 300 && status < 400) ? "auth" : "server")
 
 /** The registry reach of a host feed (contract v0.2.1 §2). */
-export const reachOf = (state: HostFeedState) => ({
+export const reachOf = (state: Pick<HostFeedState, "status" | "reason" | "since" | "checkedAt" | "cachedAt">) => ({
   state: state.status === "ready" ? "reachable" as const : state.status === "unavailable" ? "unreachable" as const : "unknown" as const,
   ...(state.status === "unavailable" ? { reason: state.reason ?? "network", since: state.since } : {}),
   ...(state.checkedAt ? { checkedAt: state.checkedAt } : {}),
@@ -122,6 +136,8 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     rows: seen ? seen.rows.map((row) => ({ ...row, host: host.id })) : [],
     scoped: false,
     decisions: [],
+    requests: [],
+    surfaces: [],
     ...(seen ? { cachedAt: seen.cachedAt } : {}),
   })
   const [live, setLive] = createSignal<Record<string, string>>({})
@@ -140,14 +156,48 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
   // The decision scope of the last list read: the project name, and that host's editspace for it
   // (`none`: that host has no such project). Undefined until the first list read.
   let scope: { project: string | undefined; es?: string; none?: boolean } | undefined
-  const readDecisions = async () => {
+  // One read of that host's open decisions with its pending requests (needs-you inputs); undefined parts failed or are
+  // not served by that dashboard, and keep their last-known rows marked stale.
+  const readNeeds = async (): Promise<{ decisions?: AttentionRecord[]; requests?: HomeRequestRow[] }> => {
+    const current = scope
+    if (!current) return {}
+    if (current.none) return { decisions: [], requests: [] }
+    const body = await read<NeedsYouInputs>(`/es/api/attention?view=open&limit=200&include=needs-you-inputs${current.es ? `&es=${encodeURIComponent(current.es)}` : ""}`)
+      .catch(() => undefined)
+    const requests = body?.inputs?.sources?.requests?.ok && Array.isArray(body.inputs.requests) ? body.inputs.requests : undefined
+    return {
+      decisions: body && Array.isArray(body.records) ? body.records.filter((record) => record.status === "open") : undefined,
+      requests: requests?.filter((request) => current.project === undefined || request.project === current.project),
+    }
+  }
+  type SurfaceRead = { surfaces: Surface[] } | { unsupported: true } | undefined
+  const readSurfaces = async (): Promise<SurfaceRead> => {
     const current = scope
     if (!current) return undefined
-    if (current.none) return []
-    return read<AttentionList>(`/es/api/attention?view=open&limit=200${current.es ? `&es=${encodeURIComponent(current.es)}` : ""}`)
-      .then((list) => Array.isArray(list.records) ? list.records.filter((record) => record.status === "open") : undefined)
-      .catch(() => undefined)
+    if (current.none) return { surfaces: [] }
+    const response = await fetch(`${base}/es/api/surfaces`, { signal: AbortSignal.timeout(15_000), cache: "no-store" }).catch(() => undefined)
+    if (response && (response.status === 404 || response.status === 501)) {
+      await response.body?.cancel()
+      return { unsupported: true }
+    }
+    if (!response?.ok || !response.headers.get("content-type")?.includes("application/json")) {
+      await response?.body?.cancel()
+      return undefined
+    }
+    const body = (await response.json().catch(() => undefined)) as { surfaces?: Surface[] } | undefined
+    if (!Array.isArray(body?.surfaces)) return undefined
+    return { surfaces: body.surfaces.filter((surface) => current.project === undefined || surface.editspace === current.project) }
   }
+  // Each part keeps its last-known rows for the same project when its read failed, marked stale.
+  const merged = (previous: HostFeedState, same: boolean, needs: Awaited<ReturnType<typeof readNeeds>>, surfaces: SurfaceRead) => ({
+    decisions: needs.decisions ?? (same ? previous.decisions : []),
+    decisionsStale: !needs.decisions,
+    requests: needs.requests ?? (same ? previous.requests : []),
+    requestsStale: !needs.requests,
+    surfaces: surfaces && "surfaces" in surfaces ? surfaces.surfaces : surfaces ? [] : same ? previous.surfaces : [],
+    surfacesStale: !surfaces,
+    surfacesUnsupported: !!surfaces && "unsupported" in surfaces,
+  })
   const readLineage = async (es: string) => {
     const [handoffs, dashboard] = await Promise.all([
       read<{ handoffs: Handoff[] }>(`/es/api/handoffs?es=${encodeURIComponent(es)}`),
@@ -207,8 +257,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
         setLineage(undefined)
         lastLineageRead = 0
       }
-      // A decision list that fails to read keeps the last one for this project, marked stale.
-      const decisions = await readDecisions()
+      const [needs, surfaces] = await Promise.all([readNeeds(), readSurfaces()])
       const rows = name && !root ? [] : hostRows(host.id, sessions, root)
       saveSeen(host.id, rows, name)
       setState((previous) => ({
@@ -216,8 +265,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
         status: "ready",
         rows,
         scoped: !!root,
-        decisions: decisions ?? (same ? previous.decisions : []),
-        decisionsStale: !decisions,
+        ...merged(previous, same, needs, surfaces),
       }))
       refreshLineage()
     } catch (error) {
@@ -232,14 +280,14 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
       }))
     }
   }
-  // Decisions have no event on the session stream: between list reads, read only the decision list.
+  // Decisions, requests and Surfaces have no event on the session stream: between list reads, read only those.
   const refreshDecisions = async () => {
     refreshLineage()
     const current = scope
     if (loading || state().status !== "ready" || document.visibilityState !== "visible") return
-    const decisions = await readDecisions()
+    const [needs, surfaces] = await Promise.all([readNeeds(), readSurfaces()])
     if (scope !== current) return
-    setState((previous) => ({ ...previous, decisions: decisions ?? previous.decisions, decisionsStale: !decisions }))
+    setState((previous) => ({ ...previous, ...merged(previous, true, needs, surfaces) }))
   }
   // Single-flight; a project change during a read reads again for the new project.
   const load = (): Promise<void> => (loading ??= (async () => {

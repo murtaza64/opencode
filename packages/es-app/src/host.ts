@@ -52,3 +52,7 @@ export const hostInfo = (value: unknown): HostInfo => {
   if (typeof record.id !== "string" || typeof record.label !== "string") return { id: "local", label: "Local", remote: false, hosts, work }
   return { id: record.id, label: record.label, remote: record.remote === true, hosts, work, ...profileOf(record.profile), ...kindOf(record.kind) }
 }
+
+/** The other hosts this page reads as Work feeds: never itself, never a Personal host (its pins, cookies and lists stay
+ * apart from Work, and the Local listener does not proxy it). */
+export const workFeedHosts = (info: Pick<HostInfo, "id" | "work">) => info.work.filter((item) => item.id !== info.id && item.profile !== "personal")

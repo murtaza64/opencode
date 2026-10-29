@@ -111,7 +111,8 @@ export type AttentionAction = {
 /** What a brief is prepared for: the request's content, not its status (older records fall back to revision). */
 export const contentRevision = (record: AttentionRecord) => record.content_revision ?? record.revision
 
-export const attentionPath = (path = "", editspace?: string) => `/es/api/attention${path}${editspace ? `?es=${encodeURIComponent(editspace)}` : ""}`
+/** `prefix`: "" for this page's host, "/hosts/<id>" for another Work host (that host's operator cookie, scoped by the Local listener). */
+export const attentionPath = (path = "", editspace?: string, prefix = "") => `${prefix}/es/api/attention${path}${editspace ? `?es=${encodeURIComponent(editspace)}` : ""}`
 
 // Evidence wording follows runtime receipts only; status or idleness never advances it.
 export const deliveryLabel = (record: AttentionRecord) => ({
@@ -156,7 +157,8 @@ export const decisionLabel = (record: AttentionRecord) => {
 // Own only the attention read/write interface; neither list nor act admits Session input.
 /** `readOnly` observes the ledger only: no operator bootstrap and no resumed answer commands. `enabled` pauses reads. */
 /** `deferOperator` leaves operator setup to `activate()`, so a shared reader does no setup writes until a page that answers needs them. */
-export const createAttention = (project: () => string | undefined, options: { readOnly?: boolean; enabled?: () => boolean; deferOperator?: boolean } = {}) => {
+/** `prefix` reads and answers another Work host's ledger through the Local listener ("/hosts/<id>"), so the answer executes on that host. */
+export const createAttention = (project: () => string | undefined, options: { readOnly?: boolean; enabled?: () => boolean; deferOperator?: boolean; prefix?: string } = {}) => {
   const [cache, setCache] = createSignal<Record<string, { records: AttentionRecord[]; project: AttentionList["projects"][number]; checked: number }>>({})
   const [scopes, setScopes] = createSignal<Record<string, { checked: number; partial: boolean; truncated: boolean }>>({})
   const snapshot = () => {
@@ -193,7 +195,7 @@ export const createAttention = (project: () => string | undefined, options: { re
     try {
       const pages: AttentionList[] = []
       for (let offset = 0; offset < 10_000; offset += 200) {
-        const response = await fetch(`${attentionPath("", scope)}${scope ? "&" : "?"}view=all&limit=200&offset=${offset}`, { signal: controller.signal, credentials: "include" })
+        const response = await fetch(`${attentionPath("", scope, options.prefix)}${scope ? "&" : "?"}view=all&limit=200&offset=${offset}`, { signal: controller.signal, credentials: "include" })
         if (!response.ok) throw new Error(response.status === 404 || response.status === 501 ? "Attention ledger is not installed. No decisions have been cleared." : `Attention ledger unavailable (HTTP ${response.status}).`)
         const page: AttentionList = await response.json()
         pages.push(page)
@@ -228,13 +230,13 @@ export const createAttention = (project: () => string | undefined, options: { re
     }
   }
   const checkOperator = async () => {
-    const response = await fetch(attentionPath("/session"), { credentials: "include" })
+    const response = await fetch(attentionPath("/session", undefined, options.prefix), { credentials: "include" })
     // An operator cookie minted before written answers existed cannot send them; refresh it.
     if (response.ok) {
       const session = await response.json()
       if (session.operator === true && session.answer !== false) { setOperator(true); return }
     }
-    const bootstrap = await fetch(attentionPath("/session"), { method: "POST", credentials: "include", headers: { "content-type": "application/json", "X-Attention-CSRF": "1" }, body: "{}" })
+    const bootstrap = await fetch(attentionPath("/session", undefined, options.prefix), { method: "POST", credentials: "include", headers: { "content-type": "application/json", "X-Attention-CSRF": "1" }, body: "{}" })
     setOperator(bootstrap.ok && (await bootstrap.json()).operator === true)
   }
   const settle = (command: PendingCommand) => {
@@ -268,7 +270,7 @@ export const createAttention = (project: () => string | undefined, options: { re
     if (!command || writing()) return false
     setWriting(true)
     try {
-      const send = () => fetch(attentionPath(`/${encodeURIComponent(command.record.id)}/commands`, command.record.editspace), {
+      const send = () => fetch(attentionPath(`/${encodeURIComponent(command.record.id)}/commands`, command.record.editspace, options.prefix), {
         method: "POST", credentials: "include", headers: { "content-type": "application/json", "X-Attention-CSRF": "1" }, body: JSON.stringify(command.body),
       })
       const first = await send()
@@ -326,7 +328,7 @@ export const createAttention = (project: () => string | undefined, options: { re
     if (writing()) return
     setWriting(true)
     try {
-      const response = await fetch(attentionPath(`/${encodeURIComponent(record.id)}/delivery`, record.editspace), {
+      const response = await fetch(attentionPath(`/${encodeURIComponent(record.id)}/delivery`, record.editspace, options.prefix), {
         method: "POST", credentials: "include", headers: { "content-type": "application/json", "X-Attention-CSRF": "1" }, body: "{}",
       })
       setNotice(response.ok ? "Delivery re-checked." : `Delivery check refused (HTTP ${response.status}). The answer remains saved.`)

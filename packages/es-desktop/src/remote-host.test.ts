@@ -475,6 +475,45 @@ test("pin, unpin and reorder reach only that Work host's own store, with only it
   expect({ mini: seen.mini.length, wing: seen.wing.length, local: seen.local.length }).toEqual(before)
 })
 
+test("the Work view frames another host's file surface from that host through the Local listener; capabilities never cross hosts", async () => {
+  const seen: Record<string, { path: string; cookie: string | null; authorization: string | null }[]> = { mini: [], wing: [] }
+  const gate = (name: string) => {
+    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (request) => {
+      const url = new URL(request.url)
+      seen[name]!.push({ path: url.pathname, cookie: request.headers.get("cookie"), authorization: request.headers.get("authorization") })
+      if (url.pathname === "/es/api/surfaces") return Response.json({ surfaces: [{ id: "report", upstream: "/api/surfaces/report/static/" }, { id: "board", upstream: "http://127.0.0.1:9/" }] })
+      if (url.pathname === "/es/api/surfaces/report/static/") return new Response(`<h1>${name} report</h1>`, { headers: { "content-type": "text/html" } })
+      return new Response("not found", { status: 404 })
+    } })
+    cleanup.push(async () => void (await server.stop(true)))
+    return server.url.origin
+  }
+  const server = await serve({ root: await renderer(), opencode: fakeHost("local").origin, dashboard: fakeHost("local").origin, peers: [{ id: "mini", origin: gate("mini") }, { id: "wing", origin: gate("wing") }] })
+  cleanup.push(() => Promise.race([server.close(), Bun.sleep(500)]))
+  const get = (pathname: string) => fetch(`${server.origin}${pathname}`, { headers: { "x-editspace-key": server.key, cookie: "es_attention_operator=local-op; es_attention_operator__mini=m-op" } })
+  // The Surface list is a host read like the decision list: no credential travels.
+  expect(await (await get("/hosts/mini/es/api/surfaces")).json()).toMatchObject({ surfaces: [{ id: "report" }, { id: "board" }] })
+  // The same surface id on two hosts: each mints its own address and frames its own host's content.
+  expect((await fetch(`${server.origin}/hosts/mini/__es/surface/report`)).status).toBe(403)
+  const mini = (await (await get("/hosts/mini/__es/surface/report")).json()).src as string
+  const wing = (await (await get("/hosts/wing/__es/surface/report")).json()).src as string
+  expect(mini).toMatch(/^\/__cap\/host\/mini\/surface\/report\/[0-9a-z]+-[0-9a-f]{32}\/$/)
+  const frame = await fetch(`${server.origin}${mini}`)
+  expect([frame.status, await frame.text()]).toEqual([200, "<h1>mini report</h1>"])
+  expect(frame.headers.get("content-security-policy")).toContain(`script-src ${server.origin}${mini} 'unsafe-inline'`)
+  expect(await (await fetch(`${server.origin}${wing}`)).text()).toBe("<h1>wing report</h1>")
+  // A capability is valid only for the host that minted it, and never for this host's own surfaces.
+  expect((await fetch(`${server.origin}${mini.replace("/host/mini/", "/host/wing/")}`)).status).toBe(404)
+  expect((await fetch(`${server.origin}${mini.replace("/host/mini/", "/")}`)).status).toBe(404)
+  // A URL surface on that host is an explicit own-host-only refusal; unknown hosts are not found.
+  const board = (await (await get("/hosts/mini/__es/surface/board")).json()).src as string
+  const refused = await fetch(`${server.origin}${board}`)
+  expect([refused.status, await refused.text()]).toEqual([502, "This surface is served only on its own host"])
+  for (const id of ["personal", "local", "other"]) expect((await get(`/hosts/${id}/__es/surface/report`)).status).toBe(404)
+  expect((await fetch(`${server.origin}/__cap/host/other/surface/report/x-${"0".repeat(32)}/`)).status).toBe(404)
+  expect([...seen.mini, ...seen.wing].every((item) => !item.cookie && !item.authorization)).toBe(true)
+})
+
 test("host reads add exactly what the session view reads: pending inputs, subagents and providers", async () => {
   const { hostApiAllowed } = await import("./policy")
   for (const pathname of ["/oc/session/ses_m/input", "/oc/session/ses_m/input/req_1", "/oc/session/ses_m/children", "/oc/config/providers"])

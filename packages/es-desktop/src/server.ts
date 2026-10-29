@@ -131,6 +131,9 @@ export const serve = async (options: {
   // Surface upstreams are loopback addresses on the dashboard's machine; never resolve a remote host's here. A remote
   // host's listener serves that host's file surfaces through its dashboard (same identity gate as its /es reads).
   const surfaces = surfaceProxy({ dashboard: remote ? undefined : targets.es, remote: remote ? targets.es : undefined, publicOrigin })
+  // A Work host's file surfaces framed in this window: minted at /hosts/<id>/__es/surface/<sid>, served from that host's
+  // dashboard under /__cap/host/<id>/surface/, each host signing its own capabilities. URL surfaces stay own-host only.
+  const peerSurfaces = new Map([...peers].map(([id, peer]) => [id, surfaceProxy({ dashboard: undefined, remote: peer.dashboard, base: `/__cap/host/${id}/surface`, publicOrigin })]))
   // Paired remote clients never write this machine's performance journal.
   const perf = pairing || !options.perfDir ? undefined : createPerfLog({ dir: options.perfDir, host: remote?.id ?? "local" })
   const sameHost = (req: { headers: IncomingHttpHeaders }) =>
@@ -202,8 +205,13 @@ export const serve = async (options: {
     // cookie or key, and outside the edge's sign-in. The path's capability is the only credential;
     // anything under /__cap/ that is not a valid surface capability gets a plain 404.
     if (sameHost(req) && req.url?.startsWith("/__cap/")) {
-      if (!targets.es) return finish(503, "Service not configured")
       res.removeHeader("Content-Security-Policy")
+      const peer = /^\/__cap\/host\/([a-z][a-z0-9-]{0,31})\//.exec(req.url)
+      if (peer) {
+        const proxy = peerSurfaces.get(peer[1]!)
+        return proxy ? void proxy.serve(req, res) : finish(404, "Not found")
+      }
+      if (!targets.es) return finish(503, "Service not configured")
       return void surfaces.serve(req, res)
     }
     if (pairing && sameHost(req) && (!allowed(req) || /^\/__es\/(pair|health)(\?|$)/.test(req.url ?? "")))
@@ -242,6 +250,11 @@ export const serve = async (options: {
     if (/^\/__es\/voice(\/|$)/.test(url.pathname)) {
       if (!options.voice || pairing || url.search) return finish(404, "Not found")
       return voiceRoute(options.voice, req, url.pathname, origin, finish)
+    }
+    const peerSurface = /^\/hosts\/([a-z][a-z0-9-]{0,31})\/__es\/surface\/[^/]+$/.exec(url.pathname)
+    if (peerSurface) {
+      const proxy = peerSurfaces.get(peerSurface[1]!)
+      return proxy ? proxy.address(req, res) : finish(404, "Not found")
     }
     if (url.pathname.startsWith("/hosts/")) {
       const qualified = hostPath(url.pathname)
