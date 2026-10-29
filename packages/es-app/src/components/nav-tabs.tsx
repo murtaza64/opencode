@@ -7,7 +7,8 @@ import { A, useLocation } from "@solidjs/router"
 import { useDeskQueue } from "../desk-queue"
 import { useDashboard } from "../state"
 import { surfaceKey, surfaceProblem, type Surface } from "../surfaces"
-import { workCountLabel, workQueue, type WorkEntry } from "../work-queue"
+import { needsYou } from "../needs-you"
+import type { WorkEntry } from "../work-queue"
 import { HostGlyph } from "./icons"
 import { PrList, sortPrs } from "./pr"
 
@@ -75,23 +76,19 @@ const SurfaceRow = (props: { surface: Surface; fresh?: boolean }) => {
 const useWork = () => {
   const queue = useDeskQueue()
   const { work } = useDashboard()
-  return createMemo(() => workQueue(queue.items(), work.feeds()))
+  return createMemo(() => needsYou({ items: queue.items(), feeds: work.feeds(), fresh: queue.surfaces.deliverables().fresh }))
 }
-export const NeedsYouBand = (props: { extra?: JSX.Element }) => {
-  const queue = useDeskQueue()
+export const NeedsYouBand = () => {
   const all = useWork()
-  const fresh = () => queue.surfaces.deliverables().fresh
   const shown = () => all().entries.slice(0, BAND_LIMIT)
   const more = () => Math.max(0, all().entries.length - BAND_LIMIT)
   // "N+" with the hosts behind named, never a falsely complete count.
-  const label = () => workCountLabel({ ...all(), count: all().count + fresh().length })
-  return <Show when={all().entries.length || fresh().length || props.extra}>
+  return <Show when={all().entries.length || all().fresh.length}>
     <section class="needs-you-band" aria-label="Needs you">
-      <div class="nav-heading">Needs you <span class="nav-heading-count" title={label().title}>{all().count + fresh().length ? label().text : ""}</span></div>
+      <div class="nav-heading">Needs you <span class="nav-heading-count" title={all().label.title}>{all().count ? all().label.text : ""}</span></div>
       <For each={shown()}>{entry => <DecisionRow entry={entry} />}</For>
-      <For each={fresh()}>{surface => <SurfaceRow surface={surface} fresh />}</For>
+      <For each={all().fresh}>{surface => <SurfaceRow surface={surface} fresh />}</For>
       <Show when={more()}><button type="button" class="link-button nav-more" onClick={() => setTab("decisions")}>{more()} more in Decisions</button></Show>
-      {props.extra}
     </section>
   </Show>
 }
@@ -117,7 +114,7 @@ export const NavTabs = (props: { agents: JSX.Element }) => {
       .filter((pr: { url: string }) => !seen.has(pr.url) && (seen.add(pr.url), true))
       .filter((pr: { url: string; title?: string }) => matches(`${pr.title ?? ""} ${pr.url}`, filter("prs"))))
   })
-  const count = (id: NavTab) => id === "decisions" ? workCountLabel(all()).text.replace(/^0$/, "") : id === "surfaces" ? queue.surfaces.list().length : id === "prs" ? prs().length : undefined
+  const count = (id: NavTab) => id === "decisions" ? all().decisions.text.replace(/^0$/, "") : id === "surfaces" ? queue.surfaces.list().length : id === "prs" ? prs().length : undefined
   const tabId = (id: NavTab) => `nav-tab-${id}`
   const FilterBox = (p: { id: Exclude<NavTab, "agents">; label: string }) =>
     <div class="search-box"><input class="search-input" type="search" placeholder={`filter ${p.label.toLowerCase()}…`} aria-label={`Filter ${p.label}`}
