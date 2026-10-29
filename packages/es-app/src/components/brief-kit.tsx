@@ -12,11 +12,11 @@ export const MISSING = "Not given in the request"
 export const Value = (props: { value: string; dir?: "auto" | "ltr" }) =>
   <Show when={props.value} fallback={<span class="brief-missing">{MISSING}</span>}><span dir={props.dir ?? "auto"}>{props.value}</span></Show>
 
-export const Refs = (props: { refs: string[]; known: EvidenceRef[]; item: DeskItem }) =>
+export const Refs = (props: { refs: string[]; known: EvidenceRef[]; item: DeskItem; host?: string }) =>
   <For each={props.refs}>{id => {
     const ref = () => props.known.find(candidate => candidate.id === id)
     return <Show when={ref()?.messageID} fallback={<span class="desk-ref" title={ref()?.label}>{id}</span>}>
-      <A class="desk-ref" title={ref()?.label} href={sessionHref(props.item.source.session, props.item.source.directory)}>{id}</A>
+      <A class="desk-ref" title={ref()?.label} href={sessionHref(props.item.source.session, props.item.source.directory) + (props.host ? `&host=${encodeURIComponent(props.host)}` : "")}>{id}</A>
     </Show>
   }}</For>
 

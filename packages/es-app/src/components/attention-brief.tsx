@@ -9,7 +9,7 @@ import { docHref } from "../pages/doc"
 import { anchorHref } from "../message-anchor"
 import { briefCommands, briefComplete, briefItems, briefSteps, safeSvg, sourceTarget, type BriefResult, type BriefShape, type BriefSource, type DeskItem, type EvidenceRef } from "../desk"
 import { briefApproval } from "../brief-approval"
-import { currentJob, readConversation, regeneratingJob, type BriefJob } from "../desk-session"
+import { completeBriefJob, currentJob, readConversation, regeneratingJob, type BriefJob } from "../desk-session"
 import { LinkedText } from "./linked-text"
 import { CopyCode, linkName, MISSING, Refs, Value } from "./brief-kit"
 import contract from "../brief-contract.json"
@@ -35,7 +35,7 @@ const failureText = (error: string) => ({
 type Part = "lead" | "visual" | "after" | "details"
 /** `part` renders one slot of a brief inside a decision card; without it the whole brief renders in one place. */
 /** `pinned`: show exactly this job (an answered decision's brief), whatever the item's current revision. */
-export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJob[]; canStart: boolean; confirming: boolean; start: () => void; confirm: () => void; unavailable?: string; unavailableDetail?: string; auto?: boolean; part?: Part; pinned?: string; regenerate?: () => void; regenerating?: boolean }) => {
+export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJob[]; canStart: boolean; confirming: boolean; start: () => void; confirm: () => void; unavailable?: string; unavailableDetail?: string; auto?: boolean; part?: Part; pinned?: string; regenerate?: () => void; regenerating?: boolean; host?: string }) => {
   const current = () => currentJob(props.jobs, props.item, props.pinned)
   const discarded = () => props.jobs.filter(job => job.meta.revision !== props.item.revision)
   const ready = () => { const job = current(); return job?.state.state === "ready" ? { job, result: job.state.result as BriefResult, omitted: job.state.omitted } : undefined }
@@ -68,32 +68,32 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
         <Show when={!props.item.record}><p class="desk-brief-question" dir="auto">{value().result.question}</p></Show>
         <Show when={value().result.context}><p class="desk-brief-context" dir="auto"><LinkedText text={value().result.context} /></p></Show>
         <Subjects subjects={value().result.subjects} refs={value().job.meta.refs} />
-        <Items result={value().result} item={props.item} job={value().job} />
-        <Steps result={value().result} refs={value().job.meta.refs} item={props.item} />
-        <Commands commands={value().result} item={props.item} />
+        <Items result={value().result} item={props.item} job={value().job} host={props.host} />
+        <Steps result={value().result} refs={value().job.meta.refs} item={props.item} host={props.host} />
+        <Commands commands={value().result} item={props.item} host={props.host} />
         <Show when={!props.item.record?.options.length && value().result.ifWait}><p class="home-muted" dir="auto">If you wait: <LinkedText text={value().result.ifWait} /></p></Show>
       </div>}</Show>
     </Show>
     <Show when={shows("visual") && complete() && ready()}>{value =>
       <Show when={value().result.visual} fallback={<Show when={value().result.shape}>{shape => <Shape shape={shape()} item={props.item} />}</Show>}>{visual => <Visual {...visual()} />}</Show>}</Show>
     <Show when={shows("after") && complete() && ready()}>{value => <div class="desk-brief-after">
-      <SourceLinks sources={value().result.sources} refs={value().job.meta.refs} item={props.item} />
+      <SourceLinks sources={value().result.sources} refs={value().job.meta.refs} item={props.item} host={props.host} />
     </div>}</Show>
     {/* Cited evidence and provenance stay one click away, not in the reading path. */}
     <Show when={shows("details") && ready()}>{value => <details class="desk-brief-detail"><summary>Details</summary>
-      <Show when={value().result.facts.length}><ul><For each={value().result.facts}>{fact => <li><bdi dir="auto"><LinkedText text={fact.text} /></bdi> <Refs refs={fact.refs} known={value().job.meta.refs} item={props.item} /></li>}</For></ul></Show>
-      <Show when={value().result.timeline.length}><ol class="desk-timeline"><For each={value().result.timeline}>{entry => <li><Show when={entry.when}><span class="home-source">{entry.when} · </span></Show><bdi dir="auto"><LinkedText text={entry.text} /></bdi> <Refs refs={entry.refs} known={value().job.meta.refs} item={props.item} /></li>}</For></ol></Show>
+      <Show when={value().result.facts.length}><ul><For each={value().result.facts}>{fact => <li><bdi dir="auto"><LinkedText text={fact.text} /></bdi> <Refs refs={fact.refs} known={value().job.meta.refs} item={props.item} host={props.host} /></li>}</For></ul></Show>
+      <Show when={value().result.timeline.length}><ol class="desk-timeline"><For each={value().result.timeline}>{entry => <li><Show when={entry.when}><span class="home-source">{entry.when} · </span></Show><bdi dir="auto"><LinkedText text={entry.text} /></bdi> <Refs refs={entry.refs} known={value().job.meta.refs} item={props.item} host={props.host} /></li>}</For></ol></Show>
       <Show when={value().result.gaps.length}><ul class="home-muted"><For each={value().result.gaps}>{gap => <li dir="auto">{gap}</li>}</For></ul></Show>
       {/* An incomplete brief still offers what it found, without standing in for the request. */}
-      <Show when={!complete()}><SourceLinks sources={value().result.sources} refs={value().job.meta.refs} item={props.item} /></Show>
-      <p class="home-source">Brief for revision {value().job.meta.revision}<Show when={value().omitted}> · {value().omitted} uncited statement(s) omitted</Show> · <A href={sessionHref(value().job.id, value().job.directory)}>Brief thread</A>
+      <Show when={!complete()}><SourceLinks sources={value().result.sources} refs={value().job.meta.refs} item={props.item} host={props.host} /></Show>
+      <p class="home-source">Brief for revision {value().job.meta.revision}<Show when={value().omitted}> · {value().omitted} uncited statement(s) omitted</Show> · <A href={sessionHref(value().job.id, value().job.directory) + (props.host ? `&host=${encodeURIComponent(props.host)}` : "")}>Brief thread</A>
 </p>
       {/* Upkeep, not reading: a fresh brief of the same request, made by the host that owns it; this one stays until the new one is ready. */}
       <Show when={props.live && !props.pinned && props.item.record && props.regenerate}><p class="desk-brief-regenerate">
         <Show when={!props.regenerating && !regeneratingJob(props.jobs, props.item)} fallback={<span class="home-muted" role="status">Regenerating brief…</span>}>
           <button type="button" class="desk-link-button" onClick={() => props.regenerate!()}>Regenerate brief</button></Show></p></Show>
       {/* Keyed to the brief shown, so a newer brief never inherits this one's rating. */}
-      <Show when={value().job} keyed>{job => <BriefFeedbackControls job={job} />}</Show>
+      <Show when={!props.host && value().job} keyed>{job => <BriefFeedbackControls job={job} />}</Show>
     </details>}</Show>
   </section>
 }
@@ -131,8 +131,8 @@ const BriefFeedbackControls = (props: { job: BriefJob }) => {
 
 // Commands an option asks the human to run, exactly as the request quotes them, with where to run them and a
 // Copy button. Display only: nothing here runs anything. Dropped unless quoted verbatim (briefCommands).
-const Commands = (props: { commands: BriefResult; item: DeskItem }) => {
-  const [found] = createResource(() => props.item.record, readConversation)
+const Commands = (props: { commands: BriefResult; item: DeskItem; host?: string }) => {
+  const [found] = createResource(() => props.host ? undefined : props.item.record, readConversation)
   const commands = () => briefCommands(props.commands, props.item, found()?.documents)
   const option = (id: string) => props.item.record?.options.find(entry => entry.id === id)?.label
   return <Show when={commands().length}>
@@ -147,8 +147,8 @@ const Commands = (props: { commands: BriefResult; item: DeskItem }) => {
 // Steps an option asks the human to do by hand, in order: the page to open (a link only when the request gave
 // one), each field with its exact value to copy, and how to check it worked. A value the request does not state
 // is shown as missing, never filled in (briefSteps). Display only: nothing here changes any console.
-const Steps = (props: { result: BriefResult; refs: EvidenceRef[]; item: DeskItem }) => {
-  const [found] = createResource(() => props.item.record, readConversation)
+const Steps = (props: { result: BriefResult; refs: EvidenceRef[]; item: DeskItem; host?: string }) => {
+  const [found] = createResource(() => props.host ? undefined : props.item.record, readConversation)
   const steps = () => briefSteps(props.result, props.item, found()?.documents)
   const option = (id: string) => props.item.record?.options.find(entry => entry.id === id)?.label
   const url = (refs: string[]) => refs.flatMap(id => props.refs.find(ref => ref.id === id)?.url ?? [])[0]
@@ -181,8 +181,8 @@ const Subjects = (props: { subjects: BriefResult["subjects"]; refs: EvidenceRef[
     }}</For></ul>
   </Show>
 
-const Items = (props: { result: BriefResult; item: DeskItem; job: BriefJob }) => {
-  const [found] = createResource(() => props.item.record, readConversation)
+const Items = (props: { result: BriefResult; item: DeskItem; job: BriefJob; host?: string }) => {
+  const [found] = createResource(() => props.host ? undefined : props.item.record, readConversation)
   const rows = () => briefItems(props.result, props.item, found()?.documents)
   const approval = () => briefApproval(rows(), props.item, { id: props.job.id, revision: props.job.meta.revision })
   // A column shows only when some row has a value for it: Approved once the ledger has an answer for this brief,
@@ -210,8 +210,8 @@ const Items = (props: { result: BriefResult; item: DeskItem; job: BriefJob }) =>
 const ItemCell = (props: { label: string; class?: string; children: JSX.Element }) =>
   <div class={props.class ? `desk-brief-item-cell ${props.class}` : "desk-brief-item-cell"}><span class="desk-brief-item-label">{props.label}</span>{props.children}</div>
 
-const SourceLinks = (props: { sources: BriefSource[]; refs: EvidenceRef[]; item: DeskItem }) => {
-  const links = () => props.sources.flatMap(source => { const link = sourceLink(source, props.refs, props.item); return link ? [{ ...link, label: source.label }] : [] })
+const SourceLinks = (props: { sources: BriefSource[]; refs: EvidenceRef[]; item: DeskItem; host?: string }) => {
+  const links = () => props.sources.flatMap(source => { const link = sourceLink(source, props.refs, props.item); return link && !(props.host && link.kind === "Doc") ? [{ ...link, href: link.href + (props.host && link.kind === "Agent thread" ? `&host=${encodeURIComponent(props.host)}` : ""), label: source.label }] : [] })
   return <Show when={links().length}><p class="desk-brief-sources ds-links"><For each={links()}>{link =>
     <A href={link.href}>↗ {link.kind} · <bdi dir="auto">{link.label}</bdi></A>}</For></p></Show>
 }
@@ -360,35 +360,32 @@ export const MoreDetail = (props: { ask: (question: string) => Promise<string | 
 }
 
 /** The ready, complete brief for one item, or undefined: what the decision card folds its request behind. */
-export const useCompleteBrief = (item: () => DeskItem, pinned?: () => string | undefined) => {
-  const prepared = useBriefs()
+export const useCompleteBrief = (item: () => DeskItem, pinned?: () => string | undefined, jobs?: () => BriefJob[]) => {
+  const prepared = jobs ? undefined : useBriefs()
   return () => {
-    const job = currentJob(prepared.briefs.jobs(), item(), pinned?.())
-    const result = job?.state.state === "ready" ? job.state.result : undefined
-    return result && briefComplete(result, item()) ? result : undefined
+    const job = completeBriefJob(jobs?.() ?? prepared!.briefs.jobs(), item(), pinned?.())
+    return job?.state.state === "ready" ? job.state.result : undefined
   }
 }
 
 /** The ready, complete brief job for one item (or the pinned one): what an answer records it was made from. */
-export const useCompleteJob = (item: () => DeskItem, pinned?: () => string | undefined) => {
-  const prepared = useBriefs()
-  return () => {
-    const job = currentJob(prepared.briefs.jobs(), item(), pinned?.())
-    return job?.state.state === "ready" && briefComplete(job.state.result, item()) ? job : undefined
-  }
+export const useCompleteJob = (item: () => DeskItem, pinned?: () => string | undefined, jobs?: () => BriefJob[]) => {
+  const prepared = jobs ? undefined : useBriefs()
+  return () => completeBriefJob(jobs?.() ?? prepared!.briefs.jobs(), item(), pinned?.())
 }
 
 /** The app-wide prepared brief for one item, as Home and the desk show it. */
-export const PreparedBrief = (props: { item: DeskItem; live: boolean; part?: Part; pinned?: string }) => {
+export const PreparedBrief = (props: { item: DeskItem; live: boolean; part?: Part; pinned?: string; jobs?: () => BriefJob[]; host?: string }) => {
   // A review item's artifact is its own explanation: no brief panel, prepare control or brief reads (attention ATTN-15).
   if (props.item.kind === "review") return null
-  const prepared = useBriefs()
-  prepared.view()
-  const briefs = prepared.briefs
-  return <BriefPanel item={props.item} live={props.live} auto={prepared.auto()} part={props.part} pinned={props.pinned}
-    jobs={briefs.jobs().filter(job => job.meta.source === props.item.key)}
-    canStart={(!prepared.auto() || prepared.anchor.ready()) && !briefs.pending() && !briefs.preparing() && !prepared.unavailable()} unavailable={prepared.unavailable() || prepared.anchor.error() || undefined} unavailableDetail={prepared.anchor.detail()}
-    confirming={briefs.jobs().some(job => job.state.state === "starting")}
-    start={() => void briefs.start(props.item)} confirm={() => void briefs.confirm()}
-    regenerate={() => void briefs.regenerate(props.item)} regenerating={briefs.regenerating()} />
+  const prepared = props.jobs ? undefined : useBriefs()
+  prepared?.view()
+  if (props.jobs) return <Show when={completeBriefJob(props.jobs(), props.item, props.pinned)}><BriefPanel item={props.item} live={false} part={props.part} pinned={props.pinned} jobs={props.jobs()}
+    canStart={false} confirming={false} start={() => undefined} confirm={() => undefined} host={props.host} /></Show>
+  return <BriefPanel item={props.item} live={props.live} auto={prepared!.auto()} part={props.part} pinned={props.pinned}
+    jobs={prepared!.briefs.jobs().filter(job => job.meta.source === props.item.key)}
+    canStart={(!prepared!.auto() || prepared!.anchor.ready()) && !prepared!.briefs.pending() && !prepared!.briefs.preparing() && !prepared!.unavailable()} unavailable={prepared!.unavailable() || prepared!.anchor.error() || undefined} unavailableDetail={prepared!.anchor.detail()}
+    confirming={prepared!.briefs.jobs().some(job => job.state.state === "starting")}
+    start={() => void prepared!.briefs.start(props.item)} confirm={() => void prepared!.briefs.confirm()}
+    regenerate={() => void prepared!.briefs.regenerate(props.item)} regenerating={prepared!.briefs.regenerating()} />
 }

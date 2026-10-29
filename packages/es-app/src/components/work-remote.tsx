@@ -5,10 +5,13 @@ import { createResource, Match, Show, Switch } from "solid-js"
 import type { PermissionRequest } from "@opencode-ai/sdk/v2"
 import { A } from "@solidjs/router"
 import { createAttention } from "../attention"
+import { attentionItem, briefCopy, briefSends } from "../desk"
+import { briefAnchorID, createBriefs, type DeskPointer } from "../desk-session"
 import { hostCore, hostPrefix, hostSurfaceAddress, readHostDecision, readHostRequest } from "../host-items"
 import { ago } from "../state"
 import type { WorkEntry } from "../work-queue"
 import { AttentionDecision } from "./attention-decision"
+import { PreparedBrief, useCompleteBrief, useCompleteJob } from "./attention-brief"
 import { HomePermission } from "./home-permission"
 import { HostGlyph } from "./icons"
 
@@ -38,11 +41,32 @@ const RemoteDecision = (props: { host: string; record: NonNullable<Extract<WorkE
     return body && typeof body === "object" && "record" in body ? (body as { record: typeof record }).record : body as typeof record | undefined
   })
   const current = () => attention.snapshot()?.value.records.find(record => record.id === props.record.id) ?? fresh() ?? props.record
+  const [anchors] = createResource(() => props.host, async host => {
+    const response = await fetch(`${hostPrefix(host)}/es/api/editspaces`, { credentials: "include" })
+    if (!response.ok) throw new Error(`Could not read ${host}'s projects (HTTP ${response.status})`)
+    const body = await response.json() as { editspaces: { root: string }[] }
+    return Promise.all(body.editspaces.map(async project => ({ session: await briefAnchorID(project.root), directory: project.root })))
+  })
   return <Show when={!fresh.error || attention.snapshot()} fallback={<p class="desk-surface-state" role="alert">{String(fresh.error?.message ?? fresh.error)}</p>}>
     <Show when={fresh.loading || fresh() !== undefined || attention.snapshot()} fallback={<p class="desk-surface-state">This decision is no longer on that host.</p>}>
-      <AttentionDecision record={current()} attention={attention} remote />
+      <Show when={anchors()} fallback={<AttentionDecision record={current()} attention={attention} remote />}>{pointers =>
+        <RemotePreparedDecision host={props.host} record={current} attention={attention} anchors={pointers()} />}</Show>
     </Show>
   </Show>
+}
+
+const RemotePreparedDecision = (props: { host: string; record: () => NonNullable<Extract<WorkEntry["remote"], { kind: "attention" }>>["record"]; attention: ReturnType<typeof createAttention>; anchors: DeskPointer[] }) => {
+  // This reader has no anchor creation, pending local job or start path. Every request uses the owning host's Core.
+  const briefs = createBriefs(() => undefined, () => undefined, undefined, () => props.anchors, { client: hostCore(props.host), readOnly: true })
+  const item = () => attentionItem(props.record(), 0)
+  const job = useCompleteJob(item, undefined, briefs.jobs)
+  const brief = useCompleteBrief(item, undefined, briefs.jobs)
+  const sends = () => { const value = brief(); return value ? { text: briefSends(value, item()), to: value.sendsTo, as: value.sendsAs } : undefined }
+  const copy = () => { const value = brief(); return value ? briefCopy(value, item()) : undefined }
+  const part = (slot: "lead" | "visual" | "after" | "details") => <PreparedBrief item={item()} live={false} part={slot} jobs={briefs.jobs} host={props.host} />
+  return <AttentionDecision record={props.record()} attention={props.attention} remote prepared={brief()}
+    briefJob={job() ? { job: job()!.id, revision: job()!.meta.revision } : undefined} sends={sends()} copy={copy()}
+    brief={part("lead")} briefVisual={part("visual")} briefAfter={part("after")} briefDetails={part("details")} />
 }
 
 // A pending request, validated against that host's Core before any control is offered; gone means its outcome is unknown.

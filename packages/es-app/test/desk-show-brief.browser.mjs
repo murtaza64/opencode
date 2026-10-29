@@ -8,13 +8,11 @@ import { directory } from "./composer-fixture.mjs"
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const now = Date.now()
 const result = {
-  ask: "Ship the homepage as decisions-only now, or keep today's layout for a later pass?",
-  whyNow: "The homepage change is paused until you pick a scope.",
-  whyYou: "", ifWait: "The homepage keeps today's mixed layout.", unknown: "", sources: [],
-  choices: [{ id: "small", outcome: "The homepage lists only what needs you.", chips: [], risk: "" }, { id: "defer", outcome: "Nothing changes this week.", chips: [], risk: "" }],
-  summary: "",
-  visual: { title: "Homepage after each option", html: `<div style="height:260px">Small scope · Defer</div>` },
-  flow: [], facts: [], timeline: [], gaps: [],
+  question: "Ship the homepage as decisions-only now, or keep today's layout for a later pass?",
+  context: "The homepage change is paused until you pick a scope.",
+  ifWait: "The homepage keeps today's mixed layout.", sources: [],
+  choices: [{ id: "small", outcome: "The homepage lists only what needs you." }, { id: "defer", outcome: "Nothing changes this week." }],
+  subjects: [], commands: [], steps: [], items: [], sends: "", sendsTo: "", sendsAs: "", copy: [], facts: [], timeline: [], gaps: [],
 }
 const briefs = [
   { id: "ses_brief_scope", source: "attention:fixture:decision_1", revision: "1", title: "Choose the bounded implementation scope", ready: true },
@@ -35,7 +33,7 @@ const preview = await startAttentionPreview([{
     server.middlewares.use("/oc/session", (req, res, next) => {
       const [, id, tail] = new URL(req.url, "http://fixture").pathname.split("/")
       if (id?.startsWith("ses_fdbrief_") && !tail) return send(res, session(id, { title: "Front desk briefs", time: { created: now, updated: now, archived: now } }))
-      if (id?.startsWith("ses_fdbrief_") && tail === "children") return send(res, briefs.map(brief => session(brief.id, { parentID: id, title: `Brief: ${brief.title}`, metadata: { frontDesk: { kind: "brief", requestID: brief.id, source: brief.source, revision: brief.revision, title: brief.title, refs: [] , contract: 2 } } })))
+      if (id?.startsWith("ses_fdbrief_") && tail === "children") return send(res, briefs.map(brief => session(brief.id, { parentID: id, title: `Brief: ${brief.title}`, metadata: { frontDesk: { kind: "brief", requestID: brief.id, source: brief.source, revision: brief.revision, title: brief.title, refs: [], contract: 4 } } })))
       const brief = briefs.find(item => item.id === id)
       if (brief && tail === "message") return send(res, [message("msg_brief_user", brief.id, "user", "Explain this request."), message("msg_brief_reply", brief.id, "assistant", JSON.stringify(result))])
       next()
@@ -67,7 +65,7 @@ const openSources = async () => { if (!await show.isVisible()) await queue.locat
 // The brief's heading line sits inside the visible part of the evidence pane and holds focus.
 const expectRevealed = async () => {
   await expect(brief).toBeFocused()
-  await expect(brief).toContainText("Ship the homepage as decisions-only now")
+  await expect(evidence.locator("h3.home-question")).toContainText("Ship the homepage as decisions-only now")
   await expect.poll(() => brief.evaluate((el) => {
     const pane = el.closest(".desk-evidence, .desk-grid").getBoundingClientRect()
     const box = el.getBoundingClientRect()

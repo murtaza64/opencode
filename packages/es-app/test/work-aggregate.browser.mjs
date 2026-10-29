@@ -3,6 +3,7 @@
 // a link Surface on the Mini says it is served there only; when the Mini stops answering, its entries stay last-known
 // and counts read "N+". Also 390px RTL. Disposable fixture. Run from packages/es-app: node test/work-aggregate.browser.mjs
 import { createRequire } from "node:module"
+import { createHash } from "node:crypto"
 import { startAttentionPreview } from "./attention-preview.mjs"
 
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
@@ -21,7 +22,10 @@ const errors = []
 page.on("pageerror", (error) => errors.push(error.message))
 const miniOrigin = "http://127.0.0.1:65031"
 const miniDir = "/Users/mini/fixture"
+const miniRoot = `${miniDir}/.editspace`
+const miniAnchor = `ses_fdbrief_${createHash("sha256").update(miniRoot).digest("hex").slice(0, 20)}`
 let miniDown = false
+let miniBrief = true
 const now = Date.now()
 // Same record ID as the local fixture decision ("decision_1"): two entries, one per host.
 const miniDecision = { id: "decision_1", editspace: "fixture", revision: 2, status: "open", kind: "decision", title: "Rotate the Mini certs?", context: "The Mini's TLS certs expire Friday.",
@@ -34,6 +38,8 @@ const surfaces = [
   { id: "srf_url", title: "Mini live board", summary: null, kind: "url", owner: "relay", lane: null, editspace: "fixture", updated_at: now - 9_000, revision: 1, health: { state: "ok" } },
 ]
 const miniWrites = []
+const localCreates = []
+page.on("request", request => { if (request.method() === "POST" && new URL(request.url()).pathname === "/oc/session") localCreates.push(request.url()) })
 await page.route(url => { const u = new URL(url); return u.origin !== preview.origin && u.origin !== miniOrigin }, route => route.abort())
 await page.route("**/__es/host", route => route.fulfill({ json: { id: "local", label: "Local", remote: false, hosts: [], work: [
   { id: "local", label: "Local", origin: preview.fixture.url }, { id: "mini", label: "Mac Mini", origin: miniOrigin }] } }))
@@ -47,7 +53,20 @@ await page.route("**/hosts/mini/**", async route => {
   if (method !== "GET") miniWrites.push(`${method} ${url.pathname}`)
   const path = url.pathname.replace(/^\/hosts\/mini/, "")
   if (path === "/oc/experimental/session") return route.fulfill({ json: [{ id: "ses_m", title: "Mini worker", directory: miniDir, time: { created: 1, updated: now } }] })
-  if (path === "/es/api/editspaces") return route.fulfill({ json: { editspaces: [{ name: "fixture", root: `${miniDir}/.editspace` }], default: "fixture" } })
+   if (path === "/es/api/editspaces") return route.fulfill({ json: { editspaces: [{ name: "fixture", root: miniRoot }], default: "fixture" } })
+   if (path === `/oc/session/${miniAnchor}` && !miniBrief) return route.fulfill({ status: 404, json: { error: "not found" } })
+   if (path === `/oc/session/${miniAnchor}`) return route.fulfill({ json: { id: miniAnchor, directory: miniRoot } })
+   if (path === `/oc/session/${miniAnchor}/children` && !miniBrief) return route.fulfill({ status: 404, json: { error: "not found" } })
+   if (path === `/oc/session/${miniAnchor}/children`) return route.fulfill({ json: [{ id: "ses_fdjob_mini", directory: miniRoot, time: { created: now - 10_000 }, metadata: { frontDesk: {
+     kind: "brief", requestID: "mini-brief", source: "attention:fixture:decision_1", revision: "2", title: miniDecision.title, refs: [{ id: "C1", label: "canonical" }], contract: 4,
+   } } }] })
+   if (path === "/oc/session/status") return route.fulfill({ json: {} })
+   if (path === "/oc/session/ses_fdjob_mini/message") return route.fulfill({ json: [
+     { info: { id: "msg_mini_user", sessionID: "ses_fdjob_mini", role: "user", time: { created: now - 9000 } }, parts: [{ type: "text", text: "Prepare" }] },
+     { info: { id: "msg_mini_reply", sessionID: "ses_fdjob_mini", role: "assistant", time: { created: now - 8000, completed: now - 7000 } }, parts: [{ type: "text", text: JSON.stringify({ question: "Rotate the Mini certificates before Friday?", choices: [
+       { id: "now", outcome: "Rotate certificates now" }, { id: "later", outcome: "Wait until next week" },
+     ] }) }] },
+   ] })
   if (path === "/es/api/attention" && method === "GET") return route.fulfill({ json: { records: [miniDecision], projects: [{ editspace: "fixture", available: true }], partial: false, limit: 200,
     inputs: { schema: "needs-you-inputs/1", boot: "b", rev: 1, requests: [request], failures: [], ignores: [], deliverables: [],
       sources: { requests: { checked_at: now, ok: true }, failures: { checked_at: now, ok: true }, ignores: { checked_at: now, ok: true }, deliverables: { checked_at: now, ok: true } } } } })
@@ -82,8 +101,19 @@ try {
   await expect(detail).toHaveAttribute("data-work-key", "mini~attention:fixture:decision_1")
   await expect(detail.locator(".work-remote-host")).toContainText("on Mac Mini")
   await expect(detail.getByText("The Mini's TLS certs expire Friday.")).toBeVisible()
-  await expect(detail.locator(".attention-routing")).toHaveCount(0)
-  await expect(miniRow).toHaveAttribute("aria-current", "page")
+   await expect(detail.locator("h3.home-question")).toHaveText("Rotate the Mini certificates before Friday?")
+   expect(miniWrites).toEqual([])
+   expect(localCreates).toEqual([])
+   await expect(detail.locator(".attention-routing")).toHaveCount(0)
+   await expect(miniRow).toHaveAttribute("aria-current", "page")
+   // Missing anchor means no brief: the raw decision remains, without any preparation control.
+   miniBrief = false
+   await page.reload({ waitUntil: "domcontentloaded" })
+   await expect(detail.getByText("The Mini's TLS certs expire Friday.")).toBeVisible()
+   await expect(detail.locator("h3.home-question")).toHaveCount(0)
+   await expect(detail.getByRole("button", { name: /Prepare brief|Prepare again|Confirm start|Regenerate brief/ })).toHaveCount(0)
+   expect(miniWrites).toEqual([])
+   expect(localCreates).toEqual([])
   await detail.getByRole("radio", { name: "Rotate now" }).check()
   await detail.getByRole("button", { name: "Send Rotate now" }).click()
   await expect.poll(() => miniWrites.filter(write => write.endsWith(`/${miniDecision.id}/commands`)).length).toBe(1)

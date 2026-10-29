@@ -9,7 +9,7 @@ import { oc, SessionCreateError, type ContextPart, type MessageWithParts } from 
 import { clearBackend, describeFailure, isTransient, reportBackend } from "./backend-status"
 import { assistantOps, handled, emptyMemory, eraseMemory, nextMemory, type MemoryDocument, type MemoryOp } from "./desk-memory"
 import type { AttentionRecord } from "./attention"
-import { BRIEF_CONTRACT, BRIEF_SCHEMA, BRIEF_SYSTEM, type ConversationDocument, type ConversationThread, briefPacket, briefState, deskContext, type BriefMeta, type BriefState, type DeskItem, SOURCE_TAIL } from "./desk"
+import { BRIEF_CONTRACT, BRIEF_SCHEMA, BRIEF_SYSTEM, type ConversationDocument, type ConversationThread, briefComplete, briefPacket, briefState, deskContext, type BriefMeta, type BriefState, type DeskItem, SOURCE_TAIL } from "./desk"
 
 const POINTER = "es-app:front-desk:1"
 const NOTE = "es-app:front-desk:context:1"
@@ -202,6 +202,11 @@ export const currentJob = (jobs: BriefJob[], item: DeskItem, pinned?: string) =>
   if (!newest || newest.state.state === "ready" || newest.state.state === "failed") return newest
   return attempts.find(job => job.state.state === "ready") ?? newest
 }
+/** Only a ready brief that covers the canonical request may replace its text. */
+export const completeBriefJob = (jobs: BriefJob[], item: DeskItem, pinned?: string) => {
+  const job = currentJob(jobs, item, pinned)
+  return job?.state.state === "ready" && briefComplete(job.state.result, item) ? job : undefined
+}
 /** A newer attempt than the brief shown is still being prepared (after Regenerate). */
 export const regeneratingJob = (jobs: BriefJob[], item: DeskItem) => {
   const shown = currentJob(jobs, item)
@@ -248,14 +253,15 @@ export const BRIEF_PERMISSION = [
 /** `others`: the brief anchors of the host's other projects. A client prepares under the anchor of the project
  * in view, so a record's brief may sit under any of them; jobs are matched by their source, wherever they are. */
 export const createBriefs = (desk: () => DeskPointer | undefined, current: (key: string) => DeskItem | undefined, ensure?: () => Promise<unknown>,
-  others: () => DeskPointer[] = () => []) => {
+  others: () => DeskPointer[] = () => [], options: { client?: Pick<typeof oc, "children" | "status" | "messagesTail">; readOnly?: boolean } = {}) => {
+  const client = options.client ?? oc
   const [jobs, setJobs] = createSignal<BriefJob[]>([])
   const [error, setError] = createSignal("")
   // The underlying cause of a non-actionable read error: kept for diagnostics, not shown as a banner.
   const [detail, setDetail] = createSignal("")
   // A create whose response was lost. It keeps its client-chosen session ID, so confirming it
   // re-sends the identical request and Core returns the same session instead of a second one.
-  const [pending, setPending] = createSignal(readJSON<PendingCreate>(PENDING, value => typeof value?.id === "string" && typeof value?.body?.id === "string"))
+  const [pending, setPending] = createSignal(options.readOnly ? undefined : readJSON<PendingCreate>(PENDING, value => typeof value?.id === "string" && typeof value?.body?.id === "string"))
   const savePending = (value?: PendingCreate) => {
     if (value) localStorage.setItem(PENDING, JSON.stringify(value))
     else localStorage.removeItem(PENDING)
@@ -283,8 +289,8 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
     if (!target && !elsewhere.length) return setJobs(local())
     const current = ++generation
     try {
-      const [children, status, ...extra] = await Promise.all([target ? oc.children(target.session, target.directory) : [], target ? oc.status(target.directory) : ({} as Awaited<ReturnType<typeof oc.status>>),
-        ...elsewhere.map(other => Promise.all([oc.children(other.session, other.directory), oc.status(other.directory)])
+      const [children, status, ...extra] = await Promise.all([target ? client.children(target.session, target.directory) : [], target ? client.status(target.directory) : ({} as Awaited<ReturnType<typeof oc.status>>),
+        ...elsewhere.map(other => Promise.all([client.children(other.session, other.directory), client.status(other.directory)])
           .catch(cause => { if (String(cause).includes("404")) absent.set(other.session, Date.now() + 300_000); return undefined }))])
       const statuses = Object.assign({}, ...extra.flatMap(value => value ? [value[1]] : []), status) as typeof status
       const seen = new Set<string>()
@@ -292,7 +298,7 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
         .flatMap(child => { const meta = metaOf(child); return meta ? [{ child, meta }] : [] })
       const live = (id: string) => ["busy", "retry"].includes(statuses[id]?.type ?? "")
       const stale = briefs.filter(({ child }) => explicit || !settled.has(child.id) || live(child.id) || child.id === inflight())
-      const read = await limited(stale, 4, ({ child, meta }) => oc.messagesTail(child.id, child.directory, 4).then((messages): BriefJob => ({
+      const read = await limited(stale, 4, ({ child, meta }) => client.messagesTail(child.id, child.directory, 4).then((messages): BriefJob => ({
         id: child.id, directory: child.directory, meta, created: child.time.created,
         state: briefState(meta, messages, statuses[child.id]?.type),
       })))
@@ -308,10 +314,10 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
       setJobs([...found, ...local()].sort((a, b) => b.created - a.created))
       if (target) setSynced(target.session)
       setError("")
-      clearBackend("Brief checks")
+      if (!options.readOnly) clearBackend("Brief checks")
     } catch (cause) {
       // Last-known brief states stay; a persisting failure also reaches the shared status.
-      if (current === generation) { setError("Briefs could not be refreshed; showing the last known."); setDetail(String(cause)); reportBackend("Brief checks", cause) }
+      if (current === generation) { setError("Briefs could not be refreshed; showing the last known."); setDetail(String(cause)); if (!options.readOnly) reportBackend("Brief checks", cause) }
     }
   }
   // Read as soon as the parent is known, not at the next poll.
@@ -361,6 +367,7 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
   const reusable = (item: DeskItem) => jobs().find(job => job.meta.source === item.key && job.meta.revision === item.revision && (job.meta.contract ?? 1) === BRIEF_CONTRACT && job.state.state !== "failed" && job.state.state !== "unknown")
   /** One read-only pass per exact source revision. An existing check for it is reused, not rerun. */
   const start = async (item: DeskItem) => {
+    if (options.readOnly) return
     // A series question gets no brief of its own: one model call per question would fan out (attention S7).
     if (item.series || item.record?.series) return
     // A review item's artifact is its own explanation: no model call (attention ATTN-15).
@@ -417,6 +424,7 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
   }
   /** Human-confirmed retry of an unconfirmed create: the identical request, never a new session. */
   const confirm = async () => {
+    if (options.readOnly) return
     const value = pending()
     if (value) await admit(value)
   }
@@ -424,6 +432,7 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
    * the phone uses). The previous brief stays shown until the new one is ready. */
   const [regenerating, setRegenerating] = createSignal(false)
   const regenerate = async (item: DeskItem) => {
+    if (options.readOnly) return
     if (!item.record || item.kind === "review" || regenerating()) return
     setRegenerating(true)
     try {
