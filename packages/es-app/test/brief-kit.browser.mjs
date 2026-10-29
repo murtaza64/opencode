@@ -53,6 +53,18 @@ const CASES = {
       context: ["Three decisions.", "N1. Table prefix? Recommended: es_.", "N2. Column case? Recommended: snake_case.", "N3. Index suffix? Recommended: _idx."].join("\n") },
     brief: { question: "Approve the three naming choices?", choices: [{ id: "accept", outcome: "All three recommendations apply" }, { id: "change", outcome: "You name what changes" }],
       items: [["N1", "Table prefix?", "es_"], ["N2", "Column case?", "snake_case"], ["N3", "Index suffix?", "_idx"]].map(([id, question, recommended]) => ({ id, question, recommended, alternatives: [], refs: ["C1"] })) } },
+  // Two posts the human makes themselves (Gleaner case shape, synthetic): copy anchors into the request, never re-typed;
+  // both posts end with the same line. The copy blocks themselves are drawn by the decision view (attention-decision).
+  posts: { record: { ...base, id: "posts", gate_key: "posts", title: "Please post these two announcements in #platform-changes",
+      context: ["Please post these two announcements in #platform-changes. Drafts: https://example.com/posts.html", "", "===== Post 1 =====", "## Post 1", "",
+        ":spring: *Spring Boot 3 upgrade* lands Monday.", "", "Pilot PRs: https://github.com/o/r/pull/1 and https://github.com/o/r/pull/2", "Run `make upgrade` locally first.", "", "Do I need to do anything? No. This is a one-time upgrade.", "",
+        "===== Post 2 =====", "## Post 2", "", ":package: *Protobuf 4* follows on Wednesday.", "", "Notes: https://example.com/protobuf", "", "Do I need to do anything? No. This is a one-time upgrade."].join("\n"),
+      options: [{ id: "posted-both", label: "Posted both" }, { id: "posted-sb3", label: "Posted Spring Boot only" }, { id: "hold", label: "Hold" }], recommendation: "posted-both" },
+    brief: { question: "Post the two announcements in #platform-changes, then record which you posted.",
+      choices: [{ id: "posted-both", outcome: "Records that you posted both" }, { id: "posted-sb3", outcome: "Records that you posted Spring Boot only" }, { id: "hold", outcome: "Nothing is recorded as posted" }],
+      subjects: [{ name: "Announcement drafts", refs: ["U1"] }],
+      copy: [{ label: "Spring Boot 3", to: "#platform-changes", start: ":spring: *Spring Boot 3 upgrade*", end: "No. This is a one-time upgrade." },
+        { label: "Protobuf 4", to: "#platform-changes", start: ":package: *Protobuf 4*", end: "No. This is a one-time upgrade." }] } },
   // A sequence whose request scopes approval to its first two steps (feedback M1).
   sequence: { record: { ...base, id: "sequence", gate_key: "sequence", title: "Migrate the ledger?", context: "Step 1 copies, step 2 verifies; switching reads and dropping the old table come later.", options: two, recommendation: "go" },
     brief: { question: "Copy and verify the ledger now?", choices: [{ id: "go", outcome: "Copied and verified today" }, { id: "wait", outcome: "Nothing moves this week" }],
@@ -136,6 +148,9 @@ const check = async (page, card, name) => card.evaluate((element, [name, missing
       const heads = [...table.querySelectorAll("thead th")].slice(1).map(th => th.querySelector("bdi"))
       return [...table.querySelectorAll("tbody tr")].every(row => [...row.querySelectorAll("td bdi")].every((cell, index) => Math.abs(edge(cell) - edge(heads[index])) <= 2))
     }),
+    // A human-action ask stays imperative, the drafts link is the first subject, and nothing reads as the system posting.
+    "copy ask imperative, drafts first": name !== "posts" || question?.textContent.trim() === "Post the two announcements in #platform-changes, then record which you posted."
+      && /Announcement drafts/.test(element.querySelector(".desk-subjects li")?.textContent ?? "") && !/Would post|Will you/.test(text),
     "4 items lossless": name !== "items" || JSON.stringify(rows) === JSON.stringify(["D1", "D2", "D3", "D4", "D5", "D6", "D7"]),
     "4 missing shown": name !== "items" && name !== "steps" || text.includes(missing),
     "5 gaps kept": name !== "single" || element.innerHTML.includes("Cost at full traffic is not measured."),

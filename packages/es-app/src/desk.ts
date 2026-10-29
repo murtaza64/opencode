@@ -199,6 +199,9 @@ export type BriefResult = {
   /** Where `sends` goes and who is in that conversation; who it is posted as. Both as the evidence states. */
   sendsTo: string
   sendsAs: string
+  /** Text the human posts themselves, one entry per post: anchors into the request, never the model's own copy
+   * of the body. briefCopy extracts the exact source text between them. */
+  copy: { label: string; to: string; start: string; end: string }[]
   /** At most one picture: a shape the app draws, or the model's own visual. */
   shape?: BriefShape
   sources: BriefSource[]
@@ -505,6 +508,9 @@ export const briefState = (meta: BriefMeta, messages: MessageWithParts[], status
           ? [{ label: text(row.label, 80), where: text(row.where, 80), option: typeof row.option === "string" ? row.option : "", command: row.command.trim() }] : []),
         steps: stepsOf(value.steps, known), items: itemsOf(value.items, known),
         ifWait: text(value.ifWait, 140), sends: typeof value.sends === "string" ? value.sends.trim() : "", sendsTo: text(value.sendsTo, 160), sendsAs: text(value.sendsAs, 60),
+        // Anchors keep their exact characters (no whitespace folding), since they must match the source.
+        copy: objects(value.copy).slice(0, 4).flatMap(row => typeof row.start === "string" && typeof row.end === "string" && row.start.trim() && row.end.trim() && text(row.label, 80)
+          ? [{ label: text(row.label, 80), to: text(row.to, 160), start: row.start.trim().slice(0, 200), end: row.end.trim().slice(0, 200) }] : []),
         ...shapeOf(value.shape), gaps: strings(value.gaps, 160, 3),
         // A source survives only with at least one ref the app can resolve; the label alone is never shown.
         sources: objects(value.sources).slice(0, 3).flatMap(row => {
@@ -555,12 +561,44 @@ export const briefComplete = (result: BriefResult, item: DeskItem) => {
   if (!options.every(option => result.choices.some(choice => choice.id === option.id))) return false
   // A step's page link shows the request's own URL too.
   const cited = new Set([...result.subjects, ...result.sources, ...result.steps.flatMap(step => step.where ? [step.where] : [])].flatMap(row => row.refs))
-  return requestLinks(item).every((_, index) => cited.has(`U${index + 1}`))
+  // A link inside a post the human copies is shown there in full, so it needs no subject row of its own.
+  const copied = briefCopy(result, item).blocks.map(block => block.text)
+  return requestLinks(item).every((url, index) => cited.has(`U${index + 1}`) || copied.some(text => text.includes(url)))
 }
 
 /** The text a decision would publish, shown only when it is quoted verbatim from the request itself. */
 export const briefSends = (result: BriefResult, item: DeskItem, documents: ConversationDocument[] = []) =>
   result.sends && [item.record?.context ?? "", ...documents.map(document => document.text)].some(source => source.includes(result.sends)) ? result.sends : ""
+
+/** Copy blocks a brief may show, in the request's order. Each is the exact request (C1) text from its `start`
+ * anchor through its `end` anchor, so line breaks, blank lines and Slack markup come from the source, never from
+ * the model. `start` must occur exactly once; `end` is its first occurrence after `start` and before the next
+ * block's start, so posts with an identical last line each keep their own. Only separator and heading lines at a
+ * block's edges stay out of the clipboard text. `quoteFailed` means a block or the `sends` text could not be quoted
+ * exactly: the card then says so and shows the original request unfolded, rather than silently dropping text. */
+export const briefCopy = (result: BriefResult, item: DeskItem, documents: ConversationDocument[] = []) => {
+  const source = item.record?.context ?? ""
+  const starts = result.copy.map(entry => {
+    const at = source.indexOf(entry.start)
+    return at >= 0 && source.indexOf(entry.start, at + 1) < 0 ? at : -1
+  })
+  const ordered = result.copy.map((entry, index) => ({ entry, from: starts[index]! })).filter(row => row.from >= 0).sort((a, b) => a.from - b.from)
+  const blocks = ordered.flatMap((row, index) => {
+    // Two blocks starting at the same place overlap: neither is shown.
+    if (ordered.some((other, at) => at !== index && other.from === row.from)) return []
+    const limit = ordered.find(other => other.from > row.from)?.from ?? source.length
+    const to = source.indexOf(row.entry.end, row.from)
+    if (to < 0 || to + row.entry.end.length > limit) return []
+    const lines = source.slice(row.from, Math.max(to + row.entry.end.length, row.from + row.entry.start.length)).split("\n")
+    while (lines.length && PRESENTATION.test(lines[0]!)) lines.shift()
+    while (lines.length && PRESENTATION.test(lines.at(-1)!)) lines.pop()
+    return lines.length ? [{ label: row.entry.label, to: row.entry.to, text: lines.join("\n") }] : []
+  })
+  return { blocks, quoteFailed: blocks.length < result.copy.length || (!!result.sends && !briefSends(result, item, documents)) }
+}
+
+// Lines that frame a post in the request but are not part of what gets posted.
+const PRESENTATION = /^\s*$|^=+.*=+\s*$|^#{1,6} Post \d+\s*$|^```/
 
 /** Commands a brief may show: each must appear character for character in the request or a named document,
  * so a paraphrased, shortened or invented command is never offered for copying. */

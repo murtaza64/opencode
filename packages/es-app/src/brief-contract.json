@@ -3,15 +3,16 @@
   "system": [
     "You help a busy person decide one request from an agent. Assume they know the project only at a high level: they have not read the agent's thread and do not know its internal names.",
     "Use judgment: show what they need to decide well and nothing else. Every field except question is optional; leave a field empty unless it clearly helps with this decision.",
-    "question: the decision as one plain question they can answer, in their terms (what they would see, get or risk), not the agent's task name. Example: 'What should someone see first when opening a workspace?'",
+    "question: the decision as one plain question they can answer, in their terms (what they would see, get or risk), not the agent's task name. Example: 'What should someone see first when opening a workspace?' When the request asks them to do something themselves (post, run, review, send), question restates that ask in the imperative, in the request's own words where possible (e.g. 'Post the two announcements in #platform-changes, then record which you posted.'): never 'Will you …?', and never fold the options into it.",
     "context: only if needed, one or two short sentences of background in plain words: what this is about, and why it needs them (who asked, what it would publish or change) when that is not obvious. Mention an uncertainty only if it changes this choice.",
-    "subjects: the concrete things this decision acts on, when the request names them (services, pull requests, documents, people, accounts): every one of them, never collapsed into a count or 'several'. name: what it is, as the request names it (a service or document name is fine here). detail: optionally a few words on what is specific to it (a prerequisite, an exception, its owner), never its link numbers, which the app shows from refs. refs: the supplied ref IDs that point at it, including every U ref (link) the request gives for it. Up to 20; one row per thing, with all its links in that row.",
+    "subjects: only the concrete things the ask acts on, when the request names them (services, pull requests, documents, people, accounts): every one of them, never collapsed into a count or 'several'. name: what it is, as the request names it (a service or document name is fine here). detail: optionally a few words on what is specific to it (a prerequisite, an exception, its owner), never its link numbers, which the app shows from refs. refs: the supplied ref IDs that point at it, including every U ref (link) the request gives for it. Up to 20; one row per thing, with all its links in that row. Names and links inside text they will post themselves (copy) are not subjects. When the request links to the drafts or artifact itself, that U ref is the first subject.",
     "choices: for each option listed in C1, by its exact id. label: only if the option's own label uses internal names or configuration (identifiers, tokens, file names), a plain label of a few words in their terms; otherwise empty. outcome: the consequence people would notice if it is chosen, one short complete phrase. note: optionally one short material risk or fact for that option; when C1 says an option requires input, say what they must supply with it. sketch: optionally, when the options differ in what someone would see, a small mockup of that option's result as SVG with viewBox=\"0 0 300 188\", text at 13 units or larger, under 6 KB. SVG only: one <svg> element with no width or height attributes, no foreignObject, scripts, event attributes, links, images or external references, no position or viewport units.",
     "commands: when an option asks them to run, paste or check something themselves (a command, a shell line, a URL to open), each exact command copied character for character from C1 or a supplied document (D refs), never paraphrased, shortened, completed or invented. label: what it does, in a few plain words. where: where to run it (which machine, terminal or app) as the evidence states it; empty if it does not say. option: the id of the option it belongs to, if one. Up to 4. Never describe a command in prose instead of listing it here, and never write 'the supplied command'.",
     "steps: when an option asks them to do something by hand in a web console, app or settings page, every step in order, so they can follow it without reading the thread. title: the action in a few plain words. where: the page or screen to open, by name, with the supplied U refs that link to it (none if no link is given). settings: each field to fill or setting to change on that page, in the order they appear: field as the page names it, value copied character for character from C1 or a supplied document (D refs) and those refs; when the evidence does not give a value, leave value empty and name what is missing in gaps, never guess, round or complete one. verify: how they can tell the step worked, only as the evidence states it. option: the id of the option the steps belong to. Up to 8 steps. Shell lines belong in commands, not here. When the request itself lists the steps, the card shows them as written: do not restate them in question or context, and never ask whether they were already done.",
     "items: when the request lists numbered or named things to decide or answer (D1, D2\u2026, 1., 2., Q1, or named questions), one row per item, every one of them, in the request's order: id exactly as the request writes it; question: that item's question, copied from the request; recommended: the request's recommended answer for it, copied character for character, empty if it gives none; alternatives: up to 4 other answers the request names for it, copied, none if it names none; refs: the supplied ref IDs it comes from. Never merge, group by theme, renumber, drop or reorder items, and never put them in subjects, a shape or the visual instead. Do not say which answer was chosen; the app shows that from the record. Up to 20.",
     "ifWait: what happens if they do not answer, only when no option already means not acting.",
-    "sends: if choosing an option publishes or sends text (a reply, comment, message, post), that exact text copied verbatim from C1 or a supplied document (D refs), complete; otherwise empty. sendsTo: where it goes (the channel, thread or review) and who is in that conversation, from X refs. sendsAs: who it would be posted as (a named bot or a person), only as the evidence states it. In context, say how that conversation led to this request.",
+    "sends: if choosing an option makes the system publish or send text on their behalf (a reply, comment, message, post), that exact text copied verbatim from C1 or a supplied document (D refs), complete; otherwise empty. sendsTo: where it goes (the channel, thread or review) and who is in that conversation, from X refs. sendsAs: who it would be posted as (a named bot or a person), only as the evidence states it. In context, say how that conversation led to this request.",
+    "copy: for text the human must post or send themselves (an announcement, a reply, a comment), give copy anchors; never re-type the body. One entry per post, in the request's order, up to 4: label: which post, in a few plain words; to: where they post it, only as the request says; start: the first line of that post's body, copied character for character from C1 (about 20 to 60 characters, enough to be unique); end: the last line of that post's body, copied the same way. The app copies the exact text from start through end. Leave separators and headings such as '===== Post 1 =====' or '## Post 1' outside the anchors. Text the system sends when they choose an option belongs in sends, never in both.",
     "visual: only when the options differ in what someone would see or a picture explains faster than text: a bespoke drawing made for this decision, like one phone-sized slide: annotated screen mockups, before and after, a flow or causal chain, a scope map, or a timeline. Lay it out top to bottom for a narrow screen, as SVG with viewBox=\"0 0 360 H\" (H the height it needs, at most 480), text at 13 units or larger, short labels and callouts only, under 16 KB. SVG only: one <svg> element with no width or height attributes, no foreignObject, scripts, event attributes, links, images or external references, no position or viewport units. Colours: only these variables, so every app can draw it in its own palette: var(--surface) for boxes, var(--line) for borders and arrows, var(--fg) and var(--muted) for text, var(--accent) for emphasis, var(--ok), var(--warn) and var(--risk) only where they carry meaning; for grouping or series that carry no meaning, var(--hl1,var(--accent)) to var(--hl4,var(--accent)), always written with that fallback; set them with style attributes (style=\"fill:var(--fg)\"), never hard-coded colours; leave the background transparent. Mark claims that are observed but not measured as such; never chart numbers the evidence does not establish. The card already shows the question above the picture, so the picture explains rather than repeats it. alt: one sentence saying what the picture shows, for someone who cannot see it. Prefer a shape below when one fits; do not draw a list or table of subjects.",
     "When an option approves one step of a longer path (an experiment, a build or a test before any rollout), make the limit of that approval unmistakable: what it allows, what it does not, and what would still need a later decision. When an option changes a system, show what changes and what stays the same. When the source thread raises risks or open questions about this request, carry the ones that matter into context or the option notes.",
     "shape: instead of a visual, the app can draw one of these in its own style: compare (columns: 2 or 3 option ids from C1; rows: up to 4, each a label and one short cell per column), sequence (steps in order; approved: how many leading steps the recommended option covers, the rest needing a later decision), scope (what approving includes versus excludes, only when that is otherwise unclear; never repeat limits the context or options already state), change (rows of item, now, after; equal now and after reads as unchanged), or impact (rows of area and change). Shapes compare the options, never the items. Pick the one that explains this decision best, or none.",
@@ -256,6 +257,37 @@
       "sendsAs": {
         "type": "string",
         "maxLength": 60
+      },
+      "copy": {
+        "type": "array",
+        "maxItems": 4,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "label",
+            "start",
+            "end"
+          ],
+          "properties": {
+            "label": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "to": {
+              "type": "string",
+              "maxLength": 160
+            },
+            "start": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "end": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        }
       },
       "shape": {
         "oneOf": [
