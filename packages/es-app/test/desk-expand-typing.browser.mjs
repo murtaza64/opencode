@@ -43,7 +43,12 @@ try {
   const trace = () => page.evaluate(() => window.__trace)
   // Keeps the current sample as the baseline, so a trace lists only changes after it.
   const reset = () => page.evaluate(() => { window.__trace = window.__trace.slice(-1) })
-  const settle = () => page.waitForTimeout(350)
+  // Waits until no CSS transition is running on the editor (a fixed wait raced with the 200 ms expand animation).
+  const settle = async () => {
+    await page.waitForTimeout(50)
+    await expect.poll(() => editor.evaluate(el => el.getAnimations().length), { timeout: 5_000 }).toBe(0)
+    await page.waitForTimeout(50)
+  }
   const lineHeight = await editor.evaluate(el => parseFloat(getComputedStyle(el).lineHeight) || 20)
   const instance = await editor.evaluate(el => { el.dataset.instance = "one"; return true })
 
@@ -90,6 +95,9 @@ try {
   const flips = rows.filter((row, index) => index && row.h < rows[index - 1].h).length
   if (flips) failures.push({ mode: "auto", step: "wrapping", note: "height went down while typing", heights: rows.map(row => row.h), expanded: rows.map(row => row.expanded) })
 
+  // Every auto height is a whole-line step from the one-line height: no partial (animated) heights.
+  const partial = rows.filter(row => Math.abs((row.h - oneLine) / lineHeight - Math.round((row.h - oneLine) / lineHeight)) > 0.15)
+  if (partial.length) failures.push({ mode: "auto", step: "wrapping", note: "partial heights between lines", heights: partial.map(row => row.h).slice(0, 12) })
   // Auto mode never enters expanded mode; growth stays within its own max-height.
   if (rows.some(row => row.expanded)) failures.push({ mode: "auto", step: "wrapping", note: "expanded on its own" })
   const max = await editor.evaluate(el => parseFloat(getComputedStyle(el).maxHeight))
@@ -103,6 +111,20 @@ try {
   const modeFlips = rows.filter((row, index) => index && row.expanded !== rows[index - 1].expanded).length
   if (modeFlips) failures.push({ mode: "auto", step: "typing after auto-expand", note: "expanded/collapsed flips", flips: modeFlips, heights: rows.map(row => row.h).slice(0, 40) })
 
+  // Typing back and forth across a wrap point steps between two line heights and nothing else.
+  await editor.fill("")
+  await editor.focus()
+  await settle()
+  const width = await editor.evaluate(el => el.clientWidth)
+  let typed = 0
+  while ((await editor.evaluate(el => Math.round(el.getBoundingClientRect().height))) === oneLine && typed < 400) { await page.keyboard.type("w"); typed++ }
+  await settle()
+  await reset()
+  for (let i = 0; i < 6; i++) { await page.keyboard.press("Backspace"); await page.keyboard.type("w") }
+  await settle()
+  rows = await trace()
+  const boundary = [...new Set(rows.map(row => row.h))]
+  if (boundary.some(h => h !== oneLine && Math.abs(h - oneLine - lineHeight) > 1.5)) failures.push({ mode: "auto", step: "wrap boundary", note: `heights other than one or two lines (width ${width})`, heights: boundary })
   // Deleting back to one line shrinks it to its starting height.
   await editor.fill("")
   await editor.focus()
