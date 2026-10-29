@@ -128,6 +128,10 @@ export type UsageDaily = {
     /** Newer Cores: the whole local day is after originSince, so originCost counts only steps this host ran. */
     originOnly?: boolean
     originCost?: number | null
+    /** Newer Cores (dotfiles#264), only on the day origin tracking began: priced origin-only cost over whole UTC
+     * hours from `since` (the first whole hour after originSince) to the end of the local day. Summable across
+     * hosts only when `since` is identical. */
+    originPartial?: { since: string; cost: number; unpricedModels: number } | null
     unpricedModels?: number
     models: { provider: string; model: string; cost: number | null; coverage?: "priced" | "missing-rate" | "local" | "no-usage"; tokens: UsageTokens }[]
   }[]
