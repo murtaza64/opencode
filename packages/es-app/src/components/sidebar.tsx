@@ -26,23 +26,29 @@ import { TodayCost } from "./today-cost"
 import { waveStart } from "../wave"
 import { NavTabs, NeedsYouBand } from "./nav-tabs"
 
-/** Project scope, shared by both modes' sidebars. */
-export const ProjectSelect = (props: { onChange?: () => void }) => {
+/** Project scope for browsing (the same dashboard scope New session targets): a chip in the Agents filter row
+ * that opens a short list of projects. Escape or choosing closes it and returns focus to the chip. */
+export const ProjectScope = (props: { onChange?: () => void }) => {
   const { state, editspace, setEditspace, editspaces, allProjects, setAllProjects } = useDashboard()
   const current = () => editspace() ?? editspaces()?.default ?? state()?.editspace ?? ""
-  return <select class="es-switcher" aria-label="Project"
-    ref={(select) => createEffect(() => {
-      editspaces()
-      select.value = allProjects() ? "__all__" : current()
-    })}
-    onChange={(e) => {
-      props.onChange?.()
-      if (e.currentTarget.value === "__all__") setAllProjects(true)
-      else setEditspace(e.currentTarget.value)
-    }}>
-    <option value="__all__">All</option>
-    <For each={editspaces()?.editspaces ?? []}>{(item) => <option value={item.name}>{item.name}</option>}</For>
-  </select>
+  let menu: HTMLDetailsElement | undefined
+  const pick = (name?: string) => {
+    props.onChange?.()
+    if (name === undefined) setAllProjects(true)
+    else setEditspace(name)
+    menu!.open = false
+    menu!.querySelector("summary")?.focus()
+  }
+  return <details class="agent-filter scope-menu" ref={menu} onKeyDown={(event) => { if (event.key === "Escape" && menu!.open) { event.preventDefault(); menu!.open = false; menu!.querySelector("summary")?.focus() } }}>
+    <summary aria-label={`Project: ${allProjects() ? "all projects" : current()}`} title="Project scope (also where New session starts)">
+      <bdi dir="auto">{allProjects() ? "All projects" : current()}</bdi><span class="scope-caret" aria-hidden="true">▾</span>
+    </summary>
+    <div class="scope-list" role="group" aria-label="Project">
+      <button type="button" aria-pressed={allProjects()} onClick={() => pick()}>All projects</button>
+      <For each={editspaces()?.editspaces ?? []}>{(item) =>
+        <button type="button" aria-pressed={!allProjects() && current() === item.name} onClick={() => pick(item.name)}><bdi dir="auto">{item.name}</bdi></button>}</For>
+    </div>
+  </details>
 }
 
 // Day headings come from the row's last turn boundary only (turn-order.ts); unknown is Undated, never Today.
@@ -104,6 +110,13 @@ export default function Sidebar() {
   const hostCount = (id: string) => id === ownHost().id ? unpinnedSessions().length + pinnedSessions().length
     : (work.feeds().find((feed) => feed.host.id === id)?.state().rows.length ?? 0)
   const allPinned = createMemo(() => [...pinnedSessions(), ...work.pinned()])
+  // Agents tab controls (NAV-16): an explicit sort beside the default activity order, and an active-only filter.
+  const SORT_KEY = "es-app:agents-sort"
+  const ACTIVE_KEY = "es-app:agents-active-only"
+  const [sortBy, setSortByRaw] = createSignal<"activity" | "name">(localStorage.getItem(SORT_KEY) === "name" ? "name" : "activity")
+  const [activeOnly, setActiveOnlyRaw] = createSignal(localStorage.getItem(ACTIVE_KEY) === "on")
+  const setSortBy = (value: "activity" | "name") => { setSortByRaw(value); try { localStorage.setItem(SORT_KEY, value) } catch { /* kept for this page */ } }
+  const setActiveOnly = (value: boolean) => { setActiveOnlyRaw(value); try { localStorage.setItem(ACTIVE_KEY, value ? "on" : "off") } catch { /* kept for this page */ } }
   const allUnpinned = createMemo(() => workRows(unpinnedSessions(), work.unpinned()))
   // Cloud agents the view already discovers sit in the ordinary list beside sessions, newest first; pinned
   // ones stay in Pinned. Same entries, account scope and pins as before; no separate drawer.
@@ -141,9 +154,24 @@ export default function Sidebar() {
     previousRows = next
     return rows
   })
+  // Shown rows: the activity order above, or by name (stable ties by key); active-only keeps the live bucket.
+  const shownRows = createMemo(() => {
+    const rows = activeOnly() ? agentRows().filter((row) => row.live) : agentRows()
+    return sortBy() === "name" ? [...rows].sort((a, b) => (a.item.title || "").localeCompare(b.item.title || "") || a.key.localeCompare(b.key)) : rows
+  })
   const cloudPin = (row: { project: string; title: string; owner: string }) => cloud.other().find((item) => item.editspace === row.project && item.lane === row.title && item.owner === row.owner)
   const feedOf = (s: SessionRow) => work.feeds().find((feed) => feed.host.id === s.host)
   const localUnavailable = () => hosted() && !!(allProjects() ? sessionsError() : stateError())
+  // The Agents tab count: agents working now in this browse scope (shown hosts, this project), pinned included,
+  // from the same live bucket the order uses. A host or list that cannot be read makes it "N+", never a false 0.
+  const activeCount = createMemo(() => {
+    const pinnedLive = allPinned().filter((s) => shownHost(s.host ?? ownHost().id)).filter((s) => s.host ? work.dot(s) === "busy" : dotFor(s) === "busy").length
+    const count = agentRows().filter((row) => row.live).length + pinnedLive
+    const behind = [...(localUnavailable() ? [ownHost().label] : []),
+      ...work.feeds().filter((feed) => shownHost(feed.host.id) && feed.state().status !== "ready").map((feed) => feed.host.label)]
+    return { text: behind.length ? `${count}+` : count ? String(count) : "",
+      title: `${count} working now${behind.length ? `; ${behind.join(", ")} not current` : ""}` }
+  })
   const clock = (time: number) => new Date(time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
   const dotText = (s: SessionRow, dot: DotState) => {
     const failure = dot === "failed" ? failures.failure(s.id) : undefined
@@ -390,7 +418,6 @@ export default function Sidebar() {
   }
 
   const projectControls = () => <>
-    <ProjectSelect onChange={clearSearch} />
     <button class="mini-btn" title={leftOpen() ? "collapse sidebar (^h)" : "expand sidebar (^h)"}
       aria-label={leftOpen() ? "Collapse sidebar" : "Expand sidebar"} onClick={toggleLeft}>
       {leftOpen() ? "⟨" : "⟩"}
@@ -435,7 +462,15 @@ export default function Sidebar() {
             <For each={cloud.pins()}>{pin => <CloudNav pin={pin} />}</For>
           </section>
         </Show>
-        <NavTabs agents={<>
+        <NavTabs agentsCount={activeCount()} agents={<>
+          <div class="agent-filters" role="group" aria-label="Agents view">
+            <ProjectScope onChange={clearSearch} />
+            <button type="button" class="agent-filter" aria-pressed={activeOnly()} title="Show only agents working now" onClick={() => setActiveOnly(!activeOnly())}>Active</button>
+            <button type="button" class="agent-filter agent-sort" title={sortBy() === "activity" ? "Sorted by activity: working first, then latest turn. Click for name." : "Sorted by name. Click for activity."}
+              aria-label={`Sort: ${sortBy() === "activity" ? "activity" : "name"}`} onClick={() => setSortBy(sortBy() === "activity" ? "name" : "activity")}>
+              <span aria-hidden="true">⇅</span> {sortBy() === "activity" ? "Activity" : "Name"}
+            </button>
+          </div>
           <Show when={hosted() && host()?.profile !== "personal"}>
             <div class="work-hosts" role="group" aria-label="Work hosts">
               <span class="work-hosts-label">Work</span>
@@ -488,15 +523,15 @@ export default function Sidebar() {
             <For each={work.feeds()}>{hostStatus}</For>
           </Show>
           <CloudSource />
-          <Show when={agentRows().length} fallback={
-            <Show when={!hosted()}><div class="dim nav-empty">{sessionsError() ? "Sessions unavailable — retrying" : sessionsLoading() ? "loading..." : pinnedSessions().length ? "All active sessions pinned" : "none"}</div></Show>
+          <Show when={shownRows().length} fallback={
+            <Show when={!hosted() || activeOnly()}><div class="dim nav-empty">{activeOnly() ? "No agents working now" : sessionsError() ? "Sessions unavailable — retrying" : sessionsLoading() ? "loading..." : pinnedSessions().length ? "All active sessions pinned" : "none"}</div></Show>
           }>
-            <For each={agentRows()}>
+            <For each={shownRows()}>
               {(row, index) => {
                 const group = () => dateGroup(row.boundary, Date.now())
-                const before = () => index() > 0 ? agentRows()[index() - 1] : undefined
+                const before = () => index() > 0 ? shownRows()[index() - 1] : undefined
                 // A heading marks each change of group; a list that is all undated needs none.
-                const heading = () => index() === 0 ? group() !== "undated" : group() !== dateGroup(before()!.boundary, Date.now())
+                const heading = () => sortBy() !== "activity" ? false : index() === 0 ? group() !== "undated" : group() !== dateGroup(before()!.boundary, Date.now())
                 return (
                   <>
                     <Show when={heading()}>

@@ -394,3 +394,28 @@
 .review-artifact { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0 0 8px; }
 .review-link { display: inline-flex; align-items: center; gap: 6px; min-inline-size: 0; font-weight: 600; overflow-wrap: anywhere; }
 .review-link svg { flex: none; }
+
+/* NAV-16/17: Agents filter row and tab feel. Selection is immediate (aria-selected); only the underline eases. */
+.agent-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px 8px 6px; }
+.agent-filter { position: relative; display: inline-flex; align-items: center; gap: 4px; min-block-size: 22px; padding: 0 8px; font: inherit; font-size: 11px; color: var(--subtext0); background: transparent; border: 1px solid var(--surface0); border-radius: 11px; cursor: pointer; white-space: nowrap; }
+.agent-filter:hover, .agent-filter[aria-pressed=true], .scope-menu[open] > summary { color: var(--text); background: var(--surface0); }
+.agent-filter[aria-pressed=true] { border-color: var(--accent); }
+.agent-filter:focus-visible, .scope-menu > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.scope-menu { padding: 0; }
+.scope-menu > summary { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; min-block-size: 22px; max-inline-size: 16ch; list-style: none; border-radius: 11px; cursor: pointer; }
+.scope-menu > summary::-webkit-details-marker { display: none; }
+.scope-menu > summary bdi { overflow: hidden; text-overflow: ellipsis; }
+.scope-caret { font-size: 9px; }
+.scope-list { position: absolute; inset-block-start: calc(100% + 4px); inset-inline-start: 0; z-index: 20; display: grid; min-inline-size: 160px; max-block-size: 50vh; overflow: auto; padding: 4px; background: var(--base); border: 1px solid var(--surface1); border-radius: 6px; box-shadow: 0 6px 18px rgb(0 0 0 / .25); }
+.scope-list button { padding: 5px 8px; font: inherit; font-size: 12px; text-align: start; color: var(--text); background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
+.scope-list button:hover, .scope-list button:focus-visible { background: var(--surface0); outline: none; }
+.scope-list button[aria-pressed=true] { color: var(--accent); font-weight: 600; }
+.nav-tabs [role=tab] { position: relative; display: inline-flex; justify-content: center; align-items: baseline; gap: 4px; border-block-end-color: transparent !important; transition: color 120ms ease; }
+.nav-tabs [role=tab]::after { content: ""; position: absolute; inset-inline: 6px; inset-block-end: -1px; block-size: 2px; border-radius: 1px; background: var(--accent); transform: scaleX(0); transition: transform 160ms cubic-bezier(.2, .8, .2, 1); }
+.nav-tabs [role=tab][aria-selected=true]::after { transform: scaleX(1); }
+.nav-tabs [role=tab]:hover:not([aria-selected=true]) { color: var(--text); }
+.nav-tabs [role=tab]:active { transform: translateY(.5px); }
+.nav-tab-count { display: inline-block; min-inline-size: 2.2ch; margin-inline-start: 0; text-align: start; }
+.nav-tabs [role=tab][aria-selected=true] .nav-tab-count { color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .nav-tabs [role=tab], .nav-tabs [role=tab]::after { transition: none; } .nav-tabs [role=tab]:active { transform: none; } }
+

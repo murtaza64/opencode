@@ -2,6 +2,7 @@
 // decisions after this host's, each with its host glyph and name; another host's decision opens on that
 // host's own Front desk. A host that stops answering keeps its last-known decisions, dimmed, and the count
 // reads "N+" naming it. Disposable fixture; no writes. Run from packages/es-app: node test/nav-work-decisions.browser.mjs
+import { selectScope } from "./scope.mjs"
 import { createRequire } from "node:module"
 import { startAttentionPreview } from "./attention-preview.mjs"
 
@@ -49,8 +50,8 @@ try {
   await expect(miniRow).toBeVisible({ timeout: 60_000 })
   // The Mini stops answering: its decision stays, dimmed, and the count is partial and names it.
   miniDown = true
-  await page.locator(".es-switcher").selectOption("__all__")
-  await page.locator(".es-switcher").selectOption("fixture")
+  await selectScope(page, "__all__")
+  await selectScope(page, "fixture")
   const stale = band.getByRole("link", { name: /^Rotate the Mini certs\?, decision, on Mac Mini, last known$/ })
   await expect(stale).toBeVisible({ timeout: 60_000 })
   await expect(band.locator(".nav-heading-count")).toHaveText(/\+$/)

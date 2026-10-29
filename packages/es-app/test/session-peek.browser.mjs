@@ -1,3 +1,4 @@
+import { selectScope } from "./scope.mjs"
 /* Sidebar hover card + right-panel context (dotfiles#140, #240): the card
  * shows the session's persisted TODOs (in progress first, finished collapsed,
  * observation basis stated) and one token number; the panel shows one token
@@ -190,7 +191,7 @@ try {
   await page.mouse.move(700, 600)
 
   // All scope: rows carry no project subtitle; the card names the project; hovering adds no requests.
-  await page.locator(".es-switcher").selectOption("__all__")
+  await selectScope(page, "__all__")
   await expect(rowA.locator(".session-project")).toHaveCount(0)
   await expect(rowA.locator(".sr-only")).toHaveCount(1)
   const callsBefore = fixture.calls.length

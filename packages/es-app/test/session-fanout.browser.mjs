@@ -1,3 +1,4 @@
+import { selectScope } from "./scope.mjs"
 import { createRequire } from "node:module"
 import { execFileSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
@@ -67,8 +68,8 @@ try {
     offscreen.time.updated = 100 + i
     emit(offscreen.directory, "session.updated", { sessionID: offscreen.id, info: { ...offscreen, time: { ...offscreen.time } } })
   }
-  await pages[0].locator(".es-switcher").selectOption("__all__")
-  await pages[1].locator(".es-switcher").selectOption("__all__")
+  await selectScope(pages[0], "__all__")
+  await selectScope(pages[1], "__all__")
   await Promise.all(pages.map((page) => expect(page.locator(".sidebar .nav-item", { hasText: "History 0" })).toHaveCount(1)))
   await expect(pages[0].locator(".sidebar .nav-item", { hasText: "History 0" }).locator(".dot.unread")).toBeVisible()
   await pages[0].getByRole("button", { name: "Pin History 0", exact: true }).click()
@@ -91,12 +92,12 @@ try {
   emit(child.directory, "permission.replied", { sessionID: child.id, requestID: gate.id, reply: "once" })
   fixture.permissionsByDirectory.set(child.directory, [])
   await Promise.all(pages.map((page) => expect(page.locator(".notification-item", { hasText: "Composer fixture" })).toHaveCount(0)))
-  await Promise.all(pages.map((page) => page.locator(".es-switcher").selectOption("fixture")))
+  await Promise.all(pages.map((page) => selectScope(page, "fixture")))
   await Promise.all(pages.map((page) => page.reload({ waitUntil: "domcontentloaded" })))
   await Promise.all(pages.map((page) => expect(page.locator(".notification-item", { hasText: "History 0" })).toBeVisible()))
-  await pages[0].locator(".es-switcher").selectOption("__all__")
+  await selectScope(pages[0], "__all__")
   await expect(pages[0].locator(".pinned-section .nav-item", { hasText: "History 0" })).toBeVisible()
-  await pages[0].locator(".es-switcher").selectOption("fixture")
+  await selectScope(pages[0], "fixture")
   await expect.poll(() => fixture.eventStreams.size).toBe(8)
   await pages[0].waitForTimeout(1500) // start the idle window after reconnect snapshots settle
   const idleStart = fixture.calls.length
@@ -116,7 +117,7 @@ try {
     const newSession = { ...session("ses_late"), slug: "late", version: "1", title: "New fixture session", time: { created: 1, updated: 500 } }
     fixture.workspaceSessions.push(newSession)
     emit(newSession.directory, "session.created", { sessionID: newSession.id, info: newSession })
-    await pages[0].locator(".es-switcher").selectOption("__all__")
+    await selectScope(pages[0], "__all__")
     await expect(pages[0].locator(".sidebar .nav-item", { hasText: newSession.title })).toBeVisible()
     emit(newSession.directory, "session.deleted", { sessionID: newSession.id, info: newSession })
     await expect(pages[0].locator(".sidebar .nav-item", { hasText: newSession.title })).toHaveCount(0)

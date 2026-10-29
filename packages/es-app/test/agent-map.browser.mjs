@@ -4,6 +4,7 @@
 // edges, packets), filters, zoom, motion controls, selection, RTL/mobile. Relations are
 // real: lane owner, handoff history, subagent parent, cloud lane record.
 // Run from packages/es-app: node test/agent-map.browser.mjs
+import { selectScope } from "./scope.mjs"
 import { createRequire } from "node:module"
 import path from "node:path"
 import { tmpdir } from "node:os"
@@ -243,10 +244,10 @@ try {
   await page.goto(selectedURL, { waitUntil: "domcontentloaded", timeout: 90_000 })
 
   // Home project scope applies to the map.
-  await page.locator(".es-switcher").selectOption("fixture")
+  await selectScope(page, "fixture")
   await expect(region("squadron")).toHaveCount(0)
   await expect(region("fixture")).toBeVisible()
-  await page.locator(".es-switcher").selectOption("__all__")
+  await selectScope(page, "__all__")
   await expect(region("squadron")).toBeVisible()
 
   // RTL: controls and detail mirror; graph geometry and time stay physical LTR.

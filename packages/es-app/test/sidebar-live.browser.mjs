@@ -1,3 +1,4 @@
+import { selectScope } from "./scope.mjs"
 import { createRequire } from "node:module"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -107,7 +108,7 @@ try {
       if (compact) await page.locator(".sidebar-mini > .mini-btn").click()
     }
   }
-  await page.locator(".es-switcher").selectOption("__all__")
+  await selectScope(page, "__all__")
   await expect(row("ses_c")).toContainText("مرحبا mixed session")
   await row("ses_b").click()
   const pinning = page.getByRole("button", { name: "Pin Other session", exact: true }).click()

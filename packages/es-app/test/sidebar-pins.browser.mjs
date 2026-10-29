@@ -1,3 +1,4 @@
+import { selectScope } from "./scope.mjs"
 import { createRequire } from "node:module"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -53,13 +54,13 @@ try {
   await expect(pinned).toHaveText([/Other session/, /Composer fixture/])
   await page.reload()
   await expect(pinned).toHaveText([/Other session/, /Composer fixture/])
-  await page.locator(".es-switcher").selectOption("__all__")
+  await selectScope(page, "__all__")
   await expect(pinned).toHaveText([/Other session/, /Composer fixture/])
   await pin("Other project").click()
   await expect(pinned).toHaveCount(3)
-  await page.locator(".es-switcher").selectOption("other")
+  await selectScope(page, "other")
   await expect(pinned).toHaveText([/Other project/])
-  await page.locator(".es-switcher").selectOption("fixture")
+  await selectScope(page, "fixture")
   await expect(pinned).toHaveText([/Other session/, /Composer fixture/])
   // Pins stay in view, in their order, for any query, and are not repeated in the results.
   await page.locator(".search-input").fill("Other")

@@ -1,6 +1,7 @@
 // #153: the project board is hidden under All. Board navigation disappears
 // from the expanded sidebar and the mini rail, and `/` under All renders an
 // all-projects landing instead of one project's board.
+import { selectScope } from "./scope.mjs"
 import { createRequire } from "node:module"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -49,7 +50,7 @@ try {
   await expect(heading).toHaveText("fixture")
   await expect(boardLink).toHaveClass(/active/)
   const historyBefore = await page.evaluate(() => history.length)
-  await page.locator(".es-switcher").selectOption("__all__")
+  await selectScope(page, "__all__")
   await expect(landing).toBeVisible()
   await expect(heading).toHaveText("All projects")
   await expect(projectBoard).toHaveCount(0)
@@ -85,11 +86,11 @@ try {
   await expect(heading).toHaveText("fixture")
   await expect(boardLink).toBeVisible()
   await expect(boardLink).toHaveClass(/active/)
-  await expect(page.locator(".es-switcher")).toHaveValue("fixture")
+  await expect(page.locator(".scope-menu summary")).toHaveAttribute("aria-label", "Project: fixture")
   expect(page.url()).toBe(`${preview.origin}/`)
 
   // Back to All, open a session from the landing, draft intact.
-  await page.locator(".es-switcher").selectOption("__all__")
+  await selectScope(page, "__all__")
   await landing.getByRole("link", { name: /Composer fixture/ }).click()
   await page.waitForURL(/\/session\/ses_a\?directory=/)
   await expect(editor).toHaveValue("Draft survives the All landing")
@@ -110,7 +111,7 @@ try {
   await page.setViewportSize({ width: 1280, height: 900 })
 
   // Project view keeps its board on both rails.
-  await page.locator(".es-switcher").selectOption("fixture")
+  await selectScope(page, "fixture")
   await expect(projectBoard).toBeVisible()
   await expect(heading).toHaveText("fixture")
   await expect(boardLink).toBeVisible()

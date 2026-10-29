@@ -1,3 +1,4 @@
+import { selectScope } from "./scope.mjs"
 import { createRequire } from "node:module"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -61,7 +62,7 @@ try {
   await replies.shift().fulfill({ status: 503, json: { error: "unavailable" } })
   await expect(rows.filter({ hasText: "Composer fixture" })).toHaveCount(1)
   await expect(page.locator(".sidebar .nav-empty", { hasText: "transcript search unavailable" })).toHaveCount(1)
-  await page.locator(".es-switcher").selectOption("__all__")
+  await selectScope(page, "__all__")
   await input.fill("project title")
   await expect(rows.filter({ hasText: "Other project title" })).toHaveCount(1)
   await expect(rows.filter({ hasText: "Composer fixture" })).toHaveCount(0)

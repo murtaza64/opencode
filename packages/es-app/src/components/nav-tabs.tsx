@@ -96,7 +96,7 @@ export const NeedsYouBand = () => {
 }
 
 /** The tab row and the Surfaces, Decisions and PRs panels; the Agents panel is the existing session list. */
-export const NavTabs = (props: { agents: JSX.Element }) => {
+export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: string; title: string } }) => {
   const queue = useDeskQueue()
   const { state } = useDashboard()
   // Each tab keeps its own filter; switching tabs never changes another tab's filter.
@@ -116,7 +116,7 @@ export const NavTabs = (props: { agents: JSX.Element }) => {
       .filter((pr: { url: string }) => !seen.has(pr.url) && (seen.add(pr.url), true))
       .filter((pr: { url: string; title?: string }) => matches(`${pr.title ?? ""} ${pr.url}`, filter("prs"))))
   })
-  const count = (id: NavTab) => id === "decisions" ? all().decisions.text.replace(/^0$/, "") : id === "surfaces" ? queue.surfaces.list().length : id === "prs" ? prs().length : undefined
+  const count = (id: NavTab) => id === "agents" ? props.agentsCount?.text : id === "decisions" ? all().decisions.text.replace(/^0$/, "") : id === "surfaces" ? queue.surfaces.list().length : id === "prs" ? prs().length : undefined
   const tabId = (id: NavTab) => `nav-tab-${id}`
   const FilterBox = (p: { id: Exclude<NavTab, "agents">; label: string }) =>
     <div class="search-box"><input class="search-input" type="search" placeholder={`filter ${p.label.toLowerCase()}…`} aria-label={`Filter ${p.label}`}
@@ -136,7 +136,8 @@ export const NavTabs = (props: { agents: JSX.Element }) => {
             setTab(TABS[index][0])
             document.getElementById(tabId(TABS[index][0]))?.focus()
           }}>
-          {label}<Show when={count(id)}><span class="nav-tab-count">{count(id)}</span></Show>
+          {/* The count keeps a fixed slot, so the tab does not change width as numbers change. */}
+          <span class="nav-tab-label">{label}</span><span class="nav-tab-count" title={id === "agents" ? props.agentsCount?.title : undefined}>{count(id) || ""}</span>
         </button>}</For>
     </div>
     <div role="tabpanel" id={`${tabId(tab())}-panel`} aria-labelledby={tabId(tab())} class="nav-tab-panel">

@@ -1,3 +1,4 @@
+import { selectScope } from "./scope.mjs"
 import { createRequire } from "node:module"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -53,10 +54,10 @@ try {
   await expect(row("ses_a")).toHaveClass(/\bactive\b/)
   await pin("Composer fixture").click()
   await expect(pinned).toHaveText([/Composer fixture/])
-  await page.locator(".es-switcher").selectOption("__all__")
+  await selectScope(page, "__all__")
   await expect(row("ses_a")).toHaveAttribute("href", `/session/ses_a?directory=${encodeURIComponent(directory)}`)
   await expect(pinned).toHaveText([/Composer fixture/])
-  await page.locator(".es-switcher").selectOption("fixture")
+  await selectScope(page, "fixture")
   dashboardDirectory = directory
   site.fixture.emitDashboard("changed")
   await expect(row("ses_a")).toHaveAttribute("href", `/session/ses_a?directory=${encodeURIComponent(directory)}`)
@@ -65,7 +66,7 @@ try {
   await expect(unpin("Composer fixture")).toHaveText("\u2665\ufe0e")
   await pin("Other session").click()
   await expect(pinned).toHaveText([/Composer fixture/, /Other session/])
-  await page.locator(".es-switcher").selectOption("__all__")
+  await selectScope(page, "__all__")
   globalDirectory = alias
   publish(alias, "session.updated", { sessionID: "ses_a", info: { ...session("ses_a"), slug: "fixture", directory: alias } })
   await expect(row("ses_a")).toHaveAttribute("href", `/session/ses_a?directory=${encodeURIComponent(alias)}`)

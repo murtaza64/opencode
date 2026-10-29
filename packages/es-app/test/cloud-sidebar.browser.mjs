@@ -1,3 +1,4 @@
+import { selectScope } from "./scope.mjs"
 import { createRequire } from "node:module"
 import { startAttentionPreview } from "./attention-preview.mjs"
 
@@ -45,9 +46,9 @@ try {
   preview.ledger.cloudStatus = 200
   await page.getByRole("button", { name: "Refresh cloud source", exact: true }).click()
   await expect(details).not.toContainText("source unavailable")
-  await page.locator(".es-switcher").selectOption("other")
+  await selectScope(page, "other")
   await expect(pinned().locator("a.cloud-nav")).toBeVisible()
-  await page.locator(".es-switcher").selectOption("__all__")
+  await selectScope(page, "__all__")
   await pinned().getByRole("link", { name: /Composer fixture/ }).click()
   await expect(page.getByRole("textbox", { name: "Message", exact: true })).toHaveValue("Keep this local draft while inspecting cloud work")
   await page.reload()

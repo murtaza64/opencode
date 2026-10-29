@@ -1,3 +1,4 @@
+import { selectScope } from "./scope.mjs"
 import { createServer as createHttpServer } from "node:http"
 import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
@@ -92,9 +93,9 @@ try {
   emit(childDirectory, { type: "permission.asked", properties: permission })
   await expect(page.locator(".notification-item")).toHaveCount(1)
   await expect(page.locator(".notification-item")).toHaveAttribute("href", `/session/${root.id}?directory=${encodeURIComponent(directory)}`)
-  await page.locator(".es-switcher").selectOption("fixture")
+  await selectScope(page, "fixture")
   await expect(page.locator(".notification-item")).toHaveCount(1)
-  await page.locator(".es-switcher").selectOption("__all__")
+  await selectScope(page, "__all__")
   await expect(page.locator(".notification-item")).toHaveCount(1)
   console.log("PASS busy parent retains genuine blocked descendant attention")
   notifications = [{ id: `permission:${permission.id}`, kind: "permission", session: child.id, title: child.title, directory: childDirectory, editspace: "fixture", updated: Date.now() }]

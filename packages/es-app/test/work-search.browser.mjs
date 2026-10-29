@@ -4,6 +4,7 @@
 // clearing restores the full list; a new Mini session matches without retyping; results sort pinned, then
 // working, then most recent; pins and Mini row links keep their host identity.
 // Disposable fixture; no writes. Run from packages/es-app: node test/work-search.browser.mjs
+import { selectScope } from "./scope.mjs"
 import { createRequire } from "node:module"
 import { startPanelPreview } from "./composer-panel-preview.mjs"
 
@@ -39,8 +40,8 @@ await page.route(`${mini}/**`, route => route.fulfill({ contentType: "text/html"
 await page.addInitScript(root => localStorage.setItem("host:mini:es-app-sidebar-pins", JSON.stringify([JSON.stringify([root, "ses_pinned"])])), miniRoot)
 // Make the Mini feed read its list again (a project scope change rereads every host), keeping the query.
 const reread = async () => {
-  await page.locator(".es-switcher").selectOption("__all__")
-  await page.locator(".es-switcher").selectOption("fixture")
+  await selectScope(page, "__all__")
+  await selectScope(page, "fixture")
 }
 const input = page.locator(".sidebar .search-input")
 const titles = () => page.locator(".sidebar .search-box ~ .session-entry .nav-title, .sidebar .search-box ~ .search-result .nav-title").allTextContents()
