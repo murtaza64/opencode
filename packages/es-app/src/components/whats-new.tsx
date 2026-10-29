@@ -1,6 +1,8 @@
-/* What's new (META-08): shown once per native app release after startup, only when it would not interrupt (no
- * focused editor with text unless input has paused, no focused permission or question); dismissing marks it seen.
- * The "What's new" entry reopens it any time and never re-marks. */
+/* What's new (META-08): shown once per native app release after startup, only in the view the person is looking
+ * at (visible and focused; every Work, Mini or Personal view runs this, and they share one seen mark), only when it
+ * would not interrupt (no focused editor with text unless input has paused, no focused permission or question);
+ * showing it marks the release seen at once, so no other view shows it too. The "What's new" entry reopens it any time
+ * and never re-marks. */
 import { createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { A } from "@solidjs/router"
 import { markReleaseNotesSeen, readReleaseNotes } from "../release-notes"
@@ -11,12 +13,12 @@ const IDLE_MS = 3000
 
 export const WhatsNew = () => {
   const dashboard = useDashboard()
-  const [state] = createResource(readReleaseNotes)
+  const [state, { mutate }] = createResource(readReleaseNotes)
   const [open, setOpen] = createSignal(false)
   let dialog: HTMLDialogElement | undefined
   let returnTo: Element | null = null
   let autoShown = false
-  let marked = false
+  let checking = false
   let lastInput = Date.now()
   const show = () => {
     if (!dialog || dialog.open) return
@@ -35,25 +37,36 @@ export const WhatsNew = () => {
     const input = () => { lastInput = Date.now() }
     window.addEventListener("input", input, true)
     window.addEventListener("keydown", input, true)
+    const looking = () => document.visibilityState === "visible" && document.hasFocus()
     const timer = setInterval(() => {
       const current = state()
-      // Startup-ready: the dashboard has answered once.
-      if (autoShown || !current?.notes || current.seen || !dashboard.state()) return
-      if (busy()) return
-      autoShown = true
-      show()
+      // Startup-ready: the dashboard has answered once. Background views never auto-show.
+      if (autoShown || checking || !current?.notes || current.seen || !dashboard.state() || !looking() || busy()) return
+      // Another view may have shown and dismissed it since this one started: ask again right before showing.
+      checking = true
+      void readReleaseNotes().then((fresh) => {
+        checking = false
+        mutate(fresh)
+        if (!fresh.notes || fresh.seen) { autoShown = true; return }
+        if (autoShown || !looking() || busy() || !fresh.release) return
+        autoShown = true
+        void markReleaseNotesSeen(fresh.release)
+        show()
+      })
     }, 1000)
-    onCleanup(() => { clearInterval(timer); window.removeEventListener("input", input, true); window.removeEventListener("keydown", input, true) })
+    onCleanup(() => {
+      clearInterval(timer)
+      window.removeEventListener("input", input, true)
+      window.removeEventListener("keydown", input, true)
+    })
   })
   const close = () => dialog?.close()
   const onClose = () => {
     setOpen(false)
-    const current = state()
-    if (current?.notes && !current.seen && current.release && !marked) { marked = true; void markReleaseNotesSeen(current.release) }
     if (returnTo instanceof HTMLElement && returnTo.isConnected) returnTo.focus({ preventScroll: true })
   }
   return <>
-    <button type="button" class="link-button whats-new-entry" onClick={show}>What's new</button>
+    <button type="button" class="link-button whats-new-entry" onClick={() => show()}>What's new</button>
     <dialog ref={dialog} class="whats-new" aria-labelledby="whats-new-title" onClose={onClose}>
       <Show when={open()}>
         <header class="whats-new-head">

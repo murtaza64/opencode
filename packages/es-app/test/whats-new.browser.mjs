@@ -1,4 +1,5 @@
-// What's new (META-08): unseen notes open once after startup and dismissing marks the release seen; a seen release
+// What's new (META-08): unseen notes open once after startup, only in the visible and focused view, and showing them
+// marks the release seen for every view (a background view never shows them and stays usable); a seen release
 // does not reopen by itself but the "What's new" entry shows it (without marking again); typing in an editor holds
 // the dialog back until input pauses, then focus returns to the editor; no notes (404) never pops up and the entry
 // says so. Also 390px RTL. Disposable fixture. Run from packages/es-app: node test/whats-new.browser.mjs
@@ -10,7 +11,10 @@ const { chromium, expect } = createRequire(new URL("../../app/package.json", imp
 const preview = await startPanelPreview()
 const browser = await chromium.launch({ headless: true,
   ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : { channel: "chrome" }) })
-const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+// Each page reports focus from window.__focused (headless pages all claim focus otherwise); default focused.
+await context.addInitScript(() => { Document.prototype.hasFocus = function () { return window.__focused !== false } })
+const page = await context.newPage()
 page.setDefaultTimeout(60_000)
 const errors = []
 page.on("pageerror", (error) => errors.push(error.message))
@@ -21,14 +25,26 @@ const notes = { schema: "release-notes/1", release, items: [
 ], limits: ["Created sort waits for Core"] }
 let served = { status: 200, body: { release, notes, seen: false } }
 const marks = []
-await page.route("**/__es/release-notes", (route) => served.status === 200 ? route.fulfill({ json: served.body }) : route.fulfill({ status: served.status, body: "" }))
-await page.route("**/__es/release-notes/seen", (route) => { marks.push(route.request().postDataJSON()); served.body = { ...served.body, seen: true }; return route.fulfill({ status: 204, body: "" }) })
+await context.route("**/__es/release-notes", (route) => served.status === 200 ? route.fulfill({ json: served.body }) : route.fulfill({ status: served.status, body: "" }))
+await context.route("**/__es/release-notes/seen", (route) => { marks.push(route.request().postDataJSON()); served.body = { ...served.body, seen: true }; return route.fulfill({ status: 204, body: "" }) })
 const dialog = page.getByRole("dialog", { name: "What's new" })
 const entry = page.locator("nav.sidebar").getByRole("button", { name: "What's new" })
 try {
-  // Unseen: opens once after startup; dismissing with Escape marks this release seen.
+  // Two views over one seen store; the second is in the background (not focused) and never shows it.
+  const background = await context.newPage()
+  await background.addInitScript(() => { window.__focused = false })
+  await background.goto(`${preview.url}/session/ses_a?directory=${encodeURIComponent(directory)}`, { waitUntil: "domcontentloaded", timeout: 300_000 })
+  // Unseen: opens once after startup in the focused view, which marks the release seen at once.
   await page.goto(`${preview.url}/agents`, { waitUntil: "domcontentloaded", timeout: 300_000 })
   await expect(dialog).toBeVisible({ timeout: 120_000 })
+  await expect.poll(() => marks).toEqual([{ release }])
+  // The background view: no dialog, its composer stays usable; brought to the front later, it still shows nothing.
+  await expect(background.getByRole("textbox", { name: "Message", exact: true })).toBeEditable({ timeout: 120_000 })
+  await background.evaluate(() => { window.__focused = true; window.dispatchEvent(new Event("focus")) })
+  await background.waitForTimeout(2500)
+  await expect(background.getByRole("dialog", { name: "What's new" })).toBeHidden()
+  await background.getByRole("textbox", { name: "Message", exact: true }).fill("still typing here")
+  await background.close()
   await expect(dialog.getByText("Pinned reorders by drag")).toBeVisible()
   await expect(dialog.getByRole("link", { name: "Open Agents" })).toHaveAttribute("href", "/agents")
   await expect(dialog.getByRole("link", { name: "Read more" })).toHaveAttribute("target", "_blank")
@@ -36,7 +52,7 @@ try {
   await expect(dialog.getByRole("button", { name: "Got it" })).toBeFocused()
   await page.keyboard.press("Escape")
   await expect(dialog).toBeHidden()
-  await expect.poll(() => marks).toEqual([{ release }])
+  expect(marks).toEqual([{ release }])
 
   // Seen: no popup after reload; the entry reopens it and closing does not mark again.
   await page.reload({ waitUntil: "domcontentloaded" })
@@ -61,7 +77,7 @@ try {
   await page.keyboard.press("Escape")
   await expect(editor).toBeFocused()
   await expect(editor).toHaveValue(/draft draft/)
-  await expect.poll(() => marks.at(-1)).toEqual({ release: "1.4.1+def5678" })
+  expect(marks.at(-1)).toEqual({ release: "1.4.1+def5678" })
 
   // No notes for this build (404): never pops up; the entry says so.
   served = { status: 404 }
