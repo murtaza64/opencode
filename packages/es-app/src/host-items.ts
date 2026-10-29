@@ -22,7 +22,8 @@ export const readHostDecision = async (host: string, record: Pick<AttentionRecor
   const response = await fetch(attentionPath(`/${encodeURIComponent(record.id)}`, record.editspace, hostPrefix(host)), { credentials: "include", cache: "no-store" })
   if (response.status === 404) return undefined
   if (!response.ok) throw new Error(`${host}: decision unavailable (HTTP ${response.status})`)
-  return (await response.json()) as AttentionRecord
+  // The record route answers { record, events }.
+  return ((await response.json()) as { record: AttentionRecord }).record
 }
 
 /** One pending permission or question, validated against that host's Core: undefined when it is no longer pending
