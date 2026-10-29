@@ -63,7 +63,7 @@ const historyVersion = (record: AttentionRecord) => `${record.revision}:${record
 
 // One answer: a selected option, a written note, or both. Either alone is a complete answer unless the
 // option declares required input; nothing is written on the human's behalf. Secondary actions sit beside the single primary one.
-export const Answer = (props: { record: AttentionRecord; attention: Attention; options: boolean; onView?: (view: AttentionView) => void; extra?: JSX.Element; prepared?: BriefResult; afterChoices?: JSX.Element; sends?: Sends; briefJob?: { job: string; revision: string } }) => {
+export const Answer = (props: { record: AttentionRecord; attention: Attention; options: boolean; hideTarget?: boolean; onView?: (view: AttentionView) => void; extra?: JSX.Element; prepared?: BriefResult; afterChoices?: JSX.Element; sends?: Sends; briefJob?: { job: string; revision: string } }) => {
   const [text, setText] = createSignal(localStorage.getItem(answerDraftKey(props.record)) ?? "")
   const [choice, setChoice] = createSignal("")
   const canWrite = () => canWriteAttention(props.attention, props.record)
@@ -127,8 +127,8 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
         <Show when={selected()} fallback="Send answer">{option => <Show when={!props.prepared} fallback="Send">Send <bdi dir="auto">{option().label}</bdi></Show>}</Show>
       </button>
       {props.extra}
-      {/* One label run ("To …") that keeps its order in an RTL page; the target name stays isolated inside it. */}
-      <span class="home-muted"><bdi>To <bdi dir="auto">{target()}</bdi></bdi></span>
+      {/* One English label run ("To …") laid out left to right in an RTL page too; the target name stays isolated. */}
+      <Show when={!props.hideTarget}><span class="home-muted"><bdi dir="ltr">To <bdi dir="auto">{target()}</bdi></bdi></span></Show>
     </div>
     <Show when={selected() && problem()}><p class="home-input-problem" id={`${id}-input-problem`} role="status" dir="auto">{problem()}</p></Show>
   </div>

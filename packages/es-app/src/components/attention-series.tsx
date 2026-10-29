@@ -1,7 +1,7 @@
 import { createMemo, For, Show } from "solid-js"
 import { A } from "@solidjs/router"
 import { Markdown } from "@opencode-ai/session-ui/markdown"
-import { sessionHref } from "../state"
+import { sessionHref, useDashboard } from "../state"
 import { deliveryLabel, inputText, type createAttention, type AttentionRecord } from "../attention"
 import { requestMarkdown } from "../request-markdown"
 import { seriesProgress } from "../attention-series"
@@ -15,6 +15,11 @@ export const AttentionSeries = (props: { item: DeskItem; attention: ReturnType<t
     before.find(old => old.id === record.id && old.revision === record.revision && old.status === record.status &&
       old.delivery_state === record.delivery_state && old.delivery?.updated_at === record.delivery?.updated_at) ?? record))
   const progress = () => seriesProgress(members())
+  const dashboard = useDashboard()
+  // One agent thread and one destination for the card; a series normally has one of each. Distinct ones are all listed.
+  const threads = () => [...new Map(members().map(record => [record.source_ref.session_id, record.source_ref])).values()]
+  const targets = () => [...new Set(members().filter(record => record.status === "open" || record.status === "decided")
+    .map(record => record.lane || dashboard.activity.session(record.source_ref.session_id)?.title || "the requesting agent"))]
   return <article class="attention-series" data-series-id={props.item.series!.id}>
     <header class="attention-series-head">
       <span class="home-source">Questions · <bdi dir="auto">{props.item.project}</bdi></span>
@@ -23,6 +28,10 @@ export const AttentionSeries = (props: { item: DeskItem; attention: ReturnType<t
         {progress().answered}/{progress().live} answered
       </p>
       {/* Question numbers only: the titles are listed right below. */}
+      <p class="attention-series-route home-source">
+        <For each={threads()}>{(source, index) => <><Show when={index() > 0}> · </Show><A href={sessionHref(source.session_id, source.directory)}>Agent thread</A></>}</For>
+        <For each={targets()}>{target => <> · <bdi dir="ltr">To <bdi dir="auto">{target}</bdi></bdi></>}</For>
+      </p>
       <Show when={progress().unanswered.length}><p class="home-muted">Unanswered: <bdi dir="ltr">{progress().unanswered.map(record => `Q${record.series!.index}`).join(", ")}</bdi></p></Show>
     </header>
     <ol class="attention-series-questions" aria-label="Series questions">
@@ -36,7 +45,7 @@ export const AttentionSeries = (props: { item: DeskItem; attention: ReturnType<t
             <For each={record.options}>{option => <li><bdi dir="auto">{option.label}</bdi><Show when={record.recommendation === option.id}> <span class="attention-series-recommended">Recommended</span></Show></li>}</For>
           </ul></Show>
           <Show when={record.status === "open" || record.status === "decided"}>
-            <span class="home-source">Suggestions</span><Answer record={record} attention={props.attention} options={record.options.length > 0} />
+            <span class="home-source">Suggestions</span><Answer record={record} attention={props.attention} options={record.options.length > 0} hideTarget />
           </Show>
         </Show>
         <Show when={record.answer}>{answer => <div class="attention-series-recorded" aria-label={`Recorded answer to question ${record.series!.index}`}>
@@ -48,7 +57,6 @@ export const AttentionSeries = (props: { item: DeskItem; attention: ReturnType<t
             <p class="home-muted">{deliveryLabel(record)}</p>
         </div>}</Show>
         <Show when={!record.answer && record.status !== "open" && record.status !== "decided" && record.status !== "withdrawn"}><p class="home-muted">{record.status}</p></Show>
-        <A href={sessionHref(record.source_ref.session_id, record.source_ref.directory)} class="home-source">Agent thread</A>
       </li>}</For>
     </ol>
   </article>

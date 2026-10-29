@@ -87,6 +87,13 @@ try {
   const rtl = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, width: window.innerWidth,
     border: getComputedStyle(document.querySelector(".attention-series-recorded")).borderInlineStartWidth }))
   if (rtl.scroll > rtl.width || rtl.border !== "2px") throw Error(`RTL layout ${JSON.stringify(rtl)}`)
+  // One agent thread and one destination per card, not per question; in RTL "To <target>" keeps its reading order.
+  await expect(card.getByRole("link", { name: "Agent thread" })).toHaveCount(1)
+  const route = card.locator(".attention-series-route bdi[dir=ltr]")
+  await expect(route).toHaveCount(1)
+  await expect(card.locator(".attention-series-question .home-actions bdi[dir=ltr]")).toHaveCount(0)
+  const order = await route.evaluate(el => { const range = document.createRange(); range.setStart(el.firstChild, 0); range.setEnd(el.firstChild, 2); return { to: range.getBoundingClientRect().left, target: el.querySelector("bdi").getBoundingClientRect().left } })
+  if (!(order.to < order.target)) throw Error(`RTL "To <target>" order ${JSON.stringify(order)}`)
   await card.screenshot({ path: `${output}/series-rtl-360.png` })
   await row(6).getByRole("radio", { name: "Other" }).check()
   const draft = row(6).getByRole("textbox", { name: "Your proposal" })
@@ -108,7 +115,7 @@ try {
   await expect(card.locator(".attention-series-head .home-muted")).toContainText("Q2")
   if (errors.length) throw Error(errors.join("\n"))
   if (preview.fixture.calls.some(call => !["GET", "HEAD", "OPTIONS"].includes(call.method))) throw Error("unexpected runtime writes")
-  console.log("PASS grilling series: 7 ordered questions, 3 exact per-record revision POSTs (recommended, alternative, Other text), reload 3/7, withdrawn 3/6, updated answered question clears old answer, recorded answer distinct from recommendation, 360px and RTL screenshots, no runtime writes")
+  console.log("PASS grilling series: 7 ordered questions, 3 exact per-record revision POSTs (recommended, alternative, Other text), reload 3/7, withdrawn 3/6, updated answered question clears old answer, recorded answer distinct from recommendation, 360px and RTL screenshots, one thread/destination per card in reading order, no runtime writes")
 } finally {
   await context.close()
   await browser.close()
