@@ -583,7 +583,9 @@ export function DashboardProvider(props: ParentProps) {
     if (info.remote) return
     // A host removed from the Work view (or unpaired) leaves no cached rows behind.
     forgetSeen(info.work.map((item) => item.id))
-    runWithOwner(owner, () => setFeeds(info.work.filter((item) => item.id !== info.id).map((item) => createHostFeed(item, workProject))))
+    runWithOwner(owner, () => setFeeds(info.work.filter((item) => item.id !== info.id).map((item) => createHostFeed(item, workProject, () => (hostPins()[item.id] ?? []).flatMap((key) => {
+      try { const value: unknown = JSON.parse(key); return Array.isArray(value) && typeof value[0] === "string" ? [value[0]] : [] } catch { return [] }
+    })))))
   })
   createEffect((previous: string | null | undefined) => {
     const project = workProject()
@@ -605,7 +607,8 @@ export function DashboardProvider(props: ParentProps) {
     for (const feed of feeds()) {
       const state = feed.state()
       const lineage = feed.lineage()
-      if (state.status !== "ready" || !state.scoped || lineage?.project !== workProject()) continue
+      const project = workProject()
+      if (state.status !== "ready" || (project !== undefined && !state.scoped) || lineage?.project !== (project ?? "*")) continue
       const current = hostPins()[feed.host.id] ?? []
       const next = reconcileHostPins(feed.host.id, current, lineage, state.rows)
       if (next.length === current.length && next.every((key, index) => key === current[index])) continue

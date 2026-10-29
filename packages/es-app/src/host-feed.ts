@@ -102,8 +102,15 @@ const DECISIONS_MS = 30_000
 const LINEAGE_MS = 60_000
 const SESSION_EVENTS = ["session.created", "session.updated", "session.deleted", "session.status"]
 
-/** `project`: the selected project name, undefined for all projects, null while not yet known. */
-export const createHostFeed = (host: WorkHost, project: () => string | undefined | null) => {
+/** That host's handoff lineage, per editspace (lane names repeat across editspaces), and which editspace holds a
+ * directory. `project`: the selected project, or "*" for All projects. */
+export type HostLineage = { project: string; byEditspace: Record<string, { edges: Handoff[]; owners: LaneOwner[] }>; editspaceOf: (directory: string) => string | undefined }
+
+const MAX_LINEAGE_EDITSPACES = 4
+
+/** `project`: the selected project name, undefined for all projects, null while not yet known. `pinned`: directories of
+ * this host's pinned sessions; in All projects, lineage is read only for the editspaces that hold them. */
+export const createHostFeed = (host: WorkHost, project: () => string | undefined | null, pinned: () => string[] = () => []) => {
   const base = `/hosts/${host.id}`
   // Until the first read answers, show what this host last listed (if the project matches), marked by its age.
   const seen = (() => {
@@ -118,7 +125,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     ...(seen ? { cachedAt: seen.cachedAt } : {}),
   })
   const [live, setLive] = createSignal<Record<string, string>>({})
-  const [lineage, setLineage] = createSignal<{ project: string; edges: Handoff[]; owners: LaneOwner[] }>()
+  const [lineage, setLineage] = createSignal<HostLineage>()
   let lastLineageRead = 0
   let lineageRead: Promise<void> | undefined
   let loading: Promise<void> | undefined
@@ -141,32 +148,47 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
       .then((list) => Array.isArray(list.records) ? list.records.filter((record) => record.status === "open") : undefined)
       .catch(() => undefined)
   }
+  const readLineage = async (es: string) => {
+    const [handoffs, dashboard] = await Promise.all([
+      read<{ handoffs: Handoff[] }>(`/es/api/handoffs?es=${encodeURIComponent(es)}`),
+      read<{ editspace: string; threads: { lanes?: { lane: string; owner?: string }[] }[] }>(`/es/api/state?es=${encodeURIComponent(es)}`),
+    ])
+    if (dashboard.editspace !== es || !Array.isArray(handoffs.handoffs) || !Array.isArray(dashboard.threads)) throw new Error("Invalid host lineage")
+    return {
+      edges: handoffs.handoffs,
+      owners: dashboard.threads.flatMap((thread) => (thread.lanes ?? []).flatMap((lane): LaneOwner[] =>
+        lane.owner ? [{ lane: lane.lane, owner: lane.owner }] : [])),
+    }
+  }
   const refreshLineage = () => {
     const current = scope
-    const es = current?.es
-    if (!es || state().status !== "ready" || lineageRead || Date.now() - lastLineageRead < LINEAGE_MS) return
+    // One project: its editspace. All projects: the editspaces holding this host's pinned sessions, found from that
+    // host's own editspace roots.
+    const all = !!current && current.project === undefined
+    const key = all ? "*" : current?.es
+    if (!key || (all && !pinned().length) || state().status !== "ready" || lineageRead || Date.now() - lastLineageRead < LINEAGE_MS) return
     lastLineageRead = Date.now()
     setLineage(undefined)
+    const same = () => (scope?.project === undefined ? "*" : scope?.es) === key && state().status === "ready"
     lineageRead = (async () => {
       try {
-        const [handoffs, dashboard] = await Promise.all([
-          read<{ handoffs: Handoff[] }>(`/es/api/handoffs?es=${encodeURIComponent(es)}`),
-          read<{ editspace: string; threads: { lanes?: { lane: string; owner?: string }[] }[] }>(`/es/api/state?es=${encodeURIComponent(es)}`),
-        ])
-        if (dashboard.editspace !== es || !Array.isArray(handoffs.handoffs) || !Array.isArray(dashboard.threads)) throw new Error("Invalid host lineage")
-        if (scope?.es !== es || state().status !== "ready") return
-        setLineage({
-          project: es,
-          edges: handoffs.handoffs,
-          owners: dashboard.threads.flatMap((thread) => (thread.lanes ?? []).flatMap((lane): LaneOwner[] =>
-            lane.owner ? [{ lane: lane.lane, owner: lane.owner }] : [])),
-        })
+        const roots = all
+          ? (await read<{ editspaces: { name: string; root: string }[] }>("/es/api/editspaces")).editspaces
+              .map((item) => ({ name: item.name, base: item.root.replace(/\/+$/, "").replace(/\/\.editspace$/, "") }))
+          : [{ name: key, base: "" }]
+        const editspaceOf = (directory: string) => all
+          ? roots.filter((item) => directory === item.base || directory.startsWith(`${item.base}/`)).toSorted((a, b) => b.base.length - a.base.length)[0]?.name
+          : key
+        const names = [...new Set(pinned().flatMap((directory) => editspaceOf(directory) ?? []))].slice(0, MAX_LINEAGE_EDITSPACES)
+        const lineages = await Promise.all((all ? names : [key]).map(async (es) => [es, await readLineage(es)] as const))
+        if (!same()) return
+        setLineage({ project: key, byEditspace: Object.fromEntries(lineages), editspaceOf })
       } catch {
-        if (scope?.es === es) setLineage(undefined)
+        if (same()) setLineage(undefined)
       }
     })().finally(() => {
       lineageRead = undefined
-      if (scope?.es !== es) refreshLineage()
+      if (!same()) refreshLineage()
     })
   }
   const run = async () => {
