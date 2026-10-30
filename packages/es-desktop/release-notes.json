@@ -1,7 +1,39 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-10-29.3",
+  "release": "2026-10-30.1",
   "items": [
+    {
+      "title": "Dictate into another host's session",
+      "detail": "The mic now works in a session on another Work host, such as the Mac Mini. Speech is captured on this machine and the text lands in that session's draft only; if the host disconnects, the text stays in the draft."
+    },
+    {
+      "title": "Rename another host's session",
+      "detail": "Click the title in the top bar to rename a session on another Work host. Enter saves on that host only; Esc cancels. If the host refuses or is unreachable, the title stays and the error says why."
+    },
+    {
+      "title": "Briefs for another host's decisions",
+      "detail": "A decision from another Work host shows the brief prepared on that host. When it has none, Request brief asks that host to prepare one there."
+    },
+    {
+      "title": "Decisions & inbox has one list",
+      "detail": "The sidebar is the one list of what needs you; rows show the requesting agent and project, and failures show their age. The page shows the open item, or an overview of waiting work, history and memory when nothing is open."
+    },
+    {
+      "title": "What's new",
+      "detail": "This window appears once for each new desktop release. Reopen it any time from What's new at the bottom of the sidebar."
+    },
+    {
+      "title": "New session lives in the Agents tab",
+      "detail": "Use + New at the end of the Agents tab controls. It still targets the project and host in scope, and /new and its shortcut work as before.",
+      "try": {
+        "label": "Start a new session",
+        "href": "/new"
+      }
+    },
+    {
+      "title": "Sort agents by when they were created",
+      "detail": "The Agents sort control now cycles Activity, Name and Created. Created lists the newest first; agents whose creation time is unknown come last, by name."
+    },
     {
       "title": "Surfaces show what they are",
       "detail": "Each Surface row's icon shows whether it is a document, dashboard or prototype, with a mark when it is interactive or keeps itself live. Untagged Surfaces keep the plain square."
@@ -15,12 +47,19 @@
       "detail": "Focus jumps to the nearest visible region in that direction. Press ? to see every shortcut."
     },
     {
-      "title": "The Front desk editor changes size only by whole lines",
-      "detail": "While collapsed it no longer animates through in-between heights as you type, wrap or delete. Expanding still animates."
+      "title": "The Front desk editor no longer jumps while you type",
+      "detail": "It starts at one line, grows by whole lines as text wraps up to its limit, scrolls inside after that, and shrinks back when you delete. Expand still works when you ask for it."
+    },
+    {
+      "title": "The wallpaper follows WalStudio's blur and dim",
+      "detail": "A blur change in WalStudio re-blurs the app's wallpaper; a dim change only darkens it, without re-blurring."
     }
   ],
   "limits": [
+    "Dictation in another host's session is verified with a simulated microphone and two test hosts, not yet with your voice on the Mac Mini.",
+    "Request brief needs this window to be paired as an operator on that host.",
     "Surface icons appear only for Surfaces whose author says what they are.",
-    "WalStudio blur and dim are verified on a test profile and test wallpaper only, not yet on your own wallpaper."
+    "WalStudio blur and dim are verified on a test profile and test wallpaper only, not yet on your own wallpaper.",
+    "Surfaces served from a URL on another host still open only on that host."
   ]
 }
