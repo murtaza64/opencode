@@ -458,3 +458,15 @@
 .nav-decision.nav-old .nav-title { color: var(--subtext0); }
 /* NAV-03 Surface type chips, same chip as the Agents filter row. */
 .surface-types { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 6px; }
+
+/* STYLE-12 session top bar, the same in the window and the native title bar (where the bar is portaled outside
+ * .session-page, which left the host glyph stacked over a wrapping label): the title leads and truncates first,
+ * the host glyph and label stay on one baseline and truncate second, the state stays readable and secondary. */
+.topbar:has(> .session-title) { flex-wrap: nowrap; align-items: center; gap: 8px; min-inline-size: 0; }
+.topbar > .session-title { flex: 0 1 auto; min-inline-size: 6ch; }
+.topbar > .session-host { display: inline-flex; align-items: center; gap: 4px; flex: 0 0.0001 auto; min-inline-size: 14px; overflow: hidden; font-size: 12px; line-height: 1; color: var(--subtext0); white-space: nowrap; }
+.topbar > .session-host .host-glyph { flex: none; display: block; inline-size: 12px; block-size: 12px; margin: 0; }
+.topbar > .session-host bdi { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+.topbar > .session-state { flex: none; font-size: 12px; color: var(--overlay1); white-space: nowrap; }
+/* The native bar hides secondary text when narrow; the working state stays (it is short and says if the agent is busy). */
+@media (max-width: 800px) { .native-header .topbar > .dim.session-state { display: inline; } }
