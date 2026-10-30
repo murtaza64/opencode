@@ -1,6 +1,6 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-10-30.3",
+  "release": "2026-10-30.4",
   "items": [
     {
       "title": "The wallpaper is smooth again on high-resolution screens",
