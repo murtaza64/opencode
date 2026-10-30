@@ -15,6 +15,16 @@
 .desk-grid > .desk-evidence.desk-surface, .desk-grid > .work-remote[data-remote-kind=surface] { flex: 1 1 0; min-height: 0; }
 .desk-evidence.work-remote[data-remote-kind=surface] { display: flex; flex-direction: column; overflow: hidden; padding-block-end: 0; }
 .work-remote-surface { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Seamless in the pane: no card padding or border, one compact bar, the frame edge to edge. */
+.desk-evidence.desk-surface, .desk-evidence.work-remote[data-remote-kind=surface] { padding: 0; border: 0; }
+.surface-bar { flex: none; display: flex; align-items: center; gap: 8px; block-size: 30px; box-sizing: border-box; min-inline-size: 0; padding-inline: 10px 4px; border-block-end: 1px solid var(--surface0); background: var(--mantle); }
+.desk .surface-bar h2 { flex: 0 1 auto; min-inline-size: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; text-transform: none; letter-spacing: normal; }
+.surface-bar .work-remote-host { display: inline-flex; align-items: center; gap: 4px; }
+.surface-bar .work-remote-host, .surface-bar-link { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--subtext0); }
+.surface-bar-actions { flex: none; display: flex; gap: 2px; margin-inline-start: auto; }
+.desk .surface-bar-button { display: inline-grid; place-items: center; inline-size: 24px; block-size: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--subtext0); font-size: 16px; line-height: 1; }
+.desk .surface-bar-button:hover { background: var(--surface0); color: var(--text); }
+.desk-surface > .desk-surface-frame, .work-remote-surface > .desk-surface-frame { border: 0; }
 @media (max-width: 900px) {
   .desk-evidence.desk-surface { padding-inline: 0; border: 0; }
   .desk-surface-frame { min-height: 70vh; }

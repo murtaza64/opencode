@@ -1,7 +1,7 @@
-// Another Work host's Surface opened in this window fills the centre pane (Laptop2547): the frame's height follows the
-// pane at two window sizes and after a resize, the pane itself does not scroll (so the sticky header never overlaps
-// the title), and the frame owns scrolling of a tall artifact, by keyboard too. Compared against this host's own
-// Surface reader on the same artifact. Disposable fixture. Run from packages/es-app: node test/work-remote-surface.browser.mjs
+// A Surface is seamless in the centre pane (Laptop2547/2578), this host's and another Work host's: one compact bar
+// (<= 32px) and the frame edge to edge (its left, right and bottom on the pane's edges) at wide, split (chat open) and
+// narrow windows and after a resize; the pane does not scroll; the frame owns scrolling of a tall artifact, by
+// keyboard too; Escape in the pane closes it. Disposable fixture. Run from packages/es-app: node test/work-remote-surface.browser.mjs
 import { createRequire } from "node:module"
 import { startAttentionPreview } from "./attention-preview.mjs"
 
@@ -37,14 +37,21 @@ await page.route("**/hosts/mini/**", route => {
   return route.fulfill({ json: [] })
 })
 const detail = page.locator(".work-remote")
-// Pane = the selected-item section; the frame should take everything below the section's header and title.
-const measure = () => detail.evaluate((section) => {
-  const frame = section.querySelector("iframe.desk-surface-frame")
+// The centre pane is the desk grid; the frame should sit on its left, right and bottom edges under one bar.
+const measure = (selector) => page.locator(selector).evaluate((section) => {
   const box = (element) => element.getBoundingClientRect()
-  return { pane: Math.round(box(section).height), paneBottom: Math.round(box(section).bottom), frame: Math.round(box(frame).height), frameBottom: Math.round(box(frame).bottom),
-    paneScrolls: section.scrollHeight > section.clientHeight + 1, headBottom: Math.round(box(section.querySelector(".desk-evidence-head")).bottom),
-    titleTop: Math.round(box(section.querySelector(".work-remote-surface h2")).top) }
+  const pane = box(section.closest(".desk-grid"))
+  const frame = box(section.querySelector("iframe.desk-surface-frame"))
+  const bar = section.querySelector(".surface-bar")
+  return { left: Math.round(frame.left - pane.left), right: Math.round(pane.right - frame.right), bottom: Math.round(pane.bottom - frame.bottom),
+    bar: bar ? Math.round(box(bar).height) : null, heads: section.querySelectorAll(".desk-evidence-head").length, frame: Math.round(frame.height), paneScrolls: section.scrollHeight > section.clientHeight + 1 }
 })
+const seamless = (name, value) => {
+  for (const edge of ["left", "right", "bottom"]) expect(Math.abs(value[edge]), `${name}: frame ${edge} inset ${value[edge]}px`).toBeLessThanOrEqual(1)
+  expect(value.bar, `${name}: bar height`).toBeLessThanOrEqual(32)
+  expect(value.heads, `${name}: stacked header`).toBe(0)
+  expect(value.paneScrolls, `${name}: the pane scrolls`).toBe(false)
+}
 const results = {}
 try {
   await page.goto(`${preview.url}/agents`, { waitUntil: "domcontentloaded", timeout: 300_000 })
@@ -55,28 +62,31 @@ try {
   await local.click()
   const localPane = page.locator(".desk-evidence.desk-surface")
   await expect(localPane.locator("iframe.desk-surface-frame")).toBeVisible()
-  results.local = await localPane.evaluate((section) => ({ pane: Math.round(section.getBoundingClientRect().height), frameBottom: Math.round(section.querySelector("iframe").getBoundingClientRect().bottom), paneBottom: Math.round(section.getBoundingClientRect().bottom) }))
+  results.local = await measure(".desk-evidence.desk-surface")
   console.log("local", JSON.stringify(results.local))
-  expect(Math.abs(results.local.frameBottom - results.local.paneBottom)).toBeLessThanOrEqual(2)
-  expect(results.local.pane).toBeGreaterThan(850)
+  seamless("local", results.local)
+  // Escape in the pane (focus on the bar, outside the frame) closes it.
+  await localPane.getByRole("button", { name: "Close and return to chat" }).focus()
+  await page.keyboard.press("Escape")
+  await expect(localPane).toHaveCount(0)
   const row = page.locator("nav.sidebar [data-nav-item='mini~surface:srf_spec']")
   await expect(row).toBeVisible({ timeout: 120_000 })
   await row.click()
   await expect(detail.locator("iframe.desk-surface-frame")).toBeVisible()
   const frame = page.frameLocator(".work-remote iframe.desk-surface-frame")
   await expect(frame.locator("nav")).toHaveText("Spec nav")
-  for (const [name, size] of [["1280x900", { width: 1280, height: 900 }], ["1600x1000", { width: 1600, height: 1000 }], ["resized 1100x700", { width: 1100, height: 700 }]]) {
+  const chat = page.locator("nav.sidebar [data-nav='front-desk']")
+  for (const [name, size, split] of [["wide 1440x900", { width: 1440, height: 900 }, false], ["split 1280x900 chat open", { width: 1280, height: 900 }, true], ["resized 1100x700", { width: 1100, height: 700 }, false]]) {
     await page.setViewportSize(size)
-    await page.waitForTimeout(200)
-    const value = await measure()
+    if (split !== (await chat.getAttribute("aria-pressed") === "true")) await chat.click()
+    await page.waitForTimeout(300)
+    const value = await measure(".work-remote")
     results[name] = value
     console.log(name, JSON.stringify(value))
-    // The frame reaches the bottom of the pane and the pane does not scroll; the header stays above the title.
-    expect(Math.abs(value.frameBottom - value.paneBottom), `${name}: frame bottom ${value.frameBottom} vs pane bottom ${value.paneBottom}`).toBeLessThanOrEqual(2)
-    expect(value.paneScrolls, `${name}: the pane scrolls`).toBe(false)
-    expect(value.headBottom, `${name}: header overlaps the title`).toBeLessThanOrEqual(value.titleTop)
-    expect(value.frame, `${name}: frame ${value.frame} of pane ${value.pane}`).toBeGreaterThan(value.pane * 0.7)
+    seamless(name, value)
+    if (process.env.SHOT) await page.screenshot({ path: `${process.env.SHOT}-${name.split(" ")[0]}.png` })
   }
+  if (await chat.getAttribute("aria-pressed") === "true") await chat.click()
   // The frame scrolls the tall artifact, by keyboard as well.
   await frame.locator("p").first().click()
   await page.keyboard.press("PageDown")
@@ -87,14 +97,21 @@ try {
   results.frameScroll = scrolled
   expect(scrolled.height).toBeGreaterThan(scrolled.view)
   expect(await detail.evaluate((section) => section.scrollTop)).toBe(0)
-  // Narrow (one column): the frame keeps a usable height, as this host's own Surface reader does.
+  // Narrow (one column): still seamless, and the frame keeps a usable height.
   await page.setViewportSize({ width: 800, height: 900 })
-  await page.waitForTimeout(200)
-  results.narrow = await detail.evaluate((section) => Math.round(section.querySelector("iframe.desk-surface-frame").getBoundingClientRect().height))
-  expect(results.narrow).toBeGreaterThanOrEqual(Math.round(900 * 0.7) - 2)
+  await page.waitForTimeout(300)
+  results.narrow = await measure(".work-remote")
+  console.log("narrow", JSON.stringify(results.narrow))
+  for (const edge of ["left", "right"]) expect(Math.abs(results.narrow[edge]), `narrow: frame ${edge} inset`).toBeLessThanOrEqual(1)
+  expect(results.narrow.bar).toBeLessThanOrEqual(32)
+  expect(results.narrow.frame).toBeGreaterThanOrEqual(Math.round(900 * 0.7) - 2)
+  // Escape closes another host's Surface too.
+  await detail.getByRole("button", { name: "Close" }).focus()
+  await page.keyboard.press("Escape")
+  await expect(detail).toHaveCount(0)
   expect(errors).toEqual([])
   console.log(JSON.stringify(results))
-  console.log("PASS work remote surface: frame fills the pane at 1280x900, 1600x1000 and after resizing to 1100x700; pane does not scroll; header above title; frame scrolls by keyboard; narrow keeps 70vh")
+  console.log("PASS seamless surface: local and remote frame 0px inset (left/right/bottom), one bar <= 32px, no stacked header, wide/split/resized/narrow; frame scrolls by keyboard; Escape closes")
 } finally {
   await browser.close()
   await preview.close()

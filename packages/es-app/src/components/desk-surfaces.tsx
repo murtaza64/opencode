@@ -82,19 +82,19 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
     props.onRetry()
     if (address.error) void refetch()
   }
-  return <section class="desk-evidence desk-surface" aria-label="Surface">
-    <div class="desk-evidence-head">
-      <h2><bdi dir="auto">{props.surface?.title ?? props.id}</bdi></h2>
-      <Show when={props.surface}>{surface => <span class="home-source" title={`${surface().lane ?? "no lane"} · ${surface().editspace} · revision ${surface().revision}`}>
-        <bdi dir="auto">{surface().owner}</bdi> · {surfaceProblem(surface().health) ?? `updated ${ago(surface().updated_at)}`}
-        <Show when={surface().requested_in}>{asked => <> · <A href={sessionHref(asked().session, asked().directory)} data-requested-in={asked().session}
-          title="The conversation this was asked for in">asked in <bdi dir="auto">{asked().title ?? "conversation"}</bdi></A></>}</Show>
-      </span>}</Show>
-      <span class="desk-surface-actions">
+  // One compact bar: title (owner, revision and freshness in its tooltip), "asked in", open in a new tab, close. The
+  // frame takes the rest of the pane edge to edge. Escape anywhere in the pane outside the frame closes it.
+  return <section class="desk-evidence desk-surface" aria-label="Surface" onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); props.onClose() } }}>
+    <div class="surface-bar">
+      <h2 title={props.surface ? `${props.surface.owner} · ${surfaceProblem(props.surface.health) ?? `updated ${ago(props.surface.updated_at)}`} · ${props.surface.lane ?? "no lane"} · ${props.surface.editspace} · revision ${props.surface.revision}` : undefined}>
+        <bdi dir="auto">{props.surface?.title ?? props.id}</bdi></h2>
+      <Show when={props.surface?.requested_in}>{asked => <A class="surface-bar-link" href={sessionHref(asked().session, asked().directory)} data-requested-in={asked().session}
+        title="The conversation this was asked for in">asked in <bdi dir="auto">{asked().title ?? "conversation"}</bdi></A>}</Show>
+      <span class="surface-bar-actions">
         <Show when={src() && props.surface && !surfaceUnavailable(props.surface)}>
-          <a class="desk-button desk-surface-open" href={src()} target="_blank" rel="noopener noreferrer" title="Open in new tab" aria-label="Open in new tab"><Glyph name="link-external" /></a>
+          <a class="surface-bar-button" href={src()} target="_blank" rel="noopener noreferrer" title="Open in new tab" aria-label="Open in new tab"><Glyph name="link-external" /></a>
         </Show>
-        <button class="desk-button" aria-label="Close and return to chat" onClick={props.onClose}>Close</button>
+        <button class="surface-bar-button" aria-label="Close and return to chat" title="Close (Esc)" onClick={props.onClose}>×</button>
       </span>
     </div>
     <Show when={props.surface} fallback={<p class="desk-surface-state">{props.checked ? "This surface was withdrawn by its owner." : "Loading…"}</p>}>{surface =>

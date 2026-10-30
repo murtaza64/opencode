@@ -1,7 +1,7 @@
 /* Another Work host's entry opened in this window (Main1555): its decision, permission, question or Surface, read
  * and acted on through the Local listener's /hosts/<id>/ routes (host-items.ts), so the action happens on the
  * owning host with that host's operator session and the window never switches to that host's tab. */
-import { createResource, Match, Show, Switch } from "solid-js"
+import { createResource, Match, Show, Switch, type JSX } from "solid-js"
 import type { PermissionRequest } from "@opencode-ai/sdk/v2"
 import { A } from "@solidjs/router"
 import { createAttention } from "../attention"
@@ -13,21 +13,24 @@ import type { WorkEntry } from "../work-queue"
 import { AttentionDecision } from "./attention-decision"
 import { PreparedBrief, useCompleteBrief, useCompleteJob } from "./attention-brief"
 import { HomePermission } from "./home-permission"
-import { HostGlyph } from "./icons"
+import { Glyph, HostGlyph } from "./icons"
 
 export const WorkRemoteDetail = (props: { entry: WorkEntry; onClose: () => void }) => {
   const host = () => props.entry.host!
   const where = () => <span class="work-remote-host" data-host={host()}><HostGlyph host={host()} size={12} /> on <bdi dir="auto">{props.entry.hostLabel ?? host()}</bdi>
     <Show when={props.entry.stale}> · <span class="home-blocked">{props.entry.unavailableReason ? "unreachable · last known" : "last known"}</span></Show></span>
-  return <section class="desk-evidence attention-home work-remote" aria-label="Selected item" data-work-key={props.entry.key} data-remote-kind={props.entry.remote?.kind}>
-    <div class="desk-evidence-head">
+  const surface = () => props.entry.remote?.kind === "surface"
+  return <section class="desk-evidence attention-home work-remote" aria-label="Selected item" data-work-key={props.entry.key} data-remote-kind={props.entry.remote?.kind}
+    onKeyDown={event => { if (surface() && event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); props.onClose() } }}>
+    {/* A Surface carries its own compact bar (host included); other items keep the Close + host head. */}
+    <Show when={!surface()}><div class="desk-evidence-head">
       <button class="desk-button" aria-label="Close" onClick={props.onClose}>Close</button>
       {where()}
-    </div>
+    </div></Show>
     <Switch>
       <Match when={props.entry.remote?.kind === "attention" ? props.entry.remote : undefined}>{remote => <RemoteDecision host={host()} record={remote().record} />}</Match>
       <Match when={props.entry.remote?.kind === "request" ? props.entry.remote : undefined}>{remote => <RemoteRequest host={host()} label={props.entry.hostLabel ?? host()} request={remote().request} stale={props.entry.stale} />}</Match>
-      <Match when={props.entry.remote?.kind === "surface" ? props.entry.remote : undefined}>{remote => <RemoteSurface host={host()} label={props.entry.hostLabel ?? host()} surface={remote().surface} frame={remote().frame} />}</Match>
+      <Match when={props.entry.remote?.kind === "surface" ? props.entry.remote : undefined}>{remote => <RemoteSurface host={host()} label={props.entry.hostLabel ?? host()} surface={remote().surface} frame={remote().frame} where={where()} onClose={props.onClose} />}</Match>
     </Switch>
   </section>
 }
@@ -94,15 +97,22 @@ const RemoteRequest = (props: { host: string; label: string; request: NonNullabl
 }
 
 // A file Surface frames through the owning host; a URL Surface is served only on its own host for now (502 here).
-const RemoteSurface = (props: { host: string; label: string; surface: NonNullable<Extract<WorkEntry["remote"], { kind: "surface" }>>["surface"]; frame: "host" | "own-host-only" }) => {
+const RemoteSurface = (props: { host: string; label: string; surface: NonNullable<Extract<WorkEntry["remote"], { kind: "surface" }>>["surface"]; frame: "host" | "own-host-only"; where: JSX.Element; onClose: () => void }) => {
   const [address, { refetch }] = createResource(() => props.frame === "host" ? props.surface.id : undefined, id => hostSurfaceAddress(props.host, id))
+  const src = () => address.error ? undefined : address()?.src
   return <div class="desk-surface work-remote-surface">
-    <h2><bdi dir="auto">{props.surface.title}</bdi></h2>
-    <p class="home-source"><bdi dir="auto">{props.surface.owner}</bdi> · updated {ago(props.surface.updated_at)}</p>
+    <div class="surface-bar">
+      <h2 title={`${props.surface.owner} · updated ${ago(props.surface.updated_at)}`}><bdi dir="auto">{props.surface.title}</bdi></h2>
+      {props.where}
+      <span class="surface-bar-actions">
+        <Show when={src()}>{href => <a class="surface-bar-button" href={href()} target="_blank" rel="noopener noreferrer" title="Open in new tab" aria-label="Open in new tab"><Glyph name="link-external" /></a>}</Show>
+        <button class="surface-bar-button" aria-label="Close" title="Close (Esc)" onClick={props.onClose}>×</button>
+      </span>
+    </div>
     <Show when={props.frame === "host"} fallback={<p class="desk-surface-state" data-surface-gap="own-host-only">This link surface is served only on <bdi dir="auto">{props.label}</bdi>; it cannot be shown from another computer yet.</p>}>
       <Show when={!address.error} fallback={<div class="desk-surface-state" role="alert"><p>Cannot open this surface from <bdi dir="auto">{props.label}</bdi>: {String(address.error?.message ?? address.error)}</p><button class="desk-button" onClick={() => void refetch()}>Try again</button></div>}>
-        <Show when={address()?.src} fallback={<p class="desk-surface-state">Loading…</p>}>{src =>
-          <iframe class="desk-surface-frame" title={props.surface.title} src={src()} referrerpolicy="no-referrer"
+        <Show when={src()} fallback={<p class="desk-surface-state">Loading…</p>}>{href =>
+          <iframe class="desk-surface-frame" title={props.surface.title} src={href()} referrerpolicy="no-referrer"
             sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" />}</Show>
       </Show>
     </Show>
