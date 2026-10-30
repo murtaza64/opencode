@@ -10,6 +10,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { Icon } from "@opencode-ai/ui/icon"
 import { es, ocAt, type ContextPart } from "../api"
 import { SessionHostProvider, useOc, type SessionHost } from "../session-host"
+import { readHostLineage } from "../host-items"
 import { createHostActivity } from "../host-activity"
 import { hostBase } from "../host-base"
 import { readHost } from "../host"
@@ -229,20 +230,29 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     laneOwners, lineage: dashboardLineage, lineageOwners, pendingHandoffs, refetch, refetchHandoffs, transferPin } = dashboard
   const hostActivity = remote ? createHostActivity(sessionHost, sessionID, directory) : undefined
   const activity = hostActivity ?? dashboard.activity
-  const lineage = () => remote ? [] : dashboardLineage()
+  // Another host's session: that host's lineage for the session's own editspace (read-only routes), so a handoff
+  // there shows here; this page's dashboard lineage describes this host only.
+  const [hostLineage] = createResource(() => remote ? sessionHost.id : undefined, (host) => readHostLineage(host, directory).catch(() => undefined))
+  const lineage = () => remote ? hostLineage()?.edges ?? [] : dashboardLineage()
   const hrefFor = (id: string, dir?: string) => remote ? `${sessionHref(id, dir)}&host=${encodeURIComponent(sessionHost.id!)}` : sessionHref(id, dir)
   const pendingTransfer = () => remote ? undefined : pendingHandoffFor(sessionID, pendingHandoffs())
   const currentEditspace = () => editspace() ?? editspaces()?.default ?? state()?.editspace
   const ownedLane = () => remote ? undefined : laneOwners().find((lane) => lane.owner === sessionID)
   const predecessor = () => {
     const edge = handoffChain(sessionID, lineage())
-    return edge && activity.session(edge.predecessor) ? edge : undefined
+    return edge && (remote || activity.session(edge.predecessor)) ? edge : undefined
   }
+  // Draft recovery into a successor is this host's flow; another host's handoff gets a plain link (remoteSuccessor).
   const nextHandoff = () => {
+    if (remote) return undefined
     const edge = handoffNext(sessionID, lineage())
     return edge && activity.session(edge.successor) ? edge : undefined
   }
   const successor = () => remote ? undefined : successorFor(sessionID, lineage(), lineageOwners())
+  const remoteSuccessor = () => remote ? successorFor(sessionID, lineage(), hostLineage()?.owners ?? []) : undefined
+  const hostTitle = (id: string) => dashboard.work.feeds().find((feed) => feed.host.id === sessionHost.id)?.state().rows.find((row) => row.id === id)
+  const sessionLabel = (id: string) => (remote ? hostTitle(id)?.title : activity.session(id)?.title) ?? id
+  const sessionDir = (id: string) => (remote ? hostTitle(id)?.directory : activity.session(id)?.directory) ?? directory
   const [wasOwner, setWasOwner] = createSignal(false)
   let ownershipChecked = false
   createEffect(() => {
@@ -1952,14 +1962,18 @@ export function SessionView(props: { sessionID: string; directory: string; embed
               <span class="dim">Exact source excerpt. Earlier history is not added to the reader.</span>
             </div>}</Show>
             <Show when={predecessor()}>{(edge) => <div class="banner handoff-history" aria-label="Previous session">
-              Previous session: <A href={sessionHref(edge().predecessor, activity.session(edge().predecessor)?.directory)}><bdi dir="auto">{activity.session(edge().predecessor)?.title ?? edge().predecessor}</bdi></A>
+              Previous session: <A href={hrefFor(edge().predecessor, sessionDir(edge().predecessor))}><bdi dir="auto">{sessionLabel(edge().predecessor)}</bdi></A>
               {" · "}<bdi dir="ltr">{edge().predecessor}</bdi>
               <Show when={edge().reason}>{(reason) => <> · <bdi dir="auto">{reason()}</bdi></>}</Show>
               <Show when={edge().kickoff === "skipped" && edge().context}>{(context) => <>
                 {" · "}Handoff brief not sent because this session was already in use: <bdi dir="ltr">{context()}</bdi>
               </>}</Show>
             </div>}</Show>
-            <Show when={pendingTransfer()}>{(transfer) => <div class="banner handoff-progress" role="status" aria-label="Handoff progress">
+            <Show when={remoteSuccessor()}>{(edge) => <div class="banner handoff-history handoff-next" role="status" aria-label="Session handoff">
+              Handed off to <A href={hrefFor(edge().successor, sessionDir(edge().successor))}><bdi dir="auto">{sessionLabel(edge().successor)}</bdi></A>
+              {" · "}<bdi dir="ltr">{edge().successor}</bdi> · lane <bdi dir="auto">{edge().lane}</bdi> on <bdi dir="auto">{sessionHost.label}</bdi>
+            </div>}</Show>
+                        <Show when={pendingTransfer()}>{(transfer) => <div class="banner handoff-progress" role="status" aria-label="Handoff progress">
               {transfer().error ? "Handoff paused. Your draft is saved." : transfer().successor === sessionID
                 ? "Loading handoff context. This session is not ready yet."
                 : transfer().status === "submitting" ? "Starting the next session. Your draft is saved here."

@@ -15,6 +15,7 @@ import { CloudNav, CloudSource } from "./cloud-sidebar"
 import { cloudRows } from "../cloud-rows"
 import { byBoundary, dateGroup, type DateGroup } from "../turn-order"
 import { compareRows } from "../session-recency"
+import { successorFor } from "../handoffs"
 import { cloudKey, type CloudPin } from "../cloud-agents"
 import { rankSearch, type Searchable } from "../search-rank"
 import { failureLabel } from "../session-failures"
@@ -429,6 +430,18 @@ export default function Sidebar() {
     const down = () => feed?.state().status === "unavailable"
     const dot = createMemo(() => work.dot(s))
     const name = () => `${s.title || s.id}, on ${label()}${down() ? ", unavailable" : ""}`
+    // A pinned session that handed off stays pinned (session pins are exact); it links to its lane's current owner on
+    // that host, from that host's lineage.
+    const handedOff = () => {
+      if (!feed || !work.isPinned(s)) return
+      const lineage = feed.lineage()
+      const es = lineage?.editspaceOf(s.directory)
+      const value = es ? lineage?.byEditspace[es] : undefined
+      const edge = value ? successorFor(s.id, value.edges, value.owners) : undefined
+      if (!edge) return
+      const row = feed.state().rows.find((item) => item.id === edge.successor)
+      return { id: edge.successor, title: row?.title || edge.successor, directory: row?.directory ?? s.directory }
+    }
     return (
     <div class="session-entry host-entry" classList={{ unavailable: down() }}>
       <a href={feed ? hostSessionHref(feed.host, s) : undefined} class="nav-item" classList={{ active: isOpen(s) }}
@@ -443,6 +456,9 @@ export default function Sidebar() {
         aria-label={`${work.isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id} on ${label()}`}
         title={`${work.isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
         onClick={() => work.togglePin(s)}>{work.isPinned(s) ? "\u2665\ufe0e" : "\u2661\ufe0e"}</button>
+      <Show when={feed && handedOff()}>{(next) => <a class="handoff-next-link" href={hostSessionHref(feed!.host, next())}
+        title={`Handed off to ${next().title} on ${label()}`} aria-label={`${s.title || s.id} handed off to ${next().title} on ${label()}`}>
+        handed off → <bdi dir="auto">{next().title}</bdi></a>}</Show>
     </div>
   )
   }

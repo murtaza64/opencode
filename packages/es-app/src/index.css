@@ -626,6 +626,10 @@ main { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
  * size keeps the scrollbar stable before a row is first rendered. */
 .session-entry, .nav-item.archived { content-visibility: auto; contain-intrinsic-size: auto 28px; }
 .session-entry .nav-item { flex: 1; min-width: 0; }
+/* A pinned session that handed off: its successor on the second line, under the title. */
+.session-entry:has(> .handoff-next-link) { flex-wrap: wrap; contain-intrinsic-size: auto 44px; }
+.handoff-next-link { flex-basis: 100%; min-width: 0; padding-inline: 28px 8px; padding-block-end: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--subtext0); }
+.handoff-next-link:hover { color: var(--accent); }
 .pin-action {
   flex: none;
   padding: 4px 7px;

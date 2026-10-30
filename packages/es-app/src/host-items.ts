@@ -2,6 +2,7 @@
  * Local listener's /hosts/<id>/ routes, so a read, an answer, a reply or a frame address is that host's own, with that
  * host's operator session, and the window never switches to that host's tab. To answer another host's decision, use
  * `createAttention(project, { prefix: hostPrefix(host) })`; to reply to its permission or question, `hostCore(host)`. */
+import type { Handoff, LaneOwner } from "./handoffs"
 import { ocAt } from "./api"
 import { attentionPath, type AttentionRecord } from "./attention"
 import type { HomeRequestRow } from "./home-requests"
@@ -42,4 +43,28 @@ export const hostSurfaceAddress = async (host: string, surface: string) => {
   if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) throw new Error(`${host}: this listener does not frame that host's surfaces`)
   const body = (await response.json()) as { src: string; expires_at?: number }
   return { src: body.src, expiresAt: body.expires_at }
+}
+
+/** Another host's handoff lineage for the editspace holding `directory` (longest root match): its handoff edges and lane
+ * owners, read through the Local listener's read-only routes; undefined when no editspace holds the directory. */
+export const readHostLineage = async (host: string, directory: string) => {
+  const json = async <T>(path: string) => {
+    const response = await fetch(`${hostPrefix(host)}${path}`, { credentials: "include" })
+    if (!response.ok) throw new Error(`${host}: ${path} answered HTTP ${response.status}`)
+    return response.json() as Promise<T>
+  }
+  const roots = (await json<{ editspaces: { name: string; root: string }[] }>("/es/api/editspaces")).editspaces
+    .map((item) => ({ name: item.name, base: item.root.replace(/\/+$/, "").replace(/\/\.editspace$/, "") }))
+  const es = roots.filter((item) => directory === item.base || directory.startsWith(`${item.base}/`)).toSorted((a, b) => b.base.length - a.base.length)[0]?.name
+  if (!es) return undefined
+  const [handoffs, state] = await Promise.all([
+    json<{ handoffs: Handoff[] }>(`/es/api/handoffs?es=${encodeURIComponent(es)}`),
+    json<{ editspace: string; threads: { lanes?: { lane: string; owner?: string }[] }[] }>(`/es/api/state?es=${encodeURIComponent(es)}`),
+  ])
+  if (state.editspace !== es || !Array.isArray(handoffs.handoffs) || !Array.isArray(state.threads)) throw new Error(`${host}: invalid lineage for ${es}`)
+  return {
+    editspace: es,
+    edges: handoffs.handoffs,
+    owners: state.threads.flatMap((thread) => (thread.lanes ?? []).flatMap((lane): LaneOwner[] => lane.owner ? [{ lane: lane.lane, owner: lane.owner }] : [])),
+  }
 }

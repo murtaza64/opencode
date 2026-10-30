@@ -658,7 +658,7 @@ export function DashboardProvider(props: ParentProps) {
       }),
       ...(pinClients()[item.id]?.state().pins.some((pin) => pin.ref.startsWith("lane:"))
         ? feeds().find((feed) => feed.host.id === item.id)?.state().rows.map((row) => row.directory) ?? [] : []),
-    ]))))
+    ], () => (pinClients()[item.id]?.state().pins ?? []).flatMap((pin) => /^lane:([^/]+)\//.exec(decodeURIComponent(pin.ref))?.[1] ?? [])))))
   })
   createEffect((previous: string | null | undefined) => {
     const project = workProject()
