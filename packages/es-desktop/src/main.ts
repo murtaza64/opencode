@@ -85,6 +85,7 @@ const start = async () => {
   const appearance = createAppearance({
     directory: process.env.ES_APPEARANCE_DIR ?? path.join(app.getPath("home"), ".cache/wal"),
     receipt: path.join(app.getPath("userData"), "appearance-receipt.json"),
+    renderer: "studio-gaussian-1",
     // Without a Studio look: shrinking to 24 samples and scaling back up is this app's own soft blur. With one, a real
     // blur at a work size, shown at display resolution (blurPlan).
     blur: async (file, sigma) => {

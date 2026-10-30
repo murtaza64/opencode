@@ -65,6 +65,9 @@ export const createAppearance = (options: {
   // Downscaled, blurred JPEG of an image file; the desktop app uses Electron's image decoder. `sigma`: Studio's blur
   // (undefined: this app's own default blur).
   blur: (file: string, sigma?: number) => Promise<Buffer>
+  // Names how `blur` renders. It is part of the wallpaper's URL version, so a release that renders differently gets a new
+  // URL instead of the year-long immutable copy a page already cached for the same file and look.
+  renderer?: string
   debounce?: number
   poll?: number
   // Where to record what the app now shows, so Palette Studio can prove an Apply landed without the
@@ -92,7 +95,7 @@ export const createAppearance = (options: {
     const wallpaper = typeof state.colors?.wallpaper === "string" ? state.colors.wallpaper : undefined
     const look = lookOf(state.colors?.studio)
     const info = wallpaper && path.isAbsolute(wallpaper) && IMAGE.test(wallpaper) ? await stat(wallpaper).catch(() => undefined) : undefined
-    const source = info?.isFile() ? `${wallpaper}:${info.mtimeMs}:${info.size}:${look?.blur ?? "default"}` : undefined
+    const source = info?.isFile() ? `${wallpaper}:${info.mtimeMs}:${info.size}:${look?.blur ?? "default"}:${options.renderer ?? ""}` : undefined
     if (source && source !== state.source) {
       const image = await options.blur(wallpaper!, look?.blur).catch(() => undefined)
       if (image) Object.assign(state, { image, source })

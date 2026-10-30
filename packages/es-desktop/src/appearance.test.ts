@@ -274,3 +274,20 @@ test("gaussian blur spreads a line symmetrically by about sigma and keeps flat a
   expect((at(23) - 10) / (at(20) - 10)).toBeGreaterThan(0.5)
   expect((at(23) - 10) / (at(20) - 10)).toBeLessThan(0.7)
 })
+
+test("a different renderer serves the same file and look at a new URL, so a cached immutable copy is not reused", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "es-appearance-renderer-"))
+  cleanup.push(() => rm(directory, { recursive: true, force: true }))
+  const wallpaper = path.join(directory, "wall.png")
+  await writeFile(wallpaper, "png bytes")
+  await writeFile(path.join(directory, "colors.json"), palette(wallpaper))
+  const served = async (renderer?: string) => {
+    const appearance = createAppearance({ directory, debounce: 30, poll: 20, renderer, blur: async () => Buffer.from("blurred") })
+    await appearance.ready
+    const url = appearance.body()?.wallpaper
+    appearance.close()
+    return url
+  }
+  expect(await served("studio-gaussian-1")).toBe(await served("studio-gaussian-1"))
+  expect(await served("studio-gaussian-1")).not.toBe(await served(undefined))
+})
