@@ -215,8 +215,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const directory = props.directory
   const sessionHost: SessionHost = props.host ?? { base: "/oc" }
   // This page's dashboard (lanes, mail, handoffs, pins, unread state, failures) describes its own host only, so
-  // another host's session shows none of it, and offers no fork, archive, delete or rename (that host exposes no
-  // such route to this window).
+  // another host's session shows none of it, and offers no fork, archive or delete (that host exposes no
+  // such route to this window). Rename goes to that host (SessionTitle).
   const remote = !!sessionHost.id
   const oc = ocAt(sessionHost.base)
   const composer = getComposer(sessionID, directory, props.host)

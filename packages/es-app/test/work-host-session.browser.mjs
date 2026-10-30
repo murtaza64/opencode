@@ -73,9 +73,9 @@ try {
   await expect(page.locator(".transcript")).toContainText("Hello from the Mini transcript")
   await expect(page.locator(".transcript")).not.toContainText("Review the composer")
   await expect(page.locator(".host-session-composer")).toHaveCount(0)
-  // Another host's session offers no fork, archive, delete or rename from here.
+  // Another host's session offers no fork, archive or delete from here; rename goes to that host (work-host-rename).
   await expect(box().getByRole("button", { name: /Fork|Archive|Delete/ })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Rename session" })).toBeDisabled()
+  await expect(page.getByRole("button", { name: "Rename session" })).toBeEnabled()
 
   // Busy (the fixture's default): Steer goes to the Mini as durable input.
   await editor().fill("Use the staging bucket")

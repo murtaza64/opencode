@@ -16,12 +16,13 @@ afterEach(async () => {
 // Both hosts use the same session ID and directory, as a laptop and Mini running the same setup do.
 const fakeHost = (name: string, options: { delay?: number; status?: number } = {}) => {
   const seen: { path: string; cookie: string | null; authorization: string | null; origin: string | null }[] = []
+  const bodies: string[] = []
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch: async (request) => {
       const url = new URL(request.url)
-      await request.text()
+      bodies.push(await request.text())
       seen.push({ path: url.pathname, cookie: request.headers.get("cookie"), authorization: request.headers.get("authorization"), origin: request.headers.get("origin") })
       if (options.status) return new Response("deny unlisted-login", { status: options.status })
       if (options.delay) await Bun.sleep(options.delay)
@@ -41,7 +42,7 @@ const fakeHost = (name: string, options: { delay?: number; status?: number } = {
     },
   })
   cleanup.push(async () => void (await server.stop(true)))
-  return { origin: server.url.origin, seen, stop: () => server.stop(true) }
+  return { origin: server.url.origin, seen, bodies, stop: () => server.stop(true) }
 }
 
 const renderer = async () => {
@@ -198,7 +199,7 @@ test("a remote host's listener opens that host's file surface through its dashbo
     },
   })
   cleanup.push(async () => void (await gate.stop(true)))
-  const { miniServer, miniGet } = await twoHosts({ origin: gate.url.origin, seen: [], stop: () => gate.stop(true) } as ReturnType<typeof fakeHost>)
+  const { miniServer, miniGet } = await twoHosts({ origin: gate.url.origin, seen: [], bodies: [], stop: () => gate.stop(true) } as ReturnType<typeof fakeHost>)
   // Minted by this listener only behind its own key, like the local host's surfaces.
   expect((await fetch(`${miniServer.origin}/__es/surface/api-tests`)).status).toBe(403)
   const minted = await miniGet("/__es/surface/api-tests", { headers: { cookie: "es_attention_operator=local-op" } })
@@ -379,6 +380,24 @@ test("this window sends input to, and stops, a run on another host: native origi
   expect((await get("/hosts/mini/oc/session/ses_m/input", { method: "POST", body, headers: { origin: "https://evil.test" } })).status).toBe(403)
   for (const pathname of ["/oc/session/ses_m/message", "/oc/session/ses_m/fork", "/es/api/pins/session:ses_m", "/es/api/frontdesk/memory"])
     expect((await get(`/hosts/mini${pathname}`, { method: "POST", body, headers: { origin: server.origin } })).status).toBe(403)
+  expect(mini.seen.length).toBe(before)
+})
+
+test("this window renames, or sets the model of, a session on another host; archive and other fields stay on that host", async () => {
+  const mini = fakeHost("mini")
+  const { server, get } = await workListener(mini)
+  const patch = (body: string, origin = server.origin) =>
+    get("/hosts/mini/oc/session/ses_same?directory=%2Fr", { method: "PATCH", body, headers: { origin, "content-type": "application/json" } })
+  expect((await patch('{"title":"Mini: release notes"}')).status).toBe(200)
+  expect(mini.seen.at(-1)).toEqual({ path: "/session/ses_same", cookie: null, authorization: null, origin: mini.origin })
+  expect(mini.bodies.at(-1)).toBe('{"title":"Mini: release notes"}')
+  expect((await patch('{"model":{"providerID":"anthropic","modelID":"claude"}}')).status).toBe(200)
+  expect(mini.bodies.at(-1)).toBe('{"model":{"providerID":"anthropic","modelID":"claude"}}')
+  const before = mini.seen.length
+  for (const body of ['{"time":{"archived":1}}', '{"title":"x","time":{"archived":1}}', '{"permission":[]}', '{"title":"  "}', '{"title":1}',
+    '{"model":{"providerID":"a","modelID":"b","variant":"c"}}', "[]", "not json", "", JSON.stringify({ title: "x".repeat(20_000) })])
+    expect((await patch(body)).status).toBe(403)
+  expect((await patch('{"title":"Mini"}', "https://evil.test")).status).toBe(403)
   expect(mini.seen.length).toBe(before)
 })
 

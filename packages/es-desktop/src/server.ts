@@ -4,7 +4,7 @@ import { createReadStream } from "node:fs"
 import { readFile, realpath, stat } from "node:fs/promises"
 import path from "node:path"
 import { randomBytes } from "node:crypto"
-import { apiAllowed, hostApiAllowed, hostAttention, hostPinWrite, hostWriteAllowed, selfHandoffRoute, serviceURL } from "./policy"
+import { apiAllowed, hostApiAllowed, hostAttention, hostPinWrite, hostSessionPatch, hostSessionUpdateAllowed, hostWriteAllowed, selfHandoffRoute, serviceURL } from "./policy"
 import { cookieName, cookieValid, issueCookie, loopbackHost, pairingCsp, pairingMatches, pairingPage, remoteListenHost } from "./pairing"
 import { eventMux } from "../../es-app/event-mux"
 import { eventProtocol, eventPaths } from "../../es-app/event-protocol"
@@ -286,6 +286,12 @@ export const serve = async (options: {
           cookie: remoteCookie(req.headers.cookie, qualified.host),
           setCookie: (values) => remoteSetCookie(values, qualified.host)?.map((value) => scopeCookie(value, qualified.host)),
         })
+      if (write && req.method === "PATCH" && hostSessionPatch.test(qualified.path)) {
+        const body = await readLimited(req, 16_384)
+        const parsed = body && (() => { try { return JSON.parse(body.toString("utf8")) as unknown } catch { return undefined } })()
+        if (!hostSessionUpdateAllowed(parsed)) return finish(403, "Host session update not exposed")
+        return peerWrite(req, res, upstream, new URL(peer.opencode).origin, finish, undefined, body!)
+      }
       if (write) return peerWrite(req, res, upstream, new URL(peer.opencode).origin, finish)
       return peerRead(req, res, upstream, finish)
     }
@@ -486,6 +492,7 @@ const scopeCookie = (value: string, host: string) => `${value.replace(/;\s*Path=
 const peerWrite = (
   req: IncomingMessage, res: ServerResponse, target: string, origin: string, finish: (status: number, body: string, type?: string) => void,
   attention?: { cookie?: string; setCookie: (values: string[] | undefined) => string[] | undefined },
+  body?: Buffer,
 ) => {
   const upstream = (target.startsWith("https:") ? httpsRequest : httpRequest)(target, { method: req.method, headers: { ...proxyHeaders(req.headers), origin, ...(attention?.cookie ? { cookie: attention.cookie } : {}) } }, (response) => {
     if ([301, 302, 303, 307, 308].includes(response.statusCode ?? 0)) {
@@ -504,8 +511,21 @@ const peerWrite = (
     finish(502, '{"error":"Host unavailable"}', "application/json")
   })
   res.on("close", () => upstream.destroy())
+  if (body) return upstream.end(body)
   req.pipe(upstream)
 }
+
+// A request body read whole for inspection; undefined when it exceeds `limit` bytes or the read fails.
+const readLimited = (req: IncomingMessage, limit: number) => new Promise<Buffer | undefined>((resolve) => {
+  const chunks: Buffer[] = []
+  let size = 0
+  req.on("data", (chunk: Buffer) => {
+    size += chunk.length
+    if (size <= limit) chunks.push(chunk)
+  })
+  req.on("end", () => resolve(size <= limit ? Buffer.concat(chunks) : undefined))
+  req.on("error", () => resolve(undefined))
+})
 
 const voiceID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 

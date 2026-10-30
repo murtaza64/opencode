@@ -183,6 +183,19 @@ const HOST_PIN_WRITES: Record<string, RegExp> = {
   DELETE: new RegExp(`^/es/api/pins/${PIN_REF}$`),
   PATCH: new RegExp(`^/es/api/pins/${PIN_REF}/order$`),
 }
+// The one session-record write another host takes from this window (PATCH /oc/session/<id>): a rename ({title}) or
+// the model preference ({model}). Archive, permission and any other field stay on that host's own window.
+export const hostSessionPatch = /^\/oc\/session\/[\w-]+$/
+export const hostSessionUpdateAllowed = (body: unknown) => {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false
+  const keys = Object.keys(body)
+  if (keys.length !== 1) return false
+  const record = body as Record<string, unknown>
+  if (keys[0] === "title") return typeof record.title === "string" && record.title.trim().length > 0 && record.title.length <= 512
+  if (keys[0] !== "model" || !record.model || typeof record.model !== "object") return false
+  const model = record.model as Record<string, unknown>
+  return Object.keys(model).length === 2 && typeof model.providerID === "string" && typeof model.modelID === "string"
+}
 export const hostPinWrite = (method: string, pathname: string) => HOST_PIN_WRITES[method]?.test(pathname) ?? false
 
 export const hostWriteAllowed = (method: string, pathname: string) => (HOST_WRITES[method]?.test(pathname) ?? false) || hostPinWrite(method, pathname)

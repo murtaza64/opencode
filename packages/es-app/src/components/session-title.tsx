@@ -1,7 +1,7 @@
 import { createEffect, onCleanup, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { Session } from "@opencode-ai/sdk/v2"
-import { useOc, useSessionHost } from "../session-host"
+import { useOc } from "../session-host"
 import { errorText } from "../live-session"
 import "./session-title.css"
 
@@ -12,9 +12,9 @@ export const SessionTitle = (props: { knownTitle?: string;
   suspendBlurSave?: boolean
   onSaved: (session: Session) => void
 }) => {
+  // Another Work host's session renames on that host only, through its /hosts/<id>/oc client; a refused or
+  // unreachable host leaves the title unchanged and shows the error.
   const oc = useOc()
-  // Another Work host's session is not renamed from here: that host exposes no rename route to this window.
-  const remote = !!useSessionHost().id
   const [state, setState] = createStore({ editing: false, draft: "", saving: false, error: "" })
   let disposed = false
   let blur: ReturnType<typeof setTimeout> | undefined
@@ -55,7 +55,7 @@ export const SessionTitle = (props: { knownTitle?: string;
     <div class="session-title">
       <Show when={state.editing} fallback={
         <h1><button ref={button} type="button" class="session-title-button" dir="auto"
-          aria-label="Rename session" title={shown()} disabled={!props.session || remote}
+          aria-label="Rename session" title={shown()} disabled={!props.session}
           onClick={() => setState({ editing: true, draft: props.session?.title ?? "", error: "" })}>
           {shown()}
         </button></h1>
