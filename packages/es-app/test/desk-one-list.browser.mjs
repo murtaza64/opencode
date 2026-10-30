@@ -120,7 +120,15 @@ try {
 
   // Narrow and RTL.
   await band.locator("[data-nav-item='attention:fixture:decision_1']").click()
+  // A long requester name (session titles are often long) must truncate, not push age and link onto new lines.
+  preview.fixture.sessionTitles.set("ses_a", "Composer fixture working through the bounded implementation scope for the homepage")
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(page.locator(".desk-evidence .home-decision .attention-agent")).toContainText("bounded implementation", { timeout: 120_000 })
   await page.setViewportSize({ width: 390, height: 844 })
+  // The decision header stays one line at 390px: requester, age and thread link share a baseline.
+  const header = await page.locator(".desk-evidence .home-decision .home-eyebrow").evaluate((el) => [el.querySelector(".attention-requester"), el.querySelector("time"), el.querySelector(":scope > a")]
+    .map((child) => { const box = child.getBoundingClientRect(); return Math.round((box.top + box.bottom) / 2) }))
+  if (Math.max(...header) - Math.min(...header) > 6) throw new Error(`decision header wraps at 390px (row centers ${header})`)
   await shot("detail-390")
   await page.evaluate(() => { document.documentElement.dir = "rtl" })
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)

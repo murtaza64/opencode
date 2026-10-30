@@ -485,3 +485,13 @@
 /* The narrow-window chat floats over the inline-end edge (380px); the open item's bar keeps its actions out from
  * under it, so Open and Close stay reachable without closing the chat. */
 body:has(.desk-companion.overlay:not(.closed)) :is(.surface-bar, .desk-evidence-head) { padding-inline-end: calc(380px + 8px); }
+
+/* ATTN-02: a decision's header is one line: requester (truncates first) · age · agent thread at the end. Who updated
+ * it or where answers go now, shown only when they differ, takes its own line below. */
+.home-decision .home-eyebrow { display: grid; grid-template-columns: minmax(0, auto) auto minmax(0, 1fr) auto; column-gap: 12px; row-gap: 2px; align-items: baseline; }
+.home-decision .home-eyebrow > .attention-requester { grid-area: 1 / 1; min-inline-size: 0; overflow: hidden; }
+.home-decision .home-eyebrow > .attention-requester .attention-agent { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-decision .home-eyebrow > .attention-project { white-space: nowrap; }
+.home-decision .home-eyebrow > time { grid-area: 1 / 2; white-space: nowrap; }
+.home-decision .home-eyebrow > a { grid-area: 1 / 4; margin: 0; white-space: nowrap; }
+.home-decision .home-eyebrow > .attention-routing { grid-area: 2 / 1 / 3 / -1; }
