@@ -97,6 +97,10 @@ try {
   await expect(detail.getByRole("button", { name: "Prepare brief" })).toBeAttached()
   await expect(detail.locator(".desk-brief").first()).toBeAttached()
   await expect(detail.getByRole("button", { name: "More detail" })).toBeVisible()
+  // Briefs unavailable here: one plain clause beside the button; the host's reason is the tooltip, not body text.
+  const why = detail.locator(".desk-brief .home-source").first()
+  await expect(why).toHaveText("Briefs unavailable on this host")
+  await expect(why).toHaveAttribute("title", /HTTP 501/)
   await shot("detail-1440")
   await page.reload({ waitUntil: "domcontentloaded" })
   await expect(detail).toBeVisible({ timeout: 120_000 })

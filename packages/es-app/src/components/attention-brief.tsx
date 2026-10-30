@@ -46,7 +46,8 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
       <Show when={current()} fallback={<Show when={props.live}>
         <Show when={props.auto && !props.unavailable} fallback={<>
           <button class="desk-button" disabled={!props.canStart} onClick={props.start}>Prepare brief</button>
-          <Show when={props.unavailable}><span class="home-source" title={props.unavailableDetail}> {props.unavailable}</span></Show>
+          {/* One plain clause beside the disabled button; the host's reason (status codes, model) is the tooltip. */}
+          <Show when={props.unavailable}>{text => <span class="home-source" title={[text(), props.unavailableDetail].filter(Boolean).join("\n")}> {text().split(":")[0].replace(/\.$/, "")}</span>}</Show>
         </>}><p class="home-muted" role="status">Preparing brief…</p></Show>
       </Show>}>{job => <>
         <Show when={job().state.state === "starting" || job().state.state === "running"}><p class="home-muted" role="status">Preparing brief…</p></Show>
