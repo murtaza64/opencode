@@ -410,6 +410,12 @@ test("another host's attention carries only that host's operator cookie, minted 
   })
   expect(command.status).toBe(200)
   expect(seen.at(-1)).toEqual({ path: "/es/api/attention/00000000-0000-4000-8000-000000000000/commands", cookie: "es_attention_operator=op-mini", origin: dashboard.url.origin })
+  // Request brief starts the job on the owning host's dashboard with that host's operator cookie.
+  const brief = await get("/hosts/mini/es/api/frontdesk/briefs/00000000-0000-4000-8000-000000000000/regenerate?es=sample", {
+    method: "POST", body: "{}", headers: { ...headers, cookie: "es_attention_operator=local-op; es_attention_operator__mini=op-mini" },
+  })
+  expect(brief.status).toBe(200)
+  expect(seen.at(-1)).toEqual({ path: "/es/api/frontdesk/briefs/00000000-0000-4000-8000-000000000000/regenerate", cookie: "es_attention_operator=op-mini", origin: dashboard.url.origin })
 })
 
 test("host writes are exactly the own-host session, Aside, model, reply and attention writes; encoded or other paths are refused", async () => {

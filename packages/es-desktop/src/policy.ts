@@ -167,11 +167,12 @@ export const selfHandoffRoute = /^\/es\/api\/handoffs\/self(?:\/[A-Za-z0-9_-]{1,
 // Writes to another Work host from this laptop's window (/hosts/<id>/...), Slice W (contract v0.2.1 §4):
 // the same session writes this listener allows on its own host (prompt/input admission, pending-input
 // edit/withdraw/deliver, recovery nudge, stop, Aside ask/cancel, the session model preference), permission
-// and question replies, and attention operator sign-in, answers and delivery checks. Fork, create and delete
+// and question replies, attention operator sign-in, answers and delivery checks, and Request brief (the owning
+// host's dashboard starts the brief job; operator only). Fork, create and delete
 // stay on that host's own window. Pin writes (`hostPinWrite`) reach only that host's own store.
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 const HOST_WRITES: Record<string, RegExp> = {
-  POST: new RegExp(`^/(?:oc/session/[\\w-]+/(?:prompt_async|input|abort|recover|aside)|oc/session/[\\w-]+/input/[\\w-]+/deliver|oc/(?:permission|question)/[\\w-]+/(?:reply|reject)|es/api/attention/(?:session|${UUID}/(?:commands|delivery)))$`),
+  POST: new RegExp(`^/(?:oc/session/[\\w-]+/(?:prompt_async|input|abort|recover|aside)|oc/session/[\\w-]+/input/[\\w-]+/deliver|oc/(?:permission|question)/[\\w-]+/(?:reply|reject)|es/api/attention/(?:session|${UUID}/(?:commands|delivery))|es/api/frontdesk/briefs/${UUID}/regenerate)$`),
   PATCH: /^\/oc\/session\/[\w-]+(?:\/input\/[\w-]+)?$/,
   DELETE: /^\/oc\/session\/[\w-]+\/(?:input|aside)\/[\w-]+$/,
 }
@@ -187,7 +188,8 @@ export const hostPinWrite = (method: string, pathname: string) => HOST_PIN_WRITE
 export const hostWriteAllowed = (method: string, pathname: string) => (HOST_WRITES[method]?.test(pathname) ?? false) || hostPinWrite(method, pathname)
 
 /** Another host's attention routes, which its dashboard authorizes with that host's operator cookie. */
-export const hostAttention = (pathname: string) => new RegExp(`^/es/api/attention/(?:session|${UUID}(?:/commands|/delivery)?)$`).test(pathname)
+// Dashboard routes of another host that carry that host's operator cookie: attention and Request brief.
+export const hostAttention = (pathname: string) => new RegExp(`^/es/api/(?:attention/(?:session|${UUID}(?:/commands|/delivery)?)|frontdesk/briefs/${UUID}/regenerate)$`).test(pathname)
 
 // Only expose the existing es-app surface, not daemon PTYs, shell, config, or file APIs.
 export const apiAllowed = (method: string, pathname: string) => {
