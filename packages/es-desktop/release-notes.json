@@ -1,13 +1,15 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-10-30.9",
+  "release": "2026-10-30.10",
   "items": [
     {
-      "title": "Agents Activity sort",
-      "detail": "Agents Activity sort: idle agents ordered by their latest turn; older sessions without a recorded turn stay last, by name."
+      "title": "Running tools in one strip",
+      "detail": "Running tool calls share one compact icon strip; hover or focus a call for its duration and input/output size, and Enter opens its details."
+    },
+    {
+      "title": "Surface actions in narrow windows",
+      "detail": "In narrow windows the floating chat no longer covers an open Surface's or decision's Open and Close buttons."
     }
   ],
-  "limits": [
-    "A host whose Core does not record turn times lists its idle agents by name."
-  ]
+  "limits": []
 }
