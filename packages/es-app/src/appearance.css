@@ -470,3 +470,7 @@
 .topbar > .session-state { flex: none; font-size: 12px; color: var(--overlay1); white-space: nowrap; }
 /* The native bar hides secondary text when narrow; the working state stays (it is short and says if the agent is busy). */
 @media (max-width: 800px) { .native-header .topbar > .dim.session-state { display: inline; } }
+
+/* The narrow-window chat floats over the inline-end edge (380px); the open item's bar keeps its actions out from
+ * under it, so Open and Close stay reachable without closing the chat. */
+body:has(.desk-companion.overlay:not(.closed)) :is(.surface-bar, .desk-evidence-head) { padding-inline-end: calc(380px + 8px); }
