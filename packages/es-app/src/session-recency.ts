@@ -51,3 +51,11 @@ export const compareRows = (a: { clock: TurnClock; title: string }, b: { clock: 
 }
 
 const valid = (value: number | undefined) => typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined
+
+/** The row's latest turn boundary (later of start and end) from Core's Session.time.turn; undefined when Core
+ * recorded none (an older Core without session.turnTime never sends the field). Never time.updated. */
+export const turnAt = (turn: TurnTime | undefined) => {
+  const started = valid(turn?.started)
+  const ended = valid(turn?.ended)
+  return started === undefined && ended === undefined ? undefined : Math.max(started ?? 0, ended ?? 0)
+}

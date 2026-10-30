@@ -25,6 +25,15 @@ describe("Work view rows", () => {
     expect(rows.map((row) => [row.host ?? "local", row.id])).toEqual([["mini", "ses_same"], ["local", "ses_same"]])
   })
 
+  test("another host's rows carry its Core turn time; a session without one has none (never time.updated)", () => {
+    const [timed, untimed] = hostRows("mini", [
+      session("ses_t", "/repo", 999, { time: { created: 1, updated: 999, turn: { started: 100, ended: 150 } } }),
+      session("ses_u", "/repo", 999),
+    ])
+    expect(timed!.turnAt).toBe(150)
+    expect(untimed!.turnAt).toBeUndefined()
+  })
+
   test("another host lists its unarchived root sessions, narrowed to its own project root", () => {
     const sessions = [
       session("ses_root", "/Users/m/opencode", 5),

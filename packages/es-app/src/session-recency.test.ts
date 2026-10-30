@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { compareRows, turnClock, type LiveStatus, type TurnTime } from "./session-recency"
+import { compareRows, turnAt, turnClock, type LiveStatus, type TurnTime } from "./session-recency"
 
 const row = (host: string, id: string, turn: TurnTime | undefined, status: LiveStatus, title = id) =>
   ({ clock: turnClock({ host, id, turn, status }), title })
@@ -80,5 +80,15 @@ describe("compareRows", () => {
   test("equal recency ties break by host-qualified key", () => {
     expect(order([row("mini", "ses_a", { started: 10 }, "idle"), row("local", "ses_a", { started: 10 }, "idle")]))
       .toEqual(["local:ses_a", "mini:ses_a"])
+  })
+})
+
+describe("turnAt", () => {
+  test("is the later of the turn's start and end, and undefined without either", () => {
+    expect(turnAt({ started: 100, ended: 250 })).toBe(250)
+    expect(turnAt({ started: 300, ended: 250 })).toBe(300)
+    expect(turnAt({ started: 100 })).toBe(100)
+    expect(turnAt(undefined)).toBeUndefined()
+    expect(turnAt({ started: 0, ended: Number.NaN })).toBeUndefined()
   })
 })

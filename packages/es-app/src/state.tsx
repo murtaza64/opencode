@@ -16,6 +16,7 @@ import {
 } from "solid-js"
 import { es, oc, type AttentionNotification } from "./api"
 import { createSessionActivity } from "./session-activity"
+import { turnAt } from "./session-recency"
 import { createServerEvents } from "./event-source"
 import { resolveProjectName } from "./project-name"
 import { reconcileHostPins, reconcilePins, transferPins, type Handoff, type PendingHandoff } from "./handoffs"
@@ -55,6 +56,8 @@ export type SessionRow = {
   /** A Work view host other than this page's; its rows open on that host's own tab. */
   host?: string
   pinnedAt?: number
+  /** Latest turn boundary from that host's Core (session-recency.ts turnAt); absent = unknown. */
+  turnAt?: number
 }
 
 /** Other hosts' sessions in this page's Work view (only the laptop listener aggregates). */
@@ -418,6 +421,7 @@ export function DashboardProvider(props: ParentProps) {
   const localProject = () => allProjects() ? undefined : editspace() ?? editspaces()?.default ?? undefined
   const sessionRows = createMemo<SessionRow[]>(() => {
     const created = new Map((globalSessions() ?? []).map((s) => [s.id, s.time.created]))
+    const turns = new Map((globalSessions() ?? []).flatMap((s) => { const at = turnAt(s.time.turn); return at === undefined ? [] : [[s.id, at] as const] }))
     const rows: SessionRow[] = allProjects()
       ? (globalSessions() ?? []).filter((s) => !s.parentID).map((s) => ({
           id: s.id,
@@ -425,6 +429,7 @@ export function DashboardProvider(props: ParentProps) {
           directory: s.directory,
           updated: s.time.updated,
           created: s.time.created,
+          ...(turns.has(s.id) ? { turnAt: turns.get(s.id) } : {}),
           archived: s.time.archived,
           project: resolveProjectName(s, editspaces()?.editspaces ?? []),
         }))
@@ -433,6 +438,8 @@ export function DashboardProvider(props: ParentProps) {
           .map((t: any) => t.sessions[0])
           // Dashboard thread rows carry no creation time; the global index supplies it when loaded.
           .map((row: SessionRow) => row.created !== undefined || !created.has(row.id) ? row : { ...row, created: created.get(row.id) })
+          // Turn boundaries come from the same Core index; thread rows do not carry them.
+          .map((row: SessionRow) => turns.has(row.id) ? { ...row, turnAt: turns.get(row.id) } : row)
     // This host unreachable on load: its last-seen rows for this project, not an empty list.
     // When the project list itself is down, the project is unknown: take the last list, whatever its project.
     const known = allProjects() || !!editspace() || !!editspaces()?.default

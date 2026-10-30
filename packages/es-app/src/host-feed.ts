@@ -5,6 +5,7 @@
 import { createSignal, onCleanup } from "solid-js"
 import type { GlobalSession } from "@opencode-ai/sdk/v2"
 import { coalesced } from "./coalesced"
+import { turnAt } from "./session-recency"
 import { createServerEvents } from "./event-source"
 import type { WorkHost } from "./host"
 import type { AttentionList, AttentionRecord } from "./attention"
@@ -27,6 +28,8 @@ export type HostedRow = {
   archived?: number
   host?: string
   pinnedAt?: number
+  /** Latest turn boundary from that host's Core (session-recency.ts turnAt); absent = unknown. */
+  turnAt?: number
 }
 
 /** Why a host is unavailable: sign-in needed (401/403/sign-in redirect) is shown apart from unreachable. */
@@ -73,7 +76,8 @@ export const hostRows = (host: string, sessions: GlobalSession[], root?: string)
   return sessions
     .filter((session) => !session.parentID && !session.time.archived)
     .filter((session) => base === undefined || session.directory === base || session.directory.startsWith(`${base}/`))
-    .map((session): HostedRow => ({ id: session.id, title: session.title, directory: session.directory, updated: session.time.updated, ...(typeof session.time.created === "number" ? { created: session.time.created } : {}), host }))
+    .map((session): HostedRow => ({ id: session.id, title: session.title, directory: session.directory, updated: session.time.updated, ...(typeof session.time.created === "number" ? { created: session.time.created } : {}),
+      ...(turnAt(session.time.turn) !== undefined ? { turnAt: turnAt(session.time.turn) } : {}), host }))
 }
 
 /** One list across hosts, newest first; each row stays distinct by its host-qualified key. */

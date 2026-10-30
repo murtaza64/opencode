@@ -183,10 +183,10 @@ export default function Sidebar() {
   // ones stay in Pinned. Same entries, account scope and pins as before; no separate drawer.
   const cloudUnpinned = createMemo(() => cloudRows({ pins: [], observed: cloud.observed(), other: cloud.other(), snapshots: cloud.snapshots() }))
   // Default order (NAV-11, session-recency.ts compareRows): rows working on their own host above idle ones; within
-  // each group, the last turn boundary newest first, unknown boundaries by title then key. Turn boundaries come from
-  // Core's Session.time.turn once it exists (none yet: every row is undated); never time.updated. Parts, tools and
-  // polls change none of these inputs, so a row moves only when its status or a turn boundary changes.
-  const boundaryOf = (_row: { kind: "session" | "cloud" }): number | undefined => undefined
+  // each group, the last turn boundary newest first, unknown boundaries by title then key. A session's boundary is its
+  // own host's Core Session.time.turn (row.turnAt; absent from a Core without session.turnTime); never time.updated.
+  // Parts, tools and polls change none of these inputs, so a row moves only when its status or a turn boundary changes.
+  const boundaryOf = (row: { kind: "session"; item: SessionRow } | { kind: "cloud" }) => row.kind === "session" ? row.item.turnAt : undefined
   const liveOf = (row: { kind: "session"; item: SessionRow } | { kind: "cloud"; item: ReturnType<typeof cloudRows>[number] }) =>
     row.kind === "cloud" ? row.item.status.chip === "busy" : row.item.host ? work.dot(row.item) === "busy" : dotFor(row.item) === "busy"
   // Row wrappers are reused while their item and boundary are unchanged, so streamed updates never remount a row
