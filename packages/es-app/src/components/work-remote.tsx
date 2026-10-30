@@ -57,16 +57,22 @@ const RemoteDecision = (props: { host: string; record: NonNullable<Extract<WorkE
 
 const RemotePreparedDecision = (props: { host: string; record: () => NonNullable<Extract<WorkEntry["remote"], { kind: "attention" }>>["record"]; attention: ReturnType<typeof createAttention>; anchors: DeskPointer[] }) => {
   // This reader has no anchor creation, pending local job or start path. Every request uses the owning host's Core.
-  const briefs = createBriefs(() => undefined, () => undefined, undefined, () => props.anchors, { client: hostCore(props.host), readOnly: true })
+  const briefs = createBriefs(() => undefined, () => undefined, undefined, () => props.anchors, { client: hostCore(props.host), readOnly: true, prefix: hostPrefix(props.host) })
   const item = () => attentionItem(props.record(), 0)
   const job = useCompleteJob(item, undefined, briefs.jobs)
   const brief = useCompleteBrief(item, undefined, briefs.jobs)
   const sends = () => { const value = brief(); return value ? { text: briefSends(value, item()), to: value.sendsTo, as: value.sendsAs } : undefined }
   const copy = () => { const value = brief(); return value ? briefCopy(value, item()) : undefined }
   const part = (slot: "lead" | "visual" | "after" | "details") => <PreparedBrief item={item()} live={false} part={slot} jobs={briefs.jobs} host={props.host} />
+  // No complete brief yet: the owning host's dashboard makes one there (operator only); this view rereads that host's briefs.
+  const running = () => briefs.jobs().some(entry => entry.meta.source === item().key && entry.meta.revision === item().revision && (entry.state.state === "running" || entry.state.state === "starting"))
+  const request = () => <Show when={!brief() && item().kind !== "review" && !item().series && !props.record().series}><p class="desk-brief-regenerate">
+    <Show when={!briefs.regenerating() && !running()} fallback={<span class="home-muted" role="status">Preparing brief on that host…</span>}>
+      <button type="button" class="desk-link-button" onClick={() => void briefs.regenerate(item())}>Request brief</button></Show>
+    <Show when={briefs.error().startsWith("Brief not regenerated") ? briefs.error() : ""}>{message => <span class="home-muted" role="alert"> {message()}</span>}</Show></p></Show>
   return <AttentionDecision record={props.record()} attention={props.attention} remote prepared={brief()}
     briefJob={job() ? { job: job()!.id, revision: job()!.meta.revision } : undefined} sends={sends()} copy={copy()}
-    brief={part("lead")} briefVisual={part("visual")} briefAfter={part("after")} briefDetails={part("details")} />
+    brief={<>{part("lead")}{request()}</>} briefVisual={part("visual")} briefAfter={part("after")} briefDetails={part("details")} />
 }
 
 // A pending request, validated against that host's Core before any control is offered; gone means its outcome is unknown.

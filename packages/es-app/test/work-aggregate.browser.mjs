@@ -38,6 +38,7 @@ const surfaces = [
   { id: "srf_url", title: "Mini live board", summary: null, kind: "url", owner: "relay", lane: null, editspace: "fixture", updated_at: now - 9_000, revision: 1, health: { state: "ok" } },
 ]
 const miniWrites = []
+const miniBriefRequests = []
 const localCreates = []
 page.on("request", request => { if (request.method() === "POST" && new URL(request.url()).pathname === "/oc/session") localCreates.push(request.url()) })
 await page.route(url => { const u = new URL(url); return u.origin !== preview.origin && u.origin !== miniOrigin }, route => route.abort())
@@ -77,6 +78,10 @@ await page.route("**/hosts/mini/**", async route => {
     Object.assign(miniDecision, { status: "answered", revision: miniDecision.revision + 1, answer: { id: "a", text: "", choice_id: body.choice_id, answered_at: Date.now() }, delivery_state: "pending" })
     return route.fulfill({ json: { record: miniDecision } })
   }
+  if (path === `/es/api/frontdesk/briefs/${miniDecision.id}/regenerate`) {
+    miniBriefRequests.push({ es: url.searchParams.get("es"), csrf: route.request().headers()["x-attention-csrf"] })
+    return route.fulfill({ status: 202, json: { ok: true } })
+  }
   if (path === "/es/api/surfaces") return route.fulfill({ json: { surfaces } })
   if (path === "/__es/surface/srf_file") return route.fulfill({ json: { src: "/hosts/mini/__es/frame/srf_file", expires_at: Date.now() + 600_000 } })
   if (path === "/__es/frame/srf_file") return route.fulfill({ contentType: "text/html", body: "<h1>Mini cost report body</h1>" })
@@ -102,6 +107,7 @@ try {
   await expect(detail.locator(".work-remote-host")).toContainText("on Mac Mini")
   await expect(detail.getByText("The Mini's TLS certs expire Friday.")).toBeVisible()
    await expect(detail.locator("h3.home-question")).toHaveText("Rotate the Mini certificates before Friday?")
+   await expect(detail.getByRole("button", { name: "Request brief" })).toHaveCount(0)
    expect(miniWrites).toEqual([])
    expect(localCreates).toEqual([])
    await expect(detail.locator(".attention-routing")).toHaveCount(0)
@@ -114,6 +120,12 @@ try {
    await expect(detail.getByRole("button", { name: /Prepare brief|Prepare again|Confirm start|Regenerate brief/ })).toHaveCount(0)
    expect(miniWrites).toEqual([])
    expect(localCreates).toEqual([])
+   // Request brief asks the owning host's dashboard to make one there; nothing is created locally.
+   await detail.getByRole("button", { name: "Request brief" }).click()
+   await expect.poll(() => miniBriefRequests).toEqual([{ es: "fixture", csrf: "1" }])
+   expect(miniWrites).toEqual([`POST /hosts/mini/es/api/frontdesk/briefs/${miniDecision.id}/regenerate`])
+   expect(localCreates).toEqual([])
+   miniWrites.length = 0
   await detail.getByRole("radio", { name: "Rotate now" }).check()
   await detail.getByRole("button", { name: "Send Rotate now" }).click()
   await expect.poll(() => miniWrites.filter(write => write.endsWith(`/${miniDecision.id}/commands`)).length).toBe(1)

@@ -253,7 +253,7 @@ export const BRIEF_PERMISSION = [
 /** `others`: the brief anchors of the host's other projects. A client prepares under the anchor of the project
  * in view, so a record's brief may sit under any of them; jobs are matched by their source, wherever they are. */
 export const createBriefs = (desk: () => DeskPointer | undefined, current: (key: string) => DeskItem | undefined, ensure?: () => Promise<unknown>,
-  others: () => DeskPointer[] = () => [], options: { client?: Pick<typeof oc, "children" | "status" | "messagesTail">; readOnly?: boolean } = {}) => {
+  others: () => DeskPointer[] = () => [], options: { client?: Pick<typeof oc, "children" | "status" | "messagesTail">; readOnly?: boolean; prefix?: string } = {}) => {
   const client = options.client ?? oc
   const [jobs, setJobs] = createSignal<BriefJob[]>([])
   const [error, setError] = createSignal("")
@@ -431,12 +431,13 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
   /** A fresh brief for an attention request's current content, made by the host that owns it (the same route
    * the phone uses). The previous brief stays shown until the new one is ready. */
   const [regenerating, setRegenerating] = createSignal(false)
+  // `prefix`: another host's dashboard. A read-only reader may still ask that host to make a brief there.
   const regenerate = async (item: DeskItem) => {
-    if (options.readOnly) return
+    if (options.readOnly && options.prefix === undefined) return
     if (!item.record || item.kind === "review" || regenerating()) return
     setRegenerating(true)
     try {
-      const response = await fetch(`/es/api/frontdesk/briefs/${encodeURIComponent(item.record.id)}/regenerate?es=${encodeURIComponent(item.record.editspace)}`, {
+      const response = await fetch(`${options.prefix ?? ""}/es/api/frontdesk/briefs/${encodeURIComponent(item.record.id)}/regenerate?es=${encodeURIComponent(item.record.editspace)}`, {
         method: "POST", credentials: "include", headers: { "content-type": "application/json", "X-Attention-CSRF": "1" }, body: "{}",
       })
       const body = await response.json().catch(() => ({})) as { error?: string }
