@@ -21,7 +21,7 @@ execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-subj
   "-keyout", path.join(certs, "key.pem"), "-out", path.join(certs, "cert.pem")], { stdio: "ignore" })
 const PAGE = `<!doctype html><title>Personal fixture</title>
 <script>window.__namesAtStart = Object.getOwnPropertyNames(window)</script>
-<textarea id="note" name="note"></textarea><input id="title" name="title">
+<textarea id="note" name="note"></textarea><input id="title" name="title"><input type="checkbox" id="done" name="done"><select id="pick" name="pick"><option value="a">A</option><option value="b">B</option></select>
 <script>
   if (!localStorage.getItem("draft")) localStorage.setItem("draft", "draft the page restored")
   document.getElementById("note").value = localStorage.getItem("draft")
@@ -82,11 +82,17 @@ try {
   results.typedAfter = await read()
   expect(results.typedAfter).toMatchObject({ valid: true, interacted: true, fieldsChanged: 1 })
 
+  // A checkbox and a select changed by the person count too.
+  await page.locator("#done").check()
+  await page.locator("#pick").selectOption("b")
+  results.controls = await read()
+  expect(results.controls).toMatchObject({ valid: true, fieldsChanged: 3 })
+
   // 4. Clearing the restored draft and the page dropping its key both count.
   await page.locator("#note").fill("")
   await page.evaluate(() => sessionStorage.removeItem("tab"))
   results.cleared = await read()
-  expect(results.cleared).toMatchObject({ valid: true, fieldsChanged: 2, ssRemoved: 1 })
+  expect(results.cleared).toMatchObject({ valid: true, fieldsChanged: 4, ssRemoved: 1 })
 
   // 5. Navigation resets: a new document has no baseline until it settles, then starts clean; a same-document URL
   // change invalidates the baseline.
@@ -127,7 +133,7 @@ try {
   results.globals = { guard: names.guard, extra: names.names.filter((name) => !plain.includes(name)), missing: plain.filter((name) => !names.names.includes(name)) }
   expect(results.globals).toEqual({ guard: "undefined", extra: [], missing: [] })
   console.log(JSON.stringify(results, null, 2))
-  console.log("PASS page guard: self-restore 0, typed after load counts, clear/removal count, navigation resets (new document + pushState), input before settle UNKNOWN, late restore counts; no page-visible globals")
+  console.log("PASS page guard: self-restore 0, typed after load counts, checkbox/select count, clear/removal count, navigation resets (new document + pushState), input before settle UNKNOWN, late restore counts; no page-visible globals")
 } finally {
   await electron.close()
   await fixture.close?.()

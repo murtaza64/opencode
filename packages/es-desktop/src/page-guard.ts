@@ -4,20 +4,25 @@
  * page-guard-core.ts) with counts only. A new document starts over; a page that was already loaded gets no baseline. */
 import { guardResult, hashValue, SETTLE_MS, type Entry, type Snapshot, type Unsupported } from "./page-guard-core"
 
-const TEXT_SKIP = new Set(["hidden", "checkbox", "radio", "password", "file", "submit", "button", "image", "reset", "range", "color"])
+// Not form state a restart can lose (hidden, buttons) or covered by its own unsupported flag (password, file).
+const SKIP = new Set(["hidden", "password", "file", "submit", "button", "image", "reset"])
 const generation = crypto.randomUUID()
 const state: { baseline?: Snapshot & { url: string }; interactedBeforeBaseline: boolean; interacted: boolean } = { interactedBeforeBaseline: false, interacted: false }
 
 const visible = (element: Element) => element.getClientRects().length > 0
+// Visible form controls and their state: text value, checked for checkboxes and radios, the selected options of a select.
 const fields = (): Entry[] => {
   const seen = new Map<string, number>()
-  return Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea"))
-    .filter((element) => visible(element) && !(element instanceof HTMLInputElement && TEXT_SKIP.has(element.type)))
+  return Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select"))
+    .filter((element) => visible(element) && !(element instanceof HTMLInputElement && SKIP.has(element.type)))
     .map((element) => {
-      const base = `${element.tagName}:${element instanceof HTMLInputElement ? element.type : "textarea"}:${element.name || element.id}`
+      const base = `${element.tagName}:${element instanceof HTMLTextAreaElement ? "textarea" : element.type}:${element.name || element.id}`
       const ordinal = seen.get(base) ?? 0
       seen.set(base, ordinal + 1)
-      return { key: `${base}:${ordinal}`, hash: hashValue(element.value) }
+      const value = element instanceof HTMLSelectElement ? Array.from(element.selectedOptions, (option) => option.value).join("\n")
+        : element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type) ? `${element.checked}:${element.value}`
+        : element.value
+      return { key: `${base}:${ordinal}`, hash: hashValue(value) }
     })
 }
 const session = (): Entry[] => {
