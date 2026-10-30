@@ -1,7 +1,11 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-10-30.1",
+  "release": "2026-10-30.2",
   "items": [
+    {
+      "title": "The wallpaper is smooth again on high-resolution screens",
+      "detail": "With a WalStudio blur or dim set, the app's wallpaper is prepared at your display's resolution instead of a small image stretched to fit, so it no longer shows blocks or pixels."
+    },
     {
       "title": "Dictate into another host's session",
       "detail": "The mic now works in a session on another Work host, such as the Mac Mini. Speech is captured on this machine and the text lands in that session's draft only; if the host disconnects, the text stays in the draft."
