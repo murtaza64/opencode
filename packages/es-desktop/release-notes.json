@@ -1,21 +1,21 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-10-30.7",
+  "release": "2026-10-30.8",
   "items": [
     {
-      "title": "Surfaces fill the pane",
-      "detail": "Surfaces fill the pane; the Surface scrolls inside it."
+      "title": "Surfaces open edge to edge",
+      "detail": "Surfaces open edge to edge with a slim title bar; Escape closes."
     },
     {
-      "title": "Personal: restarts ask less",
-      "detail": "Personal: restarts no longer ask about text the page restores itself; the first restart after this update still asks once."
+      "title": "Surface opening state",
+      "detail": "A Surface that is still opening says so, and one that cannot open shows the error with Try again."
     },
     {
-      "title": "Surface icons",
-      "detail": "Untagged Surfaces show a neutral surface icon instead of an empty square, and a Surface on another host shows that host as text after its title."
+      "title": "Correction to 2026-10-30.7",
+      "detail": "The Surface pane used the full height and scrolling happened inside the Surface; the border, close button and stacked title remained until this release."
     }
   ],
   "limits": [
-    "Surface icons show a type only for Surfaces whose author says what they are."
+    "In narrow windows where chat floats over the Desk, it covers the right end of the Surface bar; Escape still closes."
   ]
 }
