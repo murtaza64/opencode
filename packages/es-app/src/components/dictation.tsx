@@ -11,6 +11,8 @@ type Props = {
   host?: SessionHost
   // The visible draft editor; read when dictation starts and when text lands.
   editor: () => HTMLTextAreaElement | undefined
+  // An explicit Dictate-start action returns typing to this editor without changing Vim mode.
+  focus: (el: HTMLTextAreaElement) => void
   // Vim normal mode shows the caret as a one-character selection.
   normalMode: () => boolean
   // Records the pre-dictation text as one Vim undo step, then re-syncs the Vim cursor after it.
@@ -50,8 +52,16 @@ export const DictationButton = (props: Props) => {
     const current = props.composer.state[buffer]
     return dictationTarget(props.sessionID, props.directory, buffer, el?.isConnected ? { revision: current.revision, selection: range(el) } : current, props.host)
   }
+  const focusEditor = () => {
+    // A clicked mic becomes disabled while starting/transcribing. Without an editor focus owner,
+    // the browser leaves focus on body and the saved-draft fallback cannot restore a native caret.
+    // Focus only for the explicit start, never when a late transcript arrives.
+    const el = props.editor()
+    if (el?.isConnected && document.activeElement !== el) props.focus(el)
+  }
   const toggle = () => {
     if (elsewhere() || state.availability !== "ready") return
+    if (state.phase === "idle") focusEditor()
     void voice.toggle(target())
   }
   let root: HTMLSpanElement | undefined
@@ -176,7 +186,10 @@ export const DictationButton = (props: Props) => {
           </span>
           <Show when={failure()?.action === "retry"}>
             {/* The original target: if the draft changed since, text goes in at the current caret. */}
-            <button class="dictation-action" onPointerDown={keepFocus} onClick={() => void voice.start(failure()!.target)}>Try again</button>
+            <button class="dictation-action" onPointerDown={keepFocus} onClick={() => {
+              focusEditor()
+              void voice.start(failure()!.target)
+            }}>Try again</button>
           </Show>
           <Show when={failure()?.action === "settings"}>
             <button class="dictation-action" onPointerDown={keepFocus} onClick={() => void voice.settings()}>Open settings</button>
