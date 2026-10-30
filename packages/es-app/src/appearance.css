@@ -301,6 +301,17 @@
     inline-size: max-content; max-inline-size: min(36rem, 80vw); padding: 4px 8px; border-radius: 6px; background: var(--surface1); color: var(--text);
     font: 400 12px/18px var(--font-mono);
   }
+  /* A live strip (CHAT-23): consecutive calls, one focusable icon each, growing in place; counts in words beside it. */
+  .tool-strip { display: block; margin-block: 2px; }
+  .tool-strip-row { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; max-inline-size: 100%; padding-inline: 4px; }
+  .tool-strip-icons { display: inline-flex; flex-wrap: wrap; gap: 2px; }
+  .tool-strip .tool-strip-call { margin: 0; }
+  .tool-strip .tool-strip-call > .tool-chip-summary { gap: 0; padding: 2px; }
+  .tool-strip-state { font: 400 12px/20px var(--font-mono); color: var(--accent, var(--blue)); }
+  .tool-strip-call[data-status="failed"] > .tool-chip-summary .tool-run-icon { color: var(--red); }
+  .tool-call-description { color: var(--subtext1); }
+  /* A hover card never takes a click meant for the row it covers. */
+  .tool-call-card { pointer-events: none; }
   /* Opened calls keep their full details; their wrappers lose the box at rest. */
   :is(.tool-run-members, .tool-chip-member) [data-component="tool-part-wrapper"] { border: 0; background: transparent; }
   /* Mail keeps its party and kind visible (ux-feel); compact only drops the row width to its content. */

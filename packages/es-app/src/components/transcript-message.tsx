@@ -1,14 +1,14 @@
-import { createMemo, createSignal, For, Index, Show, type ComponentProps, type JSX } from "solid-js"
+import { createMemo, createSignal, For, Index, Match, Show, Switch, type ComponentProps, type JSX } from "solid-js"
 import { Message } from "@opencode-ai/session-ui/message-part"
 import { errorText } from "../live-session"
 import type { MailDelivery, MailMessage } from "../api"
 import { mailActionableStatus, mailActivityLabel, mailChipWake, mailSentAt, mailWake, mailWakeLabel } from "../mail-timeline"
 import { MailWakeEvidence } from "./mail-wake-evidence"
 import { ChatImages } from "./chat-images"
-import type { Segment } from "../transcript-groups"
+import { toolOutcome, type Segment } from "../transcript-groups"
 import type { MailNamer } from "../mail-names"
 import { MailOriginDetail, MailRoute, MailSender, MailSummary, mailPurpose, originOf, senderText } from "./mail-summary"
-import { iconEligible, ToolChip } from "./tool-run"
+import { iconEligible, ToolChip, ToolStrip } from "./tool-run"
 
 type MailSource = { type: "editspace-mail"; id: string; sender: string; recipient: string; senderSession?: string }
 const mailTime = (value: string | number | null) => value == null ? "" : new Date(value).toLocaleString()
@@ -158,26 +158,41 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
 }
 
 // Each tool call renders icon-first, with or without Living activity, which controls Filament only (ToolChip states failures and running calls in words);
-// text and other parts render as before, in order. Splitting is per part, so nothing regroups while a turn runs.
+// text and other parts render as before, in order. From a running call on, consecutive calls share one growing
+// strip (CHAT-23), keyed by its first call; once formed it stays a strip as its calls finish, so nothing regroups
+// while a turn runs. The completed turn's run (transcript-groups) takes over when the turn ends.
 const Parts = (props: ComponentProps<typeof Message>) => {
-  type Group = { key: string; parts: typeof props.parts; tool?: true }
+  type Group = { key: string; parts: typeof props.parts; tool?: true; strip?: true }
   // A streaming message replaces one part per delta. Groups are rebuilt in one linear pass, and a group whose
   // parts are unchanged keeps its previous object, so its row is not touched; only the changed group updates.
   const groups = createMemo<Map<string, Group>>((previous) => {
     const next = new Map<string, Group>()
     let open: Group | undefined
+    let calls: Extract<(typeof props.parts)[number], { type: "tool" }>[] = []
+    // The strip starts at the first running call (or where it already started) and takes every later call; earlier
+    // finished calls stay single chips, so a call starting after many finished ones never remounts them.
+    const flush = () => {
+      const sticky = calls.findIndex((part) => previous?.get(part.id)?.strip)
+      const start = sticky >= 0 ? sticky : calls.findIndex((part) => toolOutcome(part) === "unfinished")
+      const strip = start >= 0 && calls.length - start > 1 ? calls.slice(start) : []
+      calls.slice(0, strip.length ? start : calls.length).forEach((part) => next.set(part.id, { key: part.id, parts: [part], tool: true }))
+      if (strip.length) next.set(strip[0]!.id, { key: strip[0]!.id, parts: strip, strip: true })
+      calls = []
+    }
     for (const part of props.parts) {
       if (iconEligible(part, props.renderTools)) {
-        next.set(part.id, { key: part.id, parts: [part], tool: true })
+        calls.push(part)
         open = undefined
         continue
       }
+      flush()
       if (open) open.parts = [...open.parts, part]
       else next.set(part.id, open = { key: part.id, parts: [part] })
     }
+    flush()
     for (const [key, group] of next) {
       const old = previous?.get(key)
-      if (old && old.tool === group.tool && old.parts.length === group.parts.length && old.parts.every((part, index) => part === group.parts[index]))
+      if (old && old.tool === group.tool && old.strip === group.strip && old.parts.length === group.parts.length && old.parts.every((part, index) => part === group.parts[index]))
         next.set(key, old)
     }
     return next
@@ -186,8 +201,10 @@ const Parts = (props: ComponentProps<typeof Message>) => {
     { equals: (a, b) => a.length === b.length && a.every((key, index) => key === b[index]) })
   return <For each={keys()}>{(key) => {
     const group = createMemo(() => groups().get(key))
-    return <Show when={group()}>{(value) => value().tool
-      ? <ToolChip message={props.message} part={value().parts[0] as Parameters<typeof ToolChip>[0]["part"]} renderTools={props.renderTools} />
-      : <Message {...props} parts={value().parts} activityRows />}</Show>
+    // A key can turn from a single call into a strip when a second call arrives: Match swaps the row.
+    return <Show when={group()}>{(value) => <Switch fallback={<Message {...props} parts={value().parts} activityRows />}>
+      <Match when={value().strip}><ToolStrip message={props.message} parts={value().parts as Parameters<typeof ToolStrip>[0]["parts"]} renderTools={props.renderTools} /></Match>
+      <Match when={value().tool}><ToolChip message={props.message} part={value().parts[0] as Parameters<typeof ToolChip>[0]["part"]} renderTools={props.renderTools} /></Match>
+    </Switch>}</Show>
   }}</For>
 }

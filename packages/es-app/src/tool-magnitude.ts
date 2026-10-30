@@ -120,7 +120,8 @@ const cachedInput = (key: string, input: unknown) => {
   return value
 }
 
-const inputChars = (input: unknown) => {
+/** Characters of a tool input, walked with the same caps as a size badge; `partial` when a cap was hit. */
+export const inputChars = (input: unknown) => {
   const stack: { value: unknown; depth: number }[] = [{ value: input, depth: 0 }]
   let total = 0
   let nodes = 0

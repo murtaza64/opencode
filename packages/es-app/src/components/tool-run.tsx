@@ -1,10 +1,11 @@
-import { createMemo, createSignal, For, Show, type ComponentProps, type JSX } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Accessor, type ComponentProps, type JSX } from "solid-js"
 import type { Part, ToolPart } from "@opencode-ai/sdk/v2"
 import { getToolInfo, Message, type ToolRenderers } from "@opencode-ai/session-ui/message-part"
 import { Icon } from "@opencode-ai/ui/icon"
 import { runSummary, toolOutcome, type ToolRunGroup } from "../transcript-groups"
 import { SIZE_LEGEND, sizeDistribution, toolMagnitude, type ToolMagnitude } from "../tool-magnitude"
 import { editSummary, fileName, isEditTool, type EditSummary } from "../tool-edit"
+import { callCard, STATE_WORDS, toolGlyph } from "../tool-call"
 
 const STRIP_ICONS = 12
 
@@ -65,7 +66,7 @@ export const ToolRun = (props: {
   const icons = createMemo(() => props.run.members.map((member) => {
     const part = members().get(member.partID)?.part
     return part
-      ? { key: member.partID, tool: part.tool, status: toolOutcome(part), icon: getToolInfo(part.tool, part.state.input).icon, magnitude: toolMagnitude(part) }
+      ? { key: member.partID, tool: part.tool, status: toolOutcome(part), icon: toolGlyph(part.tool, part.state.input, getToolInfo(part.tool, part.state.input).icon), magnitude: toolMagnitude(part) }
       : { key: member.partID, tool: "unknown", status: "unknown" as const, icon: "help", magnitude: undefined }
   }))
   // At most STRIP_ICONS icons, failures and unfinished calls first so they are never the ones hidden; the rest
@@ -137,13 +138,14 @@ export const ToolRun = (props: {
 export const iconEligible = (part: Part, renderTools?: ToolRenderers): part is ToolPart =>
   part.type === "tool" && !renderTools?.[part.tool]
 
-const STATE_WORDS = { ok: "", failed: "failed", interrupted: "interrupted", unfinished: "running", "unknown-exit": "exit unknown" } as const
-
 // One call, icon first. A call that failed, was interrupted, is running or has an unknown exit says so in words
-// beside its icon, with what it ran. Hover and keyboard focus show its facts; Enter or click opens the original chip.
+// beside its icon, with what it ran. Hover and keyboard focus show its compact card; Enter or click opens the original chip.
 export const ToolChip = (props: { message: ComponentProps<typeof Message>["message"]; part: ToolPart; renderTools?: ToolRenderers }) => {
   const [open, setOpen] = createSignal(false)
+  const [watching, setWatching] = createSignal(false)
+  const now = useClock(watching)
   const info = createMemo(() => getToolInfo(props.part.tool, props.part.state.input))
+  const card = createMemo(() => callCard(props.part, info().title, now()))
   const summary = createMemo(() => runSummary([props.part]))
   const magnitude = createMemo(() => toolMagnitude(props.part))
   const size = createMemo(() => sizeDistribution([magnitude()]).bins[0]?.size ?? "?")
@@ -162,6 +164,7 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
   let button: HTMLButtonElement | undefined
   return <span class="tool-chip" data-compact={open() ? undefined : "true"} data-open={open() ? "true" : undefined} data-status={status()}
     data-timeline-part-id={props.part.id} data-filament-anchor={props.part.id}
+    onPointerEnter={() => setWatching(true)} onPointerLeave={() => setWatching(false)} onFocusIn={() => setWatching(true)} onFocusOut={() => setWatching(false)}
     onKeyDown={(event) => {
       if (event.key !== "Escape" || !open() || event.defaultPrevented) return
       event.preventDefault()
@@ -170,19 +173,12 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
     }}>
     <button class="tool-chip-summary" ref={button} aria-expanded={open()} aria-label={label()} aria-busy={status() === "unfinished" ? "true" : undefined}
       onClick={() => setOpen(!open())}>
-      <ToolIcon partID={props.part.id} tool={props.part.tool} status={status()} icon={info().icon} magnitude={magnitude()} />
+      <ToolIcon partID={props.part.id} tool={props.part.tool} status={status()} icon={toolGlyph(props.part.tool, props.part.state.input, info().icon)} magnitude={magnitude()} />
       {/* What ran stays legible beside the icon; a failure, uncertainty or running call leads with that word. */}
       <span class="tool-chip-state" data-status={status()} aria-hidden="true">
         {[STATE_WORDS[status()], what(), reason()].filter(Boolean).join(" · ")}
       </span>
-      <Show when={!open()}>
-        <span class="tool-run-preview" aria-hidden="true">
-          <span class="tool-run-kind"><bdi dir="auto">{info().title}</bdi></span>
-          <Show when={what()}><span class="tool-run-tools" dir="auto">{what()}</span></Show>
-          <span class="tool-run-sizes" dir="ltr">{size()}</span>
-          <Show when={summary().span}>{(span) => <span class="tool-run-span" dir="ltr">{span()}</span>}</Show>
-        </span>
-      </Show>
+      <Show when={!open()}><CallCard card={card()} /></Show>
     </button>
     <Show when={open()}>
       <div class="tool-chip-member">
@@ -197,4 +193,109 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
       </div>
     </Show>
   </span>
+}
+
+type Card = ReturnType<typeof callCard>
+
+// The compact hover/focus card (CHAT-26): state and title, a description only when the call has one, actual
+// duration and labelled sizes. The command itself is the row's text or its expanded details, never repeated here.
+const CallCard = (props: { card: Card }) =>
+  <span class="tool-run-preview tool-call-card" aria-hidden="true">
+    <span class="tool-run-kind"><bdi dir="auto">{props.card.head}</bdi></span>
+    <Show when={props.card.description}><span class="tool-call-description" dir="auto">{props.card.description}</span></Show>
+    <Show when={props.card.time}><span class="tool-run-span" dir="ltr">{props.card.time}</span></Show>
+    <span class="tool-run-sizes" dir="ltr">{props.card.sizes}</span>
+  </span>
+
+// Running time ticks only while a card can be seen (pointer over or focus inside), so idle rows never re-render.
+const useClock = (watching: Accessor<boolean>) => {
+  const [now, setNow] = createSignal(Date.now())
+  createEffect(() => {
+    if (!watching()) return
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    onCleanup(() => clearInterval(timer))
+  })
+  return now
+}
+
+/** Consecutive tool calls of a live turn from the first running one on (CHAT-23): one growing strip, one focusable icon per
+ * call with its compact card on hover and focus, and the strip's running/failed counts in words. Arrow keys move
+ * between icons; Enter or click opens that call's full details below the strip; Escape closes them. Each call keeps
+ * its .tool-chip identity, so open state and timeline lookups work as for a single chip. */
+export const ToolStrip = (props: { message: ComponentProps<typeof Message>["message"]; parts: readonly ToolPart[]; renderTools?: ToolRenderers }) => {
+  const [open, setOpen] = createSignal<ReadonlySet<string>>(new Set())
+  const [active, setActive] = createSignal<string>()
+  const [watching, setWatching] = createSignal(false)
+  const now = useClock(watching)
+  const buttons = new Map<string, HTMLButtonElement>()
+  const byID = createMemo(() => new Map(props.parts.map((part) => [part.id, part] as const)))
+  const ids = createMemo(() => props.parts.map((part) => part.id), [], { equals: (a, b) => a.length === b.length && a.every((id, index) => id === b[index]) })
+  // One tab stop: the last focused call, else the first.
+  const current = () => { const id = active(); return id && byID().has(id) ? id : ids()[0] }
+  const words = createMemo(() => {
+    const counts = new Map<string, number>()
+    props.parts.forEach((part) => { const word = STATE_WORDS[toolOutcome(part)]; if (word) counts.set(word, (counts.get(word) ?? 0) + 1) })
+    return [...counts].map(([word, count]) => `${count} ${word}`).join(" · ")
+  })
+  const toggle = (id: string) => setOpen((previous) => {
+    const next = new Set(previous)
+    if (!next.delete(id)) next.add(id)
+    return next
+  })
+  const move = (event: KeyboardEvent) => {
+    const list = ids()
+    const index = list.indexOf(current() ?? "")
+    // Escape on an opened call's icon closes its details, as on a single chip.
+    if (event.key === "Escape" && open().has(current() ?? "") && !event.defaultPrevented) {
+      event.preventDefault()
+      toggle(current()!)
+      return
+    }
+    const rtl = getComputedStyle(event.currentTarget as Element).direction === "rtl"
+    const step = { ArrowRight: rtl ? -1 : 1, ArrowLeft: rtl ? 1 : -1 }[event.key]
+    const target = event.key === "Home" ? 0 : event.key === "End" ? list.length - 1 : step === undefined ? -1 : Math.min(list.length - 1, Math.max(0, index + step))
+    if (target < 0) return
+    event.preventDefault()
+    setActive(list[target])
+    buttons.get(list[target]!)?.focus()
+  }
+  const label = () => [`${props.parts.length} tool calls`, words()].filter(Boolean).join(", ")
+  return <div class="tool-strip" data-tool-strip={ids()[0]}
+    onPointerEnter={() => setWatching(true)} onPointerLeave={() => setWatching(false)} onFocusIn={() => setWatching(true)} onFocusOut={() => setWatching(false)}>
+    <div class="tool-strip-row">
+      <div class="tool-strip-icons" role="toolbar" aria-label={label()} onKeyDown={move}>
+        <For each={ids()}>{(id) => {
+          // A streamed update replaces one part object: only that call's memos rerun, the other icons stay untouched.
+          const part = createMemo(() => byID().get(id)!)
+          const info = createMemo(() => getToolInfo(part().tool, part().state.input))
+          const card = createMemo(() => callCard(part(), info().title, now()))
+          const glyph = createMemo(() => toolGlyph(part().tool, part().state.input, info().icon))
+          const magnitude = createMemo(() => toolMagnitude(part()))
+          return <span class="tool-chip tool-strip-call" data-compact="true" data-status={card().status} data-timeline-part-id={id} data-filament-anchor={id}>
+            <button class="tool-chip-summary" ref={(element) => buttons.set(id, element)} tabIndex={current() === id ? 0 : -1}
+              aria-label={card().label} aria-expanded={open().has(id)} aria-controls={`tool-strip-member-${id}`} aria-busy={card().status === "unfinished" ? "true" : undefined}
+              onFocus={() => setActive(id)} onClick={() => toggle(id)}>
+              <ToolIcon partID={id} tool={part().tool} status={card().status} icon={glyph()} magnitude={magnitude()} />
+              <CallCard card={card()} />
+            </button>
+          </span>
+        }}</For>
+      </div>
+      <span class="tool-run-count" aria-hidden="true">{props.parts.length} calls</span>
+      {/* Running and failed counts stay in words beside the icons, never only in colour or on hover. */}
+      <Show when={words()}><span class="tool-strip-state" dir="auto" aria-hidden="true">{words()}</span></Show>
+    </div>
+    <For each={ids().filter((id) => open().has(id))}>{(id) =>
+      <div class="tool-chip-member tool-strip-member" id={`tool-strip-member-${id}`} data-tool-strip-member={id}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape" || event.defaultPrevented) return
+          event.preventDefault()
+          toggle(id)
+          buttons.get(id)?.focus()
+        }}>
+        <Show when={byID().get(id)}>{(part) => <Message message={props.message} parts={[part()]} activityRows renderTools={props.renderTools} />}</Show>
+      </div>
+    }</For>
+  </div>
 }
