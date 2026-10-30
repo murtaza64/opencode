@@ -1666,6 +1666,14 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         remove={(ref) => setContextRefs(contextRefs().filter((item) => contextKey(item) !== contextKey(ref)))} /><Attachments /></>}
       dictation={<DictationButton composer={composer} sessionID={sessionID} directory={directory} host={props.host}
         editor={() => promptEl} normalMode={() => vim.mode() === "normal"}
+        focus={(el) => {
+          const mode = vim.mode()
+          const selection = [el.selectionStart, el.selectionEnd] as const
+          el.focus({ preventScroll: true })
+          vim.setMode(mode)
+          el.setSelectionRange(...selection)
+          vim.refresh(el)
+        }}
         checkpoint={(el) => activeVim().checkpoint(el)} refresh={(el) => vim.refresh(el)} />}
       sessionMetadata={<ComposerMeta context={footerMeta().context} cost={footerMeta().cost} />}
       primary={primary} activate={activatePrimary} context={contextParts}
