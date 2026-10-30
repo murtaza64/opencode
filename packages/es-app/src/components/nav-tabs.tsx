@@ -13,13 +13,14 @@ import { HostGlyph } from "./icons"
 import { useRequestAgent } from "./attention-decision"
 import { failureAge, failureLabel, OLD_FAILURE_MS } from "../session-failures"
 import { SurfaceGlyph } from "./surface-glyph"
-import { surfaceKindLabel } from "../surface-tags"
+import { surfaceKindLabel, surfaceTags } from "../surface-tags"
 import { PrList, sortPrs } from "./pr"
 
 export type NavTab = "surfaces" | "agents" | "decisions" | "prs"
 const TAB_KEY = "es-app:nav-tab"
 const TABS: [NavTab, string][] = [["surfaces", "Surfaces"], ["agents", "Agents"], ["decisions", "Decisions"], ["prs", "PRs"]]
 const BAND_LIMIT = 8
+const SURFACE_TYPES: [string, string][] = [["document", "Document"], ["dashboard", "Dashboard"], ["prototype", "Prototype"], ["interactive", "Interactive"], ["live", "Live"]]
 
 const storedTab = (): NavTab => {
   try {
@@ -137,14 +138,35 @@ export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: stri
   const setFilter = (id: Exclude<NavTab, "agents">, value: string) => setFilters(previous => ({ ...previous, [id]: value }))
   const all = useWork()
   const decisions = createMemo(() => all().entries.filter(entry => matches(`${entry.title} ${entry.hostLabel ?? ""}`, filter("decisions"))))
-  const surfaces = createMemo(() => {
-    const split = queue.surfaces.deliverables()
-    return [...split.fresh.map(surface => ({ surface, fresh: true })), ...split.earlier.map(surface => ({ surface, fresh: false })),
-      ...queue.surfaces.boards().map(surface => ({ surface, fresh: false }))].filter(row => matches(row.surface.title, filter("surfaces")))
-  })
-  // Other Work hosts' Surfaces after this host's, each with its host; a host not current makes the count "N+".
+  // Other Work hosts' Surfaces; a host not current makes the count "N+".
   const hostSurfaces = createMemo(() => workSurfaces([], dashboard.work.feeds()))
-  const hostSurfaceRows = createMemo(() => hostSurfaces().entries.filter(entry => matches(`${entry.title} ${entry.hostLabel ?? ""}`, filter("surfaces"))))
+  // One list (NAV-03): this host's and other Work hosts' Surfaces interleaved by when their owner last published them
+  // (updated_at, newest first; seen marks do not change it). Rows without a date go last under "Date unknown"; ties
+  // by title, then key. A type chip (the author's form or accent, NAV-19) narrows the list with the text filter.
+  const [surfaceType, setSurfaceType] = createSignal<string>()
+  const surfaceRows = createMemo(() => {
+    const fresh = new Set(queue.surfaces.deliverables().fresh.map(surface => surface.id))
+    const rows = [
+      ...queue.surfaces.list().map(surface => ({ key: surfaceKey(surface.id), surface, fresh: fresh.has(surface.id), entry: undefined as WorkEntry | undefined, host: "" })),
+      ...hostSurfaces().entries.flatMap(entry => entry.remote?.kind === "surface" ? [{ key: entry.key, surface: entry.remote.surface, fresh: false, entry, host: entry.hostLabel ?? "" }] : []),
+    ]
+    const dated = (row: { surface: Surface }) => row.surface.updated_at > 0 ? row.surface.updated_at : undefined
+    return rows
+      .filter(row => matches(`${row.surface.title} ${row.host}`, filter("surfaces")))
+      .filter(row => { const type = surfaceType(); const tags = surfaceTags(row.surface); return !type || tags.form === type || (tags.accents as string[]).includes(type) })
+      .sort((a, b) => {
+        const x = dated(a)
+        const y = dated(b)
+        if (x !== y) return x === undefined ? 1 : y === undefined ? -1 : y - x
+        return a.surface.title.localeCompare(b.surface.title) || a.key.localeCompare(b.key)
+      })
+  })
+  // Only the types present get a chip.
+  const surfaceTypes = createMemo(() => {
+    const present = new Set([...queue.surfaces.list(), ...hostSurfaces().entries.flatMap(entry => entry.remote?.kind === "surface" ? [entry.remote.surface] : [])]
+      .flatMap((surface): string[] => { const tags = surfaceTags(surface); return [...(tags.form ? [tags.form] : []), ...tags.accents] }))
+    return SURFACE_TYPES.filter(([id]) => present.has(id))
+  })
   const prs = createMemo(() => {
     const seen = new Set<string>()
     return sortPrs((state()?.threads ?? []).flatMap((thread: { prs?: { url: string; title?: string }[] }) => thread.prs ?? [])
@@ -183,8 +205,16 @@ export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: stri
       </Show>
       <Show when={tab() === "surfaces"}>
         <FilterBox id="surfaces" label="Surfaces" />
-        <For each={surfaces()} fallback={<Show when={!hostSurfaceRows().length}><div class="dim nav-empty">{filter("surfaces") ? "no matches" : queue.surfaces.error() ?? "No surfaces."}</div></Show>}>{row => <SurfaceRow surface={row.surface} fresh={row.fresh} />}</For>
-        <For each={hostSurfaceRows()}>{entry => <HostSurfaceRow entry={entry} />}</For>
+        <Show when={surfaceTypes().length}>
+          <div class="surface-types" role="group" aria-label="Surface type">
+            <For each={surfaceTypes()}>{([id, label]) =>
+              <button type="button" class="agent-filter" aria-pressed={surfaceType() === id} onClick={() => setSurfaceType(surfaceType() === id ? undefined : id)}>{label}</button>}</For>
+          </div>
+        </Show>
+        <For each={surfaceRows()} fallback={<div class="dim nav-empty">{filter("surfaces") || surfaceType() ? "no matches" : queue.surfaces.error() ?? "No surfaces."}</div>}>{(row, index) => <>
+          <Show when={!(row.surface.updated_at > 0) && (index() === 0 || surfaceRows()[index() - 1].surface.updated_at > 0)}><div class="nav-heading nav-day">Date unknown</div></Show>
+          <Show when={row.entry} fallback={<SurfaceRow surface={row.surface} fresh={row.fresh} />}>{entry => <HostSurfaceRow entry={entry()} />}</Show>
+        </>}</For>
       </Show>
       <Show when={tab() === "prs"}>
         <FilterBox id="prs" label="PRs" />

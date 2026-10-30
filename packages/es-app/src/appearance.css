@@ -456,3 +456,5 @@
 .nav-item:hover .surface-glyph-knockout, .nav-item.active .surface-glyph-knockout { fill: var(--selected, var(--surface0)); }
 .surface-glyph-accent { stroke: var(--accent); }
 .nav-decision.nav-old .nav-title { color: var(--subtext0); }
+/* NAV-03 Surface type chips, same chip as the Agents filter row. */
+.surface-types { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 6px; }
