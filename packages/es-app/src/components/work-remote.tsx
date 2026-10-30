@@ -19,7 +19,7 @@ export const WorkRemoteDetail = (props: { entry: WorkEntry; onClose: () => void 
   const host = () => props.entry.host!
   const where = () => <span class="work-remote-host" data-host={host()}><HostGlyph host={host()} size={12} /> on <bdi dir="auto">{props.entry.hostLabel ?? host()}</bdi>
     <Show when={props.entry.stale}> · <span class="home-blocked">{props.entry.unavailableReason ? "unreachable · last known" : "last known"}</span></Show></span>
-  return <section class="desk-evidence attention-home work-remote" aria-label="Selected item" data-work-key={props.entry.key}>
+  return <section class="desk-evidence attention-home work-remote" aria-label="Selected item" data-work-key={props.entry.key} data-remote-kind={props.entry.remote?.kind}>
     <div class="desk-evidence-head">
       <button class="desk-button" aria-label="Close" onClick={props.onClose}>Close</button>
       {where()}
