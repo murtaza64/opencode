@@ -1,5 +1,5 @@
-// NAV-19 Surface glyphs: each Surface row shows the author's form with static accents, untagged rows keep the plain
-// square, and the row's accessible name says the kind. Shots at 14/16/20px and RTL for review.
+// NAV-19 Surface glyphs: each Surface row shows the author's form with static accents, untagged rows get the neutral
+// surface glyph, and the row's accessible name says the kind. Shots at 14/16/20px and RTL for review.
 // Run from packages/es-app: node test/surface-glyphs.browser.mjs
 import { createRequire } from "node:module"
 import { startPanelPreview } from "./composer-panel-preview.mjs"
@@ -34,8 +34,8 @@ try {
   await expect(row("wal").locator(".surface-glyph-accent")).toHaveCount(2)
   await expect(row("spec").locator(".surface-glyph-accent")).toHaveCount(0)
   for (const id of ["old", "odd"]) {
-    await expect(row(id).locator("svg.surface-glyph")).toHaveCount(0)
-    await expect(row(id).locator(".nav-kind")).toHaveText("▢")
+    await expect(row(id).locator("svg.surface-glyph[data-form]")).toHaveCount(0)
+    await expect(row(id).locator("svg.surface-glyph-generic")).toHaveCount(1)
   }
   await expect(page.getByRole("link", { name: /^Ops report\s*, document, interactive/ })).toBeVisible()
   await expect(page.getByRole("link", { name: /^Untagged page\s*, surface/ })).toBeVisible()

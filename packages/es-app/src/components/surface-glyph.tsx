@@ -1,6 +1,6 @@
 /* What a Surface is, as one small composite glyph (NAV-19): the author's form (document, dashboard, prototype) as
  * the base, with static corner accents: interactive (a pointer, bottom corner) and live (a pulse line, top corner).
- * Untagged Surfaces keep the plain square: nothing is inferred from the URL, path or purpose. Accents are not dots,
+ * Untagged Surfaces get a neutral window outline: nothing is inferred from the URL, path or purpose. Accents are not dots,
  * so they never read as unread/busy status. */
 import { For, Show } from "solid-js"
 import { surfaceTags, type Accent, type Form } from "../surface-tags"
@@ -21,7 +21,14 @@ const ACCENT: Record<Accent, { d: string; box: { x: number; y: number } }> = {
 
 export const SurfaceGlyph = (props: { surface: object }) => {
   const tags = () => surfaceTags(props.surface)
-  return <Show when={tags().form} fallback={<span class="nav-kind" aria-hidden="true">▢</span>}>{form =>
+  // Untagged: a plain window outline. It says "a surface" and nothing about its form; an empty square read as a
+  // checkbox or a missing image at row size.
+  return <Show when={tags().form} fallback={
+    <svg class="nav-kind surface-glyph surface-glyph-generic" viewBox="0 0 16 16" aria-hidden="true">
+      <g fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" stroke-linecap="round">
+        <rect x="2.25" y="3" width="11.5" height="10" rx="1.5" /><path d="M2.25 6h11.5" /><path d="M4 4.5h.01M5.5 4.5h.01" />
+      </g>
+    </svg>}>{form =>
     <svg class="nav-kind surface-glyph" viewBox="0 0 16 16" aria-hidden="true" data-form={form()} data-accents={tags().accents.join(" ") || undefined}>
       <g fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" stroke-linecap="round">
         <For each={BASE[form()]}>{d => <path d={d} />}</For>

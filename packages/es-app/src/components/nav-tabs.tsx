@@ -87,8 +87,8 @@ const HostSurfaceRow = (props: { entry: WorkEntry }) => {
     aria-current={open(props.entry.key) ? "page" : undefined} data-nav-item={props.entry.key}
     aria-label={`${props.entry.title}, ${props.entry.remote?.kind === "surface" ? surfaceKindLabel(props.entry.remote.surface) : "surface"}, on ${props.entry.hostLabel}${props.entry.stale ? ", last known" : ""}${ownOnly() ? ", opens on that computer only" : ""}`}
     title={props.entry.stale ? `${props.entry.hostLabel} not current; last-known surface` : `${props.entry.title} — on ${props.entry.hostLabel}`}>
-    <Show when={props.entry.remote?.kind === "surface" ? props.entry.remote.surface : undefined} fallback={<span class="nav-kind" aria-hidden="true">▢</span>}>{surface => <SurfaceGlyph surface={surface()} />}</Show>
-    <HostGlyph host={props.entry.host!} />
+    {/* One glyph per row (the type); the host is the trailing text and part of the name. */}
+    <Show when={props.entry.remote?.kind === "surface" ? props.entry.remote.surface : undefined} fallback={<SurfaceGlyph surface={{}} />}>{surface => <SurfaceGlyph surface={surface()} />}</Show>
     <span class="nav-title" dir="auto">{props.entry.title}</span>
     <span class="session-project">{props.entry.hostLabel}</span>
   </a>
