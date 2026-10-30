@@ -61,6 +61,18 @@ try {
   // 1. Self-restore: the draft and the sessionStorage key came from the page itself. Nothing to lose.
   await settle()
   results.selfRestore = await read()
+  // A renderer-CDP publisher reaches the same world: the top frame's isolated context named "Electron Isolated Context".
+  const cdp = await page.context().newCDPSession(page)
+  const contexts = []
+  cdp.on("Runtime.executionContextCreated", (event) => contexts.push(event.context))
+  await cdp.send("Runtime.enable")
+  const top = (await cdp.send("Page.getFrameTree")).frameTree.frame.id
+  const isolated = contexts.filter((context) => context.auxData?.frameId === top && context.auxData?.type === "isolated" && context.name === "Electron Isolated Context")
+  expect(isolated.length).toBe(1)
+  const viaCDP = await cdp.send("Runtime.evaluate", { contextId: isolated[0].id, expression: "globalThis.__esPageGuard ? globalThis.__esPageGuard.read() : null", returnByValue: true })
+  results.cdp = { contexts: contexts.map((context) => ({ name: context.name, type: context.auxData?.type, top: context.auxData?.frameId === top })), sameAsNative: JSON.stringify(viaCDP.result.value) === JSON.stringify(results.selfRestore), generationType: typeof viaCDP.result.value?.generation }
+  expect(results.cdp.sameAsNative).toBe(true)
+  await cdp.detach()
   expect(results.selfRestore).toMatchObject({ version: 1, valid: true, interacted: false, fieldsAdded: 0, fieldsChanged: 0, fieldsRemoved: 0, ssAdded: 0, ssChanged: 0, ssRemoved: 0 })
   expect(JSON.stringify(results.selfRestore)).not.toContain("127.0.0.1")
   expect(JSON.stringify(results.selfRestore)).not.toContain("note")
