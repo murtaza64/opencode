@@ -1,22 +1,17 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-10-30.5",
+  "release": "2026-10-30.6",
   "items": [
     {
-      "title": "Surfaces are one list, newest first",
-      "detail": "The Surfaces tab lists this host's and your other Work hosts' Surfaces together, by when they were last updated. Surfaces with no date come last under Date unknown. Chips filter by type: Document, Dashboard, Prototype, Interactive or Live."
+      "title": "Personal: restarts ask less",
+      "detail": "Personal: restarts no longer ask about text the page restores itself; the first restart after this update still asks once."
     },
     {
-      "title": "The session bar keeps the title first",
-      "detail": "In the top bar the session title leads, the host's icon and name stay on one line, and the busy or idle state stays visible, including in the narrow native title bar."
-    },
-    {
-      "title": "Decision cards say briefs are unavailable in one short line",
-      "detail": "When this host can't prepare briefs, the card reads Briefs unavailable on this host; hover it for the reason."
+      "title": "Surface icons",
+      "detail": "Untagged Surfaces show a neutral surface icon instead of an empty square, and a Surface on another host shows that host as text after its title."
     }
   ],
   "limits": [
-    "Surface type chips appear only for Surfaces whose author says what they are.",
-    "Surfaces served from a URL on another host still open only on that host."
+    "Surface icons show a type only for Surfaces whose author says what they are."
   ]
 }
