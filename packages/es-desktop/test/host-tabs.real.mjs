@@ -33,7 +33,7 @@ const profile = await mkdtemp(path.join(tmpdir(), "es-desktop-host-tabs-"))
 const mini = process.env.ES_TEST_MINI_ORIGIN ?? "https://murtaza-mac-mini.tailc81fd.ts.net"
 const personal = process.env.ES_TEST_PAGE_ORIGIN ?? "https://agents.murtaza.earth"
 const app = await _electron.launch({
-  args: [root],
+  args: [root, "--use-mock-keychain"],
   env: {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "",

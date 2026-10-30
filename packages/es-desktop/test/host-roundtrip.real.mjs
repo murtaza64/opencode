@@ -20,7 +20,7 @@ await mkdir(artifacts, { recursive: true })
 const fixture = await createFixture()
 const profile = await mkdtemp(path.join(tmpdir(), "es-desktop-host-roundtrip-"))
 const app = await _electron.launch({
-  args: [root],
+  args: [root, "--use-mock-keychain"],
   env: {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "",

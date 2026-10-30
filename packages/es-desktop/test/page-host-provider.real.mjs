@@ -57,7 +57,7 @@ const port = server.address().port
 const rules = Object.values(names).map((name) => `MAP ${name}:443 127.0.0.1:${port}`).join(", ")
 const fixture = await createFixture()
 const profile = await mkdtemp(path.join(tmpdir(), "es-page-provider-profile-"))
-const args = ["--ignore-certificate-errors", `--host-resolver-rules=${rules}`]
+const args = ["--ignore-certificate-errors", "--use-mock-keychain", `--host-resolver-rules=${rules}`]
 const electron = await _electron.launch({
   ...(process.env.ES_DESKTOP_EXECUTABLE ? { executablePath: process.env.ES_DESKTOP_EXECUTABLE, args } : { args: [root, ...args] }),
   env: { ...process.env, ELECTRON_RUN_AS_NODE: "", OPENCODE_URL: fixture.url, ES_DASHBOARD_URL: fixture.url, OPENCODE_SERVER_PASSWORD: "", ES_DESKTOP_USER_DATA: profile, ES_DESKTOP_START: "hidden",

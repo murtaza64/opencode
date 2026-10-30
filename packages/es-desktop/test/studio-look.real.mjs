@@ -29,7 +29,7 @@ const writeLook = async (studio) => {
 await writeLook({ blur: 4, tint: 0.95, dim: 0.2 })
 const fixture = await createFixture()
 const electron = await _electron.launch({
-  ...(executable ? { executablePath: executable, args: [] } : { args: [root] }),
+  ...(executable ? { executablePath: executable, args: ["--use-mock-keychain"] } : { args: [root, "--use-mock-keychain"] }),
   env: { ...process.env, ELECTRON_RUN_AS_NODE: "", OPENCODE_URL: fixture.url, ES_DASHBOARD_URL: fixture.url, OPENCODE_SERVER_PASSWORD: "",
     ES_DESKTOP_USER_DATA: profile, ES_APPEARANCE_DIR: wal, ES_DESKTOP_START: "hidden" },
 })

@@ -19,7 +19,7 @@ const fixture = await createFixture()
 const profile = await mkdtemp(path.join(tmpdir(), "es-desktop-nested-commit-"))
 const app = await _electron.launch({
   timeout: 30000,
-  ...(binary ? { executablePath: binary, args: [] } : { args: [fileURLToPath(new URL("..", import.meta.url))] }),
+  ...(binary ? { executablePath: binary, args: ["--use-mock-keychain"] } : { args: [fileURLToPath(new URL("..", import.meta.url)), "--use-mock-keychain"] }),
   env: {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "",

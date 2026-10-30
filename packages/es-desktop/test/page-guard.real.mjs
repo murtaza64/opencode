@@ -39,7 +39,7 @@ const fixture = await createFixture()
 const restore = path.join(profile, "restore.json")
 await writeFile(restore, JSON.stringify({ version: 1, selected: "personal", views: [{ id: "personal", created: true }] }))
 const electron = await _electron.launch({
-  ...(executable ? { executablePath: executable, args: ["--ignore-certificate-errors"] } : { args: [root, "--ignore-certificate-errors"] }),
+  ...(executable ? { executablePath: executable, args: ["--ignore-certificate-errors", "--use-mock-keychain"] } : { args: [root, "--ignore-certificate-errors", "--use-mock-keychain"] }),
   env: { ...process.env, ELECTRON_RUN_AS_NODE: "", OPENCODE_URL: fixture.url, ES_DASHBOARD_URL: fixture.url, OPENCODE_SERVER_PASSWORD: "",
     ES_DESKTOP_USER_DATA: profile, ES_DESKTOP_START: "hidden", ES_DESKTOP_RESTORE: restore,
     ES_REMOTE_HOSTS: JSON.stringify([{ id: "personal", label: "Personal", origin: personal.origin, mode: "page" }]) },

@@ -39,7 +39,7 @@ const origin = `https://127.0.0.1:${appPort()}`
 const fixture = await createFixture()
 const profile = await mkdtemp(path.join(tmpdir(), "es-page-host-profile-"))
 const electron = await _electron.launch({
-  ...(process.env.ES_DESKTOP_EXECUTABLE ? { executablePath: process.env.ES_DESKTOP_EXECUTABLE, args: ["--ignore-certificate-errors"] } : { args: [root, "--ignore-certificate-errors"] }),
+  ...(process.env.ES_DESKTOP_EXECUTABLE ? { executablePath: process.env.ES_DESKTOP_EXECUTABLE, args: ["--ignore-certificate-errors", "--use-mock-keychain"] } : { args: [root, "--ignore-certificate-errors", "--use-mock-keychain"] }),
   env: { ...process.env, ELECTRON_RUN_AS_NODE: "", OPENCODE_URL: fixture.url, ES_DASHBOARD_URL: fixture.url, OPENCODE_SERVER_PASSWORD: "", ES_DESKTOP_USER_DATA: profile, ES_DESKTOP_START: "hidden",
     ES_REMOTE_HOSTS: JSON.stringify([{ id: "personal", label: "Personal", origin, mode: "page" }]) },
 })
