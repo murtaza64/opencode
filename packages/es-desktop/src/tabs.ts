@@ -38,6 +38,8 @@ export const createTabs = (
   window: BaseWindow,
   tabs: HostTab[],
   preferences: (partition: Session) => Electron.WebPreferences,
+  // Preload for page-mode views only (page-guard.ts): watches input and keeps the restart baseline in its isolated world.
+  pageGuard?: string,
 ) => {
   const views = new Map<string, WebContentsView>()
   const state = { selected: tabs[0].id, painted: "", queued: false }
@@ -122,7 +124,7 @@ export const createTabs = (
     if (existing) return existing
     const tab = tabs.find((item) => item.id === id)
     if (!tab) throw new Error(`Unknown host tab ${id}`)
-    const created = new WebContentsView({ webPreferences: preferences(tab.session) })
+    const created = new WebContentsView({ webPreferences: { ...preferences(tab.session), ...(tab.kind === "page" && pageGuard ? { preload: pageGuard } : {}) } })
     created.setBackgroundColor("#111113")
     tab.guard(created.webContents)
     created.webContents.on("zoom-changed", () => setTimeout(() => void inset(tab, created.webContents), 0))

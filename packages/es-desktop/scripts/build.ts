@@ -12,6 +12,9 @@ const output = await Bun.build({
   external: ["electron"],
 })
 if (!output.success) throw new AggregateError(output.logs, "Electron main build failed")
+// Page-mode views' preload: sandboxed, so one self-contained script with no imports left.
+const guard = await Bun.build({ entrypoints: [path.join(root, "src/page-guard.ts")], outdir: path.join(root, "dist"), target: "browser", format: "cjs", naming: "page-guard.cjs" })
+if (!guard.success) throw new AggregateError(guard.logs, "Page guard build failed")
 // This release's notes, and which release this build is (the publisher's ES_RELEASE: the exact landed rev). Without
 // ES_RELEASE the build names no release and the app shows no notes.
 // An earlier build's files never carry over.

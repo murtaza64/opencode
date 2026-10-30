@@ -225,7 +225,7 @@ const start = async () => {
           within: "local",
         })),
         ...pages.map((host) => ({ id: host.id, label: host.label, url: `${host.origin}/`, session: pageSession(`persist:editspace-host-${host.id}`), kind: "page" as const, guard: (contents: Electron.WebContents) => guardPage(contents, host.origin) })),
-      ], preferences)
+      ], preferences, path.join(app.getAppPath(), "dist/page-guard.cjs"))
   const localContents = window instanceof BrowserWindow ? window.webContents : tabs!.contents("local")
   if (process.platform === "darwin")
     localContents.on("did-finish-load", () => {
