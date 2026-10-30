@@ -1,21 +1,13 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-10-30.8",
+  "release": "2026-10-30.9",
   "items": [
     {
-      "title": "Surfaces open edge to edge",
-      "detail": "Surfaces open edge to edge with a slim title bar; Escape closes."
-    },
-    {
-      "title": "Surface opening state",
-      "detail": "A Surface that is still opening says so, and one that cannot open shows the error with Try again."
-    },
-    {
-      "title": "Correction to 2026-10-30.7",
-      "detail": "The Surface pane used the full height and scrolling happened inside the Surface; the border, close button and stacked title remained until this release."
+      "title": "Agents Activity sort",
+      "detail": "Agents Activity sort: idle agents ordered by their latest turn; older sessions without a recorded turn stay last, by name."
     }
   ],
   "limits": [
-    "In narrow windows where chat floats over the Desk, it covers the right end of the Surface bar; Escape still closes."
+    "A host whose Core does not record turn times lists its idle agents by name."
   ]
 }
