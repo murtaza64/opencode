@@ -34,7 +34,9 @@ await page.route("**/__es/host", (route) => route.fulfill({ json: { id: "local",
 ] } }))
 await page.route("**/hosts/mini/**", (route) => {
   hostReads.mini++
-  if (!["GET", "HEAD"].includes(route.request().method())) hostWrites.push(route.request().url())
+  // Opening a Mini decision checks that host's operator session (attention.ts checkOperator: GET, then POST sign-in on
+  // that host's own dashboard). Sign-in is not a data write; it is excluded like this host's own sign-in below.
+  if (!["GET", "HEAD"].includes(route.request().method()) && new URL(route.request().url()).pathname !== "/hosts/mini/es/api/attention/session") hostWrites.push(route.request().url())
   if (miniDown) return route.abort("connectionrefused")
   const url = new URL(route.request().url())
   if (url.pathname === "/hosts/mini/oc/experimental/session") return route.fulfill({ json: miniSessions })
@@ -177,9 +179,9 @@ try {
   await page.unroute(/\/(oc|es)\//)
   // The only local write is Front desk's own operator sign-in on this host; nothing is written through /hosts/*.
   expect(preview.fixture.calls.filter((call) => !["GET", "HEAD", "OPTIONS"].includes(call.method) && call.path !== "/api/attention/session")).toEqual([])
-  // Nothing was written through /hosts.
+  // Nothing was written through /hosts (operator sign-in aside).
   expect(hostWrites).toEqual([])
-  console.log(`PASS work view: two hosts listed apart (same id), offline host shown unreachable, Mini default create without fallback, draft carried to the Mini page, host-keyed pins, Mini decisions listed in Needs you and opened on the Mini desk, Mini session opened in the normal view, reload with the Mini or Local down keeps their last-seen rows marked unavailable; host reads mini=${hostReads.mini} wing=${hostReads.wing}; zero host writes, no local mutations beyond this desk's operator sign-in`)
+  console.log(`PASS work view: two hosts listed apart (same id), offline host shown unreachable, Mini default create without fallback, draft carried to the Mini page, host-keyed pins, Mini decisions listed in Needs you and opened on the Mini desk, Mini session opened in the normal view, reload with the Mini or Local down keeps their last-seen rows marked unavailable; host reads mini=${hostReads.mini} wing=${hostReads.wing}; zero host writes, no local mutations beyond operator sign-in`)
 } finally {
   await browser.close()
   await preview.close()
