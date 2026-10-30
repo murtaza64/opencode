@@ -1,10 +1,10 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-10-30.2",
+  "release": "2026-10-30.3",
   "items": [
     {
       "title": "The wallpaper is smooth again on high-resolution screens",
-      "detail": "With a WalStudio blur or dim set, the app's wallpaper is prepared at your display's resolution instead of a small image stretched to fit, so it no longer shows blocks or pixels."
+      "detail": "With a WalStudio blur or dim set, the app's wallpaper is blurred properly and prepared at your display's resolution instead of a small image stretched to fit, so it no longer shows blocks, pixels or a grid."
     },
     {
       "title": "Dictate into another host's session",
