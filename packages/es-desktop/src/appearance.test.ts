@@ -247,16 +247,30 @@ test("the receipt adds what each tab's page confirmed it applied; only this app'
   expect((await fetch(`${paired.server.origin}/__es/appearance/applied`, { method: "POST", body: "{}" })).status).toBe(401)
 })
 
-test("blur sizes: the default look is unchanged; a Studio look is shown at display resolution, sigma in image pixels", async () => {
+test("blur plan: a Studio look blurs at a work size that keeps sigma at least 4 work pixels and shows it at display width", async () => {
   const { blurPlan } = await import("./appearance")
-  // No Studio look: 24 samples at 640 on any display.
-  expect(blurPlan(5120, undefined, 3024)).toEqual({ sample: 24, output: 640 })
-  // A 5K wallpaper on a 3024px-wide Retina panel: output at the panel's width, not 640.
-  expect(blurPlan(5120, 0, 3024)).toEqual({ sample: 3024, output: 3024 })
-  expect(blurPlan(5120, 4, 3024)).toEqual({ sample: 640, output: 3024 })
-  expect(blurPlan(5120, 64, 3024)).toEqual({ sample: 40, output: 3024 })
-  // Never upscaled past the image, never below the old 640.
-  expect(blurPlan(1920, 0, 3024)).toEqual({ sample: 1920, output: 1920 })
-  expect(blurPlan(400, 2, 3024)).toEqual({ sample: 100, output: 640 })
-  expect(blurPlan(5120, 1000, 3024).sample).toBe(8)
+  // The Laptop's case: a 2992px wallpaper, Studio blur 10, a 3456 device-pixel display.
+  expect(blurPlan(2992, 10, 3456)).toEqual({ work: 1197, sigma: (10 * 1197) / 2992, output: 2992 })
+  // A small sigma blurs at full output size; blur 0 is the image at display width, unblurred.
+  expect(blurPlan(5120, 2, 3024)).toEqual({ work: 3024, sigma: (2 * 3024) / 5120, output: 3024 })
+  expect(blurPlan(2992, 0, 3456)).toEqual({ work: 2992, sigma: 0, output: 2992 })
+  // Never below 640 out, never past the image; a huge sigma still keeps a 16px work image.
+  expect(blurPlan(400, 2, 3024).output).toBe(640)
+  expect(blurPlan(5120, 5000, 3024).work).toBe(16)
+})
+
+test("gaussian blur spreads a line symmetrically by about sigma and keeps flat areas", async () => {
+  const { gaussianBlur } = await import("./appearance")
+  const width = 41
+  const height = 9
+  const pixels = new Uint8Array(width * height * 4).fill(10)
+  for (let y = 0; y < height; y++) pixels.set([250, 250, 250, 250], (y * width + 20) * 4)
+  gaussianBlur(pixels, width, height, 3)
+  const at = (x: number) => pixels[(4 * width + x) * 4]!
+  expect(at(20)).toBeGreaterThan(at(23))
+  expect(at(23)).toBe(at(17))
+  expect(at(0)).toBe(10)
+  // One sigma out keeps about exp(-1/2) of the centre's excess.
+  expect((at(23) - 10) / (at(20) - 10)).toBeGreaterThan(0.5)
+  expect((at(23) - 10) / (at(20) - 10)).toBeLessThan(0.7)
 })

@@ -10,7 +10,7 @@ import { createTabs, TITLE_BAR_HEIGHT } from "./tabs"
 import { watchBadges } from "./badges"
 import { muxEvents, sseEvents, watchNotifications } from "./notifier"
 import { notificationsSupported, postNotice } from "./desktop-notice"
-import { blurPlan, createAppearance } from "./appearance"
+import { blurPlan, createAppearance, gaussianBlur } from "./appearance"
 import { createReleaseNotes } from "./release-notes"
 import { localStateDir, pairingSources, type PairingSource } from "./pair-phone"
 import { openPairPhone } from "./pair-phone-window"
@@ -85,13 +85,18 @@ const start = async () => {
   const appearance = createAppearance({
     directory: process.env.ES_APPEARANCE_DIR ?? path.join(app.getPath("home"), ".cache/wal"),
     receipt: path.join(app.getPath("userData"), "appearance-receipt.json"),
-    // Shrinking and scaling back up gives a soft blur without an image library (sizes: blurPlan).
+    // Without a Studio look: shrinking to 24 samples and scaling back up is this app's own soft blur. With one, a real
+    // blur at a work size, shown at display resolution (blurPlan).
     blur: async (file, sigma) => {
       const image = nativeImage.createFromPath(file)
       if (image.isEmpty()) throw new Error("Not an image")
+      if (sigma === undefined) return image.resize({ width: 24, quality: "good" }).resize({ width: 640, quality: "best" }).toJPEG(70)
       const display = Math.max(...screen.getAllDisplays().map((item) => item.size.width * item.scaleFactor))
       const plan = blurPlan(image.getSize().width, sigma, display)
-      return image.resize({ width: plan.sample, quality: "good" }).resize({ width: plan.output, quality: "best" }).toJPEG(70)
+      const work = plan.work === image.getSize().width ? image : image.resize({ width: plan.work, quality: "best" })
+      const size = work.getSize()
+      const blurred = plan.sigma ? nativeImage.createFromBitmap(Buffer.from(gaussianBlur(new Uint8Array(work.toBitmap()), size.width, size.height, plan.sigma)), size) : work
+      return (plan.output === size.width ? blurred : blurred.resize({ width: plan.output, quality: "best" })).toJPEG(70)
     },
   })
   // Remote host problems never stop local startup: that host is left out and the reason logged.

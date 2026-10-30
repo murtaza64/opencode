@@ -13,15 +13,48 @@ export type WalPalette = { revision: string; scheme: "dark" | "light"; roles: Re
 export type StudioLook = { blur: number; dim: number }
 export type AppearanceState = { palette: Record<string, string>; wallpaper?: string; wal?: WalPalette; look?: StudioLook; updatedAt: number }
 
-/** Sizes for the soft-blur resample (shrink to `sample` samples wide, scale back up to `output`). Without a Studio look:
- * 24 samples shown at 640, this app's own default. With one, Studio's sigma (pixels of the full image) keeps detail
- * about 2 sigma wide, i.e. width / (2 sigma) samples, and the result is scaled to the widest display in device pixels
- * (never past the image), since the page stretches it over the whole window: a 640 cap left visible pixels on HiDPI. */
-export const blurPlan = (imageWidth: number, sigma: number | undefined, displayWidth: number) => {
-  if (sigma === undefined) return { sample: 24, output: 640 }
+/** How a Studio look is rendered: resize the image to `work` pixels wide, blur there with `sigma` (work pixels; 0 = none),
+ * then scale to `output`, the widest display's device width (never past the image, never under 640), since the page
+ * stretches it over the window. Studio's sigma is in pixels of the full image; the work width keeps the blur at least
+ * 4 work pixels so a cheap blur stays smooth when scaled up (resampling alone left a visible sample grid). */
+export const blurPlan = (imageWidth: number, sigma: number, displayWidth: number) => {
   const output = Math.max(640, Math.min(Math.round(imageWidth), Math.round(displayWidth)))
-  const sample = sigma === 0 ? output : Math.max(8, Math.min(output, Math.round(imageWidth / (2 * sigma))))
-  return { sample, output }
+  if (sigma <= 0) return { work: output, sigma: 0, output }
+  const work = Math.max(16, Math.min(output, Math.round((imageWidth * 4) / sigma)))
+  return { work, sigma: (sigma * work) / imageWidth, output }
+}
+
+/** Gaussian blur of 4-channel pixels in place, approximated by three box blurs per axis (running sums, so the cost does
+ * not grow with sigma). Edges repeat the border pixel. */
+export const gaussianBlur = (pixels: Uint8Array, width: number, height: number, sigma: number) => {
+  if (sigma <= 0) return pixels
+  const ideal = Math.sqrt((12 * sigma * sigma) / 3 + 1)
+  const lower = Math.floor(ideal) % 2 === 0 ? Math.floor(ideal) - 1 : Math.floor(ideal)
+  const count = Math.round((12 * sigma * sigma - 3 * lower * lower - 12 * lower - 9) / (-4 * lower - 4))
+  const radii = [0, 1, 2].map((index) => ((index < count ? lower : lower + 2) - 1) / 2)
+  const scratch = new Uint8Array(pixels.length)
+  for (const radius of radii) {
+    boxPass(pixels, scratch, width, height, radius, 4, width * 4)
+    boxPass(scratch, pixels, height, width, radius, width * 4, 4)
+  }
+  return pixels
+}
+
+// One box blur along lines of `length` pixels (`step` bytes apart), `lines` lines `stride` bytes apart, src -> dst.
+const boxPass = (src: Uint8Array, dst: Uint8Array, length: number, lines: number, radius: number, step: number, stride: number) => {
+  const scale = 1 / (2 * radius + 1)
+  for (let line = 0; line < lines; line++) {
+    const base = line * stride
+    for (let channel = 0; channel < 4; channel++) {
+      const at = (index: number) => src[base + Math.min(length - 1, Math.max(0, index)) * step + channel]
+      let sum = 0
+      for (let index = -radius; index <= radius; index++) sum += at(index)
+      for (let index = 0; index < length; index++) {
+        dst[base + index * step + channel] = Math.round(sum * scale)
+        sum += at(index + radius + 1) - at(index - radius)
+      }
+    }
+  }
 }
 
 const IMAGE = /\.(png|jpe?g|webp|heic|tiff?|gif|bmp)$/i
