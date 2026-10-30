@@ -1,4 +1,4 @@
-import { app, BaseWindow, BrowserWindow, dialog, Menu, nativeImage, session, shell, systemPreferences } from "electron"
+import { app, BaseWindow, BrowserWindow, dialog, Menu, nativeImage, screen, session, shell, systemPreferences } from "electron"
 import path from "node:path"
 import { readFile, writeFile } from "node:fs/promises"
 import { serve } from "./server"
@@ -10,7 +10,7 @@ import { createTabs, TITLE_BAR_HEIGHT } from "./tabs"
 import { watchBadges } from "./badges"
 import { muxEvents, sseEvents, watchNotifications } from "./notifier"
 import { notificationsSupported, postNotice } from "./desktop-notice"
-import { createAppearance } from "./appearance"
+import { blurPlan, createAppearance } from "./appearance"
 import { createReleaseNotes } from "./release-notes"
 import { localStateDir, pairingSources, type PairingSource } from "./pair-phone"
 import { openPairPhone } from "./pair-phone-window"
@@ -85,13 +85,13 @@ const start = async () => {
   const appearance = createAppearance({
     directory: process.env.ES_APPEARANCE_DIR ?? path.join(app.getPath("home"), ".cache/wal"),
     receipt: path.join(app.getPath("userData"), "appearance-receipt.json"),
-    // Shrinking and scaling back up gives a soft blur without an image library. Studio's Gaussian sigma (pixels of the
-    // full image) keeps detail about 2 sigma wide, i.e. width / (2 sigma) samples; without a Studio look, 24.
+    // Shrinking and scaling back up gives a soft blur without an image library (sizes: blurPlan).
     blur: async (file, sigma) => {
       const image = nativeImage.createFromPath(file)
       if (image.isEmpty()) throw new Error("Not an image")
-      const width = sigma === undefined ? 24 : sigma === 0 ? 640 : Math.max(8, Math.min(640, Math.round(image.getSize().width / (2 * sigma))))
-      return image.resize({ width, quality: "good" }).resize({ width: 640, quality: "best" }).toJPEG(70)
+      const display = Math.max(...screen.getAllDisplays().map((item) => item.size.width * item.scaleFactor))
+      const plan = blurPlan(image.getSize().width, sigma, display)
+      return image.resize({ width: plan.sample, quality: "good" }).resize({ width: plan.output, quality: "best" }).toJPEG(70)
     },
   })
   // Remote host problems never stop local startup: that host is left out and the reason logged.

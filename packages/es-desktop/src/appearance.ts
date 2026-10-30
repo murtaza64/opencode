@@ -13,6 +13,17 @@ export type WalPalette = { revision: string; scheme: "dark" | "light"; roles: Re
 export type StudioLook = { blur: number; dim: number }
 export type AppearanceState = { palette: Record<string, string>; wallpaper?: string; wal?: WalPalette; look?: StudioLook; updatedAt: number }
 
+/** Sizes for the soft-blur resample (shrink to `sample` samples wide, scale back up to `output`). Without a Studio look:
+ * 24 samples shown at 640, this app's own default. With one, Studio's sigma (pixels of the full image) keeps detail
+ * about 2 sigma wide, i.e. width / (2 sigma) samples, and the result is scaled to the widest display in device pixels
+ * (never past the image), since the page stretches it over the whole window: a 640 cap left visible pixels on HiDPI. */
+export const blurPlan = (imageWidth: number, sigma: number | undefined, displayWidth: number) => {
+  if (sigma === undefined) return { sample: 24, output: 640 }
+  const output = Math.max(640, Math.min(Math.round(imageWidth), Math.round(displayWidth)))
+  const sample = sigma === 0 ? output : Math.max(8, Math.min(output, Math.round(imageWidth / (2 * sigma))))
+  return { sample, output }
+}
+
 const IMAGE = /\.(png|jpe?g|webp|heic|tiff?|gif|bmp)$/i
 const COLOR = /^#[0-9a-f]{3,8}$/i
 

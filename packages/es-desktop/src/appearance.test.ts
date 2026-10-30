@@ -246,3 +246,17 @@ test("the receipt adds what each tab's page confirmed it applied; only this app'
   const paired = await setup({ pairing: true })
   expect((await fetch(`${paired.server.origin}/__es/appearance/applied`, { method: "POST", body: "{}" })).status).toBe(401)
 })
+
+test("blur sizes: the default look is unchanged; a Studio look is shown at display resolution, sigma in image pixels", async () => {
+  const { blurPlan } = await import("./appearance")
+  // No Studio look: 24 samples at 640 on any display.
+  expect(blurPlan(5120, undefined, 3024)).toEqual({ sample: 24, output: 640 })
+  // A 5K wallpaper on a 3024px-wide Retina panel: output at the panel's width, not 640.
+  expect(blurPlan(5120, 0, 3024)).toEqual({ sample: 3024, output: 3024 })
+  expect(blurPlan(5120, 4, 3024)).toEqual({ sample: 640, output: 3024 })
+  expect(blurPlan(5120, 64, 3024)).toEqual({ sample: 40, output: 3024 })
+  // Never upscaled past the image, never below the old 640.
+  expect(blurPlan(1920, 0, 3024)).toEqual({ sample: 1920, output: 1920 })
+  expect(blurPlan(400, 2, 3024)).toEqual({ sample: 100, output: 640 })
+  expect(blurPlan(5120, 1000, 3024).sample).toBe(8)
+})
