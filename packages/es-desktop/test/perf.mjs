@@ -12,7 +12,7 @@ const root = fileURLToPath(new URL("..", import.meta.url))
 const seconds = Number(process.env.PERF_SECONDS ?? 30)
 const profile = await mkdtemp(path.join(tmpdir(), "es-desktop-perf-"))
 const app = await _electron.launch({
-  args: [root],
+  args: [root, "--use-mock-keychain"],
   env: {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "",

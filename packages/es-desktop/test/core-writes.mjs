@@ -29,7 +29,7 @@ const target = `http://127.0.0.1:${backend.address().port}`
 expect(new URL(target).port).not.toBe("4096")
 const app = await _electron.launch({
   executablePath: process.env.ES_DESKTOP_EXECUTABLE,
-  args: process.env.ES_DESKTOP_EXECUTABLE ? [] : [root],
+  args: process.env.ES_DESKTOP_EXECUTABLE ? ["--use-mock-keychain"] : [root, "--use-mock-keychain"],
   timeout: 20000,
   env: {
     ...process.env,

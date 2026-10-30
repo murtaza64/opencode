@@ -29,8 +29,8 @@ if (renderer) {
 }
 const launch = {
   ...(process.env.ES_DESKTOP_EXECUTABLE
-    ? { executablePath: process.env.ES_DESKTOP_EXECUTABLE, args: [] }
-    : { args: [root] }),
+    ? { executablePath: process.env.ES_DESKTOP_EXECUTABLE, args: ["--use-mock-keychain"] }
+    : { args: [root, "--use-mock-keychain"] }),
   env: {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "",

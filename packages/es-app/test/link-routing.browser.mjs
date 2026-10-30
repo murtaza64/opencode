@@ -22,7 +22,7 @@ fixture.messages[1].parts[0].text = cases.map(item => `[${item.label}](${item.ur
 fixture.issue = { backend: "gh", number: 1, ref: "1", title: "Routing fixture", state: "open", markers: [], claims: [], labels: [], comments: [],
   url: "https://duo.fyi/ink/https://github.com/owner/repo/issues/1?x=1#body", body: "Read-only issue fixture" }
 const profile = process.env.ES_DESKTOP_EXECUTABLE ? await mkdtemp(path.join(tmpdir(), "link-routing-")) : undefined
-const app = profile ? await _electron.launch({ executablePath: process.env.ES_DESKTOP_EXECUTABLE,
+const app = profile ? await _electron.launch({ args: ["--use-mock-keychain"], executablePath: process.env.ES_DESKTOP_EXECUTABLE,
   env: { ...process.env, ELECTRON_RUN_AS_NODE: "", ES_DESKTOP_USER_DATA: profile, ES_DESKTOP_RENDERER: "",
     OPENCODE_URL: fixture.url, ES_DASHBOARD_URL: fixture.url, OPENCODE_SERVER_PASSWORD: "" },
 }) : undefined

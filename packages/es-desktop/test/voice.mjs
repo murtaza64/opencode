@@ -42,7 +42,7 @@ const alive = async (name) => {
 const app = await _electron.launch({
   // ES_DESKTOP_EXECUTABLE runs the packaged app (electron-builder --dir output) instead of the source tree.
   executablePath: process.env.ES_DESKTOP_EXECUTABLE,
-  args: process.env.ES_DESKTOP_EXECUTABLE ? [] : [path.resolve(import.meta.dirname, "..")],
+  args: process.env.ES_DESKTOP_EXECUTABLE ? ["--use-mock-keychain"] : [path.resolve(import.meta.dirname, ".."), "--use-mock-keychain"],
   env: {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "",

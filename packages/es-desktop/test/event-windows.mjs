@@ -7,6 +7,7 @@ import { createFixture, directory } from "../../es-app/test/composer-fixture.mjs
 const fixture = await createFixture()
 const profile = await mkdtemp(path.join(tmpdir(), "es-events-windows-"))
 const app = await _electron.launch({
+  args: ["--use-mock-keychain"],
   executablePath: process.env.ES_DESKTOP_EXECUTABLE,
   env: {
     ...process.env,

@@ -25,7 +25,7 @@ fixture.children.set("ses_child", { session: { ...session("ses_child"), parentID
   parts: [{ id: "part_child", messageID: "msg_child", sessionID: "ses_child", type: "text", synthetic: true, text: "Resume child fixture — generated input" }],
 }] })
 const profile = process.env.ES_DESKTOP_EXECUTABLE ? await mkdtemp(path.join(tmpdir(), "generated-input-")) : undefined
-const app = profile ? await _electron.launch({ executablePath: process.env.ES_DESKTOP_EXECUTABLE,
+const app = profile ? await _electron.launch({ args: ["--use-mock-keychain"], executablePath: process.env.ES_DESKTOP_EXECUTABLE,
   env: { ...process.env, ELECTRON_RUN_AS_NODE: "", ES_DESKTOP_USER_DATA: profile, ES_DESKTOP_RENDERER: "", OPENCODE_URL: fixture.url, ES_DASHBOARD_URL: fixture.url, OPENCODE_SERVER_PASSWORD: "" },
 }) : undefined
 const browser = app ? undefined : await chromium.launch({ channel: "chrome", headless: true })

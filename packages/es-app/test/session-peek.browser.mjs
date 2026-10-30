@@ -44,7 +44,7 @@ const todoCalls = (id) => fixture.calls.filter((c) => c.path === `/session/${id}
 const providers = { providers: [{ id: "fixture", models: { test: { id: "test", limit: { context: 500000 } }, "test-mini": { id: "test-mini", limit: { context: 500000 } } } }], default: {} }
 
 const profile = process.env.ES_DESKTOP_EXECUTABLE ? await mkdtemp(path.join(tmpdir(), "session-peek-")) : undefined
-const app = profile ? await _electron.launch({ executablePath: process.env.ES_DESKTOP_EXECUTABLE,
+const app = profile ? await _electron.launch({ args: ["--use-mock-keychain"], executablePath: process.env.ES_DESKTOP_EXECUTABLE,
   env: { ...process.env, ELECTRON_RUN_AS_NODE: "", ES_DESKTOP_USER_DATA: profile, ES_DESKTOP_RENDERER: "",
     OPENCODE_URL: fixture.url, ES_DASHBOARD_URL: fixture.url, OPENCODE_SERVER_PASSWORD: "" },
 }) : undefined

@@ -27,7 +27,7 @@ fixture.messagesB = [{ info: { id: "msg_b", sessionID: "ses_b", role: "user", ag
   model: { providerID: "fixture", modelID: "test" }, time: { created: 1 } },
   parts: [{ id: "prt_b", messageID: "msg_b", sessionID: "ses_b", type: "text", text: "SECOND-SESSION-SENTINEL" }] }]
 const profile = native ? await mkdtemp(path.join(tmpdir(), "single-snapshot-native-")) : undefined
-const app = native ? await _electron.launch({ executablePath: process.env.ES_DESKTOP_EXECUTABLE,
+const app = native ? await _electron.launch({ args: ["--use-mock-keychain"], executablePath: process.env.ES_DESKTOP_EXECUTABLE,
   env: { ...process.env, ELECTRON_RUN_AS_NODE: "", ES_DESKTOP_USER_DATA: profile, ES_DESKTOP_RENDERER: "",
     OPENCODE_URL: fixture.url, ES_DASHBOARD_URL: fixture.url, OPENCODE_SERVER_PASSWORD: "" } }) : undefined
 const browser = app ? undefined : await chromium.launch({ channel: "chrome", headless: true })

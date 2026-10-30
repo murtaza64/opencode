@@ -31,7 +31,7 @@ const emit = (directory, type, properties) => {
     if (stream.path === "/global/event") response.write(`data: ${JSON.stringify({ directory, payload: { type, properties } })}\n\n`)
 }
 const profile = native ? await mkdtemp(path.join(tmpdir(), "es-fanout-native-")) : undefined
-const app = native ? await _electron.launch({ executablePath: process.env.ES_DESKTOP_EXECUTABLE,
+const app = native ? await _electron.launch({ args: ["--use-mock-keychain"], executablePath: process.env.ES_DESKTOP_EXECUTABLE,
   env: { ...process.env, ELECTRON_RUN_AS_NODE: "", ES_DESKTOP_USER_DATA: profile, ES_DESKTOP_RENDERER: "",
     OPENCODE_URL: fixture.url, ES_DASHBOARD_URL: fixture.url, OPENCODE_SERVER_PASSWORD: "" } }) : undefined
 const browser = app ? undefined : await chromium.launch({ channel: "chrome", headless: true })

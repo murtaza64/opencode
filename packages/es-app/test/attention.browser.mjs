@@ -62,7 +62,7 @@ process.env.ES_DASHBOARD_URL = fixtureUrl
 const vite = await createServer({ root: fileURLToPath(new URL("..", import.meta.url)), server: { host: "127.0.0.1", port: 0 } })
 await vite.listen()
 const profile = process.env.ES_DESKTOP_EXECUTABLE ? await mkdtemp(path.join(tmpdir(), "attention-native-")) : undefined
-const app = profile ? await _electron.launch({ executablePath: process.env.ES_DESKTOP_EXECUTABLE,
+const app = profile ? await _electron.launch({ args: ["--use-mock-keychain"], executablePath: process.env.ES_DESKTOP_EXECUTABLE,
   env: { ...process.env, ELECTRON_RUN_AS_NODE: "", ES_DESKTOP_USER_DATA: profile, ES_DESKTOP_RENDERER: "",
     OPENCODE_URL: fixtureUrl, ES_DASHBOARD_URL: fixtureUrl, OPENCODE_SERVER_PASSWORD: "" } }) : undefined
 const browser = app ? undefined : await chromium.launch({ headless: true, channel: "chrome" })

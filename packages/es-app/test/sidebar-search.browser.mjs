@@ -11,7 +11,7 @@ const preview = await startPanelPreview()
 preview.fixture.archived.add("ses_b")
 preview.fixture.workspaceSessions.push({ ...session("ses_external"), title: "Other project title", directory: "/another/project" })
 const profile = process.env.ES_DESKTOP_EXECUTABLE ? await mkdtemp(path.join(tmpdir(), "sidebar-search-")) : undefined
-const app = profile ? await _electron.launch({ executablePath: process.env.ES_DESKTOP_EXECUTABLE,
+const app = profile ? await _electron.launch({ args: ["--use-mock-keychain"], executablePath: process.env.ES_DESKTOP_EXECUTABLE,
   env: { ...process.env, ELECTRON_RUN_AS_NODE: "", ES_DESKTOP_USER_DATA: profile, ES_DESKTOP_RENDERER: "",
     OPENCODE_URL: preview.fixture.url, ES_DASHBOARD_URL: preview.fixture.url, OPENCODE_SERVER_PASSWORD: "" } }) : undefined
 const browser = app ? undefined : await chromium.launch({ channel: "chrome", headless: true })

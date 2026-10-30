@@ -50,7 +50,7 @@ try {
   expect(known.fixture).toBe(true)
   expect(known.root).toBe(identity.root)
   expect(execFileSync("/usr/sbin/lsof", ["-nP", `-iTCP:${new URL(identity.url).port}`, "-sTCP:LISTEN", "-t"], { encoding: "utf8" }).trim()).toBe(String(identity.pid))
-  app = await _electron.launch({ executablePath: process.env.ES_DESKTOP_EXECUTABLE, env: { ...process.env, ELECTRON_RUN_AS_NODE: "", OPENCODE_URL: core.url, ES_DASHBOARD_URL: dashboard, OPENCODE_SERVER_PASSWORD: "", ES_DESKTOP_USER_DATA: profile, ES_DESKTOP_RENDERER: "" } })
+  app = await _electron.launch({ args: ["--use-mock-keychain"], executablePath: process.env.ES_DESKTOP_EXECUTABLE, env: { ...process.env, ELECTRON_RUN_AS_NODE: "", OPENCODE_URL: core.url, ES_DASHBOARD_URL: dashboard, OPENCODE_SERVER_PASSWORD: "", ES_DESKTOP_USER_DATA: profile, ES_DESKTOP_RENDERER: "" } })
   expect(await app.evaluate(({ app }) => app.isPackaged)).toBe(true)
   const page = await app.firstWindow()
   const errors = []

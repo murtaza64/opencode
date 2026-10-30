@@ -12,7 +12,7 @@ const artifacts = path.join(root, "artifacts/header")
 await mkdir(artifacts, { recursive: true })
 const app = await _electron.launch({
   executablePath: process.env.ES_DESKTOP_EXECUTABLE,
-  args: process.env.ES_DESKTOP_EXECUTABLE ? [] : [root],
+  args: process.env.ES_DESKTOP_EXECUTABLE ? ["--use-mock-keychain"] : [root, "--use-mock-keychain"],
   env: {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "",

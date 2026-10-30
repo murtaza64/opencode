@@ -8,7 +8,7 @@ const fixture = await createFixture()
 const profile = await mkdtemp(path.join(tmpdir(), "es-shortcut-"))
 const app = await _electron.launch({
   executablePath: process.env.ES_DESKTOP_EXECUTABLE,
-  args: process.env.ES_DESKTOP_EXECUTABLE ? [] : [path.resolve(import.meta.dirname, "..")],
+  args: process.env.ES_DESKTOP_EXECUTABLE ? ["--use-mock-keychain"] : [path.resolve(import.meta.dirname, ".."), "--use-mock-keychain"],
   env: { ...process.env, ELECTRON_RUN_AS_NODE: "", ES_DESKTOP_USER_DATA: profile, ES_DESKTOP_RENDERER: "", OPENCODE_URL: fixture.url, ES_DASHBOARD_URL: fixture.url, OPENCODE_SERVER_PASSWORD: "" },
 })
 try {

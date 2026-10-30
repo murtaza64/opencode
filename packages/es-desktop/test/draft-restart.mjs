@@ -13,7 +13,7 @@ await mkdir(artifacts, { recursive: true })
 expect(["4096", "7777", "3181"]).not.toContain(new URL(fixture.url).port)
 expect((await (await fetch(`${fixture.url}/config/providers`)).json()).default).toEqual({ fixture: "test" })
 const launch = {
-  args: [root],
+  args: [root, "--use-mock-keychain"],
   env: {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "",
