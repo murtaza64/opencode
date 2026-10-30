@@ -1,6 +1,6 @@
 // #267 blank surface pane: a static deliverable (shaped like api-tests: one inline style, no script, no
 // subresources) opened in the Front Desk through the real app route (vite surfaces plugin -> surface-proxy ->
-// loopback upstream). Opens it by direct URL and by sidebar click, each with the capability mint delayed, and
+// loopback upstream). Opens it by direct URL and by a Surfaces-tab row click, each with the capability mint delayed, and
 // asserts the report's text actually commits inside the frame after the address arrives. Records the pane
 // state (iframe count, error/loading text) when it does not. Read-only: no source change.
 // Run from packages/es-app: node test/surface-open.browser.mjs [delayMs]
@@ -65,7 +65,8 @@ try {
   await run("direct URL /?surface=api-tests", (page) => page.goto(`${preview.origin}/?surface=api-tests`, { waitUntil: "domcontentloaded", timeout: 180_000 }))
   await run("sidebar click", async (page) => {
     await page.goto(`${preview.origin}/`, { waitUntil: "domcontentloaded", timeout: 180_000 })
-    await page.locator("[data-deliverable='api-tests']").click()
+    await page.locator("nav.sidebar").getByRole("tab", { name: /^Surfaces/ }).click()
+    await page.locator("nav.sidebar").getByRole("tabpanel").locator("[data-nav-item='surface:api-tests']").click()
   })
   // The capability mint never answers: the pane must say it is opening (or failed), never stay silently blank.
   {
@@ -75,11 +76,14 @@ try {
     try {
       await page.goto(`${preview.origin}/?surface=api-tests`, { waitUntil: "domcontentloaded", timeout: 180_000 })
       await expect(page.locator(".desk-surface h2")).toContainText("API tests")
-      await expect(page.locator(".desk-surface .desk-surface-state, .desk-surface [role=alert], .desk-surface iframe")).not.toHaveCount(0, { timeout: 15_000 })
-      results.push("PASS never-answering address: the pane shows a state")
+      await expect(page.locator(".desk-surface .desk-surface-state")).toHaveText("Opening…", { timeout: 5_000 })
+      // The mint gives up after 15 s: an error with Try again, not an endless "Opening…".
+      await expect(page.locator(".desk-surface [role=alert]")).toContainText("Cannot open this surface", { timeout: 25_000 })
+      await expect(page.locator(".desk-surface [role=alert] button")).toHaveText("Try again")
+      results.push("PASS never-answering address: 'Opening…', then an error with Try again")
     } catch (error) {
       process.exitCode = 1
-      results.push(`FAIL never-answering address: silent blank ${JSON.stringify(await pane(page))}`)
+      results.push(`FAIL never-answering address: ${String(error).split("\n")[0]} ${JSON.stringify(await pane(page))}`)
     } finally {
       await context.close()
     }
@@ -87,7 +91,8 @@ try {
   await run("session page -> desk route -> click", async (page) => {
     await page.goto(preview.url, { waitUntil: "domcontentloaded", timeout: 180_000 })
     await page.goto(`${preview.origin}/`, { waitUntil: "domcontentloaded" })
-    await page.locator("[data-deliverable='api-tests']").click()
+    await page.locator("nav.sidebar").getByRole("tab", { name: /^Surfaces/ }).click()
+    await page.locator("nav.sidebar").getByRole("tabpanel").locator("[data-nav-item='surface:api-tests']").click()
   })
 } finally {
   console.log(`delay=${delay}ms\n${results.join("\n")}`)

@@ -64,10 +64,12 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
   // Showing a deliverable is what marks it seen, so only a loaded, reachable one counts.
   createEffect(() => { const surface = props.surface; if (surface && !surfaceUnavailable(surface)) props.onOpen?.(surface) })
   const [address, { refetch }] = createResource(() => props.id, surfaceAddress)
-  const src = () => address()?.src
+  // Reading a failed resource throws; the error is shown from address.error instead.
+  const minted = () => address.error ? undefined : address()
+  const src = () => minted()?.src
   // Re-mint the frame address before it expires; the frame remounts on the new address.
   createEffect(() => {
-    const delay = renewDelay(address()?.expiresAt, Date.now())
+    const delay = renewDelay(minted()?.expiresAt, Date.now())
     if (delay === undefined) return
     const timer = setTimeout(() => void refetch(), delay)
     onCleanup(() => clearTimeout(timer))
@@ -101,7 +103,7 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
         <button class="desk-button" onClick={retry}>Try again</button>
       </div>}>
         <Show when={!address.error} fallback={<div class="desk-surface-state" role="alert"><p>Cannot open this surface: {String(address.error?.message ?? address.error)}</p><button class="desk-button" onClick={retry}>Try again</button></div>}>
-          <Show when={src() ? frameKey() : undefined} keyed>{_key =>
+          <Show when={src() ? frameKey() : undefined} keyed fallback={<p class="desk-surface-state" role="status">Opening…</p>}>{_key =>
             <iframe class="desk-surface-frame" title={surface().title} src={src()} referrerpolicy="no-referrer"
               sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" />}</Show>
         </Show>

@@ -105,8 +105,9 @@ export const createSurfaces = () => {
 }
 
 /** The sandboxed frame address for one surface, minted by the app server, and when it lapses. */
+// A mint that never answers ends as an error the pane can show and retry, not a silent blank.
 export const surfaceAddress = (id: string) =>
-  fetch(`/__es/surface/${encodeURIComponent(id)}`, { cache: "no-store" }).then(async response => {
+  fetch(`/__es/surface/${encodeURIComponent(id)}`, { cache: "no-store", signal: AbortSignal.timeout(15_000) }).then(async response => {
     // An app server without the surface route answers with its page fallback, not JSON.
     if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) throw new Error("this app server does not host surfaces yet")
     const body = await response.json() as { src: string; expires_at?: number }

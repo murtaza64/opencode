@@ -37,7 +37,8 @@ export const readHostRequest = async (host: string, request: Pick<HomeRequestRow
 /** A frame address for one of that host's file Surfaces, minted through the Local listener and served from that host.
  * A URL Surface cannot be framed from another computer yet: its frame answers 502 "served only on its own host". */
 export const hostSurfaceAddress = async (host: string, surface: string) => {
-  const response = await fetch(`${hostPrefix(host)}/__es/surface/${encodeURIComponent(surface)}`, { cache: "no-store" })
+  // As for this host's own Surfaces: a mint that never answers becomes an error with Try again.
+  const response = await fetch(`${hostPrefix(host)}/__es/surface/${encodeURIComponent(surface)}`, { cache: "no-store", signal: AbortSignal.timeout(15_000) })
   if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) throw new Error(`${host}: this listener does not frame that host's surfaces`)
   const body = (await response.json()) as { src: string; expires_at?: number }
   return { src: body.src, expiresAt: body.expires_at }
