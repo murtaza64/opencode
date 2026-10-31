@@ -1,14 +1,14 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-10-31.1",
+  "release": "2026-10-31.2",
   "items": [
     {
-      "title": "Handoffs from another computer",
-      "detail": "When a session on another Work host hands off, Work shows the successor banner there too, and pins on the old session follow to the new one."
+      "title": "Completed tasks in the Front Desk strip",
+      "detail": "The task strip keeps a Completed list with every finished result, newest first, and shows parts in an unknown state on their own. Ages come from when a part last changed, or say age unknown."
     },
     {
-      "title": "Tidier decisions",
-      "detail": "A decision's header stays on one line, and its Send action leads with Snooze and No longer needed set apart; the recipient sits under the actions."
+      "title": "Smoother wallpaper changes",
+      "detail": "Blurring a Studio wallpaper no longer freezes the window while it works."
     }
   ],
   "limits": []
