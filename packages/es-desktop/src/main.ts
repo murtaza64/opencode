@@ -13,6 +13,7 @@ import { notificationsSupported, postNotice } from "./desktop-notice"
 import { blurPlan, createAppearance } from "./appearance"
 import { blurOffMain } from "./blur-worker"
 import { createReleaseNotes } from "./release-notes"
+import { keepSessionCookies } from "./page-cookies"
 import { localStateDir, pairingSources, type PairingSource } from "./pair-phone"
 import { openPairPhone } from "./pair-phone-window"
 
@@ -371,7 +372,11 @@ const start = async () => {
     state.closing = true
     appearance.close()
     for (const partition of tabs?.sessions() ?? [isolated]) partition.flushStorageData()
-    void voice.close().finally(() => Promise.allSettled(listeners.map((item) => item.server.close()))).finally(() => app.quit())
+    // Personal sign-in survives the restart (page-cookies.ts); every partition's cookies reach disk before quit.
+    const pageSessions = pages.map((host) => session.fromPartition(`persist:editspace-host-${host.id}`))
+    const cookies = Promise.allSettled(pageSessions.map((partition) => keepSessionCookies(partition)))
+      .then(() => Promise.allSettled((tabs?.sessions() ?? [isolated]).concat(pageSessions).map((partition) => partition.cookies.flushStore())))
+    void Promise.allSettled([cookies, voice.close()]).finally(() => Promise.allSettled(listeners.map((item) => item.server.close()))).finally(() => app.quit())
   })
   app.on("window-all-closed", () => app.quit())
   process.on("SIGTERM", () => app.quit())
