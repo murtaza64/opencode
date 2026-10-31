@@ -43,7 +43,7 @@ export const createSelfHandoff = (input: Input) => {
     return value && typeof value.requestID === "string" ? { requestID: value.requestID, frontier: value.frontier === true } : undefined
   }
   const save = (value: Saved) => storage.setItem(key(), JSON.stringify(value))
-  const url = (path: string, extra = "") => `/es/api/handoffs/self${path}?es=${encodeURIComponent(input.editspace() ?? "")}${extra}`
+  const selfRoute = (path: string, extra = "") => `/es/api/handoffs/self${path}?es=${encodeURIComponent(input.editspace() ?? "")}${extra}`
   const write = { "content-type": "application/json", "X-Attention-CSRF": "1" }
   let timer: ReturnType<typeof setTimeout> | undefined
   let disposed = false
@@ -59,7 +59,7 @@ export const createSelfHandoff = (input: Input) => {
     const current = saved()
     const lane = input.lane()
     if (!current || !lane || !input.editspace()) return setState({ state: "idle" })
-    const response = await request(url(`/${encodeURIComponent(current.requestID)}`, `&lane=${encodeURIComponent(lane)}`), { credentials: "include" }).catch(() => undefined)
+    const response = await request(selfRoute(`/${encodeURIComponent(current.requestID)}`, `&lane=${encodeURIComponent(lane)}`), { credentials: "include" }).catch(() => undefined)
     if (disposed) return
     // A request this host no longer knows (another editspace's store, a wiped database) is not shown as live.
     if (response?.status === 404) { storage.removeItem(key()); return setState({ state: "idle" }) }
@@ -78,7 +78,7 @@ export const createSelfHandoff = (input: Input) => {
     frontier = frontier || !!current?.frontier
     save({ requestID, frontier })
     setState({ state: "sending" })
-    const response = await request(url(""), { method: "POST", credentials: "include", headers: write,
+    const response = await request(selfRoute(""), { method: "POST", credentials: "include", headers: write,
       body: JSON.stringify({ lane, session: input.session, requestID, ...(frontier ? { frontier: true } : {}) }) }).catch(() => undefined)
     if (disposed) return
     const body: Record<string, unknown> | undefined = await response?.json().catch(() => undefined)
@@ -99,7 +99,7 @@ export const createSelfHandoff = (input: Input) => {
     const current = saved()
     const lane = input.lane()
     if (!current || !lane) return
-    const response = await request(url(`/${encodeURIComponent(current.requestID)}`, `&lane=${encodeURIComponent(lane)}`),
+    const response = await request(selfRoute(`/${encodeURIComponent(current.requestID)}`, `&lane=${encodeURIComponent(lane)}`),
       { method: "DELETE", credentials: "include", headers: write }).catch(() => undefined)
     if (disposed) return
     const body = await response?.json().catch(() => undefined)
