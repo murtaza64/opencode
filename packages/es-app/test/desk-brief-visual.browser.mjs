@@ -377,7 +377,8 @@ try {
       stored.status = "resolved"
       stored.revision = 5
       laterBrief = true
-      await page.reload()
+      // A fresh load of the overview: History lives there, not beside an open item (one list, NAV-01/02).
+      await page.goto(`${preview.origin}/`)
       await page.locator(".desk-history summary").click()
       await page.locator(".desk-history").getByRole("button", { name: /^Resolved/ }).click()
       const row = page.locator(".desk-history .desk-item", { hasText: squadron.title })
