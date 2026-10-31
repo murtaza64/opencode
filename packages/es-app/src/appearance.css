@@ -486,7 +486,7 @@
 
 /* The narrow-window chat floats over the inline-end edge (380px); the open item's bar keeps its actions out from
  * under it, so Open and Close stay reachable without closing the chat. */
-body:has(.desk-companion.overlay:not(.closed)) :is(.surface-bar, .desk-evidence-head) { padding-inline-end: calc(380px + 8px); }
+body:has(.desk-companion.overlay:not(.closed)) :is(.surface-head, .desk-evidence-head) { padding-inline-end: calc(380px + 8px); }
 
 /* ATTN-02: a decision's header is one line: requester (truncates first) · age · agent thread at the end. Who updated
  * it or where answers go now, shown only when they differ, takes its own line below. */

@@ -14,13 +14,15 @@ import { AttentionDecision } from "./attention-decision"
 import { PreparedBrief, useCompleteBrief, useCompleteJob } from "./attention-brief"
 import { HomePermission } from "./home-permission"
 import { Glyph, HostGlyph } from "./icons"
+import { AppHeader } from "./native-header"
 
+// The parent may clear the entry while this view (and its portalled top-bar row) is still being disposed.
 export const WorkRemoteDetail = (props: { entry: WorkEntry; onClose: () => void }) => {
-  const host = () => props.entry.host!
-  const where = () => <span class="work-remote-host" data-host={host()}><HostGlyph host={host()} size={12} /> on <bdi dir="auto">{props.entry.hostLabel ?? host()}</bdi>
-    <Show when={props.entry.stale}> · <span class="home-blocked">{props.entry.unavailableReason ? "unreachable · last known" : "last known"}</span></Show></span>
-  const surface = () => props.entry.remote?.kind === "surface"
-  return <section class="desk-evidence attention-home work-remote" aria-label="Selected item" data-work-key={props.entry.key} data-remote-kind={props.entry.remote?.kind}
+  const host = () => props.entry?.host ?? ""
+  const where = () => <span class="work-remote-host" data-host={host()}><HostGlyph host={host()} size={12} /> on <bdi dir="auto">{props.entry?.hostLabel ?? host()}</bdi>
+    <Show when={props.entry?.stale}> · <span class="home-blocked">{props.entry?.unavailableReason ? "unreachable · last known" : "last known"}</span></Show></span>
+  const surface = () => props.entry?.remote?.kind === "surface"
+  return <section class="desk-evidence attention-home work-remote" aria-label="Selected item" data-work-key={props.entry?.key} data-remote-kind={props.entry?.remote?.kind}
     onKeyDown={event => { if (surface() && event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); props.onClose() } }}>
     {/* A Surface carries its own compact bar (host included); other items keep the Close + host head. */}
     <Show when={!surface()}><div class="desk-evidence-head">
@@ -28,9 +30,9 @@ export const WorkRemoteDetail = (props: { entry: WorkEntry; onClose: () => void 
       {where()}
     </div></Show>
     <Switch>
-      <Match when={props.entry.remote?.kind === "attention" ? props.entry.remote : undefined}>{remote => <RemoteDecision host={host()} record={remote().record} />}</Match>
-      <Match when={props.entry.remote?.kind === "request" ? props.entry.remote : undefined}>{remote => <RemoteRequest host={host()} label={props.entry.hostLabel ?? host()} request={remote().request} stale={props.entry.stale} />}</Match>
-      <Match when={props.entry.remote?.kind === "surface" ? props.entry.remote : undefined}>{remote => <RemoteSurface host={host()} label={props.entry.hostLabel ?? host()} surface={remote().surface} frame={remote().frame} where={where()} onClose={props.onClose} />}</Match>
+      <Match when={props.entry?.remote?.kind === "attention" ? props.entry.remote : undefined}>{remote => <RemoteDecision host={host()} record={remote().record} />}</Match>
+      <Match when={props.entry?.remote?.kind === "request" ? props.entry.remote : undefined}>{remote => <RemoteRequest host={host()} label={props.entry.hostLabel ?? host()} request={remote().request} stale={props.entry.stale} />}</Match>
+      <Match when={props.entry?.remote?.kind === "surface" ? props.entry.remote : undefined}>{remote => <RemoteSurface host={host()} label={props.entry.hostLabel ?? host()} surface={remote().surface} frame={remote().frame} where={where()} onClose={props.onClose} />}</Match>
     </Switch>
   </section>
 }
@@ -101,14 +103,17 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
   const [address, { refetch }] = createResource(() => props.frame === "host" ? props.surface.id : undefined, id => hostSurfaceAddress(props.host, id))
   const src = () => address.error ? undefined : address()?.src
   return <div class="desk-surface work-remote-surface">
-    <div class="surface-bar">
-      <h2 title={`${props.surface.owner} · updated ${ago(props.surface.updated_at)}`}><bdi dir="auto">{props.surface.title}</bdi></h2>
-      {props.where}
-      <span class="surface-bar-actions">
-        <Show when={src()}>{href => <a class="surface-bar-button" href={href()} target="_blank" rel="noopener noreferrer" title="Open in new tab" aria-label="Open in new tab"><Glyph name="link-external" /></a>}</Show>
-        <button class="surface-bar-button" aria-label="Close" title="Close (Esc)" onClick={props.onClose}>×</button>
-      </span>
-    </div>
+    <AppHeader>
+      <div class="surface-head" onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); props.onClose() } }}>
+        <h2 title={`${props.surface.owner} · updated ${ago(props.surface.updated_at)}`}><bdi dir="auto">{props.surface.title}</bdi></h2>
+        {props.where}
+        <span class="surface-head-actions">
+          <span class="surface-head-slot" data-slot="buildinghub" hidden />
+          <Show when={src()}>{href => <a class="surface-head-button" href={href()} target="_blank" rel="noopener noreferrer" title="Open in new tab" aria-label="Open in new tab"><Glyph name="link-external" /></a>}</Show>
+          <button class="surface-head-button" aria-label="Close" title="Close (Esc)" onClick={props.onClose}>×</button>
+        </span>
+      </div>
+    </AppHeader>
     <Show when={props.frame === "host"} fallback={<p class="desk-surface-state" data-surface-gap="own-host-only">This link surface is served only on <bdi dir="auto">{props.label}</bdi>; it cannot be shown from another computer yet.</p>}>
       <Show when={!address.error} fallback={<div class="desk-surface-state" role="alert"><p>Cannot open this surface from <bdi dir="auto">{props.label}</bdi>: {String(address.error?.message ?? address.error)}</p><button class="desk-button" onClick={() => void refetch()}>Try again</button></div>}>
         <Show when={src()} fallback={<p class="desk-surface-state">Loading…</p>}>{href =>

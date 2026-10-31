@@ -1,6 +1,7 @@
 /* Agent-owned surfaces in the Front Desk: a sidebar group above the queue and the selected
  * surface in the main panel. Content runs in the server-sandboxed frame; the desk renders
  * only the title, owner, update time and health that the registry reports. */
+import { AppHeader } from "./native-header"
 import { createEffect, createResource, createSignal, For, onCleanup, Show } from "solid-js"
 import { A } from "@solidjs/router"
 import { ago, sessionHref } from "../state"
@@ -84,19 +85,26 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
   }
   // One compact bar: title (owner, revision and freshness in its tooltip), "asked in", open in a new tab, close. The
   // frame takes the rest of the pane edge to edge. Escape anywhere in the pane outside the frame closes it.
-  return <section class="desk-evidence desk-surface" aria-label="Surface" onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); props.onClose() } }}>
-    <div class="surface-bar">
-      <h2 title={props.surface ? `${props.surface.owner} · ${surfaceProblem(props.surface.health) ?? `updated ${ago(props.surface.updated_at)}`} · ${props.surface.lane ?? "no lane"} · ${props.surface.editspace} · revision ${props.surface.revision}` : undefined}>
-        <bdi dir="auto">{props.surface?.title ?? props.id}</bdi></h2>
-      <Show when={props.surface?.requested_in}>{asked => <A class="surface-bar-link" href={sessionHref(asked().session, asked().directory)} data-requested-in={asked().session}
-        title="The conversation this was asked for in">asked in <bdi dir="auto">{asked().title ?? "conversation"}</bdi></A>}</Show>
-      <span class="surface-bar-actions">
-        <Show when={src() && props.surface && !surfaceUnavailable(props.surface)}>
-          <a class="surface-bar-button" href={src()} target="_blank" rel="noopener noreferrer" title="Open in new tab" aria-label="Open in new tab"><Glyph name="link-external" /></a>
-        </Show>
-        <button class="surface-bar-button" aria-label="Close and return to chat" title="Close (Esc)" onClick={props.onClose}>×</button>
-      </span>
-    </div>
+  const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); props.onClose() } }
+  return <section class="desk-evidence desk-surface" aria-label="Surface" onKeyDown={closeOnEscape}>
+    {/* The app's one top bar (the Mac window's title bar in the desktop app): title, "asked in", a reserved
+      * BuildingHub slot, open in a new tab, close. Escape there closes too, since the bar sits outside this section. */}
+    <AppHeader>
+      <div class="surface-head" onKeyDown={closeOnEscape}>
+        <h2 title={props.surface ? `${props.surface.owner} · ${surfaceProblem(props.surface.health) ?? `updated ${ago(props.surface.updated_at)}`} · ${props.surface.lane ?? "no lane"} · ${props.surface.editspace} · revision ${props.surface.revision}` : undefined}>
+          <bdi dir="auto">{props.surface?.title ?? props.id}</bdi></h2>
+        <Show when={props.surface?.requested_in}>{asked => <A class="surface-head-link" href={sessionHref(asked().session, asked().directory)} data-requested-in={asked().session}
+          title="The conversation this was asked for in">asked in <bdi dir="auto">{asked().title ?? "conversation"}</bdi></A>}</Show>
+        <span class="surface-head-actions">
+          {/* Reserved for "BuildingHub version" (Laptop2649): shown only from a deployed receipt, which no API offers yet. */}
+          <span class="surface-head-slot" data-slot="buildinghub" hidden />
+          <Show when={src() && props.surface && !surfaceUnavailable(props.surface)}>
+            <a class="surface-head-button" href={src()} target="_blank" rel="noopener noreferrer" title="Open in new tab" aria-label="Open in new tab"><Glyph name="link-external" /></a>
+          </Show>
+          <button class="surface-head-button" aria-label="Close and return to chat" title="Close (Esc)" onClick={props.onClose}>×</button>
+        </span>
+      </div>
+    </AppHeader>
     <Show when={props.surface} fallback={<p class="desk-surface-state">{props.checked ? "This surface was withdrawn by its owner." : "Loading…"}</p>}>{surface =>
       <Show when={!surfaceUnavailable(surface())} fallback={<div class="desk-surface-state">
         <p><bdi dir="auto">{surface().owner}</bdi> is not serving this surface right now{surface().health.last_ok_at ? `; last seen ${ago(surface().health.last_ok_at!)}` : ""}.</p>
