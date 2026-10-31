@@ -3,7 +3,9 @@ import { createImageStore } from "./image-store"
 
 test("content-addressed images are idempotent and removable", async () => {
   const store = createImageStore()
-  const image = { url: "data:image/png;base64,aGVsbG8=", mime: "image/png", filename: "one.png" }
+  // Without IndexedDB every store shares one in-memory map per process, and composer tests leave other drafts
+  // owning their images; unique bytes keep this blob's only owner "draft-a" whatever the file order.
+  const image = { url: "data:image/png;base64,aW1hZ2Utc3RvcmUtb3duZXItcmVsZWFzZQ==", mime: "image/png", filename: "one.png" }
   const key = await store.put(image, "draft-a")
   expect(key).toMatch(/^[a-f0-9]{64}$/)
   expect(await store.put(image, "draft-a")).toBe(key)
