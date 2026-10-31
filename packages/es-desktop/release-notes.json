@@ -3,9 +3,9 @@
   "release": "2026-10-31.5",
   "items": [
     {
-      "title": "Personal sign-in survives restarts",
-      "detail": "Personal: sign-in now survives app restarts (session cookies kept for up to a week)."
+      "title": "Personal session cookies kept at quit",
+      "detail": "Personal: when the app quits normally, session cookies are kept for up to 7 days."
     }
   ],
-  "limits": ["Only a normal quit keeps them; a crash or forced quit can still sign you out."]
+  "limits": ["A crash or forced quit does not keep them."]
 }
