@@ -13,7 +13,7 @@ const shots = process.argv.includes("--shots") ? process.argv[process.argv.index
 const label = process.env.LABEL ?? "after"
 const preview = await startPanelPreview()
 const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) es-desktop/1.0 Chrome/140.0.0.0 Electron/38.0.0 Safari/537.36"
-const browser = await chromium.launch({ headless: true })
+const browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : { channel: "chrome" }) })
 let failed = false
 // Where the title's text starts, and where the chat's text column starts (the session column inside its gutter).
 const edges = page => page.evaluate(() => {
