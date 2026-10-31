@@ -6,17 +6,32 @@ import { runSummary, toolOutcome, type ToolRunGroup } from "../transcript-groups
 import { SIZE_LEGEND, sizeDistribution, toolMagnitude, type ToolMagnitude } from "../tool-magnitude"
 import { editSummary, fileName, isEditTool, type EditSummary } from "../tool-edit"
 import { callCard, STATE_WORDS, toolGlyph } from "../tool-call"
+import { mailReceipts, mailSentText, useMailRecords } from "../mail-receipts"
+import { Glyph } from "./icons"
 
 const STRIP_ICONS = 12
 
 // The one icon of a call: Filament lights this element (data-filament-icon), never a glyph beside it. Its box is
 // fixed, so a tier change while a call streams never moves the row; the glyph inside scales with the call's known
 // input + output size (data-size), and an unknown size stays neutral rather than reading as small.
-const ToolIcon = (props: { partID: string; tool: string; status: string; icon: string; magnitude?: ToolMagnitude }) =>
-  <span class="tool-run-icon" data-tool={props.tool} data-status={props.status} data-filament-icon={props.partID}
+// A call that sent mail (its receipt says so) wears the mail chips' sent glyph.
+const ToolIcon = (props: { partID: string; tool: string; status: string; icon: string; magnitude?: ToolMagnitude; mail?: boolean }) =>
+  <span class="tool-run-icon" data-tool={props.tool} data-status={props.status} data-filament-icon={props.partID} data-mail={props.mail ? "sent" : undefined}
     data-size={props.magnitude?.kind === "sized" ? props.magnitude.size : "unknown"} aria-hidden="true">
-    <Icon name={(isEditTool(props.tool) ? "pencil-line" : props.icon) as never} size="normal" />
+    <Show when={props.mail} fallback={<Icon name={(isEditTool(props.tool) ? "pencil-line" : props.icon) as never} size="normal" />}><Glyph name="paper-airplane" /></Show>
   </span>
+
+/** The mail a call sent, from its receipt lines and this page's mail records (Laptop2627). */
+const useMailSent = (part: () => ToolPart) => {
+  const records = useMailRecords()
+  return createMemo(() => { const receipts = mailReceipts(part()); return receipts.length ? { receipts, ...mailSentText(receipts, records) } : undefined })
+}
+type MailSent = ReturnType<ReturnType<typeof useMailSent>>
+// The card names the mail and each recipient's delivery in place of the shell description.
+const withMail = (card: Card, mail: MailSent) => mail
+  ? { ...card, head: [`Mail sent`, STATE_WORDS[card.status]].filter(Boolean).join(" · "), description: mail.detail.join(" · "),
+    label: [`Mail sent`, STATE_WORDS[card.status], mail.text, mail.state, card.time].filter(Boolean).join(", ") }
+  : card
 
 /** "a.ts +3 −1", "3 files +12 −4", or just the file name(s) when the tool reported no counts. */
 export const editText = (edit: EditSummary) => {
@@ -145,14 +160,16 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
   const [watching, setWatching] = createSignal(false)
   const now = useClock(watching)
   const info = createMemo(() => getToolInfo(props.part.tool, props.part.state.input))
-  const card = createMemo(() => callCard(props.part, info().title, now()))
+  const records = useMailRecords()
+  const mail = useMailSent(() => props.part)
+  const card = createMemo(() => withMail(callCard(props.part, info().title, now()), mail()))
   const summary = createMemo(() => runSummary([props.part]))
   const magnitude = createMemo(() => toolMagnitude(props.part))
   const size = createMemo(() => sizeDistribution([magnitude()]).bins[0]?.size ?? "?")
   const status = createMemo(() => toolOutcome(props.part))
   const edit = createMemo(() => editSummary(props.part))
   // An edit names its file and confirmed line counts in place of the generic subtitle.
-  const what = () => { const value = edit(); return value ? editText(value) : info().subtitle }
+  const what = () => { const sent = mail(); if (sent) return `${sent.text} · ${sent.state}`; const value = edit(); return value ? editText(value) : info().subtitle }
   // A short reason in words, so a failure reads without colour: the tool's error line or its exit code.
   const reason = createMemo(() => {
     const state = props.part.state
@@ -173,7 +190,7 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
     }}>
     <button class="tool-chip-summary" ref={button} aria-expanded={open()} aria-label={label()} aria-busy={status() === "unfinished" ? "true" : undefined}
       onClick={() => setOpen(!open())}>
-      <ToolIcon partID={props.part.id} tool={props.part.tool} status={status()} icon={toolGlyph(props.part.tool, props.part.state.input, info().icon)} magnitude={magnitude()} />
+      <ToolIcon partID={props.part.id} tool={props.part.tool} status={status()} icon={toolGlyph(props.part.tool, props.part.state.input, info().icon)} magnitude={magnitude()} mail={!!mail()} />
       {/* What ran stays legible beside the icon; a failure, uncertainty or running call leads with that word. */}
       <span class="tool-chip-state" data-status={status()} aria-hidden="true">
         {[STATE_WORDS[status()], what(), reason()].filter(Boolean).join(" · ")}
@@ -182,6 +199,11 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
     </button>
     <Show when={open()}>
       <div class="tool-chip-member">
+        {/* Each mail this call sent, with its recipients' delivery, and a way to its mail row when the transcript shows one. */}
+        <Show when={mail()}>{(sent) => <ul class="tool-chip-files tool-chip-mail" aria-label="Mail sent">
+          <For each={sent().receipts}>{(receipt, index) => <li><bdi dir="auto">{sent().detail[index()]}</bdi>
+            <Show when={records(receipt.id)}> <button class="tool-chip-mail-open" onClick={() => document.querySelector(`[data-mail-id="${CSS.escape(receipt.id)}"]`)?.scrollIntoView({ block: "center" })}>Show mail</button></Show></li>}</For>
+        </ul>}</Show>
         {/* Every file an edit touched, with its own confirmed counts; the original chip follows with the diff. */}
         <Show when={(edit()?.files.length ?? 0) > 1}>
           <ul class="tool-chip-files" aria-label="Files changed">
@@ -269,14 +291,15 @@ export const ToolStrip = (props: { message: ComponentProps<typeof Message>["mess
           // A streamed update replaces one part object: only that call's memos rerun, the other icons stay untouched.
           const part = createMemo(() => byID().get(id)!)
           const info = createMemo(() => getToolInfo(part().tool, part().state.input))
-          const card = createMemo(() => callCard(part(), info().title, now()))
+          const mail = useMailSent(part)
+          const card = createMemo(() => withMail(callCard(part(), info().title, now()), mail()))
           const glyph = createMemo(() => toolGlyph(part().tool, part().state.input, info().icon))
           const magnitude = createMemo(() => toolMagnitude(part()))
           return <span class="tool-chip tool-strip-call" data-compact="true" data-status={card().status} data-timeline-part-id={id} data-filament-anchor={id}>
             <button class="tool-chip-summary" ref={(element) => buttons.set(id, element)} tabIndex={current() === id ? 0 : -1}
               aria-label={card().label} aria-expanded={open().has(id)} aria-controls={`tool-strip-member-${id}`} aria-busy={card().status === "unfinished" ? "true" : undefined}
               onFocus={() => setActive(id)} onClick={() => toggle(id)}>
-              <ToolIcon partID={id} tool={part().tool} status={card().status} icon={glyph()} magnitude={magnitude()} />
+              <ToolIcon partID={id} tool={part().tool} status={card().status} icon={glyph()} magnitude={magnitude()} mail={!!mail()} />
               <CallCard card={card()} />
             </button>
           </span>

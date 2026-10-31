@@ -43,6 +43,7 @@ import { flash } from "../motion"
 import { Glyph, HostGlyph } from "../components/icons"
 import { SelfHandoffButton, SelfHandoffStatus } from "../components/self-handoff"
 import { createSelfHandoff, SELF_HANDOFF_VERSION } from "../self-handoff"
+import { MailRecords } from "../mail-receipts"
 import { AppHeader } from "../components/native-header"
 import { SessionTitle } from "../components/session-title"
 import { SubagentTranscript } from "../components/subagent-transcript"
@@ -2003,6 +2004,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
               </button>
             </Show>
             <DataProvider data={live.data} directory={directory} sessionID={sessionID} onNavigateToSession={inspectSubagent}>
+            {/* Tool rows read the mail they sent from these already-loaded records (Laptop2627); no extra request. */}
+            <MailRecords.Provider value={(id) => mailRecords().get(id)}>
             <ToolAdornment.Provider value={ToolSize}>
             <For each={visibleTimeline()}>
               {(row) => {
@@ -2095,6 +2098,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                   onDone={() => activity.refreshDirectory(item.directory, true)} />
               }}
             </For>
+            </MailRecords.Provider>
             </DataProvider>
             <Show when={thinking()}><Thinking /></Show>
           </div>
