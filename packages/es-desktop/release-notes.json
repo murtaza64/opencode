@@ -1,14 +1,14 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-10-30.10",
+  "release": "2026-10-31.1",
   "items": [
     {
-      "title": "Running tools in one strip",
-      "detail": "Running tool calls share one compact icon strip; hover or focus a call for its duration and input/output size, and Enter opens its details."
+      "title": "Handoffs from another computer",
+      "detail": "When a session on another Work host hands off, Work shows the successor banner there too, and pins on the old session follow to the new one."
     },
     {
-      "title": "Surface actions in narrow windows",
-      "detail": "In narrow windows the floating chat no longer covers an open Surface's or decision's Open and Close buttons."
+      "title": "Tidier decisions",
+      "detail": "A decision's header stays on one line, and its Send action leads with Snooze and No longer needed set apart; the recipient sits under the actions."
     }
   ],
   "limits": []
