@@ -42,19 +42,20 @@ test("a case reaches the desk's context as owners, limits and read-back state, w
   expect(caseLines([])).toEqual([])
 })
 
-test("the strip puts what needs the human first, then work in progress, then results, with ids only in detail", () => {
+test("the strip puts what needs the human first, then work under way, then what waits on owners, then results, with ids only in detail", () => {
   const now = 10 * 86_400_000
   const cases = [{ case_id: "reports-and-streams", title: "Directions and streams", updated: now - 1_000,
     intents: [{ id: "private-project-directions", state: "delivered", state_at: now - 2_000, owner: { lane: "exploration", editspace: "directions", host: "mini", session: "ses_private000001" } },
       { id: "diff-streams-discovery", state: "working", next: "native views", state_at: now - 9_000 }, { id: "choose-scope", state: "waiting", next: "Pick the first workspace" }, { id: "dropped", state: "withdrawn" }],
-    deliverables: [{ id: "report", intent: "private-project-directions", label: "Directions report", ref: "http://127.0.0.1:1/report", read_back: true }] }]
+    deliverables: [{ id: "report", intent: "private-project-directions", label: "Directions report", ref: "http://127.0.0.1:1/report", read_back: true, read_back_at: now - 1_500 }] }]
   const rows = progressRows(cases, [{ editspace: "p", id: "a#1", owner: "alpha", text: "Which build?", asked: now - 5_000, delivery: "delivered" }])
   expect(rows.map(row => [row.group, row.label, row.status])).toEqual([
     ["needs", "Choose scope", "Pick the first workspace"],
-    ["progress", "Which build?", "Asked alpha"],
-    ["progress", "Diff streams discovery", "native views"],
+    ["working", "Diff streams discovery", "native views"],
+    ["waiting", "Which build?", "Asked alpha"],
     ["result", "Private project directions", "Delivered"]])
   expect(rows[3]!.link).toEqual({ label: "Directions report", href: "http://127.0.0.1:1/report" })
+  expect(rows[3]!.readBackAt).toBe(now - 1_500)
   expect(rows[3]!.detail).toContain("ses_private000001")
   expect(rows.map(row => row.label).join(" ")).not.toContain("ses_")
 })
@@ -73,7 +74,26 @@ test("a part's age comes only from its own state change time, never from the cas
   expect(rows.map(row => [row.label, row.at])).toEqual([["Dated", 100], ["Undated", undefined]])
 })
 
-test("a state the desk does not recognise shows as unknown, not as in progress", () => {
+test("a state the desk does not recognise shows as unknown, not as work", () => {
   const rows = progressRows([{ case_id: "c", updated: 1, intents: [{ id: "odd", state: "paused" }, { id: "plain" }], deliverables: [] }], [])
-  expect(rows.map(row => [row.group, row.label, row.status])).toEqual([["progress", "Plain", "In progress"], ["unknown", "Odd", "Unknown state: paused"]])
+  expect(rows.map(row => [row.group, row.label, row.status])).toEqual([["waiting", "Plain", "Not started (requested)"], ["unknown", "Odd", "Unknown state: paused"]])
+})
+
+test("each case state lands in one group: waiting needs the human, working is work, not-yet-started waits on owners", () => {
+  const states = ["requested", "routed", "acknowledged", "working", "waiting", "delivered", "done", "withdrawn", "paused"]
+  const rows = progressRows([{ case_id: "c", updated: 1, deliverables: [], intents: states.map(state => ({ id: state, state })) }], [])
+  expect(Object.fromEntries(rows.map(row => [row.key.split("/")[1], row.group]))).toEqual({
+    requested: "waiting", routed: "waiting", acknowledged: "waiting", working: "working", waiting: "needs", delivered: "result", done: "result", paused: "unknown" })
+})
+
+test("a question the desk asked an owner waits on that owner until answered", () => {
+  const rows = progressRows([], [{ editspace: "p", id: "a#1", owner: "alpha", text: "Which build?", asked: 5, delivery: "seen" }])
+  expect(rows.map(row => [row.group, row.status])).toEqual([["waiting", "Asked alpha"]])
+})
+
+test("only a working part counts as work; a part its owner has not started waits on that owner", () => {
+  const rows = progressRows([{ case_id: "c", updated: 1, deliverables: [],
+    intents: [{ id: "busy", state: "working" }, { id: "asked", state: "requested" }, { id: "sent", state: "routed" }, { id: "seen", state: "acknowledged", next: "Starts after review" }] }], [])
+  expect(rows.map(row => [row.group, row.label, row.status])).toEqual([
+    ["working", "Busy", "In progress"], ["waiting", "Asked", "Not started (requested)"], ["waiting", "Sent", "Not started (routed)"], ["waiting", "Seen", "Starts after review"]])
 })

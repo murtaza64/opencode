@@ -202,6 +202,8 @@
 :root .nav-entries.compact .nav-busy { position: absolute; inset-block-end: 4px; inset-inline-end: 8px; }
 .desk-companion { --companion-width: clamp(320px, 26vw, 380px); flex: none; position: relative; box-sizing: border-box; inline-size: var(--companion-width); block-size: 100%; min-height: 0; overflow: hidden; background: var(--base); }
 .desk-companion-in { position: absolute; inset-block: 0; inset-inline-start: 0; inline-size: var(--companion-width); box-sizing: border-box; border-inline-start: 1px solid var(--surface1); display: flex; flex-direction: column; }
+/* The companion fills its panel; the Decisions page's narrow-window chat height (desk.css .desk-chat 85vh) is not its. */
+.desk-companion .desk-companion-in { block-size: auto; }
 .desk-companion-in > .session-page { flex: 1; min-height: 0; height: auto; padding: 0; --chat-gutter: 14px; }
 /* Closed: zero width but still laid out at its own width inside, so text never rewraps and scroll holds. */
 .desk-companion.closed { inline-size: 0; visibility: hidden; }

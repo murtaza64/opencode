@@ -205,36 +205,67 @@ const DeskFollowUps = (props: { session: string; open: () => boolean }) => {
     async input => (await Promise.all(input.names.map(name => es.mail(name, { session: input.session }).then(timeline => followUps(timeline, input.session), () => [] as FollowUp[])))).flat())
   const chat = useDeskChat()
   const rows = () => progressRows(chat.cases(), items.latest ?? [])
-  const count = (group: ProgressRow["group"]) => rows().filter(row => row.group === group).length
-  const completed = () => rows().filter(row => row.group === "result")
-  // Folded: one summary line plus whatever needs the human. The conversation keeps the space.
-  const shown = () => rows().filter(row => row.group === "needs" || expanded() && row.group !== "result")
-  const summary = () => [count("needs") && `${count("needs")} need you`, count("progress") && `${count("progress")} in progress`,
-    count("unknown") && `${count("unknown")} in an unknown state`, count("result") && `${count("result")} done`].filter(Boolean).join(" · ")
-  return <Show when={rows().length}><section class="desk-progress" aria-label="Desk progress" data-expanded={expanded() ? "" : undefined}>
-    <button type="button" class="desk-progress-summary" aria-expanded={expanded()} onClick={() => setExpanded(!expanded())}>
-      <span class="ds-status-glyph" aria-hidden="true">{count("needs") ? "!" : count("progress") || count("unknown") ? "…" : "✓"}</span><span>{summary()}</span>
+  const group = (name: ProgressRow["group"]) => rows().filter(row => row.group === name)
+  const [doneOpen, setDoneOpen] = createSignal(false)
+  const [open, setOpen] = createSignal<string>()
+  let section: HTMLElement | undefined
+  // Opened from the folded line, the strip lands on that row with its detail showing.
+  const reveal = (key: string) => {
+    setExpanded(true)
+    setOpen(key)
+    queueMicrotask(() => section?.querySelector<HTMLElement>(`[data-row="${CSS.escape(key)}"] .desk-progress-line`)?.focus())
+  }
+  // One stop in the tab order per control; arrows walk the rows, Escape folds back to the summary.
+  const keys = (event: KeyboardEvent) => {
+    const lines = [...(section?.querySelectorAll<HTMLElement>(".desk-progress-summary, .desk-progress-line, .desk-progress-done") ?? [])]
+    const at = lines.indexOf(document.activeElement as HTMLElement)
+    if (event.key === "Escape" && expanded()) { event.preventDefault(); setExpanded(false); return section?.querySelector<HTMLElement>(".desk-progress-summary")?.focus() }
+    const next = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: lines.length - 1 }[event.key]
+    if (next === undefined || at < 0 || !expanded()) return
+    event.preventDefault()
+    lines[Math.max(0, Math.min(lines.length - 1, next))]?.focus()
+  }
+  return <Show when={rows().length}><section ref={section} class="desk-progress" aria-label="Desk progress" data-expanded={expanded() ? "" : undefined} onKeyDown={keys}>
+    <button type="button" class="desk-progress-summary" aria-expanded={expanded()} aria-controls="desk-progress-body" onClick={() => setExpanded(!expanded())}>
+      <For each={TALLY.filter(([name]) => group(name).length)}>{([name, glyph, word]) =>
+        <span class="desk-tally" data-group={name}><Show when={glyph}><span class="desk-tally-glyph" aria-hidden="true">{glyph}</span></Show>{group(name).length} {word}</span>}</For>
+      <Icon name="chevron-down" size="small" class="desk-progress-chevron" />
     </button>
-    <Show when={shown().length || expanded() && completed().length}><div class="desk-progress-body">
-      <Show when={shown().length}><ul class="desk-progress-rows"><For each={shown()}>{row => <ProgressItem row={row} />}</For></ul></Show>
+    {/* Folded, the newest thing that needs the human stays one line tall; the rest wait behind the summary. */}
+    <Show when={!expanded() && group("needs")[0]}>{row =>
+      <button type="button" class="desk-progress-peek" data-group="needs" onClick={() => reveal(row().key)}>
+        <bdi dir="auto" class="desk-progress-label">{row().label}</bdi><span class="desk-progress-status" dir="auto">{row().status}</span>
+        <span class="desk-progress-age">{row().at ? ago(row().at!) : "age unknown"}</span></button>}</Show>
+    <Show when={expanded()}><div class="desk-progress-body" id="desk-progress-body">
+      <For each={GROUPS.filter(([name]) => group(name).length)}>{([name, title]) => <>
+        <h3 class="desk-progress-group" data-group={name}>{title}</h3>
+        <ul class="desk-progress-rows"><For each={group(name)}>{row => <ProgressItem row={row} open={open() === row.key} toggle={() => setOpen(open() === row.key ? undefined : row.key)} />}</For></ul>
+      </>}</For>
       {/* Every result stays reachable here, newest first; closed until asked for. */}
-      <Show when={expanded() && completed().length}><details class="desk-progress-completed">
-        <summary>Completed ({completed().length})</summary>
-        <ul class="desk-progress-rows"><For each={completed()}>{row => <ProgressItem row={row} />}</For></ul>
-      </details></Show>
+      <Show when={group("result").length}>
+        <button type="button" class="desk-progress-done" aria-expanded={doneOpen()} onClick={() => setDoneOpen(!doneOpen())}>Completed <span>{group("result").length}</span></button>
+        <Show when={doneOpen()}><ul class="desk-progress-rows" data-group="result"><For each={group("result")}>{row => <ProgressItem row={row} open={open() === row.key} toggle={() => setOpen(open() === row.key ? undefined : row.key)} />}</For></ul></Show>
+      </Show>
     </div></Show>
   </section></Show>
 }
 
-const ProgressItem = (props: { row: ProgressRow }) =>
-  <li class="desk-progress-row" data-group={props.row.group}>
-    <span class="desk-progress-line">
-      <Show when={props.row.link} fallback={<bdi dir="auto" class="desk-progress-label">{props.row.label}</bdi>}>{link =>
-        <a class="desk-progress-label" href={link().href} target="_blank" rel="noopener noreferrer"><bdi dir="auto">{props.row.label}</bdi></a>}</Show>
-      <span class="desk-progress-status" dir="auto">{props.row.status} · {props.row.at ? ago(props.row.at) : "age unknown"}</span>
-    </span>
-    {/* Owners, sessions and mail ids are for tracing, one tap away. */}
-    <details class="desk-progress-detail"><summary aria-label={`Details for ${props.row.label}`}>Details</summary>
+const TALLY = [["needs", "!", "need you"], ["working", "", "working"], ["waiting", "", "waiting"], ["unknown", "?", "unclear"], ["result", "", "done"]] as const
+const GROUPS = [["needs", "Needs you"], ["working", "Working"], ["waiting", "Waiting on owners"], ["unknown", "State not recognised"]] as const
+const stamp = (at?: number) => at ? <time dateTime={new Date(at).toISOString()}>{new Date(at).toLocaleString()}</time> : <>unknown</>
+
+// One line per row: what, its latest status, its age. The full status, timestamps, owners and ids open in place.
+const ProgressItem = (props: { row: ProgressRow; open: boolean; toggle: () => void }) =>
+  <li class="desk-progress-row" data-group={props.row.group} data-row={props.row.key} data-open={props.open ? "" : undefined}>
+    <button type="button" class="desk-progress-line" aria-expanded={props.open} onClick={() => props.toggle()}>
+      <bdi dir="auto" class="desk-progress-label">{props.row.label}</bdi><span class="desk-progress-status" dir="auto">{props.row.status}</span>
+      <span class="desk-progress-age">{props.row.at ? ago(props.row.at) : "age unknown"}</span>
+    </button>
+    <Show when={props.row.link}>{link => <a class="desk-progress-open" href={link().href} target="_blank" rel="noopener noreferrer" aria-label={`Open ${link().label}`} title={`Open ${link().label}`}>↗</a>}</Show>
+    <Show when={props.open}><div class="desk-progress-detail">
+      <p dir="auto">{props.row.status}</p>
       <Show when={props.row.context}><p dir="auto">{props.row.context}</p></Show>
-      <p><For each={props.row.detail}>{(line, index) => <>{index() ? " · " : ""}<bdi dir="ltr">{line}</bdi></>}</For></p></details>
+      <p>{props.row.key.includes("/") ? "State changed" : "Last message"} {stamp(props.row.at)}<Show when={props.row.link}> · read back {stamp(props.row.readBackAt)}</Show></p>
+      <p class="desk-progress-ids"><For each={props.row.detail.filter(line => !line.startsWith("next: "))}>{(line, index) => <>{index() ? " · " : ""}<bdi dir="ltr">{line}</bdi></>}</For></p>
+    </div></Show>
   </li>

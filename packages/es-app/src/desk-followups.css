@@ -1,22 +1,47 @@
-/* The companion chat's progress strip (desk-companion.tsx DeskFollowUps): one summary line that opens to what needs
- * the human, work in progress and parts in an unknown state, with every result under a closed Completed disclosure. Owners and ids sit behind each row's Details. Loaded on every page. */
-.desk-progress { flex: none; margin: 0 var(--ds-space-4, 12px) var(--ds-space-2, 4px); font-size: 13px; color: var(--ds-text, var(--text)); }
-.desk-progress-summary { display: flex; gap: var(--ds-space-3, 8px); align-items: baseline; inline-size: 100%; padding: var(--ds-space-2, 4px) 0; border: 0; background: none;
-  color: var(--ds-muted, var(--subtext0)); font: inherit; font-size: 11px; text-align: start; cursor: pointer; }
-.desk-progress-summary:hover, .desk-progress-summary:focus-visible { color: var(--ds-text, var(--text)); }
-.desk-progress-summary .ds-status-glyph { color: var(--ds-accent, var(--accent)); font-variant-numeric: tabular-nums; }
-.desk-progress:has([data-group=needs]) .desk-progress-summary .ds-status-glyph { color: var(--ds-attention, var(--peach)); }
+/* The companion chat's progress strip (desk-companion.tsx DeskFollowUps). Folded: one line of tallies plus, when
+ * something needs the human, one more line naming it. Opened: rows grouped by who has the next move, one line each,
+ * with status, timestamps, owners and ids opening in place. No panel of its own: it sits on the companion's
+ * wallpaper with the chat, separated by space, not borders. Loaded on every page. */
+.desk-progress { flex: none; display: grid; padding: var(--ds-space-2, 4px) var(--ds-space-4, 12px) var(--ds-space-3, 8px); font-size: 12px; color: var(--ds-text, var(--text)); }
+.desk-progress button { font: inherit; color: inherit; background: none; border: 0; padding: 0; text-align: start; cursor: pointer; }
+.desk-progress button:focus-visible, .desk-progress a:focus-visible { outline: 1px solid var(--ds-accent, var(--accent)); outline-offset: 1px; }
+.desk-progress-summary { display: flex; align-items: center; gap: 5px; min-block-size: 24px; font-size: 11px; color: var(--ds-muted, var(--subtext0)) !important; white-space: nowrap; overflow: hidden; }
+.desk-tally { display: inline-flex; align-items: baseline; gap: 3px; font-variant-numeric: tabular-nums; }
+.desk-tally + .desk-tally::before { content: "·"; margin-inline-end: 5px; color: var(--ds-muted, var(--subtext0)); }
+.desk-tally-glyph { inline-size: 0.8em; text-align: center; color: var(--ds-accent, var(--accent)); }
+.desk-tally[data-group=needs] { color: var(--ds-attention, var(--peach)); }
+.desk-tally[data-group=needs] .desk-tally-glyph, .desk-tally[data-group=unknown] .desk-tally-glyph { color: var(--ds-attention, var(--peach)); }
+.desk-tally:is([data-group=waiting], [data-group=result]) .desk-tally-glyph { color: inherit; }
+.desk-progress-chevron { margin-inline-start: auto; opacity: 0.6; transition: none; }
+.desk-progress[data-expanded] .desk-progress-chevron { transform: rotate(180deg); }
+.desk-progress-summary:hover, .desk-progress-summary:focus-visible { color: var(--ds-text, var(--text)) !important; }
+/* Rows and the folded peek share one grammar: label, status (muted, cut to fit), age at the end. */
+:is(.desk-progress-line, .desk-progress-peek) { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; gap: var(--ds-space-3, 8px); inline-size: 100%; min-block-size: 24px; box-sizing: border-box; padding-inline: 4px !important; margin-inline: -4px; border-radius: var(--radius-control, 3px) !important; }
+:is(.desk-progress-line, .desk-progress-peek):hover { background: color-mix(in srgb, var(--ds-text, var(--text)) 6%, transparent) !important; }
+.desk-progress-label { max-inline-size: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-progress-status { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--ds-muted, var(--subtext0)); }
+.desk-progress-age { font-size: 11px; color: var(--ds-muted, var(--subtext0)); font-variant-numeric: tabular-nums; white-space: nowrap; }
+[data-group=needs] > :is(.desk-progress-line, .desk-progress-peek) .desk-progress-label, .desk-progress-peek .desk-progress-label { color: var(--ds-attention, var(--peach)); }
+[data-group=unknown] .desk-progress-status { color: var(--ds-attention, var(--peach)); }
+[data-group=result] .desk-progress-label { color: var(--ds-muted, var(--subtext0)); }
 /* Bounded: the chat below always keeps its space; a long list scrolls inside. */
-.desk-progress-body { display: grid; gap: var(--ds-space-2, 4px); max-block-size: 30vh; overflow-y: auto; }
-.desk-progress-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--ds-space-2, 4px); }
-.desk-progress-completed > summary { font-size: 11px; color: var(--ds-muted, var(--subtext0)); cursor: pointer; inline-size: max-content; }
-.desk-progress-completed > .desk-progress-rows { margin-block-start: var(--ds-space-2, 4px); }
-.desk-progress-row { display: grid; gap: var(--ds-space-1, 2px); }
-.desk-progress-line { display: flex; flex-wrap: wrap; gap: 0 var(--ds-space-3, 8px); align-items: baseline; min-inline-size: 0; }
-.desk-progress-label { color: var(--ds-text, var(--text)); overflow-wrap: anywhere; }
-.desk-progress-row[data-group=needs] .desk-progress-label { color: var(--ds-attention, var(--peach)); font-weight: 600; }
-.desk-progress-row[data-group=result] .desk-progress-label { color: var(--ds-muted, var(--subtext0)); }
-.desk-progress-row[data-group=unknown] .desk-progress-status { color: var(--ds-attention, var(--peach)); }
-.desk-progress-status { font-size: 11px; color: var(--ds-muted, var(--subtext0)); }
-.desk-progress-detail > summary { font-size: 11px; color: var(--ds-muted, var(--subtext0)); cursor: pointer; inline-size: max-content; }
-.desk-progress-detail p { margin: var(--ds-space-1, 2px) 0; font-size: 11px; color: var(--ds-muted, var(--subtext0)); overflow-wrap: anywhere; }
+.desk-progress-body { display: grid; align-content: start; max-block-size: 34vh; overflow-y: auto; scrollbar-width: thin; margin-block-start: var(--ds-space-1, 2px); }
+.desk-progress-group { margin: var(--ds-space-3, 8px) 0 0; font-size: 10px; font-weight: 400; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ds-muted, var(--subtext0)); }
+.desk-progress-group[data-group=needs] { color: var(--ds-attention, var(--peach)); }
+.desk-progress-rows { list-style: none; margin: 0; padding: 0; display: grid; }
+.desk-progress-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; }
+.desk-progress-open { padding-inline: 6px 2px; font-size: 11px; color: var(--ds-accent, var(--accent)); text-decoration: none; }
+.desk-progress-detail { grid-column: 1 / -1; padding: 2px 0 6px; border-inline-start: 1px solid color-mix(in srgb, var(--ds-muted, var(--subtext0)) 40%, transparent); padding-inline-start: var(--ds-space-3, 8px); }
+.desk-progress-detail p { margin: 2px 0; font-size: 11px; color: var(--ds-muted, var(--subtext0)); overflow-wrap: anywhere; }
+.desk-progress-detail p:first-child { color: var(--ds-text, var(--text)); font-size: 12px; }
+.desk-progress-done { margin-block-start: var(--ds-space-3, 8px); inline-size: max-content; font-size: 10px !important; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ds-muted, var(--subtext0)) !important; }
+.desk-progress-done span { margin-inline-start: 4px; font-variant-numeric: tabular-nums; }
+.desk-progress-done::after { content: " ▸"; }
+.desk-progress-done[aria-expanded=true]::after { content: " ▾"; }
+/* With a wallpaper, the strip and the chat share one backdrop: the companion paints it once, behind both. */
+:root[data-appearance=wallpaper] .desk-companion-in { isolation: isolate; }
+:root[data-appearance=wallpaper] .desk-companion-in::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(color-mix(in srgb, var(--base) 48%, transparent), color-mix(in srgb, var(--base) 78%, transparent)),
+    linear-gradient(rgb(0 0 0 / var(--wallpaper-dim, 0)), rgb(0 0 0 / var(--wallpaper-dim, 0))), var(--wallpaper, none) center / cover no-repeat; }
+:root[data-appearance=wallpaper] .desk-companion-in > .session-page::before { display: none; }
+@media (prefers-reduced-transparency: reduce) { :root[data-appearance=wallpaper] .desk-companion-in::before { background: var(--base); } }

@@ -1,5 +1,7 @@
-// The Front desk chat keeps the conversation primary: a one-line progress summary above it opens to what is in
-// progress, parts in an unknown state, and a closed Completed list holding every result, newest first: questions its conversation asked owners by es mail, in two
+// The Front desk chat keeps the conversation primary: one line of counts above it, plus one line naming what needs the
+// human, opens to rows grouped by who has the next move (needs you, working, waiting on owners, unrecognised state)
+// and a closed Completed list holding every result, newest first. Each row is one line and opens in place by keyboard.
+// Sources: durable cases and the questions its conversation asked owners by es mail, in two
 // projects, with delivery and the owner's answer, from the dashboard's per-session mail timeline (GET /api/mail
 // ?es=&session=). Display only: no button, no send, Send unchanged. Stand-in dashboard; no real mail.
 // Run from packages/es-app: node test/desk-followups.browser.mjs [--shots DIR]
@@ -33,7 +35,8 @@ const reads = []
 const caseFile = { format: "front-desk-cases/1", cases: [{ case_id: "two-parts", title: "Directions and a workspace", updated: now,
   intents: [{ id: "private-read", state: "working", owner: { lane: "exploration", editspace: "directions", host: "mini" }, next: "meeting synthesis" },
     { id: "workspace", state: "delivered", state_at: now - 3_600_000, owner: { lane: "project-lead", editspace: "streams", host: "mini" } },
-    { id: "archived-part", state: "done", state_at: now - 5 * 86_400_000 }, { id: "odd-part", state: "paused" }],
+    { id: "archived-part", state: "done", state_at: now - 5 * 86_400_000 }, { id: "odd-part", state: "paused" },
+    { id: "pick-scope", state: "waiting", next: "Pick the first workspace before the outline starts", owner: { lane: "project-lead", editspace: "streams", host: "mini" } }],
   deliverables: [{ id: "deck", intent: "workspace", label: "Explainer deck", ref: "http://127.0.0.1:64924/", read_back: true }, { id: "report", intent: "private-read", label: "Private report" }] }] }
 const preview = await startAttentionPreview([{ name: "cases", configureServer(server) {
   server.middlewares.use("/es/api/frontdesk/cases", (_req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(caseFile)) })
@@ -54,47 +57,70 @@ try {
     // Narrow windows float the companion; open it the way a person would.
     if (viewport.width < 1200) await page.locator("[data-nav=front-desk]").first().click().catch(() => undefined)
     if (rtl) await page.evaluate(() => { document.documentElement.dir = "rtl" })
-    // One summary line above the chat; nothing else until the human opens it (no case needs them here).
+    // Folded: one line of counts and one line naming what needs the human; nothing else until it is opened.
     const strip = page.getByRole("region", { name: "Desk progress" })
-    const summary = strip.getByRole("button", { name: /in progress/ })
-    await expect(summary).toHaveText(/3 in progress · 1 in an unknown state · 4 done/, { timeout: 300_000 })
+    const summary = strip.locator(".desk-progress-summary")
+    await expect(summary).toHaveText(/1 need you.*1 working.*2 waiting.*1 unclear.*4 done/, { timeout: 300_000 })
     await expect(summary).toHaveAttribute("aria-expanded", "false")
     await expect(strip.locator(".desk-progress-row")).toHaveCount(0)
+    const peek = strip.locator(".desk-progress-peek")
+    await expect(peek).toContainText("Pick scope")
+    await expect(peek).toContainText("age unknown")
     const stripHeight = (await strip.boundingBox()).height
-    assert(stripHeight <= 40, `${view}: folded strip is ${stripHeight}px tall`)
+    assert(stripHeight <= 64, `${view}: folded strip is ${stripHeight}px tall`)
+    for (const line of [summary, peek]) assert((await line.boundingBox()).height <= 30, `${view}: a folded line wraps`)
+    await expect(strip).not.toContainText("Details")
     // The conversation sits right under it.
     const chatTop = await page.locator(".desk-chat textarea").evaluate(element => element.getBoundingClientRect().top)
     assert(chatTop > (await strip.boundingBox()).y, `${view}: chat above the strip`)
-    // Opened: in progress (newest first, undated last), then unknown states; labels are human, owners and ids only in
-    // Details. Results wait behind a closed Completed disclosure, kept however old.
-    await summary.click()
-    const rows = strip.locator(".desk-progress-body > .desk-progress-rows > .desk-progress-row")
-    await expect(rows.locator(".desk-progress-label")).toHaveText(["No receipt yet", "Is the nightly green?", "Private read", "Odd part"])
-    await expect(rows.nth(0)).toContainText("Asked gamma · delivery unknown")
-    await expect(rows.nth(2)).toContainText("meeting synthesis · age unknown")
-    await expect(rows.nth(3)).toContainText("Unknown state: paused · age unknown")
-    const completed = strip.locator(".desk-progress-completed")
-    await expect(completed).not.toHaveAttribute("open", "")
-    await completed.getByText("Completed (4)").click()
-    const done = completed.locator(".desk-progress-row")
-    await expect(done.locator(".desk-progress-label")).toHaveText(["Which build is on the Mini?", "Workspace", "Old question", "Archived part"])
-    await expect(done.nth(0)).toContainText("Answered by alpha")
-    await expect(done.nth(1)).toContainText("Delivered · 60m ago")
-    await expect(done.nth(1).getByRole("link", { name: "Workspace" })).toHaveAttribute("href", "http://127.0.0.1:64924/")
-    await expect(done.nth(2)).toContainText("Answered by beta · 2d ago")
-    await expect(done.nth(3)).toContainText("Delivered · 5d ago")
+    // The needs line opens the strip on that row, its detail showing and focused.
+    await peek.click()
+    await expect(summary).toHaveAttribute("aria-expanded", "true")
+    const needs = strip.locator('.desk-progress-row[data-group="needs"]')
+    await expect(needs.locator(".desk-progress-line")).toBeFocused()
+    await expect(needs.locator(".desk-progress-detail")).toContainText("Pick the first workspace before the outline starts")
+    await expect(needs.locator(".desk-progress-detail")).toContainText("State changed unknown")
+    // Opened: grouped by who has the next move, newest first, undated last; one line per row; owners and ids only
+    // in a row's detail. Results wait behind a closed Completed control, kept however old.
+    await expect(strip.locator(".desk-progress-group")).toHaveText(["Needs you", "Working", "Waiting on owners", "State not recognised"])
+    const rows = strip.locator('.desk-progress-body > .desk-progress-rows:not([data-group="result"]) > .desk-progress-row')
+    await expect(rows.locator(".desk-progress-label")).toHaveText(["Pick scope", "Private read", "No receipt yet", "Is the nightly green?", "Odd part"])
+    await expect(rows.nth(1)).toContainText("meeting synthesis")
+    await expect(rows.nth(1)).toContainText("age unknown")
+    await expect(rows.nth(2)).toContainText("Asked gamma · delivery unknown")
+    await expect(rows.nth(4)).toContainText("Unknown state: paused")
+    for (const index of [1, 2, 4]) assert((await rows.nth(index).locator(".desk-progress-line").boundingBox()).height <= 30, `${view}: row ${index} wraps`)
+    // Keyboard: arrows walk the rows, Enter opens one in place.
+    await page.keyboard.press("ArrowDown")
+    await expect(rows.nth(1).locator(".desk-progress-line")).toBeFocused()
+    await page.keyboard.press("Enter")
+    await expect(rows.nth(1).locator(".desk-progress-detail")).toContainText("owner exploration · directions · mini")
+    await expect(rows.nth(1).locator(".desk-progress-line")).toHaveAttribute("aria-expanded", "true")
+    const done = strip.locator(".desk-progress-done")
+    await expect(done).toHaveAttribute("aria-expanded", "false")
+    await done.click()
+    const completed = strip.locator('.desk-progress-rows[data-group="result"] > .desk-progress-row')
+    await expect(completed.locator(".desk-progress-label")).toHaveText(["Which build is on the Mini?", "Workspace", "Old question", "Archived part"])
+    await expect(completed.nth(0)).toContainText("Answered by alpha")
+    await expect(completed.nth(1)).toContainText("Delivered")
+    await expect(completed.nth(1)).toContainText("60m ago")
+    await expect(completed.nth(1).getByRole("link", { name: "Open Explainer deck" })).toHaveAttribute("href", "http://127.0.0.1:64924/")
+    await expect(completed.nth(2)).toContainText("Answered by beta")
+    await expect(completed.nth(2)).toContainText("2d ago")
+    await expect(completed.nth(3)).toContainText("5d ago")
     await expect(strip).not.toContainText("Thanks")
     for (const text of ["ses_", "exploration · directions", "two-parts", "alpha#"]) await expect(strip.locator(".desk-progress-line")).not.toContainText([text])
-    await rows.nth(2).getByText("Details").click()
-    await expect(rows.nth(2).locator(".desk-progress-detail")).toContainText("owner exploration · directions · mini")
-    // No send or answer controls: only the summary toggle and Details disclosures.
+    // No send or answer controls; the draft and session stay the chat's.
     await expect(strip.locator("input, textarea")).toHaveCount(0)
-    await expect(strip.locator("button")).toHaveCount(1)
     await expect(page.getByRole("button", { name: "Ask in background" })).toHaveCount(0)
     assert(await strip.evaluate(element => element.scrollWidth <= element.clientWidth + 1), `${view}: strip overflows`)
-    const list = strip
-    if (shots) await list.screenshot({ path: path.join(shots, `followups-${view}.png`) })
-    console.log(`PROGRESS ${view}: folded to one summary line (<=40px) above the chat; opened: 3 in progress + 1 unknown state, undated parts "age unknown"; closed Completed holds 4 results newest first incl. >24h; owners/ids only in Details; one results link; no send controls`)
+    if (shots) await strip.screenshot({ path: path.join(shots, `followups-open-${view}.png`) })
+    // Escape folds back to the summary.
+    await done.focus()
+    await page.keyboard.press("Escape")
+    await expect(summary).toHaveAttribute("aria-expanded", "false")
+    await expect(summary).toBeFocused()
+    console.log(`PROGRESS ${view}: folded to counts + one needs line (<=64px) above the chat; needs line opens its row; grouped one-line rows (needs, working, waiting, unrecognised), undated "age unknown"; arrows/Enter/Escape; closed Completed holds 4 results newest first incl. >24h; owners/ids only in row detail; no send controls`)
     await context.close()
   }
   // Off Decisions (a session page, Decisions never mounted): a companion send still carries the desk's cases.
