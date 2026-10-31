@@ -2,7 +2,9 @@
 // fixture wallpaper (128px checkerboard, the Laptop wallpaper's size; never the user's image or settings), window
 // 1728x1084 CSS. For no Studio look and Studio blur 0, 10 and 40 it reads the served wallpaper's size and bytes, how long
 // the reblur took, and, from a device-scale screenshot of an empty wallpaper area, the largest and 99th-percentile
-// step between horizontal neighbours (blocks show as large steps; a smooth blur has small ones). Saves the screenshots.
+// step between horizontal neighbours (blocks show as large steps; a smooth blur has small ones), and the longest
+// main-process stall while that reblur ran (a 5 ms timer in Electron's main process). Saves the screenshots.
+// ES_WALLPAPER_WIDTH=5120 uses a 5K fixture (2880 tall).
 // Run from packages/es-desktop: node test/wallpaper-hidpi.real.mjs [<packaged Editspace executable>] [<label>]
 import { _electron } from "@playwright/test"
 import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises"
@@ -18,8 +20,8 @@ const label = process.argv[3] ?? (executable ? "packaged" : "dev")
 const out = process.env.ES_PROOF_OUT ?? tmpdir()
 const profile = await mkdtemp(path.join(tmpdir(), "es-wallpaper-hidpi-profile-"))
 const wal = await mkdtemp(path.join(tmpdir(), "es-wallpaper-hidpi-wal-"))
-const WIDTH = 2992
-const HEIGHT = 1934
+const WIDTH = Number(process.env.ES_WALLPAPER_WIDTH ?? 2992)
+const HEIGHT = WIDTH === 2992 ? 1934 : Math.round(WIDTH * 0.5625)
 const wallpaper = path.join(wal, "fixture-wallpaper.png")
 await writeFile(wallpaper, checkerboard(WIDTH, HEIGHT, 128))
 const writeLook = async (studio) => {
@@ -44,7 +46,13 @@ try {
   await electron.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0].setContentSize(1728, 1084))
   await page.waitForTimeout(500)
   const served = () => page.evaluate(async () => (await (await fetch("/__es/appearance", { cache: "no-store" })).json()).wallpaper)
+  // Longest gap between 5 ms ticks in the main process since the last reset: how long main was blocked.
+  await electron.evaluate(() => {
+    globalThis.__stall = { last: performance.now(), max: 0 }
+    setInterval(() => { const now = performance.now(); globalThis.__stall.max = Math.max(globalThis.__stall.max, now - globalThis.__stall.last); globalThis.__stall.last = now }, 5)
+  })
   const observe = async (name, studio, previous) => {
+    await electron.evaluate(() => { globalThis.__stall.max = 0; globalThis.__stall.last = performance.now() })
     const started = Date.now()
     if (studio !== "initial") await writeLook(studio)
     let version
@@ -53,6 +61,7 @@ try {
       await new Promise((resolve) => setTimeout(resolve, wait))
     }
     const ms = Date.now() - started
+    const mainStallMs = Math.round(await electron.evaluate(() => globalThis.__stall.max))
     const shown = await page.evaluate(async (src) => {
       const bytes = (await (await fetch(src)).arrayBuffer()).byteLength
       const image = new Image()
@@ -93,12 +102,12 @@ try {
       const box = document.querySelector(".transcript, .session-main").getBoundingClientRect()
       return { x: Math.round((box.x + 40) * devicePixelRatio), y: Math.round((box.y + 200) * devicePixelRatio), width: Math.round((box.width - 80) * devicePixelRatio), height: Math.round(Math.min(400, box.height - 400) * devicePixelRatio) }
     }) })
-    const row = { label, look: name, ms, displayDeviceWidth: display, ...shown, ...steps, stretch: Math.round((Math.max(shown.pageDeviceWidth, 1) / shown.imageWidth) * 100) / 100 }
+    const row = { label, look: name, ms, mainStallMs, displayDeviceWidth: display, ...shown, ...steps, stretch: Math.round((Math.max(shown.pageDeviceWidth, 1) / shown.imageWidth) * 100) / 100 }
     results.push(row)
     return version
   }
   let version = await observe("no look", "initial", undefined)
-  for (const blur of [0, 10, 40]) version = await observe(`blur ${blur}`, { blur, tint: 0.84, dim: 0 }, version)
+  for (const blur of (process.env.ES_BLURS ?? "0,10,40").split(",").map(Number)) version = await observe(`blur ${blur}`, { blur, tint: 0.84, dim: 0 }, version)
   console.log(JSON.stringify(results, null, 2))
 } finally {
   await electron.close()

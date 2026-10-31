@@ -25,9 +25,26 @@ export const blurPlan = (imageWidth: number, sigma: number, displayWidth: number
 }
 
 /** Gaussian blur of 4-channel pixels in place, approximated by three box blurs per axis (running sums, so the cost does
- * not grow with sigma). Edges repeat the border pixel. */
+ * not grow with sigma). Edges repeat the border pixel. Self-contained (no outer references): blur-worker.ts runs its
+ * source in a worker thread. */
 export const gaussianBlur = (pixels: Uint8Array, width: number, height: number, sigma: number) => {
   if (sigma <= 0) return pixels
+  // One box blur along lines of `length` pixels (`step` bytes apart), `lines` lines `stride` bytes apart, src -> dst.
+  const boxPass = (src: Uint8Array, dst: Uint8Array, length: number, lines: number, radius: number, step: number, stride: number) => {
+    const scale = 1 / (2 * radius + 1)
+    for (let line = 0; line < lines; line++) {
+      const base = line * stride
+      for (let channel = 0; channel < 4; channel++) {
+        const at = (index: number) => src[base + Math.min(length - 1, Math.max(0, index)) * step + channel]!
+        let sum = 0
+        for (let index = -radius; index <= radius; index++) sum += at(index)
+        for (let index = 0; index < length; index++) {
+          dst[base + index * step + channel] = Math.round(sum * scale)
+          sum += at(index + radius + 1) - at(index - radius)
+        }
+      }
+    }
+  }
   const ideal = Math.sqrt((12 * sigma * sigma) / 3 + 1)
   const lower = Math.floor(ideal) % 2 === 0 ? Math.floor(ideal) - 1 : Math.floor(ideal)
   const count = Math.round((12 * sigma * sigma - 3 * lower * lower - 12 * lower - 9) / (-4 * lower - 4))
@@ -38,23 +55,6 @@ export const gaussianBlur = (pixels: Uint8Array, width: number, height: number, 
     boxPass(scratch, pixels, height, width, radius, width * 4, 4)
   }
   return pixels
-}
-
-// One box blur along lines of `length` pixels (`step` bytes apart), `lines` lines `stride` bytes apart, src -> dst.
-const boxPass = (src: Uint8Array, dst: Uint8Array, length: number, lines: number, radius: number, step: number, stride: number) => {
-  const scale = 1 / (2 * radius + 1)
-  for (let line = 0; line < lines; line++) {
-    const base = line * stride
-    for (let channel = 0; channel < 4; channel++) {
-      const at = (index: number) => src[base + Math.min(length - 1, Math.max(0, index)) * step + channel]
-      let sum = 0
-      for (let index = -radius; index <= radius; index++) sum += at(index)
-      for (let index = 0; index < length; index++) {
-        dst[base + index * step + channel] = Math.round(sum * scale)
-        sum += at(index + radius + 1) - at(index - radius)
-      }
-    }
-  }
 }
 
 const IMAGE = /\.(png|jpe?g|webp|heic|tiff?|gif|bmp)$/i

@@ -10,7 +10,8 @@ import { createTabs, TITLE_BAR_HEIGHT } from "./tabs"
 import { watchBadges } from "./badges"
 import { muxEvents, sseEvents, watchNotifications } from "./notifier"
 import { notificationsSupported, postNotice } from "./desktop-notice"
-import { blurPlan, createAppearance, gaussianBlur } from "./appearance"
+import { blurPlan, createAppearance } from "./appearance"
+import { blurOffMain } from "./blur-worker"
 import { createReleaseNotes } from "./release-notes"
 import { localStateDir, pairingSources, type PairingSource } from "./pair-phone"
 import { openPairPhone } from "./pair-phone-window"
@@ -96,7 +97,7 @@ const start = async () => {
       const plan = blurPlan(image.getSize().width, sigma, display)
       const work = plan.work === image.getSize().width ? image : image.resize({ width: plan.work, quality: "best" })
       const size = work.getSize()
-      const blurred = plan.sigma ? nativeImage.createFromBitmap(Buffer.from(gaussianBlur(new Uint8Array(work.toBitmap()), size.width, size.height, plan.sigma)), size) : work
+      const blurred = plan.sigma ? nativeImage.createFromBitmap(Buffer.from(await blurOffMain(new Uint8Array(work.toBitmap()), size.width, size.height, plan.sigma)), size) : work
       return (plan.output === size.width ? blurred : blurred.resize({ width: plan.output, quality: "best" })).toJPEG(70)
     },
   })
