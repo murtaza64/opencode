@@ -1,15 +1,11 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-10-31.3",
+  "release": "2026-10-31.4",
   "items": [
     {
-      "title": "One Details section on decisions",
-      "detail": "A decision's brief evidence, original request and record history now sit together under one Details disclosure."
-    },
-    {
-      "title": "Self-handoff from the composer",
-      "detail": "A lane's own session can start a handoff to a fresh session from below the composer and follow it to the successor; your draft stays put."
+      "title": "Mail sends in the transcript",
+      "detail": "An agent's mail send shows who it went to and that mail's delivery state, such as queued, read or handled. Handled means the recipient acknowledged it, not that the work started."
     }
   ],
-  "limits": ["Self-handoff is available only on the session's own host."]
+  "limits": ["When this host has not loaded the mail record, the row says delivery not read."]
 }
