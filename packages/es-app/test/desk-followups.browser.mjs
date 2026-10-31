@@ -70,7 +70,7 @@ try {
     assert(stripHeight <= 64, `${view}: folded strip is ${stripHeight}px tall`)
     for (const line of [summary, peek]) assert((await line.boundingBox()).height <= 30, `${view}: a folded line wraps`)
     await expect(strip).not.toContainText("Details")
-    // The conversation sits right under it.
+    // The conversation sits right under it, never under the strip.
     const chatTop = await page.locator(".desk-chat textarea").evaluate(element => element.getBoundingClientRect().top)
     assert(chatTop > (await strip.boundingBox()).y, `${view}: chat above the strip`)
     // The needs line opens the strip on that row, its detail showing and focused.
@@ -79,33 +79,40 @@ try {
     const needs = strip.locator('.desk-progress-row[data-group="needs"]')
     await expect(needs.locator(".desk-progress-line")).toBeFocused()
     await expect(needs.locator(".desk-progress-detail")).toContainText("Pick the first workspace before the outline starts")
-    await expect(needs.locator(".desk-progress-detail")).toContainText("State changed unknown")
+    await expect(needs.locator(".desk-progress-detail")).toContainText(/Changed\s*unknown/)
     // Opened: grouped by who has the next move, newest first, undated last; one line per row; owners and ids only
     // in a row's detail. Results wait behind a closed Completed control, kept however old.
-    await expect(strip.locator(".desk-progress-group")).toHaveText(["Needs you", "Working", "Waiting on owners", "State not recognised"])
-    const rows = strip.locator('.desk-progress-body > .desk-progress-rows:not([data-group="result"]) > .desk-progress-row')
+    // Each group head: a shape, its name and a count; colour is never the only signal.
+    await expect(strip.locator(".desk-progress-group")).toHaveText([/!\s*Needs you\s*1/, /◐\s*Working\s*1/, /◷\s*Waiting on owners\s*2/, /\?\s*State not recognised\s*1/, /✓\s*Completed\s*4/])
+    const rows = strip.locator('.desk-progress-rows:not([data-group="result"]) > .desk-progress-row')
     await expect(rows.locator(".desk-progress-label")).toHaveText(["Pick scope", "Private read", "No receipt yet", "Is the nightly green?", "Odd part"])
-    await expect(rows.nth(1)).toContainText("meeting synthesis")
+    // Rows are terse: what, who, when. Status waits in the detail; only an ask or a blocker shows on the row.
+    await expect(rows.nth(1).locator(".desk-progress-owner")).toHaveText("exploration")
     await expect(rows.nth(1)).toContainText("age unknown")
-    await expect(rows.nth(2)).toContainText("Asked gamma · delivery unknown")
-    await expect(rows.nth(4)).toContainText("Unknown state: paused")
+    await expect(rows.nth(1)).not.toContainText("meeting synthesis")
+    await expect(rows.nth(2).locator(".desk-progress-owner")).toHaveText("gamma")
+    await expect(rows.nth(2).locator(".desk-progress-flag")).toHaveText(/!\s*no receipt/)
+    await expect(rows.nth(4).locator(".desk-progress-flag")).toHaveText(/\?\s*paused/)
     for (const index of [1, 2, 4]) assert((await rows.nth(index).locator(".desk-progress-line").boundingBox()).height <= 30, `${view}: row ${index} wraps`)
+    // Ages share one column, also on a row without an owner.
+    const ageEnds = await rows.locator(".desk-progress-age").evaluateAll(list => list.map(element => element.getBoundingClientRect()[getComputedStyle(element).direction === "rtl" ? "left" : "right"]))
+    assert(Math.max(...ageEnds) - Math.min(...ageEnds) <= 1, `${view}: age column ragged ${ageEnds}`)
     // Keyboard: arrows walk the rows, Enter opens one in place.
     await page.keyboard.press("ArrowDown")
     await expect(rows.nth(1).locator(".desk-progress-line")).toBeFocused()
     await page.keyboard.press("Enter")
     await expect(rows.nth(1).locator(".desk-progress-detail")).toContainText("owner exploration · directions · mini")
+    await expect(rows.nth(1).locator(".desk-progress-detail")).toContainText("meeting synthesis")
     await expect(rows.nth(1).locator(".desk-progress-line")).toHaveAttribute("aria-expanded", "true")
     const done = strip.locator(".desk-progress-done")
     await expect(done).toHaveAttribute("aria-expanded", "false")
     await done.click()
     const completed = strip.locator('.desk-progress-rows[data-group="result"] > .desk-progress-row')
     await expect(completed.locator(".desk-progress-label")).toHaveText(["Which build is on the Mini?", "Workspace", "Old question", "Archived part"])
-    await expect(completed.nth(0)).toContainText("Answered by alpha")
-    await expect(completed.nth(1)).toContainText("Delivered")
+    await expect(completed.nth(0).locator(".desk-progress-owner")).toHaveText("alpha")
     await expect(completed.nth(1)).toContainText("60m ago")
     await expect(completed.nth(1).getByRole("link", { name: "Open Explainer deck" })).toHaveAttribute("href", "http://127.0.0.1:64924/")
-    await expect(completed.nth(2)).toContainText("Answered by beta")
+    await expect(completed.nth(2).locator(".desk-progress-owner")).toHaveText("beta")
     await expect(completed.nth(2)).toContainText("2d ago")
     await expect(completed.nth(3)).toContainText("5d ago")
     await expect(strip).not.toContainText("Thanks")
@@ -114,6 +121,8 @@ try {
     await expect(strip.locator("input, textarea")).toHaveCount(0)
     await expect(page.getByRole("button", { name: "Ask in background" })).toHaveCount(0)
     assert(await strip.evaluate(element => element.scrollWidth <= element.clientWidth + 1), `${view}: strip overflows`)
+    const stack = await page.evaluate(() => ({ strip: document.querySelector(".desk-progress").getBoundingClientRect().bottom, chat: document.querySelector(".desk-companion .session-page").getBoundingClientRect().top }))
+    assert(stack.chat >= stack.strip - 0.5, `${view}: opened strip overlaps the chat (${stack.strip} > ${stack.chat})`)
     if (shots) await strip.screenshot({ path: path.join(shots, `followups-open-${view}.png`) })
     // Escape folds back to the summary.
     await done.focus()

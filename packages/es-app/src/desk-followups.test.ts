@@ -97,3 +97,11 @@ test("only a working part counts as work; a part its owner has not started waits
   expect(rows.map(row => [row.group, row.label, row.status])).toEqual([
     ["working", "Busy", "In progress"], ["waiting", "Asked", "Not started (requested)"], ["waiting", "Sent", "Not started (routed)"], ["waiting", "Seen", "Starts after review"]])
 })
+
+test("a row names who has it and flags a blocker: an unrecognised state or a question without a delivery receipt", () => {
+  const rows = progressRows([{ case_id: "c", updated: 1, deliverables: [], intents: [{ id: "odd", state: "paused", owner: { lane: "tour" } }, { id: "plain", state: "working" }] }],
+    [{ editspace: "p", id: "a#1", owner: "alpha", text: "No receipt", asked: 3, delivery: "unknown" }, { editspace: "p", id: "a#2", owner: "beta", text: "Bounced", asked: 2, delivery: "failed" },
+      { editspace: "p", id: "a#3", owner: "gamma", text: "Fine", asked: 1, delivery: "delivered" }])
+  expect(rows.map(row => [row.label, row.owner, row.flag])).toEqual([
+    ["Plain", undefined, undefined], ["No receipt", "alpha", "no receipt"], ["Bounced", "beta", "not delivered"], ["Fine", "gamma", undefined], ["Odd", "tour", "paused"]])
+})

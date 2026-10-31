@@ -237,35 +237,40 @@ const DeskFollowUps = (props: { session: string; open: () => boolean }) => {
         <bdi dir="auto" class="desk-progress-label">{row().label}</bdi><span class="desk-progress-status" dir="auto">{row().status}</span>
         <span class="desk-progress-age">{row().at ? ago(row().at!) : "age unknown"}</span></button>}</Show>
     <Show when={expanded()}><div class="desk-progress-body" id="desk-progress-body">
-      <For each={GROUPS.filter(([name]) => group(name).length)}>{([name, title]) => <>
-        <h3 class="desk-progress-group" data-group={name}>{title}</h3>
-        <ul class="desk-progress-rows"><For each={group(name)}>{row => <ProgressItem row={row} open={open() === row.key} toggle={() => setOpen(open() === row.key ? undefined : row.key)} />}</For></ul>
-      </>}</For>
-      {/* Every result stays reachable here, newest first; closed until asked for. */}
-      <Show when={group("result").length}>
-        <button type="button" class="desk-progress-done" aria-expanded={doneOpen()} onClick={() => setDoneOpen(!doneOpen())}>Completed <span>{group("result").length}</span></button>
-        <Show when={doneOpen()}><ul class="desk-progress-rows" data-group="result"><For each={group("result")}>{row => <ProgressItem row={row} open={open() === row.key} toggle={() => setOpen(open() === row.key ? undefined : row.key)} />}</For></ul></Show>
-      </Show>
+      <For each={GROUPS.filter(([name]) => group(name).length)}>{([name, icon, title]) => <section class="desk-progress-section" data-group={name}>
+        {/* Completed is the one group that stays closed until asked for; every result is kept, newest first. */}
+        <Show when={name === "result"} fallback={<h3 class="desk-progress-group"><span class="desk-progress-icon" aria-hidden="true">{icon}</span>{title}<span class="desk-progress-count">{group(name).length}</span></h3>}>
+          <h3 class="desk-progress-group"><button type="button" class="desk-progress-done" aria-expanded={doneOpen()} onClick={() => setDoneOpen(!doneOpen())}>
+            <span class="desk-progress-icon" aria-hidden="true">{icon}</span>{title}<span class="desk-progress-count">{group(name).length}</span></button></h3></Show>
+        <Show when={name !== "result" || doneOpen()}><ul class="desk-progress-rows" data-group={name} aria-label={title}>
+          <For each={group(name)}>{row => <ProgressItem row={row} open={open() === row.key} toggle={() => setOpen(open() === row.key ? undefined : row.key)} />}</For></ul></Show>
+      </section>}</For>
     </div></Show>
   </section></Show>
 }
 
 const TALLY = [["needs", "!", "need you"], ["working", "", "working"], ["waiting", "", "waiting"], ["unknown", "?", "unclear"], ["result", "", "done"]] as const
-const GROUPS = [["needs", "Needs you"], ["working", "Working"], ["waiting", "Waiting on owners"], ["unknown", "State not recognised"]] as const
+// Each group has its own shape as well as its colour, so colour is never the only signal.
+const GROUPS = [["needs", "!", "Needs you"], ["working", "◐", "Working"], ["waiting", "◷", "Waiting on owners"], ["unknown", "?", "State not recognised"], ["result", "✓", "Completed"]] as const
 const stamp = (at?: number) => at ? <time dateTime={new Date(at).toISOString()}>{new Date(at).toLocaleString()}</time> : <>unknown</>
 
-// One line per row: what, its latest status, its age. The full status, timestamps, owners and ids open in place.
+// One line per row: what, who has it, how long ago. Only an ask for the human or a blocker shows more without opening
+// the row; status, case, timestamps and ids open in place.
 const ProgressItem = (props: { row: ProgressRow; open: boolean; toggle: () => void }) =>
   <li class="desk-progress-row" data-group={props.row.group} data-row={props.row.key} data-open={props.open ? "" : undefined}>
     <button type="button" class="desk-progress-line" aria-expanded={props.open} onClick={() => props.toggle()}>
-      <bdi dir="auto" class="desk-progress-label">{props.row.label}</bdi><span class="desk-progress-status" dir="auto">{props.row.status}</span>
+      <span class="desk-progress-what"><bdi dir="auto" class="desk-progress-label">{props.row.label}</bdi>
+        <Show when={props.row.flag}>{flag => <span class="desk-progress-flag" data-tone={props.row.group === "unknown" ? "warn" : "risk"}><span aria-hidden="true">{props.row.group === "unknown" ? "?" : "!"}</span> {flag()}</span>}</Show></span>
+      <Show when={props.row.owner}>{owner => <bdi dir="auto" class="desk-progress-owner">{owner()}</bdi>}</Show>
       <span class="desk-progress-age">{props.row.at ? ago(props.row.at) : "age unknown"}</span>
+      <Show when={props.row.group === "needs"}><span class="desk-progress-ask" dir="auto">{props.row.status}</span></Show>
     </button>
     <Show when={props.row.link}>{link => <a class="desk-progress-open" href={link().href} target="_blank" rel="noopener noreferrer" aria-label={`Open ${link().label}`} title={`Open ${link().label}`}>↗</a>}</Show>
-    <Show when={props.open}><div class="desk-progress-detail">
-      <p dir="auto">{props.row.status}</p>
-      <Show when={props.row.context}><p dir="auto">{props.row.context}</p></Show>
-      <p>{props.row.key.includes("/") ? "State changed" : "Last message"} {stamp(props.row.at)}<Show when={props.row.link}> · read back {stamp(props.row.readBackAt)}</Show></p>
-      <p class="desk-progress-ids"><For each={props.row.detail.filter(line => !line.startsWith("next: "))}>{(line, index) => <>{index() ? " · " : ""}<bdi dir="ltr">{line}</bdi></>}</For></p>
-    </div></Show>
+    <Show when={props.open}><dl class="desk-progress-detail">
+      <dt>Status</dt><dd dir="auto">{props.row.status}</dd>
+      <Show when={props.row.context}><dt>Case</dt><dd dir="auto">{props.row.context}</dd></Show>
+      <dt>{props.row.key.includes("/") ? "Changed" : "Message"}</dt><dd>{stamp(props.row.at)}</dd>
+      <Show when={props.row.link}><dt>Read back</dt><dd>{stamp(props.row.readBackAt)}</dd></Show>
+      <dt>Trace</dt><dd class="desk-progress-ids"><For each={props.row.detail.filter(line => !line.startsWith("next: "))}>{(line, index) => <>{index() ? " · " : ""}<bdi dir="ltr">{line}</bdi></>}</For></dd>
+    </dl></Show>
   </li>

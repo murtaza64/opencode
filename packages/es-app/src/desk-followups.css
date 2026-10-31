@@ -25,19 +25,41 @@
 [data-group=unknown] .desk-progress-status { color: var(--ds-attention, var(--peach)); }
 [data-group=result] .desk-progress-label { color: var(--ds-muted, var(--subtext0)); }
 /* Bounded: the chat below always keeps its space; a long list scrolls inside. */
-.desk-progress-body { display: grid; align-content: start; max-block-size: 34vh; overflow-y: auto; scrollbar-width: thin; margin-block-start: var(--ds-space-1, 2px); }
-.desk-progress-group { margin: var(--ds-space-3, 8px) 0 0; font-size: 10px; font-weight: 400; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ds-muted, var(--subtext0)); }
-.desk-progress-group[data-group=needs] { color: var(--ds-attention, var(--peach)); }
-.desk-progress-rows { list-style: none; margin: 0; padding: 0; display: grid; }
+.desk-progress-body { display: grid; align-content: start; gap: var(--ds-space-3, 8px); max-block-size: 38vh; overflow-y: auto; scrollbar-width: thin; margin-block-start: var(--ds-space-2, 4px); }
+/* Group heads carry the hierarchy: a shape and a semantic role colour, a plain name, a count. Rows stay neutral. */
+.desk-progress-group { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 11px; font-weight: 600; color: var(--ds-text, var(--text)); }
+.desk-progress-group > .desk-progress-done { display: flex; align-items: baseline; gap: 6px; font-weight: 600 !important; }
+.desk-progress-icon { inline-size: 1em; text-align: center; font-weight: 700; }
+.desk-progress-count { font-weight: 400; color: var(--ds-muted, var(--subtext0)); font-variant-numeric: tabular-nums; }
+.desk-progress-section[data-group=needs] .desk-progress-icon { color: var(--ds-attention, var(--peach)); }
+.desk-progress-section[data-group=working] .desk-progress-icon { color: var(--ds-accent, var(--accent)); }
+.desk-progress-section[data-group=waiting] .desk-progress-icon { color: var(--ds-muted, var(--subtext0)); }
+.desk-progress-section[data-group=unknown] .desk-progress-icon { color: var(--ds-warn, var(--yellow)); }
+.desk-progress-section[data-group=result] .desk-progress-icon { color: var(--ds-ok, var(--green)); }
+.desk-progress-section[data-group=result] .desk-progress-group { color: var(--ds-muted, var(--subtext0)); }
+.desk-progress-done::after { content: "▸"; margin-inline-start: 2px; color: var(--ds-muted, var(--subtext0)); font-weight: 400; }
+.desk-progress-done[aria-expanded=true]::after { content: "▾"; }
+.desk-progress-rows { list-style: none; margin: 2px 0 0; padding: 0 0 0 calc(1em + 6px); display: grid; }
 .desk-progress-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; }
+/* Row: what (and any blocker), who, when. The needs row adds its ask on a second, muted line. */
+.desk-progress-line { grid-template-columns: minmax(0, 1fr) auto auto !important; column-gap: var(--ds-space-3, 8px) !important; row-gap: 0 !important; }
+/* Age keeps its column when a row has no owner. */
+.desk-progress-line > .desk-progress-age { grid-column: 3; }
+.desk-progress-what { display: flex; align-items: baseline; gap: 6px; min-inline-size: 0; }
+.desk-progress-owner { max-inline-size: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--ds-muted, var(--subtext0)); }
+.desk-progress-ask { grid-column: 1 / -1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--ds-muted, var(--subtext0)); padding-block-end: 2px; }
+.desk-progress-flag { flex: none; font-size: 11px; white-space: nowrap; }
+.desk-progress-flag[data-tone=warn] { color: var(--ds-warn, var(--yellow)); }
+.desk-progress-flag[data-tone=risk] { color: var(--ds-risk, var(--red)); }
+.desk-progress-row[data-group] .desk-progress-label { max-inline-size: none; color: var(--ds-text, var(--text)); }
+.desk-progress-row[data-group=result] .desk-progress-label { color: var(--ds-muted, var(--subtext0)); }
 .desk-progress-open { padding-inline: 6px 2px; font-size: 11px; color: var(--ds-accent, var(--accent)); text-decoration: none; }
-.desk-progress-detail { grid-column: 1 / -1; padding: 2px 0 6px; border-inline-start: 1px solid color-mix(in srgb, var(--ds-muted, var(--subtext0)) 40%, transparent); padding-inline-start: var(--ds-space-3, 8px); }
-.desk-progress-detail p { margin: 2px 0; font-size: 11px; color: var(--ds-muted, var(--subtext0)); overflow-wrap: anywhere; }
-.desk-progress-detail p:first-child { color: var(--ds-text, var(--text)); font-size: 12px; }
-.desk-progress-done { margin-block-start: var(--ds-space-3, 8px); inline-size: max-content; font-size: 10px !important; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ds-muted, var(--subtext0)) !important; }
-.desk-progress-done span { margin-inline-start: 4px; font-variant-numeric: tabular-nums; }
-.desk-progress-done::after { content: " ▸"; }
-.desk-progress-done[aria-expanded=true]::after { content: " ▾"; }
+/* Secondary detail: a short fact list under the row, labels muted, values plain; trace ids smallest and last. */
+.desk-progress-detail { grid-column: 1 / -1; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 1px var(--ds-space-3, 8px); margin: 0 0 6px; padding-inline-start: var(--ds-space-3, 8px);
+  border-inline-start: 1px solid color-mix(in srgb, var(--ds-muted, var(--subtext0)) 35%, transparent); font-size: 11px; }
+.desk-progress-detail dt { color: var(--ds-muted, var(--subtext0)); }
+.desk-progress-detail dd { margin: 0; color: var(--ds-text, var(--text)); overflow-wrap: anywhere; }
+.desk-progress-detail .desk-progress-ids { font-size: 10px; color: var(--ds-muted, var(--subtext0)); }
 /* With a wallpaper, the strip and the chat share one backdrop: the companion paints it once, behind both. */
 :root[data-appearance=wallpaper] .desk-companion-in { isolation: isolate; }
 :root[data-appearance=wallpaper] .desk-companion-in::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;

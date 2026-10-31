@@ -77,7 +77,11 @@ export const partLabel = (id: string) => { const words = id.replace(/[-_.]+/g, "
  * row's age is unknown. `detail` carries owners and ids, shown only on request. */
 export type ProgressRow = { key: string; group: "needs" | "working" | "waiting" | "unknown" | "result"; label: string; context?: string; status: string; at?: number; link?: { label: string; href: string }; detail: string[]
   /** When the deliverable behind `link` was read back (writer clock); absent, unknown. */
-  readBackAt?: number }
+  readBackAt?: number
+  /** Who has the part or was asked (lane, or the mail recipient), for a terse attribution. */
+  owner?: string
+  /** A short blocker or oddity worth seeing without opening the row: an unrecognised state, a question with no receipt. */
+  flag?: string }
 
 // Parts an owner has not started yet wait on that owner; only "working" is work under way.
 const QUEUED = new Set(["requested", "routed", "acknowledged"])
@@ -99,13 +103,15 @@ export const progressRows = (cases: DeskCase[], items: FollowUp[]): ProgressRow[
       const group = state === "waiting" ? "needs" : DONE.has(state) ? "result" : state === "working" ? "working" : QUEUED.has(state) ? "waiting" : "unknown"
       rows.push({ key: `${item.case_id}/${part.id}`, group, label: partLabel(part.id), context: title, ...(part.state_at ? { at: part.state_at } : {}),
         status: group === "needs" ? part.next || "Waiting for you" : group === "result" ? "Delivered" : group === "unknown" ? `Unknown state: ${state}` : part.next || (group === "waiting" ? `Not started (${state})` : "In progress"),
+        ...(part.owner?.lane ? { owner: part.owner.lane } : {}), ...(group === "unknown" ? { flag: state } : {}),
         ...(deliverable ? { link: { label: deliverable.label, href: deliverable.ref! }, ...(deliverable.read_back_at ? { readBackAt: deliverable.read_back_at } : {}) } : {}), detail })
     }
   }
   for (const item of items) rows.push({
     key: `${item.editspace}:${item.id}`, group: item.answer ? "result" : "waiting", label: item.text.slice(0, 80), at: item.answer?.at ?? item.asked,
     status: item.answer ? `Answered by ${item.owner}` : `Asked ${item.owner}${item.delivery === "failed" ? " · not delivered" : item.delivery === "unknown" ? " · delivery unknown" : ""}`,
-    detail: [`${item.editspace}:${item.id}`, ...(item.answer ? [`answer ${item.editspace}:${item.answer.id}`] : [])],
+    detail: [`${item.editspace}:${item.id}`, ...(item.answer ? [`answer ${item.editspace}:${item.answer.id}`] : [])], owner: item.owner,
+    ...(!item.answer && item.delivery === "failed" ? { flag: "not delivered" } : !item.answer && item.delivery === "unknown" ? { flag: "no receipt" } : {}),
   })
   const order = { needs: 0, working: 1, waiting: 2, unknown: 3, result: 4 }
   // Newest first within a group; rows of unknown age after those with one.
