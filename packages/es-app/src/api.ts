@@ -662,8 +662,8 @@ export const es = {
     fetch(`/es/api/lane-provenance?es=${encodeURIComponent(name)}`).then(statusJson<LaneProvenance>),
   // The dashboard must create the handoff document, spawn the successor, and
   // transfer the lane owner as one server-side operation before returning.
-  handoffs: (name: string): Promise<{ handoffs: Handoff[]; pending?: PendingHandoff[] }> =>
-    fetch(`/es/api/handoffs?es=${encodeURIComponent(name)}`).then(statusJson<{ handoffs: Handoff[]; pending?: PendingHandoff[] }>),
+  handoffs: (name: string): Promise<{ handoffs: Handoff[]; pending?: PendingHandoff[]; self?: { version?: unknown } }> =>
+    fetch(`/es/api/handoffs?es=${encodeURIComponent(name)}`).then(statusJson<{ handoffs: Handoff[]; pending?: PendingHandoff[]; self?: { version?: unknown } }>),
   handoff: (name: string, lane: string, predecessor: string, task: string, handoff: string): Promise<Handoff | { lane: string; predecessor: string; status: "pending" }> =>
     fetch(`/es/api/handoffs?es=${encodeURIComponent(name)}`, {
       method: "POST",

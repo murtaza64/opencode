@@ -41,6 +41,8 @@ import { DirectComposer } from "../components/direct-composer"
 import { DictationButton } from "../components/dictation"
 import { flash } from "../motion"
 import { Glyph, HostGlyph } from "../components/icons"
+import { SelfHandoffButton, SelfHandoffStatus } from "../components/self-handoff"
+import { createSelfHandoff, SELF_HANDOFF_VERSION } from "../self-handoff"
 import { AppHeader } from "../components/native-header"
 import { SessionTitle } from "../components/session-title"
 import { SubagentTranscript } from "../components/subagent-transcript"
@@ -238,6 +240,14 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const pendingTransfer = () => remote ? undefined : pendingHandoffFor(sessionID, pendingHandoffs())
   const currentEditspace = () => editspace() ?? editspaces()?.default ?? state()?.editspace
   const ownedLane = () => remote ? undefined : laneOwners().find((lane) => lane.owner === sessionID)
+  // Self-handoff (CHAT-13): this host's dashboard only; the lane is read once owned, so the status survives the
+  // ownership moving to the successor.
+  const [handoffLane, setHandoffLane] = createSignal<string>()
+  createEffect(() => { const lane = ownedLane()?.lane; if (lane) setHandoffLane(lane) })
+  const selfHandoff = createSelfHandoff({ editspace: () => remote ? undefined : currentEditspace() ?? undefined, lane: handoffLane, session: sessionID })
+  createEffect(on(() => [currentEditspace(), handoffLane()] as const, () => void selfHandoff.refresh()))
+  const selfHandoffGate = () => remote ? "Hand off is available on its own host"
+    : dashboard.selfHandoff() !== SELF_HANDOFF_VERSION ? "This host's dashboard does not offer self-handoff yet" : undefined
   const predecessor = () => {
     const edge = handoffChain(sessionID, lineage())
     return edge && (remote || activity.session(edge.predecessor)) ? edge : undefined
@@ -1703,6 +1713,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         >
           <Glyph name="zap" /><span class="action-label">{nudgePhase() === "stopping" ? "Stopping…" : nudgePhase() === "resuming" ? "Sending resume…" : "Nudge"}</span>
         </button>
+        {/* A local root session that owns its lane; another host's session shows it disabled with that host named. */}
+        <Show when={remote || (ownedLane() && session() && !session()!.parentID)}><SelfHandoffButton handoff={selfHandoff} gate={selfHandoffGate()} /></Show>
       </>}
       moreActions={remote ? undefined : <>
         <button class="act-fork" title="Fork this session" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
@@ -2092,6 +2104,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         <div class="prompt-box" classList={{ "prompt-expanded": floating() }} style={{ "--editor-expanded": `${expandedHeight()}px` }}>
           <ComposerPanel />
         </div>
+        <SelfHandoffStatus handoff={selfHandoff} successor={(id) => <A href={hrefFor(id, directory)}><bdi dir="auto">{sessionLabel(id)}</bdi></A>} />
       </div>
 
       <Show when={!props.embedded}>

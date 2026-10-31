@@ -103,6 +103,9 @@ export const createFixture = async () => {
     wingmanTranscript: undefined,
     handoffs: undefined,
     pendingHandoffs: [],
+    // Self-handoff (CHAT-13): undefined = this dashboard does not advertise it (no `self` in GET /api/handoffs and its
+    // routes are unexpected); otherwise (call) => { status, body } for POST/GET/DELETE /api/handoffs/self.
+    selfHandoff: undefined,
     subscriptions: undefined,
     laneOwners: [],
     superseded: new Map(),
@@ -257,7 +260,12 @@ export const createFixture = async () => {
     // Front Desk surfaces poll (src/surfaces.ts); none published in these fixtures.
     if (url.pathname === "/api/surfaces" && request.method === "GET") return json({ surfaces: fixture.surfaces ?? [] })
     if (url.pathname === "/api/handoffs" && request.method === "GET")
-      return json({ handoffs: fixture.handoffs ?? [], pending: fixture.pendingHandoffs })
+      return json({ handoffs: fixture.handoffs ?? [], pending: fixture.pendingHandoffs, ...(fixture.selfHandoff ? { self: { version: 1 } } : {}) })
+    if (fixture.selfHandoff && (url.pathname === "/api/handoffs/self" || url.pathname.startsWith("/api/handoffs/self/"))) {
+      const reply = fixture.selfHandoff({ method: request.method, id: decodeURIComponent(url.pathname.slice("/api/handoffs/self/".length)),
+        lane: url.searchParams.get("lane"), body, csrf: request.headers["x-attention-csrf"] })
+      return json(reply.body, reply.status ?? 200)
+    }
     if (url.pathname === "/api/subscriptions" && fixture.subscriptions) {
       const recipient = request.method === "GET" ? url.searchParams.get("recipient") : body?.recipient
       if (request.method === "PUT") fixture.subscriptions.set(recipient, [

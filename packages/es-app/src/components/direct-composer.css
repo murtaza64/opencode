@@ -105,3 +105,8 @@
 @media (prefers-reduced-motion: reduce) {
   .prompt-box .direct-draft > .ta-wrap > textarea { transition: none; }
 }
+/* Self-handoff progress (CHAT-13): one line under the composer, in words, with its one next action. */
+.self-handoff-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-block: 4px 0; padding: 4px 8px; border-radius: 6px; background: var(--surface0); color: var(--subtext1); font-size: 12px; }
+.self-handoff-status[data-state="failed"], .self-handoff-status[data-state="error"] { color: var(--peach); }
+.self-handoff-status[data-state="verified"] { color: var(--text); }
+.self-handoff-not-carried { color: var(--peach); }

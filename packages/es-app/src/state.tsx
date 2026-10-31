@@ -91,6 +91,9 @@ type DashboardCtx = {
   pendingHandoffs: () => PendingHandoff[]
   handoffsError: () => string
   refetchHandoffs: () => void
+  /** Self-handoff protocol version this host's dashboard advertises (GET /api/handoffs `self.version`); undefined
+   * while unread or when the host does not offer it. */
+  selfHandoff: () => number | undefined
   laneOwners: () => { lane: string; owner: string }[]
   lineage: () => Handoff[]
   lineageOwners: () => { lane: string; owner: string }[]
@@ -165,6 +168,7 @@ export function DashboardProvider(props: ParentProps) {
   )
   const [handoffsError, setHandoffsError] = createSignal("")
   const [pendingHandoffs, setPendingHandoffs] = createSignal<Record<string, PendingHandoff[]>>({})
+  const [selfHandoff, setSelfHandoff] = createSignal<Record<string, number>>({})
   const cloud = createCloudAgents({
     project: () => allProjects() ? undefined : editspace() ?? editspaces()?.default ?? undefined,
     defaultProject: () => editspace() ?? editspaces()?.default ?? undefined,
@@ -177,6 +181,8 @@ export function DashboardProvider(props: ParentProps) {
       try {
         const result = await es.handoffs(name)
         setPendingHandoffs((previous) => ({ ...previous, [name]: result.pending ?? [] }))
+        const version = typeof result.self?.version === "number" ? result.self.version : undefined
+        setSelfHandoff((previous) => { const next = { ...previous }; if (version === undefined) delete next[name]; else next[name] = version; return next })
         setHandoffsError("")
         clearBackend("Handoffs")
         return result.handoffs
@@ -863,6 +869,7 @@ export function DashboardProvider(props: ParentProps) {
       ...(otherLineages() ?? []).flatMap((item) => item.pending),
     ],
     handoffsError,
+    selfHandoff: () => selfHandoff()[editspace() ?? editspaces()?.default ?? ""],
     refetchHandoffs: () => { void refetchHandoffs() },
     laneOwners,
     lineage,
