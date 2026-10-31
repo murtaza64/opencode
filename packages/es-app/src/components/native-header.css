@@ -45,6 +45,16 @@
   min-inline-size: 0;
   flex: 1;
 }
+/* Left to right, the project column ends where the session title must start: the content pane's edge plus the chat
+ * gutter, so the title lines up with the chat's text. It never narrows below its collapse button; right to left,
+ * where the title bar's traffic lights stay physically left, the column keeps its own width. */
+:root:not([dir=rtl]) .native-header[style*="--chat-start"] .native-header-project {
+  inline-size: max(28px, calc(var(--chat-start) + var(--chat-gutter, 20px) - max(84px, env(titlebar-area-x, 84px)) - 10px - 12px));
+}
+/* The session column's gutter by width, as index.css sets it on .session-page (the title bar sits outside that page). */
+.native-header { --chat-gutter: 20px; }
+@media (max-width: 1100px) { .native-header { --chat-gutter: 10px; } }
+@media (max-width: 600px) { .native-header { --chat-gutter: 8px; } }
 .native-header-session > div {
   min-inline-size: 0;
 }

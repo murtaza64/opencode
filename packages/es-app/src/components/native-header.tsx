@@ -13,15 +13,31 @@ const [headerTarget, setHeaderTarget] = createSignal<HTMLDivElement>()
 export const NativeHeader = (props: ParentProps) => {
   const host = document.createElement("div")
   document.body.prepend(host)
-  onMount(() => document.documentElement.classList.add("native-mac-header"))
+  // The session title starts where the chat's text does: the content pane's inline-start edge, measured whenever the
+  // pane moves (sidebar resized, collapsed or the window resized) and handed to CSS as --chat-start.
+  const [chatStart, setChatStart] = createSignal<number>()
+  let observer: ResizeObserver | undefined
+  let frame = 0
+  const watch = () => {
+    const content = document.querySelector<HTMLElement>(".shell > .content")
+    if (!content) { frame = requestAnimationFrame(watch); return }
+    observer = new ResizeObserver(() => setChatStart(content.getBoundingClientRect().left))
+    observer.observe(content)
+  }
+  onMount(() => {
+    document.documentElement.classList.add("native-mac-header")
+    watch()
+  })
   onCleanup(() => {
+    cancelAnimationFrame(frame)
+    observer?.disconnect()
     setHeaderTarget(undefined)
     document.documentElement.classList.remove("native-mac-header")
     host.remove()
   })
   return (
     <Portal mount={host}>
-      <div class="native-header" role="banner" aria-label="Application header">
+      <div class="native-header" role="banner" aria-label="Application header" style={{ "--chat-start": chatStart() === undefined ? undefined : `${chatStart()}px` }}>
         <div class="native-header-safe">
           <div class="native-header-project">{props.children}</div>
           <div class="native-header-session" ref={setHeaderTarget} />
