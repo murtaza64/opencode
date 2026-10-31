@@ -193,28 +193,36 @@ const DeskTasks = (props: { tasks: ReturnType<typeof createTasks>; session: stri
 // answer, read from each project's mail timeline. Display only; the desk itself follows up when an answer wakes it.
 const DeskFollowUps = (props: { session: string; open: () => boolean }) => {
   const dashboard = useDashboard()
-  const [now, setNow] = createSignal(Date.now())
   const [tick, setTick] = createSignal(0)
   const [expanded, setExpanded] = createSignal(false)
   // Mail events refresh the strip; the 30 s fallback runs only while the chat is open.
   createEffect(() => {
     if (!props.open()) return
-    const timer = setInterval(() => { setNow(Date.now()); setTick(value => value + 1) }, 30_000)
+    const timer = setInterval(() => setTick(value => value + 1), 30_000)
     onCleanup(() => clearInterval(timer))
   })
   const [items] = createResource(() => ({ session: props.session, names: dashboard.editspaces()?.editspaces.map(item => item.name) ?? [], tick: tick(), mail: dashboard.mailRevision() }),
     async input => (await Promise.all(input.names.map(name => es.mail(name, { session: input.session }).then(timeline => followUps(timeline, input.session), () => [] as FollowUp[])))).flat())
   const chat = useDeskChat()
-  const rows = () => progressRows(chat.cases(), items.latest ?? [], now())
-  const counts = () => ({ needs: rows().filter(row => row.group === "needs").length, progress: rows().filter(row => row.group === "progress").length, result: rows().filter(row => row.group === "result").length })
+  const rows = () => progressRows(chat.cases(), items.latest ?? [])
+  const count = (group: ProgressRow["group"]) => rows().filter(row => row.group === group).length
+  const completed = () => rows().filter(row => row.group === "result")
   // Folded: one summary line plus whatever needs the human. The conversation keeps the space.
-  const shown = () => expanded() ? rows() : rows().filter(row => row.group === "needs")
-  const summary = () => [counts().needs && `${counts().needs} need you`, counts().progress && `${counts().progress} in progress`, counts().result && `${counts().result} done`].filter(Boolean).join(" · ")
+  const shown = () => rows().filter(row => row.group === "needs" || expanded() && row.group !== "result")
+  const summary = () => [count("needs") && `${count("needs")} need you`, count("progress") && `${count("progress")} in progress`,
+    count("unknown") && `${count("unknown")} in an unknown state`, count("result") && `${count("result")} done`].filter(Boolean).join(" · ")
   return <Show when={rows().length}><section class="desk-progress" aria-label="Desk progress" data-expanded={expanded() ? "" : undefined}>
     <button type="button" class="desk-progress-summary" aria-expanded={expanded()} onClick={() => setExpanded(!expanded())}>
-      <span class="ds-status-glyph" aria-hidden="true">{counts().needs ? "!" : counts().progress ? "…" : "✓"}</span><span>{summary()}</span>
+      <span class="ds-status-glyph" aria-hidden="true">{count("needs") ? "!" : count("progress") || count("unknown") ? "…" : "✓"}</span><span>{summary()}</span>
     </button>
-    <Show when={shown().length}><ul class="desk-progress-rows"><For each={shown()}>{row => <ProgressItem row={row} />}</For></ul></Show>
+    <Show when={shown().length || expanded() && completed().length}><div class="desk-progress-body">
+      <Show when={shown().length}><ul class="desk-progress-rows"><For each={shown()}>{row => <ProgressItem row={row} />}</For></ul></Show>
+      {/* Every result stays reachable here, newest first; closed until asked for. */}
+      <Show when={expanded() && completed().length}><details class="desk-progress-completed">
+        <summary>Completed ({completed().length})</summary>
+        <ul class="desk-progress-rows"><For each={completed()}>{row => <ProgressItem row={row} />}</For></ul>
+      </details></Show>
+    </div></Show>
   </section></Show>
 }
 
@@ -223,7 +231,7 @@ const ProgressItem = (props: { row: ProgressRow }) =>
     <span class="desk-progress-line">
       <Show when={props.row.link} fallback={<bdi dir="auto" class="desk-progress-label">{props.row.label}</bdi>}>{link =>
         <a class="desk-progress-label" href={link().href} target="_blank" rel="noopener noreferrer"><bdi dir="auto">{props.row.label}</bdi></a>}</Show>
-      <span class="desk-progress-status" dir="auto">{props.row.status}<Show when={props.row.at}>{at => <> · {ago(at())}</>}</Show></span>
+      <span class="desk-progress-status" dir="auto">{props.row.status} · {props.row.at ? ago(props.row.at) : "age unknown"}</span>
     </span>
     {/* Owners, sessions and mail ids are for tracing, one tap away. */}
     <details class="desk-progress-detail"><summary aria-label={`Details for ${props.row.label}`}>Details</summary>

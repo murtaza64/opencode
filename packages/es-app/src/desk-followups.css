@@ -1,5 +1,5 @@
 /* The companion chat's progress strip (desk-companion.tsx DeskFollowUps): one summary line that opens to what needs
- * the human, work in progress and recent results. Owners and ids sit behind each row's Details. Loaded on every page. */
+ * the human, work in progress and parts in an unknown state, with every result under a closed Completed disclosure. Owners and ids sit behind each row's Details. Loaded on every page. */
 .desk-progress { flex: none; margin: 0 var(--ds-space-4, 12px) var(--ds-space-2, 4px); font-size: 13px; color: var(--ds-text, var(--text)); }
 .desk-progress-summary { display: flex; gap: var(--ds-space-3, 8px); align-items: baseline; inline-size: 100%; padding: var(--ds-space-2, 4px) 0; border: 0; background: none;
   color: var(--ds-muted, var(--subtext0)); font: inherit; font-size: 11px; text-align: start; cursor: pointer; }
@@ -7,12 +7,16 @@
 .desk-progress-summary .ds-status-glyph { color: var(--ds-accent, var(--accent)); font-variant-numeric: tabular-nums; }
 .desk-progress:has([data-group=needs]) .desk-progress-summary .ds-status-glyph { color: var(--ds-attention, var(--peach)); }
 /* Bounded: the chat below always keeps its space; a long list scrolls inside. */
-.desk-progress-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--ds-space-2, 4px); max-block-size: 30vh; overflow-y: auto; }
+.desk-progress-body { display: grid; gap: var(--ds-space-2, 4px); max-block-size: 30vh; overflow-y: auto; }
+.desk-progress-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--ds-space-2, 4px); }
+.desk-progress-completed > summary { font-size: 11px; color: var(--ds-muted, var(--subtext0)); cursor: pointer; inline-size: max-content; }
+.desk-progress-completed > .desk-progress-rows { margin-block-start: var(--ds-space-2, 4px); }
 .desk-progress-row { display: grid; gap: var(--ds-space-1, 2px); }
 .desk-progress-line { display: flex; flex-wrap: wrap; gap: 0 var(--ds-space-3, 8px); align-items: baseline; min-inline-size: 0; }
 .desk-progress-label { color: var(--ds-text, var(--text)); overflow-wrap: anywhere; }
 .desk-progress-row[data-group=needs] .desk-progress-label { color: var(--ds-attention, var(--peach)); font-weight: 600; }
 .desk-progress-row[data-group=result] .desk-progress-label { color: var(--ds-muted, var(--subtext0)); }
+.desk-progress-row[data-group=unknown] .desk-progress-status { color: var(--ds-attention, var(--peach)); }
 .desk-progress-status { font-size: 11px; color: var(--ds-muted, var(--subtext0)); }
 .desk-progress-detail > summary { font-size: 11px; color: var(--ds-muted, var(--subtext0)); cursor: pointer; inline-size: max-content; }
 .desk-progress-detail p { margin: var(--ds-space-1, 2px) 0; font-size: 11px; color: var(--ds-muted, var(--subtext0)); overflow-wrap: anywhere; }

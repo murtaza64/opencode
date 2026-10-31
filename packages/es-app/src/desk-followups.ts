@@ -39,18 +39,14 @@ export const followUps = (timeline: MailTimeline, session: string): FollowUp[] =
   }).sort((a, b) => b.asked - a.asked)
 }
 
-/** Open questions first, then answers from the last day; older answered ones fold into a count. */
-export const visibleFollowUps = (items: FollowUp[], now: number) => {
-  const recent = (item: FollowUp) => !!item.answer && now - item.answer.at < 86_400_000
-  return { shown: [...items.filter(item => !item.answer), ...items.filter(recent)], earlier: items.filter(item => item.answer && !recent(item)) }
-}
-
-/** A Front Desk case as the host's dashboard stores it (dotfiles es_frontdesk_case.py): metadata only. */
+/** A Front Desk case as the host's dashboard stores it (dotfiles es_frontdesk_case.py): metadata only. `state_at` and
+ * `read_back_at` (ms, writer clock) are the last change of a part's state or a deliverable's read-back; cases written
+ * before the store recorded them lack them, and their age is unknown. */
 export type DeskCase = {
   case_id: string; title?: string; authority?: string; privacy?: string; updated: number
   intents: { id: string; mode?: string; source_scope?: string; source_capability?: string; fallback?: string; outputs?: string[]; not_granted?: string[]
-    owner?: { host?: string; editspace?: string; lane?: string; session?: string; role?: string }; evidence?: string; state?: string; next?: string }[]
-  deliverables: { id: string; intent?: string; label: string; ref?: string; read_back?: boolean; evidence?: string }[]
+    owner?: { host?: string; editspace?: string; lane?: string; session?: string; role?: string }; evidence?: string; state?: string; state_at?: number; next?: string }[]
+  deliverables: { id: string; intent?: string; label: string; ref?: string; read_back?: boolean; read_back_at?: number; evidence?: string }[]
 }
 
 export const readCases = async () => {
@@ -77,15 +73,17 @@ export const caseLines = (cases: DeskCase[]) => cases.length ? [
 /** A part's label for people: its id with separators as spaces ("diff-streams-discovery" → "Diff streams discovery"). */
 export const partLabel = (id: string) => { const words = id.replace(/[-_.]+/g, " ").trim(); return words.charAt(0).toUpperCase() + words.slice(1) }
 
-/** One row of the desk's progress strip. `detail` carries owners and ids, shown only on request. */
-export type ProgressRow = { key: string; group: "needs" | "progress" | "result"; label: string; context?: string; status: string; at?: number; link?: { label: string; href: string }; detail: string[] }
+/** One row of the desk's progress strip. `at` is when the part last changed state (or the mail's time); absent, the
+ * row's age is unknown. `detail` carries owners and ids, shown only on request. */
+export type ProgressRow = { key: string; group: "needs" | "progress" | "unknown" | "result"; label: string; context?: string; status: string; at?: number; link?: { label: string; href: string }; detail: string[] }
 
 const OPEN = new Set(["requested", "routed", "acknowledged", "working"])
 const DONE = new Set(["delivered", "done"])
 
-/** The strip's rows: what needs the human, what is in progress, and recent results. A case whose parts are all
- * delivered or withdrawn shows only as results; withdrawn parts and older answers leave the strip. */
-export const progressRows = (cases: DeskCase[], items: FollowUp[], now: number): ProgressRow[] => {
+/** The strip's rows: what needs the human, what is in progress, parts in a state the desk does not recognise, then
+ * every result, newest first. Withdrawn parts leave the strip; nothing older is dropped. A case's own `updated` time
+ * is never a part's age: it moves whenever any part or note changes. */
+export const progressRows = (cases: DeskCase[], items: FollowUp[]): ProgressRow[] => {
   const rows: ProgressRow[] = []
   for (const item of cases) {
     const title = item.title || partLabel(item.case_id)
@@ -95,19 +93,18 @@ export const progressRows = (cases: DeskCase[], items: FollowUp[], now: number):
       const owner = [part.owner?.lane, part.owner?.editspace, part.owner?.host].filter(Boolean).join(" · ")
       const detail = [`case ${item.case_id}`, `part ${part.id}`, ...(owner ? [`owner ${owner}`] : []), ...(part.owner?.session ? [part.owner.session] : []), ...(part.next ? [`next: ${part.next}`] : [])]
       const deliverable = item.deliverables.find(entry => entry.intent === part.id && entry.read_back && entry.ref && /^https?:\/\//.test(entry.ref))
-      const group = state === "waiting" ? "needs" : DONE.has(state) ? "result" : OPEN.has(state) ? "progress" : "progress"
-      // Results are older work: kept only for the case's last day of changes.
-      if (group === "result" && now - item.updated > 86_400_000) continue
-      rows.push({ key: `${item.case_id}/${part.id}`, group, label: partLabel(part.id), context: title, at: item.updated,
-        status: group === "needs" ? part.next || "Waiting for you" : group === "result" ? "Delivered" : part.next || "In progress",
+      const group = state === "waiting" ? "needs" : DONE.has(state) ? "result" : OPEN.has(state) ? "progress" : "unknown"
+      rows.push({ key: `${item.case_id}/${part.id}`, group, label: partLabel(part.id), context: title, ...(part.state_at ? { at: part.state_at } : {}),
+        status: group === "needs" ? part.next || "Waiting for you" : group === "result" ? "Delivered" : group === "unknown" ? `Unknown state: ${state}` : part.next || "In progress",
         ...(deliverable ? { link: { label: deliverable.label, href: deliverable.ref! } } : {}), detail })
     }
   }
-  for (const item of visibleFollowUps(items, now).shown) rows.push({
+  for (const item of items) rows.push({
     key: `${item.editspace}:${item.id}`, group: item.answer ? "result" : "progress", label: item.text.slice(0, 80), at: item.answer?.at ?? item.asked,
     status: item.answer ? `Answered by ${item.owner}` : `Asked ${item.owner}${item.delivery === "failed" ? " · not delivered" : item.delivery === "unknown" ? " · delivery unknown" : ""}`,
     detail: [`${item.editspace}:${item.id}`, ...(item.answer ? [`answer ${item.editspace}:${item.answer.id}`] : [])],
   })
-  const order = { needs: 0, progress: 1, result: 2 }
-  return rows.sort((a, b) => order[a.group] - order[b.group] || (b.at ?? 0) - (a.at ?? 0))
+  const order = { needs: 0, progress: 1, unknown: 2, result: 3 }
+  // Newest first within a group; rows of unknown age after those with one.
+  return rows.sort((a, b) => order[a.group] - order[b.group] || (b.at ?? -1) - (a.at ?? -1))
 }

@@ -1,5 +1,5 @@
 // The Front desk chat keeps the conversation primary: a one-line progress summary above it opens to what is in
-// progress and recent results: questions its conversation asked owners by es mail, in two
+// progress, parts in an unknown state, and a closed Completed list holding every result, newest first: questions its conversation asked owners by es mail, in two
 // projects, with delivery and the owner's answer, from the dashboard's per-session mail timeline (GET /api/mail
 // ?es=&session=). Display only: no button, no send, Send unchanged. Stand-in dashboard; no real mail.
 // Run from packages/es-app: node test/desk-followups.browser.mjs [--shots DIR]
@@ -28,10 +28,12 @@ const timelines = {
   ],
 }
 const reads = []
-// One durable case with two parts owned by existing actors, as the dashboard stores it (metadata only).
+// One durable case owned by existing actors, as the dashboard stores it (metadata only). Only parts with a state_at
+// have an age; the case's own `updated` is never one.
 const caseFile = { format: "front-desk-cases/1", cases: [{ case_id: "two-parts", title: "Directions and a workspace", updated: now,
   intents: [{ id: "private-read", state: "working", owner: { lane: "exploration", editspace: "directions", host: "mini" }, next: "meeting synthesis" },
-    { id: "workspace", state: "delivered", owner: { lane: "project-lead", editspace: "streams", host: "mini" } }],
+    { id: "workspace", state: "delivered", state_at: now - 3_600_000, owner: { lane: "project-lead", editspace: "streams", host: "mini" } },
+    { id: "archived-part", state: "done", state_at: now - 5 * 86_400_000 }, { id: "odd-part", state: "paused" }],
   deliverables: [{ id: "deck", intent: "workspace", label: "Explainer deck", ref: "http://127.0.0.1:64924/", read_back: true }, { id: "report", intent: "private-read", label: "Private report" }] }] }
 const preview = await startAttentionPreview([{ name: "cases", configureServer(server) {
   server.middlewares.use("/es/api/frontdesk/cases", (_req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(caseFile)) })
@@ -55,7 +57,7 @@ try {
     // One summary line above the chat; nothing else until the human opens it (no case needs them here).
     const strip = page.getByRole("region", { name: "Desk progress" })
     const summary = strip.getByRole("button", { name: /in progress/ })
-    await expect(summary).toHaveText(/3 in progress · 2 done/, { timeout: 300_000 })
+    await expect(summary).toHaveText(/3 in progress · 1 in an unknown state · 4 done/, { timeout: 300_000 })
     await expect(summary).toHaveAttribute("aria-expanded", "false")
     await expect(strip.locator(".desk-progress-row")).toHaveCount(0)
     const stripHeight = (await strip.boundingBox()).height
@@ -63,19 +65,28 @@ try {
     // The conversation sits right under it.
     const chatTop = await page.locator(".desk-chat textarea").evaluate(element => element.getBoundingClientRect().top)
     assert(chatTop > (await strip.boundingBox()).y, `${view}: chat above the strip`)
-    // Opened: in progress first (newest first), then results; labels are human, owners and ids only in Details.
+    // Opened: in progress (newest first, undated last), then unknown states; labels are human, owners and ids only in
+    // Details. Results wait behind a closed Completed disclosure, kept however old.
     await summary.click()
-    const rows = strip.locator(".desk-progress-row")
-    await expect(rows.locator(".desk-progress-label")).toHaveText(["Private read", "No receipt yet", "Is the nightly green?", "Workspace", "Which build is on the Mini?"])
-    await expect(rows.nth(0)).toContainText("meeting synthesis")
-    await expect(rows.nth(1)).toContainText("Asked gamma · delivery unknown")
-    await expect(rows.nth(3)).toContainText("Delivered")
-    await expect(rows.nth(3).getByRole("link", { name: "Workspace" })).toHaveAttribute("href", "http://127.0.0.1:64924/")
-    await expect(rows.nth(4)).toContainText("Answered by alpha")
+    const rows = strip.locator(".desk-progress-body > .desk-progress-rows > .desk-progress-row")
+    await expect(rows.locator(".desk-progress-label")).toHaveText(["No receipt yet", "Is the nightly green?", "Private read", "Odd part"])
+    await expect(rows.nth(0)).toContainText("Asked gamma · delivery unknown")
+    await expect(rows.nth(2)).toContainText("meeting synthesis · age unknown")
+    await expect(rows.nth(3)).toContainText("Unknown state: paused · age unknown")
+    const completed = strip.locator(".desk-progress-completed")
+    await expect(completed).not.toHaveAttribute("open", "")
+    await completed.getByText("Completed (4)").click()
+    const done = completed.locator(".desk-progress-row")
+    await expect(done.locator(".desk-progress-label")).toHaveText(["Which build is on the Mini?", "Workspace", "Old question", "Archived part"])
+    await expect(done.nth(0)).toContainText("Answered by alpha")
+    await expect(done.nth(1)).toContainText("Delivered · 60m ago")
+    await expect(done.nth(1).getByRole("link", { name: "Workspace" })).toHaveAttribute("href", "http://127.0.0.1:64924/")
+    await expect(done.nth(2)).toContainText("Answered by beta · 2d ago")
+    await expect(done.nth(3)).toContainText("Delivered · 5d ago")
     await expect(strip).not.toContainText("Thanks")
     for (const text of ["ses_", "exploration · directions", "two-parts", "alpha#"]) await expect(strip.locator(".desk-progress-line")).not.toContainText([text])
-    await rows.nth(0).getByText("Details").click()
-    await expect(rows.nth(0).locator(".desk-progress-detail")).toContainText("owner exploration · directions · mini")
+    await rows.nth(2).getByText("Details").click()
+    await expect(rows.nth(2).locator(".desk-progress-detail")).toContainText("owner exploration · directions · mini")
     // No send or answer controls: only the summary toggle and Details disclosures.
     await expect(strip.locator("input, textarea")).toHaveCount(0)
     await expect(strip.locator("button")).toHaveCount(1)
@@ -83,7 +94,7 @@ try {
     assert(await strip.evaluate(element => element.scrollWidth <= element.clientWidth + 1), `${view}: strip overflows`)
     const list = strip
     if (shots) await list.screenshot({ path: path.join(shots, `followups-${view}.png`) })
-    console.log(`PROGRESS ${view}: folded to one summary line (<=40px) above the chat; opened: 3 in progress + 2 done with human labels, owners/ids only in Details; one results link; no send controls`)
+    console.log(`PROGRESS ${view}: folded to one summary line (<=40px) above the chat; opened: 3 in progress + 1 unknown state, undated parts "age unknown"; closed Completed holds 4 results newest first incl. >24h; owners/ids only in Details; one results link; no send controls`)
     await context.close()
   }
   // Off Decisions (a session page, Decisions never mounted): a companion send still carries the desk's cases.
