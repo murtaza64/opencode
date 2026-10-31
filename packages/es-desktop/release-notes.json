@@ -1,17 +1,19 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-10-31.5",
+  "release": "2026-10-31.6",
   "items": [
     {
-      "title": "Personal session cookies kept at quit",
-      "detail": "Personal: when the app quits normally, session cookies are kept for up to 7 days."
+      "title": "Surface in the top bar",
+      "detail": "Surface title and actions now sit in the app top bar; no second bar."
+    },
+    {
+      "title": "Session title alignment",
+      "detail": "Session title lines up with the chat text."
     },
     {
       "title": "Front Desk strip",
-      "detail": "Front Desk strip: one summary line; grouped one-line rows."
+      "detail": "Front Desk strip: grouped, icon-led rows with less text."
     }
   ],
-  "limits": [
-    "Personal session cookies are not kept after a crash or forced quit."
-  ]
+  "limits": []
 }
