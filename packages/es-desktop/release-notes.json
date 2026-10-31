@@ -1,11 +1,11 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-10-31.4",
+  "release": "2026-10-31.5",
   "items": [
     {
-      "title": "Mail sends in the transcript",
-      "detail": "An agent's mail send shows who it went to and that mail's delivery state, such as queued, read or handled. Handled means the recipient acknowledged it, not that the work started."
+      "title": "Personal sign-in survives restarts",
+      "detail": "Personal: sign-in now survives app restarts (session cookies kept for up to a week)."
     }
   ],
-  "limits": ["When this host has not loaded the mail record, the row says delivery not read."]
+  "limits": ["Only a normal quit keeps them; a crash or forced quit can still sign you out."]
 }
