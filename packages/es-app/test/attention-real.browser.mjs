@@ -54,7 +54,7 @@ try {
   await expect(answered.locator(".home-answer-text")).toHaveCount(0)
   const cookies = await context.cookies()
   expect(cookies.some(cookie => cookie.name === "es_attention_operator" && cookie.httpOnly && cookie.path === "/" && cookie.sameSite === "Strict")).toBe(true)
-  await answered.getByText("Record & history", { exact: true }).click()
+  await answered.locator(".home-details > summary").click()
   await expect(answered.locator("pre")).toContainText('"actor": "operator"')
   await expect(answered.locator("pre")).toContainText('"action": "answer"')
   expect(preview.fixture.calls.filter(call => !["GET", "HEAD", "OPTIONS"].includes(call.method))).toEqual([])

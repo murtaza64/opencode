@@ -232,7 +232,7 @@ const Delivery = (props: { record: AttentionRecord; attention: Attention }) => {
 }
 
 /** A derived brief fills three slots: `brief` above the controls (status and why), `briefAfter` under the
- * choices (picture, unknown, sources) and `briefDetails` before the original request. With a complete
+ * choices (picture, unknown, sources) and `briefDetails` inside Details, before the original request. With a complete
  * `prepared` brief the producer's raw context moves behind a disclosure and each option becomes a card
  * saying what choosing it leads to. */
 export const AttentionDecision = (props: { record: AttentionRecord; attention: Attention; remote?: boolean; onView?: (view: AttentionView) => void; brief?: JSX.Element; briefVisual?: JSX.Element; briefAfter?: JSX.Element; briefDetails?: JSX.Element; prepared?: BriefResult; sends?: Sends; copy?: BriefCopy; conversation?: JSX.Element; more?: JSX.Element; briefJob?: { job: string; revision: string } }) => {
@@ -266,7 +266,7 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
       <Show when={props.record.artifact}>{artifact => <ReviewArtifact artifact={artifact()} />}</Show>
       <Show when={prepared()}>{prepared => <div class="home-decision-question">
         <h3 class="home-question"><bdi dir="auto">{prepared().question}</bdi></h3>
-        {/* The request's own title only when it says something the question does not; Record & history keeps it. */}
+        {/* The request's own title only when it says something the question does not; Details keeps it. */}
         <Show when={same(props.record.title) !== same(prepared().question)}><p class="home-request-line"><bdi>Request:</bdi> <bdi dir="auto">{props.record.title}</bdi></p></Show>
         {review() ? undefined : props.brief}
         {/* Steps the human must perform stay in the producer's exact words, unfolded, above the answer. */}
@@ -309,13 +309,13 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
     </div>
     <div class="home-decision-more">
     {props.more}
-    {review() ? undefined : props.briefDetails}
-    {/* With a brief leading, the producer's exact request comes last, after the native controls. */}
-    <Show when={prepared() && !requestHasSteps(props.record)}>
-      {/* A quote that failed verification leaves the full request open instead of hiding the text. */}
-      <details class="home-original" open={!!props.copy?.quoteFailed}><summary>Original request</summary><RequestText record={props.record} /></details>
-    </Show>
-    <details onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>Record &amp; history</summary><div class="home-source"><bdi dir="ltr">{props.record.id} · {props.record.gate_key} · revision {props.record.revision}</bdi></div><Show when={history()?.version === historyVersion(props.record) ? history() : undefined} fallback={<p>Loading history…</p>}>{item => <Show when={!item().error} fallback={<p>{item().error}</p>}><pre dir="ltr">{JSON.stringify(item().events, null, 2)}</pre></Show>}</Show></details>
+    {/* One Details disclosure holds what the explainer does not need: the brief's evidence and provenance; with a
+      * brief leading and no steps, the producer's exact request; then the record's identity and its history,
+      * loaded on open. A quote that failed verification opens it so the full request is not hidden. */}
+    <details class="home-details" open={!!props.copy?.quoteFailed && !!prepared() && !requestHasSteps(props.record)} onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>Details</summary>
+      {review() ? undefined : props.briefDetails}
+      <Show when={prepared() && !requestHasSteps(props.record)}><section class="home-original"><p class="home-source home-request-from">Original request</p><RequestText record={props.record} /></section></Show>
+      <div class="home-source"><bdi dir="ltr">{props.record.id} · {props.record.gate_key} · revision {props.record.revision}</bdi></div><Show when={history()?.version === historyVersion(props.record) ? history() : undefined} fallback={<p>Loading history…</p>}>{item => <Show when={!item().error} fallback={<p>{item().error}</p>}><pre dir="ltr">{JSON.stringify(item().events, null, 2)}</pre></Show>}</Show></details>
     </div>
   </article>
 }

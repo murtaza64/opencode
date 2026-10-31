@@ -27,7 +27,7 @@
 }
 .desk-brief-ask { color: var(--ds-text, var(--text)); margin-block: 0 6px !important; }
 .home-decision .desk-brief { margin-block: 12px 4px; padding-block: 2px; padding-inline: 12px 0; background: none; }
-.attention-home details.desk-brief-detail { font-size: 13px; }
+.attention-home .desk-brief-detail { font-size: 13px; }
 .desk-brief-detail > summary { font-size: 11px; }
 .desk-brief-detail ul, .desk-brief-detail ol { margin: 6px 0; padding-inline-start: 18px; line-height: 1.6; }
 .desk-brief-detail h3 { font-size: 11px !important; font-weight: 400 !important; color: var(--ds-muted, var(--subtext0)); margin-block: 8px 2px !important; }

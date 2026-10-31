@@ -78,7 +78,7 @@ try {
   const source = await record.getByRole("link", { name: "Open source thread" }).getAttribute("href")
   if (!delivered.includes("ses_successor") || !decodeURIComponent(delivered).includes("/successor/dir") || decodeURIComponent(source).includes("/successor/dir")) throw Error(`links ${delivered} ${source}`)
   // History refreshes when delivery evidence changes without a revision bump.
-  await record.getByText("Record & history", { exact: true }).click()
+  await record.locator(".home-details > summary").click()
   await expect(record.locator("details pre")).toContainText('"reason": "admitted"')
   fixtureRecord.delivery_state = "presented"
   fixtureRecord.delivery = { ...fixtureRecord.delivery, state: "presented", updated_at: Date.now() + 1 }

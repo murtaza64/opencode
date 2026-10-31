@@ -51,7 +51,7 @@ try {
   expect(preview.fixture.calls.filter(call => call.generate === "true")).toEqual([])
   // Decisions open in the evidence pane with their native ledger controls.
   await item("Choose the bounded implementation scope").click()
-  await record().getByText("Record & history", { exact: true }).click()
+  await record().locator(".home-details > summary").click()
   await expect(record().locator("pre")).toContainText('"revision": 1')
   // Selecting an option is the answer. A stale revision cannot overwrite a newer producer update.
   await record().getByRole("radio", { name: "Small scope", exact: true }).check()
@@ -88,7 +88,7 @@ try {
   await overview(page)
   await history.getByRole("button", { name: "Resolved 1", exact: true }).click()
   await history.locator(".desk-item").filter({ hasText: "Choose the bounded implementation scope" }).click()
-  await record().getByText("Record & history", { exact: true }).click()
+  await record().locator(".home-details > summary").click()
   await expect(record().locator("pre")).toContainText('"actor": "producer"')
   await item("Other project decision").click()
   await page.locator('[data-attention-id="other_decision"]').getByRole("button", { name: "Snooze 1h" }).click()

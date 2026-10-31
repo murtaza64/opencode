@@ -62,7 +62,7 @@ page.setDefaultTimeout(90_000)
 page.on("pageerror", error => console.error(`pageerror: ${error.message}`))
 const card = page.locator('[data-attention-id="fb"]')
 const group = card.getByRole("group", { name: "Rate this brief" })
-const openDetails = async () => { await card.locator("details.desk-brief-detail > summary").click(); await expect(group).toBeVisible() }
+const openDetails = async () => { await card.locator("details.home-details > summary").click(); await expect(group).toBeVisible() }
 // The answer controls as the human left them: chosen option, note, Send state.
 const answerState = () => card.evaluate(element => ({
   checked: [...element.querySelectorAll('input[type="radio"]')].map(input => input.checked),

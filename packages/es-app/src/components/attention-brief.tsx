@@ -2,6 +2,7 @@
  * rendered separately and stays the authority; this only makes it decidable at a glance. The UI does
  * not caption it as derived: the binding is enforced in code and provenance sits in Details. */
 import { createResource, createSignal, For, Match, Show, Switch, type JSX } from "solid-js"
+import { Dynamic } from "solid-js/web"
 import { useBriefs } from "../desk-briefs"
 import { A } from "@solidjs/router"
 import { sessionHref } from "../state"
@@ -80,8 +81,9 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
     <Show when={shows("after") && complete() && ready()}>{value => <div class="desk-brief-after">
       <SourceLinks sources={value().result.sources} refs={value().job.meta.refs} item={props.item} host={props.host} />
     </div>}</Show>
-    {/* Cited evidence and provenance stay one click away, not in the reading path. */}
-    <Show when={shows("details") && ready()}>{value => <details class="desk-brief-detail"><summary>Details</summary>
+    {/* Cited evidence and provenance stay one click away, not in the reading path. As a decision's details slot it
+      * renders bare, inside the decision's own Details disclosure, so the card has one. */}
+    <Show when={shows("details") && ready()}>{value => <Dynamic component={props.part === "details" ? "div" : "details"} class="desk-brief-detail"><Show when={props.part !== "details"}><summary>Details</summary></Show>
       <Show when={value().result.facts.length}><ul><For each={value().result.facts}>{fact => <li><bdi dir="auto"><LinkedText text={fact.text} /></bdi> <Refs refs={fact.refs} known={value().job.meta.refs} item={props.item} host={props.host} /></li>}</For></ul></Show>
       <Show when={value().result.timeline.length}><ol class="desk-timeline"><For each={value().result.timeline}>{entry => <li><Show when={entry.when}><span class="home-source">{entry.when} · </span></Show><bdi dir="auto"><LinkedText text={entry.text} /></bdi> <Refs refs={entry.refs} known={value().job.meta.refs} item={props.item} host={props.host} /></li>}</For></ol></Show>
       <Show when={value().result.gaps.length}><ul class="home-muted"><For each={value().result.gaps}>{gap => <li dir="auto">{gap}</li>}</For></ul></Show>
@@ -95,7 +97,7 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
           <button type="button" class="desk-link-button" onClick={() => props.regenerate!()}>Regenerate brief</button></Show></p></Show>
       {/* Keyed to the brief shown, so a newer brief never inherits this one's rating. */}
       <Show when={!props.host && value().job} keyed>{job => <BriefFeedbackControls job={job} />}</Show>
-    </details>}</Show>
+    </Dynamic>}</Show>
   </section>
 }
 

@@ -118,7 +118,7 @@ const check = async (page, card, name) => card.evaluate((element, [name, missing
   const question = element.querySelector("h3, h4")
   const firstHeading = [...element.querySelectorAll("h1,h2,h3,h4")].find(visible)
   // A series shows each question's own request text inline.
-  const request = name === "series" ? /Grilling question 1\./.test(text) : element.querySelector(".home-request-text, details.home-original")
+  const request = name === "series" ? /Grilling question 1\./.test(text) : element.querySelector(".home-request-text, .home-original")
   const iframe = element.querySelector(".desk-visual iframe")
   const window = element.querySelector(".desk-visual-window")
   const sizes = new Set([...element.querySelectorAll("*")].filter(node => visible(node) && [...node.childNodes].some(child => child.nodeType === 3 && child.textContent.trim()))
@@ -157,7 +157,7 @@ const check = async (page, card, name) => card.evaluate((element, [name, missing
     "6 steps copyable": name !== "steps" || element.querySelectorAll(".desk-steps .desk-command-copy").length === 2 && /Check: shows as Active/.test(text),
     "7 visual earns place": name === "visual" ? !!iframe && !!iframe.title && !!window && window.getBoundingClientRect().height <= innerHeight * 0.45 + 2 && !!element.querySelector(".desk-visual-expand") : !iframe,
     "8 no title repeat": name !== "plain" || !element.querySelector(".home-request-line"),
-    "8 no duplicate request": !(element.querySelector(".home-request-text") && visible(element.querySelector(".home-request-text")) && element.querySelector("details.home-original")) && !/This brief explains|several/.test(text),
+    "8 no duplicate request": !(element.querySelector(".home-request-text") && visible(element.querySelector(".home-request-text")) && element.querySelector(".home-original")) && !/This brief explains|several/.test(text),
     "8 no empty Approved or Question labels": !/Approved/.test(text) && ![...element.querySelectorAll(".desk-brief-item-label")].some(node => node.textContent === "Question"),
     "8 missing styled alike": name !== "items" || !!element.querySelector(".desk-brief-item:nth-child(5) .brief-missing"),
     "8 one failure line": name !== "error" || /The model provider refused sign-in\./.test(text) && !visible([...element.querySelectorAll("p")].find(node => /Briefs unavailable/.test(node.textContent))),

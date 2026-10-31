@@ -114,7 +114,7 @@ try {
     const { page, card } = await open(viewport, rtl)
     await expect(card.locator("h3.home-question")).toHaveText("Add two rate limits at the edge?", { timeout: 120_000 })
     assert.deepEqual(await aboveAnswer(card, viewport.width < 600), [], `${name}: canonical values not above the answer`)
-    await expect(card.locator("details.home-original")).toHaveCount(0)
+    await expect(card.locator(".home-original")).toHaveCount(0)
     const steps = card.locator('ol[aria-label="Steps to do"] > li')
     await expect(steps).toHaveCount(2)
     await expect(steps.nth(0)).toContainText("for “I'll add both rules now”")

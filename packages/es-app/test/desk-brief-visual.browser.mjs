@@ -231,7 +231,7 @@ try {
       await expect(frame.contentFrame().locator("svg")).toContainText("a proxy, not a measured cause")
       await expect(card.getByRole("radio")).toHaveCount(3)
       await expect(card.locator(".home-option-card").first()).toContainText("About 90 minutes of read-only runs answer the storage question")
-      await expect(card.locator(".home-original p")).toBeHidden()
+      await expect(card.locator(".home-original .home-request-text")).toBeHidden()
       await expect(card).not.toContainText("Why you")
       await expect(card).not.toContainText("Unknown")
       const sources = card.locator(".desk-brief-sources a")
