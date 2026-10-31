@@ -34,6 +34,8 @@ try {
   await expect(page.locator(".filament-canvas")).toHaveCount(0)
   const grammar = () => page.evaluate(() => [...document.querySelectorAll(".tool-run-icon")].map((icon) =>
     [icon.dataset.filamentIcon, icon.dataset.tool, icon.dataset.status, icon.dataset.size].join("|")))
+  // Rows render progressively; compare only once the oldest run is on the page too.
+  await expect(run("p11_read")).toHaveCount(1)
   const off = await grammar()
   // The initial viewport shows a group with a failure, single calls, a failed call, mail and a running call.
   for (const target of [run("p74_sa"), chip("p81_one"), chip("p91_err"), chip("p95_run"), mail])
@@ -46,6 +48,7 @@ try {
   await page.reload()
   await expect(page.getByRole("button", { name: "Living activity (Filament)" })).toHaveAttribute("aria-pressed", "true")
   await expect(run("p71_ra")).toHaveAttribute("data-compact", "true")
+  await expect(run("p11_read")).toHaveCount(1)
   expect(await grammar()).toEqual(off)
   await page.screenshot({ path: join(shots, "living-on.png") })
 
