@@ -1,15 +1,15 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-10-31.2",
+  "release": "2026-10-31.3",
   "items": [
     {
-      "title": "Completed tasks in the Front Desk strip",
-      "detail": "The task strip keeps a Completed list with every finished result, newest first, and shows parts in an unknown state on their own. Ages come from when a part last changed, or say age unknown."
+      "title": "One Details section on decisions",
+      "detail": "A decision's brief evidence, original request and record history now sit together under one Details disclosure."
     },
     {
-      "title": "Smoother wallpaper changes",
-      "detail": "Blurring a Studio wallpaper no longer freezes the window while it works."
+      "title": "Self-handoff from the composer",
+      "detail": "A lane's own session can start a handoff to a fresh session from below the composer and follow it to the successor; your draft stays put."
     }
   ],
-  "limits": []
+  "limits": ["Self-handoff is available only on the session's own host."]
 }
