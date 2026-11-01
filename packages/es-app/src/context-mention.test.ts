@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { CONTEXT_MENTION_SOURCE, contextBound, contextGroups, contextKey, contextPart, insertContextLabel, type ContextRef } from "./context-mention"
+import { appendContextLabel, CONTEXT_MENTION_SOURCE, contextBound, contextGroups, contextKey, contextPart, decisionRef, insertContextLabel, type ContextRef } from "./context-mention"
 
 const sessions = [
   { id: "ses_self", title: "Relay worker", directory: "/w/self", updated: 9 },
@@ -101,4 +101,19 @@ test("a long multi-byte snapshot stays within 2 KB of UTF-8 and keeps its refere
 test("a session with an unknown update time still produces its part", () => {
   const ref: ContextRef = { kind: "session", id: "ses_x", host: "mini:4096", label: "X", directory: "/w", updated: Number.NaN }
   expect(contextPart(ref, "https://mini/session/ses_x", 0).text).toContain("Last updated: unknown")
+})
+
+test("Ask about this builds the same decision chip as the @ picker", () => {
+  const record = { id: "att_1", editspace: "fixture", revision: 3, content_revision: 2, status: "open", lane: "lane-a", kind: "decision", title: "Pick a route",
+    context: "Which route?", options: [{ id: "a", label: "A" }], recommendation: "A", updated_at: 5 } as unknown as Parameters<typeof decisionRef>[0]
+  const picked = contextGroups({ query: "route", host: "here:1", agents: [], currentID: "ses_a", added: [], sessions: [], laneOf: () => undefined, decisions: [record] })
+    .find((group) => group.name === "Decisions")!.items[0]
+  expect(decisionRef(record, "here:1")).toEqual(picked as ReturnType<typeof decisionRef>)
+  expect(decisionRef(record, "mini")).toMatchObject({ kind: "decision", id: "att_1", host: "mini", label: "Pick a route", editspace: "fixture", revision: 2 })
+})
+
+test("appending a chip label keeps the draft and puts the caret after the label", () => {
+  expect(appendContextLabel("", "Pick a route")).toEqual({ text: "@Pick a route ", caret: 14 })
+  expect(appendContextLabel("why not B?", "Pick  a\nroute")).toEqual({ text: "why not B? @Pick a route ", caret: 25 })
+  expect(appendContextLabel("line\n", "X")).toEqual({ text: "line\n@X ", caret: 8 })
 })

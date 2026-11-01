@@ -19,7 +19,7 @@ import { useLiveSession } from "../live-session-cache"
 import FakeCaret from "../components/fake-caret"
 import { SessionChips } from "../components/session-chips"
 import { ContextChips, ContextPicker } from "../components/context-picker"
-import { contextGroups, contextKey, contextPart, insertContextLabel, MAX_CONTEXT, type AgentCandidate, type ContextRef } from "../context-mention"
+import { appendContextLabel, contextGroups, contextKey, contextPart, insertContextLabel, MAX_CONTEXT, type AgentCandidate, type ContextRef } from "../context-mention"
 import { useDeskQueue } from "../desk-queue"
 import { mentionQuery, sessionLane, tokenBefore } from "../session-mention"
 import { RelativeLines } from "../components/relative-lines"
@@ -214,7 +214,9 @@ export default function SessionPage() {
 }
 
 /** `embedded` drops the page-level info panel. `headerStart` leads the header, for a host's own pane control. `context` may attach generated parts to an idle send; `onSent` reports whether that send was accepted. `anchor` scrolls to and highlights a linked message or range. `host`: another Work host whose session this is; every read, stream, write and saved draft then belongs to that host. */
-export function SessionView(props: { sessionID: string; directory: string; embedded?: boolean; context?: () => ContextPart[]; onSent?: (context: ContextPart[], accepted: boolean) => void; anchor?: () => MessageAnchor | undefined; headerStart?: JSX.Element; host?: SessionHost }) {
+export function SessionView(props: { sessionID: string; directory: string; embedded?: boolean; context?: () => ContextPart[]; onSent?: (context: ContextPart[], accepted: boolean) => void; anchor?: () => MessageAnchor | undefined; headerStart?: JSX.Element; host?: SessionHost
+  /** A context chip to add to this draft once (Ask about this); `onIncoming` acknowledges it. */
+  incoming?: () => ContextRef | undefined; onIncoming?: () => void }) {
   const sessionID = props.sessionID
   const directory = props.directory
   const sessionHost: SessionHost = props.host ?? { base: "/oc" }
@@ -1569,11 +1571,32 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const contextHref = (ref: ContextRef) => {
     if (ref.kind === "session") return sessionHref(ref.id, ref.directory)
     // Same keys the desk opens with `/?item=` and `/?surface=`.
-    if (ref.kind === "decision") return `/?item=${encodeURIComponent(`attention:${ref.editspace}:${ref.id}`)}`
+    // Another Work host's decision opens through that host's desk key.
+    if (ref.kind === "decision") return `/?item=${encodeURIComponent(`${ref.host !== contextHost ? `${ref.host}~` : ""}attention:${ref.editspace}:${ref.id}`)}`
     if (ref.kind === "surface") return `/?surface=${encodeURIComponent(ref.id)}`
     const owner = sessionRows().find((row) => row.id === ref.owner)
     return owner ? sessionHref(owner.id, owner.directory) : "/"
   }
+  // Ask about this (ATTN-17): the chip joins the current draft, its label appended after the text already there, and
+  // the caret lands after it. Nothing is sent.
+  createEffect(() => {
+    const ref = props.incoming?.()
+    if (!ref) return
+    untrack(() => {
+      props.onIncoming?.()
+      const known = contextRefs().some((item) => contextKey(item) === contextKey(ref))
+      if (!known && contextRefs().length >= MAX_CONTEXT) return setContextNote(`At most ${MAX_CONTEXT} context items per message. Remove one to add another.`)
+      if (!known) setContextRefs([...contextRefs(), ref])
+      const next = appendContextLabel(draft(), ref.label)
+      setDraft(next.text)
+      requestAnimationFrame(() => {
+        if (!promptEl) return
+        promptEl.focus({ preventScroll: true })
+        promptEl.setSelectionRange(next.caret, next.caret)
+        saveSelection(promptEl)
+      })
+    })
+  })
   // Absolute so the receiving agent can re-fetch from the attaching host.
   const contextParts = () => contextRefs().map((ref) => contextPart(ref, linkUrl(new URL(contextHref(ref), window.location.origin).href), Date.now()))
 

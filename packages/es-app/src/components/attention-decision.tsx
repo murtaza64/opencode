@@ -14,6 +14,8 @@ import { requestAgent, type AgentRef, type RequestAgent } from "../attention-age
 import { ariaShortcut } from "../shortcuts"
 import { secretInput } from "../secret-field"
 import { SecretField } from "./secret-field"
+import { useDeskChatOptional } from "../desk-companion"
+import { decisionRef } from "../context-mention"
 
 type Attention = ReturnType<typeof createAttention>
 
@@ -235,7 +237,7 @@ const Delivery = (props: { record: AttentionRecord; attention: Attention }) => {
  * choices (picture, unknown, sources) and `briefDetails` inside Details, before the original request. With a complete
  * `prepared` brief the producer's raw context moves behind a disclosure and each option becomes a card
  * saying what choosing it leads to. */
-export const AttentionDecision = (props: { record: AttentionRecord; attention: Attention; remote?: boolean; onView?: (view: AttentionView) => void; brief?: JSX.Element; briefVisual?: JSX.Element; briefAfter?: JSX.Element; briefDetails?: JSX.Element; prepared?: BriefResult; sends?: Sends; copy?: BriefCopy; conversation?: JSX.Element; more?: JSX.Element; briefJob?: { job: string; revision: string } }) => {
+export const AttentionDecision = (props: { record: AttentionRecord; attention: Attention; remote?: boolean; host?: string; onView?: (view: AttentionView) => void; brief?: JSX.Element; briefVisual?: JSX.Element; briefAfter?: JSX.Element; briefDetails?: JSX.Element; prepared?: BriefResult; sends?: Sends; copy?: BriefCopy; conversation?: JSX.Element; more?: JSX.Element; briefJob?: { job: string; revision: string } }) => {
   // A review asks the human to try one thing and say Done; it is not decided, so no brief explains or replaces it.
   const review = () => props.record.kind === "review"
   const prepared = () => review() ? undefined : props.prepared
@@ -309,6 +311,7 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
     </div>
     <div class="home-decision-more">
     {props.more}
+    <AskAbout record={props.record} host={props.host} />
     {/* One Details disclosure holds what the explainer does not need: the brief's evidence and provenance; with a
       * brief leading and no steps, the producer's exact request; then the record's identity and its history,
       * loaded on open. A quote that failed verification opens it so the full request is not hidden. */}
@@ -357,4 +360,16 @@ const ReviewAnswer = (props: { record: AttentionRecord; attention: Attention; on
     </div>
     <Show when={reporting() && issue()}><p class="home-input-problem" id={`${id}-issue`} role="status" dir="auto">{issue()}</p></Show>
   </div>
+}
+
+/** Ask about this (ATTN-17): adds this decision, at its current revision and host, as a chip to the Front desk
+ * chat's draft and opens the chat. It writes nothing: no answer, no message, no notification. */
+const AskAbout = (props: { record: AttentionRecord; host?: string }) => {
+  const chat = useDeskChatOptional()
+  const [asked, setAsked] = createSignal(false)
+  return <Show when={chat}>{(desk) => <span class="desk-ask-about">
+    <button type="button" class="desk-button" title="Add this decision to the Front desk chat's draft; nothing is sent"
+      onClick={() => { desk().ask(decisionRef(props.record, props.host ?? window.location.host)); setAsked(true) }}>Ask about this</button>
+    <Show when={asked()}><span class="home-muted" role="status">Added to the chat draft.</span></Show>
+  </span>}</Show>
 }

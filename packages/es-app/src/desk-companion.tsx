@@ -11,6 +11,7 @@ import { createTasks, deskTasksSupported, type TaskJob } from "./desk-tasks"
 import { getComposer } from "./composer"
 import { createDeskSession } from "./desk-session"
 import { es, type ContextPart } from "./api"
+import type { ContextRef } from "./context-mention"
 import { caseLines, followUps, progressRows, readCases, type DeskCase, type FollowUp, type ProgressRow } from "./desk-followups"
 import "./desk-followups.css"
 import { SessionView } from "./pages/session"
@@ -54,6 +55,12 @@ type DeskChat = {
   tasks: ReturnType<typeof createTasks>
   setView: (view: (() => string) | undefined) => void
   view: () => string
+  /** Ask about this (ATTN-17): opens the chat and adds `ref` as a chip to its current draft once the chat's view is
+   * mounted. Never sends. */
+  ask: (ref: ContextRef) => void
+  /** The chip waiting for the chat's view, until it takes it. */
+  asked: Accessor<ContextRef | undefined>
+  takeAsked: () => void
 }
 
 const Ctx = createContext<DeskChat>()
@@ -68,6 +75,7 @@ export const DeskChatProvider = (props: ParentProps) => {
   const [floatingOpen, setFloatingOpen] = createSignal(false)
   const [contextGetter, setContextGetter] = createSignal<(() => ContextPart[]) | undefined>()
   const [viewGetter, setViewGetter] = createSignal<(() => string) | undefined>()
+  const [asked, setAsked] = createSignal<ContextRef>()
   const prepared = useBriefs()
   const tasks = createTasks(prepared.anchor.pointer, prepared.anchor.ensure, () => desk.status() === "ready" ? desk.pointer() : undefined,
     async () => { prepared.activate(); await prepared.waitReady() })
@@ -98,9 +106,15 @@ export const DeskChatProvider = (props: ParentProps) => {
     tasks,
     setView: (getter) => setViewGetter(() => getter),
     view: () => viewGetter()?.() ?? "",
+    ask: (ref) => { setAsked(() => ref); value.setOpen(true) },
+    asked,
+    takeAsked: () => setAsked(undefined),
   }
   return <Ctx.Provider value={value}>{props.children}</Ctx.Provider>
 }
+
+/** The desk chat when this tree has one (the shell does); undefined elsewhere, e.g. an isolated card. */
+export const useDeskChatOptional = () => useContext(Ctx)
 
 export const useDeskChat = () => {
   const value = useContext(Ctx)
@@ -151,6 +165,7 @@ export const DeskCompanion = () => {
       <Show when={target()}>{(current) => <DeskTasks tasks={chat.tasks} session={current().session} directory={current().directory} followUps={supported() === true} />}</Show>
       <Show when={target()} keyed fallback={<DeskStart desk={chat.desk} directory={chat.directory()} />}>
         {(current) => <SessionView sessionID={current.session} directory={current.directory} embedded context={chat.context} onSent={chat.desk.sent}
+          incoming={chat.asked} onIncoming={chat.takeAsked}
           headerStart={<button class="header-icon desk-chat-hide" aria-label="Close Front desk chat" title="Close Front desk chat" onClick={close}>
             <Icon name="chevron-down" size="small" /></button>} />}
       </Show>

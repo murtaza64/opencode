@@ -54,7 +54,7 @@ const RemoteDecision = (props: { host: string; record: NonNullable<Extract<WorkE
   })
   return <Show when={!fresh.error || attention.snapshot()} fallback={<p class="desk-surface-state" role="alert">{String(fresh.error?.message ?? fresh.error)}</p>}>
     <Show when={fresh.loading || fresh() !== undefined || attention.snapshot()} fallback={<p class="desk-surface-state">This decision is no longer on that host.</p>}>
-      <Show when={anchors()} fallback={<AttentionDecision record={current()} attention={attention} remote />}>{pointers =>
+      <Show when={anchors()} fallback={<AttentionDecision record={current()} attention={attention} remote host={props.host} />}>{pointers =>
         <RemotePreparedDecision host={props.host} record={current} attention={attention} anchors={pointers()} />}</Show>
     </Show>
   </Show>
@@ -75,7 +75,7 @@ const RemotePreparedDecision = (props: { host: string; record: () => NonNullable
     <Show when={!briefs.regenerating() && !running()} fallback={<span class="home-muted" role="status">Preparing brief on that host…</span>}>
       <button type="button" class="desk-link-button" onClick={() => void briefs.regenerate(item())}>Request brief</button></Show>
     <Show when={briefs.error().startsWith("Brief not regenerated") ? briefs.error() : ""}>{message => <span class="home-muted" role="alert"> {message()}</span>}</Show></p></Show>
-  return <AttentionDecision record={props.record()} attention={props.attention} remote prepared={brief()}
+  return <AttentionDecision record={props.record()} attention={props.attention} remote host={props.host} prepared={brief()}
     briefJob={job() ? { job: job()!.id, revision: job()!.meta.revision } : undefined} sends={sends()} copy={copy()}
     brief={<>{part("lead")}{request()}</>} briefVisual={part("visual")} briefAfter={part("after")} briefDetails={part("details")} />
 }

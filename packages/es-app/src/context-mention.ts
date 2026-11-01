@@ -93,10 +93,7 @@ export const contextGroups = (input: {
     .map((record) => ({ record, score: score(record.title, record.lane ?? undefined, record.context) }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || Number(a.record.status !== "open") - Number(b.record.status !== "open") || b.record.updated_at - a.record.updated_at)
-    .map(({ record }): ContextRef => ({ kind: "decision", id: record.id, host: input.host, label: record.title, editspace: record.editspace,
-      revision: record.content_revision ?? record.revision, status: record.status, lane: record.lane ?? undefined, ask: record.kind,
-      question: clip(record.context, 1200), options: record.options.slice(0, 8).map((option) => clip(option.label, 120)),
-      recommendation: record.recommendation ? clip(record.recommendation, 300) : undefined, updated: record.updated_at }))
+    .map(({ record }) => decisionRef(record, input.host))
     .filter((ref) => !added.has(contextKey(ref)))
     .slice(0, 6)
   const surfaces = (input.surfaces ?? [])
@@ -110,6 +107,20 @@ export const contextGroups = (input: {
     .slice(0, 6)
   return ([{ name: "Agents", items: agents }, { name: "Sessions", items: sessions }, { name: "Decisions", items: decisions },
     { name: "Surfaces", items: surfaces }] as ContextGroup[]).filter((group) => group.items.length)
+}
+
+/** A decision chip: the record's question and options at its current revision, on `host` (this window's host, or
+ * another Work host's ID). The @ picker and a card's Ask about this build the same chip. */
+export const decisionRef = (record: DecisionCandidate, host: string): Extract<ContextRef, { kind: "decision" }> => ({
+  kind: "decision", id: record.id, host, label: record.title, editspace: record.editspace,
+  revision: record.content_revision ?? record.revision, status: record.status, lane: record.lane ?? undefined, ask: record.kind,
+  question: clip(record.context, 1200), options: record.options.slice(0, 8).map((option) => clip(option.label, 120)),
+  recommendation: record.recommendation ? clip(record.recommendation, 300) : undefined, updated: record.updated_at })
+
+/** Appends `@Label ` to the end of a draft, keeping its text, with one space before it when needed. */
+export const appendContextLabel = (text: string, label: string) => {
+  const inserted = `${text && !/\s$/.test(text) ? " " : ""}@${label.replace(/\s+/g, " ").trim()} `
+  return { text: text + inserted, caret: text.length + inserted.length }
 }
 
 /** What adding this item attaches, stated before it is added. */
