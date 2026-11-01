@@ -1459,8 +1459,14 @@ const layer = Layer.effect(
           )
           const latest = MessageV2.latest(history)
           const assistant = history.findLast((m) => m.info.id === latest.assistant?.id)
-          // An advisory wake never resumes uncertain work left by a crash, abort, or error.
-          if (latest.user && !SessionRunState.completedTurn(latest.user, latest.assistant, assistant?.parts ?? []))
+          // An advisory wake never resumes uncertain work left by a crash, abort, or error. A history holding only
+          // no-reply notes has no turn to resume: notes are never answered, so waiting input may start one.
+          const notesOnly = latest.user?.noReply === true && !latest.assistant
+          if (
+            latest.user &&
+            !notesOnly &&
+            !SessionRunState.completedTurn(latest.user, latest.assistant, assistant?.parts ?? [])
+          )
             return
           if (!(yield* inputs.promote(sessionID, true))) return
           return yield* runLoop(sessionID)
