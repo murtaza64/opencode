@@ -227,6 +227,28 @@ describe.skipIf(!hasStore)("pins against the real host store", () => {
     expect(work.state()).toMatchObject({ status: "unavailable", reason: "profile", pins: [] })
   }, 60_000)
 
+  test("a read-only peer lists its host's pins and never writes, even with changes left in its outbox", async () => {
+    const origin = await storeHost("personal")
+    const owner = client("ygnium", tab(origin), memoryStorage(), "personal")
+    await owner.refresh()
+    await owner.pin("session:ses_kept")
+    const send = tab(origin)
+    const methods: string[] = []
+    const storage = memoryStorage()
+    storage.setItem("es-pins-outbox:ygnium", JSON.stringify([{ kind: "unpin", ref: "session:ses_kept", body: { at: 1, op: "stale" } }]))
+    const peer = createPinsClient({ host: "ygnium", prefix: "", profile: "personal", readOnly: true, storage,
+      fetch: (input, init) => (methods.push(init?.method ?? "GET"), send(input, init)) })
+    await peer.refresh()
+    await Promise.all([peer.pin("session:ses_new"), peer.unpin("session:ses_kept"), peer.reorder("session:ses_kept", 1), peer.migrate([{ ref: "session:ses_old" }])])
+    await peer.refresh()
+    expect(peer.state()).toMatchObject({ status: "ready", pending: 0 })
+    expect(peer.state().pins.map((pin) => pin.ref)).toEqual(["session:ses_kept"])
+    expect(methods).toEqual(["GET", "GET"])
+    expect(storage.getItem("es-pins-migrated:ygnium")).toBeNull()
+    await owner.refresh()
+    expect(owner.state().pins.map((pin) => pin.ref)).toEqual(["session:ses_kept"])
+  }, 60_000)
+
   test("importing local pins happens once per host and never overrides an unpin the store holds", async () => {
     const origin = await storeHost()
     const phone = client("mini", tab(origin))

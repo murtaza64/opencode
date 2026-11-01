@@ -1,9 +1,15 @@
-import { lanePinRef, moveRank, orderedPins, pinUnionKey, sessionPinRef, unionPins, validPinRef, type Pin, type PinsClient } from "./pins-sync"
+import { lanePinRef, moveRank, orderedPins, pinUnionKey, sessionPinRef, syncableHost, unionPins, validPinRef, type Pin, type PinsClient } from "./pins-sync"
 import { pinSessionID } from "./session-pins"
+import { aggregates, workFeedHosts, type HostInfo } from "./host"
 
 export type PinRow = { id: string; directory: string }
 export type PinOwner = { editspace: string; lane: string; owner: string }
 export type PinGroup<T extends PinRow> = { host: string; rows: T[]; owners: PinOwner[]; client?: PinsClient }
+
+/** The other hosts whose pin stores this page reads: the hosts it aggregates (the Work view, or a Personal aggregator's
+ * Personal peers), each with this page's profile and a verified id. A Work host's own tab reads none. */
+export const pinPeerHosts = (info: Pick<HostInfo, "id" | "remote" | "work" | "profile">) =>
+  aggregates(info) ? workFeedHosts(info).filter((item) => item.profile === info.profile && syncableHost(item.id)) : []
 
 export const orderingPinsClient = (client: PinsClient | undefined, migrated: boolean) => {
   if (!client || !migrated) return
@@ -78,7 +84,8 @@ export const movePinnedRow = (
 ) => {
   const host = row.host ?? ownHost
   const group = groups.find((item) => item.host === host)
-  if (!group?.client || group.client.state().status !== "ready" || !group.rows.some((item) => item.id === row.id)) return false
+  // A read-only peer's pins anchor other moves but are moved only on that host.
+  if (!group?.client || group.client.readOnly || group.client.state().status !== "ready" || !group.rows.some((item) => item.id === row.id)) return false
   const ref = rowPin(row, group.owners, group.client.state().pins)?.ref
   if (!ref) return false
   const visible = unionPins(groups.flatMap((item) => item.client?.state().status === "ready" ? [{ host: item.host, pins: item.client.state().pins }] : []))

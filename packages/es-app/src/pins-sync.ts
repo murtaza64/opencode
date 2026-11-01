@@ -101,8 +101,10 @@ export type PinsState = {
 }
 
 /** The client of one host's pin store. `prefix`: "" for this page's own host, "/hosts/<id>" for another Work host.
- * `profile`: the profile this view lists; a store of another profile is refused. */
-export const createPinsClient = (options: { host: string; prefix: string; profile: string; now?: () => number; storage?: Storage; fetch?: (input: string, init?: RequestInit) => Promise<Response> }) => {
+ * `profile`: the profile this view lists; a store of another profile is refused. `readOnly`: a peer whose transport
+ * refuses writes (a pinned-SSH Personal host, contract §5b): its pins are listed and anchor moves, but pin, unpin,
+ * reorder and import send nothing and queue nothing, and an outbox left for that host is never replayed. */
+export const createPinsClient = (options: { host: string; prefix: string; profile: string; readOnly?: boolean; now?: () => number; storage?: Storage; fetch?: (input: string, init?: RequestInit) => Promise<Response> }) => {
   if (!syncableHost(options.host)) throw new Error(`Pins sync needs a verified host id, not ${JSON.stringify(options.host)}`)
   const now = options.now ?? Date.now
   const storage = options.storage ?? localStorage
@@ -116,7 +118,7 @@ export const createPinsClient = (options: { host: string; prefix: string; profil
       return []
     }
   }
-  let outbox = loadOutbox()
+  let outbox = options.readOnly ? [] : loadOutbox()
   const saveOutbox = () => {
     try { storage.setItem(outboxKey, JSON.stringify(outbox)) } catch {
       // The write still goes out; only its retry across a reload is lost.
@@ -216,8 +218,9 @@ export const createPinsClient = (options: { host: string; prefix: string; profil
     setState((previous) => ({ ...previous, pending: outbox.length }))
     return flush()
   }
-  const write = (kind: PinKind, ref: string, order?: number) => {
+  const write = async (kind: PinKind, ref: string, order?: number) => {
     if (!validPinRef(ref)) throw new Error(`Invalid pin ref ${JSON.stringify(ref)}`)
+    if (options.readOnly) return
     return enqueue([{ kind, ref, body: { at: now(), op: crypto.randomUUID(), ...(kind === "order" ? { order } : {}) } }])
   }
   const migratedKey = `es-pins-migrated:${options.host}`
@@ -225,6 +228,7 @@ export const createPinsClient = (options: { host: string; prefix: string; profil
 
   return {
     host: options.host,
+    readOnly: options.readOnly === true,
     state,
     /** Reads this host's changes since the last read (all pins on the first), then replays unsent writes. */
     refresh: async () => {
@@ -236,7 +240,7 @@ export const createPinsClient = (options: { host: string; prefix: string; profil
     reorder: (ref: string, order: number) => write("order", ref, order),
     /** The one-time import of this device's local pins for this host; marked done per (device, host) once sent. */
     migrate: async (local: { ref: string; pinnedAt?: number }[]) => {
-      if (storage.getItem(migratedKey)) return
+      if (options.readOnly || storage.getItem(migratedKey)) return
       // An import still waiting in the outbox is replayed, not queued again; its order follows once every pin landed.
       const imported = (item: Queued) => item.body.migrate || item.body.if
       if (outbox.some(imported)) await flush()

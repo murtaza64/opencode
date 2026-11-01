@@ -22,7 +22,7 @@ import { resolveProjectName } from "./project-name"
 import { reconcileHostPins, reconcilePins, transferPins, type Handoff, type PendingHandoff } from "./handoffs"
 import { pinSessionID } from "./session-pins"
 import { createPinsClient, syncableHost, type PinsClient } from "./pins-sync"
-import { isRowPinned, legacyPinsCovered, migrateReadyPins, movePinnedRow, orderingPinsClient, pinnedRows, pinnedUnionRows, rowPinRef, type PinOwner } from "./pin-view"
+import { isRowPinned, legacyPinsCovered, migrateReadyPins, movePinnedRow, orderingPinsClient, pinPeerHosts, pinnedRows, pinnedUnionRows, rowPinRef, type PinOwner } from "./pin-view"
 import { createCloudAgents } from "./cloud-agents"
 import { createSessionFailures } from "./session-failures"
 import { coalesced } from "./coalesced"
@@ -251,9 +251,11 @@ export function DashboardProvider(props: ParentProps) {
   const [migratedHosts, setMigratedHosts] = createSignal<string[]>([])
   const migratingHosts = new Set<string>()
   const localClient = () => pinClients()[ownPinHost() ?? ""]
+  // A read-only peer has nothing of this device's to import, so its store is the view as soon as it is read.
+  const synced = (host: string) => migratedHosts().includes(host) || !!pinClients()[host]?.readOnly
   const usableClient = (host: string) => {
     const client = pinClients()[host]
-    return client?.state().status === "ready" && migratedHosts().includes(host) ? client : undefined
+    return client?.state().status === "ready" && synced(host) ? client : undefined
   }
   // One pass over the session index per index change, not per caller per event.
   const sessionIndex = createMemo(() => {
@@ -664,9 +666,8 @@ export function DashboardProvider(props: ParentProps) {
   const workProject = () => allProjects() ? undefined : editspace() ?? editspaces()?.default ?? (editspaces() ? undefined : null)
   void readHost().then((info) => {
     if (syncableHost(info.id) && info.profile) {
-      const work = info.remote ? [] : workFeedHosts(info).filter((item) => item.profile === info.profile && syncableHost(item.id))
       const clients = [createPinsClient({ host: info.id, prefix: "", profile: info.profile }),
-        ...work.map((item) => createPinsClient({ host: item.id, prefix: `/hosts/${item.id}`, profile: info.profile! }))]
+        ...pinPeerHosts(info).map((item) => createPinsClient({ host: item.id, prefix: `/hosts/${item.id}`, profile: info.profile!, readOnly: item.readOnly }))]
       runWithOwner(owner, () => {
         setOwnPinHost(info.id)
         setPinClients(Object.fromEntries(clients.map((client) => [client.host, client])))
@@ -696,7 +697,7 @@ export function DashboardProvider(props: ParentProps) {
     value.owners.map((item) => ({ editspace, lane: item.lane, owner: item.owner })))
   createEffect(() => {
     for (const client of Object.values(pinClients())) {
-      if (client.state().status !== "ready" || migratingHosts.has(client.host) || migratedHosts().includes(client.host)) continue
+      if (client.state().status !== "ready" || migratingHosts.has(client.host) || synced(client.host)) continue
       const own = client.host === ownPinHost()
       const feed = own ? undefined : feeds().find((item) => item.host.id === client.host)
       if (!own && !feed) continue
@@ -789,7 +790,7 @@ export function DashboardProvider(props: ParentProps) {
     isPinned: workPinned,
     togglePin: (row) => {
       if (!row.host) return
-      if (pinClients()[row.host]?.state().reason === "profile") return
+      if (pinClients()[row.host]?.state().reason === "profile" || pinClients()[row.host]?.readOnly) return
       const client = usableClient(row.host)
       if (client) {
         const feed = feeds().find((item) => item.host.id === row.host)
@@ -805,7 +806,7 @@ export function DashboardProvider(props: ParentProps) {
       }
       setHostPins((previous) => ({ ...previous, [row.host!]: next }))
       const offline = pinClients()[row.host]
-      if (offline && migratedHosts().includes(row.host)) {
+      if (offline && synced(row.host)) {
         const feed = feeds().find((item) => item.host.id === row.host)
         const ref = rowPinRef(row, feed ? workOwners(feed) : [])
         const existing = offline.state().pins.filter((pin) => pin.ref === ref || pin.ref === `session:${row.id}`)
@@ -828,7 +829,7 @@ export function DashboardProvider(props: ParentProps) {
       { host, rows: client ? sessions() : localClient()?.state().reason === "profile" ? [] : pinnedSessions(), owners: localPinOwners(), client },
       ...feeds().map((feed) => {
         const remote = writable ? feed.state().status === "ready" ? usableClient(feed.host.id) : undefined
-          : orderingPinsClient(pinClients()[feed.host.id], migratedHosts().includes(feed.host.id))
+          : orderingPinsClient(pinClients()[feed.host.id], synced(feed.host.id))
         return {
           host: feed.host.id,
           rows: remote ? feed.state().rows : pinClients()[feed.host.id]?.state().reason === "profile" ? [] : work.pinned().filter((row) => row.host === feed.host.id),

@@ -175,7 +175,10 @@ export default function Sidebar() {
     const rest = allPinned().filter((other) => hostRowKey(other) !== hostRowKey(row))
     const from = allPinned().findIndex((other) => hostRowKey(other) === hostRowKey(row))
     if (from === to) return
-    if (!movePin(row, rest[to - 1], rest[to])) note(`Can't reorder ${row.title || row.id} now: ${feedOf(row)?.host.label ?? "its host"} is not synced. Nothing changed.`)
+    if (movePin(row, rest[to - 1], rest[to])) return
+    const host = feedOf(row)?.host
+    note(host?.readOnly ? `Can't reorder ${row.title || row.id} here: pins on ${host.label} are changed on that host. Nothing changed.`
+      : `Can't reorder ${row.title || row.id} now: ${host?.label ?? "its host"} is not synced. Nothing changed.`)
   }
   // Rows may be rebuilt when the order changes (the move lands when the owning host answers): for a few seconds after
   // a keyboard move, a rebuilt row gets its focus back, unless focus has moved elsewhere meanwhile.
@@ -505,9 +508,10 @@ export default function Sidebar() {
         <HostGlyph host={s.host!} />
         <span class="nav-title" dir="auto">{s.title || s.id}</span>
       </a>
-      <button type="button" class="pin-action" classList={{ pinned: work.isPinned(s) }}
+      {/* A read-only host's pins are listed here but changed only on that host. */}
+      <button type="button" class="pin-action" classList={{ pinned: work.isPinned(s) }} disabled={feed?.host.readOnly}
         aria-label={`${work.isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id} on ${label()}`}
-        title={`${work.isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
+        title={feed?.host.readOnly ? `${work.isPinned(s) ? "Pinned" : "Not pinned"} on ${label()}; change pins on that host` : `${work.isPinned(s) ? "Unpin" : "Pin"} ${s.title || s.id}`}
         onClick={() => work.togglePin(s)}>{work.isPinned(s) ? "\u2665\ufe0e" : "\u2661\ufe0e"}</button>
       <Show when={feed && handedOff()}>{(next) => <a class="handoff-next-link" href={hostSessionHref(feed!.host, next())}
         title={`Handed off to ${next().title} on ${label()}`} aria-label={`${s.title || s.id} handed off to ${next().title} on ${label()}`}>
