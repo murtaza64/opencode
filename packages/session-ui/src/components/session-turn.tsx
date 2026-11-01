@@ -25,7 +25,7 @@ import { SessionRetry } from "./session-retry"
 import { TextReveal } from "@opencode-ai/ui/text-reveal"
 import { createAutoScroll } from "@opencode-ai/ui/hooks"
 import { useI18n } from "@opencode-ai/ui/context/i18n"
-import { normalize } from "./session-diff"
+import { summaryView } from "./session-diff"
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
@@ -459,7 +459,7 @@ export function SessionTurn(
                     >
                       <For each={visible()}>
                         {(diff) => {
-                          const view = normalize(diff)
+                          const view = summaryView(diff)
                           const active = createMemo(() => expanded().includes(diff.file))
                           const [shown, setShown] = createSignal(false)
 
@@ -507,9 +507,20 @@ export function SessionTurn(
                               </StickyAccordionHeader>
                               <Accordion.Content>
                                 <Show when={shown()}>
-                                  <div data-slot="session-turn-diff-view" data-scrollable>
-                                    <Dynamic component={fileComponent} mode="diff" fileDiff={view.fileDiff} />
-                                  </div>
+                                  <Show
+                                    when={"fileDiff" in view ? view : undefined}
+                                    fallback={
+                                      <div data-slot="session-turn-diff-omitted">
+                                        {i18n.t("ui.sessionTurn.diffs.omitted")}
+                                      </div>
+                                    }
+                                  >
+                                    {(shownView) => (
+                                      <div data-slot="session-turn-diff-view" data-scrollable>
+                                        <Dynamic component={fileComponent} mode="diff" fileDiff={shownView().fileDiff} />
+                                      </div>
+                                    )}
+                                  </Show>
                                 </Show>
                               </Accordion.Content>
                             </Accordion.Item>

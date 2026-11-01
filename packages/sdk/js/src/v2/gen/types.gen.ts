@@ -163,6 +163,7 @@ export type SnapshotFileDiff = {
   additions: number
   deletions: number
   status?: "added" | "deleted" | "modified"
+  patchOmitted?: true
 }
 
 export type PermissionAction = "allow" | "deny" | "ask"

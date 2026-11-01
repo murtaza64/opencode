@@ -1,5 +1,6 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { Effect, Layer, Context, Schema } from "effect"
+import { Effect, Layer, Context, Schema, Semaphore } from "effect"
+import { isDeepStrictEqual } from "node:util"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Snapshot } from "@/snapshot"
@@ -66,6 +67,41 @@ function unquoteGitPath(input: string) {
   return Buffer.from(bytes).toString()
 }
 
+/** UTF-8 bytes of patch text a user message summary carries inline; larger diffs keep counts and omit patches. */
+export const INLINE_PATCH_BUDGET = 256 * 1024
+/** Turn ranges remembered per user message, so an unchanged range is neither recomputed nor rebroadcast. */
+const RANGES = 1_000
+
+/**
+ * Keep every file's status and counts; inline patches in diff order while they fit the budget and mark the rest
+ * `patchOmitted`, so a reader can tell an omitted patch from an empty one.
+ */
+export function bound(diffs: readonly Snapshot.FileDiff[], budget = INLINE_PATCH_BUDGET): Snapshot.FileDiff[] {
+  let used = 0
+  return diffs.map((diff) => {
+    if (diff.patch === undefined) return diff
+    const size = Buffer.byteLength(diff.patch)
+    if (used + size <= budget) {
+      used += size
+      return diff
+    }
+    const { patch: _, ...metadata } = diff
+    return { ...metadata, patchOmitted: true as const }
+  })
+}
+
+/** The turn's first step-start snapshot and last step-finish snapshot. */
+function range(messages: readonly SessionV1.WithParts[]) {
+  let from: string | undefined
+  let to: string | undefined
+  for (const item of messages) {
+    if (!from)
+      from = item.parts.flatMap((part) => (part.type === "step-start" && part.snapshot ? [part.snapshot] : []))[0]
+    for (const part of item.parts) if (part.type === "step-finish" && part.snapshot) to = part.snapshot
+  }
+  return from && to ? { from, to } : undefined
+}
+
 export interface Interface {
   readonly summarize: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<void>
   readonly diff: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Snapshot.FileDiff[]>
@@ -84,45 +120,70 @@ const layer = Layer.effect(
     const database = yield* Database.Service
 
     const computeDiff = Effect.fn("SessionSummary.computeDiff")(function* (input: { messages: SessionV1.WithParts[] }) {
-      let from: string | undefined
-      let to: string | undefined
-      for (const item of input.messages) {
-        if (!from) {
-          for (const part of item.parts) {
-            if (part.type === "step-start" && part.snapshot) {
-              from = part.snapshot
-              break
-            }
-          }
-        }
-        for (const part of item.parts) {
-          if (part.type === "step-finish" && part.snapshot) to = part.snapshot
-        }
-      }
-      if (from && to) return yield* snapshot.diffFull(from, to)
+      const turn = range(input.messages)
+      if (turn) return yield* snapshot.diffFull(turn.from, turn.to)
       return []
     })
+
+    // Every step-finish asks for a summary of the whole turn. Serialize per message and remember the summarized
+    // range: a step that changed nothing must not rebuild and rebroadcast a payload that can be megabytes.
+    const summarized = new Map<MessageID, string>()
+    const locks = new Map<MessageID, { semaphore: Semaphore.Semaphore; users: number }>()
+    const exclusive = <A, E, R>(messageID: MessageID, effect: Effect.Effect<A, E, R>) =>
+      Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const entry = locks.get(messageID) ?? { semaphore: Semaphore.makeUnsafe(1), users: 0 }
+          entry.users++
+          locks.set(messageID, entry)
+          return entry
+        }),
+        (entry) => entry.semaphore.withPermits(1)(effect),
+        (entry) =>
+          Effect.sync(() => {
+            entry.users--
+            if (entry.users === 0) locks.delete(messageID)
+          }),
+      )
+    const remember = (messageID: MessageID, key: string) => {
+      summarized.delete(messageID)
+      summarized.set(messageID, key)
+      if (summarized.size > RANGES) summarized.delete(summarized.keys().next().value!)
+    }
 
     const summarize = Effect.fn("SessionSummary.summarize")(function* (input: {
       sessionID: SessionID
       messageID: MessageID
     }) {
-      yield* sessions.setSummary({
-        sessionID: input.sessionID,
-        summary: {
-          additions: 0,
-          deletions: 0,
-          files: 0,
-        },
+      const reset = Effect.gen(function* () {
+        yield* sessions.setSummary({
+          sessionID: input.sessionID,
+          summary: {
+            additions: 0,
+            deletions: 0,
+            files: 0,
+          },
+        })
+        yield* events.publish(Session.Event.Diff, { sessionID: input.sessionID, diff: [] })
       })
-      yield* events.publish(Session.Event.Diff, { sessionID: input.sessionID, diff: [] })
-      if ((yield* config.get()).snapshot === false) return
-      const messages = yield* MessageV2.turn(input).pipe(Effect.provideService(Database.Service, database))
-      const target = messages.find((m) => m.info.id === input.messageID)
-      if (!target || target.info.role !== "user") return
-      const msgDiffs = yield* computeDiff({ messages })
-      target.info.summary = { ...target.info.summary, diffs: msgDiffs }
-      yield* sessions.updateMessage(target.info)
+      if ((yield* config.get()).snapshot === false) return yield* reset
+      yield* exclusive(
+        input.messageID,
+        Effect.gen(function* () {
+          const messages = yield* MessageV2.turn(input).pipe(Effect.provideService(Database.Service, database))
+          const target = messages.find((m) => m.info.id === input.messageID)
+          const turn = range(messages)
+          const key = turn ? `${turn.from}..${turn.to}` : ""
+          if (summarized.get(input.messageID) === key) return
+          yield* reset
+          if (!target || target.info.role !== "user") return
+          const diffs = bound(turn ? yield* snapshot.diffFull(turn.from, turn.to) : [])
+          if (!isDeepStrictEqual(target.info.summary?.diffs, diffs)) {
+            target.info.summary = { ...target.info.summary, diffs }
+            yield* sessions.updateMessage(target.info)
+          }
+          remember(input.messageID, key)
+        }),
+      )
     })
 
     const diff = Effect.fn("SessionSummary.diff")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {
@@ -132,7 +193,22 @@ const layer = Layer.effect(
         Effect.provideService(Database.Service, database),
       )
       if (!message || message.info.role !== "user") return []
-      const diffs = message.info.summary?.diffs ?? []
+      const stored = message.info.summary?.diffs ?? []
+      // This route is the deliberate review read: rebuild patches the inline summary omitted. A patch the snapshot
+      // store can no longer produce stays marked omitted rather than turning into an empty diff.
+      const full = stored.some((item) => item.patchOmitted)
+        ? yield* MessageV2.turn({ sessionID: input.sessionID, messageID: input.messageID }).pipe(
+            Effect.provideService(Database.Service, database),
+            Effect.flatMap((messages) => computeDiff({ messages })),
+          )
+        : []
+      const rebuilt = new Map(full.flatMap((item) => (item.file !== undefined && item.patch ? [[item.file, item]] : [])))
+      const diffs = stored.map((item) => {
+        const hit = item.patchOmitted && item.file !== undefined ? rebuilt.get(item.file) : undefined
+        if (!hit) return item
+        const { patchOmitted: _, ...metadata } = item
+        return { ...metadata, patch: hit.patch }
+      })
       return diffs.map((item) => {
         if (item.file === undefined) return item
         const file = unquoteGitPath(item.file)

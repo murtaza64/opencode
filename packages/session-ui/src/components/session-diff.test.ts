@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { normalize, resolveFileDiff, text } from "./session-diff"
+import { normalize, resolveFileDiff, summaryView, text } from "./session-diff"
 
 describe("session diff", () => {
   test("renders whole-file unified patches as complete diffs", () => {
@@ -131,5 +131,20 @@ describe("session diff", () => {
 
     expect(text(view, "deletions")).toBe("")
     expect(text(view, "additions")).toBe("")
+  })
+
+  test("a summary row whose patch Core omitted is reported as omitted, never as an empty diff", () => {
+    const view = summaryView({ file: "big.ts", additions: 20_000, deletions: 0, status: "added", patchOmitted: true })
+
+    expect(view).toEqual({ file: "big.ts", additions: 20_000, deletions: 0, status: "added", omitted: true })
+    expect("fileDiff" in view).toBe(false)
+  })
+
+  test("a summary row with its patch inline still renders the patch", () => {
+    const patch =
+      "Index: a.ts\n===================================================================\n--- a.ts\t\n+++ a.ts\t\n@@ -1,2 +1,2 @@\n one\n-two\n+three\n"
+    const view = summaryView({ file: "a.ts", patch, additions: 1, deletions: 1, status: "modified" })
+
+    expect("fileDiff" in view && text(view, "additions")).toBe("one\nthree\n")
   })
 })
