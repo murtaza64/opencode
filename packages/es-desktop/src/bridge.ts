@@ -63,8 +63,10 @@ export const createBridge = (options: { origin: string; store: BridgeStore; fetc
       // A redirect elsewhere (the Access login) or a refusal at the gate: the token is not accepted.
       return [301, 302, 303, 307, 308, 403].includes(response.status) ? "sign-in-needed" : "unreachable"
     },
-    /** Drops this machine's pairing (Forget pairing, or the gateway no longer honours it); the token stays. */
-    forget: async () => {
+    /** Drops this machine's pairing (Forget pairing, or the gateway no longer honours it); the token stays.
+     * With `used` (the cookie header a refused request carried), only if that is still the current pairing. */
+    forget: async (used?: string) => {
+      if (used !== undefined && used !== `es_remote=${state.cookie}`) return
       state.cookie = undefined
       await options.store.forgetCookie()
     },

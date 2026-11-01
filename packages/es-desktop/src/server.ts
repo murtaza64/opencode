@@ -378,6 +378,8 @@ export const serve = async (options: {
       // A secure field's handle stays out of the performance journal.
       const timing = api ? perf?.proxy(req, res, secret ? "es/api/secret-intake/:handle" : `${api[1]}${routeOf(url.pathname.slice(api[1].length + 1))}`) : undefined
       if (timing) res.on("close", () => timing.done())
+      // The bridged credentials this request carries; a pairing refusal forgets only the cookie it actually used.
+      const credentials = bridge && api ? bridge.headers()! : undefined
       // Concatenate the path rather than resolving it: //host must never switch upstreams.
       const upstream = (target.startsWith("https:") ? httpsRequest : httpRequest)(
         `${target}${api ? url.pathname.slice(api[1].length + 1) || "/" : url.pathname}${url.search}`,
@@ -394,10 +396,7 @@ export const serve = async (options: {
             ...(api?.[1] === "oc" && options.opencodeAuth ? { authorization: options.opencodeAuth } : {}),
             // A bridged gateway checks its own public origin on every request, and needs the Access token
             // and its pairing cookie (with the operator cookie for attention routes).
-            ...(bridge && api ? (() => {
-              const credentials = bridge.headers()!
-              return { ...credentials, origin: remote!.origin, cookie: [credentials.cookie, operatorCookie].filter(Boolean).join("; ") }
-            })() : {}),
+            ...(credentials ? { ...credentials, origin: remote!.origin, cookie: [credentials.cookie, operatorCookie].filter(Boolean).join("; ") } : {}),
           },
         },
         (response) => {
@@ -409,7 +408,7 @@ export const serve = async (options: {
           }
           // The gateway's own pairing refusal (rotation or expiry, h-r N1): forget the stale cookie so the page
           // offers pairing again instead of failing with 401s until a restart. Core 401s pass through unchanged.
-          if (bridge && api && response.statusCode === 401) return pairingRefusal(response, bridge, res, finish, setCookie)
+          if (bridge && credentials && response.statusCode === 401) return pairingRefusal(response, bridge, credentials.cookie, res, finish, setCookie)
           timing?.headers(response.statusCode)
           if (timing) response.on("data", (chunk: Buffer) => timing.data(chunk.length))
           const cookies = setCookie(response.headers["set-cookie"])
@@ -706,7 +705,7 @@ const appearanceRoute = (
 }
 
 // A bridged 401: the gateway's pairing layer answers exactly {"error":"Pairing required"}; anything else is the host's.
-const pairingRefusal = (response: IncomingMessage, bridge: Bridge, res: ServerResponse, finish: (status: number, body: string, type?: string) => void, setCookie: (values: string[] | undefined) => string[] | undefined) => {
+const pairingRefusal = (response: IncomingMessage, bridge: Bridge, used: string, res: ServerResponse, finish: (status: number, body: string, type?: string) => void, setCookie: (values: string[] | undefined) => string[] | undefined) => {
   const chunks: Buffer[] = []
   let size = 0
   response.on("data", (chunk: Buffer) => {
@@ -718,7 +717,8 @@ const pairingRefusal = (response: IncomingMessage, bridge: Bridge, res: ServerRe
     const body = Buffer.concat(chunks)
     const parsed = size <= 4096 && (() => { try { return JSON.parse(body.toString("utf8")) as unknown } catch { return undefined } })()
     if (parsed && typeof parsed === "object" && Object.keys(parsed).length === 1 && (parsed as Record<string, unknown>).error === "Pairing required") {
-      await bridge.forget().catch(() => undefined)
+      // A late refusal of a request sent before a re-pair must not drop the new pairing (h-r S1).
+      await bridge.forget(used).catch(() => undefined)
       return finish(401, JSON.stringify({ error: "Pairing required" }), "application/json")
     }
     if (size > 4096) return finish(502, '{"error":"Upstream response too large"}', "application/json")

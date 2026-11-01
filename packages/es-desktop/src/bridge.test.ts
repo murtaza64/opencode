@@ -22,7 +22,8 @@ const PAIRED = "fixture-pairing-cookie-0123456789"
 const gateway = () => {
   const seen: { method: string; path: string; id: string | null; secret: string | null; cookie: string | null; origin: string | null }[] = []
   // `cookie`: the pairing the gateway currently honours; changing it models a gateway rotation or expiry.
-  const state = { accept: true, cookie: PAIRED, coreUnauthorized: false }
+  // `refusalGate`: when set, a pairing refusal waits for it (a late 401 from a request sent before a re-pair).
+  const state: { accept: boolean; cookie: string; coreUnauthorized: boolean; refusalGate?: Promise<void> } = { accept: true, cookie: PAIRED, coreUnauthorized: false }
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -34,9 +35,12 @@ const gateway = () => {
         return new Response(null, { status: 302, headers: { location: "https://team.cloudflareaccess.com/cdn-cgi/access/login/agents" } })
       if (url.pathname === "/__es/pair") {
         if (new URLSearchParams(body).get("code") !== CODE) return new Response("That code does not match", { status: 401 })
-        return new Response(null, { status: 303, headers: { location: "/", "set-cookie": `es_remote=${PAIRED}; HttpOnly; SameSite=Strict; Path=/; Secure` } })
+        return new Response(null, { status: 303, headers: { location: "/", "set-cookie": `es_remote=${state.cookie}; HttpOnly; SameSite=Strict; Path=/; Secure` } })
       }
-      if (request.headers.get("cookie")?.includes(`es_remote=${state.cookie}`) !== true) return Response.json({ error: "Pairing required" }, { status: 401 })
+      if (request.headers.get("cookie")?.includes(`es_remote=${state.cookie}`) !== true) {
+        await state.refusalGate
+        return Response.json({ error: "Pairing required" }, { status: 401 })
+      }
       // A Core-level 401 behind a valid pairing (e.g. Core server auth).
       if (state.coreUnauthorized) return Response.json({ name: "UnauthorizedError" }, { status: 401 })
       if (url.pathname === "/oc/global/event")
@@ -250,4 +254,24 @@ test("Forget pairing deletes the stored cookie, only from this window", async ()
   expect(bridge.paired()).toBe(false)
   expect(await Bun.file(file).exists()).toBe(false)
   expect(host.seen.filter((item) => item.path.includes("forget"))).toEqual([])
+})
+
+test("a late pairing refusal of a request sent before a re-pair keeps the new pairing", async () => {
+  const host = gateway()
+  const store = memory(ACCESS)
+  store.saved.push(PAIRED)
+  const { server, get, bridge } = await listener(host.origin, store)
+  const ROTATED = "rotated-pairing-cookie-0123456789"
+  host.state.cookie = ROTATED
+  let release = () => {}
+  host.state.refusalGate = new Promise<void>((resolve) => (release = resolve))
+  const stale = get("/oc/session/status")
+  for (let wait = 5; !host.seen.some((item) => item.path === "/oc/session/status") && wait < 2_000; wait *= 2) await Bun.sleep(wait)
+  const paired = await get("/__es/bridge/pair", { method: "POST", headers: { origin: server.origin, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code: CODE }).toString() })
+  expect(paired.status).toBe(303)
+  release()
+  expect(await (await stale).json()).toEqual({ error: "Pairing required" })
+  expect(bridge.paired()).toBe(true)
+  expect(store.saved.at(-1)).toBe(ROTATED)
+  expect((await get("/oc/session/status")).status).toBe(200)
 })
