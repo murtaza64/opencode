@@ -78,7 +78,8 @@ try {
   const gate = { id: "per_child", sessionID: child.id, permission: "bash", patterns: ["fixture gate"], always: [], metadata: {} }
   fixture.permissionsByDirectory.set(child.directory, [gate])
   emit(child.directory, "permission.asked", gate)
-  await Promise.all(pages.map((page) => expect(page.locator(".notification-item", { hasText: "Composer fixture" })).toBeVisible()))
+  // Requests are explicit Needs-you rows (ATTN-12: idle/finished sessions never are), keyed by the request.
+  await Promise.all(pages.map((page) => expect(page.locator('.needs-you-band .nav-decision[data-kind=permission][data-nav-item*="per_child"]')).toBeVisible()))
   await expect(pages[0].locator(".sidebar .session-entry .nav-item", { hasText: "Composer fixture" }).locator(".dot.pending")).toBeVisible()
   const question = { id: "que_offscreen", sessionID: offscreen.id,
     questions: [{ header: "Confirm", question: "Continue?", options: [{ label: "Yes", description: "Yes" }] }] }
@@ -88,13 +89,13 @@ try {
   emit(offscreen.directory, "question.asked", question)
   for (const [response, stream] of fixture.eventStreams)
     if (stream.path === "/api/notification-events") response.write("data: changed\n\n")
-  await Promise.all(pages.map((page) => expect(page.locator(".notification-item", { hasText: "History 0" })).toBeVisible()))
+  await Promise.all(pages.map((page) => expect(page.locator('.needs-you-band .nav-decision[data-kind=question][data-nav-item*="que_offscreen"]')).toBeVisible()))
   emit(child.directory, "permission.replied", { sessionID: child.id, requestID: gate.id, reply: "once" })
   fixture.permissionsByDirectory.set(child.directory, [])
-  await Promise.all(pages.map((page) => expect(page.locator(".notification-item", { hasText: "Composer fixture" })).toHaveCount(0)))
+  await Promise.all(pages.map((page) => expect(page.locator('.needs-you-band .nav-decision[data-kind=permission][data-nav-item*="per_child"]')).toHaveCount(0)))
   await Promise.all(pages.map((page) => selectScope(page, "fixture")))
   await Promise.all(pages.map((page) => page.reload({ waitUntil: "domcontentloaded" })))
-  await Promise.all(pages.map((page) => expect(page.locator(".notification-item", { hasText: "History 0" })).toBeVisible()))
+  await Promise.all(pages.map((page) => expect(page.locator('.needs-you-band .nav-decision[data-kind=question][data-nav-item*="que_offscreen"]')).toBeVisible()))
   await selectScope(pages[0], "__all__")
   await expect(pages[0].locator(".pinned-section .nav-item", { hasText: "History 0" })).toBeVisible()
   await selectScope(pages[0], "fixture")
@@ -113,7 +114,7 @@ try {
     fixture.questionsByDirectory.set(missed.directory, [{ id: "que_missed", sessionID: missed.id,
       questions: [{ header: "Confirm", question: "Proceed?", options: [{ label: "Yes", description: "Yes" }] }] }])
     // Neither the dashboard nor the live event feed reported this gate. The bounded background scan recovers it.
-    await expect(pages[0].locator(".notification-item", { hasText: "History 1" })).toBeVisible({ timeout: 45_000 })
+    await expect(pages[0].locator('.needs-you-band .nav-decision[data-kind=question][data-nav-item*="que_missed"]')).toBeVisible({ timeout: 45_000 })
     const newSession = { ...session("ses_late"), slug: "late", version: "1", title: "New fixture session", time: { created: 1, updated: 500 } }
     fixture.workspaceSessions.push(newSession)
     emit(newSession.directory, "session.created", { sessionID: newSession.id, info: newSession })

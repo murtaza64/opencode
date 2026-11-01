@@ -176,8 +176,9 @@ try {
   await page.getByRole("button", { name: "Fit", exact: true }).click()
   expect(await width()).toBe(fitted)
 
-  // No ambient motion: nothing loops, even with mail drawn.
-  expect(await page.evaluate(() => document.getAnimations().filter((animation) => animation.effect?.getTiming().iterations === Infinity).length)).toBe(0)
+  // No ambient motion in the map: nothing loops, even with mail drawn. (The sidebar's busy rows have their own halo.)
+  expect(await page.evaluate(() => document.getAnimations().filter((animation) => animation.effect?.getTiming().iterations === Infinity
+    && !animation.effect?.target?.closest?.("nav.sidebar")).length)).toBe(0)
   await expect(page.getByRole("button", { name: /Pause/ })).toHaveCount(0)
 
   // The Time weave is gone; an old ?view=weave link resolves to the Project map.
