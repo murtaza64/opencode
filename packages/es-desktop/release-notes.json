@@ -1,25 +1,19 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-11-01.1",
+  "release": "2026-11-01.2",
   "items": [
     {
-      "title": "Ask about this",
-      "detail": "Ask about this on a decision adds it to your Front Desk draft."
+      "title": "Filter popover",
+      "detail": "Filter popover: cleaner groups and controls."
     },
     {
-      "title": "Sidebar filter",
-      "detail": "Sidebar: New, Search and one Filter button; hosts, project, status and sort live in its popover."
+      "title": "Right-to-left counts",
+      "detail": "Right-to-left: counts like 0+ display correctly."
     },
     {
-      "title": "Session title alignment",
-      "detail": "Session title starts at the chat text edge, with host tabs too."
-    },
-    {
-      "title": "Pin import order",
-      "detail": "Pins imported from this device keep their order once the dashboard update is installed."
+      "title": "Mail delivery",
+      "detail": "Mail rows read delivery from the right host."
     }
   ],
-  "limits": [
-    "Correction to 2026-10-31.6: its title-alignment note was only true without host tabs."
-  ]
+  "limits": []
 }
