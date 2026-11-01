@@ -11,6 +11,7 @@ import { eventProtocol, eventPaths } from "../../es-app/event-protocol"
 import { surfaceProxy } from "../../es-app/surface-proxy"
 import { attentionRoute, bridgedTargets, hostPath, localHost, remoteCookie, remoteSetCookie, remoteTargets, type HostInfo } from "../../es-app/remote-host"
 import type { Bridge } from "./bridge"
+import type { SshPeer } from "./ssh-peer"
 import type { Voice } from "./voice"
 import type { Appearance } from "./appearance"
 import type { ReleaseNotesStore } from "./release-notes"
@@ -117,6 +118,10 @@ export const serve = async (options: {
   // Work view hosts this (local) listener reads at /hosts/<id>/...: list reads and their event
   // streams only, with no credential or cookie. Their app pages stay on their own listeners.
   peers?: { id: string; origin: string }[]
+  // Personal hosts this bridged Personal listener reads at /hosts/<id>/ over pinned SSH (ssh-peer.ts): Core list and
+  // session reads plus the pins listing, GET/HEAD only. Writes need an operator authority that does not rest on the
+  // host's loopback trust (M4), so none pass.
+  sshPeers?: { id: string; peer: SshPeer }[]
 }) => {
   const host = options.host ? remoteListenHost(options.host) : "127.0.0.1"
   if (!host) throw new Error("Remote listeners must bind loopback or a tailnet address")
@@ -133,6 +138,8 @@ export const serve = async (options: {
   if (remote && (options.opencode || options.dashboard || options.opencodeAuth))
     throw new Error("A remote host listener attaches to that host only")
   const bridge = remote?.bridge
+  if (options.sshPeers?.length && !bridge) throw new Error("SSH peers attach only to a bridged listener")
+  const sshPeers = new Map((options.sshPeers ?? []).map((item) => [item.id, item.peer]))
   const remoteUpstreams = remote && (bridge ? bridgedTargets(remote.origin) : remoteTargets(remote.origin))
   const targets = remote && remoteUpstreams
     ? { oc: remoteUpstreams.opencode, es: remoteUpstreams.dashboard }
@@ -282,6 +289,18 @@ export const serve = async (options: {
     }
     if (url.pathname.startsWith("/hosts/")) {
       const qualified = hostPath(url.pathname)
+      const ssh = qualified && sshPeers.get(qualified.host)
+      if (ssh) {
+        if (!sshReadAllowed(req.method ?? "", qualified.path)) return finish(403, "Host route not exposed")
+        // The ssh child starts with the first Personal read and ends with this listener; a refused host (auth,
+        // profile) stays refused until the config changes.
+        if (ssh.reach().state === "stopped") await ssh.start()
+        const reach = ssh.reach()
+        if (reach.state !== "ready")
+          return finish(503, JSON.stringify({ error: "Host unreachable", reason: reach.state === "unreachable" ? reach.reason : "network" }), "application/json")
+        const socket = qualified.path.startsWith("/oc") ? ssh.sockets.core : ssh.sockets.dashboard
+        return sshRead(req, res, socket, `${qualified.path.slice(3) || "/"}${url.search}`, finish)
+      }
       const peer = qualified && peers.get(qualified.host)
       if (!qualified || !peer) return finish(404, "Not found")
       const upstream = `${qualified.path.startsWith("/oc") ? peer.opencode : peer.dashboard}${qualified.path.slice(3) || "/"}${url.search}`
@@ -503,6 +522,7 @@ export const serve = async (options: {
       server.off("upgrade", mux.upgrade)
       mux.close()
       upstreams.forEach((upstream) => upstream.destroy())
+      await Promise.all([...sshPeers.values()].map((peer) => peer.stop()))
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()))
         server.closeAllConnections()
@@ -514,6 +534,34 @@ export const serve = async (options: {
 // One read of a Work view host: no browser credential, no redirect, bounded time.
 const peerRead = (req: IncomingMessage, res: ServerResponse, target: string, finish: (status: number, body: string, type?: string) => void) => {
   const upstream = (target.startsWith("https:") ? httpsRequest : httpRequest)(target, { method: req.method, headers: proxyHeaders(req.headers) }, (response) => {
+    if ([301, 302, 303, 307, 308].includes(response.statusCode ?? 0)) {
+      response.resume()
+      return finish(502, '{"error":"Upstream redirect blocked"}', "application/json")
+    }
+    res.writeHead(response.statusCode ?? 502, proxyHeaders(response.headers))
+    response.on("error", () => res.destroy())
+    response.pipe(res)
+  })
+  upstream.setTimeout(30_000, () => upstream.destroy(new Error("Upstream idle timeout")))
+  upstream.on("error", () => {
+    if (res.headersSent) return res.destroy()
+    finish(502, '{"error":"Host unavailable"}', "application/json")
+  })
+  res.on("close", () => upstream.destroy())
+  upstream.end()
+}
+
+// The reads a pinned-SSH Personal host serves: Slice R Core reads, and its pins listing and their events.
+const sshReadAllowed = (method: string, pathname: string) =>
+  hostApiAllowed(method, pathname) && (pathname.startsWith("/oc/") || pathname === "/es/api/pins" || pathname === "/es/api/pins/events")
+
+// One read of a pinned-SSH host over its forwarded socket. The request is rebuilt: only what a read needs goes on the
+// socket (no cookie, key, authorization or cf-* header); no redirect is followed and no cookie comes back.
+const sshRead = (req: IncomingMessage, res: ServerResponse, socketPath: string, target: string, finish: (status: number, body: string, type?: string) => void) => {
+  const headers = Object.fromEntries(
+    ["accept", "last-event-id"].flatMap((name) => (typeof req.headers[name] === "string" ? [[name, req.headers[name] as string]] : [])),
+  )
+  const upstream = httpRequest({ socketPath, path: target, method: req.method, headers: { ...headers, host: "127.0.0.1" } }, (response) => {
     if ([301, 302, 303, 307, 308].includes(response.statusCode ?? 0)) {
       response.resume()
       return finish(502, '{"error":"Upstream redirect blocked"}', "application/json")

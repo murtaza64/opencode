@@ -64,8 +64,12 @@ export const pageOrigin = (value: unknown) => {
 /** How a host is reached: "proxy" serves this machine's app against its Core and dashboard through a
  * laptop listener; "page" shows the host's own served page in an unprivileged, isolated view;
  * "bridged" serves this machine's app against the host's paired gateway behind Cloudflare Access,
- * with the Access service token named by `access.keychain` (read from this machine's Keychain). */
-export type RemoteHost = HostLink & { mode: "proxy" | "page" | "bridged"; default?: boolean; profile: Profile; kind?: HostKind; access?: { keychain: string } }
+ * with the Access service token named by `access.keychain` (read from this machine's Keychain);
+ * "ssh" is a Personal host read over pinned SSH as a peer of the bridged Personal listener (es-desktop ssh-peer.ts),
+ * never a listener or page of its own. Its `origin` is `ssh://<id>`, an identity only, never fetched. */
+export type RemoteHost = HostLink & { mode: "proxy" | "page" | "bridged" | "ssh"; default?: boolean; profile: Profile; kind?: HostKind; access?: { keychain: string }; ssh?: SshTarget }
+/** A pinned SSH destination (`user@host` or `host`, never an option) and the host's loopback Core and dashboard ports. */
+export type SshTarget = { destination: string; corePort: number; dashboardPort: number }
 
 /** Upstreams for a bridged host's listener: the gateway serves Core at /oc and the dashboard at /es. */
 export const bridgedTargets = (origin: string) => ({ opencode: `${origin}/oc`, dashboard: `${origin}/es` })
@@ -79,13 +83,15 @@ export const remoteHosts = (value: unknown): RemoteHost[] => {
     const record = item && typeof item === "object" ? (item as Record<string, unknown>) : {}
     if (typeof record.id !== "string" || !ID.test(record.id) || record.id === "local") throw new Error("Invalid remote host id")
     const label = typeof record.label === "string" && record.label.trim() ? record.label.trim().slice(0, 40) : record.id
-    const mode = record.mode === "page" ? "page" : record.mode === "bridged" ? "bridged" : "proxy"
+    const mode = record.mode === "page" ? "page" : record.mode === "bridged" ? "bridged" : record.mode === "ssh" ? "ssh" : "proxy"
     const access = record.access && typeof record.access === "object" ? (record.access as Record<string, unknown>).keychain : undefined
     if (mode === "bridged" && (typeof access !== "string" || !/^[A-Za-z0-9._-]{1,64}$/.test(access))) throw new Error("Bridged hosts need access.keychain")
     if (record.profile !== undefined && !PROFILES.includes(record.profile as string)) throw new Error("Invalid remote host profile")
     if (record.kind !== undefined && !KINDS.includes(record.kind as string)) throw new Error("Invalid remote host kind")
     // Proxied app hosts are Work; page and bridged hosts (behind Access) are Personal, unless configured otherwise.
     const profile = (record.profile ?? (mode === "proxy" ? "work" : "personal")) as Profile
+    // SSH reads arrive at the host as loopback trust; only a Personal host is read this way (contract §5b).
+    if (mode === "ssh") return { id: record.id, label, origin: `ssh://${record.id}`, mode, profile: personalOnly(profile), ssh: sshTarget(record.ssh), ...(record.kind ? { kind: record.kind as HostKind } : {}) } as RemoteHost
     return {
       id: record.id, label, origin: mode === "proxy" ? remoteOrigin(record.origin) : pageOrigin(record.origin), mode, profile,
       ...(mode === "bridged" ? { access: { keychain: access as string } } : {}),
@@ -99,6 +105,21 @@ export const remoteHosts = (value: unknown): RemoteHost[] => {
 }
 
 /** Upstreams for one host's listener: the Core at the root, the dashboard under /es. */
+const personalOnly = (profile: Profile) => {
+  if (profile !== "personal") throw new Error("SSH hosts are Personal only")
+  return profile
+}
+
+const sshTarget = (value: unknown): SshTarget => {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+  const port = (item: unknown) => typeof item === "number" && Number.isInteger(item) && item >= 1 && item <= 65535
+  // A leading "-" would be read by ssh as an option.
+  if (typeof record.destination !== "string" || !/^(?:[a-z_][a-z0-9_-]{0,31}@)?[A-Za-z0-9][A-Za-z0-9.-]{0,252}$/.test(record.destination))
+    throw new Error("SSH hosts need ssh.destination as user@host")
+  if (!port(record.corePort) || !port(record.dashboardPort)) throw new Error("SSH hosts need ssh.corePort and ssh.dashboardPort")
+  return { destination: record.destination, corePort: record.corePort as number, dashboardPort: record.dashboardPort as number }
+}
+
 export const remoteTargets = (origin: string) => ({ opencode: origin, dashboard: `${origin}/es` })
 
 // Routes the dashboard authorizes with the operator cookie: attention, the Front desk's own files, and pin writes.

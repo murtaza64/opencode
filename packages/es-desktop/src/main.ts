@@ -13,6 +13,7 @@ import { notificationsSupported, postNotice } from "./desktop-notice"
 import { blurPlan, createAppearance } from "./appearance"
 import { blurOffMain } from "./blur-worker"
 import { createBridge, encryptedCookie, keychainAccess } from "./bridge"
+import { createSshPeer } from "./ssh-peer"
 import { createReleaseNotes } from "./release-notes"
 import { keepSessionCookies } from "./page-cookies"
 import { localStateDir, pairingSources, type PairingSource } from "./pair-phone"
@@ -130,6 +131,9 @@ const start = async () => {
   // Hosts in the Work view (proxied app hosts; page hosts such as Personal stay their own tab), with
   // their listener origins once started. New work goes to the configured default, else the first.
   const work: WorkHost[] = []
+  const personalAggregator = configured.find((host) => host.mode === "bridged" && host.profile === "personal")?.id
+  if (!personalAggregator && configured.some((host) => host.mode === "ssh"))
+    console.error("Editspace SSH hosts ignored", { message: "no bridged Personal host to join" })
   const workDefault = configured.find((host) => host.mode === "proxy" && host.default)?.id ?? configured.find((host) => host.mode === "proxy")?.id
   // Bundled by the build (scripts/build.ts).
   const releaseNotes = await createReleaseNotes({
@@ -176,12 +180,21 @@ const start = async () => {
           })
         : undefined
       await bridge?.ready
+      // Personal hosts read over pinned SSH join the Personal aggregator (the first bridged Personal host) as its
+      // /hosts/<id>/ peers; default off: none unless configured with mode "ssh".
+      const sshPeers = bridge && host.profile === "personal" && host.id === personalAggregator
+        ? configured.filter((item) => item.mode === "ssh" && item.ssh).map((item) => ({
+            id: item.id,
+            peer: createSshPeer({ host: { id: item.id, ...item.ssh! }, dir: path.join(app.getPath("userData"), "ssh") }),
+          }))
+        : []
       const value = Number(await readFile(file, "utf8").catch(() => "0"))
       const listener = await serve({
         port: Number.isInteger(value) && value >= 1024 && value <= 65535 && ![4096, 7777, port].includes(value) ? value : 0,
         root: path.join(app.getAppPath(), "dist/renderer"),
         renderer: app.isPackaged ? undefined : process.env.ES_DESKTOP_RENDERER,
         remote: { id: host.id, origin: host.origin, ...(bridge ? { bridge } : {}) },
+        ...(sshPeers.length ? { sshPeers } : {}),
         // Dictation uses this laptop's microphone and Whisper, whichever host a tab shows.
         voice,
         // A Work host shows this laptop's look; a Personal host shows the Personal profile's look, never Work's.
