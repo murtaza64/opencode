@@ -1,9 +1,10 @@
-// Unified Work (dotfiles#240): the agent list names the Work profile and shows every Work host (this machine and
-// the Mini) by default, as toggles. Hiding one is remembered across a reload, a host added later is shown, a stored
+// Unified Work (dotfiles#240): the agent list shows every Work host (this machine and the Mini) by default; the Filter
+// popover (Laptop2677) holds one checkbox per host. Hiding one is remembered across a reload, a host added later is shown, a stored
 // choice that would hide everything shows all, and the Needs you band is never filtered by it. A Personal page has
 // no Work strip. Disposable fixture; no writes. Run from packages/es-app: node test/work-fold.browser.mjs
 import { createRequire } from "node:module"
 import { startPanelPreview } from "./composer-panel-preview.mjs"
+import { closeFilter, openFilter } from "./scope.mjs"
 
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const preview = await startPanelPreview()
@@ -27,29 +28,35 @@ await context.route("**/*", route => { const url = route.request().url(); return
 const page = await context.newPage()
 page.setDefaultTimeout(60_000)
 await setup(page)
-const strip = page.getByRole("group", { name: "Work hosts" })
+const host = async name => (await openFilter(page)).getByRole("checkbox", { name: new RegExp(name) })
 const list = page.locator(".sidebar [role=tabpanel]")
 const miniRow = () => list.getByRole("link", { name: /^Mini only, on Mac Mini$/ })
 const localRow = () => list.locator(".session-entry .nav-title", { hasText: "Other session" })
 try {
   await page.goto(preview.url, { waitUntil: "domcontentloaded", timeout: 300_000 })
   // Default: Work named, both hosts on, rows from both listed.
-  await expect(strip).toContainText("Work", { timeout: 120_000 })
-  await expect(strip.getByRole("button", { name: /Laptop/ })).toHaveAttribute("aria-pressed", "true")
-  await expect(strip.getByRole("button", { name: /Mac Mini/ })).toHaveAttribute("aria-pressed", "true")
+  await expect(miniRow()).toBeVisible({ timeout: 120_000 })
+  await expect(await host("Laptop")).toBeChecked()
+  await expect(await host("Mac Mini")).toBeChecked()
+  await closeFilter(page)
   await expect(miniRow()).toBeVisible()
   await expect(localRow()).toHaveCount(1)
   // Hide the Mini: its rows leave the list but its decision stays in Needs you; the choice survives a reload.
-  await strip.getByRole("button", { name: /Mac Mini/ }).click()
+  await (await host("Mac Mini")).click()
+  await closeFilter(page)
   await expect(miniRow()).toHaveCount(0)
+  await expect(page.locator(".sidebar .filtered-out")).toContainText("1 hidden by filters")
   await expect(page.getByRole("region", { name: "Needs you" }).getByText("Mini decision")).toBeVisible()
   await page.reload()
-  await expect(strip.getByRole("button", { name: /Mac Mini/ })).toHaveAttribute("aria-pressed", "false", { timeout: 60_000 })
+  await expect(page.locator(".sidebar .filtered-out")).toBeVisible({ timeout: 60_000 })
+  await expect(await host("Mac Mini")).not.toBeChecked()
+  await closeFilter(page)
   await expect(miniRow()).toHaveCount(0)
   // The last shown host cannot be hidden.
-  await strip.getByRole("button", { name: /Laptop/ }).click()
-  await expect(strip.getByRole("button", { name: /Laptop/ })).toHaveAttribute("aria-pressed", "true")
-  await strip.getByRole("button", { name: /Mac Mini/ }).click()
+  await (await host("Laptop")).click()
+  await expect(await host("Laptop")).toBeChecked()
+  await (await host("Mac Mini")).click()
+  await closeFilter(page)
   await expect(miniRow()).toBeVisible()
   // A stored choice that hides every host (or unknown junk) shows all.
   await page.evaluate(() => localStorage.setItem("es-app:work-hidden-hosts", JSON.stringify(["local", "mini"])))
@@ -63,9 +70,10 @@ try {
   await setup(personal, "personal")
   await personal.goto(preview.url, { waitUntil: "domcontentloaded" })
   await expect(personal.locator(".sidebar [role=tabpanel] .session-entry").first()).toBeVisible({ timeout: 60_000 })
-  await expect(personal.getByRole("group", { name: "Work hosts" })).toHaveCount(0)
+  await personal.locator(".sidebar-filter > summary").click()
+  await expect(personal.locator(".sidebar-filter-panel legend", { hasText: "Hosts" })).toHaveCount(0)
   if (preview.fixture.calls.some(call => !["GET", "HEAD", "OPTIONS"].includes(call.method) && call.path !== "/api/attention/session")) throw new Error("unexpected writes")
-  console.log("PASS work fold: Work named, all hosts shown by default, hide survives reload, last host stays, bad stored state shows all, Needs you unfiltered, Personal has no Work strip; no writes")
+  console.log("PASS work fold: Work named, all hosts shown by default, hide survives reload, last host stays, bad stored state shows all, Needs you unfiltered, Personal has no host choices; no writes")
 } finally {
   await browser.close()
   await preview.close()

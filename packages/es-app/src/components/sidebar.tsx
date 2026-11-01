@@ -53,6 +53,52 @@ export const ProjectScope = (props: { onChange?: () => void }) => {
   </details>
 }
 
+/** The Agents tab's one Filter control: a popover with hosts, project, status and sort. Choices apply at once; Clear
+ * restores the defaults; Escape or Done closes it and returns focus to the control. */
+const SidebarFilter = <S extends string>(props: { hosts: { id: string; label: string }[]; shownHost: (id: string) => boolean; toggleHost: (id: string) => void; hostCount: (id: string) => number
+  activeOnly: boolean; setActiveOnly: (value: boolean) => void; sortBy: S; setSortBy: (value: S) => void; sorts: readonly (readonly [S, string])[]; onScope?: () => void }) => {
+  const { state, editspace, setEditspace, editspaces, allProjects, setAllProjects } = useDashboard()
+  const current = () => editspace() ?? editspaces()?.default ?? state()?.editspace ?? ""
+  let menu: HTMLDetailsElement | undefined
+  const close = () => { menu!.open = false; menu!.querySelector("summary")?.focus() }
+  const hidden = () => props.hosts.filter((item) => !props.shownHost(item.id)).length
+  // Each choice that differs from the default view counts once.
+  // The window's default project is the default scope; only another project counts.
+  const projectChanged = () => !allProjects() && current() !== (editspaces()?.default ?? state()?.editspace)
+  const changed = () => (projectChanged() ? 1 : 0) + (hidden() ? 1 : 0) + (props.activeOnly ? 1 : 0) + (props.sortBy === props.sorts[0][0] ? 0 : 1)
+  const summary = () => [projectChanged() ? current() : undefined, hidden() ? `${props.hosts.length - hidden()} of ${props.hosts.length} hosts` : undefined,
+    props.activeOnly ? "working now" : undefined, props.sortBy === props.sorts[0][0] ? undefined : `by ${props.sorts.find(([value]) => value === props.sortBy)?.[1].toLowerCase()}`].filter(Boolean).join(", ")
+  const clear = () => {
+    if (projectChanged()) { props.onScope?.(); setEditspace(editspaces()?.default ?? state()?.editspace ?? current()) }
+    props.hosts.filter((item) => !props.shownHost(item.id)).forEach((item) => props.toggleHost(item.id))
+    props.setActiveOnly(false)
+    props.setSortBy(props.sorts[0][0])
+  }
+  return <details class="sidebar-filter" ref={menu} onKeyDown={(event) => { if (event.key === "Escape" && menu!.open) { event.preventDefault(); event.stopPropagation(); close() } }}>
+    <summary class="agent-filter" aria-label={changed() ? `Filter and sort: ${summary()}` : "Filter and sort"} title={changed() ? summary() : "Filter and sort"}>
+      <Glyph name="filter" /><Show when={changed()} fallback={<span class="sr-only">Filter</span>}><span class="sidebar-filter-count">{changed()}</span></Show>
+    </summary>
+    <div class="sidebar-filter-panel" role="dialog" aria-label="Filter and sort">
+      <Show when={props.hosts.length > 1}>
+        <fieldset><legend>Hosts</legend><For each={props.hosts}>{(item) =>
+          <label><input type="checkbox" checked={props.shownHost(item.id)} onChange={() => props.toggleHost(item.id)} /><HostGlyph host={item.id} /><bdi dir="auto">{item.label}</bdi><span class="sidebar-filter-n">{props.hostCount(item.id) || ""}</span></label>}</For></fieldset>
+      </Show>
+      <fieldset><legend>Project</legend>
+        <label><input type="radio" name="sidebar-project" checked={allProjects()} onChange={() => { props.onScope?.(); setAllProjects(true) }} />All projects</label>
+        <For each={editspaces()?.editspaces ?? []}>{(item) =>
+          <label><input type="radio" name="sidebar-project" checked={!allProjects() && current() === item.name} onChange={() => { props.onScope?.(); setEditspace(item.name) }} /><bdi dir="auto">{item.name}</bdi></label>}</For>
+      </fieldset>
+      <fieldset><legend>Show</legend>
+        <label><input type="radio" name="sidebar-show" checked={!props.activeOnly} onChange={() => props.setActiveOnly(false)} />All agents</label>
+        <label><input type="radio" name="sidebar-show" checked={props.activeOnly} onChange={() => props.setActiveOnly(true)} />Working now</label>
+      </fieldset>
+      <fieldset><legend>Sort</legend><For each={props.sorts}>{([value, label]) =>
+        <label><input type="radio" name="sidebar-sort" checked={props.sortBy === value} onChange={() => props.setSortBy(value)} />{label}</label>}</For></fieldset>
+      <div class="sidebar-filter-actions"><button type="button" disabled={!changed()} onClick={clear}>Clear</button><button type="button" class="sidebar-filter-done" onClick={close}>Done</button></div>
+    </div>
+  </details>
+}
+
 // Day headings come from the row's last turn boundary only (turn-order.ts); unknown is Undated, never Today.
 const GROUP_LABEL: Record<DateGroup, string> = { today: "Today", yesterday: "Yesterday", week: "This week", older: "Older", undated: "Undated" }
 
@@ -218,6 +264,9 @@ export default function Sidebar() {
   })
   // Shown rows: the activity order above, or by name (stable ties by key); active-only keeps the live bucket.
   const createdOf = (row: { kind: string; item: unknown }) => row.kind === "session" ? (row.item as SessionRow).created : undefined
+  // Rows the Filter control hides (hosts, working now), so a short filtered list is not read as the whole list.
+  const filteredOut = createMemo(() => allUnpinned().filter((item) => !shownHost(item.host ?? ownHost().id)).length + (activeOnly() ? agentRows().filter((row) => !row.live).length : 0))
+  const clearFilters = () => { workHosts().filter((item) => !shownHost(item.id)).forEach((item) => toggleHost(item.id)); setActiveOnly(false) }
   const shownRows = createMemo(() => {
     const rows = activeOnly() ? agentRows().filter((row) => row.live) : agentRows()
     if (sortBy() === "name") return [...rows].sort((a, b) => (a.item.title || "").localeCompare(b.item.title || "") || a.key.localeCompare(b.key))
@@ -564,35 +613,15 @@ export default function Sidebar() {
           </section>
         </Show>
         <NavTabs agentsCount={activeCount()} agents={<>
-          <div class="agent-filters" role="group" aria-label="Agents view">
-            <ProjectScope onChange={clearSearch} />
-            <button type="button" class="agent-filter" aria-pressed={activeOnly()} title="Show only agents working now" onClick={() => setActiveOnly(!activeOnly())}>Active</button>
-            <button type="button" class="agent-filter agent-sort" title={`${SORT_TITLE[sortBy()]}. Click for ${SORT_LABEL[SORTS[(SORTS.indexOf(sortBy()) + 1) % SORTS.length]].toLowerCase()}.`}
-              aria-label={`Sort: ${SORT_LABEL[sortBy()].toLowerCase()}`} onClick={() => setSortBy(SORTS[(SORTS.indexOf(sortBy()) + 1) % SORTS.length])}>
-              <span aria-hidden="true">⇅</span> {SORT_LABEL[sortBy()]}
-            </button>
+          {/* One row: New, Search, and one Filter control. Host, project, status and sort live in its popover;
+            * the control's count says how many differ from the defaults. */}
+          <div class="agent-toolbar" role="group" aria-label="Agents view">
             <NewSession inline />
+            <input class="search-input" type="search" placeholder="Search" aria-label="Search sessions" value={query()}
+              onInput={(e) => onQuery(e.currentTarget.value)} onKeyDown={(e) => e.key === "Escape" && clearSearch()} />
+            <SidebarFilter hosts={hosted() && host()?.profile !== "personal" ? workHosts() : []} shownHost={shownHost} toggleHost={toggleHost} hostCount={hostCount}
+              activeOnly={activeOnly()} setActiveOnly={setActiveOnly} sortBy={sortBy()} setSortBy={setSortBy} sorts={SORTS.map((value) => [value, SORT_LABEL[value]] as const)} onScope={clearSearch} />
           </div>
-          <Show when={hosted() && host()?.profile !== "personal"}>
-            <div class="work-hosts" role="group" aria-label="Work hosts">
-              <span class="work-hosts-label">Work</span>
-              <For each={workHosts()}>{(item) =>
-                <button type="button" class="work-host" aria-pressed={shownHost(item.id)} title={shownHost(item.id) ? `Hide ${item.label} sessions` : `Show ${item.label} sessions`}
-                  onClick={() => toggleHost(item.id)}>
-                  <HostGlyph host={item.id} /><span>{item.label}</span><span class="work-host-count">{hostCount(item.id) || ""}</span>
-                </button>}</For>
-            </div>
-          </Show>
-        <div class="search-box">
-          <input
-            class="search-input"
-            type="search"
-            placeholder="search sessions…"
-            value={query()}
-            onInput={(e) => onQuery(e.currentTarget.value)}
-            onKeyDown={(e) => e.key === "Escape" && clearSearch()}
-          />
-        </div>
         <Show
           when={!query().trim()}
           fallback={
@@ -650,6 +679,7 @@ export default function Sidebar() {
               }}
             </For>
           </Show>
+          <Show when={filteredOut()}><div class="filtered-out" role="status"><span>{filteredOut()} hidden by filters</span> · <button type="button" class="desk-link-button" onClick={clearFilters}>Clear</button></div></Show>
           <Show when={archived().length}>
             <button class="archived-toggle" onClick={() => setShowArchived(!showArchived())}>
               {showArchived() ? "▾" : "▸"} archived ({archived().length})

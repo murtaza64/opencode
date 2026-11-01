@@ -35,7 +35,7 @@ try {
   await expect(band.locator(".nav-item.active")).toHaveCount(0)
   // Agents is the default tab and holds the session list with its own search.
   await expect(tab("Agents")).toHaveAttribute("aria-selected", "true")
-  await expect(panel.locator(".search-input[placeholder='search sessions…']")).toBeVisible()
+  await expect(panel.locator(".agent-toolbar .search-input")).toBeVisible()
   if (shots) await page.screenshot({ path: path.join(shots, "agents.png"), clip: { x: 0, y: 0, width: 320, height: 900 } })
   // Decisions tab: its own filter; filtering it out never removes the item from the band.
   await tab("Decisions").click()

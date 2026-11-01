@@ -7,6 +7,7 @@ import assert from "node:assert/strict"
 import { createRequire } from "node:module"
 import { startPanelPreview } from "./composer-panel-preview.mjs"
 import { directory, session } from "./composer-fixture.mjs"
+import { chooseFilter } from "./scope.mjs"
 
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const preview = await startPanelPreview()
@@ -78,14 +79,13 @@ try {
   await expect.poll(titles).toEqual(["Aardvark local", "Zulu mini", "Other session", "Composer fixture", "Bravo mini"])
 
   // Name order survives a reload; Activity comes back the same; the open row stays marked.
-  const sort = page.locator(".sidebar button[aria-label^='Sort:']")
-  while (!/name/.test(await sort.getAttribute("aria-label"))) await sort.click()
+  await chooseFilter(page, "Sort", "Name")
   await expect.poll(titles).toEqual(["Aardvark local", "Bravo mini", "Composer fixture", "Other session", "Zulu mini"])
   await page.reload({ waitUntil: "domcontentloaded" })
   await page.locator(".sidebar").getByRole("tab", { name: /^Agents/ }).click()
-  await expect(page.locator(".sidebar button[aria-label^='Sort:']")).toHaveAttribute("aria-label", "Sort: name")
+  await expect(page.locator(".sidebar .sidebar-filter > summary")).toHaveAttribute("aria-label", /by name/)
   await expect.poll(titles).toEqual(["Aardvark local", "Bravo mini", "Composer fixture", "Other session", "Zulu mini"])
-  while (!/activity/.test(await sort.getAttribute("aria-label"))) await sort.click()
+  await chooseFilter(page, "Sort", "Activity")
   await expect.poll(titles).toEqual(["Aardvark local", "Zulu mini", "Other session", "Composer fixture", "Bravo mini"])
   assert.deepEqual(await open(), ["Other session"], "the open row is still marked")
   assert.deepEqual(errors, [])

@@ -44,7 +44,7 @@ const reread = async () => {
   await selectScope(page, "fixture")
 }
 const input = page.locator(".sidebar .search-input")
-const titles = () => page.locator(".sidebar .search-box ~ .session-entry .nav-title, .sidebar .search-box ~ .search-result .nav-title").allTextContents()
+const titles = () => page.locator(".sidebar [role=tabpanel] > .session-entry .nav-title, .sidebar [role=tabpanel] > .search-result .nav-title").allTextContents()
 const miniRow = name => page.locator(".sidebar [role=tabpanel]").getByRole("link", { name: new RegExp(`^${name}, on Mac Mini(, unavailable)?$`) })
 // Pinned rows stay in the Pinned section for any query.
 const pinnedRow = name => page.locator(".sidebar .pinned-section").getByRole("link", { name: new RegExp(`^${name}, on Mac Mini(, unavailable)?$`) })
