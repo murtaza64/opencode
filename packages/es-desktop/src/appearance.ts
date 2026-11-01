@@ -1,9 +1,15 @@
 /* This laptop's desktop appearance (pywal): the palette from ~/.cache/wal/colors.json, a small
  * pre-blurred copy of its wallpaper (WalStudio's `studio` blur and dim when colors.json names them), and the wal-palette/1 artifact roles from palette.json beside
  * it, served to app pages at fixed routes. Only the file pywal names is read, only as an image, and
- * only on this machine; host tabs show the same local look, never an execution host's palette. */
+ * only on this machine; host tabs show the same local look, never an execution host's palette.
+ *
+ * A profile appearance (`profile` option) instead reads one verified private cache that a profile's producer filled
+ * (contract: lanes/remote-host-client/contracts/work-hosts-and-pins.md §5a): descriptor.json naming one asset by its
+ * sha256 and a pywal legacy palette. Only that profile's listeners serve it, so the Work look never shows there and the
+ * profile's look never shows in Work. */
+import { createHash } from "node:crypto"
 import { unwatchFile, watchFile } from "node:fs"
-import { readFile, rename, stat, writeFile } from "node:fs/promises"
+import { lstat, readFile, rename, stat, writeFile } from "node:fs/promises"
 import path from "node:path"
 
 /** wal-palette/1 (pywal docs/wal-palette.md): role colours artifacts use as `--wal-<role>`. */
@@ -73,15 +79,39 @@ export const createAppearance = (options: {
   // Where to record what the app now shows, so Palette Studio can prove an Apply landed without the
   // per-launch key. Holds colours and the wal-palette revision only, never paths.
   receipt?: string
+  // Read `directory` as this profile's private cache (descriptor.json) instead of pywal's files.
+  profile?: string
 }) => {
   // What each tab's page reports it actually applied, by listener host id (bounded: one entry per host).
   const applied = new Map<string, Applied>()
-  const file = path.join(options.directory, "colors.json")
+  const file = path.join(options.directory, options.profile ? "descriptor.json" : "colors.json")
   const contract = path.join(options.directory, "palette.json")
   const listeners = new Set<() => void>()
   // `colors`: the last colors.json that held a usable palette.
-  const state: { body?: AppearanceState; image?: Buffer; source?: string; colors?: Record<string, unknown>; palette?: Record<string, string>; wal?: WalPalette } = {}
+  const state: { body?: AppearanceState; image?: Buffer; source?: string; colors?: Record<string, unknown>; palette?: Record<string, string>; wal?: WalPalette; consumed?: Consumed } = {}
   const reload = async () => {
+    if (options.profile) return reloadProfile(options.profile)
+    return reloadWal()
+  }
+  // A profile cache: only a fully verified descriptor + asset replaces what is served; anything else keeps the last good.
+  const reloadProfile = async (profile: string) => {
+    const cache = await readProfileCache(options.directory, profile)
+    if (!cache) return
+    const look = lookOf(cache.look)
+    const source = [profile, cache.producer, cache.sha256, cache.paletteDigest, cache.paletteSchema, look ? `${look.blur}:${look.dim}` : "default", options.renderer ?? ""].join(":")
+    if (source !== state.source) {
+      const image = await options.blur(cache.file, look?.blur).catch(() => undefined)
+      if (!image) return
+      Object.assign(state, { image, source, consumed: { transfer: cache.transfer, sha256: cache.sha256, paletteDigest: cache.paletteDigest, identity: createHash("sha256").update(source).digest("hex") } })
+    }
+    const wallpaper = `/__es/appearance/wallpaper?v=${encodeURIComponent(createHash("sha256").update(source).digest("hex").slice(0, 32))}`
+    const next = { palette: cache.palette, wallpaper, wal: undefined, look }
+    if (state.body && JSON.stringify({ palette: state.body.palette, wallpaper: state.body.wallpaper, wal: state.body.wal, look: state.body.look }) === JSON.stringify(next)) return
+    state.body = { ...next, updatedAt: Date.now() }
+    listeners.forEach((listener) => listener())
+    if (options.receipt) await writeReceipt(options.receipt, state.body, applied, state.consumed).catch(() => undefined)
+  }
+  const reloadWal = async () => {
     const [raw, walRaw] = await Promise.all([file, contract].map((name) =>
       readFile(name, "utf8").then((text): unknown => JSON.parse(text)).catch((error: NodeJS.ErrnoException) => (error.code === "ENOENT" ? null : undefined))))
     // A partial write keeps the last good value of that file; a removed palette.json withdraws the
@@ -132,7 +162,7 @@ export const createAppearance = (options: {
     timer = setTimeout(() => void refresh(), options.debounce ?? 300)
   }
   watchFile(file, { interval: options.poll ?? 500, persistent: false }, changed)
-  watchFile(contract, { interval: options.poll ?? 500, persistent: false }, changed)
+  if (!options.profile) watchFile(contract, { interval: options.poll ?? 500, persistent: false }, changed)
   return {
     ready,
     body: () => state.body,
@@ -141,7 +171,7 @@ export const createAppearance = (options: {
     applied: async (host: string, value: Omit<Applied, "appliedAt">) => {
       if (!applied.has(host) && applied.size >= 16) return
       applied.set(host, { ...value, appliedAt: Date.now() })
-      if (options.receipt && state.body) await writeReceipt(options.receipt, state.body, applied).catch(() => undefined)
+      if (options.receipt && state.body) await writeReceipt(options.receipt, state.body, applied, state.consumed).catch(() => undefined)
     },
     subscribe: (listener: () => void) => {
       listeners.add(listener)
@@ -161,10 +191,17 @@ export type Appearance = ReturnType<typeof createAppearance>
 /** What one tab's page applied: the wal-palette revision of its style element (null when none) and its theme. */
 export type Applied = { walRevision: string | null; theme: "wallpaper" | "default"; appliedAt: number }
 
-const writeReceipt = async (file: string, body: AppearanceState, applied: Map<string, Applied>) => {
+/** What a profile appearance SERVES from its producer's cache: the transfer, asset, palette (legacyPaletteDigest) and cache
+ * identity, recorded as the receipt's `consumed` object. Three levels stay distinct: the importer's receipt says
+ * imported; `consumed` says served (dotfiles es_artifact_lib ProfileAppearance.consumed records level "served" from it);
+ * only an `applied` entry for a host says that host's page applied it. */
+type Consumed = { transfer: string; sha256: string; paletteDigest: string; identity: string }
+
+const writeReceipt = async (file: string, body: AppearanceState, applied: Map<string, Applied>, consumed?: Consumed) => {
   // `walRevision` is what this app serves; `applied` is what each tab's page confirmed it shows.
   const receipt = {
     schema: "es-appearance-receipt/1",
+    ...(consumed ? { consumed, wallpaper: body.wallpaper } : {}),
     background: body.palette.background,
     foreground: body.palette.foreground,
     walRevision: body.wal?.revision,
@@ -186,6 +223,70 @@ const paletteOf = (raw: unknown) => {
     Object.entries(merged).filter(([key, value]) => /^[a-z0-9_]{1,32}$/i.test(key) && typeof value === "string" && COLOR.test(value)),
   ) as Record<string, string>
   return palette.background && palette.foreground ? palette : undefined
+}
+
+const PROFILE_SCHEMA = "es-profile-appearance/1"
+const PALETTE_SCHEMA = "pywal-legacy/1"
+const MAX_ASSET = 64 * 1024 * 1024
+const ASSET = /^assets\/([0-9a-f]{64})\.(jpe?g|png|webp)$/
+
+/** The profile cache's descriptor and asset, only when every check passes: schema and profile match, the cache directory is
+ * the user's and private, the asset is a regular file at exactly assets/<sha256>.<ext> whose bytes hash to that sha256, and
+ * the palette has a background and foreground. Undefined otherwise (the caller keeps what it served). */
+const readProfileCache = async (directory: string, profile: string) => {
+  const owner = process.getuid?.()
+  const folder = await lstat(directory).catch(() => undefined)
+  if (!folder?.isDirectory() || (folder.mode & 0o022) !== 0 || (owner !== undefined && folder.uid !== owner)) return undefined
+  const raw = await readFile(path.join(directory, "descriptor.json"), "utf8").then((text): unknown => JSON.parse(text)).catch(() => undefined)
+  if (!raw || typeof raw !== "object") return undefined
+  const record = raw as Record<string, unknown>
+  const asset = (record.asset && typeof record.asset === "object" ? record.asset : {}) as Record<string, unknown>
+  const colors = (record.palette && typeof record.palette === "object" ? record.palette : {}) as Record<string, unknown>
+  const match = typeof asset.file === "string" ? ASSET.exec(asset.file) : null
+  if (record.schema !== PROFILE_SCHEMA || record.profile !== profile) return undefined
+  if (typeof record.producer !== "string" || !/^[a-z][a-z0-9-]{0,31}$/.test(record.producer)) return undefined
+  if (!match || asset.sha256 !== match[1]) return undefined
+  const legacy = legacyPaletteOf(colors)
+  const palette = paletteOf(legacy)
+  if (!legacy || !palette) return undefined
+  const file = path.join(directory, match[0])
+  const info = await lstat(file).catch(() => undefined)
+  if (!info?.isFile() || info.size > MAX_ASSET) return undefined
+  const bytes = await readFile(file).catch(() => undefined)
+  if (!bytes || createHash("sha256").update(bytes).digest("hex") !== match[1]) return undefined
+  const paletteDigest = legacyPaletteDigest(legacy)
+  return {
+    file,
+    sha256: match[1],
+    producer: record.producer,
+    transfer: typeof record.transfer === "string" ? record.transfer.slice(0, 200) : "",
+    palette,
+    paletteDigest,
+    paletteSchema: PALETTE_SCHEMA,
+    look: record.look,
+  }
+}
+
+/** pywal legacy roles as the producer sends them (`pywal-legacy/1`): `special` and `colors` maps of #hex values only,
+ * keys sorted; background and foreground required. Undefined for anything else. */
+export const legacyPaletteOf = (raw: unknown) => {
+  if (!raw || typeof raw !== "object") return undefined
+  const value = raw as Record<string, unknown>
+  if (value.schema !== PALETTE_SCHEMA) return undefined
+  const roles = (group: unknown) => Object.fromEntries(Object.entries(group && typeof group === "object" ? (group as Record<string, unknown>) : {})
+    .filter((entry): entry is [string, string] => /^[a-z0-9_]{1,32}$/i.test(entry[0]) && typeof entry[1] === "string" && COLOR.test(entry[1]))
+    .sort(([a], [b]) => (a < b ? -1 : 1)))
+  const special = roles(value.special)
+  if (!special.background || !special.foreground) return undefined
+  return { schema: PALETTE_SCHEMA, special, colors: roles(value.colors) }
+}
+
+/** The one palette digest shared with the producer (dotfiles es_artifact_lib palette_digest_of): sha256 hex of the palette
+ * object {schema, special, colors} as canonical JSON, keys sorted at every level, separators "," and ":", no whitespace,
+ * UTF-8. */
+export const legacyPaletteDigest = (palette: NonNullable<ReturnType<typeof legacyPaletteOf>>) => {
+  const sorted = (group: Record<string, string>) => Object.fromEntries(Object.entries(group).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+  return createHash("sha256").update(JSON.stringify({ colors: sorted(palette.colors), schema: palette.schema, special: sorted(palette.special) })).digest("hex")
 }
 
 // Studio's look, numbers only and clamped to Studio's own ranges; anything else is no look (this app's default).

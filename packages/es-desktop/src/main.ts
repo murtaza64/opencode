@@ -85,29 +85,42 @@ const start = async () => {
         ? () => shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
         : undefined,
   })
+  // Without a Studio look: shrinking to 24 samples and scaling back up is this app's own soft blur. With one, a real
+  // blur at a work size, shown at display resolution (blurPlan).
+  const blur = async (file: string, sigma?: number) => {
+    const image = nativeImage.createFromPath(file)
+    if (image.isEmpty()) throw new Error("Not an image")
+    if (sigma === undefined) return image.resize({ width: 24, quality: "good" }).resize({ width: 640, quality: "best" }).toJPEG(70)
+    const display = Math.max(...screen.getAllDisplays().map((item) => item.size.width * item.scaleFactor))
+    const plan = blurPlan(image.getSize().width, sigma, display)
+    const work = plan.work === image.getSize().width ? image : image.resize({ width: plan.work, quality: "best" })
+    const size = work.getSize()
+    const blurred = plan.sigma ? nativeImage.createFromBitmap(Buffer.from(await blurOffMain(new Uint8Array(work.toBitmap()), size.width, size.height, plan.sigma)), size) : work
+    return (plan.output === size.width ? blurred : blurred.resize({ width: plan.output, quality: "best" })).toJPEG(70)
+  }
   const appearance = createAppearance({
     directory: process.env.ES_APPEARANCE_DIR ?? path.join(app.getPath("home"), ".cache/wal"),
     receipt: path.join(app.getPath("userData"), "appearance-receipt.json"),
     renderer: "studio-gaussian-1",
-    // Without a Studio look: shrinking to 24 samples and scaling back up is this app's own soft blur. With one, a real
-    // blur at a work size, shown at display resolution (blurPlan).
-    blur: async (file, sigma) => {
-      const image = nativeImage.createFromPath(file)
-      if (image.isEmpty()) throw new Error("Not an image")
-      if (sigma === undefined) return image.resize({ width: 24, quality: "good" }).resize({ width: 640, quality: "best" }).toJPEG(70)
-      const display = Math.max(...screen.getAllDisplays().map((item) => item.size.width * item.scaleFactor))
-      const plan = blurPlan(image.getSize().width, sigma, display)
-      const work = plan.work === image.getSize().width ? image : image.resize({ width: plan.work, quality: "best" })
-      const size = work.getSize()
-      const blurred = plan.sigma ? nativeImage.createFromBitmap(Buffer.from(await blurOffMain(new Uint8Array(work.toBitmap()), size.width, size.height, plan.sigma)), size) : work
-      return (plan.output === size.width ? blurred : blurred.resize({ width: plan.output, quality: "best" })).toJPEG(70)
-    },
+    blur,
   })
   // Remote host problems never stop local startup: that host is left out and the reason logged.
   const configured = await serviceHosts(app.getPath("userData"), { ES_REMOTE_HOSTS: process.env.ES_REMOTE_HOSTS }).catch((error: unknown) => {
     console.error("Editspace remote hosts ignored", { message: error instanceof Error ? error.message : "Unknown error" })
     return []
   })
+  // The Personal profile's look comes from its producer's private cache (descriptor + verified asset), never this
+  // laptop's pywal; created only when a Personal listener exists, so Work alone is unchanged. A Personal host on a
+  // listener (bridged, or a misconfigured proxy) gets this look or none, never Work's.
+  const personalAppearance = configured.some((host) => host.mode !== "page" && host.profile === "personal")
+    ? createAppearance({
+        directory: process.env.ES_PERSONAL_APPEARANCE_DIR ?? path.join(app.getPath("home"), ".local/share/es-profile-appearance/personal"),
+        receipt: path.join(app.getPath("userData"), "appearance-receipt-personal.json"),
+        renderer: "studio-gaussian-1",
+        profile: "personal",
+        blur,
+      })
+    : undefined
   // This machine's own identity, reported to its pages and used as the Local row's host id.
   const self = await serviceSelf(app.getPath("userData")).catch((error: unknown) => {
     console.error("Editspace host identity ignored", { message: error instanceof Error ? error.message : "Unknown error" })
@@ -171,8 +184,8 @@ const start = async () => {
         remote: { id: host.id, origin: host.origin, ...(bridge ? { bridge } : {}) },
         // Dictation uses this laptop's microphone and Whisper, whichever host a tab shows.
         voice,
-        // The look belongs to this laptop, whichever host a tab shows.
-        appearance,
+        // A Work host shows this laptop's look; a Personal host shows the Personal profile's look, never Work's.
+        appearance: host.profile === "personal" ? personalAppearance : appearance,
         // One app release, whichever host a tab shows: seen once, not per tab.
         releaseNotes,
         // Host tabs show placement natively, so the page needs no switcher of its own.
@@ -389,6 +402,7 @@ const start = async () => {
     event.preventDefault()
     state.closing = true
     appearance.close()
+    personalAppearance?.close()
     for (const partition of tabs?.sessions() ?? [isolated]) partition.flushStorageData()
     // Personal sign-in survives the restart (page-cookies.ts); every partition's cookies reach disk before quit.
     const pageSessions = pages.map((host) => session.fromPartition(`persist:editspace-host-${host.id}`))
