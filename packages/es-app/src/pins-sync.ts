@@ -12,11 +12,11 @@ import type { ReachReason } from "./host-feed"
 import { reasonFor } from "./host-feed"
 
 export type Pin = { ref: string; pinnedAt: number; order?: number | null; orderAt?: number | null }
-export type PinListing = { rev: number; reset?: true; profile?: string; pins: Pin[]; tombstones: { ref: string; at: number }[] }
+export type PinListing = { rev: number; reset?: true; profile?: string; orderIf?: true; pins: Pin[]; tombstones: { ref: string; at: number }[] }
 export type PinCurrent = { state: "pinned"; pinnedAt: number; order?: number | null; orderAt?: number | null } | { state: "unpinned"; at: number } | null
 export type PinWriteResult = { rev: number; applied: boolean; current: PinCurrent }
 export type PinKind = "pin" | "unpin" | "order"
-type PinBody = { at: number; op: string; order?: number; migrate?: true }
+type PinBody = { at: number; op: string; order?: number; migrate?: true; if?: { op: string; unordered: true } }
 type Queued = { kind: PinKind; ref: string; body: PinBody }
 
 const REF = /^(?:session:[A-Za-z0-9_-]{1,128}|lane:[A-Za-z0-9._-]{1,64}\/[A-Za-z0-9._-]{1,64})$/
@@ -69,17 +69,30 @@ export const moveRank = (before: Pin | undefined, after: Pin | undefined) => {
  * derived from (host, ref, time) so a repeated import is an exact retry, not a second change. A migrate PUT cannot
  * override an unpin the store already holds. */
 export const migrationOps = (host: string, local: { ref: string; pinnedAt?: number }[]): Queued[] =>
-  [...new Map(local.filter((item) => validPinRef(item.ref)).map((item) => [item.ref, item])).values()].map((item) => ({
-    kind: "pin",
+  importedPins(local).map((item) => ({ kind: "pin", ref: item.ref, body: { at: item.pinnedAt ?? 0, op: importOp(host, item), migrate: true } }))
+
+/** After an import, this device's local order for the pins it imported (contract §3 v0.2.4): ranks after every pin
+ * placed by time (`order` 1, 2, ... versus negative pin times), in the device's own list order. Each change carries the
+ * store-checked precondition that the ref still holds this import's pin and was never reordered, so it can neither
+ * override a reorder made anywhere nor touch an unpinned or re-pinned ref. */
+export const migrationOrderOps = (host: string, local: { ref: string; pinnedAt?: number }[], now: number): Queued[] =>
+  importedPins(local).map((item, index) => ({
+    kind: "order",
     ref: item.ref,
-    body: { at: item.pinnedAt ?? 0, op: `mig-${digest(`${host}\n${item.ref}\n${item.pinnedAt ?? 0}`)}`, migrate: true },
+    body: { at: now, op: `mig-order-${digest(`${host}\n${item.ref}\n${index}`)}`, order: index + 1, if: { op: importOp(host, item), unordered: true } },
   }))
+
+const importedPins = (local: { ref: string; pinnedAt?: number }[]) =>
+  [...new Map(local.filter((item) => validPinRef(item.ref)).map((item) => [item.ref, item])).values()]
+const importOp = (host: string, item: { ref: string; pinnedAt?: number }) => `mig-${digest(`${host}\n${item.ref}\n${item.pinnedAt ?? 0}`)}`
 
 export type PinsState = {
   status: "loading" | "ready" | "unavailable"
   reason?: ReachReason | "profile"
   rev: number
   pins: Pin[]
+  /** The store understands an import's order precondition (`if`); without it no import order is sent. */
+  orderIf?: boolean
   checkedAt?: number
   /** Writes not yet confirmed by the host. */
   pending: number
@@ -127,6 +140,7 @@ export const createPinsClient = (options: { host: string; prefix: string; profil
       status: "ready",
       reason: undefined,
       rev: listing.rev,
+      orderIf: listing.orderIf === true,
       pins: applyListing(since === undefined ? [] : previous.pins, since === undefined ? { ...listing, reset: true } : listing),
       checkedAt: now(),
     }))
@@ -197,6 +211,7 @@ export const createPinsClient = (options: { host: string; prefix: string; profil
     return enqueue([{ kind, ref, body: { at: now(), op: crypto.randomUUID(), ...(kind === "order" ? { order } : {}) } }])
   }
   const migratedKey = `es-pins-migrated:${options.host}`
+  const importAtKey = `es-pins-import-at:${options.host}`
 
   return {
     host: options.host,
@@ -212,9 +227,17 @@ export const createPinsClient = (options: { host: string; prefix: string; profil
     /** The one-time import of this device's local pins for this host; marked done per (device, host) once sent. */
     migrate: async (local: { ref: string; pinnedAt?: number }[]) => {
       if (storage.getItem(migratedKey)) return
-      // An import still waiting in the outbox is replayed, not queued again.
-      await (outbox.some((item) => item.body.migrate) ? flush() : enqueue(migrationOps(options.host, local)))
-      if (!outbox.some((item) => item.body.migrate)) storage.setItem(migratedKey, String(now()))
+      // An import still waiting in the outbox is replayed, not queued again; its order follows once every pin landed.
+      const imported = (item: Queued) => item.body.migrate || item.body.if
+      if (outbox.some(imported)) await flush()
+      else {
+        // One import time per (device, host), so a re-queued import sends byte-equal changes (exact retries).
+        const at = Number(storage.getItem(importAtKey)) || now()
+        try { storage.setItem(importAtKey, String(at)) } catch { /* the outbox still carries this attempt */ }
+        // An older store ignores `if`, so it gets no import order rather than one that could override a reorder.
+        await enqueue([...migrationOps(options.host, local), ...(state().orderIf ? migrationOrderOps(options.host, local, at) : [])])
+      }
+      if (!outbox.some(imported)) storage.setItem(migratedKey, String(now()))
     },
   }
 }
