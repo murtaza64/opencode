@@ -30,14 +30,14 @@
   height: 100%;
   display: flex;
   align-items: center;
-  gap: 12px;
+  --header-gap: 12px;
+  gap: var(--header-gap);
   padding-inline: 10px;
 }
 .native-header-project {
   display: flex;
   align-items: center;
   gap: 4px;
-  inline-size: clamp(120px, 18vw, 220px);
   min-inline-size: 0;
   flex-shrink: 0;
 }
@@ -45,11 +45,10 @@
   min-inline-size: 0;
   flex: 1;
 }
-/* Left to right, the project column ends where the session title must start: the content pane's edge plus the chat
- * gutter, so the title lines up with the chat's text. It never narrows below its collapse button; right to left,
- * where the title bar's traffic lights stay physically left, the column keeps its own width. */
-:root:not([dir=rtl]) .native-header[style*="--chat-start"] .native-header-project {
-  inline-size: max(28px, calc(var(--chat-start) + var(--chat-gutter, 20px) - max(84px, env(titlebar-area-x, 84px)) - 10px - 12px));
+/* The column before the title holds only the sidebar toggle; it widens so the title starts at the pane's text edge
+ * (pane edge + chat gutter), measured against where the header actually starts. Unmeasured, it is just the toggle. */
+.native-header-project {
+  inline-size: max(28px, calc(var(--pane-start) + var(--chat-gutter, 20px) - var(--header-start) - var(--header-gap)));
 }
 /* The session column's gutter by width, as index.css sets it on .session-page (the title bar sits outside that page). */
 .native-header { --chat-gutter: 20px; }
@@ -92,10 +91,7 @@
 }
 @media (max-width: 800px) {
   .native-header-safe {
-    gap: 8px;
-  }
-  .native-header-project {
-    inline-size: 140px;
+    --header-gap: 8px;
   }
   .native-header .fork-crumb,
   .native-header .topbar > .dim {

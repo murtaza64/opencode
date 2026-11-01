@@ -13,32 +13,45 @@ const [headerTarget, setHeaderTarget] = createSignal<HTMLDivElement>()
 export const NativeHeader = (props: ParentProps) => {
   const host = document.createElement("div")
   document.body.prepend(host)
-  // The session title starts where the chat's text does: the content pane's inline-start edge, measured whenever the
-  // pane moves (sidebar resized, collapsed or the window resized) and handed to CSS as --chat-start.
-  const [chatStart, setChatStart] = createSignal<number>()
+  // The title starts where the pane's text does. Both edges are measured, not assumed: the desktop's native host tabs
+  // move the header's start (tabs.ts inset), and the sidebar moves the pane. Each is an inline-start distance in px.
+  const [edges, setEdges] = createSignal<{ pane: number; header: number }>()
   let observer: ResizeObserver | undefined
   let frame = 0
+  let safe: HTMLDivElement | undefined
+  const measure = () => {
+    const content = document.querySelector<HTMLElement>(".shell > .content")
+    if (!content || !safe) return
+    const rtl = getComputedStyle(document.documentElement).direction === "rtl"
+    const pane = content.getBoundingClientRect(), header = safe.getBoundingClientRect()
+    const pad = parseFloat(getComputedStyle(safe).paddingInlineStart) || 0
+    setEdges(rtl ? { pane: innerWidth - pane.right, header: innerWidth - header.right + pad } : { pane: pane.left, header: header.left + pad })
+  }
   const watch = () => {
     const content = document.querySelector<HTMLElement>(".shell > .content")
-    if (!content) { frame = requestAnimationFrame(watch); return }
-    observer = new ResizeObserver(() => setChatStart(content.getBoundingClientRect().left))
+    if (!content || !safe) { frame = requestAnimationFrame(watch); return }
+    observer = new ResizeObserver(measure)
     observer.observe(content)
+    observer.observe(safe)
+    measure()
   }
   onMount(() => {
     document.documentElement.classList.add("native-mac-header")
     watch()
+    addEventListener("resize", measure)
   })
   onCleanup(() => {
     cancelAnimationFrame(frame)
     observer?.disconnect()
+    removeEventListener("resize", measure)
     setHeaderTarget(undefined)
     document.documentElement.classList.remove("native-mac-header")
     host.remove()
   })
   return (
     <Portal mount={host}>
-      <div class="native-header" role="banner" aria-label="Application header" style={{ "--chat-start": chatStart() === undefined ? undefined : `${chatStart()}px` }}>
-        <div class="native-header-safe">
+      <div class="native-header" role="banner" aria-label="Application header" style={edges() ? { "--pane-start": `${edges()!.pane}px`, "--header-start": `${edges()!.header}px` } : undefined}>
+        <div class="native-header-safe" ref={safe}>
           <div class="native-header-project">{props.children}</div>
           <div class="native-header-session" ref={setHeaderTarget} />
           <TodayCost />

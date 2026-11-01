@@ -23,7 +23,7 @@ const edges = page => page.evaluate(() => {
   return { title: title.getBoundingClientRect().left, text: main.getBoundingClientRect().left + pad, project: document.querySelector(".native-header-project").getBoundingClientRect().right }
 })
 try {
-  for (const [name, width, storage, rtl] of [["wide", 1440, {}, false], ["resized", 1440, { "es-app-left-width": "340" }, false], ["collapsed", 1440, { "es-app-left-open": "0" }, false], ["narrow", 900, {}, false], ["rtl", 1440, {}, true]]) {
+  for (const [name, width, storage, rtl, strip] of [["wide", 1440, {}, false], ["resized", 1440, { "es-app-left-width": "340" }, false], ["collapsed", 1440, { "es-app-left-open": "0" }, false], ["narrow", 900, {}, false], ["host tabs", 1440, { "es-app-left-width": "340" }, false, 296], ["host tabs wider than the sidebar", 1440, {}, false, 296], ["rtl", 1440, {}, true]]) {
     const context = await browser.newContext({ viewport: { width, height: 800 }, userAgent })
     await context.addInitScript(values => { if (window === window.top) for (const [key, value] of Object.entries(values)) localStorage.setItem(key, value) }, storage)
     await context.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
@@ -32,10 +32,14 @@ try {
     await page.goto(`${preview.origin}/session/ses_a?directory=${encodeURIComponent(directory)}`, { waitUntil: "domcontentloaded", timeout: 300_000 })
     await expect(page.locator(".native-header .session-title")).toContainText("Composer fixture", { timeout: 120_000 })
     if (rtl) await page.evaluate(() => { document.documentElement.dir = "rtl" })
+    // The desktop's native host tabs move the header's start (es-desktop tabs.ts inserts this rule).
+    if (strip) await page.addStyleTag({ content: `:root{--host-tabs-end:${strip}px}.native-header-safe{left:max(84px,${strip}px)!important}` })
     await page.waitForTimeout(500)
     const at = await edges(page)
     if (shots) await page.screenshot({ path: path.join(shots, `${label}-${name}.png`), clip: { x: 0, y: 0, width, height: 160 } })
     if (name === "collapsed") assert(at.title >= 84, `${name}: title under the traffic lights (${at.title})`)
+    // Under host tabs wider than the sidebar the title follows the toggle directly: no reserved column.
+    else if (name === "host tabs wider than the sidebar") assert(at.title < at.text + 120 && at.project - at.title < 0 && at.title - at.project <= 13, `${name}: title ${at.title} after column end ${at.project}`)
     else if (!rtl) assert(Math.abs(at.title - at.text) <= 2, `${name}: title starts at ${at.title}, chat text at ${at.text}`)
     // Nothing in the bar overflows the window.
     assert(await page.evaluate(() => document.querySelector(".native-header").scrollWidth <= innerWidth + 1), `${name}: header overflows`)
