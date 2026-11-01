@@ -1,14 +1,10 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-11-01.3",
+  "release": "2026-11-01.4",
   "items": [
     {
-      "title": "Subscription quota",
-      "detail": "Usage: a Subscription quota section; it reads Not configured until a provider is set up."
-    },
-    {
-      "title": "Sidebar filter fix",
-      "detail": "Fixed: a closed sidebar filter could count as an open dialog and block updates."
+      "title": "Lane pins",
+      "detail": "Pins on a lane follow it to its current session."
     }
   ],
   "limits": []
