@@ -119,7 +119,7 @@ export const NeedsYouBand = () => {
   // A host that is not current keeps the band (as "0+"), so an empty list never reads as "nothing needs you".
   return <Show when={all().entries.length || all().fresh.length || all().partial}>
     <section class="needs-you-band" aria-label="Needs you">
-      <div class="nav-heading">Needs you <span class="nav-heading-count" title={all().label.title}>{all().count || all().partial ? all().label.text : ""}</span></div>
+      <div class="nav-heading">Needs you <span class="nav-heading-count" dir="ltr" title={all().label.title}>{all().count || all().partial ? all().label.text : ""}</span></div>
       <For each={shown()}>{entry => <DecisionRow entry={entry} />}</For>
       <For each={all().fresh}>{surface => <SurfaceRow surface={surface} fresh />}</For>
       <Show when={more()}><button type="button" class="link-button nav-more" onClick={() => setTab("decisions")}>{more()} more in Decisions</button></Show>
@@ -194,7 +194,7 @@ export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: stri
             document.getElementById(tabId(TABS[index][0]))?.focus()
           }}>
           {/* The count keeps a fixed slot, so the tab does not change width as numbers change. */}
-          <span class="nav-tab-label">{label}</span><span class="nav-tab-count" title={id === "agents" ? props.agentsCount?.title : undefined}>{count(id) || ""}</span>
+          <span class="nav-tab-label">{label}</span><span class="nav-tab-count" dir="ltr" title={id === "agents" ? props.agentsCount?.title : undefined}>{count(id) || ""}</span>
         </button>}</For>
     </div>
     <div role="tabpanel" id={`${tabId(tab())}-panel`} aria-labelledby={tabId(tab())} class="nav-tab-panel">

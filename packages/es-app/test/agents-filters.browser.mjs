@@ -126,6 +126,14 @@ try {
   await expect(sidebar.locator("[role=tabpanel]")).toHaveAttribute("aria-labelledby", "nav-tab-decisions")
   // Keyboard, RTL: ArrowLeft moves forward in reading order.
   await page.evaluate(() => { document.documentElement.dir = "rtl" })
+  // A partial count reads "N+" in RTL too: the "+" sits after the number, visually to its right.
+  const plusAfter = await agentsTab.locator(".nav-tab-count").evaluate((element) => {
+    const text = element.firstChild
+    const at = (index) => { const range = document.createRange(); range.setStart(text, index); range.setEnd(text, index + 1); return range.getBoundingClientRect().left }
+    const plus = text.textContent.indexOf("+")
+    return plus > 0 && at(plus) > at(0)
+  })
+  expect(plusAfter).toBe(true)
   await sidebar.getByRole("tab", { name: /^Decisions/ }).focus()
   await page.keyboard.press("ArrowLeft")
   await expect(sidebar.getByRole("tab", { name: /^PRs/ })).toHaveAttribute("aria-selected", "true")
