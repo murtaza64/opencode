@@ -48,7 +48,7 @@ const personalListener = async (sshPeer: ReturnType<typeof createSshPeer>) => {
   await writeFile(path.join(root, "index.html"), "<title>Personal</title>")
   const excalibur = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (request) => Response.json({ host: "excalibur", path: new URL(request.url).pathname }) })
   cleanup.push(async () => void (await excalibur.stop(true)))
-  const bridge = createBridge({ origin: excalibur.url.origin, store: { access: async () => ({ clientId: "id", clientSecret: "secret" }), cookie: async () => "fixture-pairing-cookie-0123456789", saveCookie: async () => undefined } })
+  const bridge = createBridge({ origin: excalibur.url.origin, store: { access: async () => ({ clientId: "id", clientSecret: "secret" }), cookie: async () => "fixture-pairing-cookie-0123456789", saveCookie: async () => undefined, forgetCookie: async () => undefined } })
   await bridge.ready
   const server = await serve({ root, remote: { id: "excalibur", origin: excalibur.url.origin, bridge }, sshPeers: [{ id: "ygnium", peer: sshPeer }] })
   cleanup.push(() => Promise.race([server.close(), Bun.sleep(500)]))
