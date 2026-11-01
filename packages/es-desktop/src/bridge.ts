@@ -3,7 +3,7 @@
  * (obtained once with the pairing code, kept encrypted on disk). Upstream requests from that host's
  * listener carry them; no renderer, log, URL or mail ever does. */
 import { execFile } from "node:child_process"
-import { readFile, rename, writeFile } from "node:fs/promises"
+import { readFile, rename, rm, writeFile } from "node:fs/promises"
 
 export type Access = { clientId: string; clientSecret: string }
 export type BridgeStore = {
@@ -11,6 +11,8 @@ export type BridgeStore = {
   cookie: () => Promise<string | undefined>
   /** Throws when the cookie cannot be kept safely (no OS encryption); never stores plaintext. */
   saveCookie: (value: string) => Promise<void>
+  /** Deletes the stored cookie; absent is fine. */
+  forgetCookie: () => Promise<void>
 }
 export type PairResult = "paired" | "wrong-code" | "throttled" | "sign-in-needed" | "unreachable" | "unavailable"
 
@@ -61,6 +63,11 @@ export const createBridge = (options: { origin: string; store: BridgeStore; fetc
       // A redirect elsewhere (the Access login) or a refusal at the gate: the token is not accepted.
       return [301, 302, 303, 307, 308, 403].includes(response.status) ? "sign-in-needed" : "unreachable"
     },
+    /** Drops this machine's pairing (Forget pairing, or the gateway no longer honours it); the token stays. */
+    forget: async () => {
+      state.cookie = undefined
+      await options.store.forgetCookie()
+    },
   }
 }
 
@@ -90,4 +97,5 @@ export const encryptedCookie = (file: string, crypto: { available: () => boolean
     await writeFile(`${file}.tmp`, crypto.encrypt(value), { mode: 0o600 })
     await rename(`${file}.tmp`, file)
   },
+  forgetCookie: async () => rm(file, { force: true }),
 })

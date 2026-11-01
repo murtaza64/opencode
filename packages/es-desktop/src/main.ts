@@ -193,7 +193,7 @@ const start = async () => {
         perfDir: PERF_DIR,
       })
       await writeFile(file, new URL(listener.origin).port, { mode: 0o600 })
-      return { ...host, server: listener }
+      return { ...host, server: listener, bridge }
     }).map((started) => started.catch((error: unknown) => {
       console.error("Editspace remote host listener failed", { message: error instanceof Error ? error.message : "Unknown error" })
       return undefined
@@ -384,6 +384,13 @@ const start = async () => {
             : []),
           ...(tabs ? [{ type: "separator" as const }] : []),
           pairMenu,
+          // Forget pairing (h-r N3): drops this machine's gateway pairing for a bridged host; its tab then offers pairing.
+          ...remotes.flatMap((host) => (host.bridge ? [{
+            label: `Forget ${host.label} Pairing`,
+            click: () => void host.bridge!.forget().then(() => {
+              if (tabs?.selected() === host.id) void tabs.shownContents().loadURL(host.server.origin)
+            }, () => undefined),
+          }] : [])),
         ],
       },
       {

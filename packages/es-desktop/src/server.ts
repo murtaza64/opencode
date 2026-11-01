@@ -309,6 +309,13 @@ export const serve = async (options: {
       if (req.method !== "POST" || url.search || !trusted(req.headers.origin)) return finish(403, "Forbidden")
       return bridgePair(bridge, req, res, finish)
     }
+    // Forget pairing (h-r N3): only from this window; nothing goes to the gateway. The page then offers pairing.
+    if (bridge && url.pathname === "/__es/bridge/forget") {
+      if (req.method !== "POST" || url.search || !trusted(req.headers.origin)) return finish(403, "Forbidden")
+      await bridge.forget().catch(() => undefined)
+      res.writeHead(303, { location: "/" })
+      return res.end()
+    }
     const api = /^\/(oc|es)(\/|$)/.exec(url.pathname)
     if (api && !apiAllowed(req.method ?? "", url.pathname)) return finish(403, "API route not exposed")
     // A secure decision field (dotfiles docs/es-secret-intake.md) is answered only on the computer that asked:
@@ -400,6 +407,9 @@ export const serve = async (options: {
             if (bridge) return finish(401, '{"error":"Sign-in needed"}', "application/json")
             return finish(502, '{"error":"Upstream redirect blocked"}', "application/json")
           }
+          // The gateway's own pairing refusal (rotation or expiry, h-r N1): forget the stale cookie so the page
+          // offers pairing again instead of failing with 401s until a restart. Core 401s pass through unchanged.
+          if (bridge && api && response.statusCode === 401) return pairingRefusal(response, bridge, res, finish, setCookie)
           timing?.headers(response.statusCode)
           if (timing) response.on("data", (chunk: Buffer) => timing.data(chunk.length))
           const cookies = setCookie(response.headers["set-cookie"])
@@ -693,6 +703,29 @@ const appearanceRoute = (
     return
   }
   finish(404, "Not found")
+}
+
+// A bridged 401: the gateway's pairing layer answers exactly {"error":"Pairing required"}; anything else is the host's.
+const pairingRefusal = (response: IncomingMessage, bridge: Bridge, res: ServerResponse, finish: (status: number, body: string, type?: string) => void, setCookie: (values: string[] | undefined) => string[] | undefined) => {
+  const chunks: Buffer[] = []
+  let size = 0
+  response.on("data", (chunk: Buffer) => {
+    size += chunk.length
+    if (size <= 4096) chunks.push(chunk)
+  })
+  response.on("error", () => res.destroy())
+  response.on("end", async () => {
+    const body = Buffer.concat(chunks)
+    const parsed = size <= 4096 && (() => { try { return JSON.parse(body.toString("utf8")) as unknown } catch { return undefined } })()
+    if (parsed && typeof parsed === "object" && Object.keys(parsed).length === 1 && (parsed as Record<string, unknown>).error === "Pairing required") {
+      await bridge.forget().catch(() => undefined)
+      return finish(401, JSON.stringify({ error: "Pairing required" }), "application/json")
+    }
+    if (size > 4096) return finish(502, '{"error":"Upstream response too large"}', "application/json")
+    const cookies = setCookie(response.headers["set-cookie"])
+    res.writeHead(401, { ...proxyHeaders(response.headers), ...(cookies ? { "set-cookie": cookies } : {}), "content-length": String(body.length) })
+    res.end(body)
+  })
 }
 
 // The local pairing step for a bridged host: the code goes from this page to this listener, and from

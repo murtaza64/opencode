@@ -21,7 +21,8 @@ const PAIRED = "fixture-pairing-cookie-0123456789"
 // pairing with the code sets es_remote; everything else needs that cookie.
 const gateway = () => {
   const seen: { method: string; path: string; id: string | null; secret: string | null; cookie: string | null; origin: string | null }[] = []
-  const state = { accept: true }
+  // `cookie`: the pairing the gateway currently honours; changing it models a gateway rotation or expiry.
+  const state = { accept: true, cookie: PAIRED, coreUnauthorized: false }
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -35,7 +36,9 @@ const gateway = () => {
         if (new URLSearchParams(body).get("code") !== CODE) return new Response("That code does not match", { status: 401 })
         return new Response(null, { status: 303, headers: { location: "/", "set-cookie": `es_remote=${PAIRED}; HttpOnly; SameSite=Strict; Path=/; Secure` } })
       }
-      if (request.headers.get("cookie")?.includes(`es_remote=${PAIRED}`) !== true) return Response.json({ error: "Pairing required" }, { status: 401 })
+      if (request.headers.get("cookie")?.includes(`es_remote=${state.cookie}`) !== true) return Response.json({ error: "Pairing required" }, { status: 401 })
+      // A Core-level 401 behind a valid pairing (e.g. Core server auth).
+      if (state.coreUnauthorized) return Response.json({ name: "UnauthorizedError" }, { status: 401 })
       if (url.pathname === "/oc/global/event")
         return new Response(new ReadableStream({ start: (controller) => { controller.enqueue(new TextEncoder().encode('data: {"type":"session.updated","host":"personal"}\n\n')); controller.close() } }), { headers: { "content-type": "text/event-stream" } })
       return Response.json({ path: url.pathname, method: request.method })
@@ -47,7 +50,7 @@ const gateway = () => {
 
 const memory = (access: typeof ACCESS | undefined): BridgeStore & { saved: string[] } => {
   const saved: string[] = []
-  return { saved, access: async () => access, cookie: async () => saved.at(-1), saveCookie: async (value) => void saved.push(value) }
+  return { saved, access: async () => access, cookie: async () => saved.at(-1), saveCookie: async (value) => void saved.push(value), forgetCookie: async () => void saved.splice(0) }
 }
 
 const listener = async (origin: string, store: BridgeStore) => {
@@ -170,7 +173,7 @@ test("without OS encryption pairing is refused as 'unavailable' and nothing is w
 
 test("an unreadable pairing cookie means 'pair again', and the service token is kept", async () => {
   const host = gateway()
-  const { get, bridge } = await listener(host.origin, { access: async () => ACCESS, cookie: async () => { throw new Error("decrypt failed") }, saveCookie: async () => {} })
+  const { get, bridge } = await listener(host.origin, { access: async () => ACCESS, cookie: async () => { throw new Error("decrypt failed") }, saveCookie: async () => {}, forgetCookie: async () => {} })
   expect(bridge.configured()).toBe(true)
   expect(await (await get("/oc/session/status")).json()).toEqual({ error: "Pairing required" })
   expect(host.seen).toEqual([])
@@ -195,4 +198,56 @@ test("a page can never supply Access credentials: they are stripped on every lis
   cleanup.push(() => Promise.race([local.close(), Bun.sleep(500)]))
   await fetch(`${local.origin}/oc/session/status`, { headers: { "x-editspace-key": local.key, ...injected } })
   expect(upstream.at(-1)).toEqual({ "cf-access-client-id": null, "cf-access-client-secret": null, "cf-access-token": null, "cf-authorization": null, "cf-access-jwt-assertion": null })
+})
+
+test("a gateway pairing 401 (rotation or expiry) forgets the stale cookie and the page offers pairing again", async () => {
+  const host = gateway()
+  const store = memory(ACCESS)
+  store.saved.push(PAIRED)
+  const { get, bridge } = await listener(host.origin, store)
+  host.state.cookie = "rotated-pairing-cookie-0123456789"
+  const stale = await get("/oc/session/status")
+  expect(stale.status).toBe(401)
+  expect(await stale.json()).toEqual({ error: "Pairing required" })
+  expect(bridge.paired()).toBe(false)
+  expect(store.saved).toEqual([])
+  const calls = host.seen.length
+  expect(await (await get("/oc/session/status")).json()).toEqual({ error: "Pairing required" })
+  const page = await get("/", { headers: { "sec-fetch-dest": "document" } })
+  expect(page.status).toBe(401)
+  expect(await page.text()).toContain("pairing code")
+  expect(host.seen.length).toBe(calls)
+})
+
+test("a Core 401 behind a valid pairing passes through and keeps the pairing", async () => {
+  const host = gateway()
+  const store = memory(ACCESS)
+  store.saved.push(PAIRED)
+  const { get, bridge } = await listener(host.origin, store)
+  host.state.coreUnauthorized = true
+  const response = await get("/oc/session/status")
+  expect(response.status).toBe(401)
+  expect(await response.json()).toEqual({ name: "UnauthorizedError" })
+  expect(bridge.paired()).toBe(true)
+  expect(store.saved).toEqual([PAIRED])
+})
+
+test("Forget pairing deletes the stored cookie, only from this window", async () => {
+  const host = gateway()
+  const dir = await mkdtemp(path.join(tmpdir(), "es-bridge-forget-"))
+  cleanup.push(() => rm(dir, { recursive: true, force: true }))
+  const file = path.join(dir, "personal.cookie")
+  const cookie = encryptedCookie(file, { available: () => true, encrypt: (value: string) => Buffer.from(value).reverse(), decrypt: (value: Buffer) => Buffer.from(value).reverse().toString() })
+  await cookie.saveCookie(PAIRED)
+  const { server, get, bridge } = await listener(host.origin, { access: async () => ACCESS, ...cookie })
+  expect(bridge.paired()).toBe(true)
+  const foreign = await get("/__es/bridge/forget", { method: "POST", headers: { origin: "https://evil.example" } })
+  expect(foreign.status).toBe(403)
+  expect(await Bun.file(file).exists()).toBe(true)
+  const forgotten = await get("/__es/bridge/forget", { method: "POST", headers: { origin: server.origin } })
+  expect(forgotten.status).toBe(303)
+  expect(forgotten.headers.get("location")).toBe("/")
+  expect(bridge.paired()).toBe(false)
+  expect(await Bun.file(file).exists()).toBe(false)
+  expect(host.seen.filter((item) => item.path.includes("forget"))).toEqual([])
 })
