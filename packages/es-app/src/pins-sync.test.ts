@@ -336,10 +336,14 @@ describe.skipIf(!hasStore)("pins against the real host store", () => {
   test.skipIf(!hasOrderIf)("one host reached through two origins imports once: both listeners send the same changes", async () => {
     const origin = await storeHost()
     const local = [{ ref: "lane:opencode/a" }, { ref: "lane:opencode/b" }]
-    const own = client("mini", tab(origin))
-    const viaLaptop = client("mini", tab(origin))
+    // Each origin has its own storage, so its own import time: the second order change reuses the first one's op with
+    // another time. Fixed, different clocks make that case every run instead of whenever the two land in different ms.
+    const start = Date.now()
+    const own = client("mini", tab(origin), memoryStorage(), "work", () => start)
+    const viaLaptop = client("mini", tab(origin), memoryStorage(), "work", () => start + 1)
     await Promise.all([own.refresh(), viaLaptop.refresh()])
-    await Promise.all([own.migrate(local), viaLaptop.migrate(local)])
+    await own.migrate(local)
+    await viaLaptop.migrate(local)
     await own.refresh()
     expect(orderedPins(own.state().pins).map((pin) => [pin.ref, pin.order])).toEqual([["lane:opencode/a", 1], ["lane:opencode/b", 2]])
     expect([own.state().notSynced, viaLaptop.state().notSynced]).toEqual([[], []])

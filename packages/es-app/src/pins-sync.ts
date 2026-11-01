@@ -166,6 +166,12 @@ export const createPinsClient = (options: { host: string; prefix: string; profil
       await response?.body?.cancel()
       return "retry"
     }
+    // An import order whose op the store already holds with another time: the same import sent through another origin of
+    // this host (its own tab and another laptop's /hosts/<id>), each with its own import time. The first one stands.
+    if (response.status === 409 && item.kind === "order" && item.body.if) {
+      await response.body?.cancel()
+      return "done"
+    }
     // An imported pin older than 30 days whose ref the store already holds: the store's own state stands.
     if (response.status === 410 && item.body.migrate) {
       await response.body?.cancel()
