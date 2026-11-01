@@ -1,18 +1,14 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-11-01.2",
+  "release": "2026-11-01.3",
   "items": [
     {
-      "title": "Filter popover",
-      "detail": "Filter popover: cleaner groups and controls."
+      "title": "Subscription quota",
+      "detail": "Usage: a Subscription quota section; it reads Not configured until a provider is set up."
     },
     {
-      "title": "Right-to-left counts",
-      "detail": "Right-to-left: counts like 0+ display correctly."
-    },
-    {
-      "title": "Mail delivery",
-      "detail": "Mail rows read delivery from the right host."
+      "title": "Sidebar filter fix",
+      "detail": "Fixed: a closed sidebar filter could count as an open dialog and block updates."
     }
   ],
   "limits": []
