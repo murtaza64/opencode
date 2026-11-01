@@ -548,6 +548,13 @@ test("host reads add exactly what the session view reads: pending inputs, subage
   expect(hostApiAllowed("POST", "/oc/session/ses_m/input")).toBe(false)
 })
 
+test("host reads allow the subscription quota snapshot only as an exact read", async () => {
+  const { hostApiAllowed } = await import("./policy")
+  expect(hostApiAllowed("GET", "/es/api/quota")).toBe(true)
+  for (const pathname of ["/es/api/quota/claude", "/es/api/quotas", "/es/api/quota/"]) expect(hostApiAllowed("GET", pathname)).toBe(false)
+  for (const method of ["POST", "PUT", "DELETE"]) expect(hostApiAllowed(method, "/es/api/quota")).toBe(false)
+})
+
 test("writes reach only a configured Work host; an unknown id, a Personal host or a stopped host never falls back to this one", async () => {
   const mini = fakeHost("mini")
   const local = fakeHost("local")

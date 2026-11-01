@@ -38,3 +38,9 @@
 .usage-sessions li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; padding-block: 4px; border-block-end: 1px solid var(--surface0); font-variant-numeric: tabular-nums; }
 .usage-sessions a { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 560px) { .usage-sessions li { grid-template-columns: minmax(0, 1fr) auto; } .usage-sessions li > .home-muted { grid-column: 1 / -1; } }
+.usage-quota-list { list-style: none; padding: 0; margin: 0; max-width: 520px; }
+.usage-quota-list li { padding-block: 6px; border-block-end: 1px solid var(--surface0); }
+.usage-quota-bar { display: grid; grid-template-columns: 9em 1fr auto auto; gap: 8px; align-items: center; font-variant-numeric: tabular-nums; }
+.usage-quota-track { block-size: 6px; border-radius: 3px; background: var(--surface0); overflow: hidden; }
+.usage-quota-track i { display: block; block-size: 100%; background: var(--blue); }
+.usage-quota-bar.stale .usage-quota-track i { background: var(--overlay0); }

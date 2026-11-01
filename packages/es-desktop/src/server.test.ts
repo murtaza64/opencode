@@ -446,6 +446,12 @@ test("self-handoff POST and DELETE reach only this host's dashboard with operato
   }
 })
 
+test("the gateway exposes the subscription quota snapshot only as an exact read", () => {
+  expect(apiAllowed("GET", "/es/api/quota")).toBe(true)
+  for (const pathname of ["/es/api/quota/claude", "/es/api/quota/", "/es/api/quotas"]) expect(apiAllowed("GET", pathname)).toBe(false)
+  for (const method of ["POST", "PUT", "PATCH", "DELETE"]) expect(apiAllowed(method, "/es/api/quota")).toBe(false)
+})
+
 test("only exact pin routes are exposed", () => {
   expect(apiAllowed("GET", "/es/api/pins")).toBe(true)
   expect(apiAllowed("GET", "/es/api/pins/events")).toBe(true)

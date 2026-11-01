@@ -4,6 +4,8 @@
 // One rollup read on open; none while the page sits idle.
 // Usage v2: 7/30-day stacked trend (keyboard, unknown and uncounted days are not $0), model table,
 // computed cuts, and the per-session section gated on a newer Core.
+// COST-02 Q1: subscription quota section from the dashboard's /es/api/quota fixture: hidden without the
+// route, honest states (not configured, unavailable, stale, ok with countdown, experimental), never 0 for unknown.
 // Run from packages/es-app: node test/usage.browser.mjs
 import { createRequire } from "node:module"
 import { startAttentionPreview } from "./attention-preview.mjs"
@@ -34,12 +36,30 @@ const rollup = {
   ] },
 }
 let mode = "json"
+let quota = "missing"
+const soon = (minutes) => new Date(Date.now() + minutes * 60_000).toISOString()
+const quotaView = () => ({ schema: "es-quota/1", checkedAt: new Date().toISOString(), providers: [
+  { provider: "claude", state: "ok", source: "claude-statusline", observedAt: new Date().toISOString(), windows: [
+    { id: "five_hour", usedPercent: 42, resetsAt: soon(150) }, { id: "seven_day", usedPercent: 7, resetsAt: soon(3 * 1440 + 90) }] },
+  { provider: "codex", state: "ok", source: "codex-app-server", observedAt: new Date().toISOString(), pinned: false, windows: [
+    { id: "codex/primary", usedPercent: 10, resetsAt: soon(45), windowDurationMins: 300 }] },
+] })
+const quotaStates = () => ({ schema: "es-quota/1", checkedAt: new Date().toISOString(), providers: [
+  { provider: "claude", state: "stale", source: "claude-statusline", observedAt: soon(-420), staleSince: soon(-60), windows: [{ id: "five_hour", usedPercent: 88, resetsAt: soon(-60) }] },
+  { provider: "codex", state: "not-configured", windows: [] },
+] })
 let sessions = "missing"
 const reads = []
 const sessionReads = []
 const preview = await startAttentionPreview([{
   name: "usage-fixture",
   configureServer(server) {
+    server.middlewares.use("/es/api/quota", (req, res) => {
+      if (quota === "missing") { res.writeHead(404); return res.end() }
+      if (quota === "malformed") { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ schema: "es-quota/1", checkedAt: new Date().toISOString(), providers: [{ provider: "claude", state: "unavailable", reason: "invalid", windows: [] }] })) }
+      res.writeHead(200, { "content-type": "application/json" })
+      res.end(JSON.stringify(quota === "states" ? quotaStates() : quotaView()))
+    })
     server.middlewares.use("/oc/experimental/usage/sessions", (req, res) => {
       if (req.headers["x-under-test"]) sessionReads.push(req.url)
       if (sessions === "missing") { res.writeHead(404); return res.end() }
@@ -165,6 +185,46 @@ try {
   await expect(groups.nth(0)).toContainText("$41.50 + unpriced")
   await expect(page.getByLabel("Top sessions")).toContainText("Not a project or workstream.")
   console.log("PASS usage v2: per-session ranking; unpriced not $0; one sessions read per window, Refresh re-reads; lane/directory grouping")
+
+  // Subscription quota: absent until the dashboard serves the route.
+  const section = page.locator("[data-usage-quota]")
+  await expect(section).toHaveCount(0)
+  quota = "ok"
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(section).toContainText("Separate from API spend and token activity.")
+  const claude = section.locator('[data-quota-provider="claude"]')
+  await expect(claude.locator(".usage-quota-bar")).toHaveCount(2)
+  await expect(claude.locator(".usage-quota-bar").nth(0)).toContainText("5-hour")
+  await expect(claude.locator(".usage-quota-bar").nth(0)).toContainText("42% used")
+  await expect(claude.locator(".usage-quota-bar").nth(0)).toContainText(/resets in 2h (29|30|31)m/)
+  await expect(claude.locator(".usage-quota-bar").nth(1)).toContainText(/resets in 3d 1h/)
+  await expect(claude.getByRole("meter").nth(0)).toHaveAttribute("aria-valuenow", "42")
+  const codex = section.locator('[data-quota-provider="codex"]')
+  await expect(codex).toContainText("experimental")
+  await expect(codex).toContainText("primary (5-hour)")
+  await expect(codex).toContainText(/resets in (44|45|46)m/)
+  quota = "states"
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(section.locator('[data-quota-provider="claude"] [data-quota-status]')).toContainText("Stale since")
+  await expect(section.locator('[data-quota-provider="claude"] .usage-quota-bar.stale')).toContainText("88% used")
+  await expect(section.locator('[data-quota-provider="claude"]')).not.toContainText("resets in")
+  await expect(section.locator('[data-quota-provider="codex"]')).toContainText("Not configured")
+  await expect(section.locator('[data-quota-provider="codex"] .usage-quota-bar')).toHaveCount(0)
+  await expect(section.locator('[data-quota-provider="codex"]')).not.toContainText("0%")
+  quota = "malformed"
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(section.locator('[data-quota-provider="claude"]')).toContainText("Unavailable (invalid)")
+  await expect(section.locator(".usage-quota-bar")).toHaveCount(0)
+  quota = "ok"
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(section.locator(".usage-quota-bar")).toHaveCount(3)
+  await page.setViewportSize({ width: 390, height: 800 })
+  await page.evaluate(() => document.documentElement.setAttribute("dir", "rtl"))
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "quota: no horizontal overflow at 390px RTL").toBe(true)
+  await page.evaluate(() => document.documentElement.setAttribute("dir", "ltr"))
+  await page.setViewportSize({ width: 1280, height: 860 })
+  await section.screenshot({ path: process.env.QUOTA_SHOT ?? "/tmp/usage-quota.png" })
+  console.log("PASS usage quota: hidden without the route; ok bars + countdown; experimental Codex; stale, not configured, unavailable never 0; 390px RTL")
 
   mode = "html"
   await page.reload({ waitUntil: "domcontentloaded" })

@@ -3,12 +3,13 @@
  * returns after a minute away, or on Refresh. No polling.
  * Each host is its own origin, so this page covers this host only and says so: never a global total. */
 import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js"
-import { oc, type UsageDaily, type UsageLimit, type UsageSessions, type UsageTokens } from "../api"
+import { es, oc, type QuotaView, type UsageDaily, type UsageLimit, type UsageSessions, type UsageTokens } from "../api"
 import { seriesColor, short, STATE_LABEL, UsageChart } from "../components/usage-chart"
 import { buildTrend, groupByDirectory, OTHER, unpricedModel, type Trend } from "../usage-trend"
 import { AppHeader } from "../components/native-header"
 import { host, readHost } from "../host"
 import { unpriced } from "../today-cost"
+import { quotaRows } from "../subscription-quota"
 import "./home.css"
 import "./usage.css"
 
@@ -42,7 +43,40 @@ export default function UsagePage() {
         </Show>
       </Show>
     </Show>
+    <SubscriptionSection version={version()} host={label()} />
   </main>
+}
+
+/** Plan quota from this host's snapshots (COST-02 Q1); re-read when the page re-reads a stale rollup on tab return. Hidden on a dashboard without the route. */
+const SubscriptionSection = (props: { version: number; host: string }) => {
+  const [quota] = createResource(() => props.version, () => es.quota().catch((error: unknown) => error instanceof Error ? error : new Error(String(error))))
+  const [now, setNow] = createSignal(Date.now())
+  const timer = setInterval(() => setNow(Date.now()), 60_000)
+  onCleanup(() => clearInterval(timer))
+  const rows = () => { const value = quota(); return value && !(value instanceof Error) ? quotaRows(value, now()) : [] }
+  return <Show when={quota() !== undefined}>
+    <section aria-label="Subscription quota" class="usage-quota" data-usage-quota>
+      <h3>Subscription quota</h3>
+      <p class="home-muted">Plan windows on {props.host}, from local snapshots. Separate from API spend and token activity.</p>
+      <Show when={!(quota() instanceof Error)} fallback={<p class="home-muted" role="alert">Subscription quota unavailable: {(quota() as Error).message}</p>}>
+        <ul class="usage-quota-list">
+          <For each={rows()}>{(row) => <li data-quota-provider={row.provider}>
+            <div class="usage-quota-head">
+              <b>{row.label}</b>
+              <Show when={row.experimental}><span class="usage-incomplete" title="This CLI version is not the one the adapter was verified against"> · experimental</span></Show>
+              <Show when={row.status}><span class="home-muted" data-quota-status> · {row.status}</span></Show>
+            </div>
+            <For each={row.bars}>{(bar) => <div class="usage-quota-bar" classList={{ stale: !bar.reset }}>
+              <span class="usage-quota-label"><bdi dir="ltr">{bar.label}</bdi></span>
+              <span class="usage-quota-track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={bar.percent} aria-label={`${row.label} ${bar.label} used`}><i style={{ "inline-size": `${bar.percent}%` }} /></span>
+              <span>{bar.percent}% used</span>
+              <Show when={bar.reset}><span class="home-muted"> · {bar.reset}</span></Show>
+            </div>}</For>
+          </li>}</For>
+        </ul>
+      </Show>
+    </section>
+  </Show>
 }
 
 const Report = (props: { usage: UsageDaily; host: string; refresh: () => void; loading: boolean }) => {

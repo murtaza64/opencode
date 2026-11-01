@@ -640,6 +640,21 @@ export type CurrentWork = {
   }
 }
 
+/** GET /es/api/quota (es-quota/1): subscription windows from local snapshots, one state per provider. Never provider billing. */
+export type QuotaWindow = { id: string; usedPercent: number; resetsAt?: string; windowDurationMins?: number }
+export type QuotaProvider = {
+  provider: "claude" | "codex"
+  state: "not-configured" | "unavailable" | "stale" | "ok"
+  reason?: string
+  source?: string
+  observedAt?: string
+  staleSince?: string
+  /** false: the Codex CLI is not the version the adapter was written against; shown as experimental. */
+  pinned?: boolean
+  windows: QuotaWindow[]
+}
+export type QuotaView = { schema: "es-quota/1"; checkedAt: string; providers: QuotaProvider[] }
+
 export const es = {
   currentWork: (sessionID: string, directory: string): Promise<CurrentWork> =>
     fetch(`/es/api/current-work?session_id=${encodeURIComponent(sessionID)}&${q(directory)}`)
@@ -680,6 +695,12 @@ export const es = {
       .then(statusJson<SessionInsights>),
   prDetail: (url: string, signal?: AbortSignal): Promise<any> =>
     fetch(`/es/api/pr-detail?url=${encodeURIComponent(url)}`, { signal }).then(statusJson),
+  /** This host's subscription quota snapshots (COST-02 Q1). `prefix`: "" or "/hosts/<id>". undefined = a dashboard without the route. */
+  quota: async (prefix = "", signal?: AbortSignal): Promise<QuotaView | undefined> => {
+    const res = await fetch(`${prefix}/es/api/quota`, { signal })
+    if (res.status === 404 || !res.headers.get("content-type")?.includes("application/json")) return undefined
+    return statusJson<QuotaView>(res)
+  },
   editspaces: (): Promise<{ editspaces: { name: string; root: string }[]; default: string | null }> =>
     fetch("/es/api/editspaces").then(json<{ editspaces: { name: string; root: string }[]; default: string | null }>),
   state: (esName?: string): Promise<any> => fetch(`/es/api/state?${esQ(esName)}`).then(json),
