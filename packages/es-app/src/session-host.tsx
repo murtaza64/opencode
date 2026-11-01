@@ -4,8 +4,9 @@
 import { createContext, useContext } from "solid-js"
 import { ocAt } from "./api"
 
-/** `id`: another Work host's id; undefined for this page's own host. */
-export type SessionHost = { id?: string; label?: string; base: string }
+/** `id`: another Work host's id; undefined for this page's own host. `readOnly`: that host takes only reads from this
+ * page (a pinned-SSH Personal peer), so the view offers no composer or rename. */
+export type SessionHost = { id?: string; label?: string; base: string; readOnly?: true }
 
 const context = createContext<SessionHost>({ base: "/oc" })
 

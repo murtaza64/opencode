@@ -205,8 +205,9 @@ export default function SessionPage() {
           const base = hostBase(other, page().id)
           if (!base) return <main class="session-page"><p class="err" role="alert">Unknown host.</p></main>
           if (base === "/oc") return <SessionView sessionID={id!} directory={dir ?? ""} anchor={() => parseAnchor(search)} />
-          const label = page().work.find((item) => item.id === other)?.label ?? other
-          return <SessionView sessionID={id!} directory={dir ?? ""} anchor={() => parseAnchor(search)} host={{ id: other, label, base }} />
+          const item = page().work.find((item) => item.id === other)
+          return <SessionView sessionID={id!} directory={dir ?? ""} anchor={() => parseAnchor(search)}
+            host={{ id: other, label: item?.label ?? other, base, ...(item?.readOnly ? { readOnly: true as const } : {}) }} />
         }}</Show>
       }}
     </Show>
@@ -1883,6 +1884,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             void refetch()
           }} />
           <Show when={sessionHost.id}><span class="session-host" title={`On ${sessionHost.label}`}><HostGlyph host={sessionHost.id!} /> <bdi dir="auto">{sessionHost.label}</bdi></span></Show>
+          <Show when={sessionHost.readOnly}><span class="dim session-read-only" data-read-only>read only</span></Show>
           <span class="dim session-state" data-state={workState()}>{workState() === "working" ? "busy" : workState()}</span>
           <Show when={subagentsRunning()}><span class="dim">{subagentsRunning()} subagent(s) running</span></Show>
           <Show when={(session() as any)?.parentID}>
@@ -2134,9 +2136,12 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         </div>
 
         <WorkStatus /><ComposerResults composer={composer} connected={connected()} />
-        <div class="prompt-box" classList={{ "prompt-expanded": floating() }} style={{ "--editor-expanded": `${expandedHeight()}px` }}>
-          <ComposerPanel />
-        </div>
+        {/* A read-only host (pinned-SSH Personal peer) takes no prompt, steer or reply from this page; its listener refuses them. */}
+        <Show when={!sessionHost.readOnly} fallback={<p class="dim session-read-only-note" data-read-only-note>Read only: this session is on <bdi dir="auto">{sessionHost.label}</bdi>. Reply from that host.</p>}>
+          <div class="prompt-box" classList={{ "prompt-expanded": floating() }} style={{ "--editor-expanded": `${expandedHeight()}px` }}>
+            <ComposerPanel />
+          </div>
+        </Show>
         <SelfHandoffStatus handoff={selfHandoff} successor={(id) => <A href={hrefFor(id, directory)}><bdi dir="auto">{sessionLabel(id)}</bdi></A>} />
       </div>
 
