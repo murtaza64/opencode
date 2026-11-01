@@ -80,20 +80,20 @@ const SidebarFilter = <S extends string>(props: { hosts: { id: string; label: st
     </summary>
     <div class="sidebar-filter-panel" role="dialog" aria-label="Filter and sort">
       <Show when={props.hosts.length > 1}>
-        <fieldset><legend>Hosts</legend><For each={props.hosts}>{(item) =>
+        <fieldset class="sidebar-filter-list"><legend>Hosts</legend><For each={props.hosts}>{(item) =>
           <label><input type="checkbox" checked={props.shownHost(item.id)} onChange={() => props.toggleHost(item.id)} /><HostGlyph host={item.id} /><bdi dir="auto">{item.label}</bdi><span class="sidebar-filter-n">{props.hostCount(item.id) || ""}</span></label>}</For></fieldset>
       </Show>
-      <fieldset><legend>Project</legend>
-        <label><input type="radio" name="sidebar-project" checked={allProjects()} onChange={() => { props.onScope?.(); setAllProjects(true) }} />All projects</label>
+      <fieldset class="sidebar-filter-list" data-single><legend>Project</legend>
+        <label><input type="radio" name="sidebar-project" checked={allProjects()} onChange={() => { props.onScope?.(); setAllProjects(true) }} /><span>All projects</span></label>
         <For each={editspaces()?.editspaces ?? []}>{(item) =>
           <label><input type="radio" name="sidebar-project" checked={!allProjects() && current() === item.name} onChange={() => { props.onScope?.(); setEditspace(item.name) }} /><bdi dir="auto">{item.name}</bdi></label>}</For>
       </fieldset>
-      <fieldset><legend>Show</legend>
-        <label><input type="radio" name="sidebar-show" checked={!props.activeOnly} onChange={() => props.setActiveOnly(false)} />All agents</label>
-        <label><input type="radio" name="sidebar-show" checked={props.activeOnly} onChange={() => props.setActiveOnly(true)} />Working now</label>
+      <fieldset class="sidebar-filter-segments"><legend>Show</legend>
+        <label><input type="radio" name="sidebar-show" checked={!props.activeOnly} onChange={() => props.setActiveOnly(false)} /><span>All agents</span></label>
+        <label><input type="radio" name="sidebar-show" checked={props.activeOnly} onChange={() => props.setActiveOnly(true)} /><span>Working now</span></label>
       </fieldset>
-      <fieldset><legend>Sort</legend><For each={props.sorts}>{([value, label]) =>
-        <label><input type="radio" name="sidebar-sort" checked={props.sortBy === value} onChange={() => props.setSortBy(value)} />{label}</label>}</For></fieldset>
+      <fieldset class="sidebar-filter-segments"><legend>Sort</legend><For each={props.sorts}>{([value, label]) =>
+        <label><input type="radio" name="sidebar-sort" checked={props.sortBy === value} onChange={() => props.setSortBy(value)} /><span>{label}</span></label>}</For></fieldset>
       <div class="sidebar-filter-actions"><button type="button" disabled={!changed()} onClick={clear}>Clear</button><button type="button" class="sidebar-filter-done" onClick={close}>Done</button></div>
     </div>
   </details>
