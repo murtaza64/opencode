@@ -616,8 +616,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const mailRecords = createMemo(() => new Map(mail()?.messages.map((message) => [message.id, message] as const) ?? []))
   // Mail tool rows (Laptop2627) read receipts on the session's own host: another Work host's session reads that host's
   // dashboard, and is reread when the session's status changes there; this host's on its mail revision.
+  // A host whose dashboard does not answer JSON here (an older or refusing listener) has no receipts to show, not an error.
   const [hostEditspaces] = createResource(() => remote ? sessionHost.id : undefined, (host) => fetch(`${hostPrefix(host)}/es/api/editspaces`, { credentials: "include" })
-    .then((response) => response.ok ? response.json() as Promise<{ editspaces: { name: string; root: string }[] }> : undefined, () => undefined))
+    .then((response) => response.ok && response.headers.get("content-type")?.includes("application/json")
+      ? response.json().then((body: { editspaces?: { name: string; root: string }[] }) => Array.isArray(body?.editspaces) ? body as { editspaces: { name: string; root: string }[] } : undefined, () => undefined)
+      : undefined, () => undefined))
   const receiptRecords = createMailReceiptRecords({ prefix: remote ? hostPrefix(sessionHost.id!) : "", directory, session: sessionID,
     editspaces: () => remote ? hostEditspaces()?.editspaces : editspaces()?.editspaces, revision: () => remote ? status() : mailRevision() })
   const mailReplied = createMemo(() => new Set(mail()?.messages.flatMap((message) => message.in_reply_to ? [message.in_reply_to] : []) ?? []))
