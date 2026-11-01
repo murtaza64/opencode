@@ -104,6 +104,14 @@ test("post reads the listener, the Personal receipt's consumed and excalibur app
   expect(post.checks).toEqual({ consumedTransfer: true, appliedOnHost: true, workUnchanged: true })
 })
 
+test("no Work receipt before or after is not reported as a Work regression", async () => {
+  const machine = await laptop()
+  await rm(path.join(machine.userData, "appearance-receipt.json"))
+  const pre = await preCheck({ ...machine, host: "excalibur", transfer: "64b951fe", keychainExit: async () => 0 })
+  const post = await postCheck({ ...machine, host: "excalibur", transfer: "64b951fe", pre })
+  expect(post.checks.workUnchanged).toBeNull()
+})
+
 test("post reports a changed Work look and a missing Personal receipt as failed checks", async () => {
   const machine = await laptop()
   const pre = await preCheck({ ...machine, host: "excalibur", transfer: "64b951fe", keychainExit: async () => 0 })

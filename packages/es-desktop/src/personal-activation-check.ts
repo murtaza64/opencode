@@ -54,13 +54,15 @@ export const postCheck = async (options: Options & { pre?: Awaited<ReturnType<ty
       consumedTransfer: !!consumed && transferIs(consumed.transfer, options.transfer),
       appliedOnHost: applied.some((item) => item.theme === "wallpaper" && item.walRevision !== null),
       // Work identity unchanged by the activation: the same palette revision and colours as before it.
-      workUnchanged: before === undefined ? null
+      // null: no pre, or no Work receipt before and after (nothing to compare, not a regression).
+      workUnchanged: before === undefined || (!before.present && !work.present) ? null
         : before.present && work.present && before.walRevision === work.walRevision && before.background === work.background && before.foreground === work.foreground,
     },
   }
 }
 
-/** service-origins.json: its bytes' sha256, the parsed hosts, and the page host entry's exact bytes (config only, no secret). */
+/** service-origins.json: its bytes' sha256, the parsed hosts, and the page host entry re-serialised as canonical JSON with its
+ * sha256 (comparable pre vs post; not the file's literal bytes). Config only, no secret. */
 const serviceOrigins = async (userData: string) => {
   const file = path.join(userData, "service-origins.json")
   const bytes = await readFile(file).catch(() => undefined)
