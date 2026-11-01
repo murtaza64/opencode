@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { createHash } from "node:crypto"
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { createAppearance } from "./appearance"
@@ -290,4 +291,109 @@ test("a different renderer serves the same file and look at a new URL, so a cach
   }
   expect(await served("studio-gaussian-1")).toBe(await served("studio-gaussian-1"))
   expect(await served("studio-gaussian-1")).not.toBe(await served(undefined))
+})
+
+// A Personal profile cache as its producer writes it: descriptor.json naming one asset by sha256 (fixture bytes, not an image).
+const profileCache = async (options: { bytes?: string; background?: string; descriptor?: Record<string, unknown> } = {}) => {
+  const directory = await mkdtemp(path.join(tmpdir(), "es-profile-appearance-"))
+  cleanup.push(() => rm(directory, { recursive: true, force: true }))
+  await chmod(directory, 0o700)
+  await mkdir(path.join(directory, "assets"))
+  const write = async (bytes: string, background: string, descriptor: Record<string, unknown> = {}) => {
+    const sha256 = createHash("sha256").update(bytes).digest("hex")
+    await writeFile(path.join(directory, "assets", `${sha256}.jpg`), bytes)
+    await writeFile(path.join(directory, "descriptor.json"), JSON.stringify({
+      schema: "es-profile-appearance/1", profile: "personal", producer: "excalibur", transfer: "transfer-1",
+      asset: { sha256, file: `assets/${sha256}.jpg`, type: "image/jpeg", bytes: bytes.length },
+      palette: { schema: "pywal-legacy/1", special: { background, foreground: "#f0e6ff", cursor: "#ff66cc" }, colors: { color0: background, color5: "#ff66cc" } },
+      ...descriptor,
+    }))
+    return sha256
+  }
+  const sha256 = await write(options.bytes ?? "joi fixture bytes", options.background ?? "#1a0b2e", options.descriptor)
+  return { directory, sha256, write }
+}
+
+const profileAppearance = async (directory: string, receipt?: string) => {
+  const blurred: string[] = []
+  const appearance = createAppearance({ directory, profile: "personal", renderer: "r1", debounce: 30, poll: 20, receipt,
+    blur: async (file) => (blurred.push(path.basename(file)), Buffer.from(`blurred:${path.basename(file)}`)) })
+  cleanup.push(() => appearance.close())
+  await appearance.ready
+  return { appearance, blurred }
+}
+
+test("a Personal profile serves its producer's verified asset and legacy palette, and records what it consumed", async () => {
+  const cache = await profileCache()
+  const receipt = path.join(cache.directory, "..", `receipt-${path.basename(cache.directory)}.json`)
+  cleanup.push(() => rm(receipt, { force: true }))
+  const { appearance, blurred } = await profileAppearance(cache.directory, receipt)
+  const body = appearance.body()!
+  expect(body.palette).toEqual({ background: "#1a0b2e", foreground: "#f0e6ff", cursor: "#ff66cc", color0: "#1a0b2e", color5: "#ff66cc" })
+  expect(body.wallpaper).toMatch(/^\/__es\/appearance\/wallpaper\?v=[0-9a-f]{32}$/)
+  expect(body.wal).toBeUndefined()
+  expect(blurred).toEqual([`${cache.sha256}.jpg`])
+  expect(appearance.image()?.toString()).toBe(`blurred:${cache.sha256}.jpg`)
+  const recorded = JSON.parse(await readFile(receipt, "utf8"))
+  // Served: the `consumed` object es-artifact reads; no page has applied it yet.
+  expect(recorded).toMatchObject({ schema: "es-appearance-receipt/1", consumed: { transfer: "transfer-1", sha256: cache.sha256, paletteDigest: expect.stringMatching(/^[0-9a-f]{64}$/), identity: expect.stringMatching(/^[0-9a-f]{64}$/) }, wallpaper: body.wallpaper, applied: [] })
+})
+
+test.each([
+  ["another profile", { profile: "work" }],
+  ["an unknown descriptor schema", { schema: "es-profile-appearance/2" }],
+  ["an unknown palette schema", { palette: { schema: "wal-palette/1", special: { background: "#000000", foreground: "#ffffff" } } }],
+  ["a path outside assets/", { asset: { sha256: "a".repeat(64), file: `../${"a".repeat(64)}.jpg` } }],
+  ["a digest that is not the file's", { asset: { sha256: "b".repeat(64), file: `assets/${"b".repeat(64)}.jpg` } }],
+  ["a palette without a background", { palette: { schema: "pywal-legacy/1", special: { foreground: "#ffffff" } } }],
+] as [string, Record<string, unknown> & { asset?: { sha256: string } }][])("a Personal cache with %s serves nothing", async (_name, descriptor) => {
+  const cache = await profileCache({ descriptor })
+  if (descriptor.asset) await writeFile(path.join(cache.directory, "assets", `${descriptor.asset.sha256}.jpg`), "other bytes")
+  const { appearance, blurred } = await profileAppearance(cache.directory)
+  expect([appearance.body(), appearance.image(), blurred]).toEqual([undefined, undefined, []])
+})
+
+test("a Personal cache that is a symlink, or in a directory others can write, serves nothing", async () => {
+  const linked = await profileCache()
+  const real = path.join(linked.directory, "assets", `${linked.sha256}.jpg`)
+  await rename(real, `${real}.real`)
+  await symlink(`${real}.real`, real)
+  expect((await profileAppearance(linked.directory)).appearance.body()).toBeUndefined()
+  const open = await profileCache()
+  await chmod(open.directory, 0o777)
+  expect((await profileAppearance(open.directory)).appearance.body()).toBeUndefined()
+})
+
+test("a bad producer write keeps the last good Personal look; a new asset or palette gets a new wallpaper version", async () => {
+  const cache = await profileCache()
+  const { appearance } = await profileAppearance(cache.directory)
+  const first = appearance.body()!.wallpaper
+  await writeFile(path.join(cache.directory, "descriptor.json"), '{"schema": "es-profile-app')
+  await Bun.sleep(120)
+  expect(appearance.body()!.wallpaper).toBe(first)
+  await cache.write("joi fixture bytes", "#22113a")
+  await Bun.sleep(150)
+  const recoloured = appearance.body()!
+  expect([recoloured.palette.background, recoloured.wallpaper === first]).toEqual(["#22113a", false])
+  await cache.write("another wallpaper", "#22113a")
+  await Bun.sleep(150)
+  expect(appearance.body()!.wallpaper).not.toBe(recoloured.wallpaper)
+})
+
+test("a Personal listener serves only the Personal look and a Work listener only the Work look", async () => {
+  const work = await setup()
+  const cache = await profileCache()
+  const { appearance } = await profileAppearance(cache.directory)
+  const root = await mkdtemp(path.join(tmpdir(), "es-appearance-root-"))
+  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  await writeFile(path.join(root, "index.html"), "<title>Fixture</title>")
+  const personal = await serve({ root, appearance })
+  cleanup.push(() => Promise.race([personal.close(), Bun.sleep(500)]))
+  const get = (pathname: string) => fetch(`${personal.origin}${pathname}`, { headers: { "x-editspace-key": personal.key } })
+  const personalBody = await (await get("/__es/appearance")).json()
+  const workBody = await (await work.get("/__es/appearance")).json()
+  expect([personalBody.palette.background, workBody.palette.background]).toEqual(["#1a0b2e", "#101014"])
+  expect(await (await get(personalBody.wallpaper)).text()).toBe(`blurred:${cache.sha256}.jpg`)
+  expect((await get(workBody.wallpaper)).status).toBe(404)
+  expect((await work.get(personalBody.wallpaper)).status).toBe(404)
 })
