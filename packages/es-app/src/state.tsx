@@ -37,6 +37,8 @@ import type { Event } from "@opencode-ai/sdk/v2"
 
 /** How often other editspaces' handoff lineage (used for cross-project pins) is re-read. */
 const OTHER_LINEAGE_MS = 60_000
+const LANE_FOLLOW_MS = 30_000
+const LANE_FOLLOW_GAP_MS = 3_000
 const INDEX_MIN_GAP_MS = 120_000
 import { useLocation } from "@solidjs/router"
 export { linkUrl } from "./link-url"
@@ -513,6 +515,22 @@ export function DashboardProvider(props: ParentProps) {
   const [otherTick, setOtherTick] = createSignal(0)
   const otherInterval = setInterval(() => setOtherTick((value) => value + 1), OTHER_LINEAGE_MS)
   onCleanup(() => clearInterval(otherInterval))
+  // A new session in another editspace with a pinned lane may be that lane's handoff successor, stamped owner just after
+  // it appears: re-read those lineages every few seconds for a short window, so the lane pin follows it promptly.
+  let listedIds: Set<string> | undefined
+  let followUntil = 0
+  createEffect(() => {
+    const rows = globalSessions()
+    if (!rows) return
+    const fresh = listedIds ? rows.filter((row) => !listedIds!.has(row.id)) : []
+    listedIds = new Set(rows.map((row) => row.id))
+    const selected = currentEditspaceName()
+    const pinned = new Set((untrack(localClient)?.state().pins ?? []).flatMap((pin) => /^lane:([^/]+)\//.exec(pin.ref)?.[1] ?? []).filter((name) => name !== selected))
+    const roots = (untrack(editspaces)?.editspaces ?? []).filter((item) => pinned.has(item.name)).map((item) => item.root.replace(/\/+$/, "").replace(/\/\.editspace$/, ""))
+    if (fresh.some((row) => roots.some((root) => row.directory === root || row.directory.startsWith(`${root}/`)))) followUntil = Date.now() + LANE_FOLLOW_MS
+  })
+  const followInterval = setInterval(() => { if (Date.now() < followUntil) setOtherTick((value) => value + 1) }, LANE_FOLLOW_GAP_MS)
+  onCleanup(() => clearInterval(followInterval))
   const [otherLineages] = createResource(
     () => ({ names: (editspaces()?.editspaces.map((item) => item.name) ?? []).join("\n"), selected: currentEditspaceName(), tick: otherTick() }),
     async ({ names, selected }) => Promise.all(names.split("\n").filter((name) => name && name !== selected).map(async (name) => {

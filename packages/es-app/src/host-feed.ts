@@ -121,6 +121,11 @@ export const reachOf = (state: Pick<HostFeedState, "status" | "reason" | "since"
 const LIST_MS = 5000
 const DECISIONS_MS = 30_000
 const LINEAGE_MS = 60_000
+// A row new to the list may be a lane's handoff successor, whose owner is stamped just after it appears (es spawn:
+// create, prompt, then stamp). For a short window lineage is re-read on each list read, so a lane pin moves to the
+// successor within seconds instead of at the next interval.
+const FOLLOW_MS = 30_000
+const FOLLOW_GAP_MS = 3_000
 const SESSION_EVENTS = ["session.created", "session.updated", "session.deleted", "session.status"]
 
 /** That host's handoff lineage, per editspace (lane names repeat across editspaces), and which editspace holds a
@@ -152,6 +157,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
   const [live, setLive] = createSignal<Record<string, string>>({})
   const [lineage, setLineage] = createSignal<HostLineage>()
   let lastLineageRead = 0
+  let followUntil = 0
   let lineageRead: Promise<void> | undefined
   let loading: Promise<void> | undefined
   const read = async <T,>(path: string) => {
@@ -225,7 +231,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     // host's own editspace roots.
     const all = !!current && current.project === undefined
     const key = all ? "*" : current?.es
-    if (!key || (all && !pinned().length && !lanes().length) || state().status !== "ready" || lineageRead || Date.now() - lastLineageRead < LINEAGE_MS) return
+    if (!key || (all && !pinned().length && !lanes().length) || state().status !== "ready" || lineageRead || Date.now() - lastLineageRead < (Date.now() < followUntil ? FOLLOW_GAP_MS : LINEAGE_MS)) return
     lastLineageRead = Date.now()
     const same = () => (scope?.project === undefined ? "*" : scope?.es) === key && state().status === "ready"
     lineageRead = (async () => {
@@ -270,6 +276,8 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
       }
       const [needs, surfaces] = await Promise.all([readNeeds(), readSurfaces()])
       const rows = name && !root ? [] : hostRows(host.id, sessions, root)
+      const listed = state().checkedAt ? new Set(state().rows.map((row) => row.id)) : undefined
+      if (same && listed && (pinned().length || lanes().length) && rows.some((row) => !listed.has(row.id))) followUntil = Date.now() + FOLLOW_MS
       saveSeen(host.id, rows, name)
       setState((previous) => ({
         checkedAt: Date.now(),
