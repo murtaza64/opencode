@@ -61,6 +61,9 @@ const SidebarFilter = <S extends string>(props: { hosts: { id: string; label: st
   const current = () => editspace() ?? editspaces()?.default ?? state()?.editspace ?? ""
   let menu: HTMLDetailsElement | undefined
   const close = () => { menu!.open = false; menu!.querySelector("summary")?.focus() }
+  // The panel exists only while open: Chrome keeps a closed <details>' content laid out (content-visibility), so a
+  // mounted panel would still read as an open dialog to anything that counts dialogs by their boxes.
+  const [shown, setShown] = createSignal(false)
   const hidden = () => props.hosts.filter((item) => !props.shownHost(item.id)).length
   // Each choice that differs from the default view counts once.
   // The window's default project is the default scope; only another project counts.
@@ -74,11 +77,11 @@ const SidebarFilter = <S extends string>(props: { hosts: { id: string; label: st
     props.setActiveOnly(false)
     props.setSortBy(props.sorts[0][0])
   }
-  return <details class="sidebar-filter" ref={menu} onKeyDown={(event) => { if (event.key === "Escape" && menu!.open) { event.preventDefault(); event.stopPropagation(); close() } }}>
+  return <details class="sidebar-filter" ref={menu} onToggle={(event) => setShown(event.currentTarget.open)} onKeyDown={(event) => { if (event.key === "Escape" && menu!.open) { event.preventDefault(); event.stopPropagation(); close() } }}>
     <summary class="agent-filter" aria-label={changed() ? `Filter and sort: ${summary()}` : "Filter and sort"} title={changed() ? summary() : "Filter and sort"}>
       <Glyph name="filter" /><Show when={changed()} fallback={<span class="sr-only">Filter</span>}><span class="sidebar-filter-count">{changed()}</span></Show>
     </summary>
-    <div class="sidebar-filter-panel" role="dialog" aria-label="Filter and sort">
+    <Show when={shown()}><div class="sidebar-filter-panel" role="dialog" aria-label="Filter and sort">
       <Show when={props.hosts.length > 1}>
         <fieldset class="sidebar-filter-list"><legend>Hosts</legend><For each={props.hosts}>{(item) =>
           <label><input type="checkbox" checked={props.shownHost(item.id)} onChange={() => props.toggleHost(item.id)} /><HostGlyph host={item.id} /><bdi dir="auto">{item.label}</bdi><span class="sidebar-filter-n">{props.hostCount(item.id) || ""}</span></label>}</For></fieldset>
@@ -96,6 +99,7 @@ const SidebarFilter = <S extends string>(props: { hosts: { id: string; label: st
         <label><input type="radio" name="sidebar-sort" checked={props.sortBy === value} onChange={() => props.setSortBy(value)} /><span>{label}</span></label>}</For></fieldset>
       <div class="sidebar-filter-actions"><button type="button" disabled={!changed()} onClick={clear}>Clear</button><button type="button" class="sidebar-filter-done" onClick={close}>Done</button></div>
     </div>
+    </Show>
   </details>
 }
 

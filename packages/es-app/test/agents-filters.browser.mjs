@@ -51,6 +51,15 @@ try {
   await expect(toolbar.locator(".search-input")).toBeVisible()
   await expect(sidebar.locator(".agent-filters, .work-hosts, .search-box, .scope-menu")).toHaveCount(0)
   expect((await toolbar.boundingBox()).height).toBeLessThanOrEqual(40)
+  // A closed popover leaves no dialog laid out (desktop guards count dialogs by their boxes); open, exactly one.
+  const laidOutDialogs = () => page.evaluate(() => [...document.querySelectorAll("[role=dialog], [role=alertdialog]")].filter((element) => element.getClientRects().length).length)
+  expect(await laidOutDialogs()).toBe(0)
+  await filter.click()
+  await expect(sidebar.locator(".sidebar-filter-panel")).toBeVisible()
+  expect(await laidOutDialogs()).toBe(1)
+  await page.keyboard.press("Escape")
+  await expect(sidebar.locator(".sidebar-filter-panel")).toHaveCount(0)
+  expect(await laidOutDialogs()).toBe(0)
   // Defaults: no count; the default project is not a filter.
   await expect(filter.locator(".sidebar-filter-count")).toHaveCount(0)
   await expect(filter).toHaveAttribute("aria-label", "Filter and sort")
