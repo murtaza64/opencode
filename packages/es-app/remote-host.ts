@@ -146,8 +146,17 @@ export const remoteSetCookie = (values: string[] | undefined, id: string) => {
 }
 
 /** A host aggregated into the Work view: its laptop listener origin (for opening its pages) and
- * whether new work goes there by default. */
-export type WorkHost = HostLink & { default?: boolean; profile?: Profile; kind?: HostKind }
+ * whether new work goes there by default. `readOnly`: its rows are read through this listener, but no
+ * session is created or written there from this page (a pinned-SSH Personal peer until M4). */
+export type WorkHost = HostLink & { default?: boolean; profile?: Profile; kind?: HostKind; readOnly?: true }
+
+/** The hosts a bridged Personal aggregator lists to its own page: itself (where new work goes) and each
+ * pinned-SSH Personal peer, read only at /hosts/<id>/ on the same listener. Never a Work host. */
+export const personalWork = (self: RemoteHost, peers: RemoteHost[], origin: string): WorkHost[] => [
+  { id: self.id, label: self.label, origin, profile: "personal", default: true, ...(self.kind ? { kind: self.kind } : {}) },
+  ...peers.filter((peer) => peer.mode === "ssh" && peer.profile === "personal" && peer.id !== self.id)
+    .map((peer): WorkHost => ({ id: peer.id, label: peer.label, origin, profile: "personal", readOnly: true, ...(peer.kind ? { kind: peer.kind } : {}) })),
+]
 
 const HOST_PATH = /^\/hosts\/([a-z][a-z0-9-]{0,31})(\/(?:oc|es)(?:\/.*)?)$/
 

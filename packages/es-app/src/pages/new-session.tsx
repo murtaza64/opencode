@@ -65,7 +65,8 @@ export default function NewSessionPage() {
   // replaced by another.
   const route = useLocation()
   void readHost()
-  const workHosts = () => host()?.work ?? []
+  // A read-only peer (pinned-SSH Personal host) is never a target: nothing creates a session there from this page.
+  const workHosts = () => (host()?.work ?? []).filter((item) => !item.readOnly)
   const destination = createMemo(() => {
     const hosts = workHosts()
     const asked = new URLSearchParams(route.search).get("host")

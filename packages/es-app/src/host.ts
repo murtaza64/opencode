@@ -7,7 +7,8 @@ export type HostLink = { id: string; label: string; origin: string }
 /** A host in the Work view: its laptop listener origin, and whether new work goes there by default. */
 export type Profile = "work" | "personal"
 export type HostKind = "laptop" | "mini" | "pc"
-export type WorkHost = HostLink & { default?: boolean; profile?: Profile; kind?: HostKind }
+/** `readOnly`: rows read through this listener only; no session is created there from this page (a pinned-SSH Personal peer). */
+export type WorkHost = HostLink & { default?: boolean; profile?: Profile; kind?: HostKind; readOnly?: true }
 export type HostInfo = { id: string; label: string; remote: boolean; hosts: HostLink[]; work: WorkHost[]; profile?: Profile; kind?: HostKind }
 
 const profileOf = (value: unknown) => (value === "work" || value === "personal" ? { profile: value as Profile } : {})
@@ -45,7 +46,7 @@ export const hostInfo = (value: unknown): HostInfo => {
   const work = Array.isArray(record.work)
     ? record.work.flatMap((item: Record<string, unknown>) =>
         item && typeof item.id === "string" && /^[a-z][a-z0-9-]{0,31}$/.test(item.id) && typeof item.label === "string" && typeof item.origin === "string" && URL.parse(item.origin)
-          ? [{ id: item.id, label: item.label, origin: URL.parse(item.origin)!.origin, ...profileOf(item.profile), ...kindOf(item.kind), ...(item.default === true ? { default: true } : {}) }]
+          ? [{ id: item.id, label: item.label, origin: URL.parse(item.origin)!.origin, ...profileOf(item.profile), ...kindOf(item.kind), ...(item.default === true ? { default: true } : {}), ...(item.readOnly === true ? { readOnly: true as const } : {}) }]
           : [],
       )
     : []
@@ -53,6 +54,10 @@ export const hostInfo = (value: unknown): HostInfo => {
   return { id: record.id, label: record.label, remote: record.remote === true, hosts, work, ...profileOf(record.profile), ...kindOf(record.kind) }
 }
 
-/** The other hosts this page reads as Work feeds: never itself, never a Personal host (its pins, cookies and lists stay
- * apart from Work, and the Local listener does not proxy it). */
-export const workFeedHosts = (info: Pick<HostInfo, "id" | "work">) => info.work.filter((item) => item.id !== info.id && item.profile !== "personal")
+/** The other hosts this page reads as feeds: never itself, and only hosts of this page's profile (a Work page never
+ * reads a Personal host, a Personal page never a Work host). A host without a profile is Work. */
+export const workFeedHosts = (info: Pick<HostInfo, "id" | "work" | "profile">) =>
+  info.work.filter((item) => item.id !== info.id && (item.profile ?? "work") === (info.profile ?? "work"))
+
+/** Whether this page aggregates other hosts' rows: the Work view (the laptop's own listener) or a Personal aggregator. */
+export const aggregates = (info: Pick<HostInfo, "remote" | "profile">) => !info.remote || info.profile === "personal"

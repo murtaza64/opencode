@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { GlobalSession } from "@opencode-ai/sdk/v2"
 import { hostDecisionHref, hostRowKey, hostRows, hostSessionHref, hostTabHref, reachOf, reasonFor, workRows } from "./host-feed"
-import { hostInfo, workFeedHosts } from "./host"
+import { aggregates, hostInfo, workFeedHosts } from "./host"
 
 const session = (id: string, directory: string, updated: number, extra: Partial<GlobalSession> = {}) =>
   ({ id, title: `${id} title`, directory, time: { created: 1, updated }, ...extra }) as GlobalSession
@@ -102,6 +102,30 @@ describe("Work feeds", () => {
       { id: "personal", label: "Personal", origin: "http://127.0.0.1:4", profile: "personal" as const },
     ]
     expect(workFeedHosts({ id: "laptop", work }).map((host) => host.id)).toEqual(["mini", "wing"])
+  })
+
+  test("a Personal page reads only its Personal peers, never a Work host", () => {
+    const work = [
+      { id: "excalibur", label: "Excalibur", origin: "http://127.0.0.1:5", profile: "personal" as const, default: true as const },
+      { id: "ygnium", label: "Ygnium", origin: "http://127.0.0.1:5", profile: "personal" as const, readOnly: true as const },
+      { id: "mini", label: "Mac Mini", origin: "http://127.0.0.1:2", profile: "work" as const },
+      { id: "wing", label: "Wingman", origin: "http://127.0.0.1:3" },
+    ]
+    expect(workFeedHosts({ id: "excalibur", profile: "personal", work }).map((host) => host.id)).toEqual(["ygnium"])
+  })
+
+  test("the Work view and a Personal aggregator read other hosts; a Work host's own tab does not", () => {
+    expect(aggregates({ remote: false, profile: "work" })).toBe(true)
+    expect(aggregates({ remote: true, profile: "personal" })).toBe(true)
+    expect(aggregates({ remote: true, profile: "work" })).toBe(false)
+  })
+
+  test("a read-only peer keeps its flag; any other value is dropped", () => {
+    const info = hostInfo({ id: "excalibur", label: "Excalibur", profile: "personal", remote: true, hosts: [], work: [
+      { id: "ygnium", label: "Ygnium", origin: "http://127.0.0.1:5", profile: "personal", readOnly: true },
+      { id: "other", label: "Other", origin: "http://127.0.0.1:5", profile: "personal", readOnly: "yes" },
+    ] })
+    expect(info.work.map((item) => [item.id, item.readOnly])).toEqual([["ygnium", true], ["other", undefined]])
   })
 })
 

@@ -551,9 +551,10 @@ const peerRead = (req: IncomingMessage, res: ServerResponse, target: string, fin
   upstream.end()
 }
 
-// The reads a pinned-SSH Personal host serves: Slice R Core reads, and its pins listing and their events.
+// The reads a pinned-SSH Personal host serves: Slice R Core reads, its editspace names (a project view scopes its
+// rows by them) and its pins listing and their events.
 const sshReadAllowed = (method: string, pathname: string) =>
-  hostApiAllowed(method, pathname) && (pathname.startsWith("/oc/") || pathname === "/es/api/pins" || pathname === "/es/api/pins/events")
+  hostApiAllowed(method, pathname) && (pathname.startsWith("/oc/") || ["/es/api/editspaces", "/es/api/pins", "/es/api/pins/events"].includes(pathname))
 
 // One read of a pinned-SSH host over its forwarded socket. The request is rebuilt: only what a read needs goes on the
 // socket (no cookie, key, authorization or cf-* header); no redirect is followed and no cookie comes back.

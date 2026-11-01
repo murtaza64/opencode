@@ -555,6 +555,19 @@ test("host reads allow the subscription quota snapshot only as an exact read", a
   for (const method of ["POST", "PUT", "DELETE"]) expect(hostApiAllowed(method, "/es/api/quota")).toBe(false)
 })
 
+test("a Personal aggregator lists itself for new work and its SSH peers read only, never a Work host", async () => {
+  const { personalWork, remoteHosts } = await import("../../es-app/remote-host")
+  const configured = remoteHosts([
+    { id: "excalibur", label: "Excalibur", mode: "bridged", origin: "https://excalibur.example.com", access: { keychain: "excalibur-access" }, kind: "pc" },
+    { id: "ygnium", label: "Ygnium", mode: "ssh", ssh: { destination: "me@ygnium.lan", corePort: 4096, dashboardPort: 7777 }, kind: "pc" },
+    { id: "mini", label: "Mac Mini", origin: "https://mini.tail1234.ts.net" },
+  ])
+  expect(personalWork(configured[0]!, configured, "http://127.0.0.1:51234")).toEqual([
+    { id: "excalibur", label: "Excalibur", origin: "http://127.0.0.1:51234", profile: "personal", default: true, kind: "pc" },
+    { id: "ygnium", label: "Ygnium", origin: "http://127.0.0.1:51234", profile: "personal", readOnly: true, kind: "pc" },
+  ])
+})
+
 test("writes reach only a configured Work host; an unknown id, a Personal host or a stopped host never falls back to this one", async () => {
   const mini = fakeHost("mini")
   const local = fakeHost("local")

@@ -86,6 +86,8 @@ test("an allowlisted read reaches ygnium's Core and pins with rebuilt headers an
   expect(session.headers.get("set-cookie")).toBeNull()
   const pins = await get("/hosts/ygnium/es/api/pins")
   expect((await pins.json()).profile).toBe("personal")
+  // Editspace names reach the dashboard so a project view can scope this host's rows (M2 slice 2b).
+  expect(await (await get("/hosts/ygnium/es/api/editspaces")).json()).toEqual({ host: "ygnium", socket: "dashboard", path: "/api/editspaces" })
   const reads = (await log()).filter((entry) => entry.socket)
   const sessionRead = reads.find((entry) => entry.path === "/session/ses_shared?directory=%2Fwork")!
   const sent = Object.keys(sessionRead.headers as object)
@@ -103,11 +105,15 @@ test("writes and unlisted routes are refused with zero bytes on the sockets", as
   const refused = [
     await get("/hosts/ygnium/es/api/pins/session:ses_1", { method: "PUT", headers: { "content-type": "application/json", origin: "http://x" }, body: "{}" }),
     await get("/hosts/ygnium/oc/session/ses_1/prompt_async", { method: "POST", body: "{}" }),
-    await get("/hosts/ygnium/es/api/editspaces"),
+    await get("/hosts/ygnium/es/api/editspaces/x"),
+    await get("/hosts/ygnium/es/api/editspaces", { method: "POST", body: "{}" }),
     await get("/hosts/ygnium/es/api/attention"),
+    await get("/hosts/ygnium/es/api/state"),
+    await get("/hosts/ygnium/es/api/handoffs"),
+    await get("/hosts/ygnium/es/api/surfaces"),
     await get("/hosts/ygnium/oc/file/content"),
   ]
-  expect(refused.map((response) => response.status)).toEqual([403, 403, 403, 403, 403])
+  expect(refused.map((response) => response.status)).toEqual([403, 403, 403, 403, 403, 403, 403, 403, 403])
   expect((await log()).filter((entry) => entry.socket).length).toBe(before)
 })
 

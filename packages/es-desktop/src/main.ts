@@ -2,7 +2,7 @@ import { app, BaseWindow, BrowserWindow, dialog, Menu, nativeImage, safeStorage,
 import path from "node:path"
 import { readFile, writeFile } from "node:fs/promises"
 import { serve } from "./server"
-import { localHost, type WorkHost } from "../../es-app/remote-host"
+import { localHost, personalWork, type WorkHost } from "../../es-app/remote-host"
 import { PERF_DIR } from "./perf-log"
 import { createVoice, voiceTools } from "./voice"
 import { appRouteURL, externalURL, internalURL, pageArrivedCrossSite, pageNavigation, restorePlan, serviceHosts, serviceOrigins, serviceSelf, startupMode, startupPlan, surfaceFrameURL } from "./policy"
@@ -189,6 +189,8 @@ const start = async () => {
           }))
         : []
       const value = Number(await readFile(file, "utf8").catch(() => "0"))
+      // This listener's own origin, known once it listens; its page asks for host info only after that.
+      const origin: { value?: string } = {}
       const listener = await serve({
         port: Number.isInteger(value) && value >= 1024 && value <= 65535 && ![4096, 7777, port].includes(value) ? value : 0,
         root: path.join(app.getAppPath(), "dist/renderer"),
@@ -202,9 +204,14 @@ const start = async () => {
         // One app release, whichever host a tab shows: seen once, not per tab.
         releaseNotes,
         // Host tabs show placement natively, so the page needs no switcher of its own.
-        hostInfo: () => ({ id: host.id, label: host.label, remote: true, hosts: [], work, profile: host.profile, ...(host.kind ? { kind: host.kind } : {}) }),
+        // A Work host's page lists the Work hosts; the Personal aggregator lists itself and its SSH peers; any other
+        // Personal page lists none. Work and Personal never see each other's hosts.
+        hostInfo: () => ({ id: host.id, label: host.label, remote: true, hosts: [],
+          work: host.profile === "work" ? work : sshPeers.length && origin.value ? personalWork(host, configured.filter((item) => sshPeers.some((peer) => peer.id === item.id)), origin.value) : [],
+          profile: host.profile, ...(host.kind ? { kind: host.kind } : {}) }),
         perfDir: PERF_DIR,
       })
+      origin.value = listener.origin
       await writeFile(file, new URL(listener.origin).port, { mode: 0o600 })
       return { ...host, server: listener, bridge }
     }).map((started) => started.catch((error: unknown) => {
