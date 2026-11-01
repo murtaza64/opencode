@@ -142,4 +142,63 @@ describe("DatabaseReader", () => {
     if (Exit.isFailure(exit)) console.log(Cause.pretty(exit.cause))
     expect(Exit.isSuccess(exit) && exit.value).toEqual(["kept"])
   })
+
+  test("a reader retired on a broken file closes its connection instead of leaking it", async () => {
+    await using tmp = await tmpdir()
+    const filename = path.join(tmp.path, "reader.sqlite")
+    const fs = await import("fs/promises")
+    const writer = Database.layerFromPath(filename)
+    const layer = Layer.merge(writer, DatabaseReader.layerFromPath({ filename, workers: 1 }).pipe(Layer.provide(writer)))
+    const exit = await Effect.runPromiseExit(
+      Effect.gen(function* () {
+        const db = yield* setup
+        yield* db.run(sql`CREATE TABLE IF NOT EXISTS reader_bulk (id integer primary key, value text not null)`)
+        for (let i = 0; i < 50; i++) yield* db.run(sql`INSERT INTO reader_bulk (value) VALUES (${"x".repeat(500)})`)
+        yield* db.run(sql`PRAGMA wal_checkpoint(TRUNCATE)`)
+        const reader = (yield* DatabaseReader.Service).db
+        // Prime the worker without caching the table's pages, so the next read hits the file.
+        yield* reader.all(sql`SELECT count(*) FROM reader_fixture`)
+        const before = yield* Effect.promise(() => openConnections(filename))
+        // Overwrite one checkpointed page of the table so the next read on it reports a corrupt file.
+        const page = (yield* db.get<{ rootpage: number }>(sql`SELECT rootpage FROM sqlite_master WHERE name = 'reader_bulk'`))!.rootpage
+        yield* Effect.promise(async () => {
+          const handle = await fs.open(filename, "r+")
+          await handle.write(Buffer.alloc(4096, 0xff), 0, 4096, (page - 1) * 4096)
+          await handle.close()
+        })
+        const broken = yield* reader.all(sql`SELECT max(length(value)) FROM reader_bulk`).pipe(Effect.exit)
+        yield* reader.all(sql`SELECT 1`)
+        // The retired connection closes asynchronously, after its worker finishes what it was running.
+        const after = yield* Effect.promise(async () => {
+          const deadline = Date.now() + 3_000
+          for (;;) {
+            const count = await openConnections(filename)
+            if (count <= before || Date.now() > deadline) return count
+            await Bun.sleep(50)
+          }
+        })
+        return { before, after, broken: Exit.isFailure(broken) }
+      }).pipe(Effect.provide(layer), Effect.scoped),
+    )
+    if (Exit.isFailure(exit)) console.log(Cause.pretty(exit.cause))
+    expect(Exit.isSuccess(exit)).toBe(true)
+    if (!Exit.isSuccess(exit)) return
+    expect(exit.value.broken).toBe(true)
+    expect(exit.value.before).toBeGreaterThan(0)
+    expect(exit.value.after).toBe(exit.value.before)
+  }, 15_000)
 })
+
+/** Open file descriptors of this process on the database's main file. */
+async function openConnections(filename: string) {
+  const fs = await import("fs/promises")
+  const real = await fs.realpath(filename)
+  if (process.platform === "linux") {
+    const links = await Promise.all(
+      (await fs.readdir("/proc/self/fd")).map((fd) => fs.readlink(`/proc/self/fd/${fd}`).catch(() => "")),
+    )
+    return links.filter((link) => link === real).length
+  }
+  const output = Bun.spawnSync(["/usr/sbin/lsof", "-nP", "-p", String(process.pid)]).stdout.toString()
+  return output.split("\n").filter((line) => line.endsWith(real)).length
+}

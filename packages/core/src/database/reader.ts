@@ -48,6 +48,9 @@ type Response = { id: number; rows: unknown[] } | { id: number; error: { message
 type Pending = { deferred: Deferred.Deferred<unknown[], SqlError>; worker: Slot }
 type Slot = { worker: Worker; inflight: number; dead: boolean }
 
+/** Bounds how long a retired worker may finish its current statement before it is terminated unclosed. */
+const RETIRE_TIMEOUT_MS = 5_000
+
 // Runs inside each Worker, loaded from a blob URL as `(${readerWorker})(Database)`. Minifiers rename
 // free identifiers, so it may reference only its parameter and worker globals.
 function readerWorker(Native: typeof import("bun:sqlite").Database) {
@@ -59,6 +62,12 @@ function readerWorker(Native: typeof import("bun:sqlite").Database) {
       db = new Native(message.filename, { readonly: true })
       db.run(`PRAGMA cache_size = ${Number(message.cacheSize)}`)
       db.run("PRAGMA query_only = ON")
+      return
+    }
+    if (message.type === "close") {
+      db?.close()
+      db = undefined
+      scope.postMessage({ type: "closed" })
       return
     }
     try {
@@ -99,7 +108,8 @@ export const make = Effect.fn("DatabaseReader.make")(function* (options: Options
 
   const spawn = (): Slot => {
     const slot: Slot = { worker: new Worker(source), inflight: 0, dead: false }
-    slot.worker.onmessage = (event: MessageEvent<Response>) => {
+    slot.worker.onmessage = (event: MessageEvent<Response | { type: "closed" }>) => {
+      if ("type" in event.data) return slot.worker.terminate()
       const entry = pending.get(event.data.id)
       if (!entry) return
       pending.delete(event.data.id)
@@ -110,7 +120,7 @@ export const make = Effect.fn("DatabaseReader.make")(function* (options: Options
         pending.set(event.data.id, entry)
         slot.inflight++
         fail(slot, `database reader connection reported ${event.data.error.code}`, true)
-        slot.worker.terminate()
+        retire(slot)
         return
       }
       if ("error" in event.data)
@@ -123,6 +133,15 @@ export const make = Effect.fn("DatabaseReader.make")(function* (options: Options
     return slot
   }
 
+  // Close the connection inside the worker before ending it: a terminated worker leaves its SQLite connection, file
+  // descriptors and page cache open for the life of the process.
+  const retire = (slot: Slot) => {
+    const timer = setTimeout(() => slot.worker.terminate(), RETIRE_TIMEOUT_MS)
+    timer.unref?.()
+    slot.worker.addEventListener("close", () => clearTimeout(timer))
+    slot.worker.postMessage({ type: "close" })
+  }
+
   const size = Math.max(1, options.workers ?? 2)
   for (let i = 0; i < size; i++) slots.push(spawn())
 
@@ -131,7 +150,7 @@ export const make = Effect.fn("DatabaseReader.make")(function* (options: Options
       closed = true
       for (const slot of slots) {
         fail(slot, "database reader closed")
-        slot.worker.terminate()
+        retire(slot)
       }
     }),
   )
