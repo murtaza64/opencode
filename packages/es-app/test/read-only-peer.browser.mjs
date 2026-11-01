@@ -28,8 +28,9 @@ ygnium.messages = [{
   info: { id: "msg_y1", sessionID: "ses_a", role: "user", agent: "build", model: { providerID: "fixture", modelID: "test" }, time: { created: 1 } },
   parts: [{ id: "prt_y1", messageID: "msg_y1", sessionID: "ses_a", type: "text", text: "Hello from the Ygnium transcript" }],
 }]
-ygnium.permissions = []
-ygnium.questions = []
+// A pending permission and question: shown, with no reply controls.
+ygnium.permissions = [{ id: "per_y", sessionID: "ses_a", permission: "bash", patterns: ["make deploy"], metadata: { command: "make deploy" } }]
+ygnium.questions = [{ id: "que_y", sessionID: "ses_a", questions: [{ header: "Target", question: "Which bucket?", options: [{ label: "Staging", description: "" }, { label: "Prod", description: "" }] }] }]
 const writes = (fixture) => fixture.calls.filter((call) => !["GET", "HEAD", "OPTIONS"].includes(call.method))
 
 const browser = await chromium.launch({ headless: true,
@@ -53,11 +54,21 @@ try {
   await expect(page.locator(".prompt-box")).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Rename session" })).toHaveCount(0)
   await expect(page.locator(".session-title-button")).toBeDisabled()
+  const permission = page.getByRole("region", { name: "Permission bash" })
+  await expect(permission).toContainText("make deploy")
+  await expect(permission.getByRole("button", { name: /allow once|always|reject/ })).toHaveCount(0)
+  await expect(permission.locator("[data-read-only-reply]")).toHaveText("answer on that host")
+  await expect(page.locator(".transcript")).toContainText("Which bucket?")
+  await expect(page.getByRole("button", { name: "Answer", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Dismiss", exact: true })).toHaveCount(0)
+  // Esc Esc (Stop) sends nothing.
+  await page.keyboard.press("Escape")
+  await page.keyboard.press("Escape")
   await page.waitForTimeout(1000)
   expect(writes(ygnium)).toEqual([])
   expect(writes(local)).toEqual([])
   expect(errors).toEqual([])
-  console.log("PASS read-only peer: transcript read from ygnium; read only label; no composer or rename; no writes to either Core")
+  console.log("PASS read-only peer: transcript read from ygnium; read only label; no composer, rename, permission/question replies or Esc-Esc stop; no writes to either Core")
 } finally {
   await browser.close()
   await preview.close()

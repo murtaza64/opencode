@@ -9,7 +9,7 @@ import type { Part, ToolPart } from "@opencode-ai/sdk/v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { Icon } from "@opencode-ai/ui/icon"
 import { es, ocAt, type ContextPart } from "../api"
-import { SessionHostProvider, useOc, type SessionHost } from "../session-host"
+import { SessionHostProvider, useOc, useSessionHost, type SessionHost } from "../session-host"
 import { hostPrefix, readHostLineage } from "../host-items"
 import { createHostActivity } from "../host-activity"
 import { hostBase } from "../host-base"
@@ -105,6 +105,8 @@ export const STATUS_DELAY_MS = 2000
 
 function PermissionBanner(props: { p: any; directory: string; owner?: string; onDone: () => Promise<void> }) {
   const oc = useOc()
+  // A read-only host takes no reply from this page: the request shows, its actions do not.
+  const readOnly = !!useSessionHost().readOnly
   const [error, setError] = createSignal("")
   const [sending, setSending] = createSignal(false)
   const act = async (reply: "once" | "always" | "reject") => {
@@ -156,11 +158,13 @@ function PermissionBanner(props: { p: any; directory: string; owner?: string; on
           <Show when={props.owner}><span class="dim permission-owner">from subagent: {props.owner}</span></Show>
         </div>
         <Show when={summary()}><bdi class="permission-summary mono" dir="ltr" title={summary()}>{summary()}</bdi></Show>
-        <div class="banner-actions">
-          <button disabled={sending()} onClick={() => act("once")}>allow once</button>
-          <button disabled={sending()} onClick={() => act("always")}>always</button>
-          <button disabled={sending()} class="danger" onClick={() => act("reject")}>reject</button>
-        </div>
+        <Show when={!readOnly} fallback={<span class="dim" data-read-only-reply>answer on that host</span>}>
+          <div class="banner-actions">
+            <button disabled={sending()} onClick={() => act("once")}>allow once</button>
+            <button disabled={sending()} onClick={() => act("always")}>always</button>
+            <button disabled={sending()} class="danger" onClick={() => act("reject")}>reject</button>
+          </div>
+        </Show>
       </div>
       <Show when={props.p.patterns?.length || meta().length}>
         <details class="permission-details">
@@ -755,7 +759,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const [aborting, setAborting] = createSignal(false)
   const [nudgePhase, setNudgePhase] = createSignal<"stopping" | "resuming">()
   const abort = async () => {
-    if (aborting() || nudgePhase() || sending() || !busy()) return
+    // A read-only host is never stopped from this page (Esc Esc included).
+    if (sessionHost.readOnly || aborting() || nudgePhase() || sending() || !busy()) return
     setAborting(true)
     try {
       await oc.abort(sessionID, directory)
