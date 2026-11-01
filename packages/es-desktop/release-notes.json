@@ -5,6 +5,10 @@
     {
       "title": "Lane pins",
       "detail": "Pins on a lane follow it to its current session."
+    },
+    {
+      "title": "Pin sync",
+      "detail": "Pins: no false not-synced marker when two windows import the same pin."
     }
   ],
   "limits": []
