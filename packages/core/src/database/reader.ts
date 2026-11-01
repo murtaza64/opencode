@@ -133,8 +133,8 @@ export const make = Effect.fn("DatabaseReader.make")(function* (options: Options
     return slot
   }
 
-  // Close the connection inside the worker before ending it: a terminated worker leaves its SQLite connection, file
-  // descriptors and page cache open for the life of the process.
+  // Close the connection inside the worker before ending it, so its release does not depend on how the runtime tears
+  // down a terminated worker: under Bun 1.3.14 a terminated worker's file descriptor stayed open for at least 30 s.
   const retire = (slot: Slot) => {
     const timer = setTimeout(() => slot.worker.terminate(), RETIRE_TIMEOUT_MS)
     timer.unref?.()

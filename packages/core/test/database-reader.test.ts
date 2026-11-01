@@ -143,7 +143,8 @@ describe("DatabaseReader", () => {
     expect(Exit.isSuccess(exit) && exit.value).toEqual(["kept"])
   })
 
-  test("a reader retired on a broken file closes its connection instead of leaking it", async () => {
+  // Observes open descriptors through /proc (Linux) or lsof (macOS); Windows has neither.
+  test.skipIf(process.platform === "win32")("a reader retired on a broken file releases its connection", async () => {
     await using tmp = await tmpdir()
     const filename = path.join(tmp.path, "reader.sqlite")
     const fs = await import("fs/promises")
