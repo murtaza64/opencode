@@ -8,7 +8,8 @@ import { createMotion, createPhases, createReplay, replayPlugin } from "./previe
 // `options.replay`: adds the preview replay control (test/preview-replay.mjs): Replay motion / cases / all.
 export const startToolRunsPreview = async (portHint = 0, options = {}) => {
   const replayState = {}
-  const preview = await startPanelPreview(options.replay ? [replayPlugin(replayState)] : [], portHint)
+  // `options.plugins`: extra Vite plugins, e.g. another Work host's routes.
+  const preview = await startPanelPreview([...(options.replay ? [replayPlugin(replayState)] : []), ...(options.plugins ?? [])], portHint)
   const fixture = preview.fixture
   fixture.status = "idle"
   let clock = 1_000

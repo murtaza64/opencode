@@ -24,7 +24,13 @@ const ToolIcon = (props: { partID: string; tool: string; status: string; icon: s
 /** The mail a call sent, from its receipt lines and this page's mail records (Laptop2627). */
 const useMailSent = (part: () => ToolPart) => {
   const records = useMailRecords()
-  return createMemo(() => { const receipts = mailReceipts(part()); return receipts.length ? { receipts, ...mailSentText(receipts, records) } : undefined })
+  return createMemo(() => {
+    const receipts = mailReceipts(part())
+    if (!receipts.length) return undefined
+    // A receipt whose receipts this page has not read asks for its sender lane's feed, once per lane.
+    receipts.forEach((receipt) => { if (!records.complete(receipt.id)) records.want(receipt) })
+    return { receipts, ...mailSentText(receipts, records) }
+  })
 }
 type MailSent = ReturnType<ReturnType<typeof useMailSent>>
 // The card names the mail and each recipient's delivery in place of the shell description.
@@ -201,8 +207,8 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
       <div class="tool-chip-member">
         {/* Each mail this call sent, with its recipients' delivery, and a way to its mail row when the transcript shows one. */}
         <Show when={mail()}>{(sent) => <ul class="tool-chip-files tool-chip-mail" aria-label="Mail sent">
-          <For each={sent().receipts}>{(receipt, index) => <li><bdi dir="auto">{sent().detail[index()]}</bdi>
-            <Show when={records(receipt.id)}> <button class="tool-chip-mail-open" onClick={() => document.querySelector(`[data-mail-id="${CSS.escape(receipt.id)}"]`)?.scrollIntoView({ block: "center" })}>Show mail</button></Show></li>}</For>
+          <For each={sent().receipts}>{(receipt, index) => <li><bdi dir="auto" data-ticket-refs="off">{sent().detail[index()]}</bdi>
+            <Show when={records.record(receipt.id)}> <button class="tool-chip-mail-open" onClick={() => document.querySelector(`[data-mail-id="${CSS.escape(receipt.id)}"]`)?.scrollIntoView({ block: "center" })}>Show mail</button></Show></li>}</For>
         </ul>}</Show>
         {/* Every file an edit touched, with its own confirmed counts; the original chip follows with the diff. */}
         <Show when={(edit()?.files.length ?? 0) > 1}>
@@ -224,7 +230,8 @@ type Card = ReturnType<typeof callCard>
 const CallCard = (props: { card: Card }) =>
   <span class="tool-run-preview tool-call-card" aria-hidden="true">
     <span class="tool-run-kind"><bdi dir="auto">{props.card.head}</bdi></span>
-    <Show when={props.card.description}><span class="tool-call-description" dir="auto">{props.card.description}</span></Show>
+    {/* Solid owns this text and it changes as receipts arrive; the ticket-ref wrapper must not split its node. */}
+    <Show when={props.card.description}><span class="tool-call-description" dir="auto" data-ticket-refs="off">{props.card.description}</span></Show>
     <Show when={props.card.time}><span class="tool-run-span" dir="ltr">{props.card.time}</span></Show>
     <span class="tool-run-sizes" dir="ltr">{props.card.sizes}</span>
   </span>

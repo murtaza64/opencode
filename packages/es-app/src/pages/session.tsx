@@ -10,7 +10,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { Icon } from "@opencode-ai/ui/icon"
 import { es, ocAt, type ContextPart } from "../api"
 import { SessionHostProvider, useOc, type SessionHost } from "../session-host"
-import { readHostLineage } from "../host-items"
+import { hostPrefix, readHostLineage } from "../host-items"
 import { createHostActivity } from "../host-activity"
 import { hostBase } from "../host-base"
 import { readHost } from "../host"
@@ -43,7 +43,7 @@ import { flash } from "../motion"
 import { Glyph, HostGlyph } from "../components/icons"
 import { SelfHandoffButton, SelfHandoffStatus } from "../components/self-handoff"
 import { createSelfHandoff, SELF_HANDOFF_VERSION } from "../self-handoff"
-import { MailRecords } from "../mail-receipts"
+import { createMailReceiptRecords, MailRecords } from "../mail-receipts"
 import { AppHeader } from "../components/native-header"
 import { SessionTitle } from "../components/session-title"
 import { SubagentTranscript } from "../components/subagent-transcript"
@@ -609,6 +609,12 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     return id ? [id] : []
   })))
   const mailRecords = createMemo(() => new Map(mail()?.messages.map((message) => [message.id, message] as const) ?? []))
+  // Mail tool rows (Laptop2627) read receipts on the session's own host: another Work host's session reads that host's
+  // dashboard, and is reread when the session's status changes there; this host's on its mail revision.
+  const [hostEditspaces] = createResource(() => remote ? sessionHost.id : undefined, (host) => fetch(`${hostPrefix(host)}/es/api/editspaces`, { credentials: "include" })
+    .then((response) => response.ok ? response.json() as Promise<{ editspaces: { name: string; root: string }[] }> : undefined, () => undefined))
+  const receiptRecords = createMailReceiptRecords({ prefix: remote ? hostPrefix(sessionHost.id!) : "", directory, session: sessionID,
+    editspaces: () => remote ? hostEditspaces()?.editspaces : editspaces()?.editspaces, revision: () => remote ? status() : mailRevision() })
   const mailReplied = createMemo(() => new Set(mail()?.messages.flatMap((message) => message.in_reply_to ? [message.in_reply_to] : []) ?? []))
   const mailCauseRows = createMemo(() => mailCauses(timeline(), mailRecords()))
 
@@ -2028,7 +2034,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             </Show>
             <DataProvider data={live.data} directory={directory} sessionID={sessionID} onNavigateToSession={inspectSubagent}>
             {/* Tool rows read the mail they sent from these already-loaded records (Laptop2627); no extra request. */}
-            <MailRecords.Provider value={(id) => mailRecords().get(id)}>
+            <MailRecords.Provider value={receiptRecords}>
             <ToolAdornment.Provider value={ToolSize}>
             <For each={visibleTimeline()}>
               {(row) => {
