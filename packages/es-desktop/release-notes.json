@@ -1,19 +1,25 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-10-31.6",
+  "release": "2026-11-01.1",
   "items": [
     {
-      "title": "Surface in the top bar",
-      "detail": "Surface title and actions now sit in the app top bar; no second bar."
+      "title": "Ask about this",
+      "detail": "Ask about this on a decision adds it to your Front Desk draft."
+    },
+    {
+      "title": "Sidebar filter",
+      "detail": "Sidebar: New, Search and one Filter button; hosts, project, status and sort live in its popover."
     },
     {
       "title": "Session title alignment",
-      "detail": "Session title lines up with the chat text."
+      "detail": "Session title starts at the chat text edge, with host tabs too."
     },
     {
-      "title": "Front Desk strip",
-      "detail": "Front Desk strip: grouped, icon-led rows with less text."
+      "title": "Pin import order",
+      "detail": "Pins imported from this device keep their order once the dashboard update is installed."
     }
   ],
-  "limits": []
+  "limits": [
+    "Correction to 2026-10-31.6: its title-alignment note was only true without host tabs."
+  ]
 }
