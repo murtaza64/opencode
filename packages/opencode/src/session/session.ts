@@ -14,6 +14,7 @@ import { Database } from "@opencode-ai/core/database/database"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionAlreadyProjected } from "@opencode-ai/core/session/projector"
+import { SessionLastMessage } from "@opencode-ai/core/session/last-message"
 import * as SessionExecutionLocal from "@opencode-ai/core/session/execution/local"
 import { locationServiceMapLayer } from "@opencode-ai/core/location-services"
 
@@ -276,6 +277,11 @@ export type ProjectInfo = Types.DeepMutable<Schema.Schema.Type<typeof ProjectInf
 export const GlobalInfo = Schema.Struct({
   ...Info.fields,
   project: Schema.NullOr(ProjectInfo),
+  /**
+   * Latest visible human input or finalized assistant text (capability `session.lastMessage`). Absent means unknown:
+   * older Core, sessions with no message since the upgrade, or a staged revert. Never derived from `time.updated`.
+   */
+  lastMessage: optional(SessionLastMessage.Info),
 }).annotate({ identifier: "GlobalSession" })
 export type GlobalInfo = Types.DeepMutable<Schema.Schema.Type<typeof GlobalInfo>>
 
@@ -630,7 +636,11 @@ const layer: Layer.Layer<
           })
         }
       }
-      return rows.map((row) => ({ ...fromRow(row), project: projects.get(row.project_id) ?? null }))
+      return rows.map((row) => ({
+        ...fromRow(row),
+        project: projects.get(row.project_id) ?? null,
+        ...(row.last_message ? { lastMessage: SessionLastMessage.toInfo(row.last_message) } : {}),
+      }))
     })
 
     const children = Effect.fn("Session.children")(function* (parentID: SessionID) {

@@ -2361,6 +2361,7 @@ export type ExperimentalCapabilities = {
   noReplyRecordOnly?: true
   session?: {
     turnTime: true
+    lastMessage?: true
     summaryPatchBudget?: number
   }
 }
@@ -2550,6 +2551,33 @@ export type ProjectSummary = {
   worktree: string
 }
 
+export type SessionLastMessageSource =
+  | {
+      type: "human"
+    }
+  | {
+      type: "agent"
+      agent: string
+      providerID: string
+      modelID: string
+    }
+
+export type SessionLastMessageItem = {
+  type: "message"
+  id: string
+  role: "user" | "assistant"
+  source: SessionLastMessageSource
+  time: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  excerpt: string
+  truncated: boolean
+}
+
+export type SessionLastMessage =
+  | {
+      type: "none"
+    }
+  | SessionLastMessageItem
+
 export type GlobalSession = {
   id: string
   slug: string
@@ -2611,6 +2639,7 @@ export type GlobalSession = {
     diff?: string
   }
   project: ProjectSummary | null
+  lastMessage?: SessionLastMessage
 }
 
 export type SessionFailureError = {

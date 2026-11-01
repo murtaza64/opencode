@@ -52,11 +52,16 @@ const CapabilitiesResponse = Schema.Struct({
   noReplyRecordOnly: Schema.optionalKey(Schema.Literal(true)),
   /**
    * `turnTime`: sessions carry `time.turn {started?, ended?}`, written only at turn boundaries.
+   * `lastMessage`: `GET /experimental/session` rows carry `lastMessage` (absent = unknown).
    * `summaryPatchBudget`: present when user message summaries inline at most this many UTF-8 bytes of patch text;
    * other files carry `patchOmitted: true` and `GET /session/:sessionID/diff?messageID=` returns their patches.
    */
   session: Schema.optionalKey(
-    Schema.Struct({ turnTime: Schema.Literal(true), summaryPatchBudget: Schema.optionalKey(PositiveInt) }),
+    Schema.Struct({
+      turnTime: Schema.Literal(true),
+      lastMessage: Schema.optionalKey(Schema.Literal(true)),
+      summaryPatchBudget: Schema.optionalKey(PositiveInt),
+    }),
   ),
 }).annotate({ identifier: "ExperimentalCapabilities" })
 

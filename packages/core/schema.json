@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "650fdc36-96dd-4d11-a2a6-8ede94f987ef",
+  "id": "e2fec460-87e0-4988-947b-24b9dcc8b9a4",
   "prevIds": [
-    "d6abe54d-bfa4-46f3-87d4-6859521ed32d"
+    "650fdc36-96dd-4d11-a2a6-8ede94f987ef"
   ],
   "ddl": [
     {
@@ -1513,6 +1513,16 @@
       "default": null,
       "generated": null,
       "name": "time_turn_ended",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "last_message",
       "entityType": "columns",
       "table": "session"
     },

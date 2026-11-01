@@ -1,7 +1,7 @@
 export * as SessionProjector from "./projector"
 
 import { UsageRollup } from "../usage/rollup"
-import { and, desc, eq, gt, or, sql } from "drizzle-orm"
+import { and, desc, eq, gt, isNotNull, or, sql } from "drizzle-orm"
 import { isDeepStrictEqual } from "node:util"
 import { DateTime, Effect, Layer, Schema } from "effect"
 import { Database } from "../database/database"
@@ -13,6 +13,7 @@ import { WorkspaceTable } from "../control-plane/workspace.sql"
 import { SessionMessage } from "./message"
 import { SessionMessageUpdater } from "./message-updater"
 import { SessionInput } from "./input"
+import { SessionLastMessage } from "./last-message"
 import { WorkspaceV2 } from "../workspace"
 import { MessageTable, PartTable, SessionInputTable, SessionMessageTable, SessionTable, V1InputTable, V1InputCommandTable } from "./sql"
 import type { DeepMutable } from "../schema"
@@ -117,6 +118,13 @@ function applyUsage(
 
 function run(db: DatabaseService, event: SessionEvent.Event) {
   return Effect.gen(function* () {
+    // The list preview projects V1 messages only; V2 message activity makes it unknown rather than stale.
+    yield* db
+      .update(SessionTable)
+      .set({ last_message: null, time_updated: sql`${SessionTable.time_updated}` })
+      .where(and(eq(SessionTable.id, event.data.sessionID), isNotNull(SessionTable.last_message)))
+      .run()
+      .pipe(Effect.orDie)
     const decodeRow = (row: typeof SessionMessageTable.$inferSelect) =>
       decodeMessage({ ...row.data, id: row.id, type: row.type })
     const updateMessage = (message: SessionMessage.Message) => {
@@ -222,7 +230,7 @@ const layer = Layer.effectDiscard(
       Effect.gen(function* () {
         const stored = yield* db
           .insert(SessionTable)
-          .values(sessionRow(event.data.info))
+          .values({ ...sessionRow(event.data.info), last_message: SessionLastMessage.NONE })
           .onConflictDoNothing()
           .returning({ sessionID: SessionTable.id })
           .get()
@@ -242,7 +250,18 @@ const layer = Layer.effectDiscard(
       // Assigning the primary key, even to its current value, makes SQLite's foreign-key check count every
       // child row (messages, inputs, ...) of the Session twice on each update.
       const { id: _, ...row } = sessionRow(event.data.info)
-      return db.update(SessionTable).set(row).where(eq(SessionTable.id, event.data.sessionID)).run().pipe(Effect.orDie)
+      return Effect.gen(function* () {
+        const previous = yield* db
+          .select({ revert: SessionTable.revert })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, event.data.sessionID))
+          .get()
+          .pipe(Effect.orDie)
+        yield* db.update(SessionTable).set(row).where(eq(SessionTable.id, event.data.sessionID)).run().pipe(Effect.orDie)
+        // A staged revert hides messages: the list preview is unknown until the revert is cleared or committed.
+        if (event.data.info.revert) return yield* SessionLastMessage.unknown(db, event.data.sessionID)
+        if (previous?.revert) yield* SessionLastMessage.recompute(db, event.data.sessionID)
+      })
     })
     yield* events.project(SessionEvent.Moved, (event) =>
       Effect.gen(function* () {
@@ -274,6 +293,7 @@ const layer = Layer.effectDiscard(
           .onConflictDoUpdate({ target: MessageTable.id, set: { data } })
           .run()
           .pipe(Effect.orDie)
+        yield* SessionLastMessage.messageChanged(db, sessionID, id)
       }),
     )
     yield* events.project(SessionV1.Event.InputAdmitted, (event) =>
@@ -561,6 +581,7 @@ const layer = Layer.effectDiscard(
             .run()
             .pipe(Effect.orDie)
         }
+        yield* SessionLastMessage.observe(db, info.sessionID, info.id, event.data.part.id)
         yield* db
           .update(V1InputTable)
           .set({
@@ -642,6 +663,7 @@ const layer = Layer.effectDiscard(
           .where(and(eq(MessageTable.id, event.data.messageID), eq(MessageTable.session_id, event.data.sessionID)))
           .run()
           .pipe(Effect.orDie)
+        yield* SessionLastMessage.removed(db, event.data.sessionID, { messageID: event.data.messageID })
       }),
     )
     yield* events.project(SessionV1.Event.PartRemoved, (event) =>
@@ -660,6 +682,7 @@ const layer = Layer.effectDiscard(
           .where(and(eq(PartTable.id, event.data.partID), eq(PartTable.session_id, event.data.sessionID)))
           .run()
           .pipe(Effect.orDie)
+        yield* SessionLastMessage.removed(db, event.data.sessionID, { partID: event.data.partID })
       }),
     )
     yield* events.project(SessionV1.Event.PartUpdated, (event) =>
@@ -681,6 +704,7 @@ const layer = Layer.effectDiscard(
         if (next) yield* applyUsage(db, sessionID, next)
         if (row && previous) yield* UsageRollup.apply(db, row.message_id, previous, -1)
         if (next) yield* UsageRollup.apply(db, messageID, next, 1)
+        if (event.data.part.type === "text") yield* SessionLastMessage.observe(db, sessionID, messageID, id)
       }),
     )
     yield* events.project(SessionEvent.AgentSwitched, (event) =>
@@ -766,6 +790,7 @@ const layer = Layer.effectDiscard(
         .update(SessionTable)
         .set({
           revert: { ...event.data.revert, files: event.data.revert.files ? [...event.data.revert.files] : undefined },
+          last_message: null,
           time_updated: DateTime.toEpochMillis(event.data.timestamp),
         })
         .where(eq(SessionTable.id, event.data.sessionID))

@@ -70,6 +70,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
         noReplyRecordOnly: true as const,
         session: {
           turnTime: true as const,
+          lastMessage: true as const,
           ...(budget === undefined ? {} : { summaryPatchBudget: budget }),
         },
       }
