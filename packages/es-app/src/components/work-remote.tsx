@@ -49,7 +49,10 @@ const RemoteDecision = (props: { host: string; record: NonNullable<Extract<WorkE
   const [anchors] = createResource(() => props.host, async host => {
     const response = await fetch(`${hostPrefix(host)}/es/api/editspaces`, { credentials: "include" })
     if (!response.ok) throw new Error(`Could not read ${host}'s projects (HTTP ${response.status})`)
-    const body = await response.json() as { editspaces: { root: string }[] }
+    // A listener that answers this route with a page (an older or refusing one) gets the same message, not a parse error.
+    const body = response.headers.get("content-type")?.includes("application/json")
+      ? await response.json().catch(() => undefined) as { editspaces?: { root: string }[] } | undefined : undefined
+    if (!Array.isArray(body?.editspaces)) throw new Error(`Could not read ${host}'s projects (not a project list)`)
     return Promise.all(body.editspaces.map(async project => ({ session: await briefAnchorID(project.root), directory: project.root })))
   })
   return <Show when={!fresh.error || attention.snapshot()} fallback={<p class="desk-surface-state" role="alert">{String(fresh.error?.message ?? fresh.error)}</p>}>
