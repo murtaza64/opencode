@@ -223,11 +223,20 @@ try {
         assert(size.lines <= 9, `${name} ${view}: HUD shows ${size.lines} lines`)
         await expect(frame).toHaveAttribute("dir", "ltr")
         await expect(frame.locator(".brief-hud-title")).toBeVisible()
+        // Structural parity: the card and the glasses render the same nodes (ids) in the same order.
+        const hudIds = [...await frame.locator(".brief-hud-line").evaluateAll(lines => lines.map(line => line.dataset.node))]
         if (name === "items") {
+          if (shots) await details.locator(".brief-hud").screenshot({ path: path.join(shots, `hud-${name}-p1-${view}.png`) })
           const next = details.locator(".brief-hud").getByRole("button", { name: "Next" })
           await next.click()
           await expect(frame.locator(".brief-hud-pager")).toContainText(/^2\//)
+          hudIds.push(...await frame.locator(".brief-hud-line").evaluateAll(lines => lines.map(line => line.dataset.node)))
         }
+        const cardIds = await card.evaluate(element => [...element.querySelectorAll("[data-node]")].filter(node => !node.closest(".brief-hud")).map(node => node.dataset.node))
+        const unique = list => list.filter((id, index) => list.indexOf(id) === index)
+        const shown = new Set(cardIds)
+        assert.deepEqual(unique(hudIds).filter(id => shown.has(id)), unique(cardIds), `${name} ${view}: card and glasses node order differ`)
+        assert(cardIds.some(id => id.startsWith("option:")) && (name !== "items" || cardIds.filter(id => id.startsWith("row:")).length === 7), `${name} ${view}: card nodes missing ${cardIds}`)
         // Paging the glasses view never answers: no answer request leaves the page.
         assert.deepEqual(answers, [], `${name} ${view}: glasses preview sent an answer`)
         if (shots) await details.locator(".brief-hud").screenshot({ path: path.join(shots, `hud-${name}-${view}.png`) })

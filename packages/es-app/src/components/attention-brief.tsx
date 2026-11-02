@@ -8,14 +8,14 @@ import { A } from "@solidjs/router"
 import { sessionHref } from "../state"
 import { docHref } from "../pages/doc"
 import { anchorHref } from "../message-anchor"
-import { briefCommands, briefComplete, briefItems, briefSteps, safeSvg, sourceTarget, type BriefResult, type BriefShape, type BriefSource, type DeskItem, type EvidenceRef } from "../desk"
+import { briefCommands, briefComplete, briefSteps, safeSvg, sourceTarget, type BriefResult, type BriefShape, type BriefSource, type DeskItem, type EvidenceRef } from "../desk"
 import { briefApproval } from "../brief-approval"
 import { completeBriefJob, currentJob, readConversation, regeneratingJob, type BriefJob } from "../desk-session"
 import { LinkedText } from "./linked-text"
 import { CopyCode, linkName, MISSING, Refs, Value } from "./brief-kit"
 import contract from "../brief-contract.json"
 import { readBriefFeedback, sendBriefFeedback, type BriefRating } from "../brief-feedback"
-import { briefSemantics, hudPages } from "../brief-view"
+import { briefSemantics, hudPages, type BriefNode, type BriefNodeGroup } from "../brief-view"
 import { BriefHud } from "./brief-hud"
 
 /** Where a cited source opens: the source thread at the cited messages, or a markdown doc in the editspace. */
@@ -44,6 +44,11 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
   const ready = () => { const job = current(); return job?.state.state === "ready" ? { job, result: job.state.result as BriefResult, omitted: job.state.omitted } : undefined }
   const complete = () => { const value = ready(); return !!value && briefComplete(value.result, props.item) }
   const shows = (part: Part) => !props.part || props.part === part
+  // One read of the request's conversation documents and one node list for every projection of this brief: the
+  // card's rows, evidence and unknowns below and the glasses pages render the same nodes, ids and order.
+  const [found] = createResource(() => props.host ? undefined : props.item.record, readConversation)
+  const nodes = () => { const value = ready(); return value ? briefSemantics(props.item, value.result, { host: props.host, documents: found()?.documents }) : undefined }
+  const group = (name: BriefNodeGroup) => nodes()?.nodes.filter(node => node.group === name) ?? []
   return <section class="desk-brief" aria-label="Brief" data-part={props.part} tabIndex={!props.part || props.part === "lead" ? -1 : undefined}>
     <Show when={shows("lead")}>
       <Show when={current()} fallback={<Show when={props.live}>
@@ -72,7 +77,7 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
         <Show when={!props.item.record}><p class="desk-brief-question" dir="auto">{value().result.question}</p></Show>
         <Show when={value().result.context}><p class="desk-brief-context" dir="auto"><LinkedText text={value().result.context} /></p></Show>
         <Subjects subjects={value().result.subjects} refs={value().job.meta.refs} />
-        <Items result={value().result} item={props.item} job={value().job} host={props.host} />
+        <Items rows={group("row")} item={props.item} job={value().job} />
         <Steps result={value().result} refs={value().job.meta.refs} item={props.item} host={props.host} />
         <Commands commands={value().result} item={props.item} host={props.host} />
         <Show when={!props.item.record?.options.length && value().result.ifWait}><p class="home-muted" dir="auto">If you wait: <LinkedText text={value().result.ifWait} /></p></Show>
@@ -86,9 +91,9 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
     {/* Cited evidence and provenance stay one click away, not in the reading path. As a decision's details slot it
       * renders bare, inside the decision's own Details disclosure, so the card has one. */}
     <Show when={shows("details") && ready()}>{value => <Dynamic component={props.part === "details" ? "div" : "details"} class="desk-brief-detail"><Show when={props.part !== "details"}><summary>Details</summary></Show>
-      <Show when={value().result.facts.length}><ul><For each={value().result.facts}>{fact => <li><bdi dir="auto"><LinkedText text={fact.text} /></bdi> <Refs refs={fact.refs} known={value().job.meta.refs} item={props.item} host={props.host} /></li>}</For></ul></Show>
+      <Show when={group("evidence").length}><ul><For each={group("evidence")}>{fact => <li data-node={fact.id}><bdi dir="auto"><LinkedText text={fact.text} /></bdi> <Refs refs={fact.refs ?? []} known={value().job.meta.refs} item={props.item} host={props.host} /></li>}</For></ul></Show>
       <Show when={value().result.timeline.length}><ol class="desk-timeline"><For each={value().result.timeline}>{entry => <li><Show when={entry.when}><span class="home-source">{entry.when} · </span></Show><bdi dir="auto"><LinkedText text={entry.text} /></bdi> <Refs refs={entry.refs} known={value().job.meta.refs} item={props.item} host={props.host} /></li>}</For></ol></Show>
-      <Show when={value().result.gaps.length}><ul class="home-muted"><For each={value().result.gaps}>{gap => <li dir="auto">{gap}</li>}</For></ul></Show>
+      <Show when={group("unknown").length}><ul class="home-muted"><For each={group("unknown")}>{gap => <li dir="auto" data-node={gap.id}>{gap.text}</li>}</For></ul></Show>
       {/* An incomplete brief still offers what it found, without standing in for the request. */}
       <Show when={!complete()}><SourceLinks sources={value().result.sources} refs={value().job.meta.refs} item={props.item} host={props.host} /></Show>
       <p class="home-source">Brief for revision {value().job.meta.revision}<Show when={value().omitted}> · {value().omitted} uncited statement(s) omitted</Show> · <A href={sessionHref(value().job.id, value().job.directory) + (props.host ? `&host=${encodeURIComponent(props.host)}` : "")}>Brief thread</A>
@@ -99,7 +104,7 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
           <button type="button" class="desk-link-button" onClick={() => props.regenerate!()}>Regenerate brief</button></Show></p></Show>
       {/* The same brief as the glasses would page it: reading aid only, no device, no answer. */}
       <details class="brief-hud-preview"><summary>Glasses preview</summary>
-        <BriefHud pages={hudPages(briefSemantics(props.item, value().result, { host: props.host }))} /></details>
+        <Show when={nodes()}>{semantics => <BriefHud pages={hudPages(semantics())} />}</Show></details>
       {/* Keyed to the brief shown, so a newer brief never inherits this one's rating. */}
       <Show when={!props.host && value().job} keyed>{job => <BriefFeedbackControls job={job} />}</Show>
     </Dynamic>}</Show>
@@ -189,9 +194,8 @@ const Subjects = (props: { subjects: BriefResult["subjects"]; refs: EvidenceRef[
     }}</For></ul>
   </Show>
 
-const Items = (props: { result: BriefResult; item: DeskItem; job: BriefJob; host?: string }) => {
-  const [found] = createResource(() => props.host ? undefined : props.item.record, readConversation)
-  const rows = () => briefItems(props.result, props.item, found()?.documents)
+const Items = (props: { rows: BriefNode[]; item: DeskItem; job: BriefJob }) => {
+  const rows = () => props.rows.flatMap(node => node.row ? [node.row] : [])
   const approval = () => briefApproval(rows(), props.item, { id: props.job.id, revision: props.job.meta.revision })
   // A column shows only when some row has a value for it: Approved once the ledger has an answer for this brief,
   // the recommendation and alternatives once any item gives one. A row missing a shown value keeps its marker.
@@ -202,7 +206,7 @@ const Items = (props: { result: BriefResult; item: DeskItem; job: BriefJob; host
     <section class="desk-brief-items ds-section" aria-label="Request items" data-answered={approval().answered ? "" : undefined} style={{ "--desk-item-tracks": tracks() }}>
       <Show when={approval().verbatim}><p class="desk-brief-ledger">Recorded answer: <bdi dir="auto">{approval().verbatim}</bdi></p></Show>
       <div class="desk-brief-item-head" aria-hidden="true"><span>ID</span><span>Question</span><Show when={recommends()}><span>Agent recommends</span></Show><Show when={alternatives()}><span>Alternative(s)</span></Show><Show when={approval().answered}><span>Approved</span></Show></div>
-      <ol class="desk-brief-item-list"><For each={rows()}>{(row, index) => <li class="desk-brief-item">
+      <ol class="desk-brief-item-list"><For each={rows()}>{(row, index) => <li class="desk-brief-item" data-node={`row:${row.id}`}>
         <span class="desk-brief-item-id"><bdi dir="ltr" class="desk-brief-item-number">{index() + 1}.</bdi> <bdi dir="ltr">{row.id}</bdi></span>
         {/* The question is the row's primary line, so it carries no label. */}
         <div class="desk-brief-item-cell desk-brief-item-question"><Value value={row.question} /></div>

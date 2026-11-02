@@ -2,13 +2,15 @@
  * glasses HUD page set (Even Realities G2, 576x288, one green). A node keeps its id, group and order in every projection;
  * a projection may only lay nodes out differently, page them, or point to the full brief elsewhere. Reading, paging or
  * speaking a node is never an answer: answers stay with the native decision controls. */
-import { briefItems, type BriefResult, type ConversationDocument, type DeskItem } from "./desk"
+import { briefItems, type BriefItem, type BriefResult, type ConversationDocument, type DeskItem } from "./desk"
 
 const MISSING = "not given"
 
 export type BriefNodeGroup = "item" | "question" | "row" | "option" | "risk" | "evidence" | "unknown" | "state"
 /** `id` is stable across projections and revisions of the same brief (option ids are the producer's own). */
-export type BriefNode = { id: string; group: BriefNodeGroup; text: string; mark?: "recommended" | "chosen" }
+export type BriefNode = { id: string; group: BriefNodeGroup; text: string; mark?: "recommended" | "chosen"
+  /** Evidence refs (C1, E2…) for evidence nodes; the verified request item behind a row node. */
+  refs?: string[]; row?: BriefItem }
 
 export type BriefSemantics = {
   /** Host-qualified item identity and the revision this brief was prepared for. */
@@ -32,7 +34,7 @@ export const briefSemantics = (item: DeskItem, result: BriefResult, options: { h
     { id: "question", group: "question", text: result.question || item.title },
     // Numbered items the request lists (D1..D7), in its order with its ids, one node each, never merged. Only values
     // quoted in the request are shown (briefItems, as on the desktop card); the rest reads as not given.
-    ...briefItems(result, item, options.documents).map((row): BriefNode => ({ id: `row:${row.id}`, group: "row",
+    ...briefItems(result, item, options.documents).map((row): BriefNode => ({ id: `row:${row.id}`, group: "row", row,
       text: `${row.id} ${row.question || MISSING} → ${row.recommended || MISSING}${row.alternatives.filter(Boolean).length ? ` (or ${row.alternatives.filter(Boolean).join(", ")})` : ""}` })),
     ...choices.map(({ option, brief }): BriefNode => ({
       id: `option:${option.id}`, group: "option",
@@ -41,7 +43,7 @@ export const briefSemantics = (item: DeskItem, result: BriefResult, options: { h
     })),
     ...choices.flatMap(({ option, brief }) => brief?.note ? [{ id: `risk:${option.id}`, group: "risk" as const, text: `${option.label}: ${brief.note}` }] : []),
     ...(result.ifWait ? [{ id: "risk:wait", group: "risk" as const, text: `If you wait: ${result.ifWait}` }] : []),
-    ...result.facts.map((fact, index): BriefNode => ({ id: `evidence:${index}`, group: "evidence", text: fact.text })),
+    ...result.facts.map((fact, index): BriefNode => ({ id: `evidence:${index}`, group: "evidence", text: fact.text, refs: fact.refs })),
     ...result.gaps.map((gap, index): BriefNode => ({ id: `unknown:${index}`, group: "unknown", text: gap })),
     { id: "state", group: "state", text: record ? `${record.status}${chosen ? ` · answered ${record.options.find(option => option.id === chosen)?.label ?? chosen}` : ""} · revision ${item.revision}` : `revision ${item.revision}` },
   ]
