@@ -143,6 +143,7 @@ try {
   // A Mac Mini session opened here: its rows read the Mini's dashboard, not this host's.
   await page.goto(`${preview.origin}/session/ses_a?directory=${encodeURIComponent(directory)}&host=mini`, { waitUntil: "domcontentloaded" })
   await expect(state("mm_relay")).toHaveText("Mail sent to ux-feel · presented", { timeout: 60_000 })
+  await expect(chip("mm_relay").locator(".msg-tick[data-mail]")).toHaveAttribute("data-tick", "delivered")
   expect(laneReads(mini)).toBeGreaterThan(0)
   await page.screenshot({ path: join(shots, "mini.png") })
   // A window whose listener refuses that host's mail (as es-desktop did before this fix): said plainly, never "not read".

@@ -2,6 +2,14 @@ import { createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import type { Session } from "@opencode-ai/sdk/v2"
 import type { Composer } from "../composer"
 import { ChatImages } from "./chat-images"
+import { TickMark } from "./message-tick"
+import { bubbleTick, laterTick, type Tick } from "../message-ticks"
+
+// The bubble's tick never steps back while it is on screen (DOUBLE-TICK): each bubble keeps its highest state.
+const monotonic = (value: () => { tick: Tick; label: string }) => createMemo<{ tick: Tick; label: string }>((previous) => {
+  const next = value()
+  return previous && laterTick(previous.tick, next.tick) !== next.tick ? previous : next
+})
 
 // Every input the transcript does not show yet, as one outgoing bubble with a
 // one-line cue. Durable states (admission, receipt, set-aside recovery, normal
@@ -44,6 +52,7 @@ export const OutgoingMessages = (props: {
               <div class="pending-bubble" dir="auto">{submission().text}{submission().images && !submission().previews?.length ? ` · ${submission().images} image(s)` : ""}</div>
             </Show>
             <div class="pending-hint outgoing-cue" role="status" title={[submission().error, submission().messageID && `Message ${submission().messageID}`].filter(Boolean).join("\n") || undefined}>
+              <NormalTick status={submission().status === "sending" || submission().checking ? "sending" : submission().status === "accepted" ? "accepted" : submission().absent ? "absent" : "unknown"} />
               <span>{submission().status === "sending" || submission().checking ? "Sending…" : submission().status === "accepted" ? "Sent"
                 : submission().absent ? "Not sent" : "Not confirmed yet"}</span>
               <Show when={submission().status === "unknown"}>
@@ -102,6 +111,16 @@ const InputBubble = (props: { composer: Composer; connected: boolean; id: string
     if (admission()?.status === "sending" || check() === "checking") return `${kind} · sending…`
     return check() === "absent" ? "Not sent" : "Not confirmed yet"
   }
+  const tick = monotonic(() => {
+    const at = receipt()?.timeCreated
+    if (receipt()) return bubbleTick({ status: "pending", delivery: delivery(), at })
+    const done = settled()
+    if (done === "cancelled") return { tick: "failed" as const, label: "Cancelled" }
+    if (done && done !== "pending") return { tick: "delivered" as const, label: "Delivered" }
+    if (done === "pending") return bubbleTick({ status: "pending", delivery: delivery() })
+    if (admission()?.status === "sending" || check() === "checking") return bubbleTick({ status: "sending" })
+    return bubbleTick({ status: check() === "absent" ? "absent" : "unknown" })
+  })
   const title = () => [recovery() ? state.recoveryError : admission()?.error, admission() && state.recoveryError.startsWith("Cannot save this unknown input") && state.recoveryError, `Request ${props.id}`]
     .filter(Boolean).join("\n")
   const editing = () => props.composer.editingInput() === props.id
@@ -123,6 +142,7 @@ const InputBubble = (props: { composer: Composer; connected: boolean; id: string
       <ChatImages images={images()} />
       <Show when={text() || !images()?.length}><div class="pending-bubble receipt-text" dir="auto">{text()}</div></Show>
       <div class="pending-hint outgoing-cue receipt-row" role="status" title={title()}>
+        <TickMark tick={tick().tick} label={tick().label} />
         <span>{cue()}</span>
         <Show when={deliverable()}>
           <button class="outgoing-action outgoing-deliver" disabled={!props.connected || !!state.delivering}
@@ -161,4 +181,9 @@ const InputBubble = (props: { composer: Composer; connected: boolean; id: string
       </div>
     </li>
   )
+}
+
+const NormalTick = (props: { status: "sending" | "accepted" | "absent" | "unknown" }) => {
+  const tick = monotonic(() => bubbleTick({ status: props.status }))
+  return <TickMark tick={tick().tick} label={tick().label} />
 }

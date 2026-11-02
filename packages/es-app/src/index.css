@@ -2104,3 +2104,14 @@ a.mini-item > .glyph { margin: 0; }
 /* Another Work host's session in the normal view: its host beside the title, one line while it does not answer. */
 .session-page .topbar .session-host { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 12px; color: var(--subtext0); white-space: nowrap; }
 .host-session-offline { padding: 4px 16px; font-size: 12px; color: var(--subtext0); }
+
+/* Message ticks (DOUBLE-TICK): grey for sending, sent and delivered; accent once read; red when not sent. Mail sent
+ * rows use the mail role colour (the mail glyph's teal) so they are never read as the person's own messages. */
+.msg-tick { display: inline-flex; flex: none; align-items: center; color: var(--overlay1); }
+.msg-tick[data-tick="read"] { color: var(--accent, var(--lavender)); }
+.msg-tick[data-tick="failed"] { color: var(--red); }
+.msg-tick[data-mail] { color: var(--teal); }
+.msg-tick[data-mail][data-tick="failed"] { color: var(--red); }
+.msg-tick-row { display: flex; justify-content: flex-end; margin-block-start: 2px; }
+.outgoing-cue .msg-tick { margin-inline-end: 4px; }
+@media (prefers-reduced-motion: no-preference) { .msg-tick { transition: color 150ms; } }

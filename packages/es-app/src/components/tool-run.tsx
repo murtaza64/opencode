@@ -8,6 +8,8 @@ import { editSummary, fileName, isEditTool, type EditSummary } from "../tool-edi
 import { callCard, STATE_WORDS, toolGlyph } from "../tool-call"
 import { mailReceipts, mailSentText, useMailRecords } from "../mail-receipts"
 import { Glyph } from "./icons"
+import { TickMark } from "./message-tick"
+import { mailTick } from "../message-ticks"
 
 const STRIP_ICONS = 12
 
@@ -201,6 +203,8 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
       <span class="tool-chip-state" data-status={status()} aria-hidden="true">
         {[STATE_WORDS[status()], what(), reason()].filter(Boolean).join(" · ")}
       </span>
+      {/* DOUBLE-TICK for mail this call sent, in the mail colour: sent, delivered (never read or done), or failed. */}
+      <Show when={mail()}>{(sent) => <TickMark tick={mailTick(sent().state).tick} label={mailTick(sent().state).label} mail />}</Show>
       <Show when={!open()}><CallCard card={card()} /></Show>
     </button>
     <Show when={open()}>
@@ -307,6 +311,7 @@ export const ToolStrip = (props: { message: ComponentProps<typeof Message>["mess
               aria-label={card().label} aria-expanded={open().has(id)} aria-controls={`tool-strip-member-${id}`} aria-busy={card().status === "unfinished" ? "true" : undefined}
               onFocus={() => setActive(id)} onClick={() => toggle(id)}>
               <ToolIcon partID={id} tool={part().tool} status={card().status} icon={glyph()} magnitude={magnitude()} mail={!!mail()} />
+              <Show when={mail()}>{(sent) => <TickMark tick={mailTick(sent().state).tick} label={mailTick(sent().state).label} mail />}</Show>
               <CallCard card={card()} />
             </button>
           </span>

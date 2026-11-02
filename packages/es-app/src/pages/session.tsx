@@ -44,6 +44,7 @@ import { Glyph, HostGlyph } from "../components/icons"
 import { SelfHandoffButton, SelfHandoffStatus } from "../components/self-handoff"
 import { createSelfHandoff, SELF_HANDOFF_VERSION } from "../self-handoff"
 import { createMailReceiptRecords, MailRecords } from "../mail-receipts"
+import { DeliveredTick } from "../components/message-tick"
 import { AppHeader } from "../components/native-header"
 import { SessionTitle } from "../components/session-title"
 import { SubagentTranscript } from "../components/subagent-transcript"
@@ -1857,6 +1858,13 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     return next
   })
   const messageByID = createMemo(() => new Map(messages().map((message) => [message.id, message] as const)))
+  // A promoted input's promotion time, from its receipt (Core keeps the last terminal receipts).
+  const promotedAt = (messageID: string) => {
+    const receipt = composer.state.receipts.find((item) => "messageID" in item && item.messageID === messageID) as { timePromoted?: unknown } | undefined
+    return typeof receipt?.timePromoted === "number" ? receipt.timePromoted : undefined
+  }
+  // This session's current turn start as Core recorded it (Session.time.turn); undefined from a Core without it.
+  const turnStarted = () => { const value = (session()?.time as { turn?: { started?: unknown } } | undefined)?.turn?.started; return typeof value === "number" ? value : undefined }
   const promptIDs = createMemo(() => new Set(timeline().flatMap((row) =>
     row.type === "transcript" && isUserPrompt(row.message, live.data.part[row.message.id] ?? []) ? [row.message.id] : [])))
   createEffect(() => { promptIDs(); schedulePromptPosition() })
@@ -2074,6 +2082,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                         renderTools={renderTools}
                         mailRecord={mailRecords().get(mailSourceID(m) ?? "")}
                         mailDeliveries={mailRecords().get(mailSourceID(m) ?? "")?.deliveries} mailIDs={transcriptMailIDs()} mailName={mailName} />
+                      {/* DOUBLE-TICK: delivered at promotion (the receipt's time, else the message's), read after a later turn start. */}
+                      <Show when={promptIDs().has(m.id)}><DeliveredTick turnStarted={turnStarted()}
+                        promotedAt={promotedAt(m.id) ?? m.time.created} /></Show>
                       <Show when={!remote}><button
                         class="fork-here"
                         title="fork: new session with the history before this message"
