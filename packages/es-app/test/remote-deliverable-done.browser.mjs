@@ -31,8 +31,8 @@ const storeHost = async (editspace) => {
     for (const cookie of response.headers.getSetCookie()) { const [name, value] = cookie.split(";")[0].split("="); jar.set(name, value) }
     return response
   }
-  const publish = async (summary) =>
-    (await (await fetch(`${origin}/__fixture/publish`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "report", title: "API tests", summary }) })).json()).revision
+  const publish = async (summary, id = "report", title = "API tests") =>
+    (await (await fetch(`${origin}/__fixture/publish`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, title, summary }) })).json()).revision
   return { send, publish, home, close: async () => { child.kill(); await rm(home, { recursive: true, force: true }) } }
 }
 
@@ -40,7 +40,7 @@ const local = await storeHost("opencode")
 const mini = await storeHost("fixture")
 // This host's page already has an operator session; the Mini's is set up by the page through the Mini's own flow.
 await local.send("/api/attention/session", { method: "POST", headers: { "content-type": "application/json", "X-Attention-CSRF": "1" }, body: "{}" })
-const seenOn = async (store) => (await (await store.send("/api/surfaces")).json()).surfaces.find((item) => item.id === "report").seen
+const seenOn = async (store, id = "report") => (await (await store.send("/api/surfaces")).json()).surfaces.find((item) => item.id === id)?.seen
 
 const preview = await startPanelPreview()
 const browser = await chromium.launch({ channel: "chrome", headless: true })
@@ -52,15 +52,18 @@ const miniOrigin = "http://127.0.0.1:65032"
 const writes = { local: [], mini: [] }
 let mintDown = true
 const results = []
-const forward = async (route, store, pathname) => {
+// The Mini's "live" deliverable reads as a link surface (served only on the Mini), which this window cannot frame.
+const asLink = (pathname, body) => pathname !== "/api/surfaces" ? body
+  : JSON.stringify({ ...JSON.parse(body), surfaces: JSON.parse(body).surfaces.map((item) => item.id === "live" ? { ...item, kind: "url" } : item) })
+const forward = async (route, store, pathname, rewrite = (_pathname, body) => body) => {
   const request = route.request()
   const init = request.method() === "GET" ? {} : { method: request.method(), body: request.postData() ?? undefined,
     headers: { "content-type": "application/json", "X-Attention-CSRF": request.headers()["x-attention-csrf"] ?? "" } }
   const response = await store.send(pathname, init).catch(() => undefined)
   if (!response) return route.abort("connectionreset")
-  return route.fulfill({ status: response.status, contentType: "application/json", body: await response.text() })
+  return route.fulfill({ status: response.status, contentType: "application/json", body: rewrite(pathname, await response.text()) })
 }
-await page.route((url) => new URL(url).origin === miniOrigin, (route) => route.fulfill({ contentType: "text/html", body: "<title>Mini</title>" }))
+await page.context().route((url) => new URL(url).origin === miniOrigin, (route) => route.fulfill({ contentType: "text/html", body: "<title>Mini</title>" }))
 await page.route("**/__es/host", (route) => route.fulfill({ json: { id: "local", label: "Local", remote: false, hosts: [], work: [
   { id: "local", label: "Local", origin: preview.origin }, { id: "mini", label: "Mac Mini", origin: miniOrigin }] } }))
 await page.route((url) => new URL(url).pathname.startsWith("/hosts/mini/"), (route) => {
@@ -68,7 +71,7 @@ await page.route((url) => new URL(url).pathname.startsWith("/hosts/mini/"), (rou
   const pathname = url.pathname.replace(/^\/hosts\/mini/, "")
   if (route.request().method() !== "GET") writes.mini.push(`${route.request().method()} ${pathname} ${route.request().postData() ?? ""}`)
   if (pathname === "/es/api/surfaces" || pathname === "/es/api/attention/session" || pathname === "/es/api/frontdesk/deliverables/seen")
-    return forward(route, mini, pathname.replace(/^\/es/, ""))
+    return forward(route, mini, pathname.replace(/^\/es/, ""), asLink)
   if (pathname === "/__es/surface/report") return mintDown ? route.fulfill({ status: 502, contentType: "text/plain", body: "down" }) : route.fulfill({ json: { src: "about:blank" } })
   if (pathname === "/oc/experimental/session") return route.fulfill({ json: [] })
   if (pathname === "/es/api/editspaces") return route.fulfill({ json: { editspaces: [{ name: "fixture", root: "/Users/mini/fixture/.editspace" }], default: "fixture" } })
@@ -93,6 +96,7 @@ const step = (name) => results.push(`PASS ${name}`)
 try {
   await local.publish("local first")
   await mini.publish("mini first")
+  await mini.publish("board", "live", "Live board")
   await page.goto(`${preview.origin}/`, { waitUntil: "domcontentloaded", timeout: 180_000 })
   await expect(miniRow).toHaveAttribute("aria-label", "Try · API tests · Fixture lead · rev 1 · on Mac Mini", { timeout: 60_000 })
   await expect(localRow).toHaveAttribute("aria-label", "Try · API tests · Fixture lead · rev 1")
@@ -130,6 +134,19 @@ try {
   if (await seenOn(mini)) throw new Error("Undo not saved on the Mini")
   if (writes.local.length) throw new Error(`local writes: ${JSON.stringify(writes.local)}`)
   step("Undo brings the Mini's row back from the Mini's store only")
+
+  const linkRow = band.locator("[data-nav-item='mini~surface:live']")
+  await linkRow.click()
+  await expect(page.locator("[data-surface-gap='own-host-only']")).toBeVisible()
+  await expect(reader.getByRole("button", { name: /^Done/ })).toHaveCount(0)
+  const [popup] = await Promise.all([page.waitForEvent("popup"), page.locator("[data-open-on-host='mini']").click()])
+  await popup.waitForURL(`${miniOrigin}/?surface=live`)
+  await popup.close()
+  await reader.getByRole("button", { name: "Done (opened on Mac Mini)" }).click()
+  await expect(linkRow).toHaveCount(0)
+  await expect(localRow).toBeVisible()
+  if (!(await seenOn(mini, "live")) || writes.local.length) throw new Error(`live seen ${await seenOn(mini, "live")}, local writes ${JSON.stringify(writes.local)}`)
+  step("a link surface offers Done only after it was opened on its host; Done clears it on the Mini only")
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`)
 } catch (error) {
   process.exitCode = 1

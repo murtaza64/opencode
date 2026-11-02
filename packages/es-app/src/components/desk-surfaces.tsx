@@ -110,12 +110,12 @@ export const createDeliverableDone = (surface: () => Surface | undefined, onDone
 
 /** The Done/Undo controls of one reader (and "newer revision" when the deliverable was republished while open). */
 // Done/Undo appear only once the revision on screen is proven (`ready`); "newer revision" shows whenever one exists.
-export const DeliverableDoneControls = (props: { state: ReturnType<typeof createDeliverableDone> }) =>
+export const DeliverableDoneControls = (props: { state: ReturnType<typeof createDeliverableDone>; label?: string }) =>
   <Show when={props.state.enabled() && (props.state.ready() || props.state.newer())}>
     <span class="surface-head-done" data-revision={props.state.onScreen()}>
       <Show when={props.state.newer()}>{revision => <button class="surface-head-text" data-newer={revision()} title="Load the newer revision; Done covers only the revision on screen" onClick={() => props.state.load(revision())}>newer revision {revision()}</button>}</Show>
       <Show when={props.state.ready()}>
-        <Show when={props.state.done()} fallback={<button class="surface-head-text surface-done" disabled={props.state.writing()} title={`Mark revision ${props.state.onScreen()} done; it leaves Needs you on every device`} onClick={() => void props.state.mark(true)}>Done</button>}>{state =>
+        <Show when={props.state.done()} fallback={<button class="surface-head-text surface-done" disabled={props.state.writing()} title={`Mark revision ${props.state.onScreen()} done; it leaves Needs you on every device`} onClick={() => void props.state.mark(true)}>{props.label ?? "Done"}</button>}>{state =>
           <><span class="surface-done-state" role="status">Done{state().at ? ` · ${ago(state().at!)}` : ""}</span>
             <button class="surface-head-text" disabled={props.state.writing()} title={`Undo Done for revision ${props.state.onScreen()}`} onClick={() => void props.state.mark(false)}>Undo</button></>}</Show>
       </Show>

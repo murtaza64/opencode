@@ -1,7 +1,7 @@
 /* Another Work host's entry opened in this window (Main1555): its decision, permission, question or Surface, read
  * and acted on through the Local listener's /hosts/<id>/ routes (host-items.ts), so the action happens on the
  * owning host with that host's operator session and the window never switches to that host's tab. */
-import { createResource, Match, Show, Switch, type JSX } from "solid-js"
+import { createResource, createSignal, Match, Show, Switch, type JSX } from "solid-js"
 import type { PermissionRequest } from "@opencode-ai/sdk/v2"
 import { A } from "@solidjs/router"
 import { createAttention } from "../attention"
@@ -108,9 +108,13 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
   const src = () => address.error ? undefined : address()?.src
   // Done/Undo write that host's seen state only, then reread that host's list so its Needs you rows follow.
   const work = useDashboard().work
-  // Done covers only what was on screen: none for a surface this window cannot frame, a failed address, or before the
-  // frame has its address.
-  const done = createDeliverableDone(() => props.surface, () => props.frame === "host" && src() ? async (surface, revision, seen) => {
+  // A link surface this window cannot frame opens on its own host (that host's reader, its own tab).
+  const onHost = () => { const origin = work.host(props.host)?.origin; return origin ? `${origin}/?surface=${encodeURIComponent(props.surface.id)}` : undefined }
+  const [opened, setOpened] = createSignal(false)
+  // Done covers only what was shown: a framed surface once its frame has its address; a link surface once the human
+  // opened it on its host from this reader. None for a failed address or before load.
+  const viewed = () => props.frame === "host" ? !!src() : opened()
+  const done = createDeliverableDone(() => props.surface, () => viewed() ? async (surface, revision, seen) => {
     const ok = await markHostDeliverable(props.host, surface, revision, seen)
     if (ok) await work.feeds().find(feed => feed.host.id === props.host)?.load()
     return ok
@@ -120,7 +124,7 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
       <div class="surface-head" onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); props.onClose() } }}>
         <h2 title={`${props.surface.owner} · updated ${ago(props.surface.updated_at)}`}><bdi dir="auto">{props.surface.title}</bdi></h2>
         {props.where}
-        <DeliverableDoneControls state={done} />
+        <DeliverableDoneControls state={done} label={props.frame === "host" ? undefined : `Done (opened on ${props.label})`} />
         <span class="surface-head-actions">
           <span class="surface-head-slot" data-slot="buildinghub" hidden />
           <Show when={src()}>{href => <a class="surface-head-button" href={href()} target="_blank" rel="noopener noreferrer" title="Open in new tab" aria-label="Open in new tab"><Glyph name="link-external" /></a>}</Show>
@@ -128,7 +132,8 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
         </span>
       </div>
     </AppHeader>
-    <Show when={props.frame === "host"} fallback={<p class="desk-surface-state" data-surface-gap="own-host-only">This link surface is served only on <bdi dir="auto">{props.label}</bdi>; it cannot be shown from another computer yet.</p>}>
+    <Show when={props.frame === "host"} fallback={<p class="desk-surface-state" data-surface-gap="own-host-only">This link surface is served only on <bdi dir="auto">{props.label}</bdi>; it cannot be shown from another computer yet.
+      <Show when={onHost()}>{href => <> <a class="desk-link-button" href={href()} target="_blank" rel="noopener noreferrer" data-open-on-host={props.host} onClick={() => setOpened(true)}>Open on <bdi dir="auto">{props.label}</bdi></a></>}</Show></p>}>
       <Show when={!address.error} fallback={<div class="desk-surface-state" role="alert"><p>Cannot open this surface from <bdi dir="auto">{props.label}</bdi>: {String(address.error?.message ?? address.error)}</p><button class="desk-button" onClick={() => void refetch()}>Try again</button></div>}>
         {/* Remounts when the human loads a newer revision, so Done covers what is on screen. */}
         <Show when={src() ? `${src()}|${done.onScreen()}` : undefined} keyed fallback={<p class="desk-surface-state">Loading…</p>}>{_key =>
