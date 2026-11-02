@@ -317,7 +317,8 @@ test("the local listener reads another host's session list with no credential an
     expect(mini.seen.at(-1)).toEqual({ path: pathname.slice(3), cookie: null, authorization: null, origin: null })
   }
   // Another host's handoff lineage and lane owners are read the same way, so a pin follows a handoff there.
-  for (const pathname of ["/es/api/handoffs", "/es/api/state"]) {
+  // Mail tool rows read that host's mail and its delivery receipts (read-only, no credential).
+  for (const pathname of ["/es/api/handoffs", "/es/api/state", "/es/api/mail"]) {
     expect(await (await get(`/hosts/mini${pathname}?es=opencode`)).json()).toMatchObject({ host: "mini", path: pathname })
     expect(mini.seen.at(-1)).toEqual({ path: pathname, cookie: null, authorization: null, origin: null })
   }

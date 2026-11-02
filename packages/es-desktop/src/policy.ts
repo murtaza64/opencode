@@ -163,10 +163,11 @@ export const restorePlan = (value: unknown, tabs: readonly { id: string; origin:
 // session's record, messages and todos (read-only view in the Local window),
 // daily usage rollup (the Today total), subscription quota snapshot (Usage bars), editspace names, open-decision list, Surface list and
 // the Front Desk pointer (which the dashboard serves without an operator; pointer writes stay on the home host's own origin).
+// One lane's or session's mail with its delivery receipts, as that host's own window shows them (mail tool rows).
 // Everything else about that host, answering and operator sessions included, stays on its own tab,
 // origin and operator cookie.
 export const hostApiAllowed = (method: string, pathname: string) =>
-  ["GET", "HEAD"].includes(method) && (/^\/es\/api\/handoffs\/self\/[A-Za-z0-9_-]{1,128}$/.test(pathname) || /^\/(?:oc\/experimental\/(?:session|usage\/daily|capabilities)|oc\/session\/status|oc\/session\/[\w-]+(?:\/todo|\/children|\/message(?:\/[\w-]+)?|\/input(?:\/[\w-]+)?)?|oc\/(?:permission|question)|oc\/config\/providers|es\/api\/(?:editspaces|state|quota|handoffs|surfaces|attention|attention\/session|attention\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|pins|pins\/events|frontdesk\/pointer))$/.test(pathname))
+  ["GET", "HEAD"].includes(method) && (/^\/es\/api\/handoffs\/self\/[A-Za-z0-9_-]{1,128}$/.test(pathname) || /^\/(?:oc\/experimental\/(?:session|usage\/daily|capabilities)|oc\/session\/status|oc\/session\/[\w-]+(?:\/todo|\/children|\/message(?:\/[\w-]+)?|\/input(?:\/[\w-]+)?)?|oc\/(?:permission|question)|oc\/config\/providers|es\/api\/(?:editspaces|state|quota|handoffs|mail|surfaces|attention|attention\/session|attention\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|pins|pins\/events|frontdesk\/pointer))$/.test(pathname))
 
 // One shared pin's ref in a single path segment, as the browser sends it (a lane's slash encoded once).
 const PIN_REF = "(?:session:[A-Za-z0-9_-]{1,128}|lane:[A-Za-z0-9._-]{1,64}%2[Ff][A-Za-z0-9._-]{1,64})"

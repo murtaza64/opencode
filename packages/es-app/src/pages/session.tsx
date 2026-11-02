@@ -621,7 +621,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     .then((response) => response.ok && response.headers.get("content-type")?.includes("application/json")
       ? response.json().then((body: { editspaces?: { name: string; root: string }[] }) => Array.isArray(body?.editspaces) ? body as { editspaces: { name: string; root: string }[] } : undefined, () => undefined)
       : undefined, () => undefined))
-  const receiptRecords = createMailReceiptRecords({ prefix: remote ? hostPrefix(sessionHost.id!) : "", directory, session: sessionID,
+  const receiptRecords = createMailReceiptRecords({ prefix: remote ? hostPrefix(sessionHost.id!) : "", host: remote ? sessionHost.id : undefined, directory, session: sessionID,
     editspaces: () => remote ? hostEditspaces()?.editspaces : editspaces()?.editspaces, revision: () => remote ? status() : mailRevision() })
   const mailReplied = createMemo(() => new Set(mail()?.messages.flatMap((message) => message.in_reply_to ? [message.in_reply_to] : []) ?? []))
   const mailCauseRows = createMemo(() => mailCauses(timeline(), mailRecords()))

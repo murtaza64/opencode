@@ -3,8 +3,10 @@
 // Feeds are shaped like the dashboard's: a session feed carries only receipts addressed to that session (a mail the
 // session SENT comes back with none), a lane feed carries every recipient's receipts. So the row reads the sender
 // lane's feed once, and follows later receipt states on mail revisions (admitted -> presented -> handled, each its
-// own word; handled never becomes "started"). A receipt with no record says "reported sent · delivery not read".
-// A Mac Mini session opened here reads the Mini's dashboard. A failed send or non-mail output stays a shell row.
+// own word; handled never becomes "started"). Without a record the row shows what `es mail send` printed at send
+// time ("admitted at send"), passive and bridge-addressed mail say "recorded only", and with no evidence it says
+// "delivery state not loaded", never "not read". A Mac Mini session opened here reads the Mini's dashboard; if that
+// read is refused, the card says so. A failed send or non-mail output stays a shell row.
 // No timer: with no new revision the rows read nothing more. No writes.
 // Run from packages/es-app: node test/mail-tool-rows.browser.mjs   (SCREENSHOT_DIR=<dir>)
 import { createRequire } from "node:module"
@@ -56,8 +58,14 @@ fixture.messages.push(
       `${receipt("ux-feel#7", "ux-feel")}\n${receipt("front-desk#9", "front-desk")}`, { metadata: { exit: 0 } }),
     preview.text("q2b", "A busy recipient:"),
     preview.tool("m6_later", "bash", { command: `es mail send --to front-desk --kind task "b"` }, receipt("front-desk#9", "front-desk"), { metadata: { exit: 0 } }),
-    preview.text("q3", "A mail this host has no record of:"),
+    preview.text("q3", "Mail this host has no record of, with and without send-time lines:"),
     preview.tool("m3_unread", "bash", { command: `es mail send --to orchestrator --kind notice "x"` }, receipt("orchestrator#55", "orchestrator", "notice"), { metadata: { exit: 0 } }),
+    preview.tool("m7_atsend", "bash", { command: `es mail send --to setup --kind task "x"` },
+      `${receipt("setup#123", "setup")}\n  setup: admitted (mail-setup#123-1); wake observed scheduled at 1793600000000 epoch_ms`, { metadata: { exit: 0 } }),
+    preview.tool("m8_passive", "bash", { command: `es mail send --to serving-modes --kind notice "x"` },
+      `${receipt("serving-modes#127", "serving-modes", "notice")}\n  serving-modes: recorded only; recipient NOT woken (passive; read with es mail check)`, { metadata: { exit: 0 } }),
+    preview.tool("m9_bridge", "bash", { command: `es mail send --to rook --kind task "x"` },
+      `${receipt("rook#2745", "rook")}\n  recorded only; recipient NOT woken (no runtime recipient: muted, filtered, or no owner)`, { metadata: { exit: 0 } }),
     preview.text("q4", "A failed send, and a file that merely contains the words:"),
     preview.tool("m4_failed", "bash", { command: `es mail send --to nobody "x"` }, "error: unknown lane nobody", { status: "error" }),
     preview.text("q5", "and"),
@@ -112,8 +120,12 @@ try {
   fixture.emitDashboard("mail")
   await expect(state("m6_later")).toHaveText("Mail sent to front-desk · handled")
   expect(await page.locator(".tool-chip-state").allTextContents()).not.toContainEqual(expect.stringMatching(/\b(started|completed)\b/))
-  // No record anywhere: qualified, no state claimed.
-  await expect(state("m3_unread")).toHaveText("Mail reported sent to orchestrator · delivery not read")
+  // No current record: the send-time state, marked as such; passive and bridge say recorded only; no evidence: not loaded.
+  await expect(state("m3_unread")).toHaveText("Mail sent to orchestrator · delivery state not loaded")
+  await expect(state("m7_atsend")).toHaveText("Mail sent to setup · admitted at send")
+  await expect(state("m8_passive")).toHaveText("Mail sent to serving-modes · recorded only, not woken")
+  await expect(state("m9_bridge")).toHaveText("Mail sent to rook · recorded only, no runtime recipient")
+  expect(await page.locator(".tool-chip-state").allTextContents()).not.toContainEqual(expect.stringMatching(/not read/))
   // No receipt: the plain shell row.
   await expect(state("m4_failed")).toHaveText(/^failed · es mail send --to nobody/)
   await expect(chip("m4_failed").locator(".tool-run-icon")).not.toHaveAttribute("data-mail", "sent")
@@ -133,12 +145,18 @@ try {
   await expect(state("mm_relay")).toHaveText("Mail sent to ux-feel · presented", { timeout: 60_000 })
   expect(laneReads(mini)).toBeGreaterThan(0)
   await page.screenshot({ path: join(shots, "mini.png") })
+  // A window whose listener refuses that host's mail (as es-desktop did before this fix): said plainly, never "not read".
+  await page.route("**/hosts/mini/es/api/mail**", (route) => route.fulfill({ status: 403, json: { error: "not allowed" } }))
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await expect(state("mm_relay")).toHaveText("Mail sent to ux-feel · delivery state not loaded", { timeout: 60_000 })
+  await chip("mm_relay").locator(".tool-chip-summary").hover()
+  await expect(chip("mm_relay").locator(".tool-call-description")).toHaveText("ux-feel#423 task to ux-feel: mini's mail not readable from this window (HTTP 403)")
 
   const writes = (target) => target.calls.filter((call) => !["GET", "HEAD", "OPTIONS"].includes(call.method) && call.path !== "/api/attention/session")
   expect(writes(fixture)).toEqual([])
   expect(writes(mini)).toEqual([])
   expect(errors).toEqual([])
-  console.log(`PASS mail tool rows: session feed without recipient receipts -> sender lane feed read once -> exact state (handled stays handled); admitted -> presented -> handled on mail revisions; no record -> 'reported sent · delivery not read'; failed send / non-mail output stay shell rows; Mini session reads the Mini's dashboard; no timer reads; no writes; screenshots ${shots}`)
+  console.log(`PASS mail tool rows: session feed without recipient receipts -> sender lane feed read once -> exact state (handled stays handled); admitted -> presented -> handled on mail revisions; no record -> send-time state 'at send', passive/bridge 'recorded only', else 'delivery state not loaded' (never 'not read'); refused host read named; failed send / non-mail output stay shell rows; Mini session reads the Mini's dashboard; no timer reads; no writes; screenshots ${shots}`)
 } finally {
   await preview.close()
   await mini.close?.()
