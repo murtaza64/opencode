@@ -1,14 +1,30 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-11-01.4",
+  "release": "2026-11-02.1",
   "items": [
     {
-      "title": "Lane pins",
-      "detail": "Pins on a lane follow it to its current session."
+      "title": "Try and Done",
+      "detail": "A requested deliverable waits in Needs you as one Try line. Opening it no longer clears it; press Done in the reader, for the revision on screen. Undo brings it back."
     },
     {
-      "title": "Pin sync",
-      "detail": "Pins: no false not-synced marker when two windows import the same pin."
+      "title": "Other hosts' deliverables",
+      "detail": "Deliverables requested on another Work host appear in Needs you; Done is saved on that host."
+    },
+    {
+      "title": "Personal tab",
+      "detail": "A bridged Personal host is its own tab with its own count, never added to Work's."
+    },
+    {
+      "title": "Reconnect and Reload",
+      "detail": "A host that was restarting reconnects on its own. Reload reloads the host on screen."
+    },
+    {
+      "title": "Case actions",
+      "detail": "A waiting case needs you only when it names what to do, and links to where you do it. Superseded versions are never offered."
+    },
+    {
+      "title": "Pins",
+      "detail": "Pins on a lane follow it to its current session. The Personal view shows its peers' pins, read only."
     }
   ],
   "limits": []
