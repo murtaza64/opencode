@@ -155,6 +155,25 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     ...(seen ? { cachedAt: seen.cachedAt } : {}),
   })
   const [live, setLive] = createSignal<Record<string, string>>({})
+  // Status events seen per session, numbered in arrival order. A status read applies to a session only when no event
+  // for it arrived after the read began, so a seed never overwrites a newer transition.
+  let statusEvents = 0
+  const lastEvent = new Map<string, number>()
+  const seedLive = async (listed: string[]) => {
+    const started = statusEvents
+    const statuses = await read<Record<string, { type?: unknown } | string>>("/oc/session/status").catch(() => undefined)
+    if (!statuses || typeof statuses !== "object") return
+    setLive((previous) => {
+      const next = { ...previous }
+      for (const id of new Set([...Object.keys(previous), ...listed, ...Object.keys(statuses)])) {
+        if ((lastEvent.get(id) ?? -1) >= started) continue
+        const value = statuses[id]
+        // The status list names only sessions that are not idle.
+        next[id] = typeof value === "string" ? value : typeof value?.type === "string" ? value.type : "idle"
+      }
+      return next
+    })
+  }
   const [lineage, setLineage] = createSignal<HostLineage>()
   let lastLineageRead = 0
   let followUntil = 0
@@ -274,7 +293,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
         setLineage(undefined)
         lastLineageRead = 0
       }
-      const [needs, surfaces] = await Promise.all([readNeeds(), readSurfaces()])
+      const [needs, surfaces] = await Promise.all([readNeeds(), readSurfaces(), seedLive(sessions.map((session) => session.id))])
       const rows = name && !root ? [] : hostRows(host.id, sessions, root)
       const listed = state().checkedAt ? new Set(state().rows.map((row) => row.id)) : undefined
       if (same && listed && (pinned().length || lanes().length) && rows.some((row) => !listed.has(row.id))) followUntil = Date.now() + FOLLOW_MS
@@ -331,6 +350,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     if (event?.type === "session.status" && typeof event.properties?.sessionID === "string") {
       const id = event.properties.sessionID
       const type = typeof event.properties.status?.type === "string" ? event.properties.status.type : "idle"
+      lastEvent.set(id, statusEvents++)
       setLive((previous) => previous[id] === type ? previous : { ...previous, [id]: type })
       return
     }
