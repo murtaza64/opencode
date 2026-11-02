@@ -7,7 +7,8 @@ import type { Session } from "@opencode-ai/sdk/v2"
 import { descending } from "@opencode-ai/schema/identifier"
 import { oc, ocAt, SessionCreateError, type ContextPart, type MessageWithParts } from "./api"
 import { readHost, workFeedHosts } from "./host"
-import { earlierDesks, resolveHome, sharedNotice, writePointer, type DeskHome, type PointerView } from "./desk-pointer"
+import { earlierDesks, placement, resolveHome, sharedNotice, writePointer, type DeskHome, type Placement, type PointerView } from "./desk-pointer"
+import { unresolvedSend } from "./composer"
 import type { SessionHost } from "./session-host"
 import { clearBackend, describeFailure, isTransient, reportBackend } from "./backend-status"
 import { assistantOps, handled, emptyMemory, eraseMemory, nextMemory, type MemoryDocument, type MemoryOp } from "./desk-memory"
@@ -18,6 +19,10 @@ const POINTER = "es-app:front-desk:1"
 // This device's desks that a shared desk replaced, kept so they stay one tap away, and the shared desk last announced.
 const EARLIER = "es-app:front-desk:earlier:1"
 const SHARED_SEEN = "es-app:front-desk:shared-seen:1"
+// The remote home's desk last read, so an input to it is still reconciled while the home cannot be read.
+const HOME_DESK = "es-app:front-desk:home-desk:1"
+// How often a device whose desk lives on another host re-reads the home, to fall back or fail back.
+const HOME_POLL = 15_000
 // Per desk session: what its context notes have told it so far (NoteState).
 const NOTE = "es-app:front-desk:context:2"
 const PENDING = "es-app:front-desk:brief-create:1"
@@ -120,17 +125,50 @@ export const createDeskSession = () => {
     retire(view.session)
     if (devicePointer()?.session !== view.session) try { save({ session: view.session, directory: view.directory }) } catch { setPointer({ session: view.session, directory: view.directory }) }
   }
-  const verify = async () => {
-    setStatus("checking")
+  // Placement (desk-pointer `placement`): with a remote home, input goes to the home's desk while it answers; when it
+  // stays unreachable, to this device's own existing desk on this host ("fallback"). Each switch waits until no input
+  // on the desk being left is in flight or of unknown outcome (the composer's own receipts for that exact session).
+  const [placed, setPlaced] = createSignal<"home" | "fallback">("home")
+  const [decision, setDecision] = createSignal<Placement>()
+  let homeSeen: { up: boolean; since: number } | undefined
+  let settled = ""
+  const homeDesk = () => remote() ?? readJSON<DeskPointer>(HOME_DESK, value => typeof value?.session === "string" && typeof value?.directory === "string" && typeof value?.host?.id === "string")
+  const place = (resolved: DeskHome) => {
+    if (resolved.kind !== "remote" && resolved.kind !== "unreachable") return
+    const up = resolved.kind === "remote"
+    const now = Date.now()
+    if (homeSeen?.up !== up) homeSeen = { up, since: now }
+    const own = devicePointer()
+    const local = own && !own.create ? own : undefined
+    const left = placed() === "home" ? homeDesk() : local
+    const unsettled = left && unresolvedSend(left.session, left.directory, undefined, placed() === "home" ? left.host : undefined) ? 1 : 0
+    const next = placement({ homeUp: up, since: homeSeen.since, now, current: placed(), local, unsettled })
+    setDecision(next)
+    // Never a new conversation: without this device's own desk there is nothing to fall back to.
+    return next === "fallback" && local ? "fallback" as const : "home" as const
+  }
+  /** `quiet`: a background re-read; it changes nothing on screen unless the home or the placement changed. */
+  const verify = async (quiet = false) => {
+    if (!quiet) setStatus("checking")
     const info = await readHost()
     const resolved = await resolveHome(workFeedHosts(info))
+    const where = place(resolved)
+    const key = JSON.stringify([resolved.kind, where, resolved.kind === "remote" ? resolved.view.session ?? null : null])
     setHome(resolved)
+    if (quiet && key === settled) return
+    settled = key
+    setPlaced(where ?? "home")
+    if (where === "fallback") {
+      setRemote(undefined)
+      return verifyDevice()
+    }
     if (resolved.kind === "unreachable") return setStatus("home-offline")
     if (resolved.kind === "remote") {
       setRemote(undefined)
       if (!resolved.view.session || !resolved.view.directory) return setStatus("remote-none")
       const value = { session: resolved.view.session, directory: resolved.view.directory, host: resolved.host }
       setRemote(value)
+      try { localStorage.setItem(HOME_DESK, JSON.stringify(value)) } catch { /* reconciled this page only */ }
       try {
         setSession(await ocAt(resolved.host.base).session(value.session, value.directory))
         return setStatus("ready")
@@ -148,6 +186,11 @@ export const createDeskSession = () => {
     await verifyDevice()
   }
   onMount(() => void verify())
+  const poll = setInterval(() => {
+    const kind = home().kind
+    if (kind === "remote" || kind === "unreachable" || placed() === "fallback") void verify(true)
+  }, HOME_POLL)
+  onCleanup(() => clearInterval(poll))
   const admit = async (value: DeskPointer & { create: CreateBody }) => {
     setStatus("creating")
     setError("")
@@ -278,7 +321,7 @@ export const createDeskSession = () => {
     setSeen(current)
     try { localStorage.setItem(SHARED_SEEN, JSON.stringify(current)) } catch { /* shown again next page */ }
   }
-  return { pointer, home, session, status, error, setError, verify, start, confirm, forget, context, caseContext, sent, detail, earlier, notice, dismissNotice }
+  return { pointer, home, placed, decision, session, status, error, setError, verify, start, confirm, forget, context, caseContext, sent, detail, earlier, notice, dismissNotice }
 }
 
 export type BriefJob = { id: string; directory: string; meta: BriefMeta; created: number; state: BriefState | { state: "starting" } | { state: "unconfirmed" } }

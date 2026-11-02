@@ -216,10 +216,11 @@ export const unresolvedSend = (
   directory: string,
   storage: () => Pick<Storage, "getItem"> | null = () =>
     typeof window === "undefined" ? null : composerStorage(navigator.userAgent, window.sessionStorage, () => window.localStorage),
+  host?: SessionHost,
 ) => {
-  const live = controllers.get(storageKey(sessionID, directory))
+  const live = controllers.get(storageKey(sessionID, directory, host))
   if (live?.restoreError()) return "Saved composer state could not be restored. Check the conversation first."
-  const saved = live ? undefined : readSubmission(storage, storageKey(sessionID, directory))
+  const saved = live ? undefined : readSubmission(storage, storageKey(sessionID, directory, host))
   if (saved === "unreadable") return "Saved composer state is unreadable. Open the session and check the conversation first."
   const submission = live ? live.state.normalSubmission : saved?.normalSubmission
   if (live?.state.sending || submission?.status === "sending") return "A message is still being sent."

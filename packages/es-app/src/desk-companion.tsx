@@ -132,7 +132,9 @@ export const DeskStart = (props: { desk: ReturnType<typeof createDeskSession>; d
     <Show when={props.desk.status() === "unconfirmed"}><p class="home-warning">Chat start not confirmed. <button class="desk-button" onClick={() => void props.desk.confirm()}>Confirm start</button></p></Show>
     {/* The profile has one Front Desk, on its home host: nothing is started here and no second desk is made. */}
     <Show when={props.desk.status() === "remote-none"}>{(() => { const home = props.desk.home(); return <p class="home-warning">The Front Desk lives on {home.kind === "remote" ? home.host.label : "its home host"} and has not been started there yet. Start it from that host's window.</p> })()}</Show>
-    <Show when={props.desk.status() === "home-offline"}>{(() => { const home = props.desk.home(); return <p class="home-warning">The Front Desk is on {home.kind === "unreachable" ? home.host.label : "its home host"}, which is unreachable. <button class="desk-button" onClick={() => void props.desk.verify()}>Retry</button></p> })()}</Show>
+    <Show when={props.desk.status() === "home-offline"}>{(() => { const home = props.desk.home(); return <p class="home-warning">The Front Desk is on {home.kind === "unreachable" ? home.host.label : "its home host"}, which is unreachable.
+      {/* Drafts stay in this composer; nothing switches while an earlier message to the home is unconfirmed. */}
+      {props.desk.decision() === "wait-settle" ? " Your last message to it is not confirmed yet, so this computer's desk waits until it is." : ""} <button class="desk-button" onClick={() => void props.desk.verify()}>Retry</button></p> })()}</Show>
     <Show when={props.desk.status() === "missing"}><p class="home-warning">The saved chat no longer exists. <button class="desk-button" onClick={() => props.desk.forget()}>Clear</button></p></Show>
     <Show when={props.desk.status() === "none" || props.desk.status() === "creating"}>
       <button class="desk-button home-primary" disabled={!props.directory || props.desk.status() === "creating"} onClick={() => props.directory && void props.desk.start(props.directory)}>
@@ -172,8 +174,8 @@ export const DeskCompanion = () => {
       <Show when={target()} keyed fallback={<DeskStart desk={chat.desk} directory={chat.directory()} />}>
         {(current) => <SessionView sessionID={current.session} directory={current.directory} host={current.host} embedded context={chat.context} onSent={chat.desk.sent}
           incoming={chat.asked} onIncoming={chat.takeAsked}
-          headerStart={<button class="header-icon desk-chat-hide" aria-label="Close Front desk chat" title="Close Front desk chat" onClick={close}>
-            <Icon name="chevron-down" size="small" /></button>} />}
+          headerStart={<><button class="header-icon desk-chat-hide" aria-label="Close Front desk chat" title="Close Front desk chat" onClick={close}>
+            <Icon name="chevron-down" size="small" /></button><DeskHost desk={chat.desk} /></>} />}
       </Show>
     </div>
   </aside>
@@ -296,6 +298,15 @@ const ProgressItem = (props: { row: ProgressRow; open: boolean; toggle: () => vo
     </dl></Show>
   </li>
 
+// Which host this desk conversation runs on, shown only when the profile's desk has a home on another host.
+const DeskHost = (props: { desk: ReturnType<typeof createDeskSession> }) => {
+  const home = () => props.desk.home()
+  const label = () => props.desk.pointer()?.host?.label ?? host()?.label ?? "This computer"
+  return <Show when={home().kind === "remote" || home().kind === "unreachable" || props.desk.placed() === "fallback"}>
+    <span class="desk-host" data-placed={props.desk.placed()} title={props.desk.placed() === "fallback" ? `Front Desk on ${label()} (fallback)` : `Front Desk on ${label()}`}>
+      <Icon name="server" size="small" /><bdi dir="auto">{label()}</bdi></span></Show>
+}
+
 // The profile's one Front Desk says so once, on a device that had its own desk, and keeps every earlier desk one tap
 // away (desk-pointer-contract-v1). Earlier desks open as ordinary conversations; nothing here deletes or moves one.
 const SharedDesk = (props: { desk: ReturnType<typeof createDeskSession> }) => {
@@ -304,7 +315,10 @@ const SharedDesk = (props: { desk: ReturnType<typeof createDeskSession> }) => {
     : sessionHref(entry.session, entry.directory)
   const where = () => { const home = props.desk.home(); return home.kind === "remote" ? ` on ${home.host.label}` : "" }
   const mine = () => props.desk.earlier().find(entry => entry.from === "device")
+  const homeLabel = () => { const home = props.desk.home(); return home.kind === "remote" || home.kind === "unreachable" ? home.host.label : "The home host" }
   return <>
+    <Show when={props.desk.placed() === "fallback"}><p class="desk-shared-notice home-source" role="status">
+      {props.desk.home().kind === "remote" ? `${homeLabel()} is back; this desk switches to it once it stays up and your last message here is confirmed.` : `${homeLabel()} unreachable; using this computer's Front Desk.`}</p></Show>
     <Show when={props.desk.notice()}><p class="desk-shared-notice home-source" role="status">This is now the shared Work Front Desk{where()}.
       <Show when={mine()}>{entry => <> <A href={href(entry())}>Your earlier desk on this device</A>.</>}</Show>
       {" "}<button type="button" class="desk-link-button" onClick={() => props.desk.dismissNotice()}>OK</button></p></Show>

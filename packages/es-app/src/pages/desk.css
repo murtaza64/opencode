@@ -127,6 +127,8 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
 .desk-has-selection .desk-grid:has(> .desk-chat-rail) { grid-template-columns: var(--queue-width, 240px) minmax(0, 1fr) 36px; }
 .desk-chat-folded { position: absolute; inset-block: 0; inset-inline-end: 0; inline-size: var(--chat-width, 400px); visibility: hidden; pointer-events: none; }
 .desk-chat-hide .icon, .desk-chat-hide svg { transform: rotate(-90deg); }
+.desk-host { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--subtext0); white-space: nowrap; }
+.desk-host[data-placed="fallback"] { color: var(--yellow); }
 .desk-chat-hide:dir(rtl) .icon, .desk-chat-hide:dir(rtl) svg { transform: rotate(90deg); }
 .desk-chat-rail { display: flex; flex-direction: column; align-items: center; gap: 10px; padding-block: 10px; background: var(--mantle); border-inline-start: 1px solid var(--surface0); cursor: pointer; }
 .desk-chat-show { display: inline-flex; align-items: center; justify-content: center; inline-size: 28px; block-size: 28px; padding: 0; color: var(--subtext1); background: transparent; border: 0; cursor: pointer; }
