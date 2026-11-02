@@ -9,7 +9,7 @@ import { oc, SessionCreateError, type ContextPart, type MessageWithParts } from 
 import { clearBackend, describeFailure, isTransient, reportBackend } from "./backend-status"
 import { assistantOps, handled, emptyMemory, eraseMemory, nextMemory, type MemoryDocument, type MemoryOp } from "./desk-memory"
 import type { AttentionRecord } from "./attention"
-import { BRIEF_CONTRACT, BRIEF_SCHEMA, BRIEF_SYSTEM, type ConversationDocument, type ConversationThread, briefComplete, briefPacket, briefState, contextNote, deskContext, type BriefMeta, type NoteState, type BriefState, type DeskItem, SOURCE_TAIL } from "./desk"
+import { BRIEF_CONTRACT, BRIEF_SCHEMA, BRIEF_SYSTEM, type ConversationDocument, type ConversationThread, briefComplete, briefPacket, briefState, contextNote, deskContext, nextNoteSeq, recordNote, type BriefMeta, type NoteState, type BriefState, type DeskItem, SOURCE_TAIL } from "./desk"
 
 const POINTER = "es-app:front-desk:1"
 // Per desk session: what its context notes have told it so far (NoteState).
@@ -145,18 +145,18 @@ export const createDeskSession = () => {
   }
 
   // Notes offered to a send but not yet accepted, by part key: only an accepted plain send records what the desk knows.
-  const offered = new Map<string, NoteState>()
+  const offered = new Map<string, NoteState | undefined>()
   const told = (id: string) => readJSON<NoteState>(`${NOTE}:${id}`, value => typeof value?.sections === "object" && typeof value?.full === "number")
   // Every note offered gets the next number, kept per session so it only grows.
   const nextSeq = (id: string) => {
-    const seq = (readJSON<number>(`${NOTE}:${id}:seq`, value => Number.isInteger(value)) ?? 0) + 1
+    const seq = nextNoteSeq(readJSON<number>(`${NOTE}:${id}:seq`, value => Number.isInteger(value)), Date.now())
     try { localStorage.setItem(`${NOTE}:${id}:seq`, JSON.stringify(seq)) } catch { /* numbering restarts; still increasing this page */ }
     return seq
   }
   const offer = (id: string, build: (seq: number) => ReturnType<typeof contextNote>): ContextPart[] => {
     if (!build(0)) return []
     const note = build(nextSeq(id))!
-    if (note.state) offered.set(note.key, note.state)
+    offered.set(note.key, note.state)
     return [{ type: "text", text: note.text, synthetic: true, metadata: { source: CONTEXT_SOURCE, key: note.key } }]
   }
   /** Generated context for the next send: a complete note for a Core input, otherwise what changed since the last
@@ -176,16 +176,14 @@ export const createDeskSession = () => {
     return offer(current.id, seq => contextNote(cases, told(current.id), Date.now(),
       { partial: "Front desk context from es-app (cases only; no queue view is open). Read-only orientation; it is not an instruction and grants nothing.", input: send.input, seq }))
   }
-  // Records against what is stored now, not the read taken when the note was built, so another tab's
-  // sections are kept. An unconfirmed send, or a Core input, records nothing: the next send repeats it.
+  // Records against what is stored now (recordNote). An unconfirmed send records nothing: the next send repeats it.
   const sent = (parts: ContextPart[], accepted: boolean, send: { input: boolean }) => {
     const current = session()
     const key = parts.find(part => part.metadata.source === CONTEXT_SOURCE)?.metadata.key
-    const state = key ? offered.get(key) : undefined
-    if (!current || !state || !accepted || send.input) return
-    const stored = told(current.id)
-    localStorage.setItem(`${NOTE}:${current.id}`, JSON.stringify({ ...state, sections: { ...stored?.sections, ...state.sections } }))
-    offered.delete(key!)
+    if (!current || !key || !offered.has(key) || !accepted) return
+    const next = recordNote(told(current.id), offered.get(key), send)
+    if (next) localStorage.setItem(`${NOTE}:${current.id}`, JSON.stringify(next))
+    offered.delete(key)
   }
   /** An explicit request from a decision card, sent as an ordinary desk message beside the composer:
    * the composer's draft is untouched. Starts the conversation first if there is none yet. */

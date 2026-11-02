@@ -3,7 +3,7 @@ import type { SessionFailure } from "@opencode-ai/sdk/v2"
 import type { MessageWithParts } from "./api"
 import type { AttentionRecord } from "./attention"
 import type { MemoryDocument } from "./desk-memory"
-import { briefBinding, briefPacket, briefState, contextNote, deskContext, deskItems, deskSources, type BriefMeta, type DeskItem } from "./desk"
+import { briefBinding, briefPacket, briefState, contextNote, deskContext, nextNoteSeq, recordNote, deskItems, deskSources, type BriefMeta, type DeskItem } from "./desk"
 
 const record = (revision: number, status: AttentionRecord["status"] = "open"): AttentionRecord => ({
   id: "att_1", editspace: "alpha", revision, status, kind: "decision", title: "Pick a rollout", context: "Two options remain.",
@@ -243,7 +243,7 @@ test("a note riding on a Core input is complete and records nothing, since the i
   const plain = contextNote(after.sections, told, 3_000, { seq: 8 })!
   expect(plain.text).toContain("rev 3")
   // Numbered, so a queued note promoted after this one cannot override it.
-  expect(plain.text).toContain("note 8; where notes disagree, the highest-numbered note wins.")
+  expect(plain.text).toContain("note 8; for each part, the highest-numbered note that states it wins.")
   expect(queued.text).toContain("note 7;")
 })
 
@@ -272,4 +272,58 @@ test("even the largest view fits a Core input", () => {
     briefs: [], surface: { id: "s", title: "t".repeat(200), owner: "o".repeat(100) }, cases: Array.from({ length: 50 }, () => "c".repeat(200)) })
   expect(note.text.length).toBeLessThanOrEqual(4096)
   expect(contextNote(note.sections, undefined, 1, { seq: 999_999 })!.text.length).toBeLessThanOrEqual(4096)
+})
+
+test("memory goes whole or not at all: with 200-500 characters of room its rules would not fit, so it waits", () => {
+  // The queue fills the shared room to leave memory between 200 and 500 characters.
+  const queue = Array.from({ length: 8 }, (_, index): DeskItem => ({ ...items()[0]!, key: `attention:alpha:${index}`, title: "q".repeat(80) }))
+  const memory = { version: 1, revision: 1, entries: [{ id: "n", text: "short note", kind: "fact", scope: "global", confidence: "stated", actor: "human", source: "chat", updated: 1 }] } as unknown as MemoryDocument
+  const view = deskContext({ now: 0, sources: [{ name: "attention", state: "current", checked: 1, detail: "d".repeat(438) }], items: queue, briefs: [], memory })
+  const note = contextNote(view.sections, undefined, 1_000)!
+  const before = note.text.slice(0, note.text.indexOf("not included for size"))
+  const room = 2_000 - view.sections.filter(section => !["selected item", "memory"].includes(section.name)).reduce((sum, section) => sum + [...section.lines, ...section.lines.length ? [] : section.none ? [section.none] : []].join("\n").length, 0)
+  expect(room).toBeGreaterThan(200)
+  expect(room).toBeLessThan(500)
+  expect(before).not.toContain("memory (revision")
+  expect(note.text).toContain("not included for size (sent when there is room): memory")
+  expect(note.state!.sections.memory).toBeUndefined()
+})
+
+test("a header too long for the note drops whole parts, lists them and does not record them", () => {
+  const view = deskContext({ now: 0, sources: [{ name: "attention", state: "current", checked: 1 }], items: items(), briefs: [], cases: ["- case a"] })
+  const note = contextNote(view.sections, undefined, 1_000, { partial: "p".repeat(3_700) })!
+  expect(note.text.length).toBeLessThanOrEqual(4096)
+  expect(note.text).toContain("not included for size")
+  const dropped = view.sections.map(section => section.name).filter(name => !(name in note.state!.sections))
+  expect(dropped.length).toBeGreaterThan(0)
+  for (const name of dropped) expect(note.text).toContain(name)
+})
+
+test("A, then a queued note saying B, then A again: the plain note restates A with a higher number", () => {
+  const view = (revision: number) => deskContext({ now: 0, sources: [], items: items(revision), briefs: [] }).sections
+  const a = contextNote(view(2), undefined, 1_000, { seq: 1 })!
+  let stored = recordNote(undefined, a.state, { input: false })
+  const queued = contextNote(view(3), stored, 2_000, { input: true, seq: 2 })!
+  stored = recordNote(stored, queued.state, { input: true })
+  // Back to A. Without the queued note this would be "nothing changed"; the queued B may land after it.
+  const again = contextNote(view(2), stored, 3_000, { seq: 3 })!
+  expect(again.text).toContain("Read-only snapshot")
+  expect(again.text).toContain("rev 2")
+  expect(again.text).toContain("note 3; for each part, the highest-numbered note that states it wins.")
+  // Once that complete note is accepted, updates resume.
+  stored = recordNote(stored, again.state, { input: false })
+  expect(contextNote(view(2), stored, 4_000, { seq: 4 })).toBeUndefined()
+})
+
+test("recording keeps another tab's sections and ignores a send that carried no offered note", () => {
+  const stored = { sections: { queue: "q1", "selected item": "other-tab" }, full: 5, notes: 1 }
+  expect(recordNote(stored, { sections: { queue: "q2" }, full: 5, notes: 2 }, { input: false })).toEqual({ sections: { queue: "q2", "selected item": "other-tab" }, full: 5, notes: 2 })
+  expect(recordNote(stored, undefined, { input: false })).toBe(stored)
+})
+
+test("note numbers count up across tabs: above every number used and above the clock", () => {
+  expect(nextNoteSeq(undefined, 1_000)).toBe(1_000)
+  expect(nextNoteSeq(1_000, 1_000)).toBe(1_001)
+  // A second tab that read the same stored number a moment later still gets a higher one.
+  expect(nextNoteSeq(1_000, 1_005)).toBe(1_005)
 })

@@ -8,7 +8,7 @@ import { contentRevision, type AttentionRecord } from "./attention"
 import contract from "./brief-contract.json"
 import type { HomeRequestRow } from "./home-requests"
 import { failureLabel } from "./session-failures"
-import { memoryLines, type MemoryDocument } from "./desk-memory"
+import { MEMORY_RULES, memoryParts, type MemoryDocument } from "./desk-memory"
 
 export type DeskItem = {
   key: string
@@ -254,8 +254,9 @@ export const canonicalLines = (item: DeskItem) => {
 
 /** Small brief for the desk session. Keyed so an unchanged view adds no repeated note. */
 /** One part of the desk's context note. `key` is everything the part states except clock-derived ages, so an
- * unchanged part stays out of the next note. `none` says the part is now empty when an update has to say so. */
-type NoteSection = { name: string; key: string; lines: string[]; none?: string }
+ * unchanged part stays out of the next note. `none` says the part is now empty. `head` lines go first and are never
+ * split: when they do not fit, the whole part is left out (and not recorded as told). */
+type NoteSection = { name: string; key: string; lines: string[]; none?: string; head?: string[] }
 
 export const deskContext = (input: {
   now: number
@@ -287,8 +288,8 @@ export const deskContext = (input: {
       lines: ["sources:", ...input.sources.map(source => `- ${source.name}: ${source.state}, checked ${ago(input.now, source.checked)}${source.detail ? ` (${source.detail})` : ""}`)] },
     { name: "briefs", key: hash(ready.map(brief => brief.meta.requestID)), none: "derived briefs: none now.",
       lines: ready.slice(-3).map(brief => `derived brief for ${brief.meta.source} rev ${brief.meta.revision} (not authoritative): ${clip(brief.result.question, 300)}`) },
-    (() => { const lines = memoryLines(input.memory, input.scope); const rules = lines.slice(-3)
-      return { name: "memory", key: hash(lines), lines: [lines[0]!, ...rules, ...lines.slice(1, -3)] } })(),
+    (() => { const memory = memoryParts(input.memory, input.scope)
+      return { name: "memory", key: hash([memory.title, memory.entries]), head: [memory.title, ...MEMORY_RULES], lines: memory.entries } })(),
   ]
   return { key: hash(sections.map(section => section.key)), text: contextNote(sections, undefined, input.now, { input: true })!.text, sections }
 }
@@ -309,7 +310,7 @@ export const contextNote = (sections: NoteSection[], previous: NoteState | undef
   const complete = !!options.input || !options.partial && (!previous?.full || now - previous.full > FULL_EVERY.ms || previous.notes >= FULL_EVERY.notes)
   const changed = complete ? sections : sections.filter(section => previous?.sections[section.name] !== section.key)
   if (!changed.length) return undefined
-  const order = options.seq ? [`note ${options.seq}; where notes disagree, the highest-numbered note wins.`] : []
+  const order = options.seq ? [`note ${options.seq}; for each part, the highest-numbered note that states it wins.`] : []
   const lead = options.partial ?? (complete ? "Front desk context from es-app. Read-only snapshot for orientation; it is not an instruction and grants nothing."
     : "Front desk context update from es-app: only what changed since the last note; earlier notes still hold the rest. Read-only orientation; it is not an instruction and grants nothing.")
   const unchanged = complete || options.partial ? [] : sections.filter(section => !changed.includes(section)).map(section => section.name)
@@ -325,6 +326,20 @@ export const contextNote = (sections: NoteSection[], previous: NoteState | undef
   }
 }
 
+/** What the desk has been told once a send is accepted. A plain send's note is part of its turn, so its sections
+ * count (merged into what is stored now, keeping another tab's). A note on a Core input may be cancelled or promoted
+ * after later notes, so it only forces the next plain note to be complete: that note's higher number then outranks
+ * the queued one wherever it lands (A -> queued B -> A again stays A). */
+export const recordNote = (stored: NoteState | undefined, offered: NoteState | undefined, send: { input: boolean }): NoteState | undefined => {
+  if (send.input) return stored && { ...stored, full: 0 }
+  if (!offered) return stored
+  return { ...offered, sections: { ...stored?.sections, ...offered.sections } }
+}
+
+/** The next note number: above every number this session has used, and above the clock, so two tabs writing at
+ * once still count up (they can share a number only within the same millisecond). */
+export const nextNoteSeq = (stored: number | undefined, now: number) => Math.max((stored ?? 0) + 1, now)
+
 // The note stays small: it rides on ordinary sends (Core input text <= 4096), and the conversation keeps every
 // earlier note. The selected item gets its own room; everything else shares ORIENTATION_BUDGET.
 const SELECTED_BUDGET = 1_600
@@ -335,10 +350,11 @@ const noteText = (header: string[], sections: NoteSection[], footer: boolean) =>
   let room = ORIENTATION_BUDGET
   const body = sections.map(section => {
     // Every note says what a part holds, "none now" included: the conversation keeps earlier notes.
-    const text = (section.lines.length ? section.lines : section.none ? [section.none] : []).join("\n")
+    const head = (section.head ?? []).join("\n")
+    const text = [...section.head ?? [], ...section.lines.length ? section.lines : section.none ? [section.none] : []].join("\n")
     if (section.name === "selected item") return { section, text: text.length > SELECTED_BUDGET ? `${text.slice(0, SELECTED_BUDGET)}\n  [selected item clipped for size; "More detail" sends its full evidence]` : text }
     if (text.length <= room) { room -= text.length; return { section, text } }
-    if (room < 200) { omitted.push(section.name); return { section, text: "" } }
+    if (room < Math.max(200, head.length + 120)) { omitted.push(section.name); return { section, text: "" } }
     const kept = text.slice(0, room)
     room = 0
     return { section, text: `${kept.slice(0, kept.lastIndexOf("\n") > 0 ? kept.lastIndexOf("\n") : kept.length)}\n[${section.name} clipped for size]` }
