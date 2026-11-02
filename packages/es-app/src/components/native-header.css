@@ -106,3 +106,7 @@
  * which host from the app's own navigation. Zero-width unless the desktop sets --host-tabs-end.
  * Physical left: the host segment is window chrome and stays left in RTL too. */
 .native-header-safe::before { content: ""; position: absolute; left: 0; inset-block: 12px; inline-size: clamp(0px, calc(var(--host-tabs-end, 0px) * 100), 1px); background: var(--surface1); }
+.header-desk-toggle { -webkit-app-region: no-drag; flex: none; margin-inline-start: auto; display: grid; place-items: center; inline-size: 28px; block-size: 28px; padding: 0; color: var(--subtext0); background: transparent; border: 0; border-radius: 4px; }
+.header-desk-toggle:hover { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
+.header-desk-toggle[aria-pressed=true] { color: var(--accent); }
+.header-desk-toggle + .appearance-toggle { margin-inline-start: 0; }

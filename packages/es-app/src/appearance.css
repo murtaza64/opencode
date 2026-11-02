@@ -228,7 +228,10 @@
 :root .nav-entries { position: relative; }
 :root .nav-entries > .backend-status { position: absolute; inset-block-end: 8px; inset-inline-end: 8px; }
 :root .nav-entries > .host-badge, :root .nav-entries > .host-switch { justify-self: start; margin-inline-start: 14px; }
-:root .nav-entries > .backend-status ~ .nav-entry { padding-inline-end: 28px; }
+/* The status slot sits over the last entry's trailing edge (Front desk), so that entry keeps its own busy dot clear of
+ * it; the slot takes pointer events only while it shows a status button. */
+:root .nav-entries > .backend-status ~ .nav-entry, :root .nav-entries > .nav-entry:has(~ .backend-status) { padding-inline-end: 28px; }
+:root .nav-entries > .backend-status:not(:has(button)) { pointer-events: none; }
 /* Composer footer meta (ux-feel contract) */
 /* [model] [ctx] [cost] [Send]: the meta group shrinks and ellipsizes before Send moves. */
 .composer-meta { display: flex; align-items: center; gap: 10px; flex: 0 1 auto; min-inline-size: 0; }

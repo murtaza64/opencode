@@ -3,6 +3,8 @@ import { Portal } from "solid-js/web"
 import "./native-header.css"
 import { current, enabled, setEnabled, themeVars } from "../appearance"
 import { TodayCost } from "./today-cost"
+import { Glyph } from "./icons"
+import { useDeskChatOptional } from "../desk-companion"
 
 export const nativeHeader =
   typeof navigator !== "undefined" &&
@@ -55,6 +57,7 @@ export const NativeHeader = (props: ParentProps) => {
           <div class="native-header-project">{props.children}</div>
           <div class="native-header-session" ref={setHeaderTarget} />
           <TodayCost />
+          <DeskToggle />
           {/* Offered only when this laptop has a usable wallpaper palette. */}
           <Show when={current() && themeVars(current()!.palette)}>
             <button class="appearance-toggle" aria-pressed={enabled()} title={enabled() ? "Use the default colours" : "Use colours from your wallpaper"}
@@ -81,3 +84,14 @@ export const AppHeader = (props: ParentProps<{ inline?: boolean }>) => (
     </Show>
   </Show>
 )
+
+/** The Front desk chat toggle in the top bar: the same open state and action as the sidebar's Front desk entry, so
+ * either control shows and changes the one companion. */
+const DeskToggle = () => {
+  const chat = useDeskChatOptional()
+  return <Show when={chat}>{(desk) =>
+    <button type="button" class="header-desk-toggle" aria-pressed={desk().open()} aria-label="Front desk chat"
+      title={desk().open() ? "Hide Front desk chat" : "Show Front desk chat"} onClick={() => desk().setOpen(!desk().open())}>
+      <Glyph name="comment-discussion" />
+    </button>}</Show>
+}
