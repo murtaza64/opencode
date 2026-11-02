@@ -54,7 +54,11 @@ export const markHostDeliverable = async (host: string, surface: { id: string },
   }).catch(() => undefined)
   const mark = () => post("/es/api/frontdesk/deliverables/seen", { id: surface.id, revision, seen })
   const first = await mark()
-  if (first?.status !== 401 && first?.status !== 403) return !!first?.ok
+  // Only the dashboard's own refusal (JSON) asks for that host's operator session; a listener refusal (plain text) does not.
+  if ((first?.status !== 401 && first?.status !== 403) || !first.headers.get("content-type")?.includes("application/json")) {
+    await first?.body?.cancel()
+    return !!first?.ok
+  }
   await first.body?.cancel()
   const session = await post("/es/api/attention/session", {})
   await session?.body?.cancel()

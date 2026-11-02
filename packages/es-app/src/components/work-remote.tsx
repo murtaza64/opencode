@@ -108,11 +108,13 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
   const src = () => address.error ? undefined : address()?.src
   // Done/Undo write that host's seen state only, then reread that host's list so its Needs you rows follow.
   const work = useDashboard().work
-  const done = createDeliverableDone(() => props.surface, () => async (surface, revision, seen) => {
+  // Done covers only what was on screen: none for a surface this window cannot frame, a failed address, or before the
+  // frame has its address.
+  const done = createDeliverableDone(() => props.surface, () => props.frame === "host" && src() ? async (surface, revision, seen) => {
     const ok = await markHostDeliverable(props.host, surface, revision, seen)
     if (ok) await work.feeds().find(feed => feed.host.id === props.host)?.load()
     return ok
-  })
+  } : undefined)
   return <div class="desk-surface work-remote-surface">
     <AppHeader>
       <div class="surface-head" onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); props.onClose() } }}>

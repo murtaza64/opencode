@@ -50,6 +50,7 @@ const errors = []
 page.on("pageerror", (error) => errors.push(error.message))
 const miniOrigin = "http://127.0.0.1:65032"
 const writes = { local: [], mini: [] }
+let mintDown = true
 const results = []
 const forward = async (route, store, pathname) => {
   const request = route.request()
@@ -68,7 +69,7 @@ await page.route((url) => new URL(url).pathname.startsWith("/hosts/mini/"), (rou
   if (route.request().method() !== "GET") writes.mini.push(`${route.request().method()} ${pathname} ${route.request().postData() ?? ""}`)
   if (pathname === "/es/api/surfaces" || pathname === "/es/api/attention/session" || pathname === "/es/api/frontdesk/deliverables/seen")
     return forward(route, mini, pathname.replace(/^\/es/, ""))
-  if (pathname === "/__es/surface/report") return route.fulfill({ json: { src: "about:blank" } })
+  if (pathname === "/__es/surface/report") return mintDown ? route.fulfill({ status: 502, contentType: "text/plain", body: "down" }) : route.fulfill({ json: { src: "about:blank" } })
   if (pathname === "/oc/experimental/session") return route.fulfill({ json: [] })
   if (pathname === "/es/api/editspaces") return route.fulfill({ json: { editspaces: [{ name: "fixture", root: "/Users/mini/fixture/.editspace" }], default: "fixture" } })
   if (pathname === "/es/api/attention" && route.request().method() === "GET") return route.fulfill({ json: { records: [], projects: [{ editspace: "fixture", available: true }], partial: false, limit: 200,
@@ -101,6 +102,13 @@ try {
   await miniRow.click()
   await expect(page).toHaveURL(`${preview.origin}/?item=${encodeURIComponent("mini~surface:report")}`)
   await expect(reader.locator(".work-remote-host")).toContainText("Mac Mini")
+  // Nothing on screen yet (the frame address failed): no Done.
+  await expect(page.locator(".work-remote-surface [role=alert]")).toContainText("Cannot open this surface")
+  await expect(reader.getByRole("button", { name: "Done", exact: true })).toHaveCount(0)
+  mintDown = false
+  await page.locator(".work-remote-surface").getByRole("button", { name: "Try again" }).click()
+  await expect(page.locator(".work-remote-surface iframe")).toBeAttached()
+  step("Done is offered only once the Mini's frame is on screen")
   await reader.getByRole("button", { name: "Done", exact: true }).click()
   await expect(reader.locator(".surface-done-state")).toHaveText(/^Done · /)
   await expect(miniRow).toHaveCount(0)
