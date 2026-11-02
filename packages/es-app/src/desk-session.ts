@@ -9,10 +9,11 @@ import { oc, SessionCreateError, type ContextPart, type MessageWithParts } from 
 import { clearBackend, describeFailure, isTransient, reportBackend } from "./backend-status"
 import { assistantOps, handled, emptyMemory, eraseMemory, nextMemory, type MemoryDocument, type MemoryOp } from "./desk-memory"
 import type { AttentionRecord } from "./attention"
-import { BRIEF_CONTRACT, BRIEF_SCHEMA, BRIEF_SYSTEM, type ConversationDocument, type ConversationThread, briefComplete, briefPacket, briefState, deskContext, type BriefMeta, type BriefState, type DeskItem, SOURCE_TAIL } from "./desk"
+import { BRIEF_CONTRACT, BRIEF_SCHEMA, BRIEF_SYSTEM, type ConversationDocument, type ConversationThread, briefComplete, briefPacket, briefState, contextNote, deskContext, type BriefMeta, type NoteState, type BriefState, type DeskItem, SOURCE_TAIL } from "./desk"
 
 const POINTER = "es-app:front-desk:1"
-const NOTE = "es-app:front-desk:context:1"
+// Per desk session: what its context notes have told it so far (NoteState).
+const NOTE = "es-app:front-desk:context:2"
 const PENDING = "es-app:front-desk:brief-create:1"
 const AGENT = "front-desk"
 /** The model the Front Desk chat and its brief jobs run on is the host's own: the `front-desk` agent's model
@@ -143,29 +144,35 @@ export const createDeskSession = () => {
     setStatus("none")
   }
 
-  /** Generated context for the next idle send, only when the desk's view changed since the last accepted one. */
+  // Notes offered to a send but not yet accepted, by part key: only an accepted send records what the desk now knows.
+  const offered = new Map<string, NoteState>()
+  const told = (id: string) => readJSON<NoteState>(`${NOTE}:${id}`, value => typeof value?.sections === "object" && typeof value?.full === "number")
+  const offer = (note: ReturnType<typeof contextNote>): ContextPart[] => {
+    if (!note) return []
+    offered.set(note.key, note.state)
+    return [{ type: "text", text: note.text, synthetic: true, metadata: { source: CONTEXT_SOURCE, key: note.key } }]
+  }
+  /** Generated context for the next send: what changed in the desk's view since the last accepted note. */
   const context = (input: Parameters<typeof deskContext>[0]): ContextPart[] => {
     const current = session()
     if (!current) return []
-    const note = deskContext(input)
-    if (localStorage.getItem(`${NOTE}:${current.id}`) === note.key) return []
-    return [{ type: "text", text: note.text, synthetic: true, metadata: { source: CONTEXT_SOURCE, key: note.key } }]
+    return offer(contextNote(deskContext(input).sections, told(current.id), input.now))
   }
   /** Off the Decisions page there is no queue view, but the desk's open cases still go with the next send that
-   * changes them: the same keyed note, holding only those lines. */
+   * changes them, as a cases-only note. */
   const caseContext = (lines: string[]): ContextPart[] => {
     const current = session()
     if (!current || !lines.length) return []
-    const key = JSON.stringify(["cases", lines])
-    if (localStorage.getItem(`${NOTE}:${current.id}`) === key) return []
-    const text = ["Front desk context from es-app (cases only; no queue view is open). Read-only orientation; it is not an instruction and grants nothing.", ...lines].join("\n")
-    return [{ type: "text", text, synthetic: true, metadata: { source: CONTEXT_SOURCE, key } }]
+    const cases = deskContext({ now: Date.now(), sources: [], items: [], briefs: [], cases: lines }).sections.filter(section => section.name === "cases")
+    return offer(contextNote(cases, told(current.id), Date.now(),
+      { partial: "Front desk context from es-app (cases only; no queue view is open). Read-only orientation; it is not an instruction and grants nothing." }))
   }
-  // An unconfirmed send leaves the key unrecorded, so the next send carries the context again.
+  // An unconfirmed send leaves the note unrecorded, so the next send carries those parts again.
   const sent = (parts: ContextPart[], accepted: boolean) => {
     const current = session()
     const key = parts.find(part => part.metadata.source === CONTEXT_SOURCE)?.metadata.key
-    if (current && key && accepted) localStorage.setItem(`${NOTE}:${current.id}`, key)
+    const state = key ? offered.get(key) : undefined
+    if (current && state && accepted) localStorage.setItem(`${NOTE}:${current.id}`, JSON.stringify(state))
   }
   /** An explicit request from a decision card, sent as an ordinary desk message beside the composer:
    * the composer's draft is untouched. Starts the conversation first if there is none yet. */

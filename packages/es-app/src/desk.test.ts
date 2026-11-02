@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import type { SessionFailure } from "@opencode-ai/sdk/v2"
 import type { MessageWithParts } from "./api"
 import type { AttentionRecord } from "./attention"
-import { briefBinding, briefPacket, briefState, deskContext, deskItems, deskSources, type BriefMeta, type DeskItem } from "./desk"
+import { briefBinding, briefPacket, briefState, contextNote, deskContext, deskItems, deskSources, type BriefMeta, type DeskItem } from "./desk"
 
 const record = (revision: number, status: AttentionRecord["status"] = "open"): AttentionRecord => ({
   id: "att_1", editspace: "alpha", revision, status, kind: "decision", title: "Pick a rollout", context: "Two options remain.",
@@ -68,8 +68,9 @@ test("context note is bounded, names the selection explicitly and changes key on
   const many: DeskItem[] = Array.from({ length: 30 }, (_, index) => ({ ...items()[0]!, key: `attention:alpha:${index}`, title: "x".repeat(400) }))
   const general = deskContext({ now: 0, sources: [], items: many, briefs: [] })
   expect(general.text).toContain("selected item: none")
-  expect(general.text).toContain("… 18 more not listed")
-  expect(general.text.length).toBeLessThanOrEqual(10_000)
+  expect(general.text).toContain("… 22 more not listed")
+  // Small enough to ride on an ordinary send (Core input text <= 4096).
+  expect(general.text.length).toBeLessThanOrEqual(4096)
   const selected = deskContext({ now: 5, sources: [], items: many, selected: items()[0], briefs: [] })
   expect(selected.text).toContain("options: a=Canary; b=Full")
   expect(selected.text).toContain("recommended option: a")
@@ -169,4 +170,62 @@ test("an open surface is named in the context by its owner and changes the key; 
   expect(open.key).not.toBe(plain.key)
   expect(open.text).toContain('open surface: "Relay board" (id relay-board), maintained by Relay.')
   expect(plain.text).not.toContain("open surface")
+})
+
+test("the first note tells the desk everything; an unchanged view sends nothing", () => {
+  const view = deskContext({ now: 0, sources: [{ name: "attention", state: "current", checked: 1 }], items: items(), briefs: [] })
+  const first = contextNote(view.sections, undefined, 1_000)!
+  expect(first.text).toContain("queue (")
+  expect(first.text).toContain("sources:")
+  expect(contextNote(view.sections, first.state, 2_000)).toBeUndefined()
+})
+
+test("a later note carries only the parts that changed and names the rest as unchanged", () => {
+  const before = deskContext({ now: 0, sources: [{ name: "attention", state: "current", checked: 1 }], items: items(2), briefs: [] })
+  const first = contextNote(before.sections, undefined, 1_000)!
+  const after = deskContext({ now: 0, sources: [{ name: "attention", state: "current", checked: 1 }], items: items(3), briefs: [] })
+  const update = contextNote(after.sections, first.state, 2_000)!
+  expect(update.text).toContain("only what changed since the last note")
+  expect(update.text).toContain("rev 3")
+  expect(update.text).not.toContain("sources:")
+  expect(update.text).toContain("unchanged: scope, selected item, open surface, cases, sources, briefs, memory")
+})
+
+test("a part that became empty is said to be empty, not silently dropped", () => {
+  const open = deskContext({ now: 0, sources: [], items: [], briefs: [], surface: { id: "board", title: "Board", owner: "Relay" } })
+  const first = contextNote(open.sections, undefined, 1_000)!
+  const closed = deskContext({ now: 0, sources: [], items: [], briefs: [] })
+  expect(contextNote(closed.sections, first.state, 2_000)!.text).toContain("open surface: none now.")
+})
+
+test("a full note is sent again after twelve updates or six hours", () => {
+  const view = (revision: number) => deskContext({ now: 0, sources: [], items: items(revision), briefs: [] }).sections
+  let state = contextNote(view(1), undefined, 1)!.state
+  for (let revision = 2; revision <= 13; revision++) state = contextNote(view(revision), state, revision)!.state
+  expect(state.notes).toBe(12)
+  const refresh = contextNote(view(14), state, 14)!
+  expect(refresh.text).toContain("Read-only snapshot")
+  expect(refresh.state.notes).toBe(0)
+  const stale = contextNote(view(15), refresh.state, 14 + 6 * 3_600_000 + 1)!
+  expect(stale.text).toContain("sources:")
+})
+
+test("parts left out for size are not recorded, so they go with a later note", () => {
+  const long = Array.from({ length: 40 }, (_, index) => `- case c${index}: ${"x".repeat(90)}`)
+  const view = deskContext({ now: 0, sources: [{ name: "attention", state: "current", checked: 1 }], items: items(), briefs: [], cases: long })
+  const first = contextNote(view.sections, undefined, 1_000)!
+  expect(first.text).toContain("not included for size (sent when there is room): queue, sources")
+  expect(first.text.length).toBeLessThanOrEqual(4096)
+  expect(first.state.sections.cases).toBeDefined()
+  expect(first.state.sections.queue).toBeUndefined()
+  expect(contextNote(view.sections, first.state, 2_000)!.text).toContain("queue (")
+})
+
+test("a cases-only note never counts as the full refresh", () => {
+  const cases = deskContext({ now: 0, sources: [], items: [], briefs: [], cases: ["- case a"] }).sections.filter(section => section.name === "cases")
+  const only = contextNote(cases, undefined, 1_000, { partial: "cases only" })!
+  expect(only.text.startsWith("cases only")).toBe(true)
+  expect(only.state.full).toBe(0)
+  const view = deskContext({ now: 0, sources: [], items: items(), briefs: [], cases: ["- case a"] })
+  expect(contextNote(view.sections, only.state, 2_000)!.text).toContain("Read-only snapshot")
 })

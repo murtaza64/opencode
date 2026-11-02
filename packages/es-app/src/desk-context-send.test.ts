@@ -49,20 +49,19 @@ const note = () => {
   return [{ type: "text" as const, text: note.text, synthetic: true as const, metadata: { source: "front-desk", key: note.key } }]
 }
 
-test("a desk steer to a busy session is not refused because of the desk's own generated context", async () => {
+test("a desk steer to a busy session carries the desk's generated context and is not refused", async () => {
   const { composer, posts } = deskComposer()
   await composer.loadCapabilities()
   composer.observeBusy(true)
   composer.setText("a substantive message for the desk")
   const generated = note()
-  expect(generated[0]!.metadata.key.length).toBeGreaterThan(500)
   // Exactly as session.tsx send() composes it.
   const context = sendContext({ input: true, attaches: composer.contextAttaches("steer"), generated, chips: [] })
   await composer.submitVisible("steer", session, null, undefined, context)
   expect(composer.state.error).toBe("")
   expect(posts).toHaveLength(1)
-  // The oversized note did not go, so the desk does not record it as delivered and offers it on the next send.
-  expect((posts[0] as { context?: unknown }).context).toBeUndefined()
+  // The bounded note with its short key fits Core's input limits, so it goes with the steer.
+  expect((posts[0] as { context?: { text: string }[] }).context?.[0]?.text).toContain("queue (30):")
 })
 
 test("chips the human chose stay strict: an oversized chip still refuses the send", async () => {
