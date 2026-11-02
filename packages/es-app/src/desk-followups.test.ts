@@ -46,7 +46,7 @@ test("the strip puts what needs the human first, then work under way, then what 
   const now = 10 * 86_400_000
   const cases = [{ case_id: "reports-and-streams", title: "Directions and streams", updated: now - 1_000,
     intents: [{ id: "private-project-directions", state: "delivered", state_at: now - 2_000, owner: { lane: "exploration", editspace: "directions", host: "mini", session: "ses_private000001" } },
-      { id: "diff-streams-discovery", state: "working", next: "native views", state_at: now - 9_000 }, { id: "choose-scope", state: "waiting", next: "Pick the first workspace" }, { id: "dropped", state: "withdrawn" }],
+      { id: "diff-streams-discovery", state: "working", next: "native views", state_at: now - 9_000 }, { id: "choose-scope", state: "waiting", needs: { action: "answer" as const, label: "Pick the first workspace", ref: "attention:streams:rec-1" } }, { id: "dropped", state: "withdrawn" }],
     deliverables: [{ id: "report", intent: "private-project-directions", label: "Directions report", ref: "http://127.0.0.1:1/report", read_back: true, read_back_at: now - 1_500 }] }]
   const rows = progressRows(cases, [{ editspace: "p", id: "a#1", owner: "alpha", text: "Which build?", asked: now - 5_000, delivery: "delivered" }])
   expect(rows.map(row => [row.group, row.label, row.status])).toEqual([
@@ -79,11 +79,11 @@ test("a state the desk does not recognise shows as unknown, not as work", () => 
   expect(rows.map(row => [row.group, row.label, row.status])).toEqual([["waiting", "Plain", "Not started (requested)"], ["unknown", "Odd", "Unknown state: paused"]])
 })
 
-test("each case state lands in one group: waiting needs the human, working is work, not-yet-started waits on owners", () => {
+test("each case state lands in one group: working is work, not-yet-started and blocked parts wait on owners", () => {
   const states = ["requested", "routed", "acknowledged", "working", "waiting", "delivered", "done", "withdrawn", "paused"]
   const rows = progressRows([{ case_id: "c", updated: 1, deliverables: [], intents: states.map(state => ({ id: state, state })) }], [])
   expect(Object.fromEntries(rows.map(row => [row.key.split("/")[1], row.group]))).toEqual({
-    requested: "waiting", routed: "waiting", acknowledged: "waiting", working: "working", waiting: "needs", delivered: "result", done: "result", paused: "unknown" })
+    requested: "waiting", routed: "waiting", acknowledged: "waiting", working: "working", waiting: "waiting", delivered: "result", done: "result", paused: "unknown" })
 })
 
 test("a question the desk asked an owner waits on that owner until answered", () => {
@@ -104,4 +104,25 @@ test("a row names who has it and flags a blocker: an unrecognised state or a que
       { editspace: "p", id: "a#3", owner: "gamma", text: "Fine", asked: 1, delivery: "delivered" }])
   expect(rows.map(row => [row.label, row.owner, row.flag])).toEqual([
     ["Plain", undefined, undefined], ["No receipt", "alpha", "no receipt"], ["Bounced", "beta", "not delivered"], ["Fine", "gamma", undefined], ["Odd", "tour", "paused"]])
+})
+
+test("a waiting part needs the human only with a recorded action, which links to where it is done", () => {
+  const rows = progressRows([{ case_id: "c", updated: 1, deliverables: [], intents: [
+    { id: "decide", state: "waiting", needs: { action: "answer", label: "Choose the rollout", ref: "attention:alpha:rec-9" } },
+    { id: "try-it", state: "waiting", needs: { action: "try", label: "Try the editor", ref: "surface:vim-editor" } },
+    { id: "read", state: "waiting", needs: { action: "review", label: "Read the report", ref: "https://example.test/report" } },
+    { id: "elsewhere", state: "waiting", needs: { action: "do", label: "Plug in the TV" } },
+  ] }], [])
+  expect(rows.map(row => [row.group, row.label, row.status, row.link])).toEqual([
+    ["needs", "Decide", "Choose the rollout", { label: "Answer", href: "/?item=attention%3Aalpha%3Arec-9" }],
+    ["needs", "Try it", "Try the editor", { label: "Try it", href: "/?surface=vim-editor" }],
+    ["needs", "Read", "Read the report", { label: "Review", href: "https://example.test/report" }],
+    ["needs", "Elsewhere", "Plug in the TV", undefined]])
+})
+
+test("a waiting part with no recorded action is its owner's blocker, not a question for the human", () => {
+  const rows = progressRows([{ case_id: "c", updated: 1, deliverables: [], intents: [
+    { id: "upgrade", state: "waiting", next: "client guard rejects the current target", owner: { lane: "personal-upgrade" } }, { id: "bare", state: "waiting" }] }], [])
+  expect(rows.map(row => [row.group, row.status, row.flag])).toEqual([
+    ["waiting", "Blocked: client guard rejects the current target", "blocked"], ["waiting", "Blocked; no action for you recorded", "blocked"]])
 })

@@ -41,6 +41,8 @@
 .desk-progress-done[aria-expanded=true]::after { content: "▾"; }
 .desk-progress-rows { list-style: none; margin: 2px 0 0; padding: 0 0 0 calc(1em + 6px); display: grid; }
 .desk-progress-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; }
+/* When any row links, every row keeps that column, so ages stay in one column. */
+.desk-progress:has(.desk-progress-open) .desk-progress-row { grid-template-columns: minmax(0, 1fr) 1.6em; }
 /* Row: what (and any blocker), who, when. The needs row adds its ask on a second, muted line. */
 .desk-progress-line { grid-template-columns: minmax(0, 1fr) auto auto !important; column-gap: var(--ds-space-3, 8px) !important; row-gap: 0 !important; }
 /* Age keeps its column when a row has no owner. */

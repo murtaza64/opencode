@@ -45,7 +45,9 @@ export const followUps = (timeline: MailTimeline, session: string): FollowUp[] =
 export type DeskCase = {
   case_id: string; title?: string; authority?: string; privacy?: string; updated: number
   intents: { id: string; mode?: string; source_scope?: string; source_capability?: string; fallback?: string; outputs?: string[]; not_granted?: string[]
-    owner?: { host?: string; editspace?: string; lane?: string; session?: string; role?: string }; evidence?: string; state?: string; state_at?: number; next?: string }[]
+    owner?: { host?: string; editspace?: string; lane?: string; session?: string; role?: string }; evidence?: string; state?: string; state_at?: number; next?: string
+    /** What the human is asked to do for a waiting part, and where: an attention record, a Surface or a link. */
+    needs?: { action: "answer" | "review" | "try" | "do"; label: string; ref?: string } }[]
   deliverables: { id: string; intent?: string; label: string; ref?: string; read_back?: boolean; read_back_at?: number; evidence?: string }[]
 }
 
@@ -83,6 +85,15 @@ export type ProgressRow = { key: string; group: "needs" | "working" | "waiting" 
   /** A short blocker or oddity worth seeing without opening the row: an unrecognised state, a question with no receipt. */
   flag?: string }
 
+const ACTION = { answer: "Answer", review: "Review", try: "Try it", do: "Open" } as const
+/** Where a needs-you row leads: an attention record or Surface in this app, or an http(s) link; anything else has no link. */
+const actionLink = (needs: { action: keyof typeof ACTION; ref?: string }) => {
+  const ref = needs.ref ?? ""
+  const href = /^https?:\/\//.test(ref) ? ref : ref.startsWith("surface:") ? `/?surface=${encodeURIComponent(ref.slice(8))}`
+    : ref.startsWith("attention:") ? `/?item=${encodeURIComponent(ref)}` : undefined
+  return href ? { label: ACTION[needs.action] ?? "Open", href } : undefined
+}
+
 // Parts an owner has not started yet wait on that owner; only "working" is work under way.
 const QUEUED = new Set(["requested", "routed", "acknowledged"])
 const DONE = new Set(["delivered", "done"])
@@ -100,11 +111,14 @@ export const progressRows = (cases: DeskCase[], items: FollowUp[]): ProgressRow[
       const owner = [part.owner?.lane, part.owner?.editspace, part.owner?.host].filter(Boolean).join(" · ")
       const detail = [`case ${item.case_id}`, `part ${part.id}`, ...(owner ? [`owner ${owner}`] : []), ...(part.owner?.session ? [part.owner.session] : []), ...(part.next ? [`next: ${part.next}`] : [])]
       const deliverable = item.deliverables.find(entry => entry.intent === part.id && entry.read_back && entry.ref && /^https?:\/\//.test(entry.ref))
-      const group = state === "waiting" ? "needs" : DONE.has(state) ? "result" : state === "working" ? "working" : QUEUED.has(state) ? "waiting" : "unknown"
+      // A waiting part needs the human only when the case records what to do and where; otherwise its owner is blocked.
+      const needs = state === "waiting" && part.needs ? part.needs : undefined
+      const action = needs?.ref ? actionLink(needs) : undefined
+      const group = needs ? "needs" : state === "waiting" ? "waiting" : DONE.has(state) ? "result" : state === "working" ? "working" : QUEUED.has(state) ? "waiting" : "unknown"
       rows.push({ key: `${item.case_id}/${part.id}`, group, label: partLabel(part.id), context: title, ...(part.state_at ? { at: part.state_at } : {}),
-        status: group === "needs" ? part.next || "Waiting for you" : group === "result" ? "Delivered" : group === "unknown" ? `Unknown state: ${state}` : part.next || (group === "waiting" ? `Not started (${state})` : "In progress"),
-        ...(part.owner?.lane ? { owner: part.owner.lane } : {}), ...(group === "unknown" ? { flag: state } : {}),
-        ...(deliverable ? { link: { label: deliverable.label, href: deliverable.ref! }, ...(deliverable.read_back_at ? { readBackAt: deliverable.read_back_at } : {}) } : {}), detail })
+        status: needs ? needs.label : state === "waiting" ? (part.next ? `Blocked: ${part.next}` : "Blocked; no action for you recorded") : group === "result" ? "Delivered" : group === "unknown" ? `Unknown state: ${state}` : part.next || (group === "waiting" ? `Not started (${state})` : "In progress"),
+        ...(part.owner?.lane ? { owner: part.owner.lane } : {}), ...(group === "unknown" ? { flag: state } : state === "waiting" && !needs ? { flag: "blocked" } : {}),
+        ...(action ? { link: action } : deliverable ? { link: { label: deliverable.label, href: deliverable.ref! }, ...(deliverable.read_back_at ? { readBackAt: deliverable.read_back_at } : {}) } : {}), detail })
     }
   }
   for (const item of items) rows.push({

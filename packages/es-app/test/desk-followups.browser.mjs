@@ -36,7 +36,9 @@ const caseFile = { format: "front-desk-cases/1", cases: [{ case_id: "two-parts",
   intents: [{ id: "private-read", state: "working", owner: { lane: "exploration", editspace: "directions", host: "mini" }, next: "meeting synthesis" },
     { id: "workspace", state: "delivered", state_at: now - 3_600_000, owner: { lane: "project-lead", editspace: "streams", host: "mini" } },
     { id: "archived-part", state: "done", state_at: now - 5 * 86_400_000 }, { id: "odd-part", state: "paused" },
-    { id: "pick-scope", state: "waiting", next: "Pick the first workspace before the outline starts", owner: { lane: "project-lead", editspace: "streams", host: "mini" } }],
+    { id: "pick-scope", state: "waiting", needs: { action: "answer", label: "Pick the first workspace before the outline starts", ref: "attention:fixture:pick-scope" }, owner: { lane: "project-lead", editspace: "streams", host: "mini" } },
+    // Waiting with no recorded action: its owner's blocker, so it waits on owners and never reads as a question for you.
+    { id: "client-guard", state: "waiting", next: "client guard rejects the current target", owner: { lane: "upgrade" } }],
   deliverables: [{ id: "deck", intent: "workspace", label: "Explainer deck", ref: "http://127.0.0.1:64924/", read_back: true }, { id: "report", intent: "private-read", label: "Private report" }] }] }
 const preview = await startAttentionPreview([{ name: "cases", configureServer(server) {
   server.middlewares.use("/es/api/frontdesk/cases", (_req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(caseFile)) })
@@ -60,7 +62,7 @@ try {
     // Folded: one line of counts and one line naming what needs the human; nothing else until it is opened.
     const strip = page.getByRole("region", { name: "Desk progress" })
     const summary = strip.locator(".desk-progress-summary")
-    await expect(summary).toHaveText(/1 need you.*1 working.*2 waiting.*1 unclear.*4 done/, { timeout: 300_000 })
+    await expect(summary).toHaveText(/1 need you.*1 working.*3 waiting.*1 unclear.*4 done/, { timeout: 300_000 })
     await expect(summary).toHaveAttribute("aria-expanded", "false")
     await expect(strip.locator(".desk-progress-row")).toHaveCount(0)
     const peek = strip.locator(".desk-progress-peek")
@@ -83,17 +85,18 @@ try {
     // Opened: grouped by who has the next move, newest first, undated last; one line per row; owners and ids only
     // in a row's detail. Results wait behind a closed Completed control, kept however old.
     // Each group head: a shape, its name and a count; colour is never the only signal.
-    await expect(strip.locator(".desk-progress-group")).toHaveText([/!\s*Needs you\s*1/, /◐\s*Working\s*1/, /◷\s*Waiting on owners\s*2/, /\?\s*State not recognised\s*1/, /✓\s*Completed\s*4/])
+    await expect(strip.locator(".desk-progress-group")).toHaveText([/!\s*Needs you\s*1/, /◐\s*Working\s*1/, /◷\s*Waiting on owners\s*3/, /\?\s*State not recognised\s*1/, /✓\s*Completed\s*4/])
     const rows = strip.locator('.desk-progress-rows:not([data-group="result"]) > .desk-progress-row')
-    await expect(rows.locator(".desk-progress-label")).toHaveText(["Pick scope", "Private read", "No receipt yet", "Is the nightly green?", "Odd part"])
+    await expect(rows.locator(".desk-progress-label")).toHaveText(["Pick scope", "Private read", "No receipt yet", "Is the nightly green?", "Client guard", "Odd part"])
     // Rows are terse: what, who, when. Status waits in the detail; only an ask or a blocker shows on the row.
     await expect(rows.nth(1).locator(".desk-progress-owner")).toHaveText("exploration")
     await expect(rows.nth(1)).toContainText("age unknown")
     await expect(rows.nth(1)).not.toContainText("meeting synthesis")
     await expect(rows.nth(2).locator(".desk-progress-owner")).toHaveText("gamma")
     await expect(rows.nth(2).locator(".desk-progress-flag")).toHaveText(/!\s*no receipt/)
-    await expect(rows.nth(4).locator(".desk-progress-flag")).toHaveText(/\?\s*paused/)
-    for (const index of [1, 2, 4]) assert((await rows.nth(index).locator(".desk-progress-line").boundingBox()).height <= 30, `${view}: row ${index} wraps`)
+    await expect(rows.nth(4).locator(".desk-progress-flag")).toHaveText(/!\s*blocked/)
+    await expect(rows.nth(5).locator(".desk-progress-flag")).toHaveText(/\?\s*paused/)
+    for (const index of [1, 2, 4, 5]) assert((await rows.nth(index).locator(".desk-progress-line").boundingBox()).height <= 30, `${view}: row ${index} wraps`)
     // Ages share one column, also on a row without an owner.
     const ageEnds = await rows.locator(".desk-progress-age").evaluateAll(list => list.map(element => element.getBoundingClientRect()[getComputedStyle(element).direction === "rtl" ? "left" : "right"]))
     assert(Math.max(...ageEnds) - Math.min(...ageEnds) <= 1, `${view}: age column ragged ${ageEnds}`)
