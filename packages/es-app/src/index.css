@@ -898,6 +898,8 @@ button.stop .hint { font-family: var(--font-mono); font-size: 10px; color: var(-
   position: relative;
 }
 .dot.pending { background: var(--peach); }
+/* Another host's status could not be read: neither busy nor idle. */
+.dot.unknown { background: transparent; border: 1px dashed var(--overlay0); box-sizing: border-box; }
 .session-work-status { display: flex; align-items: center; gap: 8px; flex-shrink: 0; min-block-size: 28px; padding: 6px 0; box-sizing: border-box; white-space: nowrap; font-size: 12px; color: var(--subtext0); }
 .session-work-status > span:not(.busy-dot) { min-width: 0; overflow: hidden; text-overflow: ellipsis; line-height: 16px; }
 /* The reconnect action must fit the slot so a connection change never resizes it. */

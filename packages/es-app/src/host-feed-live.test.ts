@@ -18,13 +18,15 @@ class HostEvents {
 }
 
 // Each host's Core: its root sessions and its status list (which names only sessions that are not idle).
-let cores: Record<string, { sessions: { id: string }[]; status: Record<string, unknown>; gate?: Promise<void> }>
+let cores: Record<string, { sessions: { id: string }[]; status: Record<string, unknown>; gate?: Promise<void>; statusDown?: boolean }>
 let fetchSpy: Mock<(input: RequestInfo | URL) => Promise<Response>>
 let original: PropertyDescriptor | undefined
 const disposers: (() => void)[] = []
 
 beforeEach(() => {
   HostEvents.all = []
+  // The periodic read runs only while the page is visible.
+  Object.defineProperty(globalThis, "document", { configurable: true, value: { visibilityState: "visible" } })
   original = Object.getOwnPropertyDescriptor(globalThis, "EventSource")
   Object.defineProperty(globalThis, "EventSource", { configurable: true, value: HostEvents })
   fetchSpy = spyOn(globalThis, "fetch")
@@ -34,7 +36,7 @@ beforeEach(() => {
     if (path === "/oc/experimental/session") return Response.json(core.sessions.map((item) => ({ ...item, title: item.id, directory: "/r", time: { created: 1, updated: 1 } })))
     if (path === "/oc/session/status") {
       await core.gate
-      return Response.json(core.status)
+      return core.statusDown ? new Response("down", { status: 503 }) : Response.json(core.status)
     }
     return Response.json({}, { status: 404 })
   })
@@ -42,14 +44,15 @@ beforeEach(() => {
 
 afterEach(() => {
   disposers.splice(0).forEach((dispose) => dispose())
+  Reflect.deleteProperty(globalThis, "document")
   fetchSpy.mockRestore()
   if (original) Object.defineProperty(globalThis, "EventSource", original)
   else Reflect.deleteProperty(globalThis, "EventSource")
 })
 
-const feed = (id: string) => createRoot((dispose) => {
+const feed = (id: string, every?: number) => createRoot((dispose) => {
   disposers.push(dispose)
-  return createHostFeed({ id, label: id, origin: `http://127.0.0.1:${id === "mini" ? 1 : 2}` }, () => undefined)
+  return createHostFeed({ id, label: id, origin: `http://127.0.0.1:${id === "mini" ? 1 : 2}` }, () => undefined, undefined, undefined, every)
 })
 const settled = async (check: () => boolean) => {
   for (let wait = 5; !check(); wait *= 2) {
@@ -93,4 +96,26 @@ test("the same session id on two hosts keeps each host's own status", async () =
   const wing = feed("wing")
   await settled(() => mini.state().status === "ready" && wing.state().status === "ready")
   expect([mini.live("ses_same"), wing.live("ses_same")]).toEqual(["busy", "idle"])
+})
+
+test("a missed idle event clears at the next periodic status read, without a reconnect; a real busy stays busy", async () => {
+  cores = { mini: { sessions: [{ id: "ses_done" }, { id: "ses_working" }], status: { ses_done: { type: "busy" }, ses_working: { type: "busy" } } } }
+  const mini = feed("mini", 50)
+  await settled(() => mini.live("ses_done") === "busy")
+  // The session went idle on that host; its idle event never arrived.
+  cores.mini!.status = { ses_working: { type: "busy" } }
+  await settled(() => mini.live("ses_done") === "idle")
+  expect(mini.live("ses_working")).toBe("busy")
+  expect(HostEvents.all.length).toBe(1)
+})
+
+test("when the status read fails the status is unknown, never the last busy or a guessed idle, until a read succeeds", async () => {
+  cores = { mini: { sessions: [{ id: "ses_a" }], status: { ses_a: { type: "busy" } } } }
+  const mini = feed("mini", 50)
+  await settled(() => mini.live("ses_a") === "busy")
+  cores.mini!.statusDown = true
+  await settled(() => mini.live("ses_a") === "unknown")
+  cores.mini!.statusDown = false
+  cores.mini!.status = {}
+  await settled(() => mini.live("ses_a") === "idle")
 })

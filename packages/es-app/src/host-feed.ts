@@ -138,7 +138,9 @@ const MAX_LINEAGE_EDITSPACES = 4
  * this host's pinned sessions; in All projects, lineage is read only for the editspaces that hold them. */
 export const createHostFeed = (host: WorkHost, project: () => string | undefined | null, pinned: () => string[] = () => [],
   // Editspaces named by this host's lane pins: always read, so a pinned lane resolves to its current owner.
-  lanes: () => string[] = () => []) => {
+  lanes: () => string[] = () => [],
+  // How often decisions, Surfaces and statuses are read between list reads (tests shorten it).
+  every = DECISIONS_MS) => {
   const base = `/hosts/${host.id}`
   // Until the first read answers, show what this host last listed (if the project matches), marked by its age.
   const seen = (() => {
@@ -155,6 +157,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     ...(seen ? { cachedAt: seen.cachedAt } : {}),
   })
   const [live, setLive] = createSignal<Record<string, string>>({})
+  const [liveStale, setLiveStale] = createSignal(false)
   // Status events seen per session, numbered in arrival order. A status read applies to a session only when no event
   // for it arrived after the read began, so a seed never overwrites a newer transition.
   let statusEvents = 0
@@ -162,7 +165,9 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
   const seedLive = async (listed: string[]) => {
     const started = statusEvents
     const statuses = await read<Record<string, { type?: unknown } | string>>("/oc/session/status").catch(() => undefined)
-    if (!statuses || typeof statuses !== "object") return
+    // An unread status is unknown: neither the last busy nor a guessed idle. The next good read clears it.
+    if (!statuses || typeof statuses !== "object") return setLiveStale(true)
+    setLiveStale(false)
     setLive((previous) => {
       const next = { ...previous }
       for (const id of new Set([...Object.keys(previous), ...listed, ...Object.keys(statuses)])) {
@@ -323,7 +328,8 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     refreshLineage()
     const current = scope
     if (loading || state().status !== "ready" || document.visibilityState !== "visible") return
-    const [needs, surfaces] = await Promise.all([readNeeds(), readSurfaces()])
+    // Statuses too: a missed idle event (no other event follows it) clears within one interval without a reconnect.
+    const [needs, surfaces] = await Promise.all([readNeeds(), readSurfaces(), seedLive(state().rows.map((row) => row.id))])
     if (scope !== current) return
     setState((previous) => ({ ...previous, ...merged(previous, true, needs, surfaces) }))
   }
@@ -356,7 +362,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     }
     changed()
   }
-  const timer = setInterval(() => void refreshDecisions(), DECISIONS_MS)
+  const timer = setInterval(() => void refreshDecisions(), every)
   onCleanup(() => {
     source.close()
     changed.cancel()
@@ -367,8 +373,9 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     host,
     state,
     lineage,
-    /** Live status from that host's events since load ("busy", "retry", "idle"); undefined if unseen. */
-    live: (id: string) => live()[id],
+    /** Status from that host's last status read and its events since ("busy", "retry", "idle"); "unknown" when the last
+     * status read failed or the host is unreachable; undefined if unseen. */
+    live: (id: string) => liveStale() || state().status === "unavailable" ? "unknown" : live()[id],
     /** Reload this host's list now (project change, retry). */
     load,
   }

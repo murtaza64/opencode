@@ -43,7 +43,7 @@ const INDEX_MIN_GAP_MS = 120_000
 import { useLocation } from "@solidjs/router"
 export { linkUrl } from "./link-url"
 
-export type DotState = "pending" | "busy" | "failed" | "unread" | "idle"
+export type DotState = "pending" | "busy" | "failed" | "unread" | "idle" | "unknown"
 
 export type SessionRow = {
   id: string
@@ -818,7 +818,7 @@ export function DashboardProvider(props: ParentProps) {
     dot: (row) => {
       const feed = feeds().find((item) => item.host.id === row.host)
       const status = feed?.live(row.id)
-      return status === "busy" || status === "retry" ? "busy" : "idle"
+      return status === "busy" || status === "retry" ? "busy" : status === "unknown" ? "unknown" : "idle"
     },
   }
 
