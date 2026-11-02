@@ -169,3 +169,31 @@
 .brief-hud-title { opacity: 0.8; }
 .brief-hud-pager { margin-block-start: auto; opacity: 0.8; }
 .brief-hud-preview > summary { font-size: 11px; }
+/* Record state apart from authority (brief-view authorityStrip): one compact line, caps and marks, not colour alone. */
+.brief-authority { font-size: 11px; font-weight: 600; letter-spacing: .02em; color: var(--ds-muted, var(--subtext0)); margin-block: 0 6px !important; }
+.brief-authority::before { content: "["; } .brief-authority::after { content: "]"; }
+/* A scene by domain role (brief-view sceneNodes): outline = role, nesting = containment, dashes = proposed only. */
+.brief-scene { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 18px; margin: 8px 0; font-size: 13px; }
+.brief-scene-actors { display: grid; gap: 10px; flex: 0 1 220px; }
+.brief-scene-places { display: grid; gap: 8px; flex: 1 1 280px; min-inline-size: 0; }
+.brief-scene-label { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
+.brief-scene-icon { inline-size: 20px; block-size: 20px; flex: none; }
+.brief-scene-mark { font-weight: 800; }
+.brief-scene-note { flex-basis: 100%; font-size: 11px; color: var(--ds-muted, var(--subtext0)); }
+.brief-scene-place { display: grid; gap: 6px; padding: 6px 10px 8px; border: 1px solid var(--ds-line, var(--surface1)); background: var(--ds-surface, var(--base)); }
+.brief-scene-place > .brief-scene-label { font-size: 11px; font-weight: 600; }
+.brief-scene-place[data-role="platform"] { border-radius: 6px; }
+.brief-scene-place[data-role="channel"] { border-radius: 14px; }
+.brief-scene-place[data-role="thread"] { border-radius: 10px; border-inline-start-width: 3px; background: var(--ds-raised, var(--surface0)); }
+.brief-scene-place[data-role="boundary"] { border: 2px dashed var(--ds-text, var(--text)); border-radius: 4px; background: none; }
+.brief-scene-thing { display: grid; gap: 4px; }
+.brief-scene-thing[data-role="unknown"] { color: var(--ds-muted, var(--subtext0)); }
+.brief-scene-thing[data-role="identity"] { padding: 6px 8px; border: 1px solid var(--ds-line, var(--surface1)); border-radius: 7px; }
+.brief-scene-thing[data-role="message"] { padding: 6px 8px; border: 1.5px dashed var(--ds-warn, var(--yellow)); border-radius: 4px; font-weight: 600; }
+.brief-scene-thing[data-role="queue"] { padding: 6px 8px; border: 1px solid var(--ds-line, var(--surface1)); box-shadow: 3px 3px 0 -1px var(--ds-surface, var(--base)), 3px 3px 0 0 var(--ds-line, var(--surface1)), 6px 6px 0 -1px var(--ds-surface, var(--base)), 6px 6px 0 0 var(--ds-line, var(--surface1)); }
+.brief-scene-relation { display: flex; align-items: center; gap: 6px; margin: 0 !important; font-size: 11px; color: var(--ds-warn, var(--yellow)); }
+.brief-scene-arrow { flex: none; inline-size: 28px; block-size: 0; border-block-start: 2px dashed currentColor; position: relative; }
+.brief-scene-arrow::after { content: ""; position: absolute; inset-inline-end: -2px; inset-block-start: -6px; border: 5px solid transparent; border-inline-start: 7px solid currentColor; }
+.brief-scene-relation[data-kind="sends"] .brief-scene-arrow::after { border-inline-start-color: transparent; border: 0; inline-size: 9px; block-size: 9px; inset-block-start: -6px; border-block-start: 1.5px solid currentColor; border-inline-end: 1.5px solid currentColor; transform: rotate(45deg); }
+.brief-scene-relation[data-kind="sends"] .brief-scene-arrow:dir(rtl)::after { transform: rotate(-45deg); }
+.brief-scene-limits { flex-basis: 100%; list-style: none; padding: 0 !important; margin: 0 !important; font-size: 11px; color: var(--ds-risk, var(--red)); }

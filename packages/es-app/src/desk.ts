@@ -163,6 +163,19 @@ export type BriefShape =
   | { kind: "impact"; rows: { area: string; change: string }[] }
   /** What a choice changes and what it keeps: a row whose now and after are equal stays as it is. */
   | { kind: "change"; rows: { item: string; now: string; after: string }[] }
+/** What a scene part is, by domain role: an actor (`unknown` when the request does not say what kind), a place that
+ * holds things (platform, channel, thread, permission boundary) or an object (message, capability, queue). */
+export type SceneRole = "unknown" | "person" | "app" | "identity" | "platform" | "channel" | "thread" | "boundary" | "message" | "capability" | "queue"
+export const SCENE_ROLES: SceneRole[] = ["unknown", "person", "app", "identity", "platform", "channel", "thread", "boundary", "message", "capability", "queue"]
+/** Who and what a decision involves and how they relate: `in` nests a part inside an earlier one (a thread in a
+ * channel, a role inside an account boundary); relations are proposals only (an actor would send a message, an
+ * identity requests a capability), never a send, grant or outcome that happened. Names, notes, labels and limits are
+ * shown only when quoted exactly from the request (briefScene); an empty name reads as not stated. */
+export type BriefScene = {
+  parts: { id: string; role: SceneRole; name: string; in?: string; note?: string }[]
+  relations: { from: string; to: string; kind: "sends" | "requests"; label?: string; option?: string }[]
+  limits: string[]
+}
 /** One numbered or named item from the request (D1…, 1., Q2), kept as its own row. Values are shown only when
  * quoted exactly (briefItems); which answer was chosen comes from the record, never from the brief. */
 export type BriefItem = { id: string; question: string; recommended: string; alternatives: string[]; refs: string[] }
@@ -204,6 +217,8 @@ export type BriefResult = {
   copy: { label: string; to: string; start: string; end: string }[]
   /** At most one picture: a shape the app draws, or the model's own visual. */
   shape?: BriefShape
+  /** Typed parts and relations the app draws by role (not yet requested by the brief contract). */
+  scene?: BriefScene
   sources: BriefSource[]
   facts: { text: string; refs: string[] }[]
   timeline: { when?: string; text: string; refs: string[] }[]
@@ -506,6 +521,24 @@ const shapeOf = (value: unknown): { shape?: BriefShape } => {
   }
   return {}
 }
+// Scene names must match the request exactly, so they are kept verbatim (no citation stripping) or dropped if overlong.
+const verbatim = (value: unknown, max: number) => typeof value === "string" && value.trim().length <= max ? value.trim() : ""
+// A part may only nest inside one listed before it, so containment can never loop.
+const sceneOf = (value: unknown): { scene?: BriefScene } => {
+  if (!value || typeof value !== "object") return {}
+  const scene = value as Record<string, unknown>
+  const parts = objects(scene.parts).slice(0, 12).reduce<BriefScene["parts"]>((kept, row) => {
+    if (typeof row.id !== "string" || !row.id || kept.some(part => part.id === row.id) || !SCENE_ROLES.includes(row.role as SceneRole)) return kept
+    const inside = typeof row.in === "string" && kept.some(part => part.id === row.in) ? row.in : undefined
+    const note = verbatim(row.note, 80)
+    return [...kept, { id: row.id, role: row.role as SceneRole, name: verbatim(row.name, 80), ...(inside ? { in: inside } : {}), ...(note ? { note } : {}) }]
+  }, [])
+  const relations = objects(scene.relations).slice(0, 6).flatMap(row => typeof row.from === "string" && typeof row.to === "string" && row.from !== row.to
+    && parts.some(part => part.id === row.from) && parts.some(part => part.id === row.to) && (row.kind === "sends" || row.kind === "requests")
+    ? [{ from: row.from, to: row.to, kind: row.kind as "sends" | "requests", ...(verbatim(row.label, 60) ? { label: verbatim(row.label, 60) } : {}), ...(typeof row.option === "string" && row.option ? { option: row.option } : {}) }] : [])
+  const limits = Array.isArray(scene.limits) ? scene.limits.map(entry => verbatim(entry, 200)).filter(Boolean).slice(0, 3) : []
+  return parts.length > 1 ? { scene: { parts, relations, limits } } : {}
+}
 // The sandboxed frame cannot size itself (no scripts), so the model states the height it drew for.
 const visualHeight = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? Math.min(560, Math.max(120, Math.round(value))) : 280
 // Contract 4 draws SVG with a required description; older briefs keep their HTML so they still render on desktop.
@@ -588,7 +621,7 @@ export const briefState = (meta: BriefMeta, messages: MessageWithParts[], status
         // Anchors keep their exact characters (no whitespace folding), since they must match the source.
         copy: objects(value.copy).slice(0, 4).flatMap(row => typeof row.start === "string" && typeof row.end === "string" && row.start.trim() && row.end.trim() && text(row.label, 80)
           ? [{ label: text(row.label, 80), to: text(row.to, 160), start: row.start.trim().slice(0, 200), end: row.end.trim().slice(0, 200) }] : []),
-        ...shapeOf(value.shape), gaps: strings(value.gaps, 160, 3),
+        ...shapeOf(value.shape), ...sceneOf(value.scene), gaps: strings(value.gaps, 160, 3),
         // A source survives only with at least one ref the app can resolve; the label alone is never shown.
         sources: objects(value.sources).slice(0, 3).flatMap(row => {
           const refs = Array.isArray(row.refs) ? row.refs.filter((ref): ref is string => typeof ref === "string" && known.has(ref)) : []
@@ -710,6 +743,22 @@ export const briefItems = (result: BriefResult, item: DeskItem, documents: Conve
     recommended: quoted(row.recommended) ? row.recommended : "",
     alternatives: row.alternatives.map(value => quoted(value) ? value : ""),
   }))
+}
+
+/** The scene a brief may show. A name not quoted exactly from the request (title, context, option labels) or a named
+ * document is blanked, so the part reads as not stated rather than as a guessed actor, channel or account; an
+ * unquoted note, relation label or limit is dropped. A relation's option must be one of the request's options. */
+export const briefScene = (result: BriefResult, item: DeskItem, documents: ConversationDocument[] = []): BriefScene | undefined => {
+  if (!result.scene) return
+  const options = item.record?.options ?? []
+  const sources = [item.record?.context ?? "", item.record?.title ?? "", ...options.map(option => option.label), ...documents.map(document => document.text)]
+  const quoted = (value?: string) => !!value && sources.some(source => source.includes(value))
+  return {
+    parts: result.scene.parts.map(part => ({ id: part.id, role: part.role, name: quoted(part.name) ? part.name : "", ...(part.in ? { in: part.in } : {}), ...(quoted(part.note) ? { note: part.note } : {}) })),
+    relations: result.scene.relations.map(relation => ({ from: relation.from, to: relation.to, kind: relation.kind,
+      ...(quoted(relation.label) ? { label: relation.label } : {}), ...(options.some(option => option.id === relation.option) ? { option: relation.option } : {}) })),
+    limits: result.scene.limits.filter(quoted),
+  }
 }
 
 /** Where a cited source can be opened: the source thread at its cited messages, or a markdown file.

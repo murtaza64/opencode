@@ -1,5 +1,5 @@
 // Brief gallery: every brief state on one synthetic queue, checked against attention-lead's evidence/copy checklist
-// (1-11) at desktop, 390 px and RTL. Cases: single choice, 7 items, grilling series, steps, visual-heavy, no visual,
+// (1-11) at desktop, 390 px and RTL. Cases: single choice, 7 items, grilling series, steps, visual-heavy, no visual, scene,
 // brief error, brief absent. Hand-written contract-4 briefs; no model call, no real content.
 // Run from packages/es-app: node test/brief-kit.browser.mjs [--shots DIR] [--report-only] [--serve]
 //   --report-only  prints the checklist table without failing (for "before" screenshots on an older build)
@@ -69,6 +69,14 @@ const CASES = {
   sequence: { record: { ...base, id: "sequence", gate_key: "sequence", title: "Migrate the ledger?", context: "Step 1 copies, step 2 verifies; switching reads and dropping the old table come later.", options: two, recommendation: "go" },
     brief: { question: "Copy and verify the ledger now?", choices: [{ id: "go", outcome: "Copied and verified today" }, { id: "wait", outcome: "Nothing moves this week" }],
       shape: { kind: "sequence", steps: ["Copy rows", "Verify counts", "Switch reads", "Drop old table"], approved: 2 } } },
+  // A typed scene (communication): sender not stated, a proposed reply into a thread inside a channel, the request's limit.
+  scene: { record: { ...base, id: "scene", gate_key: "scene", title: "Ask the cache owners about rollback?", options: [{ id: "post", label: "Post the reply" }, { id: "park", label: "Keep it parked" }], recommendation: "post",
+      context: "Post one reply in the existing release thread in #cache-team, where Ana and Raj were previously involved. Ask who owns the rollback plan. This permits only that reply: no deploys." },
+    brief: { question: "Ask the cache owners who owns the rollback plan?", choices: [{ id: "post", outcome: "One reply asks the owners" }, { id: "park", outcome: "Nobody is asked yet" }],
+      scene: { parts: [{ id: "sender", role: "unknown", name: "" }, { id: "channel", role: "channel", name: "#cache-team" }, { id: "thread", role: "thread", name: "existing release thread", in: "channel" },
+        { id: "reply", role: "message", name: "who owns the rollback plan", in: "thread" }, { id: "ana", role: "person", name: "Ana", in: "thread", note: "previously involved" },
+        { id: "raj", role: "person", name: "Raj", in: "thread", note: "previously involved" }],
+        relations: [{ from: "sender", to: "reply", kind: "sends", option: "post" }], limits: ["This permits only that reply: no deploys."] } } },
   error: { record: { ...base, id: "error", gate_key: "error", title: "Archive the old dashboards?", context: "Twelve dashboards unused since June.", options: two, recommendation: "go" }, brief: "error" },
   absent: { record: { ...base, id: "absent", gate_key: "absent", title: "Close the stale tickets?", context: "Nine tickets untouched for 90 days.", options: two, recommendation: "go" }, brief: "none" },
 }
@@ -151,6 +159,11 @@ const check = async (page, card, name) => card.evaluate((element, [name, missing
     // A human-action ask stays imperative, the drafts link is the first subject, and nothing reads as the system posting.
     "copy ask imperative, drafts first": name !== "posts" || question?.textContent.trim() === "Post the two announcements in #platform-changes, then record which you posted."
       && /Announcement drafts/.test(element.querySelector(".desk-subjects li")?.textContent ?? "") && !/Would post|Will you/.test(text),
+    // A scene draws parts by role and nesting, keeps the unstated sender unstated and its send proposed, under the authority strip.
+    "scene roles and authority": name !== "scene" || !!element.querySelector('.brief-scene-place[data-role="channel"] > .brief-scene-place[data-role="thread"] > .brief-scene-thing[data-role="message"]')
+      && element.querySelectorAll('.brief-scene-thing[data-role="person"] .brief-scene-icon').length === 2
+      && /someone not stated/.test(text) && /no send receipt recorded/.test(text) && !!element.querySelector('.brief-scene-relation[data-kind="sends"] .brief-scene-arrow')
+      && /OPEN request · ◇ option 1 recommended · no option chosen/.test(element.querySelector(".brief-authority")?.textContent ?? ""),
     "4 items lossless": name !== "items" || JSON.stringify(rows) === JSON.stringify(["D1", "D2", "D3", "D4", "D5", "D6", "D7"]),
     "4 missing shown": name !== "items" && name !== "steps" || text.includes(missing),
     "5 gaps kept": name !== "single" || element.innerHTML.includes("Cost at full traffic is not measured."),
@@ -208,7 +221,7 @@ try {
       table[`${name} ${view}`] = result
       if (shots) await card.screenshot({ path: path.join(shots, `${name}-${view}.png`) }).catch(() => page.screenshot({ path: path.join(shots, `${name}-${view}.png`), fullPage: true }))
       // Glasses preview: the same brief paged for a 576x288 one-colour HUD, inside Details; reading only.
-      if (name === "single" || name === "items" || name === "sequence") {
+      if (name === "single" || name === "items" || name === "sequence" || name === "scene") {
         const answers = []
         page.on("request", request => { if (request.method() !== "GET" && /\/commands|\/answer/.test(request.url())) answers.push(request.url()) })
         const outer = card.locator("details.home-details").first()
@@ -233,7 +246,8 @@ try {
           await expect(frame.locator(".brief-hud-pager")).toContainText(new RegExp(`^${page}/`))
           hudIds.push(...await frame.locator(".brief-hud-line").evaluateAll(lines => lines.map(line => line.dataset.node)))
         }
-        if (name === "items") await expect(frame.locator(".brief-hud-pager")).toContainText(/^2\/2/)
+        // Seven items after the two-line authority strip fill three pages.
+        if (name === "items") await expect(frame.locator(".brief-hud-pager")).toContainText(/^3\/3/)
         const cardIds = await card.evaluate(element => [...element.querySelectorAll("[data-node]")].filter(node => !node.closest(".brief-hud")).map(node => node.dataset.node))
         const unique = list => list.filter((id, index) => list.indexOf(id) === index)
         const shown = new Set(cardIds)

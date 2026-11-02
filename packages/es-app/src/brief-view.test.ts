@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test"
 import type { AttentionRecord } from "./attention"
-import { briefSemantics, HUD, hudPages, pictureNodes } from "./brief-view"
-import { attentionItem, type BriefResult } from "./desk"
+import type { MessageWithParts } from "./api"
+import { authorityStrip, briefSemantics, HUD, hudPages, pictureNodes } from "./brief-view"
+import { attentionItem, briefPacket, briefState, type BriefMeta, type BriefResult, type BriefScene } from "./desk"
 
 // Synthetic fixtures only: no Work brief, source or history.
 const record = (extra: Partial<AttentionRecord> = {}): AttentionRecord => ({
@@ -17,11 +18,11 @@ const result = (extra: Partial<BriefResult> = {}): BriefResult => ({
 })
 const item = (extra: Partial<AttentionRecord> = {}) => attentionItem(record(extra), 1)
 
-test("a brief's meaning is one ordered node list: item, question, options, risks, evidence, unknowns, state", () => {
+test("a brief's meaning is one ordered node list: item, authority, question, options, risks, evidence, unknowns, state", () => {
   const view = briefSemantics(item(), result(), { host: "mini", asOf: 5 })
   expect(view.item).toEqual({ key: "attention:alpha:att_1", host: "mini", revision: "2", title: "Ship the cache change?" })
   expect(view.nodes.map(node => [node.id, node.group, node.mark])).toEqual([
-    ["item", "item", undefined], ["question", "question", undefined], ["option:go", "option", "recommended"], ["option:wait", "option", undefined],
+    ["item", "item", undefined], ["authority", "authority", undefined], ["question", "question", undefined], ["option:go", "option", "recommended"], ["option:wait", "option", undefined],
     ["risk:go", "risk", undefined], ["evidence:0", "evidence", undefined], ["unknown:0", "unknown", undefined], ["state", "state", undefined]])
   expect(view.nodes.find(node => node.id === "state")!.text).toBe("open · revision 2 · as of 01-01 00:00Z")
 })
@@ -74,7 +75,7 @@ test("numbered request items keep their ids and order as their own nodes and pag
   const rows = Array.from({ length: 7 }, (_, index) => ({ id: `D${index + 1}`, question: `Decision ${index + 1} about the keyboard?`, recommended: "yes", alternatives: ["no"], refs: [] }))
   const view = briefSemantics(item({ context: rows.map(row => `${row.id}. ${row.question} Recommended: yes. Alternative: no.`).join("\n") }), result({ items: rows }))
   expect(view.nodes.filter(node => node.group === "row").map(node => node.id)).toEqual(rows.map(row => `row:${row.id}`))
-  expect(view.nodes.map(node => node.group).indexOf("row")).toBe(2)
+  expect(view.nodes.map(node => node.group).indexOf("row")).toBe(3)
   const pages = hudPages(view)
   expect(pages.length).toBeGreaterThan(1)
   expect(pages.flatMap(page => page.lines.filter(line => line.node.startsWith("row:")).map(line => line.text))[0]).toBe("D1 Decision 1 about the keyboard? → yes (or no)")
@@ -108,5 +109,90 @@ test("the model's own drawing is one described node; the glasses never claim to 
 
 test("picture nodes sit before the options, as the card draws them, and before risks", () => {
   const view = briefSemantics(item(), result({ shape: { kind: "scope", included: ["web"], excluded: ["mobile"] } }))
-  expect(view.nodes.map(node => node.id)).toEqual(["item", "question", "picture:in:0", "picture:out:0", "option:go", "option:wait", "risk:go", "evidence:0", "unknown:0", "state"])
+  expect(view.nodes.map(node => node.id)).toEqual(["item", "authority", "question", "picture:in:0", "picture:out:0", "option:go", "option:wait", "risk:go", "evidence:0", "unknown:0", "state"])
+})
+
+test("the authority strip keeps record state apart from the recommendation and from any recorded choice", () => {
+  expect(authorityStrip(item())).toEqual(["OPEN request", "◇ option 1 recommended", "no option chosen"])
+  expect(briefSemantics(item(), result()).nodes.find(node => node.id === "authority")!.text).toBe("[OPEN request · ◇ option 1 recommended · no option chosen]")
+})
+
+test("a recorded choice reads as recorded, never as carried out", () => {
+  expect(authorityStrip(item({ status: "resolved", answer: { choice_id: "wait", text: "" } as AttentionRecord["answer"] })))
+    .toEqual(["RECORD CLOSED", "◇ option 1 recommended", "✓ option 2 = recorded choice, execution unverified"])
+})
+
+test("a record closed or withdrawn without a recorded option says its outcome is unverified", () => {
+  expect(authorityStrip(item({ status: "withdrawn" }))).toEqual(["WITHDRAWN record", "◇ option 1 recommended", "no option chosen", "outcome unverified"])
+  expect(authorityStrip(item({ status: "resolved", answer: { choice_id: null, text: "Ask the owners first" } as AttentionRecord["answer"] })))
+    .toEqual(["RECORD CLOSED", "◇ option 1 recommended", "answered in words, no option chosen", "outcome unverified"])
+})
+
+test("the glasses show the authority strip first, wrapped, never clipped", () => {
+  const pages = hudPages(briefSemantics(item({ status: "resolved", answer: { choice_id: "wait", text: "" } as AttentionRecord["answer"] }), result()))
+  const strip = pages[0]!.lines.filter(line => line.node === "authority").map(line => line.text)
+  expect(pages[0]!.lines[0]!.node).toBe("authority")
+  expect(strip.join(" ").replace(/\s+/g, " ")).toBe("[RECORD CLOSED · ◇ option 1 recommended · ✓ option 2 = recorded choice, execution unverified]")
+})
+
+// A synthetic communication request: a reply into an existing thread; who would send it is not stated.
+const POST = "Post one reply in the existing release thread in #cache-team, where Ana and Raj were previously involved. Ask who owns the rollback plan. This permits only that reply: no deploys."
+const communication: BriefScene = {
+  parts: [{ id: "sender", role: "unknown", name: "" }, { id: "slack", role: "platform", name: "Slack" }, { id: "channel", role: "channel", name: "#cache-team", in: "slack" },
+    { id: "thread", role: "thread", name: "existing release thread", in: "channel" }, { id: "reply", role: "message", name: "who owns the rollback plan", in: "thread" },
+    { id: "ana", role: "person", name: "Ana", in: "thread", note: "previously involved" }],
+  relations: [{ from: "sender", to: "reply", kind: "sends", option: "go" }], limits: ["This permits only that reply: no deploys."],
+}
+
+test("a communication scene: unknown sender, the reply it would send into the thread, the thread inside its channel", () => {
+  const nodes = pictureNodes(result({ scene: communication }), item({ context: POST }))
+  expect(nodes.map(node => node.text)).toEqual([
+    "? someone not stated", "- -> option 1 ◇ would send into ↳ existing release thread · no send receipt recorded",
+    "platform not stated", "# #cache-team", "↳ existing release thread", "✉ who owns the rollback plan", "person Ana (previously involved)", "✕ This permits only that reply: no deploys."])
+  expect(nodes.map(node => node.part && "depth" in node.part ? node.part.depth : undefined)).toEqual([0, 1, 0, 1, 2, 3, 3, undefined])
+})
+
+test("a scene name the request does not quote reads as not stated, never as a guessed actor or place", () => {
+  const nodes = pictureNodes(result({ scene: { ...communication, parts: communication.parts.map(part => part.id === "sender" ? { ...part, role: "person" as const, name: "Release bot" } : part) } }), item({ context: POST }))
+  expect(nodes[0]!.text).toBe("person not stated")
+  expect(nodes.find(node => node.id === "picture:part:slack")!.text).toBe("platform not stated")
+})
+
+test("a requested capability across a boundary is never granted; a recorded choice leaves the grant unverified", () => {
+  const scene: BriefScene = { parts: [{ id: "worker", role: "identity", name: "build-worker", note: "also used by PR builds" }, { id: "deployer", role: "identity", name: "deploy-only" },
+    { id: "account", role: "boundary", name: "prod account" }, { id: "role", role: "capability", name: "restart-role", in: "account" }],
+    relations: [{ from: "worker", to: "role", kind: "requests", label: "AssumeRole", option: "wait" }, { from: "deployer", to: "role", kind: "requests", label: "AssumeRole", option: "go" }], limits: [] }
+  const context = "Let build-worker (also used by PR builds) or a new deploy-only identity AssumeRole restart-role in the prod account."
+  expect(pictureNodes(result({ scene }), item({ context })).map(node => node.text)).toEqual([
+    "id build-worker (also used by PR builds)", "- -> option 2 requests AssumeRole on key restart-role · not granted",
+    "id deploy-only", "- -> option 1 ◇ requests AssumeRole on key restart-role · not granted", "inside prod account", "key restart-role"])
+  const chosen = pictureNodes(result({ scene }), item({ context, status: "resolved", answer: { choice_id: "go", text: "" } as AttentionRecord["answer"] }))
+  expect(chosen.find(node => node.id === "picture:relation:1")!.text).toBe("- -> option 1 ✓ requests AssumeRole on key restart-role · grant unverified")
+})
+
+test("the glasses keep a scene's nesting as indentation, in the card's order", () => {
+  const view = briefSemantics(item({ context: POST }), result({ scene: communication }))
+  const lines = hudPages(view).flatMap(page => page.lines).filter(line => line.node.startsWith("picture:"))
+  expect(lines.find(line => line.node === "picture:part:thread")!.text).toBe("    ↳ existing release thread")
+  expect(lines.find(line => line.node === "picture:part:reply")!.text).toBe("      ✉ who owns the rollback plan")
+  for (const line of lines) expect(line.text.length).toBeLessThanOrEqual(HUD.columns)
+})
+
+test("a typed scene is the picture even when a drawing or shape is also given", () => {
+  const nodes = pictureNodes(result({ scene: communication, visual: { title: "x", alt: "y", svg: "<svg/>" }, shape: { kind: "scope", included: ["a"], excluded: [] } }), item({ context: POST }))
+  expect(nodes[0]!.id).toBe("picture:part:sender")
+})
+
+test("a scene from a brief reply keeps only parts, nesting and relations that refer to listed parts", () => {
+  const record = { id: "att_s", editspace: "alpha", revision: 1, status: "open", kind: "decision", title: "Ask the owners?", context: POST, options: [{ id: "go", label: "Post" }], recommendation: "go",
+    producer_session: "ses_p", origin_session: "ses_p", gate_key: "s", source_ref: { session_id: "ses_src", directory: "/alpha" }, decision: null, delivery_state: "not-requested", created_at: 1, updated_at: 1 } as AttentionRecord
+  const packet = briefPacket(attentionItem(record, 0), [])
+  const meta: BriefMeta = { kind: "brief", requestID: "r", source: "attention:alpha:att_s", revision: "1", title: record.title, refs: packet.refs, contract: 4 }
+  const scene = { parts: [{ id: "t", role: "thread", name: "existing release thread", in: "later" }, { id: "m", role: "message", name: "x", in: "t" }, { id: "b", role: "robot", name: "Bot" }, { id: "t", role: "channel", name: "dup" }],
+    relations: [{ from: "m", to: "ghost", kind: "sends" }, { from: "m", to: "t", kind: "grants" }], limits: ["no deploys", 4] }
+  const messages = [{ info: { id: "msg_u", role: "user" }, parts: [{ type: "text", text: packet.text }] },
+    { info: { id: "msg_a", role: "assistant", time: { created: 1, completed: 2 } }, parts: [{ type: "text", text: JSON.stringify({ question: "Ask?", choices: [{ id: "go", outcome: "Reply posted" }], scene }) }] }] as unknown as MessageWithParts[]
+  const state = briefState(meta, messages, "idle")
+  if (state.state !== "ready") throw Error(state.state)
+  expect(state.result.scene).toEqual({ parts: [{ id: "t", role: "thread", name: "existing release thread" }, { id: "m", role: "message", name: "x", in: "t" }], relations: [], limits: ["no deploys"] })
 })

@@ -8,14 +8,14 @@ import { A } from "@solidjs/router"
 import { sessionHref } from "../state"
 import { docHref } from "../pages/doc"
 import { anchorHref } from "../message-anchor"
-import { briefCommands, briefComplete, briefSteps, safeSvg, sourceTarget, type BriefResult, type BriefSource, type DeskItem, type EvidenceRef } from "../desk"
+import { briefCommands, briefComplete, briefSteps, safeSvg, sourceTarget, type BriefResult, type BriefSource, type DeskItem, type EvidenceRef, type SceneRole } from "../desk"
 import { briefApproval } from "../brief-approval"
 import { completeBriefJob, currentJob, readConversation, regeneratingJob, type BriefJob } from "../desk-session"
 import { LinkedText } from "./linked-text"
 import { CopyCode, linkName, MISSING, Refs, Value } from "./brief-kit"
 import contract from "../brief-contract.json"
 import { readBriefFeedback, sendBriefFeedback, type BriefRating } from "../brief-feedback"
-import { briefSemantics, hudPages, type BriefNode, type BriefNodeGroup, type PicturePart } from "../brief-view"
+import { briefSemantics, hudPages, SCENE_CUE, type BriefNode, type BriefNodeGroup, type PicturePart } from "../brief-view"
 import { BriefHud } from "./brief-hud"
 
 /** Where a cited source opens: the source thread at the cited messages, or a markdown doc in the editspace. */
@@ -74,6 +74,8 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
       <Show when={!current() && discarded().length}><p class="home-source">The request changed since the last brief.</p></Show>
       {/* The question itself is the card's heading; the lead adds only context and the picture. */}
       <Show when={complete() && ready()}>{value => <div class="desk-brief-body">
+        {/* Record state apart from authority, from the record itself; the same node heads the glasses' first page. */}
+        <For each={group("authority")}>{node => <p class="brief-authority" data-node={node.id}><For each={node.strip}>{(segment, index) => <>{index() ? " · " : ""}<span>{segment}</span></>}</For></p>}</For>
         <Show when={!props.item.record}><p class="desk-brief-question" dir="auto">{value().result.question}</p></Show>
         <Show when={value().result.context}><p class="desk-brief-context" dir="auto"><LinkedText text={value().result.context} /></p></Show>
         <Subjects subjects={value().result.subjects} refs={value().job.meta.refs} />
@@ -84,7 +86,7 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
       </div>}</Show>
     </Show>
     <Show when={shows("visual") && complete() && ready()}>{value =>
-      <Show when={value().result.visual} fallback={<Picture parts={group("picture")} />}>{visual => <div data-node="picture:visual"><Visual {...visual()} /></div>}</Show>}</Show>
+      <Show when={group("picture")[0]?.part?.role === "visual" && value().result.visual} fallback={<Picture parts={group("picture")} />}>{visual => <div data-node="picture:visual"><Visual {...visual()} /></div>}</Show>}</Show>
     <Show when={shows("after") && complete() && ready()}>{value => <div class="desk-brief-after">
       <SourceLinks sources={value().result.sources} refs={value().job.meta.refs} item={props.item} host={props.host} />
     </div>}</Show>
@@ -258,9 +260,55 @@ const Picture = (props: { parts: BriefNode[] }) => {
         <Show when={parts("in").length}><div><span class="home-source">In</span><ul><For each={parts("in")}>{entry => <li dir="auto" data-node={entry.id}>{entry.part.text}</li>}</For></ul></div></Show>
         <Show when={parts("out").length}><div data-excluded><span class="home-source">Out</span><ul><For each={parts("out")}>{entry => <li dir="auto" data-node={entry.id}>{entry.part.text}</li>}</For></ul></div></Show>
       </div></Match>
+    <Match when={parts("entity").length}><Scene nodes={props.parts} /></Match>
     <Match when={parts("impact").length}>
       <ul class="desk-impact"><For each={parts("impact")}>{row => <li data-node={row.id}><bdi dir="auto">{row.part.area}</bdi> → <bdi dir="auto">{row.part.change}</bdi></li>}</For></ul></Match>
   </Switch>
+}
+
+type SceneNode = BriefNode & { part: Extract<PicturePart, { role: "entity" | "relation" | "limit" }> }
+// Person, app and server outlines: Lucide icons (ISC); see assets/ACTOR-LICENSES.txt. Each is built per use: one
+// JSX element is one DOM node, so a shared one would move to the last part of that role.
+const OUTLINE: Partial<Record<SceneRole, () => JSX.Element>> = {
+  person: () => <><circle cx="12" cy="8" r="5" /><path d="M20 21a8 8 0 0 0-16 0" /></>,
+  app: () => <><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M10 4v4M2 8h20M6 4v4" /></>,
+  identity: () => <><rect width="20" height="8" x="2" y="2" rx="2" ry="2" /><rect width="20" height="8" x="2" y="14" rx="2" ry="2" /><path d="M6 6h.01M6 18h.01" /></>,
+  unknown: () => <><circle cx="12" cy="8" r="5" stroke-dasharray="2 2" /><path d="M20 21a8 8 0 0 0-16 0" stroke-dasharray="2 2" /><text x="12" y="10.5" font-size="7" text-anchor="middle" stroke="none" fill="currentColor">?</text></>,
+  capability: () => <><circle cx="7" cy="12" r="5" /><circle cx="7" cy="12" r="1.5" fill="currentColor" /><path d="M12 12h10M18 12v4M21 12v3" /></>,
+  message: () => <><rect x="2" y="5" width="20" height="14" rx="2" stroke-dasharray="3 2" /><path d="M2 6l10 7 10-7" stroke-dasharray="3 2" /></>,
+  boundary: () => <><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>,
+}
+const Outline = (props: { role: SceneRole }) => <Show when={OUTLINE[props.role]}>{shape =>
+  <svg class="brief-scene-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">{shape()()}</svg>}</Show>
+
+// A scene drawn by domain role: actors on one side with what each would do (a dashed send or request, never a solid
+// success), the places they act on as nested containers (a channel room holding a thread, an account fence holding a
+// role), and the request's limits. The words are the nodes' own, so the glasses read the same parts in the same order.
+const Scene = (props: { nodes: BriefNode[] }) => {
+  const nodes = () => props.nodes.filter((node): node is SceneNode => !!node.part && ["entity", "relation", "limit"].includes(node.part.role))
+  const entity = (node: SceneNode) => node.part.role === "entity" ? node.part : undefined
+  const acting = (id: string) => nodes().some(node => node.part.role === "relation" && node.part.from === id)
+  const Part = (props: { node: SceneNode }) => {
+    const part = entity(props.node)!
+    const relations = () => nodes().filter(node => node.part.role === "relation" && node.part.from === part.id)
+    const children = () => nodes().filter(node => entity(node)?.parent === part.id)
+    const label = <><Outline role={part.entity} /><Show when={["channel", "thread"].includes(part.entity)}><span class="brief-scene-mark" aria-hidden="true">{SCENE_CUE[part.entity].mark}</span></Show>
+      <Show when={part.name} fallback={<span class="brief-missing">{SCENE_CUE[part.entity].noun} not stated</span>}><bdi dir="auto">{part.name}</bdi></Show>
+      <Show when={part.note}><span class="brief-scene-note" dir="auto">{part.note}</span></Show></>
+    return <div class={part.holds ? "brief-scene-place" : "brief-scene-thing"} data-role={part.entity} data-node={props.node.id}>
+      <span class="brief-scene-label">{label}</span>
+      <For each={relations()}>{relation => <p class="brief-scene-relation" data-kind={relation.part.role === "relation" ? relation.part.kind : undefined} data-node={relation.id}>
+        <span class="brief-scene-arrow" aria-hidden="true" /><span dir="auto">{relation.text.replace(/^- -> /, "")}</span></p>}</For>
+      <For each={children()}>{child => <Part node={child} />}</For>
+    </div>
+  }
+  const roots = () => nodes().filter(node => entity(node) && entity(node)!.depth === 0)
+  return <div class="brief-scene" aria-label="Who and what this involves">
+    <Show when={roots().some(node => acting(entity(node)!.id))}><div class="brief-scene-actors"><For each={roots().filter(node => acting(entity(node)!.id))}>{node => <Part node={node} />}</For></div></Show>
+    <div class="brief-scene-places"><For each={roots().filter(node => !acting(entity(node)!.id))}>{node => <Part node={node} />}</For></div>
+    <Show when={nodes().some(node => node.part.role === "limit")}><ul class="brief-scene-limits"><For each={nodes().filter(node => node.part.role === "limit")}>{node =>
+      <li data-node={node.id} dir="auto"><span aria-hidden="true">✕ </span>{node.part.role === "limit" ? node.part.text : ""}</li>}</For></ul></Show>
+  </div>
 }
 
 // No scripts, forms, navigation or same-origin access, and CSP blocks every network request.
