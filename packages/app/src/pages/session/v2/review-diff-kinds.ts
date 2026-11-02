@@ -2,6 +2,7 @@ import type { SnapshotFileDiff, VcsFileDiff } from "@opencode-ai/sdk/v2"
 import type { FileDiffInfo } from "@opencode-ai/client/promise"
 import type { Kind } from "@/components/file-tree-v2"
 import { normalizeFileTreeV2Path } from "@/components/file-tree-v2-model"
+import { normalize } from "@opencode-ai/session-ui/session-diff"
 
 export type RenderDiff = FileDiffInfo | (SnapshotFileDiff & { file: string }) | VcsFileDiff
 
@@ -30,6 +31,20 @@ export function turnReviewDiff(source: RenderDiff, rebuilt: readonly SnapshotFil
   if (hit.additions !== source.additions || hit.deletions !== source.deletions || hit.status !== source.status) return
   const { patchOmitted: _, ...metadata } = source
   return { ...metadata, patch: hit.patch }
+}
+
+/**
+ * Cache key part for a turn's rebuilt diff: changes whenever the turn summary does, so a running turn's refreshed
+ * counts fetch again instead of matching against a stale rebuild.
+ */
+export function turnSummaryVersion(diffs: readonly SnapshotFileDiff[]) {
+  return diffs.reduce((key, diff) => `${key}|${diff.file}:${diff.status}:${diff.additions}:${diff.deletions}`, `${diffs.length}`)
+}
+
+/** What a turn-diff row renders: the patch, or nothing when Core omitted it (the caller shows a notice). */
+export function turnDiffView(diff: RenderDiff) {
+  const view = normalize(diff)
+  return view.omitted ? undefined : view
 }
 
 export function reviewRootDirectory(root: string) {

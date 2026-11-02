@@ -56,7 +56,7 @@ import { showToast } from "@/utils/toast"
 import { downloadSessionExport, fetchSessionExport, sessionExportFilename } from "@/utils/session-export"
 import { getDirectory, getFilename } from "@opencode-ai/core/util/path"
 import { Popover as KobaltePopover } from "@kobalte/core/popover"
-import { normalize } from "@opencode-ai/session-ui/session-diff"
+import { turnDiffView } from "@/pages/session/v2/review-diff-kinds"
 import { useFileComponent } from "@opencode-ai/ui/context/file"
 import { shouldMarkBoundaryGesture, normalizeWheelDelta } from "@/pages/session/message-gesture"
 import { SessionContextUsage } from "@/components/session-context-usage"
@@ -226,12 +226,20 @@ function TimelineDiffSummaryRow(props: { diffs: SummaryDiff[] }) {
 
 function TimelineDiffView(props: { diff: SummaryDiff }) {
   const fileComponent = useFileComponent()
-  const view = normalize(props.diff)
+  const language = useLanguage()
+  const view = turnDiffView(props.diff)
 
   return (
-    <div data-slot="session-turn-diff-view" data-scrollable>
-      <Dynamic component={fileComponent} mode="diff" virtualize={false} fileDiff={view.fileDiff} />
-    </div>
+    <Show
+      when={view}
+      fallback={<div data-slot="session-turn-diff-omitted">{language.t("ui.sessionTurn.diffs.omitted")}</div>}
+    >
+      {(shown) => (
+        <div data-slot="session-turn-diff-view" data-scrollable>
+          <Dynamic component={fileComponent} mode="diff" virtualize={false} fileDiff={shown().fileDiff} />
+        </div>
+      )}
+    </Show>
   )
 }
 

@@ -5,7 +5,7 @@ import { Session } from "@/session/session"
 import { SessionID } from "@/session/schema"
 import { SessionFailure } from "@/session/failure"
 import { Worktree } from "@/worktree"
-import { NonNegativeInt } from "@opencode-ai/core/schema"
+import { NonNegativeInt, PositiveInt } from "@opencode-ai/core/schema"
 import { Schema } from "effect"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
@@ -56,7 +56,7 @@ const CapabilitiesResponse = Schema.Struct({
    * other files carry `patchOmitted: true` and `GET /session/:sessionID/diff?messageID=` returns their patches.
    */
   session: Schema.optionalKey(
-    Schema.Struct({ turnTime: Schema.Literal(true), summaryPatchBudget: Schema.optionalKey(Schema.Number) }),
+    Schema.Struct({ turnTime: Schema.Literal(true), summaryPatchBudget: Schema.optionalKey(PositiveInt) }),
   ),
 }).annotate({ identifier: "ExperimentalCapabilities" })
 

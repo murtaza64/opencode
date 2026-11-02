@@ -94,6 +94,7 @@ import {
   reviewDiffNeedsLoad,
   reviewRootDirectory,
   turnReviewDiff,
+  turnSummaryVersion,
   type RenderDiff,
 } from "@/pages/session/v2/review-diff-kinds"
 import { TerminalPanel } from "@/pages/session/terminal-panel"
@@ -735,7 +736,7 @@ export default function Page() {
     if (!source || !sessionID || !messageID || !("patchOmitted" in source) || source.patchOmitted !== true) return
     const rebuilt = await queryClient
       .fetchQuery({
-        queryKey: [serverSDK().scope, "session-turn-diff", sessionID, messageID] as const,
+        queryKey: [serverSDK().scope, "session-turn-diff", sessionID, messageID, turnSummaryVersion(turnDiffs())] as const,
         staleTime: Number.POSITIVE_INFINITY,
         retry: 2,
         queryFn: () => sdk().client.session.diff({ sessionID, messageID }).then((result) => result.data ?? []),
