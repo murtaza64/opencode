@@ -105,7 +105,8 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
             {/* A plain display label when the brief gives one; the producer's exact label stays the radio's name. */}
             <bdi dir="auto" class="home-option-label" title={outcome()?.label ? option.label : undefined}>{outcome()?.label || option.label}</bdi>
             <Show when={outcome()} fallback={<Show when={recommended()}><span class="home-source" id={`${id}-recommended`}>recommended</span></Show>}>{value => <>
-              <span class="home-option-outcome" id={`${id}-${option.id}-outcome`} dir="auto">{value().outcome}</span>
+              {/* An outcome that only repeats the label says nothing new; the label stands alone. */}
+              <Show when={!sameWords(value().outcome, outcome()?.label || option.label)}><span class="home-option-outcome" id={`${id}-${option.id}-outcome`} dir="auto">{value().outcome}</span></Show>
               <Show when={value().note}><span class="home-option-note" dir="auto">{value().note}</span></Show>
               <Show when={recommended()}><span class="home-option-chips"><span data-recommended id={`${id}-recommended`}>Recommended</span></span></Show>
             </>}</Show>
@@ -300,7 +301,7 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
           <span class="home-option-body">
             <Show when={outcome()?.sketch}>{sketch => <Sketch title={`What ${option.label} looks like`} sketch={sketch()} />}</Show>
             <bdi dir="auto" class="home-option-label" title={outcome()?.label ? option.label : undefined}>{outcome()?.label || option.label}</bdi>
-            <Show when={outcome()?.outcome}>{text => <span class="home-option-outcome" dir="auto">{text()}</span>}</Show>
+            <Show when={outcome()?.outcome && !sameWords(outcome()!.outcome, outcome()?.label || option.label) ? outcome()!.outcome : undefined}>{text => <span class="home-option-outcome" dir="auto">{text()}</span>}</Show>
             <Show when={props.record.answer?.choice_id === option.id}><span class="home-option-chips"><span data-chosen>Your choice</span></span></Show>
           </span>
         </li>
@@ -373,3 +374,5 @@ const AskAbout = (props: { record: AttentionRecord; host?: string }) => {
     <Show when={asked()}><span class="home-muted" role="status">Added to the chat draft.</span></Show>
   </span>}</Show>
 }
+
+const sameWords = (a: string, b: string) => a.replace(/\W+/g, " ").trim().toLowerCase() === b.replace(/\W+/g, " ").trim().toLowerCase()

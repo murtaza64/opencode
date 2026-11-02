@@ -168,12 +168,13 @@ export type BriefShape =
 export type SceneRole = "unknown" | "person" | "app" | "identity" | "platform" | "channel" | "thread" | "boundary" | "message" | "capability" | "queue"
 export const SCENE_ROLES: SceneRole[] = ["unknown", "person", "app", "identity", "platform", "channel", "thread", "boundary", "message", "capability", "queue"]
 /** Who and what a decision involves and how they relate: `in` nests a part inside an earlier one (a thread in a
- * channel, a role inside an account boundary); relations are proposals only (an actor would send a message, an
- * identity requests a capability), never a send, grant or outcome that happened. Names, notes, labels and limits are
+ * channel, a role inside an account boundary). `sends` and `requests` are proposals only (an actor would send a
+ * message, an identity requests a capability), never a send, grant or outcome that happened; `uses` is a standing
+ * fact the request states (a workload runs as an identity), which is how a shared identity's reach is drawn. Names, notes, labels and limits are
  * shown only when quoted exactly from the request (briefScene); an empty name reads as not stated. */
 export type BriefScene = {
   parts: { id: string; role: SceneRole; name: string; in?: string; note?: string }[]
-  relations: { from: string; to: string; kind: "sends" | "requests"; label?: string; option?: string }[]
+  relations: { from: string; to: string; kind: "sends" | "requests" | "uses"; label?: string; option?: string }[]
   limits: string[]
 }
 /** One numbered or named item from the request (D1…, 1., Q2), kept as its own row. Values are shown only when
@@ -534,8 +535,8 @@ const sceneOf = (value: unknown): { scene?: BriefScene } => {
     return [...kept, { id: row.id, role: row.role as SceneRole, name: verbatim(row.name, 80), ...(inside ? { in: inside } : {}), ...(note ? { note } : {}) }]
   }, [])
   const relations = objects(scene.relations).slice(0, 6).flatMap(row => typeof row.from === "string" && typeof row.to === "string" && row.from !== row.to
-    && parts.some(part => part.id === row.from) && parts.some(part => part.id === row.to) && (row.kind === "sends" || row.kind === "requests")
-    ? [{ from: row.from, to: row.to, kind: row.kind as "sends" | "requests", ...(verbatim(row.label, 60) ? { label: verbatim(row.label, 60) } : {}), ...(typeof row.option === "string" && row.option ? { option: row.option } : {}) }] : [])
+    && parts.some(part => part.id === row.from) && parts.some(part => part.id === row.to) && (row.kind === "sends" || row.kind === "requests" || row.kind === "uses")
+    ? [{ from: row.from, to: row.to, kind: row.kind as "sends" | "requests" | "uses", ...(verbatim(row.label, 60) ? { label: verbatim(row.label, 60) } : {}), ...(typeof row.option === "string" && row.option ? { option: row.option } : {}) }] : [])
   const limits = Array.isArray(scene.limits) ? scene.limits.map(entry => verbatim(entry, 200)).filter(Boolean).slice(0, 3) : []
   return parts.length > 1 ? { scene: { parts, relations, limits } } : {}
 }

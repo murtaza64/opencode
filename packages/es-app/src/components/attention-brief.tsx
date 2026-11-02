@@ -75,7 +75,7 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
       {/* The question itself is the card's heading; the lead adds only context and the picture. */}
       <Show when={complete() && ready()}>{value => <div class="desk-brief-body">
         {/* Record state apart from authority, from the record itself; the same node heads the glasses' first page. */}
-        <For each={group("authority")}>{node => <p class="brief-authority" data-node={node.id}><For each={node.strip}>{(segment, index) => <>{index() ? " · " : ""}<span>{segment}</span></>}</For></p>}</For>
+        <For each={group("authority")}>{node => <p class="brief-authority" data-node={node.id}><For each={node.strip}>{segment => <span data-tone={segment.startsWith("◇") ? "recommended" : segment.startsWith("✓") ? "chosen" : /unverified|no option/.test(segment) ? "unknown" : /^[A-Z]/.test(segment) ? "record" : undefined}>{segment}</span>}</For></p>}</For>
         <Show when={!props.item.record}><p class="desk-brief-question" dir="auto">{value().result.question}</p></Show>
         <Show when={value().result.context}><p class="desk-brief-context" dir="auto"><LinkedText text={value().result.context} /></p></Show>
         <Subjects subjects={value().result.subjects} refs={value().job.meta.refs} />
@@ -281,31 +281,48 @@ const OUTLINE: Partial<Record<SceneRole, () => JSX.Element>> = {
 const Outline = (props: { role: SceneRole }) => <Show when={OUTLINE[props.role]}>{shape =>
   <svg class="brief-scene-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">{shape()()}</svg>}</Show>
 
-// A scene drawn by domain role: actors on one side with what each would do (a dashed send or request, never a solid
-// success), the places they act on as nested containers (a channel room holding a thread, an account fence holding a
-// role), and the request's limits. The words are the nodes' own, so the glasses read the same parts in the same order.
+// A scene drawn by domain role, structured by type and space rather than boxes: who would act (silhouette, name, and
+// the workloads that run as it, so a shared identity shows its reach), what each would do (a dashed arrow with the
+// option and the authority state: never a solid success), and where (a fenced account, a channel holding a thread).
+// The only outlines left carry meaning: the account fence and the proposed message. Words are the nodes' own, so the
+// glasses read the same parts in the same order.
 const Scene = (props: { nodes: BriefNode[] }) => {
   const nodes = () => props.nodes.filter((node): node is SceneNode => !!node.part && ["entity", "relation", "limit"].includes(node.part.role))
   const entity = (node: SceneNode) => node.part.role === "entity" ? node.part : undefined
-  const acting = (id: string) => nodes().some(node => node.part.role === "relation" && node.part.from === id)
+  const relation = (node: SceneNode) => node.part.role === "relation" ? node.part : undefined
+  const acting = (id: string) => nodes().some(node => relation(node)?.from === id)
+  const users = (id: string) => nodes().filter(node => entity(node)?.runs === id)
+  const children = (id: string) => nodes().filter(node => entity(node)?.parent === id)
+  const roots = () => nodes().filter(node => entity(node) && entity(node)!.depth === 0)
+  const Name = (props: { node: SceneNode }) => {
+    const part = () => entity(props.node)!
+    return <><Outline role={part().entity} /><Show when={["channel", "thread"].includes(part().entity)}><span class="brief-scene-mark" aria-hidden="true">{SCENE_CUE[part().entity].mark}</span></Show>
+      <Show when={part().name} fallback={<span class="brief-missing">{SCENE_CUE[part().entity].noun} not stated</span>}><bdi dir="auto" class="brief-scene-name">{part().name}</bdi></Show>
+      <Show when={part().note}><span class="brief-scene-note" dir="auto">{part().note}</span></Show></>
+  }
+  const Runs = (props: { id: string }) => <Show when={users(props.id).length}>
+    <span class="brief-scene-runs"><span class="brief-scene-runs-label">also runs</span><For each={users(props.id)}>{user =>
+      <span class="brief-scene-run" data-node={user.id}><bdi dir="auto">{entity(user)!.name || "not stated"}</bdi></span>}</For></span></Show>
+  const Relations = (props: { id: string }) => <For each={nodes().filter(node => relation(node)?.from === props.id)}>{node => {
+    const part = relation(node)!
+    return <p class="brief-scene-relation" data-kind={part.kind} data-mark={part.option?.mark} data-node={node.id}>
+      <span class="brief-scene-arrow" aria-hidden="true" />
+      <Show when={part.option}>{option => <span class="brief-scene-option">option {option().number}{option().mark === "recommended" ? " ◇" : option().mark === "chosen" ? " ✓" : ""}</span>}</Show>
+      <span dir="auto">{part.verb}</span><span class="brief-scene-state">{part.state}</span><span class="sr-only">{node.text.replace(/^- -> /, "")}</span></p>
+  }}</For>
   const Part = (props: { node: SceneNode }) => {
-    const part = entity(props.node)!
-    const relations = () => nodes().filter(node => node.part.role === "relation" && node.part.from === part.id)
-    const children = () => nodes().filter(node => entity(node)?.parent === part.id)
-    const label = <><Outline role={part.entity} /><Show when={["channel", "thread"].includes(part.entity)}><span class="brief-scene-mark" aria-hidden="true">{SCENE_CUE[part.entity].mark}</span></Show>
-      <Show when={part.name} fallback={<span class="brief-missing">{SCENE_CUE[part.entity].noun} not stated</span>}><bdi dir="auto">{part.name}</bdi></Show>
-      <Show when={part.note}><span class="brief-scene-note" dir="auto">{part.note}</span></Show></>
-    return <div class={part.holds ? "brief-scene-place" : "brief-scene-thing"} data-role={part.entity} data-node={props.node.id}>
-      <span class="brief-scene-label">{label}</span>
-      <For each={relations()}>{relation => <p class="brief-scene-relation" data-kind={relation.part.role === "relation" ? relation.part.kind : undefined} data-node={relation.id}>
-        <span class="brief-scene-arrow" aria-hidden="true" /><span dir="auto">{relation.text.replace(/^- -> /, "")}</span></p>}</For>
-      <For each={children()}>{child => <Part node={child} />}</For>
+    const part = () => entity(props.node)!
+    return <div class={part().holds ? "brief-scene-place" : "brief-scene-thing"} data-role={part().entity} data-node={props.node.id}>
+      <span class="brief-scene-label"><Name node={props.node} /></span>
+      <Runs id={part().id} />
+      <Relations id={part().id} />
+      <Show when={children(part().id).length}><div class="brief-scene-inside"><For each={children(part().id)}>{child => <Part node={child} />}</For></div></Show>
     </div>
   }
-  const roots = () => nodes().filter(node => entity(node) && entity(node)!.depth === 0)
   return <div class="brief-scene" aria-label="Who and what this involves">
-    <Show when={roots().some(node => acting(entity(node)!.id))}><div class="brief-scene-actors"><For each={roots().filter(node => acting(entity(node)!.id))}>{node => <Part node={node} />}</For></div></Show>
-    <div class="brief-scene-places"><For each={roots().filter(node => !acting(entity(node)!.id))}>{node => <Part node={node} />}</For></div>
+    <Show when={roots().some(node => acting(entity(node)!.id))}><div class="brief-scene-actors"><p class="brief-scene-head">Who would act</p>
+      <For each={roots().filter(node => acting(entity(node)!.id))}>{node => <Part node={node} />}</For></div></Show>
+    <div class="brief-scene-places"><p class="brief-scene-head">Where</p><For each={roots().filter(node => !acting(entity(node)!.id))}>{node => <Part node={node} />}</For></div>
     <Show when={nodes().some(node => node.part.role === "limit")}><ul class="brief-scene-limits"><For each={nodes().filter(node => node.part.role === "limit")}>{node =>
       <li data-node={node.id} dir="auto"><span aria-hidden="true">✕ </span>{node.part.role === "limit" ? node.part.text : ""}</li>}</For></ul></Show>
   </div>

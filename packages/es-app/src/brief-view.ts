@@ -24,9 +24,13 @@ export type PicturePart =
   | { role: "impact"; area: string; change: string }
   | { role: "visual"; title: string; alt: string }
   /** A scene part at its nesting depth (0 = not inside anything); `name` empty = not stated in the request. */
-  | { role: "entity"; id: string; entity: SceneRole; name: string; note?: string; parent?: string; depth: number; holds: boolean }
+  | { role: "entity"; id: string; entity: SceneRole; name: string; note?: string; parent?: string; depth: number; holds: boolean
+      /** Set on a part that runs as another (a workload on a shared identity): the identity it is drawn under. */
+      runs?: string }
   /** A proposed relation, drawn under its source: never a send, grant or outcome that happened. */
-  | { role: "relation"; kind: "sends" | "requests"; from: string; to: string; target: string; label?: string; option?: { number: number; mark?: "recommended" | "chosen" }; depth: number }
+  | { role: "relation"; kind: "sends" | "requests"; from: string; to: string; target: string; label?: string; option?: { number: number; mark?: "recommended" | "chosen" }; depth: number
+      /** The relation's short words for a drawing that places the target itself, and its authority state. */
+      verb: string; state: string }
   | { role: "limit"; text: string }
 
 /** A compare shape reduced to columns that are real options; fewer than two leaves nothing to compare. */
@@ -89,13 +93,23 @@ const sceneNodes = (scene: BriefScene, item: DeskItem): BriefNode[] => {
   const options = item.record?.options ?? []
   const byId = (id: string) => scene.parts.find(part => part.id === id)!
   const inside = (id?: string) => scene.parts.filter(part => part.in === id)
-  const acts = new Set(scene.relations.map(relation => relation.from))
-  const walk = (part: BriefScene["parts"][number], depth: number): BriefNode[] => [
-    { id: `picture:part:${part.id}`, group: "picture", text: `${sceneLabel(part)}${part.note ? ` (${part.note})` : ""}`,
-      part: { role: "entity", id: part.id, entity: part.role, name: part.name, ...(part.note ? { note: part.note } : {}), ...(part.in ? { parent: part.in } : {}), depth, holds: inside(part.id).length > 0 } },
-    ...scene.relations.flatMap((relation, index) => relation.from === part.id ? [relationNode(relation, index, depth)] : []),
-    ...inside(part.id).flatMap(child => walk(child, depth + 1)),
-  ]
+  // A top-level part whose only relation is running as another part is drawn under that part, so a shared identity
+  // shows everything that would inherit what it is granted.
+  const runsAs = (part: BriefScene["parts"][number]) => {
+    const own = scene.relations.filter(relation => relation.from === part.id)
+    return !part.in && own.length > 0 && own.every(relation => relation.kind === "uses") ? own[0]!.to : undefined
+  }
+  const acts = new Set(scene.relations.filter(relation => relation.kind !== "uses").map(relation => relation.from))
+  const walk = (part: BriefScene["parts"][number], depth: number): BriefNode[] => {
+    const runs = runsAs(part)
+    return [
+      { id: `picture:part:${part.id}`, group: "picture", text: `${sceneLabel(part)}${part.note ? ` (${part.note})` : ""}${runs ? ` · runs as ${byId(runs).name || "it"}` : ""}`,
+        part: { role: "entity", id: part.id, entity: part.role, name: part.name, ...(part.note ? { note: part.note } : {}), ...(part.in ? { parent: part.in } : {}), ...(runs ? { runs } : {}), depth, holds: inside(part.id).length > 0 } },
+      ...scene.parts.filter(user => runsAs(user) === part.id).flatMap(user => walk(user, depth + 1)),
+      ...scene.relations.flatMap((relation, index) => relation.from === part.id && relation.kind !== "uses" ? [relationNode(relation, index, depth)] : []),
+      ...inside(part.id).flatMap(child => walk(child, depth + 1)),
+    ]
+  }
   const relationNode = (relation: BriefScene["relations"][number], index: number, depth: number): BriefNode => {
     const to = byId(relation.to)
     // A message is sent into the place that holds it; anything else is named itself.
@@ -103,12 +117,14 @@ const sceneNodes = (scene: BriefScene, item: DeskItem): BriefNode[] => {
     const at = options.findIndex(option => option.id === relation.option)
     const mark = at < 0 ? undefined : item.record?.answer?.choice_id === relation.option ? "chosen" as const : item.record?.recommendation === relation.option ? "recommended" as const : undefined
     const option = at < 0 ? "" : `option ${at + 1}${mark === "chosen" ? " ✓" : mark === "recommended" ? " ◇" : ""} `
-    const action = relation.kind === "sends" ? `would send into ${target} · no send receipt recorded` : `requests ${relation.label ? `${relation.label} on ` : ""}${target} · ${mark === "chosen" ? "grant unverified" : "not granted"}`
-    return { id: `picture:relation:${index}`, group: "picture", text: `- -> ${option}${action}`,
-      part: { role: "relation", kind: relation.kind, from: relation.from, to: relation.to, target, ...(relation.label ? { label: relation.label } : {}), ...(at < 0 ? {} : { option: { number: at + 1, ...(mark ? { mark } : {}) } }), depth: depth + 1 } }
+    const verb = relation.kind === "sends" ? "would send" : `requests${relation.label ? ` ${relation.label}` : ""}`
+    const state = relation.kind === "sends" ? "no send receipt recorded" : mark === "chosen" ? "grant unverified" : "not granted"
+    return { id: `picture:relation:${index}`, group: "picture", text: `- -> ${option}${verb} ${relation.kind === "sends" ? "into" : "on"} ${target} · ${state}`,
+      part: { role: "relation", kind: relation.kind as "sends" | "requests", from: relation.from, to: relation.to, target, verb, state, ...(relation.label ? { label: relation.label } : {}), ...(at < 0 ? {} : { option: { number: at + 1, ...(mark ? { mark } : {}) } }), depth: depth + 1 } }
   }
   const roots = inside(undefined)
-  return [...[...roots.filter(part => acts.has(part.id)), ...roots.filter(part => !acts.has(part.id))].flatMap(part => walk(part, 0)),
+  const placed = roots.filter(part => !runsAs(part))
+  return [...[...placed.filter(part => acts.has(part.id)), ...placed.filter(part => !acts.has(part.id))].flatMap(part => walk(part, 0)),
     ...scene.limits.map((text, index): BriefNode => ({ id: `picture:limit:${index}`, group: "picture", text: `✕ ${text}`, part: { role: "limit", text } }))]
 }
 

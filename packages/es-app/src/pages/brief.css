@@ -170,30 +170,48 @@
 .brief-hud-pager { margin-block-start: auto; opacity: 0.8; }
 .brief-hud-preview > summary { font-size: 11px; }
 /* Record state apart from authority (brief-view authorityStrip): one compact line, caps and marks, not colour alone. */
-.brief-authority { font-size: 11px; font-weight: 600; letter-spacing: .02em; color: var(--ds-muted, var(--subtext0)); margin-block: 0 6px !important; }
-.brief-authority::before { content: "["; } .brief-authority::after { content: "]"; }
-/* A scene by domain role (brief-view sceneNodes): outline = role, nesting = containment, dashes = proposed only. */
-.brief-scene { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 18px; margin: 8px 0; font-size: 13px; }
-.brief-scene-actors { display: grid; gap: 10px; flex: 0 1 220px; }
-.brief-scene-places { display: grid; gap: 8px; flex: 1 1 280px; min-inline-size: 0; }
-.brief-scene-label { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
-.brief-scene-icon { inline-size: 20px; block-size: 20px; flex: none; }
-.brief-scene-mark { font-weight: 800; }
-.brief-scene-note { flex-basis: 100%; font-size: 11px; color: var(--ds-muted, var(--subtext0)); }
-.brief-scene-place { display: grid; gap: 6px; padding: 6px 10px 8px; border: 1px solid var(--ds-line, var(--surface1)); background: var(--ds-surface, var(--base)); }
-.brief-scene-place > .brief-scene-label { font-size: 11px; font-weight: 600; }
-.brief-scene-place[data-role="platform"] { border-radius: 6px; }
-.brief-scene-place[data-role="channel"] { border-radius: 14px; }
-.brief-scene-place[data-role="thread"] { border-radius: 10px; border-inline-start-width: 3px; background: var(--ds-raised, var(--surface0)); }
-.brief-scene-place[data-role="boundary"] { border: 2px dashed var(--ds-text, var(--text)); border-radius: 4px; background: none; }
-.brief-scene-thing { display: grid; gap: 4px; }
-.brief-scene-thing[data-role="unknown"] { color: var(--ds-muted, var(--subtext0)); }
-.brief-scene-thing[data-role="identity"] { padding: 6px 8px; border: 1px solid var(--ds-line, var(--surface1)); border-radius: 7px; }
-.brief-scene-thing[data-role="message"] { padding: 6px 8px; border: 1.5px dashed var(--ds-warn, var(--yellow)); border-radius: 4px; font-weight: 600; }
-.brief-scene-thing[data-role="queue"] { padding: 6px 8px; border: 1px solid var(--ds-line, var(--surface1)); box-shadow: 3px 3px 0 -1px var(--ds-surface, var(--base)), 3px 3px 0 0 var(--ds-line, var(--surface1)), 6px 6px 0 -1px var(--ds-surface, var(--base)), 6px 6px 0 0 var(--ds-line, var(--surface1)); }
-.brief-scene-relation { display: flex; align-items: center; gap: 6px; margin: 0 !important; font-size: 11px; color: var(--ds-warn, var(--yellow)); }
-.brief-scene-arrow { flex: none; inline-size: 28px; block-size: 0; border-block-start: 2px dashed currentColor; position: relative; }
-.brief-scene-arrow::after { content: ""; position: absolute; inset-inline-end: -2px; inset-block-start: -6px; border: 5px solid transparent; border-inline-start: 7px solid currentColor; }
-.brief-scene-relation[data-kind="sends"] .brief-scene-arrow::after { border-inline-start-color: transparent; border: 0; inline-size: 9px; block-size: 9px; inset-block-start: -6px; border-block-start: 1.5px solid currentColor; border-inline-end: 1.5px solid currentColor; transform: rotate(45deg); }
-.brief-scene-relation[data-kind="sends"] .brief-scene-arrow:dir(rtl)::after { transform: rotate(-45deg); }
-.brief-scene-limits { flex-basis: 100%; list-style: none; padding: 0 !important; margin: 0 !important; font-size: 11px; color: var(--ds-risk, var(--red)); }
+.brief-authority { display: flex; flex-wrap: wrap; gap: 4px; margin-block: 0 8px !important; font-size: 11px; font-weight: 600; }
+.brief-authority span { padding: 1px 7px; border-radius: 4px; color: var(--ds-muted, var(--subtext0)); background: var(--ds-raised, var(--surface0)); }
+.brief-authority [data-tone="record"] { color: var(--ds-text, var(--text)); letter-spacing: .04em; }
+.brief-authority [data-tone="recommended"] { color: var(--ds-accent, var(--accent)); background: color-mix(in srgb, var(--ds-accent, var(--accent)) 14%, transparent); }
+.brief-authority [data-tone="chosen"] { color: var(--ds-ok, var(--green)); background: color-mix(in srgb, var(--ds-ok, var(--green)) 14%, transparent); }
+.brief-authority [data-tone="unknown"] { background: none; box-shadow: inset 0 0 0 1px var(--ds-line, var(--surface1)); }
+/* A scene by domain role (brief-view sceneNodes): type and spacing carry structure; colour is the semantic role from
+ * the design-system tokens (palette-aware); the only outlines are the account fence and the proposed message. */
+.brief-scene { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 28px; margin: 10px 0 6px; font-size: 13px; }
+.brief-scene:not(:has(.brief-scene-actors)) { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 600px) { .brief-scene { grid-template-columns: minmax(0, 1fr); gap: 14px; } }
+.brief-scene-actors, .brief-scene-places { display: grid; align-content: start; gap: 14px; min-inline-size: 0; }
+.brief-scene-head { margin: 0 !important; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ds-muted, var(--subtext0)); }
+.brief-scene-label { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
+.brief-scene-name { font-weight: 600; }
+.brief-scene-icon { inline-size: 18px; block-size: 18px; flex: none; color: var(--ds-muted, var(--subtext0)); }
+.brief-scene-mark { font-weight: 700; color: var(--ds-muted, var(--subtext0)); }
+.brief-scene-note { font-size: 11px; color: var(--ds-muted, var(--subtext0)); }
+.brief-scene-thing, .brief-scene-place { display: grid; gap: 5px; }
+.brief-scene-inside { display: grid; gap: 8px; padding-inline-start: 14px; }
+.brief-scene-thing[data-role="unknown"] .brief-scene-icon { color: var(--ds-muted, var(--subtext0)); }
+/* A shared identity's reach: what else runs as it, in the risk role, so a grant to it visibly reaches those too. */
+.brief-scene-runs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding-inline-start: 26px; font-size: 11px; }
+.brief-scene-runs-label { color: var(--ds-muted, var(--subtext0)); }
+.brief-scene-run { padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--ds-risk, var(--red)) 16%, transparent); color: var(--ds-risk, var(--red)); font-weight: 600; }
+.brief-scene-relation { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: 0 !important; padding-inline-start: 26px; font-size: 12px; color: var(--ds-muted, var(--subtext0)); }
+.brief-scene-relation[data-mark] { color: var(--ds-text, var(--text)); }
+.brief-scene-arrow { flex: none; inline-size: 26px; block-size: 0; border-block-start: 2px dashed var(--ds-warn, var(--yellow)); position: relative; }
+.brief-scene-arrow::after { content: ""; position: absolute; inset-inline-end: -2px; inset-block-start: -6px; border: 5px solid transparent; border-inline-start: 7px solid var(--ds-warn, var(--yellow)); }
+.brief-scene-arrow:dir(rtl)::after { border-inline-start-color: transparent; border-inline-end: 7px solid var(--ds-warn, var(--yellow)); inset-inline-end: auto; inset-inline-start: -2px; }
+.brief-scene-option { font-weight: 600; }
+.brief-scene-relation[data-mark="recommended"] .brief-scene-option { color: var(--ds-accent, var(--accent)); }
+.brief-scene-relation[data-mark="chosen"] .brief-scene-option { color: var(--ds-ok, var(--green)); }
+.brief-scene-state { font-size: 11px; color: var(--ds-muted, var(--subtext0)); border: 1px dashed var(--ds-line, var(--surface1)); border-radius: 4px; padding: 0 5px; }
+/* Places: a platform and a channel are headings; a thread is a quiet spine; an account is a fence around what it holds. */
+.brief-scene-place[data-role="platform"] > .brief-scene-label { font-size: 11px; letter-spacing: .04em; color: var(--ds-muted, var(--subtext0)); }
+.brief-scene-place[data-role="thread"] > .brief-scene-inside { border-inline-start: 2px solid var(--ds-line, var(--surface1)); margin-inline-start: 4px; padding-block: 2px; }
+.brief-scene-place[data-role="boundary"] { justify-self: start; padding: 8px 14px 10px; border: 1.5px dashed var(--ds-text, var(--text)); border-radius: 6px; }
+.brief-scene-place[data-role="boundary"] > .brief-scene-inside { padding-inline-start: 0; }
+.brief-scene-place[data-role="boundary"] > .brief-scene-label .brief-scene-name { font-size: 12px; }
+.brief-scene-thing[data-role="message"] { justify-self: start; padding: 6px 10px; border: 1.5px dashed var(--ds-warn, var(--yellow)); border-radius: 6px; background: color-mix(in srgb, var(--ds-warn, var(--yellow)) 8%, transparent); }
+.brief-scene-thing[data-role="message"] .brief-scene-icon { color: var(--ds-warn, var(--yellow)); }
+.brief-scene-thing[data-role="queue"] { justify-self: start; padding: 4px 8px; box-shadow: 3px 3px 0 -1px var(--ds-surface, var(--base)), 3px 3px 0 0 var(--ds-line, var(--surface1)); border: 1px solid var(--ds-line, var(--surface1)); }
+.brief-scene-limits { grid-column: 1 / -1; list-style: none; padding: 0 !important; margin: 4px 0 0 !important; font-size: 11px; color: var(--ds-muted, var(--subtext0)); }
+.brief-scene-limits span { color: var(--ds-risk, var(--red)); }

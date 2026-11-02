@@ -160,10 +160,10 @@ const check = async (page, card, name) => card.evaluate((element, [name, missing
     "copy ask imperative, drafts first": name !== "posts" || question?.textContent.trim() === "Post the two announcements in #platform-changes, then record which you posted."
       && /Announcement drafts/.test(element.querySelector(".desk-subjects li")?.textContent ?? "") && !/Would post|Will you/.test(text),
     // A scene draws parts by role and nesting, keeps the unstated sender unstated and its send proposed, under the authority strip.
-    "scene roles and authority": name !== "scene" || !!element.querySelector('.brief-scene-place[data-role="channel"] > .brief-scene-place[data-role="thread"] > .brief-scene-thing[data-role="message"]')
+    "scene roles and authority": name !== "scene" || !!element.querySelector('.brief-scene-place[data-role="channel"] .brief-scene-place[data-role="thread"] .brief-scene-thing[data-role="message"]')
       && element.querySelectorAll('.brief-scene-thing[data-role="person"] .brief-scene-icon').length === 2
       && /someone not stated/.test(text) && /no send receipt recorded/.test(text) && !!element.querySelector('.brief-scene-relation[data-kind="sends"] .brief-scene-arrow')
-      && /OPEN request · ◇ option 1 recommended · no option chosen/.test(element.querySelector(".brief-authority")?.textContent ?? ""),
+      && [...element.querySelectorAll(".brief-authority span")].map(node => node.textContent).join(" · ") === "OPEN request · ◇ option 1 recommended · no option chosen",
     "4 items lossless": name !== "items" || JSON.stringify(rows) === JSON.stringify(["D1", "D2", "D3", "D4", "D5", "D6", "D7"]),
     "4 missing shown": name !== "items" && name !== "steps" || text.includes(missing),
     "5 gaps kept": name !== "single" || element.innerHTML.includes("Cost at full traffic is not measured."),

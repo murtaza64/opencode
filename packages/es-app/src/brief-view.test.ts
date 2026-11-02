@@ -196,3 +196,14 @@ test("a scene from a brief reply keeps only parts, nesting and relations that re
   if (state.state !== "ready") throw Error(state.state)
   expect(state.result.scene).toEqual({ parts: [{ id: "t", role: "thread", name: "existing release thread" }, { id: "m", role: "message", name: "x", in: "t" }], relations: [], limits: ["no deploys"] })
 })
+
+test("workloads that run as a shared identity are drawn under it, so a grant to it shows everything it reaches", () => {
+  const scene: BriefScene = { parts: [{ id: "worker", role: "identity", name: "build-worker" }, { id: "pr", role: "app", name: "PR builds" }, { id: "deployer", role: "identity", name: "deploy-only" },
+    { id: "account", role: "boundary", name: "prod account" }, { id: "role", role: "capability", name: "restart-role", in: "account" }],
+    relations: [{ from: "pr", to: "worker", kind: "uses" }, { from: "worker", to: "role", kind: "requests", label: "AssumeRole", option: "wait" }, { from: "deployer", to: "role", kind: "requests", label: "AssumeRole", option: "go" }], limits: [] }
+  const nodes = pictureNodes(result({ scene }), item({ context: "build-worker also runs PR builds; a deploy-only identity could AssumeRole restart-role in the prod account instead." }))
+  expect(nodes.map(node => node.text)).toEqual(["id build-worker", "app PR builds · runs as build-worker", "- -> option 2 requests AssumeRole on key restart-role · not granted",
+    "id deploy-only", "- -> option 1 ◇ requests AssumeRole on key restart-role · not granted", "inside prod account", "key restart-role"])
+  expect(nodes[1]!.part).toMatchObject({ role: "entity", runs: "worker", depth: 1 })
+  expect(nodes[2]!.part).toMatchObject({ role: "relation", verb: "requests AssumeRole", state: "not granted" })
+})
