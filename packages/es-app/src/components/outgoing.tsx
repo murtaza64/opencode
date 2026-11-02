@@ -51,28 +51,31 @@ export const OutgoingMessages = (props: {
             <Show when={submission().text || !submission().previews?.length}>
               <div class="pending-bubble" dir="auto">{submission().text}{submission().images && !submission().previews?.length ? ` · ${submission().images} image(s)` : ""}</div>
             </Show>
-            <div class="pending-hint outgoing-cue" role="status" title={[submission().error, submission().messageID && `Message ${submission().messageID}`].filter(Boolean).join("\n") || undefined}>
+            {/* The tick holds one place at the bubble's inline-end corner; the cue and its actions flow beside it. */}
+            <div class="receipt-line">
+              <div class="pending-hint outgoing-cue" role="status" title={[submission().error, submission().messageID && `Message ${submission().messageID}`].filter(Boolean).join("\n") || undefined}>
+                <span>{submission().status === "sending" || submission().checking ? "Sending…" : submission().status === "accepted" ? "Sent"
+                  : submission().absent ? "Not sent" : "Not confirmed yet"}</span>
+                <Show when={submission().status === "unknown"}>
+                  <Show when={submission().messageID && !submission().absent}>
+                    <button class="outgoing-action" title="Looks the message up by its ID; never resends"
+                      disabled={submission().checking || !props.connected} onClick={() => void props.composer.checkSubmission()}>Check</button>
+                  </Show>
+                  <Show when={submission().absent && props.session}>
+                    {(session) => (
+                      <button class="outgoing-action" title="Resends under the same message ID, so it cannot duplicate"
+                        disabled={state.sending || !props.connected} onClick={() => void props.composer.sendAgain(session())}>Send again</button>
+                    )}
+                  </Show>
+                  <Show when={submission().draft}>
+                    <button class="outgoing-action" aria-label="Edit unconfirmed message" title="Moves it back into the editor; a resend is a new message"
+                      disabled={!!props.composer.visibleDraft().text || !!props.composer.visibleDraft().images.length}
+                      onClick={() => props.composer.editNormalSubmission()}>Edit</button>
+                  </Show>
+                  <button class="outgoing-action" aria-label="Dismiss send status" onClick={() => props.composer.dismissNormalSubmission()}>Dismiss</button>
+                </Show>
+              </div>
               <NormalTick status={submission().status === "sending" || submission().checking ? "sending" : submission().status === "accepted" ? "accepted" : submission().absent ? "absent" : "unknown"} />
-              <span>{submission().status === "sending" || submission().checking ? "Sending…" : submission().status === "accepted" ? "Sent"
-                : submission().absent ? "Not sent" : "Not confirmed yet"}</span>
-              <Show when={submission().status === "unknown"}>
-                <Show when={submission().messageID && !submission().absent}>
-                  <button class="outgoing-action" title="Looks the message up by its ID; never resends"
-                    disabled={submission().checking || !props.connected} onClick={() => void props.composer.checkSubmission()}>Check</button>
-                </Show>
-                <Show when={submission().absent && props.session}>
-                  {(session) => (
-                    <button class="outgoing-action" title="Resends under the same message ID, so it cannot duplicate"
-                      disabled={state.sending || !props.connected} onClick={() => void props.composer.sendAgain(session())}>Send again</button>
-                  )}
-                </Show>
-                <Show when={submission().draft}>
-                  <button class="outgoing-action" aria-label="Edit unconfirmed message" title="Moves it back into the editor; a resend is a new message"
-                    disabled={!!props.composer.visibleDraft().text || !!props.composer.visibleDraft().images.length}
-                    onClick={() => props.composer.editNormalSubmission()}>Edit</button>
-                </Show>
-                <button class="outgoing-action" aria-label="Dismiss send status" onClick={() => props.composer.dismissNormalSubmission()}>Dismiss</button>
-              </Show>
             </div>
           </section>
         )}
@@ -141,43 +144,45 @@ const InputBubble = (props: { composer: Composer; connected: boolean; id: string
       aria-label={admission() ? "Input admission" : recovery() ? "Set-aside input" : undefined}>
       <ChatImages images={images()} />
       <Show when={text() || !images()?.length}><div class="pending-bubble receipt-text" dir="auto">{text()}</div></Show>
-      <div class="pending-hint outgoing-cue receipt-row" role="status" title={title()}>
-        <TickMark tick={tick().tick} label={tick().label} />
-        <span>{cue()}</span>
-        <Show when={deliverable()}>
-          <button class="outgoing-action outgoing-deliver" disabled={!props.connected || !!state.delivering}
-            aria-label={`${props.busy ? "Interrupt and steer now" : "Steer now"}: ${text()}`}
-            title={props.busy
-              ? `Stops ${props.running ? `${props.running.name} (its output so far is kept)` : "the current reply"} and starts the next turn with this steer. Nothing is rerun.`
-              : "Starts a turn with this steer."}
-            onClick={() => void props.composer.deliverInput(props.id)}>
-            {state.delivering === props.id ? "Steering…" : props.busy ? "Interrupt and steer now" : "Steer now"}
-          </button>
-        </Show>
-        <Show when={receipt()}>
-          <Show when={state.capabilities?.sessionInput?.update}>
-            <button class="outgoing-action" disabled={!props.connected || !!props.composer.editingInput()}
-              aria-label={`Edit ${delivery()} input: ${text()}`} aria-pressed={editing()}
-              onClick={() => props.composer.editInput(props.id)}>{editing() ? "Editing" : "Edit"}</button>
+      <div class="receipt-line">
+        <div class="pending-hint outgoing-cue receipt-row" role="status" title={title()}>
+          <span>{cue()}</span>
+          <Show when={deliverable()}>
+            <button class="outgoing-action outgoing-deliver" disabled={!props.connected || !!state.delivering}
+              aria-label={`${props.busy ? "Interrupt and steer now" : "Steer now"}: ${text()}`}
+              title={props.busy
+                ? `Stops ${props.running ? `${props.running.name} (its output so far is kept)` : "the current reply"} and starts the next turn with this steer. Nothing is rerun.`
+                : "Starts a turn with this steer."}
+              onClick={() => void props.composer.deliverInput(props.id)}>
+              {state.delivering === props.id ? "Steering…" : props.busy ? "Interrupt and steer now" : "Steer now"}
+            </button>
           </Show>
-          <button class="outgoing-action receipt-cancel" disabled={!props.connected}
-            aria-label={`Cancel ${delivery()} input: ${text()}`} onClick={() => props.composer.cancelInput(props.id)}>Cancel</button>
-        </Show>
-        {/* One action at a time: Check while the outcome is unknown, Retry only once Core said it has no such input. */}
-        <Show when={unconfirmed() && check() !== "checking"}>
-          <Show when={check() === "absent"} fallback={admission()
-            ? <button class="outgoing-action" aria-label="Check admission" title="Looks the input up by its request ID; never resends"
-                disabled={!props.connected || state.inputLoading} onClick={() => props.composer.refreshInputs()}>Check</button>
-            : <button class="outgoing-action" aria-label="Check set-aside input" title="Looks the input up by its request ID; never resends"
-                disabled={!props.connected || !!state.recoveryBusy} onClick={() => props.composer.recoverAdmission(props.id)}>Check</button>}>
-            <Show when={admission()} fallback={
-              <button class="outgoing-action" aria-label="Check and retry same set-aside input" title="Checks first; a retry reuses this exact request, so it cannot duplicate"
-                disabled={!props.connected || !!state.recoveryBusy} onClick={() => props.composer.recoverAdmission(props.id, true)}>Retry</button>}>
-              <button class="outgoing-action" aria-label="Check and retry same input" title="Checks first; a retry reuses this exact request, so it cannot duplicate"
-                disabled={!props.connected || state.sending} onClick={() => props.composer.retryAdmission()}>Retry</button>
+          <Show when={receipt()}>
+            <Show when={state.capabilities?.sessionInput?.update}>
+              <button class="outgoing-action" disabled={!props.connected || !!props.composer.editingInput()}
+                aria-label={`Edit ${delivery()} input: ${text()}`} aria-pressed={editing()}
+                onClick={() => props.composer.editInput(props.id)}>{editing() ? "Editing" : "Edit"}</button>
+            </Show>
+            <button class="outgoing-action receipt-cancel" disabled={!props.connected}
+              aria-label={`Cancel ${delivery()} input: ${text()}`} onClick={() => props.composer.cancelInput(props.id)}>Cancel</button>
+          </Show>
+          {/* One action at a time: Check while the outcome is unknown, Retry only once Core said it has no such input. */}
+          <Show when={unconfirmed() && check() !== "checking"}>
+            <Show when={check() === "absent"} fallback={admission()
+              ? <button class="outgoing-action" aria-label="Check admission" title="Looks the input up by its request ID; never resends"
+                  disabled={!props.connected || state.inputLoading} onClick={() => props.composer.refreshInputs()}>Check</button>
+              : <button class="outgoing-action" aria-label="Check set-aside input" title="Looks the input up by its request ID; never resends"
+                  disabled={!props.connected || !!state.recoveryBusy} onClick={() => props.composer.recoverAdmission(props.id)}>Check</button>}>
+              <Show when={admission()} fallback={
+                <button class="outgoing-action" aria-label="Check and retry same set-aside input" title="Checks first; a retry reuses this exact request, so it cannot duplicate"
+                  disabled={!props.connected || !!state.recoveryBusy} onClick={() => props.composer.recoverAdmission(props.id, true)}>Retry</button>}>
+                <button class="outgoing-action" aria-label="Check and retry same input" title="Checks first; a retry reuses this exact request, so it cannot duplicate"
+                  disabled={!props.connected || state.sending} onClick={() => props.composer.retryAdmission()}>Retry</button>
+              </Show>
             </Show>
           </Show>
-        </Show>
+        </div>
+        <TickMark tick={tick().tick} label={tick().label} />
       </div>
     </li>
   )
