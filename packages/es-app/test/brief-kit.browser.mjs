@@ -208,7 +208,7 @@ try {
       table[`${name} ${view}`] = result
       if (shots) await card.screenshot({ path: path.join(shots, `${name}-${view}.png`) }).catch(() => page.screenshot({ path: path.join(shots, `${name}-${view}.png`), fullPage: true }))
       // Glasses preview: the same brief paged for a 576x288 one-colour HUD, inside Details; reading only.
-      if (name === "single" || name === "items") {
+      if (name === "single" || name === "items" || name === "sequence") {
         const answers = []
         page.on("request", request => { if (request.method() !== "GET" && /\/commands|\/answer/.test(request.url())) answers.push(request.url()) })
         const outer = card.locator("details.home-details").first()
@@ -225,17 +225,19 @@ try {
         await expect(frame.locator(".brief-hud-title")).toBeVisible()
         // Structural parity: the card and the glasses render the same nodes (ids) in the same order.
         const hudIds = [...await frame.locator(".brief-hud-line").evaluateAll(lines => lines.map(line => line.dataset.node))]
-        if (name === "items") {
-          if (shots) await details.locator(".brief-hud").screenshot({ path: path.join(shots, `hud-${name}-p1-${view}.png`) })
-          const next = details.locator(".brief-hud").getByRole("button", { name: "Next" })
+        // Page through every glasses page; Next stops at the last.
+        const next = details.locator(".brief-hud").getByRole("button", { name: "Next" })
+        for (let page = 2; await next.count() && await next.isEnabled(); page++) {
+          if (shots) await details.locator(".brief-hud").screenshot({ path: path.join(shots, `hud-${name}-p${page - 1}-${view}.png`) })
           await next.click()
-          await expect(frame.locator(".brief-hud-pager")).toContainText(/^2\//)
+          await expect(frame.locator(".brief-hud-pager")).toContainText(new RegExp(`^${page}/`))
           hudIds.push(...await frame.locator(".brief-hud-line").evaluateAll(lines => lines.map(line => line.dataset.node)))
         }
+        if (name === "items") await expect(frame.locator(".brief-hud-pager")).toContainText(/^2\/2/)
         const cardIds = await card.evaluate(element => [...element.querySelectorAll("[data-node]")].filter(node => !node.closest(".brief-hud")).map(node => node.dataset.node))
         const unique = list => list.filter((id, index) => list.indexOf(id) === index)
         const shown = new Set(cardIds)
-        assert.deepEqual(unique(hudIds).filter(id => shown.has(id)), unique(cardIds), `${name} ${view}: card and glasses node order differ`)
+        assert.deepEqual(unique(hudIds).filter(id => shown.has(id)), unique(cardIds), `${name} ${view}: card and glasses node order differ: card ${JSON.stringify(unique(cardIds))} glasses ${JSON.stringify(unique(hudIds))}`)
         assert(cardIds.some(id => id.startsWith("option:")) && (name !== "items" || cardIds.filter(id => id.startsWith("row:")).length === 7), `${name} ${view}: card nodes missing ${cardIds}`)
         // Paging the glasses view never answers: no answer request leaves the page.
         assert.deepEqual(answers, [], `${name} ${view}: glasses preview sent an answer`)
