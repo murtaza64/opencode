@@ -15,6 +15,8 @@ import { LinkedText } from "./linked-text"
 import { CopyCode, linkName, MISSING, Refs, Value } from "./brief-kit"
 import contract from "../brief-contract.json"
 import { readBriefFeedback, sendBriefFeedback, type BriefRating } from "../brief-feedback"
+import { briefSemantics, hudPages } from "../brief-view"
+import { BriefHud } from "./brief-hud"
 
 /** Where a cited source opens: the source thread at the cited messages, or a markdown doc in the editspace. */
 const sourceLink = (source: BriefSource, refs: EvidenceRef[], item: DeskItem) => {
@@ -95,6 +97,9 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
       <Show when={props.live && !props.pinned && props.item.record && props.regenerate}><p class="desk-brief-regenerate">
         <Show when={!props.regenerating && !regeneratingJob(props.jobs, props.item)} fallback={<span class="home-muted" role="status">Regenerating brief…</span>}>
           <button type="button" class="desk-link-button" onClick={() => props.regenerate!()}>Regenerate brief</button></Show></p></Show>
+      {/* The same brief as the glasses would page it: reading aid only, no device, no answer. */}
+      <details class="brief-hud-preview"><summary>Glasses preview</summary>
+        <BriefHud pages={hudPages(briefSemantics(props.item, value().result, { host: props.host }))} /></details>
       {/* Keyed to the brief shown, so a newer brief never inherits this one's rating. */}
       <Show when={!props.host && value().job} keyed>{job => <BriefFeedbackControls job={job} />}</Show>
     </Dynamic>}</Show>

@@ -207,6 +207,31 @@ try {
       const result = await check(page, card, name)
       table[`${name} ${view}`] = result
       if (shots) await card.screenshot({ path: path.join(shots, `${name}-${view}.png`) }).catch(() => page.screenshot({ path: path.join(shots, `${name}-${view}.png`), fullPage: true }))
+      // Glasses preview: the same brief paged for a 576x288 one-colour HUD, inside Details; reading only.
+      if (name === "single" || name === "items") {
+        const answers = []
+        page.on("request", request => { if (request.method() !== "GET" && /\/commands|\/answer/.test(request.url())) answers.push(request.url()) })
+        const outer = card.locator("details.home-details").first()
+        if (!(await outer.evaluate(element => element.open))) await outer.locator(":scope > summary").click()
+        const details = card.locator(".desk-brief-detail").first()
+        await details.locator(".brief-hud-preview > summary").click()
+        const frame = details.locator(".brief-hud-frame")
+        await expect(frame).toBeVisible()
+        const size = await frame.evaluate(element => ({ ratio: element.clientWidth / element.clientHeight, overflow: element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1, lines: element.children.length }))
+        assert(Math.abs(size.ratio - 2) < 0.05, `${name} ${view}: HUD frame ratio ${size.ratio}`)
+        assert(!size.overflow, `${name} ${view}: HUD text overflows its frame`)
+        assert(size.lines <= 9, `${name} ${view}: HUD shows ${size.lines} lines`)
+        await expect(frame).toHaveAttribute("dir", "ltr")
+        await expect(frame.locator(".brief-hud-title")).toBeVisible()
+        if (name === "items") {
+          const next = details.locator(".brief-hud").getByRole("button", { name: "Next" })
+          await next.click()
+          await expect(frame.locator(".brief-hud-pager")).toContainText(/^2\//)
+        }
+        // Paging the glasses view never answers: no answer request leaves the page.
+        assert.deepEqual(answers, [], `${name} ${view}: glasses preview sent an answer`)
+        if (shots) await details.locator(".brief-hud").screenshot({ path: path.join(shots, `hud-${name}-${view}.png`) })
+      }
       await page.close()
     }
     await context.close()

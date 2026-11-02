@@ -160,3 +160,12 @@
 .ds-status[data-tone=unknown] { color: var(--ds-muted, var(--subtext0)); }
 .ds-status[data-tone=active] .ds-status-glyph { color: var(--ds-accent, var(--accent)); }
 .ds-links { display: flex; flex-wrap: wrap; gap: var(--ds-space-1, 2px) var(--ds-space-4, 12px); margin: 0; font-size: 11px; }
+
+/* Glasses preview (brief-hud.tsx): the G2's one green on black, monospace, fixed 48x9 grid scaled to the width. */
+.brief-hud { margin: 6px 0; display: grid; gap: 4px; container-type: inline-size; max-inline-size: 576px; }
+.brief-hud-frame { inline-size: 100%; box-sizing: border-box; padding: 0.4% 1%;
+  background: #000; color: #4cff6a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: calc(100cqi / 30.5); line-height: 1.55;
+  white-space: pre; overflow: hidden; border-radius: 6px; display: flex; flex-direction: column; }
+.brief-hud-title { opacity: 0.8; }
+.brief-hud-pager { margin-block-start: auto; opacity: 0.8; }
+.brief-hud-preview > summary { font-size: 11px; }
