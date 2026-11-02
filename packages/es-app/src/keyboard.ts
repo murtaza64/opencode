@@ -42,7 +42,11 @@ const CHORDS: ShortcutID[] = ["nextRegion", "previousRegion", "focusLeft", "focu
 export const installKeyboard = (actions: KeyboardActions) => {
   const matcher = createSequenceMatcher((id) => Boolean(actions[id]))
   let timer: ReturnType<typeof setTimeout> | undefined
+  // A "g" pressed in the composer's Normal mode also reaches its vim (gg, gj, gk); the
+  // sequence only claims the second key when it completes a binding.
+  let shared = false
   const cancel = () => {
+    shared = false
     matcher.reset()
     clearTimeout(timer)
     setWhichKey(undefined)
@@ -58,7 +62,9 @@ export const installKeyboard = (actions: KeyboardActions) => {
       if (!event.repeat) actions[chord]!()
       return
     }
-    if (event.ctrlKey || event.metaKey || event.altKey || isTypingTarget(event.target)) return cancel()
+    // The composer in vim Normal mode is Normal scope (proposal §3), not text entry.
+    const composerNormal = event.target instanceof HTMLTextAreaElement && event.target.classList.contains("vim-normal")
+    if (event.ctrlKey || event.metaKey || event.altKey || (isTypingTarget(event.target) && !composerNormal)) return cancel()
     const key = sequenceKey(event)
     if (!key) return
     if (key === "Escape") {
@@ -73,8 +79,15 @@ export const installKeyboard = (actions: KeyboardActions) => {
     const step = matcher.feed(key)
     if (step.kind === "none") {
       // A pending sequence swallows the unbound key so it has no side effect.
-      if (wasPending) consume(event)
+      if (wasPending && !shared) consume(event)
       return cancel()
+    }
+    if (step.kind === "prefix" && !wasPending && composerNormal && key === "g") {
+      shared = true
+      clearTimeout(timer)
+      const prefix = matcher.pending()
+      timer = setTimeout(() => setWhichKey({ prefix, next: step.next }), 300)
+      return
     }
     consume(event)
     clearTimeout(timer)
