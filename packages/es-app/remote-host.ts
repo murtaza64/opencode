@@ -123,7 +123,7 @@ const sshTarget = (value: unknown): SshTarget => {
 export const remoteTargets = (origin: string) => ({ opencode: origin, dashboard: `${origin}/es` })
 
 // Routes the dashboard authorizes with the operator cookie: attention, the Front desk's own files, and pin writes.
-export const attentionRoute = /^\/es\/api\/(?:attention(?:\/|$)|frontdesk\/(?:memory|ignored-failures|deliverables\/seen|briefs\/[^/]+\/regenerate)$|pins\/[^/]+(?:\/order)?$)/
+export const attentionRoute = /^\/es\/api\/(?:attention(?:\/|$)|frontdesk\/(?:memory|pointer|ignored-failures|deliverables\/seen|briefs\/[^/]+\/regenerate)$|pins\/[^/]+(?:\/order)?$)/
 
 const OPERATOR = "es_attention_operator"
 // Cookies ignore ports, so every loopback listener sees every host's cookies: give each remote

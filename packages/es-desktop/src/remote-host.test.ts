@@ -703,3 +703,9 @@ test("one proxied host may be the default for new work", async () => {
   ])
   await expect(serviceHosts(directory, { ES_REMOTE_HOSTS: '[{"id":"mini","origin":"https://a.b.ts.net","default":true},{"id":"m2","origin":"https://c.b.ts.net","default":true}]' })).rejects.toThrow("Only one default host")
 })
+
+test("a proxied host's own tab carries that host's operator cookie on Front Desk pointer reads and writes", async () => {
+  const { attentionRoute } = await import("../../es-app/remote-host")
+  expect(attentionRoute.test("/es/api/frontdesk/pointer")).toBe(true)
+  expect(attentionRoute.test("/es/api/frontdesk/pointer/x")).toBe(false)
+})

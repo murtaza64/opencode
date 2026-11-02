@@ -215,7 +215,7 @@ export const apiAllowed = (method: string, pathname: string) => {
       // One completed tool part's large attachment (an image or file a tool returned), fetched lazily
       // by its index instead of inline in the message page. Read-only; Core checks the part's session.
       /^\/oc\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/attachment\/\d{1,4}$/,
-      /^\/es\/api\/(editspaces|state|quota|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work|mail|wake-events|subscriptions|handoffs|lane-provenance|frontdesk\/memory|frontdesk\/ignored-failures|surfaces|pins|pins\/events)$/,
+      /^\/es\/api\/(editspaces|state|quota|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work|mail|wake-events|subscriptions|handoffs|lane-provenance|frontdesk\/memory|frontdesk\/pointer|frontdesk\/ignored-failures|surfaces|pins|pins\/events)$/,
       /^\/es\/api\/surfaces\/[a-z0-9][a-z0-9-]{0,39}\/snapshot$/,
       /^\/es\/api\/attention(?:\/session|\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/,
       // This host's Front desk model and one request's linked conversation (read-only).
@@ -248,7 +248,7 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/es\/api\/frontdesk\/briefs\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/regenerate$/,
     ],
     PATCH: [/^\/oc\/session\/[\w-]+$/, /^\/oc\/session\/[\w-]+\/input\/[\w-]+$/, new RegExp(`^/es/api/pins/${PIN_REF}/order$`)],
-    PUT: [/^\/es\/api\/(subscriptions|frontdesk\/memory)$/, new RegExp(`^/es/api/pins/${PIN_REF}$`)],
+    PUT: [/^\/es\/api\/(subscriptions|frontdesk\/memory|frontdesk\/pointer)$/, new RegExp(`^/es/api/pins/${PIN_REF}$`)],
     DELETE: [/^\/oc\/session\/[\w-]+(?:\/(input|aside)\/[\w-]+)?$/, /^\/es\/api\/subscriptions$/, new RegExp(`^/es/api/pins/${PIN_REF}$`), SELF_HANDOFF],
   }
   return routes[method]?.some((route) => route.test(pathname)) ?? false
