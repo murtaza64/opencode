@@ -335,6 +335,8 @@ export const RestartContinuation = Schema.Struct({
   reason: Schema.optional(Schema.Literals(["interrupted-tool", "aborted", "out-of-order", "operator-recovery"])),
   interruptedTools: NonNegativeInt,
   time: NonNegativeInt,
+  /** An operator recovery with `run: false` closed the step and started no turn. */
+  closed: Schema.optional(Schema.Literal(true)),
 }).annotate({ identifier: "RestartContinuation" })
 export type RestartContinuation = Types.DeepMutable<Schema.Schema.Type<typeof RestartContinuation>>
 

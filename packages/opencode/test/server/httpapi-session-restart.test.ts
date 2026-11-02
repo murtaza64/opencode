@@ -512,7 +512,7 @@ it.live(
   90_000,
 )
 
-const recover = (dir: string, sessionID: string, body: { recoveryID: string; anchorMessageID: string; text?: string }) =>
+const recover = (dir: string, sessionID: string, body: { recoveryID: string; anchorMessageID: string; text?: string; run?: boolean }) =>
   requestInDirectory(`/session/${sessionID}/recover`, dir, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -627,4 +627,79 @@ it.live(
       { config: testProviderConfig },
     ),
   60_000,
+)
+
+it.live(
+  "recover run:false closes the interrupted step and turn once, runs nothing and leaves queued input pending",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.text("must not be requested")
+          const session = yield* Session.use.create({ title: "Close only" })
+          const seeded = yield* seedInterrupted(session, dir)
+          const started = yield* Session.Service.use((sessions) => sessions.turnStarted(session.id))
+          // Input queued while the step was unfinished: an advisory wake never promotes it.
+          const queued = yield* requestInDirectory(`/session/${session.id}/input`, dir, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ requestID: "queued-1", delivery: "queue", text: "after you recover" }),
+          }).pipe(Effect.flatMap((response) => response.json))
+          expect(queued).toMatchObject({ state: "pending" })
+          const before = (yield* messages(dir, session.id)).length
+
+          const result = yield* recover(dir, session.id, { recoveryID: "close-1", anchorMessageID: seeded.assistant.id, run: false })
+          expect(result).toMatchObject({ outcome: "closed", abandonedTools: 1, marker: { reason: "operator-recovery", interruptedTools: 1, closed: true } })
+
+          const history = yield* messages(dir, session.id)
+          expect(history).toHaveLength(before)
+          const anchor = history.find((message) => message.info.id === seeded.assistant.id)!
+          expect(anchor.info.role === "assistant" && anchor.info.error?.name).toBe("MessageAbortedError")
+          expect(anchor.info.role === "assistant" && anchor.info.time.completed).toBeGreaterThan(0)
+          const cut = anchor.parts.find((part) => part.type === "tool" && part.callID === "call_cut")!
+          expect(cut.type === "tool" && cut.state.status === "error" && cut.state.error).toContain("effect is unknown and was not repeated")
+          expect(history.some((message) => message.info.role === "user" && "source" in message.info && message.info.source?.kind === "recovery")).toBe(false)
+          const info = (yield* requestInDirectory(`/session/${session.id}`, dir).pipe(Effect.flatMap((r) => r.json))) as Session.Info
+          expect(info.time.turn?.started).toBe(started)
+          expect(info.time.turn?.ended).toBeGreaterThanOrEqual(started)
+          const receipt = yield* requestInDirectory(`/session/${session.id}/input/queued-1`, dir).pipe(Effect.flatMap((r) => r.json))
+          expect(receipt).toMatchObject({ state: "pending" })
+
+          // Exactly once: the same request is a duplicate; the other mode with this ID is refused.
+          expect(yield* recover(dir, session.id, { recoveryID: "close-1", anchorMessageID: seeded.assistant.id, run: false })).toMatchObject({ outcome: "duplicate", marker: result.marker })
+          expect(yield* recover(dir, session.id, { recoveryID: "close-1", anchorMessageID: seeded.assistant.id })).toMatchObject({ outcome: "conflict" })
+          const after = yield* messages(dir, session.id)
+          expect(after.find((m) => m.info.id === seeded.assistant.id)?.info).toEqual(anchor.info)
+          expect(yield* toolRuns(dir)).toBe("x")
+          expect(yield* llm.calls).toBe(0)
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+it.live(
+  "a recovery ID used to run cannot later close, and a finished session is refused by run:false without writing",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.text("recovered by operator intent")
+          const session = yield* Session.use.create({ title: "Run then close" })
+          const seeded = yield* seedInterrupted(session, dir)
+          expect((yield* recover(dir, session.id, { recoveryID: "run-1", anchorMessageID: seeded.assistant.id })).outcome).toBe("scheduled")
+          yield* idleWithReply(dir, session.id, "recovered by operator intent")
+          const before = yield* messages(dir, session.id)
+          expect(yield* recover(dir, session.id, { recoveryID: "run-1", anchorMessageID: seeded.assistant.id, run: false })).toMatchObject({ outcome: "conflict" })
+          expect((yield* recover(dir, session.id, { recoveryID: "close-2", anchorMessageID: seeded.assistant.id, run: false })).outcome).toBe("advanced")
+          expect(yield* messages(dir, session.id)).toEqual(before)
+          expect(yield* llm.calls).toBe(1)
+
+          const done = yield* Session.use.create({ title: "Done" })
+          const finished = yield* seedInterrupted(done, dir, { tools: false, finish: "stop", completedAt: Date.now() })
+          expect((yield* recover(dir, done.id, { recoveryID: "close-3", anchorMessageID: finished.assistant.id, run: false })).outcome).toBe("complete")
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
 )

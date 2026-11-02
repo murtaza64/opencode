@@ -1633,7 +1633,10 @@ const layer = Layer.effect(
         const marker = (yield* restartAnchor(input.sessionID, input.anchorMessageID))?.info.restarts?.find(
           (item) => item.restartID === input.recoveryID,
         )
-        return marker ? { outcome: "duplicate" as const, marker } : undefined
+        if (!marker) return undefined
+        // The recovery ID already decided one mode; the other mode gets nothing written or run.
+        if ((marker.closed === true) !== (input.run === false)) return { outcome: "conflict" as const, marker }
+        return { outcome: "duplicate" as const, marker }
       })
       const evaluate = Effect.gen(function* () {
         if (!FSUtil.sameDirectory(session.directory, ctx.directory)) return { outcome: "mismatch" as const }
@@ -1665,6 +1668,34 @@ const layer = Layer.effect(
         return { go: { decision, now } }
       }).pipe(Effect.map((value): { stop?: SessionRestart.RecoverResult; go?: { decision: Extract<SessionRestart.RecoverDecision, { outcome: "scheduled" }>; now: number } } =>
         "go" in value || "stop" in value ? value : { stop: value as SessionRestart.RecoverResult }))
+      if (input.run === false) {
+        // Close only: under the Session's run lock, re-check freshness, write the same abandoned results and
+        // closed step as a recovery, settle the open turn, and start nothing.
+        const closed = yield* state
+          .admitIdle(input.sessionID, (idle) =>
+            Effect.gen(function* () {
+              const repeated = yield* duplicate
+              if (repeated) return repeated
+              if (!idle) return { outcome: "running" as const }
+              const evaluated = yield* evaluate
+              if (evaluated.stop) return evaluated.stop
+              const current = evaluated.go!
+              const rows = SessionRestart.settleRecovery(current.decision, input, current.now)
+              for (const part of rows.parts) yield* sessions.updatePart(part)
+              yield* sessions.updateMessage(rows.anchor)
+              for (const info of rows.trailing) yield* sessions.updateMessage(info)
+              const turn = (yield* sessions.get(input.sessionID).pipe(Effect.orDie)).time.turn
+              if (turn?.started !== undefined && turn.ended === undefined) yield* sessions.turnEnded(input.sessionID, turn.started)
+              return {
+                outcome: "closed" as const,
+                marker: current.decision.marker,
+                abandonedTools: current.decision.abandoned.length,
+              } satisfies SessionRestart.RecoverResult
+            }),
+          )
+          .pipe(Effect.catchTag("SessionSuperseded", () => Effect.succeed({ outcome: "superseded" as const })))
+        return closed
+      }
       const requestID = `recovery-${input.recoveryID}`
       // Admission takes the Session's run lock, so it happens before the locked guard. While the step is
       // unfinished an advisory wake never promotes it; the guard re-checks and withdraws it if declined.

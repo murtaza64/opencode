@@ -15,6 +15,11 @@ export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly wake: (sessionID: SessionID, work: Effect.Effect<SessionV1.WithParts | undefined>) => Effect.Effect<Runner.WakeDecision, SessionSupersession.Closed>
   readonly admit: <A, E, R>(sessionID: SessionID, work: Effect.Effect<A, E, R>) => Effect.Effect<A, E | SessionSupersession.Closed, R>
+  /** Like `admit`, but `work` learns whether the Session is idle under the lock, so it can refuse a running Session. */
+  readonly admitIdle: <A, E, R>(
+    sessionID: SessionID,
+    work: (idle: boolean) => Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | SessionSupersession.Closed, R>
   readonly supersede: (
     sessionID: SessionID,
     successor: SessionID,
@@ -155,11 +160,12 @@ const layer = Layer.effect(
       if (existing?.busy) yield* busyError(sessionID)
     })
 
-    const admit = <A, E, R>(sessionID: SessionID, work: Effect.Effect<A, E, R>) =>
+    const admitIdle = <A, E, R>(sessionID: SessionID, work: (idle: boolean) => Effect.Effect<A, E, R>) =>
       Effect.gen(function* () {
         const owner = yield* runner(sessionID, Effect.succeed(undefined))
-        return yield* owner.locked((idle) => Effect.andThen(gate(sessionID, idle), work))
+        return yield* owner.locked((idle) => Effect.andThen(gate(sessionID, idle), work(idle)))
       })
+    const admit = <A, E, R>(sessionID: SessionID, work: Effect.Effect<A, E, R>) => admitIdle(sessionID, () => work)
 
     const supersede = Effect.fn("SessionRunState.supersede")(function* (
       sessionID: SessionID,
@@ -260,6 +266,7 @@ const layer = Layer.effect(
       wake: (sessionID, work) => hold(sessionID, wake(sessionID, work)),
       consume,
       admit: (sessionID, work) => hold(sessionID, admit(sessionID, work)),
+      admitIdle: (sessionID, work) => hold(sessionID, admitIdle(sessionID, work)),
       supersede,
       cancelSupersession,
     })

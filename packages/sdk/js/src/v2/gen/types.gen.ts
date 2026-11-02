@@ -244,6 +244,7 @@ export type RestartContinuation = {
   reason?: "interrupted-tool" | "aborted" | "out-of-order" | "operator-recovery"
   interruptedTools: number
   time: number
+  closed?: true
 }
 
 export type NudgeMarker = {
@@ -3041,12 +3042,15 @@ export type SessionRecoverInput = {
   text: string
   reason: string
   sender: string
+  run?: boolean
 }
 
 export type SessionRecoverResult = {
   outcome:
     | "scheduled"
+    | "closed"
     | "duplicate"
+    | "conflict"
     | "running"
     | "advanced"
     | "complete"
