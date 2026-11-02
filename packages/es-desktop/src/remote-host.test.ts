@@ -709,3 +709,72 @@ test("a proxied host's own tab carries that host's operator cookie on Front Desk
   expect(attentionRoute.test("/es/api/frontdesk/pointer")).toBe(true)
   expect(attentionRoute.test("/es/api/frontdesk/pointer/x")).toBe(false)
 })
+
+// A Mini Core whose event stream answers `fail` with an error status before it serves events again (a restart's 503,
+// or a refused 401), counting every attempt.
+const flakyStream = (fail: { status: number; times: number }) => {
+  const attempts: number[] = []
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: (request) => {
+      if (new URL(request.url).pathname !== "/global/event") return Response.json({})
+      attempts.push(Date.now())
+      if (attempts.length <= fail.times) return new Response("restarting", { status: fail.status })
+      return new Response(new ReadableStream({ start: (controller) => controller.enqueue(new TextEncoder().encode('data: {"type":"session.updated","host":"mini"}\n\n')) }),
+        { headers: { "content-type": "text/event-stream" } })
+    },
+  })
+  cleanup.push(async () => void (await server.stop(true)))
+  return { origin: server.url.origin, attempts, seen: [] } as unknown as ReturnType<typeof fakeHost> & { attempts: number[] }
+}
+
+const subscribeHost = async (origin: string, key: string, until: (packets: { id: number; type: string; code?: number }[]) => boolean, extra?: (socket: WebSocket) => void) => {
+  const packets: { id: number; type: string; code?: number }[] = []
+  const socket = new WebSocket(`${origin.replace("http", "ws")}/oc/global/event`, "opencode-events-v1", { headers: { origin, "x-editspace-key": key } })
+  cleanup.push(async () => socket.close())
+  await new Promise<void>((resolve, reject) => {
+    socket.on("open", () => {
+      socket.send(JSON.stringify({ type: "subscribe", id: 1, url: "/hosts/mini/oc/global/event" }))
+      socket.send(JSON.stringify({ type: "subscribe", id: 2, url: "/oc/global/event" }))
+      extra?.(socket)
+    })
+    socket.on("message", (data) => {
+      packets.push(JSON.parse(data.toString()))
+      if (until(packets)) resolve()
+    })
+    socket.on("error", reject)
+  })
+  return { packets, socket }
+}
+
+test("a host stream that answers an error status (Core restarting) is opened again with backoff, without the client resubscribing", async () => {
+  const mini = flakyStream({ status: 503, times: 1 })
+  const { server } = await workListener(mini)
+  const { packets } = await subscribeHost(server.origin, server.key, (seen) => seen.some((packet) => packet.id === 1 && packet.type === "message"))
+  const mine = packets.filter((packet) => packet.id === 1).map((packet) => packet.type)
+  expect(mine.slice(0, 3)).toEqual(["error", "open", "message"])
+  expect(mini.attempts.length).toBe(2)
+  expect(mini.attempts[1]! - mini.attempts[0]!).toBeGreaterThanOrEqual(900)
+  // The socket's other subscription kept serving this host's events.
+  expect(packets.filter((packet) => packet.id === 2).map((packet) => packet.type)).toContain("message")
+}, 10_000)
+
+test("a refused host stream (401) keeps reporting an error and retries with growing waits; it never reports open", async () => {
+  const mini = flakyStream({ status: 401, times: 99 })
+  const { server } = await workListener(mini)
+  const { packets } = await subscribeHost(server.origin, server.key, (seen) => seen.filter((packet) => packet.id === 1 && packet.type === "error").length >= 3)
+  expect(packets.filter((packet) => packet.id === 1).map((packet) => packet.type)).toEqual(["error", "error", "error"])
+  const gaps = mini.attempts.slice(1).map((at, index) => at - mini.attempts[index]!)
+  expect(gaps[1]!).toBeGreaterThan(gaps[0]! * 1.5)
+}, 15_000)
+
+test("unsubscribing while a host stream waits to retry leaves no stream behind", async () => {
+  const mini = flakyStream({ status: 503, times: 99 })
+  const { server } = await workListener(mini)
+  const { socket } = await subscribeHost(server.origin, server.key, (seen) => seen.some((packet) => packet.id === 1 && packet.type === "error"))
+  socket.send(JSON.stringify({ type: "unsubscribe", id: 1 }))
+  const before = mini.attempts.length
+  await Bun.sleep(1500)
+  expect(mini.attempts.length).toBe(before)
+}, 10_000)

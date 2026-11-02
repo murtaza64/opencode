@@ -743,7 +743,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       </Show>
       <Show when={workState() === "disconnected"}>
         <button disabled={live.loading()} onClick={() => {
-          void live.load().catch(() => {})
+          void live.reconnect()?.catch(() => {})
           void activity.refreshDirectory(directory, true)
         }}>reconnect</button>
       </Show>

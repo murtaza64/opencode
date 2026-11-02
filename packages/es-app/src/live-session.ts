@@ -507,50 +507,55 @@ export function createLiveSession(
     })
   }
   let source: ServerEvents | undefined
-  try {
-    // Another Work host streams only its global events through the Local listener: keep this
-    // directory's and unwrap them to the instance event shape.
-    source = createServerEvents(host.id ? `${host.base}/global/event` : `${host.base}/event?directory=${encodeURIComponent(directory)}`, {
-      types: ["session.", "message.", "todo.", "permission.", "question."],
-    })
-    source.onopen = () => {
-      if (disposed) return
-      setConnection("stream", "")
-      // Only the first open can use the short resync: a reopen after a drop may have missed any
-      // number of messages, so it re-reads the full tail.
-      const firstOpen = !streamOpened
-      streamOpened = true
-      releaseInitial?.()
-      if (!activeLoad || snapshotStarted) {
-        resyncNext = firstOpen
-        refresh()
-      }
-    }
-    source.onerror = () => {
-      if (disposed) return
-      releaseInitial?.()
-      batch(() => {
-        setConnection("stream", "Session connection lost. Reconnecting...")
-        stopOnFailure()
+  // Subscribes this session's stream; Reconnect calls it again for a fresh subscription (a new upstream stream).
+  const subscribe = () => {
+    source?.close()
+    try {
+      // Another Work host streams only its global events through the Local listener: keep this
+      // directory's and unwrap them to the instance event shape.
+      source = createServerEvents(host.id ? `${host.base}/global/event` : `${host.base}/event?directory=${encodeURIComponent(directory)}`, {
+        types: ["session.", "message.", "todo.", "permission.", "question."],
       })
-    }
-    source.onmessage = (e) => {
-      if (disposed) return
-      try {
-        const event = host.id ? globalEvent(JSON.parse(e.data), directory) : JSON.parse(e.data)
-        if (event === null) return
-        if (!event || typeof event.type !== "string") throw new Error("Invalid session event")
-        setConnection("event", "")
-        apply(event)
-        void Promise.resolve(onEvent?.(event)).catch(eventFailure)
-      } catch (failure) {
-        eventFailure(failure)
+      source.onopen = () => {
+        if (disposed) return
+        setConnection("stream", "")
+        // Only the first open can use the short resync: a reopen after a drop may have missed any
+        // number of messages, so it re-reads the full tail.
+        const firstOpen = !streamOpened
+        streamOpened = true
+        releaseInitial?.()
+        if (!activeLoad || snapshotStarted) {
+          resyncNext = firstOpen
+          refresh()
+        }
       }
+      source.onerror = () => {
+        if (disposed) return
+        releaseInitial?.()
+        batch(() => {
+          setConnection("stream", "Session connection lost. Reconnecting...")
+          stopOnFailure()
+        })
+      }
+      source.onmessage = (e) => {
+        if (disposed) return
+        try {
+          const event = host.id ? globalEvent(JSON.parse(e.data), directory) : JSON.parse(e.data)
+          if (event === null) return
+          if (!event || typeof event.type !== "string") throw new Error("Invalid session event")
+          setConnection("event", "")
+          apply(event)
+          void Promise.resolve(onEvent?.(event)).catch(eventFailure)
+        } catch (failure) {
+          eventFailure(failure)
+        }
+      }
+    } catch (failure) {
+      setConnection("stream", `Unable to connect to session: ${errorText(failure)}`)
+      stopOnFailure()
     }
-  } catch (failure) {
-    setConnection("stream", `Unable to connect to session: ${errorText(failure)}`)
-    stopOnFailure()
   }
+  subscribe()
   onCleanup(() => {
     disposed = true
     controller.abort()
@@ -558,7 +563,13 @@ export function createLiveSession(
     source?.close()
   })
 
-  return { data, load, suspend, older, reveal, hasOlder, loadingOlder, apply, error, connectionError, loading, loaded, retry }
+  return { data, load, suspend, older, reveal, hasOlder, loadingOlder, apply, error, connectionError, loading, loaded, retry,
+    /** A fresh stream subscription and a snapshot reload; nothing is resent. */
+    reconnect: () => {
+      if (disposed) return
+      subscribe()
+      return load()
+    } }
 }
 
 /** A global stream event as an instance event of `directory`; null for another directory's. */

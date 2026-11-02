@@ -374,7 +374,11 @@ const start = async () => {
       {
         role: "viewMenu",
         submenu: [
-          { role: "reload" },
+          // Under host tabs the window has no page of its own, so the reload roles would do nothing: reload the shown host.
+          ...(tabs
+            ? [{ label: "Reload", accelerator: "CommandOrControl+R", click: () => tabs.shownContents().reload() },
+                { label: "Force Reload", accelerator: "Shift+CommandOrControl+R", click: () => tabs.shownContents().reloadIgnoringCache() }]
+            : ([{ role: "reload" }, { role: "forceReload" }] as const)),
           // Under host tabs, zoom applies to the shown host and re-fits its header beside the tabs.
           ...(tabs
             ? ([["resetzoom", "Actual Size", "CommandOrControl+0", () => 1], ["zoomin", "Zoom In", "CommandOrControl+Plus", (z: number) => Math.min(3, z + 0.1)], ["zoomout", "Zoom Out", "CommandOrControl+-", (z: number) => Math.max(0.5, z - 0.1)]] as const).map(([id, label, accelerator, next]) => ({
