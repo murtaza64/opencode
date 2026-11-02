@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { AttentionRecord } from "./attention"
-import { briefSemantics, HUD, hudPages } from "./brief-view"
+import { briefSemantics, HUD, hudPages, pictureNodes } from "./brief-view"
 import { attentionItem, type BriefResult } from "./desk"
 
 // Synthetic fixtures only: no Work brief, source or history.
@@ -23,13 +23,13 @@ test("a brief's meaning is one ordered node list: item, question, options, risks
   expect(view.nodes.map(node => [node.id, node.group, node.mark])).toEqual([
     ["item", "item", undefined], ["question", "question", undefined], ["option:go", "option", "recommended"], ["option:wait", "option", undefined],
     ["risk:go", "risk", undefined], ["evidence:0", "evidence", undefined], ["unknown:0", "unknown", undefined], ["state", "state", undefined]])
-  expect(view.nodes.find(node => node.id === "state")!.text).toBe("open · revision 2")
+  expect(view.nodes.find(node => node.id === "state")!.text).toBe("open · revision 2 · as of 01-01 00:00Z")
 })
 
 test("a recorded answer marks its option as chosen; the recommendation stays labelled as a recommendation", () => {
   const view = briefSemantics(item({ status: "answered", answer: { choice_id: "wait" } as AttentionRecord["answer"] }), result())
   expect(view.nodes.filter(node => node.mark).map(node => [node.id, node.mark])).toEqual([["option:go", "recommended"], ["option:wait", "chosen"]])
-  expect(view.nodes.at(-1)!.text).toBe("answered · answered Wait a week · revision 2")
+  expect(view.nodes.at(-1)!.text).toBe("answered · answered Wait a week · revision 2 · as of unknown")
 })
 
 test("the HUD shows the same nodes in the same order on 48-column pages with title and pager", () => {
@@ -42,7 +42,7 @@ test("the HUD shows the same nodes in the same order on 48-column pages with tit
     for (const text of [page.title, page.pager, ...page.lines.map(line => line.text)]) expect(text.length).toBeLessThanOrEqual(HUD.columns)
   }
   expect(pages[0]!.title).toBe("Ship the cache change?")
-  expect(pages[0]!.pager).toBe(`1/${pages.length} · open · revision 2`)
+  expect(pages[0]!.pager).toBe(`1/${pages.length} · open · revision 2 · as of unknown`)
   expect(pages[0]!.lines.find(line => line.node === "option:go")!.text).toContain("Go ahead")
   expect(pages.flatMap(page => page.lines.map(line => line.text)).join("\n")).toContain("(rec)")
 })
@@ -62,7 +62,7 @@ test("a brief too dense for the glasses ends with where to read the rest, not sm
   const pages = hudPages(view)
   expect(pages.length).toBe(HUD.maxPages)
   expect(pages.at(-1)!.lines.map(line => line.text).join(" ")).toContain("More on the desk: mini~attention:alpha:att_1")
-  expect(pages.at(-1)!.pager).toBe(`${HUD.maxPages}/${HUD.maxPages} · open · revision 2`)
+  expect(pages.at(-1)!.pager).toBe(`${HUD.maxPages}/${HUD.maxPages} · open · revision 2 · as of unknown`)
 })
 
 test("a word longer than a line is split, never overflowing the glasses", () => {
@@ -83,4 +83,30 @@ test("numbered request items keep their ids and order as their own nodes and pag
 test("an item value the request does not quote reads as not given, as on the desktop card", () => {
   const view = briefSemantics(item({ context: "D1. Which key? Recommended: Alt." }), result({ items: [{ id: "D1", question: "Which key?", recommended: "Ctrl", alternatives: ["Super"], refs: [] }, { id: "D9", question: "Invented?", recommended: "x", alternatives: [], refs: [] }] }))
   expect(view.nodes.filter(node => node.group === "row").map(node => node.text)).toEqual(["D1 Which key? → not given"])
+})
+
+test("a compare picture becomes a head and one node per aspect, columns only for real options", () => {
+  const nodes = pictureNodes(result({ shape: { kind: "compare", columns: ["go", "ghost", "wait"], rows: [{ label: "Who gets it", cells: ["Everyone", "x", "Canary only"] }] } }), item())
+  expect(nodes.map(node => [node.id, node.text])).toEqual([["picture:head", "Go ahead (rec) | Wait a week"], ["picture:row:0", "Who gets it: Everyone | Canary only"]])
+})
+
+test("a sequence keeps the approval scope as a description on the same steps for both views", () => {
+  const nodes = pictureNodes(result({ shape: { kind: "sequence", steps: ["Canary", "Half", "All"], approved: 1 } }), item())
+  expect(nodes.map(node => node.text)).toEqual(["1. Canary [approving covers step 1]", "2. Half [later steps need their own decision]", "3. All"])
+  expect(nodes.map(node => node.part && "later" in node.part && node.part.later)).toEqual([false, true, true])
+})
+
+test("more than two unchanged rows fold into one node, as on the card", () => {
+  const rows = [{ item: "A", now: "1", after: "2" }, ...["B", "C", "D"].map(name => ({ item: name, now: "x", after: "x" }))]
+  expect(pictureNodes(result({ shape: { kind: "change", rows } }), item()).map(node => node.text)).toEqual(["A: 1 → 2", "3 other things stay the same"])
+})
+
+test("the model's own drawing is one described node; the glasses never claim to draw it", () => {
+  const nodes = pictureNodes(result({ visual: { title: "Rollout", alt: "Three stages left to right", svg: "<svg/>" }, shape: { kind: "impact", rows: [{ area: "a", change: "b" }] } }), item())
+  expect(nodes.map(node => [node.id, node.text])).toEqual([["picture:visual", "Picture: Three stages left to right (drawn on the desk)"]])
+})
+
+test("picture nodes sit before the options, as the card draws them, and before risks", () => {
+  const view = briefSemantics(item(), result({ shape: { kind: "scope", included: ["web"], excluded: ["mobile"] } }))
+  expect(view.nodes.map(node => node.id)).toEqual(["item", "question", "picture:in:0", "picture:out:0", "option:go", "option:wait", "risk:go", "evidence:0", "unknown:0", "state"])
 })

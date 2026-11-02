@@ -8,14 +8,14 @@ import { A } from "@solidjs/router"
 import { sessionHref } from "../state"
 import { docHref } from "../pages/doc"
 import { anchorHref } from "../message-anchor"
-import { briefCommands, briefComplete, briefSteps, safeSvg, sourceTarget, type BriefResult, type BriefShape, type BriefSource, type DeskItem, type EvidenceRef } from "../desk"
+import { briefCommands, briefComplete, briefSteps, safeSvg, sourceTarget, type BriefResult, type BriefSource, type DeskItem, type EvidenceRef } from "../desk"
 import { briefApproval } from "../brief-approval"
 import { completeBriefJob, currentJob, readConversation, regeneratingJob, type BriefJob } from "../desk-session"
 import { LinkedText } from "./linked-text"
 import { CopyCode, linkName, MISSING, Refs, Value } from "./brief-kit"
 import contract from "../brief-contract.json"
 import { readBriefFeedback, sendBriefFeedback, type BriefRating } from "../brief-feedback"
-import { briefSemantics, hudPages, type BriefNode, type BriefNodeGroup } from "../brief-view"
+import { briefSemantics, hudPages, type BriefNode, type BriefNodeGroup, type PicturePart } from "../brief-view"
 import { BriefHud } from "./brief-hud"
 
 /** Where a cited source opens: the source thread at the cited messages, or a markdown doc in the editspace. */
@@ -47,7 +47,7 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
   // One read of the request's conversation documents and one node list for every projection of this brief: the
   // card's rows, evidence and unknowns below and the glasses pages render the same nodes, ids and order.
   const [found] = createResource(() => props.host ? undefined : props.item.record, readConversation)
-  const nodes = () => { const value = ready(); return value ? briefSemantics(props.item, value.result, { host: props.host, documents: found()?.documents }) : undefined }
+  const nodes = () => { const value = ready(); return value ? briefSemantics(props.item, value.result, { host: props.host, documents: found()?.documents, asOf: value.job.created }) : undefined }
   const group = (name: BriefNodeGroup) => nodes()?.nodes.filter(node => node.group === name) ?? []
   return <section class="desk-brief" aria-label="Brief" data-part={props.part} tabIndex={!props.part || props.part === "lead" ? -1 : undefined}>
     <Show when={shows("lead")}>
@@ -84,7 +84,7 @@ export const BriefPanel = (props: { item: DeskItem; live: boolean; jobs: BriefJo
       </div>}</Show>
     </Show>
     <Show when={shows("visual") && complete() && ready()}>{value =>
-      <Show when={value().result.visual} fallback={<Show when={value().result.shape}>{shape => <Shape shape={shape()} item={props.item} />}</Show>}>{visual => <Visual {...visual()} />}</Show>}</Show>
+      <Show when={value().result.visual} fallback={<Picture parts={group("picture")} />}>{visual => <div data-node="picture:visual"><Visual {...visual()} /></div>}</Show>}</Show>
     <Show when={shows("after") && complete() && ready()}>{value => <div class="desk-brief-after">
       <SourceLinks sources={value().result.sources} refs={value().job.meta.refs} item={props.item} host={props.host} />
     </div>}</Show>
@@ -228,48 +228,39 @@ const SourceLinks = (props: { sources: BriefSource[]; refs: EvidenceRef[]; item:
     <A href={link.href}>↗ {link.kind} · <bdi dir="auto">{link.label}</bdi></A>}</For></p></Show>
 }
 
-// Drawn by the app in its own type styles, so every brief reads the same way and stays RTL-aware.
-const Shape = (props: { shape: BriefShape; item: DeskItem }) =>
-  <Switch>
-    <Match when={props.shape.kind === "compare" && compareOf(props.shape, props.item)}>{shape =>
+// Drawn by the app in its own type styles, so every brief reads the same way and stays RTL-aware. Elements are the
+// brief's picture nodes (brief-view pictureNodes), the same ones the glasses page shows, in the same order.
+const Picture = (props: { parts: BriefNode[] }) => {
+  const parts = <R extends PicturePart["role"]>(...roles: R[]) => props.parts.filter((node): node is BriefNode & { part: Extract<PicturePart, { role: R }> } => !!node.part && (roles as string[]).includes(node.part.role))
+  return <Switch>
+    <Match when={parts("compare-head")[0]}>{head =>
       // Columns are the request's own options under their own labels; the recommended one comes from the request.
-      <table class="desk-compare"><thead><tr><th scope="col"><span class="sr-only">Aspect</span></th><For each={shape().columns}>{column =>
+      <table class="desk-compare"><thead><tr data-node={head().id}><th scope="col"><span class="sr-only">Aspect</span></th><For each={head().part.columns}>{column =>
         <th scope="col" data-recommended={column.recommended ? "" : undefined}><bdi dir="auto">{column.label}</bdi><Show when={column.recommended}><span class="desk-compare-recommended">Agent recommends</span></Show></th>}</For></tr></thead>
-        <tbody><For each={shape().rows}>{row => <tr><th scope="row"><bdi dir="auto">{row.label}</bdi></th><For each={row.cells}>{cell => <td><bdi dir="auto">{cell}</bdi></td>}</For></tr>}</For></tbody></table>}</Match>
-    <Match when={props.shape.kind === "sequence" && props.shape}>{shape =>
-      // `approved` is the request's scope (how many steps an approval would cover), not a recorded answer, so it reads as
-      // a description: one line after the last covered step and one before the first later step; later steps are muted.
-      <ol class="desk-flow" aria-label="Sequence" data-approved={shape().approved ? "" : undefined}><For each={shape().steps}>{(step, index) =>
-        <li data-later={shape().approved && index() >= shape().approved! ? "" : undefined} data-stop={shape().approved && index() === shape().approved! - 1 ? "" : undefined}>
-          <bdi dir="auto">{step}</bdi>
-          <Show when={shape().approved && index() === shape().approved! - 1}><span class="desk-flow-scope">Approving covers {shape().approved === 1 ? "step 1" : `steps 1–${shape().approved}`}</span></Show>
-          <Show when={shape().approved && index() === shape().approved!}><span class="desk-flow-scope">Later steps need their own decision</span></Show>
-        </li>}</For></ol>}</Match>
-    <Match when={props.shape.kind === "change" && props.shape}>{shape => {
-      // Rows that stay the same are muted; more than two of them fold into one line so the changes stand out.
-      const same = () => shape().rows.filter(row => row.now === row.after)
-      const shown = () => same().length > 2 ? shape().rows.filter(row => row.now !== row.after) : shape().rows
-      return <table class="desk-change"><thead><tr><th scope="col">Thing</th><th scope="col">Now</th><th scope="col">After</th></tr></thead>
-        <tbody><For each={shown()}>{row => <tr data-same={row.now === row.after ? "" : undefined}>
-          <th scope="row" dir="auto">{row.item}</th><td dir="auto">{row.now}</td><td dir="auto">{row.after}</td>
-        </tr>}</For>
-        <Show when={same().length > 2}><tr data-same><td colspan="3" class="desk-change-same" title={same().map(row => row.item).join(", ")}>{same().length} other things stay the same</td></tr></Show></tbody></table>
-    }}</Match>
-    <Match when={props.shape.kind === "scope" && props.shape}>{shape =>
+        <tbody><For each={parts("compare-row")}>{row => <tr data-node={row.id}><th scope="row"><bdi dir="auto">{row.part.label}</bdi></th><For each={row.part.cells}>{cell => <td><bdi dir="auto">{cell}</bdi></td>}</For></tr>}</For></tbody></table>}</Match>
+    <Match when={parts("step").length}>
+      {/* `approved` is the request's scope (how many steps an approval would cover), not a recorded answer, so it reads as
+        * a description: one line after the last covered step and one before the first later step; later steps are muted. */}
+      <ol class="desk-flow" aria-label="Sequence" data-approved={parts("step").some(step => step.part.approved) ? "" : undefined}><For each={parts("step")}>{step =>
+        <li data-node={step.id} data-later={step.part.later ? "" : undefined} data-stop={step.part.scope === "covered-last" ? "" : undefined}>
+          <bdi dir="auto">{step.part.text}</bdi>
+          <Show when={step.part.scope === "covered-last"}><span class="desk-flow-scope">Approving covers {step.part.approved === 1 ? "step 1" : `steps 1–${step.part.approved}`}</span></Show>
+          <Show when={step.part.scope === "later-first"}><span class="desk-flow-scope">Later steps need their own decision</span></Show>
+        </li>}</For></ol></Match>
+    <Match when={parts("change", "change-same").length}>
+      {/* Rows that stay the same are muted; more than two of them fold into one line so the changes stand out. */}
+      <table class="desk-change"><thead><tr><th scope="col">Thing</th><th scope="col">Now</th><th scope="col">After</th></tr></thead>
+        <tbody><For each={parts("change", "change-same")}>{row => row.part.role === "change"
+          ? <tr data-node={row.id} data-same={row.part.now === row.part.after ? "" : undefined}><th scope="row" dir="auto">{row.part.item}</th><td dir="auto">{row.part.now}</td><td dir="auto">{row.part.after}</td></tr>
+          : <tr data-node={row.id} data-same><td colspan="3" class="desk-change-same" title={row.part.items.join(", ")}>{row.part.count} other things stay the same</td></tr>}</For></tbody></table></Match>
+    <Match when={parts("in", "out").length}>
       <div class="desk-scope">
-        <Show when={shape().included.length}><div><span class="home-source">In</span><ul><For each={shape().included}>{entry => <li dir="auto">{entry}</li>}</For></ul></div></Show>
-        <Show when={shape().excluded.length}><div data-excluded><span class="home-source">Out</span><ul><For each={shape().excluded}>{entry => <li dir="auto">{entry}</li>}</For></ul></div></Show>
-      </div>}</Match>
-    <Match when={props.shape.kind === "impact" && props.shape}>{shape =>
-      <ul class="desk-impact"><For each={shape().rows}>{row => <li><bdi dir="auto">{row.area}</bdi> → <bdi dir="auto">{row.change}</bdi></li>}</For></ul>}</Match>
+        <Show when={parts("in").length}><div><span class="home-source">In</span><ul><For each={parts("in")}>{entry => <li dir="auto" data-node={entry.id}>{entry.part.text}</li>}</For></ul></div></Show>
+        <Show when={parts("out").length}><div data-excluded><span class="home-source">Out</span><ul><For each={parts("out")}>{entry => <li dir="auto" data-node={entry.id}>{entry.part.text}</li>}</For></ul></div></Show>
+      </div></Match>
+    <Match when={parts("impact").length}>
+      <ul class="desk-impact"><For each={parts("impact")}>{row => <li data-node={row.id}><bdi dir="auto">{row.part.area}</bdi> → <bdi dir="auto">{row.part.change}</bdi></li>}</For></ul></Match>
   </Switch>
-
-/** A compare shape reduced to columns that are real options; fewer than two leaves nothing to compare. */
-const compareOf = (shape: Extract<BriefShape, { kind: "compare" }>, item: DeskItem) => {
-  const options = item.record?.options ?? []
-  const kept = shape.columns.flatMap((id, index) => { const option = options.find(candidate => candidate.id === id); return option ? [{ index, label: option.label, recommended: item.record?.recommendation === id }] : [] })
-  if (kept.length < 2) return
-  return { columns: kept, rows: shape.rows.map(row => ({ label: row.label, cells: kept.map(column => row.cells[column.index] ?? "") })) }
 }
 
 // No scripts, forms, navigation or same-origin access, and CSP blocks every network request.
