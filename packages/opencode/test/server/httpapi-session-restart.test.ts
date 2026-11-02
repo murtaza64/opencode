@@ -703,3 +703,25 @@ it.live(
     ),
   90_000,
 )
+
+it.live(
+  "a repeated close settles a turn that a crash left open after the marker was written",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          const session = yield* Session.use.create({ title: "Close retry" })
+          const seeded = yield* seedInterrupted(session, dir)
+          expect((yield* recover(dir, session.id, { recoveryID: "close-r", anchorMessageID: seeded.assistant.id, run: false })).outcome).toBe("closed")
+          // Simulate a crash after the marker: a turn is open again with no end.
+          const started = yield* Session.Service.use((sessions) => sessions.turnStarted(session.id))
+          expect(yield* recover(dir, session.id, { recoveryID: "close-r", anchorMessageID: seeded.assistant.id, run: false })).toMatchObject({ outcome: "duplicate" })
+          const info = (yield* requestInDirectory(`/session/${session.id}`, dir).pipe(Effect.flatMap((r) => r.json))) as Session.Info
+          expect(info.time.turn).toMatchObject({ started })
+          expect(info.time.turn?.ended).toBeGreaterThanOrEqual(started)
+          expect(yield* llm.calls).toBe(0)
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)

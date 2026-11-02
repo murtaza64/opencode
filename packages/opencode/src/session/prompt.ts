@@ -1674,7 +1674,13 @@ const layer = Layer.effect(
         const closed = yield* state
           .admitIdle(input.sessionID, (idle) =>
             Effect.gen(function* () {
+              const settleTurn = Effect.gen(function* () {
+                const turn = (yield* sessions.get(input.sessionID).pipe(Effect.orDie)).time.turn
+                if (turn?.started !== undefined && turn.ended === undefined) yield* sessions.turnEnded(input.sessionID, turn.started)
+              })
               const repeated = yield* duplicate
+              // The close is several writes; a retry after a crash between the marker and the turn end finishes it.
+              if (repeated?.outcome === "duplicate" && idle) yield* settleTurn
               if (repeated) return repeated
               if (!idle) return { outcome: "running" as const }
               const evaluated = yield* evaluate
@@ -1684,8 +1690,7 @@ const layer = Layer.effect(
               for (const part of rows.parts) yield* sessions.updatePart(part)
               yield* sessions.updateMessage(rows.anchor)
               for (const info of rows.trailing) yield* sessions.updateMessage(info)
-              const turn = (yield* sessions.get(input.sessionID).pipe(Effect.orDie)).time.turn
-              if (turn?.started !== undefined && turn.ended === undefined) yield* sessions.turnEnded(input.sessionID, turn.started)
+              yield* settleTurn
               return {
                 outcome: "closed" as const,
                 marker: current.decision.marker,
