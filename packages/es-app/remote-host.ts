@@ -104,6 +104,19 @@ export const remoteHosts = (value: unknown): RemoteHost[] => {
   return hosts
 }
 
+/** The page hosts a bridged host replaces in the window: same origin and profile. The bridged entry is the one tab of
+ * that host; the page keeps its id and partition but gets no tab, read or cookie pass, so its storage stays exactly as
+ * it was (no migration). Page id -> bridged id. */
+export const shadowedPages = (hosts: readonly RemoteHost[]) =>
+  new Map(hosts.filter((host) => host.mode === "page").flatMap((page) => {
+    const bridged = hosts.find((host) => host.mode === "bridged" && host.origin === page.origin && host.profile === page.profile)
+    return bridged ? [[page.id, bridged.id] as const] : []
+  }))
+
+/** The strip tab a host's tab sits within: a proxied Work host is shown by the Work view ("local") and opened from the
+ * Hosts menu; every other host (a bridged Personal host included) is its own strip tab with its own count. */
+export const tabWithin = (host: Pick<RemoteHost, "mode" | "profile">) => host.mode === "proxy" && host.profile === "work" ? "local" : undefined
+
 /** Upstreams for one host's listener: the Core at the root, the dashboard under /es. */
 const personalOnly = (profile: Profile) => {
   if (profile !== "personal") throw new Error("SSH hosts are Personal only")

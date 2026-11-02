@@ -275,3 +275,15 @@ test("a late pairing refusal of a request sent before a re-pair keeps the new pa
   expect(store.saved.at(-1)).toBe(ROTATED)
   expect((await get("/oc/session/status")).status).toBe(200)
 })
+
+test("a paired host whose gateway is unreachable says so plainly in its tab and retries; never a blank view or another host", async () => {
+  const store = memory(ACCESS)
+  store.saved.push(PAIRED)
+  // Nothing listens on port 1: the gateway is down or off this network.
+  const { get } = await listener("http://127.0.0.1:1", store)
+  const page = await get("/", { headers: { "sec-fetch-dest": "document" } })
+  expect(page.status).toBe(503)
+  const text = await page.text()
+  expect(text).toContain("<h1>Personal unavailable</h1>")
+  expect(text).toContain("Retrying every 5 seconds")
+})

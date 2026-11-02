@@ -2,7 +2,7 @@ import { app, BaseWindow, BrowserWindow, dialog, Menu, nativeImage, safeStorage,
 import path from "node:path"
 import { readFile, writeFile } from "node:fs/promises"
 import { serve } from "./server"
-import { localHost, personalWork, type WorkHost } from "../../es-app/remote-host"
+import { localHost, personalWork, shadowedPages, tabWithin, type WorkHost } from "../../es-app/remote-host"
 import { PERF_DIR } from "./perf-log"
 import { createVoice, voiceTools } from "./voice"
 import { appRouteURL, externalURL, internalURL, pageArrivedCrossSite, pageNavigation, restorePlan, serviceHosts, serviceOrigins, serviceSelf, startupMode, startupPlan, surfaceFrameURL } from "./policy"
@@ -225,7 +225,10 @@ const start = async () => {
     // Only Work hosts join the Work view; a bridged Personal host keeps its own tab.
     ...remotes.filter((host) => host.profile === "work" && host.mode === "proxy").map((host) => ({ id: host.id, label: host.label, origin: host.server.origin, profile: host.profile, ...(host.kind ? { kind: host.kind } : {}), ...(host.id === workDefault ? { default: true } : {}) })),
   )
-  const pages = configured.filter((host) => host.mode === "page")
+  // A page host that a bridged host of the same origin and profile replaces gets no tab, read or cookie pass: its
+  // partition stays as it was, and removing the bridged entry from config brings the page tab back unchanged.
+  const shadowed = shadowedPages(configured)
+  const pages = configured.filter((host) => host.mode === "page" && !shadowed.has(host.id))
   // The Local-origin listener is the Work view: it shows every Work host's rows (this machine and each
   // proxied host), so its tab reads "Work". Each proxied host keeps its own view, opened from the
   // Hosts menu. The id stays "local" because partitions, drafts and per-origin storage are keyed by it.
@@ -275,7 +278,8 @@ const start = async () => {
           session: listenerSession(`persist:editspace-host-${host.id}`, host.server),
           kind: "app" as const,
           guard: (contents: Electron.WebContents) => guardListener(contents, host.server.origin, false),
-          within: "local",
+          // A proxied Work host is shown by the Work view; a bridged Personal host is its own tab and count.
+          within: tabWithin(host),
         })),
         ...pages.map((host) => ({ id: host.id, label: host.label, url: `${host.origin}/`, session: pageSession(`persist:editspace-host-${host.id}`), kind: "page" as const, guard: (contents: Electron.WebContents) => guardPage(contents, host.origin) })),
       ], preferences, path.join(app.getAppPath(), "dist/page-guard.cjs"))
@@ -449,8 +453,9 @@ const start = async () => {
   const restore = process.env.ES_DESKTOP_RESTORE
     ? restorePlan(await readFile(process.env.ES_DESKTOP_RESTORE, "utf8").then((text) => JSON.parse(text) as unknown).catch(() => undefined),
         [...listeners.map((item) => ({ id: item.id, origin: item.server.origin, kind: "app" as const, start: item.server.origin })),
-          ...pages.map((host) => ({ id: host.id, origin: new URL(host.origin).origin, kind: "page" as const, start: `${host.origin}/` }))])
+          ...pages.map((host) => ({ id: host.id, origin: new URL(host.origin).origin, kind: "page" as const, start: `${host.origin}/` }))], shadowed)
     : undefined
+  if (restore?.dropped) console.info("Editspace restore dropped views of replaced page hosts", { count: restore.dropped })
   if (process.env.ES_DESKTOP_RESTORE && !restore) console.error("Editspace restore ignored: invalid or unreadable record")
   if (restore && !tabs) void localContents.loadURL(restore.views.find((item) => item.id === "local")?.url ?? server.origin)
   if (tabs) {

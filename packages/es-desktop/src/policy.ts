@@ -130,11 +130,17 @@ export const appRouteURL = (value: string, origin: string) => {
  * already allows, kept verbatim. `created: true` reopens a view on its start page without recording a URL. Nothing
  * opens another host or a non-app route. Undefined, restoring nothing, unless the whole record is valid.
  */
-export const restorePlan = (value: unknown, tabs: readonly { id: string; origin: string; kind?: "app" | "page"; start?: string }[]) => {
+/** `shadowed`: page ids now shown by another tab (page id -> that tab's id). A captured view of such a page is not
+ * reopened (its URL is that page's origin); if it was shown, the tab that replaced it is selected. `dropped` counts
+ * those views. */
+export const restorePlan = (value: unknown, tabs: readonly { id: string; origin: string; kind?: "app" | "page"; start?: string }[], shadowed: ReadonlyMap<string, string> = new Map()) => {
   if (!value || typeof value !== "object") return undefined
   const record = value as { version?: unknown; selected?: unknown; views?: unknown }
-  if (record.version !== 1 || !Array.isArray(record.views) || !record.views.length || record.views.length > tabs.length) return undefined
-  const views = record.views.map((item: { id?: unknown; url?: unknown; created?: unknown }) => {
+  if (record.version !== 1 || !Array.isArray(record.views) || !record.views.length) return undefined
+  const captured = record.views.filter((item: { id?: unknown }) => typeof item?.id !== "string" || !shadowed.has(item.id))
+  const selected = typeof record.selected === "string" ? shadowed.get(record.selected) ?? record.selected : record.selected
+  if (captured.length > tabs.length) return undefined
+  const views = captured.map((item: { id?: unknown; url?: unknown; created?: unknown }) => {
     const tab = tabs.find((candidate) => candidate.id === item?.id)
     if (!tab) return undefined
     if (item.created !== undefined) return item.created === true && item.url === undefined ? { id: tab.id, url: tab.start ?? `${tab.origin}/` } : undefined
@@ -145,8 +151,11 @@ export const restorePlan = (value: unknown, tabs: readonly { id: string; origin:
     return url ? { id: tab.id, url } : undefined
   })
   if (views.some((item) => !item) || new Set(views.map((item) => item!.id)).size !== views.length) return undefined
-  if (typeof record.selected !== "string" || !views.some((item) => item!.id === record.selected)) return undefined
-  return { selected: record.selected, views: views as { id: string; url: string }[] }
+  // A shown page that was shadowed selects the tab that replaced it, even when that tab had no captured view.
+  const reselected = selected !== record.selected && tabs.some((tab) => tab.id === selected)
+  if (typeof selected !== "string" || !(views.some((item) => item!.id === selected) || reselected)) return undefined
+  const dropped = record.views.length - captured.length
+  return { selected, views: views as { id: string; url: string }[], ...(dropped ? { dropped } : {}) }
 }
 
 // Work view reads of another host through this laptop's listener (/hosts/<id>/...): its session

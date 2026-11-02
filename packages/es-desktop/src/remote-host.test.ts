@@ -778,3 +778,38 @@ test("unsubscribing while a host stream waits to retry leaves no stream behind",
   await Bun.sleep(1500)
   expect(mini.attempts.length).toBe(before)
 }, 10_000)
+
+// The Personal shape on the laptop today: a legacy page host (id personal, no profile) and a bridged excalibur host
+// added at the same origin.
+const ORIGIN = "https://agents.murtaza.earth"
+const legacyPage = { id: "personal", label: "Personal", origin: ORIGIN, mode: "page" }
+const bridgedExcalibur = { id: "excalibur", label: "Excalibur", origin: ORIGIN, mode: "bridged", profile: "personal", kind: "pc", access: { keychain: "fixture-item" } }
+
+test("a bridged host at the legacy page's origin and profile replaces it as the one Personal tab; a page-only config is unchanged", async () => {
+  const { remoteHosts, shadowedPages } = await import("../../es-app/remote-host")
+  expect([...shadowedPages(remoteHosts([legacyPage]))]).toEqual([])
+  expect([...shadowedPages(remoteHosts([legacyPage, bridgedExcalibur]))]).toEqual([["personal", "excalibur"]])
+  expect([...shadowedPages(remoteHosts([bridgedExcalibur, legacyPage]))]).toEqual([["personal", "excalibur"]])
+  // Another origin, or a page of another profile, is its own host and keeps its tab.
+  expect([...shadowedPages(remoteHosts([{ ...legacyPage, origin: "https://other.murtaza.earth" }, bridgedExcalibur]))]).toEqual([])
+  expect([...shadowedPages(remoteHosts([{ ...legacyPage, profile: "work" }, bridgedExcalibur]))]).toEqual([])
+})
+
+test("only a proxied Work host sits within the Work tab; a bridged Personal host is its own strip tab and count", async () => {
+  const { remoteHosts, tabWithin } = await import("../../es-app/remote-host")
+  const hosts = remoteHosts([{ id: "mini", label: "Mac Mini", origin: "https://murtaza-mac-mini.tailc81fd.ts.net" }, bridgedExcalibur])
+  expect(hosts.map((host) => [host.id, tabWithin(host)])).toEqual([["mini", "local"], ["excalibur", undefined]])
+})
+
+test("a restore record from before the bridged host drops the replaced page's view and selects the bridged tab", async () => {
+  const { restorePlan } = await import("./policy")
+  const tabs = [{ id: "local", origin: "http://127.0.0.1:60302", kind: "app" as const, start: "http://127.0.0.1:60302" },
+    { id: "excalibur", origin: "http://127.0.0.1:60310", kind: "app" as const, start: "http://127.0.0.1:60310" }]
+  const shadowed = new Map([["personal", "excalibur"]])
+  const record = { version: 1, selected: "personal", views: [{ id: "local", url: "http://127.0.0.1:60302/desk" }, { id: "personal", url: `${ORIGIN}/?x=1` }] }
+  expect(restorePlan(record, tabs, shadowed)).toEqual({ selected: "excalibur", views: [{ id: "local", url: "http://127.0.0.1:60302/desk" }], dropped: 1 })
+  expect(restorePlan({ ...record, selected: "local" }, tabs, shadowed)).toEqual({ selected: "local", views: [{ id: "local", url: "http://127.0.0.1:60302/desk" }], dropped: 1 })
+  // Without the bridged host the page is a tab again and the same record names an unknown host: nothing restores
+  // silently onto another tab.
+  expect(restorePlan(record, tabs)).toBeUndefined()
+})
