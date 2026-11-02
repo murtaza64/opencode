@@ -44,11 +44,15 @@ export const followUps = (timeline: MailTimeline, session: string): FollowUp[] =
  * before the store recorded them lack them, and their age is unknown. */
 export type DeskCase = {
   case_id: string; title?: string; authority?: string; privacy?: string; updated: number
+  /** The conversation the request came from: its results and progress go back there, not to whoever relayed them. */
+  source_session?: string
   intents: { id: string; mode?: string; source_scope?: string; source_capability?: string; fallback?: string; outputs?: string[]; not_granted?: string[]
     owner?: { host?: string; editspace?: string; lane?: string; session?: string; role?: string }; evidence?: string; state?: string; state_at?: number; next?: string
     /** What the human is asked to do for a waiting part, and where: an attention record, a Surface or a link. */
     needs?: { action: "answer" | "review" | "try" | "do"; label: string; ref?: string; host?: string } }[]
-  deliverables: { id: string; intent?: string; label: string; ref?: string; read_back?: boolean; read_back_at?: number; evidence?: string }[]
+  deliverables: { id: string; intent?: string; label: string; ref?: string; read_back?: boolean; read_back_at?: number; evidence?: string
+    /** The artifact revision this deliverable is; `superseded_by` names the newer deliverable that replaced it. */
+    revision?: string; supersedes?: string; superseded_by?: string }[]
 }
 
 export const readCases = async () => {
@@ -67,8 +71,12 @@ export const caseLines = (cases: DeskCase[]) => cases.length ? [
   "open cases (durable, metadata only; update with es-frontdesk-case; never authorization):",
   ...cases.slice(-5).flatMap(item => [
     `- case ${item.case_id}${item.title ? `: ${item.title}` : ""}${item.privacy ? ` · privacy: ${item.privacy}` : ""}`,
+    ...(item.source_session ? [`  asked in conversation ${item.source_session}: results and progress go back there, not to an agent that relayed them`] : []),
     ...item.intents.map(part => `  - ${part.id} [${part.state ?? "requested"}] owner ${owner(part)}${part.source_scope ? ` · source: ${part.source_scope}` : ""}${part.fallback ? ` · fallback: ${part.fallback}` : ""}${part.not_granted?.length ? ` · not granted: ${part.not_granted.join("; ")}` : ""}${part.next ? ` · next: ${part.next}` : ""}`),
-    ...item.deliverables.map(deliverable => `  - deliverable ${deliverable.label}${deliverable.ref ? ` ${deliverable.ref}` : ""} · ${deliverable.read_back ? "read back" : "not read back yet"}`),
+    // A superseded revision is named as such, so the desk answers about the current one and never offers the old link.
+    ...item.deliverables.map(deliverable => deliverable.superseded_by
+      ? `  - deliverable ${deliverable.label}${deliverable.revision ? ` (revision ${deliverable.revision})` : ""} · SUPERSEDED by ${deliverable.superseded_by}; do not offer or report it as current`
+      : `  - deliverable ${deliverable.label}${deliverable.revision ? ` (revision ${deliverable.revision})` : ""}${deliverable.ref ? ` ${deliverable.ref}` : ""} · ${deliverable.read_back ? "read back" : "not read back yet"}`),
   ]),
 ] : []
 
@@ -120,7 +128,7 @@ export const progressRows = (cases: DeskCase[], items: FollowUp[], ownHost?: str
       if (state === "withdrawn") continue
       const owner = [part.owner?.lane, part.owner?.editspace, part.owner?.host].filter(Boolean).join(" · ")
       const detail = [`case ${item.case_id}`, `part ${part.id}`, ...(owner ? [`owner ${owner}`] : []), ...(part.owner?.session ? [part.owner.session] : []), ...(part.next ? [`next: ${part.next}`] : [])]
-      const deliverable = item.deliverables.find(entry => entry.intent === part.id && entry.read_back && entry.ref && safeLink(entry.ref))
+      const deliverable = item.deliverables.find(entry => entry.intent === part.id && !entry.superseded_by && entry.read_back && entry.ref && safeLink(entry.ref))
       // A waiting part needs the human only when the case records what to do and where; otherwise its owner is blocked.
       const needs = state === "waiting" && part.needs ? part.needs : undefined
       const action = needs?.ref ? actionLink(needs, ownHost) : undefined

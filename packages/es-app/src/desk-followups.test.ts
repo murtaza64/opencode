@@ -142,3 +142,28 @@ test("a waiting part with no recorded action is its owner's blocker, not a quest
   expect(rows.map(row => [row.group, row.status, row.flag])).toEqual([
     ["waiting", "Blocked: client guard rejects the current target", "blocked"], ["waiting", "Blocked; no action for you recorded", "blocked"]])
 })
+
+test("a superseded deliverable is never the strip's link and the desk is told which revision is current", () => {
+  const cases: DeskCase[] = [{ case_id: "visual", title: "G2 visual", updated: 1, intents: [{ id: "visual", state: "delivered" }],
+    deliverables: [
+      { id: "v1", intent: "visual", label: "Visual v1", ref: "https://example.test/v1", revision: "v1", read_back: true, superseded_by: "v2" },
+      { id: "v2", intent: "visual", label: "Visual-first v2", ref: "https://example.test/v2", revision: "c0b9f197", read_back: true, supersedes: "v1" }] }]
+  expect(progressRows(cases, [])[0]!.link).toEqual({ label: "Visual-first v2", href: "https://example.test/v2" })
+  const lines = caseLines(cases)
+  expect(lines).toContain("  - deliverable Visual v1 (revision v1) · SUPERSEDED by v2; do not offer or report it as current")
+  expect(lines).toContain("  - deliverable Visual-first v2 (revision c0b9f197) https://example.test/v2 · read back")
+  expect(lines.join("\n")).not.toContain("example.test/v1")
+})
+
+test("an unread newer revision leaves the strip without a link rather than falling back to the old one", () => {
+  const rows = progressRows([{ case_id: "visual", updated: 1, intents: [{ id: "visual", state: "delivered" }],
+    deliverables: [{ id: "v1", intent: "visual", label: "v1", ref: "https://example.test/v1", read_back: true, superseded_by: "v2" },
+      { id: "v2", intent: "visual", label: "v2", ref: "https://example.test/v2", supersedes: "v1" }] }], [])
+  expect(rows[0]!.link).toBeUndefined()
+})
+
+test("a case names the conversation it was asked in, so results go back there", () => {
+  const lines = caseLines([{ case_id: "visual", source_session: "ses_deskorigin01", updated: 1, intents: [], deliverables: [] }])
+  expect(lines).toContain("  asked in conversation ses_deskorigin01: results and progress go back there, not to an agent that relayed them")
+  expect(caseLines([{ case_id: "plain", updated: 1, intents: [], deliverables: [] }]).join("\n")).not.toContain("asked in conversation")
+})
