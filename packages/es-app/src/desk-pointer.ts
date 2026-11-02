@@ -85,3 +85,33 @@ export const earlierDesks = (home: DeskHome, current: string | undefined, device
 /** Show "This is now the shared Work Front Desk" once per shared desk, on a device that had its own desk before. */
 export const sharedNotice = (home: DeskHome, current: string | undefined, earlier: EarlierDesk[], seen: string | undefined) =>
   (home.kind === "local" || home.kind === "remote") && !!current && seen !== current && earlier.some(entry => entry.from === "device")
+
+/** Where this device's Front Desk input goes now (placement policy, Root 2962). The home (Work: the Mac mini) is the
+ * default. When it is unreachable, the fallback is this device's own existing desk on its own host, never a new or
+ * merged conversation. Switching either way waits for a safe boundary: no input on the desk being left may be in
+ * flight or of unknown outcome (each is reconciled by its exact id first), and the other side must have held steady
+ * for `hold` ms, so a flapping home does not make the desk oscillate. Without a usable fallback the desk waits for its
+ * home (read-only, drafts kept). */
+export type Placement = "home" | "fallback" | "wait-home" | "wait-settle"
+export const placement = (input: {
+  /** Is the home answering now, and since when (ms) has that been true or false. */
+  homeUp: boolean; since: number; now: number
+  /** Where input goes now. */
+  current: "home" | "fallback"
+  /** This device's own existing desk on its own host, if any. */
+  local?: { session: string }
+  /** Inputs sent to the current desk whose outcome is not yet known (accepted or not). */
+  unsettled: number
+  hold?: number
+}): Placement => {
+  const hold = input.hold ?? 60_000
+  const steady = input.now - input.since >= hold
+  if (input.current === "home") {
+    if (input.homeUp) return "home"
+    if (!input.local) return "wait-home"
+    if (input.unsettled > 0) return "wait-settle"
+    return steady ? "fallback" : "wait-home"
+  }
+  if (!input.homeUp || !steady) return "fallback"
+  return input.unsettled > 0 ? "fallback" : "home"
+}

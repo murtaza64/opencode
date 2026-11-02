@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { earlierDesks, homeOf, readPointer, resolveHome, sharedNotice, writePointer, type DeskHome, type PointerView } from "./desk-pointer"
+import { earlierDesks, homeOf, placement, readPointer, resolveHome, sharedNotice, writePointer, type DeskHome, type PointerView } from "./desk-pointer"
 import type { WorkHost } from "./host"
 
 const mini: WorkHost = { id: "mini", label: "Mac Mini", origin: "https://mini.test" }
@@ -98,4 +98,24 @@ test("a host that never answers is read as unknown within the time limit, so the
   expect(await readPointer("/hosts/mini", silent, 50)).toBeUndefined()
   expect(Date.now() - started).toBeLessThan(1_000)
   expect((await resolveHome([mini], silent, 50)).kind).toBe("off")
+})
+
+test("the home is used while it answers; an unreachable home falls back only to this device's own desk, after it held down", () => {
+  const base = { now: 100_000, current: "home" as const, local: { session: "ses_desk_local1" }, unsettled: 0 }
+  expect(placement({ ...base, homeUp: true, since: 0 })).toBe("home")
+  expect(placement({ ...base, homeUp: false, since: 90_000 })).toBe("wait-home")
+  expect(placement({ ...base, homeUp: false, since: 0 })).toBe("fallback")
+  expect(placement({ ...base, local: undefined, homeUp: false, since: 0 })).toBe("wait-home")
+})
+
+test("no switch while an input to the desk being left is in flight or unknown", () => {
+  expect(placement({ now: 100_000, homeUp: false, since: 0, current: "home", local: { session: "ses_desk_local1" }, unsettled: 1 })).toBe("wait-settle")
+  expect(placement({ now: 100_000, homeUp: true, since: 0, current: "fallback", local: { session: "ses_desk_local1" }, unsettled: 2 })).toBe("fallback")
+})
+
+test("failing back waits for the home to stay up, so a flapping home does not make the desk oscillate", () => {
+  const base = { now: 100_000, current: "fallback" as const, local: { session: "ses_desk_local1" }, unsettled: 0 }
+  expect(placement({ ...base, homeUp: true, since: 70_000 })).toBe("fallback")
+  expect(placement({ ...base, homeUp: true, since: 30_000 })).toBe("home")
+  expect(placement({ ...base, homeUp: false, since: 99_000 })).toBe("fallback")
 })

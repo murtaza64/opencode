@@ -107,14 +107,17 @@ export const createDeskSession = () => {
   /** Adopt the home's pointer on this host: it becomes this device's pointer too. */
   const [replaced, setReplaced] = createSignal(readJSON<{ session: string; directory: string }[]>(EARLIER, value => Array.isArray(value)) ?? [])
   const [seen, setSeen] = createSignal(readJSON<string>(SHARED_SEEN, value => typeof value === "string"))
+  // This device's own earlier desk becomes a read-only Earlier link, never deleted.
+  const retire = (current?: string) => {
+    const old = devicePointer()
+    if (!old || old.create || old.session === current || replaced().some(entry => entry.session === old.session)) return
+    const next = [{ session: old.session, directory: old.directory }, ...replaced()].slice(0, 10)
+    setReplaced(next)
+    try { localStorage.setItem(EARLIER, JSON.stringify(next)) } catch { /* remembered for this page */ }
+  }
   const adopt = (view: PointerView) => {
     if (!view.session || !view.directory) return
-    const old = devicePointer()
-    if (old && !old.create && old.session !== view.session && !replaced().some(entry => entry.session === old.session)) {
-      const next = [{ session: old.session, directory: old.directory }, ...replaced()].slice(0, 10)
-      setReplaced(next)
-      try { localStorage.setItem(EARLIER, JSON.stringify(next)) } catch { /* remembered for this page */ }
-    }
+    retire(view.session)
     if (devicePointer()?.session !== view.session) try { save({ session: view.session, directory: view.directory }) } catch { setPointer({ session: view.session, directory: view.directory }) }
   }
   const verify = async () => {
@@ -133,15 +136,14 @@ export const createDeskSession = () => {
         return setStatus("ready")
       } catch { return setStatus("unavailable") }
     }
-    if (resolved.kind === "local") {
-      if (resolved.view.session) adopt(resolved.view)
-      else if (devicePointer() && !devicePointer()!.create) {
-        // The home has no desk yet: this device's existing desk on this host is offered once (import only if none).
-        await verifyDevice()
-        if (status() !== "ready") return
-        const result = await writePointer({ expected_revision: resolved.view.revision, session: devicePointer()!.session, directory: devicePointer()!.directory, reason: "import" })
-        if (!result.ok && result.view?.session) adopt(result.view)
-      }
+    // A home with no desk yet starts a new conversation on first use (admit writes `create`); this device's earlier
+    // desk is never imported, since the human chose a fresh Work desk on the home (front-desk:work-home:v1). Earlier
+    // desks stay readable from their own hosts.
+    if (resolved.kind === "local" && resolved.view.session) adopt(resolved.view)
+    if (resolved.kind === "local" && !resolved.view.session && devicePointer() && !devicePointer()!.create) {
+      retire()
+      try { save(undefined) } catch { setPointer(undefined) }
+      return setStatus("none")
     }
     await verifyDevice()
   }
