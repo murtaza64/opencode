@@ -27,9 +27,9 @@ export type Surface = {
   purpose?: "board" | "deliverable"
   created_at?: number
   requested_in?: { session: string; directory: string; title?: string }
-  /** Deliverables only: the operator marked the current revision Done (viewing alone never does). */
+  /** Deliverables only: the current revision was seen (shown in the operator's foreground reader, or marked seen). */
   seen?: boolean
-  /** Deliverables only: when the operator last marked a revision Done (ms); kept after an Undo. */
+  /** Deliverables only: when a revision was last marked seen (ms); kept after marking it unread. */
   seen_at?: number | null
 }
 
@@ -51,7 +51,7 @@ export const surfaceUnavailable = (surface: Surface) => surface.health.state ===
 export const isDeliverable = (surface: Surface) => surface.purpose === "deliverable"
 const seenKey = (id: string, revision: number) => `${id}:${revision}`
 
-/** New deliverables first (newest first), then Done ones. `marks` holds Done/Undo writes still in flight for one
+/** New deliverables first (newest first), then seen ones. `marks` holds seen/unread writes still in flight for one
  * revision; a mark on an older revision never clears a newer one. */
 export const deliverables = (list: Surface[], marks: ReadonlyMap<string, boolean>) => {
   const all = list.filter(isDeliverable).toSorted((a, b) => (b.created_at ?? b.updated_at) - (a.created_at ?? a.updated_at))
@@ -87,11 +87,11 @@ export const createSurfaces = (options: { fetch?: (input: string, init?: Request
     setError()
     setChecked(Date.now())
   }
-  // Done/Undo writes in flight, per revision; the next list read is the truth again.
+  // Seen/unread writes in flight, per revision; the next list read is the truth again.
   const [marks, setMarks] = createSignal<ReadonlyMap<string, boolean>>(new Map())
   const [seenError, setSeenError] = createSignal<string>()
   const unmark = (key: string) => setMarks(new Map([...marks()].filter(([item]) => item !== key)))
-  /** Mark one revision Done (or Undo it) on this host's dashboard; true when the dashboard saved it. */
+  /** Mark one revision seen (or unread) on this host's dashboard; true when the dashboard saved it. */
   const markSeen = async (surface: Surface, revision: number, seen = true) => {
     if (!isDeliverable(surface)) return false
     const key = seenKey(surface.id, revision)
@@ -108,7 +108,7 @@ export const createSurfaces = (options: { fetch?: (input: string, init?: Request
       return true
     }
     unmark(key)
-    const action = seen ? "Done" : "Undo"
+    const action = seen ? "Seen" : "Unread"
     setSeenError(response && (response.status === 401 || response.status === 403)
       ? `${action} is not saved: the operator connection is unavailable.`
       : `${action} is not saved: the dashboard did not confirm it.`)

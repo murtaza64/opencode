@@ -124,7 +124,7 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
       <div class="surface-head" onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); props.onClose() } }}>
         <h2 title={`${props.surface.owner} · updated ${ago(props.surface.updated_at)}`}><bdi dir="auto">{props.surface.title}</bdi></h2>
         {props.where}
-        <DeliverableDoneControls state={done} label={props.frame === "host" ? undefined : `Done (opened on ${props.label})`} />
+        <DeliverableDoneControls state={done} label={props.frame === "host" ? undefined : `Mark seen (opened on ${props.label})`} />
         <span class="surface-head-actions">
           <span class="surface-head-slot" data-slot="buildinghub" hidden />
           <Show when={src()}>{href => <a class="surface-head-button" href={href()} target="_blank" rel="noopener noreferrer" title="Open in new tab" aria-label="Open in new tab"><Glyph name="link-external" /></a>}</Show>

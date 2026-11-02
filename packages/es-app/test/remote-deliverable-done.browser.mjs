@@ -1,4 +1,4 @@
-// Desk2814 S3: another Work host's requested deliverable is a Try row in this window's Needs you, and Done/Undo in its
+// Desk2814 S3: another Work host's requested deliverable is a Try row in this window's Needs you, and seen/unread in its
 // reader change only that host's seen state. Two real dashboard Surface stores (src/fixtures/surfaces-host.py over
 // dotfiles bin/es_dashboard_surfaces.py): this host's and the Mini's, each with the same deliverable id. The page's
 // /es/api routes go to the local store and /hosts/mini/es/api routes to the Mini's, each with its own operator cookie
@@ -106,47 +106,47 @@ try {
   await miniRow.click()
   await expect(page).toHaveURL(`${preview.origin}/?item=${encodeURIComponent("mini~surface:report")}`)
   await expect(reader.locator(".work-remote-host")).toContainText("Mac Mini")
-  // Nothing on screen yet (the frame address failed): no Done.
+  // Nothing on screen yet (the frame address failed): nothing is marked.
   await expect(page.locator(".work-remote-surface [role=alert]")).toContainText("Cannot open this surface")
-  await expect(reader.getByRole("button", { name: "Done", exact: true })).toHaveCount(0)
+  await page.waitForTimeout(1_000)
+  if (writes.mini.some((item) => item.includes("deliverables/seen"))) throw new Error("a failed frame marked seen")
   mintDown = false
   await page.locator(".work-remote-surface").getByRole("button", { name: "Try again" }).click()
   await expect(page.locator(".work-remote-surface iframe")).toBeAttached()
-  step("Done is offered only once the Mini's frame is on screen")
-  await reader.getByRole("button", { name: "Done", exact: true }).click()
-  await expect(reader.locator(".surface-done-state")).toHaveText(/^Done · /)
+  step("a failed Mini frame marks nothing")
+  await expect(reader.locator(".surface-done-state")).toHaveText(/^Seen · /)
   await expect(miniRow).toHaveCount(0)
   await expect(localRow).toBeVisible()
   if (!(await seenOn(mini)) || (await seenOn(local))) throw new Error(`seen: mini ${await seenOn(mini)}, local ${await seenOn(local)}`)
   if (writes.local.length) throw new Error(`local writes: ${JSON.stringify(writes.local)}`)
   if (writes.mini.at(-1) !== 'POST /es/api/frontdesk/deliverables/seen {"id":"report","revision":1,"seen":true}' || !writes.mini.some((item) => item.startsWith("POST /es/api/attention/session")))
     throw new Error(`mini writes: ${JSON.stringify(writes.mini)}`)
-  step("Done on the Mini's reader marks only the Mini's store (operator session set up through the Mini) and leaves this host's row")
+  step("showing the Mini's frame marks only the Mini's store (operator session set up through the Mini) and leaves this host's row")
 
   await page.reload({ waitUntil: "domcontentloaded" })
-  await expect(reader.locator(".surface-done-state")).toHaveText(/^Done · /, { timeout: 60_000 })
+  await expect(reader.locator(".surface-done-state")).toHaveText(/^Seen · /, { timeout: 60_000 })
   await expect(localRow).toBeVisible({ timeout: 60_000 })
   await expect(miniRow).toHaveCount(0)
-  step("the Mini's Done holds across a reload")
+  step("the Mini's seen holds across a reload")
 
-  await reader.getByRole("button", { name: "Undo" }).click()
+  await reader.getByRole("button", { name: "Mark unread" }).click()
   await expect(miniRow).toBeVisible()
-  if (await seenOn(mini)) throw new Error("Undo not saved on the Mini")
+  if (await seenOn(mini)) throw new Error("Mark unread not saved on the Mini")
   if (writes.local.length) throw new Error(`local writes: ${JSON.stringify(writes.local)}`)
-  step("Undo brings the Mini's row back from the Mini's store only")
+  step("Mark unread brings the Mini's row back from the Mini's store only")
 
   const linkRow = band.locator("[data-nav-item='mini~surface:live']")
   await linkRow.click()
   await expect(page.locator("[data-surface-gap='own-host-only']")).toBeVisible()
-  await expect(reader.getByRole("button", { name: /^Done/ })).toHaveCount(0)
+  await page.waitForTimeout(1_000)
+  if (await seenOn(mini, "live")) throw new Error("a link surface was marked before it was opened")
   const [popup] = await Promise.all([page.waitForEvent("popup"), page.locator("[data-open-on-host='mini']").click()])
   await popup.waitForURL(`${miniOrigin}/?surface=live`)
   await popup.close()
-  await reader.getByRole("button", { name: "Done (opened on Mac Mini)" }).click()
   await expect(linkRow).toHaveCount(0)
   await expect(localRow).toBeVisible()
   if (!(await seenOn(mini, "live")) || writes.local.length) throw new Error(`live seen ${await seenOn(mini, "live")}, local writes ${JSON.stringify(writes.local)}`)
-  step("a link surface offers Done only after it was opened on its host; Done clears it on the Mini only")
+  step("a link surface is marked seen only once it was opened on its host, on the Mini only")
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`)
 } catch (error) {
   process.exitCode = 1

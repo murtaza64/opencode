@@ -176,13 +176,13 @@ describe.skipIf(!hasStore)("requested deliverables against the real host store",
     expect(freshIds(desk)).toEqual([])
   }, 60_000)
 
-  test("without the operator connection Done is not saved: it stays new and says why", async () => {
+  test("without the operator connection a seen mark is not saved: it stays new and says why", async () => {
     const host = await storeHost()
     await host.publish("report", "first")
     const desk = await page(await tab(host.origin, false))
     expect(await desk.markSeen(desk.list()[0]!, 1)).toBe(false)
     expect(freshIds(desk)).toEqual(["report"])
-    expect(desk.seenError()).toBe("Done is not saved: the operator connection is unavailable.")
+    expect(desk.seenError()).toBe("Seen is not saved: the operator connection is unavailable.")
   }, 60_000)
 
   test("Done reaches only the host whose page marked it", async () => {
