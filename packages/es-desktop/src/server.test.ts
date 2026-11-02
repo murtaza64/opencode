@@ -185,6 +185,11 @@ test("API surface excludes direct shell, PTY, file, and config access", () => {
   expect(hostWriteAllowed("POST", "/es/api/frontdesk/briefs/0b7c6f1e-2d3a-4b5c-8d9e-0f1a2b3c4d5e/regenerate")).toBe(true)
   expect(hostWriteAllowed("POST", "/es/api/frontdesk/briefs/nope/regenerate")).toBe(false)
   expect(hostWriteAllowed("POST", "/es/api/frontdesk/deliverables/seen")).toBe(true)
+  // The Front Desk pointer is read through /hosts; it is written only on the home host's own origin.
+  expect(hostApiAllowed("GET", "/es/api/frontdesk/pointer")).toBe(true)
+  expect(hostApiAllowed("HEAD", "/es/api/frontdesk/pointer")).toBe(true)
+  for (const method of ["PUT", "POST", "PATCH", "DELETE"]) expect(hostApiAllowed(method, "/es/api/frontdesk/pointer") || hostWriteAllowed(method, "/es/api/frontdesk/pointer")).toBe(false)
+  expect(hostApiAllowed("GET", "/es/api/frontdesk/pointer/x")).toBe(false)
   for (const [method, pathname] of [["GET", "/es/api/frontdesk/deliverables/seen"], ["PUT", "/es/api/frontdesk/deliverables/seen"], ["POST", "/es/api/frontdesk/deliverables/seen/x"], ["POST", "/es/api/frontdesk/deliverables"]])
     expect(hostWriteAllowed(method!, pathname!)).toBe(false)
   expect(hostWriteAllowed("POST", "/es/api/frontdesk/memory")).toBe(false)
