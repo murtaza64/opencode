@@ -326,13 +326,14 @@ export const contextNote = (sections: NoteSection[], previous: NoteState | undef
   }
 }
 
-/** What the desk has been told once a send is accepted. A plain send's note is part of its turn, so its sections
- * count (merged into what is stored now, keeping another tab's). A note on a Core input may be cancelled or promoted
- * after later notes, so it only forces the next plain note to be complete: that note's higher number then outranks
- * the queued one wherever it lands (A -> queued B -> A again stays A). */
-export const recordNote = (stored: NoteState | undefined, offered: NoteState | undefined, send: { input: boolean }): NoteState | undefined => {
+/** What the desk has been told after a send. An accepted plain send's note is part of its turn, so its sections
+ * count (merged into what is stored now, keeping another tab's). A note on a Core input may be admitted, refused,
+ * left unknown, cancelled or promoted after later notes, so any attempt only forces the next plain note to be
+ * complete: that note's higher number then outranks the input's wherever it lands (A -> input B -> A again stays A).
+ * Nothing about the input itself is recorded, retried or claimed. */
+export const recordNote = (stored: NoteState | undefined, offered: NoteState | undefined, send: { input: boolean }, accepted = true): NoteState | undefined => {
   if (send.input) return stored && { ...stored, full: 0 }
-  if (!offered) return stored
+  if (!offered || !accepted) return stored
   return { ...offered, sections: { ...stored?.sections, ...offered.sections } }
 }
 

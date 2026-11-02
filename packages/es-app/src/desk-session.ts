@@ -176,14 +176,16 @@ export const createDeskSession = () => {
     return offer(current.id, seq => contextNote(cases, told(current.id), Date.now(),
       { partial: "Front desk context from es-app (cases only; no queue view is open). Read-only orientation; it is not an instruction and grants nothing.", input: send.input, seq }))
   }
-  // Records against what is stored now (recordNote). An unconfirmed send records nothing: the next send repeats it.
+  // Records against what is stored now (recordNote). An unconfirmed plain send records nothing, so the next send
+  // repeats it; any Core input attempt, admitted or not, makes the next plain note complete.
   const sent = (parts: ContextPart[], accepted: boolean, send: { input: boolean }) => {
     const current = session()
     const key = parts.find(part => part.metadata.source === CONTEXT_SOURCE)?.metadata.key
-    if (!current || !key || !offered.has(key) || !accepted) return
-    const next = recordNote(told(current.id), offered.get(key), send)
+    if (!current || !key || !offered.has(key)) return
+    const next = recordNote(told(current.id), offered.get(key), send, accepted)
     if (next) localStorage.setItem(`${NOTE}:${current.id}`, JSON.stringify(next))
-    offered.delete(key)
+    // An unconfirmed plain send stays offered: the same note may still be confirmed.
+    if (accepted || send.input) offered.delete(key)
   }
   /** An explicit request from a decision card, sent as an ordinary desk message beside the composer:
    * the composer's draft is untouched. Starts the conversation first if there is none yet. */

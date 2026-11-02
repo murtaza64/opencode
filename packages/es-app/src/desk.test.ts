@@ -327,3 +327,26 @@ test("note numbers count up across tabs: above every number used and above the c
   // A second tab that read the same stored number a moment later still gets a higher one.
   expect(nextNoteSeq(1_000, 1_005)).toBe(1_005)
 })
+
+test("A, then a Core input B whose admission is unknown or refused, then A again: the next plain note is complete", () => {
+  const view = (revision: number) => deskContext({ now: 0, sources: [], items: items(revision), briefs: [] }).sections
+  for (const accepted of [false, true]) {
+    const a = contextNote(view(2), undefined, 1_000, { seq: 1 })!
+    let stored = recordNote(undefined, a.state, { input: false })
+    const attempt = contextNote(view(3), stored, 2_000, { input: true, seq: 2 })!
+    // Unknown or refused (accepted false) resets the baseline exactly as an admitted input does, recording no section.
+    const after = recordNote(stored, attempt.state, { input: true }, accepted)!
+    expect(after.sections).toEqual(stored!.sections)
+    expect(after.full).toBe(0)
+    stored = after
+    const again = contextNote(view(2), stored, 3_000, { seq: 3 })!
+    expect(again.text).toContain("Read-only snapshot")
+    expect(again.text).toContain("note 3;")
+  }
+})
+
+test("an unconfirmed plain send records nothing", () => {
+  const view = deskContext({ now: 0, sources: [], items: items(), briefs: [] }).sections
+  const first = contextNote(view, undefined, 1_000)!
+  expect(recordNote(undefined, first.state, { input: false }, false)).toBeUndefined()
+})
