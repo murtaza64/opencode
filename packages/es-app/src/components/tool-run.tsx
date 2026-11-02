@@ -186,6 +186,11 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
     return typeof exit === "number" && exit !== 0 ? `exit ${exit}` : undefined
   })
   const label = () => [info().title, STATE_WORDS[status()], what(), reason(), `size ${size()}`, summary().spanLabel].filter(Boolean).join(", ")
+  const partialOutput = () => {
+    const state = props.part.state
+    const output = state.status === "error" && state.metadata?.interrupted === true ? state.metadata.output : undefined
+    return typeof output === "string" && output.trim() ? output : undefined
+  }
   let button: HTMLButtonElement | undefined
   return <span class="tool-chip" data-compact={open() ? undefined : "true"} data-open={open() ? "true" : undefined} data-status={status()}
     data-timeline-part-id={props.part.id} data-filament-anchor={props.part.id}
@@ -221,6 +226,9 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
               <Show when={file.additions !== undefined}><span class="tool-chip-counts" dir="ltr"> +{file.additions} −{file.deletions}</span></Show></li>}</For>
           </ul>
         </Show>
+        {/* A call Core stopped while it ran is an error card; the output it had captured is shown here. */}
+        <Show when={partialOutput()}>{(output) => <div class="tool-chip-partial"><span class="tool-chip-partial-label">Output before the interruption</span>
+          <pre dir="auto">{output()}</pre></div>}</Show>
         <Message message={props.message} parts={[props.part]} activityRows renderTools={props.renderTools} />
       </div>
     </Show>

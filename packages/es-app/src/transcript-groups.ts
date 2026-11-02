@@ -109,14 +109,19 @@ export const planToolRuns = (rows: readonly Row[], input: {
 }
 
 export type ToolOutcome = "ok" | "failed" | "interrupted" | "unfinished" | "unknown-exit"
+const SHELL_ABORTED = /<shell_metadata>[\s\S]*User aborted the command[\s\S]*<\/shell_metadata>\s*$/
 
 // Shell calls finish as "completed" even with a nonzero exit code, and tools
 // may report an error in metadata; both are failures. A null or non-numeric
 // exit says nothing either way, so it is reported as unknown.
+// Core marks an interrupted call two ways (opencode session/processor.ts, tool/shell.ts): a call still running when
+// its turn stopped becomes an error with metadata.interrupted; a shell that finished its own kill within the grace
+// period completes with exit null and a "User aborted the command" note in its <shell_metadata> block.
 export const toolOutcome = (part: ToolPart): ToolOutcome => {
   const state = part.state
   if (state.status === "pending" || state.status === "running") return "unfinished"
   if (state.status === "error") return state.metadata?.interrupted === true ? "interrupted" : "failed"
+  if (typeof state.output === "string" && SHELL_ABORTED.test(state.output)) return "interrupted"
   const metadata = state.metadata
   if (metadata?.error) return "failed"
   if (!metadata || !("exit" in metadata)) return "ok"

@@ -230,3 +230,28 @@ describe("groupableTurns", () => {
     expect([...groupableTurns(new Set(["msg_001", "msg_020"]), { before: new Set(), oldest: "msg_010" })]).toEqual(["msg_001"])
   })
 })
+
+describe("interrupted shell calls, in the shapes Core writes", () => {
+  const bash = (state: unknown) => ({ id: "prt_i", sessionID: "ses", messageID: "msg", type: "tool", callID: "call_i", tool: "bash", state }) as ToolPart
+  const input = { command: "bun run build:all" }
+
+  test("a shell that finished its own kill: completed, exit null, 'User aborted' note -> interrupted", () => {
+    expect(toolOutcome(bash({ status: "completed", input, title: "", time: { start: 0, end: 1 }, metadata: { output: "partial", exit: null, truncated: false },
+      output: "partial-build-output\n\n<shell_metadata>\nUser aborted the command\n</shell_metadata>" }))).toBe("interrupted")
+  })
+
+  test("a call still running when the turn stopped: error with metadata.interrupted -> interrupted", () => {
+    expect(toolOutcome(bash({ status: "error", input, error: "Tool execution aborted", time: { start: 0, end: 1 }, metadata: { output: "partial", interrupted: true } }))).toBe("interrupted")
+  })
+
+  test("a timeout note or a null exit without the abort note stays exit unknown", () => {
+    expect(toolOutcome(bash({ status: "completed", input, title: "", time: { start: 0, end: 1 }, metadata: { exit: null },
+      output: "x\n\n<shell_metadata>\nshell tool terminated command after exceeding timeout 1000 ms.\n</shell_metadata>" }))).toBe("unknown-exit")
+    expect(toolOutcome(bash({ status: "completed", input, title: "", time: { start: 0, end: 1 }, metadata: { exit: null }, output: "x" }))).toBe("unknown-exit")
+  })
+
+  test("the abort words inside a command's own output are not an interruption", () => {
+    expect(toolOutcome(bash({ status: "completed", input, title: "", time: { start: 0, end: 1 }, metadata: { exit: 0 },
+      output: "grep hit: User aborted the command\ndone" }))).toBe("ok")
+  })
+})

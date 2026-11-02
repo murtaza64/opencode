@@ -2115,3 +2115,6 @@ a.mini-item > .glyph { margin: 0; }
 .msg-tick-row { display: flex; justify-content: flex-end; margin-block-start: 2px; }
 .outgoing-cue .msg-tick { margin-inline-end: 4px; }
 @media (prefers-reduced-motion: no-preference) { .msg-tick { transition: color 150ms; } }
+.tool-chip-partial { margin: 2px 0 4px; padding-inline-start: 28px; }
+.tool-chip-partial-label { display: block; font-size: 12px; color: var(--subtext0); }
+.tool-chip-partial pre { margin: 2px 0 0; max-block-size: 16rem; overflow: auto; font: 400 12px/18px var(--font-mono); color: var(--subtext1); white-space: pre-wrap; }

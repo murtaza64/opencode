@@ -257,6 +257,9 @@ export const createFixture = async () => {
       : json({ detail: "Not Found" }, 404)
     if (url.pathname === "/api/lane-provenance" && request.method === "GET")
       return json(fixture.laneProvenance?.(url.searchParams.get("es")) ?? { delegations: [], spawned: [] })
+    // Front Desk home pointer (src/desk-pointer.ts): not deployed unless a test sets fixture.pointer.
+    if (url.pathname === "/api/frontdesk/pointer" && request.method === "GET")
+      return fixture.pointer ? json(fixture.pointer) : json({ detail: "Not Found" }, 404)
     // Front Desk surfaces poll (src/surfaces.ts); none published in these fixtures.
     if (url.pathname === "/api/surfaces" && request.method === "GET") return json({ surfaces: fixture.surfaces ?? [] })
     if (url.pathname === "/api/handoffs" && request.method === "GET")

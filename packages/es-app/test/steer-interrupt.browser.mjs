@@ -29,13 +29,16 @@ const bubble = (id) => page.locator(`.outgoing li[data-request-id="${id}"]`)
 const steerPosts = () => fixture.calls.filter((call) => call.method === "POST" && call.path === "/session/ses_a/input")
 const delivers = () => fixture.calls.filter((call) => call.method === "POST" && /\/session\/ses_a\/input\/[^/]+\/deliver$/.test(call.path))
 const forbidden = () => fixture.calls.filter((call) => call.method === "POST" && /\/(abort|prompt_async)$/.test(call.path))
-const bashCard = page.locator('[data-component="tool-part-wrapper"][data-tool="bash"]')
+// Tool calls render as icon chips; the original card (bash output) is inside the chip once opened.
+const bashChip = page.locator('.tool-chip[data-timeline-part-id="part_bash"]')
+const bashCard = bashChip.locator('[data-component="tool-part-wrapper"][data-tool="bash"]')
 const users = (text) => page.locator('[data-component="user-message"]').filter({ hasText: text })
 const shot = async (name) => { if (process.env.STEER_SHOTS) await page.screenshot({ path: `${process.env.STEER_SHOTS}/${name}.png` }) }
 try {
   await page.goto(preview.url, { waitUntil: "domcontentloaded", timeout: 120_000 })
   await expect(page.locator(".session-work-status:visible")).toHaveAttribute("data-state", "working")
-  await expect(bashCard).toHaveAttribute("data-status", "running")
+  await expect(bashChip).toHaveAttribute("data-status", "unfinished")
+  await expect(bashChip.locator(".tool-chip-state")).toHaveText(/^running · /)
 
   // 1. Steer while the build runs: the bubble says what it waits on and for how long.
   await editor.fill("stop the full build, only rebuild es-app")
@@ -62,11 +65,27 @@ try {
   fixture.deliverReplies.splice(0).forEach((reply) => reply())
   await expect(bubble(id)).toHaveCount(0)
   await expect(page.locator('[data-component="user-message"]').last()).toContainText("stop the full build, only rebuild es-app")
+  // Interrupted, not "exit unknown": the row says so in words, and the opened card keeps the partial output.
+  await expect(bashChip).toHaveAttribute("data-status", "interrupted")
+  await expect(bashChip.locator(".tool-chip-state")).toHaveText(/^interrupted · /)
+  await bashChip.locator(".tool-chip-summary").click()
   await expect(bashCard).toHaveAttribute("data-status", "completed")
   await expect(bashCard).toContainText("Interrupted")
   await bashCard.getByText("Interrupted").click()
   await expect(bashCard.locator('[data-component="bash-output"]')).toContainText("partial-build-output: compiled 412/980 modules")
   await expect(bashCard).not.toContainText("shell_metadata")
+  await bashChip.locator(".tool-chip-summary").click()
+  // Core's other shape: a call still running when its turn stopped is an error marked interrupted; its captured
+  // output is shown with the opened chip.
+  const stopped = { id: "part_bash_2", messageID: "msg_2", sessionID: "ses_a", type: "tool", callID: "call_bash_2", tool: "bash",
+    state: { status: "error", input: { command: "bun run test:all" }, error: "Tool execution aborted", time: { start: started, end: Date.now() },
+      metadata: { output: "partial-test-output: 120/400 passed", interrupted: true } } }
+  fixture.emit("message.part.updated", { part: stopped })
+  const stoppedChip = page.locator('.tool-chip[data-timeline-part-id="part_bash_2"]')
+  await expect(stoppedChip).toHaveAttribute("data-status", "interrupted")
+  await stoppedChip.locator(".tool-chip-summary").click()
+  await expect(stoppedChip.locator(".tool-chip-partial")).toContainText("partial-test-output: 120/400 passed")
+  await stoppedChip.locator(".tool-chip-summary").click()
   await expect(editor).toHaveValue("unrelated draft in progress")
   await expect(bubble("q-later").locator(".outgoing-cue > span")).toHaveText("Queued · after this task")
   await expect(page.locator(".session-work-status:visible")).toHaveAttribute("data-state", "working")
