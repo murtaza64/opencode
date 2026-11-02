@@ -47,7 +47,7 @@ export type DeskCase = {
   intents: { id: string; mode?: string; source_scope?: string; source_capability?: string; fallback?: string; outputs?: string[]; not_granted?: string[]
     owner?: { host?: string; editspace?: string; lane?: string; session?: string; role?: string }; evidence?: string; state?: string; state_at?: number; next?: string
     /** What the human is asked to do for a waiting part, and where: an attention record, a Surface or a link. */
-    needs?: { action: "answer" | "review" | "try" | "do"; label: string; ref?: string } }[]
+    needs?: { action: "answer" | "review" | "try" | "do"; label: string; ref?: string; host?: string } }[]
   deliverables: { id: string; intent?: string; label: string; ref?: string; read_back?: boolean; read_back_at?: number; evidence?: string }[]
 }
 
@@ -86,12 +86,22 @@ export type ProgressRow = { key: string; group: "needs" | "working" | "waiting" 
   flag?: string }
 
 const ACTION = { answer: "Answer", review: "Review", try: "Try it", do: "Open" } as const
-/** Where a needs-you row leads: an attention record or Surface in this app, or an http(s) link; anything else has no link. */
-const actionLink = (needs: { action: keyof typeof ACTION; ref?: string }) => {
+/** Where a needs-you row leads. An attention record or Surface opens in Work on the host that holds it (`<host>~<key>`,
+ * plain key when that is this host); without a named host there is no link, never a guess at this one. An http(s)
+ * link opens only when it carries no username or password. */
+export const actionLink = (needs: { action: keyof typeof ACTION; ref?: string; host?: string }, ownHost?: string) => {
   const ref = needs.ref ?? ""
-  const href = /^https?:\/\//.test(ref) ? ref : ref.startsWith("surface:") ? `/?surface=${encodeURIComponent(ref.slice(8))}`
-    : ref.startsWith("attention:") ? `/?item=${encodeURIComponent(ref)}` : undefined
-  return href ? { label: ACTION[needs.action] ?? "Open", href } : undefined
+  const label = ACTION[needs.action] ?? "Open"
+  if (/^https?:\/\//i.test(ref)) return safeLink(ref) ? { label, href: safeLink(ref)! } : undefined
+  if (!/^(attention:[^:\s]+:[^:\s]+|surface:[^:\s]+)$/.test(ref) || !needs.host) return undefined
+  return { label, href: `/?item=${encodeURIComponent(needs.host === ownHost ? ref : `${needs.host}~${ref}`)}` }
+}
+
+const safeLink = (ref: string) => {
+  try {
+    const url = new URL(ref)
+    return /^https?:$/.test(url.protocol) && url.hostname && !url.username && !url.password ? url.href : undefined
+  } catch { return undefined }
 }
 
 // Parts an owner has not started yet wait on that owner; only "working" is work under way.
@@ -101,7 +111,7 @@ const DONE = new Set(["delivered", "done"])
 /** The strip's rows: what needs the human, what is in progress, parts in a state the desk does not recognise, then
  * every result, newest first. Withdrawn parts leave the strip; nothing older is dropped. A case's own `updated` time
  * is never a part's age: it moves whenever any part or note changes. */
-export const progressRows = (cases: DeskCase[], items: FollowUp[]): ProgressRow[] => {
+export const progressRows = (cases: DeskCase[], items: FollowUp[], ownHost?: string): ProgressRow[] => {
   const rows: ProgressRow[] = []
   for (const item of cases) {
     const title = item.title || partLabel(item.case_id)
@@ -110,10 +120,10 @@ export const progressRows = (cases: DeskCase[], items: FollowUp[]): ProgressRow[
       if (state === "withdrawn") continue
       const owner = [part.owner?.lane, part.owner?.editspace, part.owner?.host].filter(Boolean).join(" · ")
       const detail = [`case ${item.case_id}`, `part ${part.id}`, ...(owner ? [`owner ${owner}`] : []), ...(part.owner?.session ? [part.owner.session] : []), ...(part.next ? [`next: ${part.next}`] : [])]
-      const deliverable = item.deliverables.find(entry => entry.intent === part.id && entry.read_back && entry.ref && /^https?:\/\//.test(entry.ref))
+      const deliverable = item.deliverables.find(entry => entry.intent === part.id && entry.read_back && entry.ref && safeLink(entry.ref))
       // A waiting part needs the human only when the case records what to do and where; otherwise its owner is blocked.
       const needs = state === "waiting" && part.needs ? part.needs : undefined
-      const action = needs?.ref ? actionLink(needs) : undefined
+      const action = needs?.ref ? actionLink(needs, ownHost) : undefined
       const group = needs ? "needs" : state === "waiting" ? "waiting" : DONE.has(state) ? "result" : state === "working" ? "working" : QUEUED.has(state) ? "waiting" : "unknown"
       rows.push({ key: `${item.case_id}/${part.id}`, group, label: partLabel(part.id), context: title, ...(part.state_at ? { at: part.state_at } : {}),
         status: needs ? needs.label : state === "waiting" ? (part.next ? `Blocked: ${part.next}` : "Blocked; no action for you recorded") : group === "result" ? "Delivered" : group === "unknown" ? `Unknown state: ${state}` : part.next || (group === "waiting" ? `Not started (${state})` : "In progress"),

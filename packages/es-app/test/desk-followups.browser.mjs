@@ -36,7 +36,7 @@ const caseFile = { format: "front-desk-cases/1", cases: [{ case_id: "two-parts",
   intents: [{ id: "private-read", state: "working", owner: { lane: "exploration", editspace: "directions", host: "mini" }, next: "meeting synthesis" },
     { id: "workspace", state: "delivered", state_at: now - 3_600_000, owner: { lane: "project-lead", editspace: "streams", host: "mini" } },
     { id: "archived-part", state: "done", state_at: now - 5 * 86_400_000 }, { id: "odd-part", state: "paused" },
-    { id: "pick-scope", state: "waiting", needs: { action: "answer", label: "Pick the first workspace before the outline starts", ref: "attention:fixture:pick-scope" }, owner: { lane: "project-lead", editspace: "streams", host: "mini" } },
+    { id: "pick-scope", state: "waiting", needs: { action: "answer", label: "Pick the first workspace before the outline starts", ref: "attention:fixture:pick-scope", host: "mini" }, owner: { lane: "project-lead", editspace: "streams", host: "mini" } },
     // Waiting with no recorded action: its owner's blocker, so it waits on owners and never reads as a question for you.
     { id: "client-guard", state: "waiting", next: "client guard rejects the current target", owner: { lane: "upgrade" } }],
   deliverables: [{ id: "deck", intent: "workspace", label: "Explainer deck", ref: "http://127.0.0.1:64924/", read_back: true }, { id: "report", intent: "private-read", label: "Private report" }] }] }
@@ -81,6 +81,8 @@ try {
     const needs = strip.locator('.desk-progress-row[data-group="needs"]')
     await expect(needs.locator(".desk-progress-line")).toBeFocused()
     await expect(needs.locator(".desk-progress-detail")).toContainText("Pick the first workspace before the outline starts")
+    // The ask opens on the host that holds the record, in Work, not on the viewing host.
+    await expect(needs.locator(".desk-progress-open")).toHaveAttribute("href", "/?item=mini~attention%3Afixture%3Apick-scope")
     await expect(needs.locator(".desk-progress-detail")).toContainText(/Changed\s*unknown/)
     // Opened: grouped by who has the next move, newest first, undated last; one line per row; owners and ids only
     // in a row's detail. Results wait behind a closed Completed control, kept however old.

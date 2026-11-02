@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { MailDelivery, MailMessage, MailTimeline } from "./api"
-import { caseLines, followUps, progressRows, type DeskCase } from "./desk-followups"
+import { actionLink, caseLines, followUps, progressRows, type DeskCase } from "./desk-followups"
 
 const delivery = (state: string): MailDelivery => ({ message_id: "x", recipient: "alpha", session: "ses_alpha", mode: "actionable", state, request_id: "r", error: null, presented_at: null, handled_at: null })
 const mail = (id: string, extra: Partial<MailMessage>): MailMessage =>
@@ -46,7 +46,7 @@ test("the strip puts what needs the human first, then work under way, then what 
   const now = 10 * 86_400_000
   const cases = [{ case_id: "reports-and-streams", title: "Directions and streams", updated: now - 1_000,
     intents: [{ id: "private-project-directions", state: "delivered", state_at: now - 2_000, owner: { lane: "exploration", editspace: "directions", host: "mini", session: "ses_private000001" } },
-      { id: "diff-streams-discovery", state: "working", next: "native views", state_at: now - 9_000 }, { id: "choose-scope", state: "waiting", needs: { action: "answer" as const, label: "Pick the first workspace", ref: "attention:streams:rec-1" } }, { id: "dropped", state: "withdrawn" }],
+      { id: "diff-streams-discovery", state: "working", next: "native views", state_at: now - 9_000 }, { id: "choose-scope", state: "waiting", needs: { action: "answer" as const, label: "Pick the first workspace", ref: "attention:streams:rec-1", host: "mini" } }, { id: "dropped", state: "withdrawn" }],
     deliverables: [{ id: "report", intent: "private-project-directions", label: "Directions report", ref: "http://127.0.0.1:1/report", read_back: true, read_back_at: now - 1_500 }] }]
   const rows = progressRows(cases, [{ editspace: "p", id: "a#1", owner: "alpha", text: "Which build?", asked: now - 5_000, delivery: "delivered" }])
   expect(rows.map(row => [row.group, row.label, row.status])).toEqual([
@@ -106,18 +106,34 @@ test("a row names who has it and flags a blocker: an unrecognised state or a que
     ["Plain", undefined, undefined], ["No receipt", "alpha", "no receipt"], ["Bounced", "beta", "not delivered"], ["Fine", "gamma", undefined], ["Odd", "tour", "paused"]])
 })
 
-test("a waiting part needs the human only with a recorded action, which links to where it is done", () => {
+test("a waiting part needs the human only with a recorded action, linked on the host that holds it", () => {
   const rows = progressRows([{ case_id: "c", updated: 1, deliverables: [], intents: [
-    { id: "decide", state: "waiting", needs: { action: "answer", label: "Choose the rollout", ref: "attention:alpha:rec-9" } },
-    { id: "try-it", state: "waiting", needs: { action: "try", label: "Try the editor", ref: "surface:vim-editor" } },
+    // A Laptop case pointing at the Mini's resolved review and a Mini Surface: both open on the Mini.
+    { id: "decide", state: "waiting", needs: { action: "answer", label: "Develop, revise or park?", ref: "attention:opencode:dba3c6ef-015e-482b-83fe-e9f53a74576c", host: "mini" } },
+    { id: "try-it", state: "waiting", needs: { action: "try", label: "Try the editor", ref: "surface:vim-editor", host: "mini" } },
+    { id: "local", state: "waiting", needs: { action: "review", label: "Read the board", ref: "surface:board", host: "laptop" } },
     { id: "read", state: "waiting", needs: { action: "review", label: "Read the report", ref: "https://example.test/report" } },
     { id: "elsewhere", state: "waiting", needs: { action: "do", label: "Plug in the TV" } },
-  ] }], [])
+  ] }], [], "laptop")
   expect(rows.map(row => [row.group, row.label, row.status, row.link])).toEqual([
-    ["needs", "Decide", "Choose the rollout", { label: "Answer", href: "/?item=attention%3Aalpha%3Arec-9" }],
-    ["needs", "Try it", "Try the editor", { label: "Try it", href: "/?surface=vim-editor" }],
+    ["needs", "Decide", "Develop, revise or park?", { label: "Answer", href: "/?item=mini~attention%3Aopencode%3Adba3c6ef-015e-482b-83fe-e9f53a74576c" }],
+    ["needs", "Try it", "Try the editor", { label: "Try it", href: "/?item=mini~surface%3Avim-editor" }],
+    ["needs", "Local", "Read the board", { label: "Review", href: "/?item=surface%3Aboard" }],
     ["needs", "Read", "Read the report", { label: "Review", href: "https://example.test/report" }],
     ["needs", "Elsewhere", "Plug in the TV", undefined]])
+})
+
+test("a record or Surface without a named host gets no link, never one on the viewing host", () => {
+  expect(actionLink({ action: "answer", ref: "attention:opencode:rec-1" }, "laptop")).toBeUndefined()
+  expect(actionLink({ action: "try", ref: "surface:board" }, "laptop")).toBeUndefined()
+})
+
+test("a link carrying a username or password is never offered", () => {
+  for (const ref of ["https://user:pass@example.test/", "https://user@example.test/", "https://us%65r%3Apw@example.test/", "javascript:alert(1)", "ftp://example.test/"])
+    expect(actionLink({ action: "review", ref }, "laptop")).toBeUndefined()
+  const rows = progressRows([{ case_id: "c", updated: 1, intents: [{ id: "done", state: "delivered" }],
+    deliverables: [{ id: "d", intent: "done", label: "Report", ref: "https://user:pass@example.test/r", read_back: true }] }], [])
+  expect(rows[0]!.link).toBeUndefined()
 })
 
 test("a waiting part with no recorded action is its owner's blocker, not a question for the human", () => {

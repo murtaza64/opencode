@@ -16,6 +16,7 @@ import { caseLines, followUps, progressRows, readCases, type DeskCase, type Foll
 import "./desk-followups.css"
 import { SessionView } from "./pages/session"
 import { ResizeHandle } from "./components/resize-handle"
+import { host } from "./host"
 import { companionWidth, setCompanionDocked } from "./ui"
 
 export type CompanionKind = "work" | "session"
@@ -219,7 +220,7 @@ const DeskFollowUps = (props: { session: string; open: () => boolean }) => {
   const [items] = createResource(() => ({ session: props.session, names: dashboard.editspaces()?.editspaces.map(item => item.name) ?? [], tick: tick(), mail: dashboard.mailRevision() }),
     async input => (await Promise.all(input.names.map(name => es.mail(name, { session: input.session }).then(timeline => followUps(timeline, input.session), () => [] as FollowUp[])))).flat())
   const chat = useDeskChat()
-  const rows = () => progressRows(chat.cases(), items.latest ?? [])
+  const rows = () => progressRows(chat.cases(), items.latest ?? [], host()?.id)
   const group = (name: ProgressRow["group"]) => rows().filter(row => row.group === name)
   const [doneOpen, setDoneOpen] = createSignal(false)
   const [open, setOpen] = createSignal<string>()
