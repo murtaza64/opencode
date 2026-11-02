@@ -22,6 +22,7 @@ execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-subj
 const PAGE = `<!doctype html><title>Personal fixture</title>
 <script>window.__namesAtStart = Object.getOwnPropertyNames(window)</script>
 <textarea id="note" name="note"></textarea><input id="title" name="title"><input type="checkbox" id="done" name="done"><select id="pick" name="pick"><option value="a">A</option><option value="b">B</option></select>
+<form id="send" action="/slow" method="post"></form><button id="submit" form="send">Send</button>
 <script>
   if (!localStorage.getItem("draft")) localStorage.setItem("draft", "draft the page restored")
   document.getElementById("note").value = localStorage.getItem("draft")
@@ -30,8 +31,12 @@ const PAGE = `<!doctype html><title>Personal fixture</title>
 </script>`
 const personal = await new Promise(async (resolve) => {
   const server = createServer({ key: await readFile(path.join(certs, "key.pem")), cert: await readFile(path.join(certs, "cert.pem")) }, (req, res) => {
-    res.writeHead(200, { "content-type": "text/html" })
-    res.end(PAGE)
+    // A form submission whose answer takes a while: the page is mid-submit until it arrives.
+    const delay = req.url === "/slow" ? 8000 : 0
+    setTimeout(() => {
+      res.writeHead(200, { "content-type": "text/html" })
+      res.end(PAGE)
+    }, delay)
   })
   server.listen(0, "127.0.0.1", () => resolve({ server, origin: `https://127.0.0.1:${server.address().port}` }))
 })
@@ -121,6 +126,41 @@ try {
   results.lateRestore = await read()
   expect(results.lateRestore).toMatchObject({ valid: true, interacted: false, fieldsChanged: 1 })
 
+  // 7. Current-state admission (DD #603): after normal use the load baseline is gone, so the page's current state decides.
+  const quiet = () => new Promise((resolve) => setTimeout(resolve, 5600))
+  await page.goto(`${personal.origin}/?n=7`)
+  await settle()
+  // Browse: type and send (the app clears the field), then move within the app; then idle.
+  await page.locator("#title").pressSequentially("sent")
+  await page.evaluate(() => { document.getElementById("title").value = "" })
+  await page.evaluate(() => history.pushState({}, "", "/browsed"))
+  await quiet()
+  results.browsedIdle = await read()
+  expect(results.browsedIdle).toMatchObject({ valid: false, reason: "navigated", admit: true, admitBasis: "current", current: { dirtyFields: 0, loading: false, submitting: false, dialogs: 0 } })
+  // Text the user typed and did not send stops it, however long the page is idle.
+  await page.locator("#title").pressSequentially("unsent")
+  results.typingNow = await read()
+  expect(results.typingNow).toMatchObject({ admit: false })
+  await quiet()
+  results.typedUnsent = await read()
+  expect(results.typedUnsent).toMatchObject({ admit: false, holdReason: "dirty", current: { dirtyFields: 1 } })
+  // A real form submission still waiting for its answer stops it.
+  await page.locator("#title").fill("")
+  // Enter on the focused button (a trusted activation); Playwright's element click would wait past the answer.
+  await page.locator("#submit").focus()
+  await page.keyboard.press("Enter")
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  // While the answer is pending the view is loading (the runner's native check), and a guard read cannot run in the
+  // submitting document: Electron runs it only once the answer's document commits, so it never admits mid-submit.
+  results.midSubmitLoading = await electron.evaluate(({ webContents }, origin) =>
+    webContents.getAllWebContents().find((item) => item.getURL().startsWith(origin)).isLoading(), personal.origin)
+  expect(results.midSubmitLoading).toBe(true)
+  const asked = Date.now()
+  results.midSubmit = await read()
+  results.midSubmitWaitedMs = Date.now() - asked
+  expect(results.midSubmitWaitedMs).toBeGreaterThan(5000)
+  expect(results.midSubmit).toMatchObject({ valid: false, reason: "not-settled", current: { submitting: false } })
+
   // The page's own window: no guard global, and the same own properties as the page loaded without the preload.
   const names = await page.evaluate(() => ({ guard: typeof globalThis.__esPageGuard, names: window.__namesAtStart }))
   const plain = await electron.evaluate(async ({ BrowserWindow }, url) => {
@@ -133,7 +173,7 @@ try {
   results.globals = { guard: names.guard, extra: names.names.filter((name) => !plain.includes(name)), missing: plain.filter((name) => !names.names.includes(name)) }
   expect(results.globals).toEqual({ guard: "undefined", extra: [], missing: [] })
   console.log(JSON.stringify(results, null, 2))
-  console.log("PASS page guard: self-restore 0, typed after load counts, checkbox/select count, clear/removal count, navigation resets (new document + pushState), input before settle UNKNOWN, late restore counts; no page-visible globals")
+  console.log("PASS page guard: browsed-then-idle admits on current state; unsent text and mid-submit hold; self-restore 0, typed after load counts, checkbox/select count, clear/removal count, navigation resets (new document + pushState), input before settle UNKNOWN, late restore counts; no page-visible globals")
 } finally {
   await electron.close()
   await fixture.close?.()
