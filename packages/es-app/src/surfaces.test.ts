@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import path from "node:path"
@@ -49,6 +49,8 @@ test("frame addresses are renewed a few minutes before they expire, never in a t
 
 const DOTFILES_BIN = process.env.DOTFILES_BIN ?? path.join(homedir(), "dotfiles/bin")
 const hasStore = existsSync(path.join(DOTFILES_BIN, "es_dashboard_surfaces.py"))
+// A stale Undo needs the store that applies an Undo only at or above the Done revision (dotfiles Desk2814 N1).
+const hasRevisionUndo = hasStore && readFileSync(path.join(DOTFILES_BIN, "es_dashboard_surfaces.py"), "utf8").includes("revision >= current")
 const cleanup: (() => Promise<unknown>)[] = []
 afterAll(async () => {
   for (const close of cleanup.splice(0).reverse()) await close()
@@ -159,6 +161,19 @@ describe.skipIf(!hasStore)("requested deliverables against the real host store",
     await desk.markSeen(desk.list()[0]!, 1)
     expect(await desk.markSeen(desk.list()[0]!, 1, false)).toBe(true)
     expect(freshIds(desk)).toEqual(["report"])
+  }, 60_000)
+
+  test.skipIf(!hasRevisionUndo)("an Undo from a device still showing an older revision never clears a newer Done", async () => {
+    const host = await storeHost()
+    await host.publish("report", "first")
+    const phone = await page(await tab(host.origin))
+    const stale = phone.list()[0]!
+    await host.publish("report", "second")
+    const desk = await page(await tab(host.origin))
+    await desk.markSeen(desk.list()[0]!, 2)
+    expect(await phone.markSeen(stale, 1, false)).toBe(true)
+    await desk.refresh()
+    expect(freshIds(desk)).toEqual([])
   }, 60_000)
 
   test("without the operator connection Done is not saved: it stays new and says why", async () => {

@@ -61,7 +61,7 @@ export const DeliverableList = (props: { surfaces: ReturnType<typeof createSurfa
   </Show>
 }
 
-export const SurfaceView = (props: { id: string; surface?: Surface; checked?: number; onDone?: (surface: Surface, revision: number, seen: boolean) => Promise<boolean>; onRetry: () => void; onClose: () => void }) => {
+export const SurfaceView = (props: { id: string; surface?: Surface; checked?: number; onDone?: (surface: Surface, revision: number, seen: boolean) => Promise<boolean>; onLoaded?: () => Promise<unknown>; onRetry: () => void; onClose: () => void }) => {
   // A deliverable keeps the revision it first showed until the human loads a newer one, so Done covers only what
   // was on screen; a board follows every republish.
   const [shown, setShown] = createSignal<number>()
@@ -77,6 +77,15 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
     if (!surface) return undefined
     if (saved()?.revision === onScreen()) return { at: saved()!.at }
     return surface.seen && surface.revision === onScreen() ? { at: surface.seen_at ?? undefined } : undefined
+  }
+  // The frame serves whatever revision is current when it loads, not the list row read before. Re-reading the list after
+  // the load and finding the same revision proves the frame shows it (revisions only grow); otherwise "newer revision"
+  // stands and Done waits until that one is loaded.
+  const [confirmed, setConfirmed] = createSignal<number>()
+  const loaded = async () => {
+    const revision = onScreen()
+    await props.onLoaded?.()
+    if (props.surface?.revision === revision) setConfirmed(revision)
   }
   const [writing, setWriting] = createSignal(false)
   const [failed, setFailed] = createSignal(false)
@@ -122,12 +131,15 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
           <bdi dir="auto">{props.surface?.title ?? props.id}</bdi></h2>
         <Show when={props.surface?.requested_in}>{asked => <A class="surface-head-link" href={sessionHref(asked().session, asked().directory)} data-requested-in={asked().session}
           title="The conversation this was asked for in">asked in <bdi dir="auto">{asked().title ?? "conversation"}</bdi></A>}</Show>
-        <Show when={deliverable() && props.onDone}>
+        {/* Done covers what the human saw, so it waits for the frame: never while loading, offline or failed. */}
+        <Show when={deliverable() && props.onDone && src() && !address.error && !surfaceUnavailable(deliverable()!) && (confirmed() === onScreen() || newer())}>
           <span class="surface-head-done" data-revision={onScreen()}>
             <Show when={newer()}>{revision => <button class="surface-head-text" data-newer={revision()} title="Load the newer revision; Done covers only the revision on screen" onClick={() => setShown(revision())}>newer revision {revision()}</button>}</Show>
+            <Show when={confirmed() === onScreen()}>
             <Show when={done()} fallback={<button class="surface-head-text surface-done" disabled={writing()} title={`Mark revision ${onScreen()} done; it leaves Needs you on every device`} onClick={() => void mark(true)}>Done</button>}>{state =>
               <><span class="surface-done-state" role="status">Done{state().at ? ` · ${ago(state().at!)}` : ""}</span>
                 <button class="surface-head-text" disabled={writing()} title={`Undo Done for revision ${onScreen()}`} onClick={() => void mark(false)}>Undo</button></>}</Show>
+            </Show>
             <Show when={failed()}><span class="home-blocked" role="alert">not saved</span></Show>
           </span>
         </Show>
@@ -148,7 +160,7 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
       </div>}>
         <Show when={!address.error} fallback={<div class="desk-surface-state" role="alert"><p>Cannot open this surface: {String(address.error?.message ?? address.error)}</p><button class="desk-button" onClick={retry}>Try again</button></div>}>
           <Show when={src() ? frameKey() : undefined} keyed fallback={<p class="desk-surface-state" role="status">Opening…</p>}>{_key =>
-            <iframe class="desk-surface-frame" title={surface().title} src={src()} referrerpolicy="no-referrer"
+            <iframe class="desk-surface-frame" title={surface().title} src={src()} referrerpolicy="no-referrer" onLoad={() => void loaded()}
               sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" />}</Show>
         </Show>
       </Show>}

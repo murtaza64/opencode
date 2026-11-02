@@ -234,7 +234,7 @@ export default function Desk() {
       </div>
 
       {/* Remount per selection so one item's reply outcome or draft never carries into the next. */}
-      <Show when={selectedSurface()} keyed>{id => <SurfaceView id={id} surface={surfaces.list().find(item => item.id === id)} checked={surfaces.checked()} onDone={(surface, revision, seen) => surfaces.markSeen(surface, revision, seen)} onRetry={() => void surfaces.refresh()} onClose={() => select()} />}</Show>
+      <Show when={selectedSurface()} keyed>{id => <SurfaceView id={id} surface={surfaces.list().find(item => item.id === id)} checked={surfaces.checked()} onDone={(surface, revision, seen) => surfaces.markSeen(surface, revision, seen)} onLoaded={() => surfaces.refresh()} onRetry={() => void surfaces.refresh()} onClose={() => select()} />}</Show>
       <Show when={selected() && !selectedSurface() ? selectedKey() : undefined} keyed>{_key => <Show when={selected()}>{current => <section ref={setEvidence} class="desk-evidence attention-home" aria-label="Selected item">
         <div class="desk-evidence-head">
           <button class="desk-button" aria-label="Close" onClick={() => select()}>Close</button>

@@ -21,8 +21,8 @@ const host = spawn("uv", ["run", "--script", fileURLToPath(new URL("../src/fixtu
 })
 const store = `http://127.0.0.1:${(await new Promise((resolve) => host.stdout.once("data", resolve))).toString().trim()}`
 for (let wait = 50; !(await fetch(`${store}/api/surfaces`).then((response) => response.status < 500, () => false)); wait *= 2) await new Promise((resolve) => setTimeout(resolve, wait))
-const publish = async (summary) =>
-  (await (await fetch(`${store}/__fixture/publish`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "report", title: "API tests", summary }) })).json()).revision
+const publish = async (summary, id = "report") =>
+  (await (await fetch(`${store}/__fixture/publish`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, title: "API tests", summary }) })).json()).revision
 const jar = new Map()
 const send = async (pathname, init = {}) => {
   const headers = { ...init.headers, origin: store, ...(jar.size ? { cookie: [...jar].map(([name, value]) => `${name}=${value}`).join("; ") } : {}) }
@@ -54,7 +54,14 @@ await page.route("**/es/api/frontdesk/deliverables/seen", (route) => {
   return forward(route, "/api/frontdesk/deliverables/seen", { method: "POST", headers: { "content-type": "application/json", "X-Attention-CSRF": request.headers()["x-attention-csrf"] ?? "" }, body: request.postData() })
 })
 // The frame content is not what this checks; an empty frame keeps the reader settled.
-await page.route("**/__es/surface/report", (route) => route.fulfill({ json: { src: "about:blank" } }))
+// The first mint waits until the test has checked that Done is not offered before the frame is on screen.
+let releaseMint
+const firstMint = new Promise((resolve) => { releaseMint = resolve })
+await page.route("**/__es/surface/report", async (route) => { await firstMint; return route.fulfill({ json: { src: "about:blank" } }) })
+// The race surface's mint waits until the test has republished it, so the frame loads after a newer revision exists.
+let releaseRace
+const raceMint = new Promise((resolve) => { releaseRace = resolve })
+await page.route("**/__es/surface/race", async (route) => { await raceMint; return route.fulfill({ json: { src: "about:blank" } }) })
 const band = page.locator("nav.sidebar section.needs-you-band")
 const row = band.locator("[data-nav-item='surface:report']")
 const reader = page.locator(".surface-head")
@@ -70,10 +77,14 @@ try {
   await expect(page).toHaveURL(`${preview.origin}/?item=${encodeURIComponent("surface:report")}`)
   await expect(reader.locator("h2")).toHaveText("API tests")
   await expect(reader.locator("[data-requested-in]")).toContainText("Asked here")
+  await page.waitForTimeout(1_000)
+  await expect(reader.locator(".surface-head-done")).toHaveCount(0)
+  releaseMint()
+  await expect(reader.getByRole("button", { name: "Done", exact: true })).toBeVisible()
   await page.waitForTimeout(2_000)
   await expect(row).toBeVisible()
   if (writes.length || (await stored()).seen) throw new Error(`opening wrote seen: ${JSON.stringify(writes)}`)
-  step("opening keeps it in Needs you and writes nothing")
+  step("opening keeps it in Needs you and writes nothing; Done waits for the frame")
 
   await reader.getByRole("button", { name: "Done", exact: true }).click()
   await expect(reader.locator(".surface-done-state")).toHaveText(/^Done · /)
@@ -111,6 +122,23 @@ try {
   await expect(reader.locator(".surface-done-state")).toHaveText(/^Done · /, { timeout: 60_000 })
   await expect(row).toHaveCount(0)
   step("an exact-retry publish does not bring it back")
+
+  // Republished between the list read and the frame load: the frame may show either revision, so Done is not offered
+  // until the newer one is loaded.
+  await publish("first", "race")
+  await page.goto(`${preview.origin}/?item=${encodeURIComponent("surface:race")}`, { waitUntil: "domcontentloaded" })
+  await expect(reader.locator("h2")).toHaveText("API tests", { timeout: 60_000 })
+  if (await publish("second", "race") !== 2) throw new Error("expected race revision 2")
+  releaseRace()
+  await expect(reader.locator("[data-newer]")).toHaveText("newer revision 2")
+  await page.waitForTimeout(1_000)
+  await expect(reader.getByRole("button", { name: "Done", exact: true })).toHaveCount(0)
+  await reader.locator("[data-newer]").click()
+  await expect(reader.locator(".surface-head-done")).toHaveAttribute("data-revision", "2")
+  await reader.getByRole("button", { name: "Done", exact: true }).click()
+  await expect(reader.locator(".surface-done-state")).toHaveText(/^Done · /)
+  expect(writes.at(-1)).toEqual({ id: "race", revision: 2, seen: true })
+  step("a republish racing the frame load offers no Done until the newer revision is loaded")
 } catch (error) {
   process.exitCode = 1
   results.push(`FAIL ${String(error).split("\n")[0]} writes=${writes.length} first=${JSON.stringify(writes.slice(0, 3))}${storeErrors.size ? ` store=${[...storeErrors]}` : ""}`)
