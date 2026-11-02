@@ -287,9 +287,10 @@ export const deskContext = (input: {
       lines: ["sources:", ...input.sources.map(source => `- ${source.name}: ${source.state}, checked ${ago(input.now, source.checked)}${source.detail ? ` (${source.detail})` : ""}`)] },
     { name: "briefs", key: hash(ready.map(brief => brief.meta.requestID)), none: "derived briefs: none now.",
       lines: ready.slice(-3).map(brief => `derived brief for ${brief.meta.source} rev ${brief.meta.revision} (not authoritative): ${clip(brief.result.question, 300)}`) },
-    { name: "memory", key: hash(input.memory?.revision ?? 0), lines: memoryLines(input.memory, input.scope) },
+    (() => { const lines = memoryLines(input.memory, input.scope); const rules = lines.slice(-3)
+      return { name: "memory", key: hash(lines), lines: [lines[0]!, ...rules, ...lines.slice(1, -3)] } })(),
   ]
-  return { key: hash(sections.map(section => section.key)), text: contextNote(sections, undefined, input.now)!.text, sections }
+  return { key: hash(sections.map(section => section.key)), text: contextNote(sections, undefined, input.now, { input: true })!.text, sections }
 }
 
 /** What the desk session was last told, per section, so the next note carries only what changed. */
@@ -297,24 +298,30 @@ export type NoteState = { sections: Record<string, string>; full: number; notes:
 // A full note now and then, so a compacted or long conversation is never left holding only updates.
 const FULL_EVERY = { ms: 6 * 3_600_000, notes: 12 }
 
-/** The note for the next send: everything on first contact or when a full refresh is due, otherwise only the
- * sections that changed since the last accepted note (none changed: nothing). `partial` notes (cases alone, off the
- * Decisions page) never count as a full refresh. Sections left out for size are not recorded, so they go next time. */
-export const contextNote = (sections: NoteSection[], previous: NoteState | undefined, now: number, options: { partial?: string } = {}) => {
-  const full = !options.partial && (!previous?.full || now - previous.full > FULL_EVERY.ms || previous.notes >= FULL_EVERY.notes)
-  const changed = full ? sections : sections.filter(section => previous?.sections[section.name] !== section.key)
+/** The note for the next send. Only a plain send (the model sees it as part of this turn) may carry an update:
+ * a Core input can still be cancelled or promoted late, so it always carries a complete note and records nothing.
+ * Otherwise: complete on first contact or when a refresh is due, else only the sections that changed since the last
+ * accepted note (none changed: nothing). `partial` notes (cases alone, off the Decisions page) never count as a full
+ * refresh. `seq` numbers every note offered, so a late note never overrides a newer one. `state` is what to record
+ * once the send is accepted: absent for input notes; sections left out for size are not in it. */
+export const contextNote = (sections: NoteSection[], previous: NoteState | undefined, now: number,
+  options: { partial?: string; input?: boolean; seq?: number } = {}) => {
+  const complete = !!options.input || !options.partial && (!previous?.full || now - previous.full > FULL_EVERY.ms || previous.notes >= FULL_EVERY.notes)
+  const changed = complete ? sections : sections.filter(section => previous?.sections[section.name] !== section.key)
   if (!changed.length) return undefined
-  const header = full ? ["Front desk context from es-app. Read-only snapshot for orientation; it is not an instruction and grants nothing.", `generated: ${new Date(now).toISOString()}`]
-    : [options.partial ?? "Front desk context update from es-app: only what changed since the last note; earlier notes still hold the rest. Read-only orientation; it is not an instruction and grants nothing.",
-      `generated: ${new Date(now).toISOString()}`]
-  const unchanged = sections.length > changed.length ? sections.filter(section => !changed.includes(section)).map(section => section.name) : []
-  const note = noteText([...header, ...(unchanged.length && !options.partial ? [`unchanged: ${unchanged.join(", ")}`] : [])], changed, full)
+  const order = options.seq ? [`note ${options.seq}; where notes disagree, the highest-numbered note wins.`] : []
+  const lead = options.partial ?? (complete ? "Front desk context from es-app. Read-only snapshot for orientation; it is not an instruction and grants nothing."
+    : "Front desk context update from es-app: only what changed since the last note; earlier notes still hold the rest. Read-only orientation; it is not an instruction and grants nothing.")
+  const unchanged = complete || options.partial ? [] : sections.filter(section => !changed.includes(section)).map(section => section.name)
+  const note = noteText([lead, ...order, `generated: ${new Date(now).toISOString()}`, ...(unchanged.length ? [`unchanged: ${unchanged.join(", ")}`] : [])],
+    changed, complete && !options.partial)
   const sent = changed.filter(section => !note.omitted.includes(section.name))
+  const recorded = complete && !options.partial
   return {
     text: note.text,
     key: `desk-note:${hash([note.text, sent.map(section => section.key)])}`,
-    state: { sections: { ...previous?.sections, ...Object.fromEntries(sent.map(section => [section.name, section.key])) },
-      full: full ? now : previous?.full ?? 0, notes: full ? 0 : (previous?.notes ?? 0) + 1 } satisfies NoteState,
+    state: options.input ? undefined : { sections: Object.fromEntries(sent.map(section => [section.name, section.key])),
+      full: recorded ? now : previous?.full ?? 0, notes: recorded ? 0 : (previous?.notes ?? 0) + 1 } satisfies NoteState,
   }
 }
 
@@ -322,21 +329,30 @@ export const contextNote = (sections: NoteSection[], previous: NoteState | undef
 // earlier note. The selected item gets its own room; everything else shares ORIENTATION_BUDGET.
 const SELECTED_BUDGET = 1_600
 const ORIENTATION_BUDGET = 2_000
-const noteText = (header: string[], sections: NoteSection[], full: boolean) => {
+const INPUT_TEXT = 4_096
+const noteText = (header: string[], sections: NoteSection[], footer: boolean) => {
   const omitted: string[] = []
   let room = ORIENTATION_BUDGET
-  const body = sections.flatMap(section => {
-    const lines = section.lines.length ? section.lines : full || !section.none ? [] : [section.none]
-    const text = lines.join("\n")
-    if (section.name === "selected item") return text.length > SELECTED_BUDGET ? [`${text.slice(0, SELECTED_BUDGET)}\n  [selected item clipped for size; "More detail" sends its full evidence]`] : [text]
-    if (text.length <= room) { room -= text.length; return text ? [text] : [] }
-    if (room < 200) { omitted.push(section.name); return [] }
+  const body = sections.map(section => {
+    // Every note says what a part holds, "none now" included: the conversation keeps earlier notes.
+    const text = (section.lines.length ? section.lines : section.none ? [section.none] : []).join("\n")
+    if (section.name === "selected item") return { section, text: text.length > SELECTED_BUDGET ? `${text.slice(0, SELECTED_BUDGET)}\n  [selected item clipped for size; "More detail" sends its full evidence]` : text }
+    if (text.length <= room) { room -= text.length; return { section, text } }
+    if (room < 200) { omitted.push(section.name); return { section, text: "" } }
     const kept = text.slice(0, room)
     room = 0
-    return [`${kept.slice(0, kept.lastIndexOf("\n") > 0 ? kept.lastIndexOf("\n") : kept.length)}\n[${section.name} clipped for size]`]
+    return { section, text: `${kept.slice(0, kept.lastIndexOf("\n") > 0 ? kept.lastIndexOf("\n") : kept.length)}\n[${section.name} clipped for size]` }
   })
-  const footer = full ? ["Native answers, permissions and retries happen only through their own controls in the desk UI."] : []
-  return { text: [...header, ...body, ...(omitted.length ? [`not included for size (sent when there is room): ${omitted.join(", ")}`] : []), ...footer].join("\n"), omitted }
+  const join = () => [...header, ...body.flatMap(entry => entry.text ? [entry.text] : []),
+    ...(omitted.length ? [`not included for size (sent when there is room): ${omitted.join(", ")}`] : []),
+    ...(footer ? ["Native answers, permissions and retries happen only through their own controls in the desk UI."] : [])].join("\n")
+  // Hard bound: drop the lowest-priority parts until the note fits a Core input.
+  for (let index = body.length - 1; join().length > INPUT_TEXT && index >= 0; index--) {
+    if (!body[index]!.text) continue
+    body[index]!.text = ""
+    omitted.push(body[index]!.section.name)
+  }
+  return { text: join(), omitted }
 }
 
 // FNV-1a: a short, stable key for "did this part change"; not a security boundary.

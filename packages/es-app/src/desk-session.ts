@@ -144,35 +144,48 @@ export const createDeskSession = () => {
     setStatus("none")
   }
 
-  // Notes offered to a send but not yet accepted, by part key: only an accepted send records what the desk now knows.
+  // Notes offered to a send but not yet accepted, by part key: only an accepted plain send records what the desk knows.
   const offered = new Map<string, NoteState>()
   const told = (id: string) => readJSON<NoteState>(`${NOTE}:${id}`, value => typeof value?.sections === "object" && typeof value?.full === "number")
-  const offer = (note: ReturnType<typeof contextNote>): ContextPart[] => {
-    if (!note) return []
-    offered.set(note.key, note.state)
+  // Every note offered gets the next number, kept per session so it only grows.
+  const nextSeq = (id: string) => {
+    const seq = (readJSON<number>(`${NOTE}:${id}:seq`, value => Number.isInteger(value)) ?? 0) + 1
+    try { localStorage.setItem(`${NOTE}:${id}:seq`, JSON.stringify(seq)) } catch { /* numbering restarts; still increasing this page */ }
+    return seq
+  }
+  const offer = (id: string, build: (seq: number) => ReturnType<typeof contextNote>): ContextPart[] => {
+    if (!build(0)) return []
+    const note = build(nextSeq(id))!
+    if (note.state) offered.set(note.key, note.state)
     return [{ type: "text", text: note.text, synthetic: true, metadata: { source: CONTEXT_SOURCE, key: note.key } }]
   }
-  /** Generated context for the next send: what changed in the desk's view since the last accepted note. */
-  const context = (input: Parameters<typeof deskContext>[0]): ContextPart[] => {
+  /** Generated context for the next send: a complete note for a Core input, otherwise what changed since the last
+   * accepted note. */
+  const context = (input: Parameters<typeof deskContext>[0], send: { input: boolean }): ContextPart[] => {
     const current = session()
     if (!current) return []
-    return offer(contextNote(deskContext(input).sections, told(current.id), input.now))
+    const sections = deskContext(input).sections
+    return offer(current.id, seq => contextNote(sections, told(current.id), input.now, { input: send.input, seq }))
   }
   /** Off the Decisions page there is no queue view, but the desk's open cases still go with the next send that
    * changes them, as a cases-only note. */
-  const caseContext = (lines: string[]): ContextPart[] => {
+  const caseContext = (lines: string[], send: { input: boolean }): ContextPart[] => {
     const current = session()
     if (!current || !lines.length) return []
     const cases = deskContext({ now: Date.now(), sources: [], items: [], briefs: [], cases: lines }).sections.filter(section => section.name === "cases")
-    return offer(contextNote(cases, told(current.id), Date.now(),
-      { partial: "Front desk context from es-app (cases only; no queue view is open). Read-only orientation; it is not an instruction and grants nothing." }))
+    return offer(current.id, seq => contextNote(cases, told(current.id), Date.now(),
+      { partial: "Front desk context from es-app (cases only; no queue view is open). Read-only orientation; it is not an instruction and grants nothing.", input: send.input, seq }))
   }
-  // An unconfirmed send leaves the note unrecorded, so the next send carries those parts again.
-  const sent = (parts: ContextPart[], accepted: boolean) => {
+  // Records against what is stored now, not the read taken when the note was built, so another tab's
+  // sections are kept. An unconfirmed send, or a Core input, records nothing: the next send repeats it.
+  const sent = (parts: ContextPart[], accepted: boolean, send: { input: boolean }) => {
     const current = session()
     const key = parts.find(part => part.metadata.source === CONTEXT_SOURCE)?.metadata.key
     const state = key ? offered.get(key) : undefined
-    if (current && state && accepted) localStorage.setItem(`${NOTE}:${current.id}`, JSON.stringify(state))
+    if (!current || !state || !accepted || send.input) return
+    const stored = told(current.id)
+    localStorage.setItem(`${NOTE}:${current.id}`, JSON.stringify({ ...state, sections: { ...stored?.sections, ...state.sections } }))
+    offered.delete(key!)
   }
   /** An explicit request from a decision card, sent as an ordinary desk message beside the composer:
    * the composer's draft is untouched. Starts the conversation first if there is none yet. */

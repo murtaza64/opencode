@@ -47,8 +47,8 @@ type DeskChat = {
   open: Accessor<boolean>
   setOpen: (open: boolean) => void
   // The Decisions view supplies its queue/selection context while mounted; other views send none.
-  setContext: (context: (() => ContextPart[]) | undefined) => void
-  context: () => ContextPart[]
+  setContext: (context: ((send: { input: boolean }) => ContextPart[]) | undefined) => void
+  context: (send: { input: boolean }) => ContextPart[]
   /** The desk's open cases (dashboard, metadata only), shared by every view so off-Decisions sends carry them too. */
   cases: () => DeskCase[]
   /** Background tasks started from the chat; their packet is the current view's text (empty elsewhere). */
@@ -73,7 +73,7 @@ export const DeskChatProvider = (props: ParentProps) => {
   const floating = media(FLOATING)
   // A floating companion's open state is for this page only; it never changes the remembered docked state.
   const [floatingOpen, setFloatingOpen] = createSignal(false)
-  const [contextGetter, setContextGetter] = createSignal<(() => ContextPart[]) | undefined>()
+  const [contextGetter, setContextGetter] = createSignal<((send: { input: boolean }) => ContextPart[]) | undefined>()
   const [viewGetter, setViewGetter] = createSignal<(() => string) | undefined>()
   const [asked, setAsked] = createSignal<ContextRef>()
   const prepared = useBriefs()
@@ -101,7 +101,7 @@ export const DeskChatProvider = (props: ParentProps) => {
     },
     setContext: (getter) => setContextGetter(() => getter),
     // The Decisions page sends its full view (cases included); every other view sends the cases alone.
-    context: () => contextGetter()?.() ?? desk.caseContext(caseLines(cases.latest ?? [])),
+    context: (send) => contextGetter()?.(send) ?? desk.caseContext(caseLines(cases.latest ?? []), send),
     cases: () => cases.latest ?? [],
     tasks,
     setView: (getter) => setViewGetter(() => getter),

@@ -219,7 +219,7 @@ export default function SessionPage() {
 }
 
 /** `embedded` drops the page-level info panel. `headerStart` leads the header, for a host's own pane control. `context` may attach generated parts to an idle send; `onSent` reports whether that send was accepted. `anchor` scrolls to and highlights a linked message or range. `host`: another Work host whose session this is; every read, stream, write and saved draft then belongs to that host. */
-export function SessionView(props: { sessionID: string; directory: string; embedded?: boolean; context?: () => ContextPart[]; onSent?: (context: ContextPart[], accepted: boolean) => void; anchor?: () => MessageAnchor | undefined; headerStart?: JSX.Element; host?: SessionHost
+export function SessionView(props: { sessionID: string; directory: string; embedded?: boolean; context?: (send: { input: boolean }) => ContextPart[]; onSent?: (context: ContextPart[], accepted: boolean, send: { input: boolean }) => void; anchor?: () => MessageAnchor | undefined; headerStart?: JSX.Element; host?: SessionHost
   /** A context chip to add to this draft once (Ask about this); `onIncoming` acknowledges it. */
   incoming?: () => ContextRef | undefined; onIncoming?: () => void }) {
   const sessionID = props.sessionID
@@ -1015,12 +1015,12 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     // them). Generated page context (props.context) rides only where it can be attached and fits (input-context.ts).
     const chips = contextParts()
     const plain = chosen === "steer" && !composer.state.busy
-    const context = sendContext({ input: !plain, attaches: composer.contextAttaches(chosen), generated: props.context?.() ?? [], chips })
+    const context = sendContext({ input: !plain, attaches: composer.contextAttaches(chosen), generated: props.context?.({ input: !plain }) ?? [], chips })
     await composer.submitVisible(chosen, s, nextModel(), messages().at(-1)?.id, context)
     // A plain send is accepted by its message; a steer or queue once its input is admitted (no admission left
     // pending or unknown, and no refusal).
     const accepted = plain ? composer.state.normalSubmission?.status === "accepted" : !composer.state.admission && !composer.state.error
-    if (context.length) props.onSent?.(context, accepted)
+    if (context.length) props.onSent?.(context, accepted, { input: !plain })
     if (chips.length && accepted) setContextRefs([])
   }
 

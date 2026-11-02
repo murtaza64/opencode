@@ -201,7 +201,7 @@ export default function Desk() {
     surface: (() => { const id = selectedSurface(); const surface = surfaces.list().find(item => item.id === id); return surface && { id: surface.id, title: surface.title, owner: surface.owner } })(),
     cases: caseLines(chat.cases()),
   })
-  const context = () => desk.context(contextInput())
+  const context = (send = { input: false }) => desk.context(contextInput(), send)
 
   // "More detail" on a selected item: fresh bounded evidence from its source thread, sent to the desk chat.
   const askDetail = async (item: DeskItem, question: string) => {
@@ -212,7 +212,7 @@ export default function Desk() {
     const note = context()
     const error = await desk.detail(request.text, [...note, request.context], deskDirectory())
     if (error) return error
-    if (note.length) desk.sent(note, true)
+    if (note.length) desk.sent(note, true, { input: false })
     chat.setOpen(true)
   }
 
