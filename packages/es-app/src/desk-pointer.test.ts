@@ -91,3 +91,11 @@ test("the shared-desk line shows once per shared desk, only where this device ha
   expect(sharedNotice(local(view), "ses_desk_current", [], undefined)).toBe(false)
   expect(sharedNotice({ kind: "off" }, "ses_desk_current", mine, undefined)).toBe(false)
 })
+
+test("a host that never answers is read as unknown within the time limit, so the desk still resolves", async () => {
+  const silent = (() => new Promise<Response>(() => {})) as unknown as typeof fetch
+  const started = Date.now()
+  expect(await readPointer("/hosts/mini", silent, 50)).toBeUndefined()
+  expect(Date.now() - started).toBeLessThan(1_000)
+  expect((await resolveHome([mini], silent, 50)).kind).toBe("off")
+})

@@ -18,9 +18,14 @@ export type DeskHome =
 
 const LAST_HOME = "es-app:front-desk:home:1"
 
-export const readPointer = async (prefix: string, fetcher: typeof fetch = fetch): Promise<PointerView | undefined> => {
+/** One host's pointer, or undefined when it cannot be read. Bounded: the desk chat waits on this before it loads, so a
+ * host that never answers (asleep, a stalled tunnel) must not keep the chat on "Loading chat…". */
+export const readPointer = async (prefix: string, fetcher: typeof fetch = fetch, timeout = 3_000): Promise<PointerView | undefined> => {
   try {
-    const response = await fetcher(`${prefix}/es/api/frontdesk/pointer`, { credentials: "include" })
+    const response = await Promise.race([
+      fetcher(`${prefix}/es/api/frontdesk/pointer`, { credentials: "include", signal: AbortSignal.timeout(timeout) }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), timeout)),
+    ])
     if (!response.ok) return undefined
     const value = await response.json() as PointerView
     return typeof value?.revision === "number" && typeof value.home === "boolean" ? value : undefined
@@ -38,8 +43,8 @@ export const homeOf = (local: PointerView | undefined, remotes: { host: WorkHost
   return previous ? { kind: "unreachable", host: host(previous.host) } : { kind: "off" }
 }
 
-export const resolveHome = async (hosts: WorkHost[], fetcher: typeof fetch = fetch): Promise<DeskHome> => {
-  const [local, ...views] = await Promise.all([readPointer("", fetcher), ...hosts.map(host => readPointer(`/hosts/${host.id}`, fetcher))])
+export const resolveHome = async (hosts: WorkHost[], fetcher: typeof fetch = fetch, timeout = 3_000): Promise<DeskHome> => {
+  const [local, ...views] = await Promise.all([readPointer("", fetcher, timeout), ...hosts.map(host => readPointer(`/hosts/${host.id}`, fetcher, timeout))])
   let last: string | undefined
   try { last = localStorage.getItem(LAST_HOME) ?? undefined } catch { /* no memory of a home */ }
   const home = homeOf(local, hosts.map((host, index) => ({ host, view: views[index] })), last)
