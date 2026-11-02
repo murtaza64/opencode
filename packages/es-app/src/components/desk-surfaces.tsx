@@ -5,7 +5,7 @@ import { AppHeader } from "./native-header"
 import { createEffect, createResource, createSignal, For, onCleanup, Show } from "solid-js"
 import { A } from "@solidjs/router"
 import { ago, sessionHref } from "../state"
-import { renewDelay, surfaceAddress, surfaceKey, surfaceProblem, surfaceUnavailable, type Surface, type createSurfaces } from "../surfaces"
+import { isDeliverable, renewDelay, surfaceAddress, surfaceKey, surfaceProblem, surfaceUnavailable, type Surface, type createSurfaces } from "../surfaces"
 import { Glyph } from "./icons"
 import "./desk-surfaces.css"
 
@@ -35,7 +35,7 @@ export const SurfaceList = (props: { surfaces: ReturnType<typeof createSurfaces>
 }
 
 /* Things the human asked for (reports, reviews), kept here so they are not lost in a chat.
- * New ones lead with a count; opened ones fold under Earlier. */
+ * New ones lead with a count; ones marked Done fold under Earlier. Opening one never marks it Done. */
 export const DeliverableList = (props: { surfaces: ReturnType<typeof createSurfaces>; selected?: string; onSelect: (key: string) => void }) => {
   const split = () => props.surfaces.deliverables()
   const row = (surface: Surface, fresh: boolean) =>
@@ -61,9 +61,35 @@ export const DeliverableList = (props: { surfaces: ReturnType<typeof createSurfa
   </Show>
 }
 
-export const SurfaceView = (props: { id: string; surface?: Surface; checked?: number; onOpen?: (surface: Surface) => void; onRetry: () => void; onClose: () => void }) => {
-  // Showing a deliverable is what marks it seen, so only a loaded, reachable one counts.
-  createEffect(() => { const surface = props.surface; if (surface && !surfaceUnavailable(surface)) props.onOpen?.(surface) })
+export const SurfaceView = (props: { id: string; surface?: Surface; checked?: number; onDone?: (surface: Surface, revision: number, seen: boolean) => Promise<boolean>; onRetry: () => void; onClose: () => void }) => {
+  // A deliverable keeps the revision it first showed until the human loads a newer one, so Done covers only what
+  // was on screen; a board follows every republish.
+  const [shown, setShown] = createSignal<number>()
+  createEffect(() => { if (props.surface && shown() === undefined) setShown(props.surface.revision) })
+  const deliverable = () => props.surface && isDeliverable(props.surface) ? props.surface : undefined
+  const onScreen = () => deliverable() ? shown() ?? 0 : props.surface?.revision ?? 0
+  const newer = () => { const surface = deliverable(); return surface && surface.revision > onScreen() ? surface.revision : undefined }
+  // Done this reader saved for the revision on screen. The list's seen covers it only while that revision is current,
+  // so a Done on N stays visible here after N+1 lands, while N+1 stays new everywhere.
+  const [saved, setSaved] = createSignal<{ revision: number; at: number }>()
+  const done = () => {
+    const surface = deliverable()
+    if (!surface) return undefined
+    if (saved()?.revision === onScreen()) return { at: saved()!.at }
+    return surface.seen && surface.revision === onScreen() ? { at: surface.seen_at ?? undefined } : undefined
+  }
+  const [writing, setWriting] = createSignal(false)
+  const [failed, setFailed] = createSignal(false)
+  const mark = async (seen: boolean) => {
+    const surface = deliverable()
+    if (!surface || !props.onDone || writing()) return
+    const revision = onScreen()
+    setWriting(true)
+    const ok = await props.onDone(surface, revision, seen)
+    setWriting(false)
+    setFailed(!ok)
+    if (ok) setSaved(seen ? { revision, at: Date.now() } : undefined)
+  }
   const [address, { refetch }] = createResource(() => props.id, surfaceAddress)
   // Reading a failed resource throws; the error is shown from address.error instead.
   const minted = () => address.error ? undefined : address()
@@ -76,8 +102,9 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
     onCleanup(() => clearTimeout(timer))
   })
   const [retries, setRetries] = createSignal(0)
-  // Remount the frame on republish, on retry, and when an offline surface comes back.
-  const frameKey = () => `${src() ?? ""}|${props.surface?.revision ?? 0}|${props.surface?.health.state}|${retries()}`
+  // Remount the frame on a board's republish, on loading a deliverable's newer revision, on retry, and when an
+  // offline surface comes back.
+  const frameKey = () => `${src() ?? ""}|${onScreen()}|${props.surface?.health.state}|${retries()}`
   const retry = () => {
     setRetries(retries() + 1)
     props.onRetry()
@@ -95,6 +122,15 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
           <bdi dir="auto">{props.surface?.title ?? props.id}</bdi></h2>
         <Show when={props.surface?.requested_in}>{asked => <A class="surface-head-link" href={sessionHref(asked().session, asked().directory)} data-requested-in={asked().session}
           title="The conversation this was asked for in">asked in <bdi dir="auto">{asked().title ?? "conversation"}</bdi></A>}</Show>
+        <Show when={deliverable() && props.onDone}>
+          <span class="surface-head-done" data-revision={onScreen()}>
+            <Show when={newer()}>{revision => <button class="surface-head-text" data-newer={revision()} title="Load the newer revision; Done covers only the revision on screen" onClick={() => setShown(revision())}>newer revision {revision()}</button>}</Show>
+            <Show when={done()} fallback={<button class="surface-head-text surface-done" disabled={writing()} title={`Mark revision ${onScreen()} done; it leaves Needs you on every device`} onClick={() => void mark(true)}>Done</button>}>{state =>
+              <><span class="surface-done-state" role="status">Done{state().at ? ` · ${ago(state().at!)}` : ""}</span>
+                <button class="surface-head-text" disabled={writing()} title={`Undo Done for revision ${onScreen()}`} onClick={() => void mark(false)}>Undo</button></>}</Show>
+            <Show when={failed()}><span class="home-blocked" role="alert">not saved</span></Show>
+          </span>
+        </Show>
         <span class="surface-head-actions">
           {/* Reserved for "BuildingHub version" (Laptop2649): shown only from a deployed receipt, which no API offers yet. */}
           <span class="surface-head-slot" data-slot="buildinghub" hidden />

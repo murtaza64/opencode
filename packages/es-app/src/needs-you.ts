@@ -66,7 +66,7 @@ export const needsYouFromInputs = (body: NeedsYouInputs, feeds: HostFeed[]) => {
     title: () => undefined,
     project: () => undefined,
   })
-  const result = needsYou({ items, feeds, fresh: deliverables(body.inputs.deliverables, new Set()).fresh })
+  const result = needsYou({ items, feeds, fresh: deliverables(body.inputs.deliverables, new Map()).fresh })
   const perEditspace = body.records.reduce((counts, record) => counts.set(record.editspace, (counts.get(record.editspace) ?? 0) + 1), new Map<string, number>())
   const truncated = [...perEditspace.values()].some((count) => count >= body.limit)
   const behind = body.partial || truncated || sources.some((source) => !source.ok)

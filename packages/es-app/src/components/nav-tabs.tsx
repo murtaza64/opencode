@@ -6,7 +6,7 @@ import { createMemo, createSignal, For, Show, type JSX } from "solid-js"
 import { useLocation } from "@solidjs/router"
 import { useDeskQueue } from "../desk-queue"
 import { useDashboard } from "../state"
-import { surfaceKey, surfaceProblem, type Surface } from "../surfaces"
+import { surfaceKey, surfaceProblem, tryLine, type Surface } from "../surfaces"
 import { needsYou } from "../needs-you"
 import { workCountLabel, workSurfaces, type WorkEntry } from "../work-queue"
 import { HostGlyph } from "./icons"
@@ -93,6 +93,18 @@ const HostSurfaceRow = (props: { entry: WorkEntry }) => {
     <span class="session-project">{props.entry.hostLabel}</span>
   </a>
 }
+// A requested deliverable waiting in Needs you: one deterministic line (Try · title · maintainer · revision, plus any
+// health problem); the summary, conversation link and Done live in the reader it opens.
+const TryRow = (props: { surface: Surface }) => {
+  const open = useOpenItem()
+  const key = () => surfaceKey(props.surface.id)
+  return <a href={itemHref(key())} classList={{ active: open(key()) }} aria-current={open(key()) ? "page" : undefined} class="nav-item nav-decision nav-try" data-kind="try" data-nav-item={key()}
+    data-revision={props.surface.revision} title={tryLine(props.surface)} aria-label={tryLine(props.surface)}>
+    <span class="nav-kind" aria-hidden="true">Try</span>
+    <span class="nav-title" dir="auto">{props.surface.title}</span>
+    <span class="session-project" classList={{ "home-blocked": !!surfaceProblem(props.surface.health) }}><bdi dir="auto">{surfaceProblem(props.surface.health) ?? props.surface.owner}</bdi> · rev {props.surface.revision}</span>
+  </a>
+}
 const SurfaceRow = (props: { surface: Surface; fresh?: boolean }) => {
   const open = useOpenItem()
   return <a href={itemHref(surfaceKey(props.surface.id))} classList={{ active: open(surfaceKey(props.surface.id)), fresh: !!props.fresh }} aria-current={open(surfaceKey(props.surface.id)) ? "page" : undefined} class="nav-item nav-surface" data-nav-item={surfaceKey(props.surface.id)}
@@ -121,7 +133,7 @@ export const NeedsYouBand = () => {
     <section class="needs-you-band" aria-label="Needs you">
       <div class="nav-heading">Needs you <span class="nav-heading-count" dir="ltr" title={all().label.title}>{all().count || all().partial ? all().label.text : ""}</span></div>
       <For each={shown()}>{entry => <DecisionRow entry={entry} />}</For>
-      <For each={all().fresh}>{surface => <SurfaceRow surface={surface} fresh />}</For>
+      <For each={all().fresh}>{surface => <TryRow surface={surface} />}</For>
       <Show when={more()}><button type="button" class="link-button nav-more" onClick={() => setTab("decisions")}>{more()} more in Decisions</button></Show>
     </section>
   </Show>

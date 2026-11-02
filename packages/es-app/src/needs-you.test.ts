@@ -31,7 +31,7 @@ const items = deskItems({
   title: () => undefined,
   project: () => "opencode",
 })
-const fresh = deliverables([surface("new"), surface("seen", { seen: true }), surface("opened"), surface("board", { purpose: "board" })], new Set(["opened:1"])).fresh
+const fresh = deliverables([surface("new"), surface("seen", { seen: true }), surface("opened"), surface("board", { purpose: "board" })], new Map([["opened:1", true]])).fresh
 
 test("the count is this host's items, other Work hosts' decisions and fresh deliverables, as the sidebar band shows it", () => {
   const feeds = [feed("mini", "Mac Mini", { decisions: [attention("11111111-1111-4111-8111-111111111111")] })]
@@ -103,7 +103,7 @@ const appPath = (feeds: HostFeed[], ignoredSessions = ["ses_ignored"]) => {
     title: () => undefined,
     project: () => undefined,
   })
-  return needsYou({ items: local, feeds, fresh: deliverables(surfaces, new Set()).fresh })
+  return needsYou({ items: local, feeds, fresh: deliverables(surfaces, new Map()).fresh })
 }
 
 test("the dashboard inputs give the app's entries and count: brief jobs out, desk tasks in, ignored out, review in", () => {

@@ -26,6 +26,12 @@
 .surface-head-actions { flex: none; display: flex; align-items: center; gap: 2px; margin-inline-start: auto; -webkit-app-region: no-drag; }
 .surface-head-button { display: inline-grid; place-items: center; inline-size: 24px; block-size: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--subtext0); font-size: 16px; line-height: 1; }
 .surface-head-button:hover { background: var(--surface0); color: var(--text); }
+/* Done for the revision on screen: a quiet text control, then "Done · time" with Undo once saved. */
+.surface-head-done { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--subtext0); -webkit-app-region: no-drag; }
+.surface-head-text { padding: 2px 6px; border: 1px solid var(--surface1); border-radius: 4px; background: transparent; color: var(--text); font-size: 11px; line-height: 1.4; }
+.surface-head-text:hover:not(:disabled) { background: var(--surface0); }
+.surface-head-text:disabled { opacity: 0.6; }
+.surface-head-text[data-newer] { border-style: dashed; }
 .surface-head :is(a, button, h2) { -webkit-app-region: no-drag; }
 .desk-surface > .desk-surface-frame, .work-remote-surface > .desk-surface-frame { border: 0; }
 @media (max-width: 900px) {

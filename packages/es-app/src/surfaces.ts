@@ -27,8 +27,10 @@ export type Surface = {
   purpose?: "board" | "deliverable"
   created_at?: number
   requested_in?: { session: string; directory: string; title?: string }
-  /** Deliverables only: the operator opened the current revision. */
+  /** Deliverables only: the operator marked the current revision Done (viewing alone never does). */
   seen?: boolean
+  /** Deliverables only: when the operator last marked a revision Done (ms); kept after an Undo. */
+  seen_at?: number | null
 }
 
 const PREFIX = "surface:"
@@ -47,24 +49,31 @@ export const surfaceProblem = (health: SurfaceHealth) => {
 export const surfaceUnavailable = (surface: Surface) => surface.health.state === "unreachable"
 
 export const isDeliverable = (surface: Surface) => surface.purpose === "deliverable"
-const seenKey = (surface: Surface) => `${surface.id}:${surface.revision}`
+const seenKey = (id: string, revision: number) => `${id}:${revision}`
 
-/** New deliverables first (newest first), then earlier ones; `opened` covers marks still in flight. */
-export const deliverables = (list: Surface[], opened: ReadonlySet<string>) => {
+/** New deliverables first (newest first), then Done ones. `marks` holds Done/Undo writes still in flight for one
+ * revision; a mark on an older revision never clears a newer one. */
+export const deliverables = (list: Surface[], marks: ReadonlyMap<string, boolean>) => {
   const all = list.filter(isDeliverable).toSorted((a, b) => (b.created_at ?? b.updated_at) - (a.created_at ?? a.updated_at))
-  const fresh = (surface: Surface) => !surface.seen && !opened.has(seenKey(surface))
+  const fresh = (surface: Surface) => !(marks.get(seenKey(surface.id, surface.revision)) ?? surface.seen)
   return { fresh: all.filter(fresh), earlier: all.filter(surface => !fresh(surface)) }
 }
 
+/** The Needs-you line for a requested deliverable: what it is, who made it, which revision, and any health problem. */
+export const tryLine = (surface: Surface) =>
+  [`Try · ${surface.title} · ${surface.owner} · rev ${surface.revision}`, surfaceProblem(surface.health)].filter(Boolean).join(" · ")
+
 const POLL_MS = 15_000
 
-export const createSurfaces = () => {
+// `fetch` lets a test reach a real dashboard store; the page uses its own origin.
+export const createSurfaces = (options: { fetch?: (input: string, init?: RequestInit) => Promise<Response>; poll?: boolean } = {}) => {
+  const send = options.fetch ?? ((input: string, init?: RequestInit) => fetch(input, init))
   const [list, setList] = createSignal<Surface[]>([])
   const [error, setError] = createSignal<string>()
   const [checked, setChecked] = createSignal<number>()
   const refresh = async () => {
     type Read = { surfaces: Surface[] } | { status: number } | { cause: unknown }
-    const result: Read = await fetch("/es/api/surfaces", { cache: "no-store" })
+    const result: Read = await send("/es/api/surfaces", { cache: "no-store" })
       .then(async (response): Promise<Read> => response.ok ? { surfaces: (await response.json()).surfaces as Surface[] } : { status: response.status })
       .catch((cause): Read => ({ cause }))
     if (!("surfaces" in result)) {
@@ -78,29 +87,39 @@ export const createSurfaces = () => {
     setError()
     setChecked(Date.now())
   }
-  // Opened revisions this page marked; kept even when the write fails so an opened item stops nagging here.
-  const [opened, setOpened] = createSignal<ReadonlySet<string>>(new Set())
+  // Done/Undo writes in flight, per revision; the next list read is the truth again.
+  const [marks, setMarks] = createSignal<ReadonlyMap<string, boolean>>(new Map())
   const [seenError, setSeenError] = createSignal<string>()
-  const markSeen = async (surface: Surface) => {
-    if (!isDeliverable(surface) || surface.seen || opened().has(seenKey(surface))) return
-    setOpened(new Set([...opened(), seenKey(surface)]))
-    const response = await fetch("/es/api/frontdesk/deliverables/seen", {
+  const unmark = (key: string) => setMarks(new Map([...marks()].filter(([item]) => item !== key)))
+  /** Mark one revision Done (or Undo it) on this host's dashboard; true when the dashboard saved it. */
+  const markSeen = async (surface: Surface, revision: number, seen = true) => {
+    if (!isDeliverable(surface)) return false
+    const key = seenKey(surface.id, revision)
+    setMarks(new Map([...marks(), [key, seen]]))
+    const response = await send("/es/api/frontdesk/deliverables/seen", {
       method: "POST",
       headers: { "content-type": "application/json", "X-Attention-CSRF": "1" },
-      body: JSON.stringify({ id: surface.id, revision: surface.revision }),
+      body: JSON.stringify({ id: surface.id, revision, seen }),
     }).catch(() => undefined)
     if (response?.ok) {
       setSeenError()
-      return void refresh()
+      await refresh()
+      unmark(key)
+      return true
     }
+    unmark(key)
+    const action = seen ? "Done" : "Undo"
     setSeenError(response && (response.status === 401 || response.status === 403)
-      ? "Seen state is not saved: the operator connection is unavailable."
-      : "Seen state is not saved: the dashboard did not confirm it.")
+      ? `${action} is not saved: the operator connection is unavailable.`
+      : `${action} is not saved: the dashboard did not confirm it.`)
+    return false
   }
-  const split = () => deliverables(list(), opened())
+  const split = () => deliverables(list(), marks())
   void refresh()
-  const timer = setInterval(() => void refresh(), POLL_MS)
-  onCleanup(() => clearInterval(timer))
+  if (options.poll !== false) {
+    const timer = setInterval(() => void refresh(), POLL_MS)
+    onCleanup(() => clearInterval(timer))
+  }
   return { list, boards: () => list().filter(surface => !isDeliverable(surface)), deliverables: split, markSeen, seenError, error, checked, refresh }
 }
 
