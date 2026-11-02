@@ -5,7 +5,10 @@
 import { createEffect, createSignal, on, onCleanup, onMount } from "solid-js"
 import type { Session } from "@opencode-ai/sdk/v2"
 import { descending } from "@opencode-ai/schema/identifier"
-import { oc, SessionCreateError, type ContextPart, type MessageWithParts } from "./api"
+import { oc, ocAt, SessionCreateError, type ContextPart, type MessageWithParts } from "./api"
+import { readHost, workFeedHosts } from "./host"
+import { resolveHome, writePointer, type DeskHome, type PointerView } from "./desk-pointer"
+import type { SessionHost } from "./session-host"
 import { clearBackend, describeFailure, isTransient, reportBackend } from "./backend-status"
 import { assistantOps, handled, emptyMemory, eraseMemory, nextMemory, type MemoryDocument, type MemoryOp } from "./desk-memory"
 import type { AttentionRecord } from "./attention"
@@ -43,16 +46,22 @@ const readJSON = <T,>(key: string, valid: (value: any) => boolean): T | undefine
 }
 
 type CreateBody = Parameters<typeof oc.createSession>[1] & { id: string }
-/** `create` is kept until Core confirms the session, so a lost response is retried with the same identity. */
-export type DeskPointer = { session: string; directory: string; create?: CreateBody }
+/** `create` is kept until Core confirms the session, so a lost response is retried with the same identity. `host` is
+ * set when the profile's desk lives on another Work host (its home); this device's own pointer is then kept, unused. */
+export type DeskPointer = { session: string; directory: string; create?: CreateBody; host?: SessionHost & { id: string; label: string } }
 
 /** The saved Front Desk chat session id, read from local storage only (no request). */
 export const deskSessionID = () => readJSON<DeskPointer>(POINTER, value => typeof value?.session === "string")?.session
 
 export const createDeskSession = () => {
-  const [pointer, setPointer] = createSignal(readJSON<DeskPointer>(POINTER, value => typeof value?.session === "string" && typeof value?.directory === "string"))
+  const [devicePointer, setPointer] = createSignal(readJSON<DeskPointer>(POINTER, value => typeof value?.session === "string" && typeof value?.directory === "string"))
+  // The profile's home (desk-pointer-contract-v1). A remote home's desk replaces this device's pointer for the view.
+  const [home, setHome] = createSignal<DeskHome>({ kind: "off" })
+  const [remote, setRemote] = createSignal<DeskPointer>()
+  const pointer = () => remote() ?? devicePointer()
+  const client = () => ocAt(pointer()?.host?.base ?? "/oc")
   const [session, setSession] = createSignal<Session>()
-  const [status, setStatus] = createSignal<"none" | "checking" | "ready" | "missing" | "unavailable" | "creating" | "unconfirmed">(pointer() ? "checking" : "none")
+  const [status, setStatus] = createSignal<"none" | "checking" | "ready" | "missing" | "unavailable" | "creating" | "unconfirmed" | "remote-none" | "home-offline">("checking")
   const [error, setError] = createSignal("")
   const save = (value?: DeskPointer) => {
     if (value) localStorage.setItem(POINTER, JSON.stringify(value))
@@ -75,10 +84,11 @@ export const createDeskSession = () => {
     const host = await readHostModel()
     const model = host.available ? host.model : undefined
     if (!model || current.preferredModel || (current.model?.providerID === model.providerID && current.model.id === model.modelID)) return
+    if (pointer()?.host) return
     await oc.preferModel(current.id, current.directory, model).then(setSession, () => undefined)
   }
-  const verify = async () => {
-    const current = pointer()
+  const verifyDevice = async () => {
+    const current = devicePointer()
     if (!current) return setStatus("none")
     setStatus("checking")
     try {
@@ -91,6 +101,39 @@ export const createDeskSession = () => {
       setStatus(missing ? "missing" : "unavailable")
     }
   }
+  /** Adopt the home's pointer on this host: it becomes this device's pointer too. */
+  const adopt = (view: PointerView) => {
+    if (!view.session || !view.directory) return
+    if (devicePointer()?.session !== view.session) try { save({ session: view.session, directory: view.directory }) } catch { setPointer({ session: view.session, directory: view.directory }) }
+  }
+  const verify = async () => {
+    setStatus("checking")
+    const info = await readHost()
+    const resolved = await resolveHome(workFeedHosts(info))
+    setHome(resolved)
+    if (resolved.kind === "unreachable") return setStatus("home-offline")
+    if (resolved.kind === "remote") {
+      setRemote(undefined)
+      if (!resolved.view.session || !resolved.view.directory) return setStatus("remote-none")
+      const value = { session: resolved.view.session, directory: resolved.view.directory, host: resolved.host }
+      setRemote(value)
+      try {
+        setSession(await ocAt(resolved.host.base).session(value.session, value.directory))
+        return setStatus("ready")
+      } catch { return setStatus("unavailable") }
+    }
+    if (resolved.kind === "local") {
+      if (resolved.view.session) adopt(resolved.view)
+      else if (devicePointer() && !devicePointer()!.create) {
+        // The home has no desk yet: this device's existing desk on this host is offered once (import only if none).
+        await verifyDevice()
+        if (status() !== "ready") return
+        const result = await writePointer({ expected_revision: resolved.view.revision, session: devicePointer()!.session, directory: devicePointer()!.directory, reason: "import" })
+        if (!result.ok && result.view?.session) adopt(result.view)
+      }
+    }
+    await verifyDevice()
+  }
   onMount(() => void verify())
   const admit = async (value: DeskPointer & { create: CreateBody }) => {
     setStatus("creating")
@@ -99,6 +142,13 @@ export const createDeskSession = () => {
       const created = await oc.createSession(value.directory, value.create)
       if (created.id !== value.session) throw new SessionCreateError("Core confirmed a different session than requested.", true)
       confirmed(created)
+      const current = home()
+      // On the home host the new desk claims the profile's pointer; if another device won, its desk is adopted and
+      // this one stays an ordinary session (nothing deleted).
+      if (current.kind === "local") {
+        const result = await writePointer({ expected_revision: current.view.revision, session: created.id, directory: created.directory, reason: "create" })
+        if (!result.ok && result.view?.session && result.view.session !== created.id) { adopt(result.view); await verifyDevice() }
+      }
     } catch (cause) {
       setError(cause instanceof SessionCreateError ? cause.message : String(cause))
       if (cause instanceof SessionCreateError && !cause.uncertain) {
@@ -109,7 +159,7 @@ export const createDeskSession = () => {
     }
   }
   const start = async (directory: string) => {
-    if (status() !== "none") return
+    if (status() !== "none" || home().kind === "remote" || home().kind === "unreachable") return
     setStatus("creating")
     const [agents, host] = await Promise.all([oc.agents(directory).catch(() => []), readHostModel()])
     const id = `ses_${descending()}`
@@ -194,9 +244,9 @@ export const createDeskSession = () => {
     const current = session()
     if (!current) return "The front desk chat is not available yet."
     // The conversation's own agent and model preference; without a preference, the desk model.
-    const fresh = await oc.session(current.id, current.directory).catch(() => current)
+    const fresh = await client().session(current.id, current.directory).catch(() => current)
     try {
-      await oc.promptBody(current.id, current.directory, {
+      await client().promptBody(current.id, current.directory, {
         ...(fresh.agent ? { agent: fresh.agent } : {}),
         ...(fresh.preferredModel || !deskModel() ? {} : { model: deskModel()! }),
         parts: [{ type: "text", text }, ...parts],
@@ -205,7 +255,7 @@ export const createDeskSession = () => {
       return `Not sent: ${cause instanceof Error ? cause.message : String(cause)}`
     }
   }
-  return { pointer, session, status, error, setError, verify, start, confirm, forget, context, caseContext, sent, detail }
+  return { pointer, home, session, status, error, setError, verify, start, confirm, forget, context, caseContext, sent, detail }
 }
 
 export type BriefJob = { id: string; directory: string; meta: BriefMeta; created: number; state: BriefState | { state: "starting" } | { state: "unconfirmed" } }

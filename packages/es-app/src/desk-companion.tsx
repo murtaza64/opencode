@@ -78,7 +78,7 @@ export const DeskChatProvider = (props: ParentProps) => {
   const [viewGetter, setViewGetter] = createSignal<(() => string) | undefined>()
   const [asked, setAsked] = createSignal<ContextRef>()
   const prepared = useBriefs()
-  const tasks = createTasks(prepared.anchor.pointer, prepared.anchor.ensure, () => desk.status() === "ready" ? desk.pointer() : undefined,
+  const tasks = createTasks(prepared.anchor.pointer, prepared.anchor.ensure, () => desk.status() === "ready" && !desk.pointer()?.host ? desk.pointer() : undefined,
     async () => { prepared.activate(); await prepared.waitReady() })
   // Cases are read once for the app, refreshed on mail and every minute.
   const [caseTick, setCaseTick] = createSignal(0)
@@ -129,6 +129,9 @@ export const DeskStart = (props: { desk: ReturnType<typeof createDeskSession>; d
     <Show when={props.desk.status() === "unavailable"}><p class="home-warning">Could not load the chat. <button class="desk-button" onClick={() => void props.desk.verify()}>Check again</button></p></Show>
     {/* Confirm resends the identical create; Core returns the existing conversation if the first one landed. */}
     <Show when={props.desk.status() === "unconfirmed"}><p class="home-warning">Chat start not confirmed. <button class="desk-button" onClick={() => void props.desk.confirm()}>Confirm start</button></p></Show>
+    {/* The profile has one Front Desk, on its home host: nothing is started here and no second desk is made. */}
+    <Show when={props.desk.status() === "remote-none"}>{(() => { const home = props.desk.home(); return <p class="home-warning">The Front Desk lives on {home.kind === "remote" ? home.host.label : "its home host"} and has not been started there yet. Start it from that host's window.</p> })()}</Show>
+    <Show when={props.desk.status() === "home-offline"}>{(() => { const home = props.desk.home(); return <p class="home-warning">The Front Desk is on {home.kind === "unreachable" ? home.host.label : "its home host"}, which is unreachable. <button class="desk-button" onClick={() => void props.desk.verify()}>Retry</button></p> })()}</Show>
     <Show when={props.desk.status() === "missing"}><p class="home-warning">The saved chat no longer exists. <button class="desk-button" onClick={() => props.desk.forget()}>Clear</button></p></Show>
     <Show when={props.desk.status() === "none" || props.desk.status() === "creating"}>
       <button class="desk-button home-primary" disabled={!props.directory || props.desk.status() === "creating"} onClick={() => props.directory && void props.desk.start(props.directory)}>
@@ -165,7 +168,7 @@ export const DeskCompanion = () => {
       <Show when={target()}>{(current) => <DeskFollowUps session={current().session} open={chat.open} />}</Show>
       <Show when={target()}>{(current) => <DeskTasks tasks={chat.tasks} session={current().session} directory={current().directory} followUps={supported() === true} />}</Show>
       <Show when={target()} keyed fallback={<DeskStart desk={chat.desk} directory={chat.directory()} />}>
-        {(current) => <SessionView sessionID={current.session} directory={current.directory} embedded context={chat.context} onSent={chat.desk.sent}
+        {(current) => <SessionView sessionID={current.session} directory={current.directory} host={current.host} embedded context={chat.context} onSent={chat.desk.sent}
           incoming={chat.asked} onIncoming={chat.takeAsked}
           headerStart={<button class="header-icon desk-chat-hide" aria-label="Close Front desk chat" title="Close Front desk chat" onClick={close}>
             <Icon name="chevron-down" size="small" /></button>} />}
