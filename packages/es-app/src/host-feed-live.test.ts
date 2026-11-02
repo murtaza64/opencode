@@ -18,7 +18,9 @@ class HostEvents {
 }
 
 // Each host's Core: its root sessions and its status list (which names only sessions that are not idle).
-let cores: Record<string, { sessions: { id: string }[]; status: Record<string, unknown>; gate?: Promise<void>; statusDown?: boolean }>
+// A session's directory defaults to /r. Like Core, a status read answers only for the directory it names (one Instance
+// per directory); a read without one names no session here.
+let cores: Record<string, { sessions: { id: string; directory?: string }[]; status: Record<string, unknown>; gate?: Promise<void>; statusDown?: boolean | string }>
 let fetchSpy: Mock<(input: RequestInfo | URL) => Promise<Response>>
 let original: PropertyDescriptor | undefined
 const disposers: (() => void)[] = []
@@ -31,12 +33,16 @@ beforeEach(() => {
   Object.defineProperty(globalThis, "EventSource", { configurable: true, value: HostEvents })
   fetchSpy = spyOn(globalThis, "fetch")
   fetchSpy.mockImplementation(async (input) => {
-    const [, host, path] = /^\/hosts\/([^/]+)(\/[^?]*)/.exec(String(input))!
+    const url = new URL(String(input), "http://listener")
+    const [, host, path] = /^\/hosts\/([^/]+)(\/.*)$/.exec(url.pathname)!
     const core = cores[host!]!
-    if (path === "/oc/experimental/session") return Response.json(core.sessions.map((item) => ({ ...item, title: item.id, directory: "/r", time: { created: 1, updated: 1 } })))
+    if (path === "/oc/experimental/session") return Response.json(core.sessions.map((item) => ({ ...item, title: item.id, directory: item.directory ?? "/r", time: { created: 1, updated: 1 } })))
     if (path === "/oc/session/status") {
       await core.gate
-      return core.statusDown ? new Response("down", { status: 503 }) : Response.json(core.status)
+      const directory = url.searchParams.get("directory")
+      if (core.statusDown === true || core.statusDown === directory) return new Response("down", { status: 503 })
+      const here = new Set(core.sessions.filter((item) => (item.directory ?? "/r") === directory).map((item) => item.id))
+      return Response.json(Object.fromEntries(Object.entries(core.status).filter(([id]) => here.has(id))))
     }
     return Response.json({}, { status: 404 })
   })
@@ -118,4 +124,38 @@ test("when the status read fails the status is unknown, never the last busy or a
   cores.mini!.statusDown = false
   cores.mini!.status = {}
   await settled(() => mini.live("ses_a") === "idle")
+})
+
+test("sessions in different directories are each read in their own directory, so a busy one is never reported idle", async () => {
+  cores = { mini: { sessions: [{ id: "ses_lane_a", directory: "/es/lanes/a" }, { id: "ses_lane_b", directory: "/es/lanes/b" }, { id: "ses_quiet", directory: "/es/lanes/b" }],
+    status: { ses_lane_a: { type: "busy" }, ses_lane_b: { type: "busy" } } } }
+  const mini = feed("mini", 30)
+  await settled(() => mini.live("ses_lane_a") === "busy" && mini.live("ses_lane_b") === "busy")
+  // Several periodic reads later, with no event at all, both are still busy and the quiet one idle.
+  await Bun.sleep(200)
+  expect([mini.live("ses_lane_a"), mini.live("ses_lane_b"), mini.live("ses_quiet")]).toEqual(["busy", "busy", "idle"])
+})
+
+test("a long silent turn stays busy through periodic reads until that host says the turn ended", async () => {
+  cores = { mini: { sessions: [{ id: "ses_thinking", directory: "/es/lanes/a" }], status: { ses_thinking: { type: "busy" } } } }
+  const mini = feed("mini", 20)
+  await settled(() => mini.live("ses_thinking") === "busy")
+  // Long thinking, then a tool call awaiting: no events, Core still reports busy at every read.
+  for (let read = 0; read < 10; read++) {
+    await Bun.sleep(20)
+    expect(mini.live("ses_thinking")).toBe("busy")
+  }
+  cores.mini!.status = {}
+  await settled(() => mini.live("ses_thinking") === "idle")
+})
+
+test("a directory whose status cannot be read shows its sessions unknown; others keep their state; the next good read corrects", async () => {
+  cores = { mini: { sessions: [{ id: "ses_a", directory: "/es/lanes/a" }, { id: "ses_b", directory: "/es/lanes/b" }], status: { ses_a: { type: "busy" }, ses_b: { type: "busy" } } } }
+  const mini = feed("mini", 30)
+  await settled(() => mini.live("ses_a") === "busy" && mini.live("ses_b") === "busy")
+  cores.mini!.statusDown = "/es/lanes/a"
+  await settled(() => mini.live("ses_a") === "unknown")
+  expect(mini.live("ses_b")).toBe("busy")
+  cores.mini!.statusDown = false
+  await settled(() => mini.live("ses_a") === "busy")
 })

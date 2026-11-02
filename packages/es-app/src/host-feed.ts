@@ -120,6 +120,8 @@ export const reachOf = (state: Pick<HostFeedState, "status" | "reason" | "since"
 
 const LIST_MS = 5000
 const DECISIONS_MS = 30_000
+// Status reads per refresh, one per listed directory; sessions beyond this many directories read as unknown.
+const MAX_STATUS_DIRECTORIES = 24
 const LINEAGE_MS = 60_000
 // A row new to the list may be a lane's handoff successor, whose owner is stamped just after it appears (es spawn:
 // create, prompt, then stamp). For a short window lineage is re-read on each list read, so a lane pin moves to the
@@ -157,25 +159,39 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     ...(seen ? { cachedAt: seen.cachedAt } : {}),
   })
   const [live, setLive] = createSignal<Record<string, string>>({})
-  const [liveStale, setLiveStale] = createSignal(false)
+  // Sessions whose status could not be read (their directory's read failed or was over the bound): unknown, never the
+  // last busy nor a guessed idle. The next good read clears them.
+  const [unread, setUnread] = createSignal<ReadonlySet<string>>(new Set())
   // Status events seen per session, numbered in arrival order. A status read applies to a session only when no event
   // for it arrived after the read began, so a seed never overwrites a newer transition.
   let statusEvents = 0
   const lastEvent = new Map<string, number>()
-  const seedLive = async (listed: string[]) => {
+  // That host's Core keeps session status per directory (one Instance each): `/session/status` answers only for the
+  // directory it is asked about, so each listed session is read in its own directory. Sessions only seen in events
+  // (not listed) keep their event status.
+  const seedLive = async (listed: { id: string; directory: string }[]) => {
     const started = statusEvents
-    const statuses = await read<Record<string, { type?: unknown } | string>>("/oc/session/status").catch(() => undefined)
-    // An unread status is unknown: neither the last busy nor a guessed idle. The next good read clears it.
-    if (!statuses || typeof statuses !== "object") return setLiveStale(true)
-    setLiveStale(false)
+    const byDirectory = listed.reduce((groups, session) => groups.set(session.directory, [...(groups.get(session.directory) ?? []), session]),
+      new Map<string, { id: string; directory: string }[]>())
+    const directories = [...byDirectory.keys()]
+    const answers = await Promise.all(directories.slice(0, MAX_STATUS_DIRECTORIES).map((directory) =>
+      read<Record<string, { type?: unknown } | string>>(`/oc/session/status?directory=${encodeURIComponent(directory)}`)
+        .then((statuses) => statuses && typeof statuses === "object" ? statuses : undefined, () => undefined)))
+    const missing = new Set<string>()
+    const seen = new Map<string, string>()
+    directories.forEach((directory, index) => {
+      const statuses = answers[index]
+      for (const session of byDirectory.get(directory)!) {
+        if (!statuses) { missing.add(session.id); continue }
+        const value = statuses[session.id]
+        // A directory's status list names only its sessions that are not idle.
+        seen.set(session.id, typeof value === "string" ? value : typeof value?.type === "string" ? value.type : "idle")
+      }
+    })
+    setUnread(new Set([...missing].filter((id) => (lastEvent.get(id) ?? -1) < started)))
     setLive((previous) => {
       const next = { ...previous }
-      for (const id of new Set([...Object.keys(previous), ...listed, ...Object.keys(statuses)])) {
-        if ((lastEvent.get(id) ?? -1) >= started) continue
-        const value = statuses[id]
-        // The status list names only sessions that are not idle.
-        next[id] = typeof value === "string" ? value : typeof value?.type === "string" ? value.type : "idle"
-      }
+      for (const [id, value] of seen) if ((lastEvent.get(id) ?? -1) < started) next[id] = value
       return next
     })
   }
@@ -298,7 +314,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
         setLineage(undefined)
         lastLineageRead = 0
       }
-      const [needs, surfaces] = await Promise.all([readNeeds(), readSurfaces(), seedLive(sessions.map((session) => session.id))])
+      const [needs, surfaces] = await Promise.all([readNeeds(), readSurfaces(), seedLive(sessions.map((session) => ({ id: session.id, directory: session.directory })))])
       const rows = name && !root ? [] : hostRows(host.id, sessions, root)
       const listed = state().checkedAt ? new Set(state().rows.map((row) => row.id)) : undefined
       if (same && listed && (pinned().length || lanes().length) && rows.some((row) => !listed.has(row.id))) followUntil = Date.now() + FOLLOW_MS
@@ -329,7 +345,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     const current = scope
     if (loading || state().status !== "ready" || document.visibilityState !== "visible") return
     // Statuses too: a missed idle event (no other event follows it) clears within one interval without a reconnect.
-    const [needs, surfaces] = await Promise.all([readNeeds(), readSurfaces(), seedLive(state().rows.map((row) => row.id))])
+    const [needs, surfaces] = await Promise.all([readNeeds(), readSurfaces(), seedLive(state().rows.map((row) => ({ id: row.id, directory: row.directory })))])
     if (scope !== current) return
     setState((previous) => ({ ...previous, ...merged(previous, true, needs, surfaces) }))
   }
@@ -357,6 +373,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
       const id = event.properties.sessionID
       const type = typeof event.properties.status?.type === "string" ? event.properties.status.type : "idle"
       lastEvent.set(id, statusEvents++)
+      if (unread().has(id)) setUnread((previous) => new Set([...previous].filter((item) => item !== id)))
       setLive((previous) => previous[id] === type ? previous : { ...previous, [id]: type })
       return
     }
@@ -375,7 +392,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     lineage,
     /** Status from that host's last status read and its events since ("busy", "retry", "idle"); "unknown" when the last
      * status read failed or the host is unreachable; undefined if unseen. */
-    live: (id: string) => liveStale() || state().status === "unavailable" ? "unknown" : live()[id],
+    live: (id: string) => unread().has(id) || state().status === "unavailable" ? "unknown" : live()[id],
     /** Reload this host's list now (project change, retry). */
     load,
   }
