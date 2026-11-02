@@ -59,6 +59,33 @@ test("a host whose decisions are not current keeps its last entries and makes th
   expect(result.label).toEqual({ text: "1+", title: "Mac Mini, Wingman: not current" })
 })
 
+test("another Work host's fresh deliverables are its own Try entries; Done, boards, Personal and read-only hosts never count", () => {
+  const personal = (id: string, extra = {}) => ({ ...feed(id, id, { surfaces: [surface("theirs")] }), host: { id, label: id, origin: "http://127.0.0.1:3", profile: "personal", ...extra } }) as unknown as HostFeed
+  const feeds = [
+    feed("mini", "Mac Mini", { surfaces: [surface("new", { kind: "path" }), surface("done", { seen: true }), surface("board", { purpose: "board" })] }),
+    personal("excalibur"),
+    personal("ygnium", { readOnly: true }),
+  ]
+  const result = needsYou({ items: [], feeds, fresh })
+  // The same deliverable ID here and on the Mini stays two entries.
+  expect(result.fresh.map((item) => item.id)).toEqual(["new"])
+  expect(result.tries.map((entry) => [entry.key, entry.host, entry.href])).toEqual([["mini~surface:new", "mini", "/?item=mini~surface%3Anew"]])
+  expect(result.tries[0]?.remote).toMatchObject({ kind: "surface", frame: "host", surface: { id: "new", revision: 1 } })
+  expect(result.label).toEqual({ text: "2", title: undefined })
+  expect(result.decisions).toEqual({ text: "0", title: undefined })
+})
+
+test("a host whose Surface list is not current keeps its last Try entries and makes the count partial", () => {
+  const result = needsYou({ items: [], feeds: [feed("mini", "Mac Mini", { surfacesStale: true, surfaces: [surface("new")] })], fresh: [] })
+  expect([result.tries.map((entry) => [entry.key, entry.stale]), result.label]).toEqual([[["mini~surface:new", true]], { text: "1+", title: "Mac Mini: not current" }])
+})
+
+test("the Dock count carries other Work hosts' fresh deliverables like the band", () => {
+  const feeds = [feed("mini", "Mac Mini", { surfaces: [surface("report")] })]
+  expect(needsYouFromInputs(inputs(), feeds)!.label).toEqual(appPath(feeds).label)
+  expect(needsYouFromInputs(inputs(), feeds)!.count).toBe(needsYouFromInputs(inputs(), [])!.count + 1)
+})
+
 test("nothing waiting anywhere is zero only when every host is current", () => {
   expect(needsYou({ items: [], feeds: [feed("mini", "Mac Mini", {})], fresh: [] }).label).toEqual({ text: "0", title: undefined })
 })

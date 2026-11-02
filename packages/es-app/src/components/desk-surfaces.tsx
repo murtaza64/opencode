@@ -61,44 +61,72 @@ export const DeliverableList = (props: { surfaces: ReturnType<typeof createSurfa
   </Show>
 }
 
-export const SurfaceView = (props: { id: string; surface?: Surface; checked?: number; onDone?: (surface: Surface, revision: number, seen: boolean) => Promise<boolean>; onLoaded?: () => Promise<unknown>; onRetry: () => void; onClose: () => void }) => {
+export type MarkDone = (surface: Surface, revision: number, seen: boolean) => Promise<boolean>
+
+/** A reader's Done/Undo for the deliverable revision on screen; `onDone` writes it to the deliverable's own host. */
+export const createDeliverableDone = (surface: () => Surface | undefined, onDone: () => MarkDone | undefined) => {
   // A deliverable keeps the revision it first showed until the human loads a newer one, so Done covers only what
   // was on screen; a board follows every republish.
   const [shown, setShown] = createSignal<number>()
-  createEffect(() => { if (props.surface && shown() === undefined) setShown(props.surface.revision) })
-  const deliverable = () => props.surface && isDeliverable(props.surface) ? props.surface : undefined
-  const onScreen = () => deliverable() ? shown() ?? 0 : props.surface?.revision ?? 0
-  const newer = () => { const surface = deliverable(); return surface && surface.revision > onScreen() ? surface.revision : undefined }
+  createEffect(() => { if (surface() && shown() === undefined) setShown(surface()!.revision) })
+  const deliverable = () => { const value = surface(); return value && isDeliverable(value) ? value : undefined }
+  const onScreen = () => deliverable() ? shown() ?? 0 : surface()?.revision ?? 0
+  const newer = () => { const value = deliverable(); return value && value.revision > onScreen() ? value.revision : undefined }
   // Done this reader saved for the revision on screen. The list's seen covers it only while that revision is current,
   // so a Done on N stays visible here after N+1 lands, while N+1 stays new everywhere.
   const [saved, setSaved] = createSignal<{ revision: number; at: number }>()
   const done = () => {
-    const surface = deliverable()
-    if (!surface) return undefined
+    const value = deliverable()
+    if (!value) return undefined
     if (saved()?.revision === onScreen()) return { at: saved()!.at }
-    return surface.seen && surface.revision === onScreen() ? { at: surface.seen_at ?? undefined } : undefined
+    return value.seen && value.revision === onScreen() ? { at: value.seen_at ?? undefined } : undefined
   }
-  // The frame serves whatever revision is current when it loads, not the list row read before. Re-reading the list after
+  // A frame serves whatever revision is current when it loads, not the list row read before. Re-reading the list after
   // the load and finding the same revision proves the frame shows it (revisions only grow); otherwise "newer revision"
-  // stands and Done waits until that one is loaded.
+  // stands and Done waits until that one is loaded. A labelled use on the owning host (`used`) covers the revision on screen.
   const [confirmed, setConfirmed] = createSignal<number>()
-  const loaded = async () => {
+  const loaded = async (reread: () => Promise<unknown>) => {
     const revision = onScreen()
-    await props.onLoaded?.()
-    if (props.surface?.revision === revision) setConfirmed(revision)
+    await reread()
+    if (surface()?.revision === revision) setConfirmed(revision)
   }
+  const used = () => setConfirmed(onScreen())
+  const ready = () => confirmed() === onScreen()
   const [writing, setWriting] = createSignal(false)
   const [failed, setFailed] = createSignal(false)
   const mark = async (seen: boolean) => {
-    const surface = deliverable()
-    if (!surface || !props.onDone || writing()) return
+    const value = deliverable()
+    const write = onDone()
+    if (!value || !write || !ready() || writing()) return
     const revision = onScreen()
     setWriting(true)
-    const ok = await props.onDone(surface, revision, seen)
+    const ok = await write(value, revision, seen)
     setWriting(false)
     setFailed(!ok)
     if (ok) setSaved(seen ? { revision, at: Date.now() } : undefined)
   }
+  return { deliverable, onScreen, newer, load: setShown, done, writing, failed, mark, loaded, used, ready, enabled: () => !!deliverable() && !!onDone() }
+}
+
+/** The Done/Undo controls of one reader (and "newer revision" when the deliverable was republished while open). */
+// Done/Undo appear only once the revision on screen is proven (`ready`); "newer revision" shows whenever one exists.
+export const DeliverableDoneControls = (props: { state: ReturnType<typeof createDeliverableDone> }) =>
+  <Show when={props.state.enabled() && (props.state.ready() || props.state.newer())}>
+    <span class="surface-head-done" data-revision={props.state.onScreen()}>
+      <Show when={props.state.newer()}>{revision => <button class="surface-head-text" data-newer={revision()} title="Load the newer revision; Done covers only the revision on screen" onClick={() => props.state.load(revision())}>newer revision {revision()}</button>}</Show>
+      <Show when={props.state.ready()}>
+        <Show when={props.state.done()} fallback={<button class="surface-head-text surface-done" disabled={props.state.writing()} title={`Mark revision ${props.state.onScreen()} done; it leaves Needs you on every device`} onClick={() => void props.state.mark(true)}>Done</button>}>{state =>
+          <><span class="surface-done-state" role="status">Done{state().at ? ` · ${ago(state().at!)}` : ""}</span>
+            <button class="surface-head-text" disabled={props.state.writing()} title={`Undo Done for revision ${props.state.onScreen()}`} onClick={() => void props.state.mark(false)}>Undo</button></>}</Show>
+      </Show>
+      <Show when={props.state.failed()}><span class="home-blocked" role="alert">not saved</span></Show>
+    </span>
+  </Show>
+
+export const SurfaceView = (props: { id: string; surface?: Surface; checked?: number; onDone?: MarkDone; onLoaded?: () => Promise<unknown>; onRetry: () => void; onClose: () => void }) => {
+  // Done covers what the human saw, so it waits for the frame: never while loading, offline or failed.
+  const doneState = createDeliverableDone(() => props.surface, () => src() && !address.error && props.surface && !surfaceUnavailable(props.surface) ? props.onDone : undefined)
+  const onScreen = doneState.onScreen
   const [address, { refetch }] = createResource(() => props.id, surfaceAddress)
   // Reading a failed resource throws; the error is shown from address.error instead.
   const minted = () => address.error ? undefined : address()
@@ -131,18 +159,7 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
           <bdi dir="auto">{props.surface?.title ?? props.id}</bdi></h2>
         <Show when={props.surface?.requested_in}>{asked => <A class="surface-head-link" href={sessionHref(asked().session, asked().directory)} data-requested-in={asked().session}
           title="The conversation this was asked for in">asked in <bdi dir="auto">{asked().title ?? "conversation"}</bdi></A>}</Show>
-        {/* Done covers what the human saw, so it waits for the frame: never while loading, offline or failed. */}
-        <Show when={deliverable() && props.onDone && src() && !address.error && !surfaceUnavailable(deliverable()!) && (confirmed() === onScreen() || newer())}>
-          <span class="surface-head-done" data-revision={onScreen()}>
-            <Show when={newer()}>{revision => <button class="surface-head-text" data-newer={revision()} title="Load the newer revision; Done covers only the revision on screen" onClick={() => setShown(revision())}>newer revision {revision()}</button>}</Show>
-            <Show when={confirmed() === onScreen()}>
-            <Show when={done()} fallback={<button class="surface-head-text surface-done" disabled={writing()} title={`Mark revision ${onScreen()} done; it leaves Needs you on every device`} onClick={() => void mark(true)}>Done</button>}>{state =>
-              <><span class="surface-done-state" role="status">Done{state().at ? ` · ${ago(state().at!)}` : ""}</span>
-                <button class="surface-head-text" disabled={writing()} title={`Undo Done for revision ${onScreen()}`} onClick={() => void mark(false)}>Undo</button></>}</Show>
-            </Show>
-            <Show when={failed()}><span class="home-blocked" role="alert">not saved</span></Show>
-          </span>
-        </Show>
+        <DeliverableDoneControls state={doneState} />
         <span class="surface-head-actions">
           {/* Reserved for "BuildingHub version" (Laptop2649): shown only from a deployed receipt, which no API offers yet. */}
           <span class="surface-head-slot" data-slot="buildinghub" hidden />
@@ -160,7 +177,7 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
       </div>}>
         <Show when={!address.error} fallback={<div class="desk-surface-state" role="alert"><p>Cannot open this surface: {String(address.error?.message ?? address.error)}</p><button class="desk-button" onClick={retry}>Try again</button></div>}>
           <Show when={src() ? frameKey() : undefined} keyed fallback={<p class="desk-surface-state" role="status">Opening…</p>}>{_key =>
-            <iframe class="desk-surface-frame" title={surface().title} src={src()} referrerpolicy="no-referrer" onLoad={() => void loaded()}
+            <iframe class="desk-surface-frame" title={surface().title} src={src()} referrerpolicy="no-referrer" onLoad={() => void doneState.loaded(() => props.onLoaded?.() ?? Promise.resolve())}
               sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" />}</Show>
         </Show>
       </Show>}

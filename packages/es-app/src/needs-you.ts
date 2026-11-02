@@ -9,19 +9,23 @@ import { deskItems, type DeskItem } from "./desk"
 import type { HomeRequestRow } from "./home-requests"
 import type { HostFeed } from "./host-feed"
 import { deliverables, type Surface } from "./surfaces"
-import { workCountLabel, workQueue } from "./work-queue"
+import { workCountLabel, workQueue, workTries } from "./work-queue"
 
 export const needsYou = (input: { items: DeskItem[]; feeds: HostFeed[]; fresh: Surface[] }) => {
   const queue = workQueue(input.items, input.feeds)
-  const count = queue.count + input.fresh.length
+  const tries = workTries(input.feeds)
+  const count = queue.count + input.fresh.length + tries.entries.length
+  const behind = [...new Set([...queue.behind, ...tries.behind])]
   return {
     entries: queue.entries,
     fresh: input.fresh,
+    /** Other Work hosts' fresh deliverables (host-qualified Try rows). */
+    tries: tries.entries,
     count,
-    partial: queue.partial,
-    behind: queue.behind,
-    /** The Needs you heading: decisions, requests, failures and fresh deliverables. */
-    label: workCountLabel({ ...queue, count }),
+    partial: behind.length > 0,
+    behind,
+    /** The Needs you heading: decisions, requests, failures and fresh deliverables of every Work host. */
+    label: workCountLabel({ ...queue, count, behind, partial: behind.length > 0 }),
     /** The Decisions tab: the same entries without deliverables. */
     decisions: workCountLabel(queue),
   }

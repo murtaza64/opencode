@@ -95,12 +95,15 @@ const HostSurfaceRow = (props: { entry: WorkEntry }) => {
 }
 // A requested deliverable waiting in Needs you: one deterministic line (Try · title · maintainer · revision, plus any
 // health problem); the summary, conversation link and Done live in the reader it opens.
-const TryRow = (props: { surface: Surface }) => {
+// Another Work host's (`entry`) opens in this window and its Done goes to that host; its line names the host.
+const TryRow = (props: { surface: Surface; entry?: WorkEntry }) => {
   const open = useOpenItem()
-  const key = () => surfaceKey(props.surface.id)
-  return <a href={itemHref(key())} classList={{ active: open(key()) }} aria-current={open(key()) ? "page" : undefined} class="nav-item nav-decision nav-try" data-kind="try" data-nav-item={key()}
-    data-revision={props.surface.revision} title={tryLine(props.surface)} aria-label={tryLine(props.surface)}>
+  const key = () => props.entry?.key ?? surfaceKey(props.surface.id)
+  const line = () => props.entry ? `${tryLine(props.surface)} · on ${props.entry.hostLabel}${props.entry.stale ? " · last known" : ""}` : tryLine(props.surface)
+  return <a href={props.entry?.href ?? itemHref(key())} classList={{ active: open(key()), stale: !!props.entry?.stale }} aria-current={open(key()) ? "page" : undefined} class="nav-item nav-decision nav-try" data-kind="try" data-nav-item={key()}
+    data-revision={props.surface.revision} title={line()} aria-label={line()}>
     <span class="nav-kind" aria-hidden="true">Try</span>
+    <Show when={props.entry?.host}>{host => <HostGlyph host={host()} />}</Show>
     <span class="nav-title" dir="auto">{props.surface.title}</span>
     <span class="session-project" classList={{ "home-blocked": !!surfaceProblem(props.surface.health) }}><bdi dir="auto">{surfaceProblem(props.surface.health) ?? props.surface.owner}</bdi> · rev {props.surface.revision}</span>
   </a>
@@ -129,11 +132,12 @@ export const NeedsYouBand = () => {
   const more = () => Math.max(0, all().entries.length - BAND_LIMIT)
   // "N+" with the hosts behind named, never a falsely complete count.
   // A host that is not current keeps the band (as "0+"), so an empty list never reads as "nothing needs you".
-  return <Show when={all().entries.length || all().fresh.length || all().partial}>
+  return <Show when={all().entries.length || all().fresh.length || all().tries.length || all().partial}>
     <section class="needs-you-band" aria-label="Needs you">
       <div class="nav-heading">Needs you <span class="nav-heading-count" dir="ltr" title={all().label.title}>{all().count || all().partial ? all().label.text : ""}</span></div>
       <For each={shown()}>{entry => <DecisionRow entry={entry} />}</For>
       <For each={all().fresh}>{surface => <TryRow surface={surface} />}</For>
+      <For each={all().tries}>{entry => <Show when={entry.remote?.kind === "surface" ? entry.remote.surface : undefined}>{surface => <TryRow surface={surface()} entry={entry} />}</Show>}</For>
       <Show when={more()}><button type="button" class="link-button nav-more" onClick={() => setTab("decisions")}>{more()} more in Decisions</button></Show>
     </section>
   </Show>

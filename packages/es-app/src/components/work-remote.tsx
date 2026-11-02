@@ -7,14 +7,15 @@ import { A } from "@solidjs/router"
 import { createAttention } from "../attention"
 import { attentionItem, briefCopy, briefSends } from "../desk"
 import { briefAnchorID, createBriefs, type DeskPointer } from "../desk-session"
-import { hostCore, hostPrefix, hostSurfaceAddress, readHostDecision, readHostRequest } from "../host-items"
-import { ago } from "../state"
+import { hostCore, hostPrefix, hostSurfaceAddress, markHostDeliverable, readHostDecision, readHostRequest } from "../host-items"
+import { ago, useDashboard } from "../state"
 import type { WorkEntry } from "../work-queue"
 import { AttentionDecision } from "./attention-decision"
 import { PreparedBrief, useCompleteBrief, useCompleteJob } from "./attention-brief"
 import { HomePermission } from "./home-permission"
 import { Glyph, HostGlyph } from "./icons"
 import { AppHeader } from "./native-header"
+import { createDeliverableDone, DeliverableDoneControls } from "./desk-surfaces"
 
 // The parent may clear the entry while this view (and its portalled top-bar row) is still being disposed.
 export const WorkRemoteDetail = (props: { entry: WorkEntry; onClose: () => void }) => {
@@ -105,11 +106,19 @@ const RemoteRequest = (props: { host: string; label: string; request: NonNullabl
 const RemoteSurface = (props: { host: string; label: string; surface: NonNullable<Extract<WorkEntry["remote"], { kind: "surface" }>>["surface"]; frame: "host" | "own-host-only"; where: JSX.Element; onClose: () => void }) => {
   const [address, { refetch }] = createResource(() => props.frame === "host" ? props.surface.id : undefined, id => hostSurfaceAddress(props.host, id))
   const src = () => address.error ? undefined : address()?.src
+  // Done/Undo write that host's seen state only, then reread that host's list so its Needs you rows follow.
+  const work = useDashboard().work
+  const done = createDeliverableDone(() => props.surface, () => async (surface, revision, seen) => {
+    const ok = await markHostDeliverable(props.host, surface, revision, seen)
+    if (ok) await work.feeds().find(feed => feed.host.id === props.host)?.load()
+    return ok
+  })
   return <div class="desk-surface work-remote-surface">
     <AppHeader>
       <div class="surface-head" onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); props.onClose() } }}>
         <h2 title={`${props.surface.owner} · updated ${ago(props.surface.updated_at)}`}><bdi dir="auto">{props.surface.title}</bdi></h2>
         {props.where}
+        <DeliverableDoneControls state={done} />
         <span class="surface-head-actions">
           <span class="surface-head-slot" data-slot="buildinghub" hidden />
           <Show when={src()}>{href => <a class="surface-head-button" href={href()} target="_blank" rel="noopener noreferrer" title="Open in new tab" aria-label="Open in new tab"><Glyph name="link-external" /></a>}</Show>
@@ -119,8 +128,9 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
     </AppHeader>
     <Show when={props.frame === "host"} fallback={<p class="desk-surface-state" data-surface-gap="own-host-only">This link surface is served only on <bdi dir="auto">{props.label}</bdi>; it cannot be shown from another computer yet.</p>}>
       <Show when={!address.error} fallback={<div class="desk-surface-state" role="alert"><p>Cannot open this surface from <bdi dir="auto">{props.label}</bdi>: {String(address.error?.message ?? address.error)}</p><button class="desk-button" onClick={() => void refetch()}>Try again</button></div>}>
-        <Show when={src()} fallback={<p class="desk-surface-state">Loading…</p>}>{href =>
-          <iframe class="desk-surface-frame" title={props.surface.title} src={href()} referrerpolicy="no-referrer"
+        {/* Remounts when the human loads a newer revision, so Done covers what is on screen. */}
+        <Show when={src() ? `${src()}|${done.onScreen()}` : undefined} keyed fallback={<p class="desk-surface-state">Loading…</p>}>{_key =>
+          <iframe class="desk-surface-frame" title={props.surface.title} src={src()} referrerpolicy="no-referrer"
             sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" />}</Show>
       </Show>
     </Show>

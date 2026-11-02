@@ -435,6 +435,16 @@ test("another host's attention carries only that host's operator cookie, minted 
   })
   expect(brief.status).toBe(200)
   expect(seen.at(-1)).toEqual({ path: "/es/api/frontdesk/briefs/00000000-0000-4000-8000-000000000000/regenerate", cookie: "es_attention_operator=op-mini", origin: dashboard.url.origin })
+  // Done for a requested deliverable is that host's seen state, with that host's operator cookie only.
+  const done = await get("/hosts/mini/es/api/frontdesk/deliverables/seen", {
+    method: "POST", body: '{"id":"report","revision":2,"seen":true}', headers: { ...headers, cookie: "es_attention_operator=local-op; es_attention_operator__mini=op-mini" },
+  })
+  expect(done.status).toBe(200)
+  expect(seen.at(-1)).toEqual({ path: "/es/api/frontdesk/deliverables/seen", cookie: "es_attention_operator=op-mini", origin: dashboard.url.origin })
+  const before = seen.length
+  const foreign = await get("/hosts/mini/es/api/frontdesk/deliverables/seen", { method: "POST", body: "{}", headers: { ...headers, origin: "https://evil.test" } })
+  expect(foreign.status).toBe(403)
+  expect(seen.length).toBe(before)
 })
 
 test("host writes are exactly the own-host session, Aside, model, reply and attention writes; encoded or other paths are refused", async () => {
