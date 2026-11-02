@@ -133,11 +133,12 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
       </div>
     </AppHeader>
     <Show when={props.frame === "host"} fallback={<p class="desk-surface-state" data-surface-gap="own-host-only">This link surface is served only on <bdi dir="auto">{props.label}</bdi>; it cannot be shown from another computer yet.
-      <Show when={onHost()}>{href => <> <a class="desk-link-button" href={href()} target="_blank" rel="noopener noreferrer" data-open-on-host={props.host} onClick={() => setOpened(true)}>Open on <bdi dir="auto">{props.label}</bdi></a></>}</Show></p>}>
+      <Show when={onHost()}>{href => <> <a class="desk-link-button" href={href()} target="_blank" rel="noopener noreferrer" data-open-on-host={props.host} onClick={() => { setOpened(true); done.used() }}>Open on <bdi dir="auto">{props.label}</bdi></a></>}</Show></p>}>
       <Show when={!address.error} fallback={<div class="desk-surface-state" role="alert"><p>Cannot open this surface from <bdi dir="auto">{props.label}</bdi>: {String(address.error?.message ?? address.error)}</p><button class="desk-button" onClick={() => void refetch()}>Try again</button></div>}>
         {/* Remounts when the human loads a newer revision, so Done covers what is on screen. */}
         <Show when={src() ? `${src()}|${done.onScreen()}` : undefined} keyed fallback={<p class="desk-surface-state">Loading…</p>}>{_key =>
           <iframe class="desk-surface-frame" title={props.surface.title} src={src()} referrerpolicy="no-referrer"
+            onLoad={() => void done.loaded(() => work.feeds().find(feed => feed.host.id === props.host)?.load() ?? Promise.resolve())}
             sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" />}</Show>
       </Show>
     </Show>
