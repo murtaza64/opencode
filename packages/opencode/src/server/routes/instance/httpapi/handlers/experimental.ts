@@ -22,6 +22,7 @@ import type { SessionID } from "@/session/schema"
 import { ToolJsonSchema } from "@/tool/json-schema"
 import { ToolRegistry } from "@/tool/registry"
 import { Worktree } from "@/worktree"
+import { SessionSummary } from "@/session/summary"
 import { Effect, Option } from "effect"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
@@ -51,6 +52,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const providers = yield* Provider.Service
 
     const capabilities = Effect.fn("ExperimentalHttpApi.capabilities")(function* () {
+      const budget = SessionSummary.patchBudget()
       return {
         backgroundSubagents: flags.experimentalBackgroundSubagents,
         sessionAside: { version: 1 as const, cancel: true as const, images: SessionV1.ImageSupport },
@@ -66,7 +68,10 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
           nudge: true as const,
         },
         noReplyRecordOnly: true as const,
-        session: { turnTime: true as const },
+        session: {
+          turnTime: true as const,
+          ...(budget === undefined ? {} : { summaryPatchBudget: budget }),
+        },
       }
     })
 

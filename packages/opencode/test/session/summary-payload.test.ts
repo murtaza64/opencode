@@ -24,6 +24,22 @@ afterEach(async () => {
 })
 
 const BUDGET = 256 * 1024
+
+/** Enables the operator rollout gate for the duration of `body`. */
+const withBudget = <A, E, R>(body: Effect.Effect<A, E, R>) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const previous = process.env.OPENCODE_SUMMARY_PATCH_BUDGET
+      process.env.OPENCODE_SUMMARY_PATCH_BUDGET = "1"
+      return previous
+    }),
+    () => body,
+    (previous) =>
+      Effect.sync(() => {
+        if (previous === undefined) delete process.env.OPENCODE_SUMMARY_PATCH_BUDGET
+        else process.env.OPENCODE_SUMMARY_PATCH_BUDGET = previous
+      }),
+  )
 const model = { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test-model") }
 const lines = (count: number, tag: string) => Array.from({ length: count }, (_, i) => `${tag} line ${i}`).join("\n") + "\n"
 
@@ -128,7 +144,7 @@ it.live(
         if (diff.patch === undefined) expect(diff.patchOmitted).toBe(true)
       }
       expect(diffs.some((d) => d.patchOmitted)).toBe(true)
-    }).pipe(withTmpdirInstance({ git: true })),
+    }).pipe(withBudget, withTmpdirInstance({ git: true })),
   120_000,
 )
 
@@ -157,7 +173,7 @@ it.live(
       const served = yield* summary.diff({ sessionID: t.session.id, messageID: t.user.id })
       expect(served.map((d) => [d.file, d.patch])).toEqual(full.map((d) => [d.file, d.patch]))
       expect(served.some((d) => d.patchOmitted)).toBe(false)
-    }).pipe(withTmpdirInstance({ git: true })),
+    }).pipe(withBudget, withTmpdirInstance({ git: true })),
   120_000,
 )
 
@@ -177,7 +193,7 @@ it.live(
       expect(diffs).toHaveLength(3)
       expect(inlineBytes(diffs)).toBeLessThanOrEqual(BUDGET)
       expect(diffs.every((d) => d.patch !== undefined || d.patchOmitted === true)).toBe(true)
-    }).pipe(withTmpdirInstance({ git: true })),
+    }).pipe(withBudget, withTmpdirInstance({ git: true })),
   120_000,
 )
 
@@ -249,4 +265,55 @@ it.live(
       expect(yield* stored(t.session.id, t.user.id)).toEqual(yield* snapshot.diffFull(from, to))
     }).pipe(withTmpdirInstance({ git: true })),
   120_000,
+)
+
+it.live(
+  "without the rollout gate every patch stays inline, as older clients expect",
+  () =>
+    Effect.gen(function* () {
+      const dir = (yield* TestInstance).directory
+      const snapshot = yield* Snapshot.Service
+      const from = (yield* snapshot.track())!
+      yield* write(`${dir}/big.ts`, lines(20_000, "big"))
+      const to = (yield* snapshot.track())!
+      const t = yield* turn(from, to)
+      yield* SessionSummary.Service.use((summary) => summary.summarize({ sessionID: t.session.id, messageID: t.user.id }))
+      const diffs = yield* stored(t.session.id, t.user.id)
+      expect(diffs).toEqual(yield* snapshot.diffFull(from, to))
+      expect(diffs.some((d) => d.patchOmitted)).toBe(false)
+    }).pipe(withTmpdirInstance({ git: true })),
+  120_000,
+)
+
+it.live(
+  "an omitted patch whose turn moved on after summarizing stays omitted in the diff route",
+  () =>
+    Effect.gen(function* () {
+      const dir = (yield* TestInstance).directory
+      const snapshot = yield* Snapshot.Service
+      const summary = yield* SessionSummary.Service
+      const from = (yield* snapshot.track())!
+      yield* write(`${dir}/big.ts`, lines(20_000, "big"))
+      const to = (yield* snapshot.track())!
+      const t = yield* turn(from, to)
+      yield* summary.summarize({ sessionID: t.session.id, messageID: t.user.id })
+      // A later step grows the file, but the summary has not been refreshed yet.
+      yield* write(`${dir}/big.ts`, lines(20_001, "big"))
+      yield* t.finish((yield* snapshot.track())!)
+
+      const served = yield* summary.diff({ sessionID: t.session.id, messageID: t.user.id })
+      expect(served).toEqual([{ file: "big.ts", status: "added", additions: 20_000, deletions: 0, patchOmitted: true }])
+    }).pipe(withBudget, withTmpdirInstance({ git: true })),
+  120_000,
+)
+
+it.live("the rollout gate is off unless OPENCODE_SUMMARY_PATCH_BUDGET names a positive byte count or 1", () =>
+  Effect.sync(() => {
+    expect(SessionSummary.patchBudget(undefined)).toBeUndefined()
+    expect(SessionSummary.patchBudget("")).toBeUndefined()
+    expect(SessionSummary.patchBudget("0")).toBeUndefined()
+    expect(SessionSummary.patchBudget("abc")).toBeUndefined()
+    expect(SessionSummary.patchBudget("1")).toBe(BUDGET)
+    expect(SessionSummary.patchBudget("4096")).toBe(4096)
+  }),
 )

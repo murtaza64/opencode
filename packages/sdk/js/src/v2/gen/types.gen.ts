@@ -2361,6 +2361,7 @@ export type ExperimentalCapabilities = {
   noReplyRecordOnly?: true
   session?: {
     turnTime: true
+    summaryPatchBudget?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
   }
 }
 

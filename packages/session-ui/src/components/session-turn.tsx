@@ -25,7 +25,7 @@ import { SessionRetry } from "./session-retry"
 import { TextReveal } from "@opencode-ai/ui/text-reveal"
 import { createAutoScroll } from "@opencode-ai/ui/hooks"
 import { useI18n } from "@opencode-ai/ui/context/i18n"
-import { summaryView } from "./session-diff"
+import { normalize } from "./session-diff"
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
@@ -459,7 +459,7 @@ export function SessionTurn(
                     >
                       <For each={visible()}>
                         {(diff) => {
-                          const view = summaryView(diff)
+                          const view = normalize(diff)
                           const active = createMemo(() => expanded().includes(diff.file))
                           const [shown, setShown] = createSignal(false)
 
@@ -508,7 +508,7 @@ export function SessionTurn(
                               <Accordion.Content>
                                 <Show when={shown()}>
                                   <Show
-                                    when={"fileDiff" in view ? view : undefined}
+                                    when={view.omitted ? undefined : view}
                                     fallback={
                                       <div data-slot="session-turn-diff-omitted">
                                         {i18n.t("ui.sessionTurn.diffs.omitted")}

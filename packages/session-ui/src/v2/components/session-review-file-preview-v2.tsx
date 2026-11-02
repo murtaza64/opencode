@@ -275,14 +275,23 @@ export function SessionReviewFilePreviewV2(props: SessionReviewFilePreviewV2Prop
         data-slot="session-review-v2-diff-scroll"
       >
         <Show
-          when={diffCanRender() || mediaKind()}
+          when={!view().omitted}
           fallback={
-            <div data-slot="session-review-v2-empty">
-              <span class="text-12-regular text-text-weak">{i18n.t("ui.fileMedia.binary.title")}</span>
+            <div data-slot="session-review-v2-omitted">
+              <span class="text-12-regular text-text-weak">{i18n.t("ui.sessionTurn.diffs.omitted")}</span>
             </div>
           }
         >
-          {diffViewer()}
+          <Show
+            when={diffCanRender() || mediaKind()}
+            fallback={
+              <div data-slot="session-review-v2-empty">
+                <span class="text-12-regular text-text-weak">{i18n.t("ui.fileMedia.binary.title")}</span>
+              </div>
+            }
+          >
+            {diffViewer()}
+          </Show>
         </Show>
       </div>
     </>

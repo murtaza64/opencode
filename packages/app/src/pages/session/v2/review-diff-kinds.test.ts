@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { filterReviewFiles, reviewDiffDirectory, reviewDiffKinds, reviewDiffNeedsLoad } from "./review-diff-kinds"
+import {
+  filterReviewFiles,
+  reviewDiffDirectory,
+  reviewDiffKinds,
+  reviewDiffNeedsLoad,
+  turnReviewDiff,
+} from "./review-diff-kinds"
 
 describe("reviewDiffKinds", () => {
   test("maps file and directory kinds", () => {
@@ -66,5 +72,32 @@ describe("reviewDiffDirectory", () => {
     expect(reviewDiffDirectory("C:\\", "README.md")).toBe("C:\\")
     expect(reviewDiffDirectory("/", "src/a.ts")).toBe("/src")
     expect(reviewDiffDirectory("C:\\", "src/a.ts")).toBe("C:\\src")
+  })
+})
+
+describe("turnReviewDiff", () => {
+  const patch = "Index: big.ts\n===================================================================\n--- big.ts\t\n+++ big.ts\t\n@@ -0,0 +1,2 @@\n+one\n+two\n"
+  const omitted = { file: "big.ts", additions: 2, deletions: 0, status: "added" as const, patchOmitted: true as const }
+
+  test("an omitted turn row needs loading and takes the rebuilt patch from the session diff route", () => {
+    expect(reviewDiffNeedsLoad(omitted)).toBe(true)
+    expect(turnReviewDiff(omitted, [{ file: "big.ts", additions: 2, deletions: 0, status: "added", patch }])).toEqual({
+      file: "big.ts",
+      additions: 2,
+      deletions: 0,
+      status: "added",
+      patch,
+    })
+  })
+
+  test("a rebuilt patch for different counts or status leaves the row omitted", () => {
+    expect(turnReviewDiff(omitted, [{ file: "big.ts", additions: 3, deletions: 0, status: "added", patch }])).toBeUndefined()
+    expect(turnReviewDiff(omitted, [{ file: "big.ts", additions: 2, deletions: 0, status: "modified", patch }])).toBeUndefined()
+    expect(turnReviewDiff(omitted, [{ file: "big.ts", additions: 2, deletions: 0, status: "added", patchOmitted: true }])).toBeUndefined()
+    expect(turnReviewDiff(omitted, [])).toBeUndefined()
+  })
+
+  test("a row that carries its patch inline is not reloaded", () => {
+    expect(turnReviewDiff({ file: "a.ts", additions: 2, deletions: 0, status: "added", patch }, [])).toBeUndefined()
   })
 })

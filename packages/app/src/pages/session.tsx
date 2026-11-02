@@ -88,7 +88,14 @@ import { SessionReviewEmptyNoGitV2 } from "@opencode-ai/session-ui/v2/session-re
 import { SessionReviewV2SidebarToggle } from "@opencode-ai/session-ui/v2/session-review-v2"
 import { ReviewPanelV2 } from "@/pages/session/v2/review-panel-v2"
 import { createReviewPanelV2State } from "@/pages/session/v2/review-panel-v2-state"
-import { reviewDiffDirectory, reviewDiffNeedsLoad, reviewRootDirectory } from "@/pages/session/v2/review-diff-kinds"
+import {
+  filterRenderableDiff,
+  reviewDiffDirectory,
+  reviewDiffNeedsLoad,
+  reviewRootDirectory,
+  turnReviewDiff,
+  type RenderDiff,
+} from "@/pages/session/v2/review-diff-kinds"
 import { TerminalPanel } from "@/pages/session/terminal-panel"
 import { TerminalPanelV2 } from "@/pages/session/terminal-panel-v2"
 import { useComposerCommands } from "@/pages/session/use-composer-commands"
@@ -718,9 +725,30 @@ export default function Page() {
     if (reviewMode() === "git" || reviewMode() === "branch") return !vcsQuery.isPending
     return true
   }
-  const loadReviewDiff = async (file: string, version?: number): Promise<VcsFileDiff | undefined> => {
+  // Turn mode: a summary row whose patch Core omitted inline loads it from the session diff route.
+  const loadTurnReviewDiff = async (file: string): Promise<RenderDiff | undefined> => {
+    const source = reviewDiffs()
+      .filter(filterRenderableDiff)
+      .find((diff) => diff.file === file)
+    const sessionID = params.id
+    const messageID = lastUserMessage()?.id
+    if (!source || !sessionID || !messageID || !("patchOmitted" in source) || source.patchOmitted !== true) return
+    const rebuilt = await queryClient
+      .fetchQuery({
+        queryKey: [serverSDK().scope, "session-turn-diff", sessionID, messageID] as const,
+        staleTime: Number.POSITIVE_INFINITY,
+        retry: 2,
+        queryFn: () => sdk().client.session.diff({ sessionID, messageID }).then((result) => result.data ?? []),
+      })
+      .catch((error) => {
+        console.debug("[session-review] failed to load turn diff", { file, error })
+        return []
+      })
+    return turnReviewDiff(source, rebuilt)
+  }
+  const loadReviewDiff = async (file: string, version?: number): Promise<RenderDiff | undefined> => {
     const mode = vcsMode()
-    if (!mode) return
+    if (!mode) return loadTurnReviewDiff(file)
     const root = reviewRootDirectory(sync().project?.worktree ?? sdk().directory)
     const directory = reviewDiffDirectory(root, file)
     const source = reviewDiffs().find((diff) => diff.file === file)

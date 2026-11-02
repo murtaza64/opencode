@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { normalize, resolveFileDiff, summaryView, text } from "./session-diff"
+import { normalize, resolveFileDiff, text } from "./session-diff"
 
 describe("session diff", () => {
   test("renders whole-file unified patches as complete diffs", () => {
@@ -133,18 +133,19 @@ describe("session diff", () => {
     expect(text(view, "additions")).toBe("")
   })
 
-  test("a summary row whose patch Core omitted is reported as omitted, never as an empty diff", () => {
-    const view = summaryView({ file: "big.ts", additions: 20_000, deletions: 0, status: "added", patchOmitted: true })
+  test("a row whose patch Core omitted is marked omitted, so review and turn views show a notice, not its empty diff", () => {
+    const view = normalize({ file: "big.ts", additions: 20_000, deletions: 0, status: "added", patchOmitted: true })
 
-    expect(view).toEqual({ file: "big.ts", additions: 20_000, deletions: 0, status: "added", omitted: true })
-    expect("fileDiff" in view).toBe(false)
+    expect(view).toMatchObject({ file: "big.ts", additions: 20_000, deletions: 0, status: "added", omitted: true })
+    expect(view.fileDiff.additionLines).toHaveLength(0)
   })
 
-  test("a summary row with its patch inline still renders the patch", () => {
+  test("a row with its patch inline is not marked omitted", () => {
     const patch =
       "Index: a.ts\n===================================================================\n--- a.ts\t\n+++ a.ts\t\n@@ -1,2 +1,2 @@\n one\n-two\n+three\n"
-    const view = summaryView({ file: "a.ts", patch, additions: 1, deletions: 1, status: "modified" })
+    const view = normalize({ file: "a.ts", patch, additions: 1, deletions: 1, status: "modified", patchOmitted: true })
 
-    expect("fileDiff" in view && text(view, "additions")).toBe("one\nthree\n")
+    expect(view.omitted).toBeUndefined()
+    expect(text(view, "additions")).toBe("one\nthree\n")
   })
 })

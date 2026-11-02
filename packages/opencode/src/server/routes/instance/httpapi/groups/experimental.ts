@@ -50,8 +50,14 @@ const CapabilitiesResponse = Schema.Struct({
   }),
   /** `prompt_async` with `noReply` records the message only: no turn starts or continues to answer it, busy or idle. */
   noReplyRecordOnly: Schema.optionalKey(Schema.Literal(true)),
-  /** Sessions carry `time.turn {started?, ended?}`, written only at turn boundaries. */
-  session: Schema.optionalKey(Schema.Struct({ turnTime: Schema.Literal(true) })),
+  /**
+   * `turnTime`: sessions carry `time.turn {started?, ended?}`, written only at turn boundaries.
+   * `summaryPatchBudget`: present when user message summaries inline at most this many UTF-8 bytes of patch text;
+   * other files carry `patchOmitted: true` and `GET /session/:sessionID/diff?messageID=` returns their patches.
+   */
+  session: Schema.optionalKey(
+    Schema.Struct({ turnTime: Schema.Literal(true), summaryPatchBudget: Schema.optionalKey(Schema.Number) }),
+  ),
 }).annotate({ identifier: "ExperimentalCapabilities" })
 
 const ConsoleOrgOption = Schema.Struct({

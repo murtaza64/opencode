@@ -18,6 +18,20 @@ export function reviewDiffNeedsLoad(diff: RenderDiff) {
   return !diff.patch || !/^@@ /m.test(diff.patch)
 }
 
+/**
+ * The rebuilt patch for a turn-summary row whose patch Core omitted inline (`patchOmitted`), taken from
+ * `GET /session/:sessionID/diff?messageID=`. A rebuilt diff with other status or counts describes a different turn
+ * range, so the row stays omitted rather than showing a patch that does not match its counts.
+ */
+export function turnReviewDiff(source: RenderDiff, rebuilt: readonly SnapshotFileDiff[]): RenderDiff | undefined {
+  if (!("patchOmitted" in source) || source.patchOmitted !== true) return
+  const hit = rebuilt.find((diff) => diff.file === source.file)
+  if (!hit?.patch || hit.patchOmitted) return
+  if (hit.additions !== source.additions || hit.deletions !== source.deletions || hit.status !== source.status) return
+  const { patchOmitted: _, ...metadata } = source
+  return { ...metadata, patch: hit.patch }
+}
+
 export function reviewRootDirectory(root: string) {
   return root === "/" || /^[A-Za-z]:[/\\]?$/.test(root) ? root : root.replace(/[/\\]+$/, "")
 }

@@ -67,8 +67,20 @@ function unquoteGitPath(input: string) {
   return Buffer.from(bytes).toString()
 }
 
-/** UTF-8 bytes of patch text a user message summary carries inline; larger diffs keep counts and omit patches. */
+/** UTF-8 bytes of patch text a user message summary carries inline when the budget is enabled. */
 export const INLINE_PATCH_BUDGET = 256 * 1024
+
+/**
+ * Rollout gate for omitting summary patches. Clients that predate `patchOmitted` render an omitted patch as an empty
+ * diff, so the budget applies only when the operator sets `OPENCODE_SUMMARY_PATCH_BUDGET` (bytes, or `1` for the
+ * default) after confirming every client reading summary patches understands it. Unset keeps every patch inline.
+ */
+export function patchBudget(value = process.env.OPENCODE_SUMMARY_PATCH_BUDGET) {
+  if (!value) return
+  const bytes = Number(value)
+  if (!Number.isInteger(bytes) || bytes < 1) return
+  return bytes === 1 ? INLINE_PATCH_BUDGET : bytes
+}
 /** Turn ranges remembered per user message, so an unchanged range is neither recomputed nor rebroadcast. */
 const RANGES = 1_000
 
@@ -76,7 +88,8 @@ const RANGES = 1_000
  * Keep every file's status and counts; inline patches in diff order while they fit the budget and mark the rest
  * `patchOmitted`, so a reader can tell an omitted patch from an empty one.
  */
-export function bound(diffs: readonly Snapshot.FileDiff[], budget = INLINE_PATCH_BUDGET): Snapshot.FileDiff[] {
+export function bound(diffs: readonly Snapshot.FileDiff[], budget = patchBudget()): Snapshot.FileDiff[] {
+  if (budget === undefined) return [...diffs]
   let used = 0
   return diffs.map((diff) => {
     if (diff.patch === undefined) return diff
@@ -205,7 +218,10 @@ const layer = Layer.effect(
       const rebuilt = new Map(full.flatMap((item) => (item.file !== undefined && item.patch ? [[item.file, item]] : [])))
       const diffs = stored.map((item) => {
         const hit = item.patchOmitted && item.file !== undefined ? rebuilt.get(item.file) : undefined
-        if (!hit) return item
+        // The turn may have moved on since it was summarized; a patch for different counts would misdescribe the
+        // stored row, so it stays omitted.
+        if (!hit || hit.additions !== item.additions || hit.deletions !== item.deletions || hit.status !== item.status)
+          return item
         const { patchOmitted: _, ...metadata } = item
         return { ...metadata, patch: hit.patch }
       })
