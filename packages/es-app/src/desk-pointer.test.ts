@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { homeOf, readPointer, resolveHome, writePointer, type PointerView } from "./desk-pointer"
+import { earlierDesks, homeOf, readPointer, resolveHome, sharedNotice, writePointer, type DeskHome, type PointerView } from "./desk-pointer"
 import type { WorkHost } from "./host"
 
 const mini: WorkHost = { id: "mini", label: "Mac Mini", origin: "https://mini.test" }
@@ -65,4 +65,29 @@ test("writes go to this host only, with CSRF, and report a refusal's reason", as
   expect((calls[0]!.init?.headers as Record<string, string>)["X-Attention-CSRF"]).toBe("1")
   const refused = (async () => Response.json({ error: "only the operator UI" }, { status: 403 })) as unknown as typeof fetch
   expect(await writePointer({ expected_revision: 0, session: "ses_desk_aaaaaa", directory: "/d", reason: "create" }, refused)).toEqual({ ok: false, error: "only the operator UI" })
+})
+
+const local = (view: PointerView): DeskHome => ({ kind: "local", view })
+const remoteHome = (view: PointerView): DeskHome => ({ kind: "remote", host: { id: "mini", label: "Mac Mini", base: "/hosts/mini/oc" }, view })
+
+test("earlier desks: this device's own, then the home's replaced desks newest first, never the current one", () => {
+  const view: PointerView = { home: true, revision: 3, session: "ses_desk_current", directory: "/d",
+    predecessors: [{ session: "ses_desk_first01", directory: "/d", until: 1 }, { session: "ses_desk_second1", directory: "/d", until: 2 }] }
+  const list = earlierDesks(remoteHome(view), "ses_desk_current", [{ session: "ses_mylaptopdesk", directory: "/l" }, { session: "ses_desk_current", directory: "/d" }])
+  expect(list.map(entry => [entry.session, entry.from, entry.host?.id])).toEqual([
+    ["ses_mylaptopdesk", "device", undefined], ["ses_desk_second1", "home", "mini"], ["ses_desk_first01", "home", "mini"]])
+})
+
+test("the same earlier desk known to both the device and the home is listed once", () => {
+  const view: PointerView = { home: true, revision: 2, session: "ses_desk_current", directory: "/d", predecessors: [{ session: "ses_mylaptopdesk", directory: "/l", until: 1 }] }
+  expect(earlierDesks(local(view), "ses_desk_current", [{ session: "ses_mylaptopdesk", directory: "/l" }]).length).toBe(1)
+})
+
+test("the shared-desk line shows once per shared desk, only where this device had its own desk", () => {
+  const view: PointerView = { home: true, revision: 1, session: "ses_desk_current", directory: "/d" }
+  const mine = earlierDesks(local(view), "ses_desk_current", [{ session: "ses_mylaptopdesk", directory: "/l" }])
+  expect(sharedNotice(local(view), "ses_desk_current", mine, undefined)).toBe(true)
+  expect(sharedNotice(local(view), "ses_desk_current", mine, "ses_desk_current")).toBe(false)
+  expect(sharedNotice(local(view), "ses_desk_current", [], undefined)).toBe(false)
+  expect(sharedNotice({ kind: "off" }, "ses_desk_current", mine, undefined)).toBe(false)
 })

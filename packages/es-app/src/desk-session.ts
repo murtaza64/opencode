@@ -7,7 +7,7 @@ import type { Session } from "@opencode-ai/sdk/v2"
 import { descending } from "@opencode-ai/schema/identifier"
 import { oc, ocAt, SessionCreateError, type ContextPart, type MessageWithParts } from "./api"
 import { readHost, workFeedHosts } from "./host"
-import { resolveHome, writePointer, type DeskHome, type PointerView } from "./desk-pointer"
+import { earlierDesks, resolveHome, sharedNotice, writePointer, type DeskHome, type PointerView } from "./desk-pointer"
 import type { SessionHost } from "./session-host"
 import { clearBackend, describeFailure, isTransient, reportBackend } from "./backend-status"
 import { assistantOps, handled, emptyMemory, eraseMemory, nextMemory, type MemoryDocument, type MemoryOp } from "./desk-memory"
@@ -15,6 +15,9 @@ import type { AttentionRecord } from "./attention"
 import { BRIEF_CONTRACT, BRIEF_SCHEMA, BRIEF_SYSTEM, type ConversationDocument, type ConversationThread, briefComplete, briefPacket, briefState, contextNote, deskContext, nextNoteSeq, recordNote, type BriefMeta, type NoteState, type BriefState, type DeskItem, SOURCE_TAIL } from "./desk"
 
 const POINTER = "es-app:front-desk:1"
+// This device's desks that a shared desk replaced, kept so they stay one tap away, and the shared desk last announced.
+const EARLIER = "es-app:front-desk:earlier:1"
+const SHARED_SEEN = "es-app:front-desk:shared-seen:1"
 // Per desk session: what its context notes have told it so far (NoteState).
 const NOTE = "es-app:front-desk:context:2"
 const PENDING = "es-app:front-desk:brief-create:1"
@@ -102,8 +105,16 @@ export const createDeskSession = () => {
     }
   }
   /** Adopt the home's pointer on this host: it becomes this device's pointer too. */
+  const [replaced, setReplaced] = createSignal(readJSON<{ session: string; directory: string }[]>(EARLIER, value => Array.isArray(value)) ?? [])
+  const [seen, setSeen] = createSignal(readJSON<string>(SHARED_SEEN, value => typeof value === "string"))
   const adopt = (view: PointerView) => {
     if (!view.session || !view.directory) return
+    const old = devicePointer()
+    if (old && !old.create && old.session !== view.session && !replaced().some(entry => entry.session === old.session)) {
+      const next = [{ session: old.session, directory: old.directory }, ...replaced()].slice(0, 10)
+      setReplaced(next)
+      try { localStorage.setItem(EARLIER, JSON.stringify(next)) } catch { /* remembered for this page */ }
+    }
     if (devicePointer()?.session !== view.session) try { save({ session: view.session, directory: view.directory }) } catch { setPointer({ session: view.session, directory: view.directory }) }
   }
   const verify = async () => {
@@ -255,7 +266,17 @@ export const createDeskSession = () => {
       return `Not sent: ${cause instanceof Error ? cause.message : String(cause)}`
     }
   }
-  return { pointer, home, session, status, error, setError, verify, start, confirm, forget, context, caseContext, sent, detail }
+  // A remote home leaves this device's own pointer in place; it counts as an earlier desk until adopted elsewhere.
+  const earlier = () => earlierDesks(home(), pointer()?.session,
+    [...replaced(), ...(remote() && devicePointer() && !devicePointer()!.create ? [{ session: devicePointer()!.session, directory: devicePointer()!.directory }] : [])])
+  const notice = () => status() === "ready" && sharedNotice(home(), pointer()?.session, earlier(), seen())
+  const dismissNotice = () => {
+    const current = pointer()?.session
+    if (!current) return
+    setSeen(current)
+    try { localStorage.setItem(SHARED_SEEN, JSON.stringify(current)) } catch { /* shown again next page */ }
+  }
+  return { pointer, home, session, status, error, setError, verify, start, confirm, forget, context, caseContext, sent, detail, earlier, notice, dismissNotice }
 }
 
 export type BriefJob = { id: string; directory: string; meta: BriefMeta; created: number; state: BriefState | { state: "starting" } | { state: "unconfirmed" } }

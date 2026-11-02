@@ -62,3 +62,21 @@ export const writePointer = async (body: { expected_revision: number; session: s
     return { ok: false, error: (value as { error?: string } | undefined)?.error ?? `HTTP ${response.status}` }
   } catch (cause) { return { ok: false, error: String(cause) } }
 }
+
+/** An earlier Front Desk conversation, still readable: on this host (`host` absent) or on the home host. */
+export type EarlierDesk = { session: string; directory: string; host?: SessionHost & { id: string; label: string }; from: "device" | "home"; until?: number }
+
+/** Earlier desks, newest first, without the current one: the home's replaced desks and this device's own earlier
+ * desk(s). Nothing is deleted; each stays a normal conversation. */
+export const earlierDesks = (home: DeskHome, current: string | undefined, device: { session: string; directory: string }[]): EarlierDesk[] => {
+  const host = home.kind === "remote" || home.kind === "unreachable" ? home.host : undefined
+  const fromHome = home.kind === "local" || home.kind === "remote"
+    ? [...home.view.predecessors ?? []].reverse().map((entry): EarlierDesk => ({ ...entry, ...(host ? { host } : {}), from: "home" }))
+    : []
+  const all = [...device.map((entry): EarlierDesk => ({ session: entry.session, directory: entry.directory, from: "device" })), ...fromHome]
+  return all.filter((entry, index) => entry.session !== current && all.findIndex(other => other.session === entry.session) === index)
+}
+
+/** Show "This is now the shared Work Front Desk" once per shared desk, on a device that had its own desk before. */
+export const sharedNotice = (home: DeskHome, current: string | undefined, earlier: EarlierDesk[], seen: string | undefined) =>
+  (home.kind === "local" || home.kind === "remote") && !!current && seen !== current && earlier.some(entry => entry.from === "device")

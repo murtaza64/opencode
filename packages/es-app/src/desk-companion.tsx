@@ -10,6 +10,7 @@ import { useBriefs } from "./desk-briefs"
 import { createTasks, deskTasksSupported, type TaskJob } from "./desk-tasks"
 import { getComposer } from "./composer"
 import { createDeskSession } from "./desk-session"
+import type { EarlierDesk } from "./desk-pointer"
 import { es, type ContextPart } from "./api"
 import type { ContextRef } from "./context-mention"
 import { caseLines, followUps, progressRows, readCases, type DeskCase, type FollowUp, type ProgressRow } from "./desk-followups"
@@ -165,6 +166,7 @@ export const DeskCompanion = () => {
     style={{ "--companion-width": floating() ? undefined : `${companionWidth()}px` }}>
     <div class="desk-companion-in desk-chat">
       <Show when={chat.desk.error()}><div class="home-warning" role="alert">{chat.desk.error()}</div></Show>
+      <Show when={target()}><SharedDesk desk={chat.desk} /></Show>
       <Show when={target()}>{(current) => <DeskFollowUps session={current().session} open={chat.open} />}</Show>
       <Show when={target()}>{(current) => <DeskTasks tasks={chat.tasks} session={current().session} directory={current().directory} followUps={supported() === true} />}</Show>
       <Show when={target()} keyed fallback={<DeskStart desk={chat.desk} directory={chat.directory()} />}>
@@ -293,3 +295,21 @@ const ProgressItem = (props: { row: ProgressRow; open: boolean; toggle: () => vo
       <dt>Trace</dt><dd class="desk-progress-ids"><For each={props.row.detail.filter(line => !line.startsWith("next: "))}>{(line, index) => <>{index() ? " · " : ""}<bdi dir="ltr">{line}</bdi></>}</For></dd>
     </dl></Show>
   </li>
+
+// The profile's one Front Desk says so once, on a device that had its own desk, and keeps every earlier desk one tap
+// away (desk-pointer-contract-v1). Earlier desks open as ordinary conversations; nothing here deletes or moves one.
+const SharedDesk = (props: { desk: ReturnType<typeof createDeskSession> }) => {
+  const href = (entry: EarlierDesk) => entry.host
+    ? `/session/${encodeURIComponent(entry.session)}?directory=${encodeURIComponent(entry.directory)}&host=${encodeURIComponent(entry.host.id)}`
+    : sessionHref(entry.session, entry.directory)
+  const where = () => { const home = props.desk.home(); return home.kind === "remote" ? ` on ${home.host.label}` : "" }
+  const mine = () => props.desk.earlier().find(entry => entry.from === "device")
+  return <>
+    <Show when={props.desk.notice()}><p class="desk-shared-notice home-source" role="status">This is now the shared Work Front Desk{where()}.
+      <Show when={mine()}>{entry => <> <A href={href(entry())}>Your earlier desk on this device</A>.</>}</Show>
+      {" "}<button type="button" class="desk-link-button" onClick={() => props.desk.dismissNotice()}>OK</button></p></Show>
+    <Show when={props.desk.earlier().length}><details class="desk-earlier home-source"><summary>Earlier desks ({props.desk.earlier().length})</summary>
+      <ul><For each={props.desk.earlier()}>{entry => <li><A href={href(entry)}><bdi dir="ltr">{entry.session}</bdi></A>
+        {" · "}{entry.from === "device" ? "this device" : entry.host ? entry.host.label : "this host"}<Show when={entry.until}>{until => <> · until {ago(until())}</>}</Show></li>}</For></ul></details></Show>
+  </>
+}
