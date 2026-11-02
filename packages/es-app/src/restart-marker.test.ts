@@ -77,6 +77,18 @@ describe("restart markers", () => {
     )
   })
 
+  test("a close-only operator recovery says it closed the step, never scheduled or stalled", () => {
+    const closed = assistant("msg_2", 10, {
+      restarts: [{ restartID: "restart-1-2", outcome: "scheduled", reason: "operator-recovery", interruptedTools: 1, time: 100, closed: true }],
+    })
+    for (const busy of [false, true])
+      expect(restartMarkers(closed, [user("msg_1"), closed], busy)[0]).toEqual({
+        restartID: "restart-1-2",
+        state: "closed",
+        label: "Operator recovery closed the step without running · 1 tool recorded as abandoned (effect unknown, not repeated)",
+      })
+  })
+
   test("messages without restart provenance render nothing", () => {
     expect(restartMarkers(user("msg_1"), [user("msg_1")], true)).toEqual([])
   })
