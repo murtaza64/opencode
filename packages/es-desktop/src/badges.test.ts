@@ -95,3 +95,14 @@ test("no reads while the window is hidden; showing it reads once", async () => {
   watcher.stop()
   expect(seen).toEqual([{ count: 1, partial: false }])
 })
+
+test("an unreadable count says why: a refusal or a sign-in redirect is signed out, no answer is unreachable, anything else an error", async () => {
+  const { readBadgeReason } = await import("./badges")
+  const answer = (response: Response | Error) => ({ id: "personal", read: async () => { if (response instanceof Error) throw response; return response } })
+  expect((await readBadgeReason(answer(new Response("", { status: 401 })))).reason).toBe("signed-out")
+  expect((await readBadgeReason(answer(new Response("", { status: 302, headers: { location: "https://team.cloudflareaccess.com/" } })))).reason).toBe("signed-out")
+  expect((await readBadgeReason(answer(new TypeError("unexpected redirect")))).reason).toBe("signed-out")
+  expect((await readBadgeReason(answer(new TypeError("fetch failed")))).reason).toBe("unreachable")
+  expect((await readBadgeReason(answer(new Response("<html>", { status: 200, headers: { "content-type": "text/html" } })))).reason).toBe("error")
+  expect(await readBadgeReason(answer(Response.json({ records: [] })))).toEqual({ badge: { count: 0, partial: true } })
+})

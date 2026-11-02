@@ -330,6 +330,7 @@ const start = async () => {
       if (!event.isMainFrame && !surfaceFrameURL(event.url, origin)) event.preventDefault()
     })
     contents.on("will-attach-webview", (event) => event.preventDefault())
+    showRendererLoss(contents, origin)
   }
   // A host's own served page: its origin and its sign-in flow stay in the tab; other links open externally.
   function guardPage(contents: Electron.WebContents, origin: string) {
@@ -355,11 +356,12 @@ const start = async () => {
       // A fresh load, not reload(): Chromium keeps a reloaded navigation's cross-site status.
       if (pageArrivedCrossSite(previous, url, origin)) void contents.loadURL(url)
     })
-    // A page that cannot load says so in the tab, with a retry; it never stays blank.
+    // A page that cannot load, or whose renderer is gone, says so in the tab with Try again; it never stays blank.
     contents.on("did-fail-load", (_event, code, description, url, mainFrame) => {
       if (!mainFrame || code === -3 || url.startsWith("data:")) return
       void contents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(pageFailure(origin, description))}`)
     })
+    showRendererLoss(contents, origin)
   }
   if (window instanceof BrowserWindow) guardListener(window.webContents, server.origin, true)
   // Pair a Phone: this machine's gateway, plus each host with an owner SSH destination in
@@ -467,7 +469,7 @@ const start = async () => {
       ...remotes.map((host) => ({ id: host.id, read: (path: string) => fetch(`${host.server.origin}${path}`, { headers: { "x-editspace-key": host.server.key, origin: host.server.origin }, redirect: "error", signal: AbortSignal.timeout(10_000) }) })),
       // A page host is read with its own partition (its own sign-in), on its own origin, read-only.
       ...pages.map((host) => ({ id: host.id, read: (path: string) => session.fromPartition(`persist:editspace-host-${host.id}`).fetch(`${host.origin}${path}`, { credentials: "include", redirect: "error", signal: AbortSignal.timeout(10_000) }) })),
-    ], (id, badge) => tabs.setBadge(id, badge), undefined, () => window.isVisible() && !window.isMinimized())
+    ], (id, badge, reason) => tabs.setBadge(id, badge, reason), undefined, () => window.isVisible() && !window.isMinimized())
     for (const event of ["show", "restore", "focus"] as const) window.on(event as "show", badges.refresh)
     app.on("before-quit", badges.stop)
   }
@@ -532,7 +534,8 @@ const listenerSession = (partition: string, listener: { origin: string; key: str
   result.setPermissionCheckHandler(() => false)
   result.on("will-download", (event) => event.preventDefault())
   result.webRequest.onBeforeRequest((details, callback) => {
-    callback({ cancel: !own(details.url) })
+    // The failure page (main.ts showRendererLoss) is a data: document loaded by this process.
+    callback({ cancel: !own(details.url) && !details.url.startsWith("data:text/html") })
   })
   result.webRequest.onBeforeSendHeaders((details, callback) => {
     // The renderer never receives the capability protecting the loopback listener.
@@ -552,6 +555,22 @@ const pageSession = (partition: string) => {
     callback({ cancel: !/^(https|wss|data|blob):/.test(details.url) })
   })
   return result
+}
+
+// A view whose renderer is gone (crash, out of memory, killed) shows the failure page with Try again (a fresh load of
+// its own origin) instead of a blank view; its partition, cookies and storage are untouched.
+const showRendererLoss = (contents: Electron.WebContents, origin: string) => {
+  contents.on("render-process-gone", (_event, details) => {
+    if (details.reason === "clean-exit" || contents.isDestroyed()) return
+    void contents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(pageFailure(origin, `renderer ${details.reason}`))}`)
+  })
+  // Try again on the failure page loads the view's own origin from this process: a link from a data: document would
+  // arrive cross-site, which a listener refuses and which withholds a page host's Strict cookies.
+  contents.on("will-navigate", (event, url) => {
+    if (!contents.getURL().startsWith("data:") || URL.parse(url)?.origin !== origin) return
+    event.preventDefault()
+    void contents.loadURL(url)
+  })
 }
 
 const pageFailure = (origin: string, reason: string) => {

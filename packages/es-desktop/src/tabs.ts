@@ -6,6 +6,9 @@
  * never cross hosts, and a view keeps its page while another host is shown. The strip has no
  * scripts or privileges; selecting a tab is a navigation the main process intercepts. */
 import { Menu, session, WebContentsView, type BaseWindow, type Session, type WebContents } from "electron"
+import type { Unavailable } from "./badges"
+
+const REASON: Record<Unavailable, string> = { "signed-out": "signed out", unreachable: "unreachable", error: "error" }
 
 export type HostTab = {
   id: string
@@ -44,6 +47,12 @@ export const createTabs = (
   const views = new Map<string, WebContentsView>()
   const state = { selected: tabs[0].id, painted: "", queued: false }
   const badges = new Map<string, Badge>()
+  const reasons = new Map<string, Unavailable>()
+  // "Needs you unavailable", with why when one host says so (signed out / unreachable / error).
+  const unavailableLabel = (ids: string[]) => {
+    const why = [...new Set(ids.flatMap((id) => badges.get(id) === "unavailable" ? [REASON[reasons.get(id) ?? "error"]] : []))]
+    return `Needs you unavailable${why.length ? `: ${why.join(", ")}` : ""}`
+  }
   const css = new Map<string, { key: string; width: number }>()
   const barSession = session.fromPartition("editspace-tab-bar")
   barSession.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith("data:") }))
@@ -64,7 +73,7 @@ export const createTabs = (
   const describe = (id: string) => {
     const badge = badges.get(id)
     if (id === state.selected || !badge) return ""
-    if (badge === "unavailable") return " · Needs you unavailable"
+    if (badge === "unavailable") return ` · ${unavailableLabel([id])}`
     return badge.count || badge.partial ? ` · ${badge.count}${badge.partial ? "+" : ""} need you` : ""
   }
   // Strip tabs: hosts without a containing tab, plus the shown host so the strip always names it.
@@ -159,8 +168,9 @@ export const createTabs = (
   }
   const paint = () => {
     const html = narrow()
-      ? collapsedHTML(current(), current().kind === "page", summary())
-      : barHTML(strip(), state.selected, current().kind === "page", badgeText, shownBadge)
+      ? collapsedHTML(current(), current().kind === "page", summary(), unavailableLabel(tabs.filter((tab) => tab.id !== state.selected).map((tab) => tab.id)))
+      : barHTML(strip(), state.selected, current().kind === "page", badgeText, shownBadge,
+        (id) => unavailableLabel(tabs.filter((tab) => (tab.id === id || tab.within === id) && tab.id !== state.selected).map((tab) => tab.id)))
     if (html === state.painted) return
     state.painted = html
     // Load on a later task, coalesced to the latest strip: a selection can run inside another
@@ -201,8 +211,10 @@ export const createTabs = (
       else view(id, url)
     },
     sessions: () => [...new Set(tabs.map((tab) => tab.session))],
-    setBadge: (id: string, badge: Badge) => {
+    setBadge: (id: string, badge: Badge, reason?: Unavailable) => {
       badges.set(id, badge)
+      if (reason) reasons.set(id, reason)
+      else reasons.delete(id)
       paint()
       layout()
     },
@@ -223,19 +235,19 @@ b{min-width:16px;height:16px;padding:0 4px;box-sizing:border-box;border-radius:8
 b.unknown{background:transparent;border:1px dashed #6c7086;min-width:12px;width:12px;height:12px;padding:0}
 </style>`
 
-const collapsedHTML = (tab: HostTab, full: boolean, summary: string) => {
+const collapsedHTML = (tab: HostTab, full: boolean, summary: string, unavailable: string) => {
   const unknown = summary === " "
-  const label = unknown ? "Other hosts: Needs you unavailable" : summary ? `Other hosts: ${summary} need you` : ""
+  const label = unknown ? `Other hosts: ${unavailable}` : summary ? `Other hosts: ${summary} need you` : ""
   const mark = summary ? `<b${unknown ? ' class="unknown"' : ""} aria-label="${label}">${unknown ? "" : summary}</b>` : ""
   return `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Hosts</title>${style(full)}<nav aria-label="Hosts"><a href="${TAB_URL}${MENU}" aria-current="page" aria-haspopup="menu" title="${escape(`Host: ${tab.label}${label ? ` · ${label}` : ""}`)}"><bdi dir="auto">${escape(tab.label)}</bdi><span aria-hidden="true">▾</span>${mark}</a></nav></html>`
 }
 
-const barHTML = (tabs: HostTab[], selected: string, full: boolean, badge: (id: string) => string, shown: (id: string) => Badge | undefined) =>
+const barHTML = (tabs: HostTab[], selected: string, full: boolean, badge: (id: string) => string, shown: (id: string) => Badge | undefined, unavailable: (id: string) => string) =>
   `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Hosts</title>${style(full)}<nav aria-label="Hosts">${tabs
     .map((tab) => {
       const text = badge(tab.id)
       const value = shown(tab.id)
-      const label = value === "unavailable" ? "Needs you unavailable" : `${text.trim()} need${text === "1" ? "s" : ""} you`
+      const label = value === "unavailable" ? unavailable(tab.id) : `${text.trim()} need${text === "1" ? "s" : ""} you`
       const mark = text ? `<b${value === "unavailable" ? ' class="unknown"' : ""} aria-label="${label}">${value === "unavailable" ? "" : text}</b>` : ""
       const tip = escape(text ? `${tab.label} · ${label}` : tab.label)
       return `<a href="${TAB_URL}${encodeURIComponent(tab.id)}" title="${tip}"${tab.id === selected ? ' aria-current="page"' : ""}><bdi dir="auto">${escape(tab.label)}</bdi>${mark}</a>`
