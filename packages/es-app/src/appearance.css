@@ -191,6 +191,7 @@
 :root .nav-entries { display: grid; padding-block: 4px 6px; border-block-end: 1px solid var(--surface1); margin-block-end: 6px; }
 :root .nav-entry { position: relative; width: 100%; font: inherit; font-size: 13px; text-align: start; background: transparent; border: 0; cursor: pointer; }
 :root .nav-entry .glyph { color: var(--subtext0); margin-inline-end: 2px; }
+:root .nav-entry .nav-avatar { inline-size: 16px; block-size: 16px; border-radius: 50%; object-fit: cover; margin-inline-end: 2px; flex: none; }
 :root .nav-entry.active, :root .nav-entry[aria-pressed=true] { color: var(--text); }
 :root .nav-entry.active { background: var(--selected); }
 :root .nav-entry[aria-pressed=true] .glyph { color: var(--accent); }
