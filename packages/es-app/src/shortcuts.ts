@@ -24,7 +24,7 @@ export const SHORTCUTS = {
   // Submit outside the composer: decisions, new session, pending-input edit.
   submit: dispatched("Submit decision, new session or edit", "decision", "Enter", "Primary"),
   // D4: Super+M exits Hyprland, so off macOS Ctrl+M is the shown chord (Super+M still works).
-  cycleTarget: { ...dispatched("Cycle steer, queue, aside", "composer", "M", "Meta"), otherModifiers: ["Control"] },
+  moreSendOptions: { ...dispatched("More send options (queue, aside) while busy", "composer", "M", "Meta"), otherModifiers: ["Control"] },
   find: dispatched("Find in transcript", "session", "F", "Primary"),
   previousPrompt: dispatched("Previous prompt", "session", "P", "Control"),
   nextPrompt: dispatched("Next prompt", "session", "N", "Control"),

@@ -1344,24 +1344,38 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   }
 
   const focusInsert = () => vim.setMode("insert")
+  // Cmd/Ctrl+M opens (or closes) the composer's More send options while the session is
+  // busy and focuses its first choice; Esc closes it and returns focus to the composer.
   const cycleMode = (e: KeyboardEvent) => {
-    if (!matchShortcut(e, "cycleTarget")) return false
+    if (!matchShortcut(e, "moreSendOptions")) return false
     e.preventDefault()
     e.stopPropagation()
-    if (!composer.state.busy) return true
     if (e.repeat) return true
+    const more = document.querySelector<HTMLButtonElement>(".prompt-box:not([inert]) button.direct-more")
+    if (!more || more.disabled) return true
     lastEsc = 0
-    const inputMode = vim.mode()
-    composer.selectTarget(composer.state.keyboardTarget === "steer" ? "queue" : composer.state.keyboardTarget === "queue" ? "aside" : "steer")
-    if (e.target instanceof HTMLSelectElement && e.target.disabled) {
-      const editor = promptEl
-      editor?.focus()
-      vim.setMode(inputMode)
-      editor?.setSelectionRange(...activeDraft().selection)
-      vim.refresh(editor)
+    const opening = more.getAttribute("aria-expanded") !== "true"
+    more.click()
+    if (!opening) {
+      promptEl?.focus()
+      return true
     }
+    queueMicrotask(() => {
+      const menu = document.querySelector<HTMLElement>(".prompt-box:not([inert]) .direct-more-menu")
+      menu?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus()
+      // The composer closes the menu on Esc; put focus back in the editor afterwards.
+      const back = (event: KeyboardEvent) => {
+        if (event.key !== "Escape") return
+        document.removeEventListener("keydown", back, true)
+        // The menu may already be gone (focus fell to body) by the time this listener runs.
+        const active = document.activeElement
+        if (!active || active === document.body || menu?.contains(active)) queueMicrotask(() => promptEl?.focus())
+      }
+      document.addEventListener("keydown", back, true)
+    })
     return true
   }
+
 
   const scrollTranscript = (dir: 1 | -1) => {
     if (!transcriptEl) return
