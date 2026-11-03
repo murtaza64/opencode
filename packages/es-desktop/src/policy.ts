@@ -168,7 +168,7 @@ export const restorePlan = (value: unknown, tabs: readonly { id: string; origin:
 // Everything else about that host, answering and operator sessions included, stays on its own tab,
 // origin and operator cookie.
 export const hostApiAllowed = (method: string, pathname: string) =>
-  ["GET", "HEAD"].includes(method) && (/^\/es\/api\/handoffs\/self\/[A-Za-z0-9_-]{1,128}$/.test(pathname) || /^\/(?:oc\/experimental\/(?:session|usage\/daily|capabilities)|oc\/session\/status|oc\/session\/[\w-]+(?:\/todo|\/children|\/message(?:\/[\w-]+(?:\/part\/[\w-]+\/attachment\/\d{1,4})?)?|\/input(?:\/[\w-]+)?)?|oc\/(?:permission|question)|oc\/config\/providers|es\/api\/(?:editspaces|state|quota|handoffs|mail|surfaces|attention|attention\/session|attention\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|pins|pins\/events|frontdesk\/pointer|decisions\/requests))$/.test(pathname))
+  ["GET", "HEAD"].includes(method) && (/^\/es\/api\/handoffs\/self\/[A-Za-z0-9_-]{1,128}$/.test(pathname) || /^\/(?:oc\/experimental\/(?:session|usage\/daily|capabilities)|oc\/session\/status|oc\/session\/[\w-]+(?:\/todo|\/children|\/message(?:\/[\w-]+(?:\/part\/[\w-]+\/attachment\/\d{1,4})?)?|\/input(?:\/[\w-]+)?)?|oc\/(?:permission|question)|oc\/config\/providers|es\/api\/(?:editspaces|state|quota|handoffs|mail|surfaces|attention|attention\/session|attention\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|pins|pins\/events|frontdesk\/pointer|decisions\/requests|surfaces\/[a-z0-9][a-z0-9-]{0,39}\/comments))$/.test(pathname))
 
 // One shared pin's ref in a single path segment, as the browser sends it (a lane's slash encoded once).
 const PIN_REF = "(?:session:[A-Za-z0-9_-]{1,128}|lane:[A-Za-z0-9._-]{1,64}%2[Ff][A-Za-z0-9._-]{1,64})"
@@ -184,8 +184,9 @@ export const selfHandoffRoute = /^\/es\/api\/handoffs\/self(?:\/[A-Za-z0-9_-]{1,
 // host's seen state; operator only). Fork, create and delete
 // stay on that host's own window. Pin writes (`hostPinWrite`) reach only that host's own store.
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+const SURFACE_ID = "[a-z0-9][a-z0-9-]{0,39}"
 const HOST_WRITES: Record<string, RegExp> = {
-  POST: new RegExp(`^/(?:oc/session/[\\w-]+/(?:prompt_async|input|abort|recover|aside)|oc/session/[\\w-]+/input/[\\w-]+/deliver|oc/(?:permission|question)/[\\w-]+/(?:reply|reject)|es/api/attention/(?:session|${UUID}/(?:commands|delivery))|es/api/frontdesk/briefs/${UUID}/regenerate|es/api/frontdesk/deliverables/seen)$`),
+  POST: new RegExp(`^/(?:oc/session/[\\w-]+/(?:prompt_async|input|abort|recover|aside)|oc/session/[\\w-]+/input/[\\w-]+/deliver|oc/(?:permission|question)/[\\w-]+/(?:reply|reject)|es/api/attention/(?:session|${UUID}/(?:commands|delivery))|es/api/frontdesk/briefs/${UUID}/regenerate|es/api/frontdesk/deliverables/seen|es/api/surfaces/${SURFACE_ID}/comments)$`),
   PATCH: /^\/oc\/session\/[\w-]+(?:\/input\/[\w-]+)?$/,
   DELETE: /^\/oc\/session\/[\w-]+\/(?:input|aside)\/[\w-]+$/,
 }
@@ -215,7 +216,7 @@ export const hostWriteAllowed = (method: string, pathname: string) => (HOST_WRIT
 
 /** Another host's attention routes, which its dashboard authorizes with that host's operator cookie. */
 // Dashboard routes of another host that carry that host's operator cookie: attention, Request brief and deliverable Done.
-export const hostAttention = (pathname: string) => new RegExp(`^/es/api/(?:attention/(?:session|${UUID}(?:/commands|/delivery)?)|frontdesk/briefs/${UUID}/regenerate|frontdesk/deliverables/seen)$`).test(pathname)
+export const hostAttention = (pathname: string) => new RegExp(`^/es/api/(?:attention/(?:session|${UUID}(?:/commands|/delivery)?)|frontdesk/briefs/${UUID}/regenerate|frontdesk/deliverables/seen|surfaces/${SURFACE_ID}/comments)$`).test(pathname)
 
 // Only expose the existing es-app surface, not daemon PTYs, shell, config, or file APIs.
 export const apiAllowed = (method: string, pathname: string) => {
@@ -228,6 +229,8 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/oc\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/attachment\/\d{1,4}$/,
       /^\/es\/api\/(editspaces|state|quota|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work|mail|wake-events|subscriptions|handoffs|lane-provenance|frontdesk\/memory|frontdesk\/pointer|frontdesk\/ignored-failures|surfaces|pins|pins\/events|personas|decisions\/requests)$/,
       /^\/es\/api\/surfaces\/[a-z0-9][a-z0-9-]{0,39}\/snapshot$/,
+      // One Surface's on-surface comments (operator text and anchors only); read-only here.
+      /^\/es\/api\/surfaces\/[a-z0-9][a-z0-9-]{0,39}\/comments$/,
       /^\/es\/api\/attention(?:\/session|\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/,
       // This host's Front desk model and one request's linked conversation (read-only).
       /^\/es\/api\/frontdesk\/(model|conversation)$/,
@@ -250,6 +253,8 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/es\/api\/handoffs\/self$/,
       /^\/es\/api\/frontdesk\/ignored-failures$/,
       /^\/es\/api\/frontdesk\/deliverables\/seen$/,
+      // The operator comments on one Surface revision; the dashboard checks operator, CSRF, size and the client id.
+      /^\/es\/api\/surfaces\/[a-z0-9][a-z0-9-]{0,39}\/comments$/,
       // The operator rates one prepared brief; the dashboard checks operator, CSRF and that it is a brief.
       /^\/es\/api\/frontdesk\/brief-feedback$/,
       // One masked decision field's single submission; the dashboard checks handle, operator, origin and scope.

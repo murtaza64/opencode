@@ -831,3 +831,24 @@ test("request history is a read on its own host and another Work host, never a w
     expect(hostApiAllowed(method, "/es/api/decisions/requests")).toBe(false)
   }
 })
+
+test("on-surface comments are read and posted on the own host and another Work host, with the operator cookie", async () => {
+  const { apiAllowed, hostApiAllowed, hostAttention, hostWriteAllowed } = await import("./policy")
+  const { attentionRoute } = await import("../../es-app/remote-host")
+  const route = "/es/api/surfaces/opencode-week-review/comments"
+  expect(apiAllowed("GET", route)).toBe(true)
+  expect(apiAllowed("POST", route)).toBe(true)
+  expect(hostApiAllowed("GET", route)).toBe(true)
+  expect(hostWriteAllowed("POST", route)).toBe(true)
+  expect(hostAttention(route)).toBe(true)
+  expect(attentionRoute.test(route)).toBe(true)
+  for (const method of ["PUT", "PATCH", "DELETE"]) {
+    expect(apiAllowed(method, route)).toBe(false)
+    expect(hostWriteAllowed(method, route)).toBe(false)
+  }
+  for (const pathname of ["/es/api/surfaces/Bad_Id/comments", "/es/api/surfaces/x/comments/cmt_1", "/es/api/surfaces/x/comment"]) {
+    expect(apiAllowed("POST", pathname)).toBe(false)
+    expect(hostWriteAllowed("POST", pathname)).toBe(false)
+    expect(hostApiAllowed("GET", pathname)).toBe(false)
+  }
+})
