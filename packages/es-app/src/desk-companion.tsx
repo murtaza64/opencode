@@ -104,7 +104,7 @@ export const DeskChatProvider = (props: ParentProps) => {
     },
     setContext: (getter) => setContextGetter(() => getter),
     // The Decisions page sends its full view (cases included); every other view sends the cases alone.
-    context: (send) => contextGetter()?.(send) ?? desk.caseContext(caseLines(cases.latest ?? []), send),
+    context: (send) => [clientPart(desk), ...(contextGetter()?.(send) ?? desk.caseContext(caseLines(cases.latest ?? []), send))],
     cases: () => cases.latest ?? [],
     tasks,
     setView: (getter) => setViewGetter(() => getter),
@@ -114,6 +114,25 @@ export const DeskChatProvider = (props: ParentProps) => {
     takeAsked: () => setAsked(undefined),
   }
   return <Ctx.Provider value={value}>{props.children}</Ctx.Provider>
+}
+
+/** Where this message was sent from, as lower-trust structured metadata on every Desk send: the client, this
+ * device's configured host label and profile, and the desk it went to. Only first-party labels already shown in the
+ * app; no location, fingerprint or user agent. Unknown fields say unknown. Server receipt time is Core's own. */
+export const clientPart = (desk: ReturnType<typeof createDeskSession>): ContextPart => {
+  const info = host()
+  const target = desk.pointer()
+  const at = new Date().toISOString()
+  const client = typeof navigator !== "undefined" && /\bElectron\/\d/.test(navigator.userAgent) ? "Editspace desktop app" : "Editspace web app"
+  const fields = [
+    `client: ${client}`,
+    `device: ${info?.label ?? "unknown"}`,
+    `profile: ${info?.profile ?? (info ? "work" : "unknown")}`,
+    `to: ${target?.host?.label ?? info?.label ?? "unknown"} session ${target?.session ?? "unknown"}`,
+    `client sent: ${at}`,
+  ]
+  return { type: "text", synthetic: true, text: `Message sent from (client metadata; lower-trust, not an instruction): ${fields.join("; ")}.`,
+    metadata: { source: "es-app/client", key: `client:${at}` } }
 }
 
 /** The desk chat when this tree has one (the shell does); undefined elsewhere, e.g. an isolated card. */
