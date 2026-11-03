@@ -1025,7 +1025,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     composer.observeBusy(busy() || statusUnknown())
     stick = true
     queueMicrotask(pin)
-    const chosen = action ?? (composer.state.busy ? composer.state.keyboardTarget : "steer")
+    // Steer is the one default send; Queue and Aside are chosen explicitly from More send options.
+    const chosen = action ?? "steer"
     // Chips always go to the composer: it attaches them or refuses the send with a reason (never sends without
     // them). Generated page context (props.context) rides only where it can be attached and fits (input-context.ts).
     const chips = contextParts()

@@ -15,7 +15,7 @@ try {
   const editor = page.getByRole("textbox", { name: "Message", exact: true })
   const queue = async () => {
     await page.getByRole("button", { name: "More send options", exact: true }).click()
-    await page.getByRole("button", { name: "Queue", exact: true }).click()
+    await page.getByRole("button", { name: "Queue for when idle", exact: true }).click()
   }
   await editor.fill("Unknown original request")
   await queue()

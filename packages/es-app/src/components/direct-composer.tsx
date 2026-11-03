@@ -32,13 +32,14 @@ export const DirectComposer = (props: {
   children: JSX.Element
 }) => {
   const state = props.composer.state
+  // Steer is the primary send; Queue and Aside are kept, behind More send options, as explicit choices.
   const actions = ["steer", "queue", "aside"] as const
   const [menu, setMenu] = createSignal(false)
   createEffect(on(() => state.busy, () => setMenu(false), { defer: true }))
-  const primary = () => (state.busy ? state.keyboardTarget : "steer")
-  // The short labels share one cell, so Send, Steer, Queue, Aside and Nudge keep one width; a longer label
+  const primary = () => "steer" as const
+  // The short labels share one cell, so Send, Steer and Nudge keep one width; a longer label
   // ("Interrupt & steer now") widens the button only while it shows.
-  const SHORT_LABELS = ["Send", "Steer", "Queue", "Aside", "Nudge"]
+  const SHORT_LABELS = ["Send", "Steer", "Nudge"]
   // The composer's own width, not the viewport's: it may sit in a narrow pane of a wide window.
   // wide: labelled actions; compact: icon actions (labels stay their accessible names); narrow: icons, and the
   // infrequent actions move behind "More session actions".
@@ -61,10 +62,9 @@ export const DirectComposer = (props: {
     if (refocus) moreButton?.focus()
   }
   const secondary = () => (state.busy ? actions.filter((action) => action !== primary()) : [])
-  const nextTarget = () => actions[(actions.indexOf(state.keyboardTarget) + 1) % actions.length]
-  const label = (action: ComposerAction) => (state.busy ? action[0]!.toUpperCase() + action.slice(1) : "Send")
+  const label = (action: ComposerAction) => action === "queue" ? "Queue for when idle" : action === "aside" ? "Ask aside" : state.busy ? "Steer" : "Send"
   const hint = (action: ComposerAction) =>
-    action === "queue" ? "After this task" : action === "aside" ? "Side question" : "At the next safe point"
+    action === "queue" ? "Runs after this task, when the agent is idle" : action === "aside" ? "Side question; does not change the task" : "At the next safe point"
   const reason = (action: ComposerAction) =>
     !props.connected
       ? "Session unavailable or another session action is running."
@@ -170,7 +170,7 @@ export const DirectComposer = (props: {
         <span class="direct-action-hint">{hint(p.action)}</span>
       </Show>
       <kbd class="direct-button-hint" aria-hidden="true">
-        {primary() === p.action ? shortcutLabel("primaryAction") : nextTarget() === p.action ? shortcutLabel("cycleTarget") : ""}
+        {primary() === p.action ? shortcutLabel("primaryAction") : ""}
       </kbd>
     </button>
   )

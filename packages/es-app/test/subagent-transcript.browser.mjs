@@ -60,9 +60,10 @@ try {
   const editor = page.getByRole("textbox", { name: "Message", exact: true })
   await editor.fill("Parent draft stays exactly here")
   await expect(page.getByRole("button", { name: "Steer", exact: true })).toBeEnabled()
-  // Cmd+M moves the keyboard target to Queue; the dialog must leave it and the draft untouched.
+  // Cmd+M changes the saved keyboard target; the primary send stays Steer (Queue is a menu choice), and the
+  // dialog must leave the target and the draft untouched.
   await editor.press("Meta+m")
-  await expect(page.locator(".direct-primary")).toHaveAccessibleName("Queue")
+  await expect(page.locator(".direct-primary")).toHaveAccessibleName("Steer")
   await editor.evaluate(el => el.setSelectionRange(2, 8))
   await trigger.scrollIntoViewIfNeeded()
   await trigger.focus()

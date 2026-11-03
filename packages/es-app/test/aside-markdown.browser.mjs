@@ -17,7 +17,7 @@ try {
   await page.goto(preview.url, { waitUntil: "domcontentloaded" })
   await page.getByRole("textbox", { name: "Message", exact: true }).fill("Give a formatted answer")
   await page.getByRole("button", { name: "More send options", exact: true }).click()
-  await page.getByRole("button", { name: "Aside", exact: true }).click()
+  await page.getByRole("button", { name: "Ask aside", exact: true }).click()
   const answer = page.locator(".aside-answer")
   await expect(answer.getByRole("heading", { name: "Snapshot" })).toBeVisible()
   await expect(answer.locator("strong")).toHaveText("Independent answer")
