@@ -33,6 +33,14 @@
 .surface-head-text:disabled { opacity: 0.6; }
 .surface-head-text[data-newer] { border-style: dashed; }
 .surface-head :is(a, button, h2) { -webkit-app-region: no-drag; }
+/* Find in Surface (Cmd/Ctrl+F): sits before the actions and shrinks before them; the count never wraps. */
+.surface-find { flex: 0 1 300px; min-inline-size: 0; display: flex; align-items: center; gap: 2px; margin-inline-start: auto; -webkit-app-region: no-drag; }
+.surface-find + .surface-head-actions { margin-inline-start: 0; }
+.surface-find-input { flex: 1 1 8rem; min-inline-size: 4rem; block-size: 24px; padding: 0 6px; border: 1px solid var(--surface1); border-radius: 4px; background: var(--base); color: var(--text); font: inherit; font-size: 12px; }
+.surface-find-input:focus-visible { outline: 2px solid var(--blue); outline-offset: -1px; }
+.surface-find-count { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--subtext0); font-variant-numeric: tabular-nums; }
+.surface-find .surface-head-button:disabled { opacity: 0.4; }
+@media (max-width: 520px) { .surface-find { flex-basis: 180px; } .surface-find-count { max-inline-size: 5.5rem; } }
 .desk-surface > .desk-surface-frame, .work-remote-surface > .desk-surface-frame { border: 0; }
 @media (max-width: 900px) {
   .desk-evidence.desk-surface { padding-inline: 0; border: 0; }

@@ -1,6 +1,7 @@
 /* Agent-owned surfaces in the Front Desk: a sidebar group above the queue and the selected
  * surface in the main panel. Content runs in the server-sandboxed frame; the desk renders
  * only the title, owner, update time and health that the registry reports. */
+import { SurfaceFind } from "./surface-find"
 import { AppHeader } from "./native-header"
 import { createEffect, createResource, createSignal, For, onCleanup, Show, type JSX } from "solid-js"
 import { A } from "@solidjs/router"
@@ -185,6 +186,7 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
           title="The conversation this was asked for in">asked in <bdi dir="auto">{asked().title ?? "conversation"}</bdi></A>}</Show>
         <Show when={props.surface}>{surface => <SurfaceOwner surface={surface()} />}</Show>
         <DeliverableDoneControls state={doneState} />
+        <SurfaceFind frame={src} />
         <span class="surface-head-actions">
           {/* Reserved for "BuildingHub version" (Laptop2649): shown only from a deployed receipt, which no API offers yet. */}
           <BuildingHubSlot surface={props.surface} />

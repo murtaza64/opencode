@@ -2,6 +2,7 @@ import { app, BaseWindow, BrowserWindow, dialog, Menu, nativeImage, powerMonitor
 import path from "node:path"
 import { readFile, writeFile } from "node:fs/promises"
 import { serve } from "./server"
+import { surfaceFinder, surfaceFrameFocused } from "./surface-find"
 import { localHost, personalWork, shadowedPages, tabWithin, type WorkHost } from "../../es-app/remote-host"
 import { PERF_DIR } from "./perf-log"
 import { createVoice, voiceTools } from "./voice"
@@ -141,7 +142,10 @@ const start = async () => {
     buildInfo: path.join(app.getAppPath(), "dist/build-info.json"),
     seen: path.join(app.getPath("userData"), "release-notes-seen.json"),
   })
+  // The view each listener's page runs in, known once the window exists (Surface find enters that view's frames).
+  const viewOf: { contents?: (id: string) => Electron.WebContents | undefined } = {}
   const server = await serve({
+    find: surfaceFinder(() => viewOf.contents?.("local"), () => server.origin),
     // Only proxied Work hosts are reachable through /hosts/<id>; Personal (page or bridged) never is.
     peers: configured.filter((host) => host.mode === "proxy" && host.profile === "work").map((host) => ({ id: host.id, origin: host.origin })),
     hostInfo: () => ({ ...selfInfo, work }),
@@ -196,6 +200,7 @@ const start = async () => {
         root: path.join(app.getAppPath(), "dist/renderer"),
         renderer: app.isPackaged ? undefined : process.env.ES_DESKTOP_RENDERER,
         remote: { id: host.id, origin: host.origin, ...(bridge ? { bridge } : {}) },
+        find: surfaceFinder(() => viewOf.contents?.(host.id), () => origin.value ?? ""),
         ...(sshPeers.length ? { sshPeers } : {}),
         // Dictation uses this laptop's microphone and Whisper, whichever host a tab shows.
         voice,
@@ -284,6 +289,7 @@ const start = async () => {
         ...pages.map((host) => ({ id: host.id, label: host.label, url: `${host.origin}/`, session: pageSession(`persist:editspace-host-${host.id}`), kind: "page" as const, guard: (contents: Electron.WebContents) => guardPage(contents, host.origin) })),
       ], preferences, path.join(app.getAppPath(), "dist/page-guard.cjs"))
   const localContents = window instanceof BrowserWindow ? window.webContents : tabs!.contents("local")
+  viewOf.contents = (id) => (tabs ? tabs.contents(id) : id === "local" ? localContents : undefined)
   // A wake or a display change can leave a live renderer with nothing painted: repaint the shown view only.
   const repaint = () => { if (window.isDestroyed()) return; if (tabs) tabs.repaint(); else localContents.invalidate() }
   powerMonitor.on("resume", repaint)
@@ -298,6 +304,14 @@ const start = async () => {
   // One host's app listener: same-origin navigation stays; app links to local ports belong to the Local
   // tab, and Work view links to another host's listener open in that host's own tab and partition.
   function guardListener(contents: Electron.WebContents, origin: string, local: boolean) {
+    // Cmd/Ctrl+F typed inside a Surface frame never reaches the app's own key handler (the frame is another origin):
+    // hand it to the reader, which opens its find bar.
+    contents.on("before-input-event", (event, input) => {
+      if (input.type !== "keyDown" || !(input.meta || input.control) || input.alt || input.shift || input.key.toLowerCase() !== "f") return
+      if (!surfaceFrameFocused(contents.focusedFrame, contents.mainFrame)) return
+      event.preventDefault()
+      void contents.mainFrame.executeJavaScript('window.dispatchEvent(new CustomEvent("editspace-surface-find"))').catch(() => undefined)
+    })
     const open = (url: string) => {
       const target = listeners.find((item) => item.server.origin !== origin && item.id !== "local" && URL.parse(url)?.origin === item.server.origin)
       const hosted = target && appRouteURL(url, target.server.origin)

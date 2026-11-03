@@ -14,6 +14,7 @@ import { attentionRoute, bridgedTargets, hostPath, localHost, remoteCookie, remo
 import type { Bridge } from "./bridge"
 import type { SshPeer } from "./ssh-peer"
 import type { Transcriber, Voice, VoiceFailure } from "./voice"
+import { findRequest, type FindRequest, type FindResult } from "./surface-find"
 import type { Appearance, HostPalette } from "./appearance"
 import type { ReleaseNotesStore } from "./release-notes"
 import { createPerfLog, routeOf } from "./perf-log"
@@ -127,6 +128,8 @@ export const serve = async (options: {
   // session reads plus the pins listing, GET/HEAD only. Writes need an operator authority that does not rest on the
   // host's loopback trust (M4), so none pass.
   sshPeers?: { id: string; peer: SshPeer }[]
+  // Find in one Surface frame of this listener's view (surface-find.ts); native only, never for paired clients.
+  find?: (input: FindRequest) => Promise<FindResult>
 }) => {
   const host = options.host ? remoteListenHost(options.host) : "127.0.0.1"
   if (!host) throw new Error("Remote listeners must bind loopback or a tailnet address")
@@ -257,6 +260,13 @@ export const serve = async (options: {
       if (!options.appearance || pairing || req.method !== "POST" || url.search) return finish(404, "Not found")
       if (!trusted(req.headers.origin)) return finish(403, "Forbidden")
       return appliedRoute(options.appearance, req, remote?.id ?? "local", finish)
+    }
+    if (url.pathname === "/__es/find") {
+      // Native window only: the reader asks whether Surface find exists (GET) and runs it (POST, native origin).
+      if (!options.find || pairing || url.search) return finish(404, "Not found")
+      if (req.method === "GET") return finish(200, JSON.stringify({ available: true }), "application/json")
+      if (req.method !== "POST" || !trusted(req.headers.origin)) return finish(403, "Forbidden")
+      return findRoute(options.find, req, finish)
     }
     if (url.pathname === "/__es/release-notes") {
       if (!options.releaseNotes || pairing || req.method !== "GET" || url.search) return finish(404, "Not found")
@@ -703,6 +713,23 @@ const escape = (value: string) => value.replace(/[&<>"']/g, (char) => `&#${char.
 const remoteOffline = (host: HostInfo | undefined) => {
   const local = host?.hosts.find((item) => item.id === "local")
   return `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="refresh" content="5"><title>${escape(host?.label ?? "Remote host")} unavailable</title><style>body{font:16px system-ui;background:#171819;color:#ececec;margin:0;padding:10vh 8vw}main{max-inline-size:42rem}h1{font-size:28px}p{line-height:1.6;color:#bbb}a{color:#9ac9ff}</style><main><h1>${escape(host?.label ?? "Remote host")} unavailable</h1><p>Its OpenCode or dashboard did not answer through the tailnet gate. Nothing on this machine changed.</p><p>Retrying every 5 seconds. <a href="/">Retry now</a>${local ? ` or <a href="${escape(local.origin)}/">return to ${escape(local.label)}</a>` : ""}.</p></main></html>`
+}
+
+const findRoute = async (find: (input: FindRequest) => Promise<FindResult>, req: IncomingMessage, finish: (status: number, body: string, type?: string) => void) => {
+  const chunks: Buffer[] = []
+  for await (const chunk of req) {
+    chunks.push(chunk)
+    if (chunks.reduce((sum, item) => sum + item.length, 0) > 2048) return finish(413, "Payload too large")
+  }
+  const input = findRequest((() => {
+    try {
+      return JSON.parse(Buffer.concat(chunks).toString()) as unknown
+    } catch {
+      return undefined
+    }
+  })())
+  if (!input) return finish(400, "Invalid find request")
+  return finish(200, JSON.stringify(await find(input).catch((): FindResult => ({ state: "unavailable", reason: "blocked" }))), "application/json")
 }
 
 const seenRoute = async (notes: ReleaseNotesStore, req: IncomingMessage, finish: (status: number, body: string, type?: string) => void) => {

@@ -1,6 +1,7 @@
 /* Another Work host's entry opened in this window (Main1555): its decision, permission, question or Surface, read
  * and acted on through the Local listener's /hosts/<id>/ routes (host-items.ts), so the action happens on the
  * owning host with that host's operator session and the window never switches to that host's tab. */
+import { SurfaceFind } from "./surface-find"
 import { createResource, createSignal, For, Match, Show, Switch, type JSX } from "solid-js"
 import type { PermissionRequest } from "@opencode-ai/sdk/v2"
 import { A } from "@solidjs/router"
@@ -133,6 +134,7 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
         {props.where}
         <SurfaceOwner surface={props.surface} host={{ id: props.host, label: props.label }} />
         <DeliverableDoneControls state={done} label={props.frame === "host" ? undefined : `Mark seen (opened on ${props.label})`} />
+        <SurfaceFind frame={() => (props.frame === "host" ? src() : undefined)} />
         <span class="surface-head-actions">
           <BuildingHubSlot surface={props.surface} />
           <Show when={src()}>{href => <a class="surface-head-button" href={href()} target="_blank" rel="noopener noreferrer" title="Open in new tab" aria-label="Open in new tab"><Glyph name="link-external" /></a>}</Show>
