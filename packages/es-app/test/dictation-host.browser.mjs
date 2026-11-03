@@ -126,12 +126,16 @@ try {
   await expect(editor()).toHaveValue("Laptop draft")
   await editor().focus()
   await stopRoute.fulfill({ json: { ok: true, text: "check the logs" } })
-  await expect.poll(() => text("mini")).toBe("Please fix the parser. Also check the logs")
+  // Bound to its origin: the person is now on the Laptop draft, so the Mini transcript is held on the Mini draft.
+  await page.waitForTimeout(300)
+  expect(await text("mini")).toBe("Please fix the parser. Also")
   await expect(editor()).toHaveValue("Laptop draft")
   await expect(editor()).toBeFocused()
   expect(await text()).toBe("Laptop draft")
 
   await navigate("mini")
+  // Back on the Mini draft: the held transcript is offered there; Insert puts it at the caret (never sends).
+  await page.locator(".dictation-held").filter({ hasText: "check the logs" }).getByRole("button", { name: "Insert" }).click()
   const original = "Please fix the parser. Also check the logs"
   await expect(editor()).toHaveValue(original)
   await record()
@@ -149,9 +153,11 @@ try {
   await navigateSession("ses_b", "mini")
   await editor().fill("Other Mini session")
   await stopRoute.fulfill({ json: { ok: true, text: "and add a test" } })
-  await expect.poll(() => text("mini")).toBe(`${original} and add a test`)
+  await page.waitForTimeout(300)
+  expect(await text("mini")).toBe(original)
   await expect(editor()).toHaveValue("Other Mini session")
   await navigate("mini")
+  await page.locator(".dictation-held").filter({ hasText: "and add a test" }).getByRole("button", { name: "Insert" }).click()
   const offlineDraft = `${original} and add a test`
   await expect(editor()).toHaveValue(offlineDraft)
   await editor().focus()

@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js"
+import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { dictationInsert, type Composer } from "../composer"
 import { dictation, dictationTarget, type Dictation } from "../dictation"
 import { Glyph } from "./icons"
@@ -42,6 +42,10 @@ export const DictationButton = (props: Props) => {
     const value = state.error
     return value && voice.owns(value.target, draft) && state.phase === "idle" ? value : undefined
   }
+  // A cancelled or clip-limited dictation says so on its own draft until the next attempt or Esc.
+  const notice = () => { const value = state.notice; return value && voice.owns(value.target, draft) && state.phase === "idle" && !failure() ? value.text : undefined }
+  // Transcripts that arrived while the person was in another draft, held here to insert or discard.
+  const held = () => voice.pending(draft)
   const [now, setNow] = createSignal(Date.now())
   // Where text goes: the editor's caret/selection, with a Vim block collapsed to the caret.
   const range = (el: HTMLTextAreaElement): [number, number] =>
@@ -79,7 +83,7 @@ export const DictationButton = (props: Props) => {
       const inView = !!root?.closest(".session-page")?.contains(document.activeElement)
       // Esc first cancels this composer's dictation, before Vim or the float editor see it.
       if (event.key === "Escape" && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
-        if ((phase() === "idle" && !failure()) || (!inView && document.activeElement !== document.body)) return
+        if ((phase() === "idle" && !failure() && !notice()) || (!inView && document.activeElement !== document.body)) return
         event.preventDefault()
         event.stopImmediatePropagation()
         if (phase() === "idle") voice.dismiss()
@@ -93,6 +97,11 @@ export const DictationButton = (props: Props) => {
       if (!event.repeat) toggle()
     }
     window.addEventListener("keydown", keydown, true)
+    // The draft the person is in: a transcript for another draft is held there instead of landing here.
+    const inView = () => voice.setView(draft)
+    const editorEl = props.editor()
+    editorEl?.addEventListener("focus", inView)
+    if (editorEl && document.activeElement === editorEl) inView()
     // A focused editor takes the text as a native edit, so Cmd+Z and Vim `u` remove it in one step.
     const detach = voice.attach(draft, (landed, text) => {
       const el = props.editor()
@@ -111,6 +120,7 @@ export const DictationButton = (props: Props) => {
       window.removeEventListener("focus", focus)
       window.removeEventListener("keydown", keydown, true)
       window.clearInterval(timer)
+      editorEl?.removeEventListener("focus", inView)
       detach()
     })
   })
@@ -123,7 +133,7 @@ export const DictationButton = (props: Props) => {
     return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
   }
   // The pill overlays the free space of the control row, so nothing else moves when it grows.
-  const open = () => phase() !== "idle" || !!failure() || (elsewhere() && state.phase === "recording")
+  const open = () => phase() !== "idle" || !!failure() || !!notice() || (elsewhere() && state.phase === "recording")
   // Grow toward whichever side of the mic has more free room in the control row, never over Send;
   // a wrapped narrow row (390px, RTL) often has room on only one side.
   const [fit, setFit] = createSignal<{ side: "start" | "end"; room: number }>({ side: "start", room: 9999 })
@@ -180,7 +190,7 @@ export const DictationButton = (props: Props) => {
           </button>
           <span class="dictation-status" dir="auto" aria-live="polite" role={failure() ? "alert" : undefined}
             title={failure() ? [failure()!.message, failure()!.detail].filter(Boolean).join("\n\n") : undefined}>
-            {failure() ? shortMessage(failure()!.message)
+            {failure() ? shortMessage(failure()!.message) : notice() ? notice()
               : state.phase === "recording" && state.availability === "ready" ? (mine() ? elapsed() : `Recording elsewhere ${elapsed()}`)
               : phase() === "transcribing" ? "Transcribing" : phase() === "starting" ? "Starting" : ""}
           </span>
@@ -194,18 +204,23 @@ export const DictationButton = (props: Props) => {
           <Show when={failure()?.action === "settings"}>
             <button class="dictation-action" onPointerDown={keepFocus} onClick={() => void voice.settings()}>Open settings</button>
           </Show>
-          <Show when={phase() !== "idle" || failure()}>
+          <Show when={phase() !== "idle" || failure() || notice()}>
             <button
               class="dictation-cancel"
-              aria-label={failure() ? "Dismiss dictation error" : "Cancel dictation"}
-              title={failure() ? "Dismiss (Esc)" : "Cancel (Esc); the draft is unchanged"}
+              aria-label={failure() ? "Dismiss dictation error" : notice() ? "Dismiss" : "Cancel dictation"}
+              title={failure() || notice() ? "Dismiss (Esc)" : "Cancel (Esc); the draft is unchanged"}
               onPointerDown={keepFocus}
-              onClick={() => (failure() ? voice.dismiss() : void voice.cancel())}
+              onClick={() => (failure() || notice() ? voice.dismiss() : void voice.cancel())}
             >
               ×
             </button>
           </Show>
         </span>
+        <For each={held()}>{(item) => <span class="dictation-held" role="group" aria-label="Dictation held for this draft">
+          <span class="dictation-held-text" dir="auto" title={item.text}>Dictated: {item.text}</span>
+          <button class="dictation-action" onPointerDown={keepFocus} onClick={() => voice.acceptPending(target(), item.id)}>Insert</button>
+          <button class="dictation-cancel" aria-label="Discard dictated text" onPointerDown={keepFocus} onClick={() => voice.discardPending(draft, item.id)}>×</button>
+        </span>}</For>
       </span>
     </Show>
   )

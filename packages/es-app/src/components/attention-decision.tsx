@@ -15,6 +15,8 @@ import { ariaShortcut } from "../shortcuts"
 import { secretInput } from "../secret-field"
 import { SecretField } from "./secret-field"
 import { useDeskChatOptional } from "../desk-companion"
+import { DictationField } from "./dictation-field"
+import { dictationInsert } from "../composer"
 import { decisionRef } from "../context-mention"
 import { DESK } from "../desk-identity"
 
@@ -136,7 +138,14 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
       <button type="button" class="home-add-note" disabled={!canWrite()} onClick={() => { setNoteOpen(true); queueMicrotask(() => document.getElementById(id)?.focus()) }}>Add a note</button>}>
       <label for={id}>{props.options ? "Note (optional)" : "Your answer"}</label>
       <textarea id={id} dir="auto" rows={props.options ? 1 : 2} maxLength={8000} value={text()} disabled={!canWrite()}
-        onInput={event => { setText(event.currentTarget.value); localStorage.setItem(answerDraftKey(props.record), event.currentTarget.value) }} /></Show></Show>
+        onInput={event => { setText(event.currentTarget.value); localStorage.setItem(answerDraftKey(props.record), event.currentTarget.value) }} />
+      {/* Operator dictation into this note (DD #333): appended at the caret, never sent. */}
+      <Show when={canWrite()}><DictationField field={`decision-note:${props.record.editspace}:${props.record.id}`} label="note" insert={(spoken) => {
+        const el = document.getElementById(id) as HTMLTextAreaElement | null
+        const next = dictationInsert({ text: text(), revision: 0, selection: el ? [el.selectionStart, el.selectionEnd] : [text().length, text().length] }, { revision: 0, selection: el ? [el.selectionStart, el.selectionEnd] : [text().length, text().length] }, spoken)
+        setText(next.text)
+        localStorage.setItem(answerDraftKey(props.record), next.text)
+      }} /></Show></Show></Show>
     {/* What a publish decision would send, verbatim from the request, right above the action that approves it. */}
     <Show when={props.sends?.text ? props.sends : undefined}>{sends => <SendsPreview sends={sends()} />}</Show>
     <For each={props.copy?.blocks ?? []}>{block => <CopyPreview block={block} />}</For>

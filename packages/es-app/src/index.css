@@ -2148,3 +2148,6 @@ a.mini-item > .glyph { margin: 0; }
   .thinking-dots > i { animation: none; opacity: 0.7; }
   .tool-run-icon[data-running] { animation: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, var(--lavender)) 45%, transparent); }
 }
+/* A transcript held for this draft (it arrived while the person was elsewhere): insert or discard, never auto-sent. */
+.dictation-held { display: inline-flex; align-items: center; gap: 4px; max-inline-size: 22rem; padding: 0 6px; border-radius: 6px; background: var(--surface0); font-size: 12px; }
+.dictation-held-text { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--subtext1); }
