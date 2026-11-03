@@ -190,6 +190,13 @@ test("API surface excludes direct shell, PTY, file, and config access", () => {
   expect(hostApiAllowed("HEAD", "/es/api/frontdesk/pointer")).toBe(true)
   for (const method of ["PUT", "POST", "PATCH", "DELETE"]) expect(hostApiAllowed(method, "/es/api/frontdesk/pointer") || hostWriteAllowed(method, "/es/api/frontdesk/pointer")).toBe(false)
   expect(hostApiAllowed("GET", "/es/api/frontdesk/pointer/x")).toBe(false)
+  // A compact page's tool attachment is read from its own host (GET/HEAD only, one exact shape).
+  expect(hostApiAllowed("GET", "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0")).toBe(true)
+  expect(hostApiAllowed("HEAD", "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/12")).toBe(true)
+  for (const pathname of ["/oc/session/ses_a/message/msg_b/part/prt_c/attachment/x", "/oc/session/ses_a/message/msg_b/part/prt_c", "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0/raw"])
+    expect(hostApiAllowed("GET", pathname)).toBe(false)
+  expect(hostApiAllowed("POST", "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0") || hostWriteAllowed("POST", "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0")).toBe(false)
+  expect(apiAllowed("GET", "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0")).toBe(true)
   // On its own host (listener or paired gateway) the pointer is read and written; nothing else on that path.
   expect(apiAllowed("GET", "/es/api/frontdesk/pointer")).toBe(true)
   // The persona registry (name, owner lane, clean avatar URL) is a read for this host's own pages and paired phones only.

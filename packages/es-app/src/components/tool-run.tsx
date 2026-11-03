@@ -3,13 +3,15 @@ import type { Part, ToolPart } from "@opencode-ai/sdk/v2"
 import { getToolInfo, Message, type ToolRenderers } from "@opencode-ai/session-ui/message-part"
 import { Icon } from "@opencode-ai/ui/icon"
 import { runSummary, toolOutcome, type ToolRunGroup } from "../transcript-groups"
-import { SIZE_LEGEND, sizeDistribution, toolMagnitude, type ToolMagnitude } from "../tool-magnitude"
+import { chars, SIZE_LEGEND, sizeDistribution, toolMagnitude, type ToolMagnitude } from "../tool-magnitude"
 import { editSummary, fileName, isEditTool, type EditSummary } from "../tool-edit"
 import { callCard, STATE_WORDS, toolGlyph } from "../tool-call"
 import { mailReceipts, mailSentText, useMailRecords } from "../mail-receipts"
 import { Glyph } from "./icons"
 import { TickMark } from "./message-tick"
 import { mailTick } from "../message-ticks"
+import { ocAt } from "../api"
+import { useSessionHost } from "../session-host"
 
 const STRIP_ICONS = 12
 
@@ -149,7 +151,7 @@ export const ToolRun = (props: {
           return <div class="tool-run-member" data-tool-run-member={member.partID} data-call-id={member.callID}
             data-message-id={member.messageID} data-find-selected={props.selectedPart === member.partID ? "true" : undefined}>
             <Show when={props.selectedPart === member.partID}>{props.excerpt}</Show>
-            <Show when={item()?.message}>{(message) => <Message message={message()} parts={parts()} activityRows renderTools={props.renderTools} />}</Show>
+            <Show when={item()?.message}>{(message) => <ToolPartView message={message()} part={parts()[0] as ToolPart} renderTools={props.renderTools} />}</Show>
           </div>
         }}</For>
       </div>
@@ -229,10 +231,61 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
         {/* A call Core stopped while it ran is an error card; the output it had captured is shown here. */}
         <Show when={partialOutput()}>{(output) => <div class="tool-chip-partial"><span class="tool-chip-partial-label">Output before the interruption</span>
           <pre dir="auto">{output()}</pre></div>}</Show>
-        <Message message={props.message} parts={[props.part]} activityRows renderTools={props.renderTools} />
+        <ToolPartView message={props.message} part={props.part} renderTools={props.renderTools} />
       </div>
     </Show>
   </span>
+}
+
+/** One tool call's details as a compact page delivered them: output over 8 KB is shortened (its full text is one read of
+ * that message away, on request), and images the tool returned load from their own route only once this view is
+ * open and the image scrolls into view. */
+const ToolPartView = (props: { message: ComponentProps<typeof Message>["message"]; part: ToolPart; renderTools?: ToolRenderers }) => {
+  const host = useSessionHost()
+  const [full, setFull] = createSignal<ToolPart>()
+  const [state, setState] = createSignal<"idle" | "loading" | "failed">("idle")
+  const part = () => full() ?? props.part
+  const shortened = () => {
+    const value = props.part.state
+    const length = value.status === "completed" ? (value.metadata?.pageTruncated as { output?: unknown } | undefined)?.output : undefined
+    return value.status === "completed" && typeof length === "number" && length > value.output.length ? length : undefined
+  }
+  // The full message is read where the session runs (its working directory, as the assistant message records it).
+  const directory = () => (props.message as { path?: { cwd?: string } }).path?.cwd
+  const showFull = async () => {
+    const cwd = directory()
+    if (!cwd || state() === "loading") return
+    setState("loading")
+    const message = await ocAt(host.base).message(props.part.sessionID, cwd, props.part.messageID).catch(() => undefined)
+    const found = message?.parts.find((item) => item.id === props.part.id)
+    if (found?.type === "tool") { setFull(found); setState("idle") }
+    else setState("failed")
+  }
+  const attachments = createMemo(() => {
+    const value = part().state
+    return (value.status === "completed" ? value.attachments ?? [] : []).flatMap((file) => {
+      const image = file.mime.startsWith("image/")
+      // A route on this host, or a small inline image; never an arbitrary link or an inline document.
+      const routed = file.url.startsWith("/") && !file.url.startsWith("//")
+      const inline = image && file.url.startsWith(`data:${file.mime};`)
+      return routed || inline ? [{ url: file.url, image, name: file.filename || (image ? "image" : "attachment") }] : []
+    })
+  })
+  return <>
+    <Message message={props.message} parts={[part()]} activityRows renderTools={props.renderTools} />
+    <Show when={!full() && shortened() && directory()}>
+      <p class="tool-full-output"><button type="button" class="tool-chip-mail-open" disabled={state() === "loading"} onClick={() => void showFull()}>
+        {state() === "loading" ? "Loading full output…" : `Show full output (${chars(shortened()!)} chars)`}</button>
+        <Show when={state() === "failed"}><span class="home-blocked" role="alert"> Full output could not be read.</span></Show></p>
+    </Show>
+    <Show when={attachments().length}>
+      <div class="tool-attachments" data-tool-attachments={props.part.id}>
+        <For each={attachments()}>{(file) => file.image
+          ? <img src={file.url} alt={file.name} loading="lazy" decoding="async" data-tool-attachment />
+          : <a href={file.url} target="_blank" rel="noopener noreferrer" data-tool-attachment>{file.name}</a>}</For>
+      </div>
+    </Show>
+  </>
 }
 
 type Card = ReturnType<typeof callCard>
@@ -337,7 +390,7 @@ export const ToolStrip = (props: { message: ComponentProps<typeof Message>["mess
           toggle(id)
           buttons.get(id)?.focus()
         }}>
-        <Show when={byID().get(id)}>{(part) => <Message message={props.message} parts={[part()]} activityRows renderTools={props.renderTools} />}</Show>
+        <Show when={byID().get(id)}>{(part) => <ToolPartView message={props.message} part={part()} renderTools={props.renderTools} />}</Show>
       </div>
     }</For>
   </div>

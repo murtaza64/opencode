@@ -58,15 +58,33 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 type Page = { items: MessageWithParts[]; cursor?: string }
+
+// Compact pages (`compact=true`, Core cf0e31b2+) bound long tool output and replace large inline tool attachments with
+// that Core's attachment route (`/session/<id>/message/<mid>/part/<pid>/attachment/<i>`), relative to the Core; it is
+// resolved under this client's base (`/oc`, or `/hosts/<id>/oc` for another host) so an image loads from its own host.
+// An older Core ignores the parameter and answers full parts, which pass through unchanged.
+const ATTACHMENT = /^\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/attachment\/\d{1,4}$/
+export const attachmentsUnder = (base: string, items: MessageWithParts[]) => items.map((message) => {
+  const routed = (part: MessageWithParts["parts"][number]) =>
+    part.type === "tool" && part.state.status === "completed" && part.state.attachments?.some((file) => ATTACHMENT.test(file.url))
+  if (!message.parts.some(routed)) return message
+  return {
+    ...message,
+    parts: message.parts.map((part) => !routed(part) || part.type !== "tool" || part.state.status !== "completed" ? part : {
+      ...part,
+      state: { ...part.state, attachments: part.state.attachments!.map((file) => ATTACHMENT.test(file.url) ? { ...file, url: `${base}${file.url}` } : file) },
+    }),
+  }
+})
 const RECENT_PAGE_MS = 2000
 type Shared = { limit: number; value: Promise<Page>; consumers: number; waiting: number; abort: AbortController; done?: boolean }
 const pages = new Map<string, Shared>()
 const readPage = async (base: string, id: string, directory: string, limit: number, before: string | undefined, signal: AbortSignal): Promise<Page> => {
   const res = await fetch(
-    `${base}/session/${id}/message?${q(directory)}&summaryPatches=false&limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ""}`,
+    `${base}/session/${id}/message?${q(directory)}&summaryPatches=false&compact=true&limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ""}`,
     { signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]) },
   )
-  const items = await json<MessageWithParts[]>(res)
+  const items = attachmentsUnder(base, await json<MessageWithParts[]>(res))
   return { items, cursor: res.headers.get("X-Next-Cursor") ?? undefined }
 }
 // `exact`: the caller pages with the cursor, so only a read of the same size can serve it.
@@ -194,7 +212,8 @@ const ocFor = (base: string) => ({
     fetch(`${base}/session/${id}?${q(directory)}`, { signal }).then(json<Session>),
 
   messages: (id: string, directory: string, signal?: AbortSignal): Promise<MessageWithParts[]> =>
-    fetch(`${base}/session/${id}/message?${q(directory)}&summaryPatches=false`, { signal }).then(json<MessageWithParts[]>),
+    fetch(`${base}/session/${id}/message?${q(directory)}&summaryPatches=false&compact=true`, { signal })
+      .then(json<MessageWithParts[]>).then((items) => attachmentsUnder(base, items)),
 
   // bounded tail: the newest `limit` messages only (hover insights fallback)
   // Message page reads are single-flight per (session, directory, cursor): opening the Front Desk

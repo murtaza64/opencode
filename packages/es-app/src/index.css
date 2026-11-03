@@ -2127,3 +2127,7 @@ a.mini-item > .glyph { margin: 0; }
 .tool-chip-partial { margin: 2px 0 4px; padding-inline-start: 28px; }
 .tool-chip-partial-label { display: block; font-size: 12px; color: var(--subtext0); }
 .tool-chip-partial pre { margin: 2px 0 0; max-block-size: 16rem; overflow: auto; font: 400 12px/18px var(--font-mono); color: var(--subtext1); white-space: pre-wrap; }
+/* Images and files a tool returned (compact pages load them from their own route when shown); full output on request. */
+.tool-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; padding-inline-start: 28px; }
+.tool-attachments img { max-inline-size: min(100%, 480px); max-block-size: 320px; border-radius: 4px; border: 1px solid var(--surface1); object-fit: contain; }
+.tool-full-output { margin: 2px 0 4px; padding-inline-start: 28px; font-size: 12px; }
