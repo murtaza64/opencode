@@ -1,5 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process"
+import { createWriteStream } from "node:fs"
 import { access, constants, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises"
+import { pipeline } from "node:stream/promises"
 import path from "node:path"
 
 /**
@@ -20,7 +22,7 @@ export type VoiceStatus = {
 }
 export type VoiceFailure = {
   ok: false
-  code: "busy" | "unavailable" | "permission" | "inactive" | "cancelled" | "empty" | "failed"
+  code: "busy" | "unavailable" | "permission" | "inactive" | "cancelled" | "empty" | "failed" | "too-large" | "unsupported"
   message: string
   // Technical cause (tool stderr tail or setup step), folded behind Details in the UI.
   detail?: string
@@ -181,6 +183,100 @@ export const createVoice = (options: {
   }
 }
 
+export type Transcription = { ok: true; text: string; language: string; duration_ms: number }
+const AUDIO_TYPES: Record<string, string> = { "audio/wav": "wav", "audio/x-wav": "wav", "audio/wave": "wav", "audio/ogg": "ogg" }
+
+/**
+ * Voice-note transcription for paired phones (android-ops VOICE-NOTES.md): an uploaded wav or ogg clip, at most
+ * `maxBytes` and `maxSeconds`, is converted by SoX to 16 kHz mono and transcribed by whisper-cli with language
+ * detection. One clip at a time on this host; aborting the request kills the tools. The upload, the converted clip
+ * and the transcript are deleted before the answer is returned; nothing about the audio is kept or logged.
+ */
+export const createTranscriber = (options: {
+  resolve: () => Promise<VoiceTools | VoiceMissing>
+  temp: string
+  maxBytes?: number
+  maxSeconds?: number
+  timeoutMs?: number
+}) => {
+  const maxBytes = options.maxBytes ?? 10 * 1024 * 1024
+  const maxSeconds = options.maxSeconds ?? 300
+  const state = { busy: false }
+  const fail = (code: VoiceFailure["code"], message: string, detail?: string): VoiceFailure => ({
+    ok: false,
+    code,
+    message,
+    ...(detail ? { detail: detail.trim().slice(-600) } : {}),
+  })
+  const run = async (file: string, args: string[], signal: AbortSignal) => {
+    const child = spawn(file, args, { stdio: ["ignore", "ignore", "pipe"] })
+    const kill = () => child.kill("SIGKILL")
+    signal.addEventListener("abort", kill, { once: true })
+    const timer = setTimeout(kill, options.timeoutMs ?? 5 * 60_000)
+    const result = await collect(child)
+    clearTimeout(timer)
+    signal.removeEventListener("abort", kill)
+    return result
+  }
+
+  const transcribe = async (input: { type?: string; length?: number; body: AsyncIterable<Uint8Array>; signal: AbortSignal }): Promise<Transcription | VoiceFailure> => {
+    const extension = AUDIO_TYPES[(input.type ?? "").split(";")[0]!.trim().toLowerCase()]
+    if (!extension) return fail("unsupported", "Send a wav or ogg clip.")
+    if (input.length === undefined || !Number.isFinite(input.length)) return fail("unsupported", "Content-Length is required.")
+    if (input.length > maxBytes) return fail("too-large", `The clip is over ${Math.round(maxBytes / 1024 / 1024)} MB.`)
+    if (state.busy) return fail("busy", "Another voice note is being transcribed.")
+    state.busy = true
+    const dir = await mkdtemp(path.join(options.temp, "es-voice-note-"))
+    try {
+      const tools = await options.resolve()
+      if ("missing" in tools) return fail("unavailable", "Couldn't transcribe: voice notes aren't set up", tools.message)
+      const upload = path.join(dir, `upload.${extension}`)
+      const counted = async function* () {
+        let size = 0
+        for await (const chunk of input.body) {
+          size += chunk.length
+          if (size > maxBytes || size > input.length!) throw new RangeError("too large")
+          yield chunk
+        }
+      }
+      const received = await pipeline(counted(), createWriteStream(upload, { mode: 0o600 }), { signal: input.signal }).then(
+        () => "ok" as const,
+        (error: unknown) => (error instanceof RangeError ? ("too-large" as const) : ("aborted" as const)),
+      )
+      if (received === "too-large") return fail("too-large", `The clip is over ${Math.round(maxBytes / 1024 / 1024)} MB.`)
+      if (received === "aborted" || input.signal.aborted) return fail("cancelled", "Transcription cancelled.")
+      const clip = path.join(dir, "clip.wav")
+      // SoX reads wav and ogg; macOS afconvert (the fallback without SoX) reads wav but not ogg.
+      const afconvert = path.basename(tools.recorder) === "afconvert"
+      if (afconvert && extension === "ogg") return fail("unsupported", "This host can only read wav clips (ogg needs SoX).")
+      const converted = await run(tools.recorder, afconvert
+        ? ["-f", "WAVE", "-d", "LEI16@16000", "-c", "1", upload, clip]
+        : ["-q", upload, "-c", "1", "-r", "16000", "-b", "16", clip], input.signal)
+      if (input.signal.aborted) return fail("cancelled", "Transcription cancelled.")
+      if (converted.code !== 0) return fail("failed", "Couldn't read the clip", converted.stderr)
+      // 16 kHz mono 16-bit after conversion: 32 bytes per millisecond after the 44-byte header.
+      const duration = Math.max(0, Math.round(((await stat(clip)).size - 44) / 32))
+      if (duration > maxSeconds * 1000) return fail("too-large", `The clip is over ${Math.round(maxSeconds / 60)} minutes.`)
+      if (duration === 0) return fail("empty", "No speech detected.")
+      const out = path.join(dir, "transcript")
+      const result = await run(tools.transcriber, ["-m", tools.model, "-f", clip, "-l", "auto", "-oj", "-of", out, "-np", "-nt"], input.signal)
+      if (input.signal.aborted) return fail("cancelled", "Transcription cancelled.")
+      if (result.code !== 0) return fail("failed", "Couldn't transcribe the clip", result.stderr || `${path.basename(tools.transcriber)} exited with ${result.code}`)
+      const json = await readFile(`${out}.json`, "utf8").then((value): unknown => JSON.parse(value)).catch(() => undefined)
+      const parsed = json && typeof json === "object" ? (json as { result?: { language?: unknown }; transcription?: { text?: unknown }[] }) : {}
+      const text = transcriptText((parsed.transcription ?? []).map((segment) => (typeof segment?.text === "string" ? segment.text : "")).join("\n"))
+      if (!text) return fail("empty", "No speech detected.")
+      return { ok: true, text, language: typeof parsed.result?.language === "string" ? parsed.result.language : "unknown", duration_ms: duration }
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+      state.busy = false
+    }
+  }
+
+  return { transcribe }
+}
+export type Transcriber = ReturnType<typeof createTranscriber>
+
 /** Finds the existing pipeline: explicit overrides, then Homebrew and the `~/whisper.cpp` checkout `bin/transcribe` uses. */
 export const voiceTools = async (input: {
   home: string
@@ -188,6 +284,8 @@ export const voiceTools = async (input: {
   config: string
   // Package-manager bin directories searched after overrides and ~/whisper.cpp.
   system?: string[]
+  // Converters accepted in place of SoX when there is no SoX (voice notes convert uploads; they never record).
+  fallback?: string[]
 }): Promise<VoiceTools | VoiceMissing> => {
   const system = input.system ?? ["/opt/homebrew/bin", "/usr/local/bin"]
   const saved = await readFile(input.config, "utf8")
@@ -197,7 +295,7 @@ export const voiceTools = async (input: {
   const configured = (key: string) => (typeof config[key] === "string" ? (config[key] as string) : undefined)
   const models = path.join(input.home, "whisper.cpp/models")
   const recorder = await first(
-    [input.env.ES_VOICE_RECORDER, configured("recorder"), ...system.map((dir) => path.join(dir, "sox"))],
+    [input.env.ES_VOICE_RECORDER, configured("recorder"), ...system.map((dir) => path.join(dir, "sox")), ...(input.fallback ?? [])],
     executable,
   )
   if (!recorder) return { missing: "recorder", message: "SoX is not installed. Install it with: brew install sox" }
@@ -212,20 +310,25 @@ export const voiceTools = async (input: {
   )
   if (!transcriber)
     return { missing: "transcriber", message: "whisper.cpp is not installed. Install it with: brew install whisper-cpp" }
-  const found = await readdir(models).catch(() => [])
+  // ~/whisper.cpp/models (bin/transcribe), then the shared model directory mac-mini-setup installs into.
+  const shared = path.join(input.home, ".local/share/whisper/models")
+  const found = [
+    ...(await readdir(models).catch(() => [])).map((name) => path.join(models, name)),
+    ...(await readdir(shared).catch(() => [])).map((name) => path.join(shared, name)),
+  ]
   const model = await first(
     [
       input.env.ES_VOICE_MODEL,
       configured("model"),
       ...found
-        .filter((name) => /^ggml-.+\.bin$/.test(name))
-        // Prefer the model `bin/transcribe` uses, then any large-v3-turbo variant.
-        .sort((a, b) => modelRank(a) - modelRank(b) || a.localeCompare(b))
-        .map((name) => path.join(models, name)),
+        .filter((file) => /^ggml-.+\.bin$/.test(path.basename(file)))
+        // Prefer the model `bin/transcribe` uses, then any large-v3-turbo variant; ~/whisper.cpp wins ties.
+        .sort((a, b) => modelRank(path.basename(a)) - modelRank(path.basename(b)) ||
+          Number(path.dirname(a) !== models) - Number(path.dirname(b) !== models) || path.basename(a).localeCompare(path.basename(b))),
     ],
     async (file) => stat(file).then((value) => value.isFile()).catch(() => false),
   )
-  if (!model) return { missing: "model", message: "No Whisper model found. Add a ggml model to ~/whisper.cpp/models." }
+  if (!model) return { missing: "model", message: "No Whisper model found. Add a ggml model to ~/whisper.cpp/models or ~/.local/share/whisper/models." }
   return { recorder, transcriber, model }
 }
 

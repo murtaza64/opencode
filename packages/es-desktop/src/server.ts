@@ -12,7 +12,7 @@ import { surfaceProxy } from "../../es-app/surface-proxy"
 import { attentionRoute, bridgedTargets, hostPath, localHost, remoteCookie, remoteSetCookie, remoteTargets, type HostInfo } from "../../es-app/remote-host"
 import type { Bridge } from "./bridge"
 import type { SshPeer } from "./ssh-peer"
-import type { Voice } from "./voice"
+import type { Transcriber, Voice, VoiceFailure } from "./voice"
 import type { Appearance } from "./appearance"
 import type { ReleaseNotesStore } from "./release-notes"
 import { createPerfLog, routeOf } from "./perf-log"
@@ -103,6 +103,8 @@ export const serve = async (options: {
   publicOrigin?: string
   // Native-only operator dictation; paired remote clients never reach this host's microphone.
   voice?: Voice
+  // Voice-note transcription of uploaded clips (POST /__es/voice/transcribe), for paired phones on a gateway.
+  transcriber?: Transcriber
   // This laptop's palette and blurred wallpaper; never offered to paired remote clients.
   appearance?: Appearance
   // This app release's notes and whether they were seen; one store for every listener of this app, never offered to
@@ -277,6 +279,16 @@ export const serve = async (options: {
     if (url.pathname === "/__es/perf") {
       if (!perf || url.search) return finish(404, "Not found")
       return perf.receive(req, finish)
+    }
+    if (url.pathname === "/__es/voice/transcribe" && options.transcriber) {
+      if (req.method !== "POST" || url.search) return finish(405, "Method not allowed")
+      const abort = new AbortController()
+      // The phone closing the request cancels the transcription.
+      res.once("close", () => { if (!res.writableFinished) abort.abort() })
+      const length = req.headers["content-length"] === undefined ? undefined : Number(req.headers["content-length"])
+      const result = await options.transcriber.transcribe({ type: req.headers["content-type"], length, body: req, signal: abort.signal })
+      if (abort.signal.aborted) return
+      return finish(result.ok ? 200 : VOICE_STATUS[result.code], JSON.stringify(result), "application/json")
     }
     if (/^\/__es\/voice(\/|$)/.test(url.pathname)) {
       if (!options.voice || pairing || url.search) return finish(404, "Not found")
@@ -621,6 +633,9 @@ const readLimited = (req: IncomingMessage, limit: number) => new Promise<Buffer 
   req.on("error", () => resolve(undefined))
 })
 
+const VOICE_STATUS: Record<VoiceFailure["code"], number> = {
+  busy: 409, inactive: 409, cancelled: 409, unavailable: 503, permission: 403, empty: 422, failed: 500, "too-large": 413, unsupported: 415,
+}
 const voiceID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 const voiceRoute = async (
@@ -661,7 +676,7 @@ const voiceRoute = async (
   const result = action === "start" ? await voice.start(id, origin) : await voice.stop(id)
   const status = result.ok
     ? 200
-    : ({ busy: 409, inactive: 409, cancelled: 409, unavailable: 503, permission: 403, empty: 422, failed: 500 } as const)[result.code]
+    : VOICE_STATUS[result.code]
   return json(status, result)
 }
 
