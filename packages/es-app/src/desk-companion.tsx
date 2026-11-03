@@ -179,7 +179,7 @@ export const DeskCompanion = () => {
         {(current) => <SessionView sessionID={current.session} directory={current.directory} host={current.host} embedded context={chat.context} onSent={chat.desk.sent}
           incoming={chat.asked} onIncoming={chat.takeAsked}
           headerStart={<><button class="header-icon desk-chat-hide" aria-label="Close Front desk chat" title="Close Front desk chat" onClick={close}>
-            <Icon name="chevron-down" size="small" /></button><DeskHost desk={chat.desk} /></>} />}
+            <Icon name="chevron-down" size="small" /></button><DeskHost desk={chat.desk} /><DeskEarlier desk={chat.desk} /></>} />}
       </Show>
     </div>
   </aside>
@@ -326,8 +326,33 @@ const SharedDesk = (props: { desk: ReturnType<typeof createDeskSession> }) => {
     <Show when={props.desk.notice()}><p class="desk-shared-notice home-source" role="status">This is now the shared Work Front Desk{where()}.
       <Show when={mine()}>{entry => <> <A href={href(entry())}>Your earlier desk on this device</A>.</>}</Show>
       {" "}<button type="button" class="desk-link-button" onClick={() => props.desk.dismissNotice()}>OK</button></p></Show>
-    <Show when={props.desk.earlier().length}><details class="desk-earlier home-source"><summary>Earlier desks ({props.desk.earlier().length})</summary>
-      <ul><For each={props.desk.earlier()}>{entry => <li><A href={href(entry)}><bdi dir="ltr">{entry.session}</bdi></A>
-        {" · "}{entry.from === "device" ? "this device" : entry.host ? entry.host.label : "this host"}<Show when={entry.until}>{until => <> · until {ago(until())}</>}</Show></li>}</For></ul></details></Show>
   </>
+}
+
+const earlierHref = (entry: EarlierDesk) => entry.host
+  ? `/session/${encodeURIComponent(entry.session)}?directory=${encodeURIComponent(entry.directory)}&host=${encodeURIComponent(entry.host.id)}`
+  : sessionHref(entry.session, entry.directory)
+
+// Earlier desks stay one tap away from the chat header, shown only when there are any and closed by default.
+const DeskEarlier = (props: { desk: ReturnType<typeof createDeskSession> }) => {
+  const [open, setOpen] = createSignal(false)
+  let button: HTMLButtonElement | undefined
+  let menu: HTMLDivElement | undefined
+  const close = (focus: boolean) => { setOpen(false); if (focus) button?.focus() }
+  const outside = (event: PointerEvent) => { if (!menu?.contains(event.target as Node) && !button?.contains(event.target as Node)) close(false) }
+  createEffect(() => {
+    if (!open()) return
+    document.addEventListener("pointerdown", outside)
+    onCleanup(() => document.removeEventListener("pointerdown", outside))
+  })
+  const count = () => props.desk.earlier().length
+  return <Show when={count()}><span class="desk-earlier-menu" onKeyDown={(event) => { if (event.key === "Escape" && open()) { event.preventDefault(); close(true) } }}>
+    <button ref={button} type="button" class="header-icon desk-earlier-button" aria-haspopup="true" aria-expanded={open()}
+      aria-label={`Earlier desks (${count()})`} title={`Earlier desks (${count()})`} onClick={() => setOpen(!open())}>
+      <Icon name="bullet-list" size="small" /></button>
+    <Show when={open()}><div ref={menu} class="desk-earlier-list" role="group" aria-label="Earlier desks">
+      <ul><For each={props.desk.earlier()}>{entry => <li><A href={earlierHref(entry)} onClick={() => close(false)}><bdi dir="ltr">{entry.session}</bdi></A>
+        <span class="home-muted">{entry.from === "device" ? "this device" : entry.host ? entry.host.label : "this host"}<Show when={entry.until}>{until => <> · until {ago(until())}</>}</Show></span></li>}</For></ul>
+    </div></Show>
+  </span></Show>
 }

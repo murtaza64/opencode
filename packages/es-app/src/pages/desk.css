@@ -129,6 +129,12 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
 .desk-chat-hide .icon, .desk-chat-hide svg { transform: rotate(-90deg); }
 .desk-host { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--subtext0); white-space: nowrap; }
 .desk-host[data-placed="fallback"] { color: var(--yellow); }
+.desk-earlier-menu { position: relative; display: inline-flex; }
+.desk-earlier-list { position: absolute; inset-block-start: calc(100% + 4px); inset-inline-start: 0; z-index: 20; min-inline-size: 240px; max-inline-size: 320px;
+  padding: 6px 0; background: var(--surface0); border: 1px solid var(--surface1); border-radius: 6px; box-shadow: 0 6px 18px rgb(0 0 0 / 0.3); }
+.desk-earlier-list ul { list-style: none; margin: 0; padding: 0; }
+.desk-earlier-list li { display: flex; flex-direction: column; gap: 1px; padding: 5px 12px; font-size: 12px; }
+.desk-earlier-list a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desk-chat-hide:dir(rtl) .icon, .desk-chat-hide:dir(rtl) svg { transform: rotate(90deg); }
 .desk-chat-rail { display: flex; flex-direction: column; align-items: center; gap: 10px; padding-block: 10px; background: var(--mantle); border-inline-start: 1px solid var(--surface0); cursor: pointer; }
 .desk-chat-show { display: inline-flex; align-items: center; justify-content: center; inline-size: 28px; block-size: 28px; padding: 0; color: var(--subtext1); background: transparent; border: 0; cursor: pointer; }
