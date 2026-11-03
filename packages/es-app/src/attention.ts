@@ -16,6 +16,8 @@ export type AttentionRecord = {
   /** Review items only: the one thing to try, at its exact revision. */
   /** What the record asks about: a web link, or a Surface on the record's own dashboard (attention-lead #504). */
   artifact?: ({ title: string; revision: string | number } & ({ url: string; surface?: undefined } | { surface: string; url?: undefined })) | null
+  /** Meeting-brief routing (attention-lead ltrpotzl, front-desk producer): what each item does and who it goes to. */
+  routing?: { source?: { kind: string; title?: string; at?: number } | null; items: RoutingItem[] } | null
   recommendation?: string | null
   producer_session: string
   origin_session: string
@@ -58,6 +60,32 @@ export type OptionInput = {
   fields?: { id: string; label: string }[]
 }
 export type AttentionOption = { id: string; label: string; input?: OptionInput }
+/** `update`: factual, within the recipient's existing authorized work; sent only after an answer that says so, no
+ * toggle. `proposal` (new work for `to`) and `desk-action` (the Desk itself acts) each need their toggle. */
+export type RoutingItem = {
+  id: string
+  kind: "update" | "proposal" | "desk-action"
+  /** `<editspace>/<lane>` or `<host>:<editspace>/<lane>`; absent for a desk action. */
+  to?: string
+  summary: string
+  recommended?: boolean
+  /** Never preselected. */
+  sensitive?: boolean
+}
+
+/** A record answered by toggling routing items: its items, the option whose multi input picks proposals and desk
+ * actions, the other options, and the picks that start on (recommended, never sensitive). Undefined when the record has
+ * no routing or no option collects its items, so older cards render as before. */
+export const routingBrief = (record: AttentionRecord) => {
+  const items = record.routing?.items
+  if (!items?.length) return
+  const pickable = items.filter(item => item.kind !== "update")
+  const apply = record.options.find(option => option.input?.kind === "multi" && (option.input.choices ?? []).every(choice => pickable.some(item => item.id === choice.id)))
+  if (!apply) return
+  const offered = new Set((apply.input?.choices ?? []).map(choice => choice.id))
+  return { items, apply, offered, other: record.options.filter(option => option.id !== apply.id), picks: pickable.filter(item => offered.has(item.id) && item.recommended && !item.sensitive).map(item => item.id) }
+}
+
 export type InputValue = string | string[]
 export const INPUT_KINDS = ["text", "choice", "multi", "secret"]
 

@@ -9,7 +9,7 @@ import type { BriefResult } from "../desk"
 import { Sketch } from "./attention-brief"
 import { Markdown } from "@opencode-ai/session-ui/markdown"
 import { requestHasSteps, requestMarkdown, surfaceRouteHref } from "../request-markdown"
-import { answerDraftKey, attentionPath, blockedReason, contentRevision, decisionLabel, deliveryLabel, inputPayload, inputProblem, inputText, INPUT_KINDS, type createAttention, type AttentionOption, type AttentionRecord, type InputValue } from "../attention"
+import { answerDraftKey, attentionPath, blockedReason, contentRevision, decisionLabel, deliveryLabel, inputPayload, inputProblem, inputText, INPUT_KINDS, routingBrief, type createAttention, type AttentionOption, type AttentionRecord, type InputValue, type RoutingItem } from "../attention"
 import { requestAgent, type AgentRef, type RequestAgent } from "../attention-agent"
 import { ariaShortcut } from "../shortcuts"
 import { secretInput } from "../secret-field"
@@ -80,24 +80,26 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
     const option = props.record.options.find(item => item.id === props.record.recommendation)
     return option && option.input?.kind !== "secret" ? option.id : ""
   }
-  const [choice, setChoice] = createSignal(preselect())
+  // A routed brief is answered by its item toggles: its apply option is the choice, recommended proposals start on.
+  const routed = props.options ? routingBrief(props.record) : undefined
+  const [choice, setChoice] = createSignal(routed ? routed.apply.id : preselect())
   // With the recommendation still selected the note waits behind "Add a note"; otherwise it is inline.
   const [noteOpen, setNoteOpen] = createSignal(!!text())
-  const noteHidden = () => !!preselect() && choice() === preselect() && !noteOpen()
+  const noteHidden = () => (routed ? true : !!preselect() && choice() === preselect()) && !noteOpen()
   const canWrite = () => canWriteAttention(props.attention, props.record)
   // Input typed for each option is kept while switching; only the selected option's value is sent.
-  const [values, setValues] = createSignal<Record<string, InputValue>>({})
+  const [values, setValues] = createSignal<Record<string, InputValue>>(routed ? { [routed.apply.id]: routed.picks } : {})
   const selected = () => props.options ? props.record.options.find(option => option.id === choice()) : undefined
   const secret = () => secretInput(selected())
   const problem = () => inputProblem(selected(), values()[choice()])
   const ready = () => canWrite() && (!!selected() || !!text().trim()) && !problem()
-  const send = async () => {
-    if (!ready()) return
-    const option = selected()
+  const send = async (other?: AttentionOption) => {
+    if (!other && !ready()) return
+    const option = other ?? selected()
     // Saved first by the ledger client; a lost response keeps this exact command for retry.
     // The brief on screen is recorded with the answer, so History reopens what was seen when deciding.
     const brief = props.briefJob && props.briefJob.revision === String(contentRevision(props.record)) ? { brief: props.briefJob } : {}
-    if (await props.attention.act(props.record, { action: "answer", ...(text().trim() ? { text: text() } : {}), ...(option ? { choice_id: option.id, ...inputPayload(option, values()[option.id]) } : {}), ...brief })) props.onView?.("answered")
+    if (await props.attention.act(props.record, { action: "answer", ...(text().trim() ? { text: text() } : {}), ...(option ? { choice_id: option.id, ...(other ? {} : inputPayload(option, values()[option.id])) } : {}), ...brief })) props.onView?.("answered")
   }
   const id = `answer-${props.record.id}`
   const dashboard = useDashboard()
@@ -106,7 +108,9 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
     : <bdi dir="auto" title={props.record.source_ref.session_id}>{dashboard.activity.session(props.record.source_ref.session_id)?.title || "the requesting agent"}</bdi>
   const keys = (event: KeyboardEvent) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); void send() } }
   return <div class="home-answer" onKeyDown={keys}>
-    <Show when={props.options}><fieldset class="home-options" classList={{ "home-option-cards": !!props.prepared }} disabled={!canWrite()}><legend class="sr-only">Your choice</legend>
+    <Show when={routed}>{brief => <RoutingItems items={brief().items} offered={brief().offered} picks={(values()[brief().apply.id] as string[] | undefined) ?? []} disabled={!canWrite()}
+      onChange={picks => setValues(current => ({ ...current, [brief().apply.id]: picks }))} />}</Show>
+    <Show when={props.options && !routed}><fieldset class="home-options" classList={{ "home-option-cards": !!props.prepared }} disabled={!canWrite()}><legend class="sr-only">Your choice</legend>
       <For each={props.record.options}>{option => {
         // A prepared brief turns each choice into a card saying what it leads to; the label, ID and the
         // radio's accessible name stay the producer's, so the card is the one and only option list.
@@ -131,10 +135,10 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
       <Show when={props.prepared?.ifWait}><div class="home-option-card home-option-wait" aria-hidden="true"><span class="home-option-body"><span class="home-option-label">No answer</span><span class="home-option-outcome" dir="auto">{props.prepared!.ifWait}</span></span></div></Show>
     </fieldset></Show>
     {/* A secret option gets masked fields with their own single submission; it never enters the answer or a draft. */}
-    <Show when={secret()} fallback={<Show when={selected()?.input && selected()}>{option => <OptionField id={`${id}-input`} option={option()} value={values()[option().id]} disabled={!canWrite()} onChange={value => setValues(current => ({ ...current, [option().id]: value }))} />}</Show>}>
+    <Show when={secret()} fallback={<Show when={!routed && selected()?.input && selected()}>{option => <OptionField id={`${id}-input`} option={option()} value={values()[option().id]} disabled={!canWrite()} onChange={value => setValues(current => ({ ...current, [option().id]: value }))} />}</Show>}>
       {spec => <SecretField id={`${id}-secret`} record={props.record} option={selected()!} spec={spec()} disabled={!canWrite()} onDelivered={() => { void props.attention.refresh(); props.onView?.("answered") }} />}</Show>
     {props.afterChoices}
-    <Show when={preselect() && choice() === preselect()}><p class="home-preselected" role="status">Recommended option selected · nothing is sent until you press Send</p></Show>
+    <Show when={routed ? routed.picks.length > 0 : preselect() && choice() === preselect()}><p class="home-preselected" role="status">{routed ? "Recommended selected" : "Recommended option selected"} · nothing is sent until you press Send</p></Show>
     <Show when={!secret()}><Show when={!noteHidden()} fallback={
       <button type="button" class="home-add-note" disabled={!canWrite()} onClick={() => { setNoteOpen(true); queueMicrotask(() => document.getElementById(id)?.focus()) }}>Add a note</button>}>
       <label for={id}>{props.options ? "Note (optional)" : "Your answer"}</label>
@@ -154,15 +158,52 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
     <div class="home-actions">
       {/* On cards the selected card already shows the choice, so the button stays short; its name still says what is sent. */}
       <button class="home-primary" dir="auto" disabled={!ready()} aria-keyshortcuts={ariaShortcut("submit")} onClick={() => void send()}
-        aria-label={props.prepared && selected() ? `Send ${selected()!.label}` : undefined}>
-        <Show when={selected()} fallback="Send answer">{option => <Show when={!props.prepared} fallback="Send">Send <bdi dir="auto">{option().label}</bdi></Show>}</Show>
+        aria-label={routed ? routedSendLabel(routed.apply.label, routed.items, (values()[routed.apply.id] as string[] | undefined) ?? []) : props.prepared && selected() ? `Send ${selected()!.label}` : undefined}>
+        <Show when={!routed} fallback={<bdi dir="auto">{routed!.apply.label}</bdi>}><Show when={selected()} fallback="Send answer">{option => <Show when={!props.prepared} fallback="Send">Send <bdi dir="auto">{option().label}</bdi></Show>}</Show></Show>
       </button>
+      {/* The brief's other options (record only, wrong meeting) are explicit one-click answers beside Send. */}
+      <For each={routed?.other ?? []}>{option => <button class="home-quiet" dir="auto" disabled={!canWrite()} onClick={() => void send(option)}>{option.label}</button>}</For>
       {props.extra}
       {/* One English label run ("To …") laid out left to right in an RTL page too; the target name stays isolated. */}
       <Show when={!props.hideTarget}><span class="home-muted"><bdi dir="ltr">To <bdi dir="auto">{target()}</bdi></bdi></span></Show>
     </div>
     <Show when={selected() && problem()}><p class="home-input-problem" id={`${id}-input-problem`} role="status" dir="auto">{problem()}</p></Show>
   </div>
+}
+
+// One row per routing item: who acts -> who receives, the one-line summary, and a toggle for a proposal or desk action.
+// An update has no toggle: it goes with the apply answer ("with Send"), and is never shown as sent before it was.
+// Sensitive items never start on.
+const RoutingItems = (props: { items: RoutingItem[]; offered: Set<string>; picks: string[]; disabled: boolean; onChange: (picks: string[]) => void }) =>
+  <ul class="routing-items" aria-label="What Send does">
+    <For each={[...props.items.filter(item => item.kind === "update"), ...props.items.filter(item => item.kind !== "update")]}>{item =>
+      <li class="routing-item" data-kind={item.kind} data-on={item.kind === "update" || props.picks.includes(item.id) ? "" : undefined}>
+        <Show when={item.kind !== "update"} fallback={<span class="routing-auto" title="Within the recipient's existing work; sent only when you send">with Send</span>}>
+          <input type="checkbox" class="routing-toggle" role="switch" checked={props.picks.includes(item.id)} disabled={props.disabled || !props.offered.has(item.id)}
+            aria-label={`${item.summary}${item.to ? ` (to ${routingLane(item.to)})` : " (Porter does this)"}`}
+            onChange={event => props.onChange(event.currentTarget.checked ? [...props.picks, item.id] : props.picks.filter(id => id !== item.id))} />
+        </Show>
+        <span class="routing-flow">
+          <RoutingActor kind={item.kind === "update" ? "meeting" : "desk"} label={item.kind === "update" ? "Meeting" : DESK.name} />
+          <Show when={item.to}>{to => <><span class="routing-arrow" aria-hidden="true">→</span><RoutingActor kind="owner" label={routingLane(to())} title={to()} /></>}</Show>
+        </span>
+        <span class="routing-effect" dir="auto">{item.summary}</span>
+        <Show when={item.recommended || item.sensitive}><span class="routing-tags">
+          <Show when={item.recommended && !item.sensitive}><span class="routing-rec">Recommended</span></Show>
+          <Show when={item.sensitive}><span class="routing-risk">Sensitive</span></Show></span></Show>
+      </li>}</For>
+  </ul>
+
+const ROUTING_GLYPH: Record<string, string> = { meeting: "▤", desk: "◎", owner: "◆" }
+const RoutingActor = (props: { kind: string; label: string; title?: string }) =>
+  <span class="routing-actor" data-kind={props.kind} title={props.title}><span aria-hidden="true">{ROUTING_GLYPH[props.kind]}</span><bdi dir="auto">{props.label}</bdi></span>
+// The lane names the recipient; editspace and host stay in the tooltip.
+const routingLane = (to: string) => to.split("/").at(-1) || to
+
+const routedSendLabel = (label: string, items: RoutingItem[], picks: string[]) => {
+  const updates = items.filter(item => item.kind === "update").length
+  const parts = [updates ? `${updates} update${updates === 1 ? "" : "s"}` : "", picks.length ? `${picks.length} selected` : ""].filter(Boolean)
+  return parts.length ? `${label}: ${parts.join(", ")}` : label
 }
 
 // The labelled control a choice asks for, by input kind; kinds this app does not know get no control (Send explains).
@@ -301,7 +342,8 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
         {/* Labelled as the request's own text, so its numbering is not read as the brief's steps. */}
         <Show when={requestHasSteps(props.record)}><p class="home-source home-request-from">From the request</p><RequestText record={props.record} host={props.remote ? props.host : undefined} /></Show>
       </div>}</Show>
-      <Show when={!prepared()}><RequestText record={props.record} host={props.remote ? props.host : undefined} />{review() ? undefined : props.brief}</Show>
+      <Show when={props.record.routing?.source}>{source => <p class="routing-source home-source"><bdi dir="auto">{source().title ?? source().kind}</bdi><Show when={source().at}>{at => <> · <time dateTime={new Date(at()).toISOString()}>{new Date(at()).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}</time></>}</Show></p>}</Show>
+      <Show when={!prepared() && !routingBrief(props.record)}><RequestText record={props.record} host={props.remote ? props.host : undefined} />{review() ? undefined : props.brief}</Show>
       {/* The picture tells the story; the original conversation it came from follows. */}
       {review() ? undefined : props.briefVisual}
       {props.conversation}
@@ -343,7 +385,7 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
       * loaded on open. A quote that failed verification opens it so the full request is not hidden. */}
     <details class="home-details" open={!!props.copy?.quoteFailed && !!prepared() && !requestHasSteps(props.record)} onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>Details</summary>
       {review() ? undefined : props.briefDetails}
-      <Show when={prepared() && !requestHasSteps(props.record)}><section class="home-original"><p class="home-source home-request-from">Original request</p><RequestText record={props.record} host={props.remote ? props.host : undefined} /></section></Show>
+      <Show when={(prepared() || routingBrief(props.record)) && !requestHasSteps(props.record)}><section class="home-original"><p class="home-source home-request-from">Original request</p><RequestText record={props.record} host={props.remote ? props.host : undefined} /></section></Show>
       <div class="home-source"><bdi dir="ltr">{props.record.id} · {props.record.gate_key} · revision {props.record.revision}</bdi></div><Show when={history()?.version === historyVersion(props.record) ? history() : undefined} fallback={<p>Loading history…</p>}>{item => <Show when={!item().error} fallback={<p>{item().error}</p>}><pre dir="ltr">{JSON.stringify(item().events, null, 2)}</pre></Show>}</Show></details>
     </div>
   </article>
