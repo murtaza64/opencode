@@ -64,6 +64,14 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/In
 
 export const use = serviceUse(Service)
 
+interface Identity {
+  ctx: InstanceContext
+  resolved: number
+  // Last request that read this identity; the sweep forgets identities nobody reads.
+  used: number
+  refreshing: boolean
+}
+
 interface Entry {
   // Resolves once the project identity is known, before bootstrap runs.
   readonly identity: Deferred.Deferred<InstanceContext>
@@ -92,12 +100,26 @@ const layer: Layer.Layer<
     const execution = yield* SessionExecution.Service
     const scope = yield* Scope.Scope
     const cache = new Map<string, Entry>()
-    const identities = new Map<string, { ctx: InstanceContext; resolved: number }>()
+    const identities = new Map<string, Identity>()
     const interval = Number(Flag.OPENCODE_INSTANCE_SWEEP_MS ?? 60_000)
     const ttl = Number(Flag.OPENCODE_INSTANCE_IDLE_TTL_MS ?? 600_000)
 
+    // fromDirectory spawns several git processes; on hosts where each exec is slow this costs seconds.
+    const identify = (directory: string) =>
+      project.fromDirectory(directory).pipe(
+        Effect.map((result): InstanceContext => ({ directory, worktree: result.sandbox, project: result.project })),
+      )
+
+    const remember = (directory: string, ctx: InstanceContext) =>
+      Effect.map(Clock.currentTimeMillis, (now) => {
+        identities.set(directory, { ctx, resolved: now, used: now, refreshing: false })
+        return ctx
+      })
+
     const boot = (input: LoadInput & { directory: string }, entry: Entry) =>
       Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis
+        const known = identities.get(input.directory)
         const ctx: InstanceContext =
           input.project && input.worktree
             ? {
@@ -105,13 +127,9 @@ const layer: Layer.Layer<
                 worktree: input.worktree,
                 project: input.project,
               }
-            : yield* project.fromDirectory(input.directory).pipe(
-                Effect.map((result) => ({
-                  directory: input.directory,
-                  worktree: result.sandbox,
-                  project: result.project,
-                })),
-              )
+            : known && now - known.resolved < ttl
+              ? known.ctx
+              : yield* identify(input.directory).pipe(Effect.flatMap((ctx) => remember(input.directory, ctx)))
         yield* Deferred.succeed(entry.identity, ctx)
         yield* bootstrap.run.pipe(Effect.provideService(InstanceRef, ctx))
         return ctx
@@ -284,9 +302,11 @@ const layer: Layer.Layer<
 
     // Project identity without bootstrapping: DB-only routes (session listing)
     // need only the project id and directory, never plugins, LSP or MCP.
-    // Memoized for the idle TTL: fromDirectory upserts the project and emits
-    // project.updated, so resolving per request turned dashboard polling over
-    // many idle lane directories into a continuous global event flood.
+    // Memoized: fromDirectory upserts the project and emits project.updated, so
+    // resolving per request turned dashboard polling over many idle lane
+    // directories into a continuous global event flood. Once the identity is
+    // older than the idle TTL, the memoized value is still served and one
+    // background refresh replaces it, so listing never waits on git.
     const resolve = (input: string) =>
       Effect.gen(function* () {
         const cached = yield* peek(input)
@@ -294,11 +314,18 @@ const layer: Layer.Layer<
         const directory = FSUtil.resolve(input)
         const now = yield* Clock.currentTimeMillis
         const known = identities.get(directory)
-        if (known && now - known.resolved < ttl) return known.ctx
-        const result = yield* project.fromDirectory(directory)
-        const ctx = { directory, worktree: result.sandbox, project: result.project } satisfies InstanceContext
-        identities.set(directory, { ctx, resolved: now })
-        return ctx
+        if (!known) return yield* identify(directory).pipe(Effect.flatMap((ctx) => remember(directory, ctx)))
+        known.used = now
+        if (now - known.resolved >= ttl && !known.refreshing) {
+          known.refreshing = true
+          yield* identify(directory).pipe(
+            Effect.flatMap((ctx) => (identities.get(directory) === known ? remember(directory, ctx) : Effect.void)),
+            Effect.catchCause((cause) => Effect.logWarning("project identity refresh failed", { directory, cause })),
+            Effect.ensuring(Effect.sync(() => (known.refreshing = false))),
+            Effect.forkIn(scope),
+          )
+        }
+        return known.ctx
       })
 
     const runtime = Effect.fn("InstanceStore.runtime")(function* () {
@@ -323,7 +350,7 @@ const layer: Layer.Layer<
 
     const sweep = Effect.fn("InstanceStore.sweep")(function* () {
       const now = yield* Clock.currentTimeMillis
-      for (const [directory, identity] of identities) if (now - identity.resolved >= ttl) identities.delete(directory)
+      for (const [directory, identity] of identities) if (now - identity.used >= ttl) identities.delete(directory)
       let evicted = 0
       for (const [directory, entry] of cache) {
         if (directory === FSUtil.resolve(process.cwd()) || now - entry.lastUsed < ttl) continue
