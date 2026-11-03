@@ -817,3 +817,17 @@ test("a restore record from before the bridged host drops the replaced page's vi
   // silently onto another tab.
   expect(restorePlan(record, tabs)).toBeUndefined()
 })
+
+test("request history is a read on its own host and another Work host, never a write or a sibling path", async () => {
+  const { apiAllowed, hostApiAllowed } = await import("./policy")
+  expect(apiAllowed("GET", "/es/api/decisions/requests")).toBe(true)
+  expect(hostApiAllowed("GET", "/es/api/decisions/requests")).toBe(true)
+  for (const pathname of ["/es/api/decisions", "/es/api/decisions/requests/x", "/es/api/decisions/"]) {
+    expect(apiAllowed("GET", pathname)).toBe(false)
+    expect(hostApiAllowed("GET", pathname)).toBe(false)
+  }
+  for (const method of ["POST", "PUT", "DELETE"]) {
+    expect(apiAllowed(method, "/es/api/decisions/requests")).toBe(false)
+    expect(hostApiAllowed(method, "/es/api/decisions/requests")).toBe(false)
+  }
+})

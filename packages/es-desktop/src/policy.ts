@@ -162,12 +162,13 @@ export const restorePlan = (value: unknown, tabs: readonly { id: string; origin:
 // list and statuses, handoff lineage and lane owners (so a pin follows a handoff on that host), one
 // session's record, messages and todos (read-only view in the Local window),
 // daily usage rollup (the Today total), subscription quota snapshot (Usage bars), editspace names, open-decision list, Surface list and
+// permission/question request history (Decisions tab, metadata only) and
 // the Front Desk pointer (which the dashboard serves without an operator; pointer writes stay on the home host's own origin).
 // One lane's or session's mail with its delivery receipts, as that host's own window shows them (mail tool rows).
 // Everything else about that host, answering and operator sessions included, stays on its own tab,
 // origin and operator cookie.
 export const hostApiAllowed = (method: string, pathname: string) =>
-  ["GET", "HEAD"].includes(method) && (/^\/es\/api\/handoffs\/self\/[A-Za-z0-9_-]{1,128}$/.test(pathname) || /^\/(?:oc\/experimental\/(?:session|usage\/daily|capabilities)|oc\/session\/status|oc\/session\/[\w-]+(?:\/todo|\/children|\/message(?:\/[\w-]+(?:\/part\/[\w-]+\/attachment\/\d{1,4})?)?|\/input(?:\/[\w-]+)?)?|oc\/(?:permission|question)|oc\/config\/providers|es\/api\/(?:editspaces|state|quota|handoffs|mail|surfaces|attention|attention\/session|attention\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|pins|pins\/events|frontdesk\/pointer))$/.test(pathname))
+  ["GET", "HEAD"].includes(method) && (/^\/es\/api\/handoffs\/self\/[A-Za-z0-9_-]{1,128}$/.test(pathname) || /^\/(?:oc\/experimental\/(?:session|usage\/daily|capabilities)|oc\/session\/status|oc\/session\/[\w-]+(?:\/todo|\/children|\/message(?:\/[\w-]+(?:\/part\/[\w-]+\/attachment\/\d{1,4})?)?|\/input(?:\/[\w-]+)?)?|oc\/(?:permission|question)|oc\/config\/providers|es\/api\/(?:editspaces|state|quota|handoffs|mail|surfaces|attention|attention\/session|attention\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|pins|pins\/events|frontdesk\/pointer|decisions\/requests))$/.test(pathname))
 
 // One shared pin's ref in a single path segment, as the browser sends it (a lane's slash encoded once).
 const PIN_REF = "(?:session:[A-Za-z0-9_-]{1,128}|lane:[A-Za-z0-9._-]{1,64}%2[Ff][A-Za-z0-9._-]{1,64})"
@@ -225,7 +226,7 @@ export const apiAllowed = (method: string, pathname: string) => {
       // One completed tool part's large attachment (an image or file a tool returned), fetched lazily
       // by its index instead of inline in the message page. Read-only; Core checks the part's session.
       /^\/oc\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/attachment\/\d{1,4}$/,
-      /^\/es\/api\/(editspaces|state|quota|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work|mail|wake-events|subscriptions|handoffs|lane-provenance|frontdesk\/memory|frontdesk\/pointer|frontdesk\/ignored-failures|surfaces|pins|pins\/events|personas)$/,
+      /^\/es\/api\/(editspaces|state|quota|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work|mail|wake-events|subscriptions|handoffs|lane-provenance|frontdesk\/memory|frontdesk\/pointer|frontdesk\/ignored-failures|surfaces|pins|pins\/events|personas|decisions\/requests)$/,
       /^\/es\/api\/surfaces\/[a-z0-9][a-z0-9-]{0,39}\/snapshot$/,
       /^\/es\/api\/attention(?:\/session|\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/,
       // This host's Front desk model and one request's linked conversation (read-only).
