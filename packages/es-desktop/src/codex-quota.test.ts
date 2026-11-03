@@ -104,7 +104,8 @@ test("the CLI gets only PATH, HOME and an explicit CODEX_HOME: no desktop secret
 test("helpers the CLI started are stopped with it, after a normal read and after a timeout", async () => {
   const normal = await run("ok")
   expect(await gone(Number(await readFile(normal.files.helperPid, "utf8")))).toBe(true)
-  const stuck = await run("silent", 300)
+  // Give the fake CLI time to start its helper under load before the timeout fires.
+  const stuck = await run("silent", 1500)
   expect(stuck.usage.quota).toMatchObject({ state: "unavailable", reason: "timeout" })
   expect(await gone(Number(await readFile(stuck.files.helperPid, "utf8")))).toBe(true)
 })
