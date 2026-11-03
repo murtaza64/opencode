@@ -419,7 +419,9 @@
 .desk-companion [data-slot=text-part-meta] { display: none; }
 
 /* Review items (ATTN-15): "Try" tag in Needs you; the artifact link leads the review view. */
-.nav-decision[data-kind=review] .nav-kind { inline-size: auto; padding-inline: 4px; border-radius: 4px; font-size: 10px; font-weight: 600; color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
+.nav-decision[data-kind=try-decision] .nav-kind, .nav-decision[data-kind=review] .nav-kind { inline-size: auto; padding-inline: 4px; border-radius: 4px; font-size: 10px; font-weight: 600; color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
+/* A Surface with a decision waiting on it: the decision count reads as the row's action. */
+.nav-linked-decision { color: var(--peach); font-weight: 600; }
 /* The title row: the request title, then the artifact to open as the primary button (wraps under it when narrow). */
 .home-decision-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .home-decision-title > h3 { flex: 1 1 16em; min-inline-size: 0; }

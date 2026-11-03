@@ -2,7 +2,7 @@
  * surface in the main panel. Content runs in the server-sandboxed frame; the desk renders
  * only the title, owner, update time and health that the registry reports. */
 import { AppHeader } from "./native-header"
-import { createEffect, createResource, createSignal, For, onCleanup, Show } from "solid-js"
+import { createEffect, createResource, createSignal, For, onCleanup, Show, type JSX } from "solid-js"
 import { A } from "@solidjs/router"
 import { ago, sessionHref } from "../state"
 import { isDeliverable, renewDelay, surfaceAddress, surfaceKey, surfaceProblem, surfaceUnavailable, type Surface, type createSurfaces } from "../surfaces"
@@ -145,7 +145,7 @@ export const DeliverableDoneControls = (props: { state: ReturnType<typeof create
     </span>
   </Show>
 
-export const SurfaceView = (props: { id: string; surface?: Surface; checked?: number; onDone?: MarkDone; onLoaded?: () => Promise<unknown>; onRetry: () => void; onClose: () => void }) => {
+export const SurfaceView = (props: { id: string; surface?: Surface; checked?: number; onDone?: MarkDone; onLoaded?: () => Promise<unknown>; onRetry: () => void; onClose: () => void; decisions?: JSX.Element }) => {
   // Seen covers what the human saw, so it waits for the frame: never while loading, offline or failed.
   const doneState = createDeliverableDone(() => props.surface, () => src() && !address.error && props.surface && !surfaceUnavailable(props.surface) ? props.onDone : undefined)
   const onScreen = doneState.onScreen
@@ -193,6 +193,7 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
         </span>
       </div>
     </AppHeader>
+    {props.decisions}
     <Show when={props.surface} fallback={<p class="desk-surface-state">{props.checked ? "This surface was withdrawn by its owner." : "Loading…"}</p>}>{surface =>
       <Show when={!surfaceUnavailable(surface())} fallback={<div class="desk-surface-state">
         <p><bdi dir="auto">{surface().owner}</bdi> is not serving this surface right now{surface().health.last_ok_at ? `; last seen ${ago(surface().health.last_ok_at!)}` : ""}.</p>

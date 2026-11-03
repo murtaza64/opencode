@@ -1,7 +1,7 @@
 /* Another Work host's entry opened in this window (Main1555): its decision, permission, question or Surface, read
  * and acted on through the Local listener's /hosts/<id>/ routes (host-items.ts), so the action happens on the
  * owning host with that host's operator session and the window never switches to that host's tab. */
-import { createResource, createSignal, Match, Show, Switch, type JSX } from "solid-js"
+import { createResource, createSignal, For, Match, Show, Switch, type JSX } from "solid-js"
 import type { PermissionRequest } from "@opencode-ai/sdk/v2"
 import { A } from "@solidjs/router"
 import { createAttention } from "../attention"
@@ -18,6 +18,9 @@ import { AppHeader } from "./native-header"
 import { BuildingHubSlot } from "./buildinghub-link"
 import { SurfaceOwner } from "./surface-owner"
 import { createDeliverableDone, DeliverableDoneControls } from "./desk-surfaces"
+import { useDeskQueue } from "../desk-queue"
+import { artifactSurface, staleArtifact } from "../needs-you"
+import type { Surface } from "../surfaces"
 
 // The parent may clear the entry while this view (and its portalled top-bar row) is still being disposed.
 export const WorkRemoteDetail = (props: { entry: WorkEntry; onClose: () => void }) => {
@@ -41,7 +44,7 @@ export const WorkRemoteDetail = (props: { entry: WorkEntry; onClose: () => void 
 }
 
 // The decision as that host has it now, answered with that host's operator session.
-const RemoteDecision = (props: { host: string; record: NonNullable<Extract<WorkEntry["remote"], { kind: "attention" }>>["record"] }) => {
+export const RemoteDecision = (props: { host: string; record: NonNullable<Extract<WorkEntry["remote"], { kind: "attention" }>>["record"] }) => {
   const attention = createAttention(() => props.record.editspace, { prefix: hostPrefix(props.host) })
   // The ledger's record route answers { record, events }; take the record (RHC readHostDecision returns the body as is).
   const [fresh] = createResource(() => props.record, async record => {
@@ -135,6 +138,7 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
         </span>
       </div>
     </AppHeader>
+    <LinkedDecisions surface={props.surface} host={props.host} />
     <Show when={props.frame === "host"} fallback={<p class="desk-surface-state" data-surface-gap="own-host-only">This link surface is served only on <bdi dir="auto">{props.label}</bdi>; it cannot be shown from another computer yet.
       <Show when={onHost()}>{href => <> <a class="desk-link-button" href={href()} target="_blank" rel="noopener noreferrer" data-open-on-host={props.host} onClick={() => { setOpened(true); done.used() }}>Open on <bdi dir="auto">{props.label}</bdi></a></>}</Show></p>}>
       <Show when={!address.error} fallback={<div class="desk-surface-state" role="alert"><p>Cannot open this surface from <bdi dir="auto">{props.label}</bdi>: {String(address.error?.message ?? address.error)}</p><button class="desk-button" onClick={() => void refetch()}>Try again</button></div>}>
@@ -146,4 +150,27 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
       </Show>
     </Show>
   </div>
+}
+
+/** The decisions that explicitly point at this Surface (`artifact.surface`), answered here with the same native controls
+ * as their own card (DD artifact-try-decision-unification). Open ones first; with none open, the latest that ended, so
+ * its outcome stays visible. Another host's come from that host's list and act on that host. Nothing is merged or rewritten. */
+export const LinkedDecisions = (props: { surface: Surface; host?: string }) => {
+  const queue = useDeskQueue()
+  const work = useDashboard().work
+  const records = () => {
+    const about = (props.host
+      ? work.feeds().find(feed => feed.host.id === props.host)?.state().decisions ?? []
+      : queue.attention.snapshot()?.value.records ?? []).filter(record => artifactSurface(record) === props.surface.id)
+    const open = about.filter(record => record.status === "open")
+    return open.length ? open : about.toSorted((a, b) => b.updated_at - a.updated_at).slice(0, 1)
+  }
+  return <Show when={records().length}>
+    <aside class="surface-decisions attention-home" aria-label={records().length === 1 ? "Decision about this" : `${records().length} decisions about this`}>
+      <For each={records()}>{record => <div class="surface-decision" data-attention-id={record.id}>
+        <Show when={staleArtifact(record, props.surface)}>{note => <p class="surface-decision-stale home-blocked" role="note">{note()} · showing rev {props.surface.revision}</p>}</Show>
+        <Show when={props.host} fallback={<AttentionDecision record={record} attention={queue.attention} />}>{host => <RemoteDecision host={host()} record={record} />}</Show>
+      </div>}</For>
+    </aside>
+  </Show>
 }

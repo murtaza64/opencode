@@ -9,7 +9,7 @@ import { useLocation } from "@solidjs/router"
 import { useDeskQueue } from "../desk-queue"
 import { useDashboard } from "../state"
 import { surfaceKey, surfaceProblem, tryLine, type Surface } from "../surfaces"
-import { needsYou } from "../needs-you"
+import { needsYou, staleArtifact, type LinkedItem } from "../needs-you"
 import { workCountLabel, workSurfaces, type WorkEntry } from "../work-queue"
 import { HostGlyph } from "./icons"
 import { useRequestAgent } from "./attention-decision"
@@ -122,16 +122,40 @@ const HostSurfaceRow = (props: { entry: WorkEntry }) => {
 // A requested deliverable waiting in Needs you: one deterministic line (Try · title · maintainer · revision, plus any
 // health problem); the summary, conversation link and Done live in the reader it opens.
 // Another Work host's (`entry`) opens in this window and its Done goes to that host; its line names the host.
-const TryRow = (props: { surface: Surface; entry?: WorkEntry }) => {
+const TryRow = (props: { surface: Surface; entry?: WorkEntry; outcome?: AttentionRecord }) => {
   const open = useOpenItem()
   const key = () => props.entry?.key ?? surfaceKey(props.surface.id)
-  const line = () => props.entry ? `${tryLine(props.surface)} · on ${props.entry.hostLabel}${props.entry.stale ? " · last known" : ""}` : tryLine(props.surface)
+  // A decision about it that has ended: its outcome rides on the Try until the Surface is viewed.
+  const ended = () => {
+    const outcome = props.outcome
+    if (!outcome) return
+    const chose = outcome.options.find(option => option.id === outcome.answer?.choice_id)?.label
+    return chose ? `you chose ${chose}` : `decision ${outcome.status}`
+  }
+  const line = () => [props.entry ? `${tryLine(props.surface)} · on ${props.entry.hostLabel}${props.entry.stale ? " · last known" : ""}` : tryLine(props.surface), ended()].filter(Boolean).join(" · ")
   return <a href={props.entry?.href ?? itemHref(key())} classList={{ active: open(key()), stale: !!props.entry?.stale }} aria-current={open(key()) ? "page" : undefined} class="nav-item nav-decision nav-try" data-kind="try" data-nav-item={key()}
     data-revision={props.surface.revision} title={line()} aria-label={line()}>
     <span class="nav-kind" aria-hidden="true">Try</span>
     <Show when={props.entry?.host}>{host => <HostGlyph host={host()} />}</Show>
     <span class="nav-title" dir="auto">{props.surface.title}</span>
-    <span class="session-project" classList={{ "home-blocked": !!surfaceProblem(props.surface.health) }}><bdi dir="auto">{surfaceProblem(props.surface.health) ?? props.surface.owner}</bdi> · rev {props.surface.revision}</span>
+    <span class="session-project" classList={{ "home-blocked": !!surfaceProblem(props.surface.health) }}><bdi dir="auto">{surfaceProblem(props.surface.health) ?? props.surface.owner}</bdi> · rev {props.surface.revision}<Show when={ended()}>{text => <> · <bdi dir="auto">{text()}</bdi></>}</Show></span>
+  </a>
+}
+// A Surface and the open decisions pointing at it (DD artifact-try-decision-unification): one row that opens the Surface
+// reader, where the decisions are answered inline. Its line says how many decisions wait and which revision they are about.
+const LinkedRow = (props: { item: LinkedItem }) => {
+  const open = useOpenItem()
+  const location = useLocation()
+  const active = () => open(props.item.key) || (!props.item.host && new URLSearchParams(location.search).get("surface") === props.item.surface.id)
+  const stale = () => props.item.decisions.map(record => staleArtifact(record, props.item.surface)).find(Boolean)
+  const what = () => props.item.decisions.length === 1 ? "decision" : `${props.item.decisions.length} decisions`
+  const line = () => [`Try ${props.item.surface.title} · rev ${props.item.surface.revision} · ${what()}`, stale(), props.item.host ? `on ${props.item.hostLabel}${props.item.stale ? " · last known" : ""}` : undefined].filter(Boolean).join(" · ")
+  return <a href={props.item.href} classList={{ active: active(), stale: props.item.stale }} aria-current={active() ? "page" : undefined} class="nav-item nav-decision nav-try nav-linked" data-kind="try-decision"
+    data-nav-item={props.item.key} data-revision={props.item.surface.revision} title={line()} aria-label={line()}>
+    <span class="nav-kind" aria-hidden="true">Try</span>
+    <Show when={props.item.host}>{host => <HostGlyph host={host()} />}</Show>
+    <span class="nav-title" dir="auto">{props.item.surface.title}</span>
+    <span class="session-project"><span class="nav-linked-decision">{what()}</span> · <Show when={stale()} fallback={<>rev {props.item.surface.revision}</>}>{text => <span class="home-blocked">{text()}</span>}</Show></span>
   </a>
 }
 const SurfaceRow = (props: { surface: Surface; fresh?: boolean }) => {
@@ -150,7 +174,8 @@ const SurfaceRow = (props: { surface: Surface; fresh?: boolean }) => {
 const useWork = () => {
   const queue = useDeskQueue()
   const { work } = useDashboard()
-  return createMemo(() => needsYou({ items: queue.items(), feeds: work.feeds(), fresh: queue.surfaces.deliverables().fresh }))
+  return createMemo(() => needsYou({ items: queue.items(), feeds: work.feeds(), fresh: queue.surfaces.deliverables().fresh, local: queue.surfaces.list(),
+    closed: (queue.attention.snapshot()?.value.records ?? []).filter(record => record.status !== "open") }))
 }
 export const NeedsYouBand = () => {
   const all = useWork()
@@ -158,11 +183,12 @@ export const NeedsYouBand = () => {
   const more = () => Math.max(0, all().entries.length - BAND_LIMIT)
   // "N+" with the hosts behind named, never a falsely complete count.
   // A host that is not current keeps the band (as "0+"), so an empty list never reads as "nothing needs you".
-  return <Show when={all().entries.length || all().fresh.length || all().tries.length || all().partial}>
+  return <Show when={all().entries.length || all().linked.length || all().fresh.length || all().tries.length || all().partial}>
     <section class="needs-you-band" aria-label="Needs you">
       <div class="nav-heading">Needs you <span class="nav-heading-count" dir="ltr" title={all().label.title}>{all().count || all().partial ? all().label.text : ""}</span></div>
       <For each={shown()}>{entry => <DecisionRow entry={entry} />}</For>
-      <For each={all().fresh}>{surface => <TryRow surface={surface} />}</For>
+      <For each={all().linked}>{item => <LinkedRow item={item} />}</For>
+      <For each={all().fresh}>{surface => <TryRow surface={surface} outcome={all().outcomes.get(surfaceKey(surface.id))} />}</For>
       <For each={all().tries}>{entry => <Show when={entry.remote?.kind === "surface" ? entry.remote.surface : undefined}>{surface => <TryRow surface={surface()} entry={entry} />}</Show>}</For>
       <Show when={more()}><button type="button" class="link-button nav-more" onClick={() => setTab("decisions")}>{more()} more in Decisions</button></Show>
     </section>
@@ -180,6 +206,7 @@ export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: stri
   const setFilter = (id: Exclude<NavTab, "agents">, value: string) => setFilters(previous => ({ ...previous, [id]: value }))
   const all = useWork()
   const decisions = createMemo(() => all().entries.filter(entry => matches(`${entry.title} ${entry.hostLabel ?? ""}`, filter("decisions"))))
+  const linkedDecisions = createMemo(() => all().linked.filter(item => matches(`${item.surface.title} ${item.decisions.map(record => record.title).join(" ")} ${item.hostLabel ?? ""}`, filter("decisions"))))
   // History: this host's attention records that no longer need you, newest change first, and ignored failures.
   // Reading only; opening a row shows the record in its own reader and writes nothing.
   const history = createMemo(() => {
@@ -276,12 +303,13 @@ export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: stri
                 if (next === "requests") void refetchRequests()
                 event.currentTarget.parentElement?.querySelector<HTMLElement>(`[data-view=${next}]`)?.focus()
               }}>
-              {label}<Show when={id === "open" && decisions().length}><span class="decision-view-count" dir="ltr">{decisions().length}</span></Show>
+              {label}<Show when={id === "open" && decisions().length + linkedDecisions().length}><span class="decision-view-count" dir="ltr">{decisions().length + linkedDecisions().length}</span></Show>
             </button>}</For>
         </div>
         <FilterBox id="decisions" label="Decisions" />
         <Show when={decisionView() === "open"}>
-          <For each={decisions()} fallback={<div class="dim nav-empty">{filter("decisions") ? "no matches" : "Nothing needs you."}</div>}>{entry => <DecisionRow entry={entry} />}</For>
+          <For each={decisions()} fallback={<Show when={!linkedDecisions().length}><div class="dim nav-empty">{filter("decisions") ? "no matches" : "Nothing needs you."}</div></Show>}>{entry => <DecisionRow entry={entry} />}</For>
+          <For each={linkedDecisions()}>{item => <LinkedRow item={item} />}</For>
         </Show>
         <Show when={decisionView() === "requests" && requests()}>
           <ul class="nav-history" aria-label="Past permission and question requests">

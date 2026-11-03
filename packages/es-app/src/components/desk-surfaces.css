@@ -56,3 +56,11 @@
   .surface-owner-inline { display: none; }
   .surface-owner-menu { display: inline-block; }
 }
+/* Decisions about the Surface on screen (artifact-try-decision-unification): a band under the reader's bar, scrolling on
+ * its own so the frame keeps most of the pane; its own "Open <artifact>" button would only reopen this view. */
+.surface-decisions { flex: none; max-block-size: 45vh; overflow: auto; border-block-end: 1px solid var(--surface0); background: var(--mantle); }
+.surface-decisions .home-decision { padding: 10px 14px; border-block-end: 0; }
+.surface-decisions .home-decision-title > .artifact-open, .surface-decisions .home-decision-title > .artifact-unavailable { display: none; }
+.surface-decision + .surface-decision { border-block-start: 1px solid var(--surface0); }
+.surface-decision-stale { margin: 8px 14px 0; font-size: 12px; }
+@media (max-width: 900px) { .surface-decisions { max-block-size: 55vh; } }

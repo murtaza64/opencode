@@ -8,27 +8,90 @@ import type { AttentionRecord } from "./attention"
 import { deskItems, type DeskItem } from "./desk"
 import type { HomeRequestRow } from "./home-requests"
 import type { HostFeed } from "./host-feed"
-import { deliverables, type Surface } from "./surfaces"
-import { workCountLabel, workQueue, workTries } from "./work-queue"
+import { deliverables, surfaceKey, type Surface } from "./surfaces"
+import { workCountLabel, workQueue, workTries, type WorkEntry } from "./work-queue"
 
-export const needsYou = (input: { items: DeskItem[]; feeds: HostFeed[]; fresh: Surface[] }) => {
+export const needsYou = (input: { items: DeskItem[]; feeds: HostFeed[]; fresh: Surface[]; local?: Surface[]; closed?: AttentionRecord[] }) => {
   const queue = workQueue(input.items, input.feeds)
   const tries = workTries(input.feeds)
-  const count = queue.count + input.fresh.length + tries.entries.length
+  const linked = linkArtifacts({ entries: queue.entries, fresh: input.fresh, tries: tries.entries, local: input.local ?? input.fresh, feeds: input.feeds, closed: input.closed ?? [] })
+  const count = linked.entries.length + linked.fresh.length + linked.tries.length + linked.items.length
   const behind = [...new Set([...queue.behind, ...tries.behind])]
   return {
-    entries: queue.entries,
-    fresh: input.fresh,
+    entries: linked.entries,
+    fresh: linked.fresh,
     /** Other Work hosts' fresh deliverables (host-qualified Try rows). */
-    tries: tries.entries,
+    tries: linked.tries,
+    /** A Surface and the open decisions that point at it, as one item (opens the Surface reader). */
+    linked: linked.items,
+    /** The outcome of a closed decision about a still-fresh Try, by the Try's key. */
+    outcomes: linked.outcomes,
     count,
     partial: behind.length > 0,
     behind,
     /** The Needs you heading: decisions, requests, failures and fresh deliverables of every Work host. */
     label: workCountLabel({ ...queue, count, behind, partial: behind.length > 0 }),
-    /** The Decisions tab: the same entries without deliverables. */
-    decisions: workCountLabel(queue),
+    /** The Decisions tab: the same entries without deliverables; a linked item counts once. */
+    decisions: workCountLabel({ ...queue, count: linked.entries.length + linked.items.length }),
   }
+}
+
+/** One item per artifact: a Surface plus the open decisions whose `artifact.surface` names it on the same host. */
+export type LinkedItem = {
+  /** The Surface's work key (`surface:<id>`, or `<host>~surface:<id>`): opening it opens the Surface reader. */
+  key: string
+  host?: string
+  hostLabel?: string
+  href: string
+  stale: boolean
+  surface: Surface
+  decisions: AttentionRecord[]
+  /** The Surface's current revision is not yet seen. */
+  fresh: boolean
+}
+
+/** The Surface id a record explicitly points at, if any. Titles are never matched. */
+export const artifactSurface = (record: AttentionRecord | undefined) =>
+  typeof record?.artifact?.surface === "string" ? record.artifact.surface : undefined
+
+/** "decision is about rev N" when a decision names an older revision than the Surface now has. */
+export const staleArtifact = (record: AttentionRecord, surface: Surface) => {
+  const revision = Number(record.artifact?.revision)
+  return Number.isFinite(revision) && revision !== surface.revision ? `decision is about rev ${record.artifact?.revision}` : undefined
+}
+
+// Presentation only: records and Surfaces are not changed; a decision whose Surface is not listed stays its own row.
+const linkArtifacts = (input: { entries: WorkEntry[]; fresh: Surface[]; tries: WorkEntry[]; local: Surface[]; feeds: HostFeed[]; closed: AttentionRecord[] }) => {
+  const items = new Map<string, LinkedItem>()
+  const entries = input.entries.filter((entry) => {
+    const record = entry.item?.series ? undefined : entry.item?.record ?? (entry.remote?.kind === "attention" ? entry.remote.record : undefined)
+    const id = artifactSurface(record)
+    const surface = id === undefined ? undefined : entry.host
+      ? input.feeds.find((feed) => feed.host.id === entry.host)?.state().surfaces.find((item) => item.id === id)
+      : input.local.find((item) => item.id === id)
+    if (!record || !surface) return true
+    const key = entry.host ? `${entry.host}~${surfaceKey(surface.id)}` : surfaceKey(surface.id)
+    const item = items.get(key) ?? { key, ...(entry.host ? { host: entry.host, hostLabel: entry.hostLabel } : {}), href: `/?item=${encodeURIComponent(key)}`, stale: entry.stale, surface, decisions: [], fresh: false }
+    items.set(key, { ...item, stale: item.stale || entry.stale, decisions: [...item.decisions, record] })
+    return false
+  })
+  const fresh = input.fresh.filter((surface) => {
+    const item = items.get(surfaceKey(surface.id))
+    if (item) item.fresh = true
+    return !item
+  })
+  const tries = input.tries.filter((entry) => {
+    const item = items.get(entry.key)
+    if (item) item.fresh = true
+    return !item
+  })
+  // A closed local decision about a fresh Try: the Try row shows how it ended until the Surface is viewed.
+  const outcomes = new Map<string, AttentionRecord>()
+  for (const record of input.closed.toSorted((a, b) => a.updated_at - b.updated_at)) {
+    const id = artifactSurface(record)
+    if (id !== undefined && record.status !== "open" && fresh.some((surface) => surface.id === id)) outcomes.set(surfaceKey(id), record)
+  }
+  return { entries, fresh, tries, items: [...items.values()], outcomes }
 }
 
 /** `GET /es/api/attention?include=needs-you-inputs` (dashboard schema needs-you-inputs/1): the open
