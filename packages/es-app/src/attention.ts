@@ -14,7 +14,8 @@ export type AttentionRecord = {
   context: string
   options: AttentionOption[]
   /** Review items only: the one thing to try, at its exact revision. */
-  artifact?: { title: string; url: string; revision: string } | null
+  /** What the record asks about: a web link, or a Surface on the record's own dashboard (attention-lead #504). */
+  artifact?: ({ title: string; revision: string | number } & ({ url: string; surface?: undefined } | { surface: string; url?: undefined })) | null
   recommendation?: string | null
   producer_session: string
   origin_session: string

@@ -8,7 +8,7 @@ import { LinkedText } from "./linked-text"
 import type { BriefResult } from "../desk"
 import { Sketch } from "./attention-brief"
 import { Markdown } from "@opencode-ai/session-ui/markdown"
-import { requestHasSteps, requestMarkdown } from "../request-markdown"
+import { requestHasSteps, requestMarkdown, surfaceRouteHref } from "../request-markdown"
 import { answerDraftKey, attentionPath, blockedReason, contentRevision, decisionLabel, deliveryLabel, inputPayload, inputProblem, inputText, INPUT_KINDS, type createAttention, type AttentionOption, type AttentionRecord, type InputValue } from "../attention"
 import { requestAgent, type AgentRef, type RequestAgent } from "../attention-agent"
 import { ariaShortcut } from "../shortcuts"
@@ -19,6 +19,7 @@ import { DictationField } from "./dictation-field"
 import { dictationInsert } from "../composer"
 import { decisionRef } from "../context-mention"
 import { DESK } from "../desk-identity"
+import { useDeskQueue } from "../desk-queue"
 
 type Attention = ReturnType<typeof createAttention>
 
@@ -236,8 +237,9 @@ const copyBySelection = (text: string) => {
 /** Title and question compared as a reader would: case and spacing ignored. */
 const same = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase()
 
-const RequestText = (props: { record: AttentionRecord }) =>
-  <div class="home-request-text" dir="auto"><Markdown text={requestMarkdown(props.record.context)} cacheKey={`attention-request:${props.record.editspace}:${props.record.id}:${props.record.revision}`} /></div>
+// Bare Surface routes in the request open the in-app reader; on another host's card, that host's Surface.
+const RequestText = (props: { record: AttentionRecord; host?: string }) =>
+  <div class="home-request-text" dir="auto"><Markdown text={requestMarkdown(props.record.context, { host: props.host })} cacheKey={`attention-request:${props.host ?? ""}:${props.record.editspace}:${props.record.id}:${props.record.revision}`} /></div>
 
 const Delivery = (props: { record: AttentionRecord; attention: Attention }) => {
   const delivery = () => props.record.delivery
@@ -285,11 +287,11 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
   // Grouped so a wide pane can set the explanation beside the answer; narrow panes stack the groups in this order.
   return <article class="home-decision" data-attention-id={props.record.id}>
     <header class="home-decision-head"><div class="home-eyebrow"><Requester record={props.record} remote={props.remote} /><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Agent thread</A></div>
-      <Show when={!prepared()}><h3><bdi dir="auto">{props.record.title}</bdi></h3></Show></header>
+      <div class="home-decision-title"><Show when={!prepared()}><h3><bdi dir="auto">{props.record.title}</bdi></h3></Show>
+        <Show when={props.record.artifact}>{artifact => <ArtifactOpen artifact={artifact()} host={props.remote ? props.host : undefined} />}</Show></div></header>
     {/* A prepared brief is one explainer: the human-level question heads it, with its context, the original
       * conversation and the picture beneath; the answer controls sit beside it (wide) or below it (narrow). */}
     <div class="home-decision-explain">
-      <Show when={props.record.artifact}>{artifact => <ReviewArtifact artifact={artifact()} />}</Show>
       <Show when={prepared()}>{prepared => <div class="home-decision-question">
         <h3 class="home-question"><bdi dir="auto">{prepared().question}</bdi></h3>
         {/* The request's own title only when it says something the question does not; Details keeps it. */}
@@ -297,9 +299,9 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
         {review() ? undefined : props.brief}
         {/* Steps the human must perform stay in the producer's exact words, unfolded, above the answer. */}
         {/* Labelled as the request's own text, so its numbering is not read as the brief's steps. */}
-        <Show when={requestHasSteps(props.record)}><p class="home-source home-request-from">From the request</p><RequestText record={props.record} /></Show>
+        <Show when={requestHasSteps(props.record)}><p class="home-source home-request-from">From the request</p><RequestText record={props.record} host={props.remote ? props.host : undefined} /></Show>
       </div>}</Show>
-      <Show when={!prepared()}><RequestText record={props.record} />{review() ? undefined : props.brief}</Show>
+      <Show when={!prepared()}><RequestText record={props.record} host={props.remote ? props.host : undefined} />{review() ? undefined : props.brief}</Show>
       {/* The picture tells the story; the original conversation it came from follows. */}
       {review() ? undefined : props.briefVisual}
       {props.conversation}
@@ -341,20 +343,50 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
       * loaded on open. A quote that failed verification opens it so the full request is not hidden. */}
     <details class="home-details" open={!!props.copy?.quoteFailed && !!prepared() && !requestHasSteps(props.record)} onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>Details</summary>
       {review() ? undefined : props.briefDetails}
-      <Show when={prepared() && !requestHasSteps(props.record)}><section class="home-original"><p class="home-source home-request-from">Original request</p><RequestText record={props.record} /></section></Show>
+      <Show when={prepared() && !requestHasSteps(props.record)}><section class="home-original"><p class="home-source home-request-from">Original request</p><RequestText record={props.record} host={props.remote ? props.host : undefined} /></section></Show>
       <div class="home-source"><bdi dir="ltr">{props.record.id} · {props.record.gate_key} · revision {props.record.revision}</bdi></div><Show when={history()?.version === historyVersion(props.record) ? history() : undefined} fallback={<p>Loading history…</p>}>{item => <Show when={!item().error} fallback={<p>{item().error}</p>}><pre dir="ltr">{JSON.stringify(item().events, null, 2)}</pre></Show>}</Show></details>
     </div>
   </article>
 }
 
-// What to try, as a plain link: opening it records nothing, so the item stays in Needs you until Done.
-const ReviewArtifact = (props: { artifact: NonNullable<AttentionRecord["artifact"]> }) =>
-  <p class="review-artifact">
-    <a class="review-link" href={props.artifact.url} target="_blank" rel="noopener noreferrer" title={props.artifact.url}>
-      <bdi dir="auto">{props.artifact.title}</bdi><Glyph name="link-external" />
-    </a>
-    <span class="home-source">revision <bdi dir="ltr">{props.artifact.revision}</bdi></span>
-  </p>
+// What the record asks about, as the primary button beside the title. A Surface is on the record's own dashboard, so
+// it opens that host's reader here; a web address opens outside the app. Opening records nothing. A Surface not in its
+// host's list reads as unavailable; any other shape gets no button and no guessed link.
+const ArtifactOpen = (props: { artifact: NonNullable<AttentionRecord["artifact"]>; host?: string }) => {
+  const work = useDashboard().work
+  const queue = useDeskQueue()
+  const surfaces = () => props.host ? work.feeds().find(feed => feed.host.id === props.host)?.state().surfaces : queue.surfaces.checked() ? queue.surfaces.list() : undefined
+  const target = (): { href: string; external: boolean } | "unavailable" | undefined => {
+    const artifact = props.artifact
+    if (typeof artifact.surface === "string") {
+      const href = surfaceRouteHref(`/?surface=${artifact.surface}`, props.host)
+      if (!href) return
+      const listed = surfaces()
+      // Until the host's list has loaded, nothing is claimed either way.
+      if (!listed) return
+      return listed.some(surface => surface.id === artifact.surface) ? { href, external: false } : "unavailable"
+    }
+    const url = artifact.url?.trim() ?? ""
+    if (url.startsWith("/")) { const href = surfaceRouteHref(url, props.host); return href ? { href, external: false } : undefined }
+    const parsed = URL.parse(url)
+    if (!parsed || !["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password) return
+    // A link to the owning host's own reader opens it here through host routing.
+    const origin = props.host ? work.host(props.host)?.origin : undefined
+    const routed = origin && parsed.origin === URL.parse(origin)?.origin ? surfaceRouteHref(parsed.pathname + parsed.search, props.host) : undefined
+    return routed ? { href: routed, external: false } : { href: parsed.href, external: true }
+  }
+  const revision = () => String(props.artifact.revision ?? "").trim()
+  const label = () => <><bdi dir="auto">{props.artifact.title}</bdi><Show when={revision()}><span class="artifact-open-rev" dir="ltr"> · rev {revision()}</span></Show></>
+  return <Show when={props.artifact.title?.trim() ? target() : undefined}>{item => {
+    const link = () => { const value = item(); return value === "unavailable" ? undefined : value }
+    return <Show when={link()} fallback={<span class="artifact-unavailable home-muted">{label()} · unavailable</span>}>{link =>
+      <a class="artifact-open" href={link().href} target={link().external ? "_blank" : undefined} rel={link().external ? "noopener noreferrer" : undefined}
+        title={props.artifact.url ?? props.artifact.surface} aria-label={`Open ${props.artifact.title}${revision() ? `, revision ${revision()}` : ""}${link().external ? " (opens outside the app)" : ""}`}>
+        <span>Open </span>{label()}
+        <Show when={link().external}><Glyph name="link-external" /></Show>
+      </a>}</Show>
+  }}</Show>
+}
 
 // A review is answered only by choosing: Done, or its one problem option with what went wrong. A note alone is refused by the ledger.
 const ReviewAnswer = (props: { record: AttentionRecord; attention: Attention; onView?: (view: AttentionView) => void; extra?: JSX.Element }) => {

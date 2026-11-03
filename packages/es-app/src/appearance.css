@@ -420,9 +420,15 @@
 
 /* Review items (ATTN-15): "Try" tag in Needs you; the artifact link leads the review view. */
 .nav-decision[data-kind=review] .nav-kind { inline-size: auto; padding-inline: 4px; border-radius: 4px; font-size: 10px; font-weight: 600; color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
-.review-artifact { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0 0 8px; }
-.review-link { display: inline-flex; align-items: center; gap: 6px; min-inline-size: 0; font-weight: 600; overflow-wrap: anywhere; }
-.review-link svg { flex: none; }
+/* The title row: the request title, then the artifact to open as the primary button (wraps under it when narrow). */
+.home-decision-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.home-decision-title > h3 { flex: 1 1 16em; min-inline-size: 0; }
+.home-decision-title a.artifact-open, .home-decision-title a.artifact-open:visited { display: inline-flex; align-items: center; gap: 6px; max-inline-size: 100%; min-block-size: 28px; padding: 3px 10px; border: 1px solid var(--peach); border-radius: 6px; color: var(--crust); background: var(--peach); font-size: 12px; font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
+.home-decision-title a.artifact-open:hover { background: color-mix(in srgb, var(--peach) 85%, var(--text)); }
+.artifact-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.artifact-open-rev { font-weight: 400; white-space: nowrap; }
+.artifact-open svg { flex: none; }
+.artifact-unavailable { font-size: 12px; }
 
 /* NAV-16/17: Agents filter row and tab feel. Selection is immediate (aria-selected); only the underline eases. */
 .agent-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px 8px 6px; }
