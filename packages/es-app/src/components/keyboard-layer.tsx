@@ -6,6 +6,12 @@ import { useNavigate } from "@solidjs/router"
 import { cycleRegion, installKeyboard, moveRegion, whichKey } from "../keyboard"
 import { SEQUENCES, sequenceLabel, SHORTCUTS, shortcutLabel, type SequenceID, type ShortcutID } from "../shortcuts"
 import "./keyboard-layer.css"
+import { DESK } from "../desk-identity"
+import { host } from "../host"
+
+// The Work desk is shown as Porter; a Personal page keeps "Front desk". A host without a profile is Work.
+const sequenceTitle = (id: SequenceID) =>
+  id === "goDesk" && host()?.profile !== "personal" ? `Go to ${DESK.name}` : SEQUENCES[id].title
 
 const GROUPS = [
   ["app", "Anywhere"],
@@ -57,7 +63,7 @@ export function KeyboardLayer() {
           <div class="kbd-which-key" role="status" aria-live="polite">
             <div class="kbd-which-key-prefix"><kbd dir="ltr">{state().prefix.join(" ")}</kbd> …</div>
             <For each={state().next}>
-              {(entry) => <div><kbd dir="ltr">{entry.key}</kbd> <span dir="auto">{SEQUENCES[entry.id].title}</span></div>}
+              {(entry) => <div><kbd dir="ltr">{entry.key}</kbd> <span dir="auto">{sequenceTitle(entry.id)}</span></div>}
             </For>
           </div>
         )}
@@ -87,7 +93,7 @@ export function KeyboardLayer() {
                         {(id) => (
                           <div class="kbd-row">
                             <dt><kbd dir="ltr">{sequenceLabel(id)}</kbd>{id === "reference" ? <> <kbd dir="ltr">{sequenceLabel("referenceLeader")}</kbd></> : null}</dt>
-                            <dd dir="auto">{SEQUENCES[id].title}</dd>
+                            <dd dir="auto">{sequenceTitle(id)}</dd>
                           </div>
                         )}
                       </For>
