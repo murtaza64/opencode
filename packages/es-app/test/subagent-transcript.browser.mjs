@@ -50,7 +50,17 @@ await context.route("**/*", route => new URL(route.request().url()).origin === p
 const errors = []
 page.on("pageerror", error => errors.push(error.message))
 const dialog = page.getByRole("dialog")
-const trigger = page.getByRole("button", { name: "Agent Explore · inspect-child" })
+// Task calls render as icon chips (a finished turn's adjacent calls may collapse into one closed tool run); the task
+// card's open-transcript link ("Agent Explore · inspect-child") appears once its chip or run is opened.
+const run = page.locator('.tool-run[data-timeline-part-ids*="inspect-child"]')
+const chip = page.locator('.tool-chip[data-timeline-part-id="inspect-child"]')
+const trigger = page.locator('[data-tool-run-member="inspect-child"], .tool-chip[data-timeline-part-id="inspect-child"]')
+  .locator("a").filter({ hasText: "inspect-child" }).first()
+const openRun = async () => {
+  await run.or(chip).first().waitFor()
+  const summary = (await run.count()) ? run.locator(".tool-run-summary") : chip.locator(".tool-chip-summary")
+  if (await summary.getAttribute("aria-expanded") !== "true") await summary.click()
+}
 const requests = () => fixture.calls.filter(call => call.path.startsWith(`/session/${childID}`))
 const childStreams = () => [...fixture.eventStreams.values()].filter(stream => stream.directory === childDirectory)
 const saved = () => page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith("es-app:composer:"))))
@@ -65,12 +75,19 @@ try {
   await editor.press("Meta+m")
   await expect(page.locator(".direct-primary")).toHaveAccessibleName("Steer")
   await editor.evaluate(el => el.setSelectionRange(2, 8))
+  await openRun()
   await trigger.scrollIntoViewIfNeeded()
   await trigger.focus()
   const before = await saved()
   const parentScroll = await scroll()
   expect(requests()).toHaveLength(0)
-  await page.locator('[data-timeline-part-id="untrusted-child"] [role="button"]').click()
+  // Each task call is its own chip; its card shows once opened.
+  const openChip = async (id) => {
+    const summary = page.locator(`.tool-chip[data-timeline-part-id="${id}"] > .tool-chip-summary`)
+    if (await summary.getAttribute("aria-expanded") !== "true") await summary.click()
+  }
+  await openChip("untrusted-child")
+  await page.locator('.tool-chip[data-timeline-part-id="untrusted-child"] .tool-chip-member [role="button"]').first().click()
   await expect(dialog).toHaveCount(0)
   expect(requests()).toHaveLength(0)
   await trigger.focus()
@@ -119,6 +136,7 @@ try {
   for (const direction of ["ltr", "rtl"]) {
     await page.setViewportSize({ width: direction === "rtl" ? 390 : 1440, height: 1000 })
     await page.evaluate(dir => { document.documentElement.dir = dir }, direction)
+    await openChip("failed-child")
     const failed = page.getByRole("button", { name: "Explore · failed-child", exact: true })
     await failed.focus()
     await failed.press("Enter")
