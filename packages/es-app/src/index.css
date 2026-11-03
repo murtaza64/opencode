@@ -2161,3 +2161,46 @@ a.mini-item > .glyph { margin: 0; }
 @media (prefers-reduced-motion: reduce) { .quiet-turns-disclosure { transition: none; } }
 /* A UTC time in agent prose: the text stays; the hover/description gives the reader's local time. */
 abbr.utc-time { text-decoration: underline dotted; text-underline-offset: 2px; cursor: help; }
+
+/* Entity tokens (chip design r4; ux-feel opencode-mail-tool-review rev 4): text height, glyph + name, state inside. */
+.eref { --c: var(--lavender); position: relative; display: inline-flex; align-items: baseline; gap: .28em; vertical-align: baseline; block-size: 1.45em; line-height: 1.45em;
+  max-inline-size: 24ch; padding: 0 .38em; box-sizing: border-box; border-radius: .38em; background: color-mix(in srgb, var(--c) 13%, transparent); color: var(--text);
+  font-size: 1em; white-space: nowrap; unicode-bidi: isolate; cursor: pointer; text-decoration: none; }
+@media (max-width: 600px) { .eref { max-inline-size: 16ch; } }
+.eref .et { overflow: hidden; text-overflow: ellipsis; min-inline-size: 0; }
+.eref > .g, .eref > .av, .eref .emk, .eref .eh { align-self: center; }
+.eref > .g { inline-size: 1em; block-size: 1em; color: var(--c); flex: none; }
+.eref:hover { background: color-mix(in srgb, var(--c) 24%, transparent); }
+.eref:focus-visible { outline: 2px solid var(--accent, var(--lavender)); outline-offset: 1px; }
+.eref.s .esec { color: var(--subtext0); flex: none; font-size: .92em; }
+.eref.missing { --c: var(--overlay0); background: none; border: 1px dashed var(--overlay0); color: var(--subtext0); }
+.eref.m { --c: var(--blue); background: none; padding-inline: 0 .1em; gap: .3em; font-weight: 600; color: var(--blue); }
+.eref.m:hover { background: color-mix(in srgb, var(--blue) 14%, transparent); }
+.eref.m .av { display: inline-grid; place-items: center; inline-size: 1.15em; block-size: 1.15em; border-radius: 50%; background: var(--surface1); color: var(--text); font-size: .62em; line-height: 1; overflow: hidden; flex: none; }
+.eref.m .av img { inline-size: 100%; block-size: 100%; object-fit: cover; }
+.eref.m.me { --c: var(--peach); color: var(--peach); background: color-mix(in srgb, var(--peach) 16%, transparent); padding-inline: .2em .38em; }
+.eref.m.unk { color: var(--subtext0); font-weight: 400; font-style: italic; }
+.eref.d[data-s=open], .eref.d[data-s=snoozed] { --c: var(--peach); }
+.eref.d[data-s=answered] { --c: var(--blue); }
+.eref.d[data-s=resolved] { --c: var(--green); }
+.eref.d[data-s=withdrawn] { --c: var(--overlay0); color: var(--subtext0); }
+.eref.d[data-s=withdrawn] .et { text-decoration: line-through; }
+.eref.d .eans { flex: none; color: var(--c); font-weight: 600; }
+.eref.d .eans::before { content: "· "; color: var(--overlay0); font-weight: 400; }
+.eref .emk { flex: none; inline-size: .42em; block-size: .42em; border-radius: 50%; }
+.eref .emk.warn { background: var(--yellow); }
+.eref .eh { display: inline-flex; color: var(--subtext0); flex: none; }
+.eref .eh .g { inline-size: .95em; block-size: .95em; }
+.eref-card { position: fixed; z-index: 40; max-inline-size: min(22rem, 90vw); padding: 8px 10px; border-radius: 8px; background: var(--surface0); color: var(--text);
+  box-shadow: 0 4px 16px color-mix(in srgb, black 30%, transparent); font-size: 12px; line-height: 1.4; pointer-events: none; }
+.eref-card-head { display: flex; gap: 8px; align-items: baseline; }
+.eref-card dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 6px 0 0; }
+.eref-card dt { color: var(--subtext0); }
+.eref-card dd { margin: 0; }
+.eref-card-preview, .eref-card-foot { margin: 6px 0 0; color: var(--subtext0); }
+/* Phone: the card is a bottom sheet. */
+@media (max-width: 600px) { .eref-card { inset-inline: 8px !important; inset-block-start: auto !important; inset-block-end: 8px; max-inline-size: none; } }
+/* Inside markdown a token replaces a link: no link underline or link colour; round marks under any theme. */
+[data-component="markdown"] a.eref { text-decoration: none; color: var(--text); }
+[data-component="markdown"] a.eref.m { color: var(--blue); }
+.eref .emk, .eref.m .av { border-radius: 50% !important; }

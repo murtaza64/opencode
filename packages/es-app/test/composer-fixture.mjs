@@ -266,6 +266,8 @@ export const createFixture = async () => {
       fixture.pointer = { home: true, revision: fixture.pointer.revision + 1, session: body.session, directory: body.directory, reason: body.reason }
       return json(fixture.pointer)
     }
+    // Persona registry (agent names and avatars): empty unless a test sets fixture.personas.
+    if (url.pathname === "/api/personas" && request.method === "GET") return json({ personas: fixture.personas ?? [] })
     // Front Desk surfaces poll (src/surfaces.ts); none published in these fixtures.
     if (url.pathname === "/api/surfaces" && request.method === "GET") return json({ surfaces: fixture.surfaces ?? [] })
     if (url.pathname === "/api/handoffs" && request.method === "GET")

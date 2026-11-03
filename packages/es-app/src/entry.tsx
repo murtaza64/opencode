@@ -23,6 +23,7 @@ import { BriefsProvider } from "./desk-briefs"
 import { DeskQueueProvider } from "./desk-queue"
 import { TicketTip, wrapTicketRefs } from "./ticket-refs"
 import { wrapUtcTimes } from "./utc-times"
+import { EntityRefs } from "./components/entity-ref"
 import { SessionRefs, wrapSessionRefs } from "./session-mention-dom"
 import { installSidebarKeys, leftOpen } from "./ui"
 import { installAppLinks, installInkLinks } from "./link-url"
@@ -104,6 +105,7 @@ function Providers(props: ParentProps) {
                 <DeskCompanion />
                 <TicketTip container={() => shellEl} />
                 <SessionRefs container={() => shellEl} />
+                <EntityRefs container={() => shellEl} />
                 <KeyboardLayer />
               </div>
               </DeskChatProvider>
