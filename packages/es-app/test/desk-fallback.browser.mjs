@@ -76,10 +76,10 @@ try {
 
   setMiniDown(true)
   await expect(chat().getByText("which is unreachable")).toBeVisible({ timeout: 30_000 })
-  await expect(chat().getByText("using this computer's Front Desk")).toHaveCount(0)
+  await expect(chat().getByText("using this computer's Porter")).toHaveCount(0)
   step("DOWN: read-only offline line during the hold; no fallback yet")
 
-  await expect(chat().getByText("Mac Mini unreachable; using this computer's Front Desk.")).toBeVisible({ timeout: 100_000 })
+  await expect(chat().getByText("Mac Mini unreachable; using this computer's Porter.")).toBeVisible({ timeout: 100_000 })
   await expect(chip()).toContainText("Laptop")
   await expect(chip()).toHaveAttribute("data-placed", "fallback")
   await expect(chat().locator(".transcript")).not.toContainText("Hello from the Mini desk")

@@ -10,6 +10,7 @@ import { contextKey, MAX_CONTEXT, surfaceRef, type ContextRef } from "../context
 import { sessionHref } from "../state"
 import type { Surface } from "../surfaces"
 import { surfaceOwner } from "../surface-owner"
+import { DESK } from "../desk-identity"
 
 /** The context chips a session's draft keeps (same store as the session page's @ chips). */
 const chipStore = (host: string | undefined, session: string) => host ? `es-app:context-refs:${host}:${session}` : `es-app:context-refs:${session}`
@@ -39,8 +40,8 @@ export const SurfaceOwner = (props: { surface: Surface; host?: { id: string; lab
     <Show when={owner()?.state === "ok"} fallback={
       <Show when={owner() && owner()!.state !== "ok"}>
         <span class="surface-head-link" role="status">{(owner() as { why: string }).why}</span>
-        <Show when={desk}>{chat => <button type="button" class="surface-head-text" title="Open the Front desk with this Surface in its draft; nothing is sent"
-          onClick={() => chat().ask(ref())}>Ask Front Desk</button>}</Show>
+        <Show when={desk}>{chat => <button type="button" class="surface-head-text" title={`Open ${DESK.name} with this Surface in its draft; nothing is sent`}
+          onClick={() => chat().ask(ref())}>Ask {DESK.name}</button>}</Show>
       </Show>}>
       <button type="button" class="surface-head-text" title="Open the owning agent's session with this Surface in its draft; nothing is sent" onClick={message}>Message owner</button>
     </Show>

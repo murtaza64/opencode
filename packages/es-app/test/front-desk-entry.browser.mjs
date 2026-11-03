@@ -53,7 +53,7 @@ try {
   const header = page.locator(".native-header .header-desk-toggle")
   const entry = page.locator("[data-nav=front-desk]")
   await expect(header).toBeVisible({ timeout: 120_000 })
-  await expect(header).toHaveAttribute("aria-label", "Front desk chat")
+  await expect(header).toHaveAttribute("aria-label", "Porter (Front desk)")
   const editor = page.locator(".session-page:not(.desk-companion *) textarea").first()
   await editor.fill("draft kept across the toggle")
   const route = page.url()

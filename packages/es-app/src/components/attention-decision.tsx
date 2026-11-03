@@ -16,6 +16,7 @@ import { secretInput } from "../secret-field"
 import { SecretField } from "./secret-field"
 import { useDeskChatOptional } from "../desk-companion"
 import { decisionRef } from "../context-mention"
+import { DESK } from "../desk-identity"
 
 type Attention = ReturnType<typeof createAttention>
 
@@ -382,7 +383,7 @@ const AskAbout = (props: { record: AttentionRecord; host?: string }) => {
   const chat = useDeskChatOptional()
   const [asked, setAsked] = createSignal(false)
   return <Show when={chat}>{(desk) => <span class="desk-ask-about">
-    <button type="button" class="desk-button" title="Add this decision to the Front desk chat's draft; nothing is sent"
+    <button type="button" class="desk-button" title={`Add this decision to ${DESK.name}'s draft; nothing is sent`}
       onClick={() => { desk().ask(decisionRef(props.record, props.host ?? window.location.host)); setAsked(true) }}>Ask about this</button>
     <Show when={asked()}><span class="home-muted" role="status">Added to the chat draft.</span></Show>
   </span>}</Show>

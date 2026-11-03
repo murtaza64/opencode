@@ -14,6 +14,7 @@ import { clearBackend, describeFailure, isTransient, reportBackend } from "./bac
 import { assistantOps, handled, emptyMemory, eraseMemory, nextMemory, type MemoryDocument, type MemoryOp } from "./desk-memory"
 import type { AttentionRecord } from "./attention"
 import { BRIEF_CONTRACT, BRIEF_SCHEMA, BRIEF_SYSTEM, type ConversationDocument, type ConversationThread, briefComplete, briefPacket, briefState, contextNote, deskContext, nextNoteSeq, recordNote, type BriefMeta, type NoteState, type BriefState, type DeskItem, SOURCE_TAIL } from "./desk"
+import { DESK } from "./desk-identity"
 
 const POINTER = "es-app:front-desk:1"
 // This device's desks that a shared desk replaced, kept so they stay one tap away, and the shared desk last announced.
@@ -201,7 +202,7 @@ export const createDeskSession = () => {
     const current = await freshHome()
     if (status() !== "home-claim" || !own || own.create || current.kind !== "local") return verify()
     const result = await writePointer({ expected_revision: current.view.revision, session: own.session, directory: own.directory, reason: "create" })
-    if (!result.ok && !result.view) setError(`Could not make this the Work Front Desk: ${result.error}`)
+    if (!result.ok && !result.view) setError(`Could not make this ${DESK.name}: ${result.error}`)
     await verify()
   }
   /** On the home host with no Work desk yet: keep this host's conversation as an earlier desk and start a new one. */
@@ -255,7 +256,7 @@ export const createDeskSession = () => {
       session: id, directory,
       create: {
         id,
-        title: "Front desk",
+        title: DESK.name,
         ...(agents.some(agent => agent.name === AGENT) ? { agent: AGENT } : {}),
         // Without a usable host model the agent's own resolution applies, and Core reports any failure.
         ...(host.available && host.model ? { model: { providerID: host.model.providerID, id: host.model.modelID } } : {}),
@@ -265,7 +266,7 @@ export const createDeskSession = () => {
     }
     // Saved before the request: without a durable identity a lost response could orphan a conversation.
     try { save(value) } catch {
-      setError("Could not save the front desk identity locally, so no conversation was created. Free browser storage and try again.")
+      setError(`Could not save ${DESK.name}'s identity locally, so no conversation was created. Free browser storage and try again.`)
       return setStatus("none")
     }
     await admit(value)
@@ -330,7 +331,7 @@ export const createDeskSession = () => {
   const detail = async (text: string, parts: ContextPart[], directory?: string) => {
     if (status() === "none" && directory) await start(directory)
     const current = session()
-    if (!current) return "The front desk chat is not available yet."
+    if (!current) return `${DESK.name} is not available yet.`
     // The conversation's own agent and model preference; without a preference, the desk model.
     const fresh = await client().session(current.id, current.directory).catch(() => current)
     try {

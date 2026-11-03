@@ -47,7 +47,7 @@ const expectFits = async (name, page) => {
   ]) {
     if (part === "list" || part === "selected item") {
       // A full-screen sheet covers the nav; it closes from its own header.
-      if (await page.locator(".desk-companion.sheet:not(.closed)").count()) await page.getByRole("button", { name: "Close Front desk chat" }).click()
+      if (await page.locator(".desk-companion.sheet:not(.closed)").count()) await page.getByRole("button", { name: "Close Porter" }).click()
       else if (await page.locator(".desk-companion.overlay:not(.closed)").count()) await page.locator('[data-nav="front-desk"]').click()
     } else if (await page.locator(".desk-companion.closed").count()) await page.locator('[data-nav="front-desk"]').click()
     const result = await reachable(locator)

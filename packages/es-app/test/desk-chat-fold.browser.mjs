@@ -49,7 +49,7 @@ try {
 
   // Close from inside the chat: focus returns to nav; the mounted pane is inert and keeps its width inside.
   await composer.focus()
-  await page.getByRole("button", { name: "Close Front desk chat" }).click()
+  await page.getByRole("button", { name: "Close Porter" }).click()
   await expect(nav).toBeFocused()
   await expect(nav).toHaveAttribute("aria-pressed", "false")
   await expect(companion).toHaveClass(/closed/)
@@ -124,7 +124,7 @@ try {
   expect(Math.round(sheetBox.y + sheetBox.height)).toBe(800)
   await expect(sheet.locator("textarea")).toBeVisible()
   await shot(narrow.page, "390-sheet")
-  await sheet.getByRole("button", { name: "Close Front desk chat" }).click()
+  await sheet.getByRole("button", { name: "Close Porter" }).click()
   await expect(sheet).toHaveClass(/closed/)
   expect(await sheet.evaluate(el => el.inert)).toBe(true)
   await narrow.page.locator('nav.sidebar [data-nav-item="attention:fixture:decision_1"]').click()

@@ -769,7 +769,7 @@ try {
   await editor().fill("my unsent draft")
   const briefsBeforeDetail = hits.brief
   await card.getByRole("button", { name: "More detail" }).click()
-  await card.getByRole("textbox", { name: "Question for the front desk (optional)" }).fill("DESK-Q9 why the canary first?")
+  await card.getByRole("textbox", { name: "Question for Porter (optional)" }).fill("DESK-Q9 why the canary first?")
   await card.getByRole("button", { name: "Ask" }).click()
   await expect(card.locator(".desk-more")).toContainText("Asked in the chat.", { timeout: 20000 })
   await expect(transcript()).toContainText("More detail: Pick a rollout", { timeout: 20000 })

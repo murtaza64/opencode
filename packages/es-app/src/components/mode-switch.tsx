@@ -12,6 +12,7 @@ import { useDeskChat } from "../desk-companion"
 import { useDashboard } from "../state"
 import { deskSessionID } from "../desk-session"
 import { KEY, modeHref, modeOf, REDIRECTS, type Mode } from "../mode"
+import { DESK } from "../desk-identity"
 
 /** Mounted once in the shell: records the last URL seen in each mode. */
 export const trackModes = () => {
@@ -91,10 +92,10 @@ export const NavEntries = (props: { compact?: boolean }) => {
     <A href="/usage" end class="nav-item nav-entry usage-link" activeClass="active" title="Usage" aria-label="Usage">
       <Glyph name="zap" /><Show when={!props.compact}><span class="nav-title">Usage</span></Show>
     </A>
-    <button type="button" class="nav-item nav-entry" data-nav="front-desk" aria-pressed={chat.open()} title={chat.open() ? "Hide Front desk chat" : "Show Front desk chat"}
-      aria-label="Front desk chat" onClick={() => chat.setOpen(!chat.open())}>
-      <Glyph name="comment-discussion" /><Show when={!props.compact}><span class="nav-title">Front desk</span></Show>
-      <Show when={deskBusy()}><span class="dot busy nav-busy" role="status" aria-label="Front desk is working" title="Front desk is working" /></Show>
+    <button type="button" class="nav-item nav-entry" data-nav="front-desk" aria-pressed={chat.open()} title={chat.open() ? `Hide ${DESK.name}` : `Show ${DESK.name}`}
+      aria-label={DESK.label} onClick={() => chat.setOpen(!chat.open())}>
+      <Glyph name="comment-discussion" /><Show when={!props.compact}><span class="nav-title">{DESK.name}</span></Show>
+      <Show when={deskBusy()}><span class="dot busy nav-busy" role="status" aria-label={`${DESK.name} is working`} title={`${DESK.name} is working`} /></Show>
     </button>
     <BackendStatus />
     <HostSwitch compact={props.compact} />

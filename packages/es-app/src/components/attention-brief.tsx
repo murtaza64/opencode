@@ -17,6 +17,7 @@ import contract from "../brief-contract.json"
 import { readBriefFeedback, sendBriefFeedback, type BriefRating } from "../brief-feedback"
 import { briefSemantics, hudPages, SCENE_CUE, type BriefNode, type BriefNodeGroup, type PicturePart } from "../brief-view"
 import { BriefHud } from "./brief-hud"
+import { DESK } from "../desk-identity"
 
 /** Where a cited source opens: the source thread at the cited messages, or a markdown doc in the editspace. */
 const sourceLink = (source: BriefSource, refs: EvidenceRef[], item: DeskItem) => {
@@ -418,7 +419,7 @@ export const MoreDetail = (props: { ask: (question: string) => Promise<string | 
   return <div class="desk-more">
     <Show when={open()} fallback={<button class="desk-button" onClick={() => { setResult(); setOpen(true) }}>More detail</button>}>
       <form class="desk-more-form" onSubmit={event => { event.preventDefault(); void send() }}>
-        <input aria-label="Question for the front desk (optional)" placeholder="What do you want to know? (optional)" dir="auto" maxLength={2000}
+        <input aria-label={`Question for ${DESK.name} (optional)`} placeholder="What do you want to know? (optional)" dir="auto" maxLength={2000}
           value={question()} onInput={event => setQuestion(event.currentTarget.value)} ref={element => queueMicrotask(() => element.focus())} />
         <button class="desk-button home-primary" type="submit" disabled={sending()}>Ask</button>
       </form>

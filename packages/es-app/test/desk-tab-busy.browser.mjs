@@ -31,7 +31,7 @@ try {
   await page.waitForTimeout(1000)
   globalStatus("ses_a", "busy")
   await expect(dot).toHaveCount(1)
-  await expect(dot).toHaveAttribute("aria-label", "Front desk is working")
+  await expect(dot).toHaveAttribute("aria-label", "Porter is working")
   const tab = await nav.boundingBox()
   globalStatus("ses_a", "idle")
   await expect(dot).toHaveCount(0)

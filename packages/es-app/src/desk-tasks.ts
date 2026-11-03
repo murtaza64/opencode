@@ -17,6 +17,7 @@ import type { Session } from "@opencode-ai/sdk/v2"
 import { ascending } from "@opencode-ai/schema/identifier"
 import { oc, SessionCreateError, type MessageWithParts } from "./api"
 import { BRIEF_PERMISSION, readHostModel, type DeskModel, type DeskPointer } from "./desk-session"
+import { DESK } from "./desk-identity"
 
 const PENDING = "es-app:front-desk:task-create:2"
 /** Tasks record the human's question as a no-reply desk message. Only a Core that never answers such a message
@@ -249,7 +250,7 @@ export const createTasks = (anchor: () => DeskPointer | undefined, ensureAnchor:
   const begin = async (question: string, view: string) => {
     const conversation = desk()
     if (!question.trim()) return { error: "Type a question first." }
-    if (!conversation) return { error: "The front desk chat is not available yet." }
+    if (!conversation) return { error: `${DESK.name} is not available yet.` }
     if (pending()) return { error: "The previous task start is not confirmed yet." }
     const host = await readHostModel()
     if (!host.available || !host.model) return { error: `Background tasks are unavailable on this host: ${host.reason}.` }

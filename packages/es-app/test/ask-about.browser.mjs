@@ -61,7 +61,7 @@ try {
   await expect(ask).toBeVisible({ timeout: 120_000 })
   await expect(editor).toBeVisible({ timeout: 60_000 })
   await editor.fill("Before deciding,")
-  await chat.getByRole("button", { name: "Close Front desk chat" }).click()
+  await chat.getByRole("button", { name: "Close Porter" }).click()
   await expect(chat).toHaveClass(/closed/)
   await ask.click()
   await expect(chat).not.toHaveClass(/closed/)

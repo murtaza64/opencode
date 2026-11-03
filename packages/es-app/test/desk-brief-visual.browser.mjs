@@ -278,7 +278,7 @@ try {
       const asks = []
       page.on("request", request => { if (request.method() === "POST" && request.url().includes("/prompt_async")) asks.push(JSON.parse(request.postData())) })
       await card.getByRole("button", { name: "More detail" }).click()
-      await card.getByRole("textbox", { name: "Question for the front desk (optional)" }).fill("Why only writes?")
+      await card.getByRole("textbox", { name: "Question for Porter (optional)" }).fill("Why only writes?")
       await card.getByRole("button", { name: "Ask" }).click()
       await expect(card.locator(".desk-more")).toContainText("Asked in the chat.")
       assert.equal(asks.length, 1)

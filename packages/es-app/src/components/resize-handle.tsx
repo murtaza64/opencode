@@ -1,6 +1,7 @@
 import { panelBounds, panelWidth, keyResize, startDrag, type Side } from "../ui"
+import { DESK } from "../desk-identity"
 
-const LABEL: Record<Side, string> = { left: "Resize sidebar", right: "Resize info panel", companion: "Resize Front desk chat" }
+const LABEL: Record<Side, string> = { left: "Resize sidebar", right: "Resize info panel", companion: `Resize ${DESK.name}` }
 
 /** The resize edge of a side panel: no layout width of its own, a narrow hit strip centred on the panel's
  * seam, a keyboard-operable separator. */

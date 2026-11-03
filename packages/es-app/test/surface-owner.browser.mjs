@@ -65,7 +65,7 @@ try {
   await page.goto(`${preview.origin}/?item=${encodeURIComponent("surface:orphan")}`, { waitUntil: "domcontentloaded" })
   await expect(head.locator(".surface-owner")).toContainText("lane gone-lane not found")
   await expect(head.getByRole("button", { name: "Message owner" })).toHaveCount(0)
-  await head.getByRole("button", { name: "Ask Front Desk" }).click()
+  await head.getByRole("button", { name: "Ask Porter" }).click()
   await expect.poll(() => page.evaluate(() => localStorage.getItem("es-app:context-refs:ses_b") ?? "")).toContain('"id":"orphan"')
   await expect(page.locator(".desk-chat .context-chip[data-kind=surface]")).toContainText("orphan research")
   step("no current owner: says why and Ask Front Desk opens the Front desk with the same chip")

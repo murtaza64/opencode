@@ -5,6 +5,7 @@ import { current, enabled, setEnabled, themeVars } from "../appearance"
 import { TodayCost } from "./today-cost"
 import { Glyph } from "./icons"
 import { useDeskChatOptional } from "../desk-companion"
+import { DESK } from "../desk-identity"
 
 export const nativeHeader =
   typeof navigator !== "undefined" &&
@@ -90,8 +91,8 @@ export const AppHeader = (props: ParentProps<{ inline?: boolean }>) => (
 const DeskToggle = () => {
   const chat = useDeskChatOptional()
   return <Show when={chat}>{(desk) =>
-    <button type="button" class="header-desk-toggle" aria-pressed={desk().open()} aria-label="Front desk chat"
-      title={desk().open() ? "Hide Front desk chat" : "Show Front desk chat"} onClick={() => desk().setOpen(!desk().open())}>
+    <button type="button" class="header-desk-toggle" aria-pressed={desk().open()} aria-label={DESK.label}
+      title={desk().open() ? `Hide ${DESK.name}` : `Show ${DESK.name}`} onClick={() => desk().setOpen(!desk().open())}>
       <Glyph name="comment-discussion" />
     </button>}</Show>
 }

@@ -19,6 +19,7 @@ import { SessionView } from "./pages/session"
 import { ResizeHandle } from "./components/resize-handle"
 import { host } from "./host"
 import { companionWidth, setCompanionDocked } from "./ui"
+import { DESK } from "./desk-identity"
 
 export type CompanionKind = "work" | "session"
 export const companionKind = (pathname: string): CompanionKind => pathname.startsWith("/session/") ? "session" : "work"
@@ -131,12 +132,12 @@ export const DeskStart = (props: { desk: ReturnType<typeof createDeskSession>; d
     {/* Confirm resends the identical create; Core returns the existing conversation if the first one landed. */}
     <Show when={props.desk.status() === "unconfirmed"}><p class="home-warning">Chat start not confirmed. <button class="desk-button" onClick={() => void props.desk.confirm()}>Confirm start</button></p></Show>
     {/* The profile has one Front Desk, on its home host: nothing is started here and no second desk is made. */}
-    <Show when={props.desk.status() === "remote-none"}>{(() => { const home = props.desk.home(); return <p class="home-warning">The Front Desk lives on {home.kind === "remote" ? home.host.label : "its home host"} and has not been started there yet. Start it from that host's window.</p> })()}</Show>
-    <Show when={props.desk.status() === "home-offline"}>{(() => { const home = props.desk.home(); return <p class="home-warning">The Front Desk is on {home.kind === "unreachable" ? home.host.label : "its home host"}, which is unreachable.
+    <Show when={props.desk.status() === "remote-none"}>{(() => { const home = props.desk.home(); return <p class="home-warning">{DESK.name} lives on {home.kind === "remote" ? home.host.label : "its home host"} and has not been started there yet. Start it from that host's window.</p> })()}</Show>
+    <Show when={props.desk.status() === "home-offline"}>{(() => { const home = props.desk.home(); return <p class="home-warning">{DESK.name} is on {home.kind === "unreachable" ? home.host.label : "its home host"}, which is unreachable.
       {/* Drafts stay in this composer; nothing switches while an earlier message to the home is unconfirmed. */}
       {props.desk.decision() === "wait-settle" ? " Your last message to it is not confirmed yet, so this computer's desk waits until it is." : ""} <button class="desk-button" onClick={() => void props.desk.verify()}>Retry</button></p> })()}</Show>
     {/* This host is the Work desk's home and has no Work desk yet; its own conversation becomes it only by choice. */}
-    <Show when={props.desk.status() === "home-claim"}><p class="home-warning">This computer is now the home of the Work Front Desk. Use your current Front desk conversation as the Work desk, or start a new one (the current one stays under Earlier desks).
+    <Show when={props.desk.status() === "home-claim"}><p class="home-warning">This computer is now {DESK.name}'s home. Use your current conversation as {DESK.name}, or start a new one (the current one stays under Earlier desks).
       {" "}<button class="desk-button home-primary" onClick={() => void props.desk.claim()}>Use this conversation</button>
       {" "}<button class="desk-button" disabled={!props.directory} onClick={() => props.directory && void props.desk.startNew(props.directory)}>Start a new one</button></p></Show>
     <Show when={props.desk.status() === "missing"}><p class="home-warning">The saved chat no longer exists. <button class="desk-button" onClick={() => props.desk.forget()}>Clear</button></p></Show>
@@ -168,7 +169,7 @@ export const DeskCompanion = () => {
   }
   return <>
   <Show when={docked()}><ResizeHandle side="companion" /></Show>
-  <aside ref={section} class="desk-companion" classList={{ closed: !chat.open(), sheet: narrow(), overlay: floating() && !narrow() }} aria-label="Front desk chat" aria-hidden={!chat.open()}
+  <aside ref={section} class="desk-companion" classList={{ closed: !chat.open(), sheet: narrow(), overlay: floating() && !narrow() }} aria-label={DESK.label} aria-hidden={!chat.open()}
     style={{ "--companion-width": floating() ? undefined : `${companionWidth()}px` }}>
     <div class="desk-companion-in desk-chat">
       <Show when={chat.desk.error()}><div class="home-warning" role="alert">{chat.desk.error()}</div></Show>
@@ -178,7 +179,7 @@ export const DeskCompanion = () => {
       <Show when={target()} keyed fallback={<DeskStart desk={chat.desk} directory={chat.directory()} />}>
         {(current) => <SessionView sessionID={current.session} directory={current.directory} host={current.host} embedded context={chat.context} onSent={chat.desk.sent}
           incoming={chat.asked} onIncoming={chat.takeAsked}
-          headerStart={<><button class="header-icon desk-chat-hide" aria-label="Close Front desk chat" title="Close Front desk chat" onClick={close}>
+          headerStart={<><button class="header-icon desk-chat-hide" aria-label={`Close ${DESK.name}`} title={`Close ${DESK.name}`} onClick={close}>
             <Icon name="chevron-down" size="small" /></button><DeskHost desk={chat.desk} /><DeskEarlier desk={chat.desk} /></>} />}
       </Show>
     </div>
@@ -307,7 +308,7 @@ const DeskHost = (props: { desk: ReturnType<typeof createDeskSession> }) => {
   const home = () => props.desk.home()
   const label = () => props.desk.pointer()?.host?.label ?? host()?.label ?? "This computer"
   return <Show when={home().kind === "remote" || home().kind === "unreachable" || props.desk.placed() === "fallback"}>
-    <span class="desk-host" data-placed={props.desk.placed()} title={props.desk.placed() === "fallback" ? `Front Desk on ${label()} (fallback)` : `Front Desk on ${label()}`}>
+    <span class="desk-host" data-placed={props.desk.placed()} title={props.desk.placed() === "fallback" ? `${DESK.name} on ${label()} (fallback)` : `${DESK.name} on ${label()}`}>
       <Icon name="server" size="small" /><bdi dir="auto">{label()}</bdi></span></Show>
 }
 
@@ -322,8 +323,8 @@ const SharedDesk = (props: { desk: ReturnType<typeof createDeskSession> }) => {
   const homeLabel = () => { const home = props.desk.home(); return home.kind === "remote" || home.kind === "unreachable" ? home.host.label : "The home host" }
   return <>
     <Show when={props.desk.placed() === "fallback"}><p class="desk-shared-notice home-source" role="status">
-      {props.desk.home().kind === "remote" ? `${homeLabel()} is back; this desk switches to it once it stays up and your last message here is confirmed.` : `${homeLabel()} unreachable; using this computer's Front Desk.`}</p></Show>
-    <Show when={props.desk.notice()}><p class="desk-shared-notice home-source" role="status">This is now the shared Work Front Desk{where()}.
+      {props.desk.home().kind === "remote" ? `${homeLabel()} is back; this desk switches to it once it stays up and your last message here is confirmed.` : `${homeLabel()} unreachable; using this computer's ${DESK.name}.`}</p></Show>
+    <Show when={props.desk.notice()}><p class="desk-shared-notice home-source" role="status">This is now {DESK.name}, your shared Work desk{where()}.
       <Show when={mine()}>{entry => <> <A href={href(entry())}>Your earlier desk on this device</A>.</>}</Show>
       {" "}<button type="button" class="desk-link-button" onClick={() => props.desk.dismissNotice()}>OK</button></p></Show>
   </>
