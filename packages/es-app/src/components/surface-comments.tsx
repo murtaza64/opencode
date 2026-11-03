@@ -19,6 +19,8 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
   const [comments, setComments] = createSignal<SurfaceComment[]>([])
   const [unavailable, setUnavailable] = createSignal<string>()
   const [ready, setReady] = createSignal(false)
+  // The page declared <meta name="es-comments-anchors" content="off"> (surface-bridge.ts).
+  const [off, setOff] = createSignal(false)
   const [picking, setPicking] = createSignal(false)
   const [shown, setShown] = createSignal(true)
   const [open, setOpen] = createSignal<Open>()
@@ -79,7 +81,7 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
     const listen = (event: MessageEvent) => {
       const data = event.data as { ns?: string; type?: string; [key: string]: unknown }
       if (!data || data.ns !== NS || event.source !== props.frame()?.contentWindow) return
-      if (data.type === "ready") setReady(true)
+      if (data.type === "ready") { setOff(data.policy === "off"); setReady(data.policy !== "off") }
       if (data.type === "rects") setRects(new Map((data.items as { key: string; rect: Box | null; state: AnchorState }[]).map((item) => [item.key, { rect: item.rect, state: item.state }])))
       if (data.type === "picked") {
         setPicking(false)
@@ -219,7 +221,7 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
     }}</Show>
     <div class="sc-toolbar" data-picking={picking() ? "" : undefined} role="toolbar" aria-label="Comments">
       <Show when={picking()} fallback={<>
-        <button class="sc-tool-main" ref={toolbarButton} disabled={!ready() || !!unavailable()} title={unavailable() ?? (ready() ? "Comment on a part of this page (C)" : "This page cannot take comments yet")}
+        <button class="sc-tool-main" ref={toolbarButton} disabled={!ready() || !!unavailable()} title={unavailable() ?? (off() ? "This page turns comments off" : ready() ? "Comment on a part of this page (C)" : "This page cannot take comments yet")}
           onClick={(event) => startPick(event.detail === 0)}>
           <Glyph name="comment-discussion" size={14} /><span>Comment</span><kbd>C</kbd>
         </button>

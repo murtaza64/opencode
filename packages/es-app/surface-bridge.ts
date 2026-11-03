@@ -3,15 +3,25 @@
  * comment text, identity and storage, and never sends comment bodies into the frame (the page is agent-authored).
  *
  * Protocol (postMessage, `ns: "es-comments"`):
- *   app -> frame  { type: "pick", on, keyboard }      enter/leave pick mode; keyboard starts on the first visible candidate
- *                 { type: "track", anchors: [{ key, anchor }] }   report where these anchors are (and keep reporting)
+ *   app -> frame  { type: "pick", on, keyboard, policy }   enter/leave pick mode; keyboard starts on the first visible
+ *                                                     candidate; policy "declared" narrows anchors from now on
+ *                 { type: "track", anchors: [{ key, anchor }], policy }   report where these anchors are (and keep reporting)
  *                 { type: "pick-key", key, shift }    a pick-mode key pressed while the app had focus
  *                 { type: "reveal", key }             scroll that anchor into view
- *   frame -> app  { type: "ready" }
+ *   frame -> app  { type: "ready", policy }           policy: open | declared | off (the page's own declaration)
  *                 { type: "picked", anchor, rect }    rect in frame-viewport pixels
  *                 { type: "pick-end" }                left pick mode without picking (Esc)
  *                 { type: "rects", items: [{ key, rect, state }] }   state: shown | changed | hidden | missing
  *                 { type: "key", key }                "c" (comment) or "Escape", pressed while the page had focus
+ *
+ * Privacy (M1.1). The page declares its policy with <meta name="es-comments-anchors" content="declared|off">; the host
+ * may narrow a pick to "declared" but can never loosen the page's declaration.
+ *   open      any visible block is pickable; anchors carry id, a structural selector and a hash of visible text.
+ *   declared  only [data-anchor] elements are pickable; anchors carry { id, rect } only, and the bridge never reads
+ *             page text, element ids or structure.
+ *   off       no picking, no tracking.
+ * In every policy, a [data-es-private] subtree is never pickable, outlined, hashed or tracked, and form fields and
+ * editable regions never contribute text.
  *
  * Kept as a string (not a bundled module) so every server that serves Surfaces, packaged or not, inlines the same bytes. */
 export const SURFACE_BRIDGE = String.raw`(() => {
@@ -21,7 +31,21 @@ export const SURFACE_BRIDGE = String.raw`(() => {
   const post = (type, payload) => parent.postMessage(Object.assign({ ns: NS, type }, payload || {}), "*");
   const CANDIDATES = "[data-anchor], h1, h2, h3, h4, p, li, pre, table, figure, img, section, article, blockquote, dd, td, th, button, a, label, summary";
   const FNV = text => { let h = 0x811c9dc5; for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(16).padStart(8, "0"); };
-  const textOf = el => (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 4000);
+  const PRIVATE = "[data-es-private]";
+  const isPrivate = el => !!(el && el.closest && el.closest(PRIVATE));
+  // Visible text only: private subtrees, form fields and editable regions (drafts) are skipped.
+  const SKIP = PRIVATE + ", input, textarea, select, option, [contenteditable]:not([contenteditable=false]), script, style, template";
+  const textOf = el => {
+    let text = "";
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, { acceptNode: node => node.nodeType === 1 && node.matches(SKIP) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+    for (let node = walk.nextNode(); node && text.length < 8000; node = walk.nextNode()) if (node.nodeType === 3) text += node.data;
+    return text.replace(/\s+/g, " ").trim().slice(0, 4000);
+  };
+  const RANK = { open: 0, declared: 1, off: 2 };
+  const pagePolicy = () => { const meta = document.querySelector('meta[name="es-comments-anchors"]'); const value = meta && meta.getAttribute("content"); return value in RANK ? value : "open"; };
+  // The page's declaration is a floor: the host can narrow it, never loosen it.
+  let hostPolicy = "open";
+  const policy = () => { const page = pagePolicy(); return RANK[hostPolicy] > RANK[page] ? hostPolicy : page; };
   const hashOf = el => FNV(el.tagName + "|" + textOf(el));
   const esc = value => (window.CSS && CSS.escape) ? CSS.escape(value) : String(value).replace(/[^a-zA-Z0-9_-]/g, ch => "\\" + ch);
   const ownId = el => el.getAttribute("data-anchor") || (el.id && !/^\d/.test(el.id) ? el.id : "");
@@ -43,7 +67,9 @@ export const SURFACE_BRIDGE = String.raw`(() => {
   const round = n => Math.round(Math.max(0, Math.min(1, n)) * 10000) / 10000;
   const anchorOf = el => {
     const r = el.getBoundingClientRect(), size = docSize();
-    const anchor = { hash: hashOf(el), rect: { x: round((r.left + scrollX) / size.w), y: round((r.top + scrollY) / size.h), w: round(r.width / size.w), h: round(r.height / size.h) } };
+    const rect = { x: round((r.left + scrollX) / size.w), y: round((r.top + scrollY) / size.h), w: round(r.width / size.w), h: round(r.height / size.h) };
+    if (policy() === "declared") return { id: el.getAttribute("data-anchor").slice(0, 200), rect };
+    const anchor = { hash: hashOf(el), rect };
     const id = ownId(el);
     if (id) anchor.id = id.slice(0, 200);
     const selector = selectorOf(el);
@@ -54,17 +80,18 @@ export const SURFACE_BRIDGE = String.raw`(() => {
   // Never move a comment to a "nearest" element: an anchor whose id and selector both fail is missing, and a
   // rect-only anchor (from another client) is placed by its document fractions.
   const elementOf = anchor => {
+    const declared = policy() === "declared";
     let el = null;
-    if (anchor.id) el = document.querySelector('[data-anchor="' + String(anchor.id).replace(/"/g, '\\"') + '"]') || document.getElementById(anchor.id);
-    if (!el && anchor.selector) { try { el = document.querySelector(anchor.selector); } catch (e) { el = null; } }
-    return el;
+    if (anchor.id) el = document.querySelector('[data-anchor="' + String(anchor.id).replace(/"/g, '\\"') + '"]') || (declared ? null : document.getElementById(anchor.id));
+    if (!el && anchor.selector && !declared) { try { el = document.querySelector(anchor.selector); } catch (e) { el = null; } }
+    return isPrivate(el) ? null : el;
   };
   const resolve = anchor => {
     const el = elementOf(anchor);
     if (el) {
       const r = el.getBoundingClientRect();
       if (!r.width && !r.height) return { rect: null, state: "hidden" };
-      return { rect: viewRect(r), state: anchor.hash && hashOf(el) !== anchor.hash ? "changed" : "shown" };
+      return { rect: viewRect(r), state: anchor.hash && policy() !== "declared" && hashOf(el) !== anchor.hash ? "changed" : "shown" };
     }
     if (!anchor.id && !anchor.selector && anchor.rect) {
       const size = docSize();
@@ -75,7 +102,7 @@ export const SURFACE_BRIDGE = String.raw`(() => {
 
   let tracked = [];
   let frame = 0;
-  const report = () => { frame = 0; post("rects", { items: tracked.map(item => Object.assign({ key: item.key }, resolve(item.anchor))) }); };
+  const report = () => { frame = 0; post("rects", { items: tracked.map(item => Object.assign({ key: item.key }, policy() === "off" ? { rect: null, state: "missing" } : resolve(item.anchor))) }); };
   const schedule = () => { if (!frame) frame = requestAnimationFrame(report); };
   addEventListener("scroll", schedule, { passive: true, capture: true });
   addEventListener("resize", schedule);
@@ -83,8 +110,16 @@ export const SURFACE_BRIDGE = String.raw`(() => {
 
   // Pick mode: an outline follows the pointer (or the keyboard's current candidate); a click or Enter picks.
   let picking = false, current = null, outline = null;
-  const candidates = () => Array.from(document.querySelectorAll(CANDIDATES)).filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
-  const target = el => { for (let node = el; node && node !== document.body; node = node.parentElement) if (node.matches && node.matches(CANDIDATES)) return node; return el; };
+  const selectors = () => policy() === "declared" ? "[data-anchor]" : CANDIDATES;
+  const candidates = () => Array.from(document.querySelectorAll(selectors())).filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && !isPrivate(el); });
+  // The nearest pickable ancestor, or null inside a private subtree or (declared) outside any [data-anchor].
+  const target = el => {
+    if (isPrivate(el)) return null;
+    const match = selectors();
+    for (let node = el; node && node !== document.body; node = node.parentElement) if (node.matches && node.matches(match)) return node;
+    return policy() === "declared" ? null : el;
+  };
+  const hide = () => { current = null; if (outline) outline.style.width = "0px"; };
   const show = el => {
     current = el;
     if (!outline) {
@@ -107,11 +142,16 @@ export const SURFACE_BRIDGE = String.raw`(() => {
     list[index].scrollIntoView({ block: "nearest" });
     show(list[index]);
   };
-  addEventListener("pointermove", event => { if (picking && event.target instanceof Element && event.target !== outline) show(target(event.target)); }, true);
+  addEventListener("pointermove", event => {
+    if (!picking || !(event.target instanceof Element) || event.target === outline) return;
+    const el = target(event.target);
+    if (el) show(el); else hide();
+  }, true);
   addEventListener("click", event => {
     if (!picking) return;
     event.preventDefault(); event.stopPropagation();
-    if (event.target instanceof Element) pick(target(event.target));
+    const el = event.target instanceof Element && target(event.target);
+    if (el) pick(el);
   }, true);
   const typing = el => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
   // Pick-mode keys, pressed in the page or forwarded by the app while its own window has focus.
@@ -136,6 +176,8 @@ export const SURFACE_BRIDGE = String.raw`(() => {
     if (event.source !== parent || !data || data.ns !== NS) return;
     if (data.type === "pick") {
       if (!data.on) return stop();
+      hostPolicy = data.policy === "declared" ? "declared" : "open";
+      if (policy() === "off") { post("pick-end"); return; }
       picking = true;
       document.documentElement.style.cursor = "crosshair";
       if (data.keyboard) {
@@ -144,6 +186,7 @@ export const SURFACE_BRIDGE = String.raw`(() => {
       }
     }
     if (data.type === "pick-key" && picking) pickKey(String(data.key), !!data.shift);
+    if (data.type === "track" && (data.policy === "declared" || data.policy === "open")) hostPolicy = data.policy;
     if (data.type === "track") { tracked = Array.isArray(data.anchors) ? data.anchors.slice(0, 500) : []; schedule(); }
     if (data.type === "reveal") {
       const item = tracked.find(entry => entry.key === data.key);
@@ -151,7 +194,9 @@ export const SURFACE_BRIDGE = String.raw`(() => {
       if (found) found.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
     }
   });
-  post("ready");
+  // After parsing, so the page's policy meta (which follows this script in <head>) is known.
+  const ready = () => post("ready", { policy: pagePolicy() });
+  if (document.readyState === "loading") addEventListener("DOMContentLoaded", ready, { once: true }); else ready();
 })();`
 
 /** `html` with the bridge inlined as the first script in its head, so it runs before the page's own scripts (which may
