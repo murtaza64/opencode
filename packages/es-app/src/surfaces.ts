@@ -3,6 +3,7 @@
  * frame address comes from the app server, which owns the capability. */
 import { clearBackend, reportBackend } from "./backend-status"
 import { createSignal, onCleanup } from "solid-js"
+import { clockTime } from "./local-time"
 
 export type SurfaceHealth = {
   state: "ok" | "error" | "unreachable" | "unchecked"
@@ -54,7 +55,7 @@ const PREFIX = "surface:"
 export const surfaceKey = (id: string) => `${PREFIX}${id}`
 export const surfaceFromKey = (key: string | undefined) => key?.startsWith(PREFIX) ? key.slice(PREFIX.length) : undefined
 
-const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+const clock = (at: number) => clockTime(at)
 
 /** Short truthful health: nothing when live, otherwise what failed and when it was last seen. */
 export const surfaceProblem = (health: SurfaceHealth) => {

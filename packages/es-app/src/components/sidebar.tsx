@@ -27,6 +27,7 @@ import { NavEntries } from "./mode-switch"
 import { TodayCost } from "./today-cost"
 import { waveStart } from "../wave"
 import { NavTabs, NeedsYouBand } from "./nav-tabs"
+import { clockTime } from "../local-time"
 
 /** Project scope for browsing (the same dashboard scope New session targets): a chip in the Agents filter row
  * that opens a short list of projects. Escape or choosing closes it and returns focus to the chip. */
@@ -299,7 +300,7 @@ export default function Sidebar() {
     return { text: behind.length ? `${count}+` : count ? String(count) : "",
       title: `${count} working now${behind.length ? `; ${behind.join(", ")} not current` : ""}` }
   })
-  const clock = (time: number) => new Date(time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  const clock = (time: number) => clockTime(time)
   const dotText = (s: SessionRow, dot: DotState) => {
     const failure = dot === "failed" ? failures.failure(s.id) : undefined
     return failure ? `failed: ${failureLabel(failure)}` : dot

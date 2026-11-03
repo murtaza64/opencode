@@ -20,6 +20,7 @@ import { dictationInsert } from "../composer"
 import { decisionRef } from "../context-mention"
 import { DESK } from "../desk-identity"
 import { useDeskQueue } from "../desk-queue"
+import { dateTime, exactTime, weekdayTime } from "../local-time"
 
 type Attention = ReturnType<typeof createAttention>
 
@@ -289,13 +290,13 @@ const Delivery = (props: { record: AttentionRecord; attention: Attention }) => {
   const target = () => delivery()?.session && delivery()?.session_directory ? { session: delivery()!.session!, directory: delivery()!.session_directory! } : undefined
   return <div class="home-delivery" data-delivery-state={props.record.delivery_state}>
     <p class="home-recorded"><Show when={optionLabel(props.record, props.record.answer?.choice_id)} fallback="You answered">{label => <>You chose <bdi dir="auto">{label()}</bdi></>}</Show>
-      <Show when={props.record.answer?.answered_at}>{at => <> · <time dateTime={new Date(at()).toISOString()} title={new Date(at()).toLocaleString()}>{ago(at())}</time></>}</Show></p>
+      <Show when={props.record.answer?.answered_at}>{at => <> · <time dateTime={new Date(at()).toISOString()} title={exactTime(at())}>{ago(at())}</time></>}</Show></p>
     <Show when={props.record.answer?.input_value !== undefined && props.record.options.find(option => option.id === props.record.answer?.choice_id)}>{option =>
       <p class="home-input-value"><span class="home-source">{option().input?.label ?? "Provided"}</span> <bdi dir="auto" class="home-answer-text">{inputText(option(), props.record.answer?.input_value)}</bdi></p>}</Show>
     <Show when={props.record.answer?.text}><pre class="home-answer-text" dir="auto"><LinkedText text={props.record.answer?.text ?? ""} /></pre></Show>
     <p class={props.record.delivery_state === "blocked" ? "home-blocked" : "home-muted"} role="status">{deliveryLabel(props.record)}<Show when={props.record.delivery_state === "blocked" && delivery()?.reason}> — {blockedReason(delivery()?.reason)}</Show></p>
     <Show when={delivery()?.error && !["presented", "handled"].includes(props.record.delivery_state)}><p class="home-muted">Last attempt failed: <bdi dir="auto">{delivery()?.error}</bdi> · retrying</p></Show>
-    <Show when={delivery()?.copies?.length}><ul class="home-copies"><For each={delivery()?.copies}>{copy => <li><bdi dir="ltr">{copy.session}</bdi> · {copy.state}{copy.presented_at ? ` · presented ${new Date(copy.presented_at).toLocaleString()}` : ""}{copy.handled_at ? ` · acknowledged ${new Date(copy.handled_at).toLocaleString()}` : ""}</li>}</For></ul></Show>
+    <Show when={delivery()?.copies?.length}><ul class="home-copies"><For each={delivery()?.copies}>{copy => <li><bdi dir="ltr">{copy.session}</bdi> · {copy.state}{copy.presented_at ? ` · presented ${dateTime(copy.presented_at)}` : ""}{copy.handled_at ? ` · acknowledged ${dateTime(copy.handled_at)}` : ""}</li>}</For></ul></Show>
     <div class="home-actions"><Show when={target()} fallback={<span class="home-muted">Not delivered yet</span>}>{item => <A href={sessionHref(item().session, item().directory)} aria-label="Open delivered agent thread">Open thread</A>}</Show><Show when={["pending", "blocked", "queued"].includes(props.record.delivery_state)}><button disabled={!canWrite()} onClick={() => props.attention.retryDelivery(props.record)}>Retry delivery</button></Show><button disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "resolve", reason: "Human marked resolved" })}>Mark resolved</button></div>
   </div>
 }
@@ -342,7 +343,7 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
         {/* Labelled as the request's own text, so its numbering is not read as the brief's steps. */}
         <Show when={requestHasSteps(props.record)}><p class="home-source home-request-from">From the request</p><RequestText record={props.record} host={props.remote ? props.host : undefined} /></Show>
       </div>}</Show>
-      <Show when={props.record.routing?.source}>{source => <p class="routing-source home-source"><bdi dir="auto">{source().title ?? source().kind}</bdi><Show when={source().at}>{at => <> · <time dateTime={new Date(at()).toISOString()}>{new Date(at()).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}</time></>}</Show></p>}</Show>
+      <Show when={props.record.routing?.source}>{source => <p class="routing-source home-source"><bdi dir="auto">{source().title ?? source().kind}</bdi><Show when={source().at}>{at => <> · <time dateTime={new Date(at()).toISOString()}>{weekdayTime(at())}</time></>}</Show></p>}</Show>
       <Show when={!prepared() && !routingBrief(props.record)}><RequestText record={props.record} host={props.remote ? props.host : undefined} />{review() ? undefined : props.brief}</Show>
       {/* The picture tells the story; the original conversation it came from follows. */}
       {review() ? undefined : props.briefVisual}
@@ -374,8 +375,8 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
         </li>
       }}</For></ul>}</Show>
     <Show when={props.record.status === "answered"}><Delivery record={props.record} attention={props.attention} /></Show>
-    <Show when={props.record.status === "snoozed"}><p class="home-muted">Snoozed until {props.record.snoozed_until ? new Date(props.record.snoozed_until).toLocaleString() : "unknown"}</p><button disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "wake" })}>Return to Needs you</button></Show>
-    <Show when={["resolved", "withdrawn"].includes(props.record.status)}><p class="home-muted">{props.record.status === "resolved" ? "Resolved" : "Withdrawn"}</p><Show when={props.record.answer}><Show when={props.record.answer?.text}><pre class="home-answer-text" dir="auto"><LinkedText text={props.record.answer?.text ?? ""} /></pre></Show><Show when={optionLabel(props.record, props.record.answer?.choice_id)}>{label => <p class="home-recorded">You chose <bdi dir="auto">{label()}</bdi><Show when={props.record.answer?.answered_at}>{at => <> · <time dateTime={new Date(at()).toISOString()} title={new Date(at()).toLocaleString()}>{ago(at())}</time></>}</Show></p>}</Show><p class="home-muted">{deliveryLabel(props.record)}</p></Show></Show>
+    <Show when={props.record.status === "snoozed"}><p class="home-muted">Snoozed until {props.record.snoozed_until ? dateTime(props.record.snoozed_until) : "unknown"}</p><button disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "wake" })}>Return to Needs you</button></Show>
+    <Show when={["resolved", "withdrawn"].includes(props.record.status)}><p class="home-muted">{props.record.status === "resolved" ? "Resolved" : "Withdrawn"}</p><Show when={props.record.answer}><Show when={props.record.answer?.text}><pre class="home-answer-text" dir="auto"><LinkedText text={props.record.answer?.text ?? ""} /></pre></Show><Show when={optionLabel(props.record, props.record.answer?.choice_id)}>{label => <p class="home-recorded">You chose <bdi dir="auto">{label()}</bdi><Show when={props.record.answer?.answered_at}>{at => <> · <time dateTime={new Date(at()).toISOString()} title={exactTime(at())}>{ago(at())}</time></>}</Show></p>}</Show><p class="home-muted">{deliveryLabel(props.record)}</p></Show></Show>
     </div>
     <div class="home-decision-more">
     {props.more}

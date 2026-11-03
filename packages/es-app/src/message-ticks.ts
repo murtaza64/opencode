@@ -1,4 +1,5 @@
 import type { MailMessage } from "./api"
+import { clockTime } from "./local-time"
 
 // Message ticks (DOUBLE-TICK, android-ops specs/DOUBLE-TICK.md). One state per own message, from durable evidence
 // only: sending (local, no receipt yet) -> sent (durable receipt) -> delivered (promoted into the transcript) -> read
@@ -11,7 +12,7 @@ const RANK: Record<Tick, number> = { failed: -1, sending: 0, sent: 1, delivered:
 /** The later of two states; a failure only replaces a state that never left this device. */
 export const laterTick = (a: Tick | undefined, b: Tick) => !a ? b : b === "failed" ? (a === "sending" ? b : a) : a === "failed" ? b : RANK[b] > RANK[a] ? b : a
 
-const time = (at: number | undefined) => at === undefined || !Number.isFinite(at) ? "" : new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+const time = (at: number | undefined) => at === undefined || !Number.isFinite(at) ? "" : clockTime(at)
 
 /** A transcript user message: delivered at its promotion, read once a turn started after that promotion. */
 export const transcriptTick = (input: { promotedAt: number; turnStarted?: number }): { tick: Tick; label: string } => {

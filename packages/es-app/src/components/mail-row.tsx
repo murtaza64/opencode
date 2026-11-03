@@ -5,11 +5,12 @@ import { MailWakeEvidence } from "./mail-wake-evidence"
 import { MailParty } from "./mail-party"
 import { MailOriginDetail, MailRoute, MailSender, MailSummary, mailPurpose, originOf, senderText } from "./mail-summary"
 import { recipientSession, type MailNamer } from "../mail-names"
+import { dateTime } from "../local-time"
 
 const timestamp = (value: string | number | null) => {
   if (value == null) return ""
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
+  return Number.isNaN(date.getTime()) ? String(value) : dateTime(date)
 }
 
 export const MailRow = (props: { message: MailMessage; ids: Set<string>; anchor?: string; name?: MailNamer; session?: string; replied?: boolean }) => {

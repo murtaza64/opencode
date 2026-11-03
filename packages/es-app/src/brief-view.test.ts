@@ -24,7 +24,11 @@ test("a brief's meaning is one ordered node list: item, authority, question, opt
   expect(view.nodes.map(node => [node.id, node.group, node.mark])).toEqual([
     ["item", "item", undefined], ["authority", "authority", undefined], ["question", "question", undefined], ["option:go", "option", "recommended"], ["option:wait", "option", undefined],
     ["risk:go", "risk", undefined], ["evidence:0", "evidence", undefined], ["unknown:0", "unknown", undefined], ["state", "state", undefined]])
-  expect(view.nodes.find(node => node.id === "state")!.text).toBe("open · revision 2 · as of 01-01 00:00Z")
+  // "as of" reads in the viewer's zone (es-desktop-local-timezone), here pinned to New York.
+  const zone = process.env.TZ
+  process.env.TZ = "America/New_York"
+  expect(briefSemantics(item(), result(), { host: "mini", asOf: 5 }).nodes.find(node => node.id === "state")!.text).toMatch(/^open · revision 2 · as of Dec 31,? (at )?0?7:00 PM$/)
+  process.env.TZ = zone
 })
 
 test("a recorded answer marks its option as chosen; the recommendation stays labelled as a recommendation", () => {

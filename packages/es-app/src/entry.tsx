@@ -22,6 +22,7 @@ import { DashboardProvider } from "./state"
 import { BriefsProvider } from "./desk-briefs"
 import { DeskQueueProvider } from "./desk-queue"
 import { TicketTip, wrapTicketRefs } from "./ticket-refs"
+import { wrapUtcTimes } from "./utc-times"
 import { SessionRefs, wrapSessionRefs } from "./session-mention-dom"
 import { installSidebarKeys, leftOpen } from "./ui"
 import { installAppLinks, installInkLinks } from "./link-url"
@@ -62,13 +63,14 @@ function Providers(props: ParentProps) {
       frame = requestAnimationFrame(() => {
         frame = undefined
         // Our own decorations never need a second pass.
-        const added = [...dirty].filter((el) => el.isConnected && !el.closest(".session-ref, .ticket-ref, .session-chip, .context-picker, .context-chips"))
+        const added = [...dirty].filter((el) => el.isConnected && !el.closest(".session-ref, .ticket-ref, .session-chip, .context-picker, .context-chips, .utc-time"))
         dirty.clear()
         const set = new Set(added)
         const roots = added.filter((el) => { for (let up = el.parentElement; up; up = up.parentElement) if (set.has(up)) return false; return true })
         for (const root of roots) {
           wrapTicketRefs(root)
           wrapSessionRefs(root)
+          wrapUtcTimes(root)
         }
         if (roots.length) shellEl?.dispatchEvent(new Event("session-refs-wrapped"))
       })

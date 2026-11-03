@@ -2159,3 +2159,5 @@ a.mini-item > .glyph { margin: 0; }
 .quiet-turns[aria-expanded="true"] .quiet-turns-disclosure { transform: rotate(90deg); }
 :dir(rtl) .quiet-turns-disclosure { transform: scaleX(-1); }
 @media (prefers-reduced-motion: reduce) { .quiet-turns-disclosure { transition: none; } }
+/* A UTC time in agent prose: the text stays; the hover/description gives the reader's local time. */
+abbr.utc-time { text-decoration: underline dotted; text-underline-offset: 2px; cursor: help; }

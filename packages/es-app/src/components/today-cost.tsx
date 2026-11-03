@@ -1,6 +1,7 @@
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { costBand, startTodayCost, STALE_MS, todayCost, type HostCost } from "../today-cost"
 import "./today-cost.css"
+import { clockTime } from "../local-time"
 
 let nextID = 0
 
@@ -18,7 +19,7 @@ export const TodayCost = () => {
   onCleanup(() => clearInterval(tick))
   const id = `today-cost-details-${++nextID}`
   return <Show when={todayCost(now())}>{(cost) => {
-    const time = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    const time = (at: number) => clockTime(at)
     const stale = () => now() - cost().observedAt > STALE_MS
     const age = () => { const minutes = Math.max(0, Math.round((now() - cost().observedAt) / 60_000)); return minutes < 1 ? "just now" : `${minutes}m ago` }
     const hostLine = (item: HostCost) => `${item.label}: ${item.cost !== undefined ? `$${item.cost.toFixed(2)}` : item.state === "pending" ? "reading…" : item.state}${item.note ? ` (${item.note})` : ""}${item.observedAt ? ` · ${time(item.observedAt)}` : ""}${cost().counted.includes(item.id) || item.cost === undefined ? "" : " · not in total"}`

@@ -9,9 +9,10 @@ import { toolOutcome, type Segment } from "../transcript-groups"
 import type { MailNamer } from "../mail-names"
 import { MailOriginDetail, MailRoute, MailSender, MailSummary, mailPurpose, originOf, senderText } from "./mail-summary"
 import { iconEligible, ToolChip, ToolStrip } from "./tool-run"
+import { dateTime } from "../local-time"
 
 type MailSource = { type: "editspace-mail"; id: string; sender: string; recipient: string; senderSession?: string }
-const mailTime = (value: string | number | null) => value == null ? "" : new Date(value).toLocaleString()
+const mailTime = (value: string | number | null) => dateTime(value)
 
 // The legacy SDK message type has no source field yet. Only structured wire
 // metadata can identify mail; message text and synthetic parts cannot.

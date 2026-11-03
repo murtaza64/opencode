@@ -20,6 +20,7 @@ import { ResizeHandle } from "./components/resize-handle"
 import { host } from "./host"
 import { companionWidth, setCompanionDocked } from "./ui"
 import { DESK } from "./desk-identity"
+import { dateTime } from "./local-time"
 
 export type CompanionKind = "work" | "session"
 export const companionKind = (pathname: string): CompanionKind => pathname.startsWith("/session/") ? "session" : "work"
@@ -299,7 +300,7 @@ const DeskFollowUps = (props: { session: string; open: () => boolean }) => {
 const TALLY = [["needs", "!", "need you"], ["working", "", "working"], ["waiting", "", "waiting"], ["unknown", "?", "unclear"], ["result", "", "done"]] as const
 // Each group has its own shape as well as its colour, so colour is never the only signal.
 const GROUPS = [["needs", "!", "Needs you"], ["working", "◐", "Working"], ["waiting", "◷", "Waiting on owners"], ["unknown", "?", "State not recognised"], ["result", "✓", "Completed"]] as const
-const stamp = (at?: number) => at ? <time dateTime={new Date(at).toISOString()}>{new Date(at).toLocaleString()}</time> : <>unknown</>
+const stamp = (at?: number) => at ? <time dateTime={new Date(at).toISOString()}>{dateTime(at)}</time> : <>unknown</>
 
 // One line per row: what, who has it, how long ago. Only an ask for the human or a blocker shows more without opening
 // the row; status, case, timestamps and ids open in place.

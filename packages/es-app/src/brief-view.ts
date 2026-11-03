@@ -3,6 +3,7 @@
  * a projection may only lay nodes out differently, page them, or point to the full brief elsewhere. Reading, paging or
  * speaking a node is never an answer: answers stay with the native decision controls. */
 import { briefItems, briefScene, type BriefItem, type BriefResult, type BriefScene, type BriefShape, type ConversationDocument, type DeskItem, type SceneRole } from "./desk"
+import { shortDateTime } from "./local-time"
 
 const MISSING = "not given"
 
@@ -186,7 +187,7 @@ export const briefSemantics = (item: DeskItem, result: BriefResult, options: { h
     ...result.gaps.map((gap, index): BriefNode => ({ id: `unknown:${index}`, group: "unknown", text: gap })),
     // As of: when this brief was prepared (its job's start), stated only when known.
     { id: "state", group: "state", text: [record && `${record.status}${chosen ? ` · answered ${record.options.find(option => option.id === chosen)?.label ?? chosen}` : ""}`,
-      `revision ${item.revision}`, options.asOf ? `as of ${new Date(options.asOf).toISOString().slice(5, 16).replace("T", " ")}Z` : "as of unknown"].filter(Boolean).join(" · ") },
+      `revision ${item.revision}`, options.asOf ? `as of ${shortDateTime(options.asOf)}` : "as of unknown"].filter(Boolean).join(" · ") },
   ]
   return { item: { key: item.key, ...(options.host ? { host: options.host } : {}), revision: item.revision, title: item.title },
     ...(options.asOf ? { asOf: options.asOf } : {}), nodes: nodes.sort((a, b) => ORDER.indexOf(a.group) - ORDER.indexOf(b.group)) }

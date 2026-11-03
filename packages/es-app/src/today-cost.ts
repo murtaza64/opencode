@@ -10,6 +10,7 @@ import { createSignal } from "solid-js"
 import { oc, type UsageDaily } from "./api"
 import { host, readHost } from "./host"
 import { background } from "./startup"
+import { shortDateTime } from "./local-time"
 
 const MIN_GAP_MS = 60_000
 export const STALE_MS = 15 * 60_000
@@ -152,7 +153,7 @@ const originSubtotal = (hosts: HostCost[]) => {
 
 const clock = (iso: string) => {
   const at = new Date(iso)
-  return Number.isNaN(at.getTime()) ? iso : at.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+  return Number.isNaN(at.getTime()) ? iso : shortDateTime(at)
 }
 
 /** A model with tokens but no price: older Cores report it as cost 0, newer ones as missing-rate. */

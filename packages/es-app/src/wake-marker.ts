@@ -1,4 +1,5 @@
 import type { Message } from "@opencode-ai/sdk/v2"
+import { dateTime } from "./local-time"
 
 /** One passive-review wake recorded by the dashboard (`/es/api/wake-events`); `covers` is the frozen mail list. */
 export type WakeEvent = { id: string; session: string; host?: string; cause: string; recipient?: string; at?: number | null
@@ -47,5 +48,5 @@ export const wakeMarker = (message: Message, messages: readonly Message[], event
     unconfirmed: `${cause.kind}${count} · wake not confirmed`,
   }[state]
   const outcome = { woke: "started a turn", joined: "joined the running turn", unconfirmed: "no reply observed" }[state]
-  return { id: source.id, state, label, covers, title: `${new Date(event?.at ?? message.time.created).toLocaleString()} · ${outcome}` }
+  return { id: source.id, state, label, covers, title: `${dateTime(event?.at ?? message.time.created)} · ${outcome}` }
 }

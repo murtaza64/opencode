@@ -5,9 +5,10 @@ import { MailParty } from "./mail-party"
 import { Glyph } from "./icons"
 import { OriginChip, originOf } from "./mail-summary"
 import { SQUADRON_BRIDGE, squadronSender } from "../mail-origin"
+import { clockTime, exactTime } from "../local-time"
 
-const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-const stamp = (ms: number) => <time dateTime={new Date(ms).toISOString()} title={new Date(ms).toLocaleString()}>{clock(ms)}</time>
+const clock = (ms: number) => clockTime(ms)
+const stamp = (ms: number) => <time dateTime={new Date(ms).toISOString()} title={exactTime(ms)} aria-label={exactTime(ms)}>{clock(ms)}</time>
 
 // States only what the transcript records: which mail became the next turn's input, and when it was sent and received.
 // Same glyph column and party layout as the mail rows it summarizes.

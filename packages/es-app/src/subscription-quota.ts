@@ -2,6 +2,7 @@
  * the snapshot lacks is absent, and an unknown value is a label, never 0. Numbers come only from the host's
  * quota snapshots, never from docs. Kept apart from API spend and token activity. */
 import type { QuotaProvider, QuotaView } from "./api"
+import { weekdayTime } from "./local-time"
 
 export type QuotaBar = { id: string; label: string; percent: number; reset: string | undefined }
 export type QuotaRow = { provider: string; label: string; status: string | undefined; experimental: boolean; bars: QuotaBar[] }
@@ -48,5 +49,5 @@ const windowLabel = (id: string, minutes?: number) => {
 
 const clock = (iso: string | undefined) => {
   const at = iso ? Date.parse(iso) : NaN
-  return Number.isFinite(at) ? new Date(at).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" }) : "an unknown time"
+  return weekdayTime(at, "an unknown time")
 }

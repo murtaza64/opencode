@@ -5,6 +5,7 @@ import { createResource, For, Show } from "solid-js"
 import type { AttentionRecord } from "../attention"
 import { threadWhere, type ConversationThread } from "../desk"
 import { readConversation } from "../desk-session"
+import { dayLabel } from "../local-time"
 
 // Long comments (bot reviews, pasted logs) show their opening; the link opens the whole comment.
 const BOT_PREVIEW = 220
@@ -14,7 +15,7 @@ const preview = (body: string) => {
   const cut = plain.slice(0, BOT_PREVIEW)
   return `${cut.slice(0, cut.lastIndexOf(" ")).trimEnd()}…`
 }
-const day = (when: string) => new Date(when).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+const day = (when: string) => dayLabel(when)
 
 // The name and date link to the comment; the words read as plain text, shortened to their opening.
 const Bubble = (props: { comment: ConversationThread["comments"][number] }) =>
