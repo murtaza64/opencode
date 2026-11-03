@@ -6,6 +6,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 import { ago } from "../state"
 import { initialOf, MAX_BODY, mintCommentId, placement, placementLabel, receiptLabel, threads, type AnchorState, type CommentAnchor, type CommentHost, type SealedComment, type SurfaceComment } from "../surface-comments"
 import { Glyph } from "./icons"
+import { focusHole, placeCard } from "../../../surface-bridge/src/geometry.js"
 import "./surface-comments.css"
 
 type Box = { x: number; y: number; w: number; h: number }
@@ -14,13 +15,6 @@ type Open = { key: string; anchor: CommentAnchor; parent?: string }
 const NS = "es-comments"
 const DRAFT = "__draft"
 const POLL_MS = 30_000
-// Focus card placement, in stage pixels: gap to the anchor, margin to the stage edge, preferred room below, the
-// smallest room worth using, and the tallest card.
-const CARD_GAP = 10
-const CARD_EDGE = 8
-const CARD_ROOM = 260
-const CARD_MIN = 180
-const CARD_MAX = 460
 
 export const SurfaceComments = (props: { host: CommentHost; revision: number; frame: () => HTMLIFrameElement | undefined; stage: () => HTMLElement | undefined }) => {
   const [comments, setComments] = createSignal<SurfaceComment[]>([])
@@ -185,20 +179,14 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
     </Show>
     <Show when={open()}>{(current) => {
       const box = () => boxOf(current().key) ?? { x: size().w / 2 - 100, y: 80, w: 200, h: 0 }
-      const pad = 6
-      const hole = () => ({ x: Math.max(0, box().x - pad), y: Math.max(0, box().y - pad), r: Math.min(size().w, box().x + box().w + pad), b: Math.min(size().h, box().y + box().h + pad) })
+      const hole = () => focusHole(box(), size())
       const thread = () => list().find((item) => item.root.comment_id === current().key)
-      // The card takes the side with room (below unless above has more), capped to that room so its reply box and
-      // actions stay on screen; the thread scrolls inside. With no usable room on either side it sits over the bottom.
-      const roomBelow = () => size().h - hole().b - CARD_GAP - CARD_EDGE
-      const roomAbove = () => hole().y - CARD_GAP - CARD_EDGE
-      const below = () => roomBelow() >= CARD_ROOM || roomBelow() >= roomAbove()
-      const room = () => below() ? roomBelow() : roomAbove()
+      // The side with room, capped so the reply box and actions stay on screen (surface-bridge geometry).
+      const place = () => placeCard(box(), size())
+      const below = () => place().below
       const cardStyle = () => {
-        const left = `${Math.max(CARD_EDGE, Math.min(size().w - 368, box().x))}px`
-        if (room() < CARD_MIN) return { left, bottom: `${CARD_EDGE}px`, "max-block-size": `${Math.min(CARD_MAX, size().h - 2 * CARD_EDGE)}px` }
-        const cap = `${Math.min(CARD_MAX, room())}px`
-        return below() ? { left, top: `${hole().b + CARD_GAP}px`, "max-block-size": cap } : { left, bottom: `${size().h - hole().y + CARD_GAP}px`, "max-block-size": cap }
+        const at = place()
+        return Object.assign({ left: `${at.left}px`, "max-block-size": `${at.maxBlockSize}px` }, at.top === undefined ? { bottom: `${at.bottom}px` } : { top: `${at.top}px` })
       }
       const sending = () => [...outgoing().values()].filter((item) => item.sealed.comment_id === current().key || item.sealed.parent_id === current().key)
       let input: HTMLTextAreaElement | undefined
