@@ -9,6 +9,7 @@ import { cookieName, cookieValid, issueCookie, loopbackHost, pairingCsp, pairing
 import { eventMux } from "../../es-app/event-mux"
 import { eventProtocol, eventPaths } from "../../es-app/event-protocol"
 import { surfaceProxy } from "../../es-app/surface-proxy"
+import { onClientGone, sendRequestBody } from "../../es-app/client-gone"
 import { attentionRoute, bridgedTargets, hostPath, localHost, remoteCookie, remoteSetCookie, remoteTargets, type HostInfo } from "../../es-app/remote-host"
 import type { Bridge } from "./bridge"
 import type { SshPeer } from "./ssh-peer"
@@ -415,7 +416,7 @@ export const serve = async (options: {
       }
       // A secure field's handle stays out of the performance journal.
       const timing = api ? perf?.proxy(req, res, secret ? "es/api/secret-intake/:handle" : `${api[1]}${routeOf(url.pathname.slice(api[1].length + 1))}`) : undefined
-      if (timing) res.on("close", () => timing.done())
+      if (timing) onClientGone(req, res, () => timing.done())
       // The bridged credentials this request carries; a pairing refusal forgets only the cookie it actually used.
       const credentials = bridge && api ? bridge.headers()! : undefined
       // Concatenate the path rather than resolving it: //host must never switch upstreams.
@@ -456,14 +457,17 @@ export const serve = async (options: {
         },
       )
       upstreams.add(upstream)
-      upstream.on("close", () => upstreams.delete(upstream))
+      // Bun emits a client request's "close" as soon as it is sent, so the set is cleared when the response is over.
+      onClientGone(req, res, () => {
+        upstreams.delete(upstream)
+        upstream.destroy()
+      })
       upstream.setTimeout(api ? 15 * 60_000 : 30_000, () => upstream.destroy(new Error("Upstream idle timeout")))
       upstream.on("error", () => {
         if (res.headersSent) return res.destroy()
         finish(502, '{"error":"Attached service unavailable"}', "application/json")
       })
-      res.on("close", () => upstream.destroy())
-      req.pipe(upstream)
+      sendRequestBody(req, upstream)
       return
     }
     const decoded = (() => {
@@ -495,7 +499,7 @@ export const serve = async (options: {
       if (!res.headersSent) finish(500, "Renderer unavailable")
       else res.destroy()
     })
-    res.on("close", () => stream.destroy())
+    onClientGone(req, res, () => stream.destroy())
     stream.pipe(res)
   })
   const mux = eventMux({
@@ -566,7 +570,7 @@ const peerRead = (req: IncomingMessage, res: ServerResponse, target: string, fin
     if (res.headersSent) return res.destroy()
     finish(502, '{"error":"Host unavailable"}', "application/json")
   })
-  res.on("close", () => upstream.destroy())
+  onClientGone(req, res, () => upstream.destroy())
   upstream.end()
 }
 
@@ -595,7 +599,7 @@ const sshRead = (req: IncomingMessage, res: ServerResponse, socketPath: string, 
     if (res.headersSent) return res.destroy()
     finish(502, '{"error":"Host unavailable"}', "application/json")
   })
-  res.on("close", () => upstream.destroy())
+  onClientGone(req, res, () => upstream.destroy())
   upstream.end()
 }
 
@@ -623,7 +627,7 @@ const peerWrite = (
     if (res.headersSent) return res.destroy()
     finish(502, '{"error":"Host unavailable"}', "application/json")
   })
-  res.on("close", () => upstream.destroy())
+  onClientGone(req, res, () => upstream.destroy())
   if (body) return upstream.end(body)
   req.pipe(upstream)
 }

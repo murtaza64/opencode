@@ -15,6 +15,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http"
 import { request as httpsRequest } from "node:https"
+import { onClientGone, sendRequestBody } from "./client-gone"
 
 export type SurfaceEntry = { id: string; upstream: string }
 
@@ -167,8 +168,8 @@ export const surfaceProxy = (options: {
     )
     upstream.setTimeout(30_000, () => upstream.destroy(new Error("Surface idle timeout")))
     upstream.on("error", () => (res.headersSent ? res.destroy() : finish(res, 502, "Surface unreachable")))
-    res.on("close", () => upstream.destroy())
-    req.pipe(upstream)
+    onClientGone(req, res, () => upstream.destroy())
+    sendRequestBody(req, upstream)
   }
 
   return { address, serve, capability }

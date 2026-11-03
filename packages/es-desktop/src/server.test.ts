@@ -317,6 +317,34 @@ test("a tool attachment is proxied keyed, without browser credentials, keeping C
   expect(other.headers.get("content-security-policy")).toContain("script-src 'self'")
 })
 
+test("a client that leaves a proxied event stream closes its upstream connection to Core", async () => {
+  // Raw TCP upstream: the open socket count is what Core would see.
+  const open = new Set<import("node:net").Socket>()
+  const core = (await import("node:net")).createServer((socket) => {
+    open.add(socket)
+    socket.on("close", () => open.delete(socket))
+    socket.on("error", () => {})
+    socket.once("data", () => socket.write("HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n11\r\ndata: connected\n\n\r\n"))
+  }).listen(0, "127.0.0.1")
+  await new Promise((resolve) => core.once("listening", resolve))
+  cleanup.push(async () => void core.close())
+  const opencode = `http://127.0.0.1:${(core.address() as { port: number }).port}`
+  const root = await mkdtemp(path.join(tmpdir(), "es-desktop-stream-"))
+  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  await Bun.write(path.join(root, "index.html"), "<title>Fixture</title>")
+  const server = await serve({ root, opencode, dashboard: opencode })
+  cleanup.push(server.close)
+  for (const _ of [1, 2, 3]) {
+    const abort = new AbortController()
+    const response = await fetch(`${server.origin}/oc/event`, { headers: { "x-editspace-key": server.key }, signal: abort.signal })
+    expect(new TextDecoder().decode((await response.body!.getReader().read()).value)).toBe("data: connected\n\n")
+    abort.abort()
+  }
+  const deadline = Date.now() + 5_000
+  while (open.size && Date.now() < deadline) await Bun.sleep(25)
+  expect(open.size).toBe(0)
+})
+
 test("rejects unauthenticated, cross-origin, and foreign Host requests", async () => {
   const { server, get } = await setup()
   expect((await fetch(server.origin)).status).toBe(403)
