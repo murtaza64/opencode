@@ -64,7 +64,6 @@ try {
     if (extra.length || sent.body.choice_id !== "name-reviewers" || sent.body.input_value !== MAPPING || "text" in sent.body) throw Error(`cleanup answer ${JSON.stringify(posts("cleanup"))}`)
     // The answered request is filed in History, where it shows what was provided.
     await page.reload()
-    await page.locator(".desk-history summary").click()
     await expect(card.locator(".home-input-value")).toContainText("Reviewers")
     await expect(card.locator(".home-input-value bdi")).toHaveText(MAPPING)
     await context.close()
@@ -86,7 +85,6 @@ try {
     if (JSON.stringify(sent.body.input_value) !== JSON.stringify(["carol", "alice"])) throw Error(`pool answer ${JSON.stringify(sent.body)}`)
     // The answered request is filed in History, where it shows what was provided.
     await page.reload()
-    await page.locator(".desk-history summary").click()
     await expect(card.locator(".home-input-value bdi")).toHaveText("Carol T., Alice R.")
     await context.close()
   }

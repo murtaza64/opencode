@@ -59,6 +59,8 @@ let failed = false
 const browser = await chromium.launch({ channel: "chrome", headless: true })
 const open = async (viewport, rtl = false) => {
   const context = await browser.newContext({ viewport, permissions: ["clipboard-read", "clipboard-write"] })
+  // Copy is checked from what the page wrote, so it works without clipboard permission (headless shells deny reads).
+  await context.addInitScript(() => { const write = navigator.clipboard?.writeText?.bind(navigator.clipboard); window.__copied = []; if (navigator.clipboard) navigator.clipboard.writeText = text => { window.__copied.push(text); return write ? write(text).catch(() => undefined) : Promise.resolve() } })
   await context.addInitScript(() => { try { localStorage.setItem("es-app-all-projects", "true"); localStorage.setItem("es-app:front-desk:auto-prepare", "off"); localStorage.setItem("es-app:front-desk:chat-hidden", "0") } catch {} })
   await context.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
   const page = await context.newPage()
@@ -84,7 +86,7 @@ try {
     // Each Copy writes exactly that post's bytes from the request: no heading, separator or label.
     for (const [index, expected] of [[0, POST1], [1, POST2]]) {
       await blocks.nth(index).getByRole("button", { name: /^Copy / }).click()
-      assert.equal(await page.evaluate(() => navigator.clipboard.readText()), expected, `${name}: block ${index} clipboard`)
+      assert.equal(await page.evaluate(() => window.__copied.at(-1)), expected, `${name}: block ${index} clipboard`)
     }
     await expect(blocks.nth(0).locator("blockquote")).not.toContainText("## Post")
     const overflow = await card.evaluate(element => element.scrollWidth - element.clientWidth)

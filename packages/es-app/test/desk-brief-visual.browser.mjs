@@ -279,7 +279,7 @@ try {
       page.on("request", request => { if (request.method() === "POST" && request.url().includes("/prompt_async")) asks.push(JSON.parse(request.postData())) })
       await card.getByRole("button", { name: "More detail" }).click()
       await card.getByRole("textbox", { name: "Question for Porter (optional)" }).fill("Why only writes?")
-      await card.getByRole("button", { name: "Ask" }).click()
+      await card.getByRole("button", { name: "Ask", exact: true }).click()
       await expect(card.locator(".desk-more")).toContainText("Asked in the chat.")
       assert.equal(asks.length, 1)
       assert.equal(asks[0].parts[0].text, `More detail: ${probe.title}\n\nWhy only writes?`)

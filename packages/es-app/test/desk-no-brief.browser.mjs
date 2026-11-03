@@ -66,6 +66,8 @@ const browser = await chromium.launch({ channel: "chrome", headless: true })
 const errors = []
 try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+  // Copy is checked from what the page wrote, so it works without clipboard permission (headless shells deny reads).
+  await context.addInitScript(() => { const write = navigator.clipboard?.writeText?.bind(navigator.clipboard); window.__copied = []; if (navigator.clipboard) navigator.clipboard.writeText = text => { window.__copied.push(text); return write ? write(text).catch(() => undefined) : Promise.resolve() } })
   await context.addInitScript(() => { try { localStorage.setItem("es-app-all-projects", "true"); localStorage.setItem("es-app:front-desk:auto-prepare", "on") } catch {} })
   await context.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
   const page = await context.newPage()
@@ -94,7 +96,7 @@ try {
   await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: preview.origin })
   await card.locator(".home-request-text pre").hover()
   await card.locator('.home-request-text [data-slot="markdown-copy-button"] button').first().click()
-  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), LONG)
+  await expect.poll(() => page.evaluate(() => window.__copied?.at(-1))).toBe(LONG)
   await expect(card).toContainText("The model provider refused sign-in. (ProviderAuthError)")
   await expect(card).toContainText("Briefs unavailable on this host: duolingo-openai is not signed in on this host.")
   await expect(card.getByRole("button", { name: "Prepare again" })).toBeDisabled()
