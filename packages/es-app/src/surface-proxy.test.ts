@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { createServer, type Server } from "node:http"
+import { SURFACE_BRIDGE } from "../surface-bridge"
 import { surfaceProxy, type SurfaceEntry } from "../surface-proxy"
 
 const cleanups: (() => void)[] = []
@@ -169,7 +170,7 @@ describe("surface proxy", () => {
     const html = await fetch(`${base}${src}`)
     const text = await html.text()
 
-    expect(text).toStartWith('<!doctype html><html lang="en"><head><script data-es-comments>(() => {')
+    expect(text).toStartWith(`<!doctype html><html lang="en"><head><script data-es-comments>${SURFACE_BRIDGE}</script>`)
     expect(text.indexOf("data-es-comments")).toBeLessThan(text.indexOf("window.first"))
     expect(text).toEndWith("<body><h1>Board</h1></body></html>")
     expect(Number(html.headers.get("content-length"))).toBe(Buffer.byteLength(text))

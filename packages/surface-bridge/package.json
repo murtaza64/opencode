@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@opencode-ai/surface-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./frame": {
+      "types": "./src/frame.d.ts",
+      "default": "./src/frame.js"
+    }
+  },
+  "scripts": {
+    "test": "bun test"
+  }
+}
