@@ -150,4 +150,32 @@ describe("surface proxy", () => {
     expect(preflight.headers.get("access-control-allow-methods")).toContain("POST")
     expect(await write.text()).toBe("upstream POST /api/note")
   })
+  test("inlines the comment bridge as the first script of an HTML page and leaves other responses untouched", async () => {
+    const page = '<!doctype html><html lang="en"><head><meta charset="utf-8"><script>window.first = 1</script></head><body><h1>Board</h1></body></html>'
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(req) {
+        const path = new URL(req.url).pathname
+        if (path === "/gz.html") return new Response(Bun.gzipSync(page), { headers: { "content-type": "text/html", "content-encoding": "gzip" } })
+        if (path === "/data.json") return Response.json({ ok: true })
+        return new Response(page, { headers: { "content-type": "text/html; charset=utf-8" } })
+      },
+    })
+    cleanups.push(() => server.stop(true))
+    const base = await app(() => [{ id: "board", upstream: `http://127.0.0.1:${server.port}/` }])
+    const { src } = await fetch(`${base}/__es/surface/board`).then(response => response.json())
+
+    const html = await fetch(`${base}${src}`)
+    const text = await html.text()
+
+    expect(text).toStartWith('<!doctype html><html lang="en"><head><script data-es-comments>(() => {')
+    expect(text.indexOf("data-es-comments")).toBeLessThan(text.indexOf("window.first"))
+    expect(text).toEndWith("<body><h1>Board</h1></body></html>")
+    expect(Number(html.headers.get("content-length"))).toBe(Buffer.byteLength(text))
+    expect(html.headers.get("content-security-policy")).toStartWith("sandbox allow-scripts")
+    expect(await fetch(`${base}${src}data.json`).then(response => response.text())).toBe('{"ok":true}')
+    const zipped = await fetch(`${base}${src}gz.html`)
+    expect(await zipped.text()).toBe(page)
+  })
 })

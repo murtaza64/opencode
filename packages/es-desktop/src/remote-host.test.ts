@@ -7,6 +7,12 @@ import { serve } from "./server"
 import { pageNavigation, serviceHosts } from "./policy"
 import type { HostInfo } from "../../es-app/remote-host"
 
+// Surface pages arrive with exactly one comment bridge inlined (es-app surface-bridge.ts); the page itself is untouched.
+const pageOf = (html: string) => {
+  expect(html.match(/<script data-es-comments>/g)?.length).toBe(1)
+  return html.replace(/<script data-es-comments>[\s\S]*?<\/script>/, "")
+}
+
 const cleanup: (() => Promise<unknown>)[] = []
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close()
@@ -208,7 +214,7 @@ test("a remote host's listener opens that host's file surface through its dashbo
   expect(src).toMatch(/^\/__cap\/surface\/api-tests\/[0-9a-z]+-[0-9a-f]{32}\/$/)
   const frame = await fetch(`${miniServer.origin}${src}`)
   expect(frame.status).toBe(200)
-  expect(await frame.text()).toBe(report)
+  expect(pageOf(await frame.text())).toBe(report)
   expect(frame.headers.get("content-security-policy")).toContain(`script-src ${miniServer.origin}${src} 'unsafe-inline'`)
   expect(frame.headers.get("content-security-policy")).toContain("sandbox allow-scripts")
   expect(frame.headers.get("set-cookie")).toBeNull()
@@ -538,9 +544,9 @@ test("the Work view frames another host's file surface from that host through th
   const wing = (await (await get("/hosts/wing/__es/surface/report")).json()).src as string
   expect(mini).toMatch(/^\/__cap\/host\/mini\/surface\/report\/[0-9a-z]+-[0-9a-f]{32}\/$/)
   const frame = await fetch(`${server.origin}${mini}`)
-  expect([frame.status, await frame.text()]).toEqual([200, "<h1>mini report</h1>"])
+  expect([frame.status, pageOf(await frame.text())]).toEqual([200, "<h1>mini report</h1>"])
   expect(frame.headers.get("content-security-policy")).toContain(`script-src ${server.origin}${mini} 'unsafe-inline'`)
-  expect(await (await fetch(`${server.origin}${wing}`)).text()).toBe("<h1>wing report</h1>")
+  expect(pageOf(await (await fetch(`${server.origin}${wing}`)).text())).toBe("<h1>wing report</h1>")
   // A capability is valid only for the host that minted it, and never for this host's own surfaces.
   expect((await fetch(`${server.origin}${mini.replace("/host/mini/", "/host/wing/")}`)).status).toBe(404)
   expect((await fetch(`${server.origin}${mini.replace("/host/mini/", "/")}`)).status).toBe(404)

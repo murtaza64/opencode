@@ -1,0 +1,62 @@
+/* On-surface comments (surface-comments.tsx). Everything sits in .surface-stage, over the frame, in frame pixels. */
+.surface-stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.surface-stage > .desk-surface-frame { flex: 1; border: 0; }
+.sc-markers { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+/* A bubble's top-left corner peeking out at the anchor: rounded on three corners, square where it points. */
+.sc-peek { position: absolute; pointer-events: auto; display: inline-grid; place-items: center; inline-size: 28px; block-size: 28px; padding: 0;
+  border: 2px solid var(--base, #111); border-radius: 4px 14px 14px 14px; background: var(--peach); color: var(--crust, #000);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 45%), 0 0 0 1px rgb(255 255 255 / 12%); cursor: pointer; transition: transform 120ms ease-out, box-shadow 120ms ease-out; }
+.sc-peek:hover, .sc-peek:focus-visible { transform: scale(1.12); box-shadow: 0 4px 14px rgb(0 0 0 / 55%), 0 0 0 2px var(--peach); outline: none; }
+.sc-peek-face { font-size: 12px; font-weight: 700; line-height: 1; }
+.sc-peek-count { position: absolute; inset-block-start: -7px; inset-inline-end: -8px; min-inline-size: 16px; block-size: 16px; padding: 0 4px; border-radius: 8px;
+  background: var(--base, #111); color: var(--text); font-size: 10px; line-height: 16px; text-align: center; box-shadow: 0 0 0 1px var(--surface1); }
+.sc-peek[data-changed] { background: var(--yellow); }
+.sc-peek[data-status=sending] { opacity: .7; } .sc-peek[data-status=failed] { background: var(--red); }
+/* Focus: the anchor stays sharp inside a ring; everything around it dims and blurs. */
+.sc-focus { position: absolute; inset: 0; z-index: 4; }
+.sc-dim { position: absolute; background: rgb(0 0 0 / 42%); backdrop-filter: blur(5px) saturate(.8); -webkit-backdrop-filter: blur(5px) saturate(.8); animation: sc-fade 160ms ease-out; }
+.sc-ring { position: absolute; border-radius: 6px; box-shadow: 0 0 0 2px var(--peach), 0 0 24px rgb(250 179 135 / 25%); pointer-events: none; }
+.sc-card { position: absolute; inline-size: min(360px, calc(100% - 16px)); max-block-size: min(60vh, 460px); overflow: auto; display: grid; gap: 8px; padding: 12px;
+  border-radius: 4px 14px 14px 14px; background: var(--base, #111); border: 1px solid var(--surface1); box-shadow: 0 16px 48px rgb(0 0 0 / 55%); animation: sc-rise 180ms ease-out; }
+.sc-card:not([data-below]) { border-radius: 14px 14px 14px 4px; }
+@keyframes sc-fade { from { opacity: 0; } }
+@keyframes sc-rise { from { opacity: 0; transform: translateY(4px); } }
+.sc-thread { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.sc-comment { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; }
+.sc-face { display: inline-grid; place-items: center; inline-size: 24px; block-size: 24px; border-radius: 4px 12px 12px 12px; background: var(--peach); color: var(--crust, #000); font-size: 11px; font-weight: 700; }
+.sc-comment-head { display: flex; gap: 6px; align-items: baseline; font-size: 12px; }
+.sc-body { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.45; }
+.sc-dim-text { color: var(--subtext0); font-size: 11px; display: inline-flex; align-items: center; gap: 4px; }
+.sc-note { margin: 0; font-size: 12px; color: var(--yellow); }
+.sc-out { padding: 6px 8px; border-radius: 6px; background: var(--surface0); display: grid; gap: 4px; }
+.sc-out[data-state=failed] { box-shadow: inset 2px 0 0 var(--red); }
+.sc-failed { color: var(--red); font-size: 12px; display: inline-flex; gap: 4px; align-items: center; }
+.sc-receipt { margin: 0; font-size: 11px; color: var(--subtext0); display: flex; gap: 4px; align-items: center; }
+.sc-compose { display: grid; gap: 6px; }
+.sc-compose textarea { inline-size: 100%; box-sizing: border-box; resize: vertical; min-block-size: 44px; padding: 6px 8px; border: 1px solid var(--surface1); border-radius: 6px; background: var(--mantle); color: var(--text); font: inherit; font-size: 13px; }
+.sc-compose textarea:focus { outline: none; border-color: var(--peach); }
+.sc-compose-row { display: flex; align-items: center; gap: 8px; } .sc-compose-row .sc-dim-text { margin-inline-end: auto; }
+.sc-send { padding: 3px 12px; border: 1px solid var(--peach); border-radius: 5px; background: var(--peach); color: var(--crust, #000); font-weight: 600; font-size: 12px; }
+.sc-send:disabled { opacity: .45; }
+.sc-text-button { padding: 2px 4px; border: 0; background: none; color: var(--subtext1); font-size: 12px; text-decoration: underline; text-underline-offset: 2px; }
+/* The toolbar: one obvious button, quiet extras. */
+.sc-toolbar { position: absolute; inset-block-end: 14px; inset-inline-end: 14px; z-index: 5; display: flex; align-items: center; gap: 4px; padding: 4px;
+  border-radius: 10px; background: color-mix(in srgb, var(--base, #111) 92%, transparent); border: 1px solid var(--surface1); box-shadow: 0 6px 20px rgb(0 0 0 / 40%); }
+.sc-toolbar[data-picking] { border-color: var(--peach); }
+.sc-tool-main { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 0; border-radius: 7px; background: var(--peach); color: var(--crust, #000); font-weight: 600; font-size: 12px; }
+.sc-tool-main:disabled { background: var(--surface1); color: var(--subtext0); }
+.sc-tool-main kbd { font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0 4px; border-radius: 3px; background: rgb(0 0 0 / 15%); }
+.sc-tool { padding: 5px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--subtext1); font-size: 12px; }
+.sc-tool:hover { background: var(--surface0); }
+.sc-tool-note, .sc-tool-hint { padding: 0 6px; font-size: 11px; color: var(--subtext0); white-space: nowrap; }
+.sc-tool-hint { color: var(--text); }
+@media (prefers-reduced-motion: reduce) {
+  .sc-dim { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgb(0 0 0 / 55%); animation: none; }
+  .sc-card { animation: none; } .sc-peek { transition: none; }
+}
+@media (max-width: 600px) {
+  .sc-toolbar { inset-inline: 8px; inset-block-end: 8px; justify-content: space-between; }
+  .sc-tool-main kbd { display: none; }
+  .sc-peek { inline-size: 32px; block-size: 32px; }
+  .sc-card { inset-inline: 8px !important; inline-size: auto; }
+}

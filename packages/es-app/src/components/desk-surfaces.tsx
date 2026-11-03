@@ -9,6 +9,8 @@ import { isDeliverable, renewDelay, surfaceAddress, surfaceKey, surfaceProblem, 
 import { Glyph } from "./icons"
 import { BuildingHubSlot } from "./buildinghub-link"
 import { SurfaceOwner } from "./surface-owner"
+import { SurfaceComments } from "./surface-comments"
+import { esSurfaceHost } from "../surface-comments"
 import "./desk-surfaces.css"
 
 export const SurfaceList = (props: { surfaces: ReturnType<typeof createSurfaces>; selected?: string; onSelect: (key: string) => void }) => {
@@ -200,9 +202,15 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
         <button class="desk-button" onClick={retry}>Try again</button>
       </div>}>
         <Show when={!address.error} fallback={<div class="desk-surface-state" role="alert"><p>Cannot open this surface: {String(address.error?.message ?? address.error)}</p><button class="desk-button" onClick={retry}>Try again</button></div>}>
-          <Show when={src() ? frameKey() : undefined} keyed fallback={<p class="desk-surface-state" role="status">Opening…</p>}>{_key =>
-            <iframe class="desk-surface-frame" title={surface().title} src={src()} referrerpolicy="no-referrer" onLoad={() => void doneState.loaded(() => props.onLoaded?.() ?? Promise.resolve())}
-              sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" />}</Show>
+          <Show when={src() ? frameKey() : undefined} keyed fallback={<p class="desk-surface-state" role="status">Opening…</p>}>{_key => {
+            const [frame, setFrame] = createSignal<HTMLIFrameElement>()
+            let stage: HTMLDivElement | undefined
+            return <div class="surface-stage" ref={stage}>
+              <iframe ref={setFrame} class="desk-surface-frame" title={surface().title} src={src()} referrerpolicy="no-referrer" onLoad={() => void doneState.loaded(() => props.onLoaded?.() ?? Promise.resolve())}
+                sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" />
+              <SurfaceComments host={esSurfaceHost(props.id)} revision={onScreen()} frame={frame} stage={() => stage} />
+            </div>
+          }}</Show>
         </Show>
       </Show>}
     </Show>

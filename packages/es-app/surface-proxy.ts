@@ -16,6 +16,7 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http"
 import { request as httpsRequest } from "node:https"
 import { onClientGone, sendRequestBody } from "./client-gone"
+import { injectBridge } from "./surface-bridge"
 
 export type SurfaceEntry = { id: string; upstream: string }
 
@@ -29,6 +30,7 @@ const METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])
 const REQUEST_HEADERS = ["accept", "accept-language", "content-type", "content-length", "if-none-match", "if-modified-since", "last-event-id"]
 const RESPONSE_HEADERS = ["content-type", "content-length", "content-encoding", "last-modified", "etag"]
 const REGISTRY_TTL = 3000
+const MAX_INJECTED_PAGE = 8 * 1024 * 1024
 
 /** The edge-bypassed prefix: only capability-checked handlers may serve paths under it. */
 export const CAPABILITY_PREFIX = "/__cap/"
@@ -153,7 +155,7 @@ export const surfaceProxy = (options: {
           response.resume()
           return finish(res, 502, "Surface redirects are not supported; use relative links")
         }
-        res.writeHead(status, {
+        const headers = {
           ...Object.fromEntries(RESPONSE_HEADERS.flatMap((name) => (response.headers[name] ? [[name, response.headers[name]]] : []))),
           "content-security-policy": surfaceCsp(prefix),
           "x-content-type-options": "nosniff",
@@ -161,9 +163,36 @@ export const surfaceProxy = (options: {
           "cache-control": "no-store",
           // The sandboxed frame has an opaque origin; only capability holders reach this response.
           "access-control-allow-origin": "null",
-        })
+        }
         response.on("error", () => res.destroy())
-        response.pipe(res)
+        // Pages get the comment bridge (surface-bridge.ts) inlined; anything else, or an encoded or oversized page,
+        // passes through untouched and simply has no on-surface comments.
+        const encoding = response.headers["content-encoding"]
+        if (req.method !== "GET" || status !== 200 || !String(response.headers["content-type"] ?? "").includes("text/html") || (encoding && encoding !== "identity")) {
+          res.writeHead(status, headers)
+          return response.pipe(res)
+        }
+        const chunks: Buffer[] = []
+        let size = 0
+        const passThrough = () => {
+          response.removeListener("data", collect)
+          response.removeListener("end", inject)
+          res.writeHead(status, headers)
+          chunks.forEach((chunk) => res.write(chunk))
+          response.pipe(res)
+        }
+        const collect = (chunk: Buffer) => {
+          chunks.push(chunk)
+          size += chunk.length
+          if (size > MAX_INJECTED_PAGE) passThrough()
+        }
+        const inject = () => {
+          const body = Buffer.from(injectBridge(Buffer.concat(chunks).toString("utf8")))
+          res.writeHead(status, { ...headers, "content-length": String(body.length) })
+          res.end(body)
+        }
+        response.on("data", collect)
+        response.on("end", inject)
       },
     )
     upstream.setTimeout(30_000, () => upstream.destroy(new Error("Surface idle timeout")))
