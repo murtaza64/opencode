@@ -55,7 +55,7 @@ const settled = async (read, ok = () => true) => {
     await new Promise((resolve) => setTimeout(resolve, wait))
   }
 }
-const barOf = (electron) => settled(async () => electron.windows().find((item) => item.url().startsWith("data:text/html")))
+const barOf = (electron) => settled(async () => electron.windows().find((item) => item.url().startsWith("data:text/html") && item.url().includes("%3Cnav")))
 const stripLabels = (bar) => bar.locator("nav a bdi").allTextContents()
 const hostsMenu = (electron) => electron.evaluate(({ Menu }) => Menu.getApplicationMenu().items.find((item) => item.label === "Hosts").submenu.items.filter((item) => item.accelerator).map((item) => item.label))
 const partitions = async (profile) => (await readdir(path.join(profile, "Partitions")).catch(() => [])).sort()

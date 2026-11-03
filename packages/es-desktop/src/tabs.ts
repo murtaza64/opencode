@@ -69,7 +69,27 @@ export const createTabs = (
     select(id)
   })
   bar.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
+  // Covers the shown host's view until its first document is ready (a launch, restore or first open), so a host whose
+  // document is slow (an app listener's readiness wait, a page host's cold load) reads "Loading <host>" instead of a
+  // plain dark view. No script, data: only.
+  const cover = new WebContentsView({ webPreferences: { ...preferences(barSession), javascript: false } })
+  cover.setBackgroundColor("#111113")
+  cover.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
+  cover.webContents.on("will-navigate", (event) => event.preventDefault())
+  cover.setVisible(false)
+  window.contentView.addChildView(cover)
   window.contentView.addChildView(bar)
+  // Hosts whose first document is not ready yet.
+  const loading = new Set<string>()
+  const covered = { label: "" }
+  const recover = () => {
+    const tab = current()
+    const shown = loading.has(tab.id)
+    cover.setVisible(shown)
+    if (!shown || covered.label === tab.label || cover.webContents.isDestroyed()) return
+    covered.label = tab.label
+    void cover.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(loadingPage(tab.label))}`)
+  }
   const current = () => tabs.find((tab) => tab.id === state.selected) ?? tabs[0]
   const narrow = () => window.getContentBounds().width < NARROW
   const describe = (id: string) => {
@@ -122,6 +142,7 @@ export const createTabs = (
     const bounds = window.getContentBounds()
     const page = current().kind === "page"
     bar.setBounds({ x: 0, y: 0, width: page ? bounds.width : Math.min(stripWidth(), bounds.width), height: TITLE_BAR_HEIGHT })
+    cover.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height })
     views.forEach((view, id) => {
       const tab = tabs.find((item) => item.id === id)!
       const top = tab.kind === "page" ? TITLE_BAR_HEIGHT : 0
@@ -151,9 +172,19 @@ export const createTabs = (
       // autofocused field: a focused password field can hold macOS Secure Input (defensive; DD #645/#651).
       if (tab.kind === "page" && !active()) unfocus(created.webContents)
     })
+    // The first document only: a later reload keeps showing the page it replaces.
+    loading.add(id)
+    const ready = () => {
+      if (!loading.delete(id)) return
+      if (id === state.selected) recover()
+    }
+    created.webContents.once("dom-ready", ready)
+    created.webContents.once("did-fail-load", ready)
+    created.webContents.once("render-process-gone", ready)
     views.set(id, created)
     window.contentView.addChildView(created)
-    // Keep the strip above every host view.
+    // Keep the loading cover and then the strip above every host view.
+    window.contentView.addChildView(cover)
     window.contentView.addChildView(bar)
     layout()
     void created.webContents.loadURL(url ?? tab.url)
@@ -203,6 +234,7 @@ export const createTabs = (
     if (hidden && hidden !== shown) unfocus(hidden.webContents)
     views.forEach((item) => item.setVisible(item === shown))
     layout()
+    recover()
     paint()
     if (active()) shown.webContents.focus()
   }
@@ -274,3 +306,7 @@ const barHTML = (tabs: HostTab[], selected: string, full: boolean, badge: (id: s
       return `<a href="${TAB_URL}${encodeURIComponent(tab.id)}" title="${tip}"${tab.id === selected ? ' aria-current="page"' : ""}><bdi dir="auto">${escape(tab.label)}</bdi>${mark}</a>`
     })
     .join("")}</nav></html>`
+
+// The loading cover's page: the host's name only, centred below the strip, in the app's dark tone.
+const loadingPage = (label: string) =>
+  `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Loading</title><style>html,body{margin:0;height:100%;background:#111113;color:#8a8f98;font:500 14px system-ui;-webkit-user-select:none;user-select:none}main{display:grid;place-items:center;height:calc(100% - ${TITLE_BAR_HEIGHT}px);margin-top:${TITLE_BAR_HEIGHT}px}</style><main><p id="loading">Loading <bdi dir="auto">${escape(label)}</bdi>…</p></main></html>`

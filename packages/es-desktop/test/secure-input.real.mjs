@@ -74,7 +74,7 @@ try {
   await page.focus("#pass")
   await settle()
   readings.B_passwordFocused = owned()
-  const bar = electron.windows().find((item) => item.url().startsWith("data:text/html"))
+  const bar = electron.windows().find((item) => item.url().startsWith("data:text/html") && item.url().includes("%3Cnav"))
   await bar.locator("nav a", { hasText: "Work" }).click()
   await settle()
   readings.B_workShown = { ...owned(), personalActive: await page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName || null) }
