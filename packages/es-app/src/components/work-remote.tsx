@@ -178,10 +178,13 @@ export const LinkedDecisions = (props: { surface: Surface; host?: string }) => {
   }
   return <Show when={records().length}>
     <aside class="surface-decisions attention-home" aria-label={records().length === 1 ? "Decision about this" : `${records().length} decisions about this`}>
-      <For each={records()}>{record => <div class="surface-decision" data-attention-id={record.id}>
-        <Show when={staleArtifact(record, props.surface)}>{note => <p class="surface-decision-stale home-blocked" role="note">{note()} · showing rev {props.surface.revision}</p>}</Show>
-        <Show when={props.host} fallback={<AttentionDecision record={record} attention={queue.attention} />}>{host => <RemoteDecision host={host()} record={record} />}</Show>
-      </div>}</For>
+      {/* Keyed by record id, not object: every refresh delivers new record objects, and re-keying by object would
+        * remount the card under the human's caret. The card gets the current record in place. */}
+      <For each={records().map(record => record.id)}>{id => <Show when={records().find(record => record.id === id)}>{record =>
+        <div class="surface-decision" data-attention-id={id}>
+          <Show when={staleArtifact(record(), props.surface)}>{note => <p class="surface-decision-stale home-blocked" role="note">{note()} · showing rev {props.surface.revision}</p>}</Show>
+          <Show when={props.host} fallback={<AttentionDecision record={record()} attention={queue.attention} />}>{host => <RemoteDecision host={host()} record={record()} />}</Show>
+        </div>}</Show>}</For>
     </aside>
   </Show>
 }
