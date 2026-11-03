@@ -75,3 +75,8 @@ Frame → host:
 ## Changelog
 
 - 1.0.0: extracted from es-app M1 + M1.1 (opencode `knvkxtlo`, `rlvtrklu`) with no behaviour change; `ready` gains `version`.
+
+## Distribution
+
+- Source: this directory at a pinned commit.
+- Artifact: `bun pm pack` in this directory gives `opencode-ai-surface-bridge-<version>.tgz`. It is reproducible (same bytes for the same commit), and the `files` list leaves tests out. Consumers pin it by full sha256.

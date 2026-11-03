@@ -5,6 +5,13 @@
   "private": true,
   "type": "module",
   "license": "MIT",
+  "files": [
+    "PROTOCOL.md",
+    "src/frame.js",
+    "src/frame.d.ts",
+    "src/index.js",
+    "src/index.d.ts"
+  ],
   "exports": {
     ".": {
       "types": "./src/index.d.ts",
@@ -16,6 +23,7 @@
     }
   },
   "scripts": {
-    "test": "bun test"
+    "test": "bun test",
+    "pack": "bun pm pack"
   }
 }
