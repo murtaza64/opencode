@@ -1,6 +1,6 @@
 import { define } from "./internal"
 import type { ModelV2Info } from "@opencode-ai/sdk/v2/types"
-import { Effect, Stream } from "effect"
+import { Clock, Effect, Stream } from "effect"
 import { EventV2 } from "../event"
 import { ModelsDev } from "../models-dev"
 import { ProviderV2 } from "../provider"
@@ -176,7 +176,14 @@ export const ModelsDevPlugin = define({
       }),
     )
     yield* events.subscribe(ModelsDev.Event.Refreshed).pipe(
-      Stream.runForEach(() => ctx.integration.reload().pipe(Effect.andThen(ctx.catalog.reload()))),
+      Stream.runForEach(() =>
+        Effect.gen(function* () {
+          const started = yield* Clock.currentTimeMillis
+          yield* ctx.integration.reload()
+          yield* ctx.catalog.reload()
+          yield* Effect.logInfo("models.dev catalog reloaded", { ms: (yield* Clock.currentTimeMillis) - started })
+        }),
+      ),
       Effect.forkScoped({ startImmediately: true }),
     )
   }),

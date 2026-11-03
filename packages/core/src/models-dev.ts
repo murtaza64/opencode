@@ -181,18 +181,21 @@ const layer = Layer.effect(
       )
     })
 
-    const loadFromDisk = fs.readJson(Flag.OPENCODE_MODELS_PATH ?? filepath).pipe(
+    // Hash of the catalog text this process's cache was built from; undefined when it came from no text
+    // (bundled snapshot, empty) or has not loaded yet. Refresh compares against this, not the shared disk file,
+    // because another process may have rewritten the file since this process read it.
+    let loaded: string | undefined
+
+    const loadFromDisk = fs.readFileString(Flag.OPENCODE_MODELS_PATH ?? filepath).pipe(
+      Effect.flatMap((text) =>
+        Effect.try({ try: () => ({ text, data: JSON.parse(text) as Record<string, Provider> }), catch: () => "corrupt" as const }),
+      ),
       Effect.catch((error) => {
-        if (
-          Flag.OPENCODE_MODELS_PATH === undefined &&
-          error._tag === "FileSystemError" &&
-          error.method === "readJson"
-        ) {
+        if (Flag.OPENCODE_MODELS_PATH === undefined && error === "corrupt") {
           return fs.remove(filepath, { force: true }).pipe(Effect.ignore, Effect.as(undefined))
         }
         return Effect.succeed(undefined)
       }),
-      Effect.map((v) => v as Record<string, Provider> | undefined),
     )
 
     const loadSnapshot = Effect.sync(() =>
@@ -215,8 +218,12 @@ const layer = Layer.effect(
     })
 
     const populate = Effect.gen(function* () {
+      loaded = undefined
       const fromDisk = yield* loadFromDisk
-      if (fromDisk) return fromDisk
+      if (fromDisk) {
+        loaded = Hash.fast(fromDisk.text)
+        return fromDisk.data
+      }
       const snapshot = yield* loadSnapshot
       if (snapshot) return snapshot
       if (Flag.OPENCODE_DISABLE_MODELS_FETCH) return {}
@@ -227,6 +234,7 @@ const layer = Layer.effect(
           return yield* fetchAndWrite()
         }),
       )
+      loaded = Hash.fast(text)
       return JSON.parse(text) as Record<string, Provider>
     }).pipe(Effect.withSpan("ModelsDev.populate"), Effect.orDie)
 
@@ -234,17 +242,30 @@ const layer = Layer.effect(
 
     const get = (): Effect.Effect<Record<string, Provider>> => cachedGet
 
+    // Refreshed makes every loaded Location rebuild its full catalog at once, so announce only when the catalog
+    // differs from the one this process serves. Disk text that another process already refreshed counts too.
+    const adopt = Effect.fnUntraced(function* (text: string, fetched: boolean) {
+      const changed = loaded === undefined || Hash.fast(text) !== loaded
+      yield* Effect.logInfo("models.dev refreshed", { bytes: text.length, fetched, changed })
+      if (!changed) return
+      yield* invalidate
+      yield* events.publish(Event.Refreshed, {})
+    })
+
+    const adoptDisk = fs.readFileString(filepath).pipe(
+      Effect.flatMap((text) => (loaded === undefined ? Effect.void : adopt(text, false))),
+      Effect.catch(() => Effect.void),
+    )
+
     const refresh = Effect.fn("ModelsDev.refresh")(function* (force = false) {
-      if (!force && (yield* fresh())) return
+      if (!force && (yield* fresh())) return yield* adoptDisk
       yield* Effect.scoped(
         Effect.gen(function* () {
           yield* Flock.effect(lockKey)
           // Re-check under the lock: another process may have refreshed between
           // our outer check and lock acquisition.
-          if (!force && (yield* fresh())) return
-          yield* fetchAndWrite()
-          yield* invalidate
-          yield* events.publish(Event.Refreshed, {})
+          if (!force && (yield* fresh())) return yield* adoptDisk
+          yield* adopt(yield* fetchAndWrite(), true)
         }),
       ).pipe(
         Effect.tapCause((cause) => Effect.logError("Failed to fetch models.dev", { cause: cause })),
