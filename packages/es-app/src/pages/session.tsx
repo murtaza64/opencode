@@ -1939,7 +1939,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
           }} />
           <Show when={sessionHost.id}><span class="session-host" title={`On ${sessionHost.label}`}><HostGlyph host={sessionHost.id!} /> <bdi dir="auto">{sessionHost.label}</bdi></span></Show>
           <Show when={sessionHost.readOnly}><span class="dim session-read-only" data-read-only>read only</span></Show>
-          <span class="dim session-state" data-state={workState()}>{workState() === "working" ? "busy" : workState()}</span>
+          {/* The sidebar's round dot; the state word is its label only (chat-activity). */}
+          <span class={`session-state dot ${chatDot(workState()).dot}`} data-state={workState()} role="img"
+            aria-label={workState() === "working" ? "busy" : workState()} title={workState() === "working" ? "busy" : workState()} />
           <Show when={subagentsRunning()}><span class="dim">{subagentsRunning()} subagent(s) running</span></Show>
           <Show when={(session() as any)?.parentID}>
             {(pid) => (

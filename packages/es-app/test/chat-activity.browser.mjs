@@ -54,6 +54,11 @@ try {
   // No visible status words, and the old square spinner is gone.
   await expect(page.locator(".session-work-status:visible")).not.toContainText(/Working|Idle|Reconnecting/)
   await expect(page.locator(".session-work-status:visible .busy-dot")).toHaveCount(0)
+  // The header's state is the same round dot, its word only in the label.
+  const header = page.locator(".session-page .topbar .session-state")
+  await expect(header).toHaveAttribute("aria-label", "busy")
+  await expect(header).toHaveText("")
+  expect(await header.evaluate((el) => [getComputedStyle(el).borderRadius, el.classList.contains("busy")])).toEqual(["50%", true])
   // Busy alone is not thinking.
   await expect(thinking).toHaveCount(0)
 

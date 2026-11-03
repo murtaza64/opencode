@@ -167,13 +167,13 @@ try {
   }
   // The existing host-labelled session reports the outage; dictation is still a local draft edit.
   await expect(page.locator(".session-host")).toContainText("Mac Mini")
-  await expect(page.locator(".session-state")).toHaveText("disconnected", { timeout: 40_000 })
-  await expect(page.locator(".session-work-status")).toContainText("Reconnecting")
+  await expect(page.locator(".session-state")).toHaveAttribute("aria-label", "disconnected", { timeout: 40_000 })
+  await expect(page.locator(".session-work-status .dot")).toHaveAttribute("aria-label", /^Reconnecting/)
   await stopRoute.fulfill({ json: { ok: true, text: "offline note" } })
   await expect(editor()).toHaveValue(`${offlineDraft} offline note`)
   await expect(editor()).toBeFocused()
-  await expect(page.locator(".session-state")).toHaveText("disconnected")
-  await expect(page.locator(".session-work-status")).toContainText("Reconnecting")
+  await expect(page.locator(".session-state")).toHaveAttribute("aria-label", "disconnected")
+  await expect(page.locator(".session-work-status .dot")).toHaveAttribute("aria-label", /^Reconnecting/)
   expect(await text("mini")).toBe(`${offlineDraft} offline note`)
   expect(await text()).toBe("Laptop draft")
   await expect(page.getByRole("img", { name: "voice-fixture.png", exact: true })).toBeVisible()

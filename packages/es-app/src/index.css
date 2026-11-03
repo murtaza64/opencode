@@ -2051,8 +2051,8 @@ a.mini-item > .glyph { margin: 0; }
 .mail-kind[data-kind=notice] { color: var(--blue); }
 .mail-kind[data-kind=learning] { color: var(--mauve); }
 /* Session state in the header uses the sidebar's status colours. */
-.session-state::before { content: ""; display: inline-block; inline-size: 7px; block-size: 7px; margin-inline-end: 6px; vertical-align: 1px; background: var(--overlay0); }
-.session-state[data-state=working]::before, .session-state[data-state=retry]::before { background: var(--lavender); }
+/* The header's state is the sidebar dot (.dot classes); no square marker. */
+.session-page .topbar .session-state.dot { overflow: visible; }
 .session-state[data-state=working], .session-state[data-state=retry] { color: var(--lavender); }
 .session-state[data-state=waiting]::before { background: var(--peach); }
 .session-state[data-state=waiting] { color: var(--peach); }
