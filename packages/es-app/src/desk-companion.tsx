@@ -135,6 +135,10 @@ export const DeskStart = (props: { desk: ReturnType<typeof createDeskSession>; d
     <Show when={props.desk.status() === "home-offline"}>{(() => { const home = props.desk.home(); return <p class="home-warning">The Front Desk is on {home.kind === "unreachable" ? home.host.label : "its home host"}, which is unreachable.
       {/* Drafts stay in this composer; nothing switches while an earlier message to the home is unconfirmed. */}
       {props.desk.decision() === "wait-settle" ? " Your last message to it is not confirmed yet, so this computer's desk waits until it is." : ""} <button class="desk-button" onClick={() => void props.desk.verify()}>Retry</button></p> })()}</Show>
+    {/* This host is the Work desk's home and has no Work desk yet; its own conversation becomes it only by choice. */}
+    <Show when={props.desk.status() === "home-claim"}><p class="home-warning">This computer is now the home of the Work Front Desk. Use your current Front desk conversation as the Work desk, or start a new one (the current one stays under Earlier desks).
+      {" "}<button class="desk-button home-primary" onClick={() => void props.desk.claim()}>Use this conversation</button>
+      {" "}<button class="desk-button" disabled={!props.directory} onClick={() => props.directory && void props.desk.startNew(props.directory)}>Start a new one</button></p></Show>
     <Show when={props.desk.status() === "missing"}><p class="home-warning">The saved chat no longer exists. <button class="desk-button" onClick={() => props.desk.forget()}>Clear</button></p></Show>
     <Show when={props.desk.status() === "none" || props.desk.status() === "creating"}>
       <button class="desk-button home-primary" disabled={!props.directory || props.desk.status() === "creating"} onClick={() => props.directory && void props.desk.start(props.directory)}>

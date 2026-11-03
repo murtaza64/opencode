@@ -260,6 +260,12 @@ export const createFixture = async () => {
     // Front Desk home pointer (src/desk-pointer.ts): not deployed unless a test sets fixture.pointer.
     if (url.pathname === "/api/frontdesk/pointer" && request.method === "GET")
       return fixture.pointer ? json(fixture.pointer) : json({ detail: "Not Found" }, 404)
+    // Compare-and-swap like the dashboard: create only while the home has no desk.
+    if (url.pathname === "/api/frontdesk/pointer" && request.method === "PUT" && fixture.pointer?.home) {
+      if (body.expected_revision !== fixture.pointer.revision || (body.reason === "create" && !fixture.pointer.none)) return json(fixture.pointer, 409)
+      fixture.pointer = { home: true, revision: fixture.pointer.revision + 1, session: body.session, directory: body.directory, reason: body.reason }
+      return json(fixture.pointer)
+    }
     // Front Desk surfaces poll (src/surfaces.ts); none published in these fixtures.
     if (url.pathname === "/api/surfaces" && request.method === "GET") return json({ surfaces: fixture.surfaces ?? [] })
     if (url.pathname === "/api/handoffs" && request.method === "GET")

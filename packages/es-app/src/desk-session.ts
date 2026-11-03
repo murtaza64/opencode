@@ -69,7 +69,7 @@ export const createDeskSession = () => {
   const pointer = () => remote() ?? devicePointer()
   const client = () => ocAt(pointer()?.host?.base ?? "/oc")
   const [session, setSession] = createSignal<Session>()
-  const [status, setStatus] = createSignal<"none" | "checking" | "ready" | "missing" | "unavailable" | "creating" | "unconfirmed" | "remote-none" | "home-offline">("checking")
+  const [status, setStatus] = createSignal<"none" | "checking" | "ready" | "missing" | "unavailable" | "creating" | "unconfirmed" | "remote-none" | "home-offline" | "home-claim">("checking")
   const [error, setError] = createSignal("")
   const save = (value?: DeskPointer) => {
     if (value) localStorage.setItem(POINTER, JSON.stringify(value))
@@ -178,12 +178,40 @@ export const createDeskSession = () => {
     // desk is never imported, since the human chose a fresh Work desk on the home (front-desk:work-home:v1). Earlier
     // desks stay readable from their own hosts.
     if (resolved.kind === "local" && resolved.view.session) adopt(resolved.view)
+    // This host's own conversation is offered, never claimed silently: the human either makes it the Work desk or
+    // starts a new one (it stays readable under Earlier desks).
     if (resolved.kind === "local" && !resolved.view.session && devicePointer() && !devicePointer()!.create) {
+      await verifyDevice()
+      if (status() === "ready") return setStatus("home-claim")
       retire()
       try { save(undefined) } catch { setPointer(undefined) }
       return setStatus("none")
     }
     await verifyDevice()
+  }
+  /** Re-read the home now: it may have been turned on or off since this page loaded. */
+  const freshHome = async () => {
+    const resolved = await resolveHome(workFeedHosts(await readHost()))
+    setHome(resolved)
+    return resolved
+  }
+  /** On the home host with no Work desk yet: make this host's own conversation the Work desk (same session). */
+  const claim = async () => {
+    const own = devicePointer()
+    const current = await freshHome()
+    if (status() !== "home-claim" || !own || own.create || current.kind !== "local") return verify()
+    const result = await writePointer({ expected_revision: current.view.revision, session: own.session, directory: own.directory, reason: "create" })
+    if (!result.ok && !result.view) setError(`Could not make this the Work Front Desk: ${result.error}`)
+    await verify()
+  }
+  /** On the home host with no Work desk yet: keep this host's conversation as an earlier desk and start a new one. */
+  const startNew = (directory: string) => {
+    if (status() !== "home-claim") return
+    retire()
+    try { save(undefined) } catch { setPointer(undefined) }
+    setSession(undefined)
+    setStatus("none")
+    return start(directory)
   }
   onMount(() => void verify())
   const poll = setInterval(() => {
@@ -198,7 +226,8 @@ export const createDeskSession = () => {
       const created = await oc.createSession(value.directory, value.create)
       if (created.id !== value.session) throw new SessionCreateError("Core confirmed a different session than requested.", true)
       confirmed(created)
-      const current = home()
+      // The home is read again: this page may have loaded before its host became the home.
+      const current = await freshHome()
       // On the home host the new desk claims the profile's pointer; if another device won, its desk is adopted and
       // this one stays an ordinary session (nothing deleted).
       if (current.kind === "local") {
@@ -215,8 +244,11 @@ export const createDeskSession = () => {
     }
   }
   const start = async (directory: string) => {
-    if (status() !== "none" || home().kind === "remote" || home().kind === "unreachable") return
+    if (status() !== "none") return
     setStatus("creating")
+    // A home elsewhere that appeared after this page loaded owns the desk: nothing is created here.
+    const where = await freshHome()
+    if (where.kind === "remote" || where.kind === "unreachable") return verify()
     const [agents, host] = await Promise.all([oc.agents(directory).catch(() => []), readHostModel()])
     const id = `ses_${descending()}`
     const value = {
@@ -326,7 +358,7 @@ export const createDeskSession = () => {
   const isDesk = (sessionID: string, hostID?: string) =>
     (pointer()?.session === sessionID && pointer()?.host?.id === hostID)
     || (!hostID && devicePointer()?.session === sessionID && !devicePointer()?.create)
-  return { pointer, home, placed, decision, isDesk, session, status, error, setError, verify, start, confirm, forget, context, caseContext, sent, detail, earlier, notice, dismissNotice }
+  return { pointer, home, placed, decision, isDesk, session, status, error, setError, verify, start, claim, startNew, confirm, forget, context, caseContext, sent, detail, earlier, notice, dismissNotice }
 }
 
 export type BriefJob = { id: string; directory: string; meta: BriefMeta; created: number; state: BriefState | { state: "starting" } | { state: "unconfirmed" } }
