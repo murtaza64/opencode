@@ -81,15 +81,12 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
   const close = () => {
     const key = open()?.key
     setOpen()
-    queueMicrotask(() => returnFocus(key, 10))
-  }
-  // A marker re-renders when its thread changes (a reply just landed), leaving a detached button in the map; wait a few
-  // frames for the live one before falling back to the toolbar.
-  const returnFocus = (key: string | undefined, frames: number) => {
-    const marker = key ? markers.get(key) : undefined
-    if (marker?.isConnected) return marker.focus()
-    if (key && frames > 0) return void requestAnimationFrame(() => returnFocus(key, frames - 1))
-    toolbarButton?.focus()
+    // Markers remount when the card closes; their buttons then stay put across updates (keyed by thread id below).
+    queueMicrotask(() => {
+      const marker = key ? markers.get(key) : undefined
+      if (marker?.isConnected) return marker.focus()
+      toolbarButton?.focus()
+    })
   }
 
   onMount(() => {
@@ -169,16 +166,21 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
     }),
   ]
 
+  const markerByKey = createMemo(() => new Map(markerThreads().map((marker) => [marker.key, marker])))
+  const markerKeys = createMemo(() => [...markerByKey().keys()], [], { equals: (a, b) => a.length === b.length && a.every((key, i) => key === b[i]) })
+
   return <>
     <Show when={shown() && !open()}>
       <div class="sc-markers" aria-label="Comments on this page">
-        <For each={markerThreads()}>{(marker) =>
-          <button class="sc-peek" ref={(el) => markers.set(marker.key, el)} style={markerAt(marker.box)} data-comment={marker.key} data-status={marker.status} data-changed={marker.changed ? "" : undefined}
-            aria-label={`Comment by ${marker.author}${marker.count > 1 ? `, ${marker.count} in thread` : ""}${marker.changed ? ", its target changed" : ""}`}
-            onClick={() => setOpen({ key: marker.key, anchor: here().find((thread) => thread.root.comment_id === marker.key)?.root.anchor ?? outgoing().get(marker.key)!.sealed.anchor })}>
-            <span class="sc-peek-face">{initialOf(marker.author)}</span>
-            <Show when={marker.count > 1}><span class="sc-peek-count">{marker.count}</span></Show>
-          </button>}</For>
+        {/* Keyed by thread id, not object: every anchor report (scroll, resize, DOM change) and every reply rebuilds the
+          * marker objects, and re-keying by object would replace the button the human's focus is on. */}
+        <For each={markerKeys()}>{(key) => <Show when={markerByKey().get(key)}>{(marker) =>
+          <button class="sc-peek" ref={(el) => markers.set(marker().key, el)} style={markerAt(marker().box)} data-comment={marker().key} data-status={marker().status} data-changed={marker().changed ? "" : undefined}
+            aria-label={`Comment by ${marker().author}${marker().count > 1 ? `, ${marker().count} in thread` : ""}${marker().changed ? ", its target changed" : ""}`}
+            onClick={() => setOpen({ key: marker().key, anchor: here().find((thread) => thread.root.comment_id === marker().key)?.root.anchor ?? outgoing().get(marker().key)!.sealed.anchor })}>
+            <span class="sc-peek-face">{initialOf(marker().author)}</span>
+            <Show when={marker().count > 1}><span class="sc-peek-count">{marker().count}</span></Show>
+          </button>}</Show>}</For>
       </div>
     </Show>
     <Show when={open()}>{(current) => {
