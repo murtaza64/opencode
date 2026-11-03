@@ -45,3 +45,14 @@
 .desk-deliverables-earlier > summary { cursor: pointer; padding: 4px 10px; font-size: 12px; color: var(--subtext1); }
 /* Who owns the Surface and a way to them, beside the title. */
 .surface-owner { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 6px; min-inline-size: 0; -webkit-app-region: no-drag; }
+.surface-owner-inline { display: inline-flex; align-items: center; gap: 6px; min-inline-size: 0; }
+.surface-owner-menu { display: none; position: relative; }
+.surface-owner-menu > summary { list-style: none; cursor: pointer; white-space: nowrap; }
+.surface-owner-menu > summary::-webkit-details-marker { display: none; }
+.surface-owner-items { position: absolute; inset-inline-end: 0; inset-block-start: calc(100% + 4px); z-index: 20; display: grid; gap: 6px; padding: 8px;
+  min-inline-size: 200px; max-inline-size: min(80vw, 320px); background: var(--mantle); border: 1px solid var(--surface1); border-radius: 6px; }
+.surface-owner-items > .surface-head-link { white-space: normal; overflow: visible; }
+@media (max-width: 600px) {
+  .surface-owner-inline { display: none; }
+  .surface-owner-menu { display: inline-block; }
+}

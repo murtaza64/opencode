@@ -34,16 +34,33 @@ export const SurfaceOwner = (props: { surface: Surface; host?: { id: string; lab
     navigate(props.host ? `/session/${encodeURIComponent(value.session)}?directory=${encodeURIComponent(value.directory)}&host=${encodeURIComponent(props.host.id)}`
       : sessionHref(value.session, value.directory))
   }
-  return <span class="surface-owner" data-surface-owner={owner()?.state ?? "loading"}>
+  // The owner line and its actions; inline in a wide header, folded into one Owner menu below 600 px (index of rules in
+  // desk-surfaces.css) so the title keeps the space on a phone.
+  let menu: HTMLDetailsElement | undefined
+  const close = () => { if (menu) menu.open = false }
+  const items = () => <>
     <Show when={props.surface.lane}>{lane => <span class="surface-head-link">Owner: <bdi dir="auto">{lane()}</bdi></span>}</Show>
     <Show when={publisher()}>{name => <span class="surface-head-link">Published by <bdi dir="auto">{name()}</bdi></span>}</Show>
     <Show when={owner()?.state === "ok"} fallback={
       <Show when={owner() && owner()!.state !== "ok"}>
         <span class="surface-head-link" role="status">{(owner() as { why: string }).why}</span>
         <Show when={desk}>{chat => <button type="button" class="surface-head-text" title={`Open ${DESK.name} with this Surface in its draft; nothing is sent`}
-          onClick={() => chat().ask(ref())}>Ask {DESK.name}</button>}</Show>
+          onClick={() => { close(); chat().ask(ref()) }}>Ask {DESK.name}</button>}</Show>
       </Show>}>
-      <button type="button" class="surface-head-text" title="Open the owning agent's session with this Surface in its draft; nothing is sent" onClick={message}>Message owner</button>
+      <button type="button" class="surface-head-text" title="Open the owning agent's session with this Surface in its draft; nothing is sent" onClick={() => { close(); message() }}>Message owner</button>
     </Show>
+  </>
+  return <span class="surface-owner" data-surface-owner={owner()?.state ?? "loading"}>
+    <span class="surface-owner-inline">{items()}</span>
+    <details class="surface-owner-menu" ref={menu} onKeyDown={(event) => {
+      if (event.key !== "Escape" || !menu?.open) return
+      event.preventDefault()
+      event.stopPropagation()
+      close()
+      menu.querySelector("summary")?.focus()
+    }}>
+      <summary class="surface-head-text" title={props.surface.lane ? `Owner: ${props.surface.lane}` : "Owner"}><span aria-hidden="true">@</span> Owner</summary>
+      <span class="surface-owner-items">{items()}</span>
+    </details>
   </span>
 }

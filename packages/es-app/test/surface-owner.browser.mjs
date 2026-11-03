@@ -85,6 +85,27 @@ try {
   await expect(head.locator(".surface-owner")).toBeVisible()
   await page.screenshot({ path: new URL("owner-rtl.png", artifacts).pathname })
   step("RTL header renders")
+  // A phone-width reader: the owner line and its actions fold into one Owner menu; the title keeps the space.
+  await page.evaluate(() => { document.documentElement.dir = "ltr" })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(head.locator(".surface-owner-inline")).toBeHidden()
+  const summary = head.locator(".surface-owner-menu > summary")
+  await expect(summary).toBeVisible()
+  // The title is shown whole (not cut off) and the owner control stays small.
+  const sizes = await head.evaluate((element) => {
+    const title = element.querySelector("h2 bdi") ?? element.querySelector("h2")
+    return { title: title?.getBoundingClientRect().width ?? 0, clipped: !!title && title.scrollWidth > title.clientWidth + 1, owner: element.querySelector(".surface-owner-menu")?.getBoundingClientRect().width ?? 0 }
+  })
+  if (sizes.owner > 90 || sizes.clipped) throw new Error(`narrow sizes ${JSON.stringify(sizes)}`)
+  await page.screenshot({ path: new URL("owner-390.png", artifacts).pathname })
+  await summary.click()
+  await expect(head.locator(".surface-owner-items")).toContainText("Owner: granola-research")
+  await page.keyboard.press("Escape")
+  await expect(head.locator(".surface-owner-items")).toBeHidden()
+  await summary.click()
+  await head.locator(".surface-owner-items").getByRole("button", { name: "Message owner" }).click()
+  await expect(page).toHaveURL(new RegExp(`/session/ses_a\\?directory=`))
+  step(`390 px: one Owner menu (owner ${Math.round(sizes.owner)} px, title ${Math.round(sizes.title)} px); Escape closes it; Message owner works from it`)
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`)
 } catch (error) {
   process.exitCode = 1
