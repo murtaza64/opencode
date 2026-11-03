@@ -1,4 +1,4 @@
-import { app, BaseWindow, BrowserWindow, dialog, Menu, nativeImage, safeStorage, screen, session, shell, systemPreferences } from "electron"
+import { app, BaseWindow, BrowserWindow, dialog, Menu, nativeImage, powerMonitor, safeStorage, screen, session, shell, systemPreferences } from "electron"
 import path from "node:path"
 import { readFile, writeFile } from "node:fs/promises"
 import { serve } from "./server"
@@ -284,6 +284,10 @@ const start = async () => {
         ...pages.map((host) => ({ id: host.id, label: host.label, url: `${host.origin}/`, session: pageSession(`persist:editspace-host-${host.id}`), kind: "page" as const, guard: (contents: Electron.WebContents) => guardPage(contents, host.origin) })),
       ], preferences, path.join(app.getAppPath(), "dist/page-guard.cjs"))
   const localContents = window instanceof BrowserWindow ? window.webContents : tabs!.contents("local")
+  // A wake or a display change can leave a live renderer with nothing painted: repaint the shown view only.
+  const repaint = () => { if (window.isDestroyed()) return; if (tabs) tabs.repaint(); else localContents.invalidate() }
+  powerMonitor.on("resume", repaint)
+  screen.on("display-metrics-changed", repaint)
   if (process.platform === "darwin")
     localContents.on("did-finish-load", () => {
       if (tabs) return
@@ -362,6 +366,17 @@ const start = async () => {
       void contents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(pageFailure(origin, description))}`)
     })
     showRendererLoss(contents, origin)
+    // A navigation that has not committed after PAGE_ANSWER_MS (a host or network that accepts and never answers) shows
+    // the failure page with Try again, instead of a blank view until Chromium gives up. A commit or a failure clears it.
+    let unanswered: ReturnType<typeof setTimeout> | undefined
+    contents.on("did-start-navigation", (details) => {
+      if (!details.isMainFrame || details.isSameDocument || details.url.startsWith("data:")) return
+      clearTimeout(unanswered)
+      unanswered = setTimeout(() => {
+        if (!contents.isDestroyed()) void contents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(pageFailure(origin, `no answer in ${PAGE_ANSWER_MS / 1000} s`))}`)
+      }, PAGE_ANSWER_MS)
+    })
+    for (const event of ["did-navigate", "did-fail-load", "destroyed"] as const) contents.on(event as "did-navigate", () => clearTimeout(unanswered))
   }
   if (window instanceof BrowserWindow) guardListener(window.webContents, server.origin, true)
   // Pair a Phone: this machine's gateway, plus each host with an owner SSH destination in
@@ -560,6 +575,9 @@ const pageSession = (partition: string) => {
 
 // A view whose renderer is gone (crash, out of memory, killed) shows the failure page with Try again (a fresh load of
 // its own origin) instead of a blank view; its partition, cookies and storage are untouched.
+/** How long a page host's navigation may go without an answer before its tab says so. */
+const PAGE_ANSWER_MS = Number(process.env.ES_DESKTOP_PAGE_ANSWER_MS) || 20_000
+
 const showRendererLoss = (contents: Electron.WebContents, origin: string) => {
   contents.on("render-process-gone", (_event, details) => {
     if (details.reason === "clean-exit" || contents.isDestroyed()) return

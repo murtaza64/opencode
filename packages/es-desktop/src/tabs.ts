@@ -201,6 +201,13 @@ export const createTabs = (
     selected: () => state.selected,
     // Re-applies geometry after the shown view's zoom changed.
     refresh: () => layout(),
+    /** Re-lays out and repaints the shown view and the strip (no reload): after a wake or a display change a live
+     * renderer can be left with nothing painted. */
+    repaint: () => {
+      layout()
+      view(state.selected).webContents.invalidate()
+      bar.webContents.invalidate()
+    },
     shownContents: () => view(state.selected).webContents,
     hosts: () => tabs.map((tab) => ({ id: tab.id, label: tab.label, badge: badges.get(tab.id) })),
     contents: (id: string) => view(id).webContents,
