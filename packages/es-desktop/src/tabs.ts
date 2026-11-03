@@ -34,6 +34,8 @@ export const TITLE_BAR_HEIGHT = 44
 const CONTROLS_INSET = process.platform === "darwin" ? 78 : 8
 const TAB_URL = "https://editspace-tab.invalid/"
 const MENU = "__hosts"
+// Isolated world for focus housekeeping only, apart from the page guard's preload world.
+const UNFOCUS_WORLD = 1201
 // Below this window width the segment collapses to the current host plus a host menu.
 const NARROW = 900
 
@@ -128,6 +130,11 @@ export const createTabs = (
     })
   }
   // Views load on first selection, so an unopened host's page never runs in the background.
+  const active = () => window.isVisible() && window.isFocused()
+  // Blurs the view's focused element from an isolated world, so a page's own scripts neither see nor block it.
+  const unfocus = (contents: WebContents) => {
+    if (!contents.isDestroyed()) void contents.executeJavaScriptInIsolatedWorld(UNFOCUS_WORLD, [{ code: "document.activeElement instanceof HTMLElement && document.activeElement.blur()" }]).catch(() => undefined)
+  }
   const view = (id: string, url?: string) => {
     const existing = views.get(id)
     if (existing) return existing
@@ -140,6 +147,9 @@ export const createTabs = (
     created.webContents.on("did-finish-load", () => {
       css.delete(tab.id)
       void inset(tab, created.webContents)
+      // A page that loads while this window is not shown and focused (a restore at a hidden launch) keeps no
+      // autofocused field: a focused password field can hold macOS Secure Input (defensive; DD #645/#651).
+      if (tab.kind === "page" && !active()) unfocus(created.webContents)
     })
     views.set(id, created)
     window.contentView.addChildView(created)
@@ -185,12 +195,16 @@ export const createTabs = (
   }
   const select = (id: string) => {
     if (!tabs.some((item) => item.id === id)) return
+    const hidden = views.get(state.selected)
     state.selected = id
     const shown = view(id)
+    // The tab being hidden gives up its focused field first: hiding a view does not blur it, and a focused password
+    // field in a hidden view can keep macOS Secure Input on (defensive; causality unproven, DD #645/#651).
+    if (hidden && hidden !== shown) unfocus(hidden.webContents)
     views.forEach((item) => item.setVisible(item === shown))
     layout()
     paint()
-    shown.webContents.focus()
+    if (active()) shown.webContents.focus()
   }
   window.on("resize", () => {
     layout()

@@ -1,9 +1,12 @@
 // macOS Secure Event Input and host tabs (DD #645/#651). One disposable launch (temp profile, mock keychain) with a local
 // https page host whose page autofocuses a password field. Reads `ioreg` (read-only) for the session's Secure Input
 // owner PID and compares it with this test's own Electron process tree; nothing else is read.
-// A) launch restored onto the Personal page: is Secure Input owned by this app right after launch?
-// B) focus the password field, switch to the Work tab: does this app still own Secure Input while Work is shown?
-//    Then back to Personal and blur the field: released?
+// A) hidden launch (ES_DESKTOP_START=hidden) restored onto the Personal page: is the autofocused password field
+//    focused, and does this app own Secure Input?
+// B) show the window, focus the password field, switch to the Work tab: is Personal's field still focused, and does
+//    this app still own Secure Input while Work is shown? Then back to Personal and blur the field: released?
+// ES_SECURE_INPUT_EXPECT=released asserts the defensive fix by activeElement (A: not #pass; B: BODY). ioreg readings
+// are context only: a Secure Input owner outside this app (often loginwindow) masks this app's own.
 // Run from packages/es-desktop (after `bun run build`), macOS only: node test/secure-input.real.mjs [<packaged executable>]
 import { _electron } from "@playwright/test"
 import { execFileSync } from "node:child_process"
@@ -51,7 +54,7 @@ try {
   electron = await _electron.launch({
     ...(executable ? { executablePath: executable, args: ["--ignore-certificate-errors", "--use-mock-keychain"] } : { args: [root, "--ignore-certificate-errors", "--use-mock-keychain"] }),
     env: { ...process.env, ELECTRON_RUN_AS_NODE: "", OPENCODE_URL: fixture.url, ES_DASHBOARD_URL: fixture.url, OPENCODE_SERVER_PASSWORD: "",
-      ES_DESKTOP_USER_DATA: profile, ES_DESKTOP_RESTORE: restore,
+      ES_DESKTOP_USER_DATA: profile, ES_DESKTOP_RESTORE: restore, ES_DESKTOP_START: "hidden",
       ES_REMOTE_HOSTS: JSON.stringify([{ id: "personal", label: "Personal", origin: personal.origin, mode: "page" }]) },
   })
   const ours = () => tree(electron.process().pid)
@@ -63,8 +66,10 @@ try {
   }
   await page.waitForLoadState("load")
   await settle()
-  readings.A_afterLaunch = { ...owned(), activeElement: await page.evaluate(() => document.activeElement?.id ?? null) }
-  // B: the user types into the password field, then switches to Work.
+  readings.A_afterLaunch = { ...owned(), activeElement: await page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName || null) }
+  // B: the user opens the window, types into the password field, then switches to Work.
+  await electron.evaluate(({ BaseWindow }) => { const window = BaseWindow.getAllWindows()[0]; window.show(); window.focus() })
+  await settle()
   await page.bringToFront().catch(() => undefined)
   await page.focus("#pass")
   await settle()
@@ -72,7 +77,7 @@ try {
   const bar = electron.windows().find((item) => item.url().startsWith("data:text/html"))
   await bar.locator("nav a", { hasText: "Work" }).click()
   await settle()
-  readings.B_workShown = { ...owned(), personalActive: await page.evaluate(() => document.activeElement?.id ?? null) }
+  readings.B_workShown = { ...owned(), personalActive: await page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName || null) }
   await bar.locator("nav a", { hasText: "Personal" }).click()
   await settle()
   await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur())
@@ -80,9 +85,10 @@ try {
   readings.B_blurred = owned()
   console.log(JSON.stringify(readings))
   if (expectFixed) {
-    if (readings.A_afterLaunch.ours) throw new Error("A: this app owns Secure Input right after a restored launch")
-    if (readings.B_workShown.ours) throw new Error("B: this app owns Secure Input while the Work tab is shown")
-    console.log("PASS Secure Input: not taken at restore; released when the password page's tab is hidden")
+    if (readings.A_afterLaunch.activeElement === "pass") throw new Error("A: the password field is focused after a hidden restore")
+    if (readings.B_workShown.personalActive !== "BODY") throw new Error(`B: Personal keeps ${readings.B_workShown.personalActive} focused while Work is shown`)
+    if (readings.A_afterLaunch.ours || readings.B_workShown.ours) throw new Error("this app owns Secure Input at a hidden restore or while Work is shown")
+    console.log("PASS defensive focus (causality unproven): no focused password field after a hidden restore or while its tab is hidden")
   }
 } catch (error) {
   process.exitCode = 1
