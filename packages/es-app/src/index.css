@@ -2131,3 +2131,20 @@ a.mini-item > .glyph { margin: 0; }
 .tool-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; padding-inline-start: 28px; }
 .tool-attachments img { max-inline-size: min(100%, 480px); max-block-size: 320px; border-radius: 4px; border: 1px solid var(--surface1); object-fit: contain; }
 .tool-full-output { margin: 2px 0 4px; padding-inline-start: 28px; font-size: 12px; }
+
+/* Chat activity (chat-activity-thinking-split): the status line's dot animates like the sidebar's busy dot. */
+.session-work-status .dot.busy::after { animation: busy-halo 1.6s ease-in-out infinite; will-change: opacity, transform; }
+/* Thinking: three dots, separate from the activity dot. */
+.thinking-dots { display: inline-flex; gap: 3px; align-items: center; }
+.thinking-dots > i { inline-size: 4px; block-size: 4px; border-radius: 50%; background: var(--subtext0); animation: thinking-fade 1.2s ease-in-out infinite; }
+.thinking-dots > i:nth-child(2) { animation-delay: 0.2s; }
+.thinking-dots > i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes thinking-fade { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+/* The running tool call's icon glows gently; finished calls never animate. */
+.tool-run-icon[data-running] { border-radius: 50%; animation: tool-running 1.6s ease-in-out infinite; }
+@keyframes tool-running { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, var(--lavender)) 35%, transparent); } }
+@media (prefers-reduced-motion: reduce) {
+  .session-work-status .dot.busy::after { animation: none; opacity: 0.5; will-change: auto; }
+  .thinking-dots > i { animation: none; opacity: 0.7; }
+  .tool-run-icon[data-running] { animation: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, var(--lavender)) 45%, transparent); }
+}

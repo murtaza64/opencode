@@ -19,8 +19,10 @@ const STRIP_ICONS = 12
 // fixed, so a tier change while a call streams never moves the row; the glyph inside scales with the call's known
 // input + output size (data-size), and an unknown size stays neutral rather than reading as small.
 // A call that sent mail (its receipt says so) wears the mail chips' sent glyph.
-const ToolIcon = (props: { partID: string; tool: string; status: string; icon: string; magnitude?: ToolMagnitude; mail?: boolean }) =>
+// `running`: the call is executing now (state "running", not "pending"); only then does its icon pulse.
+const ToolIcon = (props: { partID: string; tool: string; status: string; icon: string; magnitude?: ToolMagnitude; mail?: boolean; running?: boolean }) =>
   <span class="tool-run-icon" data-tool={props.tool} data-status={props.status} data-filament-icon={props.partID} data-mail={props.mail ? "sent" : undefined}
+    data-running={props.running ? "" : undefined}
     data-size={props.magnitude?.kind === "sized" ? props.magnitude.size : "unknown"} aria-hidden="true">
     <Show when={props.mail} fallback={<Icon name={(isEditTool(props.tool) ? "pencil-line" : props.icon) as never} size="normal" />}><Glyph name="paper-airplane" /></Show>
   </span>
@@ -205,7 +207,7 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
     }}>
     <button class="tool-chip-summary" ref={button} aria-expanded={open()} aria-label={label()} aria-busy={status() === "unfinished" ? "true" : undefined}
       onClick={() => setOpen(!open())}>
-      <ToolIcon partID={props.part.id} tool={props.part.tool} status={status()} icon={toolGlyph(props.part.tool, props.part.state.input, info().icon)} magnitude={magnitude()} mail={!!mail()} />
+      <ToolIcon partID={props.part.id} tool={props.part.tool} status={status()} icon={toolGlyph(props.part.tool, props.part.state.input, info().icon)} magnitude={magnitude()} mail={!!mail()} running={props.part.state.status === "running"} />
       {/* What ran stays legible beside the icon; a failure, uncertainty or running call leads with that word. */}
       <span class="tool-chip-state" data-status={status()} aria-hidden="true">
         {[STATE_WORDS[status()], what(), reason()].filter(Boolean).join(" · ")}
@@ -371,7 +373,7 @@ export const ToolStrip = (props: { message: ComponentProps<typeof Message>["mess
             <button class="tool-chip-summary" ref={(element) => buttons.set(id, element)} tabIndex={current() === id ? 0 : -1}
               aria-label={card().label} aria-expanded={open().has(id)} aria-controls={`tool-strip-member-${id}`} aria-busy={card().status === "unfinished" ? "true" : undefined}
               onFocus={() => setActive(id)} onClick={() => toggle(id)}>
-              <ToolIcon partID={id} tool={part().tool} status={card().status} icon={glyph()} magnitude={magnitude()} mail={!!mail()} />
+              <ToolIcon partID={id} tool={part().tool} status={card().status} icon={glyph()} magnitude={magnitude()} mail={!!mail()} running={part().state.status === "running"} />
               <Show when={mail()}>{(sent) => <TickMark tick={mailTick(sent().state).tick} label={mailTick(sent().state).label} mail />}</Show>
               <CallCard card={card()} />
             </button>

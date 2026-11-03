@@ -46,6 +46,7 @@ import { SelfHandoffButton, SelfHandoffStatus } from "../components/self-handoff
 import { createSelfHandoff, SELF_HANDOFF_VERSION } from "../self-handoff"
 import { createMailReceiptRecords, MailRecords } from "../mail-receipts"
 import { DeliveredTick } from "../components/message-tick"
+import { chatDot, modelThinking } from "../chat-activity"
 import { AppHeader } from "../components/native-header"
 import { SessionTitle } from "../components/session-title"
 import { SubagentTranscript } from "../components/subagent-transcript"
@@ -62,6 +63,7 @@ import { canonicalMail, mailCauses, mailLocation, mailRows, mailSourceID } from 
 import { handoffChain, handoffNext, pendingHandoffFor, successorFor } from "../handoffs"
 import { ComposerImages } from "../components/composer-images"
 import { ActivityBriefView } from "../components/activity-brief"
+import { activityBrief } from "../activity-brief"
 import { FindExcerpt, TranscriptFind } from "../components/transcript-find"
 import type { FindHit } from "../transcript-find"
 import { ToolSize } from "../components/tool-size"
@@ -694,7 +696,6 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     return "idle"
   })
   // The open session's work line is the view's one animated busy indicator (CSS halo, compositor-only).
-  const WorkSpinner = () => <span class="busy-dot" data-animate aria-hidden="true" />
   const briefInput = createMemo(() => {
     const current = messages().slice(Math.max(0, messages().findLastIndex((message) => message.role === "user")))
     const tools = current.flatMap((message) => message.role !== "assistant" ? [] :
@@ -731,19 +732,26 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     return tool ? { name: tool.name, at: tool.at } : undefined
   }, undefined, { equals: (a, b) => a?.name === b?.name && a?.at === b?.at })
   // The work line already animates while busy, so the transcript tail shows the same dot static.
-  const Thinking = () => <div class="thinking" title="agent is thinking"><span class="busy-dot" data-animate aria-hidden="true" /></div>
+  const Thinking = () => <div class="thinking" title="waiting for the agent's first output"><span class="busy-dot" data-animate aria-hidden="true" /></div>
+  // The model's reasoning stream, apart from the session's activity (chat-activity.ts).
+  const reasoningNow = createMemo(() => {
+    const last = messages().findLast((message) => message.role === "assistant")
+    return modelThinking(last, last ? live.data.part[last.id] ?? [] : [])
+  })
+  // Status words live in the dot's label; only what the person may act on stays as text (a reply, a failure).
   const WorkStatus = () => (
     <div class="session-work-status" role="status" data-state={workState()} title={backendError() || undefined}>
-      <Show when={workState() === "working" || workState() === "idle"} fallback={<>
-        <Show when={workState() === "retry"}><WorkSpinner /></Show>
-        <span>{workState() === "retry" ? "Retrying" : workState() === "waiting" ? "Waiting for your reply" : workState() === "failed" ?
-          `Session failed — see error ${inlineError() ? "in conversation" : "above"}` : workState() === "stale"
-          ? live.loaded() ? "Waiting for daemon — showing saved transcript" : "Waiting for daemon"
-          : live.loaded() ? "Reconnecting — showing saved transcript" : "Reconnecting — activity unavailable"}</span>
+      <span class={`dot ${chatDot(workState()).dot}`} data-chat-dot={chatDot(workState()).dot} role="img"
+        aria-label={chatDot(workState()).label} title={[chatDot(workState()).label, workState() === "stale" || workState() === "disconnected"
+          ? live.loaded() ? "showing saved transcript" : "" : ""].filter(Boolean).join(": ")} />
+      <Show when={reasoningNow()}><span class="thinking-dots" role="img" aria-label="Thinking" title="Thinking"><i /><i /><i /></span></Show>
+      <Show when={workState() === "working" || workState() === "retry" || workState() === "idle"} fallback={<>
+        <Show when={workState() === "waiting" || workState() === "failed"}>
+          <span>{workState() === "waiting" ? "Waiting for your reply" : `Session failed — see error ${inlineError() ? "in conversation" : "above"}`}</span>
+        </Show>
         <Show when={workState() === "failed" && !remote}><FailureRetry sessionID={sessionID} /></Show>
       </>}>
-        <Show when={workState() === "working" || workState() === "retry"}><WorkSpinner /></Show>
-        <ActivityBriefView input={briefInput()} />
+        <Show when={!["Working", "Idle", "Activity unknown"].includes(activityBrief(briefInput(), Date.now()).text)}><ActivityBriefView input={briefInput()} /></Show>
       </Show>
       <Show when={workState() === "disconnected"}>
         <button disabled={live.loading()} onClick={() => {
