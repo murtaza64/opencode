@@ -264,3 +264,17 @@ test("a paired device writes its pins to this host with its page origin; never c
   expect((await fetch(route, { method: "PUT", headers: { cookie }, body: "{}" })).status).toBe(401)
   expect((await fetch(route, { method: "PUT", headers: { cookie, origin: server.origin, "sec-fetch-site": "cross-site" }, body: "{}" })).status).toBe(401)
 })
+
+test("a paired device reads and posts Surface comments on this host; the post needs its page origin and carries only the operator cookie", async () => {
+  const { server, pair } = await setup()
+  const cookie = cookieOf(await pair(code))
+  const route = `${server.origin}/es/api/surfaces/opencode-week-review/comments`
+  const read = await fetch(`${route}?since=0`, { headers: { cookie } })
+  expect(await read.json()).toEqual({ method: "GET", path: "/api/surfaces/opencode-week-review/comments", cookieForwarded: false })
+  const body = '{"comment_id":"cmt_00000001","revision":1,"anchor":{"id":"summary"},"body":"Tighten this"}'
+  const post = await fetch(route, { method: "POST", headers: { cookie: `${cookie}; es_attention_operator=op`, origin: server.origin, "content-type": "application/json" }, body })
+  expect(await post.json()).toEqual({ method: "POST", path: "/api/surfaces/opencode-week-review/comments", cookieForwarded: true })
+  expect((await fetch(route, { method: "POST", headers: { cookie }, body })).status).toBe(401)
+  expect((await fetch(route, { method: "POST", headers: { cookie, origin: server.origin, "sec-fetch-site": "cross-site" }, body })).status).toBe(401)
+  expect((await fetch(route, { method: "DELETE", headers: { cookie, origin: server.origin } })).status).toBe(403)
+})
