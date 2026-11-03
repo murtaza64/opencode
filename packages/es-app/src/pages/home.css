@@ -121,3 +121,24 @@
 .home-preselected { margin: 6px 0 0; font-size: 11px; color: var(--subtext0); }
 .attention-home button.home-add-note, button.home-add-note { justify-self: start; inline-size: max-content; margin-block: 6px 2px; padding: 2px 0; font: inherit; font-size: 12px; color: var(--accent); background: none; border: 0; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 button.home-add-note:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Decision card, desktop phase 1 (DD #517, decision-brief rev 3): eyebrow state and host pills, one-line option rows
+ * with the recommendation tagged at the row's end, and one quiet row for the card's secondary actions. */
+.home-decision .home-eyebrow { align-items: center; }
+.decision-state { margin-inline-start: auto; padding: 0 7px; border-radius: 8px; font-size: 10px; line-height: 16px; color: var(--peach); background: color-mix(in srgb, var(--peach) 14%, transparent); }
+.decision-state[data-kind=blocker][data-s=open] { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
+.decision-state:is([data-s=answered], [data-s=decided]) { color: var(--blue); background: color-mix(in srgb, var(--blue) 14%, transparent); }
+.decision-state[data-s=resolved] { color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
+.decision-state:is([data-s=withdrawn], [data-s=snoozed]) { color: var(--subtext0); background: color-mix(in srgb, var(--text) 6%, transparent); }
+.decision-host { padding: 0 5px; border: 1px solid var(--surface1); border-radius: 3px; font-size: 10px; line-height: 14px; color: var(--subtext1); }
+.home-decision fieldset.home-options:not(.home-option-cards) { display: grid; gap: 4px; inline-size: 100%; }
+.home-decision fieldset.home-options:not(.home-option-cards) > label { display: flex; align-items: center; gap: 10px; min-block-size: 32px; padding: 0 12px; border: 1px solid transparent; border-radius: 6px; background: color-mix(in srgb, var(--text) 4%, transparent); font-size: 13px; }
+.home-decision fieldset.home-options:not(.home-option-cards) > label:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.home-decision fieldset.home-options:not(.home-option-cards) > label:has(input:checked) { border-color: color-mix(in srgb, var(--peach) 45%, transparent); }
+.home-decision fieldset.home-options:not(.home-option-cards) > label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.home-decision fieldset.home-options:not(.home-option-cards) .home-option-body { flex: 1; flex-direction: row; align-items: center; gap: 8px; }
+.decision-rec { margin-inline-start: auto; padding: 0 6px; border-radius: 8px; font-size: 10px; line-height: 16px; color: var(--green); background: color-mix(in srgb, var(--green) 16%, transparent); flex: none; }
+.home-decision-more { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-block-start: 8px; }
+.home-decision-more > details { margin-block-start: 0; }
+.home-decision-more > details[open] { flex-basis: 100%; }
+.home-decision-more button { border-color: transparent; color: var(--subtext0); padding-inline: 6px; font-size: 12px; }
+.home-decision-more button:hover { color: var(--text); }

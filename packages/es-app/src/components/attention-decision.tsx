@@ -123,7 +123,7 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
             <Show when={outcome()?.sketch}>{sketch => <Sketch title={`What ${option.label} looks like`} sketch={sketch()} />}</Show>
             {/* A plain display label when the brief gives one; the producer's exact label stays the radio's name. */}
             <bdi dir="auto" class="home-option-label" title={outcome()?.label ? option.label : undefined}>{outcome()?.label || option.label}</bdi>
-            <Show when={outcome()} fallback={<Show when={recommended()}><span class="home-source" id={`${id}-recommended`}>recommended</span></Show>}>{value => <>
+            <Show when={outcome()} fallback={<Show when={recommended()}><span class="decision-rec" dir="ltr" id={`${id}-recommended`}><span aria-hidden="true">Rec.</span><span class="sr-only">recommended</span></span></Show>}>{value => <>
               {/* An outcome that only repeats the label says nothing new; the label stands alone. */}
               <Show when={!sameWords(value().outcome, outcome()?.label || option.label)}><span class="home-option-outcome" id={`${id}-${option.id}-outcome`} dir="auto">{value().outcome}</span></Show>
               <Show when={value().note}><span class="home-option-note" dir="auto">{value().note}</span></Show>
@@ -328,7 +328,8 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
   createEffect(() => { if (historyOpen() && history()?.version !== historyVersion(props.record)) void loadHistory(props.record) })
   // Grouped so a wide pane can set the explanation beside the answer; narrow panes stack the groups in this order.
   return <article class="home-decision" data-attention-id={props.record.id}>
-    <header class="home-decision-head"><div class="home-eyebrow"><Requester record={props.record} remote={props.remote} /><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Agent thread</A></div>
+    <header class="home-decision-head"><div class="home-eyebrow"><Requester record={props.record} remote={props.remote} /><Show when={props.remote && props.host}>{host => <span class="decision-host" title={`On ${host()}`}><bdi dir="auto">{host()}</bdi></span>}</Show><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Agent thread</A>
+      <span class="decision-state" data-s={props.record.status} data-kind={props.record.kind}>{decisionState(props.record)}</span></div>
       <div class="home-decision-title"><Show when={!prepared()}><h3><bdi dir="auto">{props.record.title}</bdi></h3></Show>
         <Show when={props.record.artifact}>{artifact => <ArtifactOpen artifact={artifact()} host={props.remote ? props.host : undefined} />}</Show></div></header>
     {/* A prepared brief is one explainer: the human-level question heads it, with its context, the original
@@ -472,5 +473,9 @@ const AskAbout = (props: { record: AttentionRecord; host?: string }) => {
     <Show when={asked()}><span class="home-muted" role="status">Added to the chat draft.</span></Show>
   </span>}</Show>
 }
+
+// The record's state as the card's eyebrow pill; an open blocker reads as blocked.
+const decisionState = (record: AttentionRecord) => record.status === "open" && record.kind === "blocker" ? "Blocked"
+  : ({ open: "Open", snoozed: "Snoozed", decided: "Saved", answered: "Answered", resolved: "Resolved", withdrawn: "Withdrawn" })[record.status]
 
 const sameWords = (a: string, b: string) => a.replace(/\W+/g, " ").trim().toLowerCase() === b.replace(/\W+/g, " ").trim().toLowerCase()
