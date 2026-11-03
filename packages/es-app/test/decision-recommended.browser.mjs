@@ -1,7 +1,5 @@
-// decision-try-feedback-ux: a decision whose producer recommends one of its options opens with that option selected
-// as a draft, marked Recommended, the note behind "Add a note"; nothing is sent until Send. No recommendation: no
-// selection, note inline. A recommended option that takes a secret is never preselected. Try (review) cards keep
-// their own controls. Keyboard and RTL. Synthetic ledger; the only write is the explicit Send.
+// Recommended radio options stay draft-only with the note behind "Add a note". Direct options instead
+// answer on click; text-only replies open with "Type something…". Secret and review controls stay unchanged.
 // Run from packages/es-app: node test/decision-recommended.browser.mjs
 import assert from "node:assert/strict"
 import { createRequire } from "node:module"
@@ -12,10 +10,11 @@ const { chromium, expect } = createRequire(new URL("../../app/package.json", imp
 const shots = process.argv.includes("--shots") ? process.argv[process.argv.indexOf("--shots") + 1] : undefined
 const preview = await startAttentionPreview()
 const base = preview.ledger.records[0]
-// The ledger answers records in place; each run starts from this untouched copy.
-const pristine = structuredClone(base)
 const record = (id, fields) => ({ ...base, id, gate_key: `fixture:${id}:v1`, created_at: Date.now() - 1000, updated_at: Date.now() - 1000, ...fields })
+// Five options keep the radio/preselection behavior under test without changing the two-option preview record.
+const radioOptions = [...base.options, { id: "expand", label: "Expand" }, { id: "review", label: "Review" }, { id: "pause", label: "Pause" }]
 preview.ledger.records.push(
+  record("recommended_radio", { title: "Pick the recommended scope", options: radioOptions }),
   record("plain", { title: "Pick a rollout window", options: [{ id: "am", label: "Morning" }, { id: "pm", label: "Evening" }], recommendation: null }),
   record("secret_rec", { title: "Rotate the deploy token", options: [{ id: "rotate", label: "Rotate now", input: { kind: "secret", label: "New token", consumer: "deploy-token", handle: "fixture-secret-rotate", fields: [{ id: "token", label: "Token" }] } }, { id: "later", label: "Later" }], recommendation: "rotate" }),
   record("try_it", { kind: "review", title: "Try the new search", artifact: { title: "Search preview", url: "http://127.0.0.1:1/preview", revision: "3" }, options: [{ id: "done", label: "Done" }, { id: "problem", label: "Report a problem", input: { kind: "text", label: "What went wrong" } }], recommendation: null }),
@@ -35,9 +34,9 @@ const open = async (key, viewport = { width: 1440, height: 1000 }) => {
 }
 try {
   for (const [name, rtl] of [["ltr", false], ["rtl", true]]) {
-    const { context, page, commands } = await open("decision_1")
+    const { context, page, commands } = await open("recommended_radio")
     if (rtl) await page.evaluate(() => { document.documentElement.dir = "rtl" })
-    const card = page.locator('[data-attention-id="decision_1"]')
+    const card = page.locator('[data-attention-id="recommended_radio"]')
     // Preselected as a draft, marked, and said in words; the note waits behind one control.
     await expect(card.getByRole("radio", { name: "Small scope" })).toBeChecked({ timeout: 120_000 })
     await expect(card.getByRole("radio", { name: "Defer" })).not.toBeChecked()
@@ -61,27 +60,29 @@ try {
     assert.equal(commands[0].text, "go with the small one")
     console.log(`RECOMMENDED ${name}: preselected draft, marked, no send on open; Add a note by keyboard; Send carries choice + note`)
     await context.close()
-    preview.ledger.records[0] = structuredClone(pristine)
+    Object.assign(preview.ledger.records.find(item => item.id === "recommended_radio"), { status: "open", revision: 1, answer: null, delivery_state: "not-requested" })
   }
   // Choosing another option shows the note inline.
   {
-    const { context, page } = await open("decision_1")
-    const card = page.locator('[data-attention-id="decision_1"]')
+    const { context, page } = await open("recommended_radio")
+    const card = page.locator('[data-attention-id="recommended_radio"]')
     await card.getByRole("radio", { name: "Defer" }).check({ timeout: 120_000 })
     await expect(card.getByRole("textbox", { name: /Note/ })).toBeVisible()
     await expect(card.locator(".home-preselected")).toHaveCount(0)
     await context.close()
   }
-  // No recommendation: nothing selected, the note inline, Send disabled until a choice or a note.
+  // No recommendation: direct buttons are neutral; text-only Send is disabled until text is entered.
   {
     const { context, page } = await open("plain")
     const card = page.locator('[data-attention-id="plain"]')
-    await expect(card.getByRole("textbox", { name: /Note/ })).toBeVisible({ timeout: 120_000 })
-    await expect(card.getByRole("radio", { checked: true })).toHaveCount(0)
+    await expect(card.getByRole("button", { name: "Morning", exact: true })).toBeVisible({ timeout: 120_000 })
+    await expect(card.locator(".decision-button.home-primary")).toHaveCount(0)
     await expect(card.getByRole("button", { name: "Add a note" })).toHaveCount(0)
-    await expect(card.getByRole("button", { name: "Send answer" })).toBeDisabled()
+    await expect(card.getByRole("textbox", { name: "Your answer" })).toHaveCount(0)
+    await card.getByRole("button", { name: "Type something…" }).click()
+    await expect(card.getByRole("button", { name: "Send", exact: true })).toBeDisabled()
     if (shots) await card.screenshot({ path: path.join(shots, "no-recommendation.png") })
-    console.log("PLAIN: no recommendation -> no selection, note inline, Send disabled")
+    console.log("PLAIN: no recommendation -> neutral direct buttons, text-only Send disabled")
     await context.close()
   }
   // A recommended option that takes a secret is never preselected.

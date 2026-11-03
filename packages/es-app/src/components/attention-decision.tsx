@@ -83,10 +83,15 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
   }
   // A routed brief is answered by its item toggles: its apply option is the choice, recommended proposals start on.
   const routed = props.options ? routingBrief(props.record) : undefined
-  const [choice, setChoice] = createSignal(routed ? routed.apply.id : preselect())
+  // A plain either/or (2-4 options, none taking input) is answered by clicking an option itself: no radio, no Send.
+  const direct = props.options && !routed && !props.prepared && props.record.status === "open" && props.record.options.length >= 2 && props.record.options.length <= 4 && props.record.options.every(option => !option.input)
+  const [clicked, setClicked] = createSignal<string>()
+  const [choice, setChoice] = createSignal(routed ? routed.apply.id : direct ? "" : preselect())
   // With the recommendation still selected the note waits behind "Add a note"; otherwise it is inline.
   const [noteOpen, setNoteOpen] = createSignal(!!text())
-  const noteHidden = () => (routed ? true : !!preselect() && choice() === preselect()) && !noteOpen()
+  const noteHidden = () => (routed || direct ? true : !!preselect() && choice() === preselect()) && !noteOpen()
+  // A direct card starts folded even with a saved draft; Type something… reopens it.
+  if (direct) setNoteOpen(false)
   const canWrite = () => canWriteAttention(props.attention, props.record)
   // Input typed for each option is kept while switching; only the selected option's value is sent.
   const [values, setValues] = createSignal<Record<string, InputValue>>(routed ? { [routed.apply.id]: routed.picks } : {})
@@ -96,22 +101,47 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
   const ready = () => canWrite() && (!!selected() || !!text().trim()) && !problem()
   const send = async (other?: AttentionOption) => {
     if (!other && !ready()) return
+    if (direct && other) {
+      // One deliberate click is the answer; the ledger client keeps this command for a same-id retry if the response is lost.
+      if (clicked() || !canWrite()) return
+      setClicked(other.id)
+    }
     const option = other ?? selected()
     // Saved first by the ledger client; a lost response keeps this exact command for retry.
     // The brief on screen is recorded with the answer, so History reopens what was seen when deciding.
     const brief = props.briefJob && props.briefJob.revision === String(contentRevision(props.record)) ? { brief: props.briefJob } : {}
-    if (await props.attention.act(props.record, { action: "answer", ...(text().trim() ? { text: text() } : {}), ...(option ? { choice_id: option.id, ...(other ? {} : inputPayload(option, values()[option.id])) } : {}), ...brief })) props.onView?.("answered")
+    const done = await props.attention.act(props.record, { action: "answer", ...(text().trim() ? { text: text() } : {}), ...(option ? { choice_id: option.id, ...(other ? {} : inputPayload(option, values()[option.id])) } : {}), ...brief })
+    if (direct) setClicked(undefined)
+    if (done) props.onView?.("answered")
   }
   const id = `answer-${props.record.id}`
   const dashboard = useDashboard()
   // Name the recipient as the human knows it; the exact session stays in the tooltip.
   const target = () => props.record.lane ? <bdi dir="auto">{props.record.lane}</bdi>
     : <bdi dir="auto" title={props.record.source_ref.session_id}>{dashboard.activity.session(props.record.source_ref.session_id)?.title || "the requesting agent"}</bdi>
+  const openTyping = () => { setChoice(""); setNoteOpen(true); queueMicrotask(() => document.getElementById(id)?.focus()) }
+  // Esc folds a direct card's reply field back to its control; the draft stays.
+  const closeTyping = (event: KeyboardEvent) => {
+    if (!direct || event.key !== "Escape") return
+    event.preventDefault()
+    setNoteOpen(false)
+    queueMicrotask(() => (document.querySelector(`[data-attention-id="${props.record.id}"] .decision-type`) as HTMLElement | null)?.focus())
+  }
   const keys = (event: KeyboardEvent) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); void send() } }
   return <div class="home-answer" onKeyDown={keys}>
     <Show when={routed}>{brief => <RoutingItems items={brief().items} offered={brief().offered} picks={(values()[brief().apply.id] as string[] | undefined) ?? []} disabled={!canWrite()}
       onChange={picks => setValues(current => ({ ...current, [brief().apply.id]: picks }))} />}</Show>
-    <Show when={props.options && !routed}><fieldset class="home-options" classList={{ "home-option-cards": !!props.prepared }} disabled={!canWrite()}><legend class="sr-only">Your choice</legend>
+    <Show when={direct}><div class="decision-buttons" role="group" aria-label="Your answer">
+      <For each={props.record.options}>{option => <button type="button" class="decision-button" classList={{ "home-primary": props.record.recommendation === option.id }} dir="auto"
+        data-recommended={props.record.recommendation === option.id ? "" : undefined} disabled={!canWrite() || !!clicked()} aria-busy={clicked() === option.id || undefined}
+        aria-describedby={props.record.recommendation === option.id ? `${id}-recommended` : undefined} onClick={() => void send(option)}>
+        <bdi dir="auto">{option.label}</bdi><Show when={clicked() === option.id}><span class="decision-sending"> · Sending…</span></Show>
+        <Show when={props.record.recommendation === option.id}><span class="sr-only" id={`${id}-recommended`}>recommended</span></Show>
+      </button>}</For>
+      {/* The one text path: a written answer of its own, sent with no option (simple-decision-buttons-text-fallback). */}
+      <Show when={!noteOpen()}><button type="button" class="home-quiet decision-type" dir="auto" disabled={!canWrite() || !!clicked()} onClick={openTyping}>Type something…</button></Show>
+    </div></Show>
+    <Show when={props.options && !routed && !direct}><fieldset class="home-options" classList={{ "home-option-cards": !!props.prepared }} disabled={!canWrite()}><legend class="sr-only">Your choice</legend>
       <For each={props.record.options}>{option => {
         // A prepared brief turns each choice into a card saying what it leads to; the label, ID and the
         // radio's accessible name stay the producer's, so the card is the one and only option list.
@@ -139,11 +169,11 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
     <Show when={secret()} fallback={<Show when={!routed && selected()?.input && selected()}>{option => <OptionField id={`${id}-input`} option={option()} value={values()[option().id]} disabled={!canWrite()} onChange={value => setValues(current => ({ ...current, [option().id]: value }))} />}</Show>}>
       {spec => <SecretField id={`${id}-secret`} record={props.record} option={selected()!} spec={spec()} disabled={!canWrite()} onDelivered={() => { void props.attention.refresh(); props.onView?.("answered") }} />}</Show>
     {props.afterChoices}
-    <Show when={routed ? routed.picks.length > 0 : preselect() && choice() === preselect()}><p class="home-preselected" role="status">{routed ? "Recommended selected" : "Recommended option selected"} · nothing is sent until you press Send</p></Show>
-    <Show when={!secret()}><Show when={!noteHidden()} fallback={
+    <Show when={routed ? routed.picks.length > 0 : !direct && preselect() && choice() === preselect()}><p class="home-preselected" role="status">{routed ? "Recommended selected" : "Recommended option selected"} · nothing is sent until you press Send</p></Show>
+    <Show when={!secret()}><Show when={!noteHidden()} fallback={direct ? undefined :
       <button type="button" class="home-add-note" disabled={!canWrite()} onClick={() => { setNoteOpen(true); queueMicrotask(() => document.getElementById(id)?.focus()) }}>Add a note</button>}>
-      <label for={id}>{props.options ? "Note (optional)" : "Your answer"}</label>
-      <textarea id={id} dir="auto" rows={props.options ? 1 : 2} maxLength={8000} value={text()} disabled={!canWrite()}
+      <label for={id}>{props.options && !direct ? "Note (optional)" : "Your answer"}</label>
+      <textarea id={id} dir="auto" rows={props.options ? 1 : 2} maxLength={8000} value={text()} disabled={!canWrite()} onKeyDown={closeTyping}
         onInput={event => { setText(event.currentTarget.value); localStorage.setItem(answerDraftKey(props.record), event.currentTarget.value) }} />
       {/* Operator dictation into this note (DD #333): appended at the caret, never sent. */}
       <Show when={canWrite()}><DictationField field={`decision-note:${props.record.editspace}:${props.record.id}`} label="note" insert={(spoken) => {
@@ -158,10 +188,12 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
     <Show when={props.copy?.quoteFailed}><p class="home-quote-failed">The brief couldn't quote this exactly; the original request below has the full text.</p></Show>
     <div class="home-actions">
       {/* On cards the selected card already shows the choice, so the button stays short; its name still says what is sent. */}
-      <button class="home-primary" dir="auto" disabled={!ready()} aria-keyshortcuts={ariaShortcut("submit")} onClick={() => void send()}
+      {/* On a direct card the option buttons answer; a written note can still go alone. */}
+      <Show when={direct && noteOpen()}><button class="home-primary" disabled={!ready()} onClick={() => void send()}>Send</button></Show>
+      <Show when={!direct}><button class="home-primary" dir="auto" disabled={!ready()} aria-keyshortcuts={ariaShortcut("submit")} onClick={() => void send()}
         aria-label={routed ? routedSendLabel(routed.apply.label, routed.items, (values()[routed.apply.id] as string[] | undefined) ?? []) : props.prepared && selected() ? `Send ${selected()!.label}` : undefined}>
         <Show when={!routed} fallback={<bdi dir="auto">{routed!.apply.label}</bdi>}><Show when={selected()} fallback="Send answer">{option => <Show when={!props.prepared} fallback="Send">Send <bdi dir="auto">{option().label}</bdi></Show>}</Show></Show>
-      </button>
+      </button></Show>
       {/* The brief's other options (record only, wrong meeting) are explicit one-click answers beside Send. */}
       <For each={routed?.other ?? []}>{option => <button class="home-quiet" dir="auto" disabled={!canWrite()} onClick={() => void send(option)}>{option.label}</button>}</For>
       {props.extra}

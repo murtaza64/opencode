@@ -78,9 +78,9 @@ try {
   expect(commands()[1].body).toMatchObject({ action: "answer", choice_id: "record" })
   expect(commands()[1].body.input_value).toBeUndefined()
 
-  // A record without routing renders as before.
+  // A record without routing uses direct option buttons.
   await open("plain_1")
-  await expect(card("plain_1").getByRole("radio", { name: "30 days" })).toBeVisible()
+  await expect(card("plain_1").getByRole("button", { name: "30 days", exact: true })).toBeVisible()
   await expect(card("plain_1").locator(".routing-items")).toHaveCount(0)
 
   // 390px RTL: rows stay whole.

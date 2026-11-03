@@ -113,20 +113,21 @@ try {
   const miniRow = band.locator("[data-nav-item='mini~attention:fixture:decision_1']")
   await miniRow.click()
   const remote = page.locator(".work-remote")
-  await remote.getByRole("radio", { name: "Rotate now" }).check()
-  await remote.getByRole("button", { name: "Send Rotate now" }).click()
+  await remote.getByRole("button", { name: "Rotate now", exact: true }).click()
   await expect.poll(() => miniWrites.filter(write => write.endsWith(`/${miniDecision.id}/commands`)).length).toBe(1)
   expect(flipped).toEqual([])
 
   // Narrow and RTL.
   await band.locator("[data-nav-item='attention:fixture:decision_1']").click()
-  // Actions: the primary action leads the row, secondaries follow at its end, the recipient is a note below.
+  // Actions: direct choices lead above the row; secondaries follow, with the recipient below.
   const actions = await detail.locator(".home-decision .home-answer .home-actions").evaluate((row) => {
-    const box = (el) => el.getBoundingClientRect()
-    const primary = box(row.querySelector(".home-primary")), quiet = [...row.querySelectorAll(".home-quiet")].map(box), to = box(row.querySelector(".home-muted"))
-    return { primaryFirst: quiet.every((q) => q.left > primary.right), toBelow: to.top >= Math.max(primary.bottom, ...quiet.map((q) => q.bottom)) - 1, rowLeft: box(row).left, primaryLeft: primary.left }
+     const box = (el) => el.getBoundingClientRect()
+     const buttons = [...row.querySelectorAll("button")].map(box), to = box(row.querySelector(".home-muted"))
+     const choices = [...row.parentElement.querySelectorAll(".decision-button")].map(box)
+     return { choicesAbove: choices.length === 2 && choices.every((choice) => choice.bottom <= Math.min(...buttons.map((button) => button.top))),
+       toBelow: to.top >= Math.max(...buttons.map((button) => button.bottom)) - 1 }
   })
-  if (!actions.primaryFirst || !actions.toBelow || actions.primaryLeft - actions.rowLeft > 2) throw new Error(`decision actions layout ${JSON.stringify(actions)}`)
+  if (!actions.choicesAbove || !actions.toBelow) throw new Error(`decision actions layout ${JSON.stringify(actions)}`)
   // A long requester name (session titles are often long) must truncate, not push age and link onto new lines.
   preview.fixture.sessionTitles.set("ses_a", "Composer fixture working through the bounded implementation scope for the homepage")
   await page.reload({ waitUntil: "domcontentloaded" })

@@ -81,7 +81,7 @@ try {
     const card = page.locator(`[data-attention-id="${id}"]`)
     await expect(card).toBeVisible()
     await expect(card).toContainText(title)
-    await expect(card.getByRole("radio").first()).toBeEnabled()
+    await expect(id === "decision_1" ? card.getByRole("button", { name: /^Small scope/ }) : card.getByRole("radio", { name: "Continue" })).toBeEnabled()
   }
   await page.locator('nav.sidebar [data-nav-item="attention:other:other_decision"]').click()
   await checkMarkdown(page, page.locator('[data-attention-id="other_decision"]'), "model unavailable")
@@ -100,8 +100,7 @@ try {
   await expect(card).toContainText("The model provider refused sign-in. (ProviderAuthError)")
   await expect(card).toContainText("Briefs unavailable on this host: duolingo-openai is not signed in on this host.")
   await expect(card.getByRole("button", { name: "Prepare again" })).toBeDisabled()
-  await card.getByRole("radio", { name: "Small scope", exact: true }).check()
-  await card.getByRole("button", { name: "Send Small scope", exact: true }).click()
+  await card.getByRole("button", { name: /^Small scope/ }).click()
   await expect(page.locator(".home-notice")).toContainText("Answer saved")
   // History: the answered request reopens with the same rendering.
   await page.reload()

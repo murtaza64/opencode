@@ -142,3 +142,10 @@ button.home-add-note:focus-visible { outline: 2px solid var(--accent); outline-o
 .home-decision-more > details[open] { flex-basis: 100%; }
 .home-decision-more button { border-color: transparent; color: var(--subtext0); padding-inline: 6px; font-size: 12px; }
 .home-decision-more button:hover { color: var(--text); }
+/* A plain either/or answered by clicking the option itself (simple-decision-direct-buttons-20261103). */
+.decision-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+.attention-home .decision-button { min-block-size: 36px; min-inline-size: 88px; padding: 0 16px; border-radius: 6px; font-size: 13px; }
+.attention-home .decision-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.attention-home .decision-button[aria-busy=true] { color: var(--subtext1); }
+.decision-sending { font-size: 11px; }
+@media (pointer: coarse), (max-width: 650px) { .attention-home .decision-button { min-block-size: 44px; flex: 1 1 auto; } }

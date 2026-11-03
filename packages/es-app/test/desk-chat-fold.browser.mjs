@@ -67,8 +67,8 @@ try {
   const endTop = await question.count() ? (await question.boundingBox()).y : act.y
   expect(act.x, "answer column at inline-end").toBeGreaterThan(explain.x + explain.width - 1)
   expect(Math.abs(endTop - explain.y), "columns share a top").toBeLessThan(2)
-  const send = await page.getByRole("button", { name: /^Send/ }).first().boundingBox()
-  expect(send.y + send.height, "Send fits the window").toBeLessThanOrEqual(1000)
+  const answer = await page.locator('[data-attention-id="decision_1"]').getByRole("button", { name: /^Small scope/ }).boundingBox()
+  expect(answer.y + answer.height, "direct answer fits the window").toBeLessThanOrEqual(1000)
 
   await nav.click()
   await expect(composer).toBeVisible()
