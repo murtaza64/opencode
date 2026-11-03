@@ -5,7 +5,7 @@ import { createAnchorKit, installSurfaceBridge } from "./frame.js"
 export { createAnchorKit, installSurfaceBridge }
 
 /** Package version; bump with any protocol or anchor-rule change and record it in PROTOCOL.md. */
-export const VERSION = "1.0.0"
+export const VERSION = "1.1.0"
 /** postMessage namespace for every bridge message, both directions. */
 export const NS = "es-comments"
 /** Page policies, weakest to strictest: <meta name="es-comments-anchors" content="declared|off">. */

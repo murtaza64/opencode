@@ -3,6 +3,7 @@
 // in an opaque-origin sandboxed frame from a bare parent page, as the Surface reader does. Run from packages/es-app.
 import { createRequire } from "node:module"
 import { injectBridge } from "../surface-bridge.ts"
+import { createAnchorKit } from "../../surface-bridge/src/index.js"
 
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : { channel: "chrome" }) })
@@ -125,6 +126,22 @@ try {
     expect(await messages("picked")).toEqual([])
     expect(await track([{ id: "sec/x" }])).toEqual(["missing"])
     expect(errors).toEqual([])
+    await page.close()
+  }
+  {
+    // The kit's visible text, for hosts that keep their own anchors: private, field and editable content never appears.
+    const page = await browser.newPage()
+    await page.setContent(`<section id="s">
+<h2>Notes</h2>
+<p>Public line</p>
+<div data-es-private><p>SECRET-123</p></div>
+<textarea>draft text</textarea>
+<input value="field text">
+<div contenteditable>editable text</div>
+<select><option>choice text</option></select>
+</section>`)
+    const text = await page.evaluate((source) => new Function(`return (${source})`)()(window).textOf(document.getElementById("s")), createAnchorKit.toString())
+    expect(text).toBe("Notes Public line")
     await page.close()
   }
   console.log("surface-bridge-privacy: PASS")

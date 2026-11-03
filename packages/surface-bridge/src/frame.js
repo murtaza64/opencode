@@ -66,6 +66,9 @@ export function createAnchorKit(win) {
     /** Narrow (never loosen) the page's policy: "declared" or "open". */
     setHostPolicy: (value) => { hostPolicy = value === "declared" ? "declared" : "open" },
     isPrivate,
+    /** An element's visible text (whitespace-collapsed, max 4000 chars): private subtrees, form fields and editable
+     * regions are skipped. Hosts that keep their own anchor text or hash build it from this. */
+    textOf,
     hashOf,
     viewRect,
     /** What a pick records: declared = { id, rect }; open = { hash, rect, id?, selector? }. rect is in document fractions. */
