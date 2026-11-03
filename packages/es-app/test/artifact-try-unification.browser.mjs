@@ -93,6 +93,8 @@ try {
   await expect(page).toHaveURL(/[?&](surface=board|item=surface%3Aboard)$/)
   await expect(page.locator(".desk-surface h2")).toContainText("Board")
   const panel = page.getByRole("complementary", { name: "2 decisions about this" })
+  // Compact until asked: one banner for both, expanded on demand.
+  await panel.getByRole("button", { name: /^2 decisions/ }).click()
   const first = panel.locator('article.home-decision[data-attention-id="pair_1"]')
   await expect(first.getByRole("button", { name: "Park", exact: true })).toBeVisible()
   await expect(panel.locator('article.home-decision[data-attention-id="pair_2"]')).toBeVisible()
@@ -108,16 +110,19 @@ try {
 
   // A stale pair says which revision the decision is about.
   await page.goto(`${preview.url}/?surface=chart`)
+  await page.locator(".surface-decisions-banner").click()
   await expect(page.locator(".surface-decision-stale")).toHaveText("decision is about rev 5 · showing rev 7")
 
   // Another host's pair opens that host's Surface here with that host's decision.
   await page.goto(`${preview.url}/?item=${encodeURIComponent("mini~surface:map")}`)
+  await page.getByRole("complementary", { name: "Decision about this" }).locator(".surface-decisions-banner").click()
   await expect(page.getByRole("complementary", { name: "Decision about this" }).locator(`article.home-decision[data-attention-id="${miniRecord.id}"]`)).toBeVisible()
 
   // 390px RTL: the reader keeps the decision controls on screen.
   await page.goto(`${preview.url}/?surface=board`)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.evaluate(() => { document.documentElement.dir = "rtl" })
+  await page.locator(".surface-decisions-banner").click()
   const answer = page.locator('article.home-decision[data-attention-id="pair_2"]').getByRole("button", { name: "Develop", exact: true })
   await answer.scrollIntoViewIfNeeded()
   const box = await answer.boundingBox()

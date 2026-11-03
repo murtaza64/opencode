@@ -2,7 +2,7 @@
  * and acted on through the Local listener's /hosts/<id>/ routes (host-items.ts), so the action happens on the
  * owning host with that host's operator session and the window never switches to that host's tab. */
 import { SurfaceFind } from "./surface-find"
-import { createResource, createSignal, For, Match, Show, Switch, type JSX } from "solid-js"
+import { createResource, createSignal, createUniqueId, For, Match, Show, Switch, type JSX } from "solid-js"
 import type { PermissionRequest } from "@opencode-ai/sdk/v2"
 import { A } from "@solidjs/router"
 import { createAttention } from "../attention"
@@ -11,7 +11,7 @@ import { briefAnchorID, createBriefs, type DeskPointer } from "../desk-session"
 import { hostCore, hostPrefix, hostSurfaceAddress, markHostDeliverable, readHostDecision, readHostRequest } from "../host-items"
 import { ago, useDashboard } from "../state"
 import type { WorkEntry } from "../work-queue"
-import { AttentionDecision } from "./attention-decision"
+import { AttentionDecision, decisionState } from "./attention-decision"
 import { PreparedBrief, useCompleteBrief, useCompleteJob } from "./attention-brief"
 import { HomePermission } from "./home-permission"
 import { Glyph, HostGlyph } from "./icons"
@@ -165,7 +165,9 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
 
 /** The decisions that explicitly point at this Surface (`artifact.surface`), answered here with the same native controls
  * as their own card (DD artifact-try-decision-unification). Open ones first; with none open, the latest that ended, so
- * its outcome stays visible. Another host's come from that host's list and act on that host. Nothing is merged or rewritten. */
+ * its outcome stays visible. Another host's come from that host's list and act on that host. Nothing is merged or rewritten.
+ * Compact by default (DD surface-decision-focus-compact-drawing): a one-line banner keeps the Surface primary and
+ * expands the cards on demand. Expanding or hiding never answers. */
 export const LinkedDecisions = (props: { surface: Surface; host?: string }) => {
   const queue = useDeskQueue()
   const work = useDashboard().work
@@ -176,15 +178,32 @@ export const LinkedDecisions = (props: { surface: Surface; host?: string }) => {
     const open = about.filter(record => record.status === "open")
     return open.length ? open : about.toSorted((a, b) => b.updated_at - a.updated_at).slice(0, 1)
   }
+  const key = () => `${props.host ?? ""}|${props.surface.id}`
+  const [expanded, setExpanded] = createSignal(linkedExpanded.get(key()) ?? false)
+  const toggle = () => { const next = !expanded(); linkedExpanded.set(key(), next); setExpanded(next) }
+  const open = () => records().filter(record => record.status === "open").length
+  const body = createUniqueId()
   return <Show when={records().length}>
-    <aside class="surface-decisions attention-home" aria-label={records().length === 1 ? "Decision about this" : `${records().length} decisions about this`}>
-      {/* Keyed by record id, not object: every refresh delivers new record objects, and re-keying by object would
-        * remount the card under the human's caret. The card gets the current record in place. */}
-      <For each={records().map(record => record.id)}>{id => <Show when={records().find(record => record.id === id)}>{record =>
-        <div class="surface-decision" data-attention-id={id}>
-          <Show when={staleArtifact(record(), props.surface)}>{note => <p class="surface-decision-stale home-blocked" role="note">{note()} · showing rev {props.surface.revision}</p>}</Show>
-          <Show when={props.host} fallback={<AttentionDecision record={record()} attention={queue.attention} />}>{host => <RemoteDecision host={host()} record={record()} />}</Show>
-        </div>}</Show>}</For>
+    <aside class="surface-decisions attention-home" data-expanded={expanded() ? "" : undefined} aria-label={records().length === 1 ? "Decision about this" : `${records().length} decisions about this`}>
+      <button type="button" class="surface-decisions-banner" aria-expanded={expanded()} aria-controls={body} onClick={toggle}>
+        <span class="dot" classList={{ pending: open() > 0 }} aria-hidden="true" />
+        <span class="surface-decisions-label">{records().length > 1 ? `${records().length} decisions` : open() ? "Decision" : decisionState(records()[0])}</span>
+        <Show when={records().length === 1}><bdi dir="auto" class="surface-decisions-title">{records()[0].title}</bdi></Show>
+        <span class="surface-decisions-toggle">{expanded() ? "Hide" : open() ? "Answer" : "Show"}</span>
+      </button>
+      {/* Hidden, not unmounted: a draft, caret or pending send in a card survives hiding it. */}
+      <div id={body} class="surface-decisions-body" hidden={!expanded()}>
+        {/* Keyed by record id, not object: every refresh delivers new record objects, and re-keying by object would
+          * remount the card under the human's caret. The card gets the current record in place. */}
+        <For each={records().map(record => record.id)}>{id => <Show when={records().find(record => record.id === id)}>{record =>
+          <div class="surface-decision" data-attention-id={id}>
+            <Show when={staleArtifact(record(), props.surface)}>{note => <p class="surface-decision-stale home-blocked" role="note">{note()} · showing rev {props.surface.revision}</p>}</Show>
+            <Show when={props.host} fallback={<AttentionDecision record={record()} attention={queue.attention} />}>{host => <RemoteDecision host={host()} record={record()} />}</Show>
+          </div>}</Show>}</For>
+      </div>
     </aside>
   </Show>
 }
+
+// Whether the human last expanded a Surface's decisions, per host and Surface, for this window's lifetime.
+const linkedExpanded = new Map<string, boolean>()

@@ -1,7 +1,8 @@
 // A decision attached to a Surface keeps its card across attention refreshes (DD surface-decision-focus-compact-drawing):
 // typing 200+ characters while 20 snapshots arrive keeps the text, the caret and focus; an IME composition survives a
 // refresh; leaving and coming back keeps the draft. Refreshes are the app's own 30 s poll, driven by a fake clock, and
-// each snapshot carries changed records. Disposable fixture. Run from packages/es-app.
+// each snapshot carries changed records. The decision opens as a compact banner and expands on demand; expanding or
+// hiding never answers, and hiding keeps the draft. Disposable fixture. Run from packages/es-app.
 import { createRequire } from "node:module"
 import { startAttentionPreview } from "./attention-preview.mjs"
 import { directory } from "./composer-fixture.mjs"
@@ -39,8 +40,18 @@ const refresh = async (step) => {
 try {
   await page.clock.install({ time: now })
   await page.goto(`${preview.url}/?surface=board`, { waitUntil: "domcontentloaded", timeout: 300_000 })
-  const card = page.getByRole("complementary", { name: "Decision about this" }).locator('article.home-decision[data-attention-id="board_1"]')
-  await expect(card.getByRole("button", { name: /^Develop/ })).toBeVisible({ timeout: 120_000 })
+  const aside = page.getByRole("complementary", { name: "Decision about this" })
+  const banner = aside.getByRole("button", { name: /Board r7: develop or park\?/ })
+  const card = aside.locator('article.home-decision[data-attention-id="board_1"]')
+  // Compact by default: one line with a pending dot; the card is mounted but hidden.
+  await expect(banner).toHaveAttribute("aria-expanded", "false", { timeout: 120_000 })
+  await expect(banner.locator(".dot.pending")).toHaveCount(1)
+  await expect(card).toBeHidden()
+  const height = (await aside.boundingBox())?.height ?? 0
+  if (height > 40) throw new Error(`compact banner is ${height}px tall`)
+  await banner.click()
+  await expect(banner).toHaveAttribute("aria-expanded", "true")
+  await expect(card.getByRole("button", { name: /^Develop/ })).toBeVisible()
   // Marks the mounted card; a remount would drop the mark.
   await card.evaluate(el => { el.dataset.probe = "mounted" })
   await card.getByRole("button", { name: "Type something…" }).click()
@@ -76,12 +87,21 @@ try {
   await expect(field).toHaveValue(typed)
   await expect(card).toHaveAttribute("data-probe", "mounted")
 
-  // Nothing was sent by typing or refreshing.
+  // Hiding and expanding again keeps the card, its draft and nothing is answered.
+  await banner.click()
+  await expect(card).toBeHidden()
+  await refresh(23)
+  await banner.click()
+  await expect(field).toHaveValue(typed)
+  await expect(card).toHaveAttribute("data-probe", "mounted")
+
+  // Nothing was sent by typing, refreshing, expanding or hiding.
   expect(preview.ledger.calls.filter(call => call.method === "POST" && call.path.endsWith("/commands"))).toHaveLength(0)
 
   // Leaving and coming back keeps the draft.
   await page.goto(`${preview.url}/agents`, { waitUntil: "domcontentloaded" })
   await page.goto(`${preview.url}/?surface=board`, { waitUntil: "domcontentloaded" })
+  await banner.click()
   await card.getByRole("button", { name: "Type something…" }).click()
   await expect(field).toHaveValue(typed)
   expect(errors).toEqual([])

@@ -64,11 +64,20 @@
   .surface-owner-inline { display: none; }
   .surface-owner-menu { display: inline-block; }
 }
-/* Decisions about the Surface on screen (artifact-try-decision-unification): a band under the reader's bar, scrolling on
- * its own so the frame keeps most of the pane; its own "Open <artifact>" button would only reopen this view. */
-.surface-decisions { flex: none; max-block-size: 45vh; overflow: auto; border-block-end: 1px solid var(--surface0); background: var(--mantle); }
+/* Decisions about the Surface on screen (artifact-try-decision-unification): a one-line banner under the reader's bar that
+ * expands into a band scrolling on its own, so the frame keeps most of the pane; the card's own "Open <artifact>" button
+ * would only reopen this view. Selectors outrank .attention-home's padding and button chrome. */
+.surface-decisions.attention-home { flex: none; padding: 0; max-width: none; margin: 0; border-block-end: 1px solid var(--surface0); background: var(--mantle); }
+.surface-decisions > .surface-decisions-banner { display: flex; align-items: center; gap: 8px; inline-size: 100%; min-block-size: 32px; padding: 4px 14px; border: 0;
+  background: none; color: var(--text); font: inherit; font-size: 13px; text-align: start; cursor: pointer; }
+.surface-decisions > .surface-decisions-banner:hover { background: var(--surface0); }
+.surface-decisions-banner:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.surface-decisions-label { flex: none; font-weight: 600; }
+.surface-decisions-title { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--subtext1); }
+.surface-decisions-toggle { flex: none; margin-inline-start: auto; color: var(--blue); font-size: 12px; }
+.surface-decisions-body { max-block-size: 45vh; overflow: auto; border-block-start: 1px solid var(--surface0); }
 .surface-decisions .home-decision { padding: 10px 14px; border-block-end: 0; }
 .surface-decisions .home-decision-title > .artifact-open, .surface-decisions .home-decision-title > .artifact-unavailable { display: none; }
 .surface-decision + .surface-decision { border-block-start: 1px solid var(--surface0); }
 .surface-decision-stale { margin: 8px 14px 0; font-size: 12px; }
-@media (max-width: 900px) { .surface-decisions { max-block-size: 55vh; } }
+@media (max-width: 900px) { .surface-decisions-body { max-block-size: 55vh; } }

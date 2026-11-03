@@ -507,7 +507,7 @@ const AskAbout = (props: { record: AttentionRecord; host?: string }) => {
 }
 
 // The record's state as the card's eyebrow pill; an open blocker reads as blocked.
-const decisionState = (record: AttentionRecord) => record.status === "open" && record.kind === "blocker" ? "Blocked"
+export const decisionState = (record: AttentionRecord) => record.status === "open" && record.kind === "blocker" ? "Blocked"
   : ({ open: "Open", snoozed: "Snoozed", decided: "Saved", answered: "Answered", resolved: "Resolved", withdrawn: "Withdrawn" })[record.status]
 
 const sameWords = (a: string, b: string) => a.replace(/\W+/g, " ").trim().toLowerCase() === b.replace(/\W+/g, " ").trim().toLowerCase()
