@@ -154,6 +154,23 @@ try {
     expect(errors).toEqual([])
     await context.close()
   }
+  {
+    // A long thread on a low anchor in a short frame: the card takes the side with room, never runs past the stage,
+    // and keeps its reply box and actions on screen while the thread scrolls inside (MCR staging, 820px touch).
+    const root = comment({ comment_id: "longthread01", revision: 2, anchor: { rect: { x: 0.05, y: 0.9, w: 0.5, h: 0.04 } }, body: "Root of a long thread" }, now - 600_000)
+    store.comments.push(root, ...Array.from({ length: 7 }, (_, index) => comment({ comment_id: `longreply0${index}`, revision: 2, anchor: root.anchor, parent_id: root.comment_id, body: `Reply ${index + 1}: ${"a fairly long sentence ".repeat(4)}` }, now - 500_000 + index)))
+    const { page, context, errors } = await open({ width: 820, height: 600 })
+    await page.locator('.sc-peek[data-comment="longthread01"]').click()
+    const stage = await page.locator(".surface-stage").boundingBox()
+    const card = await page.locator(".sc-card").boundingBox()
+    expect(card.y).toBeGreaterThanOrEqual(stage.y - 1)
+    expect(card.y + card.height).toBeLessThanOrEqual(stage.y + stage.height + 1)
+    await expect(page.locator(".sc-send")).toBeInViewport()
+    await expect(page.locator(".sc-thread .sc-comment").last()).toBeInViewport()
+    await page.screenshot({ path: "/tmp/surface-comments-long-thread.png" })
+    expect(errors).toEqual([])
+    await context.close()
+  }
   console.log("surface-comments: PASS")
 } finally {
   await browser.close()

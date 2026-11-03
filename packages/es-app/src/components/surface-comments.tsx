@@ -14,6 +14,13 @@ type Open = { key: string; anchor: CommentAnchor; parent?: string }
 const NS = "es-comments"
 const DRAFT = "__draft"
 const POLL_MS = 30_000
+// Focus card placement, in stage pixels: gap to the anchor, margin to the stage edge, preferred room below, the
+// smallest room worth using, and the tallest card.
+const CARD_GAP = 10
+const CARD_EDGE = 8
+const CARD_ROOM = 260
+const CARD_MIN = 180
+const CARD_MAX = 460
 
 export const SurfaceComments = (props: { host: CommentHost; revision: number; frame: () => HTMLIFrameElement | undefined; stage: () => HTMLElement | undefined }) => {
   const [comments, setComments] = createSignal<SurfaceComment[]>([])
@@ -179,8 +186,18 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
       const pad = 6
       const hole = () => ({ x: Math.max(0, box().x - pad), y: Math.max(0, box().y - pad), r: Math.min(size().w, box().x + box().w + pad), b: Math.min(size().h, box().y + box().h + pad) })
       const thread = () => list().find((item) => item.root.comment_id === current().key)
-      const below = () => hole().b + 12 + 260 < size().h || hole().y < 280
-      const cardStyle = () => ({ left: `${Math.max(8, Math.min(size().w - 368, box().x))}px`, ...(below() ? { top: `${Math.min(size().h - 120, hole().b + 10)}px` } : { bottom: `${size().h - hole().y + 10}px` }) })
+      // The card takes the side with room (below unless above has more), capped to that room so its reply box and
+      // actions stay on screen; the thread scrolls inside. With no usable room on either side it sits over the bottom.
+      const roomBelow = () => size().h - hole().b - CARD_GAP - CARD_EDGE
+      const roomAbove = () => hole().y - CARD_GAP - CARD_EDGE
+      const below = () => roomBelow() >= CARD_ROOM || roomBelow() >= roomAbove()
+      const room = () => below() ? roomBelow() : roomAbove()
+      const cardStyle = () => {
+        const left = `${Math.max(CARD_EDGE, Math.min(size().w - 368, box().x))}px`
+        if (room() < CARD_MIN) return { left, bottom: `${CARD_EDGE}px`, "max-block-size": `${Math.min(CARD_MAX, size().h - 2 * CARD_EDGE)}px` }
+        const cap = `${Math.min(CARD_MAX, room())}px`
+        return below() ? { left, top: `${hole().b + CARD_GAP}px`, "max-block-size": cap } : { left, bottom: `${size().h - hole().y + CARD_GAP}px`, "max-block-size": cap }
+      }
       const sending = () => [...outgoing().values()].filter((item) => item.sealed.comment_id === current().key || item.sealed.parent_id === current().key)
       let input: HTMLTextAreaElement | undefined
       onMount(() => input?.focus())
@@ -192,7 +209,7 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
         <div class="sc-dim" style={{ left: `${hole().r}px`, top: `${hole().y}px`, right: 0, height: `${hole().b - hole().y}px` }} onClick={close} />
         <div class="sc-ring" style={{ left: `${hole().x}px`, top: `${hole().y}px`, width: `${hole().r - hole().x}px`, height: `${hole().b - hole().y}px` }} />
         <section class="sc-card" style={cardStyle()} data-below={below() ? "" : undefined}>
-          <Show when={thread()}>{(item) => <ol class="sc-thread">
+          <Show when={thread()}>{(item) => <ol class="sc-thread" ref={(el) => queueMicrotask(() => { el.scrollTop = el.scrollHeight })}>
             <For each={[item().root, ...item().replies]}>{(comment) => <li class="sc-comment" data-comment-id={comment.comment_id}>
               <span class="sc-face" aria-hidden="true">{initialOf(comment.author.name)}</span>
               <div class="sc-comment-main">

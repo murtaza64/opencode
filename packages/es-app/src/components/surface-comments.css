@@ -16,12 +16,15 @@
 .sc-focus { position: absolute; inset: 0; z-index: 4; }
 .sc-dim { position: absolute; background: rgb(0 0 0 / 42%); backdrop-filter: blur(5px) saturate(.8); -webkit-backdrop-filter: blur(5px) saturate(.8); animation: sc-fade 160ms ease-out; }
 .sc-ring { position: absolute; border-radius: 6px; box-shadow: 0 0 0 2px var(--peach), 0 0 24px rgb(250 179 135 / 25%); pointer-events: none; }
-.sc-card { position: absolute; inline-size: min(360px, calc(100% - 16px)); max-block-size: min(60vh, 460px); overflow: auto; display: grid; gap: 8px; padding: 12px;
+.sc-card { position: absolute; inline-size: min(360px, calc(100% - 16px)); max-block-size: min(60vh, 460px); overflow: hidden; display: flex; flex-direction: column; gap: 8px; padding: 12px; box-sizing: border-box;
   border-radius: 4px 14px 14px 14px; background: var(--base, #111); border: 1px solid var(--surface1); box-shadow: 0 16px 48px rgb(0 0 0 / 55%); animation: sc-rise 180ms ease-out; }
 .sc-card:not([data-below]) { border-radius: 14px 14px 14px 4px; }
 @keyframes sc-fade { from { opacity: 0; } }
 @keyframes sc-rise { from { opacity: 0; transform: translateY(4px); } }
 .sc-thread { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+/* Only the thread scrolls: the note, sending state, receipt and reply box keep their place at the card's foot. */
+.sc-card > * { flex: none; }
+.sc-card > .sc-thread { flex: 0 1 auto; min-block-size: 48px; overflow-y: auto; overscroll-behavior: contain; align-content: start; }
 .sc-comment { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; }
 .sc-face { display: inline-grid; place-items: center; inline-size: 24px; block-size: 24px; border-radius: 4px 12px 12px 12px; background: var(--peach); color: var(--crust, #000); font-size: 11px; font-weight: 700; }
 .sc-comment-head { display: flex; gap: 6px; align-items: baseline; font-size: 12px; }
