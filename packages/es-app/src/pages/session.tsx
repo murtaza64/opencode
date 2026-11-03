@@ -1896,6 +1896,34 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     return next
   })
   const messageByID = createMemo(() => new Map(messages().map((message) => [message.id, message] as const)))
+  // A promoted input stays as a Delivered bubble until its user message is in this transcript (DD #343): the bubble
+  // would otherwise retire on the receipt alone while a dropped host event leaves the message unrendered. Only inputs
+  // this page saw pending count, so older terminal receipts never reappear. After 5 s the message is read by id from
+  // the session's own host and applied; if Core has no such message the bubble stays (uncertain, never dropped).
+  const seenPending = new Set<string>()
+  createEffect(() => composer.state.receipts.forEach((receipt) => { if (receipt.state === "pending") seenPending.add(receipt.requestID) }))
+  const inTranscript = (messageID: string) => !!live.data.message[sessionID]?.some((message) => message.id === messageID)
+  const deliveredWaiting = createMemo(() => composer.state.receipts.filter((receipt) => {
+    const messageID = (receipt as { messageID?: unknown }).messageID
+    return receipt.state !== "pending" && receipt.state !== "cancelled" && seenPending.has(receipt.requestID) && receipt.source?.type !== "editspace-mail"
+      && typeof messageID === "string" && !inTranscript(messageID)
+  }))
+  const reading = new Set<string>()
+  const readTimers = new Set<ReturnType<typeof setTimeout>>()
+  onCleanup(() => readTimers.forEach(clearTimeout))
+  createEffect(() => deliveredWaiting().forEach((receipt) => {
+    const messageID = (receipt as { messageID?: string }).messageID!
+    if (reading.has(messageID)) return
+    reading.add(messageID)
+    const timer = setTimeout(async () => {
+      if (inTranscript(messageID)) return
+      const found = await oc.message(sessionID, directory, messageID).catch(() => undefined)
+      if (!found || inTranscript(messageID)) return
+      live.apply({ type: "message.updated", properties: { info: found.info } })
+      found.parts.forEach((part) => live.apply({ type: "message.part.updated", properties: { part } }))
+    }, 5000)
+    readTimers.add(timer)
+  }))
   // A promoted input's promotion time, from its receipt (Core keeps the last terminal receipts).
   const promotedAt = (messageID: string) => {
     const receipt = composer.state.receipts.find((item) => "messageID" in item && item.messageID === messageID) as { timePromoted?: unknown } | undefined
@@ -2179,7 +2207,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                 <Show when={recoveryError()}><div class="err" role="alert">{recoveryError()}</div></Show>
               </section>
             </Show>
-            <OutgoingMessages composer={composer} connected={connected()} session={session()} busy={busy()} running={runningTool()} echo={echo() || (composer.state.normalSubmission?.status === "unknown" && !composer.state.normalSubmission.messageID)} />
+            <OutgoingMessages composer={composer} connected={connected()} session={session()} busy={busy()} running={runningTool()} delivered={deliveredWaiting()} echo={echo() || (composer.state.normalSubmission?.status === "unknown" && !composer.state.normalSubmission.messageID)} />
             <For each={appendedQuestions()}>
               {(item) => {
                 const owner = () => item.request.sessionID !== sessionID

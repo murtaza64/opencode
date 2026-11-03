@@ -468,6 +468,11 @@ export const createFixture = async () => {
         const found = (id === "ses_a" ? fixture.messages ?? [] : fixture.messagesB).find((message) => message.info.id === single[1])
         return found ? json(found) : json({ name: "NotFoundError", data: { message: `Message not found: ${single[1]}` } }, 404)
       }
+      // One message by id (src/api.ts message): 404 when this session has none.
+      if (action.startsWith("/message/") && request.method === "GET" && !action.includes("/part/")) {
+        const found = (fixture.messages ?? []).find((item) => item.info.id === decodeURIComponent(action.slice("/message/".length)) && item.info.sessionID === id)
+        return found ? json(found) : json({ error: "not found" }, 404)
+      }
       if (action === "/message") {
         const limit = url.searchParams.get("limit")
         const all = id === "ses_a"

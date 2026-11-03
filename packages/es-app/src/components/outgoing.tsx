@@ -1,6 +1,6 @@
 import { createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import type { Session } from "@opencode-ai/sdk/v2"
-import type { Composer } from "../composer"
+import type { Composer, InputReceipt } from "../composer"
 import { ChatImages } from "./chat-images"
 import { TickMark } from "./message-tick"
 import { bubbleTick, laterTick, type Tick } from "../message-ticks"
@@ -21,6 +21,8 @@ export type RunningTool = { name: string; at?: number }
 
 export const OutgoingMessages = (props: {
   composer: Composer; connected: boolean; echo: boolean; session?: Session; busy?: boolean; running?: RunningTool
+  /** Promoted inputs whose message the transcript does not show yet: kept as Delivered bubbles. */
+  delivered?: readonly InputReceipt[]
 }) => {
   const state = props.composer.state
   const receipts = () => state.receipts.filter((item) => item.state === "pending" && item.source?.type !== "editspace-mail")
@@ -39,6 +41,18 @@ export const OutgoingMessages = (props: {
   ], undefined, { equals: (a, b) => a.length === b.length && a.every((id, index) => id === b[index]) })
   return (
     <div class="outgoing" data-composer-controls>
+      <Show when={props.delivered?.length}>
+        <ul class="outgoing-list input-receipts" aria-label="Delivered inputs">
+          <For each={props.delivered}>{(receipt) => <li class="pending-msg outgoing-item outgoing-msg" data-request-id={receipt.requestID} data-delivery={receipt.delivery} data-status="delivered">
+            <ChatImages images={receipt.images} />
+            <Show when={receipt.text || !receipt.images?.length}><div class="pending-bubble receipt-text" dir="auto">{receipt.text}</div></Show>
+            <div class="pending-hint outgoing-cue receipt-row" role="status" title={`Request ${receipt.requestID}`}>
+              <TickMark tick="delivered" label="Delivered · waiting for the transcript to show it" />
+              <span>Delivered</span>
+            </div>
+          </li>}</For>
+        </ul>
+      </Show>
       <Show when={ids().length}>
         <ul class="outgoing-list input-receipts" aria-label="Pending inputs">
           <For each={ids()}>{(id) => <InputBubble composer={props.composer} connected={props.connected} id={id} busy={props.busy} running={props.running} />}</For>
