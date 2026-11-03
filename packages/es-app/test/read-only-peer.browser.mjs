@@ -61,14 +61,14 @@ try {
   await expect(page.locator(".transcript")).toContainText("Which bucket?")
   await expect(page.getByRole("button", { name: "Answer", exact: true })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Dismiss", exact: true })).toHaveCount(0)
-  // Esc Esc (Stop) sends nothing.
-  await page.keyboard.press("Escape")
-  await page.keyboard.press("Escape")
+  // Ctrl+C Ctrl+C (Stop) sends nothing.
+  await page.keyboard.press("Control+c")
+  await page.keyboard.press("Control+c")
   await page.waitForTimeout(1000)
   expect(writes(ygnium)).toEqual([])
   expect(writes(local)).toEqual([])
   expect(errors).toEqual([])
-  console.log("PASS read-only peer: transcript read from ygnium; read only label; no composer, rename, permission/question replies or Esc-Esc stop; no writes to either Core")
+  console.log("PASS read-only peer: transcript read from ygnium; read only label; no composer, rename, permission/question replies or Ctrl+C Ctrl+C stop; no writes to either Core")
 } finally {
   await browser.close()
   await preview.close()

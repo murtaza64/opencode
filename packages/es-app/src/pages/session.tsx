@@ -766,7 +766,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const [aborting, setAborting] = createSignal(false)
   const [nudgePhase, setNudgePhase] = createSignal<"stopping" | "resuming">()
   const abort = async () => {
-    // A read-only host is never stopped from this page (Esc Esc included).
+    // A read-only host is never stopped from this page (Ctrl+C Ctrl+C included).
     if (sessionHost.readOnly || aborting() || nudgePhase() || sending() || !busy()) return
     setAborting(true)
     try {
@@ -778,17 +778,28 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     }
   }
 
-  // Esc Esc within 400ms in normal mode aborts; the insert->normal Escape
-  // doesn't count (only taps landing while already in normal mode do)
+  // Ctrl+C twice within 400 ms stops the busy turn of this page's session (on its own
+  // host). A Ctrl+C with selected text is a copy and resets the count; repeats, IME and
+  // other modifiers never count. Esc only leaves modes and closes things.
   let lastEsc = 0
-  const escTap = () => {
+  const stopTap = (e: KeyboardEvent) => {
+    if (!matchShortcut(e, "stopTurn") || e.repeat) return false
+    // An open modal (What's new, image viewer, shortcut help) owns the keyboard.
+    if (document.querySelector("dialog[open], [role='dialog'][aria-modal='true']")) return false
+    if (hasSelectedText(e.target)) {
+      lastEsc = 0
+      return false
+    }
+    if (!busy() || sessionHost.readOnly) return false
+    e.preventDefault()
     const now = Date.now()
     if (now - lastEsc < 400) {
       lastEsc = 0
       abort()
-      return
+      return true
     }
     lastEsc = now
+    return true
   }
 
   const [forking, setForking] = createSignal(false)
@@ -1450,7 +1461,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       activatePrimary()
       return
     }
-    if (e.key === "Escape" && vim.mode() === "normal" && composer.state.keyboardTarget !== "aside") escTap()
+    if (composer.state.keyboardTarget !== "aside" && stopTap(e)) return
     // D6: while typing, Ctrl+H/D/U/N/P keep their text-editing meaning (macOS delete,
     // forward delete, line moves). Stop propagation so the window-level panel and
     // nav handlers skip them too; Ctrl+E stays the float-editor key.
@@ -1468,6 +1479,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       if (dialog.active || e.defaultPrevented) return
       const target = e.target as HTMLElement
       if (target.closest(".prompt-box") && cycleMode(e)) return
+      if (!target.closest(".prompt-box") && stopTap(e)) return
       if (e.isComposing || target.closest("textarea, input, select, button, a, [contenteditable], [data-composer-controls], .generated-input")) return
       if (navKeys(e)) return
       if (e.key === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey && vim.mode() === "normal") {
@@ -1476,7 +1488,6 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         return
       }
       if (e.key === "Escape") {
-        if (vim.mode() === "normal") escTap()
         vim.setMode("normal")
         return
       }
@@ -2181,3 +2192,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
 }
 
 const TEXT_KEYS = new Set(["h", "d", "u", "n", "p"])
+
+// Text selected in a field or the page: Ctrl+C copies it (Linux, Windows) instead of stopping.
+const hasSelectedText = (target: EventTarget | null) => {
+  if ((target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) && target.selectionStart !== null && target.selectionStart !== target.selectionEnd) return true
+  return !!window.getSelection()?.toString()
+}

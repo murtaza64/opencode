@@ -30,6 +30,8 @@ export const SHORTCUTS = {
   nextPrompt: dispatched("Next prompt", "session", "N", "Control"),
   expandEditor: dispatched("Float editor", "composer", "E", "Control"),
   toggleSessions: dispatched("Toggle sessions panel", "app", "H", "Control"),
+  // Literal Control on every platform (terminal habit); press twice. See session.tsx stopTap.
+  stopTurn: dispatched("Stop the running turn (press twice)", "session", "C", "Control"),
   nextRegion: dispatched("Next region", "app", "F6"),
   previousRegion: dispatched("Previous region", "app", "F6", "Shift"),
   sessionFinder: planned("Session finder", "app", "S", "Mod"),
