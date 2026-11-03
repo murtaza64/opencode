@@ -3,6 +3,8 @@
  * filtered by a tab. Everything here reuses existing reads (the desk queue, surfaces, dashboard PRs);
  * opening a decision or surface goes to the Front desk with it selected. */
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js"
+import type { AttentionRecord } from "../attention"
+import { ago, sessionHref } from "../state"
 import { useLocation } from "@solidjs/router"
 import { useDeskQueue } from "../desk-queue"
 import { useDashboard } from "../state"
@@ -36,6 +38,19 @@ const setTab = (next: NavTab) => {
   setTabState(next)
   try { localStorage.setItem(TAB_KEY, next) } catch { /* kept for this page */ }
 }
+
+// The Decisions tab's two views: what needs you now, and what no longer does (read-only history).
+const DECISION_VIEW_KEY = "es-app:decisions-view"
+const [decisionView, setDecisionViewState] = createSignal<"open" | "history">((() => { try { return sessionStorage.getItem(DECISION_VIEW_KEY) === "history" ? "history" : "open" } catch { return "open" } })())
+const setDecisionView = (next: "open" | "history") => {
+  setDecisionViewState(next)
+  try { sessionStorage.setItem(DECISION_VIEW_KEY, next) } catch { /* kept for this page */ }
+}
+// A record's outcome as a word and a shape, so colour never carries it alone.
+const HISTORY_STATUS: Record<string, [string, string]> = {
+  answered: ["Answered", "✓"], decided: ["Not sent", "!"], snoozed: ["Snoozed", "◷"], resolved: ["Resolved", "✓"], withdrawn: ["Withdrawn", "–"],
+}
+const historyStatus = (record: AttentionRecord) => record.status === "answered" && record.delivery_state === "blocked" ? ["Blocked", "!"] as const : HISTORY_STATUS[record.status]
 
 const itemHref = (key: string) => `/?item=${encodeURIComponent(key)}`
 const matches = (text: string, needle: string) => text.toLocaleLowerCase().includes(needle.trim().toLocaleLowerCase())
@@ -154,6 +169,18 @@ export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: stri
   const setFilter = (id: Exclude<NavTab, "agents">, value: string) => setFilters(previous => ({ ...previous, [id]: value }))
   const all = useWork()
   const decisions = createMemo(() => all().entries.filter(entry => matches(`${entry.title} ${entry.hostLabel ?? ""}`, filter("decisions"))))
+  // History: this host's attention records that no longer need you, newest change first, and ignored failures.
+  // Reading only; opening a row shows the record in its own reader and writes nothing.
+  const history = createMemo(() => {
+    const records = (queue.attention.snapshot()?.value.records ?? [])
+      .filter(record => record.status !== "open" && HISTORY_STATUS[record.status])
+      .map(record => ({ kind: "record" as const, key: `attention:${record.editspace}:${record.id}`, record, at: record.answer?.answered_at ?? record.updated_at, text: `${record.title} ${record.lane ?? ""} ${record.editspace}` }))
+    const ignored = queue.failures().filter(failure => queue.ignores.ignored(failure))
+      .map(failure => ({ kind: "ignored" as const, key: `failure:${failure.messageID}`, failure, at: failure.time, text: `${dashboard.activity.session(failure.sessionID)?.title ?? failure.sessionID} ${failureLabel(failure)}` }))
+    return [...records, ...ignored].filter(row => matches(row.text, filter("decisions"))).sort((a, b) => b.at - a.at || a.key.localeCompare(b.key))
+  })
+  const open = useOpenItem()
+  const views = [["open", "Open"], ["history", "History"]] as const
   // Other Work hosts' Surfaces; a host not current makes the count "N+".
   const hostSurfaces = createMemo(() => workSurfaces([], dashboard.work.feeds()))
   // One list (NAV-03): this host's and other Work hosts' Surfaces interleaved by when their owner last published them
@@ -216,8 +243,45 @@ export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: stri
     <div role="tabpanel" id={`${tabId(tab())}-panel`} aria-labelledby={tabId(tab())} class="nav-tab-panel">
       <Show when={tab() === "agents"}>{props.agents}</Show>
       <Show when={tab() === "decisions"}>
+        <div class="decision-views" role="radiogroup" aria-label="Decisions view">
+          <For each={views}>{([id, label]) =>
+            <button type="button" role="radio" class="decision-view" aria-checked={decisionView() === id} tabindex={decisionView() === id ? 0 : -1} data-view={id}
+              onClick={() => setDecisionView(id)}
+              onKeyDown={event => {
+                if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return
+                event.preventDefault()
+                const next = decisionView() === "open" ? "history" : "open"
+                setDecisionView(next)
+                event.currentTarget.parentElement?.querySelector<HTMLElement>(`[data-view=${next}]`)?.focus()
+              }}>
+              {label}<Show when={id === "open" && decisions().length}><span class="decision-view-count" dir="ltr">{decisions().length}</span></Show>
+            </button>}</For>
+        </div>
         <FilterBox id="decisions" label="Decisions" />
-        <For each={decisions()} fallback={<div class="dim nav-empty">{filter("decisions") ? "no matches" : "Nothing needs you."}</div>}>{entry => <DecisionRow entry={entry} />}</For>
+        <Show when={decisionView() === "open"}>
+          <For each={decisions()} fallback={<div class="dim nav-empty">{filter("decisions") ? "no matches" : "Nothing needs you."}</div>}>{entry => <DecisionRow entry={entry} />}</For>
+        </Show>
+        <Show when={decisionView() === "history"}>
+          <ul class="nav-history" aria-label="Decision history">
+            <For each={history()} fallback={<li class="dim nav-empty">{filter("decisions") ? "no matches" : "No earlier decisions on this host."}</li>}>{row => row.kind === "record"
+              ? (() => {
+                const [word, glyph] = historyStatus(row.record)
+                const choice = () => row.record.options.find(option => option.id === row.record.answer?.choice_id)?.label
+                return <li><a href={itemHref(row.key)} class="nav-item nav-decision nav-history-row" classList={{ active: open(row.key) }} aria-current={open(row.key) ? "page" : undefined}
+                  data-status={word === "Blocked" ? "blocked" : row.record.status} data-nav-item={row.key}>
+                  <span class="nav-kind" aria-hidden="true">{glyph}</span>
+                  <span class="nav-title" dir="auto">{row.record.title}</span>
+                  <span class="nav-history-meta"><span class="nav-history-status">{word}</span><Show when={choice()}>{label => <> · <bdi dir="auto">{label()}</bdi></>}</Show>
+                    {" · "}<bdi dir="auto">{row.record.lane ?? row.record.editspace}</bdi> · <time dateTime={new Date(row.at).toISOString()}>{ago(row.at)}</time></span>
+                </a></li>
+              })()
+              : <li><a href={sessionHref(row.failure.sessionID, row.failure.directory)} class="nav-item nav-decision nav-history-row" data-status="ignored" title={failureLabel(row.failure)}>
+                <span class="nav-kind" aria-hidden="true">×</span>
+                <span class="nav-title" dir="auto">{dashboard.activity.session(row.failure.sessionID)?.title ?? row.failure.sessionID}</span>
+                <span class="nav-history-meta"><span class="nav-history-status">Ignored failure</span> · {failureAge(row.failure.time, Date.now())}</span>
+              </a></li>}</For>
+          </ul>
+        </Show>
       </Show>
       <Show when={tab() === "surfaces"}>
         <FilterBox id="surfaces" label="Surfaces" />
