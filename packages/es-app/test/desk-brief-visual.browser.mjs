@@ -306,7 +306,8 @@ try {
       await expect(bubbles.nth(1).locator(".desk-bubble-text")).toHaveText("seems legit enough; check if true and fix")
       await expect(bubbles.nth(1).locator("a.desk-bubble-who")).toHaveAttribute("href", "https://github.com/acme/etl-loader/pull/143#discussion_r4351575820")
       await expect(bubbles.nth(1).locator(".desk-bubble-text a")).toHaveCount(0)
-      // The note is always an open text box; no agent-speak after the recipient.
+      // A recommended choice starts selected with the note behind "Add a note"; no agent-speak after the recipient.
+      if (await card.locator(".home-add-note").count()) await card.locator(".home-add-note").click()
       await expect(card.getByRole("textbox", { name: /Note/ })).toBeVisible()
       await expect(card.locator(".home-answer")).not.toContainText("tool approval")
       await expect(card.locator(".home-sends blockquote")).toHaveText(DRAFT)
