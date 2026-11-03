@@ -75,12 +75,11 @@ try {
   ])
   expect((await fetch(origin)).status).toBe(403)
   expect(await page.evaluate(() => fetch("/oc/pty", { method: "POST" }).then((res) => res.status))).toBe(403)
-  // Busy with a draft: Steer is the primary; Cmd+M makes it Queue, which keeps the session agent.
+  // Busy with a draft: Steer is the primary; Queue is a More send options choice, which keeps the session agent.
   await editor.fill("Electron fixture queue")
   await expect(primary).toHaveAccessibleName("Steer")
-  await editor.press("Meta+m")
-  await expect(primary).toHaveAccessibleName("Queue")
-  await primary.click()
+  await active.getByRole("button", { name: "More send options", exact: true }).click()
+  await page.getByRole("button", { name: "Queue for when idle", exact: true }).click()
   await expect(page.locator(".input-receipts")).toContainText("Electron fixture queue")
   expect(fixture.receipts).toHaveLength(1)
   expect(fixture.calls.filter((call) => call.method === "POST" && call.path.endsWith("/input"))).toMatchObject([
