@@ -8,6 +8,7 @@ import { ago, sessionHref } from "../state"
 import { isDeliverable, renewDelay, surfaceAddress, surfaceKey, surfaceProblem, surfaceUnavailable, type Surface, type createSurfaces } from "../surfaces"
 import { Glyph } from "./icons"
 import { BuildingHubSlot } from "./buildinghub-link"
+import { SurfaceOwner } from "./surface-owner"
 import "./desk-surfaces.css"
 
 export const SurfaceList = (props: { surfaces: ReturnType<typeof createSurfaces>; selected?: string; onSelect: (key: string) => void }) => {
@@ -180,6 +181,7 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
           <bdi dir="auto">{props.surface?.title ?? props.id}</bdi></h2>
         <Show when={props.surface?.requested_in}>{asked => <A class="surface-head-link" href={sessionHref(asked().session, asked().directory)} data-requested-in={asked().session}
           title="The conversation this was asked for in">asked in <bdi dir="auto">{asked().title ?? "conversation"}</bdi></A>}</Show>
+        <Show when={props.surface}>{surface => <SurfaceOwner surface={surface()} />}</Show>
         <DeliverableDoneControls state={doneState} />
         <span class="surface-head-actions">
           {/* Reserved for "BuildingHub version" (Laptop2649): shown only from a deployed receipt, which no API offers yet. */}

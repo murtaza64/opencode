@@ -16,6 +16,7 @@ import { HomePermission } from "./home-permission"
 import { Glyph, HostGlyph } from "./icons"
 import { AppHeader } from "./native-header"
 import { BuildingHubSlot } from "./buildinghub-link"
+import { SurfaceOwner } from "./surface-owner"
 import { createDeliverableDone, DeliverableDoneControls } from "./desk-surfaces"
 
 // The parent may clear the entry while this view (and its portalled top-bar row) is still being disposed.
@@ -125,6 +126,7 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
       <div class="surface-head" onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); props.onClose() } }}>
         <h2 title={`${props.surface.owner} · updated ${ago(props.surface.updated_at)}`}><bdi dir="auto">{props.surface.title}</bdi></h2>
         {props.where}
+        <SurfaceOwner surface={props.surface} host={{ id: props.host, label: props.label }} />
         <DeliverableDoneControls state={done} label={props.frame === "host" ? undefined : `Mark seen (opened on ${props.label})`} />
         <span class="surface-head-actions">
           <BuildingHubSlot surface={props.surface} />

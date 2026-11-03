@@ -100,14 +100,19 @@ export const contextGroups = (input: {
     .map((surface) => ({ surface, score: score(surface.title, surface.lane ?? undefined, surface.owner, surface.summary ?? undefined) }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || b.surface.updated_at - a.surface.updated_at)
-    .map(({ surface }): ContextRef => ({ kind: "surface", id: surface.id, host: input.host, label: surface.title, editspace: surface.editspace,
-      revision: surface.revision, owner: surface.owner, lane: surface.lane ?? undefined, summary: surface.summary ? clip(surface.summary, 600) : undefined,
-      purpose: surface.purpose ?? "board", updated: surface.updated_at, health: surface.health.state }))
+    .map(({ surface }): ContextRef => surfaceRef(surface, input.host))
     .filter((ref) => !added.has(contextKey(ref)))
     .slice(0, 6)
   return ([{ name: "Agents", items: agents }, { name: "Sessions", items: sessions }, { name: "Decisions", items: decisions },
     { name: "Surfaces", items: surfaces }] as ContextGroup[]).filter((group) => group.items.length)
 }
+
+/** A surface chip: the Surface's title and summary at its current revision, on `host` (this window's host, or another
+ * Work host's ID). The @ picker and a Surface's Message owner build the same chip. */
+export const surfaceRef = (surface: SurfaceCandidate, host: string): Extract<ContextRef, { kind: "surface" }> => ({
+  kind: "surface", id: surface.id, host, label: surface.title, editspace: surface.editspace,
+  revision: surface.revision, owner: surface.owner, lane: surface.lane ?? undefined, summary: surface.summary ? clip(surface.summary, 600) : undefined,
+  purpose: surface.purpose ?? "board", updated: surface.updated_at, health: surface.health.state })
 
 /** A decision chip: the record's question and options at its current revision, on `host` (this window's host, or
  * another Work host's ID). The @ picker and a card's Ask about this build the same chip. */
