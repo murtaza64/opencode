@@ -119,6 +119,8 @@ import type {
   McpRemoteConfig,
   McpStatusErrors,
   McpStatusResponses,
+  McpToolCallErrors,
+  McpToolCallResponses,
   ModelRef,
   MoveSessionDestination,
   OutputFormat,
@@ -2573,6 +2575,51 @@ export class Auth2 extends HeyApiClient {
   }
 }
 
+export class Tool2 extends HeyApiClient {
+  /**
+   * Call an allowlisted MCP tool
+   *
+   * Call one MCP tool without a model turn. Only server/tool pairs listed in experimental.mcp_tool_routes are callable; anything else is not found. A tool that reports its own failure still returns 200 with `isError: true` in the result; callers must check it.
+   */
+  public call<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+      tool: string
+      directory?: string
+      workspace?: string
+      arguments?: {
+        [key: string]: unknown
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { in: "path", key: "tool" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "arguments" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<McpToolCallResponses, McpToolCallErrors, ThrowOnError>({
+      url: "/mcp/{name}/tool/{tool}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Mcp extends HeyApiClient {
   /**
    * Get MCP status
@@ -2706,6 +2753,11 @@ export class Mcp extends HeyApiClient {
   private _auth?: Auth2
   get auth(): Auth2 {
     return (this._auth ??= new Auth2({ client: this.client }))
+  }
+
+  private _tool?: Tool2
+  get tool(): Tool2 {
+    return (this._tool ??= new Tool2({ client: this.client }))
   }
 }
 

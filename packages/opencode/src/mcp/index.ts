@@ -183,6 +183,12 @@ export interface Interface {
     clientName: string,
     resourceUri: string,
   ) => Effect.Effect<Awaited<ReturnType<MCPClient["readResource"]>> | undefined>
+  /** Calls one tool on a connected server; undefined when the server is not connected or the call fails. */
+  readonly callTool: (
+    clientName: string,
+    name: string,
+    args?: Record<string, unknown>,
+  ) => Effect.Effect<Awaited<ReturnType<MCPClient["callTool"]>> | undefined>
   readonly startAuth: (
     mcpName: string,
   ) => Effect.Effect<{ authorizationUrl: string; oauthState: string }, NotFoundError>
@@ -787,6 +793,34 @@ const layer = Layer.effect(
       )
     })
 
+    const callTool = Effect.fn("MCP.callTool")(function* (
+      clientName: string,
+      name: string,
+      args?: Record<string, unknown>,
+    ) {
+      const s = yield* InstanceState.get(state)
+      const client = s.clients[clientName]
+      if (s.status[clientName]?.status !== "connected" || !client) return undefined
+      const cfg = yield* cfgSvc.get()
+      return yield* Effect.tryPromise({
+        try: () =>
+          client.callTool({ name, arguments: args }, undefined, {
+            timeout: requestTimeout(s, clientName, cfg.mcp?.[clientName], cfg.experimental?.mcp_timeout),
+          }),
+        catch: (error) => error,
+      }).pipe(
+        // The server writes the error message and may echo the arguments, so log only the error type.
+        Effect.tapError((error) =>
+          Effect.logError("failed to callTool", {
+            clientName,
+            toolName: name,
+            error: error instanceof Error ? error.name : typeof error,
+          }),
+        ),
+        Effect.orElseSucceed(() => undefined),
+      )
+    })
+
     const getMcpConfig = Effect.fnUntraced(function* (mcpName: string) {
       const s = yield* InstanceState.get(state)
       if (s.config[mcpName]) return s.config[mcpName]
@@ -982,6 +1016,7 @@ const layer = Layer.effect(
       disconnect,
       getPrompt,
       readResource,
+      callTool,
       startAuth,
       authenticate,
       finishAuth,

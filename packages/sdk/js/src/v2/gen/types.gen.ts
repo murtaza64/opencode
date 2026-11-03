@@ -2216,6 +2216,10 @@ export type Config = {
     primary_tools?: Array<string>
     continue_loop_on_deny?: boolean
     mcp_timeout?: number
+    mcp_tool_routes?: Array<{
+      server: string
+      tool: string
+    }>
     policies?: Array<ConfigV2ExperimentalPolicy>
   }
 }
@@ -2830,6 +2834,20 @@ export type McpUnsupportedOAuthError = {
 export type McpServerNotFoundError = {
   _tag: "McpServerNotFoundError"
   name: string
+  message: string
+}
+
+export type McpToolNotAllowedError = {
+  _tag: "McpToolNotAllowedError"
+  server: string
+  tool: string
+  message: string
+}
+
+export type McpToolCallError = {
+  _tag: "McpToolCallError"
+  server: string
+  tool: string
   message: string
 }
 
@@ -9987,6 +10005,47 @@ export type McpConnectResponses = {
 }
 
 export type McpConnectResponse = McpConnectResponses[keyof McpConnectResponses]
+
+export type McpToolCallData = {
+  body?: {
+    arguments?: {
+      [key: string]: unknown
+    }
+  }
+  path: {
+    name: string
+    tool: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/mcp/{name}/tool/{tool}"
+}
+
+export type McpToolCallErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * McpToolNotAllowedError
+   */
+  404: McpToolNotAllowedError
+  /**
+   * McpToolCallError
+   */
+  502: McpToolCallError
+}
+
+export type McpToolCallError2 = McpToolCallErrors[keyof McpToolCallErrors]
+
+export type McpToolCallResponses = {
+  /**
+   * The MCP tool result (CallToolResult)
+   */
+  200: unknown
+}
 
 export type McpDisconnectData = {
   body?: never

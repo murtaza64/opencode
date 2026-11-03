@@ -182,6 +182,12 @@ export const Info = Schema.Struct({
       mcp_timeout: Schema.optional(PositiveInt).annotate({
         description: "Timeout in milliseconds for model context protocol (MCP) requests",
       }),
+      mcp_tool_routes: Schema.optional(
+        Schema.mutable(Schema.Array(Schema.Struct({ server: Schema.String, tool: Schema.String }))),
+      ).annotate({
+        description:
+          "MCP tools that POST /mcp/:name/tool/:tool may call without a model turn. Exact server and tool names; empty by default.",
+      }),
       policies: Schema.optional(Schema.mutable(Schema.Array(ConfigExperimental.Policy))).annotate({
         description: "Policy statements applied to supported resources, such as provider access",
       }),

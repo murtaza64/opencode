@@ -1,4 +1,5 @@
 import { describe, expect } from "bun:test"
+import path from "path"
 import { Context, Effect, Layer } from "effect"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
 import { McpPaths } from "../../src/server/routes/instance/httpapi/groups/mcp"
@@ -8,6 +9,7 @@ import { TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
 const context = Context.empty() as Context.Context<unknown>
+const toolRouteFixture = path.join(import.meta.dir, "../fixture/mcp-tool-route-stdio.ts")
 const testStateLayer = Layer.effectDiscard(
   Effect.gen(function* () {
     yield* Effect.promise(() => resetDatabase())
@@ -187,6 +189,101 @@ describe("mcp HttpApi", () => {
         },
       },
     },
+  )
+
+  const toolRouteConfig = {
+    formatter: false as const,
+    lsp: false as const,
+    mcp: {
+      granola: { type: "local" as const, command: [process.execPath, toolRouteFixture] },
+    },
+    experimental: {
+      mcp_tool_routes: [
+        { server: "granola", tool: "list_meetings" },
+        { server: "granola", tool: "huge" },
+        { server: "absent", tool: "list_meetings" },
+      ],
+    },
+  }
+
+  it.instance(
+    "calls an allowlisted MCP tool without a model turn and passes its arguments",
+    () =>
+      Effect.gen(function* () {
+        const tmp = yield* TestInstance
+        const handler = HttpApiApp.webHandler()
+        const response = yield* request(handler, "/mcp/granola/tool/list_meetings", tmp.directory, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ arguments: { day: "2026-11-03" } }),
+        })
+
+        expect(response.status).toBe(200)
+        const body = yield* json<{ content: { type: string; text: string }[] }>(response)
+        expect(JSON.parse(body.content[0]!.text)).toEqual({ tool: "list_meetings", arguments: { day: "2026-11-03" } })
+      }),
+    { config: toolRouteConfig },
+  )
+
+  it.instance(
+    "refuses a tool of a connected server that is not allowlisted",
+    () =>
+      Effect.gen(function* () {
+        const tmp = yield* TestInstance
+        const handler = HttpApiApp.webHandler()
+        const response = yield* request(handler, "/mcp/granola/tool/get_meetings", tmp.directory, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ arguments: { id: "m1" } }),
+        })
+
+        expect(response.status).toBe(404)
+        expect(yield* json(response)).toEqual({
+          _tag: "McpToolNotAllowedError",
+          server: "granola",
+          tool: "get_meetings",
+          message: "MCP tool not found: granola/get_meetings",
+        })
+      }),
+    { config: toolRouteConfig },
+  )
+
+  it.instance(
+    "reports an allowlisted tool on a server that is not connected as unavailable",
+    () =>
+      Effect.gen(function* () {
+        const tmp = yield* TestInstance
+        const handler = HttpApiApp.webHandler()
+        const response = yield* request(handler, "/mcp/absent/tool/list_meetings", tmp.directory, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({}),
+        })
+
+        expect(response.status).toBe(502)
+        expect(yield* json(response)).toMatchObject({ _tag: "McpToolCallError", message: "MCP tool unavailable: absent/list_meetings" })
+      }),
+    { config: toolRouteConfig },
+  )
+
+  it.instance(
+    "refuses a tool result over the byte limit",
+    () =>
+      Effect.gen(function* () {
+        const tmp = yield* TestInstance
+        const handler = HttpApiApp.webHandler()
+        const response = yield* request(handler, "/mcp/granola/tool/huge", tmp.directory, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({}),
+        })
+
+        expect(response.status).toBe(502)
+        const body = yield* json<{ _tag: string; message: string }>(response)
+        expect(body._tag).toBe("McpToolCallError")
+        expect(body.message).toContain("over the 1048576 byte limit")
+      }),
+    { config: toolRouteConfig },
   )
 
   it.instance(
