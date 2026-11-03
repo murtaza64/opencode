@@ -459,7 +459,6 @@ const start = async () => {
     : undefined
   if (restore?.dropped) console.info("Editspace restore dropped views of replaced page hosts", { count: restore.dropped })
   if (process.env.ES_DESKTOP_RESTORE && !restore) console.error("Editspace restore ignored: invalid or unreadable record")
-  if (restore && !tabs) void localContents.loadURL(restore.views.find((item) => item.id === "local")?.url ?? server.origin)
   if (tabs) {
     restore?.views.forEach((item) => tabs.open(item.id, item.url))
     tabs.select(restore?.selected ?? "local")
@@ -505,7 +504,9 @@ const start = async () => {
     })
     app.on("before-quit", notifications.stop)
   }
-  await (tabs ? new Promise<void>((resolve) => localContents.once("did-finish-load", () => resolve())) : localContents.loadURL(server.origin))
+  // Without host tabs the window is the Work view itself: it opens on the restored route when a capture named one.
+  await (tabs ? new Promise<void>((resolve) => localContents.once("did-finish-load", () => resolve()))
+    : localContents.loadURL(restore?.views.find((item) => item.id === "local")?.url ?? server.origin))
   opened.ready = true
   if (startup.showOnLoad) window.show()
   else if (opened.requested) reveal()
