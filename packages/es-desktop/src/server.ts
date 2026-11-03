@@ -13,7 +13,7 @@ import { attentionRoute, bridgedTargets, hostPath, localHost, remoteCookie, remo
 import type { Bridge } from "./bridge"
 import type { SshPeer } from "./ssh-peer"
 import type { Transcriber, Voice, VoiceFailure } from "./voice"
-import type { Appearance } from "./appearance"
+import type { Appearance, HostPalette } from "./appearance"
 import type { ReleaseNotesStore } from "./release-notes"
 import { createPerfLog, routeOf } from "./perf-log"
 
@@ -107,6 +107,8 @@ export const serve = async (options: {
   transcriber?: Transcriber
   // This laptop's palette and blurred wallpaper; never offered to paired remote clients.
   appearance?: Appearance
+  // This host's colours only (no wallpaper), for paired phones on a gateway: GET /__es/palette.
+  palette?: () => Promise<HostPalette | undefined>
   // This app release's notes and whether they were seen; one store for every listener of this app, never offered to
   // paired remote clients.
   releaseNotes?: ReleaseNotesStore
@@ -264,6 +266,11 @@ export const serve = async (options: {
       if (!options.releaseNotes || pairing || req.method !== "POST" || url.search) return finish(404, "Not found")
       if (!trusted(req.headers.origin)) return finish(403, "Forbidden")
       return seenRoute(options.releaseNotes, req, finish)
+    }
+    if (url.pathname === "/__es/palette" && options.palette) {
+      if (req.method !== "GET" || url.search) return finish(405, "Method not allowed")
+      const palette = await options.palette().catch(() => undefined)
+      return palette ? finish(200, JSON.stringify(palette), "application/json") : finish(404, JSON.stringify({ error: "No palette on this host" }), "application/json")
     }
     if (/^\/__es\/appearance(\/|$)/.test(url.pathname)) {
       if (!options.appearance || pairing || req.method !== "GET") return finish(404, "Not found")

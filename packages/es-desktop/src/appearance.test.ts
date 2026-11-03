@@ -3,7 +3,7 @@ import { createHash } from "node:crypto"
 import { chmod, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { createAppearance } from "./appearance"
+import { createAppearance, readPalette } from "./appearance"
 import { serve } from "./server"
 
 const cleanup: (() => Promise<unknown> | unknown)[] = []
@@ -396,4 +396,48 @@ test("a Personal listener serves only the Personal look and a Work listener only
   expect(await (await get(personalBody.wallpaper)).text()).toBe(`blurred:${cache.sha256}.jpg`)
   expect((await get(workBody.wallpaper)).status).toBe(404)
   expect((await work.get(personalBody.wallpaper)).status).toBe(404)
+})
+
+test("a host palette carries the pywal colours and wal roles, never the wallpaper or Studio look", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "es-palette-"))
+  cleanup.push(() => rm(directory, { recursive: true, force: true }))
+  await writeFile(path.join(directory, "colors.json"), JSON.stringify({ wallpaper: "/Users/me/secret/wall.png", studio: { blur: 10, dim: 0.2 },
+    special: { background: "#101014", foreground: "#e0e0e0" }, colors: { color1: "#ff5555", bad: "url(x)" } }))
+  const colours = await readPalette(directory)
+  expect(colours).toEqual({ schema: "es-palette/1", revision: expect.stringMatching(/^[0-9a-f]{16}$/), scheme: "dark",
+    palette: { background: "#101014", color1: "#ff5555", foreground: "#e0e0e0" } })
+  expect(JSON.stringify(colours)).not.toContain("wall")
+  await writeFile(path.join(directory, "palette.json"), JSON.stringify({ schema: "wal-palette/1", scheme: "dark", revision: "r42",
+    roles: { accent: "#88aaff", bad: "nope" }, highlights: ["#ffcc00"], terminal: { secret: "x" } }))
+  expect(await readPalette(directory)).toMatchObject({ revision: "r42", scheme: "dark", roles: { accent: "#88aaff" }, highlights: ["#ffcc00"] })
+  expect(JSON.stringify(await readPalette(directory))).not.toContain("terminal")
+})
+
+test("a light background reads as light; no palette files means no palette", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "es-palette-light-"))
+  cleanup.push(() => rm(directory, { recursive: true, force: true }))
+  expect(await readPalette(directory)).toBeUndefined()
+  await writeFile(path.join(directory, "colors.json"), JSON.stringify({ special: { background: "#f4f1ea", foreground: "#222222" } }))
+  expect(await readPalette(directory)).toMatchObject({ scheme: "light" })
+})
+
+test("paired phones read only the palette: GET /__es/palette with a paired cookie, while /__es/appearance stays refused", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "es-palette-gw-"))
+  cleanup.push(() => rm(directory, { recursive: true, force: true }))
+  await writeFile(path.join(directory, "colors.json"), palette(path.join(directory, "wall.png")))
+  const root = await mkdtemp(path.join(tmpdir(), "es-palette-root-"))
+  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  await writeFile(path.join(root, "index.html"), "<title>Fixture</title>")
+  const gateway = await serve({ root, host: "127.0.0.1", pairing: { code: "ABCD-EFGH-JKLM" }, palette: () => readPalette(directory) })
+  cleanup.push(() => Promise.race([gateway.close(), Bun.sleep(500)]))
+  expect((await fetch(`${gateway.origin}/__es/palette`)).status).toBe(401)
+  const paired = await fetch(`${gateway.origin}/__es/pair`, { method: "POST", redirect: "manual", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code: "ABCD-EFGH-JKLM" }) })
+  const cookie = paired.headers.get("set-cookie")!.split(";")[0]!
+  const answer = await fetch(`${gateway.origin}/__es/palette`, { headers: { cookie } })
+  expect(answer.status).toBe(200)
+  expect(await answer.json()).toMatchObject({ schema: "es-palette/1", scheme: "dark", palette: { background: "#101014", color1: "#ff5555" } })
+  expect((await fetch(`${gateway.origin}/__es/palette?x=1`, { headers: { cookie } })).status).toBe(405)
+  expect((await fetch(`${gateway.origin}/__es/palette`, { method: "POST", headers: { cookie, origin: gateway.origin } })).status).toBe(405)
+  expect((await fetch(`${gateway.origin}/__es/appearance`, { headers: { cookie } })).status).toBe(404)
+  expect((await fetch(`${gateway.origin}/__es/appearance/wallpaper`, { headers: { cookie } })).status).toBe(404)
 })

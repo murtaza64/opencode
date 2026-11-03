@@ -7,6 +7,7 @@ import { serve } from "../../es-desktop/src/server"
 import { createPairingCode, normalizePairingCode } from "../../es-desktop/src/pairing"
 import { hostIdentity, localHost } from "../../es-app/remote-host"
 import { createTranscriber, voiceTools } from "../../es-desktop/src/voice"
+import { readPalette } from "../../es-desktop/src/appearance"
 
 // Host-side half of the Android thin client: serves the es-app bundle and the
 // es-desktop API policy to paired devices. It attaches to running services only.
@@ -32,6 +33,8 @@ export const startGateway = async (options: {
     dashboard: options.dashboard,
     opencodeAuth: options.opencodeAuth,
     pairing: { code: options.code, codeFile: options.codeFile, sshHost: process.env.ES_GATEWAY_PAIRING_SSH || undefined },
+    // Phone theming: this host's pywal colours only, never its wallpaper.
+    palette: () => readPalette(path.join(homedir(), ".cache/wal")),
     // Phone voice notes: whisper.cpp on this host transcribes an uploaded clip; nothing is recorded here.
     transcriber: createTranscriber({
       resolve: () => voiceTools({ home: homedir(), env: process.env, config: path.join(homedir(), ".config/es-gateway/voice.json"), fallback: ["/usr/bin/afconvert"] }),

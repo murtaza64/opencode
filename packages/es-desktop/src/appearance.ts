@@ -186,6 +186,39 @@ export const createAppearance = (options: {
   }
 }
 
+/** es-palette/1: this host's pywal colours for paired phones (android-ops OPEN-AND-PALETTE-0140; Murtaza chose
+ * palette-only). Colours from ~/.cache/wal colors.json (special + colors) and the wal-palette/1 roles from palette.json,
+ * read fresh per call. Never the wallpaper path, its pixels, the Studio look or any other field. `revision` is the
+ * wal-palette revision when palette.json has one, else a digest of the colours, so a client can skip an unchanged
+ * palette. Undefined when neither file holds a usable palette. */
+export const readPalette = async (directory: string) => {
+  const [raw, walRaw] = await Promise.all(["colors.json", "palette.json"].map((name) =>
+    readFile(path.join(directory, name), "utf8").then((text): unknown => JSON.parse(text)).catch(() => undefined)))
+  const colors = paletteOf(raw)
+  const wal = walPaletteOf(walRaw)
+  if (!colors && !wal) return undefined
+  const palette = colors ?? {}
+  const sorted = Object.fromEntries(Object.entries(palette).sort(([a], [b]) => (a < b ? -1 : 1)))
+  const revision = wal?.revision ?? createHash("sha256").update(JSON.stringify(sorted)).digest("hex").slice(0, 16)
+  return {
+    schema: "es-palette/1" as const,
+    revision,
+    scheme: wal?.scheme ?? schemeOf(palette.background),
+    palette: sorted,
+    ...(wal ? { roles: wal.roles, highlights: wal.highlights } : {}),
+  }
+}
+export type HostPalette = NonNullable<Awaited<ReturnType<typeof readPalette>>>
+
+// Dark when the background's relative luminance is below 0.5; unknown without a readable background.
+const schemeOf = (background: string | undefined) => {
+  const hex = background?.replace("#", "") ?? ""
+  const full = hex.length === 3 ? [...hex].map((char) => char + char).join("") : hex.slice(0, 6)
+  if (!/^[0-9a-f]{6}$/i.test(full)) return "unknown" as const
+  const [r, g, b] = [0, 2, 4].map((at) => parseInt(full.slice(at, at + 2), 16) / 255)
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b! < 0.5 ? ("dark" as const) : ("light" as const)
+}
+
 export type Appearance = ReturnType<typeof createAppearance>
 
 /** What one tab's page applied: the wal-palette revision of its style element (null when none) and its theme. */
