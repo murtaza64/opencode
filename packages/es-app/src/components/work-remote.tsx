@@ -15,6 +15,7 @@ import { PreparedBrief, useCompleteBrief, useCompleteJob } from "./attention-bri
 import { HomePermission } from "./home-permission"
 import { Glyph, HostGlyph } from "./icons"
 import { AppHeader } from "./native-header"
+import { BuildingHubSlot } from "./buildinghub-link"
 import { createDeliverableDone, DeliverableDoneControls } from "./desk-surfaces"
 
 // The parent may clear the entry while this view (and its portalled top-bar row) is still being disposed.
@@ -126,7 +127,7 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
         {props.where}
         <DeliverableDoneControls state={done} label={props.frame === "host" ? undefined : `Mark seen (opened on ${props.label})`} />
         <span class="surface-head-actions">
-          <span class="surface-head-slot" data-slot="buildinghub" hidden />
+          <BuildingHubSlot surface={props.surface} />
           <Show when={src()}>{href => <a class="surface-head-button" href={href()} target="_blank" rel="noopener noreferrer" title="Open in new tab" aria-label="Open in new tab"><Glyph name="link-external" /></a>}</Show>
           <button class="surface-head-button" aria-label="Close" title="Close (Esc)" onClick={props.onClose}>×</button>
         </span>

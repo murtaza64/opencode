@@ -31,6 +31,23 @@ export type Surface = {
   seen?: boolean
   /** Deliverables only: when a revision was last marked seen (ms); kept after marking it unread. */
   seen_at?: number | null
+  /** The deploy receipt a granted publisher recorded (dotfiles es_dashboard_surfaces.py `buildinghub`): the latest
+   * receipt's state and its deploy (or, while a redeploy builds or failed, the last one that deployed). `current`:
+   * that deploy is this revision's bundle; null when either side has no bundle. */
+  buildinghub?: BuildingHubReceipt
+}
+
+type Deploy = { url?: string; version?: string; deployed_at?: number | string }
+export type BuildingHubReceipt = Deploy & { state?: "deployed" | "building" | "failed"; last_deployed?: Deploy; current?: boolean | null }
+
+/** The BuildingHub version a Surface links to: its last deployed receipt with a BuildingHub https url, and whether it
+ * is this revision's bundle (`current`; null = not comparable). Nothing when no deploy was recorded. */
+export const buildinghubLink = (surface: Pick<Surface, "buildinghub">) => {
+  const receipt = surface.buildinghub
+  const deploy = receipt?.state === "deployed" ? receipt : receipt?.last_deployed
+  const url = deploy?.url ? URL.parse(deploy.url) : null
+  if (!url || url.protocol !== "https:" || !url.hostname.endsWith(".buildinghub.duolingo.com") || url.username || url.password) return undefined
+  return { url: url.href, version: deploy?.version, current: receipt?.current ?? null }
 }
 
 const PREFIX = "surface:"

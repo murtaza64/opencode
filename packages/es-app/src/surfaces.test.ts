@@ -5,7 +5,7 @@ import { homedir, tmpdir } from "node:os"
 import path from "node:path"
 import { createRoot } from "solid-js"
 import { needsYou, needsYouFromInputs, type NeedsYouInputs } from "./needs-you"
-import { createSurfaces, deliverables, renewDelay, tryLine, type Surface } from "./surfaces"
+import { createSurfaces, deliverables, renewDelay, tryLine, type Surface, buildinghubLink } from "./surfaces"
 
 const surface = (id: string, extra: Partial<Surface>): Surface => ({
   id, title: id, summary: null, kind: "path", owner: "Relay", lane: "orchestrator", editspace: "opencode",
@@ -212,4 +212,17 @@ describe.skipIf(!hasStore)("requested deliverables against the real host store",
     expect(needsYouFromInputs(body, [])!.label).toEqual(sidebar.label)
     expect(sidebar.label.text).toBe("1")
   }, 60_000)
+})
+
+test("a Surface links to its deployed BuildingHub version, says whether it is this revision, and shows nothing without a deploy", () => {
+  const url = "https://diff-stream.buildinghub.duolingo.com/#/s/diff-stream"
+  expect(buildinghubLink({ buildinghub: { state: "deployed", url, version: "v3", current: true } })).toEqual({ url, version: "v3", current: true })
+  // A redeploy building or failed keeps linking to the last deploy; that version is older than this revision.
+  expect(buildinghubLink({ buildinghub: { state: "building", version: "v4", current: false, last_deployed: { url, version: "v3" } } })).toEqual({ url, version: "v3", current: false })
+  expect(buildinghubLink({ buildinghub: { state: "deployed", url, version: "v3", current: null } })?.current).toBeNull()
+  // Nothing deployed yet, no receipt, or a link that is not a BuildingHub https page: no link.
+  expect(buildinghubLink({ buildinghub: { state: "failed", version: "v1" } })).toBeUndefined()
+  expect(buildinghubLink({})).toBeUndefined()
+  for (const bad of ["http://diff-stream.buildinghub.duolingo.com/", "https://evil.example/#/s/x", "https://u:p@x.buildinghub.duolingo.com/"])
+    expect(buildinghubLink({ buildinghub: { state: "deployed", url: bad, current: true } })).toBeUndefined()
 })

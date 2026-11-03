@@ -7,6 +7,7 @@ import { A } from "@solidjs/router"
 import { ago, sessionHref } from "../state"
 import { isDeliverable, renewDelay, surfaceAddress, surfaceKey, surfaceProblem, surfaceUnavailable, type Surface, type createSurfaces } from "../surfaces"
 import { Glyph } from "./icons"
+import { BuildingHubSlot } from "./buildinghub-link"
 import "./desk-surfaces.css"
 
 export const SurfaceList = (props: { surfaces: ReturnType<typeof createSurfaces>; selected?: string; onSelect: (key: string) => void }) => {
@@ -182,7 +183,7 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
         <DeliverableDoneControls state={doneState} />
         <span class="surface-head-actions">
           {/* Reserved for "BuildingHub version" (Laptop2649): shown only from a deployed receipt, which no API offers yet. */}
-          <span class="surface-head-slot" data-slot="buildinghub" hidden />
+          <BuildingHubSlot surface={props.surface} />
           <Show when={src() && props.surface && !surfaceUnavailable(props.surface)}>
             <a class="surface-head-button" href={src()} target="_blank" rel="noopener noreferrer" title="Open in new tab" aria-label="Open in new tab"><Glyph name="link-external" /></a>
           </Show>
