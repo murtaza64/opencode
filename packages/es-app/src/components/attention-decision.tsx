@@ -69,7 +69,17 @@ const historyVersion = (record: AttentionRecord) => `${record.revision}:${record
 // option declares required input; nothing is written on the human's behalf. Secondary actions sit beside the single primary one.
 export const Answer = (props: { record: AttentionRecord; attention: Attention; options: boolean; hideTarget?: boolean; onView?: (view: AttentionView) => void; extra?: JSX.Element; prepared?: BriefResult; afterChoices?: JSX.Element; sends?: Sends; copy?: BriefCopy; briefJob?: { job: string; revision: string } }) => {
   const [text, setText] = createSignal(localStorage.getItem(answerDraftKey(props.record)) ?? "")
-  const [choice, setChoice] = createSignal("")
+  // A genuine recommendation that names an option starts selected, as a draft only: nothing is sent until Send.
+  // Never for an option that takes a secret (input.kind "secret", however complete its spec): that must be a deliberate choice.
+  const preselect = () => {
+    if (!props.options || props.record.status !== "open") return ""
+    const option = props.record.options.find(item => item.id === props.record.recommendation)
+    return option && option.input?.kind !== "secret" ? option.id : ""
+  }
+  const [choice, setChoice] = createSignal(preselect())
+  // With the recommendation still selected the note waits behind "Add a note"; otherwise it is inline.
+  const [noteOpen, setNoteOpen] = createSignal(!!text())
+  const noteHidden = () => !!preselect() && choice() === preselect() && !noteOpen()
   const canWrite = () => canWriteAttention(props.attention, props.record)
   // Input typed for each option is kept while switching; only the selected option's value is sent.
   const [values, setValues] = createSignal<Record<string, InputValue>>({})
@@ -120,9 +130,12 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
     <Show when={secret()} fallback={<Show when={selected()?.input && selected()}>{option => <OptionField id={`${id}-input`} option={option()} value={values()[option().id]} disabled={!canWrite()} onChange={value => setValues(current => ({ ...current, [option().id]: value }))} />}</Show>}>
       {spec => <SecretField id={`${id}-secret`} record={props.record} option={selected()!} spec={spec()} disabled={!canWrite()} onDelivered={() => { void props.attention.refresh(); props.onView?.("answered") }} />}</Show>
     {props.afterChoices}
-    <Show when={!secret()}><label for={id}>{props.options ? "Note (optional)" : "Your answer"}</label>
-    <textarea id={id} dir="auto" rows={props.options ? 1 : 2} maxLength={8000} value={text()} disabled={!canWrite()}
-      onInput={event => { setText(event.currentTarget.value); localStorage.setItem(answerDraftKey(props.record), event.currentTarget.value) }} /></Show>
+    <Show when={preselect() && choice() === preselect()}><p class="home-preselected" role="status">Recommended option selected · nothing is sent until you press Send</p></Show>
+    <Show when={!secret()}><Show when={!noteHidden()} fallback={
+      <button type="button" class="home-add-note" disabled={!canWrite()} onClick={() => { setNoteOpen(true); queueMicrotask(() => document.getElementById(id)?.focus()) }}>Add a note</button>}>
+      <label for={id}>{props.options ? "Note (optional)" : "Your answer"}</label>
+      <textarea id={id} dir="auto" rows={props.options ? 1 : 2} maxLength={8000} value={text()} disabled={!canWrite()}
+        onInput={event => { setText(event.currentTarget.value); localStorage.setItem(answerDraftKey(props.record), event.currentTarget.value) }} /></Show></Show>
     {/* What a publish decision would send, verbatim from the request, right above the action that approves it. */}
     <Show when={props.sends?.text ? props.sends : undefined}>{sends => <SendsPreview sends={sends()} />}</Show>
     <For each={props.copy?.blocks ?? []}>{block => <CopyPreview block={block} />}</For>

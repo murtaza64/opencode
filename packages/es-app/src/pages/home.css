@@ -117,3 +117,7 @@
 /* On the card's type scale: request text and its headings at 13px, code at 12px like a brief's mono values. */
 .home-request-text [data-component="markdown"] :is(h1, h2, h3, h4, h5, h6) { font-size: 13px; }
 .home-request-text [data-component="markdown"] :is(code, pre, .shiki) { font-size: 12px; }
+/* A recommendation selected as a draft says so in words; the note waits behind one quiet text button. */
+.home-preselected { margin: 6px 0 0; font-size: 11px; color: var(--subtext0); }
+.attention-home button.home-add-note, button.home-add-note { justify-self: start; inline-size: max-content; margin-block: 6px 2px; padding: 2px 0; font: inherit; font-size: 12px; color: var(--accent); background: none; border: 0; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+button.home-add-note:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

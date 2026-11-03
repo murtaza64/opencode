@@ -10,7 +10,7 @@ const preview = await startAttentionPreview()
 const base = preview.ledger.records[1]
 const PEOPLE = [{ id: "alice", label: "Alice R." }, { id: "bob", label: "Bob S." }, { id: "carol", label: "Carol T." }]
 const gate = (id, title, input) => ({
-  ...base, id, editspace: "fixture", title, gate_key: `fixture:${id}:v1`, lane: "work", recommendation: "name-reviewers",
+  ...base, id, editspace: "fixture", title, gate_key: `fixture:${id}:v1`, lane: "work", recommendation: null,
   options: [{ id: "name-reviewers", label: "Name reviewers", input }, { id: "arrange-myself", label: "Arrange reviews myself" }, { id: "defer", label: "Keep this queue parked" }],
 })
 preview.ledger.records.push(
