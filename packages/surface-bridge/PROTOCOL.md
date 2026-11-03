@@ -3,7 +3,7 @@
 Framework-free comment bridge for framed Surfaces: the in-frame anchor and privacy rules, pick mode, and the `postMessage` protocol. No store, auth, identity or comment bodies.
 
 - Single writer: opencode/ux-feel. Consumers import it and do not copy it.
-- Version: `1.1.0` (`VERSION` in `src/index.js` = `package.json`). Bump on any change to the protocol or the anchor rules, and record it below.
+- Version: `1.2.0` (`VERSION` in `src/index.js` = `package.json`). Bump on any change to the protocol or the anchor rules, and record it below.
 
 ## Files
 
@@ -17,7 +17,7 @@ Plain ES2017 modules with no dependencies. Use them as-is from vanilla JS, React
 ## Use
 
 - Full controller: inline `BRIDGE_SOURCE` into the served page (`injectBridge(html)` puts it first in `<head>`), or call `installSurfaceBridge(window, createAnchorKit)` from a frame bundle. Then drive it from the host with `toFrame` and filter replies with `isBridgeMessage`.
-- Own frame runtime: import `createAnchorKit(window)` and call `target`, `candidates`, `anchorOf`, `resolve` and `elementOf` from your own UI. If you keep your own anchor text or hash, build it from `kit.textOf(el)`, so the skip list has one source. Messages are then yours to define. The privacy rules still apply because they live in the kit.
+- Own frame runtime: import `createAnchorKit(window)` and call `target`, `candidates`, `anchorOf`, `resolve` and `elementOf` from your own UI. If you keep your own anchor text or hash, build it from `kit.textOf(el)` (capped at 4000 chars; `kit.textOf(el, { max: Infinity })` for the full text), so the skip list has one source. Messages are then yours to define. The privacy rules still apply because they live in the kit.
 
 ## Policy
 
@@ -74,6 +74,7 @@ Frame → host:
 
 ## Changelog
 
+- 1.2.0: `textOf(el, { max })`: optional cap, where `Infinity` or `0` means the full text. The default (4000), the hash and the protocol are unchanged.
 - 1.1.0: the kit exports `textOf` (visible text with the privacy skip list). Additive: the protocol and anchors are unchanged.
 - 1.0.0: extracted from es-app M1 + M1.1 (opencode `knvkxtlo`, `rlvtrklu`) with no behaviour change; `ready` gains `version`.
 

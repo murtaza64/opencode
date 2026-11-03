@@ -24,13 +24,16 @@ export function createAnchorKit(win) {
   }
   const policy = () => { const page = pagePolicy(); return RANK[hostPolicy] > RANK[page] ? hostPolicy : page }
   const isPrivate = (el) => !!(el && el.closest && el.closest(PRIVATE))
-  const textOf = (el) => {
+  const textOf = (el, options) => {
+    const asked = options && options.max !== undefined ? Number(options.max) : 4000
+    const max = asked > 0 ? asked : Infinity
     let text = ""
     const walk = document.createTreeWalker(el, win.NodeFilter.SHOW_ELEMENT | win.NodeFilter.SHOW_TEXT, {
       acceptNode: (node) => node.nodeType === 1 && node.matches(SKIP) ? win.NodeFilter.FILTER_REJECT : win.NodeFilter.FILTER_ACCEPT,
     })
-    for (let node = walk.nextNode(); node && text.length < 8000; node = walk.nextNode()) if (node.nodeType === 3) text += node.data
-    return text.replace(/\s+/g, " ").trim().slice(0, 4000)
+    // Raw text is read up to twice the cap before collapsing whitespace (8000 for the default, as hashes expect).
+    for (let node = walk.nextNode(); node && text.length < max * 2; node = walk.nextNode()) if (node.nodeType === 3) text += node.data
+    return text.replace(/\s+/g, " ").trim().slice(0, max)
   }
   const hashOf = (el) => fnv(el.tagName + "|" + textOf(el))
   const esc = (value) => win.CSS && win.CSS.escape ? win.CSS.escape(value) : String(value).replace(/[^a-zA-Z0-9_-]/g, (ch) => "\\" + ch)
@@ -66,8 +69,9 @@ export function createAnchorKit(win) {
     /** Narrow (never loosen) the page's policy: "declared" or "open". */
     setHostPolicy: (value) => { hostPolicy = value === "declared" ? "declared" : "open" },
     isPrivate,
-    /** An element's visible text (whitespace-collapsed, max 4000 chars): private subtrees, form fields and editable
-     * regions are skipped. Hosts that keep their own anchor text or hash build it from this. */
+    /** An element's visible text, whitespace-collapsed: private subtrees, form fields and editable regions are
+     * skipped. Capped at 4000 chars unless `max` says otherwise; Infinity or 0 means no cap. Hosts that keep their own
+     * anchor text or hash build it from this. */
     textOf,
     hashOf,
     viewRect,

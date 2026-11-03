@@ -142,6 +142,17 @@ try {
 </section>`)
     const text = await page.evaluate((source) => new Function(`return (${source})`)()(window).textOf(document.getElementById("s")), createAnchorKit.toString())
     expect(text).toBe("Notes Public line")
+    // Over the 4000-char default cap: the default stops at 4000; max Infinity or 0 returns all of it, still filtered.
+    await page.setContent(`<p id="long">${"a".repeat(5000)}<span data-es-private>SECRET</span>${"b".repeat(10)}</p>`)
+    const lengths = await page.evaluate((source) => {
+      const kit = new Function(`return (${source})`)()(window)
+      const el = document.getElementById("long")
+      return { capped: kit.textOf(el), full: kit.textOf(el, { max: Infinity }), zero: kit.textOf(el, { max: 0 }), small: kit.textOf(el, { max: 3 }) }
+    }, createAnchorKit.toString())
+    expect(lengths.capped).toBe("a".repeat(4000))
+    expect(lengths.full).toBe("a".repeat(5000) + "b".repeat(10))
+    expect(lengths.zero).toBe(lengths.full)
+    expect(lengths.small).toBe("aaa")
     await page.close()
   }
   console.log("surface-bridge-privacy: PASS")

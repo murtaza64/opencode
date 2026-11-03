@@ -5,7 +5,7 @@ export type AnchorKit = {
   policy(): Policy
   setHostPolicy(value: "open" | "declared" | undefined): void
   isPrivate(el: Element | null): boolean
-  textOf(el: Element): string
+  textOf(el: Element, options?: { max?: number }): string
   hashOf(el: Element): string
   viewRect(rect: DOMRect): ViewRect
   anchorOf(el: Element): Anchor
