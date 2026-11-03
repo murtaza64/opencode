@@ -341,8 +341,8 @@ test("host-qualified routes expose list reads only: writes, other routes and unk
   for (const [method, pathname] of [
     ["POST", "/oc/session/ses_same/prompt_async"], ["POST", "/oc/session/ses_same/message"], ["PATCH", "/oc/session/ses_same"],
     ["DELETE", "/oc/session/ses_same"], ["POST", "/oc/session/ses_same/abort"], ["POST", "/oc/permission/per_1/reply"],
-    ["GET", "/oc/session/ses_same/children/x"], ["GET", "/oc/session/ses_same/message/msg_1/part/prt_1/attachment/0"],
-    ["GET", "/oc/session/ses_same/message/msg_1/x"],
+    ["GET", "/oc/session/ses_same/children/x"], ["GET", "/oc/session/ses_same/message/msg_1/part/prt_1/attachment/x"],
+    ["POST", "/oc/session/ses_same/message/msg_1/part/prt_1/attachment/0"], ["GET", "/oc/session/ses_same/message/msg_1/x"],
   ]) expect((await get(`/hosts/mini${pathname}`, { method, ...(method === "GET" ? {} : { body: "{}" }) })).status).toBe(403)
   expect((await get("/hosts/mini/es/api/attention/session", { method: "POST", headers: { "content-type": "application/json", "x-attention-csrf": "1" }, body: "{}" })).status).toBe(403)
   expect((await get("/hosts/mini/es/api/attention", { method: "POST", body: "{}" })).status).toBe(403)
@@ -357,6 +357,9 @@ test("host-qualified routes expose list reads only: writes, other routes and unk
   expect((await get("/hosts/local/oc/experimental/session")).status).toBe(404)
   expect((await get("/hosts/mini//oc/experimental/session")).status).toBe(404)
   expect(mini.seen.length).toBe(before)
+  // One tool part's attachment is a session read (compact messages load it when the call is opened).
+  await get("/hosts/mini/oc/session/ses_same/message/msg_1/part/prt_1/attachment/0")
+  expect(mini.seen.at(-1)?.path).toBe("/session/ses_same/message/msg_1/part/prt_1/attachment/0")
 })
 
 test("this window sends input to, and stops, a run on another host: native origin only, that host's origin upstream, no credential", async () => {
