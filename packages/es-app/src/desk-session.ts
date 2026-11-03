@@ -24,6 +24,8 @@ const SHARED_SEEN = "es-app:front-desk:shared-seen:1"
 const HOME_DESK = "es-app:front-desk:home-desk:1"
 // How often a device whose desk lives on another host re-reads the home, to fall back or fail back.
 const HOME_POLL = 15_000
+// Longest the desk chat waits for the host and home reads before it loads this device's own desk.
+const HOME_READ_LIMIT = 5_000
 // Per desk session: what its context notes have told it so far (NoteState).
 const NOTE = "es-app:front-desk:context:2"
 const PENDING = "es-app:front-desk:brief-create:1"
@@ -151,8 +153,12 @@ export const createDeskSession = () => {
   /** `quiet`: a background re-read; it changes nothing on screen unless the home or the placement changed. */
   const verify = async (quiet = false) => {
     if (!quiet) setStatus("checking")
-    const info = await readHost()
-    const resolved = await resolveHome(workFeedHosts(info))
+    // The chat waits on this, so a host read that hangs or fails must not leave it on "Loading chat…": after the
+    // bound it continues as if no home were configured (this device's own desk), and a later check catches up.
+    const resolved = await Promise.race([
+      readHost().then(info => resolveHome(workFeedHosts(info))),
+      new Promise<DeskHome>(resolve => setTimeout(() => resolve({ kind: "off" }), HOME_READ_LIMIT)),
+    ]).catch((): DeskHome => ({ kind: "off" }))
     const where = place(resolved)
     const key = JSON.stringify([resolved.kind, where, resolved.kind === "remote" ? resolved.view.session ?? null : null])
     setHome(resolved)
@@ -192,7 +198,10 @@ export const createDeskSession = () => {
   }
   /** Re-read the home now: it may have been turned on or off since this page loaded. */
   const freshHome = async () => {
-    const resolved = await resolveHome(workFeedHosts(await readHost()))
+    const resolved = await Promise.race([
+      readHost().then(info => resolveHome(workFeedHosts(info))),
+      new Promise<DeskHome>(resolve => setTimeout(() => resolve(home()), HOME_READ_LIMIT)),
+    ]).catch(() => home())
     setHome(resolved)
     return resolved
   }
