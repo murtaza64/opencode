@@ -116,9 +116,11 @@ export const createVoice = (options: {
     return { ok: true }
   }
 
-  const stop = async (id: string): Promise<{ ok: true; text: string } | VoiceFailure> => {
+  // `owner`: the host tab (listener origin) asking. Only the tab that started a dictation stops or cancels it, so a
+  // Personal tab's words never reach a Work tab even though both share this machine's one microphone.
+  const stop = async (id: string, owner?: string): Promise<{ ok: true; text: string } | VoiceFailure> => {
     const active = holder.active
-    if (!active || active.id !== id || active.phase !== "recording" || !active.recorder || !active.recorded || !active.dir)
+    if (!active || active.id !== id || active.owner !== owner || active.phase !== "recording" || !active.recorder || !active.recorded || !active.dir)
       return fail("inactive", "No recording to stop.")
     active.phase = "transcribing"
     // SIGINT lets SoX finish the WAV header, as `bin/transcribe` does.
@@ -155,9 +157,9 @@ export const createVoice = (options: {
     }
   }
 
-  const cancel = async (id: string) => {
+  const cancel = async (id: string, owner?: string) => {
     const active = holder.active
-    if (!active || active.id !== id) return
+    if (!active || active.id !== id || active.owner !== owner) return
     active.cancelled = true
     active.recorder?.kill("SIGKILL")
     active.transcriber?.kill("SIGKILL")

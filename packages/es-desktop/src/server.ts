@@ -677,10 +677,10 @@ const voiceRoute = async (
   const id = body && typeof body === "object" && "id" in body && typeof body.id === "string" ? body.id : ""
   if (!voiceID.test(id)) return json(400, { ok: false, code: "invalid", message: "Invalid dictation id" })
   if (action === "cancel") {
-    await voice.cancel(id)
+    await voice.cancel(id, origin)
     return json(200, { ok: true })
   }
-  const result = action === "start" ? await voice.start(id, origin) : await voice.stop(id)
+  const result = action === "start" ? await voice.start(id, origin) : await voice.stop(id, origin)
   const status = result.ok
     ? 200
     : VOICE_STATUS[result.code]

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { createTranscriber, createVoice, transcriptText, voiceTools, type VoiceTools } from "./voice"
 import { serve } from "./server"
+import { createBridge } from "./bridge"
 
 const cleanup: (() => Promise<unknown>)[] = []
 afterEach(async () => {
@@ -250,6 +251,33 @@ test("remote host tabs get this machine's dictation, and only the starting tab s
   expect(await (await call(mini)).json()).toEqual({ available: true, state: "recording", id: run })
   expect((await call(local, "start", { id: id() })).status).toBe(409)
   expect(await (await call(mini, "stop", { id: run })).json()).toEqual({ ok: true, text: "Hello there. And more." })
+})
+
+test("a bridged Personal tab dictates with this machine's microphone and Whisper; only that tab can stop or cancel it", async () => {
+  const { voice, recording } = await setup()
+  const root = await mkdtemp(path.join(tmpdir(), "es-voice-root-"))
+  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  await writeFile(path.join(root, "index.html"), "<title>Fixture</title>")
+  // A bridged Personal host with no Access token: its gateway is never contacted, dictation stays on this machine.
+  const bridge = createBridge({ origin: "https://personal.example", store: { access: async () => undefined, cookie: async () => undefined, saveCookie: async () => {}, forgetCookie: async () => {} } })
+  await bridge.ready
+  const work = await serve({ root, voice })
+  const personal = await serve({ root, voice, remote: { id: "excalibur", origin: "https://personal.example", bridge } })
+  cleanup.push(work.close, personal.close)
+  const call = (server: typeof work, action?: string, body?: unknown) =>
+    fetch(`${server.origin}/__es/voice${action ? `/${action}` : ""}`, {
+      method: action ? "POST" : "GET",
+      headers: { "x-editspace-key": server.key, origin: server.origin, "content-type": "application/json" },
+      body: action ? JSON.stringify(body) : undefined,
+    })
+  const run = id()
+  expect((await call(personal, "start", { id: run })).status).toBe(200)
+  await recording()
+  // The Work tab, even knowing the id, can neither take the transcript nor cancel the Personal dictation.
+  expect((await (await call(work, "stop", { id: run })).json()).code).toBe("inactive")
+  expect((await call(work, "cancel", { id: run })).status).toBe(200)
+  expect(await (await call(personal)).json()).toEqual({ available: true, state: "recording", id: run })
+  expect(await (await call(personal, "stop", { id: run })).json()).toEqual({ ok: true, text: "Hello there. And more." })
 })
 
 // Real whisper.cpp over a synthesized private clip, when the local pipeline is installed. Capture
