@@ -197,7 +197,7 @@ export const DeskCompanion = () => {
       <Show when={target()}>{(current) => <DeskTasks tasks={chat.tasks} session={current().session} directory={current().directory} followUps={supported() === true} />}</Show>
       <Show when={target()} keyed fallback={<DeskStart desk={chat.desk} directory={chat.directory()} />}>
         {(current) => <SessionView sessionID={current.session} directory={current.directory} host={current.host} embedded context={chat.context} onSent={chat.desk.sent}
-          incoming={chat.asked} onIncoming={chat.takeAsked}
+          incoming={chat.asked} onIncoming={chat.takeAsked} hidden={() => !chat.open()} quiet={DESK.name}
           headerStart={<><button class="header-icon desk-chat-hide" aria-label={`Close ${DESK.name}`} title={`Close ${DESK.name}`} onClick={close}>
             <Icon name="chevron-down" size="small" /></button><Show when={DESK.avatar}>{src => <img class="desk-header-avatar" src={src()} alt="" width="20" height="20" />}</Show><DeskHost desk={chat.desk} /><DeskEarlier desk={chat.desk} /></>} />}
       </Show>

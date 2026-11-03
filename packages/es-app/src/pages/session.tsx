@@ -48,6 +48,7 @@ import { createSelfHandoff, SELF_HANDOFF_VERSION } from "../self-handoff"
 import { createMailReceiptRecords, MailRecords } from "../mail-receipts"
 import { DeliveredTick } from "../components/message-tick"
 import { chatDot, modelThinking } from "../chat-activity"
+import { lastAudible, quietTurns } from "../quiet-turns"
 import { AppHeader } from "../components/native-header"
 import { SessionTitle } from "../components/session-title"
 import { SubagentTranscript } from "../components/subagent-transcript"
@@ -226,7 +227,11 @@ export default function SessionPage() {
 /** `embedded` drops the page-level info panel. `headerStart` leads the header, for a host's own pane control. `context` may attach generated parts to an idle send; `onSent` reports whether that send was accepted. `anchor` scrolls to and highlights a linked message or range. `host`: another Work host whose session this is; every read, stream, write and saved draft then belongs to that host. */
 export function SessionView(props: { sessionID: string; directory: string; embedded?: boolean; context?: (send: { input: boolean }) => ContextPart[]; onSent?: (context: ContextPart[], accepted: boolean, send: { input: boolean }) => void; anchor?: () => MessageAnchor | undefined; headerStart?: JSX.Element; host?: SessionHost
   /** A context chip to add to this draft once (Ask about this); `onIncoming` acknowledges it. */
-  incoming?: () => ContextRef | undefined; onIncoming?: () => void }) {
+  incoming?: () => ContextRef | undefined; onIncoming?: () => void
+  /** True while this view is on the page but hidden (a closed Front desk chat). */
+  hidden?: () => boolean
+  /** Fold turns that end without text into one quiet row, named for this agent (the Front desk chat). */
+  quiet?: string }) {
   const sessionID = props.sessionID
   const directory = props.directory
   const sessionHost: SessionHost = props.host ?? { base: "/oc" }
@@ -636,13 +641,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   // viewing the session clears its unread state, including as new content
   // streams in while the page is open
   const { markViewed, refetchArchived } = dashboard
-  // Unread state is this page's host's; another host's same session ID must not clear it.
-  onMount(() => { if (!remote) markViewed(sessionID, true) })
-  createEffect(() => {
-    messages()
-    status()
-    if (!remote) markViewed(sessionID)
-  })
+
 
   // busy with nothing visibly moving (no running tool, no streaming part):
   // the model is thinking or the first token hasn't landed — show the busy dot
@@ -665,6 +664,22 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   })
 
   const busy = () => !live.error() && (status() === "busy" || status() === "retry")
+  // Quiet turns (Front desk chat only): folded, and never unread (quiet-turns.ts). Declared after busy(): the memo
+  // runs at creation and reads it.
+  const quiet = createMemo(() => props.quiet ? quietTurns(messages(), (id) => live.data.part[id] ?? [], !busy()) : new Map())
+  const [quietOpen, setQuietOpen] = createSignal<ReadonlySet<string>>(new Set())
+  // Unread state is this page's host's; another host's same session ID must not clear it. A hidden Front desk chat
+  // marks itself viewed only while nothing with text is new, so a quiet turn never leaves it unread and a reply does.
+  onMount(() => { if (!remote && !props.hidden?.()) markViewed(sessionID, true) })
+  let audibleSeen = 0
+  createEffect(() => {
+    messages()
+    status()
+    const audible = props.quiet ? lastAudible(messages(), quiet()) : 0
+    if (remote) return
+    if (!props.hidden?.()) { audibleSeen = audible; return markViewed(sessionID) }
+    if (props.quiet && audible <= audibleSeen) markViewed(sessionID)
+  })
   // Daemon trouble shares one status slot, shown only once it persists: brief
   // stalls change nothing visible and cannot stack banners. Auxiliary dashboard
   // reads (mail, handoffs) report inside their own panels instead.
@@ -2127,12 +2142,23 @@ export function SessionView(props: { sessionID: string; directory: string; embed
               {(row, index) => {
                  if (row.type === "mail") return <MailRow message={row.message} ids={transcriptMailIDs()} name={mailName} session={sessionID} replied={mailReplied().has(row.message.id)} />
                 const m = row.message
+                const member = () => quiet().get(m.id)
+                const folded = () => { const value = member(); return !!value && !quietOpen().has(value.group) }
                 const segments = createMemo(() => m.role === "assistant" ? messageSegments(live.data.part[m.id] ?? [], toolRuns()) : [],
                   [], { equals: sameSegments })
                 const ownHit = () => findHit()?.messageID === m.id && !toolRuns().byPart.has(findHit()!.partID) ? findHit() : undefined
-                return (
+                return (<>
+                <Show when={member()?.first}>{(_) => {
+                  const value = () => member()!
+                  return <button type="button" class="quiet-turns" data-quiet-group={value().group} aria-expanded={!folded()}
+                    onClick={() => setQuietOpen((open) => { const next = new Set(open); if (!next.delete(value().group)) next.add(value().group); return next })}>
+                    <span class="quiet-turns-disclosure" aria-hidden="true">›</span>
+                    <span>{props.quiet} handled {value().count} update{value().count === 1 ? "" : "s"}</span>
+                  </button>
+                }}</Show>
+                <Show when={!folded()}>
                 <div data-find-message={m.id} data-find-selected={ownHit() ? "true" : undefined}
-                  data-anchored={anchored().has(m.id) ? "true" : undefined}>
+                  data-anchored={anchored().has(m.id) ? "true" : undefined} data-quiet={member() ? "" : undefined}>
                   <Show when={ownHit()}>{(hit) =>
                     <div class="find-jump" role="region" aria-label="Selected transcript match"><FindExcerpt hit={hit()} /></div>
                   }</Show>
@@ -2185,6 +2211,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                     {(marker) => <div class="restart-marker" data-state={marker.state} role="note">{marker.label}</div>}
                   </For>
                 </div>
+                </Show>
+                </>
                 )
               }}
             </For>

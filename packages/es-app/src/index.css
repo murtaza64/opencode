@@ -2151,3 +2151,11 @@ a.mini-item > .glyph { margin: 0; }
 /* A transcript held for this draft (it arrived while the person was elsewhere): insert or discard, never auto-sent. */
 .dictation-held { display: inline-flex; align-items: center; gap: 4px; max-inline-size: 22rem; padding: 0 6px; border-radius: 6px; background: var(--surface0); font-size: 12px; }
 .dictation-held-text { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--subtext1); }
+/* Quiet turns (Front desk chat): routine updates that ended without text, folded into one row. */
+.quiet-turns { display: inline-flex; align-items: center; gap: 6px; margin-block: 2px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--overlay1); font: 400 12px/18px var(--font-sans); cursor: pointer; }
+.quiet-turns:is(:hover, :focus-visible) { background: var(--surface0); color: var(--subtext1); }
+.quiet-turns-disclosure { display: inline-block; transition: transform 150ms; }
+.quiet-turns[aria-expanded="true"] .quiet-turns-disclosure { transform: rotate(90deg); }
+:dir(rtl) .quiet-turns-disclosure { transform: scaleX(-1); }
+@media (prefers-reduced-motion: reduce) { .quiet-turns-disclosure { transition: none; } }
