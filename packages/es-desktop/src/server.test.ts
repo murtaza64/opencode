@@ -192,6 +192,11 @@ test("API surface excludes direct shell, PTY, file, and config access", () => {
   expect(hostApiAllowed("GET", "/es/api/frontdesk/pointer/x")).toBe(false)
   // On its own host (listener or paired gateway) the pointer is read and written; nothing else on that path.
   expect(apiAllowed("GET", "/es/api/frontdesk/pointer")).toBe(true)
+  // The persona registry (name, owner lane, clean avatar URL) is a read for this host's own pages and paired phones only.
+  expect(apiAllowed("GET", "/es/api/personas")).toBe(true)
+  for (const method of ["PUT", "POST", "PATCH", "DELETE"]) expect(apiAllowed(method, "/es/api/personas")).toBe(false)
+  expect(apiAllowed("GET", "/es/api/personas/x")).toBe(false)
+  expect(hostApiAllowed("GET", "/es/api/personas")).toBe(false)
   expect(apiAllowed("PUT", "/es/api/frontdesk/pointer")).toBe(true)
   for (const method of ["POST", "PATCH", "DELETE"]) expect(apiAllowed(method, "/es/api/frontdesk/pointer")).toBe(false)
   expect(apiAllowed("PUT", "/es/api/frontdesk/pointer/x")).toBe(false)
