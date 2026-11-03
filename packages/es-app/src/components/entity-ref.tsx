@@ -1,4 +1,5 @@
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
+import { Portal } from "solid-js/web"
 import { useNavigate } from "@solidjs/router"
 import { entityView, mentionRef, parseEntityHref, type EntityRef, type EntityStores, type EntityView } from "../entity-ref"
 import { useDeskQueue } from "../desk-queue"
@@ -188,11 +189,18 @@ export const EntityRefs = (props: { container: () => HTMLElement | undefined }) 
       root.removeEventListener("click", click)
     })
   })
-  return <Show when={card()}>{(value) => <div class="eref-card" role="tooltip" data-kind={value().view.ref.kind}
-    style={{ "inset-block-start": `${value().rect.bottom + 6}px`, "inset-inline-start": `${Math.max(8, value().rect.left)}px` }}>
+  // Touch: a bottom sheet over everything (portalled to the body), closed by swiping it down.
+  const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches
+  let swipeFrom: number | undefined
+  return <Show when={card()}>{(value) => <Portal><div class="eref-card" role="tooltip" data-kind={value().view.ref.kind} data-touch={touch ? "" : undefined}
+    style={{ "inset-block-start": `${value().rect.bottom + 6}px`, "inset-inline-start": `${Math.max(8, value().rect.left)}px` }}
+    onTouchStart={(event) => { swipeFrom = event.touches[0]?.clientY }}
+    onTouchMove={(event) => { if (swipeFrom !== undefined && (event.touches[0]?.clientY ?? 0) - swipeFrom > 40) { swipeFrom = undefined; setCard(undefined) } }}>
+    <span class="eref-card-grab" aria-hidden="true" />
     <div class="eref-card-head"><b dir="auto">{value().view.title}</b><span class="dim">{value().view.ref.kind === "surface" ? "Surface" : value().view.ref.kind === "decision" ? "Decision" : value().view.ref.kind === "agent" ? "Agent" : "Session"}</span></div>
     <dl><For each={value().view.rows}>{([name, text]) => <><dt>{name}</dt><dd dir="auto">{text}</dd></>}</For></dl>
     <Show when={value().view.preview}><p class="eref-card-preview" dir="auto">{value().view.preview}</p></Show>
-    <p class="eref-card-foot">{value().view.ref.kind === "decision" ? "Enter opens the decision · it is never answered from here" : "Enter opens · Esc closes"}</p>
-  </div>}</Show>
+    <p class="eref-card-foot">{value().view.ref.kind === "decision"
+      ? `${touch ? "Tap" : "Enter"} opens the decision · it is never answered from here` : touch ? "Tap to open · swipe down to close" : "Enter opens · Esc closes"}</p>
+  </div></Portal>}</Show>
 }

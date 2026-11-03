@@ -64,6 +64,10 @@ try {
   await expect(message).toContainText("@nobody is not an agent")
   await expect(message.locator("code .eref")).toHaveCount(0)
   await expect(message.locator("code").first()).toHaveText("open /?surface=decision-briefs @Ferry")
+  // Avatar at r4 size: 1.15em of the token text.
+  const ratio = await ferry.evaluate((el) => el.querySelector(".av").getBoundingClientRect().width / parseFloat(getComputedStyle(el).fontSize))
+  expect(ratio).toBeGreaterThan(1.05)
+  expect(ratio).toBeLessThan(1.25)
   // Card on hover and on keyboard focus; never offers to answer.
   await surface.first().hover()
   const card = page.locator(".eref-card")
@@ -78,17 +82,30 @@ try {
   // Enter opens the decision.
   await page.keyboard.press("Enter")
   await expect(page).toHaveURL(/item=attention(%3A|:)fixture(%3A|:)decision_1/)
-  // Phone and RTL.
-  await page.goBack()
-  await page.setViewportSize({ width: 390, height: 844 })
-  await expect(surface.first()).toBeVisible({ timeout: 60_000 })
-  await surface.first().focus()
-  const sheet = await card.evaluate((el) => { const box = el.getBoundingClientRect(); return { bottom: Math.round(innerHeight - box.bottom), left: Math.round(box.left) } })
-  expect(sheet.bottom).toBeLessThanOrEqual(10)
-  await page.evaluate(() => { document.documentElement.dir = "rtl" })
-  expect(await surface.first().evaluate((el) => getComputedStyle(el).unicodeBidi)).toBe("isolate")
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-  await page.screenshot({ path: join(shots, "rtl-390.png") })
+  // Phone (touch): a bottom sheet over everything, touch wording, grab handle; RTL keeps tokens isolated.
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+  await phone.route("**/__es/host", (route) => route.fulfill({ json: { id: "local", label: "Local", remote: false, hosts: [], work: [
+    { id: "local", label: "Local", origin: preview.origin }, { id: "mini", label: "Mac Mini", origin: "https://mini.example.ts.net" }] } }))
+  const mobile = await phone.newPage()
+  mobile.on("pageerror", (error) => errors.push(error.message))
+  await mobile.goto(`${preview.url}/session/ses_a?directory=${encodeURIComponent(directory)}`, { waitUntil: "domcontentloaded", timeout: 180_000 })
+  await mobile.evaluate(() => { document.documentElement.dir = "rtl" })
+  const phoneSurface = mobile.locator('[data-find-message="msg_a"] .eref.s').filter({ hasText: "Decision briefs" }).first()
+  await expect(phoneSurface).toBeVisible({ timeout: 120_000 })
+  await phoneSurface.focus()
+  const phoneCard = mobile.locator(".eref-card")
+  await expect(phoneCard).toContainText("Tap to open · swipe down to close")
+  await expect(phoneCard.locator(".eref-card-grab")).toBeVisible()
+  const placed = await phoneCard.evaluate((el) => {
+    const box = el.getBoundingClientRect()
+    const top = document.elementFromPoint(box.left + box.width / 2, box.bottom - 6)
+    return { bottom: Math.round(innerHeight - box.bottom), onTop: el.contains(top), full: box.left <= 1 && box.right >= innerWidth - 1 }
+  })
+  expect(placed).toEqual({ bottom: 0, onTop: true, full: true })
+  expect(await phoneSurface.evaluate((el) => getComputedStyle(el).unicodeBidi)).toBe("isolate")
+  expect(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await mobile.screenshot({ path: join(shots, "rtl-390.png") })
+  await phone.close()
   expect(errors).toEqual([])
   console.log(`PASS entity refs: Surface (current title, stale dot, missing dashed, other-host glyph), decision (live state), known @mention token, unknown @name text, code untouched; card on hover and focus; Enter opens; phone bottom sheet; RTL isolate; screenshots ${shots}`)
 } finally {

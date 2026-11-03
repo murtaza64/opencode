@@ -2176,7 +2176,7 @@ abbr.utc-time { text-decoration: underline dotted; text-underline-offset: 2px; c
 .eref.missing { --c: var(--overlay0); background: none; border: 1px dashed var(--overlay0); color: var(--subtext0); }
 .eref.m { --c: var(--blue); background: none; padding-inline: 0 .1em; gap: .3em; font-weight: 600; color: var(--blue); }
 .eref.m:hover { background: color-mix(in srgb, var(--blue) 14%, transparent); }
-.eref.m .av { display: inline-grid; place-items: center; inline-size: 1.15em; block-size: 1.15em; border-radius: 50%; background: var(--surface1); color: var(--text); font-size: .62em; line-height: 1; overflow: hidden; flex: none; }
+.eref.m .av { display: inline-grid; place-items: center; inline-size: 1.85em; block-size: 1.85em; border-radius: 50%; background: var(--surface1); color: var(--text); font-size: .62em; line-height: 1; overflow: hidden; flex: none; }
 .eref.m .av img { inline-size: 100%; block-size: 100%; object-fit: cover; }
 .eref.m.me { --c: var(--peach); color: var(--peach); background: color-mix(in srgb, var(--peach) 16%, transparent); padding-inline: .2em .38em; }
 .eref.m.unk { color: var(--subtext0); font-weight: 400; font-style: italic; }
@@ -2191,7 +2191,7 @@ abbr.utc-time { text-decoration: underline dotted; text-underline-offset: 2px; c
 .eref .emk.warn { background: var(--yellow); }
 .eref .eh { display: inline-flex; color: var(--subtext0); flex: none; }
 .eref .eh .g { inline-size: .95em; block-size: .95em; }
-.eref-card { position: fixed; z-index: 40; max-inline-size: min(22rem, 90vw); padding: 8px 10px; border-radius: 8px; background: var(--surface0); color: var(--text);
+.eref-card { position: fixed; z-index: 1000; max-inline-size: min(22rem, 90vw); padding: 8px 10px; border-radius: 8px; background: var(--surface0); color: var(--text);
   box-shadow: 0 4px 16px color-mix(in srgb, black 30%, transparent); font-size: 12px; line-height: 1.4; pointer-events: none; }
 .eref-card-head { display: flex; gap: 8px; align-items: baseline; }
 .eref-card dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 6px 0 0; }
@@ -2199,7 +2199,12 @@ abbr.utc-time { text-decoration: underline dotted; text-underline-offset: 2px; c
 .eref-card dd { margin: 0; }
 .eref-card-preview, .eref-card-foot { margin: 6px 0 0; color: var(--subtext0); }
 /* Phone: the card is a bottom sheet. */
-@media (max-width: 600px) { .eref-card { inset-inline: 8px !important; inset-block-start: auto !important; inset-block-end: 8px; max-inline-size: none; } }
+.eref-card-grab { display: none; }
+@media (max-width: 600px) {
+  .eref-card { inset-inline: 0 !important; inset-block-start: auto !important; inset-block-end: 0; max-inline-size: none; padding: 6px 14px calc(14px + env(safe-area-inset-bottom));
+    border-radius: 12px 12px 0 0; pointer-events: auto; }
+  .eref-card-grab { display: block; inline-size: 36px; block-size: 4px; margin: 0 auto 8px; border-radius: 2px; background: var(--overlay0); }
+}
 /* Inside markdown a token replaces a link: no link underline or link colour; round marks under any theme. */
 [data-component="markdown"] a.eref { text-decoration: none; color: var(--text); }
 [data-component="markdown"] a.eref.m { color: var(--blue); }
