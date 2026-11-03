@@ -21,6 +21,7 @@ import { SessionChips } from "../components/session-chips"
 import { ContextChips, ContextPicker } from "../components/context-picker"
 import { appendContextLabel, contextGroups, contextKey, contextPart, insertContextLabel, MAX_CONTEXT, type AgentCandidate, type ContextRef } from "../context-mention"
 import { useDeskQueue } from "../desk-queue"
+import { useDeskChatOptional } from "../desk-companion"
 import { mentionQuery, sessionLane, tokenBefore } from "../session-mention"
 import { RelativeLines } from "../components/relative-lines"
 import SessionInfo from "../components/session-info"
@@ -230,6 +231,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   // another host's session shows none of it, and offers no fork, archive or delete (that host exposes no
   // such route to this window). Rename goes to that host (SessionTitle).
   const remote = !!sessionHost.id
+  const deskChat = useDeskChatOptional()
+  const desk = () => !!deskChat?.desk.isDesk(sessionID, sessionHost.id)
   const oc = ocAt(sessionHost.base)
   const composer = getComposer(sessionID, directory, props.host)
   if (remote) adoptHostSessionState(composer, sessionHost.id!, sessionID)
@@ -1757,18 +1760,19 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         <Show when={remote || (ownedLane() && session() && !session()!.parentID)}><SelfHandoffButton handoff={selfHandoff} gate={selfHandoffGate()} /></Show>
       </>}
       moreActions={remote ? undefined : <>
-        <button class="act-fork" title="Fork this session" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
+        {/* The Front Desk is one long-lived conversation: it offers no Fork, Archive or Delete (Restore stays). */}
+        <Show when={!desk()}><button class="act-fork" title="Fork this session" disabled={forking() || !!nudgePhase()} onClick={() => fork()}>
           <Glyph name="repo-forked" /><span class="action-label">{forking() ? "Forking…" : "Fork"}</span>
-        </button>
+        </button></Show>
         <Show when={ownedLane()}><button class="act-handoff" title="Hand off this lane" disabled={handingOff()} onClick={() => setHandoffOpen(!handoffOpen())}>
           <Glyph name="arrow-switch" /><span class="action-label">Hand off</span></button></Show>
         <Show when={!session()?.time?.archived} fallback={<>
           <span class="archived-chip">Archived</span>
           <button title="Restore this session" onClick={() => setArchived(false)}><Glyph name="archive" /><span class="action-label">Restore</span></button>
         </>}>
-          <button title="Archive this session" disabled={!!nudgePhase()} onClick={() => setArchived(true)}><Glyph name="archive" /><span class="action-label">Archive</span></button>
+          <Show when={!desk()}><button title="Archive this session" disabled={!!nudgePhase()} onClick={() => setArchived(true)}><Glyph name="archive" /><span class="action-label">Archive</span></button></Show>
         </Show>
-        <button class="danger" title="Delete this session" disabled={!!nudgePhase()} onClick={remove}><Glyph name="trash" /><span class="action-label">Delete</span></button>
+        <Show when={!desk()}><button class="danger" title="Delete this session" disabled={!!nudgePhase()} onClick={remove}><Glyph name="trash" /><span class="action-label">Delete</span></button></Show>
       </>}>
       {/* Changing model mid-conversation is rare and costly, so the picker opens on request. */}
       <Show when={changingModel()} fallback={<>

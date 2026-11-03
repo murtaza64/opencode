@@ -321,7 +321,12 @@ export const createDeskSession = () => {
     setSeen(current)
     try { localStorage.setItem(SHARED_SEEN, JSON.stringify(current)) } catch { /* shown again next page */ }
   }
-  return { pointer, home, placed, decision, session, status, error, setError, verify, start, confirm, forget, context, caseContext, sent, detail, earlier, notice, dismissNotice }
+  /** Is this the profile's Front Desk conversation: the current desk on its host, or this device's own desk (its
+   * fallback when the home is unreachable). Identity comes from the pointers, never the title. */
+  const isDesk = (sessionID: string, hostID?: string) =>
+    (pointer()?.session === sessionID && pointer()?.host?.id === hostID)
+    || (!hostID && devicePointer()?.session === sessionID && !devicePointer()?.create)
+  return { pointer, home, placed, decision, isDesk, session, status, error, setError, verify, start, confirm, forget, context, caseContext, sent, detail, earlier, notice, dismissNotice }
 }
 
 export type BriefJob = { id: string; directory: string; meta: BriefMeta; created: number; state: BriefState | { state: "starting" } | { state: "unconfirmed" } }
