@@ -994,6 +994,10 @@
         "vite": "catalog:",
       },
     },
+    "packages/surface-bridge": {
+      "name": "@opencode-ai/surface-bridge",
+      "version": "1.0.0",
+    },
     "packages/tui": {
       "name": "@opencode-ai/tui",
       "version": "1.18.31",
@@ -2068,6 +2072,8 @@
     "@opencode-ai/stats-server": ["@opencode-ai/stats-server@workspace:packages/stats/server"],
 
     "@opencode-ai/storybook": ["@opencode-ai/storybook@workspace:packages/storybook"],
+
+    "@opencode-ai/surface-bridge": ["@opencode-ai/surface-bridge@workspace:packages/surface-bridge"],
 
     "@opencode-ai/tui": ["@opencode-ai/tui@workspace:packages/tui"],
 
