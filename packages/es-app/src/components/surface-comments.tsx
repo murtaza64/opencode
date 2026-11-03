@@ -74,7 +74,15 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
   const close = () => {
     const key = open()?.key
     setOpen()
-    queueMicrotask(() => (key && markers.get(key) ? markers.get(key)!.focus() : toolbarButton?.focus()))
+    queueMicrotask(() => returnFocus(key, 10))
+  }
+  // A marker re-renders when its thread changes (a reply just landed), leaving a detached button in the map; wait a few
+  // frames for the live one before falling back to the toolbar.
+  const returnFocus = (key: string | undefined, frames: number) => {
+    const marker = key ? markers.get(key) : undefined
+    if (marker?.isConnected) return marker.focus()
+    if (key && frames > 0) return void requestAnimationFrame(() => returnFocus(key, frames - 1))
+    toolbarButton?.focus()
   }
 
   onMount(() => {

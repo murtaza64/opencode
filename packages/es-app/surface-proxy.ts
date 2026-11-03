@@ -95,6 +95,8 @@ export const surfaceProxy = (options: {
       return value
     })
   const upstreamURL = (entry: SurfaceEntry, rest: string, search: string) => {
+    // A registry row without an upstream (an older or partial record) has nothing to serve.
+    if (typeof entry.upstream !== "string") return undefined
     if (options.remote) {
       if (!/^\/api\/surfaces\/[a-z0-9][a-z0-9-]{0,39}\/static\/$/.test(entry.upstream) || rest.split("/").includes("..")) return undefined
       return `${options.remote}${entry.upstream.slice(0, -1)}${rest}${search}`

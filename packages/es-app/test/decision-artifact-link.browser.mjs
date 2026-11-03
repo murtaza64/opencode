@@ -52,10 +52,11 @@ const open = async id => {
   await expect(card(id)).toBeVisible({ timeout: 120_000 })
 }
 try {
-  // A bare route in the request is a link; it opens the in-app reader in this window, no popup.
+  // A bare Surface route in the request renders as an r4 Surface token named by the Surface's current title
+  // (composer-refs entity refs); it opens the in-app reader in this window, no popup.
   await open("route_1")
-  const route = card("route_1").locator(".home-request-text").getByRole("link", { name: "/?surface=fixture-board" })
-  await expect(route).toHaveAttribute("href", "/?surface=fixture-board")
+  const route = card("route_1").locator(".home-request-text").getByRole("link", { name: /Fixture board/ })
+  await expect(route).toHaveAttribute("href", /\?surface=fixture-board$/)
   await expect(card("route_1").locator(".artifact-open")).toHaveCount(0)
   await route.click()
   await expect(page).toHaveURL(`${preview.url}/?surface=fixture-board`)
