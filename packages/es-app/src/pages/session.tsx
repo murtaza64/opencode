@@ -22,6 +22,7 @@ import { ContextChips, ContextPicker } from "../components/context-picker"
 import { appendContextLabel, contextGroups, contextKey, contextPart, insertContextLabel, MAX_CONTEXT, type AgentCandidate, type ContextRef } from "../context-mention"
 import { useDeskQueue } from "../desk-queue"
 import { useDeskChatOptional } from "../desk-companion"
+import { DESK } from "../desk-identity"
 import { mentionQuery, sessionLane, tokenBefore } from "../session-mention"
 import { RelativeLines } from "../components/relative-lines"
 import SessionInfo from "../components/session-info"
@@ -2123,7 +2124,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             <MailRecords.Provider value={receiptRecords}>
             <ToolAdornment.Provider value={ToolSize}>
             <For each={visibleTimeline()}>
-              {(row) => {
+              {(row, index) => {
                  if (row.type === "mail") return <MailRow message={row.message} ids={transcriptMailIDs()} name={mailName} session={sessionID} replied={mailReplied().has(row.message.id)} />
                 const m = row.message
                 const segments = createMemo(() => m.role === "assistant" ? messageSegments(live.data.part[m.id] ?? [], toolRuns()) : [],
@@ -2135,8 +2136,13 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                   <Show when={ownHit()}>{(hit) =>
                     <div class="find-jump" role="region" aria-label="Selected transcript match"><FindExcerpt hit={hit()} /></div>
                   }</Show>
-                  <Show when={m.role === "user"} fallback={<TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} renderTools={renderTools}
-                    segments={segments()} renderRun={renderRun} />}>
+                  <Show when={m.role === "user"} fallback={<>
+                    {/* Porter's replies start with its avatar, once per turn (the desk conversation only). */}
+                    <Show when={desk() && DESK.avatar && (() => { const previous = visibleTimeline()[index() - 1]; return !(previous && previous.type !== "mail" && (previous.message as { role?: string }).role === "assistant") })()}>
+                      <img class="desk-reply-avatar" src={DESK.avatar} alt={DESK.name} width="20" height="20" />
+                    </Show>
+                    <TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} renderTools={renderTools}
+                    segments={segments()} renderRun={renderRun} /></>}>
                     <Show when={wakeMarker(m, messages(), wakeEvents() ?? new Map())}>{(marker) =>
                       <div class="wake-marker" data-state={marker().state} role="note" title={marker().title}>
                         <span>{marker().label}</span>

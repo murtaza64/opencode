@@ -129,6 +129,8 @@ a.desk-item { box-sizing: border-box; text-decoration: none; }
 .desk-chat-hide .icon, .desk-chat-hide svg { transform: rotate(-90deg); }
 .desk-host { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--subtext0); white-space: nowrap; }
 .desk-host[data-placed="fallback"] { color: var(--yellow); }
+.desk-header-avatar, .desk-reply-avatar { inline-size: 20px; block-size: 20px; border-radius: 50%; object-fit: cover; flex: none; }
+.desk-reply-avatar { display: block; margin-block: 8px 2px; }
 .desk-earlier-menu { position: relative; display: inline-flex; }
 .desk-earlier-list { position: absolute; inset-block-start: calc(100% + 4px); inset-inline-start: 0; z-index: 20; min-inline-size: 240px; max-inline-size: 320px;
   padding: 6px 0; background: var(--surface0); border: 1px solid var(--surface1); border-radius: 6px; box-shadow: 0 6px 18px rgb(0 0 0 / 0.3); }
