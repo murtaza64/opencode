@@ -2,7 +2,7 @@
  * four browse tabs (Surfaces | Agents | Decisions | PRs), each with its own filter. The band is never
  * filtered by a tab. Everything here reuses existing reads (the desk queue, surfaces, dashboard PRs);
  * opening a decision or surface goes to the Front desk with it selected. */
-import { createMemo, createSignal, For, Show, type JSX } from "solid-js"
+import { createMemo, createResource, createSignal, For, Show, type JSX } from "solid-js"
 import type { AttentionRecord } from "../attention"
 import { ago, sessionHref } from "../state"
 import { useLocation } from "@solidjs/router"
@@ -41,14 +41,25 @@ const setTab = (next: NavTab) => {
 
 // The Decisions tab's two views: what needs you now, and what no longer does (read-only history).
 const DECISION_VIEW_KEY = "es-app:decisions-view"
-const [decisionView, setDecisionViewState] = createSignal<"open" | "history">((() => { try { return sessionStorage.getItem(DECISION_VIEW_KEY) === "history" ? "history" : "open" } catch { return "open" } })())
-const setDecisionView = (next: "open" | "history") => {
+type DecisionView = "open" | "history" | "requests"
+const [decisionView, setDecisionViewState] = createSignal<DecisionView>((() => { try { const value = sessionStorage.getItem(DECISION_VIEW_KEY); return value === "history" || value === "requests" ? value : "open" } catch { return "open" } })())
+const setDecisionView = (next: DecisionView) => {
   setDecisionViewState(next)
   try { sessionStorage.setItem(DECISION_VIEW_KEY, next) } catch { /* kept for this page */ }
 }
 // A record's outcome as a word and a shape, so colour never carries it alone.
 const HISTORY_STATUS: Record<string, [string, string]> = {
   answered: ["Answered", "✓"], decided: ["Not sent", "!"], snoozed: ["Snoozed", "◷"], resolved: ["Resolved", "✓"], withdrawn: ["Withdrawn", "–"],
+}
+// Past permission and question requests as this host's dashboard saw them (es-request-history/1): metadata only, no
+// prompt text. An older dashboard without the route hides the segment.
+type PastRequest = { request_id: string; kind: "permission" | "question"; session: string; editspace?: string; host?: string; asked_at: number; resolved_at?: number | null; resolution?: string | null }
+const RESOLUTION: Record<string, string> = { once: "Allowed once", always: "Always allowed", reject: "Denied", replied: "Answered", rejected: "Dismissed", vanished: "Gone, no answer seen" }
+const readRequests = async (): Promise<PastRequest[] | undefined> => {
+  const response = await fetch(`/es/api/decisions/requests?since=${Date.now() - 14 * 86_400_000}`, { credentials: "include" }).catch(() => undefined)
+  if (!response?.ok) return undefined
+  const body = await response.json().catch(() => undefined) as { schema?: string; requests?: PastRequest[] } | undefined
+  return body?.schema === "es-request-history/1" && Array.isArray(body.requests) ? body.requests : undefined
 }
 const historyStatus = (record: AttentionRecord) => record.status === "answered" && record.delivery_state === "blocked" ? ["Blocked", "!"] as const : HISTORY_STATUS[record.status]
 
@@ -180,7 +191,13 @@ export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: stri
     return [...records, ...ignored].filter(row => matches(row.text, filter("decisions"))).sort((a, b) => b.at - a.at || a.key.localeCompare(b.key))
   })
   const open = useOpenItem()
-  const views = [["open", "Open"], ["history", "History"]] as const
+  // Read when the Decisions tab is shown, again each time Requests is chosen; never polled.
+  const [requests, { refetch: refetchRequests }] = createResource(() => tab() === "decisions" || undefined, readRequests)
+  const pastRequests = createMemo(() => (requests() ?? [])
+    .map(request => ({ request, title: dashboard.activity.session(request.session)?.title ?? request.session, at: request.resolved_at ?? request.asked_at }))
+    .filter(row => matches(`${row.title} ${row.request.kind} ${row.request.editspace ?? ""}`, filter("decisions")))
+    .sort((a, b) => b.at - a.at))
+  const views = () => [["open", "Open"], ["history", "History"], ...(requests() ? [["requests", "Requests"]] as const : [])] as const
   // Other Work hosts' Surfaces; a host not current makes the count "N+".
   const hostSurfaces = createMemo(() => workSurfaces([], dashboard.work.feeds()))
   // One list (NAV-03): this host's and other Work hosts' Surfaces interleaved by when their owner last published them
@@ -244,14 +261,19 @@ export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: stri
       <Show when={tab() === "agents"}>{props.agents}</Show>
       <Show when={tab() === "decisions"}>
         <div class="decision-views" role="radiogroup" aria-label="Decisions view">
-          <For each={views}>{([id, label]) =>
+          <For each={views()}>{([id, label]) =>
             <button type="button" role="radio" class="decision-view" aria-checked={decisionView() === id} tabindex={decisionView() === id ? 0 : -1} data-view={id}
-              onClick={() => setDecisionView(id)}
+              aria-label={id === "requests" ? "Permissions and questions" : undefined} title={id === "requests" ? "Past permission and question requests" : undefined}
+              onClick={() => { setDecisionView(id); if (id === "requests") void refetchRequests() }}
               onKeyDown={event => {
                 if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return
                 event.preventDefault()
-                const next = decisionView() === "open" ? "history" : "open"
+                const ids = views().map(([value]) => value)
+                const rtl = event.currentTarget.matches(":dir(rtl)")
+                const forward = event.key === "ArrowDown" || event.key === (rtl ? "ArrowLeft" : "ArrowRight")
+                const next = ids[(ids.indexOf(decisionView()) + (forward ? 1 : ids.length - 1)) % ids.length]
                 setDecisionView(next)
+                if (next === "requests") void refetchRequests()
                 event.currentTarget.parentElement?.querySelector<HTMLElement>(`[data-view=${next}]`)?.focus()
               }}>
               {label}<Show when={id === "open" && decisions().length}><span class="decision-view-count" dir="ltr">{decisions().length}</span></Show>
@@ -261,7 +283,19 @@ export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: stri
         <Show when={decisionView() === "open"}>
           <For each={decisions()} fallback={<div class="dim nav-empty">{filter("decisions") ? "no matches" : "Nothing needs you."}</div>}>{entry => <DecisionRow entry={entry} />}</For>
         </Show>
-        <Show when={decisionView() === "history"}>
+        <Show when={decisionView() === "requests" && requests()}>
+          <ul class="nav-history" aria-label="Past permission and question requests">
+            <For each={pastRequests()} fallback={<li class="dim nav-empty">{filter("decisions") ? "no matches" : "No past requests seen on this host."}</li>}>{row =>
+              <li><a href={sessionHref(row.request.session, dashboard.activity.session(row.request.session)?.directory)} class="nav-item nav-decision nav-history-row" data-kind={row.request.kind}
+                data-status={row.request.resolution ?? "open"}>
+                <span class="nav-kind" aria-hidden="true">{row.request.kind === "permission" ? "!" : "?"}</span>
+                <span class="nav-title" dir="auto">{row.title}</span>
+                <span class="nav-history-meta"><span class="nav-history-status">{row.request.resolution ? RESOLUTION[row.request.resolution] ?? row.request.resolution : "Waiting"}</span>
+                  {" · "}{row.request.kind}<Show when={row.request.editspace}>{name => <> · <bdi dir="auto">{name()}</bdi></>}</Show> · <time dateTime={new Date(row.at).toISOString()}>{ago(row.at)}</time></span>
+              </a></li>}</For>
+          </ul>
+        </Show>
+        <Show when={decisionView() === "history" || (decisionView() === "requests" && requests.state === "ready" && !requests())}>
           <ul class="nav-history" aria-label="Decision history">
             <For each={history()} fallback={<li class="dim nav-empty">{filter("decisions") ? "no matches" : "No earlier decisions on this host."}</li>}>{row => row.kind === "record"
               ? (() => {

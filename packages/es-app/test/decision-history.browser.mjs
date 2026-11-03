@@ -25,10 +25,18 @@ preview.ledger.records.push(
 )
 const browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : { channel: "chrome" }) })
 let failed = false
-const open = async (viewport) => {
+// Past permission and question requests (es-request-history/1, metadata only), as the dashboard reports them.
+const REQUESTS = { schema: "es-request-history/1", requests: [
+  { request_id: "per_1", kind: "permission", session: "ses_a", editspace: "fixture", host: "local", asked_at: now - 20 * 60_000, resolved_at: now - 19 * 60_000, resolution: "once" },
+  { request_id: "que_1", kind: "question", session: "ses_b", editspace: "fixture", host: "local", asked_at: now - 50 * 60_000, resolved_at: now - 45 * 60_000, resolution: "replied" },
+  { request_id: "per_2", kind: "permission", session: "ses_a", editspace: "fixture", host: "local", asked_at: now - 90 * 60_000, resolved_at: now - 80 * 60_000, resolution: "reject" },
+] }
+const open = async (viewport, requests = REQUESTS) => {
   const context = await browser.newContext({ viewport })
   await context.addInitScript(() => { if (window === window.top) { localStorage.setItem("es-app:nav-tab", "decisions"); localStorage.setItem("es-app-all-projects", "true") } })
   await context.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
+  // Registered after the catch-all, so it takes precedence (Playwright matches the newest route first).
+  await context.route("**/es/api/decisions/requests*", route => requests ? route.fulfill({ json: requests }) : route.fulfill({ status: 404, body: "not found" }))
   const page = await context.newPage()
   page.setDefaultTimeout(60_000)
   const writes = []
@@ -73,10 +81,27 @@ try {
     await expect(rows.nth(0)).toHaveAttribute("aria-current", "page")
     await page.waitForTimeout(500)
     assert.deepEqual(writes, [], `${name}: browsing history wrote nothing: ${JSON.stringify(writes)}`)
+    // Requests: past permission and question requests, newest first, each with its outcome; read from the dashboard only.
+    await sidebar.getByRole("radio", { name: "Permissions and questions" }).click()
+    const asks = sidebar.getByRole("list", { name: "Past permission and question requests" }).locator(".nav-history-row")
+    await expect(asks.locator(".nav-history-status")).toHaveText(["Allowed once", "Answered", "Denied"])
+    await expect(asks.nth(0)).toContainText("permission")
+    if (shots) await sidebar.screenshot({ path: path.join(shots, `${name}-requests.png`) })
+    await sidebar.getByRole("radio", { name: "History" }).click()
     // The choice is remembered for this window.
     await page.reload({ waitUntil: "domcontentloaded" })
     await expect(sidebar.getByRole("radio", { name: "History" })).toHaveAttribute("aria-checked", "true", { timeout: 120_000 })
     console.log(`HISTORY ${name}: 6 outcomes newest first with words, keyboard switch, filter, read-only open, remembered`)
+    await context.close()
+  }
+  // An older dashboard without the request history: no Requests segment, no error.
+  {
+    const { context, page } = await open({ width: 1440, height: 900 }, null)
+    const views = page.locator("nav.sidebar").getByRole("radiogroup", { name: "Decisions view" })
+    await expect(views.getByRole("radio", { name: "History" })).toBeVisible({ timeout: 120_000 })
+    await page.waitForTimeout(1000)
+    await expect(views.getByRole("radio")).toHaveCount(2)
+    console.log("NO ROUTE: Requests segment hidden")
     await context.close()
   }
 } catch (error) {

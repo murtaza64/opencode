@@ -592,3 +592,6 @@ body:has(.desk-companion.overlay:not(.closed)) :is(.surface-head, .desk-evidence
 .nav-history-status { color: var(--text); }
 .nav-history-row:is([data-status=decided], [data-status=blocked]) :is(.nav-kind, .nav-history-status) { color: var(--peach); }
 .nav-history-row[data-status=answered] .nav-kind, .nav-history-row[data-status=resolved] .nav-kind { color: var(--green); }
+.nav-history-row:is([data-status=once], [data-status=always], [data-status=replied]) .nav-kind { color: var(--green); }
+.nav-history-row:is([data-status=reject], [data-status=rejected]) :is(.nav-kind, .nav-history-status) { color: var(--peach); }
+.nav-history-row[data-status=vanished] .nav-history-status { color: var(--subtext0); }
