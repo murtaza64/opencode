@@ -27,7 +27,12 @@ const row = (id, lane, owner) => ({ id, title: `${id} research`, summary: "Findi
   updated_at: Date.now(), revision: 1, health: { state: "ok" }, purpose: "board" })
 const local = [row("granola", "granola-research", "Relay"), row("orphan", "gone-lane", "gone-lane")]
 // This host: the granola lane was handed off; its record names the successor (ses_a, the fixture's session).
-const localState = { editspace: "fixture", threads: [{ sessions: [], tickets: [], lanes: [{ lane: "granola-research", owner: "ses_a" }] }], sessions: [{ id: "ses_a", directory }, { id: "ses_old", directory }] }
+// The real es-dashboard shape: lane records and the owner session on the card; no top-level lanes.
+const localState = { editspace: "fixture", threads: [
+  { kind: "session", key: "ses_a", title: "Relay", tickets: [], prs: [], lanes: [{ lane: "granola-research", owner: "ses_a", status: "active", dir: "/l", activity: "" }],
+    sessions: [{ id: "ses_a", title: "Relay", live: "idle", directory }] },
+  { kind: "ticket", key: "T-1", tickets: [], lanes: [], sessions: [] },
+], sessions: [{ id: "ses_old", title: "old", live: "idle", directory }] }
 await page.route((url) => new URL(url).origin === miniOrigin, (route) => route.abort())
 await page.route("**/__es/host", (route) => route.fulfill({ json: { id: "local", label: "Local", remote: false, hosts: [], work: [
   { id: "local", label: "Local", origin: preview.origin }, { id: "mini", label: "Mac Mini", origin: miniOrigin }] } }))
@@ -63,7 +68,7 @@ try {
   step("owner resolved through the handoff (lane record -> current session); publisher shown; Message owner opens it with the Surface chip, draft kept, nothing sent")
 
   await page.goto(`${preview.origin}/?item=${encodeURIComponent("surface:orphan")}`, { waitUntil: "domcontentloaded" })
-  await expect(head.locator(".surface-owner")).toContainText("lane gone-lane not found")
+  await expect(head.locator(".surface-owner")).toContainText("owner of gone-lane not listed on that host now")
   await expect(head.getByRole("button", { name: "Message owner" })).toHaveCount(0)
   await head.getByRole("button", { name: "Ask Porter" }).click()
   await expect.poll(() => page.evaluate(() => localStorage.getItem("es-app:context-refs:ses_b") ?? "")).toContain('"id":"orphan"')
