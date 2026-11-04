@@ -14,14 +14,18 @@ export type HostMessage =
   | { type: "pick"; on: boolean; keyboard?: boolean; policy?: "declared" | "open"; point?: boolean }
   | { type: "track"; anchors: { key: string; anchor: Anchor }[]; policy?: "declared" | "open" }
   | { type: "pick-key"; key: string; shift?: boolean }
+  /** 1.5.0: which pickable part is at (x, y), frame-viewport px; answered by "located" with the same key. */
+  | { type: "locate"; key: string; x: number; y: number; policy?: "declared" | "open" }
   | { type: "reveal"; key: string }
 
 export type FrameMessage =
   /** `features` (1.4.0): optional protocol additions this frame supports; absent on older frames. */
-  | { type: "ready"; policy: Policy; version: number; features?: "point"[] }
+  | { type: "ready"; policy: Policy; version: number; features?: ("point" | "locate")[] }
   /** `point` (1.4.0, point picks only): the click as fractions (0-1) of the picked element's box. */
   | { type: "picked"; anchor: Anchor; rect: ViewRect; point?: { x: number; y: number } }
   | { type: "pick-end" }
+  /** 1.5.0: the part at the asked point, or nulls when there is none (outside, private, declared without anchor, off). */
+  | { type: "located"; key: string; anchor: Anchor | null; rect: ViewRect | null }
   | { type: "rects"; items: { key: string; rect: ViewRect | null; state: AnchorState }[] }
   | { type: "key"; key: "c" | "m" | "Escape" }
 

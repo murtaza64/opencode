@@ -90,7 +90,7 @@ try {
     expect((await messages("picked"))[2].anchor.id).toBe("sec/public")
     // Element picks carry no point; the frame advertises point picks (1.4.0).
     expect((await messages("picked")).every((message) => !("point" in message))).toBe(true)
-    expect((await messages("ready"))[0].features).toEqual(["point"])
+    expect((await messages("ready"))[0].features).toEqual(["point", "locate"])
 
     // A point pick: the same element anchor, plus where in its box the click landed. Private stays unpickable.
     await pick({ point: true })
@@ -103,6 +103,19 @@ try {
     expect(pointed.point.x).toBeCloseTo(0.25, 1)
     expect(pointed.point.y).toBeCloseTo(0.5, 1)
     expect(JSON.stringify(pointed)).not.toContain("SECRET")
+    // Locate (1.5.0): the part at a point, by the pick rules; private content and empty space answer null.
+    const locate = async (key, el, dx = 4, dy = 4) => {
+      const at = el ? await frame.locator(el).boundingBox() : { x: 880, y: 880 }
+      const frameBox = await page.locator("iframe").boundingBox()
+      await send({ type: "locate", key, x: at.x - frameBox.x + dx, y: at.y - frameBox.y + dy })
+      await expect.poll(async () => (await messages("located")).some((message) => message.key === key)).toBe(true)
+      return (await messages("located")).find((message) => message.key === key)
+    }
+    expect((await locate("l1", "#public")).anchor.id).toBe("public")
+    const secret = await locate("l2", "#secret")
+    expect(secret.anchor).toBeNull()
+    expect(JSON.stringify(secret)).not.toContain("SECRET")
+    expect((await messages("ready"))[0].features).toContain("locate")
     // The keyboard picks the element's centre.
     await pick({ point: true, keyboard: true })
     await send({ type: "pick-key", key: "Enter" })

@@ -217,6 +217,14 @@ export function installSurfaceBridge(win, createKit) {
       }
     }
     if (data.type === "pick-key" && picking) pickKey(String(data.key), !!data.shift)
+    // The pickable part under a point (frame-viewport px), under the same policy and privacy rules as a pick;
+    // null when the point is outside the page, private, or (declared) outside every anchor. Reads no page text.
+    if (data.type === "locate" && typeof data.key === "string" && Number.isFinite(data.x) && Number.isFinite(data.y)) {
+      kit.setHostPolicy(data.policy)
+      const hit = kit.policy() === "off" ? null : document.elementFromPoint(data.x, data.y)
+      const el = hit && hit !== outline && kit.target(hit)
+      post("located", el ? { key: data.key.slice(0, 64), anchor: kit.anchorOf(el), rect: kit.viewRect(el.getBoundingClientRect()) } : { key: data.key.slice(0, 64), anchor: null, rect: null })
+    }
     if (data.type === "track" && (data.policy === "declared" || data.policy === "open")) kit.setHostPolicy(data.policy)
     if (data.type === "track") { tracked = Array.isArray(data.anchors) ? data.anchors.slice(0, 500) : []; schedule() }
     if (data.type === "reveal") {
@@ -226,6 +234,6 @@ export function installSurfaceBridge(win, createKit) {
     }
   })
   // After parsing, so the page's policy meta (which follows this script in <head>) is known.
-  const ready = () => post("ready", { policy: kit.pagePolicy(), version: 1, features: ["point"] })
+  const ready = () => post("ready", { policy: kit.pagePolicy(), version: 1, features: ["point", "locate"] })
   if (document.readyState === "loading") on("DOMContentLoaded", ready, { once: true }); else ready()
 }

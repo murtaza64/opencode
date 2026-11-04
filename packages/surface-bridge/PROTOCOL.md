@@ -3,7 +3,7 @@
 Framework-free comment bridge for framed Surfaces: the in-frame anchor and privacy rules, pick mode, and the `postMessage` protocol. No store, auth, identity or comment bodies.
 
 - Single writer: opencode/ux-feel. Consumers import it and do not copy it.
-- Version: `1.4.0` (`VERSION` in `src/index.js` = `package.json`). Bump on any change to the protocol or the anchor rules, and record it below.
+- Version: `1.5.0` (`VERSION` in `src/index.js` = `package.json`). Bump on any change to the protocol or the anchor rules, and record it below.
 
 ## Files
 
@@ -51,6 +51,7 @@ Host → frame:
 | `track` | `anchors: [{ key, anchor }]` (max 500), `policy?` | report these anchors now and on every scroll, resize or DOM change |
 | `pick-key` | `key`, `shift?` | a pick-mode key pressed while the host had focus (Esc, arrows, j/k, Tab, Enter, Space) |
 | `reveal` | `key` | scroll that tracked anchor into view |
+| `locate` | `key`, `x`, `y`, `policy?` | 1.5.0: report the pickable part at that frame-viewport point (`located`) |
 
 Frame → host:
 
@@ -59,6 +60,7 @@ Frame → host:
 | `ready` | `policy` (the page's own), `version` (protocol, `1`), `features?` (`["point"]` from 1.4.0) |
 | `picked` | `anchor`, `rect` (frame-viewport px), `point?` (point picks: `{ x, y }` fractions of the picked element's box, clamped to 0-1; the keyboard picks the centre) |
 | `pick-end` | none (Esc, or a pick under `off`) |
+| `located` | `key`, `anchor \| null`, `rect \| null` (1.5.0; nulls outside the page, in private content, or with no anchor under `declared`/`off`) |
 | `rects` | `items: [{ key, rect \| null, state: shown \| changed \| hidden \| missing }]` |
 | `key` | `key: "c" \| "m" \| "Escape"`, pressed in the page outside a text field |
 
@@ -86,6 +88,7 @@ Frame → host:
 
 ## Changelog
 
+- 1.5.0: `locate` / `located`: the host asks which pickable part is at a point (a drawing's start, for example) and gets that part's anchor and rect, under the same policy and privacy rules as a pick. `ready.features` adds `"locate"`. Additive; nothing else changes. Hosts can then store a drawing as an anchor-frame mark on that part ("box on Costs") instead of the whole page.
 - 1.4.0: point picks. `pick` takes an optional `point`; the frame then adds `point` (the click as 0-1 fractions of the picked element's box) to `picked`, and `ready` lists `features: ["point"]` so hosts can detect it. The picked element, anchor rules, privacy and every other message are unchanged; a host that never sends `point` sees 1.3.1 behaviour. Hosts store a point as an anchor-frame `pin` mark on the element anchor (`./marks`), so no store field is added.
 - 1.3.1: the frame also forwards `m` (tell the author) as a `key` message, like `c`. Additive; other keys, anchors and privacy unchanged.
 
