@@ -53,6 +53,9 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
       !props.parts.every(part => part.type === "text" && part.synthetic === true)) return ""
     return props.parts.flatMap(part => part.type === "text" && !part.ignored && part.text.trim() ? [part.text] : []).join("\n\n")
   })
+  // A desk succession seeds its successor with the predecessor's brief; it reads as the same desk continuing.
+  const handoff = createMemo(() => !!generated() && props.parts.some(part => part.type === "text" &&
+    part.metadata?.source === "front-desk/succession"))
   // Attached user images render through ChatImages, the same component as the outgoing bubble.
   const imagePart = (part: ComponentProps<typeof Message>["parts"][number]) => props.message.role === "user" &&
     part.type === "file" && part.mime.startsWith("image/") && part.url.startsWith("data:") && part.source?.text?.start === undefined
@@ -91,10 +94,13 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
       <div class="conversation-error" data-message-error-id={props.message.id} role="note" aria-label="Provider error">{errorText(error())}</div>
     }</Show>
   </>}>
-    <details class="generated-input" data-generated-message-id={props.message.id} onToggle={event => setOpen(event.currentTarget.open)}>
+    <details class="generated-input" data-generated-message-id={props.message.id} data-self-handoff={handoff() || undefined}
+      onToggle={event => setOpen(event.currentTarget.open)}>
       <summary class="activity-row">
-        <span class="activity-kind">Generated input</span>
-        <span class="activity-description" dir="auto">{generated().replace(/\s+/g, " ").trim().slice(0, 200)}</span>
+        <span class="activity-kind">{handoff() ? "Self-handoff" : "Generated input"}</span>
+        <span class="activity-description" dir="auto">{handoff()
+          ? "Continued from an earlier conversation · brief"
+          : generated().replace(/\s+/g, " ").trim().slice(0, 200)}</span>
         <span class="activity-disclosure" aria-hidden="true">›</span>
       </summary>
       <Show when={open()}>

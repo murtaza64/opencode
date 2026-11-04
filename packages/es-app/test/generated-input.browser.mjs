@@ -9,6 +9,7 @@ const { chromium, _electron, expect } = createRequire(new URL("../../app/package
 const preview = await startPanelPreview()
 const fixture = preview.fixture
 const notice = "[Agent notice fixture; not a user request]\nResume the existing PR updates after the maintenance hold. Preserve completed effects.\n\n<img src=x onerror=alert(1)> stays literal.\n" + "Full retained notice text. ".repeat(30)
+const seed = "Front Desk succession desk-succession:ses_p:1.\n-----BEGIN HANDOFF BRIEF-----\nSEED_BRIEF_BODY\n-----END HANDOFF BRIEF-----\n"
 const user = (id, parts) => ({ info: { ...fixture.messages[0].info, id }, parts: parts.map((part, index) => ({ id: `${id}_${index}`, sessionID: "ses_a", messageID: id, ...part })) })
 const assistant = fixture.messages[1]
 fixture.messages = [
@@ -17,6 +18,7 @@ fixture.messages = [
   user("msg_003", [{ type: "text", text: "[Agent notice fake] This is still human input." }]),
   user("msg_004", [{ type: "text", text: "Read the requested file" }, { type: "text", text: "EXPANSION_HIDDEN", synthetic: true }]),
   user("msg_005", [{ type: "file", mime: "image/png", filename: "fixture.png", url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jWZ0AAAAASUVORK5CYII=" }, { type: "text", text: "IMAGE_EXPANSION_HIDDEN", synthetic: true }]),
+  user("msg_0055", [{ type: "text", text: seed, synthetic: true, metadata: { source: "front-desk/succession", key: "desk-succession:ses_p:1", predecessor: "ses_p" } }]),
   { info: { ...assistant.info, id: "msg_006" }, parts: [{ type: "tool", id: "part_task", messageID: "msg_006", sessionID: "ses_a", tool: "task", callID: "task",
     state: { status: "completed", input: { subagent_type: "explore", description: "Inspect generated child" }, metadata: { sessionId: "ses_child" }, output: "Done", title: "Inspect", time: { start: 1, end: 2 } } }] },
 ]
@@ -56,12 +58,19 @@ try {
   await editor.evaluate(el => el.setSelectionRange(2, 7))
   await editor.press("Escape")
   const generated = page.locator('[data-generated-message-id="msg_002"]')
-  await expect(page.locator(".generated-input")).toHaveCount(1)
+  await expect(page.locator(".generated-input")).toHaveCount(2)
   await expect(generated.locator("summary")).toContainText("Generated input")
+  const handoff = page.locator('[data-generated-message-id="msg_0055"]')
+  await expect(handoff).toHaveAttribute("data-self-handoff", "true")
+  await expect(handoff.locator("summary")).toHaveText(/Self-handoff\s*Continued from an earlier conversation · brief/)
+  await expect(page.locator(".transcript")).not.toContainText("SEED_BRIEF_BODY")
+  await handoff.locator("summary").click()
+  await expect(handoff.getByRole("region", { name: "Generated input text" })).toHaveText(seed)
+  await handoff.locator("summary").click()
   await expect(generated.getByRole("region")).toHaveCount(0)
   await expect(page.locator('[data-component="user-message"]')).toHaveCount(4)
   await expect(page.locator('[data-component="user-message"]')).toContainText(["Human question", "[Agent notice fake] This is still human input.", "Read the requested file"])
-  await expect(page.locator('[data-slot="user-message-attachment"][data-type="image"]')).toHaveCount(1)
+  await expect(page.locator('.transcript .chat-image')).toHaveCount(1)
   await expect(page.locator(".transcript")).not.toContainText("EXPANSION_HIDDEN")
   expect(await generated.evaluate(el => {
     const previous = document.querySelector('[data-timeline-part-id="msg_001_0"]')
@@ -84,7 +93,7 @@ try {
   await generated.locator("summary").click()
   await expect(generated.getByRole("region")).toHaveCount(0)
 
-  const trigger = page.getByRole("button", { name: "Agent Explore · Inspect generated child" })
+  const trigger = page.getByRole("button", { name: /^Explore Agent, Inspect generated child/ })
   await trigger.click()
   const dialog = page.getByRole("dialog")
   await expect(dialog.locator(".generated-input")).toHaveCount(1)
@@ -100,7 +109,7 @@ try {
   await expect(editor).toHaveValue("Parent draft remains unchanged")
   expect(errors).toEqual([])
   expect(fixture.calls.filter(call => !["GET", "HEAD", "OPTIONS"].includes(call.method))).toEqual([])
-  console.log(`PASS ${app ? "packaged native" : "browser"} generated input: synthetic-only visibility/order, fake-prefix human, mixed/context+image suppression, literal safe body, full copy, keyboard/modal/focus/draft/scroll, zero mutations`)
+  console.log(`PASS ${app ? "packaged native" : "browser"} generated input: synthetic-only visibility/order, succession seed as collapsed self-handoff with inspectable brief, fake-prefix human, mixed/context+image suppression, literal safe body, full copy, keyboard/modal/focus/draft/scroll, zero mutations`)
 } finally {
   await app?.close()
   await browser?.close()
