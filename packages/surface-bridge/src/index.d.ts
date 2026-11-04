@@ -20,7 +20,7 @@ export type FrameMessage =
   | { type: "picked"; anchor: Anchor; rect: ViewRect }
   | { type: "pick-end" }
   | { type: "rects"; items: { key: string; rect: ViewRect | null; state: AnchorState }[] }
-  | { type: "key"; key: "c" | "Escape" }
+  | { type: "key"; key: "c" | "m" | "Escape" }
 
 export declare const VERSION: string
 export declare const NS: "es-comments"

@@ -78,18 +78,23 @@ try {
   await row.click()
   await expect(page).toHaveURL(`${preview.origin}/?item=${encodeURIComponent("surface:report")}`)
   await expect(reader.locator("h2")).toHaveText("API tests")
-  await expect(reader.locator("[data-requested-in]")).toContainText("Asked here")
+  await reader.locator(".surface-owner-chip").click()
+  await expect(reader.locator("[data-requested-in]")).toContainText("Open the conversation it was asked in")
+  await reader.locator(".surface-owner-chip").click()
   await page.waitForTimeout(1_000)
   await expect(reader.locator(".surface-head-done")).toHaveCount(0)
   if (writes.length || (await stored()).seen) throw new Error(`selecting before the frame wrote seen: ${JSON.stringify(writes)}`)
   releaseMint()
-  await expect(reader.locator(".surface-done-state")).toHaveText(/^Seen · /)
+  await expect(reader.locator(".surface-done")).toHaveText("✓ Seen")
+  await expect(reader.locator(".surface-head-rev")).toHaveText("rev 1")
+  await expect(reader.locator(".surface-owner-chip")).toBeVisible()
+  await expect(reader.getByRole("button", { name: "More" })).toBeVisible()
   await expect(row).toHaveCount(0)
   expect(writes).toEqual([{ id: "report", revision: 1, seen: true }])
   step("selecting writes nothing until the frame shows the revision; showing it in the foreground marks it seen and clears Needs you")
 
   await page.reload({ waitUntil: "domcontentloaded" })
-  await expect(reader.locator(".surface-done-state")).toHaveText(/^Seen · /, { timeout: 60_000 })
+  await expect(reader.locator(".surface-done")).toHaveText("✓ Seen", { timeout: 60_000 })
   await expect(row).toHaveCount(0)
   expect(writes).toHaveLength(1)
   step("seen holds across a reload with no second write (server seen)")
@@ -105,10 +110,10 @@ try {
 
   // A newer revision lands while the reader is open (the page polls every 15 s).
   if (await publish("second") !== 2) throw new Error("expected revision 2")
-  await expect(row).toHaveAttribute("aria-label", "Try · API tests · Fixture lead · rev 2", { timeout: 30_000 })
-  await expect(reader.locator("[data-newer]")).toHaveText("newer revision 2")
+  await expect(row).toHaveAttribute("aria-label", /^Try · API tests · Fixture lead · rev 2/, { timeout: 30_000 })
+  await expect(reader.locator("[data-newer]")).toHaveText("rev 2 ↻")
   await expect(reader.locator(".surface-head-done")).toHaveAttribute("data-revision", "1")
-  await expect(reader.locator(".surface-done-state")).toHaveText(/^Seen · /)
+  await expect(reader.locator(".surface-done")).toHaveText("✓ Seen")
   expect(writes.filter(write => write.revision === 2)).toEqual([])
   await reader.locator("[data-newer]").click()
   await expect(reader.locator(".surface-head-done")).toHaveAttribute("data-revision", "2")
@@ -118,7 +123,7 @@ try {
 
   if (await publish("second") !== 2) throw new Error("exact retry bumped the revision")
   await page.reload({ waitUntil: "domcontentloaded" })
-  await expect(reader.locator(".surface-done-state")).toHaveText(/^Seen · /, { timeout: 60_000 })
+  await expect(reader.locator(".surface-done")).toHaveText("✓ Seen", { timeout: 60_000 })
   await expect(row).toHaveCount(0)
   step("an exact-retry publish does not bring it back")
 
@@ -130,11 +135,11 @@ try {
   await expect(reader.locator("h2")).toHaveText("API tests", { timeout: 60_000 })
   if (await publish("second", "race") !== 2) throw new Error("expected race revision 2")
   releaseRace()
-  await expect(reader.locator("[data-newer]")).toHaveText("newer revision 2")
+  await expect(reader.locator("[data-newer]")).toHaveText("rev 2 ↻")
   await page.waitForTimeout(1_000)
   expect(writes.length).toBe(before)
   await reader.locator("[data-newer]").click()
-  await expect(reader.locator(".surface-done-state")).toHaveText(/^Seen · /)
+  await expect(reader.locator(".surface-done")).toHaveText("✓ Seen")
   expect(writes.at(-1)).toEqual({ id: "race", revision: 2, seen: true })
   step("a republish racing the frame load marks nothing until the newer revision is shown")
 
@@ -146,7 +151,7 @@ try {
   await page.waitForTimeout(1_500)
   if (writes.some(write => write.id === "hidden")) throw new Error("a hidden window marked seen")
   await page.evaluate(() => { Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" }); document.dispatchEvent(new Event("visibilitychange")) })
-  await expect(reader.locator(".surface-done-state")).toHaveText(/^Seen · /)
+  await expect(reader.locator(".surface-done")).toHaveText("✓ Seen")
   expect(writes.at(-1)).toEqual({ id: "hidden", revision: 1, seen: true })
   step("a hidden window never marks seen; it marks once the window is visible")
 
@@ -159,7 +164,7 @@ try {
   step("a failed frame load never marks seen")
 } catch (error) {
   process.exitCode = 1
-  results.push(`FAIL ${String(error).split("\n")[0]} writes=${writes.length} first=${JSON.stringify(writes.slice(0, 3))}${storeErrors.size ? ` store=${[...storeErrors]}` : ""}`)
+  results.push(`FAIL ${String(error)} writes=${writes.length} first=${JSON.stringify(writes.slice(0, 3))}${storeErrors.size ? ` store=${[...storeErrors]}` : ""}`)
 } finally {
   console.log(results.join("\n"))
   await browser.close()

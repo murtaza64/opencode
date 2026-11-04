@@ -1,9 +1,8 @@
 /* Another Work host's entry opened in this window (Main1555): its decision, permission, question or Surface, read
  * and acted on through the Local listener's /hosts/<id>/ routes (host-items.ts), so the action happens on the
  * owning host with that host's operator session and the window never switches to that host's tab. */
-import { SurfaceFind } from "./surface-find"
 import { SurfaceChangeNote } from "./surface-change-note"
-import { createResource, createSignal, createUniqueId, For, Match, Show, Switch, type JSX } from "solid-js"
+import { createResource, createSignal, createUniqueId, For, Match, Show, Switch } from "solid-js"
 import type { PermissionRequest } from "@opencode-ai/sdk/v2"
 import { A } from "@solidjs/router"
 import { createAttention } from "../attention"
@@ -15,11 +14,10 @@ import type { WorkEntry } from "../work-queue"
 import { AttentionDecision, decisionState } from "./attention-decision"
 import { PreparedBrief, useCompleteBrief, useCompleteJob } from "./attention-brief"
 import { HomePermission } from "./home-permission"
-import { Glyph, HostGlyph } from "./icons"
+import { HostGlyph } from "./icons"
 import { AppHeader } from "./native-header"
-import { BuildingHubSlot } from "./buildinghub-link"
 import { SurfaceOwner } from "./surface-owner"
-import { createDeliverableDone, DeliverableDoneControls } from "./desk-surfaces"
+import { createDeliverableDone, DeliverableDoneControls, SurfaceHeadMore } from "./desk-surfaces"
 import { SurfaceComments } from "./surface-comments"
 import { esSurfaceHost } from "../surface-comments"
 import { useDeskQueue } from "../desk-queue"
@@ -42,7 +40,7 @@ export const WorkRemoteDetail = (props: { entry: WorkEntry; onClose: () => void 
     <Switch>
       <Match when={props.entry?.remote?.kind === "attention" ? props.entry.remote : undefined}>{remote => <RemoteDecision host={host()} record={remote().record} />}</Match>
       <Match when={props.entry?.remote?.kind === "request" ? props.entry.remote : undefined}>{remote => <RemoteRequest host={host()} label={props.entry.hostLabel ?? host()} request={remote().request} stale={props.entry.stale} />}</Match>
-      <Match when={props.entry?.remote?.kind === "surface" ? props.entry.remote : undefined}>{remote => <RemoteSurface host={host()} label={props.entry.hostLabel ?? host()} surface={remote().surface} frame={remote().frame} where={where()} onClose={props.onClose} />}</Match>
+      <Match when={props.entry?.remote?.kind === "surface" ? props.entry.remote : undefined}>{remote => <RemoteSurface host={host()} label={props.entry.hostLabel ?? host()} surface={remote().surface} frame={remote().frame} onClose={props.onClose} />}</Match>
     </Switch>
   </section>
 }
@@ -112,7 +110,7 @@ const RemoteRequest = (props: { host: string; label: string; request: NonNullabl
 }
 
 // A file Surface frames through the owning host; a URL Surface is served only on its own host for now (502 here).
-const RemoteSurface = (props: { host: string; label: string; surface: NonNullable<Extract<WorkEntry["remote"], { kind: "surface" }>>["surface"]; frame: "host" | "own-host-only"; where: JSX.Element; onClose: () => void }) => {
+const RemoteSurface = (props: { host: string; label: string; surface: NonNullable<Extract<WorkEntry["remote"], { kind: "surface" }>>["surface"]; frame: "host" | "own-host-only"; onClose: () => void }) => {
   const [address, { refetch }] = createResource(() => props.frame === "host" ? props.surface.id : undefined, id => hostSurfaceAddress(props.host, id))
   const src = () => address.error ? undefined : address()?.src
   // Done/Undo write that host's seen state only, then reread that host's list so its Needs you rows follow.
@@ -132,13 +130,11 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
     <AppHeader>
       <div class="surface-head" onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); props.onClose() } }}>
         <h2 title={`${props.surface.owner} · updated ${ago(props.surface.updated_at)}`}><bdi dir="auto">{props.surface.title}</bdi></h2>
-        {props.where}
-        <SurfaceOwner surface={props.surface} host={{ id: props.host, label: props.label }} />
+        <span class="surface-head-rev">rev {done.onScreen() || props.surface.revision}</span>
+        <SurfaceOwner surface={props.surface} host={{ id: props.host, label: props.label }} onMessage={() => window.dispatchEvent(new CustomEvent("surface-message-author", { detail: props.surface.id }))} />
         <DeliverableDoneControls state={done} label={props.frame === "host" ? undefined : `Mark seen (opened on ${props.label})`} />
-        <SurfaceFind frame={() => (props.frame === "host" ? src() : undefined)} />
+        <SurfaceHeadMore surface={props.surface} src={() => props.frame === "host" ? src() : undefined} done={done} />
         <span class="surface-head-actions">
-          <BuildingHubSlot surface={props.surface} />
-          <Show when={src()}>{href => <a class="surface-head-button" href={href()} target="_blank" rel="noopener noreferrer" title="Open in new tab" aria-label="Open in new tab"><Glyph name="link-external" /></a>}</Show>
           <button class="surface-head-button" aria-label="Close" title="Close (Esc)" onClick={props.onClose}>×</button>
         </span>
       </div>
@@ -158,7 +154,7 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
               onLoad={() => void done.loaded(() => work.feeds().find(feed => feed.host.id === props.host)?.load() ?? Promise.resolve())}
               sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" />
             {/* Comments live on the host that owns the Surface, with that host's operator session. */}
-            <SurfaceComments host={esSurfaceHost(props.surface.id, hostPrefix(props.host))} revision={done.onScreen()} frame={frame} stage={() => stage} />
+            <SurfaceComments host={esSurfaceHost(props.surface.id, hostPrefix(props.host))} surface={props.surface} ownerHost={{ id: props.host, label: props.label }} revision={done.onScreen()} frame={frame} stage={() => stage} />
           </div>
         }}</Show>
       </Show>

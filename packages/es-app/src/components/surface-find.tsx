@@ -9,7 +9,7 @@ type FindState = { current: number; total: number } | { unavailable: true } | un
  * browser the reader leaves the chord to the browser's own find, which searches the frame too.
  * `frame` is the Surface frame's address as the reader set it (its capability directory).
  */
-export const SurfaceFind = (props: { frame: () => string | undefined }) => {
+export const SurfaceFind = (props: { frame: () => string | undefined; trigger?: () => number }) => {
   const [native, setNative] = createSignal(false)
   const [open, setOpen] = createSignal(false)
   const [query, setQuery] = createSignal("")
@@ -45,6 +45,7 @@ export const SurfaceFind = (props: { frame: () => string | undefined }) => {
     queueMicrotask(() => { focus.input?.focus(); focus.input?.select() })
     if (query()) void send("find")
   }
+  createEffect(on(() => props.trigger?.(), value => { if (value) show() }, { defer: true }))
   const close = () => {
     clearTimeout(focus.timer)
     setOpen(false)

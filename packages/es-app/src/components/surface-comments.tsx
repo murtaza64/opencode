@@ -4,6 +4,9 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 import { ago } from "../state"
 import { initialOf, MAX_BODY, mintCommentId, placement, placementLabel, receiptLabel, threads, type AnchorState, type CommentAnchor, type CommentHost, type SealedComment, type SurfaceComment } from "../surface-comments"
 import { Glyph } from "./icons"
+import { DictationField } from "./dictation-field"
+import { useSurfaceOwner } from "./surface-owner"
+import type { Surface } from "../surfaces"
 import { focusHole, placeCard } from "../../../surface-bridge/src/geometry.js"
 import "./surface-comments.css"
 
@@ -14,7 +17,27 @@ const NS = "es-comments"
 const DRAFT = "__draft"
 const POLL_MS = 30_000
 
-export const SurfaceComments = (props: { host: CommentHost; revision: number; frame: () => HTMLIFrameElement | undefined; stage: () => HTMLElement | undefined }) => {
+export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ownerHost?: { id: string; label: string }; revision: number; frame: () => HTMLIFrameElement | undefined; stage: () => HTMLElement | undefined }) => {
+  const author = useSurfaceOwner(() => ({ ...props.surface, revision: props.revision }), props.ownerHost)
+  const [saying, setSaying] = createSignal(false)
+  const [said, setSaid] = createSignal(false)
+  const [sayDraft, setSayDraft] = createSignal("")
+  const [sayError, setSayError] = createSignal("")
+  const [sendingSay, setSendingSay] = createSignal(false)
+  let sayInput: HTMLTextAreaElement | undefined
+  const toggleSay = () => { setSaying(!saying()); if (!saying()) return; setTray(false); setTucked(false); setSaid(false); queueMicrotask(() => sayInput?.focus()) }
+  const sendSay = async () => {
+    const text = sayDraft().trim()
+    if (!text || sendingSay() || author.owner()?.state !== "ok") return
+    setSendingSay(true)
+    setSayError("")
+    // A lost ACK may already have admitted this ID. Keep the draft and do not automatically retry it.
+    const id = `msg_${crypto.randomUUID().replaceAll("-", "")}`
+    try {
+      if (await author.send(text, id)) { setSayDraft(""); setSaid(true) }
+    } catch { setSayError("Send unconfirmed. Check the owner's chat before trying again.") }
+    setSendingSay(false)
+  }
   const [comments, setComments] = createSignal<SurfaceComment[]>([])
   const [unavailable, setUnavailable] = createSignal<string>()
   const [ready, setReady] = createSignal(false)
@@ -90,7 +113,7 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
   const toggleTray = () => {
     setTray(!tray())
     setCursor(0)
-    if (tray()) queueMicrotask(() => searchInput?.focus())
+    if (tray()) { setSaying(false); queueMicrotask(() => searchInput?.focus()) }
   }
   // Everything the frame should locate: this revision's threads, sends in flight and the open draft.
   createEffect(() => {
@@ -138,11 +161,18 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
       }
       if (data.type === "pick-end") setPicking(false)
       if (data.type === "key" && data.key === "c") startPick(true)
-      if (data.type === "key" && data.key === "Escape" && open()) close()
+      if (data.type === "key" && data.key === "m") toggleSay()
+      if (data.type === "key" && data.key === "Escape") {
+        if (saying()) setSaying(false)
+        else if (tray()) setTray(false)
+        else if (picking()) endPick()
+        else if (open()) close()
+      }
     }
     const keys = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
       const typing = event.target instanceof HTMLElement && (event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName))
+      if (event.key === "Escape" && saying()) { event.preventDefault(); event.stopImmediatePropagation(); setSaying(false); return }
       if (event.key === "Escape" && (tray() || picking() || open())) {
         event.preventDefault()
         event.stopPropagation()
@@ -164,6 +194,7 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
       if (event.key === ".") { event.preventDefault(); setTucked(!tucked()); setTray(false) }
       if (event.key.toLowerCase() === "j") { event.preventDefault(); navigate(1) }
       if (event.key.toLowerCase() === "k") { event.preventDefault(); navigate(-1) }
+      if (event.key.toLowerCase() === "m") { event.preventDefault(); toggleSay() }
     }
     const outside = (event: PointerEvent) => {
       if (!(event.target instanceof Node) || !props.stage()?.isConnected) return
@@ -177,14 +208,16 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
       if (tray()) setTray(false)
       if (open()) close(false)
     }
+    const message = (event: Event) => { if ((event as CustomEvent<string>).detail === props.surface.id) { setTray(false); setTucked(false); setSaying(true); setSaid(false); queueMicrotask(() => sayInput?.focus()) } }
     addEventListener("message", listen)
     addEventListener("keydown", keys, true)
     addEventListener("pointerdown", outside, true)
     addEventListener("blur", frameFocus)
+    addEventListener("surface-message-author", message)
     const observer = new ResizeObserver(() => { const stage = props.stage(); if (stage) setSize({ w: stage.clientWidth, h: stage.clientHeight }) })
     const stage = props.stage()
     if (stage) observer.observe(stage)
-    onCleanup(() => { removeEventListener("message", listen); removeEventListener("keydown", keys, true); removeEventListener("pointerdown", outside, true); removeEventListener("blur", frameFocus); observer.disconnect() })
+    onCleanup(() => { removeEventListener("message", listen); removeEventListener("keydown", keys, true); removeEventListener("pointerdown", outside, true); removeEventListener("blur", frameFocus); removeEventListener("surface-message-author", message); observer.disconnect() })
   })
   // A remounted frame (new revision, renewed address) starts without a bridge until it says ready again.
   createEffect(() => { props.frame(); setReady(false) })
@@ -296,6 +329,19 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
         </section>
       </div>
     }}</Show>
+    <Show when={saying()}><section class="sc-say" role="dialog" aria-label="Message the author" onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setSaying(false) } }}>
+      <div class="sc-say-to">To <bdi dir="auto">{author.name()}</bdi> · published this · rev {props.revision} · {props.ownerHost?.label ?? "this host"}
+        <Show when={author.href()}>{href => <a href={href()} onClick={event => { event.preventDefault(); author.open() }}>Open chat</a>}</Show>
+      </div>
+      <Show when={said()} fallback={<form class="sc-compose" onSubmit={event => { event.preventDefault(); void sendSay() }}>
+        <textarea ref={sayInput} dir="auto" rows={3} placeholder="Say something about the whole page…" aria-label="Message to author" value={sayDraft()} onInput={event => setSayDraft(event.currentTarget.value)}
+          onKeyDown={event => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} />
+        <div class="sc-compose-row"><DictationField field={`surface-say:${props.ownerHost?.id ?? "local"}:${props.surface.id}`} label="message to author" insert={text => { const el = sayInput; if (!el) return; const start = el.selectionStart; const next = sayDraft().slice(0, start) + text + sayDraft().slice(el.selectionEnd); setSayDraft(next); queueMicrotask(() => { el.focus(); el.setSelectionRange(start + text.length, start + text.length) }) }} />
+          <span class="sc-dim-text">⌘↵ · goes to chat, not a comment</span><button class="sc-send" type="submit" title={author.owner()?.state !== "ok" ? (author.owner() as { why?: string } | undefined)?.why ?? "Owner not readable now" : undefined} disabled={!sayDraft().trim() || sendingSay() || author.owner()?.state !== "ok"}>Send</button></div>
+        <Show when={author.owner() && author.owner()!.state !== "ok"}><p class="sc-note" role="status">{author.owner()?.state !== "ok" ? (author.owner() as { why: string }).why : ""}</p></Show>
+        <Show when={sayError()}><p class="sc-note" role="alert">{sayError()}</p></Show>
+      </form>}><p role="status">Sent to {author.name()} · <a href={author.href()} onClick={event => { event.preventDefault(); author.open() }}>open the chat</a></p></Show>
+    </section></Show>
     <Show when={tray()}><div class="sc-tray" aria-label="Find a comment">
       <div class="sc-tray-filters"><input ref={searchInput} type="search" placeholder="Find a comment" aria-label="Find a comment" value={query()} onInput={(event) => { setQuery(event.currentTarget.value); setCursor(0) }}
         onKeyDown={(event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setCursor(Math.max(0, Math.min(filtered().here.length + filtered().away.length - 1, cursor() + (event.key === "ArrowDown" ? 1 : -1)))) } if (event.key === "Enter") { event.preventDefault(); const item = [...filtered().here, ...filtered().away][cursor()]; if (item) reveal(item.root.comment_id) } }} />
@@ -308,6 +354,9 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
       </div>
     </div></Show>
     <div class="sc-toolbar" data-tucked={tucked() ? "" : undefined} data-picking={picking() ? "" : undefined} role="toolbar" aria-label="Feedback">
+      <button type="button" class="sc-tool-say" title={`Tell ${author.name()} (M)`} aria-label={`Tell ${author.name()}`} aria-pressed={saying()} onClick={toggleSay}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v4m-4 0h8" /></svg>
+      </button>
       <button class="sc-tool-main" ref={toolbarButton} aria-label="Comment (C)" aria-pressed={picking()} disabled={!ready() || !!unavailable()} title={unavailable() ?? (off() ? "This page turns comments off" : "Comment (C)")} onClick={(event) => picking() ? endPick() : startPick(event.detail === 0)}><Glyph name="comment-discussion" size={18} /></button>
       <span class="sc-draw" title={marksSupported ? "Draw (D) · hover for shapes" : "Drawing needs host support (marks)"}><button class="sc-tool" aria-label="Draw" title={marksSupported ? "Draw (D) · hover for shapes" : "Drawing needs host support (marks)"} disabled={!marksSupported}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l4-1 11-11-3-3L5 16z" /></svg></button><span class="sc-fly" aria-hidden={!marksSupported}><For each={["pen", "arrow", "rect", "ellipse"]}>{(shape) => <button disabled={!marksSupported} title={shape} aria-label={shape}><span>{shape === "pen" ? "✎" : shape === "arrow" ? "↗" : shape === "rect" ? "▢" : "◯"}</span></button>}</For></span></span>
       <button class="sc-tool" aria-label="Undo last shape" title={marksSupported ? "Undo last shape" : "Drawing needs host support (marks)"} disabled={!marksSupported}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7L4 12l5 5M4 12h10a6 6 0 0 1 6 6" /></svg></button><i />

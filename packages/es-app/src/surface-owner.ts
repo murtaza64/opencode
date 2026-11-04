@@ -1,6 +1,6 @@
 import type { Surface } from "./surfaces"
 
-export type Owner = { state: "ok"; session: string; directory: string } | { state: "none" | "unknown"; why: string }
+export type Owner = { state: "ok"; session: string; directory: string; busy?: boolean } | { state: "none" | "unknown"; why: string }
 
 /** The current owner of the lane that published `surface`, read from that host's dashboard (`prefix` "" for this host,
  * `/hosts/<id>` for another Work host): exactly one lane record naming a session that host still lists. */
@@ -12,7 +12,7 @@ export const surfaceOwner = async (surface: Pick<Surface, "lane" | "editspace">,
   // threads[].lanes[] {lane, owner, ...}; sessions both at the top level and on each card, each with its directory.
   // A top-level `lanes` list, if a dashboard serves one, is read too.
   type Lane = { lane?: string; owner?: string }
-  type Row = { id?: string; directory?: string }
+  type Row = { id?: string; directory?: string; live?: string }
   const body = await response.json().catch(() => undefined) as { threads?: { lanes?: Lane[]; sessions?: Row[] }[]; lanes?: Lane[]; sessions?: Row[] } | undefined
   const threads = Array.isArray(body?.threads) ? body.threads : []
   const records = [...threads.flatMap((thread) => Array.isArray(thread.lanes) ? thread.lanes : []), ...(Array.isArray(body?.lanes) ? body.lanes : [])]
@@ -25,6 +25,5 @@ export const surfaceOwner = async (surface: Pick<Surface, "lane" | "editspace">,
   const sessions = [...(Array.isArray(body?.sessions) ? body.sessions : []), ...threads.flatMap((thread) => Array.isArray(thread.sessions) ? thread.sessions : [])]
   const session = owner ? sessions.find((item) => item?.id === owner && typeof item.directory === "string" && item.directory) : undefined
   if (!owner || !session?.directory) return { state: "none", why: "no current owner session" }
-  return { state: "ok", session: owner, directory: session.directory }
+  return { state: "ok", session: owner, directory: session.directory, busy: session.live === "busy" || session.live === "retry" }
 }
-

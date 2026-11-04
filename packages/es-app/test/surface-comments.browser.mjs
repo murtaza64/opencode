@@ -10,7 +10,7 @@ const { chromium, expect } = createRequire(new URL("../../app/package.json", imp
 const preview = await startPanelPreview()
 const browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : { channel: "chrome" }) })
 const now = Date.now()
-const SURFACE = { id: "review", title: "Design review", summary: null, kind: "path", owner: "opencode/ux-feel", lane: "ux-feel", editspace: "opencode", updated_at: now, revision: 2, health: { state: "ok" } }
+const SURFACE = { id: "review", title: "Design review", summary: null, kind: "path", owner: "Relay", lane: "ux-feel", editspace: "fixture", updated_at: now, revision: 2, health: { state: "ok" } }
 const PAGE = injectBridge(`<!doctype html><html lang="en"><head><meta charset="utf-8"><style>body{font:15px sans-serif;margin:24px;background:#16161a;color:#ddd} section{margin:0 0 28px}</style></head><body>
 <h1>Design review</h1>
 <section data-anchor="sec/cards"><h2>Decision cards</h2><p id="cards-copy">Cards lead with the question and one recommended option.</p></section>
@@ -51,7 +51,32 @@ const open = async (viewport, options = {}) => {
 
 try {
   {
+    preview.fixture.laneOwners = [{ lane: "ux-feel", owner: "ses_a" }]
     const { page, context, errors, frame } = await open({ width: 1400, height: 900 })
+    const head = page.locator(".surface-head")
+    await expect(head.locator("h2")).toHaveText("Design review")
+    await expect(head.locator(".surface-head-rev")).toHaveText("rev 2")
+    await expect(head.locator(".surface-owner-chip")).toContainText("Relay")
+    await expect(head.getByRole("button", { name: "More" })).toBeVisible()
+    await expect(head.locator(".surface-head-actions > :is(a, button)")).toHaveCount(1)
+    await head.locator(".surface-owner-chip").click()
+    await head.getByRole("button", { name: "Open Relay's chat" }).click()
+    await expect(page).toHaveURL(/\/session\/ses_a\?directory=/)
+    await expect(page.locator(".context-chip[data-kind=surface]")).toContainText("Design review")
+    await page.goto(`${preview.origin}/?surface=review`, { waitUntil: "domcontentloaded" })
+    await expect(page.locator(".sc-tool-say")).toBeVisible()
+    await page.locator(".sc-tool-say").click()
+    await expect(page.locator(".sc-say")).toContainText("To Relay · published this · rev 2")
+    await page.locator(".sc-say textarea").fill("Please review the opening section")
+    await page.locator(".sc-say textarea").press("Meta+Enter")
+    await expect(page.locator(".sc-say [role=status]")).toContainText("Sent to Relay")
+    const prompts = preview.fixture.calls.filter(call => call.method === "POST" && call.path === "/session/ses_a/prompt_async")
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0].body.parts).toEqual(expect.arrayContaining([expect.objectContaining({ type: "text", text: "Please review the opening section" }), expect.objectContaining({ type: "text", synthetic: true, text: expect.stringContaining('"id":"review"') })]))
+    expect(prompts[0].body.parts[1].text).toContain('"revision":2')
+    await expect(page.locator(".sc-thread")).toHaveCount(0)
+    await page.keyboard.press("Escape")
+    await expect(page.locator(".sc-say")).toHaveCount(0)
     // Off-view threads are available only through the count's finder.
     await expect(page.locator(".sc-peek")).toHaveCount(0)
     await expect(page.locator(".sc-tool-note")).toHaveCount(0)
@@ -60,6 +85,15 @@ try {
     await expect(page.getByRole("button", { name: "Draw" })).toHaveAttribute("title", "Drawing needs host support (marks)")
     await page.getByRole("button", { name: "Find a comment (F)" }).click()
     await expect(page.locator(".sc-group h3", { hasText: "Not on this view" })).toBeVisible()
+    await page.locator(".sc-tool-say").click()
+    await expect(page.locator(".sc-tray")).toHaveCount(0)
+    await page.getByRole("button", { name: "Find a comment (F)" }).click()
+    await expect(page.locator(".sc-say")).toHaveCount(0)
+    await page.locator(".sc-tool-say").click()
+    await page.keyboard.press("Escape")
+    await expect(page.locator(".sc-say")).toHaveCount(0)
+    await expect(page.locator(".desk-surface-frame")).toHaveCount(1)
+    await page.getByRole("button", { name: "Find a comment (F)" }).click()
     await page.getByRole("button", { name: "From revision 1" }).click()
     await expect(page.locator(".sc-away-tag")).toHaveText("not on this view")
     await expect(page.locator(".sc-away blockquote")).toContainText("sec/cards")
@@ -198,6 +232,27 @@ try {
     await expect(page.getByRole("button", { name: "Comment (C)" })).toHaveAttribute("aria-pressed", "false")
     await expect(page.locator(".desk-surface-frame")).toHaveCount(1)
     expect(errors).toEqual([])
+    await context.close()
+  }
+  {
+    preview.fixture.laneOwners = []
+    const { page, context, frame } = await open({ width: 1200, height: 800 })
+    await page.locator(".sc-tool-say").click()
+    await page.locator(".sc-say textarea").fill("Keep this unsent")
+    await expect(page.locator(".sc-say .sc-send")).toBeDisabled()
+    await expect(page.locator(".sc-say")).toContainText("owner of ux-feel not listed on that host now")
+    await page.keyboard.press("Escape")
+    await page.locator(".sc-tool-say").click()
+    await expect(page.locator(".sc-say textarea")).toHaveValue("Keep this unsent")
+    await page.keyboard.press("Escape")
+    await frame.locator("#cards-copy").click()
+    await page.keyboard.press("m")
+    await expect(page.locator(".sc-say textarea")).toHaveValue("Keep this unsent")
+    await page.keyboard.press("Escape")
+    await page.locator(".surface-head h2").click()
+    await page.keyboard.press("m")
+    await expect(page.locator(".sc-say textarea")).toHaveValue("Keep this unsent")
+    expect(preview.fixture.calls.filter(call => call.method === "POST" && call.path.endsWith("/prompt_async"))).toHaveLength(1)
     await context.close()
   }
   {

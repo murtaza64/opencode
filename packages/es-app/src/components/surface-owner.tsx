@@ -1,18 +1,14 @@
-/* Who owns a Surface, in its header (surface-owner-feedback): the lane that published it, resolved on the Surface's
- * own host to that lane's CURRENT owner session (a handoff moves the lane record's owner, so the record is already the
- * current one), and "Published by" when the publishing author is named differently. Message owner opens that session
- * on its own host with the Surface attached to its draft as a context chip; nothing is sent. Without one current
- * owner it says so and offers Ask Front Desk with the same chip; it never guesses a session. */
 import { createResource, Show } from "solid-js"
-import { useNavigate } from "@solidjs/router"
+import { useNavigate, A } from "@solidjs/router"
 import { useDeskChatOptional } from "../desk-companion"
-import { contextKey, MAX_CONTEXT, surfaceRef, type ContextRef } from "../context-mention"
-import { sessionHref } from "../state"
+import { contextKey, contextPart, MAX_CONTEXT, surfaceRef, type ContextRef } from "../context-mention"
+import { ago, sessionHref } from "../state"
 import type { Surface } from "../surfaces"
 import { surfaceOwner } from "../surface-owner"
-import { DESK } from "../desk-identity"
+import { personas, DESK } from "../desk-identity"
+import { ocAt } from "../api"
+import { hostPrefix } from "../host-items"
 
-/** The context chips a session's draft keeps (same store as the session page's @ chips). */
 const chipStore = (host: string | undefined, session: string) => host ? `es-app:context-refs:${host}:${session}` : `es-app:context-refs:${session}`
 const addChip = (key: string, ref: ContextRef) => {
   const current = (() => { try { return JSON.parse(localStorage.getItem(key) ?? "[]") as ContextRef[] } catch { return [] } })()
@@ -20,47 +16,65 @@ const addChip = (key: string, ref: ContextRef) => {
   try { localStorage.setItem(key, JSON.stringify([...current, ref])) } catch { /* the session opens without the chip */ }
 }
 
-export const SurfaceOwner = (props: { surface: Surface; host?: { id: string; label: string } }) => {
+/** One owner resolution for the header and the on-Surface composer. Never substitute another session for a missing owner. */
+export const useSurfaceOwner = (surface: () => Surface, host?: { id: string; label: string }) => {
   const navigate = useNavigate()
-  const desk = useDeskChatOptional()
-  const [owner] = createResource(() => props.surface, (surface) => surfaceOwner(surface, props.host ? `/hosts/${props.host.id}` : ""))
-  const ref = () => surfaceRef(props.surface, props.host?.id ?? window.location.host)
-  const publisher = () => props.surface.owner && props.surface.owner !== props.surface.lane ? props.surface.owner : undefined
-  const message = () => {
+  const [owner] = createResource(surface, value => surfaceOwner(value, host ? hostPrefix(host.id) : ""))
+  const ref = () => surfaceRef(surface(), host?.id ?? window.location.host)
+  const name = () => personas().find(person => person.owner_lane === surface().lane)?.name ?? surface().owner ?? surface().lane ?? "Author"
+  const avatar = () => personas().find(person => person.owner_lane === surface().lane || person.name === name())?.avatar_url
+  const href = () => {
+    const value = owner()
+    if (value?.state !== "ok") return undefined
+    return host ? `/session/${encodeURIComponent(value.session)}?directory=${encodeURIComponent(value.directory)}&host=${encodeURIComponent(host.id)}`
+      : sessionHref(value.session, value.directory)
+  }
+  const open = () => {
     const value = owner()
     if (value?.state !== "ok") return
-    // A draft already at the chip limit keeps its chips; the session page says so when the next one is added.
-    addChip(chipStore(props.host?.id, value.session), ref())
-    navigate(props.host ? `/session/${encodeURIComponent(value.session)}?directory=${encodeURIComponent(value.directory)}&host=${encodeURIComponent(props.host.id)}`
-      : sessionHref(value.session, value.directory))
+    addChip(chipStore(host?.id, value.session), ref())
+    navigate(href()!)
   }
-  // The owner line and its actions; inline in a wide header, folded into one Owner menu below 600 px (index of rules in
-  // desk-surfaces.css) so the title keeps the space on a phone.
+  const send = async (text: string, messageID: string) => {
+    const value = owner()
+    if (value?.state !== "ok") return false
+    const core = ocAt(host ? `${hostPrefix(host.id)}/oc` : "/oc")
+    const session = await core.session(value.session, value.directory)
+    const url = new URL(host ? `/?item=${encodeURIComponent(`${host.id}~surface:${surface().id}`)}` : `/?surface=${encodeURIComponent(surface().id)}`, window.location.origin).href
+    await core.prompt(session, value.directory, text, { messageID, context: [contextPart(ref(), url, Date.now())] })
+    return true
+  }
+  return { owner, name, avatar, href, open, send }
+}
+
+export const SurfaceOwner = (props: { surface: Surface; host?: { id: string; label: string }; onMessage?: () => void }) => {
+  const author = useSurfaceOwner(() => props.surface, props.host)
+  const desk = useDeskChatOptional()
   let menu: HTMLDetailsElement | undefined
   const close = () => { if (menu) menu.open = false }
-  const items = () => <>
-    <Show when={props.surface.lane}>{lane => <span class="surface-head-link">Owner: <bdi dir="auto">{lane()}</bdi></span>}</Show>
-    <Show when={publisher()}>{name => <span class="surface-head-link">Published by <bdi dir="auto">{name()}</bdi></span>}</Show>
-    <Show when={owner()?.state === "ok"} fallback={
-      <Show when={owner() && owner()!.state !== "ok"}>
-        <span class="surface-head-link" role="status">{(owner() as { why: string }).why}</span>
-        <Show when={desk}>{chat => <button type="button" class="surface-head-text" title={`Open ${DESK.name} with this Surface in its draft; nothing is sent`}
-          onClick={() => { close(); chat().ask(ref()) }}>Ask {DESK.name}</button>}</Show>
-      </Show>}>
-      <button type="button" class="surface-head-text" title="Open the owning agent's session with this Surface in its draft; nothing is sent" onClick={() => { close(); message() }}>Message owner</button>
-    </Show>
-  </>
-  return <span class="surface-owner" data-surface-owner={owner()?.state ?? "loading"}>
-    <span class="surface-owner-inline">{items()}</span>
-    <details class="surface-owner-menu" ref={menu} onKeyDown={(event) => {
+  return <span class="surface-owner" data-surface-owner={author.owner()?.state ?? "loading"}>
+    <details class="surface-owner-menu" ref={menu} onKeyDown={event => {
       if (event.key !== "Escape" || !menu?.open) return
-      event.preventDefault()
-      event.stopPropagation()
-      close()
-      menu.querySelector("summary")?.focus()
+      event.preventDefault(); event.stopPropagation(); close(); menu.querySelector("summary")?.focus()
     }}>
-      <summary class="surface-head-text" title={props.surface.lane ? `Owner: ${props.surface.lane}` : "Owner"}><span aria-hidden="true">@</span> Owner</summary>
-      <span class="surface-owner-items">{items()}</span>
+      <summary class="surface-owner-chip" title={`Published by ${author.name()}`}>
+        <span class="surface-owner-avatar"><Show when={author.avatar()} fallback={author.name().charAt(0).toUpperCase()}>{url => <img src={url()} alt="" referrerpolicy="no-referrer" />}</Show></span>
+        <bdi dir="auto">{author.name()}</bdi>
+        <Show when={author.owner()?.state === "ok" && (author.owner() as { busy?: boolean }).busy}><span class="dot busy" title="Working" aria-label="Working" /></Show>
+      </summary>
+      <span class="surface-owner-items">
+        <span class="surface-owner-meta">Published {ago(props.surface.created_at ?? props.surface.updated_at)} · rev {props.surface.revision} · {props.host?.label ?? "this host"} · {props.surface.lane ?? "no lane"}
+          <Show when={props.surface.requested_in}>{asked => <> · asked in {asked().title ?? "conversation"}</>}</Show>
+        </span>
+        <Show when={author.owner()?.state === "ok"} fallback={<Show when={author.owner()}>{value => <>
+          <span class="surface-owner-meta" role="status">{value().state !== "ok" ? (value() as { why: string }).why : ""}</span>
+          <Show when={desk}>{chat => <button type="button" onClick={() => { close(); chat().ask(surfaceRef(props.surface, props.host?.id ?? window.location.host)) }}>Ask {DESK.name}</button>}</Show>
+        </>}</Show>}>
+          <button type="button" onClick={() => { close(); author.open() }}>Open {author.name()}'s chat</button>
+          <button type="button" onClick={() => { close(); props.onMessage?.() }}>Message {author.name()}</button>
+        </Show>
+        <Show when={props.surface.requested_in}>{asked => <A href={`${sessionHref(asked().session, asked().directory)}${props.host ? `&host=${encodeURIComponent(props.host.id)}` : ""}`} data-requested-in={asked().session} onClick={close}>Open the conversation it was asked in</A>}</Show>
+      </span>
     </details>
   </span>
 }

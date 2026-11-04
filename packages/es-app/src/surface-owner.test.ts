@@ -10,7 +10,7 @@ afterEach(() => fetchSpy?.mockRestore())
 
 test("the owner is the lane record's current owner session on that host (a handoff already moved it)", async () => {
   answer(state([{ lane: "granola", owner: "ses_successor" }], [{ id: "ses_old", directory: "/r" }, { id: "ses_successor", directory: "/r/lanes/granola" }]))
-  expect(await surfaceOwner({ lane: "granola", editspace: "opencode" }, "/hosts/mini")).toEqual({ state: "ok", session: "ses_successor", directory: "/r/lanes/granola" })
+  expect(await surfaceOwner({ lane: "granola", editspace: "opencode" }, "/hosts/mini")).toEqual({ state: "ok", session: "ses_successor", directory: "/r/lanes/granola", busy: false })
   expect(String(fetchSpy.mock.calls[0]![0])).toBe("/hosts/mini/es/api/state?es=opencode")
 })
 
@@ -42,5 +42,10 @@ test("the live dashboard shape: lanes and sessions on each card, no top-level la
     ],
     sessions: [{ id: "ses_other", title: "other", live: "idle", directory: "/es/project-directions" }],
   })
-  expect(await surfaceOwner({ lane: "eks-lead", editspace: "project-directions" }, "/hosts/mini")).toEqual({ state: "ok", session: "ses_ee8cfixture", directory: "/es/project-directions/lanes/eks-lead/repos/x" })
+  expect(await surfaceOwner({ lane: "eks-lead", editspace: "project-directions" }, "/hosts/mini")).toEqual({ state: "ok", session: "ses_ee8cfixture", directory: "/es/project-directions/lanes/eks-lead/repos/x", busy: false })
+})
+
+test("a busy owner session is reported busy, for the author chip's activity dot", async () => {
+  answer({ threads: [{ lanes: [{ lane: "ux-feel", owner: "ses_busy" }], sessions: [{ id: "ses_busy", directory: "/r/ux-feel", live: "busy" }] }] })
+  expect(await surfaceOwner({ lane: "ux-feel", editspace: "opencode" }, "")).toEqual({ state: "ok", session: "ses_busy", directory: "/r/ux-feel", busy: true })
 })

@@ -190,7 +190,7 @@ export function installSurfaceBridge(win, createKit) {
       return
     }
     if (typing(document.activeElement) || event.metaKey || event.ctrlKey || event.altKey) return
-    if (event.key === "c" || event.key === "Escape") post("key", { key: event.key })
+    if (event.key === "c" || event.key === "m" || event.key === "Escape") post("key", { key: event.key })
   }, true)
 
   on("message", (event) => {

@@ -5,10 +5,8 @@ import { SurfaceFind } from "./surface-find"
 import { SurfaceChangeNote } from "./surface-change-note"
 import { AppHeader } from "./native-header"
 import { createEffect, createResource, createSignal, For, onCleanup, Show, type JSX } from "solid-js"
-import { A } from "@solidjs/router"
-import { ago, sessionHref } from "../state"
+import { ago } from "../state"
 import { isDeliverable, renewDelay, surfaceAddress, surfaceKey, surfaceProblem, surfaceUnavailable, type Surface, type createSurfaces } from "../surfaces"
-import { Glyph } from "./icons"
 import { BuildingHubSlot } from "./buildinghub-link"
 import { SurfaceOwner } from "./surface-owner"
 import { SurfaceComments } from "./surface-comments"
@@ -138,16 +136,32 @@ export const createDeliverableDone = (surface: () => Surface | undefined, onDone
 export const DeliverableDoneControls = (props: { state: ReturnType<typeof createDeliverableDone>; label?: string }) =>
   <Show when={props.state.enabled() && (props.state.ready() || props.state.newer())}>
     <span class="surface-head-done" data-revision={props.state.onScreen()}>
-      <Show when={props.state.newer()}>{revision => <button class="surface-head-text" data-newer={revision()} title="Load the newer revision; seen covers only the revision on screen" onClick={() => props.state.load(revision())}>newer revision {revision()}</button>}</Show>
+      <Show when={props.state.newer()}>{revision => <button class="surface-head-text" data-newer={revision()} title="Load the newer revision; seen covers only the revision on screen" onClick={() => props.state.load(revision())}>rev {revision()} ↻</button>}</Show>
       <Show when={props.state.ready()}>
         <Show when={props.state.done()} fallback={<Show when={props.state.unread() || props.state.failed()}>
           <button class="surface-head-text surface-done" disabled={props.state.writing()} title={`Mark revision ${props.state.onScreen()} seen; it leaves Needs you on every device`} onClick={() => void props.state.mark(true)}>{props.label ?? "Mark seen"}</button></Show>}>{state =>
-          <><span class="surface-done-state" role="status">Seen{state().at ? ` · ${ago(state().at!)}` : ""}</span>
-            <button class="surface-head-text" disabled={props.state.writing()} title={`Mark revision ${props.state.onScreen()} unread; it returns to Needs you`} onClick={() => void props.state.mark(false)}>Mark unread</button></>}</Show>
+          <button class="surface-head-text surface-done" aria-label="Mark unread" disabled={props.state.writing()} title={`Seen rev ${props.state.onScreen()}${state().at ? ` · ${new Date(state().at!).toLocaleString()}` : ""} · click to mark unread`} onClick={() => void props.state.mark(false)}>✓ Seen</button>}</Show>
       </Show>
       <Show when={props.state.failed()}><span class="home-blocked" role="alert">not saved</span></Show>
     </span>
   </Show>
+
+export const SurfaceHeadMore = (props: { surface?: Surface; src: () => string | undefined; done: ReturnType<typeof createDeliverableDone> }) => {
+  const [find, setFind] = createSignal(0)
+  let menu: HTMLDetailsElement | undefined
+  return <>
+    <SurfaceFind frame={props.src} trigger={find} />
+    <details class="surface-more" ref={menu} onKeyDown={event => { if (event.key !== "Escape") return; event.preventDefault(); event.stopPropagation(); menu!.open = false; menu?.querySelector("summary")?.focus() }}>
+      <summary class="surface-head-button" role="button" aria-label="More" title="More">⋯</summary>
+      <div class="surface-more-items">
+        <button type="button" onClick={() => { menu!.open = false; setFind(find() + 1) }}>Find in page</button>
+        <Show when={props.src()}>{src => <a href={src()} target="_blank" rel="noopener noreferrer" aria-label="Open in new tab">Open in new tab</a>}</Show>
+        <Show when={props.done.ready() && props.done.done()}><button type="button" onClick={() => { menu!.open = false; void props.done.mark(false) }}>Mark unread</button></Show>
+        <BuildingHubSlot surface={props.surface} />
+      </div>
+    </details>
+  </>
+}
 
 export const SurfaceView = (props: { id: string; surface?: Surface; checked?: number; onDone?: MarkDone; onLoaded?: () => Promise<unknown>; onRetry: () => void; onClose: () => void; decisions?: JSX.Element }) => {
   // Seen covers what the human saw, so it waits for the frame: never while loading, offline or failed.
@@ -173,27 +187,19 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
     props.onRetry()
     if (address.error) void refetch()
   }
-  // One compact bar: title (owner, revision and freshness in its tooltip), "asked in", open in a new tab, close. The
-  // frame takes the rest of the pane edge to edge. Escape anywhere in the pane outside the frame closes it.
+  // The frame takes the rest of the pane edge to edge. Escape outside the frame closes it.
   const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); props.onClose() } }
   return <section class="desk-evidence desk-surface" aria-label="Surface" onKeyDown={closeOnEscape}>
-    {/* The app's one top bar (the Mac window's title bar in the desktop app): title, "asked in", a reserved
-      * BuildingHub slot, open in a new tab, close. Escape there closes too, since the bar sits outside this section. */}
+    {/* The app's one top bar (the Mac window's title bar in the desktop app). */}
     <AppHeader>
       <div class="surface-head" onKeyDown={closeOnEscape}>
         <h2 title={props.surface ? `${props.surface.owner} · ${surfaceProblem(props.surface.health) ?? `updated ${ago(props.surface.updated_at)}`} · ${props.surface.lane ?? "no lane"} · ${props.surface.editspace} · revision ${props.surface.revision}` : undefined}>
           <bdi dir="auto">{props.surface?.title ?? props.id}</bdi></h2>
-        <Show when={props.surface?.requested_in}>{asked => <A class="surface-head-link" href={sessionHref(asked().session, asked().directory)} data-requested-in={asked().session}
-          title="The conversation this was asked for in">asked in <bdi dir="auto">{asked().title ?? "conversation"}</bdi></A>}</Show>
-        <Show when={props.surface}>{surface => <SurfaceOwner surface={surface()} />}</Show>
+        <span class="surface-head-rev">rev {doneState.onScreen() || props.surface?.revision || ""}</span>
+        <Show when={props.surface}>{surface => <SurfaceOwner surface={surface()} onMessage={() => window.dispatchEvent(new CustomEvent("surface-message-author", { detail: props.id }))} />}</Show>
         <DeliverableDoneControls state={doneState} />
-        <SurfaceFind frame={src} />
+        <SurfaceHeadMore surface={props.surface} src={src} done={doneState} />
         <span class="surface-head-actions">
-          {/* Reserved for "BuildingHub version" (Laptop2649): shown only from a deployed receipt, which no API offers yet. */}
-          <BuildingHubSlot surface={props.surface} />
-          <Show when={src() && props.surface && !surfaceUnavailable(props.surface)}>
-            <a class="surface-head-button" href={src()} target="_blank" rel="noopener noreferrer" title="Open in new tab" aria-label="Open in new tab"><Glyph name="link-external" /></a>
-          </Show>
           <button class="surface-head-button" aria-label="Close and return to chat" title="Close (Esc)" onClick={props.onClose}>×</button>
         </span>
       </div>
@@ -214,7 +220,7 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
             return <div class="surface-stage" ref={stage}>
               <iframe ref={setFrame} class="desk-surface-frame" title={surface().title} src={src()} referrerpolicy="no-referrer" onLoad={() => void doneState.loaded(() => props.onLoaded?.() ?? Promise.resolve())}
                 sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" />
-              <SurfaceComments host={esSurfaceHost(props.id)} revision={onScreen()} frame={frame} stage={() => stage} />
+              <SurfaceComments host={esSurfaceHost(props.id)} surface={surface()} revision={onScreen()} frame={frame} stage={() => stage} />
             </div>
           }}</Show>
         </Show>

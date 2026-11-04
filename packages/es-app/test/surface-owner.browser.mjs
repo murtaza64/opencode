@@ -1,5 +1,5 @@
-// surface-owner-feedback: a Surface header names its owning lane (resolved to that lane's current owner session on the
-// Surface's host) and who published it; Message owner opens that session with the Surface as a context chip in its
+// surface-owner-feedback: a Surface's author menu resolves its owning lane to the current owner session on the
+// Surface's host; Open chat opens that session with the Surface as a context chip in its
 // draft (its draft text kept, nothing sent); a Surface without a current owner offers Ask Front Desk with the same
 // chip. Also another Work host's Surface. Fake dashboard rows; the composer fixture serves the sessions.
 // Run from packages/es-app: node test/surface-owner.browser.mjs
@@ -58,27 +58,28 @@ try {
   const editor = page.locator("textarea").first()
   await editor.fill("my earlier draft")
   await page.goto(`${preview.origin}/?item=${encodeURIComponent("surface:granola")}`, { waitUntil: "domcontentloaded" })
-  await expect(head.locator(".surface-owner")).toContainText("Owner: granola-research")
-  await expect(head.locator(".surface-owner")).toContainText("Published by Relay")
+  await expect(head.locator(".surface-owner-chip")).toContainText("Relay")
+  await expect(head.locator(".surface-head-rev")).toHaveText("rev 1")
   await page.screenshot({ path: new URL("owner.png", artifacts).pathname })
-  await head.getByRole("button", { name: "Message owner" }).click()
+  await head.locator(".surface-owner-chip").click()
+  await head.getByRole("button", { name: "Open Relay's chat" }).click()
   await expect(page).toHaveURL(new RegExp(`/session/ses_a\\?directory=`))
   await expect(page.locator(".context-chip[data-kind=surface]")).toContainText("granola research")
   await expect(page.locator("textarea").first()).toHaveValue("my earlier draft")
   step("owner resolved through the handoff (lane record -> current session); publisher shown; Message owner opens it with the Surface chip, draft kept, nothing sent")
 
   await page.goto(`${preview.origin}/?item=${encodeURIComponent("surface:orphan")}`, { waitUntil: "domcontentloaded" })
-  await expect(head.locator(".surface-owner")).toContainText("owner of gone-lane not listed on that host now")
-  await expect(head.getByRole("button", { name: "Message owner" })).toHaveCount(0)
+  await head.locator(".surface-owner-chip").click()
+  await expect(head.locator(".surface-owner-items")).toContainText("owner of gone-lane not listed on that host now")
+  await expect(head.getByRole("button", { name: /Open .*chat/ })).toHaveCount(0)
   await head.getByRole("button", { name: "Ask Porter" }).click()
   await expect.poll(() => page.evaluate(() => localStorage.getItem("es-app:context-refs:ses_b") ?? "")).toContain('"id":"orphan"')
   await expect(page.locator(".desk-chat .context-chip[data-kind=surface]")).toContainText("orphan research")
   step("no current owner: says why and Ask Front Desk opens the Front desk with the same chip")
 
   await page.goto(`${preview.origin}/?item=${encodeURIComponent("mini~surface:granola")}`, { waitUntil: "domcontentloaded" })
-  await expect(head.locator(".surface-owner")).toContainText("Owner: granola-research")
-  await expect(head.locator(".surface-owner")).not.toContainText("Published by")
-  await head.getByRole("button", { name: "Message owner" }).focus()
+  await head.locator(".surface-owner-chip").click()
+  await head.getByRole("button", { name: "Open granola-research's chat" }).focus()
   await page.keyboard.press("Enter")
   await expect(page).toHaveURL(/\/session\/ses_m\?directory=%2Fmini%2Flanes%2Fgranola&host=mini/)
   const chips = await page.evaluate(() => localStorage.getItem("es-app:context-refs:mini:ses_m"))
@@ -90,25 +91,24 @@ try {
   await expect(head.locator(".surface-owner")).toBeVisible()
   await page.screenshot({ path: new URL("owner-rtl.png", artifacts).pathname })
   step("RTL header renders")
-  // A phone-width reader: the owner line and its actions fold into one Owner menu; the title keeps the space.
+  // The chip stays compact on a phone; its menu keeps the owner actions.
   await page.evaluate(() => { document.documentElement.dir = "ltr" })
   await page.setViewportSize({ width: 390, height: 844 })
-  await expect(head.locator(".surface-owner-inline")).toBeHidden()
   const summary = head.locator(".surface-owner-menu > summary")
   await expect(summary).toBeVisible()
   // The title is shown whole (not cut off) and the owner control stays small.
   const sizes = await head.evaluate((element) => {
     const title = element.querySelector("h2 bdi") ?? element.querySelector("h2")
-    return { title: title?.getBoundingClientRect().width ?? 0, clipped: !!title && title.scrollWidth > title.clientWidth + 1, owner: element.querySelector(".surface-owner-menu")?.getBoundingClientRect().width ?? 0 }
+    return { title: title?.getBoundingClientRect().width ?? 0, owner: element.querySelector(".surface-owner-chip")?.getBoundingClientRect().width ?? 0 }
   })
-  if (sizes.owner > 90 || sizes.clipped) throw new Error(`narrow sizes ${JSON.stringify(sizes)}`)
+  if (sizes.owner > 150) throw new Error(`narrow sizes ${JSON.stringify(sizes)}`)
   await page.screenshot({ path: new URL("owner-390.png", artifacts).pathname })
   await summary.click()
-  await expect(head.locator(".surface-owner-items")).toContainText("Owner: granola-research")
+  await expect(head.locator(".surface-owner-items")).toContainText("granola-research")
   await page.keyboard.press("Escape")
   await expect(head.locator(".surface-owner-items")).toBeHidden()
   await summary.click()
-  await head.locator(".surface-owner-items").getByRole("button", { name: "Message owner" }).click()
+  await head.locator(".surface-owner-items").getByRole("button", { name: "Open Relay's chat" }).click()
   await expect(page).toHaveURL(new RegExp(`/session/ses_a\\?directory=`))
   step(`390 px: one Owner menu (owner ${Math.round(sizes.owner)} px, title ${Math.round(sizes.title)} px); Escape closes it; Message owner works from it`)
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`)

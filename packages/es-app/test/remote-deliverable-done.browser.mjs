@@ -105,7 +105,9 @@ try {
 
   await miniRow.click()
   await expect(page).toHaveURL(`${preview.origin}/?item=${encodeURIComponent("mini~surface:report")}`)
-  await expect(reader.locator(".work-remote-host")).toContainText("Mac Mini")
+  await reader.locator(".surface-owner-chip").click()
+  await expect(reader.locator(".surface-owner-meta").first()).toContainText("Mac Mini")
+  await reader.locator(".surface-owner-chip").click()
   // Nothing on screen yet (the frame address failed): nothing is marked.
   await expect(page.locator(".work-remote-surface [role=alert]")).toContainText("Cannot open this surface")
   await page.waitForTimeout(1_000)
@@ -114,7 +116,7 @@ try {
   await page.locator(".work-remote-surface").getByRole("button", { name: "Try again" }).click()
   await expect(page.locator(".work-remote-surface iframe")).toBeAttached()
   step("a failed Mini frame marks nothing")
-  await expect(reader.locator(".surface-done-state")).toHaveText(/^Seen · /)
+  await expect(reader.locator(".surface-done")).toHaveText("✓ Seen")
   await expect(miniRow).toHaveCount(0)
   await expect(localRow).toBeVisible()
   if (!(await seenOn(mini)) || (await seenOn(local))) throw new Error(`seen: mini ${await seenOn(mini)}, local ${await seenOn(local)}`)
@@ -124,7 +126,7 @@ try {
   step("showing the Mini's frame marks only the Mini's store (operator session set up through the Mini) and leaves this host's row")
 
   await page.reload({ waitUntil: "domcontentloaded" })
-  await expect(reader.locator(".surface-done-state")).toHaveText(/^Seen · /, { timeout: 60_000 })
+  await expect(reader.locator(".surface-done")).toHaveText("✓ Seen", { timeout: 60_000 })
   await expect(localRow).toBeVisible({ timeout: 60_000 })
   await expect(miniRow).toHaveCount(0)
   step("the Mini's seen holds across a reload")
@@ -150,7 +152,7 @@ try {
   if (errors.length) throw new Error(`page errors: ${errors.join("; ")}`)
 } catch (error) {
   process.exitCode = 1
-  results.push(`FAIL ${String(error).split("\n")[0]} writes=${JSON.stringify(writes)}`)
+  results.push(`FAIL ${String(error)} writes=${JSON.stringify(writes)}`)
 } finally {
   console.log(results.join("\n"))
   await browser.close()

@@ -58,6 +58,8 @@
 .sc-toolbar button { flex: none; inline-size: 34px; block-size: 34px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 9px; background: none; color: var(--subtext1); cursor: pointer; font-size: 23px; }
 .sc-toolbar button:hover, .sc-toolbar button[aria-expanded=true] { background: var(--surface1); color: var(--text); }
 .sc-toolbar button[aria-pressed=true]:not([aria-label="Hide comments (H)"]) { background: var(--peach); color: var(--crust, #000); }
+.sc-toolbar button.sc-tool-say { color: var(--yellow); }
+.sc-toolbar button.sc-tool-say:hover, .sc-toolbar button.sc-tool-say[aria-pressed=true] { background: var(--surface1); color: var(--yellow); }
 .sc-toolbar button[aria-label="Hide comments (H)"][aria-pressed=false] { opacity: .5; }
 .sc-toolbar button:disabled { opacity: .45; cursor: not-allowed; }
 .sc-toolbar svg:not(.glyph) { inline-size: 18px; block-size: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -83,6 +85,11 @@
 .sc-tray-row { display: block; inline-size: 100%; border: 0; border-radius: 9px; padding: 7px 8px; text-align: start; background: none; color: var(--text); font: inherit; cursor: pointer; overflow-wrap: anywhere; }
 .sc-tray-row:hover { background: var(--surface0); }
 .sc-empty { margin: 12px; color: var(--subtext0); }
+.sc-say { position: absolute; left: 50%; bottom: 69px; transform: translateX(-50%); z-index: 6; display: grid; gap: 10px; inline-size: min(380px, calc(100% - 24px)); padding: 12px; box-sizing: border-box; border: 1px solid var(--surface1); border-radius: 14px; background: var(--base); color: var(--text); box-shadow: 0 20px 50px rgb(0 0 0 / 35%); }
+.sc-say-to { display: flex; flex-wrap: wrap; gap: 4px; font-size: 12px; color: var(--subtext0); }
+.sc-say-to a { margin-inline-start: auto; }
+.sc-say .sc-compose-row .sc-dim-text { white-space: normal; }
+.sc-say a { color: var(--blue); }
 @media (prefers-reduced-motion: reduce) {
   .sc-veil { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgb(17 20 24 / 32%); }
   .sc-card { animation: none; } .sc-peek, .sc-toolbar, .sc-fly { transition: none; }
@@ -93,6 +100,7 @@
   .sc-toolbar .sc-count { inline-size: 42px; }
   .sc-toolbar i { margin: 0 2px; }
   .sc-tray { bottom: 60px; }
+  .sc-say { bottom: 60px; }
   .sc-tray-filters { flex-wrap: wrap; }
   .sc-peek { inline-size: 32px; block-size: 32px; }
   .sc-card { inline-size: min(360px, calc(100% - 16px)); }

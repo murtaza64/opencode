@@ -27,7 +27,9 @@
 .surface-head-button { display: inline-grid; place-items: center; inline-size: 24px; block-size: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--subtext0); font-size: 16px; line-height: 1; }
 .surface-head-button:hover { background: var(--surface0); color: var(--text); }
 /* Done for the revision on screen: a quiet text control, then "Done · time" with Undo once saved. */
-.surface-head-done { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--subtext0); -webkit-app-region: no-drag; }
+.surface-head-done { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-inline-start: auto; font-size: 11px; color: var(--subtext0); -webkit-app-region: no-drag; }
+.surface-head-rev { flex: none; color: var(--overlay1); font-size: 11px; white-space: nowrap; }
+.surface-head-done .surface-done { border: 0; color: var(--green); }
 .surface-head-text { padding: 2px 6px; border: 1px solid var(--surface1); border-radius: 4px; background: transparent; color: var(--text); font-size: 11px; line-height: 1.4; }
 .surface-head-text:hover:not(:disabled) { background: var(--surface0); }
 .surface-head-text:disabled { opacity: 0.6; }
@@ -52,18 +54,25 @@
 .desk-deliverable-preview { font-size: 12px; color: var(--subtext0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desk-deliverables-earlier > summary { cursor: pointer; padding: 4px 10px; font-size: 12px; color: var(--subtext1); }
 /* Who owns the Surface and a way to them, beside the title. */
-.surface-owner { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 6px; min-inline-size: 0; -webkit-app-region: no-drag; }
-.surface-owner-inline { display: inline-flex; align-items: center; gap: 6px; min-inline-size: 0; }
-.surface-owner-menu { display: none; position: relative; }
+.surface-owner { flex: 0 1 auto; display: inline-flex; align-items: center; min-inline-size: 0; -webkit-app-region: no-drag; }
+.surface-owner-menu { position: relative; min-inline-size: 0; }
 .surface-owner-menu > summary { list-style: none; cursor: pointer; white-space: nowrap; }
 .surface-owner-menu > summary::-webkit-details-marker { display: none; }
-.surface-owner-items { position: absolute; inset-inline-end: 0; inset-block-start: calc(100% + 4px); z-index: 20; display: grid; gap: 6px; padding: 8px;
-  min-inline-size: 200px; max-inline-size: min(80vw, 320px); background: var(--mantle); border: 1px solid var(--surface1); border-radius: 6px; }
-.surface-owner-items > .surface-head-link { white-space: normal; overflow: visible; }
-@media (max-width: 600px) {
-  .surface-owner-inline { display: none; }
-  .surface-owner-menu { display: inline-block; }
-}
+.surface-owner-chip { display: inline-flex; align-items: center; gap: 5px; max-inline-size: 140px; padding: 2px 7px 2px 2px; border-radius: 999px; background: var(--surface0); font-size: 12px; }
+.surface-owner-chip:hover { background: var(--surface1); }
+.surface-owner-chip bdi { overflow: hidden; text-overflow: ellipsis; }
+.surface-owner-avatar { flex: none; display: grid; place-items: center; inline-size: 21px; block-size: 21px; overflow: hidden; border-radius: 7px; background: var(--peach); color: var(--crust); font-weight: 700; }
+.surface-owner-avatar img { inline-size: 100%; block-size: 100%; object-fit: cover; }
+.surface-owner-items, .surface-more-items { position: absolute; inset-inline-start: 0; inset-block-start: calc(100% + 4px); z-index: 20; display: grid; gap: 2px; padding: 6px; min-inline-size: 230px;
+  max-inline-size: min(80vw, 320px); background: var(--mantle); border: 1px solid var(--surface1); border-radius: 8px; box-shadow: 0 12px 30px rgb(0 0 0 / 40%); }
+.surface-owner-items :is(button, a), .surface-more-items :is(button, a) { display: block; inline-size: 100%; padding: 7px 9px; border: 0; border-radius: 5px; background: none; color: var(--text); text-align: start; font: inherit; font-size: 12px; text-decoration: none; white-space: normal; }
+.surface-owner-items :is(button, a):hover, .surface-more-items :is(button, a):hover { background: var(--surface0); }
+.surface-owner-meta { display: block; padding: 5px 9px; font-size: 11px; color: var(--subtext0); white-space: normal; }
+.surface-more { position: relative; flex: none; -webkit-app-region: no-drag; }
+.surface-more > summary { list-style: none; cursor: pointer; }
+.surface-more > summary::-webkit-details-marker { display: none; }
+.surface-more-items { inset-inline-start: auto; inset-inline-end: 0; }
+.surface-more-items .surface-head-slot:not([hidden]) { display: block; }
 /* Decisions about the Surface on screen (artifact-try-decision-unification): a one-line banner under the reader's bar that
  * expands into a band scrolling on its own, so the frame keeps most of the pane; the card's own "Open <artifact>" button
  * would only reopen this view. Selectors outrank .attention-home's padding and button chrome. */

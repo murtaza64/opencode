@@ -3,7 +3,7 @@
 Framework-free comment bridge for framed Surfaces: the in-frame anchor and privacy rules, pick mode, and the `postMessage` protocol. No store, auth, identity or comment bodies.
 
 - Single writer: opencode/ux-feel. Consumers import it and do not copy it.
-- Version: `1.3.0` (`VERSION` in `src/index.js` = `package.json`). Bump on any change to the protocol or the anchor rules, and record it below.
+- Version: `1.3.1` (`VERSION` in `src/index.js` = `package.json`). Bump on any change to the protocol or the anchor rules, and record it below.
 
 ## Files
 
@@ -60,7 +60,7 @@ Frame → host:
 | `picked` | `anchor`, `rect` (frame-viewport px) |
 | `pick-end` | none (Esc, or a pick under `off`) |
 | `rects` | `items: [{ key, rect \| null, state: shown \| changed \| hidden \| missing }]` |
-| `key` | `key: "c" \| "Escape"`, pressed in the page outside a text field |
+| `key` | `key: "c" \| "m" \| "Escape"`, pressed in the page outside a text field |
 
 ## Marks
 
@@ -85,6 +85,8 @@ Frame → host:
   - `test/surface-comments.browser.mjs`: full pick, track and reveal flow.
 
 ## Changelog
+
+- 1.3.1: the frame also forwards `m` (tell the author) as a `key` message, like `c`. Additive; other keys, anchors and privacy unchanged.
 
 - 1.3.0: additive `./marks` (MCR mark record, validation, description, route scoping, SVG painting) and `./geometry` (es-app card placement and anchor hole), both moved unchanged. Frame script, protocol and anchors unchanged: `frame.js` is byte-identical to 1.2.0.
 - 1.2.0: `textOf(el, { max })`: optional cap, where `Infinity` or `0` means the full text. The default (4000), the hash and the protocol are unchanged.
