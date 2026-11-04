@@ -2209,3 +2209,8 @@ abbr.utc-time { text-decoration: underline dotted; text-underline-offset: 2px; c
 [data-component="markdown"] a.eref { text-decoration: none; color: var(--text); }
 [data-component="markdown"] a.eref.m { color: var(--blue); }
 .eref .emk, .eref.m .av { border-radius: 50% !important; }
+/* Quiet pending input (pending-steer-actions-hover-only): the cue and actions appear on hover, focus inside the row, a tap,
+ * or while editing; laid out all along (no height change) and still focusable. The tick is never hidden. */
+.outgoing-item[data-quiet] .receipt-quiet { opacity: 0; transition: opacity 120ms; }
+.outgoing-item[data-quiet]:is(:hover, :focus-within, [data-revealed]) .receipt-quiet { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .outgoing-item[data-quiet] .receipt-quiet { transition: none; } }

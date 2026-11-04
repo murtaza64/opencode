@@ -151,8 +151,14 @@ const InputBubble = (props: { composer: Composer; connected: boolean; id: string
     return minutes < 1 ? "" : minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`
   }
   const deliverable = () => receipt() && delivery() === "steer" && state.capabilities?.sessionInput?.interrupt
+  // A pending input is quiet: its cue and Steer/Interrupt/Edit/Cancel show on hover, keyboard focus inside the row or a
+  // tap (touch), and while it is being edited; the tick always shows. They stay laid out (opacity only), so the row never
+  // changes height, and stay focusable and in the accessibility tree. Unconfirmed inputs keep Check/Retry visible.
+  const [revealed, setRevealed] = createSignal(false)
   return (
     <li class="pending-msg outgoing-item outgoing-msg" data-request-id={props.id} data-delivery={delivery()}
+      data-quiet={receipt() ? "" : undefined} data-revealed={revealed() || editing() ? "" : undefined}
+      onClick={(event) => { if (!(event.target as Element).closest("button")) setRevealed(!revealed()) }}
       data-status={status()} data-recovery-id={recovery() ? props.id : undefined}
       classList={{ "input-admission": !!admission(), "input-recovery": !!recovery() }}
       aria-label={admission() ? "Input admission" : recovery() ? "Set-aside input" : undefined}>
@@ -160,9 +166,9 @@ const InputBubble = (props: { composer: Composer; connected: boolean; id: string
       <Show when={text() || !images()?.length}><div class="pending-bubble receipt-text" dir="auto">{text()}</div></Show>
       <div class="receipt-line">
         <div class="pending-hint outgoing-cue receipt-row" role="status" title={title()}>
-          <span>{cue()}</span>
+          <span class="receipt-quiet">{cue()}</span>
           <Show when={deliverable()}>
-            <button class="outgoing-action outgoing-deliver" disabled={!props.connected || !!state.delivering}
+            <button class="outgoing-action outgoing-deliver receipt-quiet" disabled={!props.connected || !!state.delivering}
               aria-label={`${props.busy ? "Interrupt and steer now" : "Steer now"}: ${text()}`}
               title={props.busy
                 ? `Stops ${props.running ? `${props.running.name} (its output so far is kept)` : "the current reply"} and starts the next turn with this steer. Nothing is rerun.`
@@ -173,11 +179,11 @@ const InputBubble = (props: { composer: Composer; connected: boolean; id: string
           </Show>
           <Show when={receipt()}>
             <Show when={state.capabilities?.sessionInput?.update}>
-              <button class="outgoing-action" disabled={!props.connected || !!props.composer.editingInput()}
+              <button class="outgoing-action receipt-quiet" disabled={!props.connected || !!props.composer.editingInput()}
                 aria-label={`Edit ${delivery()} input: ${text()}`} aria-pressed={editing()}
                 onClick={() => props.composer.editInput(props.id)}>{editing() ? "Editing" : "Edit"}</button>
             </Show>
-            <button class="outgoing-action receipt-cancel" disabled={!props.connected}
+            <button class="outgoing-action receipt-cancel receipt-quiet" disabled={!props.connected}
               aria-label={`Cancel ${delivery()} input: ${text()}`} onClick={() => props.composer.cancelInput(props.id)}>Cancel</button>
           </Show>
           {/* One action at a time: Check while the outcome is unknown, Retry only once Core said it has no such input. */}
