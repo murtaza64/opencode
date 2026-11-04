@@ -235,7 +235,9 @@ const make = Effect.gen(function* () {
           modelID: selected.id,
           ...(selected.variant && selected.variant !== "default" ? { variant: selected.variant } : {}),
         }
-      : (user?.model ?? (yield* provider.defaultModel().pipe(Effect.orDie)))
+      : // Same order as a prompt without a model: the agent's configured model before the last or global default.
+        // The global default is the first configured provider's top model, which shifts whenever a provider is added.
+        (agent.model ?? user?.model ?? (yield* provider.defaultModel().pipe(Effect.orDie)))
     const images = payload.images?.length
       ? yield* provider.getModel(model.providerID, model.modelID).pipe(
           Effect.mapError(() => new Invalid({ message: "Selected image model is unavailable" })),
