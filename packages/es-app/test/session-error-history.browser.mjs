@@ -8,7 +8,8 @@ const browser = await chromium.launch({ channel: "chrome", headless: true })
 const page = await browser.newPage()
 const writes = []
 page.on("request", (request) => {
-  if (!["GET", "HEAD", "OPTIONS"].includes(request.method())) writes.push(request.method())
+  // The page's own timing beacon (POST /__es/perf, telemetry only) is not a session write.
+  if (!["GET", "HEAD", "OPTIONS"].includes(request.method()) && new URL(request.url()).pathname !== "/__es/perf") writes.push(`${request.method()} ${new URL(request.url()).pathname}`)
 })
 preview.fixture.messages[1].info.error = {
   name: "APIError", data: { message: "Usage limit has been reached", statusCode: 429, isRetryable: false },
