@@ -77,7 +77,8 @@ try {
   // Surfaces are served with CSP frame-src 'none', so a nested frame normally never loads; count it only if it did.
   const nested = await frame.evaluate(() => !!document.querySelector("iframe")?.contentDocument?.body?.textContent?.includes("alpha")).catch(() => false)
   const total = nested ? 3 : 2
-  const opener = page.getByRole("link", { name: "Open in new tab" })
+  // The reader top bar keeps Open in new tab inside the More menu; any host control works as the focus target.
+  const opener = page.getByRole("button", { name: "More" })
   await opener.focus()
   step("frame ready")
   await page.keyboard.press("Meta+f")
