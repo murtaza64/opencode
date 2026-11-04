@@ -38,3 +38,9 @@ test("@mentions resolve only to known lanes or registered personas; unknown name
   expect(ferry).toMatchObject({ title: "Ferry", avatar: { url: "https://example.com/ferry.png", initials: "F" } })
   expect(ferry.rows.map(([name]) => name)).not.toContain("Mentioned")
 })
+
+test("a query-only link is root-relative, and item=<host>~surface:<id> is a Surface on that host (DD #1222)", () => {
+  expect(parseEntityHref("?item=mini~surface%3Adiff-stream-catchup-20261103", stores.here)).toEqual({ kind: "surface", id: "diff-stream-catchup-20261103", host: "mini" })
+  expect(parseEntityHref("/?item=surface:decision-briefs", stores.here)).toEqual({ kind: "surface", id: "decision-briefs", host: stores.here })
+  expect(parseEntityHref("?item=attention:opencode:dec_1", stores.here)).toEqual({ kind: "decision", id: "dec_1", editspace: "opencode", host: stores.here })
+})

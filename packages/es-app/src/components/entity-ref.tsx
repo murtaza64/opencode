@@ -1,7 +1,7 @@
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { Portal } from "solid-js/web"
 import { useNavigate } from "@solidjs/router"
-import { entityView, mentionRef, parseEntityHref, type EntityRef, type EntityStores, type EntityView } from "../entity-ref"
+import { entityView, mentionRef, parseEntityHref, rootRelative, type EntityRef, type EntityStores, type EntityView } from "../entity-ref"
 import { useDeskQueue } from "../desk-queue"
 import { personas } from "../desk-identity"
 import { sessionHref, useDashboard } from "../state"
@@ -103,11 +103,14 @@ export const EntityRefs = (props: { container: () => HTMLElement | undefined }) 
     for (const anchor of root.querySelectorAll<HTMLAnchorElement>('[data-component="markdown"] a[href]:not([data-eref])')) {
       if (anchor.closest(SKIP)) continue
       anchor.dataset.eref = "seen"
-      const ref = parseEntityHref(anchor.getAttribute("href") ?? "", current.here)
+      // "?item=…" means the app root; left as is, it would resolve against the session page it sits on.
+      const raw = anchor.getAttribute("href") ?? ""
+      if (raw.startsWith("?")) anchor.setAttribute("href", rootRelative(raw))
+      const ref = parseEntityHref(raw, current.here)
       if (!ref) continue
       const view = entityView({ ...ref, label: anchor.textContent?.trim() || undefined }, current)
       const token = tokenElement(view, "a")
-      token.setAttribute("href", anchor.getAttribute("href")!)
+      token.setAttribute("href", rootRelative(raw))
       token.dataset.eref = "token"
       anchor.replaceWith(token)
     }

@@ -60,9 +60,13 @@ export type EntityView = {
 
 const initials = (name: string) => name.split(/[\s_-]+/).filter(Boolean).slice(0, 2).map((word) => word[0]!.toUpperCase()).join("") || "?"
 
-/** A link to a Surface or decision, as written in text (`/?surface=`, `/__es/surface/`, `/?item=attention:…`). */
+/** A query-only link ("?item=…") means the app root, not the page it appears on. */
+export const rootRelative = (href: string) => href.startsWith("?") ? `/${href}` : href
+
+/** A link to a Surface or decision, as written in text (`/?surface=`, `/__es/surface/`, `/?item=[<host>~]attention:…`,
+ * `/?item=[<host>~]surface:<id>`, or the same with no leading slash). */
 export const parseEntityHref = (href: string, here: string): EntityRef | undefined => {
-  const url = (() => { try { return new URL(href, `https://${here}`) } catch { return undefined } })()
+  const url = (() => { try { return new URL(rootRelative(href), `https://${here}`) } catch { return undefined } })()
   if (!url) return undefined
   // A Work host's route (/hosts/<id>/...) names that host.
   const routed = /^\/hosts\/([\w-]+)\//.exec(url.pathname)?.[1]
@@ -72,6 +76,8 @@ export const parseEntityHref = (href: string, here: string): EntityRef | undefin
   const surface = url.searchParams.get("surface") ?? /\/__es\/surface\/([a-z0-9][a-z0-9-]{0,39})(?:\/|$)/.exec(url.pathname)?.[1]
   if (surface && /^[a-z0-9][a-z0-9-]{0,39}$/.test(surface)) return { kind: "surface", id: surface, host, ...(revision ? { revision } : {}), ...(section ? { section } : {}) }
   const item = url.searchParams.get("item")
+  const hosted = item && /^(?:([\w-]+)~)?surface:([a-z0-9][a-z0-9-]{0,39})$/.exec(item)
+  if (hosted) return { kind: "surface", id: hosted[2]!, host: hosted[1] ?? host, ...(revision ? { revision } : {}), ...(section ? { section } : {}) }
   const decision = item && /^(?:([\w-]+)~)?attention:([^:]+):(.+)$/.exec(item)
   if (decision) return { kind: "decision", id: decision[3]!, editspace: decision[2]!, host: decision[1] ?? host }
   return undefined
@@ -108,7 +114,8 @@ export const entityView = (ref: EntityRef, stores: EntityStores): EntityView => 
     const state: EntityState = elsewhere ? "elsewhere" : !surface ? "missing" : ref.revision !== undefined && surface.revision > ref.revision ? "stale" : "ok"
     const words = state === "missing" ? "not found on this host" : state === "stale" ? `changed since mentioned (was rev ${ref.revision})` : state === "elsewhere" ? `on ${hostName}` : ""
     return { ref, title, state, host: hostName, section: ref.section,
-      href: elsewhere ? undefined : `/?surface=${encodeURIComponent(ref.id)}`,
+      // Another Work host's Surface opens in the desk reader through that host's key.
+      href: elsewhere ? `/?item=${encodeURIComponent(`${ref.host}~surface:${ref.id}`)}` : `/?surface=${encodeURIComponent(ref.id)}`,
       label: [`Surface: ${title}`, ref.section && `section ${ref.section}`, surface && `revision ${surface.revision}`, words].filter(Boolean).join(", "),
       rows: surface ? [["Revision", `rev ${surface.revision} · updated ${shortDateTime(surface.updated_at)}`], ["Owner", surface.owner], ["Host", "this host"],
         ...(ref.section ? [["Section", ref.section] as [string, string]] : []), ...(state === "stale" ? [["Mentioned", `rev ${ref.revision}`] as [string, string]] : [])]

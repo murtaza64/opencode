@@ -26,7 +26,7 @@ import { DESK } from "../desk-identity"
 import { mentionQuery, sessionLane, tokenBefore } from "../session-mention"
 import { RelativeLines } from "../components/relative-lines"
 import SessionInfo from "../components/session-info"
-import { linkUrl, sessionHref, useDashboard } from "../state"
+import { ago, linkUrl, sessionHref, useDashboard } from "../state"
 import { companionDocked, rightOpen } from "../ui"
 import { createVim } from "../vim"
 import { contextLimit, contextUsage, latestCompletedTurn } from "../context-usage"
@@ -48,6 +48,7 @@ import { createSelfHandoff, SELF_HANDOFF_VERSION } from "../self-handoff"
 import { createMailReceiptRecords, MailRecords } from "../mail-receipts"
 import { DeliveredTick } from "../components/message-tick"
 import { chatDot, modelThinking } from "../chat-activity"
+import { clockTime, exactTime } from "../local-time"
 import { lastAudible, quietTurns } from "../quiet-turns"
 import { AppHeader } from "../components/native-header"
 import { SessionTitle } from "../components/session-title"
@@ -883,7 +884,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   // agent, model, wall-clock (user prompt -> completed), and an interrupted
   // marker for aborted turns. In-flight turns are omitted until they complete
   // or get aborted.
-  type TurnSummary = { agent?: string; providerID?: string; modelID?: string; duration?: number; interrupted: boolean }
+  // Times are kept apart: when the turn's prompt arrived (started), when this final reply began (replied) and when the
+  // turn completed or was interrupted (ended). A time Core did not record is omitted, never substituted.
+  type TurnSummary = { agent?: string; providerID?: string; modelID?: string; duration?: number; interrupted: boolean; started?: number; replied?: number; ended?: number }
   // Parent prompt IDs of finished agent turns (see completedTurns). Controls the
   // footer and which tool calls may coalesce, so live turns stay fully visible.
   const turnsDone = createMemo(() => {
@@ -908,6 +911,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
           modelID: last.modelID,
           duration: turnStart !== undefined && end ? end - turnStart : undefined,
           interrupted: last.error?.name === "MessageAbortedError",
+          started: turnStart,
+          replied: typeof last.time?.created === "number" ? last.time.created : undefined,
+          ended: typeof end === "number" ? end : undefined,
         })
       }
       last = undefined
@@ -2198,12 +2204,21 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                   </Show>
                   <Show when={turnSummaries().get(m.id)}>
                     {(s) => (
+                      // One footer per turn (the reply's own session-ui meta line is hidden): when it ended first, in
+                      // the viewer's time, then agent, model and duration. Hover/aria give each recorded time exactly.
                       <div class="turn-summary" classList={{ interrupted: s().interrupted }}>
-                        <span class="marker">▣</span> <span class="agent">{titlecase(s().agent)}</span>
+                        <span class="marker">▣</span>{" "}
+                        <Show when={s().ended ?? s().replied}>{(at) => {
+                          const exact = () => [s().started && `Turn started ${exactTime(s().started)}`, s().replied && `reply started ${exactTime(s().replied)}`,
+                            s().ended && `${s().interrupted ? "interrupted" : "completed"} ${exactTime(s().ended)}`].filter(Boolean).join("; ")
+                          return <><time class="turn-time" dateTime={new Date(at()).toISOString()} title={exact()} aria-label={exact()}>
+                            {s().ended ? (s().interrupted ? "interrupted " : "") : "replied "}{clockTime(at())} · {ago(at())}</time>{" · "}</>
+                        }}</Show>
+                        <span class="agent">{titlecase(s().agent)}</span>
                         {" · "}
                         {modelName(s().providerID, s().modelID)}
                         <Show when={s().duration}>{(d) => <> · {fmtDuration(d())}</>}</Show>
-                        <Show when={s().interrupted}> · interrupted</Show>
+                        <Show when={s().interrupted && !s().ended}> · interrupted</Show>
                       </div>
                     )}
                   </Show>

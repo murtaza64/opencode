@@ -2214,3 +2214,7 @@ abbr.utc-time { text-decoration: underline dotted; text-underline-offset: 2px; c
 .outgoing-item[data-quiet] .receipt-quiet { opacity: 0; transition: opacity 120ms; }
 .outgoing-item[data-quiet]:is(:hover, :focus-within, [data-revealed]) .receipt-quiet { opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .outgoing-item[data-quiet] .receipt-quiet { transition: none; } }
+
+/* One footer per agent turn: the reply's own meta line (session-ui) repeats agent/model/duration, so es-app hides it. */
+.session-page [data-slot="text-part-meta"] { display: none; }
+.turn-summary .turn-time { color: var(--subtext0); }

@@ -26,6 +26,7 @@ const text = [
   "The [old board](/?surface=old-board) is gone; [Visuals](/hosts/mini/__es/surface/visuals) lives on the Mini.",
   "Waiting on [the scope](/?item=attention:fixture:decision_1). @Ferry please look; @nobody is not an agent.",
   "Run `open /?surface=decision-briefs @Ferry` literally.",
+  "Catch-up is in [catchup](?item=mini~surface%3Adiff-stream-catchup-20261103).",
 ].join("\n\n")
 fixture.messages = [
   { info: { id: "msg_u", sessionID: "ses_a", role: "user", agent: "build", model: { providerID: "fixture", modelID: "test" }, time: { created: now - 60_000 } },
@@ -64,6 +65,10 @@ try {
   await expect(message).toContainText("@nobody is not an agent")
   await expect(message.locator("code .eref")).toHaveCount(0)
   await expect(message.locator("code").first()).toHaveText("open /?surface=decision-briefs @Ferry")
+  // A query-only link (no leading slash) to another host's Surface: a Surface token on that host, opening the desk reader.
+  const catchup = message.locator(".eref.s").filter({ hasText: "catchup" })
+  await expect(catchup.locator(".eh")).toHaveCount(1)
+  expect(await catchup.getAttribute("href")).toBe("/?item=mini~surface%3Adiff-stream-catchup-20261103")
   // Avatar at r4 size: 1.15em of the token text.
   const ratio = await ferry.evaluate((el) => el.querySelector(".av").getBoundingClientRect().width / parseFloat(getComputedStyle(el).fontSize))
   expect(ratio).toBeGreaterThan(1.05)
