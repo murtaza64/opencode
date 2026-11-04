@@ -1,5 +1,5 @@
 import { createContext, For, Match, Show, Switch, useContext, type Accessor } from "solid-js"
-import type { AttentionRecord } from "../attention"
+import { blockedReason, type AttentionRecord } from "../attention"
 import { weekdayTime } from "../local-time"
 import type { BriefAction, BriefV1 } from "../brief-v1"
 import "./brief-scenes.css"
@@ -117,19 +117,26 @@ const Secure = (props: { secure: NonNullable<BriefV1["secure"]>; part: Part }) =
 
 /** After an answer: delivery receipts only. A step is done when the ledger says so, never inferred from status or idleness. */
 const Lifecycle = (props: { record: AttentionRecord }) => {
+  // Steps only up to what the receipts show: before admission the next step names the current state, so nothing reads
+  // as presented that was not. Extra copies (delivery.copies: the same answer in other sessions) count on the Presented step.
   const steps = () => {
     const state = props.record.delivery_state
     const reached = ["admitted", "presented", "handled"].indexOf(state)
+    const copies = props.record.delivery?.copies?.length ?? 0
     const answered = { label: "You answered", state: "done", at: props.record.answer?.answered_at as number | string | undefined }
-    if (state === "blocked") return [answered, { label: "Delivery blocked", state: "bad" }]
+    if (state === "blocked") return [answered, { label: "Delivery blocked", state: "bad", note: props.record.delivery?.reason ? blockedReason(props.record.delivery.reason) : undefined }]
     if (state === "closed") return [answered, { label: "Not sent", state: "bad" }]
+    if (reached < 0) return [answered, { label: state === "queued" ? "Mail recorded · not yet in the agent's queue" : "Not delivered yet", state: "todo" }]
     return [answered,
-      { label: "In the agent's queue", state: reached >= 0 ? "done" : "todo" },
-      { label: "Presented to the agent", state: reached >= 1 ? "done" : "todo", at: props.record.delivery?.presented_at ?? undefined },
+      { label: "In the agent's queue", state: "done" },
+      { label: "Presented to the agent", state: reached >= 1 ? "done" : "todo", at: props.record.delivery?.presented_at ?? undefined, copies },
       { label: "Acknowledged", state: reached >= 2 ? "done" : "todo", at: props.record.delivery?.handled_at ?? undefined }]
   }
-  return <ol class="brief-figure brief-life" aria-label="After you answered">
-    <For each={steps()}>{step => <li class={`brief-life-step ${step.state}`}><i aria-hidden="true" /><span dir="auto">{step.label}</span><Show when={weekdayTime("at" in step ? step.at : undefined)}>{at => <small>{at()}</small>}</Show></li>}</For>
+  return <ol class="brief-figure brief-life" aria-label="After you answered" data-delivery={props.record.delivery_state}>
+    <For each={steps()}>{step => <li class={`brief-life-step ${step.state}`}><i aria-hidden="true" /><span dir="auto">{step.label}</span>
+      <Show when={"copies" in step && step.copies ? step.copies : undefined}>{count => <small class="brief-life-copies">+{count()} {count() === 1 ? "copy" : "copies"}</small>}</Show>
+      <Show when={weekdayTime("at" in step ? step.at : undefined)}>{at => <small>{at()}</small>}</Show>
+      <Show when={"note" in step && step.note}>{note => <small class="brief-life-note" dir="auto">{note()}</small>}</Show></li>}</For>
   </ol>
 }
 

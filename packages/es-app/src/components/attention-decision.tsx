@@ -20,7 +20,7 @@ import { dictationInsert } from "../composer"
 import { decisionRef } from "../context-mention"
 import { DESK } from "../desk-identity"
 import { useDeskQueue } from "../desk-queue"
-import { dateTime, exactTime, weekdayTime } from "../local-time"
+import { clockTime, dateTime, exactTime, weekdayTime } from "../local-time"
 import { optionParts, parseBriefV1, type BriefV1 } from "../brief-v1"
 import { BriefDescent } from "./brief-descent"
 import { BriefPlayback, useBriefPlayback } from "./brief-scenes"
@@ -389,6 +389,9 @@ const Delivery = (props: { record: AttentionRecord; attention: Attention; figure
  * `prepared` brief the producer's raw context moves behind a disclosure and each option becomes a card
  * saying what choosing it leads to. */
 export const AttentionDecision = (props: { record: AttentionRecord; attention: Attention; remote?: boolean; host?: string; onView?: (view: AttentionView) => void; brief?: JSX.Element; briefVisual?: JSX.Element; briefAfter?: JSX.Element; briefDetails?: JSX.Element; prepared?: BriefResult; sends?: Sends; copy?: BriefCopy; conversation?: JSX.Element; more?: JSX.Element; briefJob?: { job: string; revision: string } }) => {
+  // A copy names the agent it went to when the dashboard knows that session; the id stays in the tooltip.
+  const dashboard = useDashboard()
+  const copyName = (session: string) => dashboard.activity.session(session)?.title || session
   const settings = useBriefs()
   const briefV1 = () => settings.briefV1() && props.record.kind !== "review" ? parseBriefV1((props.record as { brief?: unknown }).brief) : undefined
   const [hovered, setHovered] = createSignal<string>()
@@ -482,7 +485,10 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
     <details class="home-details" open={!!props.copy?.quoteFailed && !!prepared() && !requestHasSteps(props.record)} onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>Details</summary>
       {review() ? undefined : props.briefDetails}
       <Show when={(prepared() || briefV1() || routingBrief(props.record)) && !requestHasSteps(props.record)}><section class="home-original"><p class="home-source home-request-from">Original request</p><RequestText record={props.record} host={props.remote ? props.host : undefined} /></section></Show>
-      <div class="home-source"><bdi dir="ltr">{props.record.id} · {props.record.gate_key} · revision {props.record.revision}</bdi></div><Show when={history()?.version === historyVersion(props.record) ? history() : undefined} fallback={<p>Loading history…</p>}>{item => <Show when={!item().error} fallback={<p>{item().error}</p>}><pre dir="ltr">{JSON.stringify(item().events, null, 2)}</pre></Show>}</Show></details>
+      <div class="home-source"><bdi dir="ltr">{props.record.id} · {props.record.gate_key} · revision {props.record.revision}</bdi></div>
+      {/* Under a v1 brief the lifecycle figure counts copies; each copy's receipts live here. */}
+      <Show when={briefV1() && props.record.delivery?.copies?.length ? props.record.delivery.copies : undefined}>{copies => <ul class="home-copies" aria-label="Copies"><For each={copies()}>{copy => <li title={copy.session}><bdi dir="auto">{copyName(copy.session)}</bdi> · {copy.handled_at ? `acknowledged ${clockTime(copy.handled_at)}` : copy.presented_at ? `presented ${clockTime(copy.presented_at)}` : copy.state}</li>}</For></ul>}</Show>
+      <Show when={history()?.version === historyVersion(props.record) ? history() : undefined} fallback={<p>Loading history…</p>}>{item => <Show when={!item().error} fallback={<p>{item().error}</p>}><pre dir="ltr">{JSON.stringify(item().events, null, 2)}</pre></Show>}</Show></details>
     </div>
   </article></BriefPlayback.Provider>
 }
