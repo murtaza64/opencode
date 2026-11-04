@@ -2,7 +2,7 @@
  * A fixed feedback bar opens pick mode or a finder tray; the non-modal card keeps the page interactive. */
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
 import { ago } from "../state"
-import { initialOf, MAX_BODY, mintCommentId, placement, placementLabel, receiptLabel, threads, type AnchorState, type CommentAnchor, type CommentHost, type SealedComment, type SurfaceComment } from "../surface-comments"
+import { initialOf, MAX_BODY, mintCommentId, placement, placementLabel, pointMark, pointOf, receiptLabel, threads, type AnchorState, type CommentAnchor, type CommentHost, type CommentPoint, type SealedComment, type SurfaceComment } from "../surface-comments"
 import { Glyph } from "./icons"
 import { DictationField } from "./dictation-field"
 import { useSurfaceOwner } from "./surface-owner"
@@ -13,10 +13,12 @@ import "./surface-comments.css"
 
 type Box = { x: number; y: number; w: number; h: number }
 type Outgoing = { sealed: SealedComment; state: "sending" | "failed"; error?: string }
-type Open = { key: string; anchor: CommentAnchor; parent?: string }
+type Open = { key: string; anchor: CommentAnchor; parent?: string; point?: CommentPoint }
+type Mode = "element" | "point"
 const NS = "es-comments"
 const DRAFT = "__draft"
 const POLL_MS = 30_000
+const MODE_KEY = "es-app:comment-mode"
 
 export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ownerHost?: { id: string; label: string }; revision: number; frame: () => HTMLIFrameElement | undefined; stage: () => HTMLElement | undefined }) => {
   const author = useSurfaceOwner(() => ({ ...props.surface, revision: props.revision }), props.ownerHost)
@@ -61,14 +63,24 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
   const markers = new Map<string, HTMLButtonElement>()
   let toolbarButton: HTMLButtonElement | undefined
   let searchInput: HTMLInputElement | undefined
-  // The es-surface-comments/1 host has no marks field or draw/undo operation.
+  // Drawing stays off until its own change (Loupe item 2); its slot keeps the toolbar from shifting when it arrives.
   const marksSupported = false
+  // A point comment needs the frame's point picks (surface-bridge 1.4.0) and a store that keeps marks.
+  const [features, setFeatures] = createSignal<string[]>([])
+  const [capabilities, setCapabilities] = createSignal<string[]>([])
+  const pointable = () => features().includes("point") && capabilities().includes("marks")
+  // Click = the last-used mode; Alt-click flips it for one comment. The fan-out picks and remembers a mode.
+  const [mode, setModeRaw] = createSignal<Mode>(localStorage.getItem(MODE_KEY) === "point" ? "point" : "element")
+  const setMode = (value: Mode) => { setModeRaw(value); localStorage.setItem(MODE_KEY, value) }
+  const [pickMode, setPickMode] = createSignal<Mode>("element")
+  const [fan, setFan] = createSignal(false)
 
   const load = async () => {
     const result = await props.host.read()
     if ("unavailable" in result) return setUnavailable(result.unavailable)
     setUnavailable()
     setComments(result.comments)
+    setCapabilities(result.capabilities ?? [])
   }
   onMount(() => {
     void load()
@@ -145,13 +157,17 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
   }, { defer: true }))
 
   // Keyboard picking keeps focus in the app; its arrow, Tab and Enter keys are forwarded to the frame's picker.
-  const startPick = (keyboard: boolean) => {
+  const startPick = (keyboard: boolean, as: Mode = mode()) => {
     if (!ready() || unavailable()) return
+    const point = as === "point" && pointable()
     setTray(false)
+    setFan(false)
     setOpen()
     setPicking(true)
-    toFrame({ type: "pick", on: true, keyboard })
+    setPickMode(point ? "point" : "element")
+    toFrame({ type: "pick", on: true, keyboard, ...(point ? { point: true } : {}) })
   }
+  const flipped = () => (mode() === "point" ? "element" : "point") as Mode
   const endPick = () => { setPicking(false); toFrame({ type: "pick", on: false }) }
   const close = (restoreFocus = true) => {
     const key = open()?.key
@@ -169,13 +185,14 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
     const listen = (event: MessageEvent) => {
       const data = event.data as { ns?: string; type?: string; [key: string]: unknown }
       if (!data || data.ns !== NS || event.source !== props.frame()?.contentWindow) return
-      if (data.type === "ready") { setOff(data.policy === "off"); setReady(data.policy !== "off") }
+      if (data.type === "ready") { setOff(data.policy === "off"); setReady(data.policy !== "off"); setFeatures(Array.isArray(data.features) ? data.features.filter((item): item is string => typeof item === "string") : []) }
       if (data.type === "rects") setRects(new Map((data.items as { key: string; rect: Box | null; state: AnchorState }[]).map((item) => [item.key, { rect: item.rect, state: item.state }])))
       if (data.type === "picked") {
         setPicking(false)
         setShown(true)
         setRects(new Map([...rects(), [DRAFT, { rect: data.rect as Box, state: "shown" as const }]]))
-        setOpen({ key: DRAFT, anchor: data.anchor as CommentAnchor })
+        const point = data.point as CommentPoint | undefined
+        setOpen({ key: DRAFT, anchor: data.anchor as CommentAnchor, ...(pickMode() === "point" && point ? { point } : {}) })
       }
       if (data.type === "pick-end") setPicking(false)
       if (data.type === "key" && data.key === "c") startPick(true)
@@ -252,24 +269,28 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
     setComments([...comments().filter((comment) => comment.comment_id !== result.comment.comment_id), result.comment])
     setOutgoing(new Map([...outgoing()].filter(([id]) => id !== sealed.comment_id)))
   }
-  const submit = (key: string, anchor: CommentAnchor, parent?: string) => {
+  const submit = (key: string, anchor: CommentAnchor, parent?: string, point?: CommentPoint) => {
     const body = (drafts().get(key) ?? "").trim()
     if (!body) return
     setDrafts(new Map([...drafts()].filter(([item]) => item !== key)))
-    void send({ comment_id: mintCommentId(), revision: props.revision, anchor, body, ...(parent ? { parent_id: parent } : {}) })
+    void send({ comment_id: mintCommentId(), revision: props.revision, anchor, body, ...(parent ? { parent_id: parent } : {}), ...(point ? { mark: pointMark(anchor, point) } : {}) })
   }
 
   const boxOf = (key: string) => rects().get(key)?.rect ?? undefined
   // The bubble's corner sits at the anchor's top-left, pulled inside the stage.
-  const markerAt = (box: Box) => ({ left: `${Math.max(4, Math.min(size().w - 34, box.x - 10))}px`, top: `${Math.max(4, Math.min(size().h - 34, box.y - 10))}px` })
+  // The pip sits just outside the part's top-left corner, so it never covers the part's own text.
+  const markerAt = (box: Box) => ({ left: `${Math.max(0, Math.min(size().w - 24, box.x - 24))}px`, top: `${Math.max(0, Math.min(size().h - 24, box.y - 24))}px` })
+  // A point comment's pin: its tip on the exact spot, as fractions of the element's current box.
+  const spotOf = (box: Box, point: CommentPoint) => ({ x: box.x + point.x * box.w, y: box.y + point.y * box.h })
+  const pinAt = (box: Box, point: CommentPoint) => { const spot = spotOf(box, point); return { left: `${Math.max(0, Math.min(size().w - 22, spot.x - 11))}px`, top: `${Math.max(0, Math.min(size().h - 27, spot.y - 27))}px` } }
   const markerThreads = () => [
     ...onView().flatMap((thread) => {
       const found = rects().get(thread.root.comment_id)
-      return found?.rect ? [{ key: thread.root.comment_id, author: thread.root.author.name, count: 1 + thread.replies.length, box: found.rect, changed: false, status: undefined as Outgoing["state"] | undefined }] : []
+      return found?.rect ? [{ key: thread.root.comment_id, author: thread.root.author.name, count: 1 + thread.replies.length, box: found.rect, point: pointOf(thread.root), changed: false, status: undefined as Outgoing["state"] | undefined }] : []
     }),
     ...pendingRoots().flatMap((item) => {
       const box = boxOf(item.sealed.comment_id)
-      return box ? [{ key: item.sealed.comment_id, author: "You", count: 1, box, changed: false, status: item.state }] : []
+      return box ? [{ key: item.sealed.comment_id, author: "You", count: 1, box, point: pointOf(item.sealed), changed: false, status: item.state }] : []
     }),
   ]
 
@@ -284,12 +305,14 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
         {/* Keyed by thread id, not object: every anchor report (scroll, resize, DOM change) and every reply rebuilds the
           * marker objects, and re-keying by object would replace the button the human's focus is on. */}
         <For each={markerKeys()}>{(key) => <Show when={markerByKey().get(key)}>{(marker) =>
-          <button class="sc-peek" ref={(el) => markers.set(marker().key, el)} style={markerAt(marker().box)} data-comment={marker().key} data-status={marker().status} data-changed={marker().changed ? "" : undefined}
-            aria-label={`Comment by ${marker().author}${marker().count > 1 ? `, ${marker().count} in thread` : ""}${marker().changed ? ", its target changed" : ""}`}
+          <><button class="sc-peek" classList={{ "sc-pin": !!marker().point }} ref={(el) => markers.set(marker().key, el)} style={marker().point ? pinAt(marker().box, marker().point!) : markerAt(marker().box)} data-comment={marker().key} data-kind={marker().point ? "point" : "element"} data-status={marker().status} data-changed={marker().changed ? "" : undefined}
+            aria-label={`${marker().point ? "Pinned comment" : "Comment"} by ${marker().author}${marker().count > 1 ? `, ${marker().count} in thread` : ""}${marker().changed ? ", its target changed" : ""}`}
              onClick={() => marker().status ? setOpen({ key: marker().key, anchor: outgoing().get(marker().key)!.sealed.anchor }) : reveal(marker().key)}>
             <span class="sc-peek-face">{initialOf(marker().author)}</span>
             <Show when={marker().count > 1}><span class="sc-peek-count">{marker().count}</span></Show>
-          </button>}</Show>}</For>
+          </button>
+          {/* An element comment's ring shows only while its pip is hovered or focused, or its finder row is. */}
+          <Show when={!marker().point}><span class="sc-rest-ring" aria-hidden="true" style={{ left: `${marker().box.x}px`, top: `${marker().box.y}px`, width: `${marker().box.w}px`, height: `${marker().box.h}px` }} /></Show></>}</Show>}</For>
       </div>
     </Show>
     <Show when={open()}>{(current) => {
@@ -311,6 +334,7 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
        return <div class="sc-focus" aria-label={thread() ? "Comment thread" : "New comment"}>
          <Show when={!notHere() && !!boxOf(current().key)}><div class="sc-veil" aria-hidden="true" style={{ "clip-path": `path(evenodd, "M0 0H${size().w}V${size().h}H0Z M${hole().x} ${hole().y}H${hole().r}V${hole().b}H${hole().x}Z")` }} /></Show>
          <Show when={!notHere() && !!boxOf(current().key)}><div class="sc-ring" style={{ left: `${hole().x}px`, top: `${hole().y}px`, width: `${hole().r - hole().x}px`, height: `${hole().b - hole().y}px` }} /></Show>
+         <Show when={!notHere() && boxOf(current().key) && (current().point ?? (thread() ? pointOf(thread()!.root) : undefined))}>{(point) => <span class="sc-spot" aria-hidden="true" style={{ left: `${spotOf(box(), point()).x}px`, top: `${spotOf(box(), point()).y}px` }} />}</Show>
          <section class="sc-card" role="region" style={cardStyle()} data-below={below() ? "" : undefined} data-away={notHere() ? "" : undefined}>
            <Show when={thread()}><div class="sc-card-nav"><span>{notHere() ? "Not on this view" : sectionOf(thread()!)}</span><button aria-label="Previous thread (K)" title="Previous thread (K)" onClick={() => navigate(-1)}>‹</button><span>{(() => { const group = notHere() ? away() : onView(); return `${group.findIndex((item) => item.root.comment_id === current().key) + 1}/${group.length}` })()}</span><button aria-label="Next thread (J)" title="Next thread (J)" onClick={() => navigate(1)}>›</button></div></Show>
            <Show when={notHere() && thread()}>{(item) => <div class="sc-away"><span class="sc-away-tag">not on this view</span><span>{placementLabel(stateOf(item()), item().root.revision)}</span><blockquote>On {item().root.anchor.id ?? item().root.anchor.selector ?? (item().root.anchor.rect ? "the recorded page area" : "this Surface")}</blockquote></div>}</Show>
@@ -335,8 +359,8 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
           </div>}</For>
           <Show when={thread()}>{(item) => <p class="sc-receipt" role="status"><Glyph name="check" size={12} /> {receiptLabel([item().root, ...item().replies].at(-1)!)}</p>}</Show>
           <Show when={current().key === DRAFT || thread()}>
-            <form class="sc-compose" onSubmit={(event) => { event.preventDefault(); submit(draftKey(), current().anchor, current().key === DRAFT ? undefined : current().key) }}>
-              <textarea ref={input} dir="auto" rows={current().key === DRAFT ? 3 : 2} maxLength={MAX_BODY} placeholder={current().key === DRAFT ? "Comment on this part…" : "Reply…"} aria-label={current().key === DRAFT ? "Comment" : "Reply"}
+            <form class="sc-compose" onSubmit={(event) => { event.preventDefault(); submit(draftKey(), current().anchor, current().key === DRAFT ? undefined : current().key, current().key === DRAFT ? current().point : undefined) }}>
+              <textarea ref={input} dir="auto" rows={current().key === DRAFT ? 3 : 2} maxLength={MAX_BODY} placeholder={current().key === DRAFT ? current().point ? "Comment on this spot…" : "Comment on this part…" : "Reply…"} aria-label={current().key === DRAFT ? "Comment" : "Reply"}
                 value={drafts().get(draftKey()) ?? ""} onInput={(event) => setDrafts(new Map([...drafts(), [draftKey(), event.currentTarget.value]]))}
                 onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} />
               <div class="sc-compose-row">
@@ -368,8 +392,8 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
         <div class="sc-segments">{(["open", "all", "resolved"] as const).map((value) => <button aria-pressed={view() === value} onClick={() => { setView(value); setCursor(0) }}>{value}</button>)}</div></div>
       <div class="sc-authors" aria-label="Filter by author"><For each={[...new Set(comments().map((comment) => comment.author.name))]}>{(name) => <button title={name} aria-label={`Filter by ${name}`} aria-pressed={authors().has(name)} onClick={() => { const next = new Set(authors()); next.has(name) ? next.delete(name) : next.add(name); setAuthors(next) }}>{initialOf(name)}</button>}</For></div>
       <div class="sc-tray-list">
-        <For each={[...new Set(filtered().here.map(sectionOf))]}>{(section) => <div class="sc-group"><h3>{section}</h3><For each={filtered().here.filter((item) => sectionOf(item) === section)}>{(item) => <button class="sc-tray-row" data-comment={item.root.comment_id} onMouseEnter={() => markers.get(item.root.comment_id)?.classList.add("sc-ping")} onMouseLeave={() => markers.get(item.root.comment_id)?.classList.remove("sc-ping")} onClick={() => reveal(item.root.comment_id)}>{item.root.author.name} · {item.replies.at(-1)?.body ?? item.root.body}</button>}</For></div>}</For>
-        <Show when={filtered().away.length}><div class="sc-group"><h3>Not on this view</h3><For each={filtered().away}>{(item) => <button class="sc-tray-row" data-comment={item.root.comment_id} onClick={() => reveal(item.root.comment_id)}>{sectionOf(item)} · {item.replies.at(-1)?.body ?? item.root.body}</button>}</For></div></Show>
+        <For each={[...new Set(filtered().here.map(sectionOf))]}>{(section) => <div class="sc-group"><h3>{section}</h3><For each={filtered().here.filter((item) => sectionOf(item) === section)}>{(item) => <button class="sc-tray-row" data-comment={item.root.comment_id} onMouseEnter={() => markers.get(item.root.comment_id)?.classList.add("sc-ping")} onMouseLeave={() => markers.get(item.root.comment_id)?.classList.remove("sc-ping")} onClick={() => reveal(item.root.comment_id)}><span class="sc-row-body">{item.root.author.name} · {item.replies.at(-1)?.body ?? item.root.body}</span><Where thread={item} /></button>}</For></div>}</For>
+        <Show when={filtered().away.length}><div class="sc-group"><h3>Not on this view</h3><For each={filtered().away}>{(item) => <button class="sc-tray-row" data-comment={item.root.comment_id} onClick={() => reveal(item.root.comment_id)}><span class="sc-row-body">{item.root.author.name} · {item.replies.at(-1)?.body ?? item.root.body}</span><Where thread={item} /></button>}</For></div></Show>
         <Show when={!filtered().here.length && !filtered().away.length}><p class="sc-empty">No comments match.</p></Show>
       </div>
     </div></Show>
@@ -377,7 +401,20 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
       <button type="button" class="sc-tool-say" title={`Tell ${author.name()} (M)`} aria-label={`Tell ${author.name()}`} aria-pressed={saying()} onClick={toggleSay}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v4m-4 0h8" /></svg>
       </button>
-      <button class="sc-tool-main" ref={toolbarButton} aria-label="Comment (C)" aria-pressed={picking()} disabled={!ready() || !!unavailable()} title={unavailable() ?? (off() ? "This page turns comments off" : "Comment (C)")} onClick={(event) => picking() ? endPick() : startPick(event.detail === 0)}><Glyph name="comment-discussion" size={18} /></button>
+      {/* Comment fans out like Draw: click = the last-used mode, Alt-click flips it once, the fan-out sets it. */}
+      <span class="sc-draw sc-comment" data-open={fan() ? "" : undefined} onPointerLeave={() => setFan(false)}>
+        <button class="sc-tool-main" ref={toolbarButton} aria-label={`Comment (C) · ${pickLabel(mode(), pointable())}`} aria-pressed={picking()} disabled={!ready() || !!unavailable()} data-mode={mode() === "point" && pointable() ? "point" : "element"}
+          title={unavailable() ?? (off() ? "This page turns comments off" : `Comment on ${pickLabel(mode(), pointable()).toLowerCase()} (C) · Alt-click: ${pickLabel(flipped(), pointable()).toLowerCase()}`)}
+          onPointerDown={(event) => { if (event.pointerType !== "touch") return; const timer = setTimeout(() => setFan(true), 450); const clear = () => clearTimeout(timer); event.currentTarget.addEventListener("pointerup", clear, { once: true }); event.currentTarget.addEventListener("pointercancel", clear, { once: true }) }}
+          onContextMenu={(event) => { if (fan()) event.preventDefault() }}
+          onClick={(event) => { if (fan()) return; picking() ? endPick() : startPick(event.detail === 0, event.altKey ? flipped() : mode()) }}>
+          <Show when={mode() === "point" && pointable()} fallback={<Glyph name="comment-discussion" size={18} />}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6-6.2-6-11a6 6 0 0 1 12 0c0 4.8-6 11-6 11z" /><circle cx="12" cy="10" r="2.2" /></svg></Show>
+        </button>
+        <span class="sc-fly sc-fly-comment" role="group" aria-label="Comment mode">
+          <button aria-pressed={mode() === "element" || !pointable()} title="Element: hover rings a part, click anchors to it" onClick={() => { setMode("element"); startPick(false, "element") }}><span>▢</span><b>Element</b></button>
+          <button aria-pressed={mode() === "point" && pointable()} disabled={!pointable()} title={pointable() ? "Point: click drops a pin at that exact spot" : "Point needs a newer page bridge and a host that keeps pins"} onClick={() => { setMode("point"); startPick(false, "point") }}><span>⌖</span><b>Point</b></button>
+        </span>
+      </span>
       <span class="sc-draw" title={marksSupported ? "Draw (D) · hover for shapes" : "Drawing needs host support (marks)"}><button class="sc-tool" aria-label="Draw" title={marksSupported ? "Draw (D) · hover for shapes" : "Drawing needs host support (marks)"} disabled={!marksSupported}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l4-1 11-11-3-3L5 16z" /></svg></button><span class="sc-fly" aria-hidden={!marksSupported}><For each={["pen", "arrow", "rect", "ellipse"]}>{(shape) => <button disabled={!marksSupported} title={shape} aria-label={shape}><span>{shape === "pen" ? "✎" : shape === "arrow" ? "↗" : shape === "rect" ? "▢" : "◯"}</span></button>}</For></span></span>
       <button class="sc-tool" aria-label="Undo last shape" title={marksSupported ? "Undo last shape" : "Drawing needs host support (marks)"} disabled={!marksSupported}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7L4 12l5 5M4 12h10a6 6 0 0 1 6 6" /></svg></button><i />
       <button class="sc-tool" aria-label="Previous thread (K)" title="Previous thread (K)" onClick={() => navigate(-1)}>‹</button>
@@ -388,4 +425,12 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
     </div>
     <Show when={tucked()}><button class="sc-tab" aria-label="Restore toolbar (.)" title="Restore toolbar (.)" onClick={() => setTucked(false)}>⌃ {list().filter((item) => item.root.state !== "resolved").length}</button></Show>
   </>
+}
+
+const pickLabel = (mode: Mode, pointable: boolean) => (mode === "point" && pointable ? "Point" : "Element")
+
+/** The finder row's place: the part a comment is on, and whether it pins a spot in it. */
+const Where = (props: { thread: { root: SurfaceComment } }) => {
+  const part = () => props.thread.root.anchor.id ?? props.thread.root.anchor.selector?.split(" > ").at(-1) ?? "this page"
+  return <span class="sc-row-where">on “<bdi dir="auto">{part()}</bdi>”{pointOf(props.thread.root) ? " · point" : ""}</span>
 }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { esSurfaceHost, mintCommentId, placement, receiptLabel, threads, type SurfaceComment } from "./surface-comments"
+import { esSurfaceHost, mintCommentId, placement, pointMark, pointOf, receiptLabel, threads, type SurfaceComment } from "./surface-comments"
 
 const comment = (id: string, at: number, extra: Partial<SurfaceComment> = {}): SurfaceComment => ({
   comment_id: id, surface_id: "board", revision: 2, anchor: { id: "sec/intro" }, author: { role: "operator", name: "Murtaza" }, body: id, created_at: at, parent_id: null, state: "open", ...extra,
@@ -78,5 +78,20 @@ describe("surface comments", () => {
     const host = esSurfaceHost("board", "", (async () => new Response("<!doctype html>", { status: 200, headers: { "content-type": "text/html" } })) )
 
     expect(await host.read()).toEqual({ unavailable: "This host does not store comments yet." })
+  })
+})
+
+describe("point comments", () => {
+  test("a point is one anchor-frame pin on its element anchor, and reads back", () => {
+    const mark = pointMark({ id: "costs", selector: "#costs" }, { x: 0.82, y: 0.75 })
+    expect(mark).toEqual({ frame: "anchor", ref: "costs", state: "", s: "", shapes: [{ tool: "pin", pts: [0.82, 0.75] }] })
+    expect(pointOf({ mark })).toEqual({ x: 0.82, y: 0.75 })
+  })
+
+  test("drawings, doc-frame marks and out-of-box pins are not points", () => {
+    expect(pointOf({})).toBeUndefined()
+    expect(pointOf({ mark: { frame: "doc", ref: "", state: "", s: "", shapes: [{ tool: "pin", pts: [1, 2] }] } })).toBeUndefined()
+    expect(pointOf({ mark: { frame: "anchor", ref: "a", state: "", s: "", shapes: [{ tool: "arrow", pts: [0, 0, 1, 1] }] } })).toBeUndefined()
+    expect(pointOf({ mark: { frame: "anchor", ref: "a", state: "", s: "", shapes: [{ tool: "pin", pts: [1.5, 0.2] }] } })).toBeUndefined()
   })
 })

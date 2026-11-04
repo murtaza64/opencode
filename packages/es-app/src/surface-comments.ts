@@ -5,6 +5,9 @@
 export type CommentRect = { x: number; y: number; w: number; h: number }
 /** Where a comment points. At least one of `id`, `selector` or `rect` (document fractions); `hash` detects a changed target. */
 export type CommentAnchor = { id?: string; selector?: string; hash?: string; rect?: CommentRect }
+/** The store's optional mark (surface-bridge ./marks). A point comment is one anchor-frame pin on its element anchor. */
+export type CommentMark = { frame: "anchor" | "doc"; ref: string; state: string; s: string; shapes: { tool: string; pts: number[] }[] }
+export type CommentPoint = { x: number; y: number }
 export type SurfaceComment = {
   comment_id: string
   surface_id: string
@@ -15,13 +18,15 @@ export type SurfaceComment = {
   created_at: number
   parent_id: string | null
   state: string
+  mark?: CommentMark
   /** The owner-mail receipt: new comments batch for about two minutes per Surface, then go to its owner lane. */
   routing?: { state: "pending" | "routed" | "failed"; to?: string; message_id?: string; at?: number } | null
 }
 /** What Send sealed. A retry sends exactly this again (same id, same bytes), so the store can recognise it. */
-export type SealedComment = { comment_id: string; revision: number; anchor: CommentAnchor; body: string; parent_id?: string }
+export type SealedComment = { comment_id: string; revision: number; anchor: CommentAnchor; body: string; parent_id?: string; mark?: CommentMark }
 export type SendResult = { ok: true; comment: SurfaceComment; duplicate: boolean } | { ok: false; error: string }
-export type ReadResult = { comments: SurfaceComment[] } | { unavailable: string }
+/** `capabilities`: what the store accepts beyond plain comments (es-surface-comments advertises "marks", "view"). */
+export type ReadResult = { comments: SurfaceComment[]; capabilities?: string[] } | { unavailable: string }
 
 /** What the overlay needs from wherever comments live. `esSurfaceHost` is the es dashboard store; another host
  * (Workbench, MCR) supplies its own adapter with the same two calls. */
@@ -49,8 +54,8 @@ export const esSurfaceHost = (surface: string, prefix = "", send: (input: string
       if (response.status === 404 || response.status === 501 || !response.headers.get("content-type")?.includes("application/json"))
         return { unavailable: "This host does not store comments yet." }
       if (!response.ok) return { unavailable: `Comments unavailable (HTTP ${response.status}).` }
-      const body = (await response.json()) as { comments?: SurfaceComment[] }
-      return { comments: Array.isArray(body.comments) ? body.comments : [] }
+      const body = (await response.json()) as { comments?: SurfaceComment[]; capabilities?: unknown }
+      return { comments: Array.isArray(body.comments) ? body.comments : [], capabilities: Array.isArray(body.capabilities) ? body.capabilities.filter((item): item is string => typeof item === "string") : [] }
     },
     send: async (comment) => {
       const post = () => send(path, {
@@ -118,6 +123,17 @@ export const receiptLabel = (comment: SurfaceComment) => {
   if (!routing || routing.state === "pending") return "Saved · goes to the owner within ~2 min"
   if (routing.state === "routed") return `Saved · sent to ${routing.to ?? "the owner"} · not a read receipt`
   return "Saved · not routed to the owner"
+}
+
+/** A point comment's mark: one pin, in the anchor frame, as 0-1 fractions of the anchored element's box. */
+export const pointMark = (anchor: CommentAnchor, point: CommentPoint): CommentMark =>
+  ({ frame: "anchor", ref: (anchor.id ?? anchor.selector ?? "").slice(0, 300), state: "", s: "", shapes: [{ tool: "pin", pts: [point.x, point.y] }] })
+
+/** Where a comment's pin sits in its element, or undefined for an element comment (or any other mark). */
+export const pointOf = (comment: { mark?: CommentMark }): CommentPoint | undefined => {
+  const shape = comment.mark?.frame === "anchor" && comment.mark.shapes.length === 1 ? comment.mark.shapes[0] : undefined
+  if (shape?.tool !== "pin" || shape.pts.length !== 2 || !shape.pts.every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) return
+  return { x: shape.pts[0], y: shape.pts[1] }
 }
 
 export const initialOf = (name: string | undefined) => (name?.trim()[0] ?? "?").toUpperCase()

@@ -13,6 +13,23 @@
 .sc-peek[data-changed] { background: var(--yellow); }
 .sc-peek[data-status=sending] { opacity: .7; } .sc-peek[data-status=failed] { background: var(--red); }
 .sc-peek.sc-ping { transform: scale(1.25); box-shadow: 0 0 0 3px var(--peach), 0 8px 18px rgb(0 0 0 / 30%); }
+/* At rest: an element comment is its pip, outside the part's corner; the ring appears while the thread is hovered,
+ * focused or pinged from the finder. A point comment is a small pin, tip on the spot. */
+/* An element pip is small enough for a page's usual 24px gutter. */
+.sc-peek:not(.sc-pin) { box-sizing: border-box; inline-size: 22px; block-size: 22px; border-width: 1px; border-radius: 3px 11px 11px 11px; }
+.sc-peek:not(.sc-pin) .sc-peek-face { font-size: 10px; }
+/* Touch keeps a 38px target around the small pip or pin. */
+@media (pointer: coarse) { .sc-peek::before { content: ""; position: absolute; inset: -8px; } }
+.sc-rest-ring { position: absolute; border-radius: 4px; box-shadow: 0 0 0 1px var(--peach); pointer-events: none; opacity: 0; transition: opacity 120ms ease-out; }
+.sc-peek:hover + .sc-rest-ring, .sc-peek:focus-visible + .sc-rest-ring, .sc-peek.sc-ping + .sc-rest-ring { opacity: 1; }
+.sc-peek.sc-pin { inline-size: 22px; block-size: 27px; border: 0; border-radius: 11px 11px 11px 2px; transform-origin: 50% 100%; clip-path: path("M11 27 C11 27 0 16 0 10 A11 10 0 0 1 22 10 C22 16 11 27 11 27 Z"); box-shadow: none; opacity: .85; }
+.sc-peek.sc-pin .sc-peek-face { margin-block-end: 7px; font-size: 10px; }
+.sc-peek.sc-pin .sc-peek-count { display: none; }
+.sc-peek.sc-pin:hover, .sc-peek.sc-pin:focus-visible, .sc-peek.sc-pin.sc-ping { transform: scale(1.12); box-shadow: none; opacity: 1; }
+.sc-peek.sc-pin:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; clip-path: none; border-radius: 11px; }
+/* The open card shows a point comment's pin at full strength inside its ring. */
+.sc-spot { position: absolute; inline-size: 22px; block-size: 27px; margin: -27px 0 0 -11px; background: var(--peach); clip-path: path("M11 27 C11 27 0 16 0 10 A11 10 0 0 1 22 10 C22 16 11 27 11 27 Z"); pointer-events: none; }
+.sc-spot::after { content: ""; position: absolute; left: 8px; top: 7px; inline-size: 6px; block-size: 6px; border-radius: 50%; background: var(--crust, #000); }
 /* Focus: the anchor stays sharp inside a ring; everything around it dims and blurs. */
 .sc-focus { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
 .sc-veil { position: absolute; inset: 0; pointer-events: none; background: rgb(17 20 24 / 22%); backdrop-filter: blur(2.5px); -webkit-backdrop-filter: blur(2.5px); }
@@ -70,6 +87,11 @@
 .sc-fly { position: absolute; left: 50%; bottom: calc(100% + 10px); transform: translate(-50%, 6px); display: grid; gap: 2px; padding: 4px; border-radius: 12px; background: var(--base, #111); opacity: 0; pointer-events: none; transition: opacity .12s, transform .12s; }
 .sc-fly::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 12px; }
 .sc-draw:hover .sc-fly:not([aria-hidden=true]), .sc-draw:focus-within .sc-fly:not([aria-hidden=true]) { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+.sc-comment[data-open] .sc-fly { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+.sc-toolbar .sc-fly-comment button { inline-size: auto; min-inline-size: 104px; display: flex; justify-content: flex-start; gap: 8px; padding: 0 10px; font-size: 13px; }
+.sc-fly-comment button span { inline-size: 16px; text-align: center; font-size: 15px; }
+.sc-fly-comment button b { font-weight: 600; }
+.sc-tray-row .sc-row-where { display: block; margin-block-start: 2px; color: var(--subtext0); font-size: 11px; }
 .sc-tab { position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); z-index: 5; border: 0; border-radius: 10px 10px 0 0; padding: 3px 10px; background: var(--base, #111); color: var(--text); cursor: pointer; }
 .sc-tray { position: absolute; left: 50%; bottom: 69px; transform: translateX(-50%); z-index: 5; inline-size: min(460px, calc(100% - 24px)); max-block-size: min(60vh, 560px); display: flex; flex-direction: column; background: var(--base, #111); color: var(--text); border: 1px solid var(--surface1); border-radius: 14px; box-shadow: 0 20px 50px rgb(0 0 0 / 35%); font-size: 13px; }
 .sc-tray-filters { display: flex; align-items: center; gap: 8px; padding: 10px 10px 6px; }
