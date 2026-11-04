@@ -11,10 +11,16 @@ import type { HostFeed } from "./host-feed"
 import { deliverables, surfaceKey, type Surface } from "./surfaces"
 import { workCountLabel, workQueue, workTries, type WorkEntry } from "./work-queue"
 
+// An update its author marked FYI asks nothing: it stays in the Surfaces list (unseen, with its line) and never enters
+// Needs you (Murtaza 2026-11-04, "it shows up in my needs. But I don't know exactly what it is for").
+export const asksSomething = (surface: Pick<Surface, "change">) => surface.change?.intent !== "fyi"
+
 export const needsYou = (input: { items: DeskItem[]; feeds: HostFeed[]; fresh: Surface[]; local?: Surface[]; closed?: AttentionRecord[] }) => {
   const queue = workQueue(input.items, input.feeds)
-  const tries = workTries(input.feeds)
-  const linked = linkArtifacts({ entries: queue.entries, fresh: input.fresh, tries: tries.entries, local: input.local ?? input.fresh, feeds: input.feeds, closed: input.closed ?? [] })
+  const all = workTries(input.feeds)
+  const tries = { ...all, entries: all.entries.filter((entry) => entry.remote?.kind !== "surface" || asksSomething(entry.remote.surface)) }
+  const fresh = input.fresh.filter(asksSomething)
+  const linked = linkArtifacts({ entries: queue.entries, fresh, tries: tries.entries, local: input.local ?? fresh, feeds: input.feeds, closed: input.closed ?? [] })
   const count = linked.entries.length + linked.fresh.length + linked.tries.length + linked.items.length
   const behind = [...new Set([...queue.behind, ...tries.behind])]
   return {

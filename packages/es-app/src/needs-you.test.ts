@@ -232,3 +232,11 @@ test("a decision about an older revision says which one", () => {
   expect(staleArtifact(attention("a1", { artifact: { title: "Board", surface: "b", revision: 5 } }), surface("b", { revision: 7 }))).toBe("decision is about rev 5")
   expect(staleArtifact(attention("a1", { artifact: { title: "Board", surface: "b", revision: 7 } }), surface("b", { revision: 7 }))).toBeUndefined()
 })
+
+test("an FYI update never enters Needs you; review and respond updates do", async () => {
+  const { asksSomething } = await import("./needs-you")
+  expect(asksSomething({})).toBe(true)
+  expect(asksSomething({ change: { base: 1, intent: "fyi", look: [], respond: null } })).toBe(false)
+  expect(asksSomething({ change: { base: 1, intent: "review", look: [], respond: null } })).toBe(true)
+  expect(asksSomething({ change: { base: 1, intent: null, look: [], respond: "Which?" } })).toBe(true)
+})

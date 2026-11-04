@@ -42,9 +42,12 @@ try {
     await expect(page.locator(".sc-look-pulse")).toHaveCount(1)
     await expect(change.locator('[data-look="0"]')).not.toContainText("not found")
     results.push("PASS FYI: Since r10 · FYI + note, no Done, no Respond; no scroll until clicked; a click scrolls and pulses; a missing place says not found in r11")
-    const row = page.locator('[data-kind="try"][data-nav-item="surface:audit"]')
-    await expect(row.locator(".nav-change")).toHaveText("Since r10 · FYI · Look at: Sources and repro +1 · Rev 9 ran on Kimi-K3 (per Core), not Opus as first reported")
-    results.push("PASS the Needs you row carries the call to action and the note")
+    // FYI asks nothing: never in Needs you; the Surfaces list carries it as line 2 while unseen.
+    await expect(page.locator('[data-kind="try"][data-nav-item="surface:audit"]')).toHaveCount(0)
+    await page.locator("#nav-tab-surfaces").click()
+    const listed = page.locator('.nav-surface[data-nav-item="surface:audit"]')
+    await expect(listed.locator(".nav-change")).toHaveText("Since r10 · FYI · Look at: Sources and repro +1 · Rev 9 ran on Kimi-K3 (per Core), not Opus as first reported")
+    results.push("PASS an FYI update stays out of Needs you; the Surfaces row carries its line while unseen")
     await page.close()
   }
   {
@@ -54,7 +57,19 @@ try {
     await expect(change.locator(".surface-change-label")).toHaveText("Since r9 · Review", { timeout: 120_000 })
     await expect(change.locator(".surface-change-respond")).toHaveText("Respond: Keep the Opus control or rerun on Kimi?")
     await expect(change.locator(".surface-change-look")).toHaveCount(0)
-    results.push("PASS review: Since r9 · Review with its Respond line")
+    const row = page.locator('[data-kind="try"][data-nav-item="surface:audit"]')
+    await expect(row.locator(".nav-kind")).toHaveText("Respond")
+    await expect(row.locator(".nav-change")).toHaveText("Keep the Opus control or rerun on Kimi?")
+    results.push("PASS review with a question: Since r9 · Review + Respond line; the Needs you row leads with Respond and the question")
+    await page.close()
+  }
+  {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 800 } })
+    await open(page, { base: 10, intent: "review", look: [{ label: "Sources and repro", id: "sources" }], respond: null })
+    const row = page.locator('[data-kind="try"][data-nav-item="surface:audit"]')
+    await expect(row.locator(".nav-kind")).toHaveText("Review", { timeout: 120_000 })
+    await expect(row.locator(".nav-change")).toHaveText("Since r10 · Look at: Sources and repro · Rev 9 ran on Kimi-K3 (per Core), not Opus as first reported")
+    results.push("PASS a review update leads its Needs you row with Review and where to look")
     await page.close()
   }
   {

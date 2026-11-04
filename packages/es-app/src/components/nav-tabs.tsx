@@ -9,7 +9,7 @@ import { useLocation } from "@solidjs/router"
 import { useDeskQueue } from "../desk-queue"
 import { useDashboard } from "../state"
 import { surfaceKey, surfaceProblem, tryLine, type Surface } from "../surfaces"
-import { changeCall, changeNoteLine } from "../surface-notes"
+import { changeCall, changeNoteLine, intentLabel } from "../surface-notes"
 import { needsYou, staleArtifact, type LinkedItem } from "../needs-you"
 import { workCountLabel, workSurfaces, type WorkEntry } from "../work-queue"
 import { HostGlyph } from "./icons"
@@ -110,6 +110,11 @@ const DecisionRow = (props: { entry: WorkEntry }) => {
 const HostSurfaceRow = (props: { entry: WorkEntry }) => {
   const open = useOpenItem()
   const ownOnly = () => props.entry.remote?.kind === "surface" && props.entry.remote.frame === "own-host-only"
+  // An unseen requested update on that host carries its call to action as line 2 until opened (FYI included).
+  const unseenCall = () => {
+    const surface = props.entry.remote?.kind === "surface" ? props.entry.remote.surface : undefined
+    return surface && surface.purpose === "deliverable" && surface.seen === false ? [...changeCall(surface), changeNoteLine(surface)].filter(Boolean).join(" · ") : ""
+  }
   return <a href={props.entry.href} class="nav-item nav-surface host-surface" classList={{ stale: props.entry.stale, active: open(props.entry.key) }}
     aria-current={open(props.entry.key) ? "page" : undefined} data-nav-item={props.entry.key}
     aria-label={`${props.entry.title}, ${props.entry.remote?.kind === "surface" ? surfaceKindLabel(props.entry.remote.surface) : "surface"}, on ${props.entry.hostLabel}${props.entry.stale ? ", last known" : ""}${ownOnly() ? ", opens on that computer only" : ""}`}
@@ -118,6 +123,7 @@ const HostSurfaceRow = (props: { entry: WorkEntry }) => {
     <Show when={props.entry.remote?.kind === "surface" ? props.entry.remote.surface : undefined} fallback={<SurfaceGlyph surface={{}} />}>{surface => <SurfaceGlyph surface={surface()} />}</Show>
     <span class="nav-title" dir="auto">{props.entry.title}</span>
     <span class="session-project">{props.entry.hostLabel}</span>
+    <Show when={unseenCall()}>{text => <span class="nav-change" dir="auto">{text()}</span>}</Show>
   </a>
 }
 // A requested deliverable waiting in Needs you: one deterministic line (Try · title · maintainer · revision, plus any
@@ -133,11 +139,14 @@ const TryRow = (props: { surface: Surface; entry?: WorkEntry; outcome?: Attentio
     const chose = outcome.options.find(option => option.id === outcome.answer?.choice_id)?.label
     return chose ? `you chose ${chose}` : `decision ${outcome.status}`
   }
-  const note = () => [...changeCall(props.surface), changeNoteLine(props.surface)].filter(Boolean).join(" · ")
-  const line = () => [props.entry ? `${tryLine(props.surface)} · on ${props.entry.hostLabel}${props.entry.stale ? " · last known" : ""}` : tryLine(props.surface), ended(), note() && `What's new: ${note()}`].filter(Boolean).join(" · ")
+  // A row leads with what the update asks (Review, Decision, Respond); line 2 says where to look, or the question.
+  const ask = () => props.surface.change?.respond ? "Respond" : intentLabel(props.surface.change?.intent)
+  const note = () => props.surface.change?.respond ? props.surface.change.respond
+    : [...changeCall(props.surface).filter(part => part.startsWith("Look at") || part.startsWith("Since")), changeNoteLine(props.surface)].filter(Boolean).join(" · ")
+  const line = () => [ask(), props.entry ? `${tryLine(props.surface)} · on ${props.entry.hostLabel}${props.entry.stale ? " · last known" : ""}` : tryLine(props.surface), ended(), note()].filter(Boolean).join(" · ")
   return <a href={props.entry?.href ?? itemHref(key())} classList={{ active: open(key()), stale: !!props.entry?.stale }} aria-current={open(key()) ? "page" : undefined} class="nav-item nav-decision nav-try" data-kind="try" data-nav-item={key()}
     data-revision={props.surface.revision} title={line()} aria-label={line()}>
-    <span class="nav-kind" aria-hidden="true">Try</span>
+    <span class="nav-kind" aria-hidden="true">{ask() ?? "Try"}</span>
     <Show when={props.entry?.host}>{host => <HostGlyph host={host()} />}</Show>
     <span class="nav-title" dir="auto">{props.surface.title}</span>
     <span class="session-project" classList={{ "home-blocked": !!surfaceProblem(props.surface.health) }}><bdi dir="auto">{surfaceProblem(props.surface.health) ?? props.surface.owner}</bdi> · rev {props.surface.revision}<Show when={ended()}>{text => <> · <bdi dir="auto">{text()}</bdi></>}</Show></span>
@@ -165,6 +174,8 @@ const LinkedRow = (props: { item: LinkedItem }) => {
 }
 const SurfaceRow = (props: { surface: Surface; fresh?: boolean }) => {
   const open = useOpenItem()
+  // An unseen update (FYI included, which never enters Needs you) carries its call to action as line 2 until opened.
+  const call = () => props.fresh ? [...changeCall(props.surface), changeNoteLine(props.surface)].filter(Boolean).join(" · ") : ""
   return <a href={itemHref(surfaceKey(props.surface.id))} classList={{ active: open(surfaceKey(props.surface.id)), fresh: !!props.fresh }} aria-current={open(surfaceKey(props.surface.id)) ? "page" : undefined} class="nav-item nav-surface" data-nav-item={surfaceKey(props.surface.id)}
     title={`${props.surface.title} — ${surfaceKindLabel(props.surface)}`}>
     <SurfaceGlyph surface={props.surface} />
@@ -172,6 +183,7 @@ const SurfaceRow = (props: { surface: Surface; fresh?: boolean }) => {
     <span class="sr-only">, {surfaceKindLabel(props.surface)}</span>
     <Show when={props.fresh}><span class="sr-only">, new delivery</span></Show>
     <span class="session-project">{surfaceProblem(props.surface.health) ?? props.surface.owner}</span>
+    <Show when={call()}>{text => <span class="nav-change" dir="auto">{text()}</span>}</Show>
   </a>
 }
 
