@@ -3,7 +3,7 @@
 Framework-free comment bridge for framed Surfaces: the in-frame anchor and privacy rules, pick mode, and the `postMessage` protocol. No store, auth, identity or comment bodies.
 
 - Single writer: opencode/ux-feel. Consumers import it and do not copy it.
-- Version: `1.3.1` (`VERSION` in `src/index.js` = `package.json`). Bump on any change to the protocol or the anchor rules, and record it below.
+- Version: `1.4.0` (`VERSION` in `src/index.js` = `package.json`). Bump on any change to the protocol or the anchor rules, and record it below.
 
 ## Files
 
@@ -47,7 +47,7 @@ Host → frame:
 
 | type | fields | effect |
 |---|---|---|
-| `pick` | `on`, `keyboard?`, `policy?` | enter or leave pick mode; `keyboard` starts on the first visible candidate |
+| `pick` | `on`, `keyboard?`, `policy?`, `point?` | enter or leave pick mode; `keyboard` starts on the first visible candidate; `point` also reports where in the element the pick landed |
 | `track` | `anchors: [{ key, anchor }]` (max 500), `policy?` | report these anchors now and on every scroll, resize or DOM change |
 | `pick-key` | `key`, `shift?` | a pick-mode key pressed while the host had focus (Esc, arrows, j/k, Tab, Enter, Space) |
 | `reveal` | `key` | scroll that tracked anchor into view |
@@ -56,8 +56,8 @@ Frame → host:
 
 | type | fields |
 |---|---|
-| `ready` | `policy` (the page's own), `version` (protocol, `1`) |
-| `picked` | `anchor`, `rect` (frame-viewport px) |
+| `ready` | `policy` (the page's own), `version` (protocol, `1`), `features?` (`["point"]` from 1.4.0) |
+| `picked` | `anchor`, `rect` (frame-viewport px), `point?` (point picks: `{ x, y }` fractions of the picked element's box, clamped to 0-1; the keyboard picks the centre) |
 | `pick-end` | none (Esc, or a pick under `off`) |
 | `rects` | `items: [{ key, rect \| null, state: shown \| changed \| hidden \| missing }]` |
 | `key` | `key: "c" \| "m" \| "Escape"`, pressed in the page outside a text field |
@@ -86,6 +86,7 @@ Frame → host:
 
 ## Changelog
 
+- 1.4.0: point picks. `pick` takes an optional `point`; the frame then adds `point` (the click as 0-1 fractions of the picked element's box) to `picked`, and `ready` lists `features: ["point"]` so hosts can detect it. The picked element, anchor rules, privacy and every other message are unchanged; a host that never sends `point` sees 1.3.1 behaviour. Hosts store a point as an anchor-frame `pin` mark on the element anchor (`./marks`), so no store field is added.
 - 1.3.1: the frame also forwards `m` (tell the author) as a `key` message, like `c`. Additive; other keys, anchors and privacy unchanged.
 
 - 1.3.0: additive `./marks` (MCR mark record, validation, description, route scoping, SVG painting) and `./geometry` (es-app card placement and anchor hole), both moved unchanged. Frame script, protocol and anchors unchanged: `frame.js` is byte-identical to 1.2.0.

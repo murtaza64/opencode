@@ -140,7 +140,8 @@ export function installSurfaceBridge(win, createKit) {
   new win.MutationObserver(schedule).observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true })
 
   // Pick mode: an outline follows the pointer (or the keyboard's current candidate); a click or Enter picks.
-  let picking = false, current = null, outline = null
+  // Point mode picks the same element and also reports where in it the click landed.
+  let picking = false, pointing = false, current = null, outline = null
   const hide = () => { current = null; if (outline) outline.style.width = "0px" }
   const show = (el) => {
     current = el
@@ -154,8 +155,15 @@ export function installSurfaceBridge(win, createKit) {
     const r = el.getBoundingClientRect()
     Object.assign(outline.style, { left: r.left - 3 + "px", top: r.top - 3 + "px", width: r.width + 6 + "px", height: r.height + 6 + "px" })
   }
-  const stop = () => { picking = false; current = null; if (outline) { outline.remove(); outline = null } document.documentElement.style.cursor = "" }
-  const pick = (el) => { const anchor = kit.anchorOf(el), rect = kit.viewRect(el.getBoundingClientRect()); stop(); post("picked", { anchor, rect }) }
+  const stop = () => { picking = false; pointing = false; current = null; if (outline) { outline.remove(); outline = null } document.documentElement.style.cursor = "" }
+  // `at`: the click in viewport px. The point is a fraction of the element's box, clamped to it; the keyboard picks its centre.
+  const pick = (el, at) => {
+    const box = el.getBoundingClientRect(), anchor = kit.anchorOf(el), rect = kit.viewRect(box)
+    const fraction = (value, start, size) => size > 0 ? Math.round(Math.min(1, Math.max(0, (value - start) / size)) * 10000) / 10000 : 0.5
+    const point = pointing ? (at ? { x: fraction(at.x, box.left, box.width), y: fraction(at.y, box.top, box.height) } : { x: 0.5, y: 0.5 }) : undefined
+    stop()
+    post("picked", point ? { anchor, rect, point } : { anchor, rect })
+  }
   const step = (delta) => {
     const list = kit.candidates()
     if (!list.length) return
@@ -173,7 +181,7 @@ export function installSurfaceBridge(win, createKit) {
     if (!picking) return
     event.preventDefault(); event.stopPropagation()
     const el = event.target instanceof win.Element && kit.target(event.target)
-    if (el) pick(el)
+    if (el) pick(el, { x: event.clientX, y: event.clientY })
   }, true)
   const typing = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))
   // Pick-mode keys, pressed in the page or forwarded by the host while its own window has focus.
@@ -201,6 +209,7 @@ export function installSurfaceBridge(win, createKit) {
       kit.setHostPolicy(data.policy)
       if (kit.policy() === "off") { post("pick-end"); return }
       picking = true
+      pointing = !!data.point
       document.documentElement.style.cursor = "crosshair"
       if (data.keyboard) {
         const first = kit.candidates().find((el) => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.top < win.innerHeight })
@@ -217,6 +226,6 @@ export function installSurfaceBridge(win, createKit) {
     }
   })
   // After parsing, so the page's policy meta (which follows this script in <head>) is known.
-  const ready = () => post("ready", { policy: kit.pagePolicy(), version: 1 })
+  const ready = () => post("ready", { policy: kit.pagePolicy(), version: 1, features: ["point"] })
   if (document.readyState === "loading") on("DOMContentLoaded", ready, { once: true }); else ready()
 }

@@ -88,6 +88,26 @@ try {
     await expect.poll(async () => (await messages("picked")).length).toBe(3)
     expect(Object.keys((await messages("picked"))[2].anchor).sort()).toEqual(["id", "rect"])
     expect((await messages("picked"))[2].anchor.id).toBe("sec/public")
+    // Element picks carry no point; the frame advertises point picks (1.4.0).
+    expect((await messages("picked")).every((message) => !("point" in message))).toBe(true)
+    expect((await messages("ready"))[0].features).toEqual(["point"])
+
+    // A point pick: the same element anchor, plus where in its box the click landed. Private stays unpickable.
+    await pick({ point: true })
+    await frame.locator("#secret").click()
+    const box = await frame.locator("#public").boundingBox()
+    await frame.locator("#public").click({ position: { x: box.width / 4, y: box.height / 2 } })
+    await expect.poll(async () => (await messages("picked")).length).toBe(4)
+    const pointed = (await messages("picked"))[3]
+    expect(pointed.anchor.id).toBe("public")
+    expect(pointed.point.x).toBeCloseTo(0.25, 1)
+    expect(pointed.point.y).toBeCloseTo(0.5, 1)
+    expect(JSON.stringify(pointed)).not.toContain("SECRET")
+    // The keyboard picks the element's centre.
+    await pick({ point: true, keyboard: true })
+    await send({ type: "pick-key", key: "Enter" })
+    await expect.poll(async () => (await messages("picked")).length).toBe(5)
+    expect((await messages("picked"))[4].point).toEqual({ x: 0.5, y: 0.5 })
     expect(errors).toEqual([])
     await page.close()
   }

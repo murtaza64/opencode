@@ -21,7 +21,7 @@ test("the serialized frame script runs on its own and announces the page policy"
   const { win, posted, listeners } = fakeWindow("declared")
   // Function() sees only globals: any reference to this module's scope would throw here.
   new Function("window", BRIDGE_SOURCE)(win)
-  expect(posted).toEqual([{ ns: NS, type: "ready", policy: "declared", version: 1 }])
+  expect(posted).toEqual([{ ns: NS, type: "ready", policy: "declared", version: 1, features: ["point"] }])
   expect(listeners).toEqual(expect.arrayContaining(["message", "click", "keydown", "pointermove", "scroll"]))
 })
 

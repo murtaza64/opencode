@@ -10,14 +10,17 @@ export type Anchor = { id?: string; selector?: string; hash?: string; rect?: Anc
 export type AnchorState = "shown" | "changed" | "hidden" | "missing"
 
 export type HostMessage =
-  | { type: "pick"; on: boolean; keyboard?: boolean; policy?: "declared" | "open" }
+  /** `point` (1.4.0): also report where in the picked element the click landed. */
+  | { type: "pick"; on: boolean; keyboard?: boolean; policy?: "declared" | "open"; point?: boolean }
   | { type: "track"; anchors: { key: string; anchor: Anchor }[]; policy?: "declared" | "open" }
   | { type: "pick-key"; key: string; shift?: boolean }
   | { type: "reveal"; key: string }
 
 export type FrameMessage =
-  | { type: "ready"; policy: Policy; version: number }
-  | { type: "picked"; anchor: Anchor; rect: ViewRect }
+  /** `features` (1.4.0): optional protocol additions this frame supports; absent on older frames. */
+  | { type: "ready"; policy: Policy; version: number; features?: "point"[] }
+  /** `point` (1.4.0, point picks only): the click as fractions (0-1) of the picked element's box. */
+  | { type: "picked"; anchor: Anchor; rect: ViewRect; point?: { x: number; y: number } }
   | { type: "pick-end" }
   | { type: "rects"; items: { key: string; rect: ViewRect | null; state: AnchorState }[] }
   | { type: "key"; key: "c" | "m" | "Escape" }
