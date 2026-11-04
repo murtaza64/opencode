@@ -761,3 +761,124 @@ it.live(
     ),
   90_000,
 )
+
+// A lost server process (OOM, crash) leaves the newest step open with no runner and no restart manifest.
+// Rows the lost process wrote: all recorded activity predates this server process.
+const before = () => Date.now() - 10 * 60_000
+
+const queueMail = (dir: string, sessionID: string, requestID: string, text: string) =>
+  requestInDirectory(`/session/${sessionID}/input`, dir, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ requestID, delivery: "queue", text, source: { type: "editspace-mail", id: requestID, sender: "owner", recipient: "worker" } }),
+  }).pipe(Effect.flatMap((response) => response.json))
+
+it.live(
+  "after a lost process, a step whose tools all completed lets the waiting input start the next turn once, never re-running the tool",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.text("continued after the crash")
+          const session = yield* Session.use.create({ title: "Orphan durable" })
+          const seeded = yield* seedInterrupted(session, dir, { tools: "completed", text: "checking", at: before() })
+          expect(yield* queueMail(dir, session.id, "resume-1", "resume your task")).toMatchObject({ state: "pending" })
+          const history = yield* idleWithReply(dir, session.id, "continued after the crash")
+          const promoted = history.find((message) => message.info.role === "user" && message.parts.some((part) => part.type === "text" && part.text === "resume your task"))
+          expect(promoted).toBeDefined()
+          // The open step is kept as it was: same id, its completed tool untouched and not re-run.
+          const anchor = history.find((message) => message.info.id === seeded.assistant.id)!
+          expect(anchor.parts.filter((part) => part.type === "tool").map((part) => part.type === "tool" && part.state.status)).toEqual(["completed"])
+          expect(yield* toolRuns(dir)).toBe("x")
+          expect(yield* llm.calls).toBe(1)
+          // The receipt keeps its request ID and links the user message it became.
+          const receipt = (yield* requestInDirectory(`/session/${session.id}/input/resume-1`, dir).pipe(Effect.flatMap((r) => r.json))) as { state: string; messageID?: string }
+          expect(receipt.state).not.toBe("pending")
+          expect(receipt.messageID).toBe(promoted!.info.id)
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+it.live(
+  "after a lost process, an empty open step lets the waiting input start the next turn",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.text("answered after an empty step")
+          const session = yield* Session.use.create({ title: "Orphan empty" })
+          yield* seedInterrupted(session, dir, { tools: false, at: before() })
+          yield* queueMail(dir, session.id, "resume-2", "go on")
+          yield* idleWithReply(dir, session.id, "answered after an empty step")
+          expect(yield* llm.calls).toBe(1)
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+it.live(
+  "after a lost process, unknown effects, explicit stops and provider failures keep the waiting input pending",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.text("must not be requested")
+          const cases = [
+            { title: "running tool", options: { tools: "mixed" as const, at: before() } },
+            { title: "interrupted tool", options: { tools: "cancelled" as const, at: before() } },
+            { title: "stopped", options: { tools: "completed" as const, at: before(), error: { name: "MessageAbortedError", data: { message: "stopped" } } as never } },
+            // Opened after this process started: possibly still streaming in a live runner, never an orphan.
+            { title: "fresh open text step", options: { tools: false as const, text: "streaming" } },
+            { title: "provider failure", options: { tools: false as const, at: before(), error: { name: "APIError", data: { message: "boom", isRetryable: false } } as never } },
+          ]
+          const sessions = []
+          for (const item of cases) {
+            const session = yield* Session.use.create({ title: item.title })
+            yield* seedInterrupted(session, dir, item.options)
+            expect(yield* queueMail(dir, session.id, `hold-${sessions.length}`, "resume")).toMatchObject({ state: "pending" })
+            sessions.push(session.id)
+          }
+          yield* Effect.sleep("3 seconds")
+          for (const [index, sessionID] of sessions.entries()) {
+            const receipt = yield* requestInDirectory(`/session/${sessionID}/input/hold-${index}`, dir).pipe(Effect.flatMap((r) => r.json))
+            expect({ case: cases[index]!.title, state: (receipt as { state: string }).state }).toEqual({ case: cases[index]!.title, state: "pending" })
+          }
+          expect(yield* llm.calls).toBe(0)
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+// Shapes recorded on a real Linux OOM (Personal, 2026-11-05; metadata only): "native" ended its step with
+// finish tool-calls after a completed bash; "core" had a completed-tool step and then an empty step with no parts.
+it.live(
+  "after a lost process, the recorded OOM shapes (completed tool-calls step; empty follow-up step) let waiting input continue",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          yield* llm.text("native continued")
+          yield* llm.text("core continued")
+          const native = yield* Session.use.create({ title: "native shape" })
+          yield* seedInterrupted(native, dir, { tools: "completed", finish: "tool-calls", at: before(), completedAt: before() })
+          const core = yield* Session.use.create({ title: "core shape" })
+          const at = before()
+          const seeded = yield* seedInterrupted(core, dir, { tools: "completed", finish: "tool-calls", at, completedAt: at })
+          yield* Session.Service.use((sessions) =>
+            sessions.updateMessage({ ...seeded.assistant, id: MessageID.ascending(), time: { created: at + 1 }, finish: undefined }),
+          )
+          yield* queueMail(dir, native.id, "native-1", "resume")
+          yield* idleWithReply(dir, native.id, "native continued")
+          yield* queueMail(dir, core.id, "core-1", "resume")
+          yield* idleWithReply(dir, core.id, "core continued")
+          expect(yield* llm.calls).toBe(2)
+          expect(yield* toolRuns(dir)).toBe("x")
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)

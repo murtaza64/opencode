@@ -108,6 +108,40 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
   return part.state.status === "error" && part.state.metadata?.interrupted === true
 }
 
+// When this server process started. Recorded activity older than this cannot belong to a runner in this process.
+const processStarted = Date.now()
+
+/**
+ * The newest step answering the newest prompt was left open by a lost server process and every effect on it is
+ * durable, so a waiting input may start the next turn. The open step itself is never re-run.
+ *
+ * Lost process: every recorded time on the step (created, completed, part and tool times) predates this process,
+ * so no runner here owns it. Another live server sharing the database could still own a step it opened before this
+ * one started; local Session execution is process-local and does not support that.
+ * Durable: no error (explicit stop, provider failure) or restart marker, not a compaction summary, and each tool call
+ * completed (or none). Pending, running, interrupted and failed tool calls keep holding for explicit recovery, so the
+ * advisory wake still never resumes unknown effects.
+ */
+function orphanedDurableStep(
+  user: SessionV1.User | undefined,
+  assistant: SessionV1.Assistant | undefined,
+  parts: readonly SessionV1.Part[],
+) {
+  if (!user || !assistant || assistant.parentID !== user.id) return false
+  // A restart marker means explicit recovery already decided this step (uncertain, scheduled or closed).
+  if (assistant.error || assistant.restarts?.length || assistant.summary) return false
+  if (!parts.every((part) => part.type !== "tool" || part.state.status === "completed")) return false
+  const times = [
+    assistant.time.created,
+    assistant.time.completed,
+    ...parts.flatMap((part) => {
+      const time = part.type === "tool" ? (part.state as { time?: { start?: number; end?: number } }).time : (part as { time?: { start?: number; end?: number } }).time
+      return [time?.start, time?.end]
+    }),
+  ].filter((value): value is number => typeof value === "number")
+  return times.every((time) => time < processStarted)
+}
+
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly wake: (sessionID: SessionID) => Effect.Effect<Runner.WakeDecision, SessionSupersession.Closed>
@@ -1469,6 +1503,7 @@ const layer = Layer.effect(
             latest.user &&
             !notesOnly &&
             !closedByOperator &&
+            !orphanedDurableStep(latest.user, latest.assistant, assistant?.parts ?? []) &&
             !SessionRunState.completedTurn(latest.user, latest.assistant, assistant?.parts ?? [])
           )
             return
