@@ -38,28 +38,33 @@ export const useRequestAgent = () => {
   })
 }
 
+/** A thread link on the record's own host (DD #787): this host's route, or `&host=<id>` for another Work host's record,
+ * which the session page opens through that host (and says so when it cannot), never this machine's same-ID session. */
+export const threadHref = (session: string, directory: string | undefined, host?: string) =>
+  sessionHref(session, directory) + (host ? `&host=${encodeURIComponent(host)}` : "")
+
 /** The agent's name, linked to its conversation when its directory is known; the session ID stays in the tooltip. */
-export const AgentName = (props: { agent: AgentRef; class?: string }) => {
+export const AgentName = (props: { agent: AgentRef; class?: string; host?: string }) => {
   const title = () => props.agent.named ? props.agent.session : `${props.agent.session} · no session title`
   return <Show when={props.agent.directory} fallback={<bdi dir="auto" class={props.class} title={title()} data-agent-session={props.agent.session}>{props.agent.label}</bdi>}>
-    {directory => <A class={props.class} href={sessionHref(props.agent.session, directory())} title={title()} data-agent-session={props.agent.session}><bdi dir="auto">{props.agent.label}</bdi></A>}
+    {directory => <A class={props.class} href={threadHref(props.agent.session, directory(), props.host)} title={title()} data-agent-session={props.agent.session}><bdi dir="auto">{props.agent.label}</bdi></A>}
   </Show>
 }
 
 // Requester first, project second. Who updated it and where answers go now are listed only when they differ.
-const Requester = (props: { record: AttentionRecord; remote?: boolean }) => {
+const Requester = (props: { record: AttentionRecord; remote?: boolean; host?: string }) => {
   const agentFor = useRequestAgent()
   // Another host's record: this host's sessions and lane lineage describe a different machine (a moved lane's
   // stale copy), so the requester comes from the record alone and no hand-off is inferred.
   const agent = () => props.remote ? requestAgent(props.record, { session: () => undefined, handoffs: [], owners: [] }) : agentFor(props.record)
   return <>
     <span class="attention-requester"><Glyph name={props.record.kind === "blocker" ? "question" : "comment-discussion"} />
-      <AgentName agent={agent()} class="attention-agent" /><span class="attention-project"> · <bdi dir="auto">{props.record.editspace}</bdi></span></span>
+      <AgentName agent={agent()} class="attention-agent" host={props.host} /><span class="attention-project"> · <bdi dir="auto">{props.record.editspace}</bdi></span></span>
     <Show when={agent().author || agent().destination}>
       <span class="attention-routing home-source">
-        <Show when={agent().author}>{author => <>Updated by <AgentName agent={author()} /></>}</Show>
+        <Show when={agent().author}>{author => <>Updated by <AgentName agent={author()} host={props.host} /></>}</Show>
         <Show when={agent().author && agent().destination}> · </Show>
-        <Show when={agent().destination}>{destination => <>Handed off · answers go to <AgentName agent={destination()} /></>}</Show>
+        <Show when={agent().destination}>{destination => <>Handed off · answers go to <AgentName agent={destination()} host={props.host} /></>}</Show>
       </span>
     </Show>
   </>
@@ -366,7 +371,7 @@ const RequestText = (props: { record: AttentionRecord; host?: string }) =>
   <div class="home-request-text" dir="auto"><Markdown text={requestMarkdown(props.record.context, { host: props.host })} cacheKey={`attention-request:${props.host ?? ""}:${props.record.editspace}:${props.record.id}:${props.record.revision}`} /></div>
 
 // `figure`: a v1 brief's lifecycle figure is the delivery statement, so the receipt wording and thread fallback stay out.
-const Delivery = (props: { record: AttentionRecord; attention: Attention; figure?: boolean }) => {
+const Delivery = (props: { record: AttentionRecord; attention: Attention; figure?: boolean; host?: string }) => {
   const delivery = () => props.record.delivery
   const canWrite = () => canWriteAttention(props.attention, props.record)
   // Link the delivered session only with its own verified directory; the source link stays separate.
@@ -380,7 +385,7 @@ const Delivery = (props: { record: AttentionRecord; attention: Attention; figure
     <Show when={!props.figure}><p class={props.record.delivery_state === "blocked" ? "home-blocked" : "home-muted"} role="status">{deliveryLabel(props.record)}<Show when={props.record.delivery_state === "blocked" && delivery()?.reason}> — {blockedReason(delivery()?.reason)}</Show></p></Show>
     <Show when={delivery()?.error && !["presented", "handled"].includes(props.record.delivery_state)}><p class="home-muted">Last attempt failed: <bdi dir="auto">{delivery()?.error}</bdi> · retrying</p></Show>
     <Show when={!props.figure && delivery()?.copies?.length}><ul class="home-copies"><For each={delivery()?.copies}>{copy => <li><bdi dir="ltr">{copy.session}</bdi> · {copy.state}{copy.presented_at ? ` · presented ${dateTime(copy.presented_at)}` : ""}{copy.handled_at ? ` · acknowledged ${dateTime(copy.handled_at)}` : ""}</li>}</For></ul></Show>
-    <div class="home-actions"><Show when={target()} fallback={props.figure ? undefined : <span class="home-muted">Not delivered yet</span>}>{item => <A href={sessionHref(item().session, item().directory)} aria-label="Open delivered agent thread">Open thread</A>}</Show><Show when={["pending", "blocked", "queued"].includes(props.record.delivery_state)}><button disabled={!canWrite()} onClick={() => props.attention.retryDelivery(props.record)}>Retry delivery</button></Show><button disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "resolve", reason: "Human marked resolved" })}>Mark resolved</button></div>
+    <div class="home-actions"><Show when={target()} fallback={props.figure ? undefined : <span class="home-muted">Not delivered yet</span>}>{item => <A href={threadHref(item().session, item().directory, props.host)} aria-label="Open delivered agent thread">Open thread</A>}</Show><Show when={["pending", "blocked", "queued"].includes(props.record.delivery_state)}><button disabled={!canWrite()} onClick={() => props.attention.retryDelivery(props.record)}>Retry delivery</button></Show><button disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "resolve", reason: "Human marked resolved" })}>Mark resolved</button></div>
   </div>
 }
 
@@ -425,7 +430,7 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
   // Grouped so a wide pane can set the explanation beside the answer; narrow panes stack the groups in this order.
   return <BriefPlayback.Provider value={playback}><article class="home-decision" data-attention-id={props.record.id}>
     <Show when={briefV1()}>{brief => <BriefDescent record={props.record} brief={brief()} />}</Show>
-    <header class="home-decision-head"><div class="home-eyebrow"><Requester record={props.record} remote={props.remote} /><Show when={props.remote && props.host}>{host => <span class="decision-host" title={`On ${host()}`}><bdi dir="auto">{host()}</bdi></span>}</Show><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open source thread">Agent thread</A>
+    <header class="home-decision-head"><div class="home-eyebrow"><Requester record={props.record} remote={props.remote} host={props.remote ? props.host : undefined} /><Show when={props.remote && props.host}>{host => <span class="decision-host" title={`On ${host()}`}><bdi dir="auto">{host()}</bdi></span>}</Show><time dateTime={new Date(props.record.created_at).toISOString()}>{ago(props.record.created_at)}</time><A href={threadHref(props.record.source_ref.session_id, props.record.source_ref.directory, props.remote ? props.host : undefined)} aria-label="Open source thread" data-thread-host={props.remote ? props.host : undefined}>Agent thread</A>
       <span class="decision-state" data-s={props.record.status} data-kind={props.record.kind}>{decisionState(props.record)}</span></div>
       <div class="home-decision-title"><Show when={!prepared() && !briefV1()}><h3><bdi dir="auto">{props.record.title}</bdi></h3></Show>
         <Show when={props.record.artifact}>{artifact => <ArtifactOpen artifact={artifact()} host={props.remote ? props.host : undefined} />}</Show></div></header>
@@ -458,7 +463,7 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
       <Answer record={props.record} attention={props.attention} options={props.record.options.length > 0} onView={props.onView} prepared={prepared()} afterChoices={review() || briefV1() ? undefined : props.briefAfter} sends={review() ? undefined : props.sends} copy={review() ? undefined : props.copy} briefJob={review() ? undefined : props.briefJob} briefV1={briefV1()}
         extra={<><button class="home-quiet" disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "snooze", snoozed_until: Date.now() + 3600_000 })}>Snooze 1h</button><button class="home-quiet" disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "resolve", reason: "Human marked no longer needed" })}>No longer needed</button></>} />
     </Show>
-    <Show when={props.record.status === "decided"}><p class="home-recorded">Saved: <bdi dir="auto">{decisionLabel(props.record)}</bdi> · not sent</p><Answer record={props.record} attention={props.attention} options={props.record.options.length > 0} onView={props.onView} briefV1={briefV1()} /><div class="home-actions"><A href={sessionHref(props.record.source_ref.session_id, props.record.source_ref.directory)} aria-label="Open agent thread">Open thread</A><button disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "resolve", reason: "Human marked resolved" })}>Mark resolved</button></div></Show>
+    <Show when={props.record.status === "decided"}><p class="home-recorded">Saved: <bdi dir="auto">{decisionLabel(props.record)}</bdi> · not sent</p><Answer record={props.record} attention={props.attention} options={props.record.options.length > 0} onView={props.onView} briefV1={briefV1()} /><div class="home-actions"><A href={threadHref(props.record.source_ref.session_id, props.record.source_ref.directory, props.remote ? props.host : undefined)} aria-label="Open agent thread">Open thread</A><button disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "resolve", reason: "Human marked resolved" })}>Mark resolved</button></div></Show>
     {/* A completed decision keeps its explainer: the options as they were shown, the chosen one marked, read-only. */}
     <Show when={prepared() && props.record.answer && ["answered", "resolved", "withdrawn"].includes(props.record.status) ? prepared() : undefined}>{prepared =>
       <ul class="home-options home-option-cards home-chosen" aria-label="Options as shown when you answered"><For each={props.record.options}>{option => {
@@ -472,7 +477,7 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
           </span>
         </li>
       }}</For></ul>}</Show>
-    <Show when={props.record.status === "answered"}><Delivery record={props.record} attention={props.attention} figure={!!briefV1()} /></Show>
+    <Show when={props.record.status === "answered"}><Delivery record={props.record} attention={props.attention} figure={!!briefV1()} host={props.remote ? props.host : undefined} /></Show>
     <Show when={props.record.status === "snoozed"}><p class="home-muted">Snoozed until {props.record.snoozed_until ? dateTime(props.record.snoozed_until) : "unknown"}</p><button disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "wake" })}>Return to Needs you</button></Show>
     <Show when={["resolved", "withdrawn"].includes(props.record.status)}><p class="home-muted">{props.record.status === "resolved" ? "Resolved" : "Withdrawn"}</p><Show when={props.record.answer}><Show when={props.record.answer?.text}><pre class="home-answer-text" dir="auto"><LinkedText text={props.record.answer?.text ?? ""} /></pre></Show><Show when={optionLabel(props.record, props.record.answer?.choice_id)}>{label => <p class="home-recorded">You chose <bdi dir="auto">{label()}</bdi><Show when={props.record.answer?.answered_at}>{at => <> · <time dateTime={new Date(at()).toISOString()} title={exactTime(at())}>{ago(at())}</time></>}</Show></p>}</Show><Show when={!briefV1()}><p class="home-muted">{deliveryLabel(props.record)}</p></Show></Show></Show>
     </div>
