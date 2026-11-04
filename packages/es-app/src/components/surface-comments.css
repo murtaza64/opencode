@@ -92,6 +92,18 @@
 .sc-fly-comment button span { inline-size: 16px; text-align: center; font-size: 15px; }
 .sc-fly-comment button b { font-weight: 600; }
 .sc-tray-row .sc-row-where { display: block; margin-block-start: 2px; color: var(--subtext0); font-size: 11px; }
+/* Drawings sit under the markers' layer, half strength at rest; the open thread's and the draft are full. */
+.sc-drawings { position: absolute; inset: 0; pointer-events: none; z-index: 3; overflow: visible; }
+.sc-drawing { opacity: .5; transition: opacity 120ms ease-out; }
+.sc-drawing[data-open], .sc-drawing.sc-draft { opacity: 1; }
+.sc-draw-layer { position: absolute; inset: 0; z-index: 4; cursor: crosshair; touch-action: none; }
+.sc-draw-tool[data-open] .sc-fly:not([aria-hidden=true]) { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+.sc-toolbar .sc-fly-draw button { inline-size: auto; min-inline-size: 96px; display: flex; justify-content: flex-start; gap: 8px; padding: 0 10px; font-size: 13px; }
+.sc-fly-draw button span { inline-size: 16px; text-align: center; font-size: 15px; }
+.sc-fly-draw button b { font-weight: 600; }
+.sc-tool-glyph { font-size: 17px; line-height: 1; }
+.sc-mark-line { margin: 0; font-size: 12px; color: var(--subtext1); }
+.sc-mark-line b { color: var(--text); }
 .sc-tab { position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); z-index: 5; border: 0; border-radius: 10px 10px 0 0; padding: 3px 10px; background: var(--base, #111); color: var(--text); cursor: pointer; }
 .sc-tray { position: absolute; left: 50%; bottom: 69px; transform: translateX(-50%); z-index: 5; inline-size: min(460px, calc(100% - 24px)); max-block-size: min(60vh, 560px); display: flex; flex-direction: column; background: var(--base, #111); color: var(--text); border: 1px solid var(--surface1); border-radius: 14px; box-shadow: 0 20px 50px rgb(0 0 0 / 35%); font-size: 13px; }
 .sc-tray-filters { display: flex; align-items: center; gap: 8px; padding: 10px 10px 6px; }

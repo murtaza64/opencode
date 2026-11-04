@@ -81,8 +81,9 @@ try {
     await expect(page.locator(".sc-peek")).toHaveCount(0)
     await expect(page.locator(".sc-tool-note")).toHaveCount(0)
     const width = await page.locator(".sc-toolbar").evaluate((el) => el.getBoundingClientRect().width)
-    await expect(page.getByRole("button", { name: "Draw" })).toBeDisabled()
-    await expect(page.getByRole("button", { name: "Draw" })).toHaveAttribute("title", "Drawing needs host support (marks)")
+    // This fixture store lists no capabilities, so Draw stays off (surface-draw.browser covers a store with marks).
+    await expect(page.getByRole("button", { name: /^Draw \(D\)/ })).toBeDisabled()
+    await expect(page.getByRole("button", { name: /^Draw \(D\)/ })).toHaveAttribute("title", "Drawing needs a host that keeps marks")
     await page.getByRole("button", { name: "Find a comment (F)" }).click()
     await expect(page.locator(".sc-group h3", { hasText: "Not on this view" })).toBeVisible()
     await page.locator(".sc-tool-say").click()
