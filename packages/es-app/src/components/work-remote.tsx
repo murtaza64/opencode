@@ -2,6 +2,7 @@
  * and acted on through the Local listener's /hosts/<id>/ routes (host-items.ts), so the action happens on the
  * owning host with that host's operator session and the window never switches to that host's tab. */
 import { SurfaceChangeNote } from "./surface-change-note"
+import { CitedRevisionGate } from "./cited-revision"
 import { createResource, createSignal, createUniqueId, For, Match, Show, Switch } from "solid-js"
 import type { PermissionRequest } from "@opencode-ai/sdk/v2"
 import { A } from "@solidjs/router"
@@ -25,7 +26,7 @@ import { artifactSurface, staleArtifact } from "../needs-you"
 import type { Surface } from "../surfaces"
 
 // The parent may clear the entry while this view (and its portalled top-bar row) is still being disposed.
-export const WorkRemoteDetail = (props: { entry: WorkEntry; onClose: () => void }) => {
+export const WorkRemoteDetail = (props: { entry: WorkEntry; cited?: number; onClose: () => void }) => {
   const host = () => props.entry?.host ?? ""
   const where = () => <span class="work-remote-host" data-host={host()}><HostGlyph host={host()} size={12} /> on <bdi dir="auto">{props.entry?.hostLabel ?? host()}</bdi>
     <Show when={props.entry?.stale}> · <span class="home-blocked">{props.entry?.unavailableReason ? "unreachable · last known" : "last known"}</span></Show></span>
@@ -40,7 +41,7 @@ export const WorkRemoteDetail = (props: { entry: WorkEntry; onClose: () => void 
     <Switch>
       <Match when={props.entry?.remote?.kind === "attention" ? props.entry.remote : undefined}>{remote => <RemoteDecision host={host()} record={remote().record} />}</Match>
       <Match when={props.entry?.remote?.kind === "request" ? props.entry.remote : undefined}>{remote => <RemoteRequest host={host()} label={props.entry.hostLabel ?? host()} request={remote().request} stale={props.entry.stale} />}</Match>
-      <Match when={props.entry?.remote?.kind === "surface" ? props.entry.remote : undefined}>{remote => <RemoteSurface host={host()} label={props.entry.hostLabel ?? host()} surface={remote().surface} frame={remote().frame} onClose={props.onClose} />}</Match>
+      <Match when={props.entry?.remote?.kind === "surface" ? props.entry.remote : undefined}>{remote => <RemoteSurface host={host()} label={props.entry.hostLabel ?? host()} surface={remote().surface} frame={remote().frame} cited={props.cited} onClose={props.onClose} />}</Match>
     </Switch>
   </section>
 }
@@ -110,7 +111,7 @@ const RemoteRequest = (props: { host: string; label: string; request: NonNullabl
 }
 
 // A file Surface frames through the owning host; a URL Surface is served only on its own host for now (502 here).
-const RemoteSurface = (props: { host: string; label: string; surface: NonNullable<Extract<WorkEntry["remote"], { kind: "surface" }>>["surface"]; frame: "host" | "own-host-only"; onClose: () => void }) => {
+const RemoteSurface = (props: { host: string; label: string; surface: NonNullable<Extract<WorkEntry["remote"], { kind: "surface" }>>["surface"]; frame: "host" | "own-host-only"; cited?: number; onClose: () => void }) => {
   const [address, { refetch }] = createResource(() => props.frame === "host" ? props.surface.id : undefined, id => hostSurfaceAddress(props.host, id))
   const src = () => address.error ? undefined : address()?.src
   // Done/Undo write that host's seen state only, then reread that host's list so its Needs you rows follow.
@@ -146,6 +147,7 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
       <Show when={onHost()}>{href => <> <a class="desk-link-button" href={href()} target="_blank" rel="noopener noreferrer" data-open-on-host={props.host} onClick={() => { setOpened(true); done.used() }}>Open on <bdi dir="auto">{props.label}</bdi></a></>}</Show></p>}>
       <Show when={!address.error} fallback={<div class="desk-surface-state" role="alert"><p>Cannot open this surface from <bdi dir="auto">{props.label}</bdi>: {String(address.error?.message ?? address.error)}</p><button class="desk-button" onClick={() => void refetch()}>Try again</button></div>}>
         {/* Remounts when the human loads a newer revision, so Done covers what is on screen. */}
+        <CitedRevisionGate cited={props.cited} current={props.surface.revision}>
         <Show when={src() ? `${src()}|${done.onScreen()}` : undefined} keyed fallback={<p class="desk-surface-state">Loading…</p>}>{_key => {
           const [frame, setFrame] = createSignal<HTMLIFrameElement>()
           let stage: HTMLDivElement | undefined
@@ -157,6 +159,7 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
             <SurfaceComments host={esSurfaceHost(props.surface.id, hostPrefix(props.host))} surface={props.surface} ownerHost={{ id: props.host, label: props.label }} revision={done.onScreen()} frame={frame} stage={() => stage} />
           </div>
         }}</Show>
+        </CitedRevisionGate>
       </Show>
     </Show>
   </div>

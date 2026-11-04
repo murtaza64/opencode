@@ -27,6 +27,8 @@ import { peekLiveSession } from "../live-session-cache"
 import { flash } from "../motion"
 import type { MemoryEntry, MemoryRevision } from "../desk-memory"
 import { parseWorkKey, workQueue, workSurfaces, type WorkEntry } from "../work-queue"
+import { host, readHost } from "../host"
+import { localWorkKey, remoteGap } from "../surface-ref"
 import { LinkedDecisions, WorkRemoteDetail } from "../components/work-remote"
 import { SurfaceView } from "../components/desk-surfaces"
 import { surfaceFromKey, surfaceKey } from "../surfaces"
@@ -121,15 +123,29 @@ export default function Desk() {
   // Another Work host's entry (`<host>~<key>`): its detail opens here, acted on through that host (work-remote.tsx).
   const remoteEntries = createMemo(() => [...workQueue([], dashboard.work.feeds()).entries, ...workSurfaces([], dashboard.work.feeds()).entries])
   const lastRemote = new Map<string, WorkEntry>()
+  // A ref naming this host (`<own>~surface:x`, as `es surface publish` cites it) opens as this host's own item.
+  onMount(() => void readHost())
+  const resolvedKey = createMemo(() => { const key = selectedKey(); return key && localWorkKey(key, host()?.id) })
+  // The revision a cite link pinned (`&rev=N`); the reader says so when the host serves another one.
+  const cited = () => typeof params.rev === "string" && /^[1-9][0-9]{0,8}$/.test(params.rev) ? Number(params.rev) : undefined
   const selectedRemote = createMemo(() => {
-    const key = selectedKey()
+    const key = resolvedKey()
     if (!key || !parseWorkKey(key).host) return
     const entry = remoteEntries().find(candidate => candidate.key === key)
     if (entry) lastRemote.set(key, entry)
     return entry ?? lastRemote.get(key)
   })
+  // Another host's Surface ref with no entry in that host's list: say why, never show another copy.
+  const remoteSurfaceGap = createMemo(() => {
+    const key = resolvedKey()
+    const parts = key ? parseWorkKey(key) : undefined
+    if (!parts?.host || !parts.key.startsWith("surface:") || selectedRemote()) return
+    const feed = dashboard.work.feeds().find(item => item.host.id === parts.host)
+    const state = feed?.state()
+    return remoteGap({ host: parts.host, label: feed?.host.label, known: !!feed, current: !!state && state.status === "ready" && !state.surfacesStale })
+  })
   const selected = createMemo((): { surface: string } | { item: DeskItem; live: boolean } | { record: AttentionRecord } | undefined => {
-    const key = selectedKey()
+    const key = resolvedKey()
     if (!key || parseWorkKey(key).host) return
     const surface = surfaceFromKey(key)
     if (surface) return { surface }
@@ -147,7 +163,7 @@ export default function Desk() {
   const select = (key?: string) => {
     setSelectedKey(key)
     const surface = surfaceFromKey(key)
-    setParams({ surface, item: surface ? undefined : key }, { replace: true })
+    setParams({ surface, item: surface ? undefined : key, rev: undefined }, { replace: true })
   }
   const [evidence, setEvidence] = createSignal<HTMLElement>()
   // A brief sits below its request and may be off screen, already selected or stacked below the
@@ -235,7 +251,7 @@ export default function Desk() {
       </div>
 
       {/* Remount per selection so one item's reply outcome or draft never carries into the next. */}
-      <Show when={selectedSurface()} keyed>{id => <SurfaceView id={id} surface={surfaces.list().find(item => item.id === id)} checked={surfaces.checked()} onDone={(surface, revision, seen) => surfaces.markSeen(surface, revision, seen)} onLoaded={() => surfaces.refresh()} onRetry={() => void surfaces.refresh()} onClose={() => select()}
+      <Show when={selectedSurface()} keyed>{id => <SurfaceView id={id} surface={surfaces.list().find(item => item.id === id)} checked={surfaces.checked()} cited={cited()} onDone={(surface, revision, seen) => surfaces.markSeen(surface, revision, seen)} onLoaded={() => surfaces.refresh()} onRetry={() => void surfaces.refresh()} onClose={() => select()}
         decisions={<Show when={surfaces.list().find(item => item.id === id)}>{surface => <LinkedDecisions surface={surface()} />}</Show>} />}</Show>
       <Show when={selected() && !selectedSurface() ? selectedKey() : undefined} keyed>{_key => <Show when={selected()}>{current => <section ref={setEvidence} class="desk-evidence attention-home" aria-label="Selected item">
         <div class="desk-evidence-head">
@@ -255,10 +271,14 @@ export default function Desk() {
       </section>}</Show>}</Show>
 
       {/* Keyed by the entry key: list polls replace entry objects, and the detail (its answer draft, its host ledger) stays mounted. */}
-      <Show when={selectedRemote()?.key} keyed>{_key => <WorkRemoteDetail entry={selectedRemote()!} onClose={() => select()} />}</Show>
+      <Show when={selectedRemote()?.key} keyed>{_key => <WorkRemoteDetail entry={selectedRemote()!} cited={cited()} onClose={() => select()} />}</Show>
+      <Show when={remoteSurfaceGap()}>{gap => <section class="desk-evidence desk-surface" aria-label="Surface" data-surface-gap="ref">
+        <p class="desk-surface-state" role="status">{gap()}</p>
+        <button class="desk-button" onClick={() => select()}>Close</button>
+      </section>}</Show>
       {/* Nothing open: what is not already in the sidebar (Needs you and the Decisions and Surfaces tabs list the open
         * items): answers waiting on agents, history, ignored failures, memory and the desk's sources. */}
-      <Show when={!selected() && !selectedRemote() && !selectedSurface()}>
+      <Show when={!selected() && !selectedRemote() && !selectedSurface() && !remoteSurfaceGap()}>
         <section class="desk-overview" aria-label="Decisions and inbox">
           <p class="home-muted desk-overview-hint">Open something from Needs you or the Decisions tab; answered and older items are here.</p>
           <Show when={uncertainRequests().length}><details class="home-unknown"><summary>Unknown outcome ({uncertainRequests().length})</summary><For each={uncertainRequests()}>{item => <div class="home-source"><bdi dir="auto">{item.title}</bdi> · {item.state === "unavailable" ? "source unavailable" : "no longer pending; outcome unknown"} · <A href={sessionHref(item.session, item.directory)}>Open thread</A></div>}</For></details></Show>

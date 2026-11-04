@@ -3,6 +3,7 @@
  * only the title, owner, update time and health that the registry reports. */
 import { SurfaceFind } from "./surface-find"
 import { SurfaceChangeNote } from "./surface-change-note"
+import { CitedRevisionGate } from "./cited-revision"
 import { AppHeader } from "./native-header"
 import { createEffect, createResource, createSignal, For, onCleanup, Show, type JSX } from "solid-js"
 import { ago } from "../state"
@@ -163,7 +164,7 @@ export const SurfaceHeadMore = (props: { surface?: Surface; src: () => string | 
   </>
 }
 
-export const SurfaceView = (props: { id: string; surface?: Surface; checked?: number; onDone?: MarkDone; onLoaded?: () => Promise<unknown>; onRetry: () => void; onClose: () => void; decisions?: JSX.Element }) => {
+export const SurfaceView = (props: { id: string; surface?: Surface; checked?: number; cited?: number; onDone?: MarkDone; onLoaded?: () => Promise<unknown>; onRetry: () => void; onClose: () => void; decisions?: JSX.Element }) => {
   // Seen covers what the human saw, so it waits for the frame: never while loading, offline or failed.
   const doneState = createDeliverableDone(() => props.surface, () => src() && !address.error && props.surface && !surfaceUnavailable(props.surface) ? props.onDone : undefined)
   const onScreen = doneState.onScreen
@@ -214,6 +215,7 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
         <button class="desk-button" onClick={retry}>Try again</button>
       </div>}>
         <Show when={!address.error} fallback={<div class="desk-surface-state" role="alert"><p>Cannot open this surface: {String(address.error?.message ?? address.error)}</p><button class="desk-button" onClick={retry}>Try again</button></div>}>
+          <CitedRevisionGate cited={props.cited} current={surface().revision}>
           <Show when={src() ? frameKey() : undefined} keyed fallback={<p class="desk-surface-state" role="status">Opening…</p>}>{_key => {
             const [frame, setFrame] = createSignal<HTMLIFrameElement>()
             let stage: HTMLDivElement | undefined
@@ -223,6 +225,7 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
               <SurfaceComments host={esSurfaceHost(props.id)} surface={surface()} revision={onScreen()} frame={frame} stage={() => stage} />
             </div>
           }}</Show>
+          </CitedRevisionGate>
         </Show>
       </Show>}
     </Show>
