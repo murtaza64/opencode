@@ -1,7 +1,7 @@
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { Portal } from "solid-js/web"
 import { useNavigate } from "@solidjs/router"
-import { entityView, mentionRef, parseEntityHref, rootRelative, type EntityRef, type EntityStores, type EntityView } from "../entity-ref"
+import { entityView, mentionRef, parseEntityHref, rootRelative, unqualifiedHref, type EntityRef, type EntityStores, type EntityView } from "../entity-ref"
 import { useDeskQueue } from "../desk-queue"
 import { personas } from "../desk-identity"
 import { sessionHref, useDashboard } from "../state"
@@ -79,6 +79,12 @@ export const useEntityStores = () => {
       .flatMap((thread) => (thread.lanes ?? []).map((lane) => ({ editspace: dashboard.state()?.editspace ?? "", lane: lane.lane, owner: lane.owner, activity: lane.activity, title: thread.title }))),
     personas: personas(),
     hostLabel: (id) => dashboard.work.feeds().find((feed) => feed.host.id === id)?.host.label,
+    remote: (id) => {
+      const feed = dashboard.work.feeds().find((item) => item.host.id === id)
+      if (!feed) return undefined
+      const state = feed.state()
+      return { surfaces: state.surfaces, decisions: state.decisions, stale: !!state.surfacesStale || state.status === "unavailable" }
+    },
   }))
 }
 
@@ -106,11 +112,15 @@ export const EntityRefs = (props: { container: () => HTMLElement | undefined }) 
       // "?item=…" means the app root; left as is, it would resolve against the session page it sits on.
       const raw = anchor.getAttribute("href") ?? ""
       if (raw.startsWith("?")) anchor.setAttribute("href", rootRelative(raw))
-      const ref = parseEntityHref(raw, current.here)
-      if (!ref) continue
+      const parsed = parseEntityHref(raw, current.here)
+      if (!parsed) continue
+      // An unqualified link means the host of the transcript it sits in (a Mini session viewed from the Laptop).
+      const sessionHost = anchor.closest<HTMLElement>("[data-session-host]")?.dataset.sessionHost
+      const ref = sessionHost && unqualifiedHref(raw) ? { ...parsed, host: sessionHost } : parsed
       const view = entityView({ ...ref, label: anchor.textContent?.trim() || undefined }, current)
       const token = tokenElement(view, "a")
-      token.setAttribute("href", rootRelative(raw))
+      // A ref on another host opens through that host's key, never this host's same-named item.
+      token.setAttribute("href", ref.host !== current.here && view.href ? view.href : rootRelative(raw))
       token.dataset.eref = "token"
       anchor.replaceWith(token)
     }

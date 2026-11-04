@@ -36,6 +36,8 @@ export type EntityStores = {
   personas: readonly Persona[]
   /** A Work host's label for an ID. */
   hostLabel?: (host: string) => string | undefined
+  /** Another Work host's held lists (its feed's last-known Surfaces and open decisions); undefined when not held. */
+  remote?: (host: string) => { surfaces: readonly Surface[]; decisions: readonly AttentionRecord[]; stale?: boolean } | undefined
 }
 
 export type EntityState = "ok" | "stale" | "missing" | "elsewhere"
@@ -59,6 +61,13 @@ export type EntityView = {
 }
 
 const initials = (name: string) => name.split(/[\s_-]+/).filter(Boolean).slice(0, 2).map((word) => word[0]!.toUpperCase()).join("") || "?"
+
+/** A link that names no host: relative, not under /hosts/<id>/, and no `<host>~` key. It means the host of the
+ * transcript it appears in, which may not be the viewer's. */
+export const unqualifiedHref = (href: string) => {
+  const decoded = (() => { try { return decodeURIComponent(href) } catch { return href } })()
+  return !/^[a-z][\w+.-]*:\/\//i.test(href) && !href.startsWith("//") && !/(^|\/)hosts\/[\w-]+\//.test(href) && !/[?&]item=[\w-]+~/.test(decoded)
+}
 
 /** A query-only link ("?item=…") means the app root, not the page it appears on. */
 export const rootRelative = (href: string) => href.startsWith("?") ? `/${href}` : href
@@ -109,25 +118,29 @@ export const entityView = (ref: EntityRef, stores: EntityStores): EntityView => 
   const elsewhere = ref.host !== stores.here
   const hostName = elsewhere ? stores.hostLabel?.(ref.host) ?? ref.host : undefined
   if (ref.kind === "surface") {
-    const surface = elsewhere ? undefined : stores.surfaces.find((item) => item.id === ref.id)
+    // Another Work host's Surface resolves from that host's held list; it is 'missing' only when that list was read.
+    const held = elsewhere ? stores.remote?.(ref.host) : { surfaces: stores.surfaces, decisions: stores.decisions }
+    const surface = held?.surfaces.find((item) => item.id === ref.id)
     const title = surface?.title ?? ref.label ?? ref.id
-    const state: EntityState = elsewhere ? "elsewhere" : !surface ? "missing" : ref.revision !== undefined && surface.revision > ref.revision ? "stale" : "ok"
-    const words = state === "missing" ? "not found on this host" : state === "stale" ? `changed since mentioned (was rev ${ref.revision})` : state === "elsewhere" ? `on ${hostName}` : ""
+    const state: EntityState = !surface ? (held && !held.stale ? "missing" : "elsewhere") : ref.revision !== undefined && surface.revision > ref.revision ? "stale" : "ok"
+    const where = elsewhere ? `on ${hostName}` : "on this host"
+    const words = state === "missing" ? `not found ${where}` : state === "stale" ? `changed since mentioned (was rev ${ref.revision})` : elsewhere ? where : ""
     return { ref, title, state, host: hostName, section: ref.section,
       // Another Work host's Surface opens in the desk reader through that host's key.
       href: elsewhere ? `/?item=${encodeURIComponent(`${ref.host}~surface:${ref.id}`)}` : `/?surface=${encodeURIComponent(ref.id)}`,
       label: [`Surface: ${title}`, ref.section && `section ${ref.section}`, surface && `revision ${surface.revision}`, words].filter(Boolean).join(", "),
-      rows: surface ? [["Revision", `rev ${surface.revision} · updated ${shortDateTime(surface.updated_at)}`], ["Owner", surface.owner], ["Host", "this host"],
+      rows: surface ? [["Revision", `rev ${surface.revision} · updated ${shortDateTime(surface.updated_at)}`], ["Owner", surface.owner], ["Host", hostName ?? "this host"],
         ...(ref.section ? [["Section", ref.section] as [string, string]] : []), ...(state === "stale" ? [["Mentioned", `rev ${ref.revision}`] as [string, string]] : [])]
-        : [["Host", hostName ?? "this host"], ["State", elsewhere ? `not loaded from ${hostName}` : "not found on this host"]],
+        : [["Host", hostName ?? "this host"], ["State", state === "missing" ? `not found ${where}` : `not loaded from ${hostName}`]],
       preview: surface?.summary ?? undefined }
   }
   if (ref.kind === "decision") {
-    const record = elsewhere ? undefined : stores.decisions.find((item) => item.id === ref.id && (!ref.editspace || item.editspace === ref.editspace))
+    const decisions = elsewhere ? stores.remote?.(ref.host)?.decisions ?? [] : stores.decisions
+    const record = decisions.find((item) => item.id === ref.id && (!ref.editspace || item.editspace === ref.editspace))
     const title = record?.title ?? ref.label ?? "decision"
     const answer = record?.answer?.choice_id ? record.options.find((option) => option.id === record.answer!.choice_id)?.label ?? record.answer.choice_id : undefined
     const status = record?.status ?? "unknown"
-    const state: EntityState = elsewhere ? "elsewhere" : record ? "ok" : "missing"
+    const state: EntityState = record ? "ok" : elsewhere ? "elsewhere" : "missing"
     return { ref, title, state, host: hostName, decision: record ? { status, ...(answer ? { answer } : {}) } : undefined,
       href: `/?item=${encodeURIComponent(`${elsewhere ? `${ref.host}~` : ""}attention:${record?.editspace ?? ref.editspace ?? ""}:${ref.id}`)}`,
       label: `Decision: ${title}, ${record ? `${DECISION_WORD[status] ?? status}${answer ? `: ${answer}` : ""}` : elsewhere ? `on ${hostName}` : "not found on this host"}`,

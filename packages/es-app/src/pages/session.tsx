@@ -2086,7 +2086,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
 
         <Show when={livingActivity()}><Filament messages={messages} parts={(id) => live.data.part[id] ?? []} steps={(id) => live.data.step[id] ?? []} status={status}
           pending={pending} subagents={subagentsRunning} transcript={() => transcriptEl} /></Show>
-        <div class="transcript" ref={transcriptEl}>
+        <div class="transcript" ref={transcriptEl} data-session-host={sessionHost.id ?? undefined}>
           <div ref={inner} class="transcript-inner" classList={{ "transcript-arrive": arrived() }}
             onPointerOver={stampBlock} onFocusIn={stampBlock} onClick={(event) => {
             // Only a standalone chip's own disclosure counts (an icon chip's summary, or a session-ui chip's trigger);

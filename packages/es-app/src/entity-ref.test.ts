@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { AttentionRecord } from "./attention"
 import type { Surface } from "./surfaces"
-import { entityView, mentionRef, parseEntityHref, type EntityStores } from "./entity-ref"
+import { entityView, mentionRef, parseEntityHref, unqualifiedHref, type EntityStores } from "./entity-ref"
 
 const surface = { id: "decision-briefs", title: "Decision briefs", summary: "21 cases", kind: "path", owner: "desktop-delivery", lane: "ux-feel", editspace: "opencode",
   updated_at: Date.UTC(2026, 10, 3, 15), revision: 3, health: { state: "ok" } } as unknown as Surface
@@ -43,4 +43,19 @@ test("a query-only link is root-relative, and item=<host>~surface:<id> is a Surf
   expect(parseEntityHref("?item=mini~surface%3Adiff-stream-catchup-20261103", stores.here)).toEqual({ kind: "surface", id: "diff-stream-catchup-20261103", host: "mini" })
   expect(parseEntityHref("/?item=surface:decision-briefs", stores.here)).toEqual({ kind: "surface", id: "decision-briefs", host: stores.here })
   expect(parseEntityHref("?item=attention:opencode:dec_1", stores.here)).toEqual({ kind: "decision", id: "dec_1", editspace: "opencode", host: stores.here })
+})
+
+test("an unqualified link in a Mini transcript resolves on the Mini, from its held list (DD #1273)", () => {
+  const feedback = { ...surface, id: "opencode-feedback-fixture", title: "Feedback fixture", revision: 2, owner: "ux-feel" } as Surface
+  const withMini: EntityStores = { ...stores, remote: (host) => host === "mini" ? { surfaces: [feedback], decisions: [] } : undefined }
+  expect(unqualifiedHref("/?surface=opencode-feedback-fixture")).toBe(true)
+  expect(unqualifiedHref("?item=mini~surface%3Ax")).toBe(false)
+  expect(unqualifiedHref("/hosts/mini/__es/surface/x")).toBe(false)
+  const ref = { ...parseEntityHref("/?surface=opencode-feedback-fixture", stores.here)!, host: "mini" }
+  const view = entityView(ref, withMini)
+  expect(view).toMatchObject({ state: "ok", title: "Feedback fixture", host: "Mac Mini", href: "/?item=mini~surface%3Aopencode-feedback-fixture" })
+  expect(view.rows).toContainEqual(["Host", "Mac Mini"])
+  // Missing only after that host's list was read; not held -> not loaded, never 'not found'.
+  expect(entityView({ kind: "surface", id: "gone", host: "mini" }, withMini)).toMatchObject({ state: "missing", label: "Surface: gone, not found on Mac Mini" })
+  expect(entityView({ kind: "surface", id: "gone", host: "other" }, withMini).state).toBe("elsewhere")
 })
