@@ -26,7 +26,33 @@ describe("parseBriefV1", () => {
   })
 })
 
+describe("figure library", () => {
+  test("scope keeps three touches and three nevers, and needs an action and a touch", () => {
+    expect(parseBriefV1({ scope: { action: "open 2 draft PRs", touches: ["a", "b", "c", "d"], never: ["deploy", "", "x", "y", "z"] } }))
+      .toEqual({ scope: { action: "open 2 draft PRs", touches: ["a", "b", "c"], never: ["deploy", "x", "y"] } })
+    expect(parseBriefV1({ scope: { action: "open", touches: [] } })).toBeUndefined()
+  })
+
+  test("flow keeps two to five labelled nodes, ids default to the label and unknown states are unknown", () => {
+    const nodes = ["a", "b", "c", "d", "e", "f"].map(label => ({ label, state: "ok" }))
+    expect(parseBriefV1({ flow: { nodes } })?.flow?.nodes.map(node => node.id)).toEqual(["a", "b", "c", "d", "e"])
+    expect(parseBriefV1({ flow: { nodes: [{ id: "clean", label: "11 clean", state: "ok", note: "safe" }, { label: "3 unpushed", state: "weird" }] } }))
+      .toEqual({ flow: { nodes: [{ id: "clean", label: "11 clean", state: "ok", note: "safe" }, { id: "3 unpushed", label: "3 unpushed", state: "unknown" }] } })
+    expect(parseBriefV1({ flow: { nodes: [{ label: "only" }] } })).toBeUndefined()
+  })
+
+  test("secure needs a destination", () => {
+    expect(parseBriefV1({ secure: { dest: "Doppler · api-tests", note: "sealed" } })).toEqual({ secure: { dest: "Doppler · api-tests", note: "sealed" } })
+    expect(parseBriefV1({ secure: { note: "no destination" } })).toBeUndefined()
+  })
+})
+
 describe("optionParts", () => {
+  test("the option that takes a secret owns the sealed field; the recommendation owns a scope", () => {
+    expect(optionParts({ secure: { dest: "Doppler" } }, [{ id: "save", input: { kind: "secret" } }, { id: "dry" }], "dry")).toEqual({ save: ["secure"], dry: [] })
+    expect(optionParts({ scope: { action: "open", touches: ["CI"] } }, [{ id: "publish" }, { id: "hold" }], "publish")).toEqual({ publish: ["scope"], hold: [] })
+  })
+
   const options = [{ id: "draft" }, { id: "hold" }]
 
   test("the recommended option is the drawn action unless the brief maps parts", () => {

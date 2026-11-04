@@ -23,6 +23,12 @@ export type BriefV1 = {
   key?: string
   action?: BriefAction
   metric?: { series: number[]; limit?: number; baseline?: number[]; unit?: string; label?: string }
+  /** Who acts is the lane; the brief names the one action and what it touches and never touches. */
+  scope?: { action: string; touches: string[]; never?: string[] }
+  /** A few states side by side; options name the nodes they act on by `id` (or label) in `shows`. */
+  flow?: { nodes: { id: string; label: string; state: "ok" | "bad" | "unknown"; note?: string }[] }
+  /** Where a secret goes; the value itself is typed into the sealed field, never into the brief. */
+  secure?: { dest: string; note?: string }
   /** Per option: what choosing it leads to, and which figure parts it is (`series`, `baseline`, `action`…). */
   options?: Record<string, { consequence?: string; shows?: string[] }>
 }
@@ -64,6 +70,23 @@ export const parseBriefV1 = (value: unknown): BriefV1 | undefined => {
       ...(short(value.metric.label, 120) ? { label: short(value.metric.label, 120) } : {}),
     }
   }
+  if (object(value.scope)) {
+    const action = short(value.scope.action, 80)
+    // Three of each at most: a scope that lists more is a report, not a picture.
+    const touches = strings(value.scope.touches)?.slice(0, 3)
+    const never = strings(value.scope.never)?.slice(0, 3)
+    if (action && touches?.length) brief.scope = { action, touches, ...(never?.length ? { never } : {}) }
+  }
+  if (object(value.flow) && Array.isArray(value.flow.nodes)) {
+    const nodes = value.flow.nodes.filter(object).flatMap(node => {
+      const label = short(node.label, 40)
+      if (!label) return []
+      const state = (["ok", "bad", "unknown"] as const).find(item => item === node.state) ?? "unknown"
+      return [{ id: short(node.id, 40) ?? label, label, state, ...(short(node.note, 60) ? { note: short(node.note, 60) } : {}) }]
+    }).slice(0, 5)
+    if (nodes.length >= 2) brief.flow = { nodes }
+  }
+  if (object(value.secure) && short(value.secure.dest, 80)) brief.secure = { dest: short(value.secure.dest, 80)!, ...(short(value.secure.note, 120) ? { note: short(value.secure.note, 120) } : {}) }
   if (object(value.options)) {
     const options = Object.fromEntries(Object.entries(value.options).flatMap(([id, item]) => {
       if (id.length === 0 || id.length > 120 || !object(item)) return []
@@ -77,12 +100,15 @@ export const parseBriefV1 = (value: unknown): BriefV1 | undefined => {
   return Object.keys(brief).length ? brief : undefined
 }
 
-/** Which figure parts each option is. Explicit `options.<id>.shows` wins; otherwise the recommended option is the
- * drawn action, and so are a grant's `once`/`always` options (the scene marks which key). A metric line belongs to an option only when
+/** Which figure parts each option is. Explicit `options.<id>.shows` wins; otherwise the option that takes a secret
+ * is the sealed field, and the recommended option is the drawn action or scope; a grant's `once`/`always` options
+ * are both the action (the scene marks which key). Flow nodes have no default owner. A metric line belongs to an option only when
  * the brief says so, so an unmapped chart never implies which choice leads where. */
-export const optionParts = (brief: BriefV1, options: { id: string }[], recommendation?: string | null) => Object.fromEntries(options.map(option => {
+export const optionParts = (brief: BriefV1, options: { id: string; input?: { kind: string } }[], recommendation?: string | null) => Object.fromEntries(options.map(option => {
   const shows = brief.options?.[option.id]?.shows
   if (shows) return [option.id, shows]
+  if (brief.secure && option.input?.kind === "secret") return [option.id, ["secure"]]
+  if (brief.scope && !brief.action && !brief.metric && option.id === recommendation) return [option.id, ["scope"]]
   if (brief.action?.verb === "grant" && ["once", "always"].includes(option.id)) return [option.id, ["action"]]
   if (brief.action && !brief.metric && option.id === recommendation) return [option.id, ["action"]]
   return [option.id, []]

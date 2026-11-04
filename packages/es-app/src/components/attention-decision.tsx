@@ -326,7 +326,8 @@ const same = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase()
 const RequestText = (props: { record: AttentionRecord; host?: string }) =>
   <div class="home-request-text" dir="auto"><Markdown text={requestMarkdown(props.record.context, { host: props.host })} cacheKey={`attention-request:${props.host ?? ""}:${props.record.editspace}:${props.record.id}:${props.record.revision}`} /></div>
 
-const Delivery = (props: { record: AttentionRecord; attention: Attention }) => {
+// `figure`: a v1 brief's lifecycle figure is the delivery statement, so the receipt wording and thread fallback stay out.
+const Delivery = (props: { record: AttentionRecord; attention: Attention; figure?: boolean }) => {
   const delivery = () => props.record.delivery
   const canWrite = () => canWriteAttention(props.attention, props.record)
   // Link the delivered session only with its own verified directory; the source link stays separate.
@@ -337,10 +338,10 @@ const Delivery = (props: { record: AttentionRecord; attention: Attention }) => {
     <Show when={props.record.answer?.input_value !== undefined && props.record.options.find(option => option.id === props.record.answer?.choice_id)}>{option =>
       <p class="home-input-value"><span class="home-source">{option().input?.label ?? "Provided"}</span> <bdi dir="auto" class="home-answer-text">{inputText(option(), props.record.answer?.input_value)}</bdi></p>}</Show>
     <Show when={props.record.answer?.text}><pre class="home-answer-text" dir="auto"><LinkedText text={props.record.answer?.text ?? ""} /></pre></Show>
-    <p class={props.record.delivery_state === "blocked" ? "home-blocked" : "home-muted"} role="status">{deliveryLabel(props.record)}<Show when={props.record.delivery_state === "blocked" && delivery()?.reason}> — {blockedReason(delivery()?.reason)}</Show></p>
+    <Show when={!props.figure}><p class={props.record.delivery_state === "blocked" ? "home-blocked" : "home-muted"} role="status">{deliveryLabel(props.record)}<Show when={props.record.delivery_state === "blocked" && delivery()?.reason}> — {blockedReason(delivery()?.reason)}</Show></p></Show>
     <Show when={delivery()?.error && !["presented", "handled"].includes(props.record.delivery_state)}><p class="home-muted">Last attempt failed: <bdi dir="auto">{delivery()?.error}</bdi> · retrying</p></Show>
-    <Show when={delivery()?.copies?.length}><ul class="home-copies"><For each={delivery()?.copies}>{copy => <li><bdi dir="ltr">{copy.session}</bdi> · {copy.state}{copy.presented_at ? ` · presented ${dateTime(copy.presented_at)}` : ""}{copy.handled_at ? ` · acknowledged ${dateTime(copy.handled_at)}` : ""}</li>}</For></ul></Show>
-    <div class="home-actions"><Show when={target()} fallback={<span class="home-muted">Not delivered yet</span>}>{item => <A href={sessionHref(item().session, item().directory)} aria-label="Open delivered agent thread">Open thread</A>}</Show><Show when={["pending", "blocked", "queued"].includes(props.record.delivery_state)}><button disabled={!canWrite()} onClick={() => props.attention.retryDelivery(props.record)}>Retry delivery</button></Show><button disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "resolve", reason: "Human marked resolved" })}>Mark resolved</button></div>
+    <Show when={!props.figure && delivery()?.copies?.length}><ul class="home-copies"><For each={delivery()?.copies}>{copy => <li><bdi dir="ltr">{copy.session}</bdi> · {copy.state}{copy.presented_at ? ` · presented ${dateTime(copy.presented_at)}` : ""}{copy.handled_at ? ` · acknowledged ${dateTime(copy.handled_at)}` : ""}</li>}</For></ul></Show>
+    <div class="home-actions"><Show when={target()} fallback={props.figure ? undefined : <span class="home-muted">Not delivered yet</span>}>{item => <A href={sessionHref(item().session, item().directory)} aria-label="Open delivered agent thread">Open thread</A>}</Show><Show when={["pending", "blocked", "queued"].includes(props.record.delivery_state)}><button disabled={!canWrite()} onClick={() => props.attention.retryDelivery(props.record)}>Retry delivery</button></Show><button disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "resolve", reason: "Human marked resolved" })}>Mark resolved</button></div>
   </div>
 }
 
@@ -429,9 +430,9 @@ export const AttentionDecision = (props: { record: AttentionRecord; attention: A
           </span>
         </li>
       }}</For></ul>}</Show>
-    <Show when={props.record.status === "answered"}><Delivery record={props.record} attention={props.attention} /></Show>
+    <Show when={props.record.status === "answered"}><Delivery record={props.record} attention={props.attention} figure={!!briefV1()} /></Show>
     <Show when={props.record.status === "snoozed"}><p class="home-muted">Snoozed until {props.record.snoozed_until ? dateTime(props.record.snoozed_until) : "unknown"}</p><button disabled={!canWrite()} onClick={() => props.attention.act(props.record, { action: "wake" })}>Return to Needs you</button></Show>
-    <Show when={["resolved", "withdrawn"].includes(props.record.status)}><p class="home-muted">{props.record.status === "resolved" ? "Resolved" : "Withdrawn"}</p><Show when={props.record.answer}><Show when={props.record.answer?.text}><pre class="home-answer-text" dir="auto"><LinkedText text={props.record.answer?.text ?? ""} /></pre></Show><Show when={optionLabel(props.record, props.record.answer?.choice_id)}>{label => <p class="home-recorded">You chose <bdi dir="auto">{label()}</bdi><Show when={props.record.answer?.answered_at}>{at => <> · <time dateTime={new Date(at()).toISOString()} title={exactTime(at())}>{ago(at())}</time></>}</Show></p>}</Show><p class="home-muted">{deliveryLabel(props.record)}</p></Show></Show>
+    <Show when={["resolved", "withdrawn"].includes(props.record.status)}><p class="home-muted">{props.record.status === "resolved" ? "Resolved" : "Withdrawn"}</p><Show when={props.record.answer}><Show when={props.record.answer?.text}><pre class="home-answer-text" dir="auto"><LinkedText text={props.record.answer?.text ?? ""} /></pre></Show><Show when={optionLabel(props.record, props.record.answer?.choice_id)}>{label => <p class="home-recorded">You chose <bdi dir="auto">{label()}</bdi><Show when={props.record.answer?.answered_at}>{at => <> · <time dateTime={new Date(at()).toISOString()} title={exactTime(at())}>{ago(at())}</time></>}</Show></p>}</Show><Show when={!briefV1()}><p class="home-muted">{deliveryLabel(props.record)}</p></Show></Show></Show>
     </div>
     <div class="home-decision-more">
     {props.more}

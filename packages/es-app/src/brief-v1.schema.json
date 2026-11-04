@@ -39,10 +39,36 @@
         "label": { "type": "string", "maxLength": 120 }
       }
     },
+    "scope": {
+      "type": "object",
+      "required": ["action", "touches"],
+      "properties": {
+        "action": { "type": "string", "maxLength": 28 },
+        "touches": { "type": "array", "minItems": 1, "maxItems": 3, "items": { "type": "string", "maxLength": 28 } },
+        "never": { "type": "array", "maxItems": 3, "items": { "type": "string", "maxLength": 28 } }
+      }
+    },
+    "flow": {
+      "type": "object",
+      "required": ["nodes"],
+      "properties": {
+        "nodes": { "type": "array", "minItems": 2, "maxItems": 5, "items": { "type": "object", "required": ["label"], "properties": {
+          "id": { "type": "string", "maxLength": 40 },
+          "label": { "type": "string", "maxLength": 28 },
+          "state": { "enum": ["ok", "bad", "unknown"] },
+          "note": { "type": "string", "maxLength": 28 }
+        } } }
+      }
+    },
+    "secure": {
+      "type": "object",
+      "required": ["dest"],
+      "properties": { "dest": { "type": "string", "maxLength": 28 }, "note": { "type": "string", "maxLength": 120 } }
+    },
     "options": { "type": "object", "propertyNames": { "minLength": 1, "maxLength": 120 }, "additionalProperties": {
       "type": "object", "properties": {
         "consequence": { "type": "string", "maxLength": 240 },
-        "shows": { "description": "Figure parts this option is: series, baseline, action, once, always", "type": "array", "maxItems": 8, "items": { "type": "string", "maxLength": 120 } }
+        "shows": { "description": "Figure parts this option is: series, baseline, action, scope, secure, or flow node ids", "type": "array", "maxItems": 8, "items": { "type": "string", "maxLength": 120 } }
       }
     } }
   },
