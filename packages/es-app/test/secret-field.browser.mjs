@@ -80,8 +80,8 @@ try {
     const carriers = requests.filter(request => Object.values(values).some(value => request.url.includes(value) || request.body.includes(value)))
     if (carriers.length !== 1 || !carriers[0].url.includes("/es/api/secret-intake/")) throw Error(`canary left through ${carriers.map(item => item.url).join(", ")}`)
     if (preview.ledger.calls.some(call => JSON.stringify(call).includes(values.secret) || JSON.stringify(call).includes(values.issuer))) throw Error("canary reached the attention ledger")
+    // The item stays selected across the reload, so the answered card is on the item page (NAV-01/02): no History disclosure.
     await page.reload()
-    await page.locator(".desk-history summary").click()
     await expect(card.locator(".home-input-value")).toContainText("Handed to the approved program")
     const after = await traces(page)
     if (Object.values(values).some(value => after.includes(value))) throw Error("canary remained in storage, URL or page text")
