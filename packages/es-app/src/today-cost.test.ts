@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import type { UsageDaily } from "./api"
-import { costSummary } from "./today-cost"
+import { costSummary, nextLocalMidnight } from "./today-cost"
 
 const NOW = Date.parse("2026-10-28T12:00:00Z")
 const tokens = { input: 1_000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } }
@@ -185,5 +185,46 @@ describe("costSummary", () => {
       laptop: { value: originRollup(0, { cost: null, originCost: null }), readAt: NOW },
     }, NOW)
     expect(summary).toBeUndefined()
+  })
+})
+
+// New York, west of UTC: 00:00Z is still the previous local day (DD .03.12, Porter #1231).
+describe("local day", () => {
+  const zone = process.env.TZ
+  beforeAll(() => { process.env.TZ = "America/New_York" })
+  afterAll(() => { process.env.TZ = zone })
+  const nov3 = (cost: number): UsageDaily => ({ ...originRollup(cost, { day: "2026-11-03" }), offsetMinutes: -300 })
+
+  test("after 00:00Z but before local midnight, today's total is unchanged", () => {
+    const summary = costSummary([laptop], { laptop: { value: nov3(142), readAt: Date.parse("2026-11-03T23:50:00Z") } }, Date.parse("2026-11-04T00:30:00Z"))
+    expect(summary?.total).toBe(142)
+  })
+
+  test("after local midnight, yesterday's reading is not today's total and is not shown as 0", () => {
+    const summary = costSummary([laptop], { laptop: { value: nov3(142), readAt: Date.parse("2026-11-04T04:50:00Z") } }, Date.parse("2026-11-04T05:00:30Z"))
+    expect(summary).toBeUndefined()
+  })
+
+  test("with two hosts, one still on yesterday's reading leaves no combined total and says why", () => {
+    const now = Date.parse("2026-11-04T05:01:00Z")
+    const nov4 = (cost: number): UsageDaily => ({ ...originRollup(cost, { day: "2026-11-04" }), offsetMinutes: -300 })
+    const summary = costSummary([laptop, mini], { laptop: { value: nov4(3), readAt: now }, mini: { value: nov3(90), readAt: now } }, now)
+    expect(summary?.total).toBeUndefined()
+    expect(summary?.hosts.map((item) => [item.label, item.state, item.cost])).toEqual([["Laptop", "ok", 3], ["Mini", "stale", undefined]])
+    expect(summary?.hosts[1]?.note).toBe("last reading is for 2026-11-03")
+  })
+
+  test("each host records the offset it was asked for", () => {
+    const summary = costSummary([laptop], { laptop: { value: nov3(142), readAt: Date.parse("2026-11-03T18:00:00Z") } }, Date.parse("2026-11-03T18:00:00Z"))
+    expect(summary?.hosts[0]?.offsetMinutes).toBe(-300)
+  })
+
+  test("the re-read is scheduled just after the next local midnight, not 00:00Z", () => {
+    expect(new Date(nextLocalMidnight(Date.parse("2026-11-03T23:30:00Z"))).toISOString()).toBe("2026-11-04T05:00:05.000Z")
+  })
+
+  test("on the DST change the local day is 25 hours long and the re-read follows local midnight", () => {
+    // Nov 1 2026: clocks go back at 2 AM EDT; local midnight Nov 2 is 05:00Z.
+    expect(new Date(nextLocalMidnight(Date.parse("2026-11-01T04:30:00Z"))).toISOString()).toBe("2026-11-02T05:00:05.000Z")
   })
 })

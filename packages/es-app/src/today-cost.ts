@@ -23,6 +23,7 @@ const [targets, setTargets] = createSignal<Target[]>([])
 const last = new Map<string, number>()
 const inflight = new Map<string, Promise<void>>()
 let timer: ReturnType<typeof setTimeout> | undefined
+let midnight: ReturnType<typeof setTimeout> | undefined
 let started = false
 
 /** This host when it is a WORK host (or the only host known), plus every other WORK host. */
@@ -62,8 +63,32 @@ export const startTodayCost = () => {
   void readHost().then(() => {
     setTargets(workTargets())
     targets().forEach((target) => void read(target))
+    armMidnight()
   })
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") touchTodayCost() })
+}
+
+/** Re-reads every host just after the next local midnight, then re-arms, so the badge rolls over to the new
+ * local day without waiting for a turn or a tab switch. */
+const armMidnight = () => {
+  clearTimeout(midnight)
+  midnight = setTimeout(() => {
+    targets().forEach((target) => void read(target))
+    armMidnight()
+  }, Math.max(0, nextLocalMidnight(Date.now()) - Date.now()))
+}
+
+/** A few seconds after the next local midnight (a 23- or 25-hour day on a DST change). */
+export const nextLocalMidnight = (now: number) => {
+  const next = new Date(now)
+  next.setHours(24, 0, 5, 0)
+  return next.getTime()
+}
+
+/** This device's local calendar date, YYYY-MM-DD: the day each host's rollup is asked for. */
+export const localDay = (now: number) => {
+  const at = new Date(now)
+  return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`
 }
 
 /** Something may have added spend: re-read each host, at most once a minute per host. */
@@ -81,8 +106,12 @@ export const touchTodayCost = () => {
  * tracks origin, coverage.origin present, but this local day began before originSince, so it cannot yet be
  * split by host and is not combined), unsupported
  * (older Core without origin-only cost: its raw daily cost may include history moved from another host, so it is
- * shown on its own and never combined), unreachable (no value yet), pending (first read in flight). */
-export type HostCost = { id: string; label: string; current: boolean; state: "ok" | "partial" | "offline" | "unpriced" | "tracking" | "unsupported" | "unreachable" | "pending"; cost?: number; observedAt?: number; note?: string
+ * shown on its own and never combined), unreachable (no value yet), pending (first read in flight), stale (the last
+ * reading is for another local day, e.g. yesterday's before the midnight re-read lands: no amount, never combined). */
+export type HostCost = { id: string; label: string; current: boolean; state: "ok" | "partial" | "offline" | "unpriced" | "tracking" | "unsupported" | "unreachable" | "pending" | "stale"; cost?: number; observedAt?: number; note?: string
+  /** The east-positive UTC offset the host was asked to bucket days by; 0 on a non-UTC device means the
+   * renderer's clock zone is wrong. */
+  offsetMinutes?: number
   /** Origin-only cost from a whole hour after originSince, on the day tracking began. */
   since?: { at: number; cost: number; unpriced: boolean } }
 
@@ -100,9 +129,12 @@ export const costSummary = (targets: Target[], readings: Record<string, Reading>
     if (!reading) return { id: target.id, label: target.label, current: target.current, state: "pending" }
     if (!value || !today) return { id: target.id, label: target.label, current: target.current, state: "unreachable", note: reading.error }
     const observedAt = Date.parse(value.observedAt)
+    const offset = { offsetMinutes: value.offsetMinutes }
+    // Yesterday's total is not today's: until the re-read lands, this host has no amount for today.
+    if (today.day !== localDay(now)) return { id: target.id, label: target.label, current: target.current, state: "stale", observedAt, ...offset, note: `last reading is for ${today.day}` }
     const used = today.models.filter((model) => model.coverage !== "no-usage")
     const priced = used.filter((model) => !unpriced(model))
-    const base = { id: target.id, label: target.label, current: target.current, observedAt }
+    const base = { id: target.id, label: target.label, current: target.current, observedAt, ...offset }
     const failed = reading.error ? `last read failed: ${reading.error}` : undefined
     if (today.cost === null || (used.length && !priced.length)) return { ...base, state: "unpriced", note: failed ?? "no priced usage" }
     const partial = !value.coverage.backfilled || today.complete === false || priced.length < used.length || (today.unpricedModels ?? 0) > 0

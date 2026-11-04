@@ -5,6 +5,13 @@ import { clockTime } from "../local-time"
 
 let nextID = 0
 
+// "UTC−05:00": the offset a host bucketed today by, so a renderer that reports UTC on a non-UTC device is visible.
+const utcOffset = (minutes: number) => {
+  const sign = minutes < 0 ? "−" : "+"
+  const abs = Math.abs(minutes)
+  return `UTC${sign}${String(Math.floor(abs / 60)).padStart(2, "0")}:${String(abs % 60).padStart(2, "0")}`
+}
+
 // "tracking": the Core supports origin-only cost, but today started before it began recording origin.
 const gapLabel = (item: HostCost) => `${item.label} ${item.state === "tracking" ? "origin tracking started today" : item.state}`
 
@@ -22,7 +29,7 @@ export const TodayCost = () => {
     const time = (at: number) => clockTime(at)
     const stale = () => now() - cost().observedAt > STALE_MS
     const age = () => { const minutes = Math.max(0, Math.round((now() - cost().observedAt) / 60_000)); return minutes < 1 ? "just now" : `${minutes}m ago` }
-    const hostLine = (item: HostCost) => `${item.label}: ${item.cost !== undefined ? `$${item.cost.toFixed(2)}` : item.state === "pending" ? "reading…" : item.state}${item.note ? ` (${item.note})` : ""}${item.observedAt ? ` · ${time(item.observedAt)}` : ""}${cost().counted.includes(item.id) || item.cost === undefined ? "" : " · not in total"}`
+    const hostLine = (item: HostCost) => `${item.label}: ${item.cost !== undefined ? `$${item.cost.toFixed(2)}` : item.state === "pending" ? "reading…" : item.state}${item.note ? ` (${item.note})` : ""}${item.observedAt ? ` · ${time(item.observedAt)}` : ""}${item.offsetMinutes !== undefined ? ` · day as ${utcOffset(item.offsetMinutes)}` : ""}${cost().counted.includes(item.id) || item.cost === undefined ? "" : " · not in total"}`
     const sub = () => cost().total === undefined ? cost().subtotal : undefined
     const shown = () => cost().total ?? sub()?.cost
     const since = () => sub() ? time(sub()!.since) : ""
@@ -54,7 +61,7 @@ export const TodayCost = () => {
             <Show when={sub()?.hosts.find((part) => part.id === item.id)}>{(part) =>
               <span class="today-cost-host-since">since {since()}: ${part().cost.toFixed(2)} (in total)</span>}
             </Show>
-            <span class="today-cost-host-state">{item.state}{item.note ? ` · ${item.note}` : ""}{cost().counted.includes(item.id) || item.cost === undefined ? "" : sub() ? " · full day not in total" : " · not in total"}</span>
+            <span class="today-cost-host-state">{item.state}{item.note ? ` · ${item.note}` : ""}{item.offsetMinutes !== undefined ? ` · day as ${utcOffset(item.offsetMinutes)}` : ""}{cost().counted.includes(item.id) || item.cost === undefined ? "" : sub() ? " · full day not in total" : " · not in total"}</span>
           </div>}
         </For>
         <Show when={coverage()}><div class="today-cost-coverage">{coverage()}</div></Show>
