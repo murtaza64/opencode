@@ -99,6 +99,8 @@ try {
   expect(writes).toHaveLength(1)
   step("seen holds across a reload with no second write (server seen)")
 
+  // Seen is a status; Mark unread lives in ⋯.
+  await reader.locator(".surface-more summary").click()
   await reader.getByRole("button", { name: "Mark unread" }).click()
   await expect(row).toBeVisible()
   await page.waitForTimeout(2_000)

@@ -12,6 +12,8 @@ import { missingSurface } from "../surface-ref"
 import { BuildingHubSlot } from "./buildinghub-link"
 import { SurfaceOwner } from "./surface-owner"
 import { SurfaceComments } from "./surface-comments"
+import { useEntityStores } from "./entity-ref"
+import { surfaceToken } from "../entity-ref"
 import { esSurfaceHost } from "../surface-comments"
 import "./desk-surfaces.css"
 
@@ -133,8 +135,8 @@ export const createDeliverableDone = (surface: () => Surface | undefined, onDone
   return { deliverable, onScreen, newer, load: setShown, done, writing, failed, mark, loaded, used, ready, unread: () => unread() === onScreen(), enabled: () => !!deliverable() && !!onDone() }
 }
 
-/** The seen state of one reader (and "newer revision" when the deliverable was republished while open): "Seen" with
- * "Mark unread" once the revision on screen is marked, "Mark seen" after the human marked it unread or a write failed. */
+/** The seen state of one reader (and "newer revision" when the deliverable was republished while open): a "Seen"
+ * status once the revision on screen is marked (Mark unread is in ⋯), "Mark seen" after the human marked it unread or a write failed. */
 export const DeliverableDoneControls = (props: { state: ReturnType<typeof createDeliverableDone>; label?: string }) =>
   <Show when={props.state.enabled() && (props.state.ready() || props.state.newer())}>
     <span class="surface-head-done" data-revision={props.state.onScreen()}>
@@ -142,22 +144,33 @@ export const DeliverableDoneControls = (props: { state: ReturnType<typeof create
       <Show when={props.state.ready()}>
         <Show when={props.state.done()} fallback={<Show when={props.state.unread() || props.state.failed()}>
           <button class="surface-head-text surface-done" disabled={props.state.writing()} title={`Mark revision ${props.state.onScreen()} seen; it leaves Needs you on every device`} onClick={() => void props.state.mark(true)}>{props.label ?? "Mark seen"}</button></Show>}>{state =>
-          <button class="surface-head-text surface-done" aria-label="Mark unread" disabled={props.state.writing()} title={`Seen rev ${props.state.onScreen()}${state().at ? ` · ${new Date(state().at!).toLocaleString()}` : ""} · click to mark unread`} onClick={() => void props.state.mark(false)}>✓ Seen</button>}</Show>
+          <span class="surface-head-text surface-done" role="status" title={`Seen rev ${props.state.onScreen()}${state().at ? ` · ${new Date(state().at!).toLocaleString()}` : ""} · Mark unread is in ⋯`}>✓ Seen</span>}</Show>
       </Show>
       <Show when={props.state.failed()}><span class="home-blocked" role="alert">not saved</span></Show>
     </span>
   </Show>
 
-export const SurfaceHeadMore = (props: { surface?: Surface; src: () => string | undefined; done: ReturnType<typeof createDeliverableDone> }) => {
+/** `host`: the Work host that owns the Surface when it is another host's; this window's host otherwise. */
+export const SurfaceHeadMore = (props: { surface?: Surface; src: () => string | undefined; done: ReturnType<typeof createDeliverableDone>; host?: string }) => {
   const [find, setFind] = createSignal(0)
   let menu: HTMLDetailsElement | undefined
+  // The canonical reference to the revision on screen (<host>~surface:<id>@r<N>), as entity cards copy it.
+  const stores = useEntityStores()
+  const reference = () => props.surface ? surfaceToken({ id: props.surface.id, host: props.host ?? stores().here, ...(props.done.onScreen() ? { revision: props.done.onScreen() } : {}) }, stores()) : undefined
+  const [copied, setCopied] = createSignal(false)
+  const copy = async (text: string) => {
+    setCopied(await navigator.clipboard?.writeText(text).then(() => true, () => false) ?? false)
+    setTimeout(() => { setCopied(false); if (menu) menu.open = false }, 1200)
+  }
   return <>
     <SurfaceFind frame={props.src} trigger={find} />
     <details class="surface-more" ref={menu} onKeyDown={event => { if (event.key !== "Escape") return; event.preventDefault(); event.stopPropagation(); menu!.open = false; menu?.querySelector("summary")?.focus() }}>
       <summary class="surface-head-button" role="button" aria-label="More" title="More">⋯</summary>
       <div class="surface-more-items">
-        <button type="button" onClick={() => { menu!.open = false; setFind(find() + 1) }}>Find in page</button>
+        {/* Find and new tab need a page on screen; an offline or failed Surface has none. */}
+        <Show when={props.src()}><button type="button" onClick={() => { menu!.open = false; setFind(find() + 1) }}>Find in page</button></Show>
         <Show when={props.src()}>{src => <a href={src()} target="_blank" rel="noopener noreferrer" aria-label="Open in new tab">Open in new tab</a>}</Show>
+        <Show when={reference()}>{text => <button type="button" title={text()} onClick={() => void copy(text())}>{copied() ? "Copied" : "Copy reference"}</button>}</Show>
         <Show when={props.done.ready() && props.done.done()}><button type="button" onClick={() => { menu!.open = false; void props.done.mark(false) }}>Mark unread</button></Show>
         <BuildingHubSlot surface={props.surface} />
       </div>
@@ -195,13 +208,15 @@ export const SurfaceView = (props: { id: string; surface?: Surface; withdrawn?: 
     {/* The app's one top bar (the Mac window's title bar in the desktop app). */}
     <AppHeader>
       <div class="surface-head" onKeyDown={closeOnEscape}>
-        <h2 title={props.surface ? `${props.surface.owner} · ${surfaceProblem(props.surface.health) ?? `updated ${ago(props.surface.updated_at)}`} · ${props.surface.lane ?? "no lane"} · ${props.surface.editspace} · revision ${props.surface.revision}` : undefined}>
+        <h2 title={props.surface ? `${props.surface.title}\n${props.surface.owner} · ${surfaceProblem(props.surface.health) ?? `updated ${ago(props.surface.updated_at)}`} · ${props.surface.lane ?? "no lane"} · ${props.surface.editspace} · revision ${props.surface.revision}` : undefined}>
           <bdi dir="auto">{props.surface?.title ?? props.id}</bdi></h2>
         <span class="surface-head-rev">rev {doneState.onScreen() || props.surface?.revision || ""}</span>
         <Show when={props.surface}>{surface => <SurfaceOwner surface={surface()} onMessage={() => window.dispatchEvent(new CustomEvent("surface-message-author", { detail: props.id }))} />}</Show>
+        {/* Seen, ⋯ and close stay together at the end, whether or not Seen is shown. */}
+        <span class="surface-head-spacer" />
         {/* An FYI revision asks nothing: no Done (seen is still recorded by opening it). */}
         <Show when={props.surface?.change?.intent !== "fyi"}><DeliverableDoneControls state={doneState} /></Show>
-        <SurfaceHeadMore surface={props.surface} src={src} done={doneState} />
+        <SurfaceHeadMore surface={props.surface} src={() => props.surface && !surfaceUnavailable(props.surface) && !address.error ? src() : undefined} done={doneState} />
         <span class="surface-head-actions">
           <button class="surface-head-button" aria-label="Close and return to chat" title="Close (Esc)" onClick={props.onClose}>×</button>
         </span>

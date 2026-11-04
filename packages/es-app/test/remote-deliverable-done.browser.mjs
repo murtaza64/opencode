@@ -131,6 +131,8 @@ try {
   await expect(miniRow).toHaveCount(0)
   step("the Mini's seen holds across a reload")
 
+  // Seen is a status; Mark unread lives in ⋯.
+  await reader.locator(".surface-more summary").click()
   await reader.getByRole("button", { name: "Mark unread" }).click()
   await expect(miniRow).toBeVisible()
   if (await seenOn(mini)) throw new Error("Mark unread not saved on the Mini")

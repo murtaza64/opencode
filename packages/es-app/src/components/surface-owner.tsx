@@ -21,7 +21,9 @@ export const useSurfaceOwner = (surface: () => Surface, host?: { id: string; lab
   const navigate = useNavigate()
   const [owner] = createResource(surface, value => surfaceOwner(value, host ? hostPrefix(host.id) : ""))
   const ref = () => surfaceRef(surface(), host?.id ?? window.location.host)
-  const name = () => personas().find(person => person.owner_lane === surface().lane)?.name ?? surface().owner ?? surface().lane ?? "Author"
+  // A persona's name when the lane has one; else the owner as written when it is a name, or the humanised last lane
+  // segment ("opencode/ux-feel" -> "Ux feel"), never a raw editspace/lane path.
+  const name = () => personas().find(person => person.owner_lane === surface().lane)?.name ?? ownerName(surface())
   const avatar = () => personas().find(person => person.owner_lane === surface().lane || person.name === name())?.avatar_url
   const href = () => {
     const value = owner()
@@ -57,7 +59,7 @@ export const SurfaceOwner = (props: { surface: Surface; host?: { id: string; lab
       if (event.key !== "Escape" || !menu?.open) return
       event.preventDefault(); event.stopPropagation(); close(); menu.querySelector("summary")?.focus()
     }}>
-      <summary class="surface-owner-chip" title={`Published by ${author.name()}`}>
+      <summary class="surface-owner-chip" title={`Published by ${author.name()}${props.surface.lane ? ` · lane ${props.surface.lane}` : ""}`}>
         <span class="surface-owner-avatar"><Show when={author.avatar()} fallback={author.name().charAt(0).toUpperCase()}>{url => <img src={url()} alt="" referrerpolicy="no-referrer" />}</Show></span>
         <bdi dir="auto">{author.name()}</bdi>
         <Show when={author.owner()?.state === "ok" && (author.owner() as { busy?: boolean }).busy}><span class="dot busy" title="Working" aria-label="Working" /></Show>
@@ -77,4 +79,12 @@ export const SurfaceOwner = (props: { surface: Surface; host?: { id: string; lab
       </span>
     </details>
   </span>
+}
+
+const ownerName = (surface: Pick<Surface, "owner" | "lane">) => {
+  if (surface.owner && !surface.owner.includes("/")) return surface.owner
+  const segment = surface.owner?.split("/").at(-1) || surface.lane
+  if (!segment) return "Author"
+  const words = segment.replace(/[-_]+/g, " ").trim()
+  return words.charAt(0).toUpperCase() + words.slice(1)
 }
