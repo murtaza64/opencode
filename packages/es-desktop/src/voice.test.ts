@@ -377,7 +377,10 @@ test("one voice note at a time; aborting the request kills whisper and frees the
   abort.abort()
   expect(await first).toMatchObject({ ok: false, code: "cancelled" })
   const pid = Number(await Bun.file(pidFile).text())
-  expect(() => process.kill(pid, 0)).toThrow()
+  // The kill is sent before "cancelled" resolves; the process can take a moment to exit under load.
+  const alive = () => { try { process.kill(pid, 0); return true } catch { return false } }
+  for (let i = 0; i < 200 && alive(); i++) await Bun.sleep(10)
+  expect(alive()).toBe(false)
   expect(await readdir(temp)).toEqual([])
 })
 
