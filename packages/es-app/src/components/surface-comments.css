@@ -64,8 +64,8 @@
 .sc-compose textarea { inline-size: 100%; box-sizing: border-box; resize: vertical; min-block-size: 44px; padding: 6px 8px; border: 1px solid var(--surface1); border-radius: 6px; background: var(--mantle); color: var(--text); font: inherit; font-size: 13px; }
 .sc-compose textarea:focus { outline: none; border-color: var(--peach); }
 .sc-compose-row { display: flex; align-items: center; gap: 8px; } .sc-compose-row .sc-dim-text { margin-inline-end: auto; }
-.sc-send { padding: 3px 12px; border: 1px solid var(--peach); border-radius: 5px; background: var(--peach); color: var(--crust, #000); font-weight: 600; font-size: 12px; }
-.sc-send:disabled { opacity: .45; }
+.sc-send, .sc-chat-send { padding: 3px 12px; border: 1px solid var(--peach); border-radius: 5px; background: var(--peach); color: var(--crust, #000); font-weight: 600; font-size: 12px; }
+.sc-send:disabled, .sc-chat-send:disabled { opacity: .45; }
 .sc-text-button { padding: 2px 4px; border: 0; background: none; color: var(--subtext1); font-size: 12px; text-decoration: underline; text-underline-offset: 2px; }
 /* A fixed-size row; the finder and drawing shapes grow above it. */
 .sc-toolbar { position: absolute; inset-block-end: 14px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 2px; padding: 5px;
@@ -75,8 +75,46 @@
 .sc-toolbar button { flex: none; inline-size: 34px; block-size: 34px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 9px; background: none; color: var(--subtext1); cursor: pointer; font-size: 23px; }
 .sc-toolbar button:hover, .sc-toolbar button[aria-expanded=true] { background: var(--surface1); color: var(--text); }
 .sc-toolbar button[aria-pressed=true]:not([aria-label="Hide comments (H)"]) { background: var(--peach); color: var(--crust, #000); }
-.sc-toolbar button.sc-tool-say { color: var(--yellow); }
-.sc-toolbar button.sc-tool-say:hover, .sc-toolbar button.sc-tool-say[aria-pressed=true] { background: var(--surface1); color: var(--yellow); }
+.sc-toolbar button.sc-tool-mic { color: var(--yellow); }
+.sc-toolbar button.sc-tool-mic:hover { background: var(--surface1); color: var(--yellow); }
+/* Recording: the mic shows REC and the elapsed time, red, until clicked again. */
+.sc-toolbar button.sc-tool-mic[data-state=recording] { inline-size: auto; padding: 0 8px; background: color-mix(in srgb, var(--red) 22%, transparent); color: var(--red); }
+.sc-toolbar button.sc-tool-mic[data-state=transcribing] { opacity: .6; }
+.sc-rec { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sc-rec svg { inline-size: 16px; block-size: 16px; }
+.sc-rec i { inline-size: 8px; block-size: 8px; border-radius: 50%; background: currentColor; animation: sc-rec 1s ease-in-out infinite; }
+@keyframes sc-rec { 50% { opacity: .3; } }
+.sc-toolbar button.sc-tool-chat { position: relative; }
+.sc-chat-unread { position: absolute; inset-block-start: -4px; inset-inline-end: -4px; min-inline-size: 16px; block-size: 16px; padding: 0 4px; border-radius: 8px; background: var(--red); color: var(--crust, #000); font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; }
+/* The chat pop: bottom-right, above the toolbar's row, never over the toolbar. */
+.sc-chat { position: absolute; inset-inline-end: 12px; bottom: 69px; z-index: 6; display: flex; flex-direction: column; inline-size: min(360px, calc(100% - 24px)); block-size: min(440px, calc(100% - 81px)); box-sizing: border-box; border: 1px solid var(--surface1); border-radius: 14px; background: var(--base); color: var(--text); box-shadow: 0 20px 50px rgb(0 0 0 / 35%); overflow: hidden; }
+.sc-chat.sc-chat-min { display: none; }
+.sc-chat-head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 10px; border-block-end: 1px solid var(--surface0); font-size: 13px; }
+.sc-chat-avatar { flex: none; display: grid; place-items: center; inline-size: 26px; block-size: 26px; overflow: hidden; border-radius: 8px; background: var(--peach); color: var(--crust); font-weight: 700; font-size: 12px; }
+.sc-chat-avatar img { inline-size: 100%; block-size: 100%; object-fit: cover; }
+.sc-chat-name { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc-chat-full { flex: none; font-size: 12px; color: var(--blue); }
+.sc-toolbar .sc-chat-icon, .sc-chat-icon { flex: none; inline-size: 26px; block-size: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--subtext0); font-size: 16px; line-height: 1; cursor: pointer; }
+.sc-chat-icon:hover, .sc-chat-icon:focus-visible { background: var(--surface0); color: var(--text); }
+.sc-chat-body { flex: 1; min-block-size: 0; overflow-y: auto; display: grid; align-content: start; gap: 10px; padding: 10px 12px; font-size: 13px; }
+.sc-chat-empty { margin: 8px 0; color: var(--subtext0); font-size: 12px; }
+.sc-chat-msg { display: grid; gap: 3px; max-inline-size: 90%; }
+.sc-chat-msg[data-role=user] { justify-self: end; padding: 6px 10px; border-radius: 12px 12px 4px 12px; background: var(--surface0); }
+.sc-chat-msg[data-role=assistant] { justify-self: start; }
+.sc-chat-msg p { margin: 0; }
+.sc-chat-msg :is(h1, h2, h3) { font-size: 13px; margin: 4px 0; }
+.sc-chat-meta { display: flex; justify-content: flex-end; gap: 6px; font-size: 10px; color: var(--subtext0); }
+.sc-chat-tick[data-state=replied] { color: var(--green); }
+.sc-chat-chip { display: inline-block; padding: 1px 7px; border-radius: 30px; background: var(--surface0); color: var(--subtext1); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-inline-size: 100%; }
+.sc-chat-working { margin: 0; color: var(--subtext0); font-size: 12px; }
+.sc-chat-working span { letter-spacing: 2px; animation: sc-rec 1.2s ease-in-out infinite; }
+.sc-chat-compose { display: grid; gap: 6px; padding: 8px 10px 10px; border-block-start: 1px solid var(--surface0); }
+.sc-chat-compose .sc-chat-chip { justify-self: start; }
+.sc-chat-compose textarea { box-sizing: border-box; inline-size: 100%; resize: none; padding: 6px 8px; border: 1px solid var(--surface1); border-radius: 8px; background: var(--crust, #000); color: var(--text); font: inherit; font-size: 13px; }
+.sc-chat-row { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.sc-chat-bubble { position: absolute; inset-inline-end: 16px; bottom: 69px; z-index: 6; display: grid; place-items: center; inline-size: 44px; block-size: 44px; padding: 0; border: 1px solid var(--surface1); border-radius: 50%; background: var(--base); box-shadow: 0 8px 24px rgb(0 0 0 / 35%); cursor: pointer; }
+.sc-chat-bubble .sc-chat-avatar { inline-size: 32px; block-size: 32px; border-radius: 50%; }
+@media (prefers-reduced-motion: reduce) { .sc-rec i, .sc-chat-working span { animation: none; } }
 .sc-toolbar button[aria-label="Hide comments (H)"][aria-pressed=false] { opacity: .5; }
 .sc-toolbar button:disabled { opacity: .45; cursor: not-allowed; }
 .sc-toolbar svg:not(.glyph) { inline-size: 18px; block-size: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -119,11 +157,6 @@
 .sc-tray-row { display: block; inline-size: 100%; border: 0; border-radius: 9px; padding: 7px 8px; text-align: start; background: none; color: var(--text); font: inherit; cursor: pointer; overflow-wrap: anywhere; }
 .sc-tray-row:hover { background: var(--surface0); }
 .sc-empty { margin: 12px; color: var(--subtext0); }
-.sc-say { position: absolute; left: 50%; bottom: 69px; transform: translateX(-50%); z-index: 6; display: grid; gap: 10px; inline-size: min(380px, calc(100% - 24px)); padding: 12px; box-sizing: border-box; border: 1px solid var(--surface1); border-radius: 14px; background: var(--base); color: var(--text); box-shadow: 0 20px 50px rgb(0 0 0 / 35%); }
-.sc-say-to { display: flex; flex-wrap: wrap; gap: 4px; font-size: 12px; color: var(--subtext0); }
-.sc-say-to a { margin-inline-start: auto; }
-.sc-say .sc-compose-row .sc-dim-text { white-space: normal; }
-.sc-say a { color: var(--blue); }
 @media (prefers-reduced-motion: reduce) {
   .sc-veil { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgb(17 20 24 / 32%); }
   .sc-card { animation: none; } .sc-peek, .sc-toolbar, .sc-fly { transition: none; }
@@ -134,7 +167,6 @@
   .sc-toolbar .sc-count { inline-size: 42px; }
   .sc-toolbar i { margin: 0 2px; }
   .sc-tray { bottom: 60px; }
-  .sc-say { bottom: 60px; }
   .sc-tray-filters { flex-wrap: wrap; }
   .sc-peek { inline-size: 32px; block-size: 32px; }
   .sc-card { inline-size: min(360px, calc(100% - 16px)); }
@@ -143,3 +175,8 @@
 .sc-look-pulse { position: absolute; pointer-events: none; border-radius: 6px; box-shadow: 0 0 0 2px var(--blue), 0 0 0 6px color-mix(in srgb, var(--blue) 25%, transparent); animation: sc-look-pulse 1.6s ease-out forwards; }
 @keyframes sc-look-pulse { 0% { opacity: 0; } 15% { opacity: 1; } 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .sc-look-pulse { animation: none; opacity: 1; } }
+/* The transcript components at chat size: the reader's own colours, no copy/meta chrome (the full chat has those). */
+.sc-chat-msg [data-component="user-message"], .sc-chat-msg [data-slot="user-message-body"], .sc-chat-msg [data-slot="user-message-text"] { margin: 0; padding: 0; border: 0; background: none; box-shadow: none; max-inline-size: none; }
+.sc-chat-msg :is([data-slot="user-message-text"], [data-component="markdown"], [data-component="text-part"]) { color: var(--text); font-size: 13px; line-height: 1.45; }
+.sc-chat-msg [data-component="markdown"] :is(p, ul, ol) { margin: 0 0 4px; }
+.sc-chat-msg :is([data-slot="user-message-copy-wrapper"], [data-slot="text-part-copy-wrapper"]) { display: none; }

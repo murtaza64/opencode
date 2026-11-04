@@ -4,7 +4,8 @@ import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Sh
 import { ago } from "../state"
 import { initialOf, MAX_BODY, mintCommentId, placement, placementLabel, pointMark, pointOf, receiptLabel, threads, type AnchorState, type CommentAnchor, type CommentHost, type CommentPoint, type SealedComment, type SurfaceComment } from "../surface-comments"
 import { Glyph } from "./icons"
-import { DictationField } from "./dictation-field"
+import { SurfaceChat } from "./surface-chat"
+import { dictation, fieldTarget } from "../dictation"
 import { useSurfaceOwner } from "./surface-owner"
 import type { Surface } from "../surfaces"
 import { focusHole, placeCard } from "../../../surface-bridge/src/geometry.js"
@@ -30,25 +31,30 @@ const TOOLS: { tool: Tool; label: string; glyph: string }[] = [{ tool: "pen", la
 
 export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ownerHost?: { id: string; label: string }; revision: number; frame: () => HTMLIFrameElement | undefined; stage: () => HTMLElement | undefined }) => {
   const author = useSurfaceOwner(() => ({ ...props.surface, revision: props.revision }), props.ownerHost)
-  const [saying, setSaying] = createSignal(false)
-  const [said, setSaid] = createSignal(false)
-  const [sayDraft, setSayDraft] = createSignal("")
-  const [sayError, setSayError] = createSignal("")
-  const [sendingSay, setSendingSay] = createSignal(false)
-  let sayInput: HTMLTextAreaElement | undefined
-  const toggleSay = () => { setSaying(!saying()); if (!saying()) return; setTray(false); setTucked(false); setSaid(false); queueMicrotask(() => sayInput?.focus()) }
-  const sendSay = async () => {
-    const text = sayDraft().trim()
-    if (!text || sendingSay() || author.owner()?.state !== "ok") return
-    setSendingSay(true)
-    setSayError("")
-    // A lost ACK may already have admitted this ID. Keep the draft and do not automatically retry it.
-    const id = `msg_${crypto.randomUUID().replaceAll("-", "")}`
-    try {
-      if (await author.send(text, id)) { setSayDraft(""); setSaid(true) }
-    } catch { setSayError("Send unconfirmed. Check the owner's chat before trying again.") }
-    setSendingSay(false)
-  }
+  // Chat with the author: a pop-out over the reader (surface-chat.tsx). Esc minimises to a bubble; × closes.
+  const [chat, setChat] = createSignal<"closed" | "open" | "min">("closed")
+  const [chatDraft, setChatDraft] = createSignal("")
+  const [unread, setUnread] = createSignal(0)
+  let chatButton: HTMLButtonElement | undefined
+  let micButton: HTMLButtonElement | undefined
+  const openChat = () => { setChat("open"); setTray(false); setTucked(false) }
+  const minimiseChat = () => { setChat("min"); queueMicrotask(() => chatButton?.focus()) }
+  const closeChat = () => { setChat("closed"); queueMicrotask(() => chatButton?.focus()) }
+  const toggleChat = () => chat() === "open" ? minimiseChat() : openChat()
+  // Mic: one click records at once (the same dictation engine as the composer's ⌘⇧Space); a second click stops and
+  // the transcript lands in the chat's composer as a draft. Nothing is sent until Enter.
+  const voice = dictation
+  const micTarget = () => fieldTarget(`surface-chat:${props.ownerHost?.id ?? "local"}:${props.surface.id}`)
+  const recording = () => voice.owns(voice.state.target, micTarget()) && ["starting", "recording"].includes(voice.state.phase)
+  const transcribing = () => voice.owns(voice.state.target, micTarget()) && voice.state.phase === "transcribing"
+  const [clock, setClock] = createSignal(Date.now())
+  createEffect(() => { if (!recording()) return; const timer = setInterval(() => setClock(Date.now()), 500); onCleanup(() => clearInterval(timer)) })
+  const elapsed = () => { const seconds = Math.max(0, Math.floor((clock() - (voice.state.startedAt || clock())) / 1000)); return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}` }
+  const toggleMic = () => { if (!recording()) openChat(); void voice.toggle(micTarget()) }
+  onMount(() => {
+    if (voice.state.availability === "unknown") void voice.refresh()
+    onCleanup(voice.attachField(micTarget().field!, (text) => { setChatDraft(chatDraft() ? `${chatDraft().trimEnd()} ${text}` : text); openChat() }))
+  })
   const [comments, setComments] = createSignal<SurfaceComment[]>([])
   const [unavailable, setUnavailable] = createSignal<string>()
   const [ready, setReady] = createSignal(false)
@@ -141,7 +147,7 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
   const toggleTray = () => {
     setTray(!tray())
     setCursor(0)
-    if (tray()) { setSaying(false); queueMicrotask(() => searchInput?.focus()) }
+    if (tray()) { if (chat() === "open") setChat("min"); queueMicrotask(() => searchInput?.focus()) }
   }
   // Everything the frame should locate: this revision's threads, sends in flight and the open draft.
   createEffect(() => {
@@ -275,9 +281,10 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
       }
       if (data.type === "pick-end") setPicking(false)
       if (data.type === "key" && data.key === "c") startPick(true)
-      if (data.type === "key" && data.key === "m") toggleSay()
+      if (data.type === "key" && data.key === "m") toggleChat()
       if (data.type === "key" && data.key === "Escape") {
-        if (saying()) setSaying(false)
+        if (recording()) void voice.stop()
+        else if (chat() === "open") minimiseChat()
         else if (tray()) setTray(false)
         else if (picking()) endPick()
         else if (open()) close()
@@ -286,7 +293,9 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
     const keys = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
       const typing = event.target instanceof HTMLElement && (event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName))
-      if (event.key === "Escape" && saying()) { event.preventDefault(); event.stopImmediatePropagation(); setSaying(false); return }
+      // Esc stops a recording (the text is kept), else minimises the chat.
+      if (event.key === "Escape" && recording()) { event.preventDefault(); event.stopImmediatePropagation(); void voice.stop(); return }
+      if (event.key === "Escape" && chat() === "open") { event.preventDefault(); event.stopImmediatePropagation(); minimiseChat(); return }
       if (event.key === "Escape" && (tray() || picking() || open() || drawing())) {
         event.preventDefault()
         event.stopPropagation()
@@ -310,7 +319,7 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
       if (event.key === ".") { event.preventDefault(); setTucked(!tucked()); setTray(false) }
       if (event.key.toLowerCase() === "j") { event.preventDefault(); navigate(1) }
       if (event.key.toLowerCase() === "k") { event.preventDefault(); navigate(-1) }
-      if (event.key.toLowerCase() === "m") { event.preventDefault(); toggleSay() }
+      if (event.key.toLowerCase() === "m") { event.preventDefault(); toggleChat() }
     }
     const outside = (event: PointerEvent) => {
       if (!(event.target instanceof Node) || !props.stage()?.isConnected) return
@@ -324,7 +333,7 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
       if (tray()) setTray(false)
       if (open()) close(false)
     }
-    const message = (event: Event) => { if ((event as CustomEvent<string>).detail === props.surface.id) { setTray(false); setTucked(false); setSaying(true); setSaid(false); queueMicrotask(() => sayInput?.focus()) } }
+    const message = (event: Event) => { if ((event as CustomEvent<string>).detail === props.surface.id) openChat() }
     addEventListener("message", listen)
     addEventListener("keydown", keys, true)
     addEventListener("pointerdown", outside, true)
@@ -478,19 +487,14 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
         </section>
       </div>
     }}</Show>
-    <Show when={saying()}><section class="sc-say" role="dialog" aria-label="Message the author" onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setSaying(false) } }}>
-      <div class="sc-say-to">To <bdi dir="auto">{author.name()}</bdi> · published this · rev {props.revision} · {props.ownerHost?.label ?? "this host"}
-        <Show when={author.href()}>{href => <a href={href()} onClick={event => { event.preventDefault(); author.open() }}>Open chat</a>}</Show>
-      </div>
-      <Show when={said()} fallback={<form class="sc-compose" onSubmit={event => { event.preventDefault(); void sendSay() }}>
-        <textarea ref={sayInput} dir="auto" rows={3} placeholder="Say something about the whole page…" aria-label="Message to author" value={sayDraft()} onInput={event => setSayDraft(event.currentTarget.value)}
-          onKeyDown={event => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} />
-        <div class="sc-compose-row"><DictationField field={`surface-say:${props.ownerHost?.id ?? "local"}:${props.surface.id}`} label="message to author" insert={text => { const el = sayInput; if (!el) return; const start = el.selectionStart; const next = sayDraft().slice(0, start) + text + sayDraft().slice(el.selectionEnd); setSayDraft(next); queueMicrotask(() => { el.focus(); el.setSelectionRange(start + text.length, start + text.length) }) }} />
-          <span class="sc-dim-text">⌘↵ · goes to chat, not a comment</span><button class="sc-send" type="submit" title={author.owner()?.state !== "ok" ? (author.owner() as { why?: string } | undefined)?.why ?? "Owner not readable now" : undefined} disabled={!sayDraft().trim() || sendingSay() || author.owner()?.state !== "ok"}>Send</button></div>
-        <Show when={author.owner() && author.owner()!.state !== "ok"}><p class="sc-note" role="status">{author.owner()?.state !== "ok" ? (author.owner() as { why: string }).why : ""}</p></Show>
-        <Show when={sayError()}><p class="sc-note" role="alert">{sayError()}</p></Show>
-      </form>}><p role="status">Sent to {author.name()} · <a href={author.href()} onClick={event => { event.preventDefault(); author.open() }}>open the chat</a></p></Show>
-    </section></Show>
+    {/* The chat stays mounted while minimised, so its replies keep counting toward the bubble. */}
+    <Show when={chat() !== "closed"}>
+      <SurfaceChat surface={props.surface} author={author} revision={props.revision} host={props.ownerHost} draft={chatDraft} setDraft={setChatDraft}
+        minimised={chat() === "min"} onMinimise={minimiseChat} onClose={closeChat} onUnread={setUnread} recording={recording() || transcribing()} />
+      <Show when={chat() === "min"}><button type="button" class="sc-chat-bubble" aria-label={`Open chat with ${author.name()}${unread() ? `, ${unread()} unread` : ""}`} onClick={openChat}>
+        <span class="sc-chat-avatar" aria-hidden="true"><Show when={author.avatar()} fallback={author.name().charAt(0).toUpperCase()}>{(url) => <img src={url()} alt="" referrerpolicy="no-referrer" />}</Show></span>
+        <Show when={unread()}><span class="sc-chat-unread">{unread()}</span></Show></button></Show>
+    </Show>
     <Show when={tray()}><div class="sc-tray" aria-label="Find a comment">
       <div class="sc-tray-filters"><input ref={searchInput} type="search" placeholder="Find a comment" aria-label="Find a comment" value={query()} onInput={(event) => { setQuery(event.currentTarget.value); setCursor(0) }}
         onKeyDown={(event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setCursor(Math.max(0, Math.min(filtered().here.length + filtered().away.length - 1, cursor() + (event.key === "ArrowDown" ? 1 : -1)))) } if (event.key === "Enter") { event.preventDefault(); const item = [...filtered().here, ...filtered().away][cursor()]; if (item) reveal(item.root.comment_id) } }} />
@@ -503,8 +507,18 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
       </div>
     </div></Show>
     <div class="sc-toolbar" data-tucked={tucked() ? "" : undefined} data-picking={picking() ? "" : undefined} role="toolbar" aria-label="Feedback">
-      <button type="button" class="sc-tool-say" title={`Tell ${author.name()} (M)`} aria-label={`Tell ${author.name()}`} aria-pressed={saying()} onClick={toggleSay}>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v4m-4 0h8" /></svg>
+      <button type="button" class="sc-tool-mic" ref={micButton} aria-pressed={recording()} data-state={recording() ? "recording" : transcribing() ? "transcribing" : "idle"}
+        disabled={voice.state.availability !== "ready" || (voice.state.phase !== "idle" && !voice.owns(voice.state.target, micTarget())) || transcribing()}
+        aria-label={recording() ? `Stop recording (${elapsed()})` : `Dictate to ${author.name()}`}
+        title={voice.state.availability === "setup" ? `Dictation unavailable: ${voice.state.setup}` : voice.state.availability !== "ready" ? "Dictation needs the desktop app" : recording() ? "Stop (click or Esc); the text lands in the chat" : `Speak to ${author.name()}: records at once, click again to stop`}
+        onClick={toggleMic}>
+        <Show when={recording()} fallback={<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v4m-4 0h8" /></svg>}>
+          <span class="sc-rec" aria-hidden="true"><i /><svg viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="13" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v4m-4 0h8" /></svg>{elapsed()}</span></Show>
+      </button>
+      <button type="button" class="sc-tool-chat" ref={chatButton} title={`Chat with ${author.name()} (M)`} aria-label={`Chat with ${author.name()}${unread() ? `, ${unread()} unread` : ""}`} aria-expanded={chat() === "open"} onClick={toggleChat}>
+        {/* A conversation: a bubble with three dots (Comment is a bubble with a +). */}
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z" /><circle cx="8.5" cy="10.5" r=".9" fill="currentColor" /><circle cx="12" cy="10.5" r=".9" fill="currentColor" /><circle cx="15.5" cy="10.5" r=".9" fill="currentColor" /></svg>
+        <Show when={unread()}><span class="sc-chat-unread">{unread()}</span></Show>
       </button>
       {/* Comment fans out like Draw: click = the last-used mode, Alt-click flips it once, the fan-out sets it. */}
       <span class="sc-draw sc-comment" data-open={fan() ? "" : undefined} onPointerLeave={() => setFan(false)}>
@@ -513,7 +527,7 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
           onPointerDown={(event) => { if (event.pointerType !== "touch") return; const timer = setTimeout(() => setFan(true), 450); const clear = () => clearTimeout(timer); event.currentTarget.addEventListener("pointerup", clear, { once: true }); event.currentTarget.addEventListener("pointercancel", clear, { once: true }) }}
           onContextMenu={(event) => { if (fan()) event.preventDefault() }}
           onClick={(event) => { if (fan()) return; picking() ? endPick() : startPick(event.detail === 0, event.altKey ? flipped() : mode()) }}>
-          <Show when={mode() === "point" && pointable()} fallback={<Glyph name="comment-discussion" size={18} />}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6-6.2-6-11a6 6 0 0 1 12 0c0 4.8-6 11-6 11z" /><circle cx="12" cy="10" r="2.2" /></svg></Show>
+          <Show when={mode() === "point" && pointable()} fallback={<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z" /><path d="M12 7.5v6M9 10.5h6" /></svg>}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6-6.2-6-11a6 6 0 0 1 12 0c0 4.8-6 11-6 11z" /><circle cx="12" cy="10" r="2.2" /></svg></Show>
         </button>
         <span class="sc-fly sc-fly-comment" role="group" aria-label="Comment mode">
           <button aria-pressed={mode() === "element" || !pointable()} title="Element: hover rings a part, click anchors to it" onClick={() => { setMode("element"); startPick(false, "element") }}><span>▢</span><b>Element</b></button>

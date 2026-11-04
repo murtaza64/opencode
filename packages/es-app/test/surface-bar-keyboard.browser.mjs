@@ -5,13 +5,14 @@
 // Run from packages/es-app: node test/surface-bar-keyboard.browser.mjs
 import { createRequire } from "node:module"
 import { startPanelPreview } from "./composer-panel-preview.mjs"
+import { injectBridge } from "../surface-bridge.ts"
 
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const preview = await startPanelPreview()
 const browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : { channel: "chrome" }) })
 const now = Date.now()
 const SURFACE = { id: "review", title: "Design review", summary: null, kind: "path", owner: "opencode/ux-feel", lane: "ux-feel", editspace: "fixture", purpose: "deliverable", updated_at: now, revision: 2, seen: true, seen_at: now - 60_000, health: { state: "ok" } }
-const PAGE = "<!doctype html><html><body><h1>Design review</h1><p>Body.</p></body></html>"
+const PAGE = injectBridge("<!doctype html><html><body><h1>Design review</h1><p>Body.</p></body></html>")
 const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
 const page = await context.newPage()
 page.setDefaultTimeout(30_000)
@@ -73,6 +74,21 @@ try {
   await expect(bar.locator(".surface-owner-menu")).toHaveAttribute("open", "")
   await page.keyboard.press("Escape")
   expect(await name()).toBe("Ux feel")
+  // The feedback toolbar leads mic, chat, comment, each a Tab stop; M opens the chat, Esc minimises it back to its button.
+  const toolbar = page.locator(".sc-toolbar")
+  // The mic is a stop only where dictation is available (the desktop app); here it is enabled for the walk.
+  await toolbar.locator(".sc-tool-mic").evaluate((el) => el.removeAttribute("disabled"))
+  await expect(toolbar.getByRole("button", { name: /^Comment \(C\)/ })).toBeEnabled()
+  await toolbar.locator(".sc-tool-mic").focus()
+  const tools = [await page.evaluate(() => document.activeElement.className)]
+  for (let i = 0; i < 2; i++) { await page.keyboard.press("Tab"); tools.push(await page.evaluate(() => document.activeElement.className)) }
+  expect(tools).toEqual(["sc-tool-mic", "sc-tool-chat", "sc-tool-main"])
+  await page.locator(".surface-head h2").click()
+  await page.keyboard.press("m")
+  await expect(page.locator(".sc-chat textarea")).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(page.locator(".sc-chat")).toBeHidden()
+  await expect(toolbar.locator(".sc-tool-chat")).toBeFocused()
   expect(errors).toEqual([])
   console.log("surface-bar-keyboard: PASS")
 } finally {
