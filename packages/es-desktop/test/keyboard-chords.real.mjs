@@ -34,14 +34,16 @@ try {
   const help = menu.filter((item) => item.role === "help")
   if (help.length) throw new Error(`Help-role menu present: ${JSON.stringify(help)}`)
   const reload = menu.find((item) => item.label === "Reload" || item.role === "reload")
-  if (!reload || (reload.label === "Reload" && reload.accelerator !== "CommandOrControl+R")) throw new Error(`Reload item: ${JSON.stringify(reload)}`)
-  results.push(`PASS no menu item claims ${mod}+?, ${mod}+/ or F1; no Help-role menu; Reload keeps CommandOrControl+R`)
+  if (!reload || (!/^(CommandOrControl|CmdOrCtrl)\+R$/.test(reload.accelerator))) throw new Error(`Reload item: ${JSON.stringify(reload)}`)
+  results.push(`PASS no menu item claims ${mod}+?, ${mod}+/ or F1; no Help-role menu; Reload keeps ${reload.accelerator}`)
 
   const page = await app.firstWindow()
   await page.waitForURL("http://127.0.0.1:*/")
   await page.goto(`${new URL(page.url()).origin}/session/ses_a?directory=${encodeURIComponent(directory)}`)
   await page.getByRole("textbox", { name: "Message", exact: true }).waitFor()
   await page.locator("body").click({ position: { x: 5, y: 5 } }).catch(() => {})
+  const writes = () => fixture.calls.filter((call) => call.method !== "GET")
+  const before = writes().length
   const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts" })
   for (const key of [`${mod}+Shift+Slash`, "F1"]) {
     await page.keyboard.press(key)
@@ -63,14 +65,18 @@ try {
   await page.waitForFunction(() => window.__esChordReload === undefined, undefined, { timeout: 15_000 })
   await page.waitForLoadState("load")
   results.push("PASS View > Reload reloads the Work view")
-  if (fixture.calls.some((call) => call.method !== "GET")) throw new Error("a chord wrote to Core")
+  // Only writes during the chords count; the reload's own startup reads/bootstrap come after.
+  const chordWrites = writes().slice(before)
+  if (chordWrites.length) throw new Error(`writes after the chords: ${JSON.stringify(chordWrites.map((call) => `${call.method} ${call.path ?? call.url}`))}`)
   results.push("PASS no writes")
 } catch (error) {
   process.exitCode = 1
   results.push(`FAIL ${String(error).split("\n")[0]}`)
 } finally {
   console.log(results.join("\n"))
-  await app?.close()
+  const child = app?.process()
+  await Promise.race([app?.close(), new Promise((resolve) => setTimeout(resolve, 10_000))])
+  child?.kill("SIGKILL")
   await fixture.close?.()
   await rm(profile, { recursive: true, force: true })
 }
