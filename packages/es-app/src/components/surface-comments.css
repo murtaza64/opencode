@@ -12,14 +12,22 @@
   background: var(--base, #111); color: var(--text); font-size: 10px; line-height: 16px; text-align: center; box-shadow: 0 0 0 1px var(--surface1); }
 .sc-peek[data-changed] { background: var(--yellow); }
 .sc-peek[data-status=sending] { opacity: .7; } .sc-peek[data-status=failed] { background: var(--red); }
+.sc-peek.sc-ping { transform: scale(1.25); box-shadow: 0 0 0 3px var(--peach), 0 8px 18px rgb(0 0 0 / 30%); }
 /* Focus: the anchor stays sharp inside a ring; everything around it dims and blurs. */
-.sc-focus { position: absolute; inset: 0; z-index: 4; }
-.sc-dim { position: absolute; background: rgb(0 0 0 / 42%); backdrop-filter: blur(5px) saturate(.8); -webkit-backdrop-filter: blur(5px) saturate(.8); animation: sc-fade 160ms ease-out; }
+.sc-focus { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+.sc-veil { position: absolute; inset: 0; pointer-events: none; background: rgb(17 20 24 / 22%); backdrop-filter: blur(2.5px); -webkit-backdrop-filter: blur(2.5px); }
 .sc-ring { position: absolute; border-radius: 6px; box-shadow: 0 0 0 2px var(--peach), 0 0 24px rgb(250 179 135 / 25%); pointer-events: none; }
 .sc-card { position: absolute; inline-size: min(360px, calc(100% - 16px)); max-block-size: min(60vh, 460px); overflow: hidden; display: flex; flex-direction: column; gap: 8px; padding: 12px; box-sizing: border-box;
-  border-radius: 4px 14px 14px 14px; background: var(--base, #111); border: 1px solid var(--surface1); box-shadow: 0 16px 48px rgb(0 0 0 / 55%); animation: sc-rise 180ms ease-out; }
+  border-radius: 4px 14px 14px 14px; background: var(--base, #111); border: 1px solid var(--surface1); box-shadow: 0 16px 48px rgb(0 0 0 / 55%); animation: sc-rise 180ms ease-out; pointer-events: auto; }
 .sc-card:not([data-below]) { border-radius: 14px 14px 14px 4px; }
-@keyframes sc-fade { from { opacity: 0; } }
+.sc-card[data-away] { inline-size: min(400px, calc(100% - 16px)); }
+.sc-card-nav { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--subtext0); }
+.sc-card-nav > span:first-child { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sc-card-nav button { inline-size: 25px; block-size: 25px; border: 0; border-radius: 6px; background: none; color: var(--subtext1); cursor: pointer; font-size: 20px; }
+.sc-card-nav button:hover { background: var(--surface1); }
+.sc-away { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; color: var(--subtext0); }
+.sc-away-tag { border-radius: 4px; padding: 2px 5px; background: var(--surface1); color: var(--yellow); font-weight: 700; }
+.sc-away blockquote { flex-basis: 100%; margin: 0; padding: 6px 10px; border-inline-start: 3px solid var(--surface1); overflow-wrap: anywhere; }
 @keyframes sc-rise { from { opacity: 0; transform: translateY(4px); } }
 .sc-thread { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 /* Only the thread scrolls: the note, sending state, receipt and reply box keep their place at the card's foot. */
@@ -42,24 +50,50 @@
 .sc-send { padding: 3px 12px; border: 1px solid var(--peach); border-radius: 5px; background: var(--peach); color: var(--crust, #000); font-weight: 600; font-size: 12px; }
 .sc-send:disabled { opacity: .45; }
 .sc-text-button { padding: 2px 4px; border: 0; background: none; color: var(--subtext1); font-size: 12px; text-decoration: underline; text-underline-offset: 2px; }
-/* The toolbar: one obvious button, quiet extras. */
-.sc-toolbar { position: absolute; inset-block-end: 14px; inset-inline-end: 14px; z-index: 5; display: flex; align-items: center; gap: 4px; padding: 4px;
-  border-radius: 10px; background: color-mix(in srgb, var(--base, #111) 92%, transparent); border: 1px solid var(--surface1); box-shadow: 0 6px 20px rgb(0 0 0 / 40%); }
+/* A fixed-size row; the finder and drawing shapes grow above it. */
+.sc-toolbar { position: absolute; inset-block-end: 14px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 2px; padding: 5px;
+  border-radius: 14px; background: color-mix(in srgb, var(--base, #111) 94%, transparent); border: 1px solid var(--surface1); box-shadow: 0 12px 30px rgb(0 0 0 / 30%); transition: transform .2s, opacity .2s; }
+.sc-toolbar[data-tucked] { transform: translate(-50%, 90px); opacity: 0; pointer-events: none; }
 .sc-toolbar[data-picking] { border-color: var(--peach); }
-.sc-tool-main { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 0; border-radius: 7px; background: var(--peach); color: var(--crust, #000); font-weight: 600; font-size: 12px; }
-.sc-tool-main:disabled { background: var(--surface1); color: var(--subtext0); }
-.sc-tool-main kbd { font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0 4px; border-radius: 3px; background: rgb(0 0 0 / 15%); }
-.sc-tool { padding: 5px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--subtext1); font-size: 12px; }
-.sc-tool:hover { background: var(--surface0); }
-.sc-tool-note, .sc-tool-hint { padding: 0 6px; font-size: 11px; color: var(--subtext0); white-space: nowrap; }
-.sc-tool-hint { color: var(--text); }
+.sc-toolbar button { flex: none; inline-size: 34px; block-size: 34px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 9px; background: none; color: var(--subtext1); cursor: pointer; font-size: 23px; }
+.sc-toolbar button:hover, .sc-toolbar button[aria-expanded=true] { background: var(--surface1); color: var(--text); }
+.sc-toolbar button[aria-pressed=true]:not([aria-label="Hide comments (H)"]) { background: var(--peach); color: var(--crust, #000); }
+.sc-toolbar button[aria-label="Hide comments (H)"][aria-pressed=false] { opacity: .5; }
+.sc-toolbar button:disabled { opacity: .45; cursor: not-allowed; }
+.sc-toolbar svg:not(.glyph) { inline-size: 18px; block-size: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.sc-toolbar i { inline-size: 1px; block-size: 20px; background: var(--surface2); margin: 0 4px; }
+.sc-toolbar .sc-count { inline-size: 52px; display: flex; justify-content: center; gap: 4px; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sc-off-count { font-size: 10px; color: var(--yellow); }
+.sc-draw { position: relative; display: inline-flex; }
+.sc-fly { position: absolute; left: 50%; bottom: calc(100% + 10px); transform: translate(-50%, 6px); display: grid; gap: 2px; padding: 4px; border-radius: 12px; background: var(--base, #111); opacity: 0; pointer-events: none; transition: opacity .12s, transform .12s; }
+.sc-fly::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 12px; }
+.sc-draw:hover .sc-fly:not([aria-hidden=true]), .sc-draw:focus-within .sc-fly:not([aria-hidden=true]) { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+.sc-tab { position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); z-index: 5; border: 0; border-radius: 10px 10px 0 0; padding: 3px 10px; background: var(--base, #111); color: var(--text); cursor: pointer; }
+.sc-tray { position: absolute; left: 50%; bottom: 69px; transform: translateX(-50%); z-index: 5; inline-size: min(460px, calc(100% - 24px)); max-block-size: min(60vh, 560px); display: flex; flex-direction: column; background: var(--base, #111); color: var(--text); border: 1px solid var(--surface1); border-radius: 14px; box-shadow: 0 20px 50px rgb(0 0 0 / 35%); font-size: 13px; }
+.sc-tray-filters { display: flex; align-items: center; gap: 8px; padding: 10px 10px 6px; }
+.sc-tray-filters input { flex: 1; min-inline-size: 0; background: var(--surface0); color: var(--text); border: 0; border-radius: 9px; padding: 7px 10px; }
+.sc-segments { display: inline-flex; gap: 2px; background: var(--surface0); border-radius: 9px; padding: 3px; }
+.sc-segments button { border: 0; border-radius: 7px; padding: 4px 7px; background: none; color: var(--subtext1); text-transform: capitalize; cursor: pointer; }
+.sc-segments button[aria-pressed=true] { background: var(--surface2); color: var(--text); }
+.sc-authors { display: flex; gap: 5px; padding: 0 10px 6px; }
+.sc-authors button { border: 0; border-radius: 50%; inline-size: 24px; block-size: 24px; background: var(--peach); color: var(--crust); opacity: .55; cursor: pointer; }
+.sc-authors button[aria-pressed=true] { opacity: 1; outline: 2px solid var(--blue); }
+.sc-tray-list { overflow-y: auto; padding: 0 6px 8px; }
+.sc-group h3 { position: sticky; top: 0; z-index: 1; margin: 0; background: var(--base); color: var(--subtext0); padding: 8px 8px 4px; font-size: 11px; }
+.sc-tray-row { display: block; inline-size: 100%; border: 0; border-radius: 9px; padding: 7px 8px; text-align: start; background: none; color: var(--text); font: inherit; cursor: pointer; overflow-wrap: anywhere; }
+.sc-tray-row:hover { background: var(--surface0); }
+.sc-empty { margin: 12px; color: var(--subtext0); }
 @media (prefers-reduced-motion: reduce) {
-  .sc-dim { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgb(0 0 0 / 55%); animation: none; }
-  .sc-card { animation: none; } .sc-peek { transition: none; }
+  .sc-veil { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgb(17 20 24 / 32%); }
+  .sc-card { animation: none; } .sc-peek, .sc-toolbar, .sc-fly { transition: none; }
 }
 @media (max-width: 600px) {
-  .sc-toolbar { inset-inline: 8px; inset-block-end: 8px; justify-content: space-between; }
-  .sc-tool-main kbd { display: none; }
+  .sc-toolbar { bottom: 8px; padding: 4px; gap: 0; }
+  .sc-toolbar button { inline-size: 30px; block-size: 32px; }
+  .sc-toolbar .sc-count { inline-size: 42px; }
+  .sc-toolbar i { margin: 0 2px; }
+  .sc-tray { bottom: 60px; }
+  .sc-tray-filters { flex-wrap: wrap; }
   .sc-peek { inline-size: 32px; block-size: 32px; }
-  .sc-card { inset-inline: 8px !important; inline-size: auto; }
+  .sc-card { inline-size: min(360px, calc(100% - 16px)); }
 }

@@ -1,7 +1,5 @@
-/* On-surface comments over the Surface reader's frame (DD #519 M1). One floating toolbar: Comment (C) enters pick mode,
- * a click or Enter on an element drops a draft there, Esc leaves. Each thread shows as a corner-peek bubble at its
- * anchor; opening one dims and blurs everything around the anchor and shows the thread with an inline reply. Comments
- * come only from the host's store (surface-comments.ts); the frame learns anchors, never comment text. */
+/* On-surface comments over the Surface reader's frame. The host owns text and drafts; the frame only receives anchors.
+ * A fixed feedback bar opens pick mode or a finder tray; the non-modal card keeps the page interactive. */
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { ago } from "../state"
 import { initialOf, MAX_BODY, mintCommentId, placement, placementLabel, receiptLabel, threads, type AnchorState, type CommentAnchor, type CommentHost, type SealedComment, type SurfaceComment } from "../surface-comments"
@@ -24,6 +22,12 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
   const [off, setOff] = createSignal(false)
   const [picking, setPicking] = createSignal(false)
   const [shown, setShown] = createSignal(true)
+  const [tucked, setTucked] = createSignal(false)
+  const [tray, setTray] = createSignal(false)
+  const [query, setQuery] = createSignal("")
+  const [view, setView] = createSignal<"open" | "all" | "resolved">("open")
+  const [authors, setAuthors] = createSignal<ReadonlySet<string>>(new Set())
+  const [cursor, setCursor] = createSignal(0)
   const [open, setOpen] = createSignal<Open>()
   const [rects, setRects] = createSignal<ReadonlyMap<string, { rect: Box | null; state: AnchorState }>>(new Map())
   const [outgoing, setOutgoing] = createSignal<ReadonlyMap<string, Outgoing>>(new Map())
@@ -32,6 +36,9 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
   const [size, setSize] = createSignal({ w: 0, h: 0 })
   const markers = new Map<string, HTMLButtonElement>()
   let toolbarButton: HTMLButtonElement | undefined
+  let searchInput: HTMLInputElement | undefined
+  // The es-surface-comments/1 host has no marks field or draw/undo operation.
+  const marksSupported = false
 
   const load = async () => {
     const result = await props.host.read()
@@ -49,10 +56,42 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
   const pendingRoots = () => [...outgoing().values()].filter((item) => !item.sealed.parent_id && !comments().some((comment) => comment.comment_id === item.sealed.comment_id))
   const list = createMemo(() => threads(comments()))
   const here = () => list().filter((thread) => thread.root.revision === props.revision)
-  const elsewhere = () => list().flatMap((thread) => {
-    const state = placement(thread.root, props.revision, rects().get(thread.root.comment_id)?.state)
-    return state === "shown" || state === "changed" || state === "locating" ? [] : [{ thread, state }]
-  })
+  const stateOf = (thread: ReturnType<typeof threads>[number]) => placement(thread.root, props.revision, rects().get(thread.root.comment_id)?.state)
+  const onView = () => list().filter((thread) => stateOf(thread) === "shown")
+    .toSorted((a, b) => {
+      const ar = rects().get(a.root.comment_id)?.rect
+      const br = rects().get(b.root.comment_id)?.rect
+      return (ar?.y ?? 0) - (br?.y ?? 0) || (ar?.x ?? 0) - (br?.x ?? 0)
+    })
+  const away = () => list().filter((thread) => !["shown", "locating"].includes(stateOf(thread)))
+  const sectionOf = (thread: ReturnType<typeof threads>[number]) => thread.root.anchor.id?.split("/")[0] ?? thread.root.anchor.selector?.split(" > ")[0] ?? "Page"
+  const filtered = () => {
+    const matches = (thread: ReturnType<typeof threads>[number]) =>
+      (view() === "all" || (view() === "open" ? thread.root.state !== "resolved" : thread.root.state === "resolved")) &&
+      (!authors().size || [thread.root, ...thread.replies].some((comment) => authors().has(comment.author.name))) &&
+      (!query() || [sectionOf(thread), ...[thread.root, ...thread.replies].flatMap((comment) => [comment.body, comment.author.name])].some((text) => text.toLowerCase().includes(query().toLowerCase())))
+    return { here: onView().filter(matches), away: away().filter(matches) }
+  }
+  const navigate = (delta: number) => {
+    const current = open()?.key
+    const group = current && away().some((thread) => thread.root.comment_id === current) ? away() : onView()
+    if (!group.length) return
+    const index = group.findIndex((thread) => thread.root.comment_id === current)
+    reveal(group[(index + delta + group.length) % group.length].root.comment_id)
+  }
+  const reveal = (key: string) => {
+    const thread = list().find((item) => item.root.comment_id === key)
+    if (!thread) return
+    setTray(false)
+    setPicking(false)
+    setOpen({ key, anchor: thread.root.anchor })
+    if (stateOf(thread) === "shown") toFrame({ type: "reveal", key })
+  }
+  const toggleTray = () => {
+    setTray(!tray())
+    setCursor(0)
+    if (tray()) queueMicrotask(() => searchInput?.focus())
+  }
   // Everything the frame should locate: this revision's threads, sends in flight and the open draft.
   createEffect(() => {
     if (!ready()) return
@@ -67,14 +106,16 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
   // Keyboard picking keeps focus in the app; its arrow, Tab and Enter keys are forwarded to the frame's picker.
   const startPick = (keyboard: boolean) => {
     if (!ready() || unavailable()) return
+    setTray(false)
     setOpen()
     setPicking(true)
     toFrame({ type: "pick", on: true, keyboard })
   }
   const endPick = () => { setPicking(false); toFrame({ type: "pick", on: false }) }
-  const close = () => {
+  const close = (restoreFocus = true) => {
     const key = open()?.key
     setOpen()
+    if (!restoreFocus) return
     // Markers remount when the card closes; their buttons then stay put across updates (keyed by thread id below).
     queueMicrotask(() => {
       const marker = key ? markers.get(key) : undefined
@@ -102,10 +143,11 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
     const keys = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
       const typing = event.target instanceof HTMLElement && (event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName))
-      if (event.key === "Escape" && (picking() || open())) {
+      if (event.key === "Escape" && (tray() || picking() || open())) {
         event.preventDefault()
         event.stopPropagation()
-        if (picking()) endPick()
+        if (tray()) { setTray(false); toolbarButton?.focus() }
+        else if (picking()) endPick()
         else close()
         return
       }
@@ -115,14 +157,34 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
         toFrame({ type: "pick-key", key: event.key, shift: event.shiftKey })
         return
       }
-      if (event.key === "c" && !typing && props.stage()?.isConnected) { event.preventDefault(); startPick(true) }
+      if (typing || !props.stage()?.isConnected) return
+      if (event.key.toLowerCase() === "c") { event.preventDefault(); picking() ? endPick() : startPick(true) }
+      if (event.key.toLowerCase() === "f") { event.preventDefault(); toggleTray() }
+      if (event.key.toLowerCase() === "h") { event.preventDefault(); setShown(!shown()) }
+      if (event.key === ".") { event.preventDefault(); setTucked(!tucked()); setTray(false) }
+      if (event.key.toLowerCase() === "j") { event.preventDefault(); navigate(1) }
+      if (event.key.toLowerCase() === "k") { event.preventDefault(); navigate(-1) }
+    }
+    const outside = (event: PointerEvent) => {
+      if (!(event.target instanceof Node) || !props.stage()?.isConnected) return
+      if (event.target instanceof Element && event.target.closest(".sc-card, .sc-toolbar, .sc-tray, .sc-peek, .sc-tab")) return
+      if (tray()) setTray(false)
+      if (open()) close(false)
+    }
+    // A click inside the sandboxed frame does not bubble to the host. It moves focus to the frame instead.
+    const frameFocus = () => {
+      if (document.activeElement !== props.frame()) return
+      if (tray()) setTray(false)
+      if (open()) close(false)
     }
     addEventListener("message", listen)
     addEventListener("keydown", keys, true)
+    addEventListener("pointerdown", outside, true)
+    addEventListener("blur", frameFocus)
     const observer = new ResizeObserver(() => { const stage = props.stage(); if (stage) setSize({ w: stage.clientWidth, h: stage.clientHeight }) })
     const stage = props.stage()
     if (stage) observer.observe(stage)
-    onCleanup(() => { removeEventListener("message", listen); removeEventListener("keydown", keys, true); observer.disconnect() })
+    onCleanup(() => { removeEventListener("message", listen); removeEventListener("keydown", keys, true); removeEventListener("pointerdown", outside, true); removeEventListener("blur", frameFocus); observer.disconnect() })
   })
   // A remounted frame (new revision, renewed address) starts without a bridge until it says ready again.
   createEffect(() => { props.frame(); setReady(false) })
@@ -150,9 +212,9 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
   // The bubble's corner sits at the anchor's top-left, pulled inside the stage.
   const markerAt = (box: Box) => ({ left: `${Math.max(4, Math.min(size().w - 34, box.x - 10))}px`, top: `${Math.max(4, Math.min(size().h - 34, box.y - 10))}px` })
   const markerThreads = () => [
-    ...here().flatMap((thread) => {
+    ...onView().flatMap((thread) => {
       const found = rects().get(thread.root.comment_id)
-      return found?.rect && (found.state === "shown" || found.state === "changed") ? [{ key: thread.root.comment_id, author: thread.root.author.name, count: 1 + thread.replies.length, box: found.rect, changed: found.state === "changed", status: undefined as Outgoing["state"] | undefined }] : []
+      return found?.rect ? [{ key: thread.root.comment_id, author: thread.root.author.name, count: 1 + thread.replies.length, box: found.rect, changed: false, status: undefined as Outgoing["state"] | undefined }] : []
     }),
     ...pendingRoots().flatMap((item) => {
       const box = boxOf(item.sealed.comment_id)
@@ -171,18 +233,19 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
         <For each={markerKeys()}>{(key) => <Show when={markerByKey().get(key)}>{(marker) =>
           <button class="sc-peek" ref={(el) => markers.set(marker().key, el)} style={markerAt(marker().box)} data-comment={marker().key} data-status={marker().status} data-changed={marker().changed ? "" : undefined}
             aria-label={`Comment by ${marker().author}${marker().count > 1 ? `, ${marker().count} in thread` : ""}${marker().changed ? ", its target changed" : ""}`}
-            onClick={() => setOpen({ key: marker().key, anchor: here().find((thread) => thread.root.comment_id === marker().key)?.root.anchor ?? outgoing().get(marker().key)!.sealed.anchor })}>
+             onClick={() => marker().status ? setOpen({ key: marker().key, anchor: outgoing().get(marker().key)!.sealed.anchor }) : reveal(marker().key)}>
             <span class="sc-peek-face">{initialOf(marker().author)}</span>
             <Show when={marker().count > 1}><span class="sc-peek-count">{marker().count}</span></Show>
           </button>}</Show>}</For>
       </div>
     </Show>
     <Show when={open()}>{(current) => {
-      const box = () => boxOf(current().key) ?? { x: size().w / 2 - 100, y: 80, w: 200, h: 0 }
-      const hole = () => focusHole(box(), size())
-      const thread = () => list().find((item) => item.root.comment_id === current().key)
+       const box = () => boxOf(current().key) ?? { x: size().w / 2 - 100, y: 80, w: 200, h: 0 }
+       const hole = () => focusHole(box(), size())
+       const thread = () => list().find((item) => item.root.comment_id === current().key)
+       const notHere = () => !!thread() && stateOf(thread()!) !== "shown"
       // The side with room, capped so the reply box and actions stay on screen (surface-bridge geometry).
-      const place = () => placeCard(box(), size())
+       const place = () => notHere() ? { below: false, left: Math.max(8, (size().w - Math.min(400, size().w - 16)) / 2), bottom: 70, maxBlockSize: Math.min(460, size().h - 88) } : placeCard(box(), size())
       const below = () => place().below
       const cardStyle = () => {
         const at = place()
@@ -192,13 +255,12 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
       let input: HTMLTextAreaElement | undefined
       onMount(() => input?.focus())
       const draftKey = () => current().key
-      return <div class="sc-focus" role="dialog" aria-modal="true" aria-label={thread() ? "Comment thread" : "New comment"}>
-        <div class="sc-dim" style={{ left: 0, top: 0, width: "100%", height: `${hole().y}px` }} onClick={close} />
-        <div class="sc-dim" style={{ left: 0, top: `${hole().b}px`, width: "100%", bottom: 0 }} onClick={close} />
-        <div class="sc-dim" style={{ left: 0, top: `${hole().y}px`, width: `${hole().x}px`, height: `${hole().b - hole().y}px` }} onClick={close} />
-        <div class="sc-dim" style={{ left: `${hole().r}px`, top: `${hole().y}px`, right: 0, height: `${hole().b - hole().y}px` }} onClick={close} />
-        <div class="sc-ring" style={{ left: `${hole().x}px`, top: `${hole().y}px`, width: `${hole().r - hole().x}px`, height: `${hole().b - hole().y}px` }} />
-        <section class="sc-card" style={cardStyle()} data-below={below() ? "" : undefined}>
+       return <div class="sc-focus" aria-label={thread() ? "Comment thread" : "New comment"}>
+         <Show when={!notHere() && !!boxOf(current().key)}><div class="sc-veil" aria-hidden="true" style={{ "clip-path": `path(evenodd, "M0 0H${size().w}V${size().h}H0Z M${hole().x} ${hole().y}H${hole().r}V${hole().b}H${hole().x}Z")` }} /></Show>
+         <Show when={!notHere() && !!boxOf(current().key)}><div class="sc-ring" style={{ left: `${hole().x}px`, top: `${hole().y}px`, width: `${hole().r - hole().x}px`, height: `${hole().b - hole().y}px` }} /></Show>
+         <section class="sc-card" role="region" style={cardStyle()} data-below={below() ? "" : undefined} data-away={notHere() ? "" : undefined}>
+           <Show when={thread()}><div class="sc-card-nav"><span>{notHere() ? "Not on this view" : sectionOf(thread()!)}</span><button aria-label="Previous thread (K)" title="Previous thread (K)" onClick={() => navigate(-1)}>‹</button><span>{(() => { const group = notHere() ? away() : onView(); return `${group.findIndex((item) => item.root.comment_id === current().key) + 1}/${group.length}` })()}</span><button aria-label="Next thread (J)" title="Next thread (J)" onClick={() => navigate(1)}>›</button></div></Show>
+           <Show when={notHere() && thread()}>{(item) => <div class="sc-away"><span class="sc-away-tag">not on this view</span><span>{placementLabel(stateOf(item()), item().root.revision)}</span><blockquote>On {item().root.anchor.id ?? item().root.anchor.selector ?? (item().root.anchor.rect ? "the recorded page area" : "this Surface")}</blockquote></div>}</Show>
           <Show when={thread()}>{(item) => <ol class="sc-thread" ref={(el) => queueMicrotask(() => { el.scrollTop = el.scrollHeight })}>
             <For each={[item().root, ...item().replies]}>{(comment) => <li class="sc-comment" data-comment-id={comment.comment_id}>
               <span class="sc-face" aria-hidden="true">{initialOf(comment.author.name)}</span>
@@ -226,7 +288,7 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
                 onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} />
               <div class="sc-compose-row">
                 <span class="sc-dim-text">Goes to the Surface's owner · ⌘↵</span>
-                <button type="button" class="sc-text-button" onClick={close}>Close</button>
+                 <button type="button" class="sc-text-button" onClick={() => close()}>Close</button>
                 <button type="submit" class="sc-send" disabled={!(drafts().get(draftKey()) ?? "").trim()}>{current().key === DRAFT ? "Comment" : "Reply"}</button>
               </div>
             </form>
@@ -234,22 +296,27 @@ export const SurfaceComments = (props: { host: CommentHost; revision: number; fr
         </section>
       </div>
     }}</Show>
-    <div class="sc-toolbar" data-picking={picking() ? "" : undefined} role="toolbar" aria-label="Comments">
-      <Show when={picking()} fallback={<>
-        <button class="sc-tool-main" ref={toolbarButton} disabled={!ready() || !!unavailable()} title={unavailable() ?? (off() ? "This page turns comments off" : ready() ? "Comment on a part of this page (C)" : "This page cannot take comments yet")}
-          onClick={(event) => startPick(event.detail === 0)}>
-          <Glyph name="comment-discussion" size={14} /><span>Comment</span><kbd>C</kbd>
-        </button>
-        <Show when={list().length}>
-          <button class="sc-tool" aria-pressed={!shown()} title={shown() ? "Hide comments" : "Show comments"} onClick={() => setShown(!shown())}>{shown() ? "Hide" : "Show"} {list().length}</button>
-        </Show>
-        <Show when={elsewhere().length}>
-          <span class="sc-tool-note" title={elsewhere().map((item) => `${item.thread.root.author.name}: ${placementLabel(item.state, item.thread.root.revision)}`).join("\n")}>{elsewhere().length} not on this view</span>
-        </Show>
-      </>}>
-        <span class="sc-tool-hint" role="status">Click a part to comment · ↑↓ Enter · Esc</span>
-        <button class="sc-tool" onClick={endPick}>Cancel</button>
-      </Show>
+    <Show when={tray()}><div class="sc-tray" aria-label="Find a comment">
+      <div class="sc-tray-filters"><input ref={searchInput} type="search" placeholder="Find a comment" aria-label="Find a comment" value={query()} onInput={(event) => { setQuery(event.currentTarget.value); setCursor(0) }}
+        onKeyDown={(event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setCursor(Math.max(0, Math.min(filtered().here.length + filtered().away.length - 1, cursor() + (event.key === "ArrowDown" ? 1 : -1)))) } if (event.key === "Enter") { event.preventDefault(); const item = [...filtered().here, ...filtered().away][cursor()]; if (item) reveal(item.root.comment_id) } }} />
+        <div class="sc-segments">{(["open", "all", "resolved"] as const).map((value) => <button aria-pressed={view() === value} onClick={() => { setView(value); setCursor(0) }}>{value}</button>)}</div></div>
+      <div class="sc-authors" aria-label="Filter by author"><For each={[...new Set(comments().map((comment) => comment.author.name))]}>{(name) => <button title={name} aria-label={`Filter by ${name}`} aria-pressed={authors().has(name)} onClick={() => { const next = new Set(authors()); next.has(name) ? next.delete(name) : next.add(name); setAuthors(next) }}>{initialOf(name)}</button>}</For></div>
+      <div class="sc-tray-list">
+        <For each={[...new Set(filtered().here.map(sectionOf))]}>{(section) => <div class="sc-group"><h3>{section}</h3><For each={filtered().here.filter((item) => sectionOf(item) === section)}>{(item) => <button class="sc-tray-row" data-comment={item.root.comment_id} onMouseEnter={() => markers.get(item.root.comment_id)?.classList.add("sc-ping")} onMouseLeave={() => markers.get(item.root.comment_id)?.classList.remove("sc-ping")} onClick={() => reveal(item.root.comment_id)}>{item.root.author.name} · {item.replies.at(-1)?.body ?? item.root.body}</button>}</For></div>}</For>
+        <Show when={filtered().away.length}><div class="sc-group"><h3>Not on this view</h3><For each={filtered().away}>{(item) => <button class="sc-tray-row" data-comment={item.root.comment_id} onClick={() => reveal(item.root.comment_id)}>{sectionOf(item)} · {item.replies.at(-1)?.body ?? item.root.body}</button>}</For></div></Show>
+        <Show when={!filtered().here.length && !filtered().away.length}><p class="sc-empty">No comments match.</p></Show>
+      </div>
+    </div></Show>
+    <div class="sc-toolbar" data-tucked={tucked() ? "" : undefined} data-picking={picking() ? "" : undefined} role="toolbar" aria-label="Feedback">
+      <button class="sc-tool-main" ref={toolbarButton} aria-label="Comment (C)" aria-pressed={picking()} disabled={!ready() || !!unavailable()} title={unavailable() ?? (off() ? "This page turns comments off" : "Comment (C)")} onClick={(event) => picking() ? endPick() : startPick(event.detail === 0)}><Glyph name="comment-discussion" size={18} /></button>
+      <span class="sc-draw" title={marksSupported ? "Draw (D) · hover for shapes" : "Drawing needs host support (marks)"}><button class="sc-tool" aria-label="Draw" title={marksSupported ? "Draw (D) · hover for shapes" : "Drawing needs host support (marks)"} disabled={!marksSupported}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l4-1 11-11-3-3L5 16z" /></svg></button><span class="sc-fly" aria-hidden={!marksSupported}><For each={["pen", "arrow", "rect", "ellipse"]}>{(shape) => <button disabled={!marksSupported} title={shape} aria-label={shape}><span>{shape === "pen" ? "✎" : shape === "arrow" ? "↗" : shape === "rect" ? "▢" : "◯"}</span></button>}</For></span></span>
+      <button class="sc-tool" aria-label="Undo last shape" title={marksSupported ? "Undo last shape" : "Drawing needs host support (marks)"} disabled={!marksSupported}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7L4 12l5 5M4 12h10a6 6 0 0 1 6 6" /></svg></button><i />
+      <button class="sc-tool" aria-label="Previous thread (K)" title="Previous thread (K)" onClick={() => navigate(-1)}>‹</button>
+      <button class="sc-count" aria-label="Find a comment (F)" title="Find a comment (F)" aria-expanded={tray()} onClick={toggleTray}>{list().filter((item) => item.root.state !== "resolved").length}<Show when={away().length}><span class="sc-off-count">+{away().length}</span></Show></button>
+      <button class="sc-tool" aria-label="Next thread (J)" title="Next thread (J)" onClick={() => navigate(1)}>›</button><i />
+      <button class="sc-tool" aria-label="Hide comments (H)" title="Show / hide comments (H)" aria-pressed={shown()} onClick={() => setShown(!shown())}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg></button>
+      <button class="sc-tool" aria-label="Tuck toolbar (.)" title="Tuck toolbar (.)" onClick={() => { setTucked(true); setTray(false); if (picking()) endPick() }}>⌄</button>
     </div>
+    <Show when={tucked()}><button class="sc-tab" aria-label="Restore toolbar (.)" title="Restore toolbar (.)" onClick={() => setTucked(false)}>⌃ {list().filter((item) => item.root.state !== "resolved").length}</button></Show>
   </>
 }
