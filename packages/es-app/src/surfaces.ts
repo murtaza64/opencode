@@ -52,7 +52,9 @@ export type Surface = {
 type Deploy = { url?: string; version?: string; deployed_at?: number | string; source_revision?: number }
 export type BuildingHubReceipt = Deploy & { state?: "deployed" | "building" | "failed"; last_deployed?: Deploy; current?: boolean | null
   /** How the deployed copy relates to this revision (DD #782): built from it, from an older revision, or another copy. */
-  copy?: "current" | "older" | "different" | null }
+  copy?: "current" | "older" | "different" | null
+  /** False when "from rN" is not pinned to that revision's bytes (a path Surface has no frozen bundle). */
+  source_verified?: boolean }
 
 /** The BuildingHub version a Surface links to: its last deployed receipt with a BuildingHub https url, and whether it
  * is this revision's bundle (`current`; null = not comparable). Nothing when no deploy was recorded. */
@@ -61,7 +63,8 @@ export const buildinghubLink = (surface: Pick<Surface, "buildinghub">) => {
   const deploy = receipt?.state === "deployed" ? receipt : receipt?.last_deployed
   const url = deploy?.url ? URL.parse(deploy.url) : null
   if (!url || url.protocol !== "https:" || !url.hostname.endsWith(".buildinghub.duolingo.com") || url.username || url.password) return undefined
-  return { url: url.href, version: deploy?.version, current: receipt?.current ?? null, copy: receipt?.copy ?? null, from: deploy?.source_revision }
+  return { url: url.href, version: deploy?.version, current: receipt?.current ?? null, copy: receipt?.copy ?? null, from: deploy?.source_revision,
+    unverified: receipt?.source_verified === false && receipt?.copy === "current" && !!deploy?.source_revision }
 }
 
 /** The reader's Share line for BuildingHub (DD #782). The link is offered only for a copy built from the revision on
@@ -72,7 +75,7 @@ export const buildinghubShare = (surface: Pick<Surface, "buildinghub" | "revisio
   const version = link.version ? ` ${link.version}` : ""
   // Hosts without lineage compare bundles only (`current`).
   const copy = link.copy ?? (link.current === true ? "current" : link.current === false ? "different" : null)
-  if (copy === "current") return { state: "current" as const, text: `On BuildingHub:${version}${link.from ? ` from r${link.from}` : ""}`, url: link.url }
+  if (copy === "current") return { state: "current" as const, text: `On BuildingHub:${version}${link.from ? ` from r${link.from}` : ""}${link.unverified ? " (bundle not verified)" : ""}`, url: link.url }
   if (copy === "older") return { state: "older" as const, text: `BuildingHub copy${version} is from r${link.from ?? "?"} (older than r${surface.revision})` }
   return { state: "different" as const, text: `BuildingHub has a different copy${version}` }
 }
