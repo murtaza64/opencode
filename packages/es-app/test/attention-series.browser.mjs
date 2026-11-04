@@ -24,11 +24,13 @@ await context.addInitScript(() => localStorage.setItem("es-app-all-projects", "t
 await context.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
 const page = await context.newPage()
 page.on("pageerror", error => errors.push(error.message))
-const card = page.locator('[data-series-id="keyboard-plan"]')
+// The board ("See all") inside the grilling stepper lists every question with its own controls.
+const card = page.locator('.attention-series[data-series-id="keyboard-plan"]')
 const row = index => card.locator(`[data-attention-id="grill_${index}"]`)
 try {
   await page.goto(url, { timeout: 300_000 })
   await expect(page.locator(`nav.sidebar [data-nav-item="${key}"]`)).toHaveCount(1)
+  await page.getByRole("button", { name: "See all", exact: true }).click()
   await expect(card.locator(".attention-series-question")).toHaveCount(7)
   await expect(card.locator(".attention-series-progress")).toHaveText("0/7 answered")
   // Progress is neutral text, not the green that means recommended.
@@ -51,6 +53,7 @@ try {
       ["/grill_3/commands", 5, "other", "أختار مسارًا ثالثًا — keep exact text"]])) throw Error(`per-record commands ${JSON.stringify(posts)}`)
   if (posts.some(call => call.csrf !== "1" || !call.body.command_id)) throw Error("missing command identity or CSRF")
   await page.reload()
+  await page.getByRole("button", { name: "See all", exact: true }).click()
   await expect(card.locator(".attention-series-progress")).toHaveText("3/7 answered")
   await expect(card.locator(".attention-series-head .home-muted")).toHaveText("Unanswered: Q4, Q5, Q6, Q7")
   await expect(row(2).locator(".attention-series-recorded")).toContainText("Alternative 2")

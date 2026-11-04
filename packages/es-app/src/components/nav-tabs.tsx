@@ -14,6 +14,8 @@ import { needsYou, staleArtifact, type LinkedItem } from "../needs-you"
 import { workCountLabel, workSurfaces, type WorkEntry } from "../work-queue"
 import { HostGlyph } from "./icons"
 import { useRequestAgent } from "./attention-decision"
+import { GrillSegments } from "./grilling"
+import { grilling } from "../attention-series"
 import { failureAge, failureLabel, OLD_FAILURE_MS } from "../session-failures"
 import { SurfaceGlyph } from "./surface-glyph"
 import { surfaceKindLabel, surfaceTags } from "../surface-tags"
@@ -76,6 +78,7 @@ const useOpenItem = () => {
 const DecisionRow = (props: { entry: WorkEntry }) => {
   const open = useOpenItem()
   const series = () => props.entry.item?.series
+  const session = createMemo(() => { const value = series(); return value && grilling(value.members) })
   const glyph = () => props.entry.kind === "permission" ? "!" : props.entry.kind === "failure" ? "×" : props.entry.kind === "review" ? "Try" : "?"
   // Read out as what it asks: a review is something ready to try.
   const spoken = () => props.entry.kind === "review" ? "ready to try" : props.entry.kind
@@ -83,14 +86,19 @@ const DecisionRow = (props: { entry: WorkEntry }) => {
   // A failure older than the recent window is dimmed, as it was in the desk queue.
   const old = () => !!props.entry.item?.failure && Date.now() - props.entry.item.failure.time >= OLD_FAILURE_MS
   return <Show when={props.entry.host} fallback={
-    <a href={props.entry.href} classList={{ active: open(props.entry.key), "nav-old": old() }} aria-current={open(props.entry.key) ? "page" : undefined} class="nav-item nav-decision" data-kind={props.entry.kind} data-nav-item={props.entry.key}>
+    <a href={props.entry.href} classList={{ active: open(props.entry.key), "nav-old": old(), "nav-grill": !!series() }} aria-current={open(props.entry.key) ? "page" : undefined} class="nav-item nav-decision" data-kind={props.entry.kind} data-nav-item={props.entry.key}>
       <span class="nav-kind" aria-hidden="true">{glyph()}</span>
-      <span class="nav-title" dir="auto">{series() ? `${series()!.title} (${series()!.answered}/${series()!.live})` : props.entry.title}</span>
+      <span class="nav-title" dir="auto">{series() ? `Grilling · ${series()!.title}` : props.entry.title}</span>
+      {/* A grilling session is one entry: how far it got, and how many questions came from the answers so far. */}
+      <Show when={session()}>{value => <span class="nav-grill-line">
+        <span class="nav-grill-progress"><Show when={props.entry.item?.record}>{record => <bdi dir="auto" class="desk-item-agent">{agentFor(record()).label}</bdi>}</Show> · <bdi dir="ltr">{value().answered} of {value().live} answered<Show when={value().followUps}> · {value().followUps} follow-up{value().followUps === 1 ? "" : "s"}</Show></bdi></span>
+        <GrillSegments session={value()} current={value().next?.index} />
+      </span>}</Show>
       <span class="sr-only">, {spoken()}</span>
       {/* Who asks, so agents sharing a project are told apart; the project stays secondary. */}
       {/* A failed step says when it failed, so an old one reads as old; its error label is the tooltip. */}
       <Show when={props.entry.item?.failure}>{failure => <span class="session-project" title={failureLabel(failure())}>{failureAge(failure().time, Date.now())}</span>}</Show>
-      <Show when={!props.entry.item?.failure && props.entry.item?.record} fallback={<Show when={!props.entry.item?.failure && props.entry.project}><span class="session-project">{props.entry.project}</span></Show>}>{record => {
+      <Show when={!props.entry.item?.failure && !series() && props.entry.item?.record} fallback={<Show when={!props.entry.item?.failure && !series() && props.entry.project}><span class="session-project">{props.entry.project}</span></Show>}>{record => {
         const agent = () => agentFor(record()!)
         return <span class="session-project"><bdi dir="auto" class="desk-item-agent" data-named={agent().named ? "true" : undefined} title={agent().session}>{agent().label}</bdi>
           <Show when={props.entry.project}> · <bdi dir="auto">{props.entry.project}</bdi></Show></span>

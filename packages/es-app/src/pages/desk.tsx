@@ -8,7 +8,7 @@ import { ago, sessionHref, useDashboard } from "../state"
 import type { createAttention, AttentionRecord } from "../attention"
 import { requestLive, type createHomeRequests } from "../home-requests"
 import { AttentionDecision, useRequestAgent, type AttentionView } from "../components/attention-decision"
-import { AttentionSeries } from "../components/attention-series"
+import { Grilling } from "../components/grilling"
 import { HomePermission, type HomeReplyReceipt } from "../components/home-permission"
 import { FailureRetry } from "../components/session-failure"
 import type { IgnoredFailure } from "../failure-ignores"
@@ -264,8 +264,8 @@ export default function Desk() {
         <Show when={"record" in current() ? current() as { record: AttentionRecord } : undefined}>{entry => <Answered record={entry().record} attention={attention} onView={view => view !== "open" && setHistoryView(view)} />}</Show>
         <Show when={selectedItem()}>{entry => <>
           {/* Permission cards state their own verified status; other items only know they left the queue. */}
-          <Show when={!entry().live && entry().item.request?.kind !== "permission"}><div class="home-warning" role="status">No longer waiting for you. <A href={sessionHref(entry().item.source.session, entry().item.source.directory)}>Open the thread</A> to see what happened.</div></Show>
-          <Canonical item={entry().item} live={entry().live} attention={attention} requests={requests} now={now()} ignoring={!!entry().item.failure && ignores.busy(entry().item.failure!)} detail={question => askDetail(entry().item, question)}
+          <Show when={!entry().live && entry().item.request?.kind !== "permission" && !entry().item.series}><div class="home-warning" role="status">No longer waiting for you. <A href={sessionHref(entry().item.source.session, entry().item.source.directory)}>Open the thread</A> to see what happened.</div></Show>
+          <Canonical item={entry().item} live={entry().live} attention={attention} onClose={() => select()} requests={requests} now={now()} ignoring={!!entry().item.failure && ignores.busy(entry().item.failure!)} detail={question => askDetail(entry().item, question)}
             onIgnore={failure => void ignores.ignore(failure, failureLabel(failure)).then(() => { if (ignores.ignored(failure)) select() })} onReceipt={receipt => setReceipts(previous => [receipt, ...previous.filter(old => old.key !== receipt.key || old.at !== receipt.at)].slice(0, 5))} />
           <Show when={receipts().length}><ul class="home-receipts" aria-label={`Replies from ${DESK.name}`}><For each={receipts()}>{receipt => <li data-result={receipt.result}><b>{receiptText(receipt)}</b> · <bdi dir="ltr">{receipt.permission}</bdi> · <bdi dir="auto">{receipt.title}</bdi> · {ago(receipt.at)}{receipt.result === "uncertain" ? " · not confirmed" : receipt.result === "not-applied" ? " · no longer pending" : ""} · <A href={sessionHref(receipt.session, receipt.directory)}>Open thread</A></li>}</For></ul></Show>
           <Show when={!entry().item.record}><PreparedBrief item={entry().item} live={entry().live} /><MoreDetail ask={question => askDetail(entry().item, question)} /></Show>
@@ -374,7 +374,7 @@ const Answered = (props: { record: AttentionRecord; attention: ReturnType<typeof
       briefAfter={<PreparedBrief item={item()} live={false} part="after" pinned={job} />} briefDetails={<PreparedBrief item={item()} live={false} part="details" pinned={job} />} />}</Show>
 }
 
-const Canonical = (props: { item: DeskItem; live: boolean; detail: (question: string) => Promise<string | undefined>; attention: ReturnType<typeof createAttention>; requests: ReturnType<typeof createHomeRequests>; now: number; ignoring: boolean; onIgnore: (failure: SessionFailure) => void; onReceipt: (receipt: HomeReplyReceipt) => void }) => {
+const Canonical = (props: { item: DeskItem; live: boolean; onClose: () => void; detail: (question: string) => Promise<string | undefined>; attention: ReturnType<typeof createAttention>; requests: ReturnType<typeof createHomeRequests>; now: number; ignoring: boolean; onIgnore: (failure: SessionFailure) => void; onReceipt: (receipt: HomeReplyReceipt) => void }) => {
   const dashboard = useDashboard()
   // With a complete brief for this exact revision, the brief leads and the producer's text folds away.
   const brief = useCompleteBrief(() => props.item)
@@ -390,7 +390,7 @@ const Canonical = (props: { item: DeskItem; live: boolean; detail: (question: st
     <Show when={props.item.series} fallback={<Show when={props.item.record}>{record => <AttentionDecision record={record()} attention={props.attention} prepared={brief()}
       briefJob={briefJob()} sends={sends()} copy={copy()} conversation={<RecordConversation record={record()} />}
       brief={<PreparedBrief item={props.item} live={props.live} part="lead" />} briefVisual={<PreparedBrief item={props.item} live={props.live} part="visual" />} briefAfter={<PreparedBrief item={props.item} live={props.live} part="after" />}
-      briefDetails={<PreparedBrief item={props.item} live={props.live} part="details" />} more={<MoreDetail ask={props.detail} />} />}</Show>}><AttentionSeries item={props.item} attention={props.attention} /></Show>
+      briefDetails={<PreparedBrief item={props.item} live={props.live} part="details" />} more={<MoreDetail ask={props.detail} />} />}</Show>}><Grilling item={props.item} attention={props.attention} onClose={props.onClose} /></Show>
     <Show when={props.item.request?.kind === "permission" ? props.item.request : undefined}>{request =>
       <HomePermission item={request()} live={requestLive(props.live, request(), props.requests.rows(), dashboard.activity.requestState("permission", request().session, request().directory, request().id))}
         siblings={dashboard.activity.requests().filter(other => other.kind === "permission" && other.directory === request().directory && other.request.sessionID === request().session && other.request.id !== request().id).length}

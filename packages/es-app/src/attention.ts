@@ -24,6 +24,8 @@ export type AttentionRecord = {
   gate_key: string
   /** A question in a series from one producer origin (attention S5): stable index, gaps allowed. */
   series?: { id: string; index: number; title?: string } | null
+  /** Proposed publisher field (grilling seam, not yet in the ledger): the series question whose answer prompted this one. */
+  caused_by?: { index: number } | null
   source_ref: { session_id: string; directory: string }
   decision: { choice_id: string; label?: string } | string | null
   delivery_state: DeliveryState

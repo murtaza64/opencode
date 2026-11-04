@@ -1,0 +1,81 @@
+.grill { container-type: inline-size; padding: 16px 17px; background: var(--mantle); border-inline-start: 2px solid var(--yellow); min-inline-size: 0; overflow-wrap: anywhere; }
+.grill:focus { outline: none; }
+.grill kbd { font: inherit; font-size: 10px; padding: 0 4px; border: 1px solid var(--surface1); border-radius: 3px; color: var(--subtext1); }
+.grill-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; }
+.grill-head > :not(.grill-head-actions) { grid-column: 1; }
+.grill-head h3 { margin-block: 4px 2px; font-size: 15px; }
+.grill-meta { margin: 0 0 8px; }
+.grill-count { color: var(--text); font-variant-numeric: tabular-nums; }
+.grill-head-actions { grid-column: 2; grid-row: 1 / span 3; display: flex; gap: 6px; align-items: flex-start; }
+.grill-head-actions .desk-button { font-size: 12px; white-space: nowrap; }
+.grill-segments { display: flex; gap: 3px; block-size: 4px; max-inline-size: 360px; }
+.grill-segment { flex: 1; border-radius: 2px; background: var(--surface1); }
+.grill-segment[data-state=answered] { background: var(--subtext0); }
+.grill-segment[data-state=current] { background: var(--peach); }
+.grill-segment[data-follow-up][data-state=open] { background: color-mix(in srgb, var(--lavender) 45%, var(--surface1)); }
+.grill-segment[data-follow-up][data-state=answered] { background: var(--lavender); }
+
+.grill-body { display: grid; grid-template-columns: minmax(150px, 210px) minmax(0, 1fr); gap: 18px; margin-block-start: 16px; }
+.grill-nav { min-inline-size: 0; }
+.grill-strip { display: none; }
+.grill-rail { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.grill .grill-rail-item { display: grid; gap: 1px; inline-size: 100%; text-align: start; padding: 6px 8px; border: 0; border-inline-start: 2px solid transparent; border-radius: 0; background: transparent; color: var(--subtext1); font: inherit; font-size: 12px; cursor: pointer; }
+.grill .grill-rail-item:hover { background: var(--surface0); }
+.grill-rail-item[aria-current=step] { background: var(--base); border-inline-start-color: var(--peach); color: var(--text); }
+.grill-rail-item[data-follow-up]:not([aria-current=step]) { border-inline-start-color: color-mix(in srgb, var(--lavender) 55%, transparent); }
+.grill .grill-rail-item:disabled { opacity: 1; cursor: default; text-decoration: line-through; color: var(--overlay0); }
+.grill-rail-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grill-rail-note { font-size: 11px; color: var(--subtext0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grill-rail-item[data-follow-up] .grill-rail-note { color: var(--lavender); }
+.grill-rail-item[data-status=answered] .grill-rail-note { color: var(--subtext0); }
+.grill-rail-summary { color: var(--subtext0); margin-block-start: 6px; }
+.grill-q { font-variant-numeric: tabular-nums; color: var(--subtext0); font-weight: 600; }
+.grill-delivered { color: var(--subtext0); }
+.grill-delivered[data-state=delivered] { color: var(--green); }
+.grill-delivered[data-state=blocked] { color: var(--red); }
+
+.grill-pane { min-inline-size: 0; }
+.grill-question h4 { margin: 0 0 6px; font-size: 16px; line-height: 1.4; color: var(--text); }
+.grill-because { margin: 0 0 6px; font-size: 12px; color: var(--lavender); }
+.grill-hinge { margin: 0 0 10px; color: var(--subtext1); line-height: 1.5; }
+.grill-choices { display: flex; flex-direction: column; align-items: stretch; gap: 6px; margin-block: 12px 8px; max-inline-size: 520px; }
+.attention-home .grill-choice { justify-content: flex-start; text-align: start; min-block-size: 38px; }
+.attention-home .grill-choice:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
+.grill-rec { font-size: 11px; color: var(--peach); margin: 0 8px; unicode-bidi: isolate; }
+.grill-free { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-inline-size: 520px; }
+.grill-free textarea { flex: 1 1 220px; min-inline-size: 0; box-sizing: border-box; min-block-size: 38px; padding: 9px 10px; font: inherit; color: var(--text); background: var(--base); border: 1px dashed var(--surface1); border-radius: 6px; resize: vertical; }
+.grill-free textarea:focus { outline: none; border-style: solid; border-color: var(--lavender); }
+.grill-recorded { border-inline-start: 2px solid var(--green); background: var(--base); padding: 8px 12px; margin-block: 10px; }
+.grill-recorded strong { color: var(--green); font-size: 12px; }
+.grill-recorded p { margin: 4px 0; }
+.grill-sent { color: var(--green); font-weight: 600; }
+.grill-more { margin-block-start: 14px; }
+.grill-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; margin-block-start: 18px; padding-block-start: 10px; border-block-start: 1px solid var(--surface0); }
+
+.grill-summary h4 { margin: 0 0 10px; font-size: 15px; color: var(--text); }
+.grill-decided { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.grill-decided li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 8px; padding-block-end: 8px; border-block-end: 1px solid var(--surface0); }
+.grill-decided-answer { grid-column: 2; color: var(--text); font-weight: 600; }
+.grill-decided .grill-delivered { grid-column: 3; grid-row: 1 / span 2; font-size: 11px; }
+
+/* Narrow (phone or a squeezed pane): the question fills the view; the rail folds into a "4 of 7" strip. */
+@container (max-width: 560px) {
+  .grill-head { grid-template-columns: minmax(0, 1fr); }
+  .grill-head-actions { grid-column: 1; grid-row: auto; margin-block-start: 10px; }
+  .grill-body { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .grill-strip { display: inline-flex; gap: 6px; align-items: center; padding: 4px 10px; font: inherit; font-size: 12px; color: var(--text); background: var(--base); border: 1px solid var(--surface1); border-radius: 12px; cursor: pointer; }
+  .grill-nav:not([data-open]) .grill-rail { display: none; }
+  .grill-nav[data-open] .grill-rail { margin-block-start: 6px; }
+  .grill-choices { max-inline-size: none; }
+  .attention-home .grill-choice { min-block-size: 44px; }
+  .grill-foot > span:first-child { display: none; }
+}
+@media (pointer: coarse) { .grill-foot > span:first-child { display: none; } }
+
+/* The Needs-you entry for a grilling session: title, then progress and segments on a second line. */
+.nav-grill { flex-wrap: wrap; row-gap: 3px; }
+.nav-grill > .nav-title { flex: 1 1 0; min-inline-size: 0; }
+/* The same segmented bar as the stepper header, wide enough to count segments; it wraps under the text when narrow. */
+.nav-grill-line { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding-inline-start: 22px; font-size: 11px; color: var(--subtext0); }
+.nav-grill-line .grill-segments { flex: 1 0 80px; min-inline-size: 80px; max-inline-size: 160px; }
+.nav-grill-progress { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
