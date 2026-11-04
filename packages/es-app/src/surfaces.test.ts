@@ -216,13 +216,28 @@ describe.skipIf(!hasStore)("requested deliverables against the real host store",
 
 test("a Surface links to its deployed BuildingHub version, says whether it is this revision, and shows nothing without a deploy", () => {
   const url = "https://diff-stream.buildinghub.duolingo.com/#/s/diff-stream"
-  expect(buildinghubLink({ buildinghub: { state: "deployed", url, version: "v3", current: true } })).toEqual({ url, version: "v3", current: true })
+  expect(buildinghubLink({ buildinghub: { state: "deployed", url, version: "v3", current: true } })).toEqual({ url, version: "v3", current: true, copy: null, from: undefined })
   // A redeploy building or failed keeps linking to the last deploy; that version is older than this revision.
-  expect(buildinghubLink({ buildinghub: { state: "building", version: "v4", current: false, last_deployed: { url, version: "v3" } } })).toEqual({ url, version: "v3", current: false })
+  expect(buildinghubLink({ buildinghub: { state: "building", version: "v4", current: false, last_deployed: { url, version: "v3" } } })).toEqual({ url, version: "v3", current: false, copy: null, from: undefined })
   expect(buildinghubLink({ buildinghub: { state: "deployed", url, version: "v3", current: null } })?.current).toBeNull()
   // Nothing deployed yet, no receipt, or a link that is not a BuildingHub https page: no link.
   expect(buildinghubLink({ buildinghub: { state: "failed", version: "v1" } })).toBeUndefined()
   expect(buildinghubLink({})).toBeUndefined()
   for (const bad of ["http://diff-stream.buildinghub.duolingo.com/", "https://evil.example/#/s/x", "https://u:p@x.buildinghub.duolingo.com/"])
     expect(buildinghubLink({ buildinghub: { state: "deployed", url: bad, current: true } })).toBeUndefined()
+})
+
+test("the reader's BuildingHub share links only a copy built from this revision", async () => {
+  const { buildinghubShare } = await import("./surfaces")
+  const url = "https://diff-stream.buildinghub.duolingo.com/#/s/show"
+  expect(buildinghubShare({ revision: 3, buildinghub: { state: "deployed", url, version: "v4", copy: "current", source_revision: 3 } }))
+    .toEqual({ state: "current", text: "On BuildingHub: v4 from r3", url })
+  expect(buildinghubShare({ revision: 3, buildinghub: { state: "deployed", url, version: "v4", copy: "older", source_revision: 2 } }))
+    .toEqual({ state: "older", text: "BuildingHub copy v4 is from r2 (older than r3)" })
+  expect(buildinghubShare({ revision: 3, buildinghub: { state: "deployed", url, version: "v4", copy: "different" } }))
+    .toEqual({ state: "different", text: "BuildingHub has a different copy v4" })
+  // A host without lineage: bundle comparison only.
+  expect(buildinghubShare({ revision: 3, buildinghub: { state: "deployed", url, version: "v4", current: true } })).toEqual({ state: "current", text: "On BuildingHub: v4", url })
+  expect(buildinghubShare({ revision: 3 })).toEqual({ state: "none", text: "Not on BuildingHub" })
+  expect(buildinghubShare({ revision: 3, buildinghub: { state: "failed", version: "v1" } })).toEqual({ state: "none", text: "Not on BuildingHub" })
 })

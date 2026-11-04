@@ -116,3 +116,6 @@ span.surface-done { cursor: default; }
 .surface-change-place { font-size: 12px; }
 .surface-change[data-intent="review"] > .surface-change-label { color: var(--blue); }
 .surface-change[data-intent="decision"] > .surface-change-label { color: var(--peach); }
+/* BuildingHub share line in the reader's More menu (DD #782). */
+.surface-buildinghub { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 4px 8px; font-size: 12px; }
+.surface-buildinghub-note { color: var(--subtext0); }
