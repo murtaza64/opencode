@@ -2,6 +2,7 @@ import type { AttentionRecord } from "./attention"
 import type { ContextRef } from "./context-mention"
 import type { Surface } from "./surfaces"
 import { exactTime, shortDateTime } from "./local-time"
+import { formatSurfaceRef, parseSurfaceRef, surfaceRefFromRoute, surfaceRefHref } from "./surface-ref"
 
 // Entity references (chip design r4, DD #364/#371): one shared shape for a Surface, decision, agent or session named in
 // running text, mail rows, snippets and the composer. A reference is resolved only from stores the app already holds
@@ -36,8 +37,24 @@ export type EntityStores = {
   personas: readonly Persona[]
   /** A Work host's label for an ID. */
   hostLabel?: (host: string) => string | undefined
-  /** Another Work host's held lists (its feed's last-known Surfaces and open decisions); undefined when not held. */
-  remote?: (host: string) => { surfaces: readonly Surface[]; decisions: readonly AttentionRecord[]; stale?: boolean } | undefined
+  /** Another Work host's held lists (its feed's last-known Surfaces and open decisions); undefined when not held.
+   * `reach`: that host's last read failed for want of sign-in (auth) or connection (offline). */
+  remote?: (host: string) => { surfaces: readonly Surface[]; decisions: readonly AttentionRecord[]; stale?: boolean; reach?: "offline" | "auth" } | undefined
+  /** This host's own Work host ID, for canonical references; undefined when unknown. */
+  self?: string
+}
+
+// The one Surface reference grammar is surface-ref.ts (RHC, DD #740); these only map its host between the viewer's
+// window host (`here`) and this host's own Work ID (`self`).
+
+/** A Surface reference as the canonical text `<host>~surface:<id>[@r<N>]` (pinned when it names a revision). */
+export const surfaceToken = (ref: Pick<EntityRef, "id" | "host" | "revision">, stores: Pick<EntityStores, "here" | "self">) =>
+  formatSurfaceRef({ host: ref.host === stores.here ? stores.self : ref.host, id: ref.id, ...(ref.revision !== undefined ? { revision: ref.revision } : {}) })
+/** A canonical Surface reference in text as an EntityRef; this host's own ID (or no host) means the viewer's host. */
+export const parseSurfaceToken = (text: string, stores: Pick<EntityStores, "here" | "self">): EntityRef | undefined => {
+  const ref = parseSurfaceRef(text)
+  if (!ref) return undefined
+  return { kind: "surface", id: ref.id, host: !ref.host || ref.host === stores.self ? stores.here : ref.host, ...(ref.revision ? { revision: ref.revision } : {}) }
 }
 
 export type EntityState = "ok" | "stale" | "missing" | "elsewhere"
@@ -80,13 +97,14 @@ export const parseEntityHref = (href: string, here: string): EntityRef | undefin
   // A Work host's route (/hosts/<id>/...) names that host.
   const routed = /^\/hosts\/([\w-]+)\//.exec(url.pathname)?.[1]
   const host = routed ?? (url.host === here ? here : url.host)
-  const revision = Number(url.searchParams.get("rev")) || undefined
   const section = url.searchParams.get("section") ?? (url.hash.length > 1 ? decodeURIComponent(url.hash.slice(1)) : undefined)
-  const surface = url.searchParams.get("surface") ?? /\/__es\/surface\/([a-z0-9][a-z0-9-]{0,39})(?:\/|$)/.exec(url.pathname)?.[1]
-  if (surface && /^[a-z0-9][a-z0-9-]{0,39}$/.test(surface)) return { kind: "surface", id: surface, host, ...(revision ? { revision } : {}), ...(section ? { section } : {}) }
-  const item = url.searchParams.get("item")
-  const hosted = item && /^(?:([\w-]+)~)?surface:([a-z0-9][a-z0-9-]{0,39})$/.exec(item)
-  if (hosted) return { kind: "surface", id: hosted[2]!, host: hosted[1] ?? host, ...(revision ? { revision } : {}), ...(section ? { section } : {}) }
+  const item = url.searchParams.get("item") ?? undefined
+  const framed = /\/__es\/surface\/([a-z0-9][a-z0-9-]{0,39})(?:\/|$)/.exec(url.pathname)?.[1]
+  // Routes (/?item=<host>~surface:<id>[&rev=N], /?surface=<id>) go through surface-ref.ts; an `@rN` inside the item
+  // token pins too, as a cite may carry either form.
+  const cited = surfaceRefFromRoute(item?.includes("surface:") ? item.replace(/@r(\d+)$/, "") : undefined, url.searchParams.get("surface") ?? framed,
+    url.searchParams.get("rev") ?? (item && /surface:.*@r(\d+)$/.exec(item)?.[1]) ?? undefined)
+  if (cited) return { kind: "surface", id: cited.id, host: cited.host ?? host, ...(cited.revision ? { revision: cited.revision } : {}), ...(section ? { section } : {}) }
   const decision = item && /^(?:([\w-]+)~)?attention:([^:]+):(.+)$/.exec(item)
   if (decision) return { kind: "decision", id: decision[3]!, editspace: decision[2]!, host: decision[1] ?? host }
   return undefined
@@ -124,14 +142,18 @@ export const entityView = (ref: EntityRef, stores: EntityStores): EntityView => 
     const title = surface?.title ?? ref.label ?? ref.id
     const state: EntityState = !surface ? (held && !held.stale ? "missing" : "elsewhere") : ref.revision !== undefined && surface.revision > ref.revision ? "stale" : "ok"
     const where = elsewhere ? `on ${hostName}` : "on this host"
-    const words = state === "missing" ? `not found ${where}` : state === "stale" ? `changed since mentioned (was rev ${ref.revision})` : elsewhere ? where : ""
+    // A host that could not be read says why; the Surface is never looked up on another host instead.
+    const reach = elsewhere && !surface ? (held?.reach === "auth" ? `sign-in needed on ${hostName}` : held?.reach === "offline" ? `${hostName} offline` : !held ? `not loaded from ${hostName}` : "") : ""
+    const words = reach || (state === "missing" ? `not found ${where} (withdrawn or never published there)` : state === "stale" ? `r${ref.revision} pinned; r${surface!.revision} latest` : elsewhere ? where : "")
     return { ref, title, state, host: hostName, section: ref.section,
       // Another Work host's Surface opens in the desk reader through that host's key.
-      href: elsewhere ? `/?item=${encodeURIComponent(`${ref.host}~surface:${ref.id}`)}` : `/?surface=${encodeURIComponent(ref.id)}`,
-      label: [`Surface: ${title}`, ref.section && `section ${ref.section}`, surface && `revision ${surface.revision}`, words].filter(Boolean).join(", "),
+      // Same target for hover, Enter and click: this host's reader, or the origin host's through its key (pinned revision kept).
+      href: elsewhere ? surfaceRefHref({ host: ref.host, id: ref.id, ...(ref.revision !== undefined ? { revision: ref.revision } : {}) })
+        : `/?surface=${encodeURIComponent(ref.id)}${ref.revision !== undefined ? `&rev=${ref.revision}` : ""}`,
+      label: [`Surface: ${title}`, ref.section && `section ${ref.section}`, surface && state !== "stale" && `revision ${surface.revision}`, words].filter(Boolean).join(", "),
       rows: surface ? [["Revision", `rev ${surface.revision} · updated ${shortDateTime(surface.updated_at)}`], ["Owner", surface.owner], ["Host", hostName ?? "this host"],
-        ...(ref.section ? [["Section", ref.section] as [string, string]] : []), ...(state === "stale" ? [["Mentioned", `rev ${ref.revision}`] as [string, string]] : [])]
-        : [["Host", hostName ?? "this host"], ["State", state === "missing" ? `not found ${where}` : `not loaded from ${hostName}`]],
+        ...(ref.section ? [["Section", ref.section] as [string, string]] : []), ...(state === "stale" ? [["Pinned", `r${ref.revision} pinned; r${surface!.revision} latest`] as [string, string]] : [])]
+        : [["Host", hostName ?? "this host"], ["State", words]],
       preview: surface?.summary ?? undefined }
   }
   if (ref.kind === "decision") {

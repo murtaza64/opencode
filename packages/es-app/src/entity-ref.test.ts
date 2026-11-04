@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { AttentionRecord } from "./attention"
 import type { Surface } from "./surfaces"
-import { entityView, mentionRef, parseEntityHref, unqualifiedHref, type EntityStores } from "./entity-ref"
+import { entityView, mentionRef, parseEntityHref, parseSurfaceToken, surfaceToken, unqualifiedHref, type EntityStores } from "./entity-ref"
 
 const surface = { id: "decision-briefs", title: "Decision briefs", summary: "21 cases", kind: "path", owner: "desktop-delivery", lane: "ux-feel", editspace: "opencode",
   updated_at: Date.UTC(2026, 10, 3, 15), revision: 3, health: { state: "ok" } } as unknown as Surface
@@ -19,9 +19,9 @@ test("links to Surfaces and decisions parse to refs; other paths are not refs", 
 
 test("a Surface ref shows the current title, and says when it changed since mentioned, is elsewhere or missing", () => {
   expect(entityView({ kind: "surface", id: "decision-briefs", host: stores.here }, stores)).toMatchObject({ title: "Decision briefs", state: "ok" })
-  expect(entityView({ kind: "surface", id: "decision-briefs", host: stores.here, revision: 2 }, stores)).toMatchObject({ state: "stale", label: expect.stringContaining("was rev 2") })
+  expect(entityView({ kind: "surface", id: "decision-briefs", host: stores.here, revision: 2 }, stores)).toMatchObject({ state: "stale", label: "Surface: Decision briefs, r2 pinned; r3 latest" })
   expect(entityView({ kind: "surface", id: "visuals", host: "mini", label: "Visuals" }, stores)).toMatchObject({ state: "elsewhere", host: "Mac Mini", title: "Visuals" })
-  expect(entityView({ kind: "surface", id: "old-board", host: stores.here }, stores)).toMatchObject({ state: "missing", label: "Surface: old-board, not found on this host" })
+  expect(entityView({ kind: "surface", id: "old-board", host: stores.here }, stores)).toMatchObject({ state: "missing", label: "Surface: old-board, not found on this host (withdrawn or never published there)" })
 })
 
 test("a decision ref shows its current state and answer; never more", () => {
@@ -56,6 +56,26 @@ test("an unqualified link in a Mini transcript resolves on the Mini, from its he
   expect(view).toMatchObject({ state: "ok", title: "Feedback fixture", host: "Mac Mini", href: "/?item=mini~surface%3Aopencode-feedback-fixture" })
   expect(view.rows).toContainEqual(["Host", "Mac Mini"])
   // Missing only after that host's list was read; not held -> not loaded, never 'not found'.
-  expect(entityView({ kind: "surface", id: "gone", host: "mini" }, withMini)).toMatchObject({ state: "missing", label: "Surface: gone, not found on Mac Mini" })
+  expect(entityView({ kind: "surface", id: "gone", host: "mini" }, withMini)).toMatchObject({ state: "missing", label: "Surface: gone, not found on Mac Mini (withdrawn or never published there)" })
   expect(entityView({ kind: "surface", id: "gone", host: "other" }, withMini).state).toBe("elsewhere")
+})
+
+test("canonical Surface tokens: parse, pinned vs latest, host states, and copy back unchanged (DD #1335)", () => {
+  const self = { ...stores, self: "laptop" }
+  expect(parseSurfaceToken("mini~surface:opencode-feedback-fixture@r4", self)).toEqual({ kind: "surface", id: "opencode-feedback-fixture", host: "mini", revision: 4 })
+  expect(parseSurfaceToken("laptop~surface:decision-briefs", self)).toEqual({ kind: "surface", id: "decision-briefs", host: stores.here })
+  // The grammar is surface-ref.ts's: a single-host ref (no host) is this host's; invalid shared vectors stay text.
+  expect(parseSurfaceToken("surface:board-1@r12", self)).toEqual({ kind: "surface", id: "board-1", host: stores.here, revision: 12 })
+  for (const bad of ["Mini~surface:x", "mini~surface:x@r0", "mini~surface:Opencode"]) expect(parseSurfaceToken(bad, self)).toBeUndefined()
+  expect(parseEntityHref("/?item=mini~surface%3Afeedback&rev=4", stores.here)).toMatchObject({ host: "mini", id: "feedback", revision: 4 })
+  expect(parseEntityHref("/?item=mini~surface%3Afeedback%40r4", stores.here)).toMatchObject({ host: "mini", id: "feedback", revision: 4 })
+  expect(surfaceToken({ id: "decision-briefs", host: stores.here }, self)).toBe("laptop~surface:decision-briefs")
+  expect(surfaceToken({ id: "feedback", host: "mini", revision: 4 }, self)).toBe("mini~surface:feedback@r4")
+  const feedback = { ...surface, id: "feedback", title: "Feedback", revision: 6 } as Surface
+  const mini = (reach?: "offline" | "auth", list = [feedback], stale = false): EntityStores => ({ ...self, remote: (host) => host === "mini" ? { surfaces: list, decisions: [], stale, reach } : undefined })
+  expect(entityView({ kind: "surface", id: "feedback", host: "mini", revision: 4 }, mini())).toMatchObject({ state: "stale", label: "Surface: Feedback, r4 pinned; r6 latest, on Mac Mini".replace(", on Mac Mini", "") , href: "/?item=mini~surface%3Afeedback&rev=4" })
+  expect(entityView({ kind: "surface", id: "feedback", host: "mini" }, mini("offline", [], true)).label).toBe("Surface: feedback, Mac Mini offline")
+  expect(entityView({ kind: "surface", id: "feedback", host: "mini" }, mini("auth", [], true)).label).toBe("Surface: feedback, sign-in needed on Mac Mini")
+  // Never another host's copy: a same-id Surface on this host does not stand in for the Mini's.
+  expect(entityView({ kind: "surface", id: "decision-briefs", host: "mini" }, mini("offline", [], true))).toMatchObject({ title: "decision-briefs", state: "elsewhere" })
 })

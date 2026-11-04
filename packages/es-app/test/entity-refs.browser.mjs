@@ -50,9 +50,9 @@ try {
   await expect(surface).toHaveCount(2, { timeout: 30_000 })
   // Current title, not the link text; the older link is marked stale.
   await expect(surface.first()).toHaveAttribute("aria-label", "Surface: Decision briefs, revision 3")
-  await expect(surface.nth(1)).toHaveAttribute("aria-label", /changed since mentioned \(was rev 2\)/)
+  await expect(surface.nth(1)).toHaveAttribute("aria-label", /r2 pinned; r3 latest/)
   await expect(surface.nth(1).locator(".emk.warn")).toHaveCount(1)
-  await expect(message.locator(".eref.s.missing")).toHaveAttribute("aria-label", "Surface: old board, not found on this host")
+  await expect(message.locator(".eref.s.missing")).toHaveAttribute("aria-label", "Surface: old board, not found on this host (withdrawn or never published there)")
   await expect(message.locator(".eref.s").filter({ hasText: "Visuals" }).locator(".eh")).toHaveCount(1)
   // Decision: live state.
   const decision = message.locator(".eref.d")
