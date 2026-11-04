@@ -142,7 +142,9 @@ export default function Desk() {
     if (!parts?.host || !parts.key.startsWith("surface:") || selectedRemote()) return
     const feed = dashboard.work.feeds().find(item => item.host.id === parts.host)
     const state = feed?.state()
-    return remoteGap({ host: parts.host, label: feed?.host.label, known: !!feed, current: !!state && state.status === "ready" && !state.surfacesStale })
+    const id = parts.key.slice("surface:".length)
+    return remoteGap({ host: parts.host, label: feed?.host.label, known: !!feed, current: !!state && state.status === "ready" && !state.surfacesStale,
+      withdrawn: state?.withdrawn?.find(item => item.id === id) })
   })
   const selected = createMemo((): { surface: string } | { item: DeskItem; live: boolean } | { record: AttentionRecord } | undefined => {
     const key = resolvedKey()
@@ -251,7 +253,7 @@ export default function Desk() {
       </div>
 
       {/* Remount per selection so one item's reply outcome or draft never carries into the next. */}
-      <Show when={selectedSurface()} keyed>{id => <SurfaceView id={id} surface={surfaces.list().find(item => item.id === id)} checked={surfaces.checked()} cited={cited()} onDone={(surface, revision, seen) => surfaces.markSeen(surface, revision, seen)} onLoaded={() => surfaces.refresh()} onRetry={() => void surfaces.refresh()} onClose={() => select()}
+      <Show when={selectedSurface()} keyed>{id => <SurfaceView id={id} surface={surfaces.list().find(item => item.id === id)} withdrawn={surfaces.withdrawn().find(item => item.id === id)} checked={surfaces.checked()} cited={cited()} onDone={(surface, revision, seen) => surfaces.markSeen(surface, revision, seen)} onLoaded={() => surfaces.refresh()} onRetry={() => void surfaces.refresh()} onClose={() => select()}
         decisions={<Show when={surfaces.list().find(item => item.id === id)}>{surface => <LinkedDecisions surface={surface()} />}</Show>} />}</Show>
       <Show when={selected() && !selectedSurface() ? selectedKey() : undefined} keyed>{_key => <Show when={selected()}>{current => <section ref={setEvidence} class="desk-evidence attention-home" aria-label="Selected item">
         <div class="desk-evidence-head">

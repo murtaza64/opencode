@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, onMount, Show } from "solid-js"
+import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { changeNotes, intentLabel, markOpened, openedRevision } from "../surface-notes"
 import { declareLooks, lookNote, lookStates, requestLook } from "../surface-look"
 import type { Surface } from "../surfaces"
@@ -25,9 +25,21 @@ export const SurfaceChangeNote = (props: { surface: Surface; host?: string; revi
   createEffect(() => declareLooks(props.surface.id, looks()))
   const states = () => lookStates(props.surface.id)
   const [open, setOpen] = createSignal(false)
+  // One fixed row (the frame top never moves between revisions or note/no note); More expands it in place.
+  const [expanded, setExpanded] = createSignal(false)
+  const [overflows, setOverflows] = createSignal(false)
+  let row: HTMLDivElement | undefined
+  const measure = () => { if (row && !expanded()) setOverflows(row.scrollWidth > row.clientWidth + 1) }
+  onMount(() => {
+    const observer = new ResizeObserver(measure)
+    if (row) observer.observe(row)
+    onCleanup(() => observer.disconnect())
+  })
+  createEffect(() => { notes(); looks(); change(); queueMicrotask(measure) })
   const lead = () => [change()?.base ? `Since r${change()!.base}` : undefined, intentLabel(change()?.intent)].filter(Boolean).join(" · ")
   return <Show when={notes().current || notes().since || lead() || looks().length || change()?.respond}>
-    <div class="surface-change" data-surface-change={props.revision} data-intent={change()?.intent ?? undefined}>
+    <div class="surface-change-wrap" data-expanded={expanded() ? "" : undefined}>
+    <div ref={row} class="surface-change" data-surface-change={props.revision} data-intent={change()?.intent ?? undefined}>
       <span class="surface-change-label">{lead() || `What's new in rev ${props.revision}`}</span>
       <span class="surface-change-text" classList={{ "surface-change-none": !shown().whats_new }} dir="auto">{notes().current ?? "No change note provided"}</span>
       <Show when={looks().length}>
@@ -41,7 +53,7 @@ export const SurfaceChangeNote = (props: { surface: Surface; host?: string; revi
       </Show>
       <Show when={change()?.respond}>{question => <span class="surface-change-respond">Respond: <bdi dir="auto">{question()}</bdi></span>}</Show>
       <Show when={notes().since}>{since => <>
-        <button type="button" class="link-button surface-change-since" aria-expanded={open()} onClick={() => setOpen(!open())}>
+        <button type="button" class="link-button surface-change-since" aria-expanded={open()} onClick={() => { const next = !open(); setOpen(next); if (next) setExpanded(true) }}>
           you last opened r{since().base}{since().earlier.length ? ` · ${since().earlier.length} earlier note${since().earlier.length > 1 ? "s" : ""}` : ""}
         </button>
         <Show when={open()}>
@@ -51,6 +63,10 @@ export const SurfaceChangeNote = (props: { surface: Surface; host?: string; revi
           </ul>
         </Show>
       </>}</Show>
+    </div>
+    <Show when={overflows() || expanded()}>
+      <button type="button" class="link-button surface-change-more" aria-expanded={expanded()} onClick={() => setExpanded(!expanded())}>{expanded() ? "Less" : "More"}</button>
+    </Show>
     </div>
   </Show>
 }

@@ -13,7 +13,7 @@ import { loadSeen, saveSeen } from "./last-seen"
 import type { Handoff, LaneOwner } from "./handoffs"
 import type { HomeRequestRow } from "./home-requests"
 import type { NeedsYouInputs } from "./needs-you"
-import type { Surface } from "./surfaces"
+import type { Surface, SurfaceTombstone } from "./surfaces"
 
 /** A session row; `host` names a Work view host other than this page's, undefined for this page's. */
 export type HostedRow = {
@@ -62,6 +62,8 @@ export type HostFeedState = {
   surfaces: Surface[]
   /** The Surface list could not be read on the last attempt. */
   surfacesStale?: boolean
+  /** That host's withdrawn Surfaces (tombstones), when it reports them. */
+  withdrawn?: SurfaceTombstone[]
   /** That host's dashboard serves no Surfaces (404/501): a plain fact, not an outage. */
   surfacesUnsupported?: boolean
 }
@@ -225,7 +227,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
       requests: requests?.filter((request) => current.project === undefined || request.project === current.project),
     }
   }
-  type SurfaceRead = { surfaces: Surface[] } | { unsupported: true } | undefined
+  type SurfaceRead = { surfaces: Surface[]; withdrawn?: SurfaceTombstone[] } | { unsupported: true } | undefined
   const readSurfaces = async (): Promise<SurfaceRead> => {
     const current = scope
     if (!current) return undefined
@@ -239,9 +241,10 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
       await response?.body?.cancel()
       return undefined
     }
-    const body = (await response.json().catch(() => undefined)) as { surfaces?: Surface[] } | undefined
+    const body = (await response.json().catch(() => undefined)) as { surfaces?: Surface[]; withdrawn?: SurfaceTombstone[] } | undefined
     if (!Array.isArray(body?.surfaces)) return undefined
-    return { surfaces: body.surfaces.filter((surface) => current.project === undefined || surface.editspace === current.project) }
+    return { surfaces: body.surfaces.filter((surface) => current.project === undefined || surface.editspace === current.project),
+      withdrawn: Array.isArray(body.withdrawn) ? body.withdrawn : [] }
   }
   // Each part keeps its last-known rows for the same project when its read failed, marked stale.
   const merged = (previous: HostFeedState, same: boolean, needs: Awaited<ReturnType<typeof readNeeds>>, surfaces: SurfaceRead) => ({
@@ -251,6 +254,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     requestsStale: !needs.requests,
     surfaces: surfaces && "surfaces" in surfaces ? surfaces.surfaces : surfaces ? [] : same ? previous.surfaces : [],
     surfacesStale: !surfaces,
+    withdrawn: surfaces && "surfaces" in surfaces ? surfaces.withdrawn ?? [] : same ? previous.withdrawn : [],
     surfacesUnsupported: !!surfaces && "unsupported" in surfaces,
   })
   const readLineage = async (es: string) => {

@@ -27,6 +27,8 @@ try {
     await expect(change).toContainText("What's new in rev 2", { timeout: 120_000 })
     await expect(change).toContainText("Pick A or B in the header")
     await expect(change.locator(".surface-change-since")).toHaveCount(0)
+    const height = await page.locator(".surface-change-wrap").evaluate((el) => el.getBoundingClientRect().height)
+    if (Math.abs(height - 31) > 2) throw new Error(`the change row is ${height}px, not one fixed line`)
     results.push("PASS reader shows the author's note for the revision on screen")
     await page.close()
   }

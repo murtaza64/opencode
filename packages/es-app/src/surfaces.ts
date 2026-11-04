@@ -13,6 +13,8 @@ export type SurfaceHealth = {
   /** Last successful probe this dashboard saw; absent when it never reached the surface. */
   last_ok_at?: number | null
 }
+/** A withdrawn Surface as its host remembers it (DD #765): never its content. */
+export type SurfaceTombstone = { id: string; title: string; owner: string; editspace: string; revision: number; withdrawn_at: number }
 export type SurfaceIntent = "fyi" | "review" | "decision"
 export type SurfaceLook = { label: string; id?: string; selector?: string }
 export type Surface = {
@@ -96,12 +98,13 @@ const POLL_MS = 15_000
 export const createSurfaces = (options: { fetch?: (input: string, init?: RequestInit) => Promise<Response>; poll?: boolean } = {}) => {
   const send = options.fetch ?? ((input: string, init?: RequestInit) => fetch(input, init))
   const [list, setList] = createSignal<Surface[]>([])
+  const [withdrawn, setWithdrawn] = createSignal<SurfaceTombstone[]>([])
   const [error, setError] = createSignal<string>()
   const [checked, setChecked] = createSignal<number>()
   const refresh = async () => {
-    type Read = { surfaces: Surface[] } | { status: number } | { cause: unknown }
+    type Read = { surfaces: Surface[]; withdrawn?: SurfaceTombstone[] } | { status: number } | { cause: unknown }
     const result: Read = await send("/es/api/surfaces", { cache: "no-store" })
-      .then(async (response): Promise<Read> => response.ok ? { surfaces: (await response.json()).surfaces as Surface[] } : { status: response.status })
+      .then(async (response): Promise<Read> => { if (!response.ok) return { status: response.status }; const body = await response.json(); return { surfaces: body.surfaces as Surface[], withdrawn: Array.isArray(body.withdrawn) ? body.withdrawn : [] } })
       .catch((cause): Read => ({ cause }))
     if (!("surfaces" in result)) {
       // Load trouble keeps the last list and goes to the shared header status; a dashboard
@@ -111,6 +114,7 @@ export const createSurfaces = (options: { fetch?: (input: string, init?: Request
     }
     clearBackend("Surfaces")
     setList(result.surfaces)
+    setWithdrawn(result.withdrawn ?? [])
     setError()
     setChecked(Date.now())
   }
@@ -147,7 +151,7 @@ export const createSurfaces = (options: { fetch?: (input: string, init?: Request
     const timer = setInterval(() => void refresh(), POLL_MS)
     onCleanup(() => clearInterval(timer))
   }
-  return { list, boards: () => list().filter(surface => !isDeliverable(surface)), deliverables: split, markSeen, seenError, error, checked, refresh }
+  return { list, withdrawn, boards: () => list().filter(surface => !isDeliverable(surface)), deliverables: split, markSeen, seenError, error, checked, refresh }
 }
 
 /** The sandboxed frame address for one surface, minted by the app server, and when it lapses. */

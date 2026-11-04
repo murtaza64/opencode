@@ -7,7 +7,8 @@ import { CitedRevisionGate } from "./cited-revision"
 import { AppHeader } from "./native-header"
 import { createEffect, createResource, createSignal, For, onCleanup, Show, type JSX } from "solid-js"
 import { ago } from "../state"
-import { isDeliverable, renewDelay, surfaceAddress, surfaceKey, surfaceProblem, surfaceUnavailable, type Surface, type createSurfaces } from "../surfaces"
+import { isDeliverable, renewDelay, surfaceAddress, surfaceKey, surfaceProblem, surfaceUnavailable, type Surface, type SurfaceTombstone, type createSurfaces } from "../surfaces"
+import { missingSurface } from "../surface-ref"
 import { BuildingHubSlot } from "./buildinghub-link"
 import { SurfaceOwner } from "./surface-owner"
 import { SurfaceComments } from "./surface-comments"
@@ -164,7 +165,7 @@ export const SurfaceHeadMore = (props: { surface?: Surface; src: () => string | 
   </>
 }
 
-export const SurfaceView = (props: { id: string; surface?: Surface; checked?: number; cited?: number; onDone?: MarkDone; onLoaded?: () => Promise<unknown>; onRetry: () => void; onClose: () => void; decisions?: JSX.Element }) => {
+export const SurfaceView = (props: { id: string; surface?: Surface; withdrawn?: SurfaceTombstone; checked?: number; cited?: number; onDone?: MarkDone; onLoaded?: () => Promise<unknown>; onRetry: () => void; onClose: () => void; decisions?: JSX.Element }) => {
   // Seen covers what the human saw, so it waits for the frame: never while loading, offline or failed.
   const doneState = createDeliverableDone(() => props.surface, () => src() && !address.error && props.surface && !surfaceUnavailable(props.surface) ? props.onDone : undefined)
   const onScreen = doneState.onScreen
@@ -210,7 +211,7 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
     <Show when={props.surface && doneState.onScreen() ? `${props.surface.id}:${doneState.onScreen()}` : undefined} keyed>{_key =>
       <SurfaceChangeNote surface={props.surface!} revision={doneState.onScreen()} />}</Show>
     {props.decisions}
-    <Show when={props.surface} fallback={<p class="desk-surface-state">{props.checked ? "This surface was withdrawn by its owner." : "Loading…"}</p>}>{surface =>
+    <Show when={props.surface} fallback={<p class="desk-surface-state">{props.checked ? missingSurface(props.withdrawn) : "Loading…"}</p>}>{surface =>
       <Show when={!surfaceUnavailable(surface())} fallback={<div class="desk-surface-state">
         <p><bdi dir="auto">{surface().owner}</bdi> is not serving this surface right now{surface().health.last_ok_at ? `; last seen ${ago(surface().health.last_ok_at!)}` : ""}.</p>
         <button class="desk-button" onClick={retry}>Try again</button>

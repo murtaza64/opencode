@@ -53,5 +53,6 @@ test("a cited revision other than the current one is said plainly, never shown a
 test("another host's Surface that cannot be shown says why", () => {
   expect(remoteGap({ host: "pc", known: false, current: false })).toContain("not a Work host")
   expect(remoteGap({ host: "mini", label: "Mac Mini", known: true, current: false })).toContain("Mac Mini is not answering")
-  expect(remoteGap({ host: "mini", label: "Mac Mini", known: true, current: true })).toContain("withdrawn, or never published")
+  expect(remoteGap({ host: "mini", label: "Mac Mini", known: true, current: true })).toContain("never published there")
+  expect(remoteGap({ host: "mini", label: "Mac Mini", known: true, current: true, withdrawn: { revision: 3, owner: "opencode/lane-a" } })).toBe("opencode/lane-a withdrew this Surface at rev 3; Mac Mini no longer serves it.")
 })

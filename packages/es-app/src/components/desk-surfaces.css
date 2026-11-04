@@ -91,7 +91,14 @@
 .surface-decision-stale { margin: 8px 14px 0; font-size: 12px; }
 @media (max-width: 900px) { .surface-decisions-body { max-block-size: 55vh; } }
 /* A Surface's change note (DD #725): one line under the reader bar; earlier notes open below it. */
-.surface-change { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 6px 12px; border-block-end: 1px solid var(--surface0); font-size: 12px; color: var(--text); }
+/* One fixed row: the note ellipsises and the frame top stays put; More (data-expanded) lets it wrap and grow. */
+.surface-change-wrap { display: flex; align-items: flex-start; gap: 8px; padding: 0 12px; border-block-end: 1px solid var(--surface0); }
+.surface-change { flex: 1 1 auto; min-inline-size: 0; display: flex; flex-wrap: nowrap; align-items: baseline; gap: 4px 8px; block-size: 30px; line-height: 30px; overflow: hidden; white-space: nowrap; font-size: 12px; color: var(--text); }
+.surface-change > * { flex: none; }
+.surface-change > .surface-change-text { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.surface-change-wrap[data-expanded] .surface-change { flex-wrap: wrap; block-size: auto; line-height: 1.5; padding-block: 6px; white-space: normal; }
+.surface-change-wrap[data-expanded] .surface-change > .surface-change-text { flex-shrink: 1; overflow: visible; }
+.surface-change-more { flex: none; line-height: 30px; font-size: 11px; }
 .surface-change-label { flex: none; font-size: 11px; color: var(--subtext0); }
 .surface-change-text { min-inline-size: 0; overflow-wrap: anywhere; }
 .surface-change-none { color: var(--subtext0); font-style: italic; }

@@ -44,6 +44,16 @@ try {
   await expect(page.locator('[data-surface-gap="ref"]')).toContainText("pc is not a Work host this app reads", { timeout: 60_000 })
   await expect(page.locator(".desk-surface-frame")).toHaveCount(0)
   results.push("PASS a ref to a host this app does not read says why, with no substituted copy")
+
+  // A Surface this host withdrew (tombstone) reads as withdrawn; an id it never listed reads as not found.
+  await page.unroute((url) => new URL(url).pathname === "/es/api/surfaces")
+  await page.route((url) => new URL(url).pathname === "/es/api/surfaces", (route) => route.fulfill({ json: { surfaces: [], withdrawn: [
+    { id: "old-report", title: "Old report", owner: "opencode/lane-a", editspace: "opencode", revision: 3, withdrawn_at: now }] } }))
+  await page.goto(`${preview.origin}/?item=mini~surface%3Aold-report`, { waitUntil: "domcontentloaded" })
+  await expect(page.locator(".desk-surface-state").first()).toContainText("opencode/lane-a withdrew this Surface at rev 3", { timeout: 60_000 })
+  await page.goto(`${preview.origin}/?item=mini~surface%3Anever-was`, { waitUntil: "domcontentloaded" })
+  await expect(page.locator(".desk-surface-state").first()).toContainText("never published there", { timeout: 60_000 })
+  results.push("PASS a withdrawn Surface reads as withdrawn by its owner at its last revision; an unknown one as not found")
 } catch (error) {
   process.exitCode = 1
   results.push(`FAIL ${String(error).split("\n").slice(0, 8).join(" | ")}`)

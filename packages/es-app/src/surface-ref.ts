@@ -49,9 +49,14 @@ export const citedRevision = (cited: number | undefined, current: number | undef
 }
 
 /** Why another host's Surface cannot be shown, from what this app knows of that host. */
-export const remoteGap = (input: { host: string; label?: string; known: boolean; current: boolean }) => {
+export const remoteGap = (input: { host: string; label?: string; known: boolean; current: boolean; withdrawn?: { revision: number; owner: string } }) => {
   const name = input.label ?? input.host
   if (!input.known) return `${input.host} is not a Work host this app reads, so this Surface cannot be opened here.`
   if (!input.current) return `${name} is not answering right now; this Surface cannot be checked or shown until it does.`
-  return `This Surface is not on ${name}: it was withdrawn, or never published there.`
+  return missingSurface(input.withdrawn, name)
 }
+
+/** A Surface a host does not list: withdrawn (its tombstone says by whom and at which revision) or not found. */
+export const missingSurface = (withdrawn: { revision: number; owner: string } | undefined, where = "this host") =>
+  withdrawn ? `${withdrawn.owner} withdrew this Surface at rev ${withdrawn.revision}; ${where} no longer serves it.`
+    : `This Surface is not on ${where}: it was never published there, or was withdrawn before ${where} kept a record of it.`
