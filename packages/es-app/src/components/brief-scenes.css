@@ -1,0 +1,117 @@
+.brief-v1 { --brief-ws: var(--blue); max-inline-size: 640px; padding: 14px 16px; margin-block: 10px; background: var(--base); border: 1px solid var(--surface0); border-radius: 12px; color: var(--text); }
+.brief-v1-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12px; margin-block-end: 10px; }
+.brief-v1-workstream { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 4px; border-radius: 30px; color: var(--brief-ws); background: color-mix(in srgb, var(--brief-ws) 14%, transparent); font-weight: 650; }
+.brief-v1-glyph { display: inline-grid; place-items: center; inline-size: 18px; block-size: 18px; border-radius: 50%; color: var(--crust); background: var(--brief-ws); }
+.brief-v1-who { color: var(--subtext0); }
+.brief-v1-levels { display: grid; gap: 4px; }
+.brief-v1-level { display: flex; align-items: baseline; gap: 8px; line-height: 1.35; color: var(--subtext1); }
+.brief-v1-level:nth-child(2) { padding-inline-start: 14px; }
+.brief-v1-level:first-child { color: var(--text); font-weight: 600; }
+.brief-v1-level > span { flex: none; inline-size: 8px; block-size: 8px; border-inline-start: 2px solid var(--brief-ws); border-block-end: 2px solid var(--brief-ws); border-end-start-radius: 4px; }
+.brief-v1-level:first-child > span { border: 0; border-radius: 50%; background: var(--brief-ws); inline-size: 6px; block-size: 6px; }
+.attention-home .brief-v1-key { border-inline-start: 3px solid var(--yellow); padding-inline-start: 10px; color: var(--yellow); font-size: 14px; font-weight: 600; margin-block: 12px 4px; }
+.attention-home .brief-v1-question { font-size: 19px; line-height: 1.3; margin-block: 10px; }
+.brief-figure-frame { margin-block: 8px 0; }
+.brief-figure { display: block; inline-size: 100%; background: var(--mantle); border-radius: 10px; overflow: hidden; transition: opacity .2s ease; }
+.brief-act { padding: 10px; }
+.brief-act.dim { opacity: .4; }
+.brief-act svg { display: block; inline-size: 100%; block-size: auto; }
+/* Every scene below is drawn in its end state; `.animate` plays from the start state into it. */
+/* A time axis reads left to right in every locale, so the chart and its labels stay physical. */
+.brief-threshold { position: relative; direction: ltr; }
+.brief-threshold svg { display: block; inline-size: 100%; block-size: auto; }
+.brief-threshold .limit { stroke: var(--red); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.brief-threshold-label { position: absolute; transform: translateY(calc(-100% - 3px)); font-size: 12px; line-height: 1.2; white-space: nowrap; max-inline-size: 45%; overflow: hidden; text-overflow: ellipsis; transition: opacity .2s ease; }
+.brief-threshold-label.limit-label { left: 4.3%; color: color-mix(in srgb, var(--red) 75%, var(--subtext0)); }
+.brief-threshold-label.end { right: 4.3%; font-size: 13px; font-weight: 650; color: var(--subtext1); }
+.brief-threshold-label.end.below { transform: translateY(3px); }
+.brief-threshold-label.end.rec { color: var(--peach); }
+.brief-threshold-label.end.dim { opacity: .45; }
+.brief-threshold .line path { fill: none; stroke: var(--overlay0); stroke-width: 2; stroke-linejoin: round; transition: opacity .2s ease, stroke-width .2s ease; }
+.brief-threshold .line-series path { stroke: var(--peach); stroke-width: 2.5; }
+.brief-threshold .line.other path { stroke: var(--subtext0); stroke-width: 2.5; }
+.brief-threshold .line.rec path { stroke: var(--peach); stroke-width: 2.5; }
+.brief-threshold .line.on path { stroke-width: 3.5; }
+.brief-threshold .line.dim { opacity: .3; }
+.animate .brief-threshold .line:not(.dim) path { stroke-dasharray: 1; animation: brief-draw .8s ease-out both; }
+@keyframes brief-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.brief-slack { position: relative; display: grid; grid-template-columns: 88px minmax(0, 1fr); block-size: 156px; border-radius: 8px; overflow: hidden; background: var(--base); font-size: 11px; }
+.brief-slack-side { display: grid; align-content: start; gap: 8px; padding: 8px; color: var(--subtext1); background: var(--surface0); }
+.brief-slack-channel { border-radius: 4px; padding: 2px 4px; color: var(--text); background: var(--surface1); }
+.brief-slack-main { padding: 8px 10px; overflow: hidden; }
+.brief-slack-main > b { display: block; padding-block-end: 6px; border-block-end: 1px solid var(--surface1); }
+.brief-slack-message { display: flex; gap: 7px; margin-block-start: 12px; padding: 5px; border-radius: 5px; background: color-mix(in srgb, var(--blue) 10%, transparent); }
+.brief-slack-message > span:last-child { display: grid; gap: 4px; min-inline-size: 0; overflow-wrap: anywhere; }
+.brief-slack-from { display: flex; align-items: center; gap: 6px; }
+.brief-slack-draft { padding: 0 5px; border-radius: 3px; color: var(--yellow); background: color-mix(in srgb, var(--yellow) 16%, transparent); font-size: 10px; font-weight: 650; }
+.brief-slack-avatar { display: grid; place-items: center; flex: none; inline-size: 18px; block-size: 18px; background: var(--peach); color: var(--crust); border-radius: 4px; }
+.brief-envelope { position: absolute; inset-inline-start: 30px; top: 60%; font-size: 29px; color: var(--peach); opacity: 0; pointer-events: none; }
+.brief-slack:dir(rtl) .brief-envelope { --brief-fly: -200px; }
+.animate .brief-act-slack:not(.dim) .brief-envelope { animation: brief-envelope .6s cubic-bezier(.2,.8,.2,1) both; }
+.animate .brief-act-slack:not(.dim) .brief-slack-message { animation: brief-arrive .3s ease-out .45s both; }
+@keyframes brief-envelope { from { opacity: 1; transform: none; } 80% { opacity: 1; } to { opacity: 0; transform: translate(var(--brief-fly, 200px), -40px) scale(.6); } }
+@keyframes brief-arrive { from { opacity: 0; transform: translateY(8px); } }
+.brief-plug text, .brief-deploy text, .brief-prs text { fill: var(--subtext0); font-size: 11px; }
+.brief-plug .laptop rect, .brief-plug .phone > rect:first-child { fill: var(--surface0); stroke: var(--surface1); }
+.brief-plug .screen { fill: var(--base); }
+.brief-plug .cable { fill: none; stroke: var(--overlay0); stroke-width: 5; stroke-linecap: round; }
+.brief-plug .plughead rect { fill: var(--subtext1); }
+.brief-plug .plughead { transform: translateY(-10px); }
+.brief-plug .install rect { fill: var(--surface1); }
+.brief-plug .install .fill { fill: var(--green); transform-origin: 332px 72px; }
+.animate .brief-act-plug:not(.dim) .plughead { animation: brief-plug-in .4s ease both; }
+.animate .brief-act-plug:not(.dim) .install { animation: brief-arrive .2s ease .35s both; }
+.animate .brief-act-plug:not(.dim) .fill { animation: brief-fill 1.6s ease-out .4s both; }
+@keyframes brief-plug-in { from { transform: none; } }
+@keyframes brief-fill { from { transform: scaleX(0); } }
+.brief-deploy .rail { fill: none; stroke: var(--surface1); stroke-width: 2; }
+.brief-deploy .platform rect, .brief-deploy .gate rect { fill: var(--surface0); }
+.brief-deploy .gate .arm { fill: var(--green); transform-origin: 202px 65px; transform: rotate(-80deg); }
+.brief-deploy .package { transform: translateX(250px); }
+.brief-deploy .package rect { fill: var(--peach); }
+.brief-deploy .package text { fill: var(--crust); font-weight: 700; }
+.animate .brief-act-deploy:not(.dim) .gate .arm { animation: brief-gate .35s ease both; }
+.animate .brief-act-deploy:not(.dim) .package { animation: brief-ship .7s ease .2s both; }
+@keyframes brief-gate { from { transform: none; fill: var(--red); } }
+@keyframes brief-ship { from { transform: none; } }
+.brief-prs .tray { fill: none; stroke: var(--overlay0); stroke-width: 3; }
+.brief-prs .sheet { transform-box: fill-box; transform-origin: center; }
+.brief-prs .sheet-0 { transform: translate(226px, 22px) scale(.5); }
+.brief-prs .sheet-1 { transform: translate(256px, 14px) scale(.5); }
+.brief-prs .sheet rect { fill: var(--text); stroke: var(--surface1); }
+.brief-prs .sheet text { fill: var(--crust); font-weight: 700; }
+.brief-prs .sheet path { stroke: var(--overlay0); stroke-width: 2; }
+.brief-prs .ci { fill: var(--green); }
+.animate .brief-act-open-prs:not(.dim) .sheet { animation: brief-file .55s ease both; }
+.animate .brief-act-open-prs:not(.dim) .sheet-1 { animation-delay: .12s; }
+.animate .brief-act-open-prs:not(.dim) .ci { animation: brief-ci .2s ease .6s both; }
+@keyframes brief-file { from { transform: none; } }
+@keyframes brief-ci { from { opacity: .25; } }
+.brief-restart { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; align-items: center; }
+.brief-restart-window { overflow: hidden; border-radius: 8px; background: var(--base); border: 1px solid var(--surface1); }
+.brief-restart-bar { padding: 6px 8px; background: var(--surface0); color: var(--subtext0); }
+.brief-restart-body { position: relative; display: grid; place-items: center; block-size: 104px; }
+.brief-login { display: grid; gap: 6px; inline-size: 60%; }
+.brief-login span { block-size: 12px; background: var(--surface0); border-radius: 4px; }
+.brief-spinner { position: absolute; inline-size: 26px; block-size: 26px; border: 3px solid var(--surface1); border-block-start-color: var(--blue); border-radius: 50%; opacity: 0; }
+.animate .brief-act-restart:not(.dim) .brief-login { animation: brief-reload 1.2s ease both; }
+.animate .brief-act-restart:not(.dim) .brief-spinner { animation: brief-spin .8s linear 1.5, brief-spinner 1.2s ease both; }
+@keyframes brief-reload { 0%, 70% { opacity: .15; } }
+@keyframes brief-spinner { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes brief-spin { to { transform: rotate(360deg); } }
+.brief-restart-keeps { display: grid; gap: 6px; }
+.brief-restart-keeps span { color: var(--green); }
+.brief-restart-keeps .brief-lose { color: var(--peach); }
+.brief-grant { display: grid; grid-template-columns: minmax(0, 1fr) 70px; gap: 10px; align-items: center; }
+.brief-grant code { padding: 8px 10px; background: var(--crust); color: var(--green); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brief-grant svg { inline-size: 60px; }
+.brief-grant rect { fill: var(--surface1); }
+.brief-grant .shackle { fill: none; stroke: var(--overlay0); stroke-width: 6; transform-origin: 42px 26px; }
+.brief-grant.granted .shackle { transform: translateY(-8px); stroke: var(--yellow); }
+.brief-grant-keys { grid-column: 1 / -1; display: flex; gap: 10px; }
+.brief-grant-keys span { padding: 5px 10px; border-radius: 30px; background: var(--surface0); color: var(--subtext0); }
+.brief-act-grant.go-once .once, .brief-act-grant.go-always .always { background: color-mix(in srgb, var(--yellow) 25%, var(--surface0)); color: var(--yellow); transform: translateY(-4px); }
+.animate .brief-grant.granted .shackle { animation: brief-unlock .3s ease both; }
+@keyframes brief-unlock { from { transform: none; stroke: var(--overlay0); } }
+.attention-home .brief-v1-preview { block-size: 18px; line-height: 18px; margin: 6px 0 0; color: var(--blue); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (prefers-reduced-motion: reduce) { .brief-figure-frame *, .brief-figure-frame *::before, .brief-figure-frame *::after { transition: none !important; animation: none !important; } }

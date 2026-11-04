@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Brief v1",
+  "type": "object",
+  "properties": {
+    "thing": { "type": "string", "maxLength": 80 },
+    "happened": { "type": "string", "maxLength": 120 },
+    "key": { "type": "string", "maxLength": 120 },
+    "action": {
+      "type": "object",
+      "required": ["verb"],
+      "properties": {
+        "verb": { "enum": ["post", "deploy", "rollback", "open-prs", "merge", "plug", "restart", "install", "grant", "spend", "delete"] },
+        "to": { "type": "object", "properties": { "slack": { "type": "string", "maxLength": 120 } } },
+        "as": { "type": "string", "maxLength": 120 },
+        "text": { "type": "string", "maxLength": 500 },
+        "from": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 120 },
+        "version": { "type": "string", "maxLength": 120 },
+        "build": { "type": "string", "maxLength": 120 },
+        "soak": { "type": "string", "maxLength": 120 },
+        "watch": { "type": "string", "maxLength": 120 },
+        "repo": { "type": "string", "maxLength": 120 },
+        "prs": { "type": "array", "maxItems": 8, "items": { "type": "string", "maxLength": 120 } },
+        "view": { "type": "string", "maxLength": 120 },
+        "keeps": { "type": "array", "maxItems": 8, "items": { "type": "string", "maxLength": 120 } },
+        "lose": { "type": "string", "maxLength": 120 },
+        "cmd": { "type": "string", "maxLength": 120 }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "required": ["series"],
+      "properties": {
+        "series": { "$ref": "#/$defs/series" },
+        "baseline": { "$ref": "#/$defs/series" },
+        "limit": { "type": "number" },
+        "unit": { "type": "string", "maxLength": 24 },
+        "label": { "type": "string", "maxLength": 120 }
+      }
+    },
+    "options": { "type": "object", "propertyNames": { "minLength": 1, "maxLength": 120 }, "additionalProperties": {
+      "type": "object", "properties": {
+        "consequence": { "type": "string", "maxLength": 240 },
+        "shows": { "description": "Figure parts this option is: series, baseline, action, once, always", "type": "array", "maxItems": 8, "items": { "type": "string", "maxLength": 120 } }
+      }
+    } }
+  },
+  "$defs": { "series": { "type": "array", "minItems": 2, "maxItems": 100, "items": { "type": "number" } } }
+}

@@ -314,6 +314,7 @@ export default function Desk() {
               <button class="desk-button" disabled={attention.loading()} onClick={refresh}>Refresh</button>
             </div>
             <label class="desk-auto home-muted" title="Prepare a brief for each new item in the background"><input type="checkbox" checked={prepared.auto()} onChange={event => prepared.setAuto(event.currentTarget.checked)} /> Auto briefs</label>
+            <label class="desk-auto home-muted"><input type="checkbox" checked={prepared.briefV1()} onChange={event => prepared.setBriefV1(event.currentTarget.checked)} /> Decision brief v1</label>
           </section>
         </section>
       </Show>
