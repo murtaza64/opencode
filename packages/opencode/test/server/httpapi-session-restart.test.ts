@@ -679,6 +679,42 @@ it.live(
 )
 
 it.live(
+  "after recover run:false, the next queued input wakes the session and every waiting input is answered",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          // A human queued input runs alone at an idle boundary, so the two waiting inputs take two turns.
+          yield* llm.text("answered the earlier input")
+          yield* llm.text("new work after the close")
+          const session = yield* Session.use.create({ title: "Close then new work" })
+          const seeded = yield* seedInterrupted(session, dir)
+          const queue = (requestID: string, text: string) =>
+            requestInDirectory(`/session/${session.id}/input`, dir, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ requestID, delivery: "queue", text }),
+            }).pipe(Effect.flatMap((response) => response.json))
+          expect(yield* queue("before-close", "waiting since the crash")).toMatchObject({ state: "pending" })
+          expect((yield* recover(dir, session.id, { recoveryID: "close-w", anchorMessageID: seeded.assistant.id, run: false })).outcome).toBe("closed")
+          expect(yield* llm.calls).toBe(0)
+
+          // The closed step is settled, so new owner work must not stay stuck behind it.
+          yield* queue("after-close", "follow-up from the owner")
+          const history = yield* idleWithReply(dir, session.id, "new work after the close")
+          const texts = history.flatMap((message) =>
+            message.info.role === "user" ? message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])) : [],
+          )
+          expect(texts).toContain("waiting since the crash")
+          expect(texts).toContain("follow-up from the owner")
+          expect(yield* toolRuns(dir)).toBe("x")
+        }),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+it.live(
   "a recovery ID used to run cannot later close, and a finished session is refused by run:false without writing",
   () =>
     provideTmpdirServer(

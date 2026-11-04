@@ -1462,9 +1462,13 @@ const layer = Layer.effect(
           // An advisory wake never resumes uncertain work left by a crash, abort, or error. A history holding only
           // no-reply notes has no turn to resume: notes are never answered, so waiting input may start one.
           const notesOnly = latest.user?.noReply === true && !latest.assistant
+          // An operator close-only recovery (`recover` with run:false) settled that step on purpose; waiting input
+          // starts the next turn instead of staying behind it.
+          const closedByOperator = latest.assistant?.restarts?.at(-1)?.closed === true
           if (
             latest.user &&
             !notesOnly &&
+            !closedByOperator &&
             !SessionRunState.completedTurn(latest.user, latest.assistant, assistant?.parts ?? [])
           )
             return
