@@ -2,6 +2,7 @@
  * surface in the main panel. Content runs in the server-sandboxed frame; the desk renders
  * only the title, owner, update time and health that the registry reports. */
 import { SurfaceFind } from "./surface-find"
+import { SurfaceChangeNote } from "./surface-change-note"
 import { AppHeader } from "./native-header"
 import { createEffect, createResource, createSignal, For, onCleanup, Show, type JSX } from "solid-js"
 import { A } from "@solidjs/router"
@@ -197,6 +198,9 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
         </span>
       </div>
     </AppHeader>
+    {/* Remounts per revision on screen, so "since rev N" compares against what this device had opened before. */}
+    <Show when={props.surface && doneState.onScreen() ? `${props.surface.id}:${doneState.onScreen()}` : undefined} keyed>{_key =>
+      <SurfaceChangeNote surface={props.surface!} revision={doneState.onScreen()} />}</Show>
     {props.decisions}
     <Show when={props.surface} fallback={<p class="desk-surface-state">{props.checked ? "This surface was withdrawn by its owner." : "Loading…"}</p>}>{surface =>
       <Show when={!surfaceUnavailable(surface())} fallback={<div class="desk-surface-state">

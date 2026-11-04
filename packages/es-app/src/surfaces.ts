@@ -36,6 +36,10 @@ export type Surface = {
    * receipt's state and its deploy (or, while a redeploy builds or failed, the last one that deployed). `current`:
    * that deploy is this revision's bundle; null when either side has no bundle. */
   buildinghub?: BuildingHubReceipt
+  /** The author's change note for the current revision (null: none given). Absent on hosts without notes. */
+  whats_new?: string | null
+  /** Earlier revisions' notes too, newest first (bounded by the host). */
+  notes?: { revision: number; text: string; at?: number }[]
 }
 
 type Deploy = { url?: string; version?: string; deployed_at?: number | string }

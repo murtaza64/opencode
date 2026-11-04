@@ -9,6 +9,7 @@ import { useLocation } from "@solidjs/router"
 import { useDeskQueue } from "../desk-queue"
 import { useDashboard } from "../state"
 import { surfaceKey, surfaceProblem, tryLine, type Surface } from "../surfaces"
+import { changeNoteLine } from "../surface-notes"
 import { needsYou, staleArtifact, type LinkedItem } from "../needs-you"
 import { workCountLabel, workSurfaces, type WorkEntry } from "../work-queue"
 import { HostGlyph } from "./icons"
@@ -132,13 +133,15 @@ const TryRow = (props: { surface: Surface; entry?: WorkEntry; outcome?: Attentio
     const chose = outcome.options.find(option => option.id === outcome.answer?.choice_id)?.label
     return chose ? `you chose ${chose}` : `decision ${outcome.status}`
   }
-  const line = () => [props.entry ? `${tryLine(props.surface)} · on ${props.entry.hostLabel}${props.entry.stale ? " · last known" : ""}` : tryLine(props.surface), ended()].filter(Boolean).join(" · ")
+  const note = () => changeNoteLine(props.surface)
+  const line = () => [props.entry ? `${tryLine(props.surface)} · on ${props.entry.hostLabel}${props.entry.stale ? " · last known" : ""}` : tryLine(props.surface), ended(), note() && `What's new: ${note()}`].filter(Boolean).join(" · ")
   return <a href={props.entry?.href ?? itemHref(key())} classList={{ active: open(key()), stale: !!props.entry?.stale }} aria-current={open(key()) ? "page" : undefined} class="nav-item nav-decision nav-try" data-kind="try" data-nav-item={key()}
     data-revision={props.surface.revision} title={line()} aria-label={line()}>
     <span class="nav-kind" aria-hidden="true">Try</span>
     <Show when={props.entry?.host}>{host => <HostGlyph host={host()} />}</Show>
     <span class="nav-title" dir="auto">{props.surface.title}</span>
     <span class="session-project" classList={{ "home-blocked": !!surfaceProblem(props.surface.health) }}><bdi dir="auto">{surfaceProblem(props.surface.health) ?? props.surface.owner}</bdi> · rev {props.surface.revision}<Show when={ended()}>{text => <> · <bdi dir="auto">{text()}</bdi></>}</Show></span>
+    <Show when={note()}>{text => <span class="nav-change" dir="auto">{text()}</span>}</Show>
   </a>
 }
 // A Surface and the open decisions pointing at it (DD artifact-try-decision-unification): one row that opens the Surface
@@ -149,13 +152,15 @@ const LinkedRow = (props: { item: LinkedItem }) => {
   const active = () => open(props.item.key) || (!props.item.host && new URLSearchParams(location.search).get("surface") === props.item.surface.id)
   const stale = () => props.item.decisions.map(record => staleArtifact(record, props.item.surface)).find(Boolean)
   const what = () => props.item.decisions.length === 1 ? "decision" : `${props.item.decisions.length} decisions`
-  const line = () => [`Try ${props.item.surface.title} · rev ${props.item.surface.revision} · ${what()}`, stale(), props.item.host ? `on ${props.item.hostLabel}${props.item.stale ? " · last known" : ""}` : undefined].filter(Boolean).join(" · ")
+  const note = () => changeNoteLine(props.item.surface)
+  const line = () => [`Try ${props.item.surface.title} · rev ${props.item.surface.revision} · ${what()}`, stale(), props.item.host ? `on ${props.item.hostLabel}${props.item.stale ? " · last known" : ""}` : undefined, note() && `What's new: ${note()}`].filter(Boolean).join(" · ")
   return <a href={props.item.href} classList={{ active: active(), stale: props.item.stale }} aria-current={active() ? "page" : undefined} class="nav-item nav-decision nav-try nav-linked" data-kind="try-decision"
     data-nav-item={props.item.key} data-revision={props.item.surface.revision} title={line()} aria-label={line()}>
     <span class="nav-kind" aria-hidden="true">Try</span>
     <Show when={props.item.host}>{host => <HostGlyph host={host()} />}</Show>
     <span class="nav-title" dir="auto">{props.item.surface.title}</span>
     <span class="session-project"><span class="nav-linked-decision">{what()}</span> · <Show when={stale()} fallback={<>rev {props.item.surface.revision}</>}>{text => <span class="home-blocked">{text()}</span>}</Show></span>
+    <Show when={note()}>{text => <span class="nav-change" dir="auto">{text()}</span>}</Show>
   </a>
 }
 const SurfaceRow = (props: { surface: Surface; fresh?: boolean }) => {

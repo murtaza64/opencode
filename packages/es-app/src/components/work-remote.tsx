@@ -2,6 +2,7 @@
  * and acted on through the Local listener's /hosts/<id>/ routes (host-items.ts), so the action happens on the
  * owning host with that host's operator session and the window never switches to that host's tab. */
 import { SurfaceFind } from "./surface-find"
+import { SurfaceChangeNote } from "./surface-change-note"
 import { createResource, createSignal, createUniqueId, For, Match, Show, Switch, type JSX } from "solid-js"
 import type { PermissionRequest } from "@opencode-ai/sdk/v2"
 import { A } from "@solidjs/router"
@@ -142,6 +143,8 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
         </span>
       </div>
     </AppHeader>
+    <Show when={done.onScreen() ? `${props.surface.id}:${done.onScreen()}` : undefined} keyed>{_key =>
+      <SurfaceChangeNote surface={props.surface} host={props.host} revision={done.onScreen()} />}</Show>
     <LinkedDecisions surface={props.surface} host={props.host} />
     <Show when={props.frame === "host"} fallback={<p class="desk-surface-state" data-surface-gap="own-host-only">This link surface is served only on <bdi dir="auto">{props.label}</bdi>; it cannot be shown from another computer yet.
       <Show when={onHost()}>{href => <> <a class="desk-link-button" href={href()} target="_blank" rel="noopener noreferrer" data-open-on-host={props.host} onClick={() => { setOpened(true); done.used() }}>Open on <bdi dir="auto">{props.label}</bdi></a></>}</Show></p>}>

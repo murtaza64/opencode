@@ -81,3 +81,11 @@
 .surface-decision + .surface-decision { border-block-start: 1px solid var(--surface0); }
 .surface-decision-stale { margin: 8px 14px 0; font-size: 12px; }
 @media (max-width: 900px) { .surface-decisions-body { max-block-size: 55vh; } }
+/* A Surface's change note (DD #725): one line under the reader bar; earlier notes open below it. */
+.surface-change { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 6px 12px; border-block-end: 1px solid var(--surface0); font-size: 12px; color: var(--text); }
+.surface-change-label { flex: none; font-size: 11px; color: var(--subtext0); }
+.surface-change-text { min-inline-size: 0; overflow-wrap: anywhere; }
+.surface-change-none { color: var(--subtext0); font-style: italic; }
+.surface-change-since { font-size: 11px; }
+.surface-change-earlier { flex-basis: 100%; margin: 2px 0 0; padding-inline-start: 16px; display: grid; gap: 2px; }
+.nav-change { display: block; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--subtext0); }
