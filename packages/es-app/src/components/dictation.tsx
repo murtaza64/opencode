@@ -2,6 +2,7 @@ import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid
 import { dictationInsert, type Composer } from "../composer"
 import { dictation, dictationTarget, type Dictation } from "../dictation"
 import { Glyph } from "./icons"
+import { primaryView } from "../keyboard"
 import type { SessionHost } from "../session-host"
 
 type Props = {
@@ -80,7 +81,9 @@ export const DictationButton = (props: Props) => {
       if (state.phase === "recording") setNow(Date.now())
     }, 250)
     const keydown = (event: KeyboardEvent) => {
-      const inView = !!root?.closest(".session-page")?.contains(document.activeElement)
+      // From outside every text box and session view, the page's primary composer takes it.
+      const view = root?.closest<HTMLElement>(".session-page") ?? undefined
+      const inView = !!view?.contains(document.activeElement) || (!document.activeElement?.closest(".session-page") && primaryView() === view)
       // Esc first cancels this composer's dictation, before Vim or the float editor see it.
       if (event.key === "Escape" && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
         if ((phase() === "idle" && !failure() && !notice()) || (!inView && document.activeElement !== document.body)) return

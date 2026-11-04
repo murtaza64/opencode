@@ -7,6 +7,7 @@ test("a full sequence matches and clears pending keys", () => {
     kind: "prefix",
     next: [
       { key: "d", id: "goDesk" },
+      { key: "i", id: "goInbox" },
       { key: "a", id: "goAgents" },
       { key: "u", id: "goUsage" },
       { key: "C", id: "goCloud" },

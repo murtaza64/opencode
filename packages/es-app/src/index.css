@@ -1601,6 +1601,11 @@ textarea { caret-color: var(--lavender); }
 textarea.vim-normal { caret-color: transparent; }
 textarea.vim-normal::selection { background: var(--lavender); color: var(--crust); }
 .ta-wrap { position: relative; flex: 1; display: flex; min-width: 0; }
+/* Keyboard mode while the composer has focus (dotfiles#254): quiet, in the corner, never over the text's first line. */
+.kbd-mode { position: absolute; inset-block-end: 4px; inset-inline-end: 8px; padding: 0 4px; border-radius: 3px; font: 600 10px/14px var(--font-mono, ui-monospace, monospace); letter-spacing: 0.04em; color: var(--subtext0); background: var(--mantle); pointer-events: none; }
+.kbd-mode[data-mode="normal"] { color: var(--crust); background: var(--lavender); }
+.transcript:focus { outline: none; }
+.transcript:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: -2px; }
 .ta-wrap textarea { width: 100%; }
 /* Outer box covers the fixed-width @ses_ token's glyphs with the textarea's
  * own background; the pill inside sizes to its content. */

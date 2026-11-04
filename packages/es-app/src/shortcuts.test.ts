@@ -24,6 +24,9 @@ test.each([
   ["mruForward", "⌃⇧Tab", "Ctrl+Shift+Tab"],
   ["focusLeft", "⌃⌥H", "Ctrl+Alt+H"],
   ["previousRegion", "⇧F6", "Shift+F6"],
+  ["help", "⌘?", "Alt+?"],
+  ["helpF1", "F1", "F1"],
+  ["porter", "⌘/", "Alt+/"],
 ] as const)("labels approved app chord %s with Cmd on macOS and Alt elsewhere", (id, mac, other) => {
   expect(shortcutLabel(id, "mac")).toBe(mac)
   expect(shortcutLabel(id, "other")).toBe(other)
@@ -114,3 +117,11 @@ test("D4: off macOS cycle target accepts Ctrl+M and still Super+M", () => {
   expect(matchShortcut(key({ key: "m", code: "KeyM", ctrlKey: true }), "moreSendOptions", "mac")).toBe(false)
 })
 
+
+test("the help chord and Porter share the slash key, told apart by Shift", () => {
+  const slash = (shiftKey: boolean) => key({ key: shiftKey ? "?" : "/", code: "Slash", metaKey: true, shiftKey })
+  expect(matchShortcut(slash(true), "help", "mac")).toBe(true)
+  expect(matchShortcut(slash(true), "porter", "mac")).toBe(false)
+  expect(matchShortcut(slash(false), "porter", "mac")).toBe(true)
+  expect(matchShortcut(slash(false), "help", "mac")).toBe(false)
+})

@@ -82,6 +82,7 @@ import { anchorNote, anchorRange, parseAnchor, type MessageAnchor } from "../mes
 import { perfEvent, perfReady, perfSpan } from "../perf-telemetry"
 import { targetReady } from "../startup"
 import { ariaShortcut, matchShortcut, shortcutLabel } from "../shortcuts"
+import { leaveComposer, ownsKey } from "../keyboard"
 
 // The provider catalog per directory, shared by session views for a few minutes so switching
 // sessions does not refetch it each time.
@@ -1098,6 +1099,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   }
 
   let transcriptEl: HTMLDivElement | undefined
+  let pageEl: HTMLElement | undefined
   let inner: HTMLDivElement | undefined
   let promptEl: HTMLTextAreaElement | undefined
   const [findOpen, setFindOpen] = createSignal(false)
@@ -1374,6 +1376,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   }
 
   const focusInsert = () => vim.setMode("insert")
+  const [promptFocused, setPromptFocused] = createSignal(false)
   // Cmd/Ctrl+M opens (or closes) the composer's More send options while the session is
   // busy and focuses its first choice; Esc closes it and returns focus to the composer.
   const cycleMode = (e: KeyboardEvent) => {
@@ -1515,7 +1518,10 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       return
     }
     if (navKeys(e)) return
+    // Esc ladder: Insert -> Normal -> the transcript, keeping the draft (`i` comes back).
+    const leave = e.key === "Escape" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && vim.mode() === "normal" && !floating()
     vim.handleKeyDown(e)
+    if (leave) leaveComposer(pageEl ?? null)
   }
 
   // global keys when focus is outside the prompt: nav + mode entry
@@ -1526,6 +1532,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       if (target.closest(".prompt-box") && cycleMode(e)) return
       if (!target.closest(".prompt-box") && stopTap(e)) return
       if (e.isComposing || target.closest("textarea, input, select, button, a, [contenteditable], [data-composer-controls], .generated-input")) return
+      // Beside Porter two session views listen; only the one holding focus (or the page's own, from nowhere) acts.
+      if (!ownsKey(pageEl, target)) return
       if (navKeys(e)) return
       if (e.key === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey && vim.mode() === "normal") {
         e.preventDefault()
@@ -1766,8 +1774,10 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         onCompositionEnd={() => { composing = false; setQuery(undefined) }}
         onSelect={(e) => { saveSelection(e.currentTarget); if (query() && (e.currentTarget.selectionStart !== e.currentTarget.selectionEnd || !mentionQuery(e.currentTarget.value, e.currentTarget.selectionStart))) setQuery(undefined) }}
         onKeyUp={(e) => { if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) update(e.currentTarget, e.isComposing); else saveSelection(e.currentTarget) }}
-        onFocus={focusInsert} onClick={(e) => { focusInsert(); update(e.currentTarget) }}
-        onBlur={(e) => { saveSelection(e.currentTarget); setQuery(undefined) }} />
+        onFocus={() => { focusInsert(); setPromptFocused(true) }} onClick={(e) => { focusInsert(); update(e.currentTarget) }}
+        onBlur={(e) => { saveSelection(e.currentTarget); setQuery(undefined); setPromptFocused(false) }} />
+      {/* Which mode the keys go to, while they go here. */}
+      <Show when={promptFocused()}><span class="kbd-mode" data-mode={vim.mode()} aria-hidden="true">{vim.mode() === "normal" ? "NORMAL" : "INSERT"}</span></Show>
       <SessionChips target={target()} text={draft()} selection={activeDraft().selection} />
       <Show when={query() && vim.mode() !== "normal" && !composing}><ContextPicker groups={groups()} selected={selected()} select={setSelected} add={insert} /></Show>
       <Show when={floating()}><RelativeLines target={promptEl!} value={draft()} /></Show>
@@ -1978,7 +1988,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
 
   return (
     <SessionHostProvider value={sessionHost}>
-    <main class="session-page" classList={{ "finding-transcript": findOpen() }} data-host={sessionHost.id}>
+    <main ref={pageEl} class="session-page" classList={{ "finding-transcript": findOpen() }} data-host={sessionHost.id}>
       <div class="session-main">
         {/* Embedded beside the desk queue, the chat's title and tools belong to its own pane. */}
         <AppHeader inline={props.embedded}>
@@ -2086,7 +2096,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
 
         <Show when={livingActivity()}><Filament messages={messages} parts={(id) => live.data.part[id] ?? []} steps={(id) => live.data.step[id] ?? []} status={status}
           pending={pending} subagents={subagentsRunning} transcript={() => transcriptEl} /></Show>
-        <div class="transcript" ref={transcriptEl} data-session-host={sessionHost.id ?? undefined}>
+        <div class="transcript" ref={transcriptEl} tabIndex={-1} role="region" aria-label="Transcript" data-session-host={sessionHost.id ?? undefined}>
           <div ref={inner} class="transcript-inner" classList={{ "transcript-arrive": arrived() }}
             onPointerOver={stampBlock} onFocusIn={stampBlock} onClick={(event) => {
             // Only a standalone chip's own disclosure counts (an icon chip's summary, or a session-ui chip's trigger);

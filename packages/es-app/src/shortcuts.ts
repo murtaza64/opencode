@@ -32,6 +32,11 @@ export const SHORTCUTS = {
   toggleSessions: dispatched("Toggle sessions panel", "app", "H", "Control"),
   // Literal Control on every platform (terminal habit); press twice. See session.tsx stopTap.
   stopTurn: dispatched("Stop the running turn (press twice)", "session", "C", "Control"),
+  // One help key in every mode, never typed: ⌘? (Alt+? off macOS) and F1. Plain "?" stays the Normal-scope key.
+  help: dispatched("Keyboard shortcuts", "app", "?", "Mod", "Shift"),
+  helpF1: dispatched("Keyboard shortcuts", "app", "F1"),
+  // ⌘/ is his terminal's "ask" popup (tmux prefix /): here it focuses Porter's text box; again returns.
+  porter: dispatched("Porter: type to it; again to go back", "app", "/", "Mod"),
   nextRegion: dispatched("Next region", "app", "F6"),
   previousRegion: dispatched("Previous region", "app", "F6", "Shift"),
   sessionFinder: planned("Session finder", "app", "S", "Mod"),
@@ -57,7 +62,10 @@ const sequence = (status: Status, title: string, ...keys: string[]): Sequence =>
 export const SEQUENCES = {
   reference: sequence("dispatched", "Keyboard shortcuts", "?"),
   referenceLeader: sequence("dispatched", "Keyboard shortcuts", "Space", "?"),
+  hints: sequence("dispatched", "Label this area and the main menu, then type a label", "f"),
+  hintsAll: sequence("dispatched", "Label everything on screen", "F"),
   goDesk: sequence("dispatched", "Go to Front desk", "g", "d"),
+  goInbox: sequence("dispatched", "Go to Decisions & inbox", "g", "i"),
   goAgents: sequence("dispatched", "Go to Agents", "g", "a"),
   goUsage: sequence("dispatched", "Go to Usage", "g", "u"),
   goCloud: sequence("dispatched", "Go to Cloud", "g", "C"),
@@ -90,10 +98,12 @@ const ordered = (modifiers: Modifier[], order: Modifier[]) => order.filter((modi
 /** Visible hint, e.g. "⌘↵" on macOS and "Ctrl+Enter" elsewhere. */
 export const shortcutLabel = (id: ShortcutID, platform = currentPlatform()) => {
   const binding: Binding = SHORTCUTS[id]
+  // "?" already says Shift: ⌘? and Alt+?, as macOS menus print it.
+  const shown = (modifiers: Modifier[]) => binding.key === "?" ? modifiers.filter((modifier) => modifier !== "Shift") : modifiers
   if (platform === "mac")
-    return ordered(binding.modifiers, MAC_ORDER).map((modifier) => MAC_GLYPH[modifier]).join("") + (MAC_KEY[binding.key] ?? binding.key)
+    return ordered(shown(binding.modifiers), MAC_ORDER).map((modifier) => MAC_GLYPH[modifier]).join("") + (MAC_KEY[binding.key] ?? binding.key)
   const modifiers = binding.otherModifiers ?? binding.modifiers
-  return [...ordered(modifiers, OTHER_ORDER).map((modifier) => OTHER_NAME[modifier]), OTHER_KEY[binding.key] ?? binding.key].join("+")
+  return [...ordered(shown(modifiers), OTHER_ORDER).map((modifier) => OTHER_NAME[modifier]), OTHER_KEY[binding.key] ?? binding.key].join("+")
 }
 
 /** Visible hint for a key sequence, e.g. "Space m" or "g C". */
@@ -158,6 +168,8 @@ export const isTypingTarget = (target: EventTarget | null) => {
 const keyMatches = (key: string, event: KeyEventLike) => {
   if (key === "1-9") return /^Digit[1-9]$/.test(event.code)
   if (key === "`") return event.code === "Backquote"
+  // "/" and "?" share a physical key; Shift is checked with the other modifiers.
+  if (key === "/" || key === "?") return event.code === "Slash"
   if (!/^[A-Z]$/.test(key)) return event.key === key
   if (/^[a-z]$/i.test(event.key)) return event.key.toUpperCase() === key
   return event.code === `Key${key}`
