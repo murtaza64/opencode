@@ -149,3 +149,20 @@ button.home-add-note:focus-visible { outline: 2px solid var(--accent); outline-o
 .attention-home .decision-button[aria-busy=true] { color: var(--subtext1); }
 .decision-sending { font-size: 11px; }
 @media (pointer: coarse), (max-width: 650px) { .attention-home .decision-button { min-block-size: 44px; flex: 1 1 auto; } }
+/* An input option stays labelled while its field is open; the chevron and pressed fill say it is expanded. */
+.attention-home .decision-button[aria-expanded=true] { background: var(--surface0); box-shadow: inset 0 0 0 1px var(--subtext0); }
+.decision-chevron { display: inline-block; flex: none; inline-size: 10px; block-size: 10px; margin-inline-start: 8px; vertical-align: middle; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; transition: transform .15s ease; }
+.decision-button[aria-expanded=true] .decision-chevron { transform: rotate(180deg); }
+.decision-field-open { margin-block: 4px 8px; }
+.decision-field-row { display: flex; align-items: end; gap: 8px; }
+.decision-field-row > .home-input { flex: 1; min-inline-size: 0; }
+.decision-field-row > .home-input > label, .home-secret-inline .home-secret-field > span { font-size: 12px; color: var(--subtext0); }
+.decision-field-send { box-sizing: border-box; flex: none; block-size: 40px; min-block-size: 0; margin: 0; }
+.attention-home fieldset.home-secret-inline { margin: 0; padding: 0; border: 0; display: grid; gap: 6px; max-inline-size: 560px; }
+.home-secret-row { display: flex; align-items: end; gap: 8px; }
+.home-secret-fields { flex: 1; min-inline-size: 0; max-inline-size: 360px; display: grid; gap: 8px; }
+.home-secret-inline .home-secret-field { display: grid; gap: 6px; }
+.home-secret-inline .home-secret-field input { box-sizing: border-box; inline-size: 100%; block-size: 40px; min-block-size: 0; padding-block: 0; margin: 0; }
+.home-secret-inline .home-secret-field input:focus-visible, .home-secret-inline .home-secret-field input:focus { outline-offset: 0; }
+.home-secret-row > .home-primary { box-sizing: border-box; flex: none; block-size: 40px; min-block-size: 0; margin: 0; }
+.home-secret-inline .home-secret-note { margin: 0; font-size: 12px; color: var(--overlay1); }

@@ -1,7 +1,8 @@
 // simple-decision-direct-buttons-20261103: a plain either/or (2-4 options, none taking input) is answered by clicking
 // the option itself. The recommendation is styled primary but never sent on its own; Type something… opens the one
-// text path (a text-only answer, Esc keeps the draft); one click sends once; a lost response retries the same command. Multi-select, input-taking options and five
-// or more options keep radio + Send. Keyboard, RTL and touch size at 390. Synthetic ledger.
+// text path (a text-only answer, Esc keeps the draft); one click sends once; a lost response retries the same command. An option
+// that takes input is a button too: its click opens the field under the buttons with Send (Save for a secret) beside it,
+// and Esc or a second click folds it. Five or more options keep radio + Send. Keyboard, RTL and touch size at 390. Synthetic ledger.
 // Run from packages/es-app: node test/decision-direct.browser.mjs [--shots <dir>]
 import assert from "node:assert/strict"
 import { createRequire } from "node:module"
@@ -119,9 +120,49 @@ try {
     }
     await context.close()
   }
-  for (const key of ["multi", "secret", "five"]) {
-    // Input-taking options and five or more options keep radio + Send.
-    const { context, card } = await open(key)
+  {
+    // An input option opens its field in place; its button becomes Send and sends the value with the choice once.
+    const { context, page, commands, card } = await open("multi")
+    await expect(card.getByRole("radio")).toHaveCount(0)
+    await expect(card.locator(".home-preselected")).toHaveCount(0)
+    const sendTo = card.getByRole("button", { name: "Send to", exact: true })
+    await sendTo.click()
+    await expect(card.getByRole("checkbox", { name: "Docs" })).toBeVisible()
+    // The option keeps its label, pressed; the field's own Send sits beside it and the free-text row hides.
+    await expect(sendTo).toHaveAttribute("aria-expanded", "true")
+    await expect(card.getByRole("button", { name: "Type something…" })).toHaveCount(0)
+    const send = card.getByRole("button", { name: "Send", exact: true })
+    // Esc folds it back to its button, which keeps its label.
+    await page.keyboard.press("Escape")
+    await expect(card.getByRole("checkbox")).toHaveCount(0)
+    await expect(sendTo).toBeFocused()
+    await sendTo.click()
+    await card.getByRole("checkbox", { name: "Release" }).check()
+    await send.dblclick()
+    await expect.poll(() => commands.length).toBe(1)
+    await page.waitForTimeout(800)
+    assert.equal(commands.length, 1, "double click sent once")
+    assert.equal(commands[0].choice_id, "send")
+    assert.deepEqual(commands[0].input_value, ["b"])
+    await context.close()
+  }
+  {
+    // A secret option opens the sealed field and its button becomes Save; the other button collapses it and answers.
+    const { context, commands, card } = await open("secret")
+    await expect(card.getByRole("radio")).toHaveCount(0)
+    await card.getByRole("button", { name: "Provide it", exact: true }).click()
+    await expect(card.getByLabel("Token")).toHaveAttribute("type", "password")
+    await expect(card.getByRole("button", { name: "Save", exact: true })).toBeDisabled()
+    await expect(card.getByRole("button", { name: "Submit securely" })).toHaveCount(0)
+    await card.getByRole("button", { name: "I can't", exact: true }).click()
+    await expect(card.getByLabel("Token")).toHaveCount(0)
+    await expect.poll(() => commands.length).toBe(1)
+    assert.equal(commands[0].choice_id, "cant")
+    await context.close()
+  }
+  {
+    // Five or more options keep radio + Send.
+    const { context, card } = await open("five")
     await expect(card.getByRole("radio").first()).toBeVisible()
     await expect(card.locator(".decision-buttons")).toHaveCount(0)
     await context.close()

@@ -1,6 +1,6 @@
 /* One attention record with its native ledger controls. Shared by Home and the
  * front desk so both surfaces keep identical answer, choice and delivery semantics. */
-import { createEffect, createSignal, For, Show, type JSX } from "solid-js"
+import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js"
 import { A } from "@solidjs/router"
 import { ago, sessionHref, useDashboard } from "../state"
 import { Glyph } from "./icons"
@@ -92,8 +92,10 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
   }
   // A routed brief is answered by its item toggles: its apply option is the choice, recommended proposals start on.
   const routed = props.options ? routingBrief(props.record) : undefined
-  // A plain either/or (2-4 options, none taking input) is answered by clicking an option itself: no radio, no Send.
-  const direct = props.options && !routed && !props.prepared && props.record.status === "open" && props.record.options.length >= 2 && props.record.options.length <= 4 && props.record.options.every(option => !option.input)
+  // 2-4 options are answered by their own buttons: no radio, no Send. An option that takes input (of a kind this app
+  // can collect; a secret only with a complete spec) opens its field under the buttons and its button becomes the submit;
+  // any other option sends on click.
+  const direct = props.options && !routed && !props.prepared && props.record.status === "open" && props.record.options.length >= 2 && props.record.options.length <= 4 && props.record.options.every(option => !option.input || INPUT_KINDS.includes(option.input.kind) && (option.input.kind !== "secret" || !!secretInput(option)))
   const [clicked, setClicked] = createSignal<string>()
   const [choice, setChoice] = createSignal(routed ? routed.apply.id : direct ? "" : preselect())
   // With the recommendation still selected the note waits behind "Add a note"; otherwise it is inline.
@@ -110,16 +112,16 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
   const ready = () => canWrite() && (!!selected() || !!text().trim()) && !problem()
   const send = async (other?: AttentionOption) => {
     if (!other && !ready()) return
-    if (direct && other) {
+    if (direct) {
       // One deliberate click is the answer; the ledger client keeps this command for a same-id retry if the response is lost.
       if (clicked() || !canWrite()) return
-      setClicked(other.id)
+      setClicked(other?.id ?? (choice() || "text"))
     }
     const option = other ?? selected()
     // Saved first by the ledger client; a lost response keeps this exact command for retry.
     // The brief on screen is recorded with the answer, so History reopens what was seen when deciding.
     const brief = props.briefJob && props.briefJob.revision === String(contentRevision(props.record)) ? { brief: props.briefJob } : {}
-    const done = await props.attention.act(props.record, { action: "answer", ...(text().trim() ? { text: text() } : {}), ...(option ? { choice_id: option.id, ...(other ? {} : inputPayload(option, values()[option.id])) } : {}), ...brief })
+    const done = await props.attention.act(props.record, { action: "answer", ...(text().trim() && !(direct && option?.input) ? { text: text() } : {}), ...(option ? { choice_id: option.id, ...(other ? {} : inputPayload(option, values()[option.id])) } : {}), ...brief })
     if (direct) setClicked(undefined)
     if (done) props.onView?.("answered")
   }
@@ -136,19 +138,52 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
     setNoteOpen(false)
     queueMicrotask(() => (document.querySelector(`[data-attention-id="${props.record.id}"] .decision-type`) as HTMLElement | null)?.focus())
   }
-  const keys = (event: KeyboardEvent) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); void send() } }
+  // A direct card's input option toggles its field open under the buttons; the field's own Send/Save submits it.
+  const pick = (option: AttentionOption) => {
+    if (!option.input) { setChoice(""); return void send(option) }
+    if (choice() === option.id) return setChoice("")
+    setChoice(option.id)
+    setNoteOpen(false)
+    queueMicrotask(() => (document.querySelector(`[data-attention-id="${props.record.id}"] .decision-field :is(input, textarea)`) as HTMLElement | null)?.focus())
+  }
+  const open = (option: AttentionOption) => direct && !!option.input && choice() === option.id
+  const opened = () => direct && !!selected()?.input
+  // An on-screen keyboard shrinks the visual viewport; keep the open field and its submit in view above it.
+  // Measured after the keyboard settles, so the row lands fully above it.
+  const keep = () => setTimeout(() => {
+    const row = document.querySelector(`[data-attention-id="${props.record.id}"] .decision-field-open :is(.decision-field-row, .home-secret-row)`)
+    if (row?.contains(document.activeElement)) row.scrollIntoView({ block: "center" })
+  }, 250)
+  window.visualViewport?.addEventListener("resize", keep)
+  onCleanup(() => window.visualViewport?.removeEventListener("resize", keep))
+  // Enter sends an open field when its value is valid; Shift+Enter keeps a newline in a text field.
+  const enter = (event: KeyboardEvent) => {
+    if (event.key !== "Enter" || event.shiftKey || event.metaKey || event.ctrlKey || event.isComposing || event.keyCode === 229) return
+    event.preventDefault()
+    void send()
+  }
+  // Esc folds an open input field back to its button.
+  const fold = (event: KeyboardEvent) => {
+    const option = selected()
+    if (!direct || event.key !== "Escape" || !option?.input) return
+    event.preventDefault()
+    setChoice("")
+    queueMicrotask(() => (document.querySelector(`[data-attention-id="${props.record.id}"] [data-option="${CSS.escape(option.id)}"]`) as HTMLElement | null)?.focus())
+  }
+  const keys = (event: KeyboardEvent) => { fold(event); if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); void send() } }
   return <div class="home-answer" onKeyDown={keys}>
     <Show when={routed}>{brief => <RoutingItems items={brief().items} offered={brief().offered} picks={(values()[brief().apply.id] as string[] | undefined) ?? []} disabled={!canWrite()}
       onChange={picks => setValues(current => ({ ...current, [brief().apply.id]: picks }))} />}</Show>
     <Show when={direct}><div class="decision-buttons" role="group" aria-label="Your answer">
       <For each={props.record.options}>{option => <button type="button" class="decision-button" classList={{ "home-primary": props.record.recommendation === option.id }} dir="auto"
-        data-recommended={props.record.recommendation === option.id ? "" : undefined} disabled={!canWrite() || !!clicked()} aria-busy={clicked() === option.id || undefined}
-        aria-describedby={props.record.recommendation === option.id ? `${id}-recommended` : undefined} onMouseEnter={() => showChoice(option.id)} onMouseLeave={hideChoice} onFocus={() => showChoice(option.id)} onBlur={hideChoice} onClick={() => void send(option)}>
-        <bdi dir="auto">{option.label}</bdi><Show when={clicked() === option.id}><span class="decision-sending"> · Sending…</span></Show>
+        data-recommended={props.record.recommendation === option.id ? "" : undefined} data-option={option.id} disabled={!canWrite() || !!clicked()} aria-busy={clicked() === option.id || undefined}
+        aria-expanded={option.input ? open(option) : undefined}
+        aria-describedby={props.record.recommendation === option.id ? `${id}-recommended` : undefined} onMouseEnter={() => showChoice(option.id)} onMouseLeave={hideChoice} onFocus={() => showChoice(option.id)} onBlur={hideChoice} onClick={() => pick(option)}>
+        <bdi dir="auto">{option.label}</bdi><Show when={option.input}><svg class="decision-chevron" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 L5 6.5 L8 3.5" /></svg></Show><Show when={clicked() === option.id}><span class="decision-sending"> · Sending…</span></Show>
         <Show when={props.record.recommendation === option.id}><span class="sr-only" id={`${id}-recommended`}>recommended</span></Show>
       </button>}</For>
       {/* The one text path: a written answer of its own, sent with no option (simple-decision-buttons-text-fallback). */}
-      <Show when={!noteOpen()}><button type="button" class="home-quiet decision-type" dir="auto" disabled={!canWrite() || !!clicked()} onClick={openTyping}>Type something…</button></Show>
+      <Show when={!noteOpen() && !opened()}><button type="button" class="home-quiet decision-type" dir="auto" disabled={!canWrite() || !!clicked()} onClick={openTyping}>Type something…</button></Show>
     </div></Show>
     <Show when={props.options && !routed && !direct}><fieldset class="home-options" classList={{ "home-option-cards": !!props.prepared }} disabled={!canWrite()}><legend class="sr-only">Your choice</legend>
       <For each={props.record.options}>{option => {
@@ -177,10 +212,14 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
     </fieldset></Show>
     <Show when={props.briefV1}><p class="brief-v1-preview" role="status" aria-live="polite" dir="auto">{preview()}</p></Show>
     {/* A secret option gets masked fields with their own single submission; it never enters the answer or a draft. */}
-    <Show when={secret()} fallback={<Show when={!routed && selected()?.input && selected()}>{option => <OptionField id={`${id}-input`} option={option()} value={values()[option().id]} disabled={!canWrite()} onChange={value => setValues(current => ({ ...current, [option().id]: value }))} />}</Show>}>
-      {spec => <SecretField id={`${id}-secret`} record={props.record} option={selected()!} spec={spec()} disabled={!canWrite()} onDelivered={() => { void props.attention.refresh(); props.onView?.("answered") }} />}</Show>
+    {/* On a direct card the open field sits right under the buttons with its submit beside it: [field] [Send]. */}
+    <div class="decision-field" classList={{ "decision-field-open": opened() }}><Show when={secret()} fallback={<Show when={!routed && selected()?.input && selected()}>{option => <div class="decision-field-row" onKeyDown={event => { if (opened()) enter(event) }}>
+        <OptionField id={`${id}-input`} option={option()} value={values()[option().id]} disabled={!canWrite()} onChange={value => setValues(current => ({ ...current, [option().id]: value }))} />
+        <Show when={opened()}><button type="button" class="home-primary decision-field-send" disabled={!ready() || !!clicked()} onClick={() => void send()}>Send</button></Show>
+      </div>}</Show>}>
+      {spec => <SecretField id={`${id}-secret`} record={props.record} option={selected()!} spec={spec()} disabled={!canWrite()} inline={direct} onDelivered={() => { void props.attention.refresh(); props.onView?.("answered") }} />}</Show></div>
     {props.afterChoices}
-    <Show when={routed ? routed.picks.length > 0 : !direct && preselect() && choice() === preselect()}><p class="home-preselected" role="status">{routed ? "Recommended selected" : "Recommended option selected"} · nothing is sent until you press Send</p></Show>
+    <Show when={routed && routed.picks.length > 0}><p class="home-preselected" role="status">Recommended selected · nothing is sent until you press Send</p></Show>
     <Show when={!secret()}><Show when={!noteHidden()} fallback={direct ? undefined :
       <button type="button" class="home-add-note" disabled={!canWrite()} onClick={() => { setNoteOpen(true); queueMicrotask(() => document.getElementById(id)?.focus()) }}>Add a note</button>}>
       <label for={id}>{props.options && !direct ? "Note (optional)" : "Your answer"}</label>
@@ -211,7 +250,7 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
       {/* One English label run ("To …") laid out left to right in an RTL page too; the target name stays isolated. */}
       <Show when={!props.hideTarget}><span class="home-muted"><bdi dir="ltr">To <bdi dir="auto">{target()}</bdi></bdi></span></Show>
     </div>
-    <Show when={selected() && problem()}><p class="home-input-problem" id={`${id}-input-problem`} role="status" dir="auto">{problem()}</p></Show>
+    <Show when={selected() && problem() && !(direct && secret())}><p class="home-input-problem" id={`${id}-input-problem`} role="status" dir="auto">{problem()}</p></Show>
   </div>
 }
 

@@ -1,5 +1,6 @@
-// Recommended radio options stay draft-only with the note behind "Add a note". Direct options instead
-// answer on click; text-only replies open with "Type something…". Secret and review controls stay unchanged.
+// Recommended radio options (five or more) stay draft-only with the note behind "Add a note". Direct options instead
+// answer on click; text-only replies open with "Type something…". A recommended secret option is a button that never
+// starts open. Review controls stay unchanged.
 // Run from packages/es-app: node test/decision-recommended.browser.mjs
 import assert from "node:assert/strict"
 import { createRequire } from "node:module"
@@ -37,10 +38,10 @@ try {
     const { context, page, commands } = await open("recommended_radio")
     if (rtl) await page.evaluate(() => { document.documentElement.dir = "rtl" })
     const card = page.locator('[data-attention-id="recommended_radio"]')
-    // Preselected as a draft, marked, and said in words; the note waits behind one control.
+    // Preselected as a draft and marked; the note waits behind one control.
     await expect(card.getByRole("radio", { name: "Small scope" })).toBeChecked({ timeout: 120_000 })
     await expect(card.getByRole("radio", { name: "Defer" })).not.toBeChecked()
-    await expect(card.locator(".home-preselected")).toHaveText(/nothing is sent until you press Send/)
+    await expect(card.locator(".home-preselected")).toHaveCount(0)
     await expect(card.locator('[data-recommended]').first()).toBeVisible()
     await expect(card.getByRole("textbox", { name: /Note/ })).toHaveCount(0)
     await page.waitForTimeout(500)
@@ -89,11 +90,13 @@ try {
   {
     const { context, page } = await open("secret_rec")
     const card = page.locator('[data-attention-id="secret_rec"]')
-    await expect(card.getByRole("radio", { name: "Rotate now" })).toBeVisible({ timeout: 120_000 })
-    await expect(card.getByRole("radio", { name: "Rotate now" })).not.toBeChecked()
+    const rotate = card.getByRole("button", { name: /^Rotate now/ })
+    await expect(rotate).toBeVisible({ timeout: 120_000 })
+    await expect(rotate).toHaveClass(/home-primary/)
+    await expect(rotate).toHaveAttribute("aria-expanded", "false")
+    await expect(card.getByLabel("Token")).toHaveCount(0)
     await expect(card.locator(".home-preselected")).toHaveCount(0)
-    await expect(card.getByRole("textbox", { name: /Note/ })).toBeVisible()
-    console.log("SECRET: a secret-taking recommendation is not preselected")
+    console.log("SECRET: a secret-taking recommendation is a primary button that starts closed")
     await context.close()
   }
   // Try cards keep their controls: no preselection, no Add a note.
