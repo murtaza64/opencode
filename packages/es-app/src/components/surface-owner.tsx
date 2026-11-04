@@ -60,7 +60,7 @@ export const SurfaceOwner = (props: { surface: Surface; host?: { id: string; lab
       event.preventDefault(); event.stopPropagation(); close(); menu.querySelector("summary")?.focus()
     }}>
       <summary class="surface-owner-chip" title={`Published by ${author.name()}${props.surface.lane ? ` · lane ${props.surface.lane}` : ""}`}>
-        <span class="surface-owner-avatar"><Show when={author.avatar()} fallback={author.name().charAt(0).toUpperCase()}>{url => <img src={url()} alt="" referrerpolicy="no-referrer" />}</Show></span>
+        <span class="surface-owner-avatar" aria-hidden="true"><Show when={author.avatar()} fallback={author.name().charAt(0).toUpperCase()}>{url => <img src={url()} alt="" referrerpolicy="no-referrer" />}</Show></span>
         <bdi dir="auto">{author.name()}</bdi>
         <Show when={author.owner()?.state === "ok" && (author.owner() as { busy?: boolean }).busy}><span class="dot busy" title="Working" aria-label="Working" /></Show>
       </summary>
