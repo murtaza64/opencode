@@ -198,7 +198,8 @@ export const SurfaceView = (props: { id: string; surface?: Surface; checked?: nu
           <bdi dir="auto">{props.surface?.title ?? props.id}</bdi></h2>
         <span class="surface-head-rev">rev {doneState.onScreen() || props.surface?.revision || ""}</span>
         <Show when={props.surface}>{surface => <SurfaceOwner surface={surface()} onMessage={() => window.dispatchEvent(new CustomEvent("surface-message-author", { detail: props.id }))} />}</Show>
-        <DeliverableDoneControls state={doneState} />
+        {/* An FYI revision asks nothing: no Done (seen is still recorded by opening it). */}
+        <Show when={props.surface?.change?.intent !== "fyi"}><DeliverableDoneControls state={doneState} /></Show>
         <SurfaceHeadMore surface={props.surface} src={src} done={doneState} />
         <span class="surface-head-actions">
           <button class="surface-head-button" aria-label="Close and return to chat" title="Close (Esc)" onClick={props.onClose}>×</button>

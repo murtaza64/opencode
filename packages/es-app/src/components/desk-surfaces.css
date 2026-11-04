@@ -98,3 +98,7 @@
 .surface-change-since { font-size: 11px; }
 .surface-change-earlier { flex-basis: 100%; margin: 2px 0 0; padding-inline-start: 16px; display: grid; gap: 2px; }
 .nav-change { display: block; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--subtext0); }
+.surface-change-look, .surface-change-respond { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; font-size: 12px; color: var(--subtext0); }
+.surface-change-place { font-size: 12px; }
+.surface-change[data-intent="review"] > .surface-change-label { color: var(--blue); }
+.surface-change[data-intent="decision"] > .surface-change-label { color: var(--peach); }

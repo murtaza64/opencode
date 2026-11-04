@@ -13,6 +13,8 @@ export type SurfaceHealth = {
   /** Last successful probe this dashboard saw; absent when it never reached the surface. */
   last_ok_at?: number | null
 }
+export type SurfaceIntent = "fyi" | "review" | "decision"
+export type SurfaceLook = { label: string; id?: string; selector?: string }
 export type Surface = {
   id: string
   title: string
@@ -38,8 +40,11 @@ export type Surface = {
   buildinghub?: BuildingHubReceipt
   /** The author's change note for the current revision (null: none given). Absent on hosts without notes. */
   whats_new?: string | null
-  /** Earlier revisions' notes too, newest first (bounded by the host). */
-  notes?: { revision: number; text: string; at?: number }[]
+  /** Earlier revisions' notes too, newest first (bounded by the host). A record may carry only a change (no text). */
+  notes?: { revision: number; text?: string; at?: number; base?: number; intent?: SurfaceIntent; look?: SurfaceLook[]; respond?: string }[]
+  /** What the current revision asks (DD #753): the revision it compares against (default the previous), its intent,
+   * places to look and the question it asks. Absent on hosts without it. */
+  change?: { base: number | null; intent: SurfaceIntent | null; look: SurfaceLook[]; respond: string | null }
 }
 
 type Deploy = { url?: string; version?: string; deployed_at?: number | string }

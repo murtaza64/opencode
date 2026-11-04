@@ -1,6 +1,6 @@
 /* On-surface comments over the Surface reader's frame. The host owns text and drafts; the frame only receives anchors.
  * A fixed feedback bar opens pick mode or a finder tray; the non-modal card keeps the page interactive. */
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
 import { ago } from "../state"
 import { initialOf, MAX_BODY, mintCommentId, placement, placementLabel, receiptLabel, threads, type AnchorState, type CommentAnchor, type CommentHost, type SealedComment, type SurfaceComment } from "../surface-comments"
 import { Glyph } from "./icons"
@@ -8,6 +8,7 @@ import { DictationField } from "./dictation-field"
 import { useSurfaceOwner } from "./surface-owner"
 import type { Surface } from "../surfaces"
 import { focusHole, placeCard } from "../../../surface-bridge/src/geometry.js"
+import { lookAnchor, lookKey, lookRequest, looksFor, reportLooks } from "../surface-look"
 import "./surface-comments.css"
 
 type Box = { x: number; y: number; w: number; h: number }
@@ -122,9 +123,26 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
       ...here().map((thread) => ({ key: thread.root.comment_id, anchor: thread.root.anchor })),
       ...pendingRoots().map((item) => ({ key: item.sealed.comment_id, anchor: item.sealed.anchor })),
       ...(open()?.key === DRAFT ? [{ key: DRAFT, anchor: open()!.anchor }] : []),
+      // The change header's "Look at" places (surface-look.ts), located with the same bridge; revealed only on click.
+      ...looksFor(props.surface.id).flatMap((place, index) => { const anchor = lookAnchor(place); return anchor ? [{ key: lookKey(index), anchor }] : [] }),
     ]
     toFrame({ type: "track", anchors })
   })
+  createEffect(() => {
+    const list = looksFor(props.surface.id)
+    if (!list.length) return
+    reportLooks(props.surface.id, list.map((place, index) => !lookAnchor(place) ? "unlocated" : off() ? "unavailable" : rects().get(lookKey(index))?.state ?? "missing"))
+  })
+  const [pulse, setPulse] = createSignal<string>()
+  createEffect(on(lookRequest, (asked) => {
+    if (!asked || asked.surface !== props.surface.id) return
+    const key = lookKey(asked.index)
+    const state = rects().get(key)?.state
+    if (state !== "shown" && state !== "changed") return
+    toFrame({ type: "reveal", key })
+    setPulse(key)
+    setTimeout(() => setPulse((current) => (current === key ? undefined : current)), 1600)
+  }, { defer: true }))
 
   // Keyboard picking keeps focus in the app; its arrow, Tab and Enter keys are forwarded to the frame's picker.
   const startPick = (keyboard: boolean) => {
@@ -259,6 +277,8 @@ export const SurfaceComments = (props: { host: CommentHost; surface: Surface; ow
   const markerKeys = createMemo(() => [...markerByKey().keys()], [], { equals: (a, b) => a.length === b.length && a.every((key, i) => key === b[i]) })
 
   return <>
+    <Show when={pulse() ? boxOf(pulse()!) : undefined}>{(box) =>
+      <div class="sc-look-pulse" aria-hidden="true" style={{ left: `${box().x - 4}px`, top: `${box().y - 4}px`, width: `${box().w + 8}px`, height: `${box().h + 8}px` }} />}</Show>
     <Show when={shown() && !open()}>
       <div class="sc-markers" aria-label="Comments on this page">
         {/* Keyed by thread id, not object: every anchor report (scroll, resize, DOM change) and every reply rebuilds the

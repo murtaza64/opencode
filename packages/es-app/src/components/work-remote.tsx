@@ -133,7 +133,8 @@ const RemoteSurface = (props: { host: string; label: string; surface: NonNullabl
         <h2 title={`${props.surface.owner} · updated ${ago(props.surface.updated_at)}`}><bdi dir="auto">{props.surface.title}</bdi></h2>
         <span class="surface-head-rev">rev {done.onScreen() || props.surface.revision}</span>
         <SurfaceOwner surface={props.surface} host={{ id: props.host, label: props.label }} onMessage={() => window.dispatchEvent(new CustomEvent("surface-message-author", { detail: props.surface.id }))} />
-        <DeliverableDoneControls state={done} label={props.frame === "host" ? undefined : `Mark seen (opened on ${props.label})`} />
+        {/* An FYI revision asks nothing: no Done (seen is still recorded by opening it). */}
+        <Show when={props.surface.change?.intent !== "fyi"}><DeliverableDoneControls state={done} label={props.frame === "host" ? undefined : `Mark seen (opened on ${props.label})`} /></Show>
         <SurfaceHeadMore surface={props.surface} src={() => props.frame === "host" ? src() : undefined} done={done} />
         <span class="surface-head-actions">
           <button class="surface-head-button" aria-label="Close" title="Close (Esc)" onClick={props.onClose}>×</button>

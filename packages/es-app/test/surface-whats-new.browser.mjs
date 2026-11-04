@@ -37,7 +37,7 @@ try {
     const change = page.locator(".surface-change")
     await expect(change).toContainText("No change note provided", { timeout: 120_000 })
     const since = change.locator(".surface-change-since")
-    await expect(since).toContainText("since rev 2 you last opened · 1 earlier note")
+    await expect(since).toContainText("you last opened r2 · 1 earlier note")
     await since.click()
     await expect(change.locator(".surface-change-earlier")).toContainText("rev 3 Header redrawn")
     await expect(change.locator(".surface-change-earlier")).toContainText("1 revision with no change note")
