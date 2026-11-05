@@ -599,3 +599,20 @@ test("a busy session whose tool waits on a permission in its exact directory rea
   // (pending() is asserted by the existing suite's request tests, which fail on dev in this harness for reasons
   // unrelated to status; requestState is the read the dot's pending path relies on.)
 })
+
+test("after a reconnect read succeeds, a later failed status read keeps the freshly observed busy (orchestrator #844)", async () => {
+  snapshots[childDirectory].status = { ses_child: { type: "busy" } }
+  const { activity } = start()
+  await load(activity)
+  ActivityEvents.current.onopen?.()
+  ActivityEvents.current.onerror?.()
+  expect(activity.running("ses_parent")).toEqual([])
+  ActivityEvents.current.onopen?.()
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  await activity.refreshDirectory(childDirectory, true)
+  expect(activity.running("ses_parent")).toEqual(["ses_child"])
+  // The stream stays up; the next status read of that directory fails.
+  failures.add(`${childDirectory}:/oc/session/status`)
+  await activity.refreshDirectory(childDirectory, true)
+  expect(activity.running("ses_parent")).toEqual(["ses_child"])
+})

@@ -36,6 +36,8 @@ export const createSessionActivity = (
   const statusVersions = new Map<string, number>()
   // The status revision when the event stream last dropped: statuses from before it are not authoritative until re-read.
   const dropped = { at: -1 }
+  // Directories whose status read succeeded since the last drop: their statuses are fresh observations again.
+  const fresh = new Set<string>()
   const [connectionError, setConnectionError] = createSignal("")
   const index = createMemo(() => new Map(sessions().map((s) => [s.id, s])))
   const children = createMemo(() => {
@@ -92,7 +94,8 @@ export const createSessionActivity = (
   const stale = (id: string) => {
     const snapshot = snapshots()[index().get(id)?.directory ?? ""]
     // Only after a real stream drop (at >= 0): a failed status read with the stream up keeps the last known state.
-    return dropped.at >= 0 && !!snapshot && snapshot.statusKnown === false && (statusVersions.get(id) ?? 0) <= dropped.at
+    const directory = index().get(id)?.directory ?? ""
+    return dropped.at >= 0 && !fresh.has(directory) && !!snapshot && snapshot.statusKnown === false && (statusVersions.get(id) ?? 0) <= dropped.at
   }
   const liveStatus = (id: string) => stale(id) ? undefined : statuses()[id]
   const running = (id: string) => [...family(id)].filter((owner) => {
@@ -190,6 +193,8 @@ export const createSessionActivity = (
     const active = inflight.get(directory)
     if (active) return afterReply ? active.promise.then(() => refreshDirectory(directory)) : active.promise
     const before = statusRevision
+    // A read counts as fresh after a drop only if it started after that drop (not one in flight across it).
+    const epoch = dropped.at
     const events: Event[] = []
     const promise = (async () => {
       const [status, permissions, questions] = await Promise.allSettled([
@@ -198,6 +203,7 @@ export const createSessionActivity = (
         background(() => oc.questions(directory)),
       ])
       if (disposed) return
+      if (status.status === "fulfilled" && epoch >= 0 && epoch === dropped.at) fresh.add(directory)
       batch(() => {
         if (status.status === "fulfilled") {
           // Status belongs to a Session, not a directory spelling. Only its
@@ -315,6 +321,7 @@ export const createSessionActivity = (
     if (disposed) return
     setConnectionError("Activity connection lost. Reconnecting; requests and status may be outdated.")
     dropped.at = statusRevision
+    fresh.clear()
     setSnapshots((current) => Object.fromEntries(Object.entries(current).map(([directory, snapshot]) =>
       [directory, { ...snapshot, statusKnown: false, permissionsKnown: false, questionsKnown: false }])))
   }
