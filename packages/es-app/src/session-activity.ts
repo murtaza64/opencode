@@ -86,8 +86,16 @@ export const createSessionActivity = (
     const ids = family(id)
     return requests().filter((item) => ids.has(item.request.sessionID))
   }
+  // While the stream is down (or a directory has not been re-read since), a status from before the drop is not
+  // authoritative: unknown, never a stale busy (Personal032 Core OOM, orchestrator #818). An event that arrived after
+  // the stream came back is authoritative again.
+  const stale = (id: string) => {
+    const snapshot = snapshots()[index().get(id)?.directory ?? ""]
+    return !!snapshot && snapshot.statusKnown === false && (statusVersions.get(id) ?? 0) <= dropped.at
+  }
+  const liveStatus = (id: string) => stale(id) ? undefined : statuses()[id]
   const running = (id: string) => [...family(id)].filter((owner) => {
-    const type = statuses()[owner]?.type
+    const type = liveStatus(owner)?.type
     return type === "busy" || type === "retry"
   })
   const error = (id: string, directory?: string) => {
@@ -296,7 +304,9 @@ export const createSessionActivity = (
     // Also every directory holding a live non-idle status: a session that turned busy by event after its last read
     // would otherwise keep that status (a Core that restarted meanwhile no longer runs it) until the slow rotation.
     const live = Object.entries(statuses()).filter(([, value]) => value.type !== "idle").map(([id]) => index().get(id)?.directory)
-    void refresh([...new Set([...relevant(), ...live.filter((directory): directory is string => !!directory)])])
+    // Chained after any read in flight: a fetch started before the drop may predate a Core restart.
+    const dirs = [...new Set([...relevant(), ...live.filter((directory): directory is string => !!directory)])]
+    void (async () => { for (let offset = 0; offset < dirs.length && !disposed; offset += 4) await Promise.all(dirs.slice(offset, offset + 4).map((directory) => refreshDirectory(directory, true))) })()
     todos.reload()
     options?.reconnected?.()
   }
@@ -374,10 +384,7 @@ export const createSessionActivity = (
   })
   const status = (id: string) => {
     const snapshot = snapshots()[index().get(id)?.directory ?? ""]
-    // While the stream is down (or its directory has not been re-read since), the last event is not authoritative:
-    // unknown, never a stale busy dot (Personal032 Core OOM, orchestrator #818).
-    // An event that arrived after the stream came back is authoritative again.
-    if (snapshot && snapshot.statusKnown === false && (statusVersions.get(id) ?? 0) <= dropped.at) return undefined
+    if (stale(id)) return undefined
     return statuses()[id]?.type ?? (snapshot && !snapshot.error ? "idle" : undefined)
   }
   const idle = (id: string) => !connectionError() && [...family(id)].every((owner) => {

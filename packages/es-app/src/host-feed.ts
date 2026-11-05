@@ -168,11 +168,16 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
   // for it arrived after the read began, so a seed never overwrites a newer transition.
   let statusEvents = 0
   const lastEvent = new Map<string, number>()
+  // When that host's event stream last dropped (in status-event counts), and when each session's status was last read:
+  // a status older than the drop is not authoritative until read again (Personal032 Core OOM, orchestrator #818/#826).
+  const [droppedAt, setDroppedAt] = createSignal<number>()
+  const seededAt = new Map<string, number>()
   // That host's Core keeps session status per directory (one Instance each): `/session/status` answers only for the
   // directory it is asked about, so each listed session is read in its own directory. Sessions only seen in events
   // (not listed) keep their event status.
   const seedLive = async (listed: { id: string; directory: string }[]) => {
-    const started = statusEvents
+    // One sequence for events, reads and drops, so "after the drop" holds even when no event arrived in between.
+    const started = ++statusEvents
     const byDirectory = listed.reduce((groups, session) => groups.set(session.directory, [...(groups.get(session.directory) ?? []), session]),
       new Map<string, { id: string; directory: string }[]>())
     const directories = [...byDirectory.keys()]
@@ -191,6 +196,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
       }
     })
     setUnread(new Set([...missing].filter((id) => (lastEvent.get(id) ?? -1) < started)))
+    for (const id of seen.keys()) seededAt.set(id, started)
     setLive((previous) => {
       const next = { ...previous }
       for (const [id, value] of seen) if ((lastEvent.get(id) ?? -1) < started) next[id] = value
@@ -363,7 +369,10 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
   const changed = coalesced(() => void load(), LIST_MS)
   const source = createServerEvents(`${base}/oc/global/event`, { types: SESSION_EVENTS })
   let dropped = false
-  source.onerror = () => (dropped = true)
+  source.onerror = () => {
+    dropped = true
+    setDroppedAt(++statusEvents)
+  }
   source.onopen = () => {
     if (!dropped) return
     dropped = false
@@ -376,7 +385,7 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     if (event?.type === "session.status" && typeof event.properties?.sessionID === "string") {
       const id = event.properties.sessionID
       const type = typeof event.properties.status?.type === "string" ? event.properties.status.type : "idle"
-      lastEvent.set(id, statusEvents++)
+      lastEvent.set(id, ++statusEvents)
       if (unread().has(id)) setUnread((previous) => new Set([...previous].filter((item) => item !== id)))
       setLive((previous) => previous[id] === type ? previous : { ...previous, [id]: type })
       return
@@ -396,7 +405,13 @@ export const createHostFeed = (host: WorkHost, project: () => string | undefined
     lineage,
     /** Status from that host's last status read and its events since ("busy", "retry", "idle"); "unknown" when the last
      * status read failed or the host is unreachable; undefined if unseen. */
-    live: (id: string) => unread().has(id) || state().status === "unavailable" ? "unknown" : live()[id],
+    live: (id: string) => {
+      if (unread().has(id) || state().status === "unavailable") return "unknown"
+      const drop = droppedAt()
+      // Neither an event nor a read since the stream dropped: not authoritative.
+      if (drop !== undefined && live()[id] !== undefined && Math.max(lastEvent.get(id) ?? -1, seededAt.get(id) ?? -1) < drop) return "unknown"
+      return live()[id]
+    },
     /** Reload this host's list now (project change, retry). */
     load,
   }

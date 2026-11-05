@@ -555,3 +555,29 @@ test("an event after the stream comes back is shown before its directory is re-r
   ActivityEvents.current.send(childDirectory, "session.status", { sessionID: "ses_child", status: { type: "busy" } })
   expect(activity.status("ses_child")).toBe("busy")
 })
+
+test("running() follows the same outage rule: a busy child from before the drop is not running while unknown", async () => {
+  const { activity } = start()
+  await load(activity)
+  ActivityEvents.current.onopen?.()
+  ActivityEvents.current.send(childDirectory, "session.status", { sessionID: "ses_child", status: { type: "busy" } })
+  expect(activity.running("ses_parent")).toEqual(["ses_child"])
+  ActivityEvents.current.onerror?.()
+  expect(activity.running("ses_parent")).toEqual([])
+})
+
+test("a reconnect read does not reuse a status fetch that started before the drop", async () => {
+  snapshots[childDirectory].status = { ses_child: { type: "busy" } }
+  const { activity } = start()
+  await load(activity)
+  ActivityEvents.current.onopen?.()
+  const held = holdSnapshot(activity, childDirectory)
+  ActivityEvents.current.onerror?.()
+  // Core restarts while the old read is held; the reconnect must read again after it.
+  snapshots[childDirectory].status = {}
+  ActivityEvents.current.onopen?.()
+  held.release()
+  await held.loading
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  expect(activity.status("ses_child")).toBe("idle")
+})

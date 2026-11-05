@@ -159,3 +159,22 @@ test("a directory whose status cannot be read shows its sessions unknown; others
   cores.mini!.statusDown = false
   await settled(() => mini.live("ses_a") === "busy")
 })
+
+test("while that host's stream is down a pre-drop status reads unknown, and an event-only session stays unknown until read (orchestrator #826)", async () => {
+  cores = { mini: { sessions: [{ id: "ses_a" }], status: { ses_a: { type: "busy" } } } }
+  const mini = feed("mini")
+  await settled(() => mini.live("ses_a") === "busy")
+  const stream = HostEvents.all[0]!
+  // Seen only by event (not listed): the 032 case of a worker green after its host's Core restarted.
+  stream.status("ses_worker", "busy")
+  expect(mini.live("ses_worker")).toBe("busy")
+  stream.onerror?.()
+  expect([mini.live("ses_a"), mini.live("ses_worker")]).toEqual(["unknown", "unknown"])
+  cores.mini!.status = {}
+  stream.onopen?.()
+  await settled(() => mini.live("ses_a") === "idle")
+  // Never read (unlisted) and no event since the drop: still unknown, not a stale green.
+  expect(mini.live("ses_worker")).toBe("unknown")
+  stream.status("ses_worker", "idle")
+  expect(mini.live("ses_worker")).toBe("idle")
+})
