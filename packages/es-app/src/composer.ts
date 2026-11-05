@@ -1305,8 +1305,12 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     }
     tracked.add(admission.payload.requestID)
     setState("admission", admission)
+    // The editor clears as soon as the input is captured: saving an exact image copy can take seconds, and
+    // the outgoing bubble already shows it. The saved snapshot keeps the draft until that write lands.
+    clearTask(admission.revision, buffer, direct?.targetRevision)
     if (!(images ? await persistAsync() : persist()) && images) {
       tracked.delete(admission.payload.requestID)
+      restoreSubmitted(buffer, draft)
       setState({
         admission: null,
         sending: false,
@@ -1315,7 +1319,6 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       })
       return
     }
-    clearTask(admission.revision, buffer, direct?.targetRevision)
     await admit(admission)
     // An unanswered input moves to the set-aside list (same request ID, checked on every refresh),
     // so it never blocks the next message.
