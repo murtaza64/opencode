@@ -19,7 +19,9 @@ try {
   await page.goto(preview.url)
   const errors = page.locator(".session-page .transcript .conversation-error")
   await expect(errors).toHaveCount(1)
-  await expect(errors.first()).toHaveText("Usage limit has been reached")
+  await expect(errors.first().locator(".conversation-error-cause")).toHaveText("Usage limit has been reached")
+  await expect(errors.first().locator(".conversation-error-detail")).toContainText("Usage limit has been reached")
+  await expect(errors.first().locator("summary")).toContainText("Details")
   await expect(page.locator(".session-alerts")).not.toContainText("Usage limit has been reached")
 
   preview.fixture.messages.push(
@@ -29,8 +31,8 @@ try {
   )
   await page.reload()
   await expect(errors).toHaveCount(2)
-  await expect(errors.nth(0)).toHaveText("Usage limit has been reached")
-  await expect(errors.nth(1)).toHaveText("Token is expired")
+  await expect(errors.nth(0).locator(".conversation-error-cause")).toHaveText("Usage limit has been reached")
+  await expect(errors.nth(1).locator(".conversation-error-cause")).toHaveText("Token is expired")
   await expect(page.locator(".session-alerts")).not.toContainText(/Usage limit has been reached|Token is expired/)
 
   preview.fixture.messages.push(
@@ -40,7 +42,7 @@ try {
   )
   await page.reload()
   await expect(errors).toHaveCount(2)
-  await expect(page.locator(".turn-summary.interrupted")).toHaveCount(1)
+  await expect(page.locator('[data-find-message="msg_6"] .turn-summary[data-state="interrupted"]')).toHaveCount(1)
   await expect(page.locator(".session-alerts")).not.toContainText(/Usage limit has been reached|Token is expired/)
 
   preview.fixture.emit("session.error", { sessionID: "ses_a", error: { name: "UnknownError", data: { message: "Transient connection failure" } } })

@@ -32,6 +32,7 @@ import { DeskChatProvider, DeskCompanion } from "./desk-companion"
 import { installAppearance } from "./appearance"
 import { KeyboardLayer } from "./components/keyboard-layer"
 import { startPerfTelemetry } from "./perf-telemetry"
+import "./components/reasoning-chip"
 
 startPerfTelemetry()
 

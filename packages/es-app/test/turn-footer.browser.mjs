@@ -35,10 +35,19 @@ try {
     await page.goto(`${preview.origin}/session/ses_a?directory=${encodeURIComponent(directory)}`, { waitUntil: "domcontentloaded", timeout: 180_000 })
     const turn = page.locator('[data-find-message="msg_3a"]')
     await expect(turn).toContainText("Reply msg_3a", { timeout: 120_000 })
-    // One footer for the turn; no second meta line under the reply.
+    // One footer for the turn; no second meta line under the reply, and no old TUI square.
     await expect(page.locator(".turn-summary")).toHaveCount(2)
     await expect(page.locator('.session-page [data-slot="text-part-meta"]:visible')).toHaveCount(0)
+    await expect(page.locator(".turn-summary .marker")).toHaveCount(0)
     const footer = turn.locator(".turn-summary")
+    // Hidden until the row is hovered or focused: it rides the Copy row.
+    const copyRow = turn.locator('[data-slot="text-part-copy-wrapper"]')
+    await expect(copyRow).toHaveCount(1)
+    await expect(copyRow.locator(".turn-summary")).toHaveCount(1)
+    expect(await copyRow.evaluate(el => getComputedStyle(el).opacity)).toBe("0")
+    await turn.locator('[data-component="text-part"]').last().hover()
+    await expect.poll(() => copyRow.evaluate(el => getComputedStyle(el).opacity)).toBe("1")
+    await expect(copyRow.getByRole("button", { name: /Copy response|Copied/ })).toHaveCount(1)
     await expect(footer).toContainText(clock)
     await expect(footer).toContainText("Implement")
     await expect(footer).toContainText("2m 41s")
@@ -46,8 +55,10 @@ try {
     const exact = await time.getAttribute("title")
     expect(exact).toMatch(zone === "UTC" ? /Turn started .*exact: 2026-11-03T15:00:00Z.*reply started .*15:02:12Z.*completed .*15:02:41Z/ : /Turn started .*-05:00.*reply started .*completed .*10:02:41-05:00/)
     expect(await time.getAttribute("aria-label")).toBe(exact)
-    // Interrupted turn says so with its time.
+    // Interrupted turn says so with its time, and marks the state with an accessible icon.
     await expect(page.locator('[data-find-message="msg_5a"] .turn-summary time')).toContainText("interrupted")
+    await expect(page.locator('[data-find-message="msg_5a"] .turn-summary .turn-state')).toHaveAttribute("aria-label", "Interrupted")
+    await expect(page.locator('[data-find-message="msg_5a"] .turn-summary .turn-state')).toHaveAttribute("data-state", "interrupted")
     await context.close()
   }
   expect(errors).toEqual([])
