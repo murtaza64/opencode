@@ -77,6 +77,14 @@ export const externalURL = (value: string) => {
 // dash.cloudflare.com is Access's "Cloudflare" identity provider (its OAuth authorize page).
 const SIGN_IN = [/\.cloudflareaccess\.com$/, /^dash\.cloudflare\.com$/, /^accounts\.google\.com$/, /^github\.com$/]
 
+/** A page host's user agent: Chromium's own, without the app and Electron product tokens. Google sign-in refuses
+ * user agents that name an embedded framework ("This browser or app may not be secure"); a page tab is a normal
+ * browser view of that host, so it presents as the Chrome it is built on. Only page-host partitions use this. */
+export const plainChromeUserAgent = (agent: string, appName: string) => {
+  const escaped = appName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return agent.replace(new RegExp(`\\s(?:${escaped}|Electron)/\\S+`, "gi"), "").replace(/\s{2,}/g, " ").trim()
+}
+
 /** Whether a page host's tab may navigate in place: its own origin, or a secure sign-in step. */
 export const pageNavigation = (value: string, origin: string) => {
   const url = URL.parse(value)

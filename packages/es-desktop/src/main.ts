@@ -6,7 +6,7 @@ import { surfaceFinder, surfaceFrameFocused } from "./surface-find"
 import { localHost, personalWork, shadowedPages, tabWithin, type WorkHost } from "../../es-app/remote-host"
 import { PERF_DIR } from "./perf-log"
 import { createVoice, voiceTools } from "./voice"
-import { appRouteURL, externalURL, internalURL, pageArrivedCrossSite, pageNavigation, restorePlan, serviceHosts, serviceOrigins, serviceSelf, startupMode, startupPlan, surfaceFrameURL } from "./policy"
+import { appRouteURL, externalURL, internalURL, pageArrivedCrossSite, pageNavigation, plainChromeUserAgent, restorePlan, serviceHosts, serviceOrigins, serviceSelf, startupMode, startupPlan, surfaceFrameURL } from "./policy"
 import { createTabs, TITLE_BAR_HEIGHT } from "./tabs"
 import { watchBadges } from "./badges"
 import { muxEvents, sseEvents, watchNotifications } from "./notifier"
@@ -587,6 +587,8 @@ const listenerSession = (partition: string, listener: { origin: string; key: str
 // A remote page's partition: secure web only, so it can never reach this machine's loopback services.
 const pageSession = (partition: string) => {
   const result = session.fromPartition(partition)
+  // Sign-in providers (Google) refuse embedded-framework user agents; a page tab presents as plain Chrome.
+  result.setUserAgent(plainChromeUserAgent(result.getUserAgent(), app.getName()))
   result.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   result.setPermissionCheckHandler(() => false)
   result.on("will-download", (event) => event.preventDefault())

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import WebSocket from "ws"
 import { serve } from "./server"
-import { pageNavigation, serviceHosts } from "./policy"
+import { pageNavigation, plainChromeUserAgent, serviceHosts } from "./policy"
 import type { HostInfo } from "../../es-app/remote-host"
 
 // Surface pages arrive with exactly one comment bridge inlined (es-app surface-bridge.ts); the page itself is untouched.
@@ -857,4 +857,14 @@ test("on-surface comments are read and posted on the own host and another Work h
     expect(hostWriteAllowed("POST", pathname)).toBe(false)
     expect(hostApiAllowed("GET", pathname)).toBe(false)
   }
+})
+
+test("a page host presents Chromium's own user agent, without the app or Electron tokens", () => {
+  const electron = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Editspace/2026.11.5 Chrome/142.0.7444.59 Electron/42.3.3 Safari/537.36"
+  expect(plainChromeUserAgent(electron, "Editspace")).toBe("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.7444.59 Safari/537.36")
+  // A plain Chrome agent is unchanged; an app name with regex characters is matched literally.
+  const chrome = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.7444.59 Safari/537.36"
+  expect(plainChromeUserAgent(chrome, "Editspace")).toBe(chrome)
+  expect(plainChromeUserAgent(`${chrome.replace(" Safari", " Edit.space/1 Safari")}`, "Edit.space")).toBe(chrome)
+  expect(plainChromeUserAgent(`${chrome.replace(" Safari", " EditXspace/1 Safari")}`, "Edit.space")).toContain("EditXspace/1")
 })
