@@ -6,6 +6,7 @@ import { surfaceFinder, surfaceFrameFocused } from "./surface-find"
 import { localHost, personalWork, shadowedPages, tabWithin, type WorkHost } from "../../es-app/remote-host"
 import { PERF_DIR } from "./perf-log"
 import { createVoice, voiceTools } from "./voice"
+import { watchPageAnswer } from "./page-answer"
 import { appRouteURL, externalURL, internalURL, pageArrivedCrossSite, pageNavigation, plainChromeUserAgent, restorePlan, serviceHosts, serviceOrigins, serviceSelf, startupMode, startupPlan, surfaceFrameURL } from "./policy"
 import { createTabs, TITLE_BAR_HEIGHT } from "./tabs"
 import { watchBadges } from "./badges"
@@ -352,6 +353,11 @@ const start = async () => {
   }
   // A host's own served page: its origin and its sign-in flow stay in the tab; other links open externally.
   function guardPage(contents: Electron.WebContents, origin: string) {
+    // A navigation that has not committed after PAGE_ANSWER_MS (a host or network that accepts and never answers) shows
+    // the failure page with Try again, instead of a blank view until Chromium gives up. A commit, any failure, or a
+    // navigation refused below clears it.
+    const answer = watchPageAnswer(contents, PAGE_ANSWER_MS, () =>
+      void contents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(pageFailure(origin, `no answer in ${PAGE_ANSWER_MS / 1000} s`))}`))
     contents.setWindowOpenHandler(({ url }) => {
       void openExternal(url).catch(() => console.error("External browser unavailable"))
       return { action: "deny" }
@@ -359,6 +365,9 @@ const start = async () => {
     contents.on("will-navigate", (event, url) => {
       if (pageNavigation(url, origin)) return
       event.preventDefault()
+      answer.refused()
+      // Host only: names a sign-in step the tab does not allow yet, without its path or query.
+      console.info("Editspace page tab sent a navigation to the browser", { host: URL.parse(url)?.host ?? "unknown" })
       void openExternal(url).catch(() => console.error("External browser unavailable"))
     })
     contents.on("will-attach-webview", (event) => event.preventDefault())
@@ -380,17 +389,6 @@ const start = async () => {
       void contents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(pageFailure(origin, description))}`)
     })
     showRendererLoss(contents, origin)
-    // A navigation that has not committed after PAGE_ANSWER_MS (a host or network that accepts and never answers) shows
-    // the failure page with Try again, instead of a blank view until Chromium gives up. A commit or a failure clears it.
-    let unanswered: ReturnType<typeof setTimeout> | undefined
-    contents.on("did-start-navigation", (details) => {
-      if (!details.isMainFrame || details.isSameDocument || details.url.startsWith("data:")) return
-      clearTimeout(unanswered)
-      unanswered = setTimeout(() => {
-        if (!contents.isDestroyed()) void contents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(pageFailure(origin, `no answer in ${PAGE_ANSWER_MS / 1000} s`))}`)
-      }, PAGE_ANSWER_MS)
-    })
-    for (const event of ["did-navigate", "did-fail-load", "destroyed"] as const) contents.on(event as "did-navigate", () => clearTimeout(unanswered))
   }
   if (window instanceof BrowserWindow) guardListener(window.webContents, server.origin, true)
   // Pair a Phone: this machine's gateway, plus each host with an owner SSH destination in
