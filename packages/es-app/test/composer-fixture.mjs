@@ -469,7 +469,7 @@ export const createFixture = async () => {
       if (action === "/todo" && request.method === "GET") return json(fixture.todos?.get(id) ?? [])
       const single = /^\/message\/([^/]+)$/.exec(action)
       if (single && request.method === "GET") {
-        const found = (id === "ses_a" ? fixture.messages ?? [] : fixture.messagesB).find((message) => message.info.id === single[1])
+        const found = (fixture.messagesBySession?.[id] ?? (id === "ses_a" ? fixture.messages ?? [] : fixture.messagesB)).find((message) => message.info.id === single[1])
         return found ? json(found) : json({ name: "NotFoundError", data: { message: `Message not found: ${single[1]}` } }, 404)
       }
       // One message by id (src/api.ts message): 404 when this session has none.
@@ -479,7 +479,8 @@ export const createFixture = async () => {
       }
       if (action === "/message") {
         const limit = url.searchParams.get("limit")
-        const all = id === "ses_a"
+        // Per-session transcripts when a test sets fixture.messagesBySession (continuous transcript chains).
+        const all = fixture.messagesBySession?.[id] ?? (id === "ses_a"
           ? (fixture.messages ?? [
                 {
                   info: {
@@ -510,7 +511,7 @@ export const createFixture = async () => {
                   parts: [],
                 },
             ])
-          : fixture.messagesB
+          : fixture.messagesB)
         const before = url.searchParams.get("before")
         const eligible = before ? all.filter((message) => message.info.id < before) : all
         const messages = limit ? eligible.slice(-Number(limit)) : eligible

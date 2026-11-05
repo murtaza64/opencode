@@ -1,6 +1,7 @@
 /* Conversation view: live transcript (session-ui renderer over an SSE-fed
  * store), prompt input, and inline permission/question replies. */
 import { ResizeHandle } from "../components/resize-handle"
+import { createStore } from "solid-js/store"
 import { createEffect, createMemo, createResource, createSignal, For, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js"
 import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router"
 import { DataProvider } from "@opencode-ai/session-ui/context"
@@ -82,6 +83,8 @@ import { wakeMarker, type WakeEvent } from "../wake-marker"
 import { anchorNote, anchorRange, parseAnchor, type MessageAnchor } from "../message-anchor"
 import { perfEvent, perfReady, perfSpan } from "../perf-telemetry"
 import { targetReady } from "../startup"
+import { EarlierSession, HandoffRule, type SegmentControl } from "../components/earlier-session"
+import { deskChain, laneChain, successionPredecessor, type Chain, type ChainLink } from "../transcript-chain"
 import { ariaShortcut, matchShortcut, shortcutLabel } from "../shortcuts"
 import { leaveComposer, ownsKey } from "../keyboard"
 
@@ -410,7 +413,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   }
   let userScroll = false
   const loadEarlier = async () => {
-    if (!transcriptEl || !live.hasOlder() || live.loadingOlder()) return
+    if (!transcriptEl || live.loadingOlder()) return
+    if (!live.hasOlder()) return loadEarlierSession()
     stick = false
     userScroll = false
     // Measure before mounting held-back rows so the restore below covers them too.
@@ -423,6 +427,40 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       if (transcriptEl) transcriptEl.scrollTop = top + transcriptEl.scrollHeight - height
     } catch (failure) {
       setError(`Unable to load earlier messages: ${errorText(failure)}`)
+    }
+  }
+  // Past this session's first message: older rows of the top earlier session, else the next earlier session. The row
+  // at the top of the view keeps its place on screen while rows are added above it.
+  let earlierLoading = false
+  const loadEarlierSession = async () => {
+    if (!transcriptEl || earlierLoading || !live.loaded()) return
+    const ids = shownIDs()
+    const top = ids.length ? segments[ids[0]!] : undefined
+    if (top && !top.ready()) return
+    if (!top?.hasOlder() && !earlierLeft()) return
+    earlierLoading = true
+    stick = false
+    userScroll = false
+    mountAll()
+    const anchor = [...transcriptEl.querySelectorAll<HTMLElement>("[data-find-message], .handoff-rule")]
+      .find((element) => element.getBoundingClientRect().bottom > transcriptEl!.getBoundingClientRect().top)
+    const offset = anchor ? anchor.getBoundingClientRect().top : 0
+    const keep = () => { if (anchor && transcriptEl) transcriptEl.scrollTop += anchor.getBoundingClientRect().top - offset }
+    try {
+      if (top?.hasOlder()) await top.older()
+      else {
+        setShownEarlier((count) => count + 1)
+        const next = shownIDs()[0]!
+        // Holds the anchor while the earlier session's first page arrives and renders.
+        for (let frame = 0; frame < 600 && !segments[next]?.ready(); frame++) {
+          keep()
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+        }
+      }
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      keep()
+    } finally {
+      earlierLoading = false
     }
   }
   const inspectSubagent = (id: string) => {
@@ -505,6 +543,28 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const attentionError = () => (remote ? "" : sessionsError()) || activity.error(sessionID, directory)
 
   const session = () => live.data.session[0]
+  // One continuous transcript (DD #857/#858): earlier sessions of this one's verified chain load above it on scroll-up,
+  // read-only, each from its own host. The desk follows the home pointer; other sessions their lane's handoff edges.
+  const [segments, setSegments] = createStore<Record<string, SegmentControl>>({})
+  const [shownEarlier, setShownEarlier] = createSignal(0)
+  const chain = createMemo((): Chain => {
+    if (!desk()) {
+      // Another host's chain is that host's own lineage; here an earlier session must also be known to this host.
+      const value = laneChain(sessionID, lineage())
+      const known = remote ? value.links.length : value.links.findIndex((link) => !activity.session(link.session))
+      return known === -1 ? value : { links: value.links.slice(0, known) }
+    }
+    const earlier = (deskChat?.desk.earlier() ?? []).filter((entry) => entry.from === "home")
+      .map((entry) => ({ session: entry.session, directory: entry.directory, ...(entry.host ? { host: entry.host } : {}), ...(entry.until ? { until: entry.until } : {}) }))
+    return deskChain(sessionID, earlier, (id) => successionPredecessor(id === sessionID ? live.data.session[0]?.metadata : segments[id]?.metadata()))
+  })
+  const shownIDs = createMemo(() => chain().links.slice(0, shownEarlier()).map((link) => link.session).reverse(), [],
+    { equals: (a, b) => a.length === b.length && a.every((id, index) => id === b[index]) })
+  const earlierLeft = () => chain().links.length > shownEarlier()
+  const earlierHref = (link: ChainLink) => {
+    const dir = link.directory ?? sessionDir(link.session)
+    return link.host ? `${sessionHref(link.session, dir)}&host=${encodeURIComponent(link.host.id)}` : hrefFor(link.session, dir)
+  }
   const status = () => live.data.session_status[sessionID]?.type ??
     (!activity.error(sessionID, directory) ? activity.status(sessionID) : undefined) ?? "idle"
   const messages = createMemo(() => live.data.message[sessionID] ?? [])
@@ -2122,7 +2182,30 @@ export function SessionView(props: { sessionID: string; directory: string; embed
               <FindExcerpt hit={hit()} />
               <span class="dim">Exact source excerpt. Earlier history is not added to the reader.</span>
             </div>}</Show>
-            <Show when={predecessor()}>{(edge) => <div class="banner handoff-history" aria-label="Previous session">
+            <Show when={!earlierLeft() && !segments[shownIDs()[0] ?? ""]?.hasOlder() && chain().broken && !live.hasOlder()}>
+              <div class="earlier-session-status" role="note">Earlier history isn't linked</div>
+            </Show>
+            <Show when={!live.hasOlder() && (earlierLeft() || segments[shownIDs()[0] ?? ""]?.hasOlder())}>
+              <button class="transcript-older" disabled={earlierLoading} onClick={() => void loadEarlierSession()}>Load earlier session</button>
+            </Show>
+            <For each={shownIDs()}>{(id) => {
+              const index = () => chain().links.findIndex((item) => item.session === id)
+              const link = chain().links[index()]!
+              const dir = link.directory ?? sessionDir(id)
+              const href = link.host ? `${sessionHref(id, dir)}&host=${encodeURIComponent(link.host.id)}` : hrefFor(id, dir)
+              return <>
+                <Show when={chain().links[index() + 1]}>{(prior) => <HandoffRule predecessor={prior().session} successor={id}
+                  label={segments[prior().session]?.title() ?? sessionLabel(prior().session)} href={earlierHref(prior())} reason={prior().reason}
+                  at={segments[id]?.created()} />}</Show>
+                <EarlierSession link={link} directory={dir} host={link.host ?? sessionHost} href={href} hostLabel={link.host?.label}
+                  renderTools={renderTools} register={(control) => setSegments(id, control)} />
+              </>
+            }}</For>
+            <Show when={chain().links[0]}>{(prior) => <HandoffRule previous predecessor={prior().session} successor={sessionID}
+              label={segments[prior().session]?.title() ?? sessionLabel(prior().session)} href={earlierHref(prior())}
+              reason={prior().reason ?? predecessor()?.reason} at={session()?.time.created}
+              skipped={predecessor()?.kickoff === "skipped" ? predecessor()?.context : undefined} />}</Show>
+            <Show when={!chain().links.length && predecessor()}>{(edge) => <div class="banner handoff-history" aria-label="Previous session">
               Previous session: <A href={hrefFor(edge().predecessor, sessionDir(edge().predecessor))}><bdi dir="auto">{sessionLabel(edge().predecessor)}</bdi></A>
               {" · "}<bdi dir="ltr">{edge().predecessor}</bdi>
               <Show when={edge().reason}>{(reason) => <> · <bdi dir="auto">{reason()}</bdi></>}</Show>

@@ -73,7 +73,7 @@ const routes = async (page) => {
 await routes(page)
 const pinned = { locator: (selector) => page.locator(".sidebar .pinned-section").locator(selector) }
 const banner = () => page.locator(".banner.handoff-next")
-const previous = () => page.locator(".banner.handoff-history[aria-label='Previous session']")
+const previous = () => page.getByRole("separator", { name: "Previous session" })
 const miniA = `${preview.origin}/session/ses_a?directory=${encodeURIComponent(directory)}&host=mini`
 try {
   await page.goto(preview.url, { waitUntil: "domcontentloaded", timeout: 300_000 })
@@ -93,7 +93,7 @@ try {
   await expect(banner()).toContainText("lane lead on Mac Mini")
   await banner().getByRole("link").click()
   await expect(page).toHaveURL(/\/session\/ses_b\?.*host=mini/)
-  await expect(previous()).toContainText("Previous session: Delta (before handoff)")
+  await expect(previous()).toContainText("Delta (before handoff) continued in a new session")
   await expect(previous().getByRole("link")).toHaveAttribute("href", /\/session\/ses_a\?.*host=mini/)
   await expect(banner()).toHaveCount(0)
   // Back, reload, and opening the old link directly all show the handoff.

@@ -1201,6 +1201,19 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   font-size: 12px;
   color: var(--subtext1);
 }
+/* Continuous transcript: earlier sessions above the open one, one thin rule at each handoff. */
+.handoff-rule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-block: 12px;
+  font-size: 11px;
+  color: var(--subtext0);
+}
+.handoff-rule::before, .handoff-rule::after { content: ""; flex: 1; border-block-start: 1px solid var(--surface1); }
+.handoff-rule > span { flex: none; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.earlier-session-status { margin-block: 8px; text-align: center; font-size: 12px; color: var(--subtext1); }
+.earlier-session-plumbing > summary { cursor: pointer; font-size: 11px; color: var(--subtext0); }
 [data-component="dialog-overlay"]:has(+ [data-dialog-layer] .subagent-transcript-dialog) {
   background: color-mix(in srgb, var(--crust) 65%, transparent);
 }
