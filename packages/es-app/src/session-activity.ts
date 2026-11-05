@@ -35,7 +35,7 @@ export const createSessionActivity = (
   let statusRevision = 0
   const statusVersions = new Map<string, number>()
   // The status revision when the event stream last dropped: statuses from before it are not authoritative until re-read.
-  const dropped = { at: 0 }
+  const dropped = { at: -1 }
   const [connectionError, setConnectionError] = createSignal("")
   const index = createMemo(() => new Map(sessions().map((s) => [s.id, s])))
   const children = createMemo(() => {
@@ -91,7 +91,8 @@ export const createSessionActivity = (
   // the stream came back is authoritative again.
   const stale = (id: string) => {
     const snapshot = snapshots()[index().get(id)?.directory ?? ""]
-    return !!snapshot && snapshot.statusKnown === false && (statusVersions.get(id) ?? 0) <= dropped.at
+    // Only after a real stream drop (at >= 0): a failed status read with the stream up keeps the last known state.
+    return dropped.at >= 0 && !!snapshot && snapshot.statusKnown === false && (statusVersions.get(id) ?? 0) <= dropped.at
   }
   const liveStatus = (id: string) => stale(id) ? undefined : statuses()[id]
   const running = (id: string) => [...family(id)].filter((owner) => {
