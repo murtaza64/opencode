@@ -197,6 +197,12 @@ test("API surface excludes direct shell, PTY, file, and config access", () => {
     expect(hostApiAllowed("GET", pathname)).toBe(false)
   expect(hostApiAllowed("POST", "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0") || hostWriteAllowed("POST", "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0")).toBe(false)
   expect(apiAllowed("GET", "/oc/session/ses_a/message/msg_b/part/prt_c/attachment/0")).toBe(true)
+  // A compact page's file part (pasted image) bytes, the same way (runtime-lag #895).
+  expect(hostApiAllowed("GET", "/oc/session/ses_a/message/msg_b/part/prt_c/file")).toBe(true)
+  expect(apiAllowed("GET", "/oc/session/ses_a/message/msg_b/part/prt_c/file")).toBe(true)
+  for (const pathname of ["/oc/session/ses_a/message/msg_b/part/prt_c/file/x", "/oc/session/ses_a/message/msg_b/part/prt_c/files"])
+    expect(hostApiAllowed("GET", pathname) || apiAllowed("GET", pathname)).toBe(false)
+  expect(hostApiAllowed("POST", "/oc/session/ses_a/message/msg_b/part/prt_c/file") || hostWriteAllowed("POST", "/oc/session/ses_a/message/msg_b/part/prt_c/file")).toBe(false)
   // On its own host (listener or paired gateway) the pointer is read and written; nothing else on that path.
   expect(apiAllowed("GET", "/es/api/frontdesk/pointer")).toBe(true)
   // The persona registry (name, owner lane, clean avatar URL) is a read for this host's own pages and paired phones only.

@@ -58,7 +58,8 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
     part.metadata?.source === "front-desk/succession"))
   // Attached user images render through ChatImages, the same component as the outgoing bubble.
   const imagePart = (part: ComponentProps<typeof Message>["parts"][number]) => props.message.role === "user" &&
-    part.type === "file" && part.mime.startsWith("image/") && part.url.startsWith("data:") && part.source?.text?.start === undefined
+    part.type === "file" && part.mime.startsWith("image/") && (part.url.startsWith("data:") || !!(part as { metadata?: { compactFile?: unknown } }).metadata?.compactFile) &&
+    part.source?.text?.start === undefined
   const images = createMemo(() => props.parts.flatMap(part => imagePart(part) && part.type === "file"
     ? [{ url: part.url, mime: part.mime, ...(part.filename ? { filename: part.filename } : {}) }] : []),
   [], { equals: (a, b) => a.length === b.length && a.every((image, index) => image.url === b[index]!.url && image.filename === b[index]!.filename) })
