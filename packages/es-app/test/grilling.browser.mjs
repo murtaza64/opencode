@@ -175,11 +175,31 @@ try {
   await expect(page.locator(".grill-choice[data-recommended]")).toBeFocused()
   await page.setViewportSize({ width: 1440, height: 900 })
 
+  // DD (a): a stale revision is refused, said so, and never auto-answered: the agent reworded Q5 after this page read it.
+  const q5 = preview.ledger.records.find(record => record.id === "grill_5")
+  q5.revision++
+  q5.content_revision++
+  q5.title = "Keep a rejection in the phase it happened in (reworded)?"
+  await page.keyboard.press("Enter")
+  await expect(page.locator(".home-notice")).toContainText("This record changed. Review the current revision before choosing again.")
+  await expect(pane.locator("h4")).toHaveText("Keep a rejection in the phase it happened in (reworded)?")
+  await expect(pane).toHaveAttribute("data-index", "5")
+  await expect(pane.locator(".grill-recorded")).toHaveCount(0)
+  await expect(pane.locator(".grill-choice")).toHaveCount(2)
+  if (q5.answer || q5.status !== "open") throw Error("stale revision was answered")
+  await page.waitForTimeout(600)
+  await expect(pane).toHaveAttribute("data-index", "5")
+  if (answers().length !== 5) throw Error(`stale refusal retried on its own: ${answers().length} answer commands`)
+  await page.locator(".grill-choice[data-recommended]").focus()
+
   // Q5–Q7 by keyboard; the last answer empties the queue entry and the summary closes the session.
   await page.keyboard.press("Enter")
   await expect(pane).toHaveAttribute("data-index", "6")
   await page.keyboard.press("Enter")
   await expect(pane).toHaveAttribute("data-index", "7")
+  // DD (f): with one unanswered question left, the session is still in Needs you.
+  await expect(entry).toHaveCount(1)
+  await expect(entry.locator(".nav-grill-progress")).toContainText("6 of 7 answered")
   await page.keyboard.press("Enter")
   await expect(grill.locator(".grill-summary h4")).toHaveText("Decided so far")
   await expect(grill.locator(".grill-decided li")).toHaveCount(7)
@@ -192,16 +212,17 @@ try {
   await page.keyboard.press("Enter")
   await expect(grill).toHaveCount(0)
 
-  // Each answer is its own command on its own record at that record's revision; nothing is bundled.
+  // Each answer is its own command on its own record at that record's revision; nothing is bundled. Q5's first
+  // command is the refused stale one; the second is the deliberate answer to the reworded question.
   const sent = answers().map(call => [call.path, call.body.expected_revision, call.body.choice_id, call.body.input_value ?? call.body.text])
   const expected = [["/grill_1/commands", 1, "other", "maybe the column it was rejected from?"], ["/grill_2/commands", 1, "yes", undefined], ["/grill_3/commands", 1, "yes", undefined],
-    ["/grill_4/commands", 1, "other", "nice to have… no rush"], ["/grill_5/commands", 1, "keep", undefined], ["/grill_6/commands", 1, "same", undefined], ["/grill_7/commands", 1, "keep", undefined]]
+    ["/grill_4/commands", 1, "other", "nice to have… no rush"], ["/grill_5/commands", 1, "keep", undefined], ["/grill_5/commands", 2, "keep", undefined], ["/grill_6/commands", 1, "same", undefined], ["/grill_7/commands", 1, "keep", undefined]]
   if (JSON.stringify(sent) !== JSON.stringify(expected)) throw Error(`per-record answers ${JSON.stringify(sent)}`)
   if (answers().some(call => call.csrf !== "1" || !call.body.command_id)) throw Error("missing command identity or CSRF")
-  if (new Set(answers().map(call => call.body.command_id)).size !== 7) throw Error("command ids reused")
+  if (new Set(answers().map(call => call.body.command_id)).size !== 8) throw Error("command ids reused")
   if (errors.length) throw Error(errors.join("\n"))
   if (preview.fixture.calls.some(call => !["GET", "HEAD", "OPTIONS"].includes(call.method))) throw Error("unexpected runtime writes")
-  console.log(`PASS grilling: one Needs-you entry (progress, follow-ups), stepper focus on recommendation, / free text via Other, Enter answers + auto-advance, follow-up "because" from caused_by, K/J, See all board, Esc pause keeps place, phone strip + swipe, summary after the queue entry clears, 7 separate per-record answer commands, no runtime writes. Frames: ${shots}`)
+  console.log(`PASS grilling: one Needs-you entry (progress, follow-ups), stepper focus on recommendation, / free text via Other, Enter answers + auto-advance, follow-up "because" from caused_by, K/J, See all board, Esc pause keeps place, phone strip + swipe, stale revision refused and not auto-answered (DD a), entry kept with one unanswered (DD f), summary after the queue entry clears, 7 answers as separate per-record commands plus the refused stale one, no runtime writes. Frames: ${shots}`)
 } finally {
   await context.close()
   await browser.close()
