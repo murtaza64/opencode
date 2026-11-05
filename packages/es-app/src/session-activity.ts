@@ -34,6 +34,8 @@ export const createSessionActivity = (
   const [statuses, setStatuses] = createSignal<Record<string, { type: string }>>({})
   let statusRevision = 0
   const statusVersions = new Map<string, number>()
+  // The status revision when the event stream last dropped: statuses from before it are not authoritative until re-read.
+  const dropped = { at: 0 }
   const [connectionError, setConnectionError] = createSignal("")
   const index = createMemo(() => new Map(sessions().map((s) => [s.id, s])))
   const children = createMemo(() => {
@@ -291,13 +293,17 @@ export const createSessionActivity = (
     }
     lastSessionRefresh = Date.now()
     refreshSessions()
-    void refresh()
+    // Also every directory holding a live non-idle status: a session that turned busy by event after its last read
+    // would otherwise keep that status (a Core that restarted meanwhile no longer runs it) until the slow rotation.
+    const live = Object.entries(statuses()).filter(([, value]) => value.type !== "idle").map(([id]) => index().get(id)?.directory)
+    void refresh([...new Set([...relevant(), ...live.filter((directory): directory is string => !!directory)])])
     todos.reload()
     options?.reconnected?.()
   }
   source.onerror = () => {
     if (disposed) return
     setConnectionError("Activity connection lost. Reconnecting; requests and status may be outdated.")
+    dropped.at = statusRevision
     setSnapshots((current) => Object.fromEntries(Object.entries(current).map(([directory, snapshot]) =>
       [directory, { ...snapshot, statusKnown: false, permissionsKnown: false, questionsKnown: false }])))
   }
@@ -368,6 +374,10 @@ export const createSessionActivity = (
   })
   const status = (id: string) => {
     const snapshot = snapshots()[index().get(id)?.directory ?? ""]
+    // While the stream is down (or its directory has not been re-read since), the last event is not authoritative:
+    // unknown, never a stale busy dot (Personal032 Core OOM, orchestrator #818).
+    // An event that arrived after the stream came back is authoritative again.
+    if (snapshot && snapshot.statusKnown === false && (statusVersions.get(id) ?? 0) <= dropped.at) return undefined
     return statuses()[id]?.type ?? (snapshot && !snapshot.error ? "idle" : undefined)
   }
   const idle = (id: string) => !connectionError() && [...family(id)].every((owner) => {

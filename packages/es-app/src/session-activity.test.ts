@@ -528,3 +528,30 @@ test("a queued EventSource error after disposal cannot change the public error s
   queuedError?.()
   expect(activity.error("ses_parent")).toBe(before)
 })
+
+test("a busy dot is unknown while the stream is down; a reconnect re-reads its directory even outside the relevant set (orchestrator #818)", async () => {
+  const { activity } = start(undefined, { directories: () => [rootDirectory], sessionEvent: () => true })
+  await load(activity)
+  ActivityEvents.current.onopen?.()
+  ActivityEvents.current.send(unrelatedDirectory, "session.status", { sessionID: "ses_unrelated", status: { type: "busy" } })
+  expect(activity.status("ses_unrelated")).toBe("busy")
+  ActivityEvents.current.onerror?.()
+  expect(activity.status("ses_unrelated")).toBeUndefined()
+  // Core restarted meanwhile: it no longer runs the session.
+  snapshots[unrelatedDirectory].status = {}
+  const before = fetchSpy.mock.calls.length
+  ActivityEvents.current.onopen?.()
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  const read = fetchSpy.mock.calls.slice(before).some(([input]) => String(input).includes("/oc/session/status") && String(input).includes(encodeURIComponent(unrelatedDirectory)))
+  expect(read).toBe(true)
+  expect(activity.status("ses_unrelated")).toBe("idle")
+})
+
+test("an event after the stream comes back is shown before its directory is re-read", async () => {
+  const { activity } = start()
+  await load(activity)
+  ActivityEvents.current.onopen?.()
+  ActivityEvents.current.onerror?.()
+  ActivityEvents.current.send(childDirectory, "session.status", { sessionID: "ses_child", status: { type: "busy" } })
+  expect(activity.status("ses_child")).toBe("busy")
+})
