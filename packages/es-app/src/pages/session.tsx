@@ -524,11 +524,16 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     onCleanup(() => observer.disconnect())
     // The composer growing or shrinking resizes the transcript's viewport, not its content. A view that was at the
     // bottom stays there; a reader scrolled up keeps the same messages in view (scrollTop is unchanged).
+    // Both the composer and the outgoing rows can grow in the same frame (a Steer gains its row while the draft
+    // image leaves the composer). Measure "was at the bottom" against the sizes from before that frame, or the new
+    // content height makes a pinned transcript look scrolled up and the re-pin is skipped.
     let viewportHeight = transcriptEl?.clientHeight ?? 0
+    let contentHeight = transcriptEl?.scrollHeight ?? 0
     const viewport = new ResizeObserver(() => {
       if (!transcriptEl) return
-      const wasBottom = transcriptEl.scrollHeight - transcriptEl.scrollTop - viewportHeight < 4
+      const wasBottom = contentHeight - transcriptEl.scrollTop - viewportHeight < 4
       viewportHeight = transcriptEl.clientHeight
+      contentHeight = transcriptEl.scrollHeight
       if (stick && wasBottom) pin()
     })
     if (transcriptEl) viewport.observe(transcriptEl)
@@ -2001,6 +2006,17 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     return receipt.state !== "pending" && receipt.state !== "cancelled" && seenPending.has(receipt.requestID) && receipt.source?.type !== "editspace-mail"
       && typeof messageID === "string" && !inTranscript(messageID)
   }))
+  // A delivery row (admission, pending receipt, the normal send, a delivered bubble) lives at the end of the
+  // transcript. When one appears while the reader is at the bottom, pin in this render rather than waiting for a
+  // ResizeObserver callback: a Steer can add its row and shrink the composer in the same frame, and a frame's gap
+  // must not leave the reader short of the newest row.
+  let outgoingRows = -1
+  createEffect(() => {
+    const count = composer.state.receipts.length + composer.state.recoveries.length
+      + (composer.state.admission ? 1 : 0) + (composer.state.normalSubmission ? 1 : 0) + deliveredWaiting().length
+    if (outgoingRows !== -1 && count !== outgoingRows && stick) pin()
+    outgoingRows = count
+  })
   const reading = new Set<string>()
   const readTimers = new Set<ReturnType<typeof setTimeout>>()
   onCleanup(() => readTimers.forEach(clearTimeout))
