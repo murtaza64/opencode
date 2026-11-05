@@ -96,7 +96,8 @@
 .sc-chat-full { flex: none; font-size: 12px; color: var(--blue); }
 .sc-toolbar .sc-chat-icon, .sc-chat-icon { flex: none; inline-size: 26px; block-size: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--subtext0); font-size: 16px; line-height: 1; cursor: pointer; }
 .sc-chat-icon:hover, .sc-chat-icon:focus-visible { background: var(--surface0); color: var(--text); }
-.sc-chat-body { flex: 1; min-block-size: 0; overflow-y: auto; display: grid; align-content: start; gap: 10px; padding: 10px 12px; font-size: 13px; }
+.sc-chat-body { flex: 1; min-block-size: 0; overflow-y: auto; overflow-anchor: none; display: grid; align-content: start; gap: 10px; padding: 10px 12px; font-size: 13px; }
+.sc-chat-content { display: grid; align-content: start; gap: 10px; min-inline-size: 0; }
 .sc-chat-empty { margin: 8px 0; color: var(--subtext0); font-size: 12px; }
 .sc-chat-msg { display: grid; gap: 3px; max-inline-size: 90%; }
 .sc-chat-msg[data-role=user] { justify-self: end; padding: 6px 10px; border-radius: 12px 12px 4px 12px; background: var(--surface0); }
@@ -180,3 +181,7 @@
 .sc-chat-msg :is([data-slot="user-message-text"], [data-component="markdown"], [data-component="text-part"]) { color: var(--text); font-size: 13px; line-height: 1.45; }
 .sc-chat-msg [data-component="markdown"] :is(p, ul, ol) { margin: 0 0 4px; }
 .sc-chat-msg :is([data-slot="user-message-copy-wrapper"], [data-slot="text-part-copy-wrapper"]) { display: none; }
+
+/* The micro chat's history cap: older matches live in the full chat. */
+.sc-chat-earlier { align-self: center; margin: 2px 0 4px; padding: 2px 6px; border: 0; background: none; color: var(--blue); font: inherit; font-size: 11px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.sc-chat-earlier:hover, .sc-chat-earlier:focus-visible { color: var(--text); }
