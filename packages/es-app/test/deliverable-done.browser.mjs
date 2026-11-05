@@ -72,7 +72,7 @@ try {
   await publish("first")
   await page.goto(`${preview.origin}/`, { waitUntil: "domcontentloaded", timeout: 180_000 })
   await expect(row).toHaveAttribute("aria-label", "Try · API tests · Fixture lead · rev 1", { timeout: 60_000 })
-  await expect(row.locator(".nav-kind")).toHaveText("Try")
+  await expect(row.locator(".nav-try-shape .surface-glyph")).toBeVisible()
   step("Needs you shows one deterministic Try line")
 
   await row.click()

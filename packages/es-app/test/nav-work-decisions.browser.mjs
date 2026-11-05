@@ -52,15 +52,15 @@ try {
   if (opened.length) throw new Error(`opened another host's origin: ${opened}`)
   await page.goto(`${preview.url}/agents`)
   await expect(miniRow).toBeVisible({ timeout: 60_000 })
-  // The Mini stops answering: its decision stays, dimmed, and the count is partial and names it.
+  // The Mini stops answering: its decision stays, dimmed; the count shows nothing rather than a misleading "N+".
   miniDown = true
   await selectScope(page, "__all__")
   await selectScope(page, "fixture")
   const stale = band.getByRole("link", { name: /^Rotate the Mini certs\?, decision, on Mac Mini, last known$/ })
   await expect(stale).toBeVisible({ timeout: 60_000 })
-  await expect(band.locator(".nav-heading-count")).toHaveText(/\+$/)
+  await expect(band.locator(".nav-heading-count")).toHaveText("")
   await expect(band.locator(".nav-heading-count")).toHaveAttribute("title", "Mac Mini: not current")
-  console.log("PASS nav work decisions: Mini decision in band + Decisions tab with host glyph, local first, host filter, opens in this window (no native flip), unreachable host kept dimmed with N+ naming it")
+  console.log("PASS nav work decisions: Mini decision in band + Decisions tab with host glyph, local first, host filter, opens in this window (no native flip), unreachable host kept dimmed with no false count")
 } finally {
   await browser.close()
   await preview.close()

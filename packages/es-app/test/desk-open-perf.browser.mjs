@@ -86,11 +86,12 @@ try {
   rows.at(-1).desk_message_reads = fixture.calls.filter((call) => call.method === "GET" && call.path === "/session/ses_a/message").length
   if (process.env.DEBUG_READS) console.log("READS", JSON.stringify(fixture.calls.filter((call) => call.method === "GET" && call.path === "/session/ses_a/message").map((call) => `${call.limit}/${call.before ?? ""}`)))
   // Revisit: navigate to Agent map, then back to Decisions; the chat stays mounted.
-  await page.locator('a.nav-entry[href="/agents"]').click()
+  await page.locator('a.nav-quick-item[href="/agents"]').click()
   await page.waitForTimeout(1500)
   fixture.calls.length = 0
   const start = await page.evaluate(() => performance.now())
-  await page.locator('a.nav-entry[aria-label^="Decisions & inbox"]').click()
+  await page.keyboard.press("g")
+  await page.keyboard.press("i")
   await measure("revisit", start)
   rows.at(-1).requests = fixture.calls.length
   rows.at(-1).desk_message_reads = fixture.calls.filter((call) => call.method === "GET" && call.path === "/session/ses_a/message").length

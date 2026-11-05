@@ -1,10 +1,15 @@
-/* Unified navigation (dotfiles#240, slice 1): a Needs you band at the top of the sidebar, then Pinned, then
- * four browse tabs (Surfaces | Agents | Decisions | PRs), each with its own filter. The band is never
- * filtered by a tab. Everything here reuses existing reads (the desk queue, surfaces, dashboard PRs);
- * opening a decision or surface goes to the Front desk with it selected. */
-import { createMemo, createResource, createSignal, For, Show, type JSX } from "solid-js"
+/* Unified navigation (dotfiles#240): one sidebar list instead of four tabs. All is the default and
+ * blends agents, Surfaces and closed decisions under one Needs you section; the chips narrow that
+ * list by kind. Each kind keeps the reads and row renderers it had (the desk queue, this host's and
+ * other Work hosts' Surfaces, the dashboard's closed decisions), and opening a decision or Surface
+ * still goes to the Front desk with it selected. PRs are not part of this list. */
+import { createEffect, createMemo, createResource, createSignal, For, onCleanup, Show, untrack, type JSX } from "solid-js"
 import type { AttentionRecord } from "../attention"
 import { ago, sessionHref } from "../state"
+import { clockTime } from "../local-time"
+import { host } from "../host"
+import { changedSinceOpened, FILTERS, holdOrder, markSidebarOpened, newcomers, openedAt, ORDER_LABEL, ORDER_MODES,
+  readDensity, readOrder, recentOrder, writeDensity, writeOrder, type Density, type RecentItem, type RecentOrder, type SidebarFilter } from "../sidebar-recent"
 import { useLocation } from "@solidjs/router"
 import { useDeskQueue } from "../desk-queue"
 import { useDashboard } from "../state"
@@ -19,20 +24,19 @@ import { grilling } from "../attention-series"
 import { failureAge, failureLabel, OLD_FAILURE_MS } from "../session-failures"
 import { SurfaceGlyph } from "./surface-glyph"
 import { surfaceKindLabel, surfaceTags } from "../surface-tags"
-import { PrList, sortPrs } from "./pr"
 
-export type NavTab = "surfaces" | "agents" | "decisions" | "prs"
+export type NavTab = SidebarFilter
 const TAB_KEY = "es-app:nav-tab"
-const TABS: [NavTab, string][] = [["surfaces", "Surfaces"], ["agents", "Agents"], ["decisions", "Decisions"], ["prs", "PRs"]]
+const TABS = FILTERS
 const BAND_LIMIT = 8
 const SURFACE_TYPES: [string, string][] = [["document", "Document"], ["dashboard", "Dashboard"], ["prototype", "Prototype"], ["interactive", "Interactive"], ["live", "Live"]]
 
 const storedTab = (): NavTab => {
   try {
     const value = localStorage.getItem(TAB_KEY)
-    return TABS.some(([id]) => id === value) ? value as NavTab : "agents"
+    return TABS.some(([id]) => id === value) ? value as NavTab : "all"
   } catch {
-    return "agents"
+    return "all"
   }
 }
 const [tab, setTabState] = createSignal<NavTab>(storedTab())
@@ -75,7 +79,7 @@ const useOpenItem = () => {
   return (key: string) => location.pathname === "/" && new URLSearchParams(location.search).get("item") === key
 }
 // Every entry opens in this window; another Work host's detail and actions go through that host (work-remote.tsx).
-const DecisionRow = (props: { entry: WorkEntry }) => {
+export const DecisionRow = (props: { entry: WorkEntry }) => {
   const open = useOpenItem()
   const series = () => props.entry.item?.series
   const session = createMemo(() => { const value = series(); return value && grilling(value.members) })
@@ -115,7 +119,7 @@ const DecisionRow = (props: { entry: WorkEntry }) => {
   </Show>
 }
 // Another Work host's Surface, opened in this window and framed through that host; a link Surface says it is served there only.
-const HostSurfaceRow = (props: { entry: WorkEntry }) => {
+export const HostSurfaceRow = (props: { entry: WorkEntry }) => {
   const open = useOpenItem()
   const ownOnly = () => props.entry.remote?.kind === "surface" && props.entry.remote.frame === "own-host-only"
   // An unseen requested update on that host carries its call to action as line 2 until opened (FYI included).
@@ -131,13 +135,16 @@ const HostSurfaceRow = (props: { entry: WorkEntry }) => {
     <Show when={props.entry.remote?.kind === "surface" ? props.entry.remote.surface : undefined} fallback={<SurfaceGlyph surface={{}} />}>{surface => <SurfaceGlyph surface={surface()} />}</Show>
     <span class="nav-title" dir="auto">{props.entry.title}</span>
     <span class="session-project">{props.entry.hostLabel}</span>
+    <span class="row-secondary">{[props.entry.remote?.kind === "surface" ? props.entry.remote.surface.owner : undefined, props.entry.remote?.kind === "surface" ? `rev ${props.entry.remote.surface.revision}` : undefined, props.entry.remote?.kind === "surface" ? props.entry.remote.surface.whats_new : undefined].filter(Boolean).join(" · ")}</span>
     <Show when={unseenCall()}>{text => <span class="nav-change" dir="auto">{text()}</span>}</Show>
+    <span class="row-trailing" aria-hidden="true"><span class="host-tile" title={props.entry.hostLabel}>{[...(props.entry.hostLabel ?? "?")][0]}</span>
+      <Show when={props.entry.updated && props.entry.updated > 1e12}><time>{ago(props.entry.updated)}</time></Show></span>
   </a>
 }
 // A requested deliverable waiting in Needs you: one deterministic line (Try · title · maintainer · revision, plus any
 // health problem); the summary, conversation link and Done live in the reader it opens.
 // Another Work host's (`entry`) opens in this window and its Done goes to that host; its line names the host.
-const TryRow = (props: { surface: Surface; entry?: WorkEntry; outcome?: AttentionRecord }) => {
+export const TryRow = (props: { surface: Surface; entry?: WorkEntry; outcome?: AttentionRecord }) => {
   const open = useOpenItem()
   const key = () => props.entry?.key ?? surfaceKey(props.surface.id)
   // A decision about it that has ended: its outcome rides on the Try until the Surface is viewed.
@@ -154,16 +161,18 @@ const TryRow = (props: { surface: Surface; entry?: WorkEntry; outcome?: Attentio
   const line = () => [ask(), props.entry ? `${tryLine(props.surface)} · on ${props.entry.hostLabel}${props.entry.stale ? " · last known" : ""}` : tryLine(props.surface), ended(), note()].filter(Boolean).join(" · ")
   return <a href={props.entry?.href ?? itemHref(key())} classList={{ active: open(key()), stale: !!props.entry?.stale }} aria-current={open(key()) ? "page" : undefined} class="nav-item nav-decision nav-try" data-kind="try" data-nav-item={key()}
     data-revision={props.surface.revision} title={line()} aria-label={line()}>
-    <span class="nav-kind" aria-hidden="true">{ask() ?? "Try"}</span>
+    <span class="nav-try-shape" aria-hidden="true"><SurfaceGlyph surface={props.surface} /></span>
     <Show when={props.entry?.host}>{host => <HostGlyph host={host()} />}</Show>
+    <Show when={ask()} fallback={<span class="kind-badge">new</span>}><span class="kind-badge">{ask()}</span></Show>
     <span class="nav-title" dir="auto">{props.surface.title}</span>
     <span class="session-project" classList={{ "home-blocked": !!surfaceProblem(props.surface.health) }}><bdi dir="auto">{surfaceProblem(props.surface.health) ?? props.surface.owner}</bdi> · rev {props.surface.revision}<Show when={ended()}>{text => <> · <bdi dir="auto">{text()}</bdi></>}</Show></span>
     <Show when={note()}>{text => <span class="nav-change" dir="auto">{text()}</span>}</Show>
+
   </a>
 }
 // A Surface and the open decisions pointing at it (DD artifact-try-decision-unification): one row that opens the Surface
 // reader, where the decisions are answered inline. Its line says how many decisions wait and which revision they are about.
-const LinkedRow = (props: { item: LinkedItem }) => {
+export const LinkedRow = (props: { item: LinkedItem }) => {
   const open = useOpenItem()
   const location = useLocation()
   const active = () => open(props.item.key) || (!props.item.host && new URLSearchParams(location.search).get("surface") === props.item.surface.id)
@@ -173,14 +182,16 @@ const LinkedRow = (props: { item: LinkedItem }) => {
   const line = () => [`Try ${props.item.surface.title} · rev ${props.item.surface.revision} · ${what()}`, stale(), props.item.host ? `on ${props.item.hostLabel}${props.item.stale ? " · last known" : ""}` : undefined, note() && `What's new: ${note()}`].filter(Boolean).join(" · ")
   return <a href={props.item.href} classList={{ active: active(), stale: props.item.stale }} aria-current={active() ? "page" : undefined} class="nav-item nav-decision nav-try nav-linked" data-kind="try-decision"
     data-nav-item={props.item.key} data-revision={props.item.surface.revision} title={line()} aria-label={line()}>
-    <span class="nav-kind" aria-hidden="true">Try</span>
+    <span class="nav-try-shape" aria-hidden="true"><SurfaceGlyph surface={props.item.surface} /></span>
     <Show when={props.item.host}>{host => <HostGlyph host={host()} />}</Show>
+    <Show when={props.item.fresh}><span class="kind-badge">new</span></Show>
     <span class="nav-title" dir="auto">{props.item.surface.title}</span>
     <span class="session-project"><span class="nav-linked-decision">{what()}</span> · <Show when={stale()} fallback={<>rev {props.item.surface.revision}</>}>{text => <span class="home-blocked">{text()}</span>}</Show></span>
     <Show when={note()}>{text => <span class="nav-change" dir="auto">{text()}</span>}</Show>
+
   </a>
 }
-const SurfaceRow = (props: { surface: Surface; fresh?: boolean }) => {
+export const SurfaceRow = (props: { surface: Surface; fresh?: boolean }) => {
   const open = useOpenItem()
   // An unseen update (FYI included, which never enters Needs you) carries its call to action as line 2 until opened.
   const call = () => props.fresh ? [...changeCall(props.surface), changeNoteLine(props.surface)].filter(Boolean).join(" · ") : ""
@@ -191,7 +202,9 @@ const SurfaceRow = (props: { surface: Surface; fresh?: boolean }) => {
     <span class="sr-only">, {surfaceKindLabel(props.surface)}</span>
     <Show when={props.fresh}><span class="sr-only">, new delivery</span></Show>
     <span class="session-project">{surfaceProblem(props.surface.health) ?? props.surface.owner}</span>
+    <span class="row-secondary">{[surfaceProblem(props.surface.health) ?? props.surface.owner, `rev ${props.surface.revision}`, props.surface.whats_new].filter(Boolean).join(" · ")}</span>
     <Show when={call()}>{text => <span class="nav-change" dir="auto">{text()}</span>}</Show>
+    <span class="row-trailing" aria-hidden="true"><Show when={props.surface.updated_at > 1e12}><time>{ago(props.surface.updated_at)}</time></Show></span>
   </a>
 }
 
@@ -210,7 +223,7 @@ export const NeedsYouBand = () => {
   // A host that is not current keeps the band (as "0+"), so an empty list never reads as "nothing needs you".
   return <Show when={all().entries.length || all().linked.length || all().fresh.length || all().tries.length || all().partial}>
     <section class="needs-you-band" aria-label="Needs you">
-      <div class="nav-heading">Needs you <span class="nav-heading-count" dir="ltr" title={all().label.title}>{all().count || all().partial ? all().label.text : ""}</span></div>
+      <div class="nav-heading">Needs you <span class="nav-heading-count" dir="ltr" title={all().label.title}>{all().partial ? "" : all().count ? String(all().count) : ""}</span></div>
       <For each={shown()}>{entry => <DecisionRow entry={entry} />}</For>
       <For each={all().linked}>{item => <LinkedRow item={item} />}</For>
       <For each={all().fresh}>{surface => <TryRow surface={surface} outcome={all().outcomes.get(surfaceKey(surface.id))} />}</For>
@@ -220,16 +233,41 @@ export const NeedsYouBand = () => {
   </Show>
 }
 
-/** The tab row and the Surfaces, Decisions and PRs panels; the Agents panel is the existing session list. */
-export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: string; title: string } }) => {
+export type Preview = { kind: string; title: string; agent?: string; owner?: string; host?: string; meta?: string; whatsNew?: string }
+
+/** An agent row already rendered by the sidebar, with the data the blended list needs. */
+export type RecentAgent = { key: string; title: string; updated?: number; host?: string; node: JSX.Element; preview: Preview }
+
+type RecentNode = RecentItem & { node: JSX.Element; preview: Preview }
+
+const previewAttrs = (row: { key: string; preview: Preview }): Record<string, string> => {
+  const data = row.preview
+  return {
+    "data-nav-key": row.key,
+    "data-preview-kind": data.kind,
+    "data-preview-title": data.title,
+    ...(data.agent ? { "data-preview-agent": data.agent } : {}),
+    ...(data.owner ? { "data-preview-owner": data.owner } : {}),
+    ...(data.host ? { "data-preview-host": data.host } : {}),
+    ...(data.meta ? { "data-preview-meta": data.meta } : {}),
+    ...(data.whatsNew ? { "data-preview-whats-new": data.whatsNew } : {}),
+  }
+}
+
+const KIND_LABEL: Record<string, string> = { agent: "Agent", surface: "Surface", decision: "Decision", permission: "Permission", question: "Question", failure: "Failure" }
+
+/** One sidebar list: Needs you on top, then Recent (blended agents, Surfaces and closed decisions).
+ * The chips narrow by kind; each kind keeps the fuller list it had where that list has its own
+ * filters (Agents, Surfaces, Decisions). PRs are intentionally absent. */
+export const UnifiedSidebar = (props: { toolbar: JSX.Element; agents: JSX.Element; agentsCount?: { text: string; title: string }
+  recentAgents: RecentAgent[]; searching?: boolean; statuses?: JSX.Element }) => {
   const queue = useDeskQueue()
   const dashboard = useDashboard()
-  const state = dashboard.state
-  // Each tab keeps its own filter; switching tabs never changes another tab's filter.
-  const [filters, setFilters] = createSignal<Record<Exclude<NavTab, "agents">, string>>({ surfaces: "", decisions: "", prs: "" })
-  const filter = (id: Exclude<NavTab, "agents">) => filters()[id]
-  const setFilter = (id: Exclude<NavTab, "agents">, value: string) => setFilters(previous => ({ ...previous, [id]: value }))
   const all = useWork()
+  // Each kind keeps its own filter; switching chips never changes another view's filter.
+  const [filters, setFilters] = createSignal<Record<"surfaces" | "decisions", string>>({ surfaces: "", decisions: "" })
+  const filter = (id: "surfaces" | "decisions") => filters()[id]
+  const setFilter = (id: "surfaces" | "decisions", value: string) => setFilters(previous => ({ ...previous, [id]: value }))
   const decisions = createMemo(() => all().entries.filter(entry => matches(`${entry.title} ${entry.hostLabel ?? ""}`, filter("decisions"))))
   const linkedDecisions = createMemo(() => all().linked.filter(item => matches(`${item.surface.title} ${item.decisions.map(record => record.title).join(" ")} ${item.hostLabel ?? ""}`, filter("decisions"))))
   // History: this host's attention records that no longer need you, newest change first, and ignored failures.
@@ -243,7 +281,7 @@ export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: stri
     return [...records, ...ignored].filter(row => matches(row.text, filter("decisions"))).sort((a, b) => b.at - a.at || a.key.localeCompare(b.key))
   })
   const open = useOpenItem()
-  // Read when the Decisions tab is shown, again each time Requests is chosen; never polled.
+  // Read when Decisions is shown, again each time Requests is chosen; never polled.
   const [requests, { refetch: refetchRequests }] = createResource(() => tab() === "decisions" || undefined, readRequests)
   const pastRequests = createMemo(() => (requests() ?? [])
     .map(request => ({ request, title: dashboard.activity.session(request.session)?.title ?? request.session, at: request.resolved_at ?? request.asked_at }))
@@ -256,14 +294,14 @@ export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: stri
   // (updated_at, newest first; seen marks do not change it). Rows without a date go last under "Date unknown"; ties
   // by title, then key. A type chip (the author's form or accent, NAV-19) narrows the list with the text filter.
   const [surfaceType, setSurfaceType] = createSignal<string>()
+  const freshSurfaces = createMemo(() => new Set(queue.surfaces.deliverables().fresh.map(surface => surface.id)))
+  const allSurfaces = createMemo(() => [
+    ...queue.surfaces.list().map(surface => ({ key: surfaceKey(surface.id), surface, fresh: freshSurfaces().has(surface.id), entry: undefined as WorkEntry | undefined, host: host()?.label ?? "Local" })),
+    ...hostSurfaces().entries.flatMap(entry => entry.remote?.kind === "surface" ? [{ key: entry.key, surface: entry.remote.surface, fresh: false, entry, host: entry.hostLabel ?? "" }] : []),
+  ])
   const surfaceRows = createMemo(() => {
-    const fresh = new Set(queue.surfaces.deliverables().fresh.map(surface => surface.id))
-    const rows = [
-      ...queue.surfaces.list().map(surface => ({ key: surfaceKey(surface.id), surface, fresh: fresh.has(surface.id), entry: undefined as WorkEntry | undefined, host: "" })),
-      ...hostSurfaces().entries.flatMap(entry => entry.remote?.kind === "surface" ? [{ key: entry.key, surface: entry.remote.surface, fresh: false, entry, host: entry.hostLabel ?? "" }] : []),
-    ]
     const dated = (row: { surface: Surface }) => row.surface.updated_at > 0 ? row.surface.updated_at : undefined
-    return rows
+    return allSurfaces()
       .filter(row => matches(`${row.surface.title} ${row.host}`, filter("surfaces")))
       .filter(row => { const type = surfaceType(); const tags = surfaceTags(row.surface); return !type || tags.form === type || (tags.accents as string[]).includes(type) })
       .sort((a, b) => {
@@ -275,28 +313,147 @@ export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: stri
   })
   // Only the types present get a chip.
   const surfaceTypes = createMemo(() => {
-    const present = new Set([...queue.surfaces.list(), ...hostSurfaces().entries.flatMap(entry => entry.remote?.kind === "surface" ? [entry.remote.surface] : [])]
-      .flatMap((surface): string[] => { const tags = surfaceTags(surface); return [...(tags.form ? [tags.form] : []), ...tags.accents] }))
+    const present = new Set(allSurfaces().flatMap((row): string[] => { const tags = surfaceTags(row.surface); return [...(tags.form ? [tags.form] : []), ...tags.accents] }))
     return SURFACE_TYPES.filter(([id]) => present.has(id))
   })
-  const prs = createMemo(() => {
-    const seen = new Set<string>()
-    return sortPrs((state()?.threads ?? []).flatMap((thread: { prs?: { url: string; title?: string }[] }) => thread.prs ?? [])
-      .filter((pr: { url: string }) => !seen.has(pr.url) && (seen.add(pr.url), true))
-      .filter((pr: { url: string; title?: string }) => matches(`${pr.title ?? ""} ${pr.url}`, filter("prs"))))
-  })
-  const count = (id: NavTab) => id === "agents" ? props.agentsCount?.text : id === "decisions" ? all().decisions.text.replace(/^0$/, "") : id === "surfaces" ? workCountLabel({ ...hostSurfaces(), count: queue.surfaces.list().length + hostSurfaces().count }).text.replace(/^0$/, "") : id === "prs" ? prs().length : undefined
   const tabId = (id: NavTab) => `nav-tab-${id}`
-  const FilterBox = (p: { id: Exclude<NavTab, "agents">; label: string }) =>
+  const FilterBox = (p: { id: "surfaces" | "decisions"; label: string }) =>
     <div class="search-box"><input class="search-input" type="search" placeholder={`filter ${p.label.toLowerCase()}…`} aria-label={`Filter ${p.label}`}
       value={filter(p.id)} onInput={event => setFilter(p.id, event.currentTarget.value)} onKeyDown={event => event.key === "Escape" && setFilter(p.id, "")} /></div>
-  return <>
+
+  // Recent order is this device's choice; Open was read once at mount.
+  const [order, setOrderState] = createSignal<RecentOrder>(readOrder())
+  const setOrder = (value: RecentOrder) => { setOrderState(value); writeOrder(value) }
+  const [density, setDensityState] = createSignal<Density>(readDensity())
+  const setDensity = (value: Density) => { setDensityState(value); writeDensity(value) }
+  const recent = createMemo(() => {
+    const localHost = host()?.label ?? "Local"
+    const closedRows: RecentNode[] = (queue.attention.snapshot()?.value.records ?? [])
+      .filter(record => record.status !== "open" && HISTORY_STATUS[record.status])
+      .map(record => {
+        const key = `attention:${record.editspace}:${record.id}`
+        const [, glyph] = historyStatus(record)
+        return {
+          kind: "decision" as const, key, title: record.title, updated: record.answer?.answered_at ?? record.updated_at, opened: openedAt(key),
+          node: <a href={itemHref(key)} class="nav-item nav-decision nav-history-row" classList={{ active: open(key) }} aria-current={open(key) ? "page" : undefined}
+            data-status={record.status} data-nav-item={key}>
+            <span class="nav-kind" aria-hidden="true">{glyph}</span>
+            <span class="nav-title" dir="auto">{record.title}</span>
+            <span class="nav-history-meta"><span class="nav-history-status">{historyStatus(record)[0]}</span>
+              {" · "}<bdi dir="auto">{record.lane ?? record.editspace}</bdi></span>
+            <span class="row-secondary">{[historyStatus(record)[0], record.lane ?? record.editspace].filter(Boolean).join(" · ")}</span>
+            <span class="row-trailing" aria-hidden="true"><time>{ago(record.answer?.answered_at ?? record.updated_at)}</time></span>
+          </a>,
+          preview: { kind: KIND_LABEL.decision!, title: record.title, owner: record.lane ?? record.editspace, host: localHost,
+            meta: `${historyStatus(record)[0]} · ${ago(record.answer?.answered_at ?? record.updated_at)}` },
+        }
+      })
+    const surfaceRows: RecentNode[] = allSurfaces().map(row => ({
+      kind: "surface" as const, key: row.key, title: row.surface.title, updated: row.surface.updated_at || undefined, opened: openedAt(row.key),
+      node: row.entry ? <HostSurfaceRow entry={row.entry} /> : <SurfaceRow surface={row.surface} fresh={row.fresh} />,
+      preview: { kind: KIND_LABEL.surface!, title: row.surface.title, agent: row.surface.owner, owner: row.surface.lane ?? row.surface.editspace,
+        host: row.host, meta: `rev ${row.surface.revision}${row.surface.updated_at ? ` · ${clockTime(row.surface.updated_at)}` : ""}`,
+        whatsNew: [...changeCall(row.surface), changeNoteLine(row.surface)].filter(Boolean).join(" · ") || undefined },
+    }))
+    const agents: RecentNode[] = props.recentAgents.map(row => ({
+      kind: "agent" as const, key: row.key, title: row.title, updated: row.updated, opened: openedAt(row.key), node: row.node, preview: row.preview,
+    }))
+    return { agents, surfaces: surfaceRows, closed: closedRows, all: recentOrder([...agents, ...surfaceRows, ...closedRows], order()) }
+  })
+
+  // Stable order: a refetch never reorders what is shown; new rows wait behind "N new ↑" until asked for.
+  const [shownKeys, setShownKeys] = createSignal<string[]>([])
+  const [pending, setPending] = createSignal<string[]>([])
+  const [frozen, setFrozen] = createSignal<string[] | null>(null)
+  // Until the reader has been in the list once (or a short settle), everything that arrives is part
+  // of the first paint; only later arrivals queue behind the "N new" pill.
+  const [settled, setSettled] = createSignal(false)
+  const settleTimer = setTimeout(() => setSettled(true), 8000)
+  onCleanup(() => clearTimeout(settleTimer))
+  createEffect(() => {
+    const keys = recent().all.map(row => row.key)
+    const current = untrack(shownKeys)
+    if (!keys.length) { setShownKeys([]); setPending([]); return }
+    if (!current.length || !untrack(settled)) { setShownKeys(keys); setPending([]); return }
+    const kept = holdOrder(current, keys)
+    // Existing rows keep their places (no reorder on refetch); newcomers append at the end and the
+    // pill offers their sorted position. Under the pointer or focus the frozen order hides them.
+    const added = newcomers(kept, keys)
+    setPending(added)
+    setShownKeys([...kept, ...added])
+  })
+  const byKey = createMemo(() => new Map(recent().all.map(row => [row.key, row])))
+  const shown = () => (frozen() ?? shownKeys()).flatMap(key => { const row = byKey().get(key); return row ? [row] : [] })
+  const applyNew = () => { setShownKeys(recent().all.map(row => row.key)); setPending([]); setFrozen(null) }
+
+  // Hover / focus / long-press preview. It reads only the row's own data: it never marks anything seen,
+  // answers nothing and starts nothing.
+  let listEl: HTMLDivElement | undefined
+  let pressTimer: ReturnType<typeof setTimeout> | undefined
+  const [preview, setPreview] = createSignal<{ data: Preview; top: number; left?: number; right?: number } | null>(null)
+  const showRow = (target: EventTarget | null) => {
+    const row = target instanceof Element ? target.closest<HTMLElement>("[data-preview-title]") : null
+    if (!row || !listEl?.contains(row)) { setPreview(null); return }
+    const box = row.getBoundingClientRect()
+    const rtl = getComputedStyle(row).direction === "rtl"
+    setPreview({
+      data: { kind: row.dataset.previewKind ?? "", title: row.dataset.previewTitle ?? "", agent: row.dataset.previewAgent,
+        owner: row.dataset.previewOwner, host: row.dataset.previewHost, meta: row.dataset.previewMeta, whatsNew: row.dataset.previewWhatsNew },
+      top: Math.min(Math.max(8, box.top), Math.max(8, window.innerHeight - 240)),
+      ...(rtl ? { right: window.innerWidth - box.left + 10 } : { left: box.right + 10 }),
+    })
+  }
+  const clearPreview = () => setPreview(null)
+  const cancelPress = () => { clearTimeout(pressTimer); pressTimer = undefined }
+  const startPress = (event: PointerEvent) => {
+    setSettled(true)
+    if (event.pointerType === "mouse") return
+    const target = event.target
+    cancelPress()
+    pressTimer = setTimeout(() => showRow(target), 500)
+  }
+  const focusIn = (event: FocusEvent) => showRow(event.target)
+  const focusOut = (event: FocusEvent) => {
+    if (event.relatedTarget instanceof Node && listEl?.contains(event.relatedTarget)) return
+    clearPreview()
+  }
+  const rowLinks = () => [...(listEl?.querySelectorAll<HTMLElement>("a.nav-item") ?? [])].filter(link => link.getClientRects().length > 0)
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.target instanceof Element && event.target.closest("input, textarea, select")) return
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return
+    const links = rowLinks()
+    if (!links.length) return
+    event.preventDefault()
+    const index = links.indexOf(document.activeElement as HTMLElement)
+    const next = index < 0 ? (event.key === "ArrowDown" ? 0 : links.length - 1) : Math.min(links.length - 1, Math.max(0, index + (event.key === "ArrowDown" ? 1 : -1)))
+    links[next]?.focus()
+  }
+  const freezekey = () => { if (!frozen()) setFrozen(untrack(shownKeys)) }
+  const unfreeze = () => { if (!(document.activeElement instanceof Node && listEl?.contains(document.activeElement))) setFrozen(null) }
+  const markRow = (event: MouseEvent) => {
+    const row = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-nav-key]") : null
+    if (row?.dataset.navKey) markSidebarOpened(row.dataset.navKey)
+    clearPreview()
+  }
+  onCleanup(cancelPress)
+
+  return <div class="unified-sidebar" data-density={density()} data-filter={tab()}
+    onClick={markRow} onKeyDown={onKeyDown} onPointerDown={startPress} onPointerUp={cancelPress} onPointerCancel={cancelPress}
+    onPointerOver={(event) => showRow(event.target)} onPointerLeave={() => { cancelPress(); clearPreview(); unfreeze() }}
+    onFocusIn={(event) => { freezekey(); focusIn(event) }} onFocusOut={focusOut}>
+    <Show when={tab() === "all" || tab() === "agents"}>
+      <div class="unified-toolbar">{props.toolbar}
+        <button type="button" class="density-toggle" aria-pressed={density() === "expanded"} aria-label={`Row density: ${density()}`}
+          title={`Row density: ${density() === "compact" ? "compact one-line rows; switch to expanded" : "expanded two-line rows; switch to compact"}`}
+          onClick={() => setDensity(density() === "compact" ? "expanded" : "compact")}>{density() === "compact" ? "☰" : "▤"}</button>
+      </div>
+    </Show>
     <div class="nav-tabs" role="tablist" aria-label="Browse">
       <For each={TABS}>{([id, label]) =>
         <button type="button" role="tab" id={tabId(id)} aria-selected={tab() === id} aria-controls={`${tabId(id)}-panel`} tabindex={tab() === id ? 0 : -1}
-          onClick={() => setTab(id)}
+          onClick={() => { setTab(id); setFrozen(null); clearPreview() }}
           onKeyDown={event => {
-            // Arrow keys move between tabs in reading order (mirrored in RTL by the browser's layout direction).
+            // Arrow keys move between chips in reading order (mirrored in RTL by the browser's layout direction).
             const rtl = event.currentTarget.matches(":dir(rtl)")
             const step = event.key === "ArrowRight" ? (rtl ? -1 : 1) : event.key === "ArrowLeft" ? (rtl ? 1 : -1) : 0
             if (!step) return
@@ -305,12 +462,38 @@ export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: stri
             setTab(TABS[index][0])
             document.getElementById(tabId(TABS[index][0]))?.focus()
           }}>
-          {/* The count keeps a fixed slot, so the tab does not change width as numbers change. */}
-          <span class="nav-tab-label">{label}</span><span class="nav-tab-count" dir="ltr" title={id === "agents" ? props.agentsCount?.title : undefined}>{count(id) || ""}</span>
+          <span class="nav-tab-label">{label}</span>
         </button>}</For>
     </div>
-    <div role="tabpanel" id={`${tabId(tab())}-panel`} aria-labelledby={tabId(tab())} class="nav-tab-panel">
+    {/* Explicit requests only: attention records, permissions, questions, delivered requests. A finished or
+      * idle agent is activity: its row and status say it, never a Needs you row. */}
+    <NeedsYouBand />
+    <div role="tabpanel" ref={listEl} id={`${tabId(tab())}-panel`} aria-labelledby={tabId(tab())} class="nav-tab-panel">
       <Show when={tab() === "agents"}>{props.agents}</Show>
+      <Show when={tab() === "all"}>
+        <Show when={props.searching} fallback={
+          <>
+            <div class="recent-heading">
+              <span class="nav-heading">Recent</span>
+              <details class="recent-order">
+                <summary title="How Recent is ordered">{[ORDER_LABEL[order()], "▾"].join(" ")}</summary>
+                <div role="group" aria-label="Recent order">
+                  <For each={ORDER_MODES}>{mode => <button type="button" aria-pressed={order() === mode} onClick={() => setOrder(mode)}>{ORDER_LABEL[mode]}</button>}</For>
+                </div>
+              </details>
+            </div>
+            <Show when={pending().length}>
+              <button type="button" class="new-items" onClick={applyNew}>{pending().length} new ↑</button>
+            </Show>
+            {props.statuses}
+            <div class="recent-list">
+              <For each={shown()}>{row =>
+                <Show when={row.kind === "agent"} fallback={<div class="recent-row" {...previewAttrs(row)}>{row.node}</div>}>{row.node}</Show>}</For>
+            </div>
+            <Show when={!shown().length}><div class="dim nav-empty">{queue.surfaces.error() ?? "Nothing recent yet."}</div></Show>
+          </>
+        }>{props.agents}</Show>
+      </Show>
       <Show when={tab() === "decisions"}>
         <div class="decision-views" role="radiogroup" aria-label="Decisions view">
           <For each={views()}>{([id, label]) =>
@@ -383,10 +566,15 @@ export const NavTabs = (props: { agents: JSX.Element; agentsCount?: { text: stri
           <Show when={row.entry} fallback={<SurfaceRow surface={row.surface} fresh={row.fresh} />}>{entry => <HostSurfaceRow entry={entry()} />}</Show>
         </>}</For>
       </Show>
-      <Show when={tab() === "prs"}>
-        <FilterBox id="prs" label="PRs" />
-        <div class="nav-prs"><Show when={prs().length} fallback={<div class="dim nav-empty">{filter("prs") ? "no matches" : "No pull requests in this view."}</div>}><PrList prs={prs()} compact /></Show></div>
-      </Show>
     </div>
-  </>
+    <Show when={preview()}>{value => <div class="sidebar-preview" style={{ top: `${value().top}px`, ...(value().left !== undefined ? { left: `${value().left}px` } : { right: `${value().right}px` }) }}>
+      <Show when={value().data.kind}><div class="sidebar-preview-kind">{value().data.kind}</div></Show>
+      <div class="sidebar-preview-title" dir="auto">{value().data.title}</div>
+      <Show when={value().data.agent}><div class="sidebar-preview-line"><span class="sidebar-preview-agent">{value().data.agent}</span> published{value().data.owner ? <> · for <bdi dir="auto">{value().data.owner}</bdi></> : null}</div></Show>
+      <Show when={!value().data.agent && value().data.owner}><div class="sidebar-preview-line"><bdi dir="auto">{value().data.owner}</bdi></div></Show>
+      <Show when={value().data.host || value().data.meta}><div class="sidebar-preview-line">{[value().data.host, value().data.meta].filter(Boolean).join(" · ")}</div></Show>
+      <Show when={value().data.whatsNew}><div class="sidebar-preview-line sidebar-preview-new" dir="auto">{value().data.whatsNew}</div></Show>
+      <div class="sidebar-preview-foot">preview only · nothing marked seen</div>
+    </div>}</Show>
+  </div>
 }

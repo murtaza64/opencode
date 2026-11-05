@@ -62,11 +62,10 @@ export const ModeSwitch = (props: { compact?: boolean }) => {
   </nav>
 }
 
-/** Permanent entries of the persistent left nav: Decisions & inbox and Agent map open views; Front desk
- * toggles the chat companion beside whatever is open. Replaces the two-mode switch. */
+/** Permanent entries of the persistent left nav: Agent map, Usage and Porter/Desk on one compact row.
+ * Decisions no longer has its own row; Needs you in the unified list is the entry point, and decision
+ * deep links (?item=…) still open the same reader. `g i` keeps navigating to "/" unchanged. */
 export const NavEntries = (props: { compact?: boolean }) => {
-  const location = useLocation()
-  const queue = useDeskQueue()
   const { activity } = useDashboard()
   const chat = useDeskChat()
   const deskBusy = () => {
@@ -74,30 +73,22 @@ export const NavEntries = (props: { compact?: boolean }) => {
     const status = pointer ? activity.status(pointer.session) : undefined
     return status === "busy" || status === "retry"
   }
-  const onDecisions = () => location.pathname === "/"
-  const href = () => { location.pathname; return modeHref("desk", onDecisions() ? "desk" : "agents", sessionStorage.getItem(KEY.desk)) }
-  const delivered = () => queue.surfaces.deliverables().fresh.length
-  const waiting = () => queue.items().length + delivered()
-  const label = () => [queue.items().length ? `${queue.items().length} need${queue.items().length === 1 ? "s" : ""} you` : "",
-    delivered() ? `${delivered()} new deliverable${delivered() === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ")
   return <nav class="nav-entries" classList={{ compact: props.compact }} aria-label="Main">
-    <A href={href()} class="nav-item nav-entry" classList={{ active: onDecisions() }} aria-current={onDecisions() ? "page" : undefined} title="Decisions & inbox"
-      aria-label={waiting() ? `Decisions & inbox, ${label()}` : "Decisions & inbox"}>
-      <Glyph name="inbox" /><Show when={!props.compact}><span class="nav-title">Decisions & inbox</span></Show>
-      <Show when={waiting()}><span class="mode-count nav-count" aria-hidden="true">{waiting() > 99 ? "99+" : waiting()}</span></Show>
-    </A>
-    <A href="/agents" end class="nav-item nav-entry" activeClass="active" title="Agent map" aria-label="Agent map">
-      <Glyph name="graph" /><Show when={!props.compact}><span class="nav-title">Agent map</span></Show>
-    </A>
-    <A href="/usage" end class="nav-item nav-entry usage-link" activeClass="active" title="Usage" aria-label="Usage">
-      <Glyph name="zap" /><Show when={!props.compact}><span class="nav-title">Usage</span></Show>
-    </A>
-    <button type="button" class="nav-item nav-entry" data-nav="front-desk" aria-pressed={chat.open()} title={chat.open() ? `Hide ${DESK.name}` : `Show ${DESK.name}`}
-      aria-label={DESK.label} onClick={() => chat.setOpen(!chat.open())}>
-      <Show when={DESK.avatar} fallback={<Glyph name="comment-discussion" />}>{src => <img class="nav-avatar" src={src()} alt="" width="16" height="16" />}</Show>
-      <Show when={!props.compact}><span class="nav-title">{DESK.name}</span></Show>
-      <Show when={deskBusy()}><span class="dot busy nav-busy" role="status" aria-label={`${DESK.name} is working`} title={`${DESK.name} is working`} /></Show>
-    </button>
+    <div class="nav-quick" role="group" aria-label="Workspace">
+      <A href="/agents" end class="nav-quick-item" activeClass="active" aria-label="Agent map" title="Agent map">
+        <Glyph name="graph" /><Show when={!props.compact}><span class="nav-quick-label">Map</span></Show>
+      </A>
+      <A href="/usage" end class="nav-quick-item" activeClass="active" aria-label="Usage" title="Usage">
+        <Glyph name="zap" /><Show when={!props.compact}><span class="nav-quick-label">Usage</span></Show>
+      </A>
+      <button type="button" class="nav-quick-item" data-nav="front-desk" aria-pressed={chat.open()} title={chat.open() ? `Hide ${DESK.name}` : `Show ${DESK.name}`}
+        aria-label={DESK.label} onClick={() => chat.setOpen(!chat.open())}>
+        <Show when={DESK.avatar} fallback={<Glyph name="comment-discussion" />}>{src => <img class="nav-avatar" src={src()} alt="" width="16" height="16" />}</Show>
+        <Show when={chat.open()}><span class="nav-quick-open" aria-hidden="true" /></Show>
+        <Show when={!props.compact}><span class="nav-quick-label">{DESK.name}</span></Show>
+        <Show when={deskBusy()}><span class="dot busy nav-busy" role="status" aria-label={`${DESK.name} is working`} title={`${DESK.name} is working`} /></Show>
+      </button>
+    </div>
     <BackendStatus />
     <HostSwitch compact={props.compact} />
   </nav>

@@ -30,7 +30,7 @@ await page.route("**/es/api/state?*", (route) => route.fulfill({ json: {
 } }))
 const pinned = page.locator(".sidebar .pinned-section .nav-item")
 // The session list lives in the Agents tab of the unified nav.
-const active = page.locator(".sidebar [role=tabpanel] > .session-entry .nav-item")
+const active = page.locator(".sidebar [role=tabpanel] .session-entry .nav-item")
 const pin = (title) => page.getByRole("button", { name: `Pin ${title}`, exact: true })
 const unpin = (title) => page.getByRole("button", { name: `Unpin ${title}`, exact: true })
 try {

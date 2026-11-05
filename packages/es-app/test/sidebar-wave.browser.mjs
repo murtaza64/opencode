@@ -22,7 +22,7 @@ const bump = (id) => {
 const check = async (reducedMotion) => {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion })
   await context.route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
-  await context.addInitScript(() => { try { localStorage.removeItem("es-app-sidebar-pins") } catch {} })
+  await context.addInitScript(() => { try { localStorage.removeItem("es-app-sidebar-pins"); localStorage.setItem("es-app:nav-tab", "agents") } catch {} })
   const page = await context.newPage()
   page.setDefaultTimeout(60_000)
   await page.goto(`${preview.url}`, { waitUntil: "domcontentloaded", timeout: 300_000 })

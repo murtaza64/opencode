@@ -37,7 +37,7 @@ await page.route("**/hosts/mini/**", (route) => {
 })
 const sidebar = page.locator("nav.sidebar")
 const agentsTab = sidebar.getByRole("tab", { name: /^Agents/ })
-const list = sidebar.locator("[role=tabpanel] > .session-entry .nav-title")
+const list = sidebar.locator("[role=tabpanel] .session-entry .nav-title")
 try {
   await page.goto(preview.url, { waitUntil: "domcontentloaded", timeout: 300_000 })
   await expect(sidebar.getByRole("link", { name: /^Mini copy of a, on Mac Mini$/ })).toBeVisible({ timeout: 120_000 })
@@ -66,12 +66,9 @@ try {
   await expect(sidebar.getByRole("link", { name: "New session", exact: true })).toHaveCount(1)
   await expect(sidebar.locator(".sidebar-actions")).toHaveCount(0)
 
-  // Count = working now in scope, from the same live bucket the rows show: it equals the busy dots in Agents
-  // and Pinned (at least Local's busy ses_a), never the total.
-  const busy = () => page.evaluate(() => document.querySelectorAll("nav.sidebar .pinned-section .dot.busy, nav.sidebar [role=tabpanel] > .session-entry .dot.busy").length)
-  await expect.poll(busy).toBeGreaterThan(0)
-  await expect(agentsTab.locator(".nav-tab-count")).toHaveText(String(await busy()))
-  expect(Number(await agentsTab.locator(".nav-tab-count").textContent())).toBeLessThan(await sidebar.locator("[role=tabpanel] > .session-entry").count() + await sidebar.locator(".pinned-section .session-entry").count())
+  // Chips carry no counts; the list itself shows the working state.
+  await expect.poll(() => page.evaluate(() => document.querySelectorAll("nav.sidebar .pinned-section .dot.busy, nav.sidebar [role=tabpanel] .session-entry .dot.busy").length)).toBeGreaterThan(0)
+  await expect(sidebar.locator(".nav-tab-count")).toHaveCount(0)
   const width = (await agentsTab.boundingBox()).width
 
   // Active filter keeps only the working rows; sort by name orders the full list alphabetically.
@@ -79,7 +76,7 @@ try {
   await expect(list.filter({ hasText: "Other session" })).toHaveCount(0)
   await expect(list.filter({ hasText: "Alpha mini idle" })).toHaveCount(0)
   await expect.poll(() => list.count()).toBeGreaterThan(0)
-  expect(await sidebar.locator("[role=tabpanel] > .session-entry .dot:not(.busy)").count()).toBe(0)
+  expect(await sidebar.locator("[role=tabpanel] .session-entry .dot:not(.busy)").count()).toBe(0)
   // A filter that hides rows says so under the list, with Clear; the control counts it and names it.
   await expect(filter.locator(".sidebar-filter-count")).toHaveText("1")
   await expect(filter).toHaveAttribute("aria-label", "Filter and sort: working now")
@@ -122,31 +119,22 @@ try {
   await selectScope(page, "__all__")
   await expect(filter.locator(".sidebar-filter-count")).toHaveCount(0)
 
-  // The Mini stops answering: the count says "N+" and the tab keeps its width.
+  // The Mini stops answering; the chips keep their width.
   miniDown = true
   await page.reload({ waitUntil: "domcontentloaded" })
   await expect(sidebar.locator(".host-status", { hasText: "Mac Mini" })).toContainText("unreachable", { timeout: 120_000 })
-  await expect(agentsTab.locator(".nav-tab-count")).toHaveText(/\+$/)
   expect(Math.abs((await agentsTab.boundingBox()).width - width)).toBeLessThan(1)
 
   // Immediate selection: rapid switching ends on the last tab clicked, with its panel shown at once.
-  for (const name of ["Surfaces", "Decisions", "PRs", "Agents", "Decisions"]) await sidebar.getByRole("tab", { name: new RegExp(`^${name}`) }).click()
+  for (const name of ["Surfaces", "Decisions", "Agents", "Decisions"]) await sidebar.getByRole("tab", { name: new RegExp(`^${name}`) }).click()
   await expect(sidebar.getByRole("tab", { name: /^Decisions/ })).toHaveAttribute("aria-selected", "true")
   await expect(sidebar.locator("[role=tabpanel]")).toHaveAttribute("aria-labelledby", "nav-tab-decisions")
   // Keyboard, RTL: ArrowLeft moves forward in reading order.
   await page.evaluate(() => { document.documentElement.dir = "rtl" })
-  // A partial count reads "N+" in RTL too: the "+" sits after the number, visually to its right.
-  const plusAfter = await agentsTab.locator(".nav-tab-count").evaluate((element) => {
-    const text = element.firstChild
-    const at = (index) => { const range = document.createRange(); range.setStart(text, index); range.setEnd(text, index + 1); return range.getBoundingClientRect().left }
-    const plus = text.textContent.indexOf("+")
-    return plus > 0 && at(plus) > at(0)
-  })
-  expect(plusAfter).toBe(true)
   await sidebar.getByRole("tab", { name: /^Decisions/ }).focus()
   await page.keyboard.press("ArrowLeft")
-  await expect(sidebar.getByRole("tab", { name: /^PRs/ })).toHaveAttribute("aria-selected", "true")
-  await expect(sidebar.getByRole("tab", { name: /^PRs/ })).toBeFocused()
+  await expect(sidebar.getByRole("tab", { name: /^All/ })).toHaveAttribute("aria-selected", "true")
+  await expect(sidebar.getByRole("tab", { name: /^All/ })).toBeFocused()
   await page.setViewportSize({ width: 390, height: 844 })
   await agentsTab.click()
   await page.screenshot({ path: "/tmp/agents-filters-rtl-390.png" })

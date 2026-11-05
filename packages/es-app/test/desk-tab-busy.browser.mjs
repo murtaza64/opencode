@@ -12,7 +12,7 @@ const browser = await chromium.launch({ channel: "chrome", headless: true })
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
 const errors = []
 page.on("pageerror", (error) => errors.push(error.message))
-const nav = page.locator('.nav-entry[data-nav="front-desk"]')
+const nav = page.locator('[data-nav="front-desk"]')
 const dot = nav.locator(".nav-busy")
 // The app reads cross-session status from the global stream ({directory, payload}).
 const globalStatus = (sessionID, type, dir = directory) => {

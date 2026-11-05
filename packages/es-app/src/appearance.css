@@ -663,3 +663,118 @@ body:has(.desk-companion.overlay:not(.closed)) :is(.surface-head, .desk-evidence
 .routing-rec { color: var(--peach); background: color-mix(in srgb, var(--peach) 14%, transparent); }
 .routing-risk { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
 @media (max-width: 520px) { .routing-item { grid-template-columns: auto minmax(0, 1fr); } .routing-flow, .routing-effect { grid-column: 2; } .routing-tags { grid-column: 2; } }
+
+/* Unified sidebar (Loupe BUILD, approved ~21:13Z): one list. Needs you opens it; Recent blends
+ * agents, Surfaces and closed decisions. Chips narrow by kind; PRs have no row, chip or count. */
+.unified-sidebar { display: flex; flex-direction: column; min-block-size: 0; }
+.unified-toolbar { display: flex; align-items: center; gap: 2px; padding-inline-end: 8px; }
+.unified-toolbar > .agent-toolbar { flex: 1; min-inline-size: 0; }
+.density-toggle { flex: none; inline-size: 26px; block-size: 26px; display: grid; place-items: center; padding: 0; border: 1px solid var(--surface1); border-radius: var(--radius-control); background: var(--base); color: var(--subtext0); font-size: 12px; cursor: pointer; }
+.density-toggle[aria-pressed=true] { color: var(--text); background: var(--surface0); }
+.density-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.unified-sidebar .nav-tabs { display: flex; flex-wrap: nowrap; gap: 3px; padding: 2px 8px 8px; border-block-end: 0; margin-block-end: 0; overflow-x: auto; scrollbar-width: none; }
+.unified-sidebar .nav-tabs::-webkit-scrollbar { display: none; }
+.unified-sidebar .nav-tabs [role=tab] { flex: 0 0 auto; padding: 2px 6px; border: 1px solid var(--surface1); border-radius: 999px; font-size: 10.5px; color: var(--subtext0); background: transparent; }
+.unified-sidebar .nav-tabs [role=tab][aria-selected=true] { color: var(--text); font-weight: 600; background: var(--chip-fill); border-color: transparent; }
+.unified-sidebar .nav-tabs [role=tab]::after { display: none; }
+.unified-sidebar .nav-tabs [role=tab]:hover:not([aria-selected=true]) { background: var(--hover); }
+.recent-heading { display: flex; align-items: baseline; justify-content: space-between; padding-inline-end: 12px; }
+.recent-heading .nav-heading { flex: 1; min-inline-size: 0; }
+.recent-order { position: relative; }
+.recent-order > summary { list-style: none; padding: 2px 4px; font-size: 11px; color: var(--subtext0); cursor: pointer; border-radius: 4px; }
+.recent-order > summary::-webkit-details-marker { display: none; }
+.recent-order > summary:hover { color: var(--text); background: var(--hover); }
+.recent-order > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.recent-order [role=group] { position: absolute; inset-block-start: calc(100% + 4px); inset-inline-end: 0; z-index: 20; display: grid; min-inline-size: 120px; padding: 4px; border: 1px solid var(--surface1); border-radius: var(--radius-control); background: var(--base); box-shadow: var(--shadow-raised); }
+.recent-order [role=group] button { padding: 3px 8px; text-align: start; font: inherit; font-size: 12px; color: var(--subtext0); background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
+.recent-order [role=group] button:hover { background: var(--hover); color: var(--text); }
+.recent-order [role=group] button[aria-pressed=true] { color: var(--accent); }
+.new-items { align-self: flex-start; margin: 0 10px 4px; padding: 1px 10px; font: inherit; font-size: 11.5px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 999px; cursor: pointer; }
+.recent-list { display: flex; flex-direction: column; min-block-size: 0; }
+.recent-row { display: block; }
+
+/* Kind shapes: the shape says the kind before colour does. Agents are round avatars (initial
+ * fallback); Surfaces use the page glyph; decisions are diamonds; permissions are shields. */
+.session-entry[data-avatar]::before { content: attr(data-avatar); flex: none; inline-size: 22px; block-size: 22px; margin-inline-start: 12px; display: grid; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--accent) 18%, var(--surface0)); color: var(--text); font-size: 10px; font-weight: 700; }
+/* The status is a small dot on the avatar's corner; no separate dot row. */
+:root :is(.recent-list, .pinned-section) .session-entry[data-dot] { position: relative; }
+:root :is(.recent-list, .pinned-section) .session-entry[data-dot]::after { content: ""; position: absolute; inset-inline-start: 28px; inset-block-start: 17px; inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--overlay0); box-shadow: 0 0 0 2px var(--mantle); }
+:root :is(.recent-list, .pinned-section) .session-entry[data-dot=busy]::after { background: transparent; border: 1.5px solid var(--green); border-block-start-color: transparent; animation: es-sidebar-spin .8s linear infinite; }
+:root :is(.recent-list, .pinned-section) .session-entry > .nav-item > .dot { display: none; }
+@keyframes es-sidebar-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  :root :is(.recent-list, .pinned-section) .session-entry[data-dot=busy]::after { animation: none; border: 0; background: var(--green); }
+}
+:root :is(.recent-list, .pinned-section) .session-entry[data-dot=failed]::after { background: var(--red); }
+:root :is(.recent-list, .pinned-section) .session-entry[data-dot=idle]::after { background: var(--overlay0); }
+:root :is(.recent-list, .pinned-section) .cloud-nav-entry .cloud-runtime-icon { display: none; }
+/* Kinds at row size: a tinted tile, then the shape. */
+:root .unified-sidebar .nav-kind { display: grid; place-items: center; flex: none; inline-size: 18px; block-size: 18px; border-radius: 5px; font-size: 11px; font-weight: 700; color: var(--text); background: color-mix(in srgb, var(--accent) 12%, var(--surface0)); }
+.nav-decision .nav-kind { position: relative; background: transparent; }
+.nav-decision[data-kind=decision] .nav-kind::before, .nav-decision[data-kind=blocker] .nav-kind::before,
+.nav-decision[data-kind=question] .nav-kind::before { content: ""; position: absolute; inset: 1px; background: color-mix(in srgb, var(--peach) 38%, transparent); transform: rotate(45deg); border-radius: 2px; }
+.nav-decision[data-kind=permission] .nav-kind::before { content: ""; position: absolute; inset: 0; background: color-mix(in srgb, var(--pink) 38%, transparent); clip-path: polygon(50% 0, 100% 18%, 100% 60%, 50% 100%, 0 60%, 0 18%); }
+:root .unified-sidebar :is(.nav-surface, .nav-try-shape) .surface-glyph { inline-size: 14px; block-size: 16px; padding: 2px; box-sizing: content-box; border-radius: 4px; background: color-mix(in srgb, var(--teal) 20%, var(--surface0)); color: var(--teal); }
+.kind-badge { flex: none; padding: 0 5px; border-radius: 999px; font-size: 9.5px; font-weight: 700; line-height: 15px; color: var(--teal); background: color-mix(in srgb, var(--teal) 18%, transparent); }
+
+/* Compact is the default: one line. Expanded adds the secondary owner/host line. */
+:root .unified-sidebar[data-density=compact] :is(.recent-list, .needs-you-band) :is(.session-project, .nav-change, .nav-history-meta) { display: none; }
+:root .unified-sidebar[data-density=compact] .nav-item .nav-title { flex: 1 1 auto; min-inline-size: 0; }
+:root .needs-you-band .row-trailing { margin-inline-start: auto; }
+:root .unified-sidebar[data-density=compact] .recent-list .session-entry { contain-intrinsic-size: auto 30px; }
+:root .recent-list :is(.session-project, .nav-change, .nav-history-meta) { display: none; }
+.row-secondary { display: none; }
+:root .recent-list .nav-history-row { display: flex !important; align-items: center; gap: 6px; }
+:root .recent-list .nav-history-row .nav-kind { position: relative; display: grid; place-items: center; }
+:root .recent-list .nav-history-row .nav-kind { background: transparent; }
+:root .recent-list .nav-history-row .nav-kind::before { content: ""; position: absolute; inset: 1px; background: color-mix(in srgb, currentColor 35%, transparent); transform: rotate(45deg); border-radius: 2px; }
+:root .unified-sidebar[data-density=expanded] .recent-list .nav-item { flex-wrap: wrap; row-gap: 1px; }
+:root .unified-sidebar[data-density=expanded] .recent-list .nav-title { flex: 1 1 0; min-inline-size: 0; }
+:root .unified-sidebar[data-density=expanded] .recent-list .row-trailing { order: 2; }
+:root .unified-sidebar[data-density=expanded] .recent-list .row-secondary { display: block; order: 3; flex: 1 0 100%; margin-inline-start: 22px; font-size: 11px; color: var(--subtext0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root .unified-sidebar[data-density=expanded] .recent-list .session-entry { align-items: flex-start; }
+:root .unified-sidebar[data-density=expanded] .recent-list .session-entry .row-secondary { margin-inline-start: 0; }
+:root .unified-sidebar[data-density=expanded] .recent-list .session-entry[data-avatar]::before { margin-block-start: 3px; }
+:root .recent-list .session-entry .host-glyph { display: none; }
+
+/* Hover/focus/long-press preview. No side effects: it only describes the row. */
+.sidebar-preview { position: fixed; z-index: 70; inline-size: 300px; max-inline-size: min(300px, calc(100vw - 24px)); padding: 10px 12px 8px; border: 1px solid var(--surface1); border-radius: 10px; background: var(--base); box-shadow: 0 16px 44px rgb(0 0 0 / .45); pointer-events: none; }
+.sidebar-preview-kind { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--subtext0); }
+.sidebar-preview-title { margin-block: 2px 4px; font-size: 13px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.sidebar-preview-line { margin-block: 2px; font-size: 11.5px; color: var(--subtext0); overflow-wrap: anywhere; }
+.sidebar-preview-agent { color: var(--text); font-weight: 600; }
+.sidebar-preview-new { color: var(--text); }
+.sidebar-preview-foot { margin-block-start: 6px; padding-block-start: 5px; border-block-start: 1px solid var(--surface0); font-size: 10.5px; color: var(--overlay0); }
+@media (prefers-reduced-motion: reduce) { .sidebar-preview { scroll-behavior: auto; } }
+/* The Filter popover anchors to the sidebar's edge, not the small control, so its 232px panel stays
+ * inside a 240px rail. */
+.unified-sidebar { position: relative; }
+.unified-sidebar .sidebar-filter { position: static; }
+.unified-sidebar .sidebar-filter-panel { inset-inline-end: 8px; inset-block-start: 38px; inline-size: min(224px, calc(100vw - 16px)); }
+
+/* Compact trailing: the host tile and the row's own time at the inline end, visible in both densities. */
+:root .recent-list .nav-title { flex: 1 1 auto; min-inline-size: 0; }
+.row-trailing { display: inline-flex; align-items: center; gap: 5px; flex: none; margin-inline-start: auto; padding-inline-start: 6px; font-size: 10.5px; color: var(--overlay1); font-variant-numeric: tabular-nums; }
+.row-trailing time { white-space: nowrap; }
+.host-tile { display: inline-grid; place-items: center; inline-size: 14px; block-size: 14px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 24%, var(--surface0)); color: var(--text); font-size: 9px; font-weight: 800; line-height: 1; }
+:root .recent-list .session-project { margin-inline-start: 6px; }
+/* Expanded Needs you rows: title on the first line, the owner/rev/what's-new line beneath. */
+:root .unified-sidebar[data-density=expanded] .needs-you-band .nav-item { flex-wrap: wrap; row-gap: 1px; }
+:root .unified-sidebar[data-density=expanded] .needs-you-band .nav-title { flex: 1 1 0; min-inline-size: 0; }
+:root .unified-sidebar[data-density=expanded] .needs-you-band :is(.session-project, .nav-change) { order: 3; flex: 1 0 100%; margin-inline-start: 24px; max-inline-size: none; font-size: 11px; color: var(--subtext0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Top of the sidebar: Agent map, Usage and Porter/Desk on one compact row. Three equal targets,
+ * icon over a short label at 240px; icons only in the collapsed rail. */
+.nav-quick { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 2px 8px 6px; }
+.nav-quick-item { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; position: relative;
+  min-block-size: 44px; padding: 4px 2px; border: 0; border-radius: 6px; background: transparent; color: var(--subtext0);
+  font: inherit; text-decoration: none; cursor: pointer; }
+.nav-quick-item:hover { background: var(--hover); color: var(--text); }
+.nav-quick-item.active { background: var(--selected); color: var(--text); }
+.nav-quick-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.nav-quick-label { max-inline-size: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; line-height: 1; }
+.nav-quick-item .nav-avatar { inline-size: 16px; block-size: 16px; }
+.nav-quick-item .nav-busy { position: absolute; inset-block-start: 7px; inset-inline-end: 13px; }
+.nav-quick-open { position: absolute; inset-block-start: 18px; inset-inline-end: calc(50% - 14px); inline-size: 6px; block-size: 6px; border-radius: 50%; background: var(--accent); }
+.nav-entries.compact .nav-quick { grid-template-columns: 1fr; padding: 4px; }
+.nav-entries.compact .nav-quick-item { min-block-size: 34px; }

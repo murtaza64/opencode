@@ -29,7 +29,7 @@ await page.route("**/hosts/mini/**", (route) => {
   if (path === "/hosts/mini/es/api/editspaces") return route.fulfill({ json: { editspaces: [{ name: "fixture", root: `${miniRoot}/.editspace` }], default: "fixture" } })
   return route.fulfill({ json: [] })
 })
-const list = ".sidebar [role=tabpanel] > .session-entry"
+const list = ".sidebar [role=tabpanel] .session-entry"
 const miniRow = () => page.locator(`${list} .nav-item[data-host-key='mini:ses_a']`)
 const localRow = () => page.locator(`${list} .nav-item:not([data-host-key])`, { hasText: "Composer fixture" })
 const current = () => page.locator(".sidebar [aria-current=page]")

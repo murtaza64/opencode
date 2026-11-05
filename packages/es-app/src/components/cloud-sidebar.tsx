@@ -24,12 +24,15 @@ export const CloudNav = (props: { pin: CloudPin; mini?: boolean }) => {
   }
   const start = createMemo<number | undefined>((previous) => dot() === "busy" ? previous ?? waveStart() : undefined)
 
-  return <div class={props.mini ? "cloud-mini-entry" : "session-entry cloud-nav-entry"} data-cloud-owner={props.pin.owner}>
+  const initial = () => [...(props.pin.lane.trim())][0]?.toLocaleUpperCase() ?? "?"
+  return <div class={props.mini ? "cloud-mini-entry" : "session-entry cloud-nav-entry"} data-cloud-owner={props.pin.owner}
+    data-avatar={props.mini ? undefined : initial()} data-dot={props.mini ? undefined : dot()}>
     <A href={cloudHref(props.pin)} activeClass="" class={props.mini ? "mini-item" : "nav-item cloud-nav"} classList={{ active: active() }} title={`Cloud · ${props.pin.lane} · ${props.pin.editspace} · ${status()}`}>
       <span class={`dot ${dot()}`} style={start() === undefined ? undefined : { "--wave-start": String(start()) }} {...(dot() === "failed" || dot() === "unknown" ? { role: "img", "aria-label": status() } : {})} />
       <span class="cloud-runtime-icon" aria-label="Cloud agent"><HostGlyph host="wingman" size={props.mini ? 12 : 14} /></span>
       <Show when={!props.mini}>
-        <span class="nav-title"><bdi dir="auto">{props.pin.lane}</bdi></span><span class="session-project">{props.pin.editspace} · {status()}</span></Show>
+        <span class="nav-title"><bdi dir="auto">{props.pin.lane}</bdi></span><span class="session-project">{props.pin.editspace} · {status()}</span>
+        <span class="row-secondary">{[props.pin.editspace, status()].filter(Boolean).join(" · ")}</span></Show>
     </A>
     <Show when={!props.mini}><button type="button" class="pin-action" disabled={!pinned() && !cloudOwnerKnown(props.pin.owner)} classList={{ pinned: pinned() }} aria-label={`${pinned() ? "Unpin" : "Pin"} cloud agent ${props.pin.lane}`} title={pinned() ? "Unpin cloud agent" : "Pin cloud agent"} onClick={() => cloud.togglePin(props.pin)}>{pinned() ? "\u2665\ufe0e" : "\u2661\ufe0e"}</button></Show>
   </div>

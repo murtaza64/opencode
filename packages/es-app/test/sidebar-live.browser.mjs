@@ -59,8 +59,13 @@ const publish = (type) => {
     } })}\n\n`)
   }
 }
-// A busy row pulses its halo with the CSS busy-halo animation on ::after, no JS clock.
+// A busy row spins the status on its avatar corner (expanded list); the collapsed rail keeps the busy-halo dot.
 const pulsingHalo = async () => {
+  const entry = page.locator('.sidebar .session-entry:has(a[href*="/session/ses_a?"])')
+  if (await entry.count()) {
+    expect(await entry.evaluate((el) => getComputedStyle(el, "::after").animationName)).toBe("es-sidebar-spin")
+    return
+  }
   const dot = row("ses_a").locator(".dot")
   expect(await dot.evaluate((el) => getComputedStyle(el, "::after").animationName)).toBe("busy-halo")
 }
@@ -155,10 +160,13 @@ try {
     const restoredPage = await restored.newPage()
     await restoredPage.goto(url)
     await expect(restoredPage.locator(".pinned-section .nav-item")).toHaveText([/Other session/])
-    const dot = restoredPage.locator('.sidebar a[href*="/session/ses_a?"] .dot.busy')
-    await expect(dot).toBeVisible()
-    // Reduced motion: the halo holds static.
-    await expect.poll(() => dot.evaluate((el) => [getComputedStyle(el, "::after").animationName, getComputedStyle(el, "::after").opacity])).toEqual(["none", "0.5"])
+    const entry = restoredPage.locator('.sidebar .session-entry:has(a[href*="/session/ses_a?"])')
+    await expect(entry).toHaveAttribute("data-dot", "busy")
+    // The avatar corner is the visible status; reduced motion holds it static as a solid green dot.
+    await expect.poll(() => entry.evaluate((el) => {
+      const dot = getComputedStyle(el, "::after")
+      return [dot.inlineSize, dot.animationName, dot.backgroundColor]
+    })).toEqual(["7px", "none", "rgb(166, 227, 161)"])
   } finally {
     await restored.close()
   }

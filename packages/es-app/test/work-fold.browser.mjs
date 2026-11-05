@@ -25,6 +25,7 @@ const setup = async (page, profile = "work") => {
 }
 const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
 await context.route("**/*", route => { const url = route.request().url(); return url.startsWith(preview.origin) || url.startsWith(mini) ? route.fallback() : route.abort() })
+await context.addInitScript(() => localStorage.setItem("es-app:nav-tab", "agents"))
 const page = await context.newPage()
 page.setDefaultTimeout(60_000)
 await setup(page)

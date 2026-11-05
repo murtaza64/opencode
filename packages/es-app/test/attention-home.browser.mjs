@@ -129,9 +129,9 @@ try {
   await expect(item("قرار التنفيذ")).toHaveCount(1)
   await page.setViewportSize({ width: 760, height: 1000 })
   expect(await page.locator("main.desk").evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
-  // Persistent nav: Agent map and Decisions & inbox are always one click away; Decisions returns to the
-  // selected item, and a session draft survives the round trip. Narrow windows open the chat as a sheet;
-  // close it to reach the list.
+  // Persistent quick row: Agent map is one click away; a decision deep link returns to the selected item,
+  // and a session draft survives the round trip. Narrow windows open the chat as a sheet; close it to reach
+  // the list.
   if (await page.locator(".desk-companion.sheet:not(.closed)").count()) await page.locator('[data-nav="front-desk"]').click()
   await expect(page.locator(".desk-companion.sheet:not(.closed)")).toHaveCount(0)
   await item("قرار التنفيذ").click()
@@ -140,7 +140,7 @@ try {
   await expect(page).toHaveURL(`${preview.url}/agents`)
   await page.locator(".sidebar .pinned-section").getByRole("link", { name: /^Composer fixture/ }).first().click()
   await page.getByRole("textbox", { name: "Message", exact: true }).fill("Draft survives navigation; do not send")
-  await nav.getByRole("link", { name: /^Decisions & inbox/ }).click()
+  await page.goto(deskURL, { waitUntil: "domcontentloaded" })
   await expect(page).toHaveURL(deskURL)
   await expect(page.getByRole("heading", { name: "Decisions & inbox", exact: true })).toBeAttached()
   await expect(page.locator(".desk-evidence")).toContainText("قرار التنفيذ")

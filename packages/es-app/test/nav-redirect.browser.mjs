@@ -1,5 +1,5 @@
 // An old /desk?item= link (redirect to the desk) must not poison where the nav leads afterwards: Agent map
-// opens /agents and Decisions & inbox returns to the desk item. Installed 9a3d recorded /desk as Agents
+// opens /agents and a decision deep link returns to the desk. Installed 9a3d recorded /desk as Agents
 // mode's last place, so its Agents tab navigated back to the desk (dotfiles orchestrator #1088).
 // Run from packages/es-app: node test/nav-redirect.browser.mjs
 import { createRequire } from "node:module"
@@ -17,9 +17,9 @@ try {
   expect(stored.some(value => value?.startsWith("/desk"))).toBe(false)
   await page.getByRole("link", { name: "Agent map" }).first().click()
   await expect.poll(() => new URL(page.url()).pathname, { timeout: 10_000 }).toBe("/agents")
-  await page.getByRole("link", { name: /^Decisions & inbox/ }).first().click()
+  await page.goto(`${preview.origin}/`)
   await expect.poll(() => new URL(page.url()).pathname, { timeout: 10_000 }).toBe("/")
-  console.info("PASS nav after a /desk redirect: /desk not recorded as an Agents place; Agent map -> /agents; Decisions -> desk")
+  console.info("PASS nav after a /desk redirect: /desk not recorded as an Agents place; Agent map -> /agents; deep link -> desk")
 } finally {
   await browser.close()
   await preview.close()

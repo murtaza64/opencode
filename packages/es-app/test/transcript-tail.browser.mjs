@@ -63,17 +63,19 @@ try {
 
   // Keep the first message currently visible fixed, even when the new page
   // grows above it. DOM click avoids Playwright scrolling the button into view.
+  // The newest page opens at the bottom, where taller turns can leave only assistant
+  // rows in view; anchor on the first visible message row, not necessarily a user turn.
   const anchor = await page.evaluate(() => {
     const viewport = document.querySelector(".transcript").getBoundingClientRect()
-    const nodes = [...document.querySelectorAll('[data-component="user-message"]')]
-    const node = nodes.find((item) => item.getBoundingClientRect().top >= viewport.top)
-    return { index: nodes.indexOf(node), top: node.getBoundingClientRect().top }
+    const rows = [...document.querySelectorAll("[data-find-message]")]
+    const node = rows.find((item) => item.getBoundingClientRect().top >= viewport.top)
+    return { id: node.getAttribute("data-find-message"), top: node.getBoundingClientRect().top }
   })
   await page.evaluate(() => document.querySelector(".transcript-older").click())
   await expect(users).toHaveCount(80)
   expect(calls()).toHaveLength(2)
   expect(calls()[1]).toMatchObject({ limit: "80", before: "msg_000220" })
-  await expect.poll(() => users.nth(anchor.index + 40).evaluate((node, top) => Math.abs(node.getBoundingClientRect().top - top), anchor.top)).toBeLessThanOrEqual(2)
+  await expect.poll(() => page.locator(`[data-find-message="${anchor.id}"]`).evaluate((node, top) => Math.abs(node.getBoundingClientRect().top - top), anchor.top)).toBeLessThanOrEqual(2)
   const ids = await messages.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-timeline-part-id")))
   expect(ids).toEqual([...new Set(ids)].sort())
   expect(ids).toHaveLength(160)
