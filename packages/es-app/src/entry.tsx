@@ -96,6 +96,8 @@ function Providers(props: ParentProps) {
               <DeskQueueProvider>
               <DeskChatProvider>
               <div class="shell" ref={shellEl}>
+                {/* One wallpaper for the whole window, behind the content and the companion split (appearance.css). */}
+                <div class="wallpaper-backdrop" aria-hidden="true" />
                 {/* One persistent left nav on every view; the Front desk chat is a companion pane. */}
                 <Sidebar />
                 <Show when={leftOpen()}>

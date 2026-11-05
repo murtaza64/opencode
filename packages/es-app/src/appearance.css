@@ -80,23 +80,38 @@
 :root .desk-item:hover { background: var(--hover); }
 :root .desk-item[aria-pressed=true] { background: var(--selected); border-inline-start-color: var(--accent); }
 
-/* Wallpaper backdrop: one fixed, pre-blurred image under the session page, dimmed with a
- * scrim so text contrast holds. Painted once; no backdrop-filter on content. */
-/* The backdrop spans the whole session page, padding and gaps included, so it meets the nav and the
- * info panel (opaque) with no solid gutters. */
+/* Wallpaper backdrop: one pre-blurred image for the whole window, behind the content and the Front desk
+ * companion split, so two chat panes meet on the same pixels. Panes keep only their own scrim; the image never
+ * scrolls and never re-crops when the split opens or the sidebar toggles. No backdrop-filter on content. */
+:root[data-appearance=wallpaper] .shell { position: relative; isolation: isolate; }
+:root[data-appearance=wallpaper] .wallpaper-backdrop { display: none; }
+:root[data-appearance=wallpaper] .shell:has(> .content .session-page) > .wallpaper-backdrop {
+  display: block;
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    /* WalStudio's Dim darkens the wallpaper itself, under the pane scrims. */
+    linear-gradient(rgb(0 0 0 / var(--wallpaper-dim, 0)), rgb(0 0 0 / var(--wallpaper-dim, 0))),
+    var(--wallpaper, none) center / cover no-repeat;
+}
 :root[data-appearance=wallpaper] .session-page { position: relative; isolation: isolate; }
 :root[data-appearance=wallpaper] .session-page::before {
   content: "";
   position: absolute;
   inset: 0;
   z-index: -1;
-  background:
-    linear-gradient(color-mix(in srgb, var(--base) 48%, transparent), color-mix(in srgb, var(--base) 78%, transparent)),
-    /* WalStudio's Dim darkens the wallpaper itself, under the same scrim. */
-    linear-gradient(rgb(0 0 0 / var(--wallpaper-dim, 0)), rgb(0 0 0 / var(--wallpaper-dim, 0))),
-    var(--wallpaper, none) center / cover no-repeat;
+  background: linear-gradient(color-mix(in srgb, var(--base) 48%, transparent), color-mix(in srgb, var(--base) 78%, transparent));
   pointer-events: none;
 }
+/* In a session split the companion shares the window image: transparent panel, scrim only, hairline divider.
+ * (On a desk page there is no main session; the companion's own backdrop stays as desk-followups.css draws it.) */
+:root[data-appearance=wallpaper] .shell:has(> .content .session-page) .desk-companion { background: transparent; }
+:root[data-appearance=wallpaper] .shell:has(> .content .session-page) .desk-companion-in::before {
+  background: linear-gradient(color-mix(in srgb, var(--base) 48%, transparent), color-mix(in srgb, var(--base) 78%, transparent));
+}
+:root[data-appearance=wallpaper] .desk-companion-in { border-inline-start-color: color-mix(in srgb, var(--text) 18%, transparent); }
 :root[data-appearance=wallpaper] .sidebar { background: color-mix(in srgb, var(--accent) 5%, var(--mantle)); }
 :root[data-appearance=wallpaper] .session-page,
 :root[data-appearance=wallpaper] .session-page .topbar,
@@ -107,7 +122,10 @@
 :root[data-appearance=wallpaper] .transcript [data-component="tool-part-wrapper"] { background: color-mix(in srgb, var(--mantle) 88%, transparent); }
 
 @media (prefers-reduced-transparency: reduce) {
-  :root[data-appearance=wallpaper] .session-page::before { background: var(--base); }
+  /* The one image becomes the solid base, as each pane used to; no scrim over it. */
+  :root[data-appearance=wallpaper] .shell:has(> .content .session-page) > .wallpaper-backdrop { background: var(--base); }
+  :root[data-appearance=wallpaper] .session-page::before,
+  :root[data-appearance=wallpaper] .shell:has(> .content .session-page) .desk-companion-in::before { background: none; }
 }
 
 /* Inputs, chips and secondary buttons share the control radius; panels and rows stay square
