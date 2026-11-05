@@ -87,7 +87,8 @@ export const DeskChatProvider = (props: ParentProps) => {
   const [caseTick, setCaseTick] = createSignal(0)
   const caseTimer = setInterval(() => setCaseTick(value => value + 1), 60_000)
   onCleanup(() => clearInterval(caseTimer))
-  const [cases] = createResource(() => [caseTick(), dashboard.mailRevision()] as const, () => readCases().catch(() => [] as DeskCase[]))
+  const [cases] = createResource(() => [caseTick(), dashboard.mailRevision(), desk.pointer()?.host?.id] as const,
+    ([, , host]) => readCases(host).catch(() => [] as DeskCase[]))
   const kind = () => companionKind(location.pathname)
   const directory = () => {
     const name = dashboard.editspace() ?? dashboard.editspaces()?.default

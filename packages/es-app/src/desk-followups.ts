@@ -1,6 +1,7 @@
 /* What the Front desk is waiting on: the questions its conversation sent owners by es mail, and whether each
  * was delivered and answered. Read-only, from each editspace's mail timeline for the desk session (the dashboard
  * selects mail by its sender session); nothing here sends, acknowledges or marks anything read. */
+import { hostPrefix } from "./host-items"
 import type { MailMessage, MailTimeline } from "./api"
 
 export type FollowUp = {
@@ -55,8 +56,10 @@ export type DeskCase = {
     revision?: string; supersedes?: string; superseded_by?: string }[]
 }
 
-export const readCases = async () => {
-  const response = await fetch("/es/api/frontdesk/cases", { credentials: "include" })
+/** The cases the desk keeps on its home host: through that host's listener when the desk runs elsewhere, so a
+ * Laptop window never shows the Laptop's own (former-home) case file as the desk's ledger. */
+export const readCases = async (host?: string) => {
+  const response = await fetch(host ? `${hostPrefix(host)}/es/api/frontdesk/cases` : "/es/api/frontdesk/cases", { credentials: "include" })
   if (!response.ok) return []
   return ((await response.json()) as { cases?: DeskCase[] }).cases ?? []
 }
