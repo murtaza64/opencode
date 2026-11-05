@@ -92,7 +92,8 @@ const send = async () => {
 try {
   await page.goto(preview.url, { waitUntil: "domcontentloaded", timeout: 120000 })
   await expect(page.locator('[data-component="user-message"]').first()).toBeVisible()
-  await expect(page.locator('.prompt-box button[aria-label="Send"]')).toBeVisible()
+  // The composer's send controls: a group labelled Send whose primary button reads Send or Steer (the fixture session is busy).
+  await expect(page.locator(".prompt-box:not([inert])").getByRole("group", { name: "Send", exact: true })).toBeVisible()
   await page.waitForTimeout(500)
   await measure("idle-empty")
 
