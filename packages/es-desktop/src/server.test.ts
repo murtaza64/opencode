@@ -353,6 +353,76 @@ test("a client that leaves a proxied event stream closes its upstream connection
   expect(open.size).toBe(0)
 })
 
+// An upstream that accepts and never answers: what a stalled Core or dashboard looks like to the proxy (DD #921).
+const silentUpstream = async () => {
+  const open = new Set<import("node:net").Socket>()
+  const requests: string[] = []
+  const core = (await import("node:net")).createServer((socket) => {
+    open.add(socket)
+    socket.on("close", () => open.delete(socket))
+    socket.on("error", () => {})
+    socket.on("data", (chunk) => requests.push(String(chunk).split("\r\n")[0]!))
+  }).listen(0, "127.0.0.1")
+  await new Promise((resolve) => core.once("listening", resolve))
+  cleanup.push(async () => void core.close())
+  const origin = `http://127.0.0.1:${(core.address() as { port: number }).port}`
+  const root = await mkdtemp(path.join(tmpdir(), "es-desktop-silent-"))
+  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  await Bun.write(path.join(root, "index.html"), "<title>Fixture</title>")
+  const server = await serve({ root, opencode: origin, dashboard: origin })
+  cleanup.push(server.close)
+  return { server, open, requests }
+}
+
+test("a client that leaves a read before the upstream answers frees the upstream connection within a second", async () => {
+  const { server, open, requests } = await silentUpstream()
+  for (const route of ["/oc/session/ses_a/message", "/es/api/state", "/oc/event"]) {
+    const abort = new AbortController()
+    const pending = fetch(`${server.origin}${route}`, { headers: { "x-editspace-key": server.key }, signal: abort.signal }).catch(() => undefined)
+    const sent = Date.now() + 2_000
+    while (!requests.some((line) => line.includes(route.slice(3))) && Date.now() < sent) await Bun.sleep(10)
+    expect(open.size).toBeGreaterThan(0)
+    abort.abort()
+    await pending
+    const deadline = Date.now() + 1_000
+    while (open.size && Date.now() < deadline) await Bun.sleep(25)
+    expect(open.size).toBe(0)
+  }
+})
+
+test("a client that leaves a write before the upstream answers does not cut the write short", async () => {
+  const { server, open, requests } = await silentUpstream()
+  const abort = new AbortController()
+  const pending = fetch(`${server.origin}/oc/session/ses_a/prompt_async`, { method: "POST", headers: { "x-editspace-key": server.key, "content-type": "application/json", origin: server.origin },
+    body: JSON.stringify({ parts: [] }), signal: abort.signal }).catch(() => undefined)
+  const sent = Date.now() + 2_000
+  while (!requests.some((line) => line.includes("prompt_async")) && Date.now() < sent) await Bun.sleep(10)
+  expect(open.size).toBe(1)
+  abort.abort()
+  await pending
+  await Bun.sleep(500)
+  // The upstream write stays open for its answer (bounded by the proxy's idle timeout), never half-applied.
+  expect(open.size).toBe(1)
+})
+
+test("a client that leaves a write mid-body cuts the upstream request (no half-received body held open)", async () => {
+  const { server, open, requests } = await silentUpstream()
+  const abort = new AbortController()
+  let push!: ReadableStreamDefaultController<Uint8Array>
+  const body = new ReadableStream<Uint8Array>({ start: (controller) => { push = controller } })
+  const pending = fetch(`${server.origin}/oc/session/ses_a/prompt_async`, { method: "POST", signal: abort.signal, body, duplex: "half",
+    headers: { "x-editspace-key": server.key, "content-type": "application/json", "content-length": "1000", origin: server.origin } } as RequestInit).catch(() => undefined)
+  push.enqueue(new TextEncoder().encode('{"parts":['))
+  const sent = Date.now() + 2_000
+  while (!requests.some((line) => line.includes("prompt_async")) && Date.now() < sent) await Bun.sleep(10)
+  expect(open.size).toBe(1)
+  abort.abort()
+  await pending
+  const deadline = Date.now() + 1_000
+  while (open.size && Date.now() < deadline) await Bun.sleep(25)
+  expect(open.size).toBe(0)
+})
+
 test("rejects unauthenticated, cross-origin, and foreign Host requests", async () => {
   const { server, get } = await setup()
   expect((await fetch(server.origin)).status).toBe(403)

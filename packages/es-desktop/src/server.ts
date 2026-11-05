@@ -1,4 +1,4 @@
-import { createServer, request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http"
+import { createServer, request as httpRequest, type ClientRequest, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http"
 import { request as httpsRequest } from "node:https"
 import { createReadStream } from "node:fs"
 import { readFile, realpath, stat } from "node:fs/promises"
@@ -468,9 +468,11 @@ export const serve = async (options: {
       )
       upstreams.add(upstream)
       // Bun emits a client request's "close" as soon as it is sent, so the set is cleared when the response is over.
+      // A read is freed at once; a write runs to its answer (bounded by the idle timeout below) so a prompt or a
+      // permission reply is never cut off half-applied when its page goes away (DD #921, h-r S1).
       onClientGone(req, res, () => {
         upstreams.delete(upstream)
-        upstream.destroy()
+        leaveUpstream(req, upstream)
       })
       upstream.setTimeout(api ? 15 * 60_000 : 30_000, () => upstream.destroy(new Error("Upstream idle timeout")))
       upstream.on("error", () => {
@@ -565,6 +567,19 @@ export const serve = async (options: {
 }
 
 // One read of a Work view host: no browser credential, no redirect, bounded time.
+const readOnly = (req: IncomingMessage) => req.method === "GET" || req.method === "HEAD"
+
+/** The client left. A read, or a write whose body never fully arrived, is cut at once (Core would otherwise wait on
+ * body bytes that never come). A fully sent write runs to its answer, which is then drained, never cut half-applied
+ * (DD #921, h-r #924). */
+const leaveUpstream = (req: IncomingMessage, upstream: ClientRequest) => {
+  if (readOnly(req) || !req.complete) return void upstream.destroy()
+  // Drain the answer: one already being piped to the gone client stops with it, so resume it here too.
+  const current = (upstream as ClientRequest & { res?: IncomingMessage }).res
+  if (current) current.resume()
+  else upstream.once("response", (response) => response.resume())
+}
+
 const peerRead = (req: IncomingMessage, res: ServerResponse, target: string, finish: (status: number, body: string, type?: string) => void) => {
   const upstream = (target.startsWith("https:") ? httpsRequest : httpRequest)(target, { method: req.method, headers: proxyHeaders(req.headers) }, (response) => {
     if ([301, 302, 303, 307, 308].includes(response.statusCode ?? 0)) {
@@ -637,7 +652,8 @@ const peerWrite = (
     if (res.headersSent) return res.destroy()
     finish(502, '{"error":"Host unavailable"}', "application/json")
   })
-  onClientGone(req, res, () => upstream.destroy())
+  // A write runs to its answer (bounded by its idle timeout) even if the page leaves; it is never cut off half-applied.
+  onClientGone(req, res, () => leaveUpstream(req, upstream))
   if (body) return upstream.end(body)
   req.pipe(upstream)
 }
