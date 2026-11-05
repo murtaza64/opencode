@@ -541,8 +541,26 @@ export type MailDelivery = {
   wake_observed_at?: number | null
   presented_ms?: number | null
   handled_ms?: number | null
+  /** es-dashboard's delivery tick (es.mail.wake/v1): presented, admitted, queued, recorded or a terminal state. */
+  tick?: string
 }
 export type MailWakeState = "caused" | "joined" | "none" | "unknown"
+/** GET /es/api/mail/wake (es.mail.wake/v1): when this lane's or session's owner wakes next and why, from the
+ * dashboard's real schedulers; `at_ms` only when a scheduler holds a clock time. */
+export type MailWakeStatus = {
+  schema: "es.mail.wake/v1"
+  lane: string | null
+  session: string | null
+  state: "scheduled" | "waiting-idle" | "paused" | "blocked" | "none"
+  next: { reason: string; at_ms: number | null; count?: number } | null
+  pending: { queued: number; admitted: number; unread_passive: number }
+  checked_at: number
+  host?: string
+  wake_now: boolean
+}
+/** POST /es/api/mail/wake: what the operator's Wake now re-offered (same request ids; the runtime coalesces). */
+export type MailWakeResult = { lane: string | null; session: string | null; offered: number; offered_session?: number; busy: boolean
+  review: { action?: string; request_id?: string } | null; state: MailWakeStatus }
 export type MailTimeline = { editspace: string; lane: string; messages: MailMessage[] }
 export type Handoff = { lane: string; predecessor: string; successor: string; reason?: string; kickoff?: "skipped"; context?: string }
 export type LaneProvenance = {
@@ -709,6 +727,13 @@ export const es = {
   mail: (name: string, recipient: { lane: string } | { session: string }, signal?: AbortSignal): Promise<MailTimeline> =>
     fetch(`/es/api/mail?es=${encodeURIComponent(name)}&${"lane" in recipient
       ? `lane=${encodeURIComponent(recipient.lane)}` : `session=${encodeURIComponent(recipient.session)}`}`, { signal }).then(statusJson<MailTimeline>),
+  mailWake: (name: string, session: string, signal?: AbortSignal): Promise<MailWakeStatus> =>
+    fetch(`/es/api/mail/wake?es=${encodeURIComponent(name)}&session=${encodeURIComponent(session)}`, { signal }).then(statusJson<MailWakeStatus>),
+  // Operator only (the dashboard checks the operator cookie and CSRF header); one click = one coalesced wake.
+  wakeNow: (name: string, session: string): Promise<MailWakeResult> =>
+    fetch(`/es/api/mail/wake?es=${encodeURIComponent(name)}&session=${encodeURIComponent(session)}`, {
+      method: "POST", headers: { "content-type": "application/json", "X-Attention-CSRF": "1" }, body: "{}",
+    }).then(statusJson<MailWakeResult>),
   wakeEvents: (name: string, session: string, signal?: AbortSignal): Promise<{ events: WakeEvent[] }> =>
     fetch(`/es/api/wake-events?es=${encodeURIComponent(name)}&session=${encodeURIComponent(session)}`, { signal }).then(statusJson<{ events: WakeEvent[] }>),
   sessionInsights: (sessionID: string, directory: string, signal?: AbortSignal): Promise<SessionInsights> =>

@@ -2,6 +2,8 @@ import { Show, type JSX } from "solid-js"
 import type { MailWakeState } from "../api"
 import type { MailDirection } from "../mail-timeline"
 import { Glyph } from "./icons"
+import { TickMark } from "./message-tick"
+import type { Tick } from "../message-ticks"
 import { MailParty } from "./mail-party"
 import type { MailNamer } from "../mail-names"
 import { mailOrigin, originLabel, squadronSender, type MailOrigin, type SquadronMeta } from "../mail-origin"
@@ -48,6 +50,10 @@ export const MailRoute = (props: { from: string; fromEvidence?: string | null; t
 export const MailSummary = (props: {
   direction: MailDirection; party: JSX.Element; partyText: string; purpose: string; status?: string; sentAt?: number
   wake?: { state: MailWakeState; label: string }
+  /** Outgoing mail's one tick slot (mail-ticks.ts); its words, wake included, live in the hover and accessible name. */
+  tick?: { tick: Tick; label: string }
+  /** Incoming mail this session's agent has not been shown: a dot, a bolder sender and one line on its next wake. */
+  unread?: { line?: string }
   /** The mail's ID: Filament lights this chip's glyph (data-filament-icon). */
   id?: string
 }) => {
@@ -60,13 +66,18 @@ export const MailSummary = (props: {
     <span class="mail-activity-sep" aria-hidden="true">·</span>
     <span class="mail-activity-purpose" dir="auto">{props.purpose}</span>
   </>
-  return <summary class="mail-activity-summary" data-wake={props.wake?.state} data-compact={compact() ? "true" : undefined}
-    title={[relativeTime(props.sentAt), props.wake?.label].filter(Boolean).join(" · ") || undefined}
-    aria-label={`Mail${preposition()} ${props.partyText}: ${props.purpose}${props.status ? `, ${props.status}` : ""}${props.wake ? `, ${props.wake.label}` : ""}`}>
+  // An outgoing tick carries the wake in its own words, so the chip draws no separate wake cue.
+  const wake = () => props.tick ? undefined : props.wake
+  const said = () => props.tick?.label.replaceAll("\n", "; ") ?? wake()?.label
+  return <summary class="mail-activity-summary" data-wake={wake()?.state} data-compact={compact() && !props.unread?.line ? "true" : undefined}
+    data-unread={props.unread ? "true" : undefined}
+    title={[relativeTime(props.sentAt), props.tick?.label ?? wake()?.label].filter(Boolean).join(" · ") || undefined}
+    aria-label={`${props.unread ? "Unread mail" : "Mail"}${preposition()} ${props.partyText}: ${props.purpose}${props.status ? `, ${props.status}` : ""}${said() ? `, ${said()}` : ""}${props.unread?.line ? `, ${props.unread.line}` : ""}`}>
+    <Show when={props.unread}><span class="mail-unread-dot" aria-hidden="true" /></Show>
     <span class="mail-activity-kind" data-direction={props.direction} data-filament-icon={props.id} aria-hidden="true">
       <Glyph name={props.direction === "out" ? "paper-airplane" : "inbox"} />
     </span>
-    <Show when={props.wake?.state === "caused" || props.wake?.state === "unknown" ? props.wake.state : undefined}>{(state) =>
+    <Show when={wake()?.state === "caused" || wake()?.state === "unknown" ? wake()!.state : undefined}>{(state) =>
       <span class="mail-activity-wake" data-wake={state()} aria-hidden="true">
         <Glyph name={state() === "caused" ? "zap-fill" : "dot"} size={12} />
       </span>}
@@ -77,6 +88,8 @@ export const MailSummary = (props: {
       <span class="mail-activity-sep" aria-hidden="true">·</span>
       <span class="mail-activity-status" data-status={status()}>{status()}</span>
     </>}</Show>
+    <Show when={props.tick}>{(tick) => <TickMark tick={tick().tick} label={tick().label.replaceAll("\n", "; ")} />}</Show>
+    <Show when={props.unread?.line}>{(line) => <span class="mail-unread-wake" aria-hidden="true">{line()}</span>}</Show>
   </summary>
 }
 

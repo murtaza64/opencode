@@ -229,6 +229,8 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/oc\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/attachment\/\d{1,4}$/,
       /^\/es\/api\/(editspaces|state|quota|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work|mail|wake-events|subscriptions|handoffs|lane-provenance|frontdesk\/memory|frontdesk\/pointer|frontdesk\/ignored-failures|surfaces|pins|pins\/events|personas|decisions\/requests)$/,
       /^\/es\/api\/surfaces\/[a-z0-9][a-z0-9-]{0,39}\/snapshot$/,
+      // Per-session wake state (es.mail.wake/v1): next wake time and reason from the dashboard's schedulers; read-only.
+      /^\/es\/api\/mail\/wake$/,
       // One Surface's on-surface comments (operator text and anchors only); read-only here.
       /^\/es\/api\/surfaces\/[a-z0-9][a-z0-9-]{0,39}\/comments$/,
       /^\/es\/api\/attention(?:\/session|\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/,
@@ -253,6 +255,8 @@ export const apiAllowed = (method: string, pathname: string) => {
       /^\/es\/api\/handoffs\/self$/,
       /^\/es\/api\/frontdesk\/ignored-failures$/,
       /^\/es\/api\/frontdesk\/deliverables\/seen$/,
+      // Wake now (DD #414): the dashboard checks operator, CSRF and channel ui, then re-offers existing admissions.
+      /^\/es\/api\/mail\/wake$/,
       // The operator comments on one Surface revision; the dashboard checks operator, CSRF, size and the client id.
       /^\/es\/api\/surfaces\/[a-z0-9][a-z0-9-]{0,39}\/comments$/,
       // The operator rates one prepared brief; the dashboard checks operator, CSRF and that it is a brief.

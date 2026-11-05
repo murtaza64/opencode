@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { bubbleTick, laterTick, mailTick, transcriptTick } from "./message-ticks"
+import { bubbleTick, laterTick, transcriptTick } from "./message-ticks"
 
 test("an outgoing bubble is sending, then sent with how it waits, or not sent", () => {
   expect(bubbleTick({ status: "sending" }).tick).toBe("sending")
@@ -23,13 +23,4 @@ test("states never step back; a failure only replaces a message still on this de
   expect(laterTick("sending", "failed")).toBe("failed")
   expect(laterTick("failed", "sent")).toBe("sent")
   expect(["sending", "sent", "delivered", "read"].reduce<ReturnType<typeof laterTick> | undefined>((a, b) => laterTick(a, b as never), undefined)).toBe("read")
-})
-
-test("mail: stored or admitted is sent, presented or handled is delivered (never read), passive says not woken", () => {
-  expect(mailTick("admitted at send").tick).toBe("sent")
-  expect(mailTick("presented").tick).toBe("delivered")
-  expect(mailTick("handled")).toEqual({ tick: "delivered", label: "Mail delivered and acknowledged; not proof the work started" })
-  expect(mailTick("recorded only, not woken")).toEqual({ tick: "sent", label: "Mail recorded, recipient not woken" })
-  expect(mailTick("failed").tick).toBe("failed")
-  expect(["admitted", "queued", "presented", "handled", "delivery state not loaded"].map((state) => mailTick(state).tick)).not.toContain("read")
 })

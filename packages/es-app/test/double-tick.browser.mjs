@@ -121,14 +121,15 @@ try {
   tight(await place(lost, ".pending-bubble"), "not sent, with Check")
   await page.screenshot({ path: join(shots, "states.png") })
 
-  // Mail sent row: mail colour, delivered for presented, never the read accent.
+  // Mail sent row (mail ticks, DD #414): presented to the recipient agent is the accent ✓✓, worded "Read by".
   const mailTick = page.locator('.tool-chip[data-timeline-part-id="prt_relay"] .msg-tick')
-  await expect(mailTick).toHaveAttribute("data-tick", "delivered", { timeout: 20_000 })
-  await expect(mailTick).toHaveAttribute("aria-label", "Mail delivered to the recipient agent")
-  const colors = await page.evaluate(() => [getComputedStyle(document.querySelector('.tool-chip .msg-tick[data-mail]')).color,
+  await expect(mailTick).toHaveAttribute("data-tick", "read", { timeout: 20_000 })
+  await expect(mailTick).toHaveAttribute("aria-label", "Read by ux-feel")
+  const colors = await page.evaluate(() => [getComputedStyle(document.querySelector('.tool-chip[data-timeline-part-id="prt_relay"] .msg-tick')).color,
     getComputedStyle(document.querySelector('[data-find-message="msg_steer_one"] .msg-tick')).color,
     getComputedStyle(document.querySelector('.outgoing-item .msg-tick[data-tick="failed"]')).color])
-  expect(new Set(colors).size).toBe(3)
+  expect(colors[0]).not.toBe(colors[2])
+  expect(new Set(colors.slice(1)).size).toBe(2)
 
   // RTL: the tick stays on the trailing (left) side of its row.
   await page.evaluate(() => { document.documentElement.dir = "rtl" })

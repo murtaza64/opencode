@@ -100,31 +100,38 @@ try {
   await page.goto(preview.url, { waitUntil: "domcontentloaded", timeout: 180_000 })
   const chip = (id) => page.locator(`.tool-chip[data-timeline-part-id="${id}"]`)
   const state = (id) => chip(id).locator(".tool-chip-state")
+  // Mail ticks (DD #414): the state lives in the tick (glyph + hover/aria), never as an inline word.
+  const tick = (id) => chip(id).locator(".tool-chip-summary > .msg-tick")
+  const ticked = async (id, text, value, label) => {
+    await expect(state(id)).toHaveText(text)
+    await expect(tick(id)).toHaveAttribute("data-tick", value)
+    await expect(tick(id)).toHaveAttribute("aria-label", label)
+  }
   const laneReads = (target) => target.calls.filter((call) => call.path === "/api/mail" && call.recipientSession === null).length
   await expect(chip("m1_handled")).toHaveCount(1, { timeout: 120_000 })
 
   // The session feed has the sent mail but not its receipts; the sender lane's feed supplies them.
-  await expect(state("m1_handled")).toHaveText("Mail sent to ux-feel · handled")
+  await ticked("m1_handled", "Mail sent to ux-feel", "read", "Read by ux-feel")
   await expect(chip("m1_handled").locator(".tool-run-icon")).toHaveAttribute("data-mail", "sent")
   await chip("m1_handled").locator(".tool-chip-summary").hover()
   await expect(chip("m1_handled").locator(".tool-call-description")).toHaveText("ux-feel#7 task to ux-feel: ux-feel handled (acknowledged by the recipient; not proof the work started)")
   await page.screenshot({ path: join(shots, "handled.png") })
   await page.mouse.move(0, 0)
-  await expect(state("m2_two")).toHaveText("Mail sent to ux-feel, front-desk · mixed states")
+  await ticked("m2_two", "Mail sent to ux-feel, front-desk", "delivered", "ux-feel: Read by ux-feel; front-desk: In front-desk's inbox")
   // Later receipts arrive on mail revisions, each state its own word.
-  await expect(state("m6_later")).toHaveText("Mail sent to front-desk · admitted")
+  await ticked("m6_later", "Mail sent to front-desk", "delivered", "In front-desk's inbox")
   states["front-desk#9"] = "presented"
   fixture.emitDashboard("mail")
-  await expect(state("m6_later")).toHaveText("Mail sent to front-desk · presented")
+  await ticked("m6_later", "Mail sent to front-desk", "read", "Read by front-desk")
   states["front-desk#9"] = "handled"
   fixture.emitDashboard("mail")
-  await expect(state("m6_later")).toHaveText("Mail sent to front-desk · handled")
-  expect(await page.locator(".tool-chip-state").allTextContents()).not.toContainEqual(expect.stringMatching(/\b(started|completed)\b/))
+  await ticked("m6_later", "Mail sent to front-desk", "read", "Read by front-desk")
+  expect(await page.locator(".tool-chip-state").allTextContents()).not.toContainEqual(expect.stringMatching(/\b(started|completed|admitted)\b/))
   // No current record: the send-time state, marked as such; passive and bridge say recorded only; no evidence: not loaded.
-  await expect(state("m3_unread")).toHaveText("Mail sent to orchestrator · delivery state not loaded")
-  await expect(state("m7_atsend")).toHaveText("Mail sent to setup · admitted at send")
-  await expect(state("m8_passive")).toHaveText("Mail sent to serving-modes · recorded only, not woken")
-  await expect(state("m9_bridge")).toHaveText("Mail sent to rook · recorded only, no runtime recipient")
+  await ticked("m3_unread", "Mail sent to orchestrator", "sent", "Sent · delivery receipt not available (not loaded here)")
+  await ticked("m7_atsend", "Mail sent to setup", "delivered", "In setup's inbox (at send)")
+  await ticked("m8_passive", "Mail sent to serving-modes", "delivered", "In serving-modes's inbox · waits for serving-modes's next turn (at send)")
+  await ticked("m9_bridge", "Mail sent to rook", "delivered", "In rook's inbox · waits for rook's next turn (at send)")
   expect(await page.locator(".tool-chip-state").allTextContents()).not.toContainEqual(expect.stringMatching(/not read/))
   // No receipt: the plain shell row.
   await expect(state("m4_failed")).toHaveText(/^failed · es mail send --to nobody/)
@@ -142,14 +149,15 @@ try {
 
   // A Mac Mini session opened here: its rows read the Mini's dashboard, not this host's.
   await page.goto(`${preview.origin}/session/ses_a?directory=${encodeURIComponent(directory)}&host=mini`, { waitUntil: "domcontentloaded" })
-  await expect(state("mm_relay")).toHaveText("Mail sent to ux-feel · presented", { timeout: 60_000 })
-  await expect(chip("mm_relay").locator(".msg-tick[data-mail]")).toHaveAttribute("data-tick", "delivered")
+  await expect(tick("mm_relay")).toHaveAttribute("data-tick", "read", { timeout: 60_000 })
+  await ticked("mm_relay", "Mail sent to ux-feel", "read", "Read by ux-feel")
   expect(laneReads(mini)).toBeGreaterThan(0)
   await page.screenshot({ path: join(shots, "mini.png") })
   // A window whose listener refuses that host's mail (as es-desktop did before this fix): said plainly, never "not read".
   await page.route("**/hosts/mini/es/api/mail**", (route) => route.fulfill({ status: 403, json: { error: "not allowed" } }))
   await page.reload({ waitUntil: "domcontentloaded" })
-  await expect(state("mm_relay")).toHaveText("Mail sent to ux-feel · delivery state not loaded", { timeout: 60_000 })
+  await expect(tick("mm_relay")).toHaveAttribute("data-tick", "sent", { timeout: 60_000 })
+  await ticked("mm_relay", "Mail sent to ux-feel", "sent", "Sent · delivery receipt not available (mini's mail not readable from this window (HTTP 403))")
   await chip("mm_relay").locator(".tool-chip-summary").hover()
   await expect(chip("mm_relay").locator(".tool-call-description")).toHaveText("ux-feel#423 task to ux-feel: mini's mail not readable from this window (HTTP 403)")
 
@@ -157,7 +165,7 @@ try {
   expect(writes(fixture)).toEqual([])
   expect(writes(mini)).toEqual([])
   expect(errors).toEqual([])
-  console.log(`PASS mail tool rows: session feed without recipient receipts -> sender lane feed read once -> exact state (handled stays handled); admitted -> presented -> handled on mail revisions; no record -> send-time state 'at send', passive/bridge 'recorded only', else 'delivery state not loaded' (never 'not read'); refused host read named; failed send / non-mail output stay shell rows; Mini session reads the Mini's dashboard; no timer reads; no writes; screenshots ${shots}`)
+  console.log(`PASS mail tool rows (ticks): session feed without recipient receipts -> sender lane feed read once -> exact state (handled stays handled); admitted -> presented -> handled on mail revisions; no record -> send-time state 'at send', passive/bridge 'recorded only', else 'delivery state not loaded' (never 'not read'); refused host read named; failed send / non-mail output stay shell rows; Mini session reads the Mini's dashboard; no timer reads; no writes; screenshots ${shots}`)
 } finally {
   await preview.close()
   await mini.close?.()

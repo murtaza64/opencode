@@ -3,6 +3,7 @@ import type { ToolPart } from "@opencode-ai/sdk/v2"
 import type { MailMessage, MailTimeline } from "./api"
 import { canonicalMail, mailLocation } from "./mail-timeline"
 import { shellProgram } from "./tool-call"
+import { lostReceiptTick, outgoingMailTick, type TickDelivery } from "./mail-ticks"
 
 // Mail a tool call sent (Laptop2627), from the transport's own receipt in the call's output, never from the command
 // text: `es mail send` prints `sent <id> (<kind>) <from> -> <to>` once the dashboard stored the mail, then one line per
@@ -101,7 +102,20 @@ export const mailSentText = (receipts: readonly MailReceipt[], records: MailReco
   const words = per.flatMap((item) => item.words)
   const unique = [...new Set(words)]
   const state = words.includes("failed") ? "failed" : unique.length === 1 ? unique[0]! : "mixed states"
-  return { text: `Mail sent to ${recipients.join(", ")}`, state, detail: receipts.map((receipt, index) => `${receipt.id} ${receipt.kind} to ${receipt.to}: ${per[index]!.detail}`) }
+  return { text: `Mail sent to ${recipients.join(", ")}`, state, tick: sentTick(receipts, records),
+    detail: receipts.map((receipt, index) => `${receipt.id} ${receipt.kind} to ${receipt.to}: ${per[index]!.detail}`) }
+}
+
+/** The chip's one tick (mail-ticks.ts), best evidence first like the words: current receipts, else the send-time lines
+ * (said so), else a sent mail whose receipt this page cannot read. */
+const sentTick = (receipts: readonly MailReceipt[], records: MailRecordsValue) => {
+  const current = receipts.map((receipt) => readReceipts(records, receipt.id))
+  if (current.every((deliveries) => deliveries?.length)) return outgoingMailTick(current.flatMap((deliveries) => deliveries!))
+  const atSend = receipts.flatMap((receipt, index) => current[index]?.length ? current[index]!
+    : receipt.atSend.map((item): TickDelivery => ({ recipient: item.recipient ?? receipt.to, state: item.word,
+      mode: item.word.startsWith("recorded only") ? "passive" : null })))
+  if (receipts.every((receipt, index) => current[index]?.length || receipt.atSend.length)) return outgoingMailTick(atSend, undefined, " (at send)")
+  return lostReceiptTick(records.unreadable?.() ?? (current.some((deliveries) => deliveries) ? "no runtime delivery recorded" : "not loaded here"))
 }
 
 /** This page's mail records by id; tool rows outside a session page see none. */

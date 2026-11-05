@@ -250,6 +250,10 @@ export const createFixture = async () => {
     if (url.pathname === "/api/frontdesk/ignored-failures" && request.method === "GET") return json({ format: "front-desk-ignored-failures/1", entries: [] })
     // Passive-review wake records; none unless a test sets fixture.wakeEvents.
     if (url.pathname === "/api/wake-events") return json({ events: fixture.wakeEvents?.(url.searchParams.get("session")) ?? [] })
+    // Wake state + Wake now (es.mail.wake/v1, DD #414): absent unless a test sets fixture.mailWake(method, params, body).
+    if (url.pathname === "/api/mail/wake") return fixture.mailWake
+      ? (({ status = 200, body: payload }) => json(payload, status))(fixture.mailWake(request.method, url.searchParams, body))
+      : json({ detail: "Not Found" }, 404)
     if (url.pathname === "/api/mail") return fixture.mail
       ? json(fixture.mail(url.searchParams.get("es"), url.searchParams.get("lane") ?? url.searchParams.get("session")))
       : json({ detail: "Not Found" }, 404)
