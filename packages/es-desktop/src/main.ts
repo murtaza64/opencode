@@ -535,13 +535,22 @@ const start = async () => {
   }
   // Without host tabs the window is the Work view itself: it opens on the restored route when a capture named one.
   await (tabs ? new Promise<void>((resolve) => localContents.once("did-finish-load", () => resolve()))
-    : localContents.loadURL(restore?.views.find((item) => item.id === "local")?.url ?? server.origin))
+    : localContents.loadURL(restore?.views.find((item) => item.id === "local")?.url ?? server.origin).catch(abortedByNewerNavigation))
   opened.ready = true
   if (startup.showOnLoad) window.show()
   else if (opened.requested) reveal()
   console.info(`Editspace listening at ${server.origin} (native session only)`)
   remotes.forEach((item) => console.info(`Editspace ${item.label} listening at ${item.server.origin} (native session only)`))
   pages.forEach((item) => console.info(`Editspace ${item.label} tab shows ${item.origin}`))
+}
+
+/** The first load's outcome never fails startup. A newer navigation (a notification click or an opened route during
+ * launch) replaces it, and Electron then rejects the first loadURL with ERR_ABORTED, or with the newer load's own error
+ * (seen: ERR_FAILED for the newer URL). The window already shows whatever loaded or the server's offline page; a
+ * startup error box here would block the main process behind a modal with a working window behind it. */
+const abortedByNewerNavigation = (error: unknown) => {
+  const record = error as { code?: unknown; errno?: unknown } | null
+  console.error("Editspace first load did not complete; continuing", { code: typeof record?.code === "string" ? record.code : undefined })
 }
 
 void start().catch((error: unknown) => {
