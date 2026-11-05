@@ -15,6 +15,7 @@ import { composerStorage } from "./composer-storage"
 import type { ContextPart } from "./api"
 import { defaultImageCapability } from "./image-fit"
 import { createImageStore, type ImageStore } from "./image-store"
+import { accessState, whenSignedIn } from "./access-auth"
 import { perfEvent } from "./perf-telemetry"
 import type { SessionHost } from "./session-host"
 
@@ -1257,6 +1258,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       if (draft.images.length) await persistAsync()
       else persist()
       clearTask(draft.revision, buffer, direct?.targetRevision)
+      if (accessState() !== "ok") await whenSignedIn()
       try {
         await prompt(state.sessionModel ? { ...session, preferredModel: { id: state.sessionModel.modelID, providerID: state.sessionModel.providerID } } : session, directory, text, {
           images: draft.images, model: state.sessionModel ? undefined : draft.model ?? nextModel ?? undefined, ...(context?.length ? { context } : {}),
@@ -1319,6 +1321,8 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       })
       return
     }
+    // Behind an expired Access session the input waits (editor cleared, bubble shown) and goes once sign-in is back.
+    if (accessState() !== "ok") await whenSignedIn()
     await admit(admission)
     // An unanswered input moves to the set-aside list (same request ID, checked on every refresh),
     // so it never blocks the next message.

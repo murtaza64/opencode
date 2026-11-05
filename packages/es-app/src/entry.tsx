@@ -33,7 +33,10 @@ import { installAppearance } from "./appearance"
 import { KeyboardLayer } from "./components/keyboard-layer"
 import { startPerfTelemetry } from "./perf-telemetry"
 import "./components/reasoning-chip"
+import { installAccessAuth } from "./access-auth"
 
+// Before any request: same-origin calls carry X-Requested-With so an expired Access session reads as Sign in.
+installAccessAuth()
 startPerfTelemetry()
 
 function Providers(props: ParentProps) {

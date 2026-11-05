@@ -2279,3 +2279,8 @@ abbr.utc-time { text-decoration: underline dotted; text-underline-offset: 2px; c
 /* One footer per agent turn: the reply's own meta line (session-ui) repeats agent/model/duration, so es-app hides it. */
 .session-page [data-slot="text-part-meta"] { display: none; }
 .turn-summary .turn-time { color: var(--subtext0); }
+
+/* Expired Access session above the composer: one slim line, the editor stays usable. */
+.access-sign-in { display: flex; align-items: center; gap: 8px; margin-block: 4px; padding: 4px 8px; font-size: 12px;
+  color: var(--subtext1); border-block-start: 1px solid var(--surface1); }
+.access-sign-in > span { flex: 1; min-width: 0; }
