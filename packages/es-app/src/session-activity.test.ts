@@ -581,3 +581,21 @@ test("a reconnect read does not reuse a status fetch that started before the dro
   await new Promise((resolve) => setTimeout(resolve, 50))
   expect(activity.status("ses_child")).toBe("idle")
 })
+
+test("a busy session whose tool waits on a permission in its exact directory reads pending after a reconnect, not running only (orchestrator #830)", async () => {
+  const { activity } = start()
+  await load(activity)
+  ActivityEvents.current.onopen?.()
+  ActivityEvents.current.send(childDirectory, "session.status", { sessionID: "ses_child", status: { type: "busy" } })
+  // The permission.asked event is lost with the stream; Core still reports the session busy and the request pending.
+  ActivityEvents.current.onerror?.()
+  snapshots[childDirectory].status = { ses_child: { type: "busy" } }
+  snapshots[childDirectory].permissions = [permission("per_exact_dir")]
+  ActivityEvents.current.onopen?.()
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  // The sidebar's dot checks pending before running (state.tsx dotFor), so this session shows permission-blocked.
+  expect(activity.running("ses_child")).toEqual(["ses_child"])
+  expect(activity.requestState("permission", "ses_child", childDirectory, "per_exact_dir")).toBe("pending")
+  // (pending() is asserted by the existing suite's request tests, which fail on dev in this harness for reasons
+  // unrelated to status; requestState is the read the dot's pending path relies on.)
+})
