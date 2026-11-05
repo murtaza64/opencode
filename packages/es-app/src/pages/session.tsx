@@ -85,6 +85,7 @@ import { wakeMarker, type WakeEvent } from "../wake-marker"
 import { anchorNote, anchorRange, parseAnchor, type MessageAnchor } from "../message-anchor"
 import { perfEvent, perfReady, perfSpan } from "../perf-telemetry"
 import { targetReady } from "../startup"
+import { accessState } from "../access-auth"
 import { EarlierSession, HandoffRule, type SegmentControl } from "../components/earlier-session"
 import { deskChain, laneChain, successionPredecessor, type Chain, type ChainLink } from "../transcript-chain"
 import { ariaShortcut, matchShortcut, shortcutLabel } from "../shortcuts"
@@ -2453,6 +2454,13 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         <WorkStatus /><ComposerResults composer={composer} connected={connected()} />
         <MailWakeBar unread={unreadMail()} status={mailWake.status()} editspace={location()?.name} session={sessionID}
           onWoke={() => { void mailWake.refetch(); void refetchMail() }} />
+        {/* This page's own origin is behind Cloudflare Access and its session expired (DD #897): not offline, not re-pair. */}
+        <Show when={accessState() === "sign-in"}>
+          <div class="access-sign-in" role="status" aria-live="polite">
+            <span>Sign-in expired. Drafts are kept; anything you send waits and goes once you sign in.</span>
+            <button type="button" onClick={() => window.location.reload()}>Sign in</button>
+          </div>
+        </Show>
         {/* A read-only host (pinned-SSH Personal peer) takes no prompt, steer or reply from this page; its listener refuses them. */}
         <Show when={!sessionHost.readOnly} fallback={<p class="dim session-read-only-note" data-read-only-note>Read only: this session is on <bdi dir="auto">{sessionHost.label}</bdi>. Reply from that host.</p>}>
           <div class="prompt-box" classList={{ "prompt-expanded": floating() }} style={{ "--editor-expanded": `${expandedHeight()}px` }}>
