@@ -187,6 +187,8 @@ test("API surface excludes direct shell, PTY, file, and config access", () => {
   expect(hostWriteAllowed("POST", "/es/api/frontdesk/deliverables/seen")).toBe(true)
   // The Front Desk pointer is read through /hosts; it is written only on the home host's own origin.
   expect(hostApiAllowed("GET", "/es/api/frontdesk/pointer")).toBe(true)
+  expect(hostApiAllowed("GET", "/es/api/frontdesk/cases")).toBe(true)
+  expect(hostApiAllowed("POST", "/es/api/frontdesk/cases") || hostWriteAllowed("POST", "/es/api/frontdesk/cases")).toBe(false)
   expect(hostApiAllowed("HEAD", "/es/api/frontdesk/pointer")).toBe(true)
   for (const method of ["PUT", "POST", "PATCH", "DELETE"]) expect(hostApiAllowed(method, "/es/api/frontdesk/pointer") || hostWriteAllowed(method, "/es/api/frontdesk/pointer")).toBe(false)
   expect(hostApiAllowed("GET", "/es/api/frontdesk/pointer/x")).toBe(false)
