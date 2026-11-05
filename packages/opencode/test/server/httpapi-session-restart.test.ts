@@ -882,3 +882,132 @@ it.live(
     ),
   90_000,
 )
+
+const incidentFiles = (restartDir: string) =>
+  Effect.promise(async () => {
+    const { readdir, readFile } = await import("fs/promises")
+    const names = (await readdir(restartDir).catch(() => [] as string[])).filter((name) => name.endsWith(".incident-source.json"))
+    return Promise.all(names.map(async (name) => ({ name, body: JSON.parse(await readFile(path.join(restartDir, name), "utf8")) })))
+  })
+
+const withRestartDir = <A, E, R>(dir: string, effect: Effect.Effect<A, E, R>) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const previous = process.env.OC_RESTART_DIR
+      process.env.OC_RESTART_DIR = path.join(dir, "restarts")
+      return previous
+    }),
+    () => effect,
+    (previous) => Effect.sync(() => {
+      if (previous === undefined) delete process.env.OC_RESTART_DIR
+      else process.env.OC_RESTART_DIR = previous
+    }),
+  )
+
+it.live(
+  "a held orphan records one crash-observed incident source per session, write-once, and never for a durable orphan",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        withRestartDir(
+          dir,
+          Effect.gen(function* () {
+            yield* llm.text("durable continued")
+            const held = yield* Session.use.create({ title: "held" })
+            const heldStep = yield* seedInterrupted(held, dir, { tools: "mixed", at: before() })
+            const second = yield* Session.use.create({ title: "held 2" })
+            yield* seedInterrupted(second, dir, { tools: "cancelled", at: before() })
+            const stopped = yield* Session.use.create({ title: "stopped" })
+            yield* seedInterrupted(stopped, dir, { tools: false, at: before(), error: { name: "MessageAbortedError", data: { message: "stopped" } } as never })
+            const durable = yield* Session.use.create({ title: "durable" })
+            yield* seedInterrupted(durable, dir, { tools: "completed", at: before() })
+
+            yield* queueMail(dir, held.id, "h-1", "resume")
+            yield* queueMail(dir, second.id, "h-2", "resume")
+            yield* queueMail(dir, stopped.id, "s-1", "resume")
+            yield* queueMail(dir, durable.id, "d-1", "resume")
+            yield* idleWithReply(dir, durable.id, "durable continued")
+            // A second refusal in the same process generation adds nothing.
+            yield* queueMail(dir, held.id, "h-3", "again")
+            const files = yield* pollWithTimeout(
+              incidentFiles(path.join(dir, "restarts")).pipe(Effect.map((list) => (list.length >= 3 ? list : undefined))),
+              "incident sources were not written",
+            )
+            yield* Effect.sleep("1 second")
+            const final = yield* incidentFiles(path.join(dir, "restarts"))
+            expect(final).toHaveLength(3)
+            const bySession = Object.fromEntries(final.map((file) => [file.body.session.session, file.body]))
+            expect(Object.keys(bySession).sort()).toEqual([held.id, second.id, stopped.id].sort())
+            expect(bySession[stopped.id].session.reason).toBe("explicit-stop")
+            // Names follow the dispatcher's crash-<generation>-<session>.incident-source.json and files are private.
+            for (const file of final) {
+              expect(file.name).toMatch(/^crash-\d{1,16}-\d{1,10}-ses_[A-Za-z0-9]{1,64}\.incident-source\.json$/)
+              const { statSync } = yield* Effect.promise(() => import("fs"))
+              expect(statSync(path.join(dir, "restarts", file.name)).mode & 0o777).toBe(0o600)
+            }
+            const body = bySession[held.id]
+            expect(body).toMatchObject({ kind: "crash-observed", version: 1, source: "core-wake-guard", previous_generation: null, core_binary_sha256: null })
+            expect(body.session).toMatchObject({ anchor: heldStep.assistant.id, reason: "unknown-effect", fenced: false, lane: null, recorded_owner: null })
+            expect(body.session.tools).toEqual([{ tool: "bash", status: "completed" }, { tool: "bash", status: "running" }])
+            expect(body.session.pending_inputs).toBeGreaterThanOrEqual(1)
+            expect(JSON.stringify(body)).not.toContain("sleep 600")
+            expect("capturedAt" in body || "manifest" in body).toBe(false)
+            expect(files.every((file) => file.name.startsWith(`crash-${body.generation}-`))).toBe(true)
+            // The held sessions still hold: their inputs stay pending and no provider call ran for them.
+            expect(yield* llm.calls).toBe(1)
+          }),
+        ),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+it.live(
+  "a fresh open step newer than this process is not a crash orphan and records nothing",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        withRestartDir(
+          dir,
+          Effect.gen(function* () {
+            yield* llm.text("must not be requested")
+            const session = yield* Session.use.create({ title: "fresh" })
+            yield* seedInterrupted(session, dir, { tools: "mixed" })
+            yield* queueMail(dir, session.id, "f-1", "resume")
+            yield* Effect.sleep("2 seconds")
+            expect(yield* incidentFiles(path.join(dir, "restarts"))).toEqual([])
+          }),
+        ),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)
+
+it.live(
+  "a prompt promoted before a lost process opened its step holds and records the prompt as the anchor",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        withRestartDir(
+          dir,
+          Effect.gen(function* () {
+            yield* llm.text("must not be requested")
+            const session = yield* Session.use.create({ title: "no step" })
+            const user: SessionV1.User = { id: MessageID.ascending(), sessionID: session.id, role: "user", agent: "build", time: { created: before() }, model }
+            yield* Session.Service.use((sessions) => sessions.updateMessage(user))
+            yield* Session.Service.use((sessions) => sessions.updatePart({ id: PartID.ascending(), sessionID: session.id, messageID: user.id, type: "text", text: "do the work" }))
+            yield* queueMail(dir, session.id, "n-1", "resume")
+            const files = yield* pollWithTimeout(
+              incidentFiles(path.join(dir, "restarts")).pipe(Effect.map((list) => (list.length ? list : undefined))),
+              "incident source was not written",
+            )
+            expect(files).toHaveLength(1)
+            expect(files[0]!.body.session).toMatchObject({ session: session.id, anchor: user.id, reason: "unknown-effect", tools: [] })
+            expect(yield* requestInDirectory(`/session/${session.id}/input/n-1`, dir).pipe(Effect.flatMap((r) => r.json))).toMatchObject({ state: "pending" })
+            expect(yield* llm.calls).toBe(0)
+          }),
+        ),
+      { config: testProviderConfig },
+    ),
+  90_000,
+)

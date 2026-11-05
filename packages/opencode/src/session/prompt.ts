@@ -52,6 +52,7 @@ import { Runner } from "@/effect/runner"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
 import { SessionSupersession } from "./supersession"
+import { SessionCrashIncident } from "./crash-incident"
 import { SessionInput } from "./input"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -203,6 +204,7 @@ const layer = Layer.effect(
     const instruction = yield* Instruction.Service
     const state = yield* SessionRunState.Service
     const inputs = yield* SessionInput.Service
+    const supersession = yield* SessionSupersession.Service
     const revert = yield* SessionRevert.Service
     const summary = yield* SessionSummary.Service
     const sys = yield* SystemPrompt.Service
@@ -1505,8 +1507,27 @@ const layer = Layer.effect(
             !closedByOperator &&
             !orphanedDurableStep(latest.user, latest.assistant, assistant?.parts ?? []) &&
             !SessionRunState.completedTurn(latest.user, latest.assistant, assistant?.parts ?? [])
-          )
+          ) {
+            // A held orphan left by a lost process: record it once for its owner. The step still holds here.
+            const reason = SessionCrashIncident.seen(sessionID)
+              ? undefined
+              : SessionCrashIncident.classify(latest.user, latest.assistant, assistant?.parts ?? [], processStarted)
+            const answering = latest.assistant?.parentID === latest.user.id ? latest.assistant : undefined
+            if (reason) {
+              const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+              yield* SessionCrashIncident.record({
+                started: processStarted,
+                sessionID,
+                directory: session.directory,
+                anchor: answering ?? latest.user,
+                parts: answering ? (assistant?.parts ?? []) : [],
+                reason,
+                pendingInputs: (yield* inputs.list(sessionID, { state: "pending", limit: 50 })).items.length,
+                fenced: (yield* supersession.get(sessionID)) !== undefined,
+              })
+            }
             return
+          }
           if (!(yield* inputs.promote(sessionID, true))) return
           return yield* runLoop(sessionID)
         }),
@@ -2225,6 +2246,7 @@ export const node = LayerNode.make({
     Instruction.node,
     SessionRunState.node,
     SessionInput.node,
+    SessionSupersession.node,
     SessionRevert.node,
     SessionSummary.node,
     SystemPrompt.node,
