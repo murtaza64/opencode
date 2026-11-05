@@ -66,13 +66,19 @@ type Page = { items: MessageWithParts[]; cursor?: string }
 // resolved under this client's base (`/oc`, or `/hosts/<id>/oc` for another host) so an image loads from its own host.
 // An older Core ignores the parameter and answers full parts, which pass through unchanged.
 const ATTACHMENT = /^\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/attachment\/\d{1,4}$/
+// A large file part (a pasted screenshot) on a compact page (runtime-lag #895): its url is Core's part file route and
+// metadata.compactFile carries its sizes.
+const FILE_ROUTE = /^\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/file$/
+export const compactFile = (part: MessageWithParts["parts"][number]) =>
+  part.type === "file" && FILE_ROUTE.test(part.url) && !!(part as { metadata?: { compactFile?: unknown } }).metadata?.compactFile
 export const attachmentsUnder = (base: string, items: MessageWithParts[]) => items.map((message) => {
-  const routed = (part: MessageWithParts["parts"][number]) =>
-    part.type === "tool" && part.state.status === "completed" && part.state.attachments?.some((file) => ATTACHMENT.test(file.url))
+  const routed = (part: MessageWithParts["parts"][number]) => compactFile(part) ||
+    (part.type === "tool" && part.state.status === "completed" && part.state.attachments?.some((file) => ATTACHMENT.test(file.url)))
   if (!message.parts.some(routed)) return message
   return {
     ...message,
-    parts: message.parts.map((part) => !routed(part) || part.type !== "tool" || part.state.status !== "completed" ? part : {
+    parts: message.parts.map((part) => part.type === "file" && compactFile(part) ? { ...part, url: `${base}${part.url}` }
+      : !routed(part) || part.type !== "tool" || part.state.status !== "completed" ? part : {
       ...part,
       state: { ...part.state, attachments: part.state.attachments!.map((file) => ATTACHMENT.test(file.url) ? { ...file, url: `${base}${file.url}` } : file) },
     }),
