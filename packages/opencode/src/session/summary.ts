@@ -191,8 +191,15 @@ const layer = Layer.effect(
           if (!target || target.info.role !== "user") return
           const diffs = bound(turn ? yield* snapshot.diffFull(turn.from, turn.to) : [])
           if (!isDeepStrictEqual(target.info.summary?.diffs, diffs)) {
-            target.info.summary = { ...target.info.summary, diffs }
-            yield* sessions.updateMessage(target.info)
+            // Summaries can run after the turn (off the dispatch path): a revert or delete since then wins.
+            const current = yield* MessageV2.get({ sessionID: input.sessionID, messageID: input.messageID }).pipe(
+              Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)),
+              Effect.provideService(Database.Service, database),
+            )
+            if (!current || current.info.role !== "user" || (yield* sessions.get(input.sessionID).pipe(Effect.orDie)).revert)
+              return
+            // Write onto the current row, not the copy read before diffing, so other fields updated since are kept.
+            yield* sessions.updateMessage({ ...current.info, summary: { ...current.info.summary, diffs } })
           }
           remember(input.messageID, key)
         }),

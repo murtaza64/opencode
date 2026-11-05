@@ -1203,8 +1203,13 @@ const layer = Layer.effect(
         let started = false
         let boundary = true
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+        // The finish tree of the step that ran in the previous iteration, if that iteration was a model step. Only an
+        // immediately following model step may start from it; any other iteration clears it.
+        let finishedTree: string | undefined
 
         while (true) {
+          const base = finishedTree
+          finishedTree = undefined
           yield* status.set(sessionID, { type: "busy" })
           yield* Effect.logInfo("loop", { "session.id": sessionID, step })
 
@@ -1336,6 +1341,7 @@ const layer = Layer.effect(
               assistantMessage: msg,
               sessionID,
               model,
+              base,
             })
             .pipe(Effect.onInterrupt(() => finalizeInterruptedAssistant))
 
@@ -1422,6 +1428,7 @@ const layer = Layer.effect(
               inputs.presented(sessionID, mail),
             )
 
+            finishedTree = handle.finished()
             if (result === "stop") return "break" as const
             const finished = handle.message.finish && !["tool-calls", "unknown"].includes(handle.message.finish)
             if (finished && !handle.message.error) {

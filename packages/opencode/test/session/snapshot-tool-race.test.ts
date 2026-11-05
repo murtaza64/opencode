@@ -214,3 +214,37 @@ it.live("tool execution produces non-empty session diff (snapshot race)", () =>
     { git: true, config: providerCfg },
   ),
 )
+
+it.live("a new turn does not reuse the last turn's finish tree, so edits made between turns stay out of its patch", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ dir, llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "between turns",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      const agentFile = path.join(dir, "agent-made.txt")
+      yield* llm.toolMatch((hit) => JSON.stringify(hit.body).includes("first task"), "bash", { command: `echo one > ${agentFile}` })
+      yield* llm.textMatch((hit) => JSON.stringify(hit.body).includes("first task") && JSON.stringify(hit.body).includes("bash"), "first done")
+      yield* prompt.prompt({ sessionID: session.id, agent: "build", noReply: true, parts: [{ type: "text", text: "first task" }] })
+      yield* prompt.loop({ sessionID: session.id })
+
+      // A human edit between turns.
+      yield* Effect.promise(() => fs.writeFile(path.join(dir, "human-made.txt"), "mine\n"))
+
+      const second = path.join(dir, "agent-second.txt")
+      yield* llm.toolMatch((hit) => JSON.stringify(hit.body).includes("second task"), "bash", { command: `echo two > ${second}` })
+      yield* llm.textMatch((hit) => JSON.stringify(hit.body).includes("second task") && JSON.stringify(hit.body).includes("agent-second"), "second done")
+      yield* prompt.prompt({ sessionID: session.id, agent: "build", noReply: true, parts: [{ type: "text", text: "second task" }] })
+      yield* prompt.loop({ sessionID: session.id })
+
+      const all = yield* MessageV2.filterCompactedEffect(session.id)
+      const patches = all.flatMap((m) => m.parts).filter((p): p is SessionV1.PatchPart => p.type === "patch")
+      const secondPatch = patches.find((p) => p.files.some((f) => f.endsWith("agent-second.txt")))
+      expect(secondPatch).toBeDefined()
+      expect(secondPatch!.files.some((f) => f.endsWith("human-made.txt"))).toBe(false)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
