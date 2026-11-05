@@ -1,9 +1,14 @@
 import { define } from "./internal"
 import type { ModelV2Info } from "@opencode-ai/sdk/v2/types"
-import { Clock, Effect, Stream } from "effect"
+import { Clock, Effect, Exit, Semaphore, Stream } from "effect"
 import { EventV2 } from "../event"
 import { ModelsDev } from "../models-dev"
 import { ProviderV2 } from "../provider"
+
+// One Location rebuilds its catalog at a time across the whole process. A rebuild is mostly synchronous work over
+// the full models.dev catalog; every loaded Location rebuilding at once blocked the event loop for the sum of them all
+// (seconds with tens of Locations). Serialized, each rebuild is one short block and requests run between them.
+const rebuild = Semaphore.makeUnsafe(1)
 
 function released(date: string) {
   const time = Date.parse(date)
@@ -175,13 +180,53 @@ export const ModelsDevPlugin = define({
         }
       }),
     )
+    // Every Refreshed marks this Location dirty; one pass waits its turn and rebuilds until no refresh arrived during the
+    // rebuild, so a burst (e.g. two announcements of one refresh) costs at most one extra rebuild.
+    let dirty = false
+    let running = false
+    // Check-and-clear is one synchronous step, so a Refreshed can never land between "nothing left" and "not running".
+    const next = Effect.sync(() => {
+      if (!dirty) {
+        running = false
+        return false
+      }
+      dirty = false
+      return true
+    })
+    const pass = Effect.gen(function* () {
+      while (yield* next) {
+        const requested = yield* Clock.currentTimeMillis
+        yield* rebuild.withPermits(1)(
+          Effect.gen(function* () {
+            const started = yield* Clock.currentTimeMillis
+            yield* Effect.gen(function* () {
+              yield* ctx.integration.reload()
+              yield* ctx.catalog.reload()
+            }).pipe(
+              // One stuck Location must not hold the only permit and freeze every other Location's refresh.
+              Effect.timeoutOrElse({
+                duration: "30 seconds",
+                orElse: () => Effect.logWarning("models.dev catalog reload timed out", { waitedMs: started - requested }),
+              }),
+            )
+            yield* Effect.logInfo("models.dev catalog reloaded", {
+              ms: (yield* Clock.currentTimeMillis) - started,
+              waitedMs: started - requested,
+            })
+          }),
+        )
+        // Release first, then yield to the macrotask queue so pending requests run before the next rebuild.
+        yield* Effect.sleep(0)
+      }
+    // A pass that ends early (interrupt, defect) frees the slot; a normal end already cleared it in `next`.
+    }).pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : Effect.sync(() => (running = false)))))
     yield* events.subscribe(ModelsDev.Event.Refreshed).pipe(
       Stream.runForEach(() =>
         Effect.gen(function* () {
-          const started = yield* Clock.currentTimeMillis
-          yield* ctx.integration.reload()
-          yield* ctx.catalog.reload()
-          yield* Effect.logInfo("models.dev catalog reloaded", { ms: (yield* Clock.currentTimeMillis) - started })
+          dirty = true
+          if (running) return
+          running = true
+          yield* pass.pipe(Effect.forkScoped)
         }),
       ),
       Effect.forkScoped({ startImmediately: true }),

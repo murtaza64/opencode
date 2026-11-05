@@ -381,7 +381,18 @@ function roll() {
   state.minute.p99 = Math.max(state.minute.p99, loop.p99Ms)
   state.minute.max = Math.max(state.minute.max, loop.maxMs)
   if (++state.minute.windows === 6) {
-    log({ type: "loop", at, p99Ms: state.minute.p99, maxMs: state.minute.max, stalls: state.minute.stalls, rssMB: mb(memory.rss) })
+    log({
+      type: "loop",
+      at,
+      p99Ms: state.minute.p99,
+      maxMs: state.minute.max,
+      stalls: state.minute.stalls,
+      rssMB: mb(memory.rss),
+      // Split RSS: JS heap vs memory outside it (Buffers, native), so a memory jump says which side grew.
+      heapUsedMB: mb(memory.heapUsed),
+      externalMB: mb(memory.external),
+      arrayBuffersMB: mb(memory.arrayBuffers),
+    })
     state.minute = { p99: 0, max: 0, stalls: 0, windows: 0 }
   }
   state.windows.push({
