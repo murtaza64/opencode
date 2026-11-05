@@ -312,6 +312,21 @@
   .tool-run-icon[data-size="XL"] { --tool-icon: 20px; }
   .tool-run-icon [data-component="icon"], .tool-run-icon svg { inline-size: var(--tool-icon); block-size: var(--tool-icon); color: inherit; }
   .tool-run-icon[data-status="unfinished"] { color: var(--accent, var(--blue)); }
+  /* One reasoning chip per part, in the same quiet row as a tool: brain, label, disclosure. Collapsed while streaming
+   * and after; the live dot is the chip's own state (the composer keeps only the session activity dot). */
+  .reasoning-chip { display: inline-block; max-inline-size: 100%; margin-block: 2px; }
+  .reasoning-chip[data-open] { display: block; }
+  .reasoning-chip-summary { gap: 6px; }
+  .reasoning-chip-label { color: var(--subtext0); font: 400 13px/20px var(--font-sans); }
+  .reasoning-chip[data-streaming] .reasoning-chip-label { color: var(--subtext1); }
+  .reasoning-chip-live { display: inline-flex; align-items: center; }
+  .reasoning-chip-live i { inline-size: 5px; block-size: 5px; border-radius: 50%; background: var(--accent, var(--blue)); animation: reasoning-pulse 1s ease-in-out infinite; }
+  .reasoning-chip-disclosure { color: var(--overlay1); font-size: 15px; line-height: 1; transition: transform .12s ease-out; }
+  .reasoning-chip-disclosure[data-open] { transform: rotate(90deg); }
+  .reasoning-chip-member { margin: 2px 0 4px; padding-inline-start: 26px; color: var(--subtext0); }
+  .reasoning-chip-member [data-component="markdown"] { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--subtext0); }
+  @keyframes reasoning-pulse { 50% { opacity: .3; } }
+  @media (prefers-reduced-motion: reduce) { .reasoning-chip-live i { animation: none; } .reasoning-chip-disclosure { transition: none; } }
   .tool-run-icon[data-status="failed"] { color: var(--red); }
   .tool-run-icon:is([data-status="interrupted"], [data-status="unknown-exit"], [data-status="unknown"]) { color: var(--overlay1); }
   .tool-run-more { align-self: center; padding-inline: 2px; font-size: 12px; color: var(--subtext0); font-variant-numeric: tabular-nums; }

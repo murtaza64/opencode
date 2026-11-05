@@ -1,7 +1,8 @@
 // Chat activity (chat-activity-thinking-split-20261103). Above the composer: the sidebar's circular dot, same state
 // class as the session's sidebar row (busy, idle; dashed unknown while disconnected), words only in its label.
-// Thinking dots appear only while a reasoning part streams with no running tool and no streaming text, never
-// from busy alone. The running tool call's icon pulses; none after it completes. Reduced motion: no animation.
+// A reasoning part renders one chip; it shows the live state only while that part streams, never from busy alone and
+// never beside the composer's activity dot. The running tool call's icon pulses; none after it completes. Reduced
+// motion: no animation.
 // RTL. A Mac Mini session shows the Mini's state.
 // Run from packages/es-app: node test/chat-activity.browser.mjs   (SCREENSHOT_DIR=<dir>)
 import { createRequire } from "node:module"
@@ -46,7 +47,7 @@ try {
   const line = page.locator(".prompt-box").locator("xpath=preceding::div[contains(@class,'session-work-status')][1]")
   const chatDot = page.locator(".session-work-status:visible .dot")
   const sidebarDot = page.locator('.sidebar a[href*="/session/ses_a"] .dot').first()
-  const thinking = page.locator(".session-work-status:visible .thinking-dots")
+  const thinking = page.locator(".reasoning-chip")
   await expect(chatDot).toHaveAttribute("data-chat-dot", "busy", { timeout: 120_000 })
   await expect(chatDot).toHaveAttribute("aria-label", "Working")
   expect(await sidebarDot.getAttribute("class")).toContain("busy")
@@ -62,7 +63,7 @@ try {
   // Busy alone is not thinking.
   await expect(thinking).toHaveCount(0)
 
-  // An open assistant message streaming reasoning: thinking. Text starts streaming: not thinking.
+  // An open assistant message streaming reasoning: one live chip. Text starts streaming: the chip rests.
   const info = { id: "msg_think", parentID: "msg_1", sessionID: "ses_a", role: "assistant", agent: "build", mode: "build", providerID: "fixture", modelID: "test",
     path: { cwd: directory, root: directory }, time: { created: Date.now() }, cost: 0, tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } } }
   const reasoning = { id: "prt_reason", messageID: info.id, sessionID: "ses_a", type: "reasoning", text: "Let me think", time: { start: Date.now() } }
@@ -70,25 +71,31 @@ try {
   fixture.emit("message.updated", { info })
   fixture.emit("message.part.updated", { part: reasoning })
   await expect(thinking).toHaveCount(1)
-  await expect(thinking).toHaveAttribute("aria-label", "Thinking")
+  await expect(thinking).toContainText("Thinking")
+  await expect(thinking).toHaveAttribute("data-streaming", "")
+  await expect(page.locator(".session-work-status:visible .thinking-dots")).toHaveCount(0)
   await page.screenshot({ path: join(shots, "thinking.png") })
   fixture.emit("message.part.updated", { part: { ...reasoning, time: { start: reasoning.time.start, end: Date.now() } } })
+  await expect(thinking).toContainText("Reasoning")
+  await expect(thinking).not.toHaveAttribute("data-streaming", "")
   const tool = { id: "prt_run", messageID: info.id, sessionID: "ses_a", type: "tool", tool: "bash", callID: "call_run",
     state: { status: "running", input: { command: "bun run build" }, title: "", metadata: {}, time: { start: Date.now() } } }
   fixture.emit("message.part.updated", { part: tool })
-  await expect(thinking).toHaveCount(0)
+  await expect(thinking).toHaveCount(1)
+  await expect(thinking).not.toHaveAttribute("data-streaming", "")
   // The running call pulses; exactly one.
   await expect(page.locator(".tool-run-icon[data-running]")).toHaveCount(1)
   expect(await page.locator(".tool-run-icon[data-running]").evaluate((el) => getComputedStyle(el).animationName)).toBe("tool-running")
   await page.screenshot({ path: join(shots, "running.png") })
   fixture.emit("message.part.updated", { part: { ...tool, state: { ...tool.state, status: "completed", output: "ok", metadata: { exit: 0 }, time: { start: tool.state.time.start, end: Date.now() } } } })
   await expect(page.locator(".tool-run-icon[data-running]")).toHaveCount(0)
-  // Reasoning again while text streams: not thinking.
+  // A completed reasoning block stays as a resting chip when text follows; text alone never starts a live chip.
   const text = { id: "prt_text", messageID: info.id, sessionID: "ses_a", type: "text", text: "Here", time: { start: Date.now() } }
-  fixture.emit("message.part.updated", { part: { ...reasoning, id: "prt_reason2", time: { start: Date.now() } } })
   fixture.emit("message.part.updated", { part: text })
   await page.waitForTimeout(300)
-  await expect(thinking).toHaveCount(0)
+  await expect(thinking).toHaveCount(1)
+  await expect(thinking).toContainText("Reasoning")
+  await expect(thinking).not.toHaveAttribute("data-streaming", "")
 
   // Idle (Core completes the turn's message, then reports idle): dot idle on both; disconnected: dashed unknown.
   const done = { ...info, time: { created: info.time.created, completed: Date.now() } }
@@ -101,7 +108,7 @@ try {
   expect(await chatDot.evaluate((el) => getComputedStyle(el).borderStyle)).toBe("dashed")
   await page.reload()
 
-  // Reduced motion: no pulse, no fading dots, a static glow on the running call.
+  // Reduced motion: no pulse, no live chip animation, a static glow on the running call.
   await page.emulateMedia({ reducedMotion: "reduce" })
   fixture.setStatus("busy")
   // A new turn's open message with a running call.
@@ -124,7 +131,7 @@ try {
   await expect(chatDot).toHaveAttribute("data-chat-dot", "busy", { timeout: 60_000 })
   void line
   expect(errors).toEqual([])
-  console.log(`PASS chat activity: sidebar circular dot with matching state (busy, idle, dashed unknown), words in its label only; thinking only while reasoning streams (not from busy, not with a running tool or streaming text); one pulsing running tool icon, none after completion; reduced motion static; RTL; Mini session shows the Mini's state; screenshots ${shots}`)
+  console.log(`PASS chat activity: sidebar circular dot with matching state (busy, idle, dashed unknown), words in its label only; one reasoning chip live only while that part streams, never beside the composer's activity dot; one pulsing running tool icon, none after completion; reduced motion static; RTL; Mini session shows the Mini's state; screenshots ${shots}`)
 } finally {
   await preview.close()
   await mini.close?.()

@@ -1315,19 +1315,33 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   }
 }
 
-/* TUI-style turn footer on the agent (start) side: ▣ Agent · model · duration [· interrupted].
- * Quiet metadata: no rule, so turns separate by spacing rather than chrome. */
+/* One quiet turn footer on the agent (start) side: time · agent · model · duration, plus a state icon only for a
+ * turn that did not finish cleanly. It rides the Copy row when the turn ends in agent text; a tool-only or silent end
+ * keeps its own row. No success mark. */
 .turn-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-inline-size: 0;
+  max-inline-size: 100%;
   text-align: start;
-  color: var(--subtext0);
-  font-size: 11px;
-  font-family: var(--font-mono);
-  margin: 4px 0 18px;
+  color: var(--text-weak, var(--subtext0));
+  font-size: 12px;
+  font-family: var(--font-sans);
+  margin: 0;
 }
-.turn-summary .marker { color: var(--mauve); }
+.turn-meta { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-summary[data-standalone] { display: flex; margin: 4px 0 18px; }
 .turn-summary .agent { color: var(--text); }
-.turn-summary.interrupted .marker,
-.turn-summary.interrupted .agent { color: var(--overlay0); }
+.turn-summary .turn-time { color: var(--subtext0); }
+.turn-state { display: inline-flex; align-items: center; color: var(--overlay1); }
+.turn-state[data-state="interrupted"] { color: var(--yellow); }
+.turn-state[data-state="error"] { color: var(--red); }
+.turn-state[data-state="cancelled"] { color: var(--overlay1); }
+.turn-copy { display: inline-flex; align-items: center; padding: 0; border: 0; background: none; color: var(--subtext0); cursor: pointer; }
+.turn-copy:hover { color: var(--text); }
+/* A tap on the turn reveals the Copy row on touch, where hover never arrives. */
+.transcript [data-touch-reveal] [data-slot="text-part-copy-wrapper"] { opacity: 1; pointer-events: auto; }
 /* System provenance, not a message: a single dim line, never a bubble. */
 .restart-marker {
   color: var(--overlay1);
@@ -1359,11 +1373,15 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
   background: var(--surface0);
   color: var(--text);
   padding: 10px 12px;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
-  max-height: 30vh;
-  overflow-y: auto;
 }
+.conversation-error > summary { display: flex; align-items: baseline; gap: 8px; cursor: pointer; list-style: none; font-size: 12px; color: var(--text); }
+.conversation-error > summary::-webkit-details-marker { display: none; }
+.conversation-error-cause { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-error-details { margin-inline-start: auto; flex: none; color: var(--subtext0); font-size: 11px; text-decoration: underline; text-underline-offset: 2px; }
+.conversation-error-detail { margin-block-start: 8px; max-height: 30vh; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+  color: var(--subtext1); font: 11px/1.5 var(--font-mono); }
+.conversation-error-detail:focus-visible { outline: 1px solid var(--lavender); outline-offset: 2px; }
 
 /* right info panel: one recessed sidebar, sections split by headings only */
 .session-info {
@@ -2168,18 +2186,11 @@ a.mini-item > .glyph { margin: 0; }
 
 /* Chat activity (chat-activity-thinking-split): the status line's dot animates like the sidebar's busy dot. */
 .session-work-status .dot.busy::after { animation: busy-halo 1.6s ease-in-out infinite; will-change: opacity, transform; }
-/* Thinking: three dots, separate from the activity dot. */
-.thinking-dots { display: inline-flex; gap: 3px; align-items: center; }
-.thinking-dots > i { inline-size: 4px; block-size: 4px; border-radius: 50%; background: var(--subtext0); animation: thinking-fade 1.2s ease-in-out infinite; }
-.thinking-dots > i:nth-child(2) { animation-delay: 0.2s; }
-.thinking-dots > i:nth-child(3) { animation-delay: 0.4s; }
-@keyframes thinking-fade { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
 /* The running tool call's icon glows gently; finished calls never animate. */
 .tool-run-icon[data-running] { border-radius: 50%; animation: tool-running 1.6s ease-in-out infinite; }
 @keyframes tool-running { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, var(--lavender)) 35%, transparent); } }
 @media (prefers-reduced-motion: reduce) {
   .session-work-status .dot.busy::after { animation: none; opacity: 0.5; will-change: auto; }
-  .thinking-dots > i { animation: none; opacity: 0.7; }
   .tool-run-icon[data-running] { animation: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, var(--lavender)) 45%, transparent); }
 }
 /* A transcript held for this draft (it arrived while the person was elsewhere): insert or discard, never auto-sent. */

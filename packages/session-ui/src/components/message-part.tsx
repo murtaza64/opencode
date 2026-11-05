@@ -185,6 +185,8 @@ export interface MessageProps {
   showReasoningSummaries?: boolean
   useV2Actions?: boolean
   comments?: UserMessageComment[]
+  /** Host-rendered turn footer, placed on the last text part's Copy row (never on its own row). */
+  turnFooter?: JSX.Element
 }
 
 export type SessionAction = (input: { sessionID: string; messageID: string }) => Promise<void> | void
@@ -218,6 +220,7 @@ export interface MessagePartProps {
   showAssistantCopyPartID?: string | null
   turnDurationMs?: number
   useV2Actions?: boolean
+  turnFooter?: JSX.Element
 }
 
 function MessageActionButton(
@@ -746,6 +749,7 @@ export function AssistantParts(props: {
   showReasoningSummaries?: boolean
   shellToolDefaultOpen?: boolean
   editToolDefaultOpen?: boolean
+  turnFooter?: JSX.Element
 }) {
   const data = useData()
   const emptyParts: PartType[] = []
@@ -827,6 +831,7 @@ export function AssistantParts(props: {
                         showAssistantCopyPartID={props.showAssistantCopyPartID}
                         turnDurationMs={props.turnDurationMs}
                         useV2Actions={props.useV2Actions}
+                        turnFooter={props.turnFooter}
                         defaultOpen={partDefaultOpen(item()!, props.shellToolDefaultOpen, props.editToolDefaultOpen)}
                       />
                     </Show>
@@ -973,6 +978,7 @@ export function Message(props: MessageProps) {
             showAssistantCopyPartID={props.showAssistantCopyPartID}
             showReasoningSummaries={props.showReasoningSummaries}
             useV2Actions={props.useV2Actions}
+            turnFooter={props.turnFooter}
           />
         )}
       </Match>
@@ -988,6 +994,7 @@ export function AssistantMessageDisplay(props: {
   showAssistantCopyPartID?: string | null
   showReasoningSummaries?: boolean
   useV2Actions?: boolean
+  turnFooter?: JSX.Element
 }) {
   const emptyTools: ToolPart[] = []
   const part = createMemo(() => index(props.parts))
@@ -1049,6 +1056,7 @@ export function AssistantMessageDisplay(props: {
                       renderTools={props.renderTools}
                       showAssistantCopyPartID={props.showAssistantCopyPartID}
                       useV2Actions={props.useV2Actions}
+                      turnFooter={props.turnFooter}
                     />
                   </Show>
                 )
@@ -1484,6 +1492,7 @@ export function Part(props: MessagePartProps) {
         showAssistantCopyPartID={props.showAssistantCopyPartID}
         turnDurationMs={props.turnDurationMs}
         useV2Actions={props.useV2Actions}
+        turnFooter={props.turnFooter}
       />
     </Show>
   )
@@ -1796,6 +1805,7 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
                 {meta()}
               </span>
             </Show>
+            {props.turnFooter}
           </div>
         </Show>
       </div>

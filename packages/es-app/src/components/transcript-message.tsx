@@ -90,9 +90,16 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
           fallback={<Parts {...props} parts={parts()} />}>{(key) => props.renderRun?.(key)}</Show>
       }}</Index>
     }</Show>
-    <Show when={messageError()}>{(error) =>
-      <div class="conversation-error" data-message-error-id={props.message.id} role="note" aria-label="Provider error">{errorText(error())}</div>
-    }</Show>
+    <Show when={messageError()}>{(error) => {
+      // One short cause, then the provider's own words behind Details. Text only (never markup), control codes and
+      // ANSI escapes removed, and bounded so a provider dump cannot flood the transcript.
+      const full = errorText(error()).replace(/\u001b\[[0-9;]*m/g, "").trim().slice(0, 4000)
+      const cause = (full.split(/\n/).find(line => line.trim()) ?? "The model provider returned an error").replace(/\s+/g, " ").trim().slice(0, 180)
+      return <details class="conversation-error" data-message-error-id={props.message.id} aria-label="Provider error">
+        <summary><span class="conversation-error-cause" dir="auto">{cause}</span><span class="conversation-error-details">Details</span></summary>
+        <div class="conversation-error-detail" dir="auto" tabIndex={0} role="region" aria-label="Provider error details">{full || cause}</div>
+      </details>
+    }}</Show>
   </>}>
     <details class="generated-input" data-generated-message-id={props.message.id} data-self-handoff={handoff() || undefined}
       onToggle={event => setOpen(event.currentTarget.open)}>

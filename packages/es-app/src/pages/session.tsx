@@ -49,7 +49,7 @@ import { createSelfHandoff, SELF_HANDOFF_VERSION } from "../self-handoff"
 import { createMailReceiptRecords, MailRecords } from "../mail-receipts"
 import { DeliveredTick } from "../components/message-tick"
 import { ContextLines } from "../components/context-line"
-import { chatDot, modelThinking } from "../chat-activity"
+import { chatDot } from "../chat-activity"
 import { clockTime, exactTime } from "../local-time"
 import { lastAudible, quietTurns } from "../quiet-turns"
 import { AppHeader } from "../components/native-header"
@@ -817,18 +817,12 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   }, undefined, { equals: (a, b) => a?.name === b?.name && a?.at === b?.at })
   // The work line already animates while busy, so the transcript tail shows the same dot static.
   const Thinking = () => <div class="thinking" title="waiting for the agent's first output"><span class="busy-dot" data-animate aria-hidden="true" /></div>
-  // The model's reasoning stream, apart from the session's activity (chat-activity.ts).
-  const reasoningNow = createMemo(() => {
-    const last = messages().findLast((message) => message.role === "assistant")
-    return modelThinking(last, last ? live.data.part[last.id] ?? [] : [])
-  })
   // Status words live in the dot's label; only what the person may act on stays as text (a reply, a failure).
   const WorkStatus = () => (
     <div class="session-work-status" role="status" data-state={workState()} title={backendError() || undefined}>
       <span class={`dot ${chatDot(workState()).dot}`} data-chat-dot={chatDot(workState()).dot} role="img"
         aria-label={chatDot(workState()).label} title={[chatDot(workState()).label, workState() === "stale" || workState() === "disconnected"
           ? live.loaded() ? "showing saved transcript" : "" : ""].filter(Boolean).join(": ")} />
-      <Show when={reasoningNow()}><span class="thinking-dots" role="img" aria-label="Thinking" title="Thinking"><i /><i /><i /></span></Show>
       <Show when={workState() === "working" || workState() === "retry" || workState() === "idle"} fallback={<>
         <Show when={workState() === "waiting" || workState() === "failed"}>
           <span>{workState() === "waiting" ? "Waiting for your reply" : `Session failed — see error ${inlineError() ? "in conversation" : "above"}`}</span>
@@ -953,7 +947,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   // or get aborted.
   // Times are kept apart: when the turn's prompt arrived (started), when this final reply began (replied) and when the
   // turn completed or was interrupted (ended). A time Core did not record is omitted, never substituted.
-  type TurnSummary = { agent?: string; providerID?: string; modelID?: string; duration?: number; interrupted: boolean; started?: number; replied?: number; ended?: number }
+  type TurnState = "completed" | "interrupted" | "error" | "cancelled"
+  type TurnSummary = { messageID: string; agent?: string; providerID?: string; modelID?: string; duration?: number; state: TurnState
+    started?: number; replied?: number; ended?: number; copyPartID?: string; copyMessageID?: string; copyText?: string; endsInText: boolean }
   // Parent prompt IDs of finished agent turns (see completedTurns). Controls the
   // footer and which tool calls may coalesce, so live turns stay fully visible.
   const turnsDone = createMemo(() => {
@@ -969,29 +965,57 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     const out = new Map<string, TurnSummary>()
     let turnStart: number | undefined
     let last: any | undefined
-    const flush = () => {
-      if (last && turnsDone().has(last.parentID)) {
-        const end = last.time?.completed
-        out.set(last.id, {
-          agent: last.agent ?? last.mode,
-          providerID: last.providerID,
-          modelID: last.modelID,
-          duration: turnStart !== undefined && end ? end - turnStart : undefined,
-          interrupted: last.error?.name === "MessageAbortedError",
-          started: turnStart,
-          replied: typeof last.time?.created === "number" ? last.time.created : undefined,
-          ended: typeof end === "number" ? end : undefined,
-        })
+    let steps: any[] = []
+    // The turn's last text (Copy) and what is visibly last (a text vs a tool/reasoning/no output). Copy is one per
+    // turn, on the final message; the footer joins it there when the turn ends in agent text.
+    const derive = (message: any) => {
+      let copyPartID: string | undefined
+      let copyMessageID: string | undefined
+      let copyText: string | undefined
+      let lastVisible: any | undefined
+      for (const step of steps) for (const part of live.data.part[step.id] ?? []) {
+        if (part.type === "text" && part.text?.trim()) { copyPartID = part.id; copyMessageID = step.id; copyText = part.text }
+        if (renderable(part, true)) lastVisible = part
       }
-      last = undefined
+      const end = message.time?.completed
+      const state: TurnState = message.error?.name === "MessageAbortedError" ? "interrupted"
+        : message.error || message.finish === "error" ? "error"
+        : typeof end === "number" ? "completed"
+        : "cancelled"
+      out.set(message.id, {
+        messageID: message.id,
+        agent: message.agent ?? message.mode,
+        providerID: message.providerID,
+        modelID: message.modelID,
+        duration: turnStart !== undefined && end ? end - turnStart : undefined,
+        state,
+        started: turnStart,
+        replied: typeof message.time?.created === "number" ? message.time.created : undefined,
+        ended: typeof end === "number" ? end : undefined,
+        ...(copyPartID ? { copyPartID } : {}),
+        ...(copyMessageID ? { copyMessageID } : {}),
+        ...(copyText ? { copyText } : {}),
+        endsInText: lastVisible?.type === "text",
+      })
     }
-    for (const m of messages()) {
+    const flush = () => {
+      if (last && turnsDone().has(last.parentID)) derive(last)
+      last = undefined
+      steps = []
+    }
+    // Message IDs are time-ordered in Core, but a fixture or an imported transcript may not be; sort by the record's
+    // own created time so a user prompt always precedes its assistant steps.
+    const ordered = [...messages()].sort((a, b) => ((a as any).time?.created ?? 0) - ((b as any).time?.created ?? 0)
+      || a.id.localeCompare(b.id))
+    for (const m of ordered) {
       const time = (m as any).time ?? {}
       if (m.role === "user") {
         flush()
         turnStart = time.created
-      } else if (time.completed || (m as any).error) {
+      } else {
+        // The final assistant step is the turn's footer even when it never completed (a cancelled end).
         last = m
+        steps.push(m)
       }
     }
     flush()
@@ -1011,6 +1035,48 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     if (s < 60) return `${s}s`
     if (s < 3600) return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`
     return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
+  }
+
+  // One quiet footer per turn: completion time, agent, model, duration, and a state icon only when the turn did not
+  // finish cleanly. It rides the Copy row (styled like the user message's hover meta) when the turn ends in agent
+  // text; a tool-only or silent end keeps its own always-visible row. No success mark: only interrupted/error/cancelled
+  // are marked, with an icon and an accessible label.
+  const TurnStateIcon = (props: { state: Exclude<TurnState, "completed"> }) => {
+    const icon = () => props.state === "interrupted" ? "stop" : props.state === "error" ? "warning" : "close"
+    const label = () => props.state === "interrupted" ? "Interrupted" : props.state === "error" ? "Error" : "Cancelled"
+    return <span class="turn-state" data-state={props.state} role="img" aria-label={label()} title={label()}>
+      <Icon name={icon()} size="small" />
+    </span>
+  }
+  const TurnFooter = (props: { summary: TurnSummary; copy?: string; standalone?: boolean }) => {
+    const [copied, setCopied] = createSignal(false)
+    const copy = async () => {
+      if (!props.copy) return
+      const ok = await navigator.clipboard?.writeText(props.copy).then(() => true, () => false)
+      if (!ok) return
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+    const state = () => props.summary.state
+    const endedLabel = () => state() === "interrupted" ? "interrupted" : state() === "error" ? "error" : state() === "cancelled" ? "cancelled" : ""
+    const exact = () => [props.summary.started && `Turn started ${exactTime(props.summary.started)}`,
+      props.summary.replied && `reply started ${exactTime(props.summary.replied)}`,
+      props.summary.ended && `${endedLabel() || "completed"} ${exactTime(props.summary.ended)}`].filter(Boolean).join("; ")
+    return <span class="turn-summary" data-state={state()} data-standalone={props.standalone ? "" : undefined}>
+      <Show when={state() === "completed" ? undefined : state() as Exclude<TurnState, "completed">}>{value => <TurnStateIcon state={value()} />}</Show>
+      <Show when={props.copy}><button type="button" class="turn-copy" aria-label={copied() ? "Copied" : "Copy response"}
+        title={copied() ? "Copied" : "Copy response"} onMouseDown={event => event.preventDefault()} onClick={() => void copy()}>
+        <Icon name={copied() ? "check" : "copy"} size="small" /></button></Show>
+      <span class="turn-meta" dir="auto">
+        <Show when={props.summary.ended ?? props.summary.replied}>{(at) =>
+          <><time class="turn-time" dateTime={new Date(at()).toISOString()} title={exact()} aria-label={exact()}>
+            {props.summary.ended ? `${endedLabel()}${endedLabel() ? " " : ""}` : "replied "}{clockTime(at())} · {ago(at())}</time>{" · "}</>}</Show>
+        <span class="agent">{titlecase(props.summary.agent)}</span>
+        {" · "}
+        {modelName(props.summary.providerID, props.summary.modelID)}
+        <Show when={props.summary.duration}>{(d) => <> · {fmtDuration(d())}</>}</Show>
+      </span>
+    </span>
   }
 
   const activeDraft = composer.visibleDraft
@@ -2258,6 +2324,12 @@ export function SessionView(props: { sessionID: string; directory: string; embed
               {(row, index) => {
                  if (row.type === "mail") return <MailRow message={row.message} ids={transcriptMailIDs()} name={mailName} session={sessionID} replied={mailReplied().has(row.message.id)} />
                 const m = row.message
+                // The final step's footer; a text-ending footer may belong to an earlier step when the last step is empty.
+                const final = () => turnSummaries().get(m.id)
+                const summary = () => {
+                  if (final()?.endsInText) return final()
+                  return [...turnSummaries().values()].find(value => value.endsInText && value.copyMessageID === m.id)
+                }
                 const member = () => quiet().get(m.id)
                 const folded = () => { const value = member(); return !!value && !quietOpen().has(value.group) }
                 const segments = createMemo(() => m.role === "assistant" ? messageSegments(live.data.part[m.id] ?? [], toolRuns()) : [],
@@ -2274,7 +2346,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                 }}</Show>
                 <Show when={!folded()}>
                 <div data-find-message={m.id} data-find-selected={ownHit() ? "true" : undefined}
-                  data-anchored={anchored().has(m.id) ? "true" : undefined} data-quiet={member() ? "" : undefined}>
+                  data-anchored={anchored().has(m.id) ? "true" : undefined} data-quiet={member() ? "" : undefined}
+                  onPointerUp={(event) => {
+                    // Touch has no hover: one tap reveals the turn's Copy row.
+                    if (event.pointerType === "touch" && m.role === "assistant") (event.currentTarget as HTMLElement).dataset.touchReveal = ""
+                  }}>
                   <Show when={ownHit()}>{(hit) =>
                     <div class="find-jump" role="region" aria-label="Selected transcript match"><FindExcerpt hit={hit()} /></div>
                   }</Show>
@@ -2284,7 +2360,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                       <img class="desk-reply-avatar" src={DESK.avatar} alt={DESK.name} width="20" height="20" />
                     </Show>
                     <TranscriptMessage message={m} parts={live.data.part[m.id] ?? []} renderTools={renderTools}
-                    segments={segments()} renderRun={renderRun} /></>}>
+                    segments={segments()} renderRun={renderRun}
+                    showAssistantCopyPartID={summary()?.endsInText ? summary()?.copyPartID ?? null : null}
+                    turnFooter={summary()?.endsInText ? <TurnFooter summary={summary()!} /> : undefined} /></>}>
                     <Show when={wakeMarker(m, messages(), wakeEvents() ?? new Map())}>{(marker) =>
                       <div class="wake-marker" data-state={marker().state} role="note" title={marker().title}>
                         <span>{marker().label}</span>
@@ -2314,25 +2392,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                     </div>
                     <Show when={mailCauseRows().get(m.id)}>{(cause) => <MailCauseRow cause={cause()} name={mailName} />}</Show>
                   </Show>
-                  <Show when={turnSummaries().get(m.id)}>
-                    {(s) => (
-                      // One footer per turn (the reply's own session-ui meta line is hidden): when it ended first, in
-                      // the viewer's time, then agent, model and duration. Hover/aria give each recorded time exactly.
-                      <div class="turn-summary" classList={{ interrupted: s().interrupted }}>
-                        <span class="marker">▣</span>{" "}
-                        <Show when={s().ended ?? s().replied}>{(at) => {
-                          const exact = () => [s().started && `Turn started ${exactTime(s().started)}`, s().replied && `reply started ${exactTime(s().replied)}`,
-                            s().ended && `${s().interrupted ? "interrupted" : "completed"} ${exactTime(s().ended)}`].filter(Boolean).join("; ")
-                          return <><time class="turn-time" dateTime={new Date(at()).toISOString()} title={exact()} aria-label={exact()}>
-                            {s().ended ? (s().interrupted ? "interrupted " : "") : "replied "}{clockTime(at())} · {ago(at())}</time>{" · "}</>
-                        }}</Show>
-                        <span class="agent">{titlecase(s().agent)}</span>
-                        {" · "}
-                        {modelName(s().providerID, s().modelID)}
-                        <Show when={s().duration}>{(d) => <> · {fmtDuration(d())}</>}</Show>
-                        <Show when={s().interrupted && !s().ended}> · interrupted</Show>
-                      </div>
-                    )}
+                  {/* A tool-only or silent end has no last text to carry the Copy row: the footer stays visible. */}
+                  <Show when={final() && !final()!.endsInText ? final() : undefined}>
+                    {(s) => <TurnFooter summary={s()} copy={s().copyText} standalone />}
                   </Show>
                   <For each={restartMarkers(m, messages(), status() !== "idle")}>
                     {(marker) => <div class="restart-marker" data-state={marker.state} role="note">{marker.label}</div>}
