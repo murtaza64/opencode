@@ -9,7 +9,6 @@ import { callCard, STATE_WORDS, toolGlyph } from "../tool-call"
 import { mailReceipts, mailSentText, useMailRecords } from "../mail-receipts"
 import { Glyph } from "./icons"
 import { TickMark } from "./message-tick"
-import { mailTick } from "../message-ticks"
 import { ocAt } from "../api"
 import { useSessionHost } from "../session-host"
 
@@ -42,7 +41,7 @@ type MailSent = ReturnType<ReturnType<typeof useMailSent>>
 // The card names the mail and each recipient's delivery in place of the shell description.
 const withMail = (card: Card, mail: MailSent) => mail
   ? { ...card, head: [`Mail sent`, STATE_WORDS[card.status]].filter(Boolean).join(" · "), description: mail.detail.join(" · "),
-    label: [`Mail sent`, STATE_WORDS[card.status], mail.text, mail.state, card.time].filter(Boolean).join(", ") }
+    label: [`Mail sent`, STATE_WORDS[card.status], mail.text, mail.tick.label.replaceAll("\n", "; "), card.time].filter(Boolean).join(", ") }
   : card
 
 /** "a.ts +3 −1", "3 files +12 −4", or just the file name(s) when the tool reported no counts. */
@@ -181,7 +180,7 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
   const status = createMemo(() => toolOutcome(props.part))
   const edit = createMemo(() => editSummary(props.part))
   // An edit names its file and confirmed line counts in place of the generic subtitle.
-  const what = () => { const sent = mail(); if (sent) return `${sent.text} · ${sent.state}`; const value = edit(); return value ? editText(value) : info().subtitle }
+  const what = () => { const sent = mail(); if (sent) return sent.text; const value = edit(); return value ? editText(value) : info().subtitle }
   // A short reason in words, so a failure reads without colour: the tool's error line or its exit code.
   const reason = createMemo(() => {
     const state = props.part.state
@@ -189,7 +188,7 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
     const exit = state.status === "completed" ? state.metadata?.exit : undefined
     return typeof exit === "number" && exit !== 0 ? `exit ${exit}` : undefined
   })
-  const label = () => [info().title, STATE_WORDS[status()], what(), reason(), `size ${size()}`, summary().spanLabel].filter(Boolean).join(", ")
+  const label = () => [info().title, STATE_WORDS[status()], what(), mail()?.tick.label.replaceAll("\n", "; "), reason(), `size ${size()}`, summary().spanLabel].filter(Boolean).join(", ")
   const partialOutput = () => {
     const state = props.part.state
     const output = state.status === "error" && state.metadata?.interrupted === true ? state.metadata.output : undefined
@@ -212,8 +211,8 @@ export const ToolChip = (props: { message: ComponentProps<typeof Message>["messa
       <span class="tool-chip-state" data-status={status()} aria-hidden="true">
         {[STATE_WORDS[status()], what(), reason()].filter(Boolean).join(" · ")}
       </span>
-      {/* DOUBLE-TICK for mail this call sent, in the mail colour: sent, delivered (never read or done), or failed. */}
-      <Show when={mail()}>{(sent) => <TickMark tick={mailTick(sent().state).tick} label={mailTick(sent().state).label} mail />}</Show>
+      {/* Mail ticks (mail-ticks.ts): ✓ sending, ✓✓ grey in the recipient's inbox, ✓✓ accent shown to its agent, ! failed. */}
+      <Show when={mail()}>{(sent) => <TickMark tick={sent().tick.tick} label={sent().tick.label.replaceAll("\n", "; ")} />}</Show>
       <Show when={!open()}><CallCard card={card()} /></Show>
     </button>
     <Show when={open()}>
@@ -374,7 +373,7 @@ export const ToolStrip = (props: { message: ComponentProps<typeof Message>["mess
               aria-label={card().label} aria-expanded={open().has(id)} aria-controls={`tool-strip-member-${id}`} aria-busy={card().status === "unfinished" ? "true" : undefined}
               onFocus={() => setActive(id)} onClick={() => toggle(id)}>
               <ToolIcon partID={id} tool={part().tool} status={card().status} icon={glyph()} magnitude={magnitude()} mail={!!mail()} running={part().state.status === "running"} />
-              <Show when={mail()}>{(sent) => <TickMark tick={mailTick(sent().state).tick} label={mailTick(sent().state).label} mail />}</Show>
+              <Show when={mail()}>{(sent) => <TickMark tick={sent().tick.tick} label={sent().tick.label.replaceAll("\n", "; ")} />}</Show>
               <CallCard card={card()} />
             </button>
           </span>

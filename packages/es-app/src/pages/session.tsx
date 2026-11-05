@@ -62,6 +62,8 @@ import { MailCauseRow } from "../components/mail-cause"
 import { InlineQuestion } from "../components/inline-question"
 import { TodoPart } from "../components/todos"
 import { MailRow } from "../components/mail-row"
+import { createMailWake, MailWakeBar } from "../components/mail-wake-bar"
+import { mailUnread } from "../mail-ticks"
 import { useMailNamer } from "../components/mail-party"
 import { MailSubscriptions } from "../components/mail-subscriptions"
 import { canonicalMail, mailCauses, mailLocation, mailRows, mailSourceID } from "../mail-timeline"
@@ -703,6 +705,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       : undefined, () => undefined))
   const receiptRecords = createMailReceiptRecords({ prefix: remote ? hostPrefix(sessionHost.id!) : "", host: remote ? sessionHost.id : undefined, directory, session: sessionID,
     editspaces: () => remote ? hostEditspaces()?.editspaces : editspaces()?.editspaces, revision: () => remote ? status() : mailRevision() })
+  // Incoming mail this session's agent has not been shown (DD #414): its rows say so, one bar offers Wake now.
+  const unreadMail = createMemo(() => mail()?.messages.filter((message) => message.direction === "received" && mailUnread(message.deliveries, sessionID)).length ?? 0)
+  const mailWake = createMailWake({ editspace: () => location()?.name, session: sessionID, unread: unreadMail, revision: mailRevision })
   const mailReplied = createMemo(() => new Set(mail()?.messages.flatMap((message) => message.in_reply_to ? [message.in_reply_to] : []) ?? []))
   const mailCauseRows = createMemo(() => mailCauses(timeline(), mailRecords()))
 
@@ -2322,7 +2327,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             <ToolAdornment.Provider value={ToolSize}>
             <For each={visibleTimeline()}>
               {(row, index) => {
-                 if (row.type === "mail") return <MailRow message={row.message} ids={transcriptMailIDs()} name={mailName} session={sessionID} replied={mailReplied().has(row.message.id)} />
+                 if (row.type === "mail") return <MailRow message={row.message} ids={transcriptMailIDs()} name={mailName} session={sessionID} replied={mailReplied().has(row.message.id)} wakeLine={mailWake.line} />
                 const m = row.message
                 // The final step's footer; a text-ending footer may belong to an earlier step when the last step is empty.
                 const final = () => turnSummaries().get(m.id)
@@ -2446,6 +2451,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         </div>
 
         <WorkStatus /><ComposerResults composer={composer} connected={connected()} />
+        <MailWakeBar unread={unreadMail()} status={mailWake.status()} editspace={location()?.name} session={sessionID}
+          onWoke={() => { void mailWake.refetch(); void refetchMail() }} />
         {/* A read-only host (pinned-SSH Personal peer) takes no prompt, steer or reply from this page; its listener refuses them. */}
         <Show when={!sessionHost.readOnly} fallback={<p class="dim session-read-only-note" data-read-only-note>Read only: this session is on <bdi dir="auto">{sessionHost.label}</bdi>. Reply from that host.</p>}>
           <div class="prompt-box" classList={{ "prompt-expanded": floating() }} style={{ "--editor-expanded": `${expandedHeight()}px` }}>

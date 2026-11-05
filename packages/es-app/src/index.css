@@ -1123,7 +1123,22 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .mail-activity-summary[data-wake=caused] .mail-activity-party { font-weight: 600; }
 .mail-activity-summary[data-wake=none] .mail-activity-party, .mail-activity-summary[data-wake=none] .mail-activity-purpose,
 .mail-activity-summary[data-wake=unknown] .mail-activity-party, .mail-activity-summary[data-wake=unknown] .mail-activity-purpose { color: var(--overlay1); }
+/* Mail ticks + unread (Loupe mail-ticks.md): the tick is the chip's last glyph; unread is a 6px accent dot at
+   inline-start, a bolder sender and, when known, one line on the agent's next wake. */
+.mail-activity-summary > .msg-tick { margin-inline-start: 2px; }
+.mail-unread-dot { flex: none; inline-size: 6px; block-size: 6px; border-radius: 50%; background: var(--accent, var(--lavender)); }
+.mail-activity-summary[data-unread] .mail-activity-party { font-weight: 600; }
+.mail-activity-summary[data-unread]:has(> .mail-unread-wake) { flex-wrap: wrap; row-gap: 0; }
+.mail-unread-wake { flex: 1 0 100%; padding-inline-start: 34px; color: var(--subtext0); font-size: 12px; line-height: 16px; white-space: normal; }
 .mail-activity-sep { flex: none; color: var(--overlay1); }
+/* One per session above the composer while unread mail exists: "3 unread · Wake now". */
+.mail-wake-bar { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 2px 12px; color: var(--subtext0); font: 12px/1.5 var(--font-sans); }
+.mail-wake-count { color: var(--text); font-weight: 600; }
+.mail-wake-sep { color: var(--overlay1); }
+.mail-wake-now { padding: 0; border: 0; background: none; color: var(--accent, var(--lavender)); font: inherit; cursor: pointer; }
+.mail-wake-now:disabled { color: var(--subtext0); cursor: default; }
+.mail-wake-now:focus-visible { outline: 2px solid var(--accent, var(--lavender)); outline-offset: 2px; border-radius: 2px; }
+.mail-wake-error, .mail-wake-blocked { color: var(--red); }
 .mail-activity-purpose { flex: none; }
 .mail-activity-status { flex: none; color: var(--peach); }
 .mail-activity-status[data-status=Failed], .mail-activity-status[data-status="Not delivered"] { color: var(--red); }

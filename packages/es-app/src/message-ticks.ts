@@ -31,14 +31,4 @@ export const bubbleTick = (input: { status: "sending" | "pending" | "unknown" | 
   return { tick: "sent", label: `Sent ${time(input.at)}${how}`.replace(/ $/, "") }
 }
 
-/** A mail sent row: stored or admitted (sent), presented or handled (delivered, never read or done), or failed. */
-export const mailTick = (state: string): { tick: Tick; label: string } => {
-  if (state === "failed") return { tick: "failed", label: "Mail delivery failed" }
-  if (["presented", "read", "handled"].includes(state))
-    return { tick: "delivered", label: state === "handled" ? "Mail delivered and acknowledged; not proof the work started" : "Mail delivered to the recipient agent" }
-  if (state.startsWith("recorded only")) return { tick: "sent", label: "Mail recorded, recipient not woken" }
-  if (state === "mixed states") return { tick: "sent", label: "Mail sent; recipients are in different states" }
-  return { tick: "sent", label: state === "delivery state not loaded" ? "Mail sent; delivery state not loaded" : `Mail sent; ${state}` }
-}
-
 export type { MailMessage }

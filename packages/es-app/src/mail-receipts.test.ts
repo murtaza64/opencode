@@ -44,7 +44,18 @@ describe("mail receipts", () => {
     const receipts = mailReceipts(send("setup", ...ADMITTED))
     expect(mailSentText(receipts, records([record("setup#123", [{ recipient: "setup", state: "presented" }])]))).toMatchObject({ text: "Mail sent to setup", state: "presented" })
     const handled = mailSentText(receipts, records([record("setup#123", [{ recipient: "setup", state: "handled" }])]))
-    expect(handled).toEqual({ text: "Mail sent to setup", state: "handled", detail: ["setup#123 task to setup: setup handled (acknowledged by the recipient; not proof the work started)"] })
+    expect(handled).toMatchObject({ text: "Mail sent to setup", state: "handled", detail: ["setup#123 task to setup: setup handled (acknowledged by the recipient; not proof the work started)"] })
+    expect(handled.tick).toMatchObject({ tick: "read", level: "presented", label: "Read by setup" })
+  })
+
+  test("the tick: current receipts, else the send-time lines (said so), else a lost receipt (never the inbox)", () => {
+    const receipts = mailReceipts(send("setup", ...ADMITTED))
+    expect(mailSentText(receipts, records([record("setup#123", [{ recipient: "setup", state: "admitted" }])])).tick)
+      .toMatchObject({ tick: "delivered", level: "inbox", label: "In setup's inbox" })
+    expect(mailSentText(receipts, records([])).tick).toMatchObject({ tick: "delivered", level: "inbox", label: "In setup's inbox (at send)" })
+    const bare = mailReceipts(send("ux-feel", "sent ux-feel#423 (task) composer -> ux-feel"))
+    expect(mailSentText(bare, records([])).tick).toMatchObject({ tick: "sent", level: "sending", label: "Sent · delivery receipt not available (not loaded here)" })
+    expect(mailSentText(bare, records([record("ux-feel#423", [])])).tick.label).toBe("Sent · delivery receipt not available (no runtime delivery recorded)")
   })
 
   test("without current receipts the send-time state shows, marked 'at send', never 'not read'", () => {
