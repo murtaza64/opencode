@@ -1,5 +1,6 @@
 /* Conversation view: live transcript (session-ui renderer over an SSE-fed
  * store), prompt input, and inline permission/question replies. */
+import { pageHidden } from "../page-visible"
 import { ResizeHandle } from "../components/resize-handle"
 import { createStore } from "solid-js/store"
 import { createEffect, createMemo, createResource, createSignal, For, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js"
@@ -382,10 +383,14 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   })
   onMount(() => {
     const timer = window.setInterval(() => {
-      if (!connected()) return
+      if (!connected() || pageHidden()) return
       // Capabilities that failed to load (slow daemon) retry here; Steer/Queue stay disabled until then.
       if (composer.state.capabilityError) void composer.loadCapabilities()
-      void composer.refreshInputs()
+      // Only while this composer has an input in flight, pending or set aside; session.input.* events cover the rest.
+      const state = composer.state
+      if (state.admission || state.recoveries.length || Object.keys(state.inputChecks).length || Object.keys(state.inputEdits).length ||
+        (state.normalSubmission && state.normalSubmission.status !== "accepted") ||
+        state.receipts.some((receipt) => receipt.state === "pending")) void composer.refreshInputs()
     }, 5000)
     onCleanup(() => window.clearInterval(timer))
   })

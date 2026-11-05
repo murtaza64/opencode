@@ -1,6 +1,7 @@
 /* Front Desk surfaces: views a granted agent publishes (dashboard /api/surfaces) and the desk
  * embeds through the app's surface proxy (surface-proxy.ts). The list is display data; the
  * frame address comes from the app server, which owns the capability. */
+import { pageHidden } from "./page-visible"
 import { clearBackend, reportBackend } from "./backend-status"
 import { createSignal, onCleanup } from "solid-js"
 import { clockTime } from "./local-time"
@@ -166,7 +167,7 @@ export const createSurfaces = (options: { fetch?: (input: string, init?: Request
   const split = () => deliverables(list(), marks())
   void refresh()
   if (options.poll !== false) {
-    const timer = setInterval(() => void refresh(), POLL_MS)
+    const timer = setInterval(() => { if (!pageHidden()) void refresh() }, POLL_MS)
     onCleanup(() => clearInterval(timer))
   }
   return { list, withdrawn, boards: () => list().filter(surface => !isDeliverable(surface)), deliverables: split, markSeen, seenError, error, checked, refresh }

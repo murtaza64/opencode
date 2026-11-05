@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js"
+import { pageHidden } from "./page-visible"
 import type { PermissionRequest } from "@opencode-ai/sdk/v2"
 import { oc } from "./api"
 import type { useDashboard } from "./state"
@@ -58,7 +59,7 @@ export const createHomeRequests = (sources: () => HomeRequest[], settled: (item:
   const keys = createMemo(() => sources().map(requestKey).sort().join("\n"))
   createEffect(on(keys, () => void refresh()))
   onMount(() => {
-    const interval = setInterval(() => { setNow(Date.now()); void refresh() }, 30_000)
+    const interval = setInterval(() => { if (pageHidden()) return; setNow(Date.now()); void refresh() }, 30_000)
     onCleanup(() => { clearInterval(interval); generation++ })
   })
   return { rows, now, refresh }

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, spyOn, test, type Mock } from "bun:test"
 import { createRoot } from "solid-js"
-import { clearLiveSessions, LIVE_SESSION_CACHE, useLiveSession } from "./live-session-cache"
+import { clearLiveSessions, LIVE_SESSION_CACHE, peekLiveSession, useLiveSession } from "./live-session-cache"
 
 class Events {
   static all: Events[] = []
@@ -72,8 +72,11 @@ test("events reach only the currently mounted view's listener", async () => {
 test("the oldest unmounted sessions are released beyond the cache size; mounted ones never are", () => {
   const pinned = mount("ses_pinned")
   Array.from({ length: LIVE_SESSION_CACHE + 2 }, (_, index) => mount(`ses_${index}`).unmount())
-  // Sources open in mount order: pinned, then ses_0..ses_9. Eleven stores exceed the cap by three.
-  expect(Events.all.flatMap((source, index) => source.closed ? [index] : [])).toEqual([1, 2, 3])
+  // Sources open in mount order: pinned, then ses_0..ses_9. An unmounted store holds no stream (DD #922), so every one
+  // of ses_0..ses_9 closed its stream on unmount; only the mounted one keeps its stream.
+  expect(Events.all.flatMap((source, index) => source.closed ? [index] : [])).toEqual(Array.from({ length: LIVE_SESSION_CACHE + 2 }, (_, index) => index + 1))
+  // Eleven stores exceed the cap by three: the three oldest unmounted stores are released, the rest kept.
+  expect(["ses_0", "ses_1", "ses_2", "ses_3"].map((id) => !!peekLiveSession(id, "/repo"))).toEqual([false, false, false, true])
   expect(mount("ses_pinned").live).toBe(pinned.live)
 })
 

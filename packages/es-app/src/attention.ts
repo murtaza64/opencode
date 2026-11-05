@@ -1,4 +1,5 @@
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js"
+import { pageHidden } from "./page-visible"
 import { clearBackend, describeFailure, reportBackend } from "./backend-status"
 
 export type AttentionRecord = {
@@ -287,12 +288,12 @@ export const createAttention = (project: () => string | undefined, options: { re
   }
   onMount(() => {
     if (options.readOnly) {
-      const timer = setInterval(() => { setNow(Date.now()); void refresh() }, 30_000)
+      const timer = setInterval(() => { if (pageHidden()) return; setNow(Date.now()); void refresh() }, 30_000)
       onCleanup(() => { clearInterval(timer); version++; controller?.abort() })
       return
     }
     if (!options.deferOperator) activate()
-    const timer = setInterval(() => { setNow(Date.now()); void refresh() }, 30_000)
+    const timer = setInterval(() => { if (pageHidden()) return; setNow(Date.now()); void refresh() }, 30_000)
     onCleanup(() => { clearInterval(timer); version++; controller?.abort() })
   })
   createEffect(() => { project(); options.enabled?.(); void refresh() })

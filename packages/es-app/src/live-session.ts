@@ -152,6 +152,8 @@ export function createLiveSession(
   const load = (): Promise<void> => {
     if (disposed) return Promise.resolve()
     suspended = false
+    // A store reused after suspend() has no stream: subscribe again; its open resyncs what was missed.
+    if (!source) subscribe()
     if (activeLoad) return activeLoad
     setLoading(true)
     const abort = new AbortController()
@@ -357,6 +359,9 @@ export function createLiveSession(
     loadAbort?.abort()
     clearTimeout(retryTimer)
     retryTimer = undefined
+    // A cached (unmounted) store holds no stream; the transcript it has stays and is reconciled on reuse (DD #922).
+    source?.close()
+    source = undefined
   }
 
   const refresh = () => {
@@ -524,6 +529,9 @@ export function createLiveSession(
         const firstOpen = !streamOpened
         streamOpened = true
         releaseInitial?.()
+        // Joining a stream another view already holds opens at once, before this store's first load has started:
+        // that load reads the snapshot after this open anyway, so a refresh here would read it twice.
+        if (firstOpen && !activeLoad && !snapshotStarted) return
         if (!activeLoad || snapshotStarted) {
           resyncNext = firstOpen
           refresh()

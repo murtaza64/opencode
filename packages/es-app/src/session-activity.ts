@@ -1,4 +1,5 @@
 import { batch, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js"
+import { pageHidden } from "./page-visible"
 import type { Event, GlobalSession, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2"
 import { oc, type AttentionNotification } from "./api"
 import { createServerEvents } from "./event-source"
@@ -366,6 +367,7 @@ export const createSessionActivity = (
   let backgroundCursor = 0
   let ticks = 0
   const interval = setInterval(() => {
+    if (pageHidden()) return
     // Session rows follow session.* events; the full index (~1 MB with a long
     // history) is only a safety net against missed events.
     if (ticks++ % 4 === 0 && Date.now() - lastSessionRefresh >= 60_000) {

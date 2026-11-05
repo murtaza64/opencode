@@ -1,7 +1,7 @@
 /* Recently viewed live session stores, kept above the route so navigating back
  * renders the last transcript at once while a background snapshot reconciles it.
- * Each cached store keeps its event subscription (multiplexed over one socket),
- * so it stays current while hidden. */
+ * An unmounted store holds no event subscription (DD #922): reused, it resubscribes and
+ * reconciles from a snapshot, so only mounted views keep a stream. */
 import { createRoot, getOwner, onCleanup } from "solid-js"
 import { createLiveSession } from "./live-session"
 import type { SessionHost } from "./session-host"

@@ -1,5 +1,6 @@
 /* Shared dashboard state: one fetch of /es/api/state for the sidebar, board,
  * and session info panel, refreshed on the dashboard's SSE ticks. */
+import { pageHidden } from "./page-visible"
 import {
   createContext,
   createEffect,
@@ -359,9 +360,9 @@ export function DashboardProvider(props: ParentProps) {
   })
   const notificationSource = createServerEvents("/es/api/notification-events")
   notificationSource.onmessage = () => refetchNotifications()
+  // The stream pushes every change; a (re)open resyncs whatever was missed while it was down or the page hidden. No poll.
+  notificationSource.onopen = () => refetchNotifications()
   onCleanup(() => notificationSource.close())
-  const notificationInterval = setInterval(refetchNotifications, 30_000)
-  onCleanup(() => clearInterval(notificationInterval))
   const interval = setInterval(refetch, 60_000)
   onCleanup(() => clearInterval(interval))
 
@@ -515,7 +516,7 @@ export function DashboardProvider(props: ParentProps) {
   // re-reading them on every local state refresh only multiplied requests: each dashboard event
   // cost one state + one handoffs GET per other editspace. They refresh on their own slow clock.
   const [otherTick, setOtherTick] = createSignal(0)
-  const otherInterval = setInterval(() => setOtherTick((value) => value + 1), OTHER_LINEAGE_MS)
+  const otherInterval = setInterval(() => { if (!pageHidden()) setOtherTick((value) => value + 1) }, OTHER_LINEAGE_MS)
   onCleanup(() => clearInterval(otherInterval))
   // A new session in another editspace with a pinned lane may be that lane's handoff successor, stamped owner just after
   // it appears: re-read those lineages every few seconds for a short window, so the lane pin follows it promptly.
