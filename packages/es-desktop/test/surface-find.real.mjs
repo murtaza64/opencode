@@ -52,7 +52,9 @@ try {
   })
   step("launched")
   const page = await electron.firstWindow()
-  await page.waitForLoadState("domcontentloaded")
+  // Wait for startup's own load to finish (as the other real tests do). A goto during it aborts the main process's
+  // startup loadURL, startup fails behind a modal error box, and every later step hangs.
+  await page.waitForURL("http://127.0.0.1:*/")
   const origin = new URL(page.url()).origin
   page.on("response", async (response) => {
     if (new URL(response.url()).pathname === "/__es/find" && response.request().method() === "POST") replies.push(await response.json().catch(() => "unparsed"))
