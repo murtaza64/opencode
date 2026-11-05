@@ -28,16 +28,22 @@ try {
   electron.process().stdout?.on("data", (chunk) => logs.push(String(chunk)))
   globalThis.__logs = logs
   // Record any startup error box instead of blocking, and replace the first load with another route the moment it starts.
-  await electron.evaluate(({ app, dialog, webContents }) => {
+  await electron.evaluate(({ app, dialog, BrowserWindow }) => {
     globalThis.__boxes = []
     dialog.showErrorBox = (title) => { globalThis.__boxes.push(title) }
     const hook = (contents) => contents.once("did-start-navigation", (details) => {
       if (!details.isMainFrame) return
       const next = new URL("/new", details.url)
-      void contents.loadURL(next.href).catch(() => undefined)
+      // A real notification click or opened route reaches the window as its own task. A loadURL called synchronously
+      // inside this event re-enters the first loadURL, and the packaged app's Chromium rejects it with ERR_FAILED
+      // before any navigation starts; that is not the startup abort this test covers. One microtask takes it out of
+      // the first load's stack while the first request is still in flight.
+      queueMicrotask(() => { void contents.loadURL(next.href).catch(() => undefined) })
     })
-    webContents.getAllWebContents().forEach(hook)
-    app.on("web-contents-created", (_event, contents) => hook(contents))
+    // The app window is the Work view (no remote hosts); hidden webContents are not part of this launch's route.
+    const window = BrowserWindow.getAllWindows()[0]
+    if (window) hook(window.webContents)
+    else app.on("web-contents-created", (_event, contents) => hook(contents))
   })
   const outcome = await Promise.race([exited.then((code) => ({ exited: code })), new Promise((resolve) => setTimeout(() => resolve({ alive: true }), 8000))])
   if (!("alive" in outcome)) throw new Error(`the app exited (${outcome.exited}) after a navigation during its first load`)
