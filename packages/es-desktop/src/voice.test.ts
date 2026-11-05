@@ -19,8 +19,10 @@ echo "$$" > "$(dirname "$0")/recorder.pid"
 trap 'exit 0' INT
 while :; do sleep 0.05; done
 `
-// Stands in for whisper-cli: honours -of and -otxt, optionally slowly.
+// Stands in for whisper-cli: honours -of and -otxt, optionally slowly. Fails without the no-carry-over decode
+// options, which keep a long clip from ending in one repeated sentence.
 const fakeTranscriber = (text: string, delay = 0) => `#!/bin/sh
+case "$*" in *"-mc 0 -sns"*) ;; *) echo "missing -mc 0 -sns" >&2; exit 4;; esac
 while [ $# -gt 0 ]; do case "$1" in -of) out="$2"; shift;; esac; shift; done
 echo "$$" > "$(dirname "$0")/transcriber.pid"
 sleep ${delay}
@@ -321,6 +323,7 @@ head -c ${44 + ms * 32} /dev/zero > "$out"
 // Stands in for whisper-cli -oj: honours -of, optionally slowly, and records that it saw -l auto.
 const fakeJsonTranscriber = (segments: string[], delay = 0) => `#!/bin/sh
 case "$*" in *"-l auto"*) ;; *) exit 3;; esac
+case "$*" in *"-mc 0 -sns"*) ;; *) echo "missing -mc 0 -sns" >&2; exit 4;; esac
 while [ $# -gt 0 ]; do case "$1" in -of) out="$2"; shift;; esac; shift; done
 echo "$$" > "$(dirname "$0")/transcriber.pid"
 sleep ${delay}

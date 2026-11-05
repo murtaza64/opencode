@@ -11,6 +11,14 @@ import path from "node:path"
  * touches drafts. One capture or transcription runs at a time and its clip is always deleted.
  */
 export type VoiceTools = { recorder: string; transcriber: string; model: string }
+
+/**
+ * Decoding options for every whisper-cli run. `-mc 0` decodes each 30 s window without the previous window's text
+ * as its prompt: with that carry-over, a long clip that ends in a pause or room noise loops on one recent sentence
+ * until the end (reproduced with synthetic speech plus trailing silence or noise, DD keyboard-workflow#72).
+ * `-sns` suppresses non-speech tokens. Neither edits the words that were decoded.
+ */
+export const DECODE = ["-mc", "0", "-sns"]
 export type VoiceMissing = { missing: "recorder" | "transcriber" | "model"; message: string }
 export type VoiceStatus = {
   available: boolean
@@ -139,7 +147,7 @@ export const createVoice = (options: {
       const tools = await options.resolve()
       if ("missing" in tools) return fail("unavailable", "Couldn't transcribe: dictation isn't set up", tools.message)
       const out = path.join(active.dir, "transcript")
-      const transcriber = spawn(tools.transcriber, ["-m", tools.model, "-f", clip, "-otxt", "-of", out, "-np", "-nt"], {
+      const transcriber = spawn(tools.transcriber, ["-m", tools.model, "-f", clip, ...DECODE, "-otxt", "-of", out, "-np", "-nt"], {
         stdio: ["ignore", "ignore", "pipe"],
       })
       active.transcriber = transcriber
@@ -261,7 +269,7 @@ export const createTranscriber = (options: {
       if (duration > maxSeconds * 1000) return fail("too-large", `The clip is over ${Math.round(maxSeconds / 60)} minutes.`)
       if (duration === 0) return fail("empty", "No speech detected.")
       const out = path.join(dir, "transcript")
-      const result = await run(tools.transcriber, ["-m", tools.model, "-f", clip, "-l", "auto", "-oj", "-of", out, "-np", "-nt"], input.signal)
+      const result = await run(tools.transcriber, ["-m", tools.model, "-f", clip, ...DECODE, "-l", "auto", "-oj", "-of", out, "-np", "-nt"], input.signal)
       if (input.signal.aborted) return fail("cancelled", "Transcription cancelled.")
       if (result.code !== 0) return fail("failed", "Couldn't transcribe the clip", result.stderr || `${path.basename(tools.transcriber)} exited with ${result.code}`)
       const json = await readFile(`${out}.json`, "utf8").then((value): unknown => JSON.parse(value)).catch(() => undefined)
