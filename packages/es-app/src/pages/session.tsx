@@ -47,6 +47,7 @@ import { SelfHandoffButton, SelfHandoffStatus } from "../components/self-handoff
 import { createSelfHandoff, SELF_HANDOFF_VERSION } from "../self-handoff"
 import { createMailReceiptRecords, MailRecords } from "../mail-receipts"
 import { DeliveredTick } from "../components/message-tick"
+import { ContextLines } from "../components/context-line"
 import { chatDot, modelThinking } from "../chat-activity"
 import { clockTime, exactTime } from "../local-time"
 import { lastAudible, quietTurns } from "../quiet-turns"
@@ -2198,9 +2199,11 @@ export function SessionView(props: { sessionID: string; directory: string; embed
                         renderTools={renderTools}
                         mailRecord={mailRecords().get(mailSourceID(m) ?? "")}
                         mailDeliveries={mailRecords().get(mailSourceID(m) ?? "")?.deliveries} mailIDs={transcriptMailIDs()} mailName={mailName} />
-                      {/* DOUBLE-TICK: delivered at promotion (the receipt's time, else the message's), read after a later turn start. */}
-                      <Show when={promptIDs().has(m.id)}><DeliveredTick turnStarted={turnStarted()}
-                        promotedAt={promotedAt(m.id) ?? m.time.created} /></Show>
+                      {/* What the prompt was looking at or @-referenced, under the bubble (the agent's text is unchanged).
+                          DOUBLE-TICK: delivered at promotion (the receipt's time, else the message's), read after a later
+                          turn start; with context it shares the last line's row instead of adding one. */}
+                      <ContextLines parts={live.data.part[m.id] ?? []} tick={promptIDs().has(m.id) ? () =>
+                        <DeliveredTick turnStarted={turnStarted()} promotedAt={promotedAt(m.id) ?? m.time.created} row={false} /> : undefined} />
                       <Show when={!remote}><button
                         class="fork-here"
                         title="fork: new session with the history before this message"

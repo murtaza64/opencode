@@ -13,10 +13,13 @@ export const TickMark = (props: { tick: Tick; label: string; mail?: boolean }) =
   </i>
 
 /** A promoted user message: delivered, then read once a turn started after its promotion. Never steps back. */
-export const DeliveredTick = (props: { promotedAt: number; turnStarted?: number }) => {
+export const DeliveredTick = (props: { promotedAt: number; turnStarted?: number; row?: boolean }) => {
   const value = createMemo<ReturnType<typeof transcriptTick> | undefined>((previous) => {
     const next = transcriptTick(props)
     return previous && laterTick(previous.tick, next.tick) === previous.tick && previous.tick !== next.tick ? previous : next
   })
-  return <Show when={value()}>{(tick) => <div class="msg-tick-row"><TickMark tick={tick().tick} label={tick().label} /></div>}</Show>
+  // `row: false` lets a caller put the mark on a row of its own content (a prompt's context line).
+  return <Show when={value()}>{(tick) => props.row === false
+    ? <TickMark tick={tick().tick} label={tick().label} />
+    : <div class="msg-tick-row"><TickMark tick={tick().tick} label={tick().label} /></div>}</Show>
 }

@@ -43,7 +43,8 @@ export const useSurfaceOwner = (surface: () => Surface, host?: { id: string; lab
     const core = ocAt(host ? `${hostPrefix(host.id)}/oc` : "/oc")
     const session = await core.session(value.session, value.directory)
     const url = new URL(host ? `/?item=${encodeURIComponent(`${host.id}~surface:${surface().id}`)}` : `/?surface=${encodeURIComponent(surface().id)}`, window.location.origin).href
-    await core.prompt(session, value.directory, text, { messageID, context: [contextPart(ref(), url, Date.now())] })
+    // Sent from the reader's Message owner: the transcript says "While looking at …", not "About …".
+    await core.prompt(session, value.directory, text, { messageID, context: [contextPart(ref(), url, Date.now(), "reader")] })
     return true
   }
   return { owner, name, avatar, href, open, send }

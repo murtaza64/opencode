@@ -91,6 +91,23 @@ test("a surface part is metadata only and says its content is not included", () 
   expect(part.metadata.key).toBe("surface:mini:4096:board")
 })
 
+test("the transcript metadata says where a part came from and links its exact revision, without changing the text", () => {
+  const [chipRef] = withCatalog("", [], [surface("board", 1)])[0]!.items
+  const reader = contextPart(chipRef!, "https://mini/?surface=board", Date.UTC(2026, 9, 27), "reader")
+  const chip = contextPart(chipRef!, "https://mini/?surface=board", Date.UTC(2026, 9, 27))
+  // Same model-facing text for both origins: only this app's transcript reads the difference.
+  expect(reader.text).toBe(chip.text)
+  expect(reader.metadata).toMatchObject({ source: CONTEXT_MENTION_SOURCE, key: "surface:mini:4096:board", origin: "reader", kind: "surface",
+    label: "Relay board", revision: 4, href: "https://mini/?surface=board&rev=4", asOf: "2026-10-27T00:00:00.000Z" })
+  expect(chip.metadata.origin).toBe("chip")
+  const [decisionItem] = withCatalog("", [decision("d1", "open", 1)], [])[0]!.items
+  expect(contextPart(decisionItem!, "https://mini/?item=attention%3Aes%3Ad1", 0).metadata.href).toBe("https://mini/?item=attention%3Aes%3Ad1&rev=3")
+  // A chip with no revision (an agent or a session) adds no `rev`.
+  const agent: ContextRef = { kind: "agent", id: "es/lane", host: "mini:4096", label: "lane", editspace: "es", lane: "lane" }
+  expect(contextPart(agent, "https://mini/session/ses_a", 0).metadata).toEqual({ source: CONTEXT_MENTION_SOURCE, key: "agent:mini:4096:es/lane",
+    origin: "chip", kind: "agent", label: "lane", href: "https://mini/session/ses_a", asOf: "1970-01-01T00:00:00.000Z" })
+})
+
 test("a long multi-byte snapshot stays within 2 KB of UTF-8 and keeps its reference", () => {
   const [ref] = withCatalog("", [decision("d1", "open", 1, { context: "é界".repeat(3000), options: Array.from({ length: 20 }, (_, index) => ({ id: `${index}`, label: "選".repeat(500) })) })], [])[0]!.items
   const part = contextPart(ref!, "https://mini/?item=x", 0)

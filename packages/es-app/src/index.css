@@ -2120,6 +2120,22 @@ a.mini-item > .glyph { margin: 0; }
 /* One place per bubble: the tick sits just below the bubble's inline-end corner, in a 16px line, in every state.
  * An outgoing bubble's cue and actions flow to the tick's inline-start, so actions appearing never move it. */
 .msg-tick-row { display: flex; justify-content: flex-end; align-items: center; min-block-size: 16px; margin-block-start: 2px; }
+/* Context a prompt carried (CONTEXT-LINE): one quiet line per attached item under the bubble, aligned with the tick's
+ * inline-end. No box and no chip border: it is a note about the message, not another message. */
+.msg-context-lines { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; margin-block-start: 3px; max-inline-size: 100%; }
+.msg-context { display: flex; align-items: baseline; gap: 4px; margin: 0; max-inline-size: 100%; font-size: 12px; line-height: 1.5; color: var(--subtext0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg-context a { color: inherit; text-decoration: none; display: inline-flex; align-items: baseline; gap: 4px; min-inline-size: 0; max-inline-size: 100%; }
+.msg-context a:hover { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.msg-context a:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; border-radius: 2px; }
+.msg-context-lead { flex: none; color: var(--overlay1); }
+.msg-context bdi { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+.msg-context-rev { flex: none; font-variant-numeric: tabular-nums; }
+.msg-context-go { flex: none; color: var(--overlay0); }
+.msg-context-more { color: var(--overlay1); }
+/* The message's tick shares the last context row, so the context adds no row of its own below the bubble. */
+.msg-context-row { display: flex; align-items: center; justify-content: flex-end; gap: 8px; max-inline-size: 100%; min-block-size: 16px; }
+.msg-context-row > .msg-context { min-inline-size: 0; }
+.msg-context-tick { display: inline-flex; flex: none; align-items: center; block-size: 16px; }
 .receipt-line { display: flex; justify-content: flex-end; align-items: flex-start; gap: 6px; max-inline-size: 100%; }
 .receipt-line > .outgoing-cue { flex: 0 1 auto; min-inline-size: 0; }
 :is(.msg-tick-row, .receipt-line) > .msg-tick { block-size: 16px; }

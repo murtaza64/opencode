@@ -7,8 +7,10 @@ import type { SquadronMeta } from "./mail-origin"
 import type { WakeEvent } from "./wake-marker"
 
 export type MessageWithParts = { info: Message; parts: Part[] }
-/** Generated text attached to a human's own message; marked synthetic and with its producer. */
-export type ContextPart = { type: "text"; text: string; synthetic: true; metadata: { source: string; key: string } }
+/** Generated text attached to a human's own message; marked synthetic and with its producer. A context mention also
+ * carries where it came from and enough reference to show it under the bubble (never read by the model). */
+export type ContextPart = { type: "text"; text: string; synthetic: true; metadata: { source: string; key: string
+  origin?: "reader" | "chip"; kind?: string; label?: string; revision?: number; href?: string; asOf?: string } }
 export type InputImage = Readonly<SessionV1InputImage>
 export const inputImages = <Mime extends string>(
   images: readonly { mime: Mime; url: string; filename?: string }[],
