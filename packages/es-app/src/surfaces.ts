@@ -48,6 +48,9 @@ export type Surface = {
   /** What the current revision asks (DD #753): the revision it compares against (default the previous), its intent,
    * places to look and the question it asks. Absent on hosts without it. */
   change?: { base: number | null; intent: SurfaceIntent | null; look: SurfaceLook[]; respond: string | null }
+  /** The producing session recorded at publish (RHC's authoritative published-ref seam). Absent on an older
+    * dashboard means unknown: the reader shows nothing and never infers one from a lane or link text. */
+  author_session?: string
 }
 
 type Deploy = { url?: string; version?: string; deployed_at?: number | string; source_revision?: number }
