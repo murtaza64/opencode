@@ -43,7 +43,8 @@ const publish = (dir, sessionID, type) => {
       response.write(`data: ${JSON.stringify({ directory: dir, payload: { type: "session.status", properties: { sessionID, status: { type } } } })}\n\n`)
 }
 const globalStreams = () => [...fixture.eventStreams.values()].filter((stream) => stream.path === "/global/event").length
-const dot = (id) => page.locator(`.sidebar a[href*="/session/${id}?"] .dot`)
+// The unified sidebar shows status on the row's avatar corner (data-dot on .session-entry).
+const dot = (id) => page.locator(`.sidebar .session-entry:has(a[href*="/session/${id}?"])`).first()
 const hold = (dir) => {
   let release
   const promise = new Promise((resolve) => { release = resolve })
@@ -75,27 +76,27 @@ const check = async (name, run) => {
 try {
   await page.goto(`${origin()}/session/ses_a?directory=${encodeURIComponent(directory)}`)
   await selectScope(page, "__all__")
-  await expect(dot("ses_a")).toHaveClass("dot busy")
+  await expect(dot("ses_a")).toHaveAttribute("data-dot", "busy")
   await expect.poll(globalStreams).toBeGreaterThan(0)
 
   await check("outage: a busy dot from the dropped stream is not shown as busy while the stream is down", async () => {
     const down = await restart()
     try {
-      await expect(dot("ses_a")).not.toHaveClass(/busy/, { timeout: 3000 })
+      await expect(dot("ses_a")).not.toHaveAttribute("data-dot", "busy", { timeout: 3000 })
     } finally {
       await down.up()
     }
   })
 
   await check("restart: the reconnect snapshot from a Core with an empty status map clears the busy dot", async () => {
-    await expect(dot("ses_a")).not.toHaveClass(/busy/, { timeout: 5000 })
+    await expect(dot("ses_a")).not.toHaveAttribute("data-dot", "busy", { timeout: 5000 })
   })
 
   await check("cross-directory: a busy event under an alias spelling is cleared by reconnect even while its indexed directory is out of view", async () => {
     await expect(dot("ses_c")).toBeVisible()
-    await expect(dot("ses_c")).not.toHaveClass(/busy/)
+    await expect(dot("ses_c")).not.toHaveAttribute("data-dot", "busy")
     publish(alias, "ses_c", "busy")
-    await expect(dot("ses_c")).toHaveClass("dot busy")
+    await expect(dot("ses_c")).toHaveAttribute("data-dot", "busy")
     // Scroll every row out of view: only ses_a (the open session) keeps its directory relevant.
     await page.locator(".sidebar").evaluate((el) => { el.style.transform = "translateY(-200vh)" })
     await page.waitForTimeout(300)
@@ -106,7 +107,7 @@ try {
     await expect.poll(() => reads.slice(after).some((dir) => dir === second || dir === alias), { timeout: 5000 }).toBe(true)
     await page.waitForTimeout(1000)
     await page.locator(".sidebar").evaluate((el) => { el.style.transform = "" })
-    await expect(dot("ses_c")).not.toHaveClass(/busy/, { timeout: 3000 })
+    await expect(dot("ses_c")).not.toHaveAttribute("data-dot", "busy", { timeout: 3000 })
   })
 
   await check("race: a busy event during the reconnect snapshot wins over the snapshot's empty map", async () => {
@@ -116,10 +117,10 @@ try {
     await down.up()
     await expect.poll(() => reads.slice(before).includes(directory), { timeout: 5000 }).toBe(true)
     publish(directory, "ses_a", "busy")
-    await expect(dot("ses_a")).toHaveClass("dot busy")
+    await expect(dot("ses_a")).toHaveAttribute("data-dot", "busy")
     release()
     await page.waitForTimeout(1000)
-    await expect(dot("ses_a")).toHaveClass("dot busy")
+    await expect(dot("ses_a")).toHaveAttribute("data-dot", "busy")
   })
 
   await check("race: an idle event during the reconnect snapshot wins over the snapshot's stale busy", async () => {
@@ -130,11 +131,11 @@ try {
     await down.up({ [directory]: { ses_a: { type: "busy" } } })
     await expect.poll(() => reads.slice(before).includes(directory), { timeout: 5000 }).toBe(true)
     publish(directory, "ses_a", "idle")
-    await expect(dot("ses_a")).not.toHaveClass(/busy/)
+    await expect(dot("ses_a")).not.toHaveAttribute("data-dot", "busy")
     release()
     core.set(directory, {})
     await page.waitForTimeout(1000)
-    await expect(dot("ses_a")).not.toHaveClass(/busy/)
+    await expect(dot("ses_a")).not.toHaveAttribute("data-dot", "busy")
   })
 
   await check("blocked: a busy session whose exact directory holds a permission after restart shows pending, not active", async () => {
@@ -144,7 +145,7 @@ try {
     ]]])
     const down = await restart()
     await down.up({ [second]: { ses_c: { type: "busy" } } })
-    await expect(dot("ses_c")).toHaveClass("dot pending", { timeout: 35000 })
+    await expect(dot("ses_c")).toHaveAttribute("data-dot", "pending", { timeout: 35000 })
   })
 
   expect(errors).toEqual([])
