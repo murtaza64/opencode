@@ -16,6 +16,7 @@ bun test scripts/publish-packet
 - `purpose` is `release` or `verification`. Setup must refuse physical use of verification records; historical reconstruction is not current admission.
 - `authority` names DD acceptance, scope owner, runner review, Setup executor, current Perf and Core exclusions. A new attempt or unknown predecessor requires explicit disposition. An amended release receipt requires its DD amendment.
 - Laptop parameters also bind executor-jobs equality, an explicit retained-helper qualification and the adopted Setup caller workspace. Exact absence includes the caller-state basename. The previous web request and terminal receipts are re-hashed, not synthesized.
+- Laptop may explicitly set `oldAppKind: "launchd-parented"` for an app relaunched by the human. Placement must carry `keeper: null` and the actual `parent` PID1 identity (ppid0, `/sbin/launchd`, start); native must have ppid1 and plain argv. This uses the runner's existing mode, never owns/signals PID1, and needs a new compiler review receipt. Omitted mode remains strict owned-keeper; Mini cannot select launchd placement.
 - `profile.manifest` is the adopted predecessor, not an uninvoked release. Source files are read as data; no adopted code is imported or executed by the generator.
 
 ## Output

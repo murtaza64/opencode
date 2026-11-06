@@ -52,6 +52,51 @@ test("Mini release changes only exact shared target and caller literals and reta
   expect(JSON.parse(packet.bodies["runtime-plan.json"]).target).toBe(`${packet.deploy}/runtime`)
 })
 
+test("an explicitly launchd-parented Laptop binds PID1 without claiming or owning a keeper", () => {
+  const input = launchdFixture()
+  const packet = compilePacket(input), manifest = JSON.parse(packet.bodies["publish.manifest.json"])
+  const receipt = JSON.parse(packet.bodies["normal-publication/old-app-identity.json"])
+  expect(manifest.oldApp.kind).toBe("launchd-parented")
+  expect(manifest.oldApp.observed.child.ppid).toBe(1)
+  expect(manifest.oldApp.observed.parent).toEqual({ pid: 1, ppid: 0, lstart: "fixture-launchd-start", comm: "/sbin/launchd" })
+  expect(manifest.oldApp).not.toHaveProperty("keeper")
+  expect(receipt).not.toHaveProperty("keeper")
+  expect(JSON.parse(packet.bodies["provenance/host-guards.json"]).keeper).toBeNull()
+  expect(manifest.files).not.toHaveProperty(`${input.profile.manifest.state}/keeper-request.json`)
+  expect(packet.bodies["normal-publication/native.mjs"]).toEqual(input.sources["normal-publication/native.mjs"])
+  expect(programFingerprint({ ...input.profile, manifest, caller: JSON.parse(packet.bodies["caller-plan.json"]) }, packet.bodies)).toBe(input.profile.programSHA)
+})
+
+test("a PID1-parented native cannot silently select the launchd mode", () => {
+  const input = launchdFixture()
+  delete input.parameters.oldAppKind
+  expect(() => compilePacket(input)).toThrow("current native parent identity required")
+})
+
+test("launchd placement refuses a claimed keeper and a missing or changed PID1 identity", () => {
+  const claimedKeeper = launchdFixture()
+  claimedKeeper.placement.keeper = fixture("laptop", "/decoy/output").placement.keeper
+  expect(() => compilePacket(claimedKeeper)).toThrow("no owned keeper")
+  const missingParent = launchdFixture()
+  delete missingParent.placement.parent
+  expect(() => compilePacket(missingParent)).toThrow("current native parent identity required")
+  const wrongExecutable = launchdFixture()
+  wrongExecutable.placement.parent.comm = "/decoy/impostor"
+  expect(() => compilePacket(wrongExecutable)).toThrow()
+  const wrongChild = launchdFixture()
+  wrongChild.placement.native.ppid = "2"
+  expect(() => compilePacket(wrongChild)).toThrow()
+})
+
+test("Mini cannot opt into Laptop launchd placement", () => {
+  const input = launchdFixture()
+  input.profile.kind = "mini"
+  input.parameters.host = input.profile.manifest.target.host = input.placement.host = "murtaza-mac-mini"
+  input.manifestBytes = Buffer.from(json(input.profile.manifest))
+  input.profile.manifestSHA = hash(input.manifestBytes)
+  expect(() => compilePacket(input)).toThrow("Laptop-only")
+})
+
 test("rejects cross-host placement before generating anything", () => {
   const input = fixture("mini", "/decoy/output")
   input.placement.host = "murtaza-macbook-pro"
@@ -237,6 +282,16 @@ function retainedFixture(ancestors) {
   input.previousRequestBytes = Buffer.from(json(request))
   input.placement.opFiles["owned-web-request.json"] = hash(input.previousRequestBytes)
   input.placement.web.argv = `${input.profile.manifest.node} ${input.profile.manifest.webStart.script} ${input.profile.manifest.state}/owned-web-request.json ${hash(input.previousRequestBytes)}`
+  input.placementBytes = Buffer.from(json(input.placement))
+  return input
+}
+
+function launchdFixture() {
+  const input = fixture("laptop", "/decoy/output")
+  input.parameters.oldAppKind = "launchd-parented"
+  input.placement.native.ppid = "1"
+  input.placement.keeper = null
+  input.placement.parent = { pid: 1, ppid: "0", startUTC: "fixture-launchd-start", comm: "/sbin/launchd" }
   input.placementBytes = Buffer.from(json(input.placement))
   return input
 }

@@ -32,14 +32,28 @@ export function compilePacket(input) {
   assert.equal(input.placement.asar, old.target.asar)
   assert.equal(input.placement.config, old.target.configSHA)
   assert.equal(input.placement.native.argv, input.placement.native.comm)
-  assert.equal(Number(input.placement.native.ppid), input.placement.keeper.pid)
-  assert.equal(Number(input.placement.keeper.ppid), 1)
+  const oldAppKind = p.oldAppKind ?? "owned-single-child-no-relaunch"
+  assert.ok(["owned-single-child-no-relaunch", "launchd-parented"].includes(oldAppKind))
+  const parent = oldAppKind === "launchd-parented" ? input.placement.parent : input.placement.keeper
+  assert.ok(parent, "current native parent identity required")
+  assert.equal(Number(input.placement.native.ppid), parent.pid)
+  if (oldAppKind === "launchd-parented") {
+    assert.equal(profile.kind, "laptop", "launchd-parented mode is Laptop-only")
+    assert.equal(input.placement.keeper, null, "launchd-parented native has no owned keeper")
+    assert.equal(parent.pid, 1)
+    assert.equal(Number(parent.ppid), 0)
+    assert.equal(parent.comm, "/sbin/launchd")
+  }
+  if (oldAppKind === "owned-single-child-no-relaunch") {
+    assert.ok(parent.pid > 1)
+    assert.equal(Number(parent.ppid), 1)
+  }
   assert.equal(input.placement.devToolsActivePort, "ABSENT")
   assert.deepEqual(input.placement.l9229, [])
   assert.deepEqual(input.placement.guiLabels, [])
   assert.equal(input.placement.lease, false)
-  assert.ok(input.placement.native.pid > 1 && input.placement.keeper.pid > 1)
-  for (const process of [input.placement.native, input.placement.keeper]) assert.ok(process.startUTC)
+  assert.ok(input.placement.native.pid > 1)
+  for (const process of [input.placement.native, parent]) assert.ok(process.startUTC)
   const suffix = profile.kind === "mini" ? "-mini" : ""
   const operation = `desktop-publish-${p.accepted.source.slice(0, 8)}${suffix}-v${p.attempt}`
   const jobID = profile.kind === "mini" ? `desktop-${p.accepted.source.slice(0, 8)}-mini-v${p.attempt}` : `desktop-${p.accepted.source.slice(0, 8)}-publish-v${p.attempt}`
@@ -82,15 +96,17 @@ export function compilePacket(input) {
   bodies[callerName] = Buffer.from(replaceOnce(replaceOnce(bodies[callerName].toString(), old.target.operation, operation), old.jobID, jobID))
   if (profile.kind === "laptop") bodies[callerName] = Buffer.from(replaceOnce(bodies[callerName].toString(), path.basename(callerBefore.state), path.basename(callerState)))
   if (profile.kind === "mini") bodies["normal-publication/shared.mjs"] = Buffer.from(replaceOnce(bodies["normal-publication/shared.mjs"].toString(), JSON.stringify(old.target), JSON.stringify(target)))
-  const keeper = { contract: "normal-publication-single-child/1", script: `${deployBefore}/normal-publication/keeper.mjs`, scriptSHA: metadata.code["normal-publication/keeper.mjs"],
-    request: `${old.state}/keeper-request.json`, requestSHA: metadata.opFiles["keeper-request.json"], result: `${old.state}/keeper.json`, resultSHA: metadata.opFiles["keeper.json"] }
-  keeper.argv = [old.node, keeper.script, keeper.request, keeper.requestSHA]
-  assert.equal(keeper.argv.join(" "), metadata.keeper.argv)
-  assert.equal(keeper.scriptSHA, profile.sourcePins["normal-publication/keeper.mjs"])
+  const keeper = oldAppKind === "owned-single-child-no-relaunch" ? { contract: "normal-publication-single-child/1", script: `${deployBefore}/normal-publication/keeper.mjs`, scriptSHA: metadata.code["normal-publication/keeper.mjs"],
+    request: `${old.state}/keeper-request.json`, requestSHA: metadata.opFiles["keeper-request.json"], result: `${old.state}/keeper.json`, resultSHA: metadata.opFiles["keeper.json"] } : undefined
+  if (keeper) {
+    keeper.argv = [old.node, keeper.script, keeper.request, keeper.requestSHA]
+    assert.equal(keeper.argv.join(" "), metadata.keeper.argv)
+    assert.equal(keeper.scriptSHA, profile.sourcePins["normal-publication/keeper.mjs"])
+  }
   const listen = profile.kind === "laptop" ? "listen60302" : "listen63977"
-  const oldApp = { kind: "owned-single-child-no-relaunch", timezone: "UTC", observed: {
+  const oldApp = { kind: oldAppKind, timezone: "UTC", observed: {
     child: { pid: metadata.native.pid, ppid: Number(metadata.native.ppid), lstart: metadata.native.startUTC, exe: metadata.native.comm, asar: metadata.asar },
-    parent: { pid: metadata.keeper.pid, ppid: Number(metadata.keeper.ppid), lstart: metadata.keeper.startUTC, comm: metadata.keeper.comm }, [listen]: [metadata.native.pid] }, keeper }
+    parent: { pid: parent.pid, ppid: Number(parent.ppid), lstart: parent.startUTC, comm: parent.comm }, [listen]: [metadata.native.pid] }, ...(keeper ? { keeper } : {}) }
   if (profile.kind === "laptop") oldApp.nativeCommand = metadata.native.argv
   const identityName = profile.kind === "laptop" ? "normal-publication/old-app-identity.json" : "provenance/old-app.json"
   Object.assign(bodies, {
@@ -98,13 +114,13 @@ export function compilePacket(input) {
     "provenance/release-parameters.json": Buffer.from(json(p)), "provenance/placement-current.json": input.placementBytes,
     "provenance/standing-runner-review.json": Buffer.from(json(input.runnerReview)),
     "provenance/previous-terminal-journal.json": Buffer.from(json(input.previousJournal)),
-    "provenance/host-guards.json": Buffer.from(json({ schema: "desktop-host-guards/1", host: p.host, observedAt: metadata.at, native: metadata.native, keeper: metadata.keeper, web: metadata.web ?? null,
+    "provenance/host-guards.json": Buffer.from(json({ schema: "desktop-host-guards/1", host: p.host, observedAt: metadata.at, native: metadata.native, keeper: metadata.keeper, ...(oldAppKind === "launchd-parented" ? { parent } : {}), web: metadata.web ?? null,
       core: metadata.l4096, dashboard: metadata.l7777, gateway: metadata.l47120 ?? null, tools: metadata.helpers, configSHA: metadata.config, partitions: metadata.partitions,
       currentObservationRequired: true, workQuietMs: 60000, workWaitMaxMs: 1800000, personalAdmission: "current-required", coreExclusion: p.authority.coreExclusion })),
     "provenance/target-absence.json": Buffer.from(json(input.absence)), "provenance/accepted-artifact.txt": Buffer.from(artifact.provenance),
     [profile.kind === "laptop" ? "provenance/native-artifact-proof.json" : "provenance/native-artifact.json"]: Buffer.from(json(artifact.native)), "normal-publication/app-tree.json": Buffer.from(json(artifact.appTree)),
   })
-  const priorPins = { [keeper.script]: keeper.scriptSHA, [keeper.request]: keeper.requestSHA, [keeper.result]: keeper.resultSHA }
+  const priorPins = keeper ? { [keeper.script]: keeper.scriptSHA, [keeper.request]: keeper.requestSHA, [keeper.result]: keeper.resultSHA } : {}
   const prior = profile.kind === "laptop" ? laptopPrior(input, old, metadata, priorPins, bodies) : miniPrior(input, old, metadata, priorPins)
   if (profile.kind === "laptop") {
     assert.ok(p.helperCompatibility?.authority && p.helperCompatibility?.qualification, "retained helper requires qualified acceptance")
