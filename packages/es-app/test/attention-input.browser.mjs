@@ -18,6 +18,8 @@ preview.ledger.records.push(
   gate("pool", "Pick reviewers from the owners", { kind: "multi", label: "Reviewers", required: true, choices: PEOPLE, max: 2 }),
   gate("future", "A newer input kind", { kind: "date", label: "Review by", required: true }),
   gate("refused", "Old client path", { kind: "text", label: "Reviewers", required: true }),
+  gate("noted", "Claim the EKS migration repos", { kind: "multi", label: "Repos", required: true, choices: [{ id: "repo-a", label: "repo-a" }, { id: "repo-b", label: "repo-b" }, { id: "repo-c", label: "repo-c" }] }),
+  gate("noted-optional", "Claim the second batch", { kind: "multi", label: "Repos", required: true, choices: [{ id: "repo-a", label: "repo-a" }, { id: "repo-b", label: "repo-b" }] }),
 )
 const browser = await chromium.launch({ channel: "chrome", headless: true })
 const errors = []
@@ -86,6 +88,49 @@ try {
     // The answered request is filed in History, where it shows what was provided.
     await page.reload()
     await expect(card.locator(".home-input-value bdi")).toHaveText("Carol T., Alice R.")
+    await context.close()
+  }
+  {
+    // A checklist option also takes an optional note in the same answer: one POST with choice + checklist + text.
+    const { context, card, page } = await open({ width: 1440, height: 1000 }, "noted")
+    await card.getByRole("button", { name: "Name reviewers", exact: true }).click()
+    const repos = card.getByRole("group", { name: "Repos" })
+    await repos.getByRole("checkbox", { name: "repo-a" }).check()
+    await repos.getByRole("checkbox", { name: "repo-b" }).check()
+    const note = card.getByRole("textbox", { name: /Add a note/ })
+    await note.fill("Claimed under the EKS migration")
+    // Enter in the note never submits; Cmd/Ctrl+Enter or Send does.
+    await note.press("Enter")
+    await page.waitForTimeout(400)
+    if (posts("noted").length) throw Error(`Enter in the note sent ${JSON.stringify(posts("noted"))}`)
+    // Collapse keeps the unsubmitted choice, checklist and note; so does a remount.
+    await page.keyboard.press("Escape")
+    await expect(card.getByRole("checkbox", { name: "repo-a" })).toHaveCount(0)
+    await card.getByRole("button", { name: "Name reviewers", exact: true }).click()
+    await expect(card.getByRole("checkbox", { name: "repo-a" })).toBeChecked()
+    await expect(card.getByRole("checkbox", { name: "repo-b" })).toBeChecked()
+    await expect(card.getByRole("textbox", { name: /Add a note/ })).toHaveValue(/Claimed under the EKS migration/)
+    // Reconnect/remount keeps the unsubmitted choice, checklist and note.
+    await page.reload()
+    await expect(card.getByRole("checkbox", { name: "repo-a" })).toBeChecked()
+    await expect(card.getByRole("checkbox", { name: "repo-b" })).toBeChecked()
+    await expect(card.getByRole("textbox", { name: /Add a note/ })).toHaveValue(/Claimed under the EKS migration/)
+    await card.getByRole("button", { name: "Send", exact: true }).click()
+    await expect(page.locator(".home-notice")).toContainText("Answer saved")
+    const [sent, ...extra] = posts("noted")
+    if (extra.length || sent.body.choice_id !== "name-reviewers" || JSON.stringify(sent.body.input_value) !== JSON.stringify(["repo-a", "repo-b"])
+      || sent.body.text.trim() !== "Claimed under the EKS migration") throw Error(`checklist + note answer ${JSON.stringify(posts("noted"))}`)
+    await context.close()
+  }
+  {
+    // The note is optional: the same checklist sends with no text field at all.
+    const { context, card, page } = await open({ width: 1440, height: 1000 }, "noted-optional")
+    await card.getByRole("button", { name: "Name reviewers", exact: true }).click()
+    await card.getByRole("group", { name: "Repos" }).getByRole("checkbox", { name: "repo-a" }).check()
+    await card.getByRole("button", { name: "Send", exact: true }).click()
+    await expect(page.locator(".home-notice")).toContainText("Answer saved")
+    const [sent] = posts("noted-optional")
+    if (sent.body.choice_id !== "name-reviewers" || JSON.stringify(sent.body.input_value) !== JSON.stringify(["repo-a"]) || "text" in sent.body) throw Error(`optional note answer ${JSON.stringify(sent.body)}`)
     await context.close()
   }
   {

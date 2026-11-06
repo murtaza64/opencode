@@ -78,7 +78,7 @@ try {
     const card = page.locator('[data-attention-id="plain"]')
     await expect(card.getByRole("button", { name: "Morning", exact: true })).toBeVisible({ timeout: 120_000 })
     await expect(card.locator(".decision-button.home-primary")).toHaveCount(0)
-    await expect(card.getByRole("button", { name: "Add a note" })).toHaveCount(0)
+    await expect(card.getByRole("button", { name: "Add a note", exact: true })).toHaveCount(1)
     await expect(card.getByRole("textbox", { name: "Your answer" })).toHaveCount(0)
     await card.getByRole("button", { name: "Type something…" }).click()
     await expect(card.getByRole("button", { name: "Send", exact: true })).toBeDisabled()

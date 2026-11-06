@@ -22,6 +22,12 @@ preview.ledger.records.push(
   ...["keys_ltr", "keys_rtl"].map(id => record(id, { title: "Pick a rollout window", options: [{ id: "am", label: "Morning" }, { id: "pm", label: "Evening" }], recommendation: null })),
   record("multi", { title: "Which lanes get the summary?", options: [{ id: "send", label: "Send to", input: { kind: "multi", label: "Lanes", choices: [{ id: "a", label: "Docs" }, { id: "b", label: "Release" }] } }, { id: "none", label: "Nobody" }], recommendation: null }),
   record("secret", { title: "Provide the deploy token", options: [{ id: "give", label: "Provide it", input: { kind: "secret", label: "Token", consumer: "deploy-token", handle: "fixture-secret", fields: [{ id: "token", label: "Token" }] } }, { id: "cant", label: "I can't" }], recommendation: null }),
+  record("noted", { title: "Send the release note?", options: [{ id: "yes", label: "Send it" }, { id: "no", label: "Not yet" }], recommendation: null }),
+  record("noted-lost", { title: "Publish the canary with a note?", options: [{ id: "yes", label: "Publish" }, { id: "no", label: "Hold" }], recommendation: null }),
+  record("noted-switch", { title: "Pick repositories", options: [
+    { id: "first", label: "First batch", input: { kind: "multi", label: "Repos", choices: [{ id: "a", label: "repo-a" }, { id: "b", label: "repo-b" }] } },
+    { id: "second", label: "Second batch", input: { kind: "multi", label: "Repos", choices: [{ id: "c", label: "repo-c" }, { id: "d", label: "repo-d" }] } },
+  ], recommendation: null }),
   record("five", { title: "Pick a theme", options: ["Mocha", "Latte", "Frappe", "Macchiato", "Plain"].map(label => ({ id: label.toLowerCase(), label })), recommendation: null }),
 )
 const browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : { channel: "chrome" }) })
@@ -68,6 +74,50 @@ try {
     await card.getByRole("button", { name: "Send", exact: true }).click()
     await expect.poll(() => commands.length).toBe(1)
     assert.deepEqual({ ...commands[0], command_id: "id" }, { action: "answer", text: "plugged into the laptop", expected_revision: 1, command_id: "id" })
+    await context.close()
+  }
+  {
+    // A note beside the buttons rides the option click in the same answer; Enter never submits it.
+    const { context, page, commands, card } = await open("noted")
+    await card.getByRole("button", { name: "Add a note", exact: true }).click()
+    const note = card.getByRole("textbox", { name: /Note \(optional\)/ })
+    await note.fill("Mention the staged rollout")
+    await note.press("Enter")
+    await page.waitForTimeout(400)
+    assert.equal(commands.length, 0, "Enter in the note sent nothing")
+    await card.getByRole("button", { name: "Send it", exact: true }).click()
+    await expect.poll(() => commands.length).toBe(1)
+    assert.equal(commands[0].choice_id, "yes")
+    assert.equal(commands[0].text.trim(), "Mention the staged rollout")
+    await context.close()
+  }
+  {
+    // A failed send keeps the note in place for the retry.
+    const { context, page, commands, card } = await open("noted-lost")
+    await context.route("**/es/api/attention/*/commands?*", route => route.abort("failed"))
+    await card.getByRole("button", { name: "Add a note", exact: true }).click()
+    const note = card.getByRole("textbox", { name: /Note \(optional\)/ })
+    await note.fill("keep this note")
+    await card.getByRole("button", { name: "Publish", exact: true }).click()
+    await expect(page.locator(".home-notice")).toContainText("Outcome unknown")
+    await expect(note).toHaveValue(/keep this note/)
+    assert.equal(commands.length, 1)
+    await context.close()
+  }
+  {
+    // The note survives switching between two options that both take a field.
+    const { context, page, commands, card } = await open("noted-switch")
+    await card.getByRole("button", { name: "Add a note", exact: true }).click()
+    await card.getByRole("textbox", { name: /Note \(optional\)/ }).fill("same note")
+    await card.getByRole("button", { name: "First batch", exact: true }).click()
+    await expect(card.getByRole("textbox", { name: /Add a note/ })).toHaveValue("same note")
+    await card.getByRole("button", { name: "Second batch", exact: true }).click()
+    await expect(card.getByRole("textbox", { name: /Add a note/ })).toHaveValue("same note")
+    await card.getByRole("group", { name: "Repos" }).getByRole("checkbox", { name: "repo-c" }).check()
+    await card.getByRole("button", { name: "Send", exact: true }).click()
+    await expect.poll(() => commands.length).toBe(1)
+    assert.equal(commands[0].choice_id, "second")
+    assert.equal(commands[0].text, "same note")
     await context.close()
   }
   {
@@ -152,6 +202,8 @@ try {
     await expect(card.getByRole("radio")).toHaveCount(0)
     await card.getByRole("button", { name: "Provide it", exact: true }).click()
     await expect(card.getByLabel("Token")).toHaveAttribute("type", "password")
+    await expect(card.getByRole("button", { name: "Add a note", exact: true })).toHaveCount(0)
+    await expect(card.locator(".decision-note-beside")).toHaveCount(0)
     await expect(card.getByRole("button", { name: "Save", exact: true })).toBeDisabled()
     await expect(card.getByRole("button", { name: "Submit securely" })).toHaveCount(0)
     await card.getByRole("button", { name: "I can't", exact: true }).click()

@@ -76,6 +76,19 @@ export const canWriteAttention = (attention: Attention, record: AttentionRecord)
   attention.snapshot()?.value.projects.find(item => item.editspace === record.editspace)?.available !== false
 
 const optionLabel = (record: AttentionRecord, id?: string | null) => record.options.find(option => option.id === id)?.label
+
+/** A direct card's unsubmitted choice + field values, kept across a collapse, a reconnect or a remount.
+ * Answered only by its Send: nothing here is sent on its own. */
+type PickDraft = { choice?: string; values?: Record<string, InputValue> }
+const pickDraftKey = (record: AttentionRecord) => `es-attention-pick:${record.editspace}:${record.id}${record.series ? `:${contentRevision(record)}` : ""}`
+const readPickDraft = (record: AttentionRecord): PickDraft | undefined => {
+  try {
+    const value = JSON.parse(localStorage.getItem(pickDraftKey(record)) ?? "null")
+    return value && typeof value === "object" && !Array.isArray(value) ? value as PickDraft : undefined
+  } catch {
+    return undefined
+  }
+}
 // Delivery events append history without a revision bump, so include delivery evidence in the cache key.
 const historyVersion = (record: AttentionRecord) => `${record.revision}:${record.delivery_state}:${record.delivery?.updated_at ?? ""}`
 
@@ -102,7 +115,8 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
   // any other option sends on click.
   const direct = props.options && !routed && !props.prepared && props.record.status === "open" && props.record.options.length >= 2 && props.record.options.length <= 4 && props.record.options.every(option => !option.input || INPUT_KINDS.includes(option.input.kind) && (option.input.kind !== "secret" || !!secretInput(option)))
   const [clicked, setClicked] = createSignal<string>()
-  const [choice, setChoice] = createSignal(routed ? routed.apply.id : direct ? "" : preselect())
+  const storedPick = direct ? readPickDraft(props.record) : undefined
+  const [choice, setChoice] = createSignal(routed ? routed.apply.id : direct ? (storedPick?.choice ?? "") : preselect())
   // With the recommendation still selected the note waits behind "Add a note"; otherwise it is inline.
   const [noteOpen, setNoteOpen] = createSignal(!!text())
   const noteHidden = () => (routed || direct ? true : !!preselect() && choice() === preselect()) && !noteOpen()
@@ -110,7 +124,16 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
   if (direct) setNoteOpen(false)
   const canWrite = () => canWriteAttention(props.attention, props.record)
   // Input typed for each option is kept while switching; only the selected option's value is sent.
-  const [values, setValues] = createSignal<Record<string, InputValue>>(routed ? { [routed.apply.id]: routed.picks } : {})
+  const [values, setValues] = createSignal<Record<string, InputValue>>(routed ? { [routed.apply.id]: routed.picks } : (storedPick?.values ?? {}))
+  // Persist the unsubmitted direct choice and values; a fresh card resumes them, and a send clears them.
+  createEffect(() => {
+    if (!direct) return
+    const draft: PickDraft = { choice: choice(), values: values() }
+    try {
+      if (!draft.choice && !Object.keys(draft.values ?? {}).length) localStorage.removeItem(pickDraftKey(props.record))
+      else localStorage.setItem(pickDraftKey(props.record), JSON.stringify(draft))
+    } catch { /* the page keeps the draft */ }
+  })
   const selected = () => props.options ? props.record.options.find(option => option.id === choice()) : undefined
   const secret = () => secretInput(selected())
   const problem = () => inputProblem(selected(), values()[choice()])
@@ -126,9 +149,9 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
     // Saved first by the ledger client; a lost response keeps this exact command for retry.
     // The brief on screen is recorded with the answer, so History reopens what was seen when deciding.
     const brief = props.briefJob && props.briefJob.revision === String(contentRevision(props.record)) ? { brief: props.briefJob } : {}
-    const done = await props.attention.act(props.record, { action: "answer", ...(text().trim() && !(direct && option?.input) ? { text: text() } : {}), ...(option ? { choice_id: option.id, ...(other ? {} : inputPayload(option, values()[option.id])) } : {}), ...brief })
+    const done = await props.attention.act(props.record, { action: "answer", ...(text().trim() ? { text: text() } : {}), ...(option ? { choice_id: option.id, ...(other ? {} : inputPayload(option, values()[option.id])) } : {}), ...brief })
     if (direct) setClicked(undefined)
-    if (done) props.onView?.("answered")
+    if (done) { localStorage.removeItem(pickDraftKey(props.record)); props.onView?.("answered") }
   }
   const id = `answer-${props.record.id}`
   const dashboard = useDashboard()
@@ -189,7 +212,18 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
       </button>}</For>
       {/* The one text path: a written answer of its own, sent with no option (simple-decision-buttons-text-fallback). */}
       <Show when={!noteOpen() && !opened()}><button type="button" class="home-quiet decision-type" dir="auto" disabled={!canWrite() || !!clicked()} onClick={openTyping}>Type something…</button></Show>
+      {/* A note beside the direct buttons: clicking an option sends it in the same answer. */}
+      <Show when={!noteOpen() && !opened() && !secret()}><button type="button" class="home-add-note decision-note-add" disabled={!canWrite() || !!clicked()}
+        onClick={() => { setNoteOpen(true); queueMicrotask(() => (document.getElementById(`${id}-direct-note`) as HTMLElement | null)?.focus()) }}>Add a note</button></Show>
     </div></Show>
+    <Show when={direct && noteOpen() && !opened() && !secret()}>
+      <div class="decision-note-beside">
+        <label class="decision-note-label" for={`${id}-direct-note`}>Note (optional)</label>
+        <textarea id={`${id}-direct-note`} class="decision-note" dir="auto" rows={2} maxLength={8000} value={text()} disabled={!canWrite()}
+          onInput={event => { setText(event.currentTarget.value); localStorage.setItem(answerDraftKey(props.record), event.currentTarget.value) }}
+          onKeyDown={event => { if (event.key === "Enter" && !event.metaKey && !event.ctrlKey && !event.isComposing) event.stopPropagation() }} />
+      </div>
+    </Show>
     <Show when={props.options && !routed && !direct}><fieldset class="home-options" classList={{ "home-option-cards": !!props.prepared }} disabled={!canWrite()}><legend class="sr-only">Your choice</legend>
       <For each={props.record.options}>{option => {
         // A prepared brief turns each choice into a card saying what it leads to; the label, ID and the
@@ -219,7 +253,15 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
     {/* A secret option gets masked fields with their own single submission; it never enters the answer or a draft. */}
     {/* On a direct card the open field sits right under the buttons with its submit beside it: [field] [Send]. */}
     <div class="decision-field" classList={{ "decision-field-open": opened() }}><Show when={secret()} fallback={<Show when={!routed && selected()?.input && selected()}>{option => <div class="decision-field-row" onKeyDown={event => { if (opened()) enter(event) }}>
+        <div class="decision-field-stack">
         <OptionField id={`${id}-input`} option={option()} value={values()[option().id]} disabled={!canWrite()} onChange={value => setValues(current => ({ ...current, [option().id]: value }))} />
+        <Show when={opened()}>
+          <label class="decision-note-label" for={`${id}-input-note`}>Add a note <span class="home-muted">(optional)</span></label>
+          <textarea id={`${id}-input-note`} class="decision-note" dir="auto" rows={2} maxLength={8000} value={text()} disabled={!canWrite()}
+            onInput={event => { setText(event.currentTarget.value); localStorage.setItem(answerDraftKey(props.record), event.currentTarget.value) }}
+            onKeyDown={event => { if (event.key === "Enter" && !event.metaKey && !event.ctrlKey && !event.isComposing) event.stopPropagation() }} />
+        </Show>
+        </div>
         <Show when={opened()}><button type="button" class="home-primary decision-field-send" disabled={!ready() || !!clicked()} onClick={() => void send()}>Send</button></Show>
       </div>}</Show>}>
       {spec => <SecretField id={`${id}-secret`} record={props.record} option={selected()!} spec={spec()} disabled={!canWrite()} inline={direct} onDelivered={() => { void props.attention.refresh(); props.onView?.("answered") }} />}</Show></div>

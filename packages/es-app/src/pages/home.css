@@ -166,3 +166,11 @@ button.home-add-note:focus-visible { outline: 2px solid var(--accent); outline-o
 .home-secret-inline .home-secret-field input:focus-visible, .home-secret-inline .home-secret-field input:focus { outline-offset: 0; }
 .home-secret-row > .home-primary { box-sizing: border-box; flex: none; block-size: 40px; min-block-size: 0; margin: 0; }
 .home-secret-inline .home-secret-note { margin: 0; font-size: 12px; color: var(--overlay1); }
+
+/* A direct option's field and its optional note stack in the field row; Send stays beside both. */
+.decision-field-stack { display: grid; gap: 6px; flex: 1; min-inline-size: 0; }
+.decision-note-label { font-size: 12px; color: var(--subtext0); }
+.decision-note { box-sizing: border-box; inline-size: 100%; min-block-size: 44px; padding: 6px 8px; font: inherit; font-size: 13px; color: var(--text); background: var(--base); border: 1px solid var(--surface1); border-radius: var(--radius-control); resize: vertical; }
+.decision-note:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.decision-note-beside { display: grid; gap: 4px; margin-block: 4px 2px; }
+.decision-note-add { align-self: center; }
