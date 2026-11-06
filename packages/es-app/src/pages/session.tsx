@@ -440,6 +440,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   // Past this session's first message: older rows of the top earlier session, else the next earlier session. The row
   // at the top of the view keeps its place on screen while rows are added above it.
   let earlierLoading = false
+  // A settling anchor hold outlives its load; a new load cancels the old one.
+  let settleRun = 0
+  let settleObserver: ResizeObserver | undefined
   const loadEarlierSession = async () => {
     if (!transcriptEl || earlierLoading || !live.loaded()) return
     const ids = shownIDs()
@@ -447,6 +450,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     if (top && !top.ready()) return
     if (!top?.hasOlder() && !earlierLeft()) return
     earlierLoading = true
+    const run = ++settleRun
+    settleObserver?.disconnect()
+    settleObserver = undefined
     stick = false
     userScroll = false
     mountAll()
@@ -458,6 +464,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     // every content resize until the load settles, not only on the rAF loop below.
     const observer = inner && typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => keep()) : undefined
     if (inner) observer?.observe(inner)
+    settleObserver = observer
     try {
       if (top?.hasOlder()) await top.older()
       else {
@@ -472,10 +479,18 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
       keep()
     } finally {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-      keep()
-      observer?.disconnect()
       earlierLoading = false
+      // Background QoS can delay the earlier page's first paint past the frame that saw its segment "ready".
+      // Keep the anchor over a short settling window (each frame also lets the ResizeObserver fire), then stop.
+      // A newer load has its own anchor; this one stops as soon as it starts.
+      for (let frame = 0; frame < 60 && run === settleRun; frame++) {
+        keep()
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      }
+      if (run === settleRun) {
+        observer?.disconnect()
+        if (settleObserver === observer) settleObserver = undefined
+      }
     }
   }
   const inspectSubagent = (id: string) => {
