@@ -129,8 +129,11 @@ try {
   await expect(frame.locator("nav")).toHaveText("Spec nav")
   // The frame scrolls the tall artifact, by keyboard as well (the reopened frame: the last one with that address).
   await frame.locator("p").first().click()
-  await page.keyboard.press("PageDown")
   const artifact = page.frames().filter((item) => item.url().includes("/__es/frame/srf_spec") && !item.isDetached()).at(-1)
+  // Keys go to the frame only once its document holds focus: wait for that observable state, not a sleep, so the
+  // press cannot race the click's focus hand-off (it did on a loaded host, DD #451). One press, never retried.
+  await expect.poll(() => artifact.evaluate(() => document.readyState === "complete" && document.hasFocus())).toBe(true)
+  await page.keyboard.press("PageDown")
   // Keyboard scrolling may animate: wait for it to move.
   await expect.poll(() => artifact.evaluate(() => scrollY)).toBeGreaterThan(0)
   const scrolled = await artifact.evaluate(() => ({ y: scrollY, height: document.documentElement.scrollHeight, view: innerHeight }))
