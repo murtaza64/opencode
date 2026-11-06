@@ -42,17 +42,39 @@ try {
     // Synthetic multi-line text, roughly prose-shaped (words, a few @ and links), never real content.
     const line = "Lorem ipsum dolor sit amet, see surface:fixture-board and @nobody at https://example.com/x?y=1 consectetur.\n"
     const text = line.repeat(Math.ceil(size / line.length)).slice(0, size)
+    // TRACE=paste: the paste's timeline events (layouts with their JS caller, style, script), largest size only.
+    const tracePaste = process.env.TRACE === "paste" && size === Math.max(...sizes)
+    const events = []
+    if (tracePaste) {
+      cdp.on("Tracing.dataCollected", (data) => events.push(...data.value))
+      await cdp.send("Tracing.start", { categories: "devtools.timeline,disabled-by-default-devtools.timeline.stack", transferMode: "ReportEvents" })
+    }
     const profilePaste = process.env.PROFILE === "paste" && size === Math.max(...sizes)
     if (profilePaste) { await cdp.send("Profiler.enable"); await cdp.send("Profiler.setSamplingInterval", { interval: 500 }); await cdp.send("Profiler.start") }
     const pasteStart = Date.now()
     await cdp.send("Input.insertText", { text })
     await settle(page)
     const pasteMs = Date.now() - pasteStart
+    if (tracePaste) {
+      const done = new Promise((resolve) => cdp.once("Tracing.tracingComplete", resolve))
+      await cdp.send("Tracing.end")
+      await done
+      const complete = events.filter((event) => event.ph === "X" && event.dur)
+      const totals = new Map()
+      for (const event of complete) totals.set(event.name, (totals.get(event.name) ?? 0) + event.dur / 1000)
+      console.log("TRACE totals (ms):", JSON.stringify([...totals].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, ms]) => [name, Math.round(ms)])))
+      for (const event of complete.filter((item) => item.name === "Layout" && item.dur > 20_000)) {
+        const stack = event.args?.beginData?.stackTrace ?? []
+        console.log(`TRACE Layout ${Math.round(event.dur / 1000)} ms dirty=${event.args?.beginData?.dirtyObjects ?? "?"}/${event.args?.beginData?.totalObjects ?? "?"} from ${stack.slice(0, 3).map((frame) => `${frame.functionName || "(anon)"}@${frame.url.split("/").at(-1)?.split("?")[0]}:${frame.lineNumber + 1}`).join(" < ") || "(no JS: frame)"}`)
+      }
+    }
     if (profilePaste) { console.log("TOP self-time (ms) during paste at", size); for (const item of topSelf((await cdp.send("Profiler.stop")).profile)) console.log(`  ${item.ms.toFixed(1).padStart(8)}  ${item.name}`) }
     if ((await box.inputValue()).length !== size) throw new Error(`paste of ${size} chars did not land`)
     // DIAG=1: where a paste's one-time cost goes, each part forced on its own after the page settled.
-    // DIAG=1 also pastes the same text into a plain textarea (no app handlers): the browser's own cost of the edit.
-    if (process.env.DIAG === "1") {
+    // The same paste into a plain textarea (no app handlers): the browser's own cost of the edit, the baseline the
+    // composer's paste is held to (DIAG=1, and ASSERT=1 at the largest size).
+    let plainPasteMs
+    if (process.env.DIAG === "1" || (process.env.ASSERT === "1" && size === Math.max(...sizes))) {
       await page.evaluate(() => {
         const plain = document.createElement("textarea")
         plain.id = "diag-plain"
@@ -63,7 +85,8 @@ try {
       const started = Date.now()
       await cdp.send("Input.insertText", { text })
       await settle(page)
-      console.log("DIAG plain textarea paste", size, `${Date.now() - started} ms`)
+      plainPasteMs = Date.now() - started
+      console.log("plain textarea paste", size, `${plainPasteMs} ms`)
       await page.evaluate(() => document.getElementById("diag-plain")?.remove())
       await box.focus()
     }
@@ -123,7 +146,7 @@ try {
     const vimLat = (await page.evaluate(() => window.__lat)).sort((a, b) => a - b)
     if ((await box.inputValue()) !== value) throw new Error("a Vim motion changed the draft")
     const sorted = [...lat].sort((a, b) => a - b)
-    const row = { size, pasteMs, keys, medianMs: round(sorted[Math.floor(sorted.length / 2)]), p90Ms: round(sorted[Math.floor(sorted.length * 0.9)]), maxMs: round(sorted.at(-1)),
+    const row = { size, pasteMs, plainPasteMs, keys, medianMs: round(sorted[Math.floor(sorted.length / 2)]), p90Ms: round(sorted[Math.floor(sorted.length * 0.9)]), maxMs: round(sorted.at(-1)),
       taskMsPerKey: round((after.TaskDuration - before.TaskDuration) * 1000 / keys), scriptMsPerKey: round((after.ScriptDuration - before.ScriptDuration) * 1000 / keys),
       layoutMsPerKey: round((after.LayoutDuration - before.LayoutDuration) * 1000 / keys), styleMsPerKey: round((after.RecalcStyleDuration - before.RecalcStyleDuration) * 1000 / keys),
       vimMedianMs: round(vimLat[Math.floor(vimLat.length / 2)]), vimMaxMs: round(vimLat.at(-1)), vimTaskMsPerKey: round((vimAfter.TaskDuration - vimBefore.TaskDuration) * 1000 / motions.length) }
@@ -139,13 +162,17 @@ try {
   const ratio = large.medianMs / Math.max(small.medianMs, 1)
   console.log(`RATIO median ${large.size}/${small.size}: ${ratio.toFixed(2)}`)
   const vimRatio = large.vimMedianMs / Math.max(small.vimMedianMs, 1)
+  // A paste costs at most twice a plain textarea's own paste, plus a second (DD #443: was ~6x, 10 s vs 1.7 s at 200k).
+  const pasteBound = large.plainPasteMs === undefined ? undefined : 2 * large.plainPasteMs + 1000
+  if (pasteBound !== undefined) console.log(`PASTE ${large.size}: ${large.pasteMs} ms, plain textarea ${large.plainPasteMs} ms, bound ${pasteBound} ms`)
+  if (process.env.ASSERT === "1" && pasteBound !== undefined && large.pasteMs > pasteBound) { console.log(`FAIL paste of ${large.size} chars took ${large.pasteMs} ms`); process.exitCode = 1 }
   console.log(`RATIO vim median ${large.size}/${small.size}: ${vimRatio.toFixed(2)}`)
   // Main-thread time per key also stays bounded at the largest size (it was ~14.5 s per key before DD #432).
   // Medians near one frame are noise (a 50 ms vs 110 ms frame wait is not lag): a ratio only counts above 150 ms.
   if (process.env.ASSERT === "1" && (large.vimTaskMsPerKey > 100 || (vimRatio > 2 && large.vimMedianMs > 150))) { console.log(`FAIL Vim motions: ${large.vimTaskMsPerKey} ms per key at ${large.size} chars, ratio ${vimRatio.toFixed(2)}`); process.exitCode = 1 }
   else if (process.env.ASSERT === "1" && large.taskMsPerKey > 100) { console.log(`FAIL ${large.taskMsPerKey} ms of main-thread work per key at ${large.size} chars`); process.exitCode = 1 }
   else if (process.env.ASSERT === "1" && ratio > 2 && large.medianMs > 150) { console.log("FAIL keystroke cost scales with draft length"); process.exitCode = 1 }
-  else if (process.env.ASSERT === "1") console.log(`PASS composer long input: typing and Vim motions -> paint at ${large.size} chars within 2x of ${small.size}`)
+  else if (process.env.ASSERT === "1" && !process.exitCode) console.log(`PASS composer long input: paste, typing and Vim motions -> paint at ${large.size} chars within 2x of ${small.size}`)
 } finally {
   await browser.close()
   await server.close()

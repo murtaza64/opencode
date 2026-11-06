@@ -2983,28 +2983,39 @@ test("an image Steer whose exact image cannot be saved puts the draft back and s
   expect(requests.filter((request) => request.method === "POST")).toHaveLength(0)
 })
 
-test("an input event writes the draft once: the caret saves with the text, and a caret move alone saves in a microtask", async () => {
+test("typed text saves once per task: a many-line paste writes the draft once, and nothing is lost", async () => {
   const storage = new MemoryStorage()
   const writes: string[] = []
   const write = storage.setItem.bind(storage)
   storage.setItem = (key, value) => { writes.push(value); write(key, value) }
   const { composer } = harness(undefined, { storage })
-  await Promise.resolve()
+  await new Promise((resolve) => setTimeout(resolve, 0))
   writes.length = 0
-  const text = "x".repeat(200_000)
-  // The composer's input handler: caret first, then the text.
-  composer.setVisibleSelection(text.length, text.length)
-  composer.setVisibleText(text)
-  expect(writes).toHaveLength(1)
-  await Promise.resolve()
+  // A 2,000-line paste arrives as one input event per line, all in one task.
+  const lines = Array.from({ length: 2_000 }, (_, index) => `line ${index} ${"x".repeat(90)}\n`)
+  let text = ""
+  for (const line of lines) {
+    text += line
+    composer.setVisibleSelection(text.length, text.length)
+    composer.setVisibleText(text)
+  }
+  expect(writes).toHaveLength(0)
+  await new Promise((resolve) => setTimeout(resolve, 0))
   expect(writes).toHaveLength(1)
   expect(JSON.parse(writes[0]!).task).toMatchObject({ text, selection: [text.length, text.length] })
-  // The same caret again writes nothing; a new caret alone is saved before the next task.
-  composer.setVisibleSelection(text.length, text.length)
+  // Any other write saves the pending text at once; leaving the page flushes it too.
+  composer.setVisibleText(`${text}more`)
+  composer.setVisibleModel({ providerID: "fixture", modelID: "test" })
+  expect(JSON.parse(writes.at(-1)!).task.text).toBe(`${text}more`)
+  composer.setVisibleText(`${text}last`)
+  globalThis.dispatchEvent?.(new Event("pagehide"))
+  expect(JSON.parse(writes.at(-1)!).task.text).toBe(`${text}last`)
+  // A caret move alone saves in a microtask; the same caret again writes nothing.
+  const count = writes.length
   composer.setVisibleSelection(3, 3)
-  composer.setVisibleSelection(4, 4)
-  expect(writes).toHaveLength(1)
+  composer.setVisibleSelection(3, 3)
+  expect(writes).toHaveLength(count)
   await Promise.resolve()
-  expect(writes).toHaveLength(2)
-  expect(JSON.parse(writes[1]!).task.selection).toEqual([4, 4])
+  expect(writes).toHaveLength(count + 1)
+  expect(JSON.parse(writes.at(-1)!).task.selection).toEqual([3, 3])
 })
