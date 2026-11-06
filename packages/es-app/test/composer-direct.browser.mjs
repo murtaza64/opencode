@@ -20,7 +20,8 @@ const active = () => page.locator(".prompt-box")
 const editor = () => active().getByRole("textbox", { name: "Message", exact: true })
 const button = (name) => active().getByRole("button", { name, exact: true })
 const more = () => active().getByRole("button", { name: "More send options", exact: true })
-// Queue and Aside are secondary: open the menu before clicking one.
+// Steer is the one send (composer-steer-primary): Queue and Aside are explicit choices in More send options, which
+// Cmd+M opens and closes; it no longer cycles a keyboard target.
 const secondary = async (name) => {
   if ((await more().getAttribute("aria-expanded")) !== "true") await more().click()
   return button(name)
@@ -35,8 +36,8 @@ try {
   await expect(active().locator(".direct-primary")).toHaveAccessibleName("Nudge the agent (empty message)")
   await expect(active().locator(".direct-primary")).toBeDisabled()
   await expect(more()).toHaveAttribute("aria-expanded", "false")
-  await expect(button("Queue")).toHaveCount(0)
-  await expect(button("Aside")).toHaveCount(0)
+  await expect(button("Queue for when idle")).toHaveCount(0)
+  await expect(button("Ask aside")).toHaveCount(0)
   // No agent preset picker; the model name is the Change model button.
   await expect(active().getByLabel("Queue agent", { exact: true })).toHaveCount(0)
   await expect(active().getByRole("combobox")).toHaveCount(0)
@@ -50,52 +51,52 @@ try {
   await editor().evaluate((el) => el.setSelectionRange(2, 7))
   await editor().dispatchEvent("keydown", { code: "KeyM", key: "m", altKey: true })
   await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
+  // Cmd+M opens More send options; Steer stays the keyboard target, and the menu's choices carry no chord.
   await editor().press("Meta+m")
-  await expect(button("Queue")).toHaveAttribute("data-keyboard-target", "true")
-  await expect(button("Queue").locator("kbd")).toHaveText("⌘↵")
-  await expect(button("Aside")).toHaveCount(0)
-  await expect(await secondary("Aside")).toBeVisible()
-  await expect(button("Aside").locator("kbd")).toHaveText("⌘M")
+  await expect(more()).toHaveAttribute("aria-expanded", "true")
+  await expect(button("Queue for when idle")).toBeVisible()
+  await expect(button("Queue for when idle").locator("kbd")).toHaveText("")
+  await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
+  await editor().press("Meta+m")
+  await expect(more()).toHaveAttribute("aria-expanded", "false")
+  await expect(editor()).toBeFocused()
+  await expect(button("Ask aside")).toHaveCount(0)
+  await expect(await secondary("Ask aside")).toBeVisible()
+  // A repeated or composing Cmd+M leaves the menu as it is.
   await editor().dispatchEvent("keydown", { code: "KeyM", key: "m", metaKey: true, repeat: true })
   await editor().dispatchEvent("keydown", { code: "KeyM", key: "m", metaKey: true, isComposing: true })
-  await expect(button("Queue")).toHaveAttribute("data-keyboard-target", "true")
+  await expect(more()).toHaveAttribute("aria-expanded", "true")
+  await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
   await expect(editor()).toHaveValue("current visible message")
   expect(await editor().evaluate((el) => [el.selectionStart, el.selectionEnd])).toEqual([2, 7])
   expect(inputs()).toHaveLength(0)
   fixture.holdAside = true
-  await (await secondary("Aside")).click()
+  await (await secondary("Ask aside")).click()
   await expect(more()).toHaveAttribute("aria-expanded", "false")
   await expect(editor()).toBeFocused()
   await expect.poll(() => asides().length).toBe(1)
   expect(asides()[0].body.question).toBe("current visible message")
-  await expect(button("Queue")).toHaveAttribute("data-keyboard-target", "true")
-  await expect(await secondary("Aside")).toBeDisabled()
+  await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
+  await expect(await secondary("Ask aside")).toBeDisabled()
   await page.keyboard.press("Escape")
   await expect(more()).toHaveAttribute("aria-expanded", "false")
   await editor().fill("newer visible text")
-  await editor().press("Meta+m")
   fixture.holdAside = false
   fixture.asideReplies.shift()()
   await expect(page.locator(".aside-answer")).toContainText("ASIDE ONLY")
   await expect(editor()).toHaveValue("newer visible text")
-  await expect(button("Aside")).toHaveAttribute("data-keyboard-target", "true")
   await page.getByRole("button", { name: "Close aside", exact: true }).click()
 
-  await editor().press("Meta+m")
-  await editor().press("Meta+m")
   fixture.loseInput = true
-  await button("Queue").click()
+  await (await secondary("Queue for when idle")).click()
   await expect(page.locator(".input-admission")).toContainText("Not sent")
   const unknown = inputs().at(-1).body
   // Queue keeps the session agent: no agent override in the request.
   expect(unknown).toEqual({ requestID: unknown.requestID, text: "newer visible text", delivery: "queue" })
   await editor().fill("draft after unknown")
-  await editor().press("Meta+m")
-  await expect(editor()).toBeFocused()
   await page.reload({ waitUntil: "domcontentloaded" })
   await expect(editor()).toHaveValue("draft after unknown")
-  // Sending cleared the editor and reset the target to Steer, so one Cmd+M chose Queue.
-  await expect(button("Queue")).toHaveAttribute("data-keyboard-target", "true")
+  await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
   await page.getByRole("button", { name: "Check and retry same input", exact: true }).click()
   await expect(page.locator(".input-admission")).toHaveCount(0)
   expect(inputs().at(-1).body).toEqual(unknown)
@@ -103,7 +104,7 @@ try {
   await expect(page.locator('.input-receipts li[data-delivery="queue"]')).toHaveCount(1)
   await expect(page.locator(".input-receipts li")).toHaveCount(1)
 
-  await (await secondary("Steer")).click()
+  await button("Steer").click()
   await expect.poll(() => inputs().at(-1).body.delivery).toBe("steer")
   expect(inputs().at(-1).body.text).toBe("draft after unknown")
   expect(inputs().at(-1).body.agent).toBeUndefined()
@@ -114,25 +115,23 @@ try {
   await expect(active().locator(".direct-primary")).toHaveAccessibleName("Interrupt & steer now with your pending steer")
   await expect(active().locator(".direct-primary")).toBeDisabled()
   await expect(page.locator(".input-receipts li")).toHaveCount(2)
-  await editor().fill("keyboard uses current target")
-  await editor().press("Meta+m")
+  // The keyboard always steers; Queue is only an explicit menu choice.
+  await editor().fill("keyboard steers")
   await editor().press("Control+Enter")
-  await expect.poll(() => inputs().at(-1).body.text).toBe("keyboard uses current target")
-  expect(inputs().at(-1).body.delivery).toBe("queue")
+  await expect.poll(() => inputs().at(-1).body.text).toBe("keyboard steers")
+  expect(inputs().at(-1).body.delivery).toBe("steer")
   await expect(editor()).toHaveValue("")
-  // The target reset to Steer: one Cmd+M on the next draft chooses Queue (below).
   await page.screenshot({ path: "artifacts/direct-composer/desktop.png", fullPage: true })
 
   await editor().fill("idle starts in chat")
-  await editor().press("Meta+m")
-  await expect(button("Queue")).toHaveAttribute("data-keyboard-target", "true")
   fixture.setStatus("idle")
-  await expect(page.locator(".topbar")).toContainText("idle")
+  // Idle: More send options goes away (the top bar no longer prints the status word).
+  await expect(more()).toHaveCount(0)
   await expect(button("Send").locator("kbd")).toHaveText("⌘↵")
   await expect(more()).toHaveCount(0)
   await expect(button("Steer")).toHaveCount(0)
-  await expect(button("Queue")).toHaveCount(0)
-  await expect(button("Aside")).toHaveCount(0)
+  await expect(button("Queue for when idle")).toHaveCount(0)
+  await expect(button("Ask aside")).toHaveCount(0)
   await editor().press("Meta+m")
   await expect(editor()).toHaveValue("idle starts in chat")
   const before = inputs().length
@@ -144,11 +143,9 @@ try {
   await editor().press("Control+Enter")
   expect(normal()).toHaveLength(1)
   fixture.setStatus("busy")
-  await expect(page.locator(".topbar")).toContainText("busy")
-  // The Send cleared the editor and reset the target to Steer.
+  await expect(more()).toHaveCount(1)
   await editor().fill("new draft while chat sends")
   await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
-  await editor().press("Meta+m")
   fixture.holdNormal = false
   fixture.normalReplies.shift()()
   // Accepted: the outgoing bubble reads Sent until the transcript shows the message; no actions.
@@ -156,7 +153,7 @@ try {
   await expect(page.getByRole("button", { name: "Dismiss send status", exact: true })).toHaveCount(0)
   await expect(active()).not.toContainText("A task message is being sent")
   await expect(editor()).toHaveValue("new draft while chat sends")
-  await expect(button("Queue")).toHaveAttribute("data-keyboard-target", "true")
+  await expect(button("Steer")).toHaveAttribute("data-keyboard-target", "true")
   expect(inputs()).toHaveLength(before)
   fixture.setStatus("idle")
   await expect(button("Send")).toBeVisible()
@@ -210,8 +207,8 @@ try {
     el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true }))
   })
   await expect(button("Remove saved.png")).toBeVisible()
-  await expect(button("Queue")).toHaveCount(0)
-  await expect(button("Aside")).toHaveCount(0)
+  await expect(button("Queue for when idle")).toHaveCount(0)
+  await expect(button("Ask aside")).toHaveCount(0)
   await expect(button("Send")).toBeEnabled()
   await editor().press("Meta+m")
   await expect(button("Remove saved.png")).toBeVisible()
@@ -248,7 +245,7 @@ try {
   expect(errors).toEqual([])
   expect(fixture.unexpected).toEqual([])
   console.log(
-    "PASS direct B: visible payloads, per-message target, races/retry, idle chat/busy inputs, settings/images, Nudge, Markdown, expanded/Vim/mobile/RTL",
+    "PASS direct B: visible payloads, Steer primary + Cmd+M menu, races/retry, idle chat/busy inputs, settings/images, Nudge, Markdown, expanded/Vim/mobile/RTL",
   )
 } finally {
   await preview.close()

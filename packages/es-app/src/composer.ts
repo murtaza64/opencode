@@ -594,7 +594,12 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       if (current === revision) return result
     }
   }
+  // A selection-only change saves in a microtask unless a full write happens first (DD #439): the composer saves the
+  // caret before the text of an input event, so a keystroke or a 200k paste writes the draft once, not twice. The
+  // microtask runs before any other task, so the caret is never lost.
+  let selectionWrite = false
   const persist = () => {
+    selectionWrite = false
     ++revision
     if (state.hydrating || heldDraft("task").images.length || heldDraft("aside").images.length || state.superseded?.draft.images.length || state.admission?.payload.images?.length || state.admission?.draft?.images.length || state.asideRequest?.images?.length || state.recoveries.some((entry) => entry.admission.payload.images?.length || entry.admission.draft?.images.length)) {
       if (!scheduled) {
@@ -1767,8 +1772,14 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       setState("sessionModel", next)
       persist()
     },
-    setVisibleSelection: (start: number, end: number) =>
-      updateDraft({ selection: [start, end] }, false, state.visibleBuffer),
+    setVisibleSelection: (start: number, end: number) => {
+      const key = state.visibleBuffer
+      if (state[key].selection[0] === start && state[key].selection[1] === end) return
+      setState(key, { selection: [start, end] })
+      if (selectionWrite) return
+      selectionWrite = true
+      queueMicrotask(() => { if (selectionWrite) persist() })
+    },
     /** Pass the selected context so an action that cannot carry it is blocked, not sent without it. */
     reasonForAction: (action: ComposerAction, context?: readonly ContextPart[]) =>
       blockedReason(action === "steer" && !state.busy ? "send" : action, state.visibleBuffer) || contextReason(action, context),
