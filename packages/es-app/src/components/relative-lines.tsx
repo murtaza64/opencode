@@ -42,30 +42,42 @@ export const RelativeLines = (props: { target: HTMLTextAreaElement; value: strin
     setHeight(probe.point(0).height)
     setLines(visible)
   }
+  // One measure per frame, before it paints (DD #443): a 200k paste fires thousands of selectionchange/scroll
+  // events (one per pasted line) and each measured the gutter again: 3,700 updates, ~6 s. The last state wins, so
+  // nothing is dropped and the numbers never lag the text by a frame.
+  let frame = 0
+  const schedule = () => {
+    if (frame) return
+    frame = requestAnimationFrame(() => {
+      frame = 0
+      update()
+    })
+  }
+  onCleanup(() => cancelAnimationFrame(frame))
   createEffect(() => {
     props.value
-    queueMicrotask(update)
+    schedule()
   })
   onMount(() => {
     const target = props.target
-    const observer = new ResizeObserver(update)
+    const observer = new ResizeObserver(schedule)
     observer.observe(target)
-    const mutation = new MutationObserver(update)
+    const mutation = new MutationObserver(schedule)
     mutation.observe(target, { attributes: true, attributeFilter: ["style", "dir", "class"] })
     const fontsLoaded = () => {
       invalidateTextareaLayout()
-      update()
+      schedule()
     }
     document.fonts.addEventListener("loadingdone", fontsLoaded)
     for (const event of ["input", "select", "selectionchange", "keyup", "click", "scroll"])
-      target.addEventListener(event, update)
+      target.addEventListener(event, schedule)
     update()
     onCleanup(() => {
       observer.disconnect()
       mutation.disconnect()
       document.fonts.removeEventListener("loadingdone", fontsLoaded)
       for (const event of ["input", "select", "selectionchange", "keyup", "click", "scroll"])
-        target.removeEventListener(event, update)
+        target.removeEventListener(event, schedule)
     })
   })
   return (

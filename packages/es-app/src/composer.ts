@@ -598,8 +598,20 @@ export const createComposer = (sessionID: string, directory: string, dependencie
   // caret before the text of an input event, so a keystroke or a 200k paste writes the draft once, not twice. The
   // microtask runs before any other task, so the caret is never lost.
   let selectionWrite = false
+  // Typed text saves in the next task (DD #443): a paste of N lines arrives as N input events in one task, and a
+  // synchronous write each time saved the whole growing draft N times (1.8 s of writes for a 200k paste). Any other
+  // write (a send, a recovery) saves it at once, and leaving the page flushes it, so the last input is never lost.
+  let textWrite: ReturnType<typeof setTimeout> | undefined
+  const flushText = () => {
+    if (textWrite !== undefined) persist()
+  }
   const persist = () => {
     selectionWrite = false
+    if (textWrite !== undefined) {
+      clearTimeout(textWrite)
+      textWrite = undefined
+      globalThis.removeEventListener?.("pagehide", flushText)
+    }
     ++revision
     if (state.hydrating || heldDraft("task").images.length || heldDraft("aside").images.length || state.superseded?.draft.images.length || state.admission?.payload.images?.length || state.admission?.draft?.images.length || state.asideRequest?.images?.length || state.recoveries.some((entry) => entry.admission.payload.images?.length || entry.admission.draft?.images.length)) {
       if (!scheduled) {
@@ -763,13 +775,16 @@ export const createComposer = (sessionID: string, directory: string, dependencie
     selectionChain = selectionChain.then(apply, apply)
     return selectionChain
   }
-  const updateDraft = (value: Partial<ComposerDraft>, revise = true, key: ComposerBuffer = draftKey()) => {
+  const updateDraft = (value: Partial<ComposerDraft>, revise = true, key: ComposerBuffer = draftKey(), typed = false) => {
     const hadContent = !!state[key].text || !!state[key].images.length
     setState(key, { ...value, revision: state[key].revision + (revise ? 1 : 0) })
     if (key === state.visibleBuffer && hadContent && !state[key].text && !state[key].images.length) {
       setState({ keyboardTarget: "steer", targetRevision: state.targetRevision + 1 })
     }
-    persist()
+    if (!typed) return persist()
+    if (textWrite !== undefined) return
+    textWrite = setTimeout(flushText, 0)
+    globalThis.addEventListener?.("pagehide", flushText)
   }
   const clearTask = (revision: number, buffer: ComposerBuffer = "task", targetRevision?: number) => {
     if (state[buffer].revision !== revision) return
@@ -1759,7 +1774,7 @@ export const createComposer = (sessionID: string, directory: string, dependencie
       setState({ visibleBuffer, keyboardTarget: "steer", targetRevision: state.targetRevision + 1 })
       persist()
     },
-    setVisibleText: (text: string) => updateDraft({ text }, true, state.visibleBuffer),
+    setVisibleText: (text: string) => updateDraft({ text }, true, state.visibleBuffer, true),
     setVisibleModel: (model: ComposerModel | null) =>
       updateDraft({ model: model ? { ...model } : null }, true, state.visibleBuffer),
     chooseSessionModel,
