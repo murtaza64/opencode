@@ -52,7 +52,7 @@ try {
   await page.goto(preview.url)
   await expect(miniRow("Ledger migration")).toBeVisible({ timeout: 90_000 })
   // Live status moves busy rows above idle ones (NAV-11); capture the list once that status has arrived.
-  await expect(page.locator(".sidebar [role=tabpanel] .session-entry .dot.busy").first()).toBeVisible()
+  await expect(page.locator(".sidebar [role=tabpanel] .session-entry[data-dot=busy]").first()).toBeVisible()
   const before = await titles()
 
   // A query matching a Mini row keeps it and drops non-matching rows from both hosts; case does not matter.

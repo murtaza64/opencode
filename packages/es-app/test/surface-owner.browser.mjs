@@ -13,6 +13,7 @@ const expect = base.configure({ timeout: 30_000 })
 const artifacts = new URL("../artifacts/surface-owner/", import.meta.url)
 await mkdir(artifacts, { recursive: true })
 const preview = await startPanelPreview()
+preview.fixture.personas = [{ name: "Relay", owner_lane: "fixture/granola-research", avatar_url: "https://example.com/relay.png" }]
 const browser = await chromium.launch({ channel: "chrome", headless: true })
 const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
 // The Front desk chat is a ready session (ses_b), as in ask-about.browser.
@@ -79,7 +80,7 @@ try {
 
   await page.goto(`${preview.origin}/?item=${encodeURIComponent("mini~surface:granola")}`, { waitUntil: "domcontentloaded" })
   await head.locator(".surface-owner-chip").click()
-  await head.getByRole("button", { name: "Open granola-research's chat" }).focus()
+  await head.getByRole("button", { name: "Open Relay's chat" }).focus()
   await page.keyboard.press("Enter")
   await expect(page).toHaveURL(/\/session\/ses_m\?directory=%2Fmini%2Flanes%2Fgranola&host=mini/)
   const chips = await page.evaluate(() => localStorage.getItem("es-app:context-refs:mini:ses_m"))

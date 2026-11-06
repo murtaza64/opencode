@@ -12,11 +12,11 @@ const delivery = { message_id: "mail-a", recipient: "lane-alpha", session: "ses_
 const outbound = { message_id: "mail-b", recipient: "lane-beta", session: "ses_b", mode: "steer", state: "pending", request_id: "req-2", error: null, presented_at: null, handled_at: null }
 fixture.messages = [{
   info: { id: "msg_promoted", sessionID: "ses_a", role: "user", agent: "build", time: { created: Date.parse(ts) + 120000 },
-    source: { type: "editspace-mail", id: "mail-c", sender: "lane-beta", recipient: "lane-alpha" }, delivery: "queue", state: "promoted" },
+    source: { type: "editspace-mail", id: "mail-c", sender: "fixture/lane-beta", recipient: "lane-alpha" }, delivery: "queue", state: "promoted" },
   parts: [{ id: "part_promoted", messageID: "msg_promoted", sessionID: "ses_a", type: "text", text: "Promoted body" }],
 }, {
   info: { id: "msg_historical", sessionID: "ses_a", role: "user", time: { created: Date.parse(ts) + 180000 },
-    source: { type: "editspace-mail", id: "old-promoted", sender: "lane-beta", recipient: "lane-alpha" } },
+    source: { type: "editspace-mail", id: "old-promoted", sender: "fixture/lane-beta", recipient: "lane-alpha" } },
   parts: [{ id: "part_historical", messageID: "msg_historical", sessionID: "ses_a", type: "text", text: "HISTORICAL_PROMOTED_SENTINEL" }],
 }]
 fixture.mail = (es, lane) => {
@@ -55,12 +55,12 @@ try {
   await expect(page.locator('[id="mail-mail-c"]')).toHaveCount(1)
   await expect(page.locator('[data-mail-id="mail-c"]')).toHaveCount(0)
   await page.locator('[id="mail-mail-c"] summary').click()
-  await expect(page.locator('[id="mail-mail-c"] summary')).toHaveAttribute("aria-label", /^Mail from lane-beta: /)
+  await expect(page.locator('[id="mail-mail-c"] summary')).toHaveAttribute("aria-label", /^Mail from fixture\/lane-beta: /)
   await expect(page.locator('[id="mail-mail-c"]')).toContainText("Promoted body")
   await expect(page.locator('[id="mail-mail-c"]')).toContainText("Sent:")
   await expect(page.locator('[id="mail-mail-c"]')).toContainText("To lane-alpha · queue · handled")
   // Collapsed: sender and purpose only; delivery and wake detail live in the expansion.
-  await expect(page.locator('[data-mail-id="mail-a"] summary')).toHaveAttribute("aria-label", "Mail from lane-beta: Update")
+  await expect(page.locator('[data-mail-id="mail-a"] summary')).toHaveAttribute("aria-label", "Mail from fixture/lane-beta: Update")
   await expect(page.locator('[data-mail-id="mail-a"] summary')).not.toContainText(/read|Wake/)
   await expect(page.locator('[data-mail-id="mail-a"]')).toHaveAttribute("data-direction", "in")
   await expect(page.locator('[data-mail-id="mail-a"] .mail-activity-details')).toContainText("To lane-alpha · queue · read")

@@ -80,6 +80,7 @@ import { HeaderMenu } from "../components/header-menu"
 import { SurfaceGlyph } from "../components/surface-glyph"
 import type { Surface } from "../surfaces"
 import { SurfaceDiscovery } from "../components/surface-discovery"
+import { agentIdentity, agentLabel } from "../agent-identity"
 import { surfaceRefHref } from "../surface-ref"
 import { FailureRetry } from "../components/session-failure"
 import { blockTime } from "../recorded-time"
@@ -598,6 +599,12 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const attentionError = () => (remote ? "" : sessionsError()) || activity.error(sessionID, directory)
 
   const session = () => live.data.session[0]
+  // Identity is project/lane (alias when registered), with the session title as the task line. The Desk pointer is
+  // Porter; the front-desk implementation lane keeps its own project/lane.
+  const sessionIdentity = createMemo(() => agentIdentity({
+    editspace: currentEditspace(), lane: sessionLane(sessionID, lineage(), lineageOwners()) ?? ownedLane()?.lane,
+    host: sessionHost.id, session: sessionID, title: session()?.title ?? activity.session(sessionID)?.title, desk: desk(),
+  }))
   // One continuous transcript (DD #857/#858): earlier sessions of this one's verified chain load above it on scroll-up,
   // read-only, each from its own host. The desk follows the home pointer; other sessions their lane's handoff edges.
   const [segments, setSegments] = createStore<Record<string, SegmentControl>>({})
@@ -2198,10 +2205,26 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         {/* Embedded beside the desk queue, the chat's title and tools belong to its own pane. */}
         <AppHeader inline={props.embedded}>
           {props.headerStart}
-          <SessionTitle sessionID={sessionID} directory={directory} session={session()} knownTitle={activity.session(sessionID)?.title} suspendBlurSave={findOpen()} onSaved={(info) => {
-            live.apply({ type: "session.updated", properties: { sessionID, info } })
-            void refetch()
-          }} />
+          <Show when={sessionIdentity().primary.toLowerCase() !== (sessionIdentity().task ?? "").toLowerCase()} fallback={
+            <SessionTitle sessionID={sessionID} directory={directory} session={session()} knownTitle={activity.session(sessionID)?.title} suspendBlurSave={findOpen()} onSaved={(info) => {
+              live.apply({ type: "session.updated", properties: { sessionID, info } })
+              void refetch()
+            }} />
+          }>
+            <div class="session-identity">
+              <div class="session-identity-name">
+                <Show when={sessionIdentity().avatar} fallback={<span class="agent-avatar-initial" aria-hidden="true">{[...(sessionIdentity().alias ?? sessionIdentity().primary)][0]?.toUpperCase()}</span>}>{src =>
+                  <img class="agent-avatar" src={src()} alt="" width="16" height="16" />}</Show>
+                <bdi dir="auto">{agentLabel(sessionIdentity())}</bdi>
+              </div>
+              <div class="session-identity-task">
+                <SessionTitle sessionID={sessionID} directory={directory} session={session()} knownTitle={activity.session(sessionID)?.title} suspendBlurSave={findOpen()} onSaved={(info) => {
+                  live.apply({ type: "session.updated", properties: { sessionID, info } })
+                  void refetch()
+                }} />
+              </div>
+            </div>
+          </Show>
           <Show when={sessionHost.id}><span class="session-host" title={`On ${sessionHost.label}`}><HostGlyph host={sessionHost.id!} /> <bdi dir="auto">{sessionHost.label}</bdi></span></Show>
           <Show when={sessionHost.readOnly}><span class="dim session-read-only" data-read-only>read only</span></Show>
           {/* The sidebar's round dot; the state word is its label only (chat-activity). */}

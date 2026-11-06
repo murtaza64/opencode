@@ -10,7 +10,7 @@ const user = (id, text, extra = {}) => ({
 })
 const source = { type: "editspace-mail", id: "mail-42", sender: "lane-alpha", recipient: "lane-beta" }
 fixture.messages = [
-  user("msg_001", "Human: mail-42 from lane-alpha to lane-beta"),
+  user("msg_001", "Human: mail-42 from fixture/lane-alpha to lane-beta"),
   user("msg_002", "Synthetic notice is not mail", { source: { type: "other", id: "mail-42", sender: "fake", recipient: "fake" } }),
   user("msg_003", "Mail body with <img src=x onerror=alert(1)>", { source, delivery: "queue", state: "promoted" }),
   user("msg_004", "Mail without delivery metadata", { source: { ...source, id: "mail-43" } }),
@@ -33,9 +33,9 @@ try {
   const mail = page.locator('[data-mail-message-id="msg_003"]')
   await expect(page.locator(".mail-activity")).toHaveCount(3)
   // An agent's resume is agent-originated activity, never a human turn.
-  await expect(page.locator('[data-mail-message-id="msg_005"] summary')).toHaveText("lane-alpha·Agent resume")
+  await expect(page.locator('[data-mail-message-id="msg_005"] summary')).toHaveText("fixture/lane-alpha·Agent resume")
   // A mail input is incoming: one content-sized chip with the sender and purpose, aligned inline-end.
-  await expect(mail.locator("summary")).toHaveAttribute("aria-label", /^Mail from lane-alpha: \w/)
+  await expect(mail.locator("summary")).toHaveAttribute("aria-label", /^Mail from fixture\/lane-alpha: \w/)
   await expect(mail.locator("summary")).not.toContainText(/queue|promoted|→|scheduled|Wake/)
   await expect(page.locator('.transcript [data-component="user-message"]:not(.mail-activity [data-component="user-message"])')).toHaveCount(2)
   const geometry = await mail.evaluate((element) => {
@@ -52,7 +52,7 @@ try {
   await expect(mail).toContainText("Mail ID: mail-42")
   await expect(mail).toContainText("Mail body with")
   await expect(mail.locator(".mail-activity-details")).toContainText("queue · promoted")
-  await expect(mail.locator(".mail-activity-details")).toContainText("lane-alpha → lane-beta")
+  await expect(mail.locator(".mail-activity-details")).toContainText("fixture/lane-alpha → fixture/lane-beta")
   await expect(mail.locator('[data-component="user-message"]')).toHaveCount(0)
   await expect(mail.locator("img,script,iframe")).toHaveCount(0)
   await expect(page.locator('[data-mail-message-id="msg_004"] summary')).not.toContainText(/queue|steer|pending|promoted|cancelled/)

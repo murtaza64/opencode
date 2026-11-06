@@ -2305,3 +2305,13 @@ abbr.utc-time { text-decoration: underline dotted; text-underline-offset: 2px; c
 .surface-discovery-list a bdi { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @keyframes surface-discovery-in { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .surface-discovery { animation: none; } }
+
+/* Agent identity in a chat header: project/lane (alias when registered) over its task title. */
+.session-identity { display: flex; flex-direction: column; gap: 0; min-inline-size: 0; line-height: 1.15; }
+.session-identity-name { display: flex; align-items: center; gap: 5px; min-inline-size: 0; font-size: 13px; font-weight: 600; color: var(--text); }
+.session-identity-name bdi { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-identity .agent-avatar { inline-size: 16px; block-size: 16px; border-radius: 50%; }
+.session-identity .agent-avatar-initial { display: grid; place-items: center; inline-size: 16px; block-size: 16px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 18%, var(--surface0)); color: var(--text); font-size: 9px; font-weight: 700; }
+.session-identity-task { min-inline-size: 0; }
+.session-identity-task .session-title h1 { margin: 0; font-size: 11px; font-weight: 400; line-height: 1.2; color: var(--subtext0); }
+.session-identity-task .session-title-button { font-size: 11px; font-weight: 400; color: var(--subtext0); }

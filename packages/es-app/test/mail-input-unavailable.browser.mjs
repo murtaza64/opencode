@@ -38,7 +38,7 @@ try {
   fixture.mail = undefined
   let page = await open()
   await expect(chip(page)).toHaveCount(1)
-  await expect(chip(page).locator(".mail-activity-summary")).toHaveAccessibleName(/^Mail from designer: Task/)
+  await expect(chip(page).locator(".mail-activity-summary")).toHaveAccessibleName(/^Mail from fixture\/designer: Task/)
   await expect(chip(page).locator(".mail-activity-summary")).not.toHaveAttribute("data-wake", /.+/)
   await chip(page).locator(".mail-activity-summary").click()
   await expect(chip(page).locator(".mail-record-unavailable")).toHaveText("Mail record not available on this host. Sender and kind are from the stored input.")

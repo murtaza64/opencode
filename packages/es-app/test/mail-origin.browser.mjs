@@ -3,6 +3,7 @@ import { startPanelPreview } from "./composer-panel-preview.mjs"
 
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const preview = await startPanelPreview()
+preview.fixture.personas = [{ name: "Relay", owner_lane: "fixture/orchestrator", avatar_url: "https://example.com/relay.png" }]
 const fixture = preview.fixture
 fixture.status = "idle"
 const directory = `${fixture.editspaces[0].root}/lanes/squadron-v2/repos/org/repo`
@@ -66,7 +67,7 @@ try {
     await expect(sender).toHaveAttribute("title", "smoke-peer · via integration:squadron")
     // Outgoing names the counterpart only.
     await expect(row(page, "tether-out").locator("summary .mail-party")).toHaveText(["Relay"])
-    await expect(row(page, "tether-out").locator("summary")).toHaveAttribute("aria-label", "Mail to Relay: Task")
+    await expect(row(page, "tether-out").locator("summary")).toHaveAttribute("aria-label", "Mail to Relay: Task, Read by Relay")
     await expect(row(page, "external-in").locator("summary")).toHaveAttribute("aria-label", "Mail from smoke-peer: Task")
     // Transcript input and the turn-input note use the same cue.
     const input = page.locator('[data-mail-message-id="msg_002"]')
@@ -107,7 +108,7 @@ try {
     await expect(details).toContainText("Reply in the Squadron workspace (es squadron post 5654abc)")
     await expect(details.getByRole("link", { name: "Open workspace" })).toHaveAttribute("href", squadron.ui_url)
     await row(page, "unknown-in").locator("summary").click()
-    await expect(row(page, "unknown-in").locator(".mail-activity-details")).toContainText(`From: ${unknown}`)
+    await expect(row(page, "unknown-in").locator(".mail-activity-details")).toContainText(`From: fixture/${unknown}`)
     await expect(row(page, "unknown-in").locator(".mail-activity-details")).toContainText("Origin: unknown")
     await row(page, "internal-cross").locator("summary").click()
     await expect(row(page, "internal-cross").locator(".mail-activity-details")).toContainText("Origin: Electric Sheep · reply here with es mail send --reply-to internal-cross")

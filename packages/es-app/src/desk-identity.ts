@@ -4,14 +4,14 @@ import { host } from "./host"
 // The Work desk's avatar: the canonical image registered for "Porter" in this host's persona registry
 // (GET /es/api/personas, clean avatar_url only). Read once per page; none until a registry entry exists.
 const [porterAvatar, setPorterAvatar] = createSignal<string>()
-const [registry, setRegistry] = createSignal<readonly { name: string; owner_lane: string; avatar_url?: string }[]>([])
+const [registry, setRegistry] = createSignal<readonly { name: string; owner_lane: string; avatar_url?: string; role?: string; aliases?: string[] }[]>([])
 let avatarRead = false
 const readAvatar = () => {
   if (avatarRead || typeof fetch !== "function") return
   avatarRead = true
   void fetch("/es/api/personas", { credentials: "include" })
     .then(response => response.ok ? response.json() : undefined)
-    .then((value: { personas?: { name: string; owner_lane: string; avatar_url: string }[] } | undefined) => {
+    .then((value: { personas?: { name: string; owner_lane: string; avatar_url: string; role?: string; aliases?: string[] }[] } | undefined) => {
       setRegistry(value?.personas ?? [])
       setPorterAvatar(value?.personas?.find(entry => entry.name === "Porter" && /^https:\/\//.test(entry.avatar_url))?.avatar_url)
     })

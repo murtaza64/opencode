@@ -28,6 +28,8 @@ import { TodayCost } from "./today-cost"
 import { waveStart } from "../wave"
 import { UnifiedSidebar, type RecentAgent } from "./nav-tabs"
 import { clockTime } from "../local-time"
+import { agentIdentity, agentLabel } from "../agent-identity"
+import { sessionLane } from "../session-mention"
 
 /** Project scope for browsing (the same dashboard scope New session targets): a chip in the Agents filter row
  * that opens a short list of projects. Escape or choosing closes it and returns focus to the chip. */
@@ -121,7 +123,7 @@ const StatusDot = (props: { state: DotState; label?: string }) => {
 }
 
 export default function Sidebar() {
-  const { state, dotFor, editspace, setEditspace, editspaces, archivedIds,
+  const { state, dotFor, editspace, setEditspace, editspaces, archivedIds, lineage, lineageOwners,
     allProjects, sessionRows, sessions, pinnedSessions, unpinnedSessions, isPinned, togglePin,
     sessionsLoading, sessionsError, setVisibleSessions, cloud, failures, work, stateError, pinnedUnion, movePin, pinSync } =
     useDashboard()
@@ -364,10 +366,10 @@ export default function Sidebar() {
     const state = s.host ? work.dot(s) : dotFor(s)
     return [{
       key: hostRowKey(s),
-      title: s.title || s.id,
+      title: identityTitle(s),
       updated: s.turnAt ?? s.updated,
       node: item(s),
-      preview: { kind: "Agent", title: s.title || s.id, agent: s.title || s.id,
+      preview: { kind: "Agent", title: identityTitle(s), agent: identityFor(s).task ?? (s.title || s.id),
         owner: s.host ? `on ${feed?.host.label ?? s.host}` : `in ${s.project ?? current()}`,
         host: s.host ? feed?.host.label ?? s.host : ownHost().label,
         meta: [state, s.directory].filter(Boolean).join(" · ") },
@@ -466,6 +468,12 @@ export default function Sidebar() {
     </A>
   )
 
+  // One identity per agent row: project/lane when the session's lane is known, else the session title (fallback).
+  const identityFor = (s: SessionRow) => agentIdentity({ editspace: s.project ?? current(), lane: sessionLane(s.id, lineage(), lineageOwners()), host: s.host, session: s.id, title: s.title })
+  const identityTitle = (s: SessionRow) => {
+    const identity = identityFor(s)
+    return identity.primary.toLowerCase() !== (s.title || "").toLowerCase() ? agentLabel(identity) : s.title || s.id
+  }
   // dotFor reads every activity snapshot; memoize per row so unrelated status
   // and request updates do not rewrite each row's class and title (~100
   // same-value class writes/s across a long sidebar).
@@ -487,8 +495,8 @@ export default function Sidebar() {
     </a>
   ) : (
     <div class="session-entry" {...peekAttrs(s)}
-      data-nav-key={hostRowKey(s)} data-avatar={initialOf(s.title || s.id)} data-dot={dot()} data-preview-kind="Agent" data-preview-title={s.title || s.id}
-      data-preview-agent={s.title || s.id} data-preview-owner={`in ${s.project ?? current()}`} data-preview-host={ownHost().label}
+      data-nav-key={hostRowKey(s)} data-avatar={initialOf(identityFor(s).alias ?? (s.title || s.id))} data-dot={dot()} data-preview-kind="Agent" data-preview-title={identityTitle(s)}
+      data-preview-agent={identityFor(s).task ?? (s.title || s.id)} data-preview-owner={`in ${s.project ?? current()}`} data-preview-host={ownHost().label}
       data-preview-meta={[dotText(s, dot()), s.directory].filter(Boolean).join(" · ")}>
       <a
         ref={(el) => observeSession(el, s.id)}
@@ -499,10 +507,10 @@ export default function Sidebar() {
       >
         <StatusDot state={dot()} label={dotText(s, dot())} />
         <Show when={hosted()}><HostGlyph host="local" /></Show>
-        <span class="nav-title" dir="auto">{s.title || s.id}</span>
+        <span class="nav-title" dir="auto">{identityTitle(s)}</span>
         <Show when={allProjects() && s.project}><span class="sr-only">, {s.project}</span></Show>
         <Show when={hosted()}><span class="sr-only">, on Local</span></Show>
-        <span class="row-secondary">{[dotText(s, dot()), s.project, s.directory].filter(Boolean).join(" · ")}</span>
+        <span class="row-secondary">{[identityFor(s).task !== identityTitle(s) ? identityFor(s).task : undefined, dotText(s, dot()), s.project, s.directory].filter(Boolean).join(" · ")}</span>
         <span class="row-trailing" aria-hidden="true">
           <Show when={(s.turnAt ?? s.updated) > 1e12}><time>{ago(s.turnAt ?? s.updated)}</time></Show></span>
       </a>
@@ -535,8 +543,8 @@ export default function Sidebar() {
     }
     return (
     <div class="session-entry host-entry" classList={{ unavailable: down() }}
-      data-nav-key={hostRowKey(s)} data-avatar={initialOf(s.title || s.id)} data-dot={dot()} data-preview-kind="Agent" data-preview-title={s.title || s.id}
-      data-preview-agent={s.title || s.id} data-preview-owner={`on ${label()}`} data-preview-host={label()}
+      data-nav-key={hostRowKey(s)} data-avatar={initialOf(identityFor(s).alias ?? (s.title || s.id))} data-dot={dot()} data-preview-kind="Agent" data-preview-title={identityTitle(s)}
+      data-preview-agent={identityFor(s).task ?? (s.title || s.id)} data-preview-owner={`on ${label()}`} data-preview-host={label()}
       data-preview-meta={[dot(), down() ? "unreachable" : "current", s.directory].filter(Boolean).join(" · ")}>
       <a href={feed ? hostSessionHref(feed.host, s) : undefined} class="nav-item" classList={{ active: isOpen(s) }}
         aria-current={isOpen(s) ? "page" : undefined} aria-label={name()} aria-disabled={down() || undefined}
@@ -544,8 +552,8 @@ export default function Sidebar() {
         data-host-key={hostRowKey(s)} onClick={(event) => { if (down()) event.preventDefault() }}>
         <StatusDot state={dot()} label={`${label()}: ${dot()}`} />
         <HostGlyph host={s.host!} />
-        <span class="nav-title" dir="auto">{s.title || s.id}</span>
-        <span class="row-secondary">{[label(), down() ? "unreachable" : "current", s.directory].filter(Boolean).join(" · ")}</span>
+        <span class="nav-title" dir="auto">{identityTitle(s)}</span>
+        <span class="row-secondary">{[identityFor(s).task !== identityTitle(s) ? identityFor(s).task : undefined, label(), down() ? "unreachable" : "current", s.directory].filter(Boolean).join(" · ")}</span>
         <span class="row-trailing" aria-hidden="true"><span class="host-tile" title={label()}>{[...label()][0]}</span>
           <Show when={(s.turnAt ?? s.updated) > 1e12}><time>{ago(s.turnAt ?? s.updated)}</time></Show></span>
       </a>

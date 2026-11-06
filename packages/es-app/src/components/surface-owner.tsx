@@ -1,11 +1,12 @@
-import { createResource, Show } from "solid-js"
+import { createMemo, createResource, Show } from "solid-js"
 import { useNavigate, A } from "@solidjs/router"
 import { useDeskChatOptional } from "../desk-companion"
 import { contextKey, contextPart, MAX_CONTEXT, surfaceRef, type ContextRef } from "../context-mention"
 import { ago, sessionHref } from "../state"
 import type { Surface } from "../surfaces"
 import { surfaceOwner } from "../surface-owner"
-import { personas, DESK } from "../desk-identity"
+import { DESK } from "../desk-identity"
+import { agentIdentity, agentLabel } from "../agent-identity"
 import { ocAt } from "../api"
 import { hostPrefix } from "../host-items"
 
@@ -21,10 +22,12 @@ export const useSurfaceOwner = (surface: () => Surface, host?: { id: string; lab
   const navigate = useNavigate()
   const [owner] = createResource(surface, value => surfaceOwner(value, host ? hostPrefix(host.id) : ""))
   const ref = () => surfaceRef(surface(), host?.id ?? window.location.host)
-  // A persona's name when the lane has one; else the owner as written when it is a name, or the humanised last lane
-  // segment ("opencode/ux-feel" -> "Ux feel"), never a raw editspace/lane path.
-  const name = () => personas().find(person => person.owner_lane === surface().lane)?.name ?? ownerName(surface())
-  const avatar = () => personas().find(person => person.owner_lane === surface().lane || person.name === name())?.avatar_url
+  // The author's stable identity: project/lane with its registered alias when one is set. The recorded surface
+  // lane is the author, never the current owner of that lane.
+  const identity = createMemo(() => agentIdentity({ editspace: surface().editspace, lane: surface().lane, owner: surface().owner, host: host?.id }))
+  const name = () => identity().alias ?? identity().primary
+  const label = () => agentLabel(identity())
+  const avatar = () => identity().avatar
   const href = () => {
     const value = owner()
     if (value?.state !== "ok") return undefined
@@ -47,7 +50,7 @@ export const useSurfaceOwner = (surface: () => Surface, host?: { id: string; lab
     await core.prompt(session, value.directory, text, { messageID, context: [contextPart(ref(), url, Date.now(), "reader")] })
     return true
   }
-  return { owner, name, avatar, href, open, send }
+  return { owner, name, label, avatar, href, open, send }
 }
 
 export const SurfaceOwner = (props: { surface: Surface; host?: { id: string; label: string }; onMessage?: () => void }) => {
@@ -60,9 +63,9 @@ export const SurfaceOwner = (props: { surface: Surface; host?: { id: string; lab
       if (event.key !== "Escape" || !menu?.open) return
       event.preventDefault(); event.stopPropagation(); close(); menu.querySelector("summary")?.focus()
     }}>
-      <summary class="surface-owner-chip" title={`Published by ${author.name()}${props.surface.lane ? ` · lane ${props.surface.lane}` : ""}`}>
+      <summary class="surface-owner-chip" title={`Published by ${author.label()}${props.surface.lane ? ` · lane ${props.surface.lane}` : ""}`}>
         <span class="surface-owner-avatar" aria-hidden="true"><Show when={author.avatar()} fallback={author.name().charAt(0).toUpperCase()}>{url => <img src={url()} alt="" referrerpolicy="no-referrer" />}</Show></span>
-        <bdi dir="auto">{author.name()}</bdi>
+        <bdi dir="auto">{author.label()}</bdi>
         <Show when={author.owner()?.state === "ok" && (author.owner() as { busy?: boolean }).busy}><span class="dot busy" title="Working" aria-label="Working" /></Show>
       </summary>
       <span class="surface-owner-items">

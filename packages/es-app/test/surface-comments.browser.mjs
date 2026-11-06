@@ -8,6 +8,7 @@ import { startPanelPreview } from "./composer-panel-preview.mjs"
 
 const { chromium, expect } = createRequire(new URL("../../app/package.json", import.meta.url))("@playwright/test")
 const preview = await startPanelPreview()
+preview.fixture.personas = [{ name: "Relay", owner_lane: "fixture/ux-feel", avatar_url: "https://example.com/relay.png" }, { name: "Relay", owner_lane: "fixture/granola-research", avatar_url: "https://example.com/relay.png" }]
 const browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : { channel: "chrome" }) })
 const now = Date.now()
 const SURFACE = { id: "review", title: "Design review", summary: null, kind: "path", owner: "Relay", lane: "ux-feel", editspace: "fixture", updated_at: now, revision: 2, health: { state: "ok" } }

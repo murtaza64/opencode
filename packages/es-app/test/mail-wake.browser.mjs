@@ -57,13 +57,13 @@ try {
     await expect(chip(page, "caused").locator('.mail-activity-wake[data-wake="caused"]')).toHaveCount(1)
     // Outgoing mail carries its wake inside the tick's words (DD #414), not as a separate cue.
     await expect(chip(page, "out-caused").locator(".mail-activity-wake")).toHaveCount(0)
-    await expect(chip(page, "out-caused").locator(".msg-tick")).toHaveAttribute("aria-label", "Read by Relay")
+    await expect(chip(page, "out-caused").locator(".msg-tick")).toHaveAttribute("aria-label", "Read by fixture/orchestrator")
     await expect(chip(page, "unknown").locator('.mail-activity-wake[data-wake="unknown"]')).toHaveCount(1)
     for (const id of ["joined", "none", "legacy"]) await expect(chip(page, id).locator(".mail-activity-wake")).toHaveCount(0)
 
     // Words live only in the tooltip and accessible label, never in the collapsed text.
     const labels = { caused: "Woke this agent", joined: "Arrived while this agent was working", none: "Recorded, did not wake",
-      unknown: "Wake not confirmed", "out-caused": "Read by Relay" }
+      unknown: "Wake not confirmed", "out-caused": "Read by fixture/orchestrator" }
     for (const [id, label] of Object.entries(labels)) {
       await expect(chip(page, id)).toHaveAttribute("title", new RegExp(`· ${label}$`))
       await expect(chip(page, id)).toHaveAttribute("aria-label", new RegExp(`, ${label}$`))

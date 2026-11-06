@@ -12,6 +12,11 @@ const { chromium, expect } = createRequire(new URL("../../app/package.json", imp
 const shots = process.env.SCREENSHOT_DIR ?? join(tmpdir(), "es-app-mail-ticks")
 mkdirSync(shots, { recursive: true })
 const preview = await startPanelPreview()
+preview.fixture.personas = [
+  { name: "Relay", owner_lane: "fixture/orchestrator", avatar_url: "https://example.com/relay.png" },
+  { name: "Tether", owner_lane: "fixture/squadron-v2", avatar_url: "https://example.com/tether.png" },
+  { name: "UX Impl", owner_lane: "fixture/ux-impl", avatar_url: "https://example.com/ux.png" },
+]
 const fixture = preview.fixture
 fixture.status = "idle"
 const directory = `${fixture.editspaces[0].root}/lanes/squadron-v2/repos/org/repo`
@@ -36,7 +41,7 @@ const records = [
   // Two recipients: one presented, one only in its inbox -> the lower state.
   out("o-two", 6000, [delivery("o-two", "orchestrator", "ses_relay", { tick: "presented", presented_ms: at + 6500 }), delivery("o-two", "ux-impl", "ses_ux2", { tick: "admitted" })]),
   // A recipient on another host (federated address, no local session) and a successor session's receipt.
-  out("o-remote", 7000, [delivery("o-remote", "mini:opencode/ux-feel", null, { tick: "admitted" })]),
+  out("o-remote", 7000, [delivery("o-remote", "opencode/ux-feel", null, { tick: "admitted" })]),
   out("o-successor", 8000, [delivery("o-successor", "ux-impl", "ses_ux2", { tick: "presented", presented_ms: at + 8500 })]),
   unreadFrom("i-unread-1", 9000),
   unreadFrom("i-unread-2", 9500),
@@ -79,7 +84,7 @@ try {
       "o-inbox": ["delivered", "In Relay's inbox · Relay was working"],
       "o-failed": ["failed", "Not delivered to Relay: lane refused"],
       "o-two": ["delivered", "Relay: Read by Relay · "],
-      "o-remote": ["delivered", "In mini:opencode/ux-feel's inbox"],
+      "o-remote": ["delivered", "In opencode/ux-feel's inbox"],
       "o-successor": ["read", "Read by UX Impl · "],
       "o-read": ["read", "Read by Relay · "],
     }
