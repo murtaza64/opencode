@@ -1910,7 +1910,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       }}
         aria-label="Message" dir="auto"
         classList={{ "vim-normal": vim.mode() === "normal", "vim-insert": vim.mode() === "insert" }}
-        value={draft()} onInput={(e) => { setDraft(e.currentTarget.value); update(e.currentTarget, e.isComposing) }}
+        value={draft()} onInput={(e) => { saveSelection(e.currentTarget); setDraft(e.currentTarget.value); update(e.currentTarget, e.isComposing) }}
         onPaste={pasteImages} onDrop={dropImages} onDragOver={(e) => e.preventDefault()}
         onKeyDown={promptKeyDown}
         onCompositionStart={() => { composing = true; setQuery(undefined) }}
