@@ -3,7 +3,7 @@
  * the textarea's content and overlays a block. */
 import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js"
 import type { VimMode } from "../vim"
-import { invalidateTextareaLayout, textareaLayout } from "../textarea-layout"
+import { invalidateTextareaLayout, textareaProbe } from "../textarea-layout"
 
 export default function FakeCaret(props: {
   target: HTMLTextAreaElement | undefined
@@ -33,8 +33,9 @@ export default function FakeCaret(props: {
     version()
     const c = props.caret
     if (props.mode !== "normal" || !c || c.hasChar || !props.target || c.el !== props.target) return null
-    const point = textareaLayout(c.el).points.find((point) => point.pos === c.pos)
-    if (!point) return null
+    // One measured position, not the whole draft's layout (DD #432).
+    if (c.pos < 0 || c.pos > c.el.value.length) return null
+    const point = textareaProbe(c.el).point(c.pos)
     const top = point.top - c.el.scrollTop + c.el.clientTop
     // clip when scrolled out of the textarea's visible box
     if (top < 0 || top > c.el.clientHeight - 4) return null

@@ -4,9 +4,12 @@ const TOKEN = /@ses_[A-Za-z0-9]{26}(?![A-Za-z0-9])(?: \(session [^()\n]*\))?/g
 
 export const mentionQuery = (text: string, caret: number) => {
   if (caret < 0 || caret > text.length) return undefined
-  const match = /(^|\s)@(\S*)$/.exec(text.slice(0, caret))
-  if (!match) return undefined
-  return { start: caret - match[2]!.length - 1, query: match[2]! }
+  // Walk back over the word at the caret only (DD #432): a regex over everything before the caret cost ~0.7 s per
+  // call at 200k chars. Same rule as /(^|\s)@(\S*)$/: the run of non-space ending at the caret starts with "@".
+  let start = caret
+  while (start > 0 && !/\s/.test(text[start - 1]!)) start--
+  if (text[start] !== "@" || start >= caret) return undefined
+  return { start, query: text.slice(start + 1, caret) }
 }
 
 export const mentionText = (id: string, context: { title?: string; lane?: string } = {}) => {

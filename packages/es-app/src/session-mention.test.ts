@@ -15,6 +15,22 @@ describe("mentionQuery", () => {
     expect(mentionQuery("@or done", 8)).toBeUndefined()
     expect(mentionQuery("@or", 4)).toBeUndefined()
   })
+  test("same answers as the old whole-prefix regex, and a 200k-char draft costs only the word at the caret", () => {
+    const old = (text: string, caret: number) => {
+      const match = /(^|\s)@(\S*)$/.exec(text.slice(0, caret))
+      return match ? { start: caret - match[2]!.length - 1, query: match[2]! } : undefined
+    }
+    const alphabet = ["a", "@", " ", "\n", "\t", "é", "\u00a0", "😀"]
+    let seed = 7
+    for (let round = 0; round < 500; round++) {
+      const text = Array.from({ length: 12 }, () => alphabet[(seed = (seed * 1103515245 + 12345) % 2 ** 31) % alphabet.length]).join("")
+      for (let caret = 0; caret <= text.length; caret++) expect(mentionQuery(text, caret)).toEqual(old(text, caret))
+    }
+    const long = "lorem @ipsum dolor ".repeat(11_000)
+    const started = performance.now()
+    for (let index = 0; index < 100; index++) mentionQuery(long, long.length - 1)
+    expect(performance.now() - started).toBeLessThan(50)
+  })
 })
 
 test("mentionText omits unknown lane and title and neutralizes characters that would end the suffix", () => {
