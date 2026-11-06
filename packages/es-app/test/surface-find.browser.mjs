@@ -46,6 +46,28 @@ try {
     results.push("PASS plain browser: Cmd/Ctrl+F stays the browser's native find")
     await page.close()
   }
+  {
+    // A Mac shell knows it has native find from the UA: Cmd+F opens on a fresh reader even while the
+    // /__es/find probe is still in flight (the packaged reader reload race).
+    const context = await browser.newContext({ viewport: { width: 1100, height: 800 },
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Electron/42.3.3" })
+    const page = await context.newPage()
+    await setup(page, true)
+    await page.route("**/__es/find", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback()
+      await new Promise((resolve) => setTimeout(resolve, 5000))
+      return route.fulfill({ json: { available: true } })
+    })
+    await page.goto(`${preview.origin}/?surface=ops`, { waitUntil: "domcontentloaded", timeout: 300_000 })
+    await page.getByRole("button", { name: /Close/ }).first().focus()
+    await page.keyboard.press("Meta+f")
+    const input = page.getByRole("searchbox", { name: "Find in Surface" })
+    await expect(input).toBeFocused({ timeout: 2_000 })
+    await input.fill("ops")
+    await expect(page.locator(".surface-find-count")).toHaveText("1 of 2")
+    results.push("PASS Mac shell: Cmd+F opens before the native-find probe answers")
+    await context.close()
+  }
   for (const dir of ["ltr", "rtl"]) {
     const page = await browser.newPage({ viewport: { width: 390, height: 760 } })
     const posts = await setup(page, true)

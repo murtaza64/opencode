@@ -454,6 +454,10 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       .find((element) => element.getBoundingClientRect().bottom > transcriptEl!.getBoundingClientRect().top)
     const offset = anchor ? anchor.getBoundingClientRect().top : 0
     const keep = () => { if (anchor && transcriptEl) transcriptEl.scrollTop += anchor.getBoundingClientRect().top - offset }
+    // The earlier session's first page can mount a frame after its segment reads ready. Keep the anchor on
+    // every content resize until the load settles, not only on the rAF loop below.
+    const observer = inner && typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => keep()) : undefined
+    if (inner) observer?.observe(inner)
     try {
       if (top?.hasOlder()) await top.older()
       else {
@@ -468,6 +472,9 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
       keep()
     } finally {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      keep()
+      observer?.disconnect()
       earlierLoading = false
     }
   }

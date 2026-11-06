@@ -3,6 +3,23 @@ import { createEffect, createSignal, on, onCleanup, onMount, Show } from "solid-
 /** What the find bar shows: counts from the native shell, or why search is not offered for this Surface. */
 type FindState = { current: number; total: number } | { unavailable: true } | undefined
 
+// Whether this window has the native shell's frame search. It is a property of the app, not of one reader:
+// a reader mounted for a new Surface uses it at once instead of starting a second probe (the old per-reader
+// probe left Cmd+F ignored for the first moments of a navigation).
+// The Mac app is the native-find shell; its UA is known synchronously, so a reloaded reader can take Cmd+F
+// before the /__es/find probe answers. Kept local (no UI import) so this module has no other side effects.
+const nativeShell = typeof navigator !== "undefined" &&
+  /\bElectron\/\d/.test(navigator.userAgent) && /Macintosh/.test(navigator.userAgent)
+let nativeKnown: boolean | undefined
+let nativeProbe: Promise<boolean> | undefined
+const probeNative = () => {
+  if (nativeKnown !== undefined) return Promise.resolve(nativeKnown)
+  return nativeProbe ??= fetch("/__es/find").then(async (response) => {
+    const body = response.ok && response.headers.get("content-type")?.includes("application/json") ? await response.json() : undefined
+    return body?.available === true
+  }).then((value) => { nativeKnown = value; return value }).catch(() => { nativeProbe = undefined; return false })
+}
+
 /**
  * Cmd/Ctrl+F for the Surface reader (DD #672/#676). In the Mac app the native shell searches only the shown Surface
  * frame (an isolated world inside that frame) and returns counts; the app never sees the Surface's text. In a plain
@@ -10,18 +27,14 @@ type FindState = { current: number; total: number } | { unavailable: true } | un
  * `frame` is the Surface frame's address as the reader set it (its capability directory).
  */
 export const SurfaceFind = (props: { frame: () => string | undefined; trigger?: () => number }) => {
-  const [native, setNative] = createSignal(false)
+  // Other clients still learn from the probe; the Mac shell knows immediately.
+  const [native, setNative] = createSignal(nativeShell || nativeKnown === true)
   const [open, setOpen] = createSignal(false)
   const [query, setQuery] = createSignal("")
   const [state, setState] = createSignal<FindState>()
   const focus = { before: undefined as HTMLElement | undefined, input: undefined as HTMLInputElement | undefined, timer: 0, serial: 0 }
 
-  onMount(() => {
-    void fetch("/__es/find").then(async (response) => {
-      const body = response.ok && response.headers.get("content-type")?.includes("application/json") ? await response.json() : undefined
-      setNative(body?.available === true)
-    }).catch(() => undefined)
-  })
+  onMount(() => { void probeNative().then(setNative) })
 
   const send = async (action: "find" | "next" | "previous" | "clear", text = query()) => {
     const frame = props.frame()
@@ -58,7 +71,7 @@ export const SurfaceFind = (props: { frame: () => string | undefined; trigger?: 
 
   onMount(() => {
     const keydown = (event: KeyboardEvent) => {
-      if (event.isComposing || !props.frame()) return
+      if (event.isComposing) return
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "f") return
       // Typing in a field outside the reader keeps that field's own find (or none).
       const active = document.activeElement
@@ -68,6 +81,8 @@ export const SurfaceFind = (props: { frame: () => string | undefined; trigger?: 
       event.stopImmediatePropagation()
       // A plain browser keeps its native find, which searches the Surface frame too.
       if (!native()) return
+      // Open even while the frame address is still loading: the bar can appear, and the effect above
+      // searches once the address arrives.
       event.preventDefault()
       show()
     }
