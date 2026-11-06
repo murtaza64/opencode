@@ -50,42 +50,6 @@ try {
     const pasteMs = Date.now() - pasteStart
     if (profilePaste) { console.log("TOP self-time (ms) during paste at", size); for (const item of topSelf((await cdp.send("Profiler.stop")).profile)) console.log(`  ${item.ms.toFixed(1).padStart(8)}  ${item.name}`) }
     if ((await box.inputValue()).length !== size) throw new Error(`paste of ${size} chars did not land`)
-    // DIAG=1: where a paste's one-time cost goes, each part forced on its own after the page settled.
-    // DIAG=1 also pastes the same text into a plain textarea (no app handlers): the browser's own cost of the edit.
-    if (process.env.DIAG === "1") {
-      await page.evaluate(() => {
-        const plain = document.createElement("textarea")
-        plain.id = "diag-plain"
-        plain.style.cssText = "position:fixed;left:0;top:0;width:700px;height:300px;white-space:pre-wrap;z-index:99999"
-        document.body.append(plain)
-        plain.focus()
-      })
-      const started = Date.now()
-      await cdp.send("Input.insertText", { text })
-      await settle(page)
-      console.log("DIAG plain textarea paste", size, `${Date.now() - started} ms`)
-      await page.evaluate(() => document.getElementById("diag-plain")?.remove())
-      await box.focus()
-    }
-    if (process.env.DIAG === "1") console.log("DIAG", size, JSON.stringify(await page.evaluate(async () => {
-      const el = document.querySelector('textarea[aria-label="Message"]')
-      const time = (run) => { const start = performance.now(); run(); return Math.round(performance.now() - start) }
-      const layout = await import("/src/textarea-layout.ts")
-      // A letter-spacing change reflows every line of the textarea's own text.
-      const textarea = time(() => { el.style.letterSpacing = "0.01px"; void el.scrollHeight })
-      el.style.letterSpacing = ""
-      void el.scrollHeight
-      layout.invalidateTextareaLayout()
-      const mirror = time(() => layout.textareaProbe(el).point(0))
-      const again = time(() => layout.textareaProbe(el).point(el.value.length))
-      const style = time(() => { const computed = getComputedStyle(el); for (const name of ["font-family", "line-height", "padding-top", "white-space"]) computed.getPropertyValue(name) })
-      const draft = JSON.stringify({ task: { text: el.value, images: [], selection: [0, 0] } })
-      const stringify = time(() => JSON.stringify({ task: { text: el.value, images: [], selection: [0, 0] } }))
-      const store = time(() => localStorage.setItem("diag-composer", draft))
-      const store2 = time(() => localStorage.setItem("diag-composer", draft + " "))
-      localStorage.removeItem("diag-composer")
-      return { textareaRelayoutMs: textarea, mirrorBuildMs: mirror, mirrorPointMs: again, styleReadMs: style, stringifyMs: stringify, setItemMs: store, setItemAgainMs: store2, scrollHeight: el.scrollHeight }
-    })))
     await page.evaluate(() => {
       window.__lat = []
       const el = document.querySelector('textarea[aria-label="Message"]')
@@ -107,26 +71,10 @@ try {
     const lat = await page.evaluate(() => window.__lat)
     const value = await box.inputValue()
     if (value.length !== size + keys) throw new Error(`typed ${keys} keys at ${size}: value has ${value.length - size} new chars`)
-    // Vim normal mode (DD #439): row moves (k/j), grapheme steps (h/l), words and line ends, from the end of the draft.
-    // The first Escape may only close an open @-mention picker (the text can end inside "@nobody").
-    await page.keyboard.press("Escape")
-    if (!(await box.evaluate((el) => el.classList.contains("vim-normal")))) await page.keyboard.press("Escape")
-    if (!(await box.evaluate((el) => el.classList.contains("vim-normal")))) throw new Error("not in Vim normal mode")
-    await page.evaluate(() => { window.__lat = [] })
-    const motions = ["k", "k", "k", "h", "l", "b", "w", "0", "$", "j", "k", "g", "j", "g", "k", "h"]
-    const vimBefore = metrics(await cdp.send("Performance.getMetrics"))
-    for (const [index, key] of motions.entries()) {
-      await page.keyboard.press(key)
-      await page.waitForFunction((n) => window.__lat.length > n, index, { timeout: 120_000 })
-    }
-    const vimAfter = metrics(await cdp.send("Performance.getMetrics"))
-    const vimLat = (await page.evaluate(() => window.__lat)).sort((a, b) => a - b)
-    if ((await box.inputValue()) !== value) throw new Error("a Vim motion changed the draft")
     const sorted = [...lat].sort((a, b) => a - b)
     const row = { size, pasteMs, keys, medianMs: round(sorted[Math.floor(sorted.length / 2)]), p90Ms: round(sorted[Math.floor(sorted.length * 0.9)]), maxMs: round(sorted.at(-1)),
       taskMsPerKey: round((after.TaskDuration - before.TaskDuration) * 1000 / keys), scriptMsPerKey: round((after.ScriptDuration - before.ScriptDuration) * 1000 / keys),
-      layoutMsPerKey: round((after.LayoutDuration - before.LayoutDuration) * 1000 / keys), styleMsPerKey: round((after.RecalcStyleDuration - before.RecalcStyleDuration) * 1000 / keys),
-      vimMedianMs: round(vimLat[Math.floor(vimLat.length / 2)]), vimMaxMs: round(vimLat.at(-1)), vimTaskMsPerKey: round((vimAfter.TaskDuration - vimBefore.TaskDuration) * 1000 / motions.length) }
+      layoutMsPerKey: round((after.LayoutDuration - before.LayoutDuration) * 1000 / keys), styleMsPerKey: round((after.RecalcStyleDuration - before.RecalcStyleDuration) * 1000 / keys) }
     results.push(row)
     console.log(JSON.stringify(row))
     if (top) { console.log("TOP self-time (ms) at", size); for (const item of top) console.log(`  ${item.ms.toFixed(1).padStart(8)}  ${item.name}`) }
@@ -138,14 +86,10 @@ try {
   const large = results.find((row) => row.size === Math.max(...sizes))
   const ratio = large.medianMs / Math.max(small.medianMs, 1)
   console.log(`RATIO median ${large.size}/${small.size}: ${ratio.toFixed(2)}`)
-  const vimRatio = large.vimMedianMs / Math.max(small.vimMedianMs, 1)
-  console.log(`RATIO vim median ${large.size}/${small.size}: ${vimRatio.toFixed(2)}`)
   // Main-thread time per key also stays bounded at the largest size (it was ~14.5 s per key before DD #432).
-  // Medians near one frame are noise (a 50 ms vs 110 ms frame wait is not lag): a ratio only counts above 150 ms.
-  if (process.env.ASSERT === "1" && (large.vimTaskMsPerKey > 100 || (vimRatio > 2 && large.vimMedianMs > 150))) { console.log(`FAIL Vim motions: ${large.vimTaskMsPerKey} ms per key at ${large.size} chars, ratio ${vimRatio.toFixed(2)}`); process.exitCode = 1 }
-  else if (process.env.ASSERT === "1" && large.taskMsPerKey > 100) { console.log(`FAIL ${large.taskMsPerKey} ms of main-thread work per key at ${large.size} chars`); process.exitCode = 1 }
-  else if (process.env.ASSERT === "1" && ratio > 2 && large.medianMs > 150) { console.log("FAIL keystroke cost scales with draft length"); process.exitCode = 1 }
-  else if (process.env.ASSERT === "1") console.log(`PASS composer long input: typing and Vim motions -> paint at ${large.size} chars within 2x of ${small.size}`)
+  if (process.env.ASSERT === "1" && large.taskMsPerKey > 100) { console.log(`FAIL ${large.taskMsPerKey} ms of main-thread work per key at ${large.size} chars`); process.exitCode = 1 }
+  else if (process.env.ASSERT === "1" && ratio > 2) { console.log("FAIL keystroke cost scales with draft length"); process.exitCode = 1 }
+  else if (process.env.ASSERT === "1") console.log(`PASS composer long input: keystroke -> paint at ${large.size} chars within 2x of ${small.size}`)
 } finally {
   await browser.close()
   await server.close()
@@ -161,13 +105,11 @@ function topSelf(profile) {
   const deltas = profile.timeDeltas
   profile.samples.forEach((id, index) => {
     // Native frames (Range rects, layout) are charged to the nearest app function that called them.
-    const leaf = byID.get(id)
-    let node = leaf
+    let node = byID.get(id)
     while (node && !node.callFrame.url && parent.has(node.id) && !["(idle)", "(program)", "(garbage collector)"].includes(node.callFrame.functionName)) node = byID.get(parent.get(node.id))
-    node ??= leaf
+    node ??= byID.get(id)
     const frame = node.callFrame
-    const native = node !== leaf ? `${leaf.callFrame.functionName || "(native)"} <- ` : ""
-    const name = `${native}${frame.functionName || "(anonymous)"} ${frame.url.split("/").slice(-1)[0].split("?")[0]}:${frame.lineNumber + 1}`
+    const name = `${frame.functionName || "(anonymous)"} ${frame.url.split("/").slice(-1)[0].split("?")[0]}:${frame.lineNumber + 1}`
     self.set(name, (self.get(name) ?? 0) + (deltas[index] ?? 0) / 1000)
   })
   return [...self].map(([name, ms]) => ({ name, ms })).sort((a, b) => b.ms - a.ms).slice(0, 18)

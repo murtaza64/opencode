@@ -5,7 +5,7 @@
  * beyond one internal, or visual mode. The block cursor in normal mode is a
  * one-grapheme selection styled via ::selection. */
 import { createSignal } from "solid-js"
-import { graphemeNext, graphemePrev, graphemeStart, graphemeStarts, lineStartsOf, textareaProbe, visualRowMove } from "./textarea-layout"
+import { textareaLayout } from "./textarea-layout"
 
 export type VimMode = "normal" | "insert"
 
@@ -79,13 +79,13 @@ function wordEnd(text: string, pos: number): number {
   return i
 }
 
-// Logical line starts are ordered UTF-16 positions: the index of the last one at or before `pos`.
-const lastAtOrBefore = (starts: readonly number[], pos: number) => {
+// Both layout points and logical line starts are ordered UTF-16 boundaries.
+const boundaryIndex = (points: { pos: number }[], pos: number) => {
   let low = 0
-  let high = starts.length
+  let high = points.length
   while (low < high) {
     const mid = Math.floor((low + high) / 2)
-    if (starts[mid]! <= pos) low = mid + 1
+    if (points[mid]!.pos <= pos) low = mid + 1
     else high = mid
   }
   return Math.max(0, low - 1)
@@ -110,7 +110,7 @@ export function createVim(opts: {
   let count = 0
   let operatorCount = 1
   let observed:
-    | { el: HTMLTextAreaElement; value: string; start: number; end: number; width: number }
+    | { el: HTMLTextAreaElement; value: string; start: number; end: number; layout: ReturnType<typeof textareaLayout> }
     | undefined
   const undoStack: Snapshot[] = []
   const redoStack: Snapshot[] = []
@@ -133,8 +133,7 @@ export function createVim(opts: {
   }
 
   const remember = (t: HTMLTextAreaElement) => {
-    // Motions measure only near the caret (DD #439); a width change (rewrap) still resets the visual goal.
-    observed = { el: t, value: t.value, start: t.selectionStart, end: t.selectionEnd, width: t.clientWidth }
+    observed = { el: t, value: t.value, start: t.selectionStart, end: t.selectionEnd, layout: textareaLayout(t) }
   }
 
   const sync = (t: HTMLTextAreaElement) => {
@@ -143,7 +142,7 @@ export function createVim(opts: {
       observed.value === t.value &&
       observed.start === t.selectionStart &&
       observed.end === t.selectionEnd &&
-      observed.width === t.clientWidth
+      observed.layout === textareaLayout(t)
     )
       return false
     goal = undefined
@@ -153,25 +152,26 @@ export function createVim(opts: {
   }
 
   const adjacent = (t: HTMLTextAreaElement, pos: number, dir: 1 | -1) => {
-    const start = graphemeStart(t.value, pos)
-    if (dir === 1) return graphemeNext(t.value, start)
-    return start < pos ? start : graphemePrev(t.value, start)
+    const points = textareaLayout(t).points
+    const i = boundaryIndex(points, pos)
+    return points[Math.max(0, Math.min(points.length - 1, i + (dir === 1 ? 1 : points[i]!.pos < pos ? 0 : -1)))]!.pos
   }
 
   const paint = (t: HTMLTextAreaElement, pos: number, scroll = true) => {
     const text = t.value
-    const p = graphemeStart(text, pos)
+    const layout = textareaLayout(t)
+    const i = boundaryIndex(layout.points, Math.max(0, Math.min(pos, text.length)))
+    const point = layout.points[i]!
+    const p = point.pos
     const hasChar = p < text.length && text[p] !== "\n"
     if (mode() === "normal" && hasChar) {
-      t.setSelectionRange(p, graphemeNext(text, p), "forward")
+      t.setSelectionRange(p, layout.points[i + 1]!.pos, "forward")
     } else {
       t.setSelectionRange(p, p)
     }
     if (scroll) {
       // Layout coordinates already include padding, but not the textarea border.
-      const probe = textareaProbe(t)
-      const point = probe.point(p)
-      const bottom = point.top + (point.height || probe.lineHeight)
+      const bottom = point.top + (point.height || layout.lineHeight)
       if (point.top < t.scrollTop) t.scrollTop = point.top
       else if (bottom > t.scrollTop + t.clientHeight) t.scrollTop = bottom - t.clientHeight
     }
@@ -180,17 +180,19 @@ export function createVim(opts: {
   }
 
   const verticalMove = (t: HTMLTextAreaElement, dir: 1 | -1, amount: number, logical: boolean) => {
-    const text = t.value
-    const here = graphemeStart(text, cursor(t))
+    const layout = textareaLayout(t)
+    const i = boundaryIndex(layout.points, cursor(t))
+    const point = layout.points[i]!
     if (!logical) {
       // Match native textarea navigation's integer-pixel horizontal goal.
-      if (goal?.kind !== "visual") goal = { kind: "visual", value: Math.floor(textareaProbe(t).point(here).left) }
-      return visualRowMove(t, here, dir, amount, goal.value)
+      if (goal?.kind !== "visual") goal = { kind: "visual", value: Math.floor(point.left) }
+      const x = goal.value
+      const row = layout.rows[Math.max(0, Math.min(layout.rows.length - 1, point.row + dir * amount))]!
+      return row.reduce((best, next) => (Math.abs(next.left - x) < Math.abs(best.left - x) ? next : best)).pos
     }
 
-    const lines = lineStartsOf(text)
-    const line = lastAtOrBefore(lines, here)
-    const target = lines[Math.max(0, Math.min(lines.length - 1, line + dir * amount))]!
+    const line = boundaryIndex(layout.lines, point.pos)
+    const target = layout.lines[Math.max(0, Math.min(layout.lines.length - 1, line + dir * amount))]!
     const style = getComputedStyle(t)
     const tab = Math.max(1, Number.parseFloat(style.tabSize) || 8)
     const tabSize = (() => {
@@ -200,22 +202,24 @@ export function createVim(opts: {
       return tab / (context.measureText(" ").width || 1)
     })()
     const nextColumn = (col: number, pos: number) =>
-      text[pos] === "\t" ? (Math.floor(col / tabSize) + 1) * tabSize : col + 1
+      t.value[pos] === "\t" ? (Math.floor(col / tabSize) + 1) * tabSize : col + 1
     if (goal?.kind !== "logical") {
-      const col = graphemeStarts(text, lines[line]!, here).reduce((value, pos) => nextColumn(value, pos), 0)
+      let col = 0
+      for (let j = boundaryIndex(layout.points, layout.lines[line]!.pos); j < i; j++) {
+        col = nextColumn(col, layout.points[j]!.pos)
+      }
       goal = { kind: "logical", value: col }
     }
-    const end = lineEnd(text, target)
-    const stops = [...graphemeStarts(text, target, end), end]
-    let j = 0
+    const end = lineEnd(t.value, target.pos)
+    let j = boundaryIndex(layout.points, target.pos)
     let col = 0
-    while (stops[j + 1] !== undefined) {
-      const next = nextColumn(col, stops[j]!)
+    while (layout.points[j + 1] && layout.points[j + 1]!.pos <= end) {
+      const next = nextColumn(col, layout.points[j]!.pos)
       if (next > goal.value) break
       col = next
       j++
     }
-    return stops[j]!
+    return layout.points[j]!.pos
   }
 
   const snapshot = (t: HTMLTextAreaElement) => {
@@ -233,7 +237,8 @@ export function createVim(opts: {
 
   const enterInsert = (t: HTMLTextAreaElement, pos: number) => {
     setMode("insert")
-    const p = graphemeStart(t.value, pos)
+    const points = textareaLayout(t).points
+    const p = points[boundaryIndex(points, pos)]!.pos
     t.setSelectionRange(p, p)
     remember(t)
   }
@@ -277,9 +282,9 @@ export function createVim(opts: {
         return [pos, lineEnd(text, pos), false]
       case "j":
       case "k": {
-        const lines = lineStartsOf(text)
-        const line = lastAtOrBefore(lines, pos)
-        const target = lines[Math.max(0, Math.min(lines.length - 1, line + (key === "j" ? amount : -amount)))]!
+        const lines = textareaLayout(t).lines
+        const line = boundaryIndex(lines, pos)
+        const target = lines[Math.max(0, Math.min(lines.length - 1, line + (key === "j" ? amount : -amount)))]!.pos
         return [
           lineStart(text, Math.min(pos, target)),
           Math.min(lineEnd(text, Math.max(pos, target)) + 1, text.length),
@@ -295,10 +300,11 @@ export function createVim(opts: {
 
   const runOperator = (t: HTMLTextAreaElement, op: "d" | "c" | "y", from: number, to: number, linewise: boolean) => {
     goal = undefined
+    const points = textareaLayout(t).points
+    from = points[boundaryIndex(points, from)]!.pos
+    const end = boundaryIndex(points, to)
+    to = points[Math.min(points.length - 1, end + (points[end]!.pos < to ? 1 : 0))]!.pos
     const text = t.value
-    from = graphemeStart(text, from)
-    const end = graphemeStart(text, to)
-    to = end < to ? graphemeNext(text, end) : end
     const chunk = text.slice(from, to)
     register = chunk
     registerLinewise = linewise

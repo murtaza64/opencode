@@ -77,6 +77,10 @@ import type { FindHit } from "../transcript-find"
 import { ToolSize } from "../components/tool-size"
 import { ToolRun } from "../components/tool-run"
 import { HeaderMenu } from "../components/header-menu"
+import { SurfaceGlyph } from "../components/surface-glyph"
+import type { Surface } from "../surfaces"
+import { SurfaceDiscovery } from "../components/surface-discovery"
+import { surfaceRefHref } from "../surface-ref"
 import { FailureRetry } from "../components/session-failure"
 import { blockTime } from "../recorded-time"
 import { completedTurns, groupableTurns, messageSegments, planToolRuns, samePlan, sameSegments } from "../transcript-groups"
@@ -1832,6 +1836,15 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   })
   // Decisions and surfaces come from the shell's shared desk reads, so the picker adds no requests.
   const deskQueue = useDeskQueue()
+  // The chat's agent: Surfaces whose recorded author session is this chat or a verified predecessor in its chain.
+  // author_session is RHC's authoritative published-ref seam; absent means unknown, so nothing is shown or inferred.
+  const discoverySurfaces = createMemo(() => {
+    const authored = new Set([sessionID, ...chain().links.map((link) => link.session)])
+    const list = sessionHost.id ? (dashboard.work.feeds().find((feed) => feed.host.id === sessionHost.id)?.state().surfaces ?? []) : deskQueue.surfaces.list()
+    return list.filter((surface) => surface.author_session !== undefined && authored.has(surface.author_session))
+      .sort((a, b) => (b.updated_at || b.created_at || 0) - (a.updated_at || a.created_at || 0) || b.revision - a.revision)
+  })
+  const discoveryHref = (surface: Surface) => surfaceRefHref({ id: surface.id, ...(sessionHost.id ? { host: sessionHost.id } : {}) })
   const contextHref = (ref: ContextRef) => {
     if (ref.kind === "session") return sessionHref(ref.id, ref.directory)
     // Same keys the desk opens with `/?item=` and `/?surface=`.
@@ -1948,7 +1961,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       }}
         aria-label="Message" dir="auto"
         classList={{ "vim-normal": vim.mode() === "normal", "vim-insert": vim.mode() === "insert" }}
-        value={draft()} onInput={(e) => { saveSelection(e.currentTarget); setDraft(e.currentTarget.value); update(e.currentTarget, e.isComposing) }}
+        value={draft()} onInput={(e) => { setDraft(e.currentTarget.value); update(e.currentTarget, e.isComposing) }}
         onPaste={pasteImages} onDrop={dropImages} onDragOver={(e) => e.preventDefault()}
         onKeyDown={promptKeyDown}
         onCompositionStart={() => { composing = true; setQuery(undefined) }}
@@ -2222,6 +2235,12 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             <button class="header-icon" aria-label="Next prompt" aria-keyshortcuts={ariaShortcut("nextPrompt")} aria-describedby={`prompt-scope-${sessionID}`}
               title={`Next prompt (${shortcutLabel("nextPrompt")}) · ${promptScope()}`} onPointerDown={(event) => event.preventDefault()}
               disabled={!promptState().next} onClick={() => jumpUserMessage(1)}><Icon name="chevron-down" size="small" /></button>
+            {/* The same author's Surfaces, always one menu away; the slim bar uses the latest. */}
+            <Show when={discoverySurfaces().length}>
+              <HeaderMenu id={`session-surfaces-${sessionID}`} label="Surfaces" title="Surfaces this agent published"
+                icon={<SurfaceGlyph surface={discoverySurfaces()[0]!} />}
+                items={discoverySurfaces().slice(0, 12).map((surface) => ({ label: `${surface.title} · r${surface.revision}`, select: () => navigate(discoveryHref(surface)) }))} />
+            </Show>
             {/* Mail routing tools are for debugging delivery, not daily use: only with localStorage es-app:debug=1. */}
             <Show when={location() && localStorage.getItem("es-app:debug") === "1" ? location() : undefined}>{(scope) =>
               <HeaderMenu id={`session-mail-menu-${sessionID}`} label="Session mail" title="Mail subscriptions and lane mail"
@@ -2234,6 +2253,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
             }</Show>
           </div>
         </AppHeader>
+        <SurfaceDiscovery sessionID={sessionID} editspace={discoverySurfaces()[0]?.editspace ?? currentEditspace() ?? ""} host={sessionHost.id}
+          surfaces={discoverySurfaces()} href={discoveryHref} />
         <Show when={findOpen()}><TranscriptFind sessionID={sessionID} directory={directory} messages={messages()}
           parts={live.data.part} jump={jumpFind} close={closeFind} clear={() => setFindHit(undefined)}
           subscribeRemoved={(remove) => { findRemovals.add(remove); return () => { findRemovals.delete(remove) } }} /></Show>

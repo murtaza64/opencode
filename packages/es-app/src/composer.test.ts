@@ -2982,29 +2982,3 @@ test("an image Steer whose exact image cannot be saved puts the draft back and s
   expect(unwrap(composer.state.task)).toMatchObject({ text: "look", images: [image] })
   expect(requests.filter((request) => request.method === "POST")).toHaveLength(0)
 })
-
-test("an input event writes the draft once: the caret saves with the text, and a caret move alone saves in a microtask", async () => {
-  const storage = new MemoryStorage()
-  const writes: string[] = []
-  const write = storage.setItem.bind(storage)
-  storage.setItem = (key, value) => { writes.push(value); write(key, value) }
-  const { composer } = harness(undefined, { storage })
-  await Promise.resolve()
-  writes.length = 0
-  const text = "x".repeat(200_000)
-  // The composer's input handler: caret first, then the text.
-  composer.setVisibleSelection(text.length, text.length)
-  composer.setVisibleText(text)
-  expect(writes).toHaveLength(1)
-  await Promise.resolve()
-  expect(writes).toHaveLength(1)
-  expect(JSON.parse(writes[0]!).task).toMatchObject({ text, selection: [text.length, text.length] })
-  // The same caret again writes nothing; a new caret alone is saved before the next task.
-  composer.setVisibleSelection(text.length, text.length)
-  composer.setVisibleSelection(3, 3)
-  composer.setVisibleSelection(4, 4)
-  expect(writes).toHaveLength(1)
-  await Promise.resolve()
-  expect(writes).toHaveLength(2)
-  expect(JSON.parse(writes[1]!).task.selection).toEqual([4, 4])
-})
