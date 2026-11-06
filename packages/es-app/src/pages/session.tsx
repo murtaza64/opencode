@@ -440,9 +440,24 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   // Past this session's first message: older rows of the top earlier session, else the next earlier session. The row
   // at the top of the view keeps its place on screen while rows are added above it.
   let earlierLoading = false
-  // A settling anchor hold outlives its load; a new load cancels the old one.
-  let settleRun = 0
-  let settleObserver: ResizeObserver | undefined
+  // The anchor hold outlives its load until late layout settles, a new load starts, or the reader scrolls.
+  let anchorHoldTimer: ReturnType<typeof setTimeout> | undefined
+  let anchorHoldObserver: ResizeObserver | undefined
+  const releaseAnchorHold = () => {
+    clearTimeout(anchorHoldTimer)
+    anchorHoldTimer = undefined
+    anchorHoldObserver?.disconnect()
+    anchorHoldObserver = undefined
+  }
+  onCleanup(releaseAnchorHold)
+  // Wait for the scroll to settle before loading: the anchor must be the message in view after the
+  // gesture, not a transient position while the wheel/scroll is still arriving.
+  let earlierTimer: ReturnType<typeof setTimeout> | undefined
+  const scheduleEarlier = () => {
+    clearTimeout(earlierTimer)
+    earlierTimer = setTimeout(() => { earlierTimer = undefined; void loadEarlier() }, 500)
+  }
+  onCleanup(() => clearTimeout(earlierTimer))
   const loadEarlierSession = async () => {
     if (!transcriptEl || earlierLoading || !live.loaded()) return
     const ids = shownIDs()
@@ -450,21 +465,23 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     if (top && !top.ready()) return
     if (!top?.hasOlder() && !earlierLeft()) return
     earlierLoading = true
-    const run = ++settleRun
-    settleObserver?.disconnect()
-    settleObserver = undefined
+    releaseAnchorHold()
     stick = false
     userScroll = false
     mountAll()
-    const anchor = [...transcriptEl.querySelectorAll<HTMLElement>("[data-find-message], .handoff-rule")]
+    const anchor = [...transcriptEl.querySelectorAll<HTMLElement>("[data-find-message]")]
       .find((element) => element.getBoundingClientRect().bottom > transcriptEl!.getBoundingClientRect().top)
     const offset = anchor ? anchor.getBoundingClientRect().top : 0
     const keep = () => { if (anchor && transcriptEl) transcriptEl.scrollTop += anchor.getBoundingClientRect().top - offset }
-    // The earlier session's first page can mount a frame after its segment reads ready. Keep the anchor on
-    // every content resize until the load settles, not only on the rAF loop below.
-    const observer = inner && typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => keep()) : undefined
-    if (inner) observer?.observe(inner)
-    settleObserver = observer
+    // The earlier session's first page can mount long after its segment reads ready (background QoS). Keep
+    // the anchor on every content resize until layout has been quiet for a while, then stop.
+    const hold = () => {
+      clearTimeout(anchorHoldTimer)
+      anchorHoldTimer = setTimeout(releaseAnchorHold, 10_000)
+    }
+    const observer = inner && typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => { keep(); hold() }) : undefined
+    if (inner) { observer?.observe(inner); hold() }
+    anchorHoldObserver = observer
     try {
       if (top?.hasOlder()) await top.older()
       else {
@@ -480,16 +497,14 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       keep()
     } finally {
       earlierLoading = false
-      // Background QoS can delay the earlier page's first paint past the frame that saw its segment "ready".
-      // Keep the anchor over a short settling window (each frame also lets the ResizeObserver fire), then stop.
-      // A newer load has its own anchor; this one stops as soon as it starts.
-      for (let frame = 0; frame < 60 && run === settleRun; frame++) {
-        keep()
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-      }
-      if (run === settleRun) {
-        observer?.disconnect()
-        if (settleObserver === observer) settleObserver = undefined
+      keep()
+      if (observer) hold()
+      else {
+        // No ResizeObserver (older client): fall back to a few frames of manual keeps.
+        for (let frame = 0; frame < 60; frame++) {
+          keep()
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+        }
       }
     }
   }
@@ -526,7 +541,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
       () => {
         schedulePromptPosition()
         if (!inspecting && atBottom()) stick = true
-        if (userScroll && transcriptEl && transcriptEl.scrollTop <= 200) void loadEarlier()
+        if (userScroll) releaseAnchorHold()
+        if (userScroll && transcriptEl && transcriptEl.scrollTop <= 200) scheduleEarlier()
         userScroll = false
       },
       { passive: true },
@@ -538,12 +554,12 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         if (e.deltaY < 0) {
           stick = false
           userScroll = true
-          if (transcriptEl?.scrollTop === 0) void loadEarlier()
+          if (transcriptEl?.scrollTop === 0) scheduleEarlier()
         }
       },
       { passive: true },
     )
-    transcriptEl?.addEventListener("touchmove", () => { stick = false; userScroll = true; anchorHold = undefined }, { passive: true })
+    transcriptEl?.addEventListener("touchmove", () => { stick = false; userScroll = true; anchorHold = undefined; releaseAnchorHold() }, { passive: true })
     const observer = new ResizeObserver(() => {
       if (stick) pin()
       // Late-rendering content (Markdown, images) must not push a linked message out of view.
