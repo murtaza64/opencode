@@ -1,15 +1,11 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-11-18.1",
+  "release": "2026-11-19.1",
   "items": [
     {
-      "title": "Inference usage",
-      "detail": "Usage leads with actual Ori-key spend today, its credit limit, and separately reported provider-billed costs. Historical model and session estimates expand under Detailed breakdown."
-    },
-    {
-      "title": "Ori spend in the title bar",
-      "detail": "The Ori badge shows the key's UTC-day spend and opens Usage. Work-host estimates stay separate."
+      "title": "Session switching and streaming",
+      "detail": "Session history can appear before the task list finishes loading. Plain-text streaming avoids reparsing the entire line on each update."
     }
   ],
-  "limits": ["The key's credit limit excludes BYOK charges when OpenRouter reports that setting. Provider-side remaining budget is not reported."]
+  "limits": []
 }

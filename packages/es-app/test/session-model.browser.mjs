@@ -22,19 +22,21 @@ if (app) {
 }
 await page.context().route("**/*", route => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
 const editor = () => page.locator(".prompt-box:not([inert]) textarea[aria-label='Message']")
-const model = () => page.getByRole("combobox", { name: "Session model" })
+const model = () => page.getByRole("combobox", { name: "Search models" })
 const modelName = () => page.locator(".prompt-box .direct-model-name")
 // The picker is closed by default; the model name (Change model) opens it and choosing closes it.
 const choose = async (value) => {
   await page.getByRole("button", { name: /^Change model/ }).click()
   await expect(model()).toBeFocused()
-  await model().selectOption(value)
+  const [provider, id] = value.split("\u0000")
+  await model().fill(`${provider} ${id === "test" ? "Fixture model" : "Next model"}`)
+  await page.getByRole("option", { name: id === "test" ? /^Fixture model/ : /^Next model/ }).click()
   await expect(model()).toHaveCount(0)
 }
 const queue = async () => {
   const more = page.getByRole("button", { name: "More send options", exact: true })
   if ((await more.getAttribute("aria-expanded")) !== "true") await more.click()
-  return page.getByRole("button", { name: "Queue", exact: true })
+  return page.getByRole("button", { name: "Queue for when idle", exact: true })
 }
 const patches = () => fixture.calls.filter(call => call.method === "PATCH" && call.path === "/session/ses_a" && call.body?.model)
 const inputs = () => fixture.calls.filter(call => call.method === "POST" && call.path === "/session/ses_a/input")
@@ -80,7 +82,7 @@ try {
   fixture.sessionModels.set("ses_a", updated)
   fixture.emit("session.updated", { sessionID: "ses_a", info: {
     id: "ses_a", title: "Composer fixture", directory, projectID: "fixture", version: "1", agent: "build",
-    time: { created: 1, updated: Date.now() + 1000 }, model: updated, preferredModel: updated,
+    time: { created: 1, updated: Date.now() }, model: updated, preferredModel: updated,
   } })
   await expect(modelName()).toHaveText("Fixture model")
   expect(prompts()).toHaveLength(0)

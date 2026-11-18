@@ -9,3 +9,4 @@
 .new-session-submit button.primary { color: var(--green); box-shadow: inset 0 0 0 1px var(--green); background: var(--crust); }
 .new-session-submit button.primary:disabled { color: var(--overlay0); box-shadow: inset 0 0 0 1px var(--surface1); }
 .new-session-submit kbd { font: 10px var(--font-mono); color: var(--overlay1); margin-inline-start: 6px; }
+.new-session-model { max-inline-size: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

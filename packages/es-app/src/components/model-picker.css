@@ -1,0 +1,29 @@
+.model-picker { box-sizing: border-box; margin: auto; inline-size: min(600px, calc(100vw - 24px)); max-inline-size: none; max-block-size: min(720px, calc(100dvh - 32px)); padding: 0; border: 1px solid var(--surface1); border-radius: 12px; background: var(--base); color: var(--text); box-shadow: 0 20px 80px #0006; font: inherit; }
+.model-picker[open] { display: flex; flex-direction: column; }
+.model-picker::backdrop { background: #0007; }
+.model-picker header { display: flex; justify-content: space-between; align-items: start; gap: 12px; padding: 18px 18px 12px; }
+.model-picker h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.model-picker header p { margin: 5px 0 0; color: var(--subtext0); font-size: 12px; }
+.model-picker button { font: inherit; cursor: pointer; color: var(--subtext1); background: transparent; border: 1px solid var(--surface1); border-radius: 6px; padding: 5px 9px; font-size: 12px; }
+.model-picker button:hover { background: var(--surface0); color: var(--text); }
+.model-picker > input { box-sizing: border-box; flex: none; inline-size: calc(100% - 36px); margin-inline: 18px; padding: 11px 12px; background: var(--mantle); color: var(--text); border: 1px solid var(--surface1); border-radius: 7px; font: inherit; font-size: 14px; }
+.model-picker :focus-visible { outline: 2px solid var(--accent, var(--peach)); outline-offset: 2px; }
+.model-picker-filters { display: flex; gap: 6px; flex-wrap: wrap; flex: none; max-block-size: 92px; overflow: auto; padding: 12px 18px 4px; }
+.model-picker-filters button[aria-pressed=true] { background: var(--surface0); color: var(--text); border-color: var(--accent, var(--peach)); }
+.model-picker-summary { display: flex; justify-content: space-between; gap: 12px; padding: 10px 18px; font-size: 12px; color: var(--subtext0); }
+.model-picker-summary label { display: flex; align-items: center; gap: 5px; }
+.model-picker-results { overflow: auto; overscroll-behavior: contain; min-block-size: 100px; block-size: 370px; border-block: 1px solid var(--surface0); padding: 6px; }
+.model-picker-option { padding: 10px 12px; border-radius: 6px; cursor: pointer; text-align: start; }
+.model-picker-option:hover { background: var(--mantle); }
+.model-picker-option[data-active] { background: var(--surface0); box-shadow: inset 2px 0 var(--accent, var(--peach)); }
+[dir=rtl] .model-picker-option[data-active] { box-shadow: inset -2px 0 var(--accent, var(--peach)); }
+.model-picker-option-name { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 14px; }
+.model-picker-option-name > bdi { overflow-wrap: anywhere; font-weight: 500; }
+.model-picker-option-name > span { display: flex; flex: none; gap: 6px; flex-wrap: wrap; }
+.model-picker-option small { color: var(--accent, var(--peach)); font-size: 10px; }
+.model-picker-option-id { margin-block-start: 4px; color: var(--subtext0); font-size: 11px; overflow-wrap: anywhere; }
+.model-picker-capability { display: inline-block; margin-block-start: 4px; color: var(--subtext1); font-size: 10px; }
+.model-picker-empty { padding: 28px 12px; color: var(--subtext0); font-size: 13px; }
+.model-picker footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 18px; flex: none; }
+.model-picker footer > span { color: var(--subtext0); font-size: 11px; }
+@media (max-width: 480px) { .model-picker button { min-block-size: 44px; } .model-picker-option-name { gap: 6px; } .model-picker-option-name > span { max-inline-size: 70px; } }

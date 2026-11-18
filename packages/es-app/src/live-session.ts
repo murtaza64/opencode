@@ -146,6 +146,7 @@ export function createLiveSession(
   // quietly and reconnects/retries wait until a view loads it again.
   let suspended = false
   let loadAbort: AbortController | undefined
+  let todoRevision = 0
   // A stream that opens after the transcript is shown only needs the newest messages re-read to
   // close the gap before it opened; older history is already held.
   let resyncNext = false
@@ -190,12 +191,15 @@ export function createLiveSession(
       if (disposed) return
       snapshotStarted = true
       const snapshot = perfSpan("session.snapshot", { sessionID, warm: loaded() })
-      const [session, page, status, todos] = await Promise.all([
+      // Todos must not hold transcript readiness or replace a newer live update.
+      const revision = ++todoRevision
+      void timed("todos", oc.todos(sessionID, directory, signal)).then((todos) => {
+        if (!disposed && !signal.aborted && revision === todoRevision) setData("todo", reconcile(todos))
+      }, () => {})
+      const [session, page, status] = await Promise.all([
         record,
         timed("messages", oc.messagesPage(sessionID, directory, resync ? RESYNC_TAIL : TAIL, undefined, signal)),
         timed("status", oc.status(directory, signal)),
-        // Todos are auxiliary: a failed read keeps the last list, never the transcript.
-        timed("todos", oc.todos(sessionID, directory, signal)).catch(() => undefined),
       ]).catch((failure: unknown) => {
         snapshot.end(signal.aborted ? "aborted" : "failed", { ...timings, error: errorText(failure).slice(0, 160) })
         throw failure
@@ -242,7 +246,6 @@ export function createLiveSession(
           ),
         )
         setOlderCursor(cursor)
-        if (todos) setData("todo", reconcile(todos))
         setData("part_text_accum_delta", reconcile({}))
         const bases = new Set<string>()
         uncertainParts.clear()
@@ -391,6 +394,7 @@ export function createLiveSession(
       }
       case "todo.updated": {
         if (props.sessionID !== sessionID || !Array.isArray(props.todos)) break
+        todoRevision++
         setData("todo", reconcile(props.todos))
         break
       }

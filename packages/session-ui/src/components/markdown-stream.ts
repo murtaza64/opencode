@@ -13,6 +13,7 @@ export type Block = {
 export type Projection = {
   text: string
   blocks: Block[]
+  plainLine?: true
 }
 
 function refs(text: string) {
@@ -102,6 +103,12 @@ export function project(previous: Projection | undefined, text: string, live: bo
         return block
       }),
     }
+  }
+  // Classify only appended characters while the stream is still a plain line.
+  if (previous?.plainLine && text.startsWith(previous.text)
+    ? /^[\p{L}\p{M}\p{N} ,;]*$/u.test(text.slice(previous.text.length))
+    : /^[\p{L}\p{N}][\p{L}\p{M}\p{N} ,;]*$/u.test(text)) {
+    return { text, blocks: [{ raw: text, src: text, mode: "live" }], plainLine: true }
   }
   if (!previous || !text.startsWith(previous.text)) return { text, blocks: stream(text, live) }
   const tail = previous.blocks.at(-1)
