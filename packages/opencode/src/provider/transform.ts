@@ -499,6 +499,8 @@ export function message(msgs: ModelMessage[], model: Provider.Model, options: Re
     msgs = mapProviderOptions(msgs, remap)
   }
 
+  if (model.api.npm === "@openrouter/ai-sdk-provider") msgs = isolateOpenRouterReasoning(msgs)
+
   // Strip Responses item IDs before serialization, following Codex and keeping signed request bodies immutable.
   if (
     options.store !== true &&
@@ -516,6 +518,51 @@ export function message(msgs: ModelMessage[], model: Provider.Model, options: Re
   }
 
   return msgs
+}
+
+// OpenRouter Auto (and provider fallback) can route each step of one model ID to a different upstream.
+// Upstreams reject replayed encrypted or signed reasoning minted by another provider (HTTP 400), so the
+// request keeps provider-bound reasoning only from the most recent upstream format. Single-format
+// histories pass through unchanged; persisted parts are never modified.
+function isolateOpenRouterReasoning(msgs: ModelMessage[]): ModelMessage[] {
+  const formats = msgs.flatMap((msg) =>
+    msg.role === "assistant" && Array.isArray(msg.content)
+      ? [
+          msg.providerOptions,
+          ...msg.content.map((part) => ("providerOptions" in part ? part.providerOptions : undefined)),
+        ].flatMap((options) => openRouterReasoningDetails(options).filter(isProviderBound).map(reasoningFormat))
+      : [],
+  )
+  if (new Set(formats).size <= 1) return msgs
+  const keep = formats.at(-1)
+  return mapProviderOptions(msgs, (options) => {
+    if (!Array.isArray(options?.openrouter?.reasoning_details)) return options
+    return {
+      ...options,
+      openrouter: {
+        ...options.openrouter,
+        reasoning_details: openRouterReasoningDetails(options).filter(
+          (detail) => !isProviderBound(detail) || reasoningFormat(detail) === keep,
+        ),
+      },
+    }
+  })
+}
+
+type OpenRouterReasoningDetail = { type?: unknown; signature?: unknown; format?: unknown }
+
+function openRouterReasoningDetails(options: Record<string, any> | undefined): OpenRouterReasoningDetail[] {
+  const details = options?.openrouter?.reasoning_details
+  if (!Array.isArray(details)) return []
+  return details.filter((detail): detail is OpenRouterReasoningDetail => typeof detail === "object" && detail !== null)
+}
+
+function isProviderBound(detail: OpenRouterReasoningDetail) {
+  return detail.type === "reasoning.encrypted" || (detail.type === "reasoning.text" && !!detail.signature)
+}
+
+function reasoningFormat(detail: OpenRouterReasoningDetail) {
+  return typeof detail.format === "string" ? detail.format : "unknown"
 }
 
 const GEMINI_MODELS_WITH_SAMPLING_DEFAULTS = [
