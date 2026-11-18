@@ -700,7 +700,40 @@ export type QuotaProvider = {
 }
 export type QuotaView = { schema: "es-quota/1"; checkedAt: string; providers: QuotaProvider[] }
 
+export type OpenRouterUsage = {
+  schema: "es-openrouter-usage/1"
+  state: "ok" | "not-configured" | "unavailable"
+  reason?: string
+  observedAt?: string
+  credits_usd?: number | null
+  external_byok_usd?: number | null
+  total_inference_usd?: number | null
+  credits_today_utc_usd?: number | null
+  external_byok_today_utc_usd?: number | null
+  key_limit_usd?: number | null
+  key_remaining_usd?: number | null
+  include_byok_in_key_limit?: boolean | null
+  expires_at?: string | null
+  limit_reset?: string | null
+  effective_budget?: {
+    scope: string
+    limit_usd: number
+    spend_usd: number
+    remaining_usd: number
+    reset_interval: string | null
+    resets_at: string | null
+    include_byok: boolean | null
+  } | null
+}
+
 export const es = {
+  async openrouterUsage(signal?: AbortSignal): Promise<OpenRouterUsage | undefined> {
+    const response = await fetch("/es/api/usage/openrouter", { credentials: "include", signal })
+    if (response.status === 404 || !response.headers.get("content-type")?.includes("application/json")) return undefined
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const value = await response.json().catch(() => undefined)
+    return value?.schema === "es-openrouter-usage/1" ? value : undefined
+  },
   currentWork: (sessionID: string, directory: string): Promise<CurrentWork> =>
     fetch(`/es/api/current-work?session_id=${encodeURIComponent(sessionID)}&${q(directory)}`)
       .then(statusJson<CurrentWork>),

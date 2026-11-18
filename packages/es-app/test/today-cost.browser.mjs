@@ -14,6 +14,8 @@ if (shots) await mkdir(shots, { recursive: true })
 const tokens = (input, output) => ({ input, output, reasoning: 0, cache: { read: 0, write: 0 } })
 let total = 142.4
 let mode = "json"
+let ori
+const oriReads = []
 // Newer Cores: nullable cost with per-model coverage.
 let shape = "old"
 // /__es/host answer (undefined: route missing, single host) and the Mini host's rollup.
@@ -21,7 +23,6 @@ let hostInfo
 let mini = { mode: "fail" }
 const originDay = (cost) => ({ day: new Date().toLocaleDateString("en-CA"), complete: true, cost, originOnly: true, originCost: cost, unpricedModels: cost === null ? 1 : 0, unpricedTokens: 0,
   models: [{ provider: "anthropic", model: "claude-opus", cost, coverage: cost === null ? "missing-rate" : "priced", tokens: tokens(1_000, 100) }] })
-// dotfiles#264 cutoff day: origin tracking began this morning; origin-only spend from one common whole hour.
 const SINCE = (() => { const at = new Date(); at.setMinutes(0, 0, 0); at.setHours(Math.max(0, at.getHours() - 2)); return at.toISOString() })()
 const cutoffDay = (raw, partial) => ({ day: new Date().toLocaleDateString("en-CA"), complete: true, cost: raw, originOnly: false, originCost: null, unpricedModels: 0, unpricedTokens: 0,
   originPartial: partial, models: [{ provider: "anthropic", model: "claude-opus", cost: raw, coverage: "priced", tokens: tokens(1_000, 100) }] })
@@ -59,6 +60,12 @@ const preview = await startAttentionPreview([{
       res.writeHead(200, { "content-type": "application/json" })
       res.end(JSON.stringify({ ...rollup(), days: [day], coverage: { scope: "Mini", backfilled: true } }))
     })
+    server.middlewares.use("/es/api/usage/openrouter", (req, res) => {
+      if (req.headers["x-under-test"]) oriReads.push(req.url)
+      if (!ori) { res.writeHead(404); return res.end() }
+      res.writeHead(200, { "content-type": "application/json" })
+      res.end(JSON.stringify({ schema: "es-openrouter-usage/1", state: "ok", observedAt: new Date().toISOString(), ...ori }))
+    })
     server.middlewares.use("/oc/experimental/usage/daily", (req, res) => {
       // Count only the page under test: the preview's warm-up page also loads the app (and its badge).
       if (req.headers["x-under-test"]) reads.push(req.url)
@@ -78,7 +85,7 @@ await context.route("**/*", (route) => new URL(route.request().url()).origin ===
 const page = await context.newPage()
 const errors = []
 page.on("pageerror", (error) => errors.push(error.message))
-const badge = page.locator(".today-cost:visible")
+const badge = page.locator(".today-cost:not(.ori-today-cost):visible")
 const amount = badge.locator(".today-cost-amount")
 const colour = (name) => page.evaluate((name) => { const probe = document.createElement("span"); probe.style.color = `var(--${name})`; document.body.append(probe); const value = getComputedStyle(probe).color; probe.remove(); return value }, name)
 const inside = () => badge.evaluate((node) => { const rect = node.getBoundingClientRect(); const amountRect = node.querySelector(".today-cost-chip").lastElementChild.getBoundingClientRect(); return rect.width > 0 && rect.left >= 0 && rect.right <= window.innerWidth + 0.5 && node.scrollWidth <= node.clientWidth + 1 && amountRect.right <= window.innerWidth + 0.5 })
@@ -123,7 +130,7 @@ try {
   console.log("PASS bands: $40 green, $200 text, $600 peach (never red)")
 
   await page.evaluate(() => document.documentElement.setAttribute("dir", "rtl"))
-  const rtl = await badge.evaluate((node) => { const row = node.parentElement.getBoundingClientRect(); const rect = node.getBoundingClientRect(); return { start: rect.left - row.left, end: row.right - rect.right } })
+  const rtl = await badge.evaluate((node) => { const row = node.closest(".sidebar-top, .native-header-safe").getBoundingClientRect(); const rect = node.getBoundingClientRect(); return { start: rect.left - row.left, end: row.right - rect.right } })
   expect(rtl.start, "RTL: badge at the inline end (left)").toBeLessThan(rtl.end)
   if (shots) await page.screenshot({ path: `${shots}/rtl.png` })
   await page.evaluate(() => document.documentElement.setAttribute("dir", "ltr"))
@@ -173,7 +180,6 @@ try {
   await expect(page.locator(".today-cost:visible, .today-cost-host:visible")).toHaveCount(1)
   await expect(badge).toHaveAttribute("aria-label", /partial, no combined total; Mini unsupported/)
   expect(await amount.evaluate((node) => getComputedStyle(node).color), "partial reads in a neutral tone").toBe(await colour("subtext1"))
-  // The breakdown lives in the details, opened from the one chip.
   await badge.locator(".today-cost-chip").click()
   const details = page.locator(".today-cost-details:popover-open")
   await expect(details).toBeVisible()
@@ -183,7 +189,6 @@ try {
   await expect(details.locator(".today-cost-coverage")).toHaveText("partial: no combined total (Mini unsupported)")
   const chipBox = await badge.locator(".today-cost-chip").boundingBox()
   const detailsBox = await details.boundingBox()
-  // Under the chip, overlapping it, inside the window; end-aligned when there is room.
   const placed = (box, chip) => box.y >= chip.y + chip.height && box.x >= 0 && box.x + box.width <= 1440 &&
     box.x < chip.x + chip.width && box.x + box.width > chip.x
   expect(placed(detailsBox, chipBox), "LTR: details under the chip, inside the window").toBe(true)
@@ -198,7 +203,6 @@ try {
   await page.evaluate(() => document.documentElement.setAttribute("dir", "ltr"))
   if (shots) await page.screenshot({ path: `${shots}/partial.png`, clip: { x: 0, y: 0, width: 1440, height: 200 } })
   console.log("PASS mixed capability: one partial summary, no amount, no host chips; details list hosts + coverage, LTR/RTL")
-  // Cutoff day, same origin start on both hosts: one visible subtotal, scoped "since", never the raw sum.
   shape = "cutoff"
   total = 310.5
   mini = { mode: "cutoff", partial: { since: SINCE, cost: 420.25, unpricedModels: 0 } }
@@ -217,7 +221,6 @@ try {
   await expect(details.locator('.today-cost-host[data-host="mini"]')).toContainText("full day not in total")
   await page.keyboard.press("Escape")
   if (shots) await page.screenshot({ path: `${shots}/since.png`, clip: { x: 0, y: 0, width: 1440, height: 200 } })
-  // A host on a pre-#264 Core (no originPartial) cannot be matched: back to one partial summary.
   mini = { mode: "cutoff", partial: undefined }
   await page.reload({ waitUntil: "domcontentloaded" })
   await expect(amount).toHaveText("partial")
@@ -239,7 +242,54 @@ try {
   // No zero total anywhere in the title row or sidebar top (session costs elsewhere are separate).
   await expect(page.locator(".native-header, .sidebar-top").getByText(/\$0\b/)).toHaveCount(0)
   console.log("PASS older Core: badge hidden, never $0")
+
+  ori = { credits_today_utc_usd: 0, external_byok_today_utc_usd: 23.21, total_inference_usd: 23.24 }
+  const beforeOri = oriReads.length
+  await page.reload({ waitUntil: "domcontentloaded" })
+  const link = page.getByRole("link", { name: "Ori today (UTC): $23.21. Open Usage" }).filter({ visible: true })
+  await expect(link).toBeVisible()
+  await expect(link).toHaveAttribute("title", /\$23\.21 provider-billed \(BYOK\) · \$0\.00 from OpenRouter credits/)
+  await link.click()
+  await expect(page).toHaveURL(`${preview.url}/usage`)
+  await expect(link).toBeVisible()
+  await expect.poll(() => oriReads.length - beforeOri).toBe(2)
+  console.log("PASS Ori badge: provider-billed daily spend even without Core pricing; links to Usage without adding host estimates")
+
+  mode = "json"
+  const native = await browser.newPage({
+    viewport: { width: 760, height: 900 },
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/142.0.0.0 Safari/537.36 Electron/42.3.3",
+  })
+  native.on("pageerror", (error) => errors.push(error.message))
+  await native.route("**/*", (route) => new URL(route.request().url()).origin === preview.origin ? route.continue() : route.abort())
+  await native.goto(preview.url, { waitUntil: "domcontentloaded" })
+  const nativeLink = native.locator(".native-header-safe").getByRole("link", { name: "Ori today (UTC): $23.21. Open Usage" })
+  await expect(nativeLink).toBeVisible()
+  await expect(native.locator(".native-header .today-cost-chip")).toBeVisible()
+  for (const direction of ["ltr", "rtl"]) {
+    await native.evaluate((dir) => { document.documentElement.dir = dir }, direction)
+    const position = await nativeLink.evaluate((node) => {
+      const safe = node.closest(".native-header-safe").getBoundingClientRect()
+      const badge = node.getBoundingClientRect()
+      const work = node.parentElement.querySelector(".today-cost-chip").getBoundingClientRect()
+      return { safeLeft: safe.left, left: badge.left, right: badge.right, safeRight: safe.right,
+        followsWork: getComputedStyle(node).direction === "rtl" ? badge.right <= work.left : badge.left >= work.right,
+        drag: getComputedStyle(node).getPropertyValue("-webkit-app-region") }
+    })
+    expect(position.safeLeft, `${direction}: physical window-control inset`).toBeGreaterThanOrEqual(84)
+    expect(position.left, `${direction}: badge within safe area`).toBeGreaterThanOrEqual(position.safeLeft)
+    expect(position.right, `${direction}: badge within safe area`).toBeLessThanOrEqual(position.safeRight)
+    expect(position.followsWork, `${direction}: Ori follows Work toward inline end`).toBe(true)
+    expect(position.drag, `${direction}: link is clickable in title bar`).toBe("no-drag")
+  }
+  await nativeLink.click()
+  await expect(native).toHaveURL(`${preview.url}/usage`)
+  await native.close()
+  console.log("PASS macOS native renderer layout: Ori follows Work inline-end in LTR and RTL, stays outside window controls, and opens Usage")
   expect(errors).toEqual([])
+} catch (error) {
+  console.error(error)
+  process.exitCode = 1
 } finally {
   await browser.close()
   await preview.close()

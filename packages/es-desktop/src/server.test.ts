@@ -864,6 +864,17 @@ test("re-checking an answer's delivery and regenerating a brief reach the dashbo
   expect(apiAllowed("POST", `/es/api/attention/${record}/delivery/x`)).toBe(false)
 })
 
+test("Ori key usage is read-only on the local desktop listener", async () => {
+  const { get } = await setup()
+  expect(apiAllowed("GET", "/es/api/usage/openrouter")).toBe(true)
+  expect(apiAllowed("POST", "/es/api/usage/openrouter")).toBe(false)
+  expect(apiAllowed("GET", "/es/api/usage/openrouter/other")).toBe(false)
+  expect(hostApiAllowed("GET", "/es/api/usage/openrouter")).toBe(false)
+  const response = await get("/es/api/usage/openrouter", { headers: { cookie: "unrelated=private" } })
+  expect(response.status).toBe(200)
+  expect(await response.json()).toMatchObject({ method: "GET", path: "/api/usage/openrouter", credentialForwarded: false })
+})
+
 test("the Front desk model and a request's conversation are read-only reads without browser credentials", async () => {
   const { get } = await setup()
   for (const pathname of ["/es/api/frontdesk/model", `/es/api/frontdesk/conversation?es=dotfiles&record=${record}`]) {

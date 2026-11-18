@@ -3,7 +3,7 @@
  * returns after a minute away, or on Refresh. No polling.
  * Each host is its own origin, so this page covers this host only and says so: never a global total. */
 import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js"
-import { es, oc, type QuotaView, type UsageDaily, type UsageLimit, type UsageSessions, type UsageTokens } from "../api"
+import { es, oc, type OpenRouterUsage, type UsageDaily, type UsageLimit, type UsageSessions, type UsageTokens } from "../api"
 import { seriesColor, short, STATE_LABEL, UsageChart } from "../components/usage-chart"
 import { buildTrend, groupByDirectory, OTHER, unpricedModel, type Trend } from "../usage-trend"
 import { AppHeader } from "../components/native-header"
@@ -23,12 +23,17 @@ const STALE_MS = 60_000
 export default function UsagePage() {
   onMount(() => void readHost())
   const [version, setVersion] = createSignal(0)
-  const [usage, { refetch }] = createResource(version, () => oc.usageDaily(DAYS))
+  const [usage] = createResource(version, () => oc.usageDaily(DAYS, AbortSignal.timeout(30_000)))
+  const [today] = createResource(version, () => oc.usageDaily(1, AbortSignal.timeout(15_000)))
+  const [ori] = createResource(version, () => es.openrouterUsage().catch((): OpenRouterUsage => ({
+    schema: "es-openrouter-usage/1", state: "unavailable", reason: "request failed",
+  })))
+  const refresh = () => setVersion((value) => value + 1)
   onMount(() => {
     // Returning to the tab re-reads a stale rollup once; a hidden tab reads nothing.
     const visible = () => {
       const at = usage()?.observedAt ? Date.parse(usage()!.observedAt) : 0
-      if (document.visibilityState === "visible" && !usage.loading && Date.now() - at > STALE_MS) setVersion((value) => value + 1)
+      if (document.visibilityState === "visible" && !usage.loading && !ori.loading && Date.now() - at > STALE_MS) refresh()
     }
     document.addEventListener("visibilitychange", visible)
     onCleanup(() => document.removeEventListener("visibilitychange", visible))
@@ -36,10 +41,11 @@ export default function UsagePage() {
   const label = () => host()?.label ?? "This host"
   return <main class="attention-home usage-page">
     <AppHeader><h1>Usage</h1><span class="home-muted">{label()}</span></AppHeader>
-    <Show when={!usage.error} fallback={<div class="home-warning" role="alert">Usage unavailable: {String(usage.error?.message ?? usage.error)} <button onClick={() => refetch()}>Retry</button></div>}>
+    <OriUsage value={ori.latest} loading={ori.loading} today={today.error ? undefined : today.latest?.days[0]} refresh={refresh} />
+    <Show when={!usage.error} fallback={<div class="home-warning" role="alert">Usage unavailable: {String(usage.error?.message ?? usage.error)} <button onClick={refresh}>Retry</button></div>}>
       <Show when={usage.state !== "unresolved" && !(usage.loading && !usage.latest)} fallback={<p class="home-muted">Loading usage…</p>}>
         <Show when={usage.latest} fallback={<p class="home-muted">Usage is not available on {label()} yet: its Core predates the usage rollup.</p>}>
-          {(value) => <Report usage={value()} host={label()} refresh={() => refetch()} loading={usage.loading} />}
+          {(value) => <details class="usage-details"><summary>Detailed breakdown</summary><Report usage={value()} host={label()} refresh={refresh} loading={usage.loading} /></details>}
         </Show>
       </Show>
     </Show>
@@ -77,6 +83,64 @@ const SubscriptionSection = (props: { version: number; host: string }) => {
       </Show>
     </section>
   </Show>
+}
+
+const OriUsage = (props: { value?: OpenRouterUsage; loading: boolean; today?: UsageDaily["days"][number]; refresh: () => void }) => {
+  const budget = () => props.value?.effective_budget
+  const limit = () => budget()?.limit_usd ?? props.value?.key_limit_usd
+  const left = () => budget()?.remaining_usd ?? props.value?.key_remaining_usd
+  const spend = () => budget()?.spend_usd ?? (limit() != null && left() != null ? limit()! - left()! : undefined)
+  const amount = (value?: number | null) => value == null ? "not reported" : money(value)
+  const expiration = () => {
+    const value = Date.parse(props.value?.expires_at ?? "")
+    return Number.isFinite(value) ? new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "not reported"
+  }
+  const daily = () => {
+    const credits = props.value?.credits_today_utc_usd
+    const byok = props.value?.external_byok_today_utc_usd
+    const observed = Date.parse(props.value?.observedAt ?? "")
+    if (!Number.isFinite(observed) || new Date(observed).toISOString().slice(0, 10) !== new Date().toISOString().slice(0, 10)) return
+    return typeof credits === "number" && Number.isFinite(credits) && credits >= 0 && typeof byok === "number" && Number.isFinite(byok) && byok >= 0 ? credits + byok : undefined
+  }
+  const budgetLabel = () => `${amount(spend())} used of ${amount(limit())} · ${amount(left())} remaining`
+  const includesByok = () => budget()?.include_byok ?? props.value?.include_byok_in_key_limit
+  const outside = () => props.today?.models.filter((row) => row.provider !== "openrouter" && row.coverage !== "no-usage")
+  const priced = () => outside()?.filter((row) => row.cost != null && !unpriced(row))
+  return <section class="ori-usage" aria-label="Inference usage">
+    <div class="usage-trend-head"><h2>Inference</h2><button class="usage-refresh" disabled={props.loading} onClick={props.refresh}>{props.loading ? "Refreshing…" : "Refresh"}</button></div>
+    <Show when={props.value?.state === "ok"} fallback={<p class="home-muted" role="status">{
+      props.loading ? "Loading OpenRouter usage…" : props.value?.state === "not-configured" ? "OpenRouter key not configured" :
+        props.value?.state === "unavailable" ? `OpenRouter usage unavailable: ${props.value.reason ?? "reason not reported"}` : "OpenRouter usage not reported on this dashboard"
+    }</p>}>
+      <div class="ori-headline">
+        <span class="ori-number">{amount(daily())}</span>
+        <span class="ori-headline-label">spent today<br /><span class="home-muted">Ori key · UTC day</span></span>
+      </div>
+      <p class="ori-source home-source">{amount(props.value?.total_inference_usd)} since this key was created · as of {props.value?.observedAt ? clock(props.value.observedAt) : "not reported"}</p>
+      <div class="ori-availability" aria-label="Available spending">
+        <h3>Available</h3>
+        <div class="ori-budget-row">
+          <div class="ori-budget-heading"><span>{includesByok() === false ? "Ori key limit · credits only" : "Enforced budget"}</span><strong>{left() == null ? "Not reported" : left()! <= 0 ? "Limit reached" : `${amount(left())} left`}</strong></div>
+          <Show when={spend() != null && limit() != null && limit()! > 0} fallback={<div class="ori-budget-missing">Budget not reported</div>}>
+            <progress class="ori-budget" aria-label={`Enforced budget: ${budgetLabel()}`} max={limit()!} value={Math.max(0, Math.min(spend()!, limit()!))} />
+            <div class="ori-budget-foot"><span>{amount(spend())} used</span><span>{amount(limit())} limit</span></div>
+          </Show>
+          <span class="home-source">Key expires {expiration()}</span>
+        </div>
+        <div class="ori-provider-row"><span>Provider-billed inference <span class="home-muted">(BYOK)</span></span>
+          <strong class={includesByok() === false ? "usage-incomplete" : "home-muted"}>{includesByok() === false ? "Limit not reported" : includesByok() === true ? "Counted in budget above" : "Budget status not reported"}</strong>
+        </div>
+        <Show when={includesByok() === false}><p class="ori-warning">Provider-billed spend does not count toward the credit limit.</p></Show>
+      </div>
+      <details class="ori-breakdown"><summary>How this is billed</summary>
+        <p>Today (UTC): {amount(props.value?.credits_today_utc_usd)} from OpenRouter credits · {amount(props.value?.external_byok_today_utc_usd)} billed to provider.</p>
+        <p>Key lifetime: {amount(props.value?.credits_usd)} from credits · {amount(props.value?.external_byok_usd)} billed to provider.</p>
+        <p class="home-source">Source: OpenRouter key billing, including this key’s use from other harnesses. Duolingo cost-tracking integration is not confirmed here.</p>
+      </details>
+    </Show>
+    <div class="ori-outside"><span>Outside OpenRouter <span class="home-muted">· this host, local day</span></span><strong>{amount(outside()?.length === 0 ? 0 : priced()?.length ? priced()!.reduce((sum, row) => sum + row.cost!, 0) : undefined)}{outside()?.some(unpriced) ? " + unpriced" : ""}</strong></div>
+    <p class="home-source">Estimate only. Other OpenRouter keys and other hosts are not included.</p>
+  </section>
 }
 
 const Report = (props: { usage: UsageDaily; host: string; refresh: () => void; loading: boolean }) => {

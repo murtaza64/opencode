@@ -238,6 +238,7 @@ export const apiAllowed = (method: string, pathname: string) => {
       // A user/assistant file part's bytes (a pasted screenshot), referenced by compact pages instead of inlined.
       /^\/oc\/session\/[\w-]+\/message\/[\w-]+\/part\/[\w-]+\/file$/,
       /^\/es\/api\/(editspaces|state|quota|notifications|events|notification-events|issues|issue|docs|doc|search|session-insights|pr-detail|current-work|mail|wake-events|subscriptions|handoffs|lane-provenance|frontdesk\/memory|frontdesk\/pointer|frontdesk\/ignored-failures|surfaces|pins|pins\/events|personas|decisions\/requests)$/,
+      /^\/es\/api\/usage\/openrouter$/,
       /^\/es\/api\/surfaces\/[a-z0-9][a-z0-9-]{0,39}\/snapshot$/,
       // Per-session wake state (es.mail.wake/v1): next wake time and reason from the dashboard's schedulers; read-only.
       /^\/es\/api\/mail\/wake$/,

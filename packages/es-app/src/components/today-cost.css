@@ -1,3 +1,8 @@
+.today-cost-group { display: inline-flex; align-items: baseline; gap: 12px; min-inline-size: 0; }
+.sidebar-top .today-cost-group { margin-inline-start: auto; }
+.sidebar-top .today-cost-group .today-cost { margin-inline-start: 0; }
+.ori-today-cost { align-items: baseline; gap: 5px; text-decoration: none; }
+.ori-today-cost:is(:hover, :focus-visible) .today-cost-label { text-decoration: underline; }
 .today-cost { display: inline-flex; white-space: nowrap; flex-shrink: 0; }
 .today-cost-chip { display: inline-flex; align-items: baseline; gap: 5px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: default; }
 .today-cost[data-band=partial] .today-cost-amount { color: var(--subtext1); font-weight: 500; }

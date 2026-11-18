@@ -1,5 +1,6 @@
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js"
-import { costBand, startTodayCost, STALE_MS, todayCost, type HostCost } from "../today-cost"
+import { A } from "@solidjs/router"
+import { costBand, oriCost, startTodayCost, STALE_MS, todayCost, type HostCost } from "../today-cost"
 import "./today-cost.css"
 import { clockTime } from "../local-time"
 
@@ -25,7 +26,7 @@ export const TodayCost = () => {
   const tick = setInterval(() => setNow(Date.now()), 60_000)
   onCleanup(() => clearInterval(tick))
   const id = `today-cost-details-${++nextID}`
-  return <Show when={todayCost(now())}>{(cost) => {
+  return <div class="today-cost-group"><Show when={todayCost(now())}>{(cost) => {
     const time = (at: number) => clockTime(at)
     const stale = () => now() - cost().observedAt > STALE_MS
     const age = () => { const minutes = Math.max(0, Math.round((now() - cost().observedAt) / 60_000)); return minutes < 1 ? "just now" : `${minutes}m ago` }
@@ -69,4 +70,16 @@ export const TodayCost = () => {
       </div>
     </span>
   }}</Show>
+    <Show when={oriCost()}>{(ori) => {
+      const stale = () => now() - ori().observedAt > STALE_MS || new Date(ori().observedAt).toISOString().slice(0, 10) !== new Date(now()).toISOString().slice(0, 10)
+      const dollars = (value: number) => new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(value)
+      const label = () => stale() ? "Ori last read" : "Ori today (UTC)"
+      return <A href="/usage" class="today-cost ori-today-cost" data-band={costBand(ori().total)} data-stale={stale() ? "true" : undefined}
+        title={`Ori key · ${new Date(ori().observedAt).toISOString().slice(0, 10)} UTC\n${dollars(ori().byok)} provider-billed (BYOK) · ${dollars(ori().credits)} from OpenRouter credits\nOpen Usage for the credit limit and estimates outside OpenRouter.`}
+        aria-label={`${label()}: ${dollars(ori().total)}. Open Usage`}>
+        <span class="today-cost-label">{label()}</span>
+        <bdi class="today-cost-amount" dir="ltr">{dollars(ori().total)}</bdi>
+      </A>
+    }}</Show>
+  </div>
 }

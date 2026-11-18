@@ -7,7 +7,7 @@
  * not wholly origin-attributed, unpriced models) makes the total partial and is named in the tooltip;
  * it never blocks the others. Personal is not a WORK host and is never read. */
 import { createSignal } from "solid-js"
-import { oc, type UsageDaily } from "./api"
+import { es, oc, type OpenRouterUsage, type UsageDaily } from "./api"
 import { host, readHost } from "./host"
 import { background } from "./startup"
 import { shortDateTime } from "./local-time"
@@ -19,7 +19,11 @@ export type Target = { id: string; label: string; base: string; current: boolean
 export type Reading = { value?: UsageDaily; error?: string; readAt: number }
 
 const [readings, setReadings] = createSignal<Record<string, Reading>>({})
+const [oriReading, setOriReading] = createSignal<OpenRouterUsage | null>()
 const [targets, setTargets] = createSignal<Target[]>([])
+let oriLast = 0
+let oriInflight: Promise<void> | undefined
+let oriTimer: ReturnType<typeof setTimeout> | undefined
 const last = new Map<string, number>()
 const inflight = new Map<string, Promise<void>>()
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -56,10 +60,31 @@ const read = (target: Target) => {
   return promise
 }
 
+const readOri = () => {
+  if (oriInflight) return oriInflight
+  oriLast = Date.now()
+  oriInflight = background(() => es.openrouterUsage(AbortSignal.timeout(55_000)))
+    .then((value) => setOriReading(value ?? null), () => setOriReading(null))
+    .then(() => { oriInflight = undefined })
+  return oriInflight
+}
+
+export const oriCost = () => {
+  const value = oriReading()
+  if (!value || value.state !== "ok") return undefined
+  const credits = value.credits_today_utc_usd
+  const byok = value.external_byok_today_utc_usd
+  const observedAt = Date.parse(value.observedAt ?? "")
+  if (typeof credits !== "number" || !Number.isFinite(credits) || credits < 0 ||
+      typeof byok !== "number" || !Number.isFinite(byok) || byok < 0 || !Number.isFinite(observedAt)) return undefined
+  return { total: credits + byok, credits, byok, observedAt }
+}
+
 /** Starts the first reads; later calls do nothing. */
 export const startTodayCost = () => {
   if (started) return
   started = true
+  void readOri()
   void readHost().then(() => {
     setTargets(workTargets())
     targets().forEach((target) => void read(target))
@@ -93,7 +118,12 @@ export const localDay = (now: number) => {
 
 /** Something may have added spend: re-read each host, at most once a minute per host. */
 export const touchTodayCost = () => {
-  if (!started || timer || !targets().length) return
+  if (!started) return
+  if (!oriTimer) oriTimer = setTimeout(() => {
+    oriTimer = undefined
+    void readOri()
+  }, Math.max(0, oriLast + MIN_GAP_MS - Date.now()))
+  if (timer || !targets().length) return
   const due = Math.min(...targets().map((target) => (last.get(target.id) ?? 0) + MIN_GAP_MS))
   timer = setTimeout(() => {
     timer = undefined

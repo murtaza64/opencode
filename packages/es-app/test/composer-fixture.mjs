@@ -29,6 +29,7 @@ export const createFixture = async () => {
   const fixture = {
     sessionIDs: ["ses_a", "ses_b"],
     status: "busy",
+    openrouterUsage: undefined,
     capabilities: true,
     updateInput: false,
     holdInputUpdate: false,
@@ -152,6 +153,8 @@ export const createFixture = async () => {
       response.writeHead(status, { "content-type": "application/json" })
       response.end(JSON.stringify(value))
     }
+    if (url.pathname === "/api/usage/openrouter" && request.method === "GET")
+      return fixture.openrouterUsage ? json(fixture.openrouterUsage) : json({ error: "Not found" }, 404)
     const childMatch = /^\/session\/([^/]+)(\/message)?$/.exec(url.pathname)
     const child = childMatch && fixture.children.get(childMatch[1])
     if (child && request.method === "GET") {
