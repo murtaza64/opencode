@@ -1,4 +1,5 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { Diagnostics } from "@opencode-ai/core/diagnostics"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import path from "path"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
@@ -1295,6 +1296,7 @@ const layer = Layer.effect(
             yield* sessions.updateMessage(msg)
           })
 
+          const prepareStart = performance.now()
           const handle = yield* processor
             .create({
               assistantMessage: msg,
@@ -1302,6 +1304,7 @@ const layer = Layer.effect(
               model,
             })
             .pipe(Effect.onInterrupt(() => finalizeInterruptedAssistant))
+          const snapshotEnd = performance.now()
 
           const outcome: "break" | "continue" = yield* Effect.gen(function* () {
             const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
@@ -1334,13 +1337,16 @@ const layer = Layer.effect(
               })
             }
 
+            const toolsEnd = performance.now()
             if (step === 1)
               yield* summary.summarize({ sessionID, messageID: lastUser.id }).pipe(
                 Effect.catchCause((cause) => Effect.logError("session summary failed", { sessionID, cause: Cause.pretty(cause) })),
               )
 
+            const summaryEnd = performance.now()
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
+            const hooksEnd = performance.now()
             const [skills, env, instructions, mcpInstructions, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
               sys.environment(model),
@@ -1367,6 +1373,16 @@ const layer = Layer.effect(
               )
               .map((m) => m.info.id)
             turn.started ??= yield* sessions.turnStarted(sessionID)
+            Diagnostics.turnPreparation({
+              sessionID,
+              inputID: lastUser.id,
+              snapshotMs: Math.round(snapshotEnd - prepareStart),
+              toolsMs: Math.round(toolsEnd - snapshotEnd),
+              summaryMs: Math.round(summaryEnd - toolsEnd),
+              hooksMs: Math.round(hooksEnd - summaryEnd),
+              contextMs: Math.round(performance.now() - hooksEnd),
+              elapsedMs: Math.round(performance.now() - prepareStart),
+            })
             const result = yield* handle.process(
               {
                 user: lastUser,

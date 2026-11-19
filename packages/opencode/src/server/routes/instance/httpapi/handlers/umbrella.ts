@@ -2,7 +2,7 @@
 import { Effect } from "effect"
 import { and, desc, eq, isNull, like, or, sql } from "drizzle-orm"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { Database } from "@opencode-ai/core/database/database"
+import { DatabaseReader } from "@opencode-ai/core/database/reader"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { InstanceState } from "@/effect/instance-state"
 import { fromRow } from "@/session/session"
@@ -11,7 +11,7 @@ import { InstanceHttpApi } from "../api"
 
 export const umbrellaHandlers = HttpApiBuilder.group(InstanceHttpApi, "umbrella", (handlers) =>
   Effect.gen(function* () {
-    const { db } = yield* Database.Service
+    const reader = yield* DatabaseReader.Service
 
     const list = Effect.fn("UmbrellaHttpApi.list")(function* () {
       const directory = yield* InstanceState.directory
@@ -19,7 +19,7 @@ export const umbrellaHandlers = HttpApiBuilder.group(InstanceHttpApi, "umbrella"
       const umbrella = Umbrella.find(umbrellas, directory)
       if (!umbrella) return []
 
-      const rows = yield* db
+      const rows = yield* reader.db
         .select()
         .from(SessionTable)
         .where(

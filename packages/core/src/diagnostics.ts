@@ -423,6 +423,35 @@ function log(record: Record<string, unknown>) {
   if (state.pending.length < LOG_MAX_PENDING) state.pending.push(JSON.stringify(record))
 }
 
+/** Timing only: never record prompts, tool data, model responses, or request headers. */
+export function providerTurn(record: {
+  sessionID: string
+  inputID: string
+  modelInitMs: number
+  prepareMs: number
+  dispatchMs?: number
+  streamReadyMs?: number
+  firstTextMs?: number
+  elapsedMs: number
+  attempts: number
+}) {
+  if (!enabled()) return
+  log({ type: "provider-turn", at: new Date().toISOString(), ...record })
+}
+
+export function turnPreparation(record: {
+  sessionID: string
+  inputID: string
+  snapshotMs: number
+  toolsMs: number
+  summaryMs: number
+  hooksMs: number
+  contextMs: number
+  elapsedMs: number
+}) {
+  if (enabled()) log({ type: "turn-preparation", at: new Date().toISOString(), ...record })
+}
+
 function logFile() {
   return path.join(Global.Path.log, "diagnostics.jsonl")
 }

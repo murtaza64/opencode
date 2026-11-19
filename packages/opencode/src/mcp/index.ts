@@ -1,4 +1,5 @@
 import path from "node:path"
+import { createHash } from "node:crypto"
 import { pathToFileURL } from "node:url"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
@@ -109,6 +110,15 @@ export type Status = Schema.Schema.Type<typeof Status>
 // Store transports for OAuth servers to allow finishing auth
 type TransportWithAuth = StreamableHTTPClientTransport | SSEClientTransport
 const pendingOAuthTransports = new Map<string, { transport: TransportWithAuth; provider?: McpOAuthPendingProvider }>()
+// Must outlast the ten-minute idle instance eviction to help a returning session.
+const AUTH_REQUIRED_TTL_MS = 30 * 60_000
+
+function remoteAuthKey(name: string, config: ConfigMCPV1.Info) {
+  if (config.type !== "remote" || config.oauth === false) return
+  // `enabled` controls whether to probe, not the identity of the remote.
+  const { enabled: _enabled, ...remote } = config
+  return createHash("sha256").update(JSON.stringify([name, remote])).digest("hex")
+}
 
 // Prompt cache types
 type PromptInfo = Awaited<ReturnType<MCPClient["listPrompts"]>>["prompts"][number]
@@ -489,11 +499,16 @@ const layer = Layer.effect(
       }
     }
 
+    // Cache only confirmed auth-required outcomes. Use the effective remote
+    // configuration, not the name alone; two projects can configure it differently.
+    const authRequired = new Map<string, number>()
     const state = yield* InstanceState.make<State>(
       Effect.fn("MCP.state")(function* () {
         const cfg = yield* cfgSvc.get()
         const bridge = yield* EffectBridge.make()
         const config = cfg.mcp ?? {}
+        const now = Date.now()
+        for (const [key, expires] of authRequired) if (expires <= now) authRequired.delete(key)
         const s: State = {
           config: {},
           status: {},
@@ -516,7 +531,17 @@ const layer = Layer.effect(
                 return
               }
 
+              const cacheKey = remoteAuthKey(key, mcp)
+              if (mcp.type === "remote" && cacheKey && (authRequired.get(cacheKey) ?? 0) > Date.now() &&
+                  !(yield* auth.getForUrl(key, mcp.url))?.tokens) {
+                s.status[key] = { status: "needs_auth" }
+                return
+              }
               const result = yield* create(key, mcp)
+              if (cacheKey && result.status.status === "needs_auth") {
+                if (authRequired.size >= 1024) authRequired.delete(authRequired.keys().next().value ?? "")
+                authRequired.set(cacheKey, Date.now() + AUTH_REQUIRED_TTL_MS)
+              }
               s.status[key] = result.status
               if (result.mcpClient) {
                 s.clients[key] = result.mcpClient
@@ -626,6 +651,9 @@ const layer = Layer.effect(
 
     const createAndStore = Effect.fn("MCP.createAndStore")(function* (name: string, mcp: ConfigMCPV1.Info) {
       const s = yield* InstanceState.get(state)
+      const key = remoteAuthKey(name, mcp)
+      // An explicit retry invalidates the last observation even if it fails for a different reason.
+      if (key) authRequired.delete(key)
       const result = yield* create(name, mcp)
 
       s.status[name] = result.status
@@ -809,6 +837,8 @@ const layer = Layer.effect(
       if (mcpConfig.oauth === false) throw new Error(`MCP server ${mcpName} has OAuth explicitly disabled`)
       const url = remoteURL(mcpConfig.url)
       if (!url) throw new Error(`Invalid MCP URL for "${mcpName}"`)
+      const key = remoteAuthKey(mcpName, mcpConfig)
+      if (key) authRequired.delete(key)
 
       // OAuth config is optional - if not provided, we'll use auto-discovery
       const oauthConfig = typeof mcpConfig.oauth === "object" ? mcpConfig.oauth : undefined

@@ -30,6 +30,7 @@ import { RateLimits } from "@opencode-ai/core/usage/rate-limits"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
+import { Diagnostics } from "@opencode-ai/core/diagnostics"
 
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
@@ -89,7 +90,7 @@ const live: Layer.Layer<
     const llmClient = yield* LLMClient.Service
     const flags = yield* RuntimeFlags.Service
 
-    const run = Effect.fn("LLM.run")(function* (request: StreamRequest) {
+    const run = Effect.fn("LLM.run")(function* (request: StreamRequest, timing: TurnTiming) {
       const input =
         request.purpose === "aside"
           ? {
@@ -119,6 +120,7 @@ const live: Layer.Layer<
         ],
         { concurrency: "unbounded" },
       )
+      timing.modelInitMs = timing.elapsed()
 
       const isWorkflow = language instanceof GitLabWorkflowLanguageModel
       if (input.purpose === "aside" && isWorkflow)
@@ -131,6 +133,7 @@ const live: Layer.Layer<
         flags,
         isWorkflow,
       })
+      timing.prepareMs = timing.elapsed() - timing.modelInitMs
 
       // Wire up toolExecutor for DWS workflow models so that tool calls
       // from the workflow service are executed via opencode's tool system
@@ -352,6 +355,13 @@ const live: Layer.Layer<
             middleware: [
               {
                 specificationVersion: "v3" as const,
+                async wrapStream({ doStream }) {
+                  timing.attempts++
+                  timing.dispatchMs ??= timing.elapsed()
+                  const stream = await doStream()
+                  timing.streamReadyMs ??= timing.elapsed()
+                  return stream
+                },
                 async transformParams(args) {
                   if (args.type === "stream") {
                     // @ts-expect-error
@@ -388,7 +398,14 @@ const live: Layer.Layer<
               (ctrl) => Effect.sync(() => ctrl.abort()),
             )
 
-            const result = yield* run({ ...input, abort: ctrl.signal })
+            const start = performance.now()
+            const timing: TurnTiming = { elapsed: () => Math.round(performance.now() - start), modelInitMs: 0, prepareMs: 0, attempts: 0 }
+            yield* Effect.addFinalizer(() => Effect.sync(() => {
+              if (!timing.attempts) return
+              const { elapsed, ...marks } = timing
+              Diagnostics.providerTurn({ ...marks, sessionID: input.sessionID, inputID: input.user.id, elapsedMs: elapsed() })
+            }))
+            const result = yield* run({ ...input, abort: ctrl.signal }, timing)
 
             if (result.type === "native") return result.stream
 
@@ -401,6 +418,7 @@ const live: Layer.Layer<
               Stream.tap((event) =>
                 Effect.sync(() => {
                   if (event.type === "finish-step") RateLimits.record(input.model.providerID, event.response?.headers)
+                  if (event.type === "text-delta" && event.text) timing.firstTextMs ??= timing.elapsed()
                 }),
               ),
               Stream.mapEffect((event) => LLMAISDK.toLLMEvents(state, event)),
@@ -415,6 +433,16 @@ const live: Layer.Layer<
 )
 
 export const hasToolCalls = LLMRequestPrep.hasToolCalls
+
+type TurnTiming = {
+  elapsed: () => number
+  modelInitMs: number
+  prepareMs: number
+  dispatchMs?: number
+  streamReadyMs?: number
+  firstTextMs?: number
+  attempts: number
+}
 
 export const node = LayerNode.make({
   service: Service,

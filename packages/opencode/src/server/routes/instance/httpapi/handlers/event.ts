@@ -1,4 +1,5 @@
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { MCP } from "@/mcp"
 import { InstanceState } from "@/effect/instance-state"
 import { GlobalBus } from "@/bus/global"
 import { EventV2 } from "@opencode-ai/core/event"
@@ -8,6 +9,7 @@ import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { EventApi } from "../groups/event"
+import { untilDisconnected } from "../stream-disconnect"
 
 function eventData(data: unknown): Sse.Event {
   return {
@@ -66,12 +68,14 @@ function eventResponse(events: EventV2.Interface) {
     )
 
     yield* Effect.logInfo("event connected")
+    const stopOnClose = yield* untilDisconnected
     return HttpServerResponse.stream(
       Stream.make({ id: eventID(), type: "server.connected", properties: {} }).pipe(
         Stream.concat(output.pipe(Stream.merge(heartbeat, { haltStrategy: "left" }))),
         Stream.map(eventData),
         Stream.pipeThroughChannel(Sse.encode()),
         Stream.encodeText,
+        stopOnClose,
         Stream.ensuring(Effect.logInfo("event disconnected")),
       ),
       {
@@ -89,9 +93,13 @@ function eventResponse(events: EventV2.Interface) {
 export const eventHandlers = HttpApiBuilder.group(EventApi, "event", (handlers) =>
   Effect.gen(function* () {
     const events = yield* EventV2Bridge.Service
+    const mcp = yield* MCP.Service
     return handlers.handleRaw(
       "subscribe",
       Effect.fn("EventHttpApi.subscribe")(function* () {
+        // Warm only opened workspaces, not every directory from a dashboard poll.
+        // A prompt still joins the same discovery if it arrives before completion.
+        yield* mcp.status().pipe(Effect.asVoid, Effect.catchCause(() => Effect.void), Effect.forkScoped)
         return yield* eventResponse(events)
       }),
     )

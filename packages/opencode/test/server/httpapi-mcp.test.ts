@@ -1,10 +1,11 @@
 import { describe, expect } from "bun:test"
+import { NodeServices } from "@effect/platform-node"
 import { Context, Effect, Layer } from "effect"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
 import { McpPaths } from "../../src/server/routes/instance/httpapi/groups/mcp"
 import { Server } from "../../src/server/server"
 import { resetDatabase } from "../fixture/db"
-import { TestInstance } from "../fixture/fixture"
+import { TestInstance, tmpdirScoped } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
 const context = Context.empty() as Context.Context<unknown>
@@ -56,6 +57,67 @@ const readResponse = Effect.fnUntraced(function* (input: { app: TestApp; path: s
 })
 
 describe("mcp HttpApi", () => {
+  it.live("opens the event stream while remote tool discovery is still pending", () =>
+    Effect.gen(function* () {
+      const started = Promise.withResolvers<void>()
+      const release = Promise.withResolvers<void>()
+      const remote = yield* Effect.acquireRelease(
+        Effect.sync(() => Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch() {
+          started.resolve()
+          await release.promise
+          return new Response(null, { status: 503 })
+        } })),
+        (server) => Effect.promise(() => { release.resolve(); return server.stop(true) }),
+      )
+      const directory = yield* tmpdirScoped({ config: { mcp: { fixture_delayed: { type: "remote", url: remote.url.href, oauth: false, timeout: 1500 } } } })
+      const handler = HttpApiApp.webHandler()
+      const response = yield* request(handler, "/event", directory)
+      expect(response.status).toBe(200)
+      const reader = response.body!.getReader()
+      yield* Effect.addFinalizer(() => Effect.promise(() => reader.cancel()).pipe(Effect.ignore))
+      yield* Effect.promise(() => started.promise).pipe(Effect.timeout("2 seconds"), Effect.orDie)
+      const first = yield* Effect.promise(() => reader.read()).pipe(Effect.timeout("2 seconds"), Effect.orDie)
+      expect(new TextDecoder().decode(first.value)).toContain("server.connected")
+      release.resolve()
+    }).pipe(Effect.provide(NodeServices.layer)),
+  )
+  it.live("does not reprobe a known auth-required remote from a fresh directory", () =>
+    Effect.gen(function* () {
+      let initializations = 0
+      const remote = yield* Effect.acquireRelease(
+        Effect.sync(() => Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(req, server) {
+          const url = new URL(req.url)
+          const origin = server.url.origin
+          if (url.pathname === "/mcp") {
+            initializations++
+            return new Response(null, { status: 401, headers: {
+              "WWW-Authenticate": `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`,
+            } })
+          }
+          if (url.pathname === "/.well-known/oauth-protected-resource") return Response.json({ resource: `${origin}/mcp`, authorization_servers: [origin] })
+          if (url.pathname === "/.well-known/oauth-authorization-server") return Response.json({ issuer: origin, authorization_endpoint: `${origin}/authorize`, token_endpoint: `${origin}/token`, response_types_supported: ["code"], code_challenge_methods_supported: ["S256"] })
+          return new Response(null, { status: 404 })
+        } })),
+        (server) => Effect.promise(() => server.stop(true)),
+      )
+      const config = { mcp: { fixture_auth_cache: { type: "remote" as const, url: new URL("/mcp", remote.url).href, oauth: { clientId: "fixture" } } } }
+      const one = yield* tmpdirScoped({ config })
+      const two = yield* tmpdirScoped({ config })
+      const three = yield* tmpdirScoped({ config })
+      const handler = HttpApiApp.webHandler()
+      expect(yield* json(yield* request(handler, McpPaths.status, one))).toMatchObject({ fixture_auth_cache: { status: "needs_auth" } })
+      const before = initializations
+      expect(before).toBeGreaterThan(0)
+      expect(yield* json(yield* request(handler, McpPaths.status, two))).toMatchObject({ fixture_auth_cache: { status: "needs_auth" } })
+      expect(initializations).toBe(before)
+      const reconnect = yield* request(handler, "/mcp/fixture_auth_cache/connect", two, { method: "POST" })
+      expect(reconnect.status).toBe(200)
+      expect(initializations).toBeGreaterThan(before)
+      const afterReconnect = initializations
+      expect(yield* json(yield* request(handler, McpPaths.status, three))).toMatchObject({ fixture_auth_cache: { status: "needs_auth" } })
+      expect(initializations).toBeGreaterThan(afterReconnect)
+    }).pipe(Effect.provide(NodeServices.layer)),
+  )
   it.instance(
     "serves status endpoint",
     () =>

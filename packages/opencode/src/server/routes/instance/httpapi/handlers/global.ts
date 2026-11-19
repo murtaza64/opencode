@@ -13,6 +13,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
 import { GlobalUpgradeInput } from "../groups/global"
+import { untilDisconnected } from "../stream-disconnect"
 
 function eventData(data: unknown): Sse.Event {
   return {
@@ -26,6 +27,7 @@ function eventData(data: unknown): Sse.Event {
 function eventResponse() {
   return Effect.gen(function* () {
     yield* Effect.logInfo("global event connected")
+    const stopOnClose = yield* untilDisconnected
     const events = Stream.callback<GlobalBusEvent>((queue) => {
       const handler = (event: GlobalBusEvent) => Queue.offerUnsafe(queue, event)
       return Effect.acquireRelease(
@@ -44,6 +46,7 @@ function eventResponse() {
         Stream.map(eventData),
         Stream.pipeThroughChannel(Sse.encode()),
         Stream.encodeText,
+        stopOnClose,
         Stream.ensuring(Effect.logInfo("global event disconnected")),
       ),
       {
