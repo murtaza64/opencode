@@ -466,23 +466,35 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
   // "unknown" is not settled: a job read between its prompt's admission and Core reporting it busy looks stopped,
   // and caching that would show "Brief stopped before finishing" beside a brief that finished moments later.
   const isSettled = (job: BriefJob) => ["ready", "failed"].includes(job.state.state)
-  const absent = new Map<string, number>()
+  // Other projects' anchors: next read time and last-known children. Each read holds one of the browser's six
+  // sockets until Core answers, so N projects read on every 1.5 s poll queued unrelated reads behind them.
+  const due = new Map<string, number>()
+  const elsewhereChildren = new Map<string, Session[]>()
   const refresh = async (explicit = false) => {
     const target = desk()
     const local = () => pending() ? [pendingJob(pending()!)] : []
-    // Other anchors are read only. One that does not exist (never used) is not asked again for a few minutes, so
-    // N unused projects are not N reads per poll. Without this project's own anchor, those briefs still show.
-    const elsewhere = others().filter(other => other.session !== target?.session && (absent.get(other.session) ?? 0) < Date.now())
+    // Other anchors are read only, at most once a minute unless one holds an unfinished brief; one that does not
+    // exist (never used) waits five minutes. Without this project's own anchor, those briefs still show.
+    const now = Date.now()
+    const unfinished = (session: string) => (elsewhereChildren.get(session) ?? []).some(child => metaOf(child) && !settled.has(child.id))
+    const elsewhere = others().filter(other => other.session !== target?.session)
+    const reading = elsewhere.filter(other => explicit || (due.get(other.session) ?? 0) <= now || unfinished(other.session))
     if (!target && !elsewhere.length) return setJobs(local())
     const current = ++generation
     try {
-      const [children, status, ...extra] = await Promise.all([target ? client.children(target.session, target.directory) : [], target ? client.status(target.directory) : ({} as Awaited<ReturnType<typeof oc.status>>),
-        ...elsewhere.map(other => Promise.all([client.children(other.session, other.directory), client.status(other.directory)])
-          .catch(cause => { if (String(cause).includes("404")) absent.set(other.session, Date.now() + 300_000); return undefined }))])
-      const statuses = Object.assign({}, ...extra.flatMap(value => value ? [value[1]] : []), status) as typeof status
+      const childrenOf = (anchor: DeskPointer) => client.children(anchor.session, anchor.directory)
+      const [children] = await Promise.all([target ? childrenOf(target) : [], limited(reading, 3, other => childrenOf(other).then(
+        list => { elsewhereChildren.set(other.session, list); due.set(other.session, Date.now() + OTHER_MS) },
+        cause => { due.set(other.session, Date.now() + (String(cause).includes("404") ? ABSENT_MS : OTHER_MS)) }))])
+      const present = new Set(elsewhere.map(other => other.session))
+      for (const session of elsewhereChildren.keys()) if (!present.has(session)) elsewhereChildren.delete(session)
       const seen = new Set<string>()
-      const briefs = [...children, ...extra.flatMap(value => value?.[0] ?? [])].filter(child => !seen.has(child.id) && seen.add(child.id))
+      const briefs = [...children, ...[...elsewhereChildren.values()].flat()].filter(child => !seen.has(child.id) && seen.add(child.id))
         .flatMap(child => { const meta = metaOf(child); return meta ? [{ child, meta }] : [] })
+      // Status is directory-wide and only decides whether a brief is still running: read it only where a brief
+      // could be (the target, when it has briefs) and is not already settled.
+      const directories = [...new Set(briefs.filter(({ child }) => explicit || !settled.has(child.id) || child.id === inflight()).map(({ child }) => child.directory))]
+      const statuses = Object.assign({}, ...await limited(directories, 3, directory => client.status(directory).catch(() => ({})))) as Awaited<ReturnType<typeof oc.status>>
       const live = (id: string) => ["busy", "retry"].includes(statuses[id]?.type ?? "")
       const stale = briefs.filter(({ child }) => explicit || !settled.has(child.id) || live(child.id) || child.id === inflight())
       const read = await limited(stale, 4, ({ child, meta }) => client.messagesTail(child.id, child.directory, 4).then((messages): BriefJob => ({
@@ -659,6 +671,9 @@ export const readConversation = (record: AttentionRecord) => {
 }
 
 /** Map with at most `limit` requests in flight, preserving input order. */
+const OTHER_MS = 60_000
+const ABSENT_MS = 300_000
+
 const limited = async <T, R>(items: T[], limit: number, map: (item: T) => Promise<R>) => {
   const results: R[] = new Array(items.length)
   let next = 0

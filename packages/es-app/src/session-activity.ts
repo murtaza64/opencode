@@ -252,9 +252,11 @@ export const createSessionActivity = (
       Object.values(snapshot.status).some((status) => status.type === "busy" || status.type === "retry"))
       .map(([directory]) => directory),
   ])].sort(), [], { equals: (a, b) => a.length === b.length && a.every((value, index) => value === b[index]) })
+  // Each directory is three reads; two directories at a time leave the browser's six-socket pool
+  // room for the transcript and dashboard reads a slow Core would otherwise queue behind these.
   const refresh = async (dirs = relevant()) => {
-    for (let offset = 0; offset < dirs.length && !disposed; offset += 4) {
-      await Promise.all(dirs.slice(offset, offset + 4).map((directory) => refreshDirectory(directory)))
+    for (let offset = 0; offset < dirs.length && !disposed; offset += 2) {
+      await Promise.all(dirs.slice(offset, offset + 2).map((directory) => refreshDirectory(directory)))
     }
   }
   let seenNotifications = new Set<string>()
@@ -270,7 +272,8 @@ export const createSessionActivity = (
     seenNotifications = current
     // Dashboard polling can discover a gate whose event never reached this client.
     // Recheck its owner directory even if an earlier snapshot said it was empty.
-    await Promise.all([...directories].map((directory) => refreshDirectory(directory, true)))
+    const dirs = [...directories]
+    for (let offset = 0; offset < dirs.length && !disposed; offset += 2) await Promise.all(dirs.slice(offset, offset + 2).map((directory) => refreshDirectory(directory, true)))
     for (const item of notifications) {
       if (item.kind === "idle") continue
       if (snapshots()[item.directory]?.error) seenNotifications.delete(`${item.kind}\u0000${item.id}\u0000${item.session}\u0000${item.directory}`)
@@ -314,7 +317,7 @@ export const createSessionActivity = (
     const live = Object.entries(statuses()).filter(([, value]) => value.type !== "idle").map(([id]) => index().get(id)?.directory)
     // Chained after any read in flight: a fetch started before the drop may predate a Core restart.
     const dirs = [...new Set([...relevant(), ...live.filter((directory): directory is string => !!directory)])]
-    void (async () => { for (let offset = 0; offset < dirs.length && !disposed; offset += 4) await Promise.all(dirs.slice(offset, offset + 4).map((directory) => refreshDirectory(directory, true))) })()
+    void (async () => { for (let offset = 0; offset < dirs.length && !disposed; offset += 2) await Promise.all(dirs.slice(offset, offset + 2).map((directory) => refreshDirectory(directory, true))) })()
     todos.reload()
     options?.reconnected?.()
   }
