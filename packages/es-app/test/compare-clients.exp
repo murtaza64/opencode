@@ -1,0 +1,22 @@
+set timeout 20
+log_user 0
+lassign $argv binary base dir session prompt
+spawn -noecho $binary attach $base --dir $dir --session $session --pure
+stty rows 40 columns 120
+expect {
+  -re {ask anything|Ask anything|Build|build} {}
+  timeout {puts stderr "TUI prompt readiness timed out"; exit 2}
+  eof {puts stderr "TUI exited before readiness"; exit 2}
+}
+after 300
+send -- $prompt
+set start [clock milliseconds]
+send -- "\r"
+expect {
+  -re {READY} {set elapsed [expr {[clock milliseconds] - $start}]}
+  timeout {close; puts stderr "TUI reply timed out"; exit 3}
+  eof {puts stderr "TUI exited before replying"; exit 3}
+}
+close
+wait
+puts "FIXTURE_TUI_REPLY_MS=$elapsed"
