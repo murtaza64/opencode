@@ -12,7 +12,7 @@ import { Permission } from "@/permission"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Question } from "@/question"
 import { SessionStatus } from "@/session/status"
-import { Clock, Context, Deferred, Duration, Effect, Exit, Layer, Scope } from "effect"
+import { Cause, Clock, Context, Deferred, Duration, Effect, Exit, Layer, Scope } from "effect"
 import { type InstanceContext } from "./instance-context"
 import { InstanceBootstrap } from "./bootstrap-service"
 import * as Project from "./project"
@@ -72,6 +72,16 @@ interface Entry {
   lastUsed: number
 }
 
+// A boot that failed is answered from memory for this long, so pollers do not re-boot a broken directory several times
+// a minute. Reload and dispose clear it at once.
+const BOOT_FAILURE_TTL_MS = 30_000
+
+interface Failure {
+  readonly identity: Exit.Exit<InstanceContext>
+  readonly exit: Exit.Exit<InstanceContext>
+  readonly until: number
+}
+
 const layer: Layer.Layer<
   Service,
   never,
@@ -93,6 +103,7 @@ const layer: Layer.Layer<
     const scope = yield* Scope.Scope
     const cache = new Map<string, Entry>()
     const identities = new Map<string, { ctx: InstanceContext; resolved: number }>()
+    const failures = new Map<string, Failure>()
     const interval = Number(Flag.OPENCODE_INSTANCE_SWEEP_MS ?? 60_000)
     const ttl = Number(Flag.OPENCODE_INSTANCE_IDLE_TTL_MS ?? 600_000)
 
@@ -128,9 +139,16 @@ const layer: Layer.Layer<
       Effect.gen(function* () {
         const exit = yield* Effect.exit(boot({ ...input, directory }, entry))
         if (Exit.isFailure(exit)) {
-          yield* removeEntry(directory, entry)
+          yield* Effect.logWarning("instance boot failed", { directory, cause: Cause.pretty(exit.cause) })
           // Identity may already be resolved when bootstrap fails; this only wakes waiters for an identity failure.
           yield* Deferred.done(entry.identity, exit)
+          // Only the entry still in the cache records a failure; a reload or dispose that replaced it has moved on.
+          if (yield* removeEntry(directory, entry))
+            failures.set(directory, {
+              identity: yield* Effect.exit(Deferred.await(entry.identity)),
+              exit,
+              until: (yield* Clock.currentTimeMillis) + BOOT_FAILURE_TTL_MS,
+            })
         }
         yield* Deferred.done(entry.deferred, exit).pipe(Effect.asVoid)
       })
@@ -179,6 +197,13 @@ const layer: Layer.Layer<
         const existing = cache.get(directory)
         if (existing) return existing
         const entry = yield* makeEntry
+        const failed = failures.get(directory)
+        if (failed && (yield* Clock.currentTimeMillis) < failed.until) {
+          yield* Deferred.done(entry.identity, failed.identity)
+          yield* Deferred.done(entry.deferred, failed.exit)
+          return entry
+        }
+        failures.delete(directory)
         cache.set(directory, entry)
         yield* Effect.gen(function* () {
           yield* Effect.logInfo("creating instance", { directory: directory })
@@ -211,6 +236,7 @@ const layer: Layer.Layer<
         Effect.gen(function* () {
           const previous = cache.get(directory)
           identities.delete(directory)
+          failures.delete(directory)
           const entry = yield* makeEntry
           cache.set(directory, entry)
           yield* Effect.gen(function* () {
@@ -230,6 +256,7 @@ const layer: Layer.Layer<
     }
 
     const dispose = Effect.fn("InstanceStore.dispose")(function* (ctx: InstanceContext) {
+      failures.delete(ctx.directory)
       const entry = cache.get(ctx.directory)
       if (!entry) return yield* disposeContext(ctx)
 
@@ -241,6 +268,7 @@ const layer: Layer.Layer<
 
     const disposeDirectory = Effect.fn("InstanceStore.disposeDirectory")(function* (input: string) {
       const directory = FSUtil.resolve(input)
+      failures.delete(directory)
       const entry = cache.get(directory)
       if (!entry) return
       const exit = yield* Deferred.await(entry.deferred).pipe(Effect.exit)
@@ -250,6 +278,7 @@ const layer: Layer.Layer<
 
     const disposeAllOnce = Effect.fnUntraced(function* () {
       yield* Effect.logInfo("disposing all instances")
+      failures.clear()
       yield* Effect.forEach(
         [...cache.entries()],
         (item) =>
@@ -324,6 +353,7 @@ const layer: Layer.Layer<
     const sweep = Effect.fn("InstanceStore.sweep")(function* () {
       const now = yield* Clock.currentTimeMillis
       for (const [directory, identity] of identities) if (now - identity.resolved >= ttl) identities.delete(directory)
+      for (const [directory, failure] of failures) if (now >= failure.until) failures.delete(directory)
       let evicted = 0
       for (const [directory, entry] of cache) {
         if (directory === FSUtil.resolve(process.cwd()) || now - entry.lastUsed < ttl) continue

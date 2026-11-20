@@ -295,6 +295,62 @@ describe("InstanceStore", () => {
     }),
   )
 
+  // A directory whose boot fails is not re-booted by every poller: for 30s the failure is answered from memory.
+  it.effect("a failed boot is answered from memory for 30s, then retried", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      let boots = 0
+      yield* setBootstrap(Effect.gen(function* () {
+        boots++
+        if (boots === 1) return yield* Effect.die(new Error("bootstrap exploded"))
+      }))
+      expect(Exit.isFailure(yield* store.load({ directory: dir }).pipe(Effect.exit))).toBe(true)
+      expect(Exit.isFailure(yield* store.load({ directory: dir }).pipe(Effect.exit))).toBe(true)
+      // The identity resolved before bootstrap failed, so DB-only routes still get it without a boot.
+      expect((yield* store.start({ directory: dir })).directory).toBe(dir)
+      expect(boots).toBe(1)
+      expect(store.size()).toBe(0)
+      yield* TestClock.adjust("31 seconds")
+      const ctx = yield* store.load({ directory: dir })
+      expect(ctx.directory).toBe(dir)
+      expect(boots).toBe(2)
+      expect(yield* store.peek(dir)).toBe(ctx)
+    }),
+  )
+
+  it.effect("reload retries a failed boot at once", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      let boots = 0
+      yield* setBootstrap(Effect.gen(function* () {
+        boots++
+        if (boots === 1) return yield* Effect.die(new Error("bootstrap exploded"))
+      }))
+      expect(Exit.isFailure(yield* store.load({ directory: dir }).pipe(Effect.exit))).toBe(true)
+      const ctx = yield* store.reload({ directory: dir })
+      expect(boots).toBe(2)
+      expect(yield* store.load({ directory: dir })).toBe(ctx)
+    }),
+  )
+
+  it.effect("disposeDirectory forgets a failed boot", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+      let boots = 0
+      yield* setBootstrap(Effect.gen(function* () {
+        boots++
+        if (boots === 1) return yield* Effect.die(new Error("bootstrap exploded"))
+      }))
+      expect(Exit.isFailure(yield* store.load({ directory: dir }).pipe(Effect.exit))).toBe(true)
+      yield* store.disposeDirectory(dir)
+      yield* store.load({ directory: dir })
+      expect(boots).toBe(2)
+    }),
+  )
+
   it.effect("a load refreshes lastUsed before the next sweep", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped({ git: true })
@@ -412,7 +468,7 @@ describe("InstanceStore", () => {
     }),
   )
 
-  it.live("removes failed loads from the cache", () =>
+  it.effect("removes failed loads from the cache", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped({ git: true })
       const store = yield* InstanceStore.Service
@@ -430,12 +486,15 @@ describe("InstanceStore", () => {
       )
 
       expect(failed).toBe(true)
+      expect(store.size()).toBe(0)
 
       yield* setBootstrap(
         Effect.sync(() => {
           attempts++
         }),
       )
+      // Past the failed-boot memory, the next load boots again.
+      yield* TestClock.adjust("31 seconds")
       const ctx = yield* store.load({ directory: dir })
 
       expect(ctx.directory).toBe(dir)
