@@ -6,7 +6,7 @@ import { surfaceFinder, surfaceFrameFocused } from "./surface-find"
 import { localHost, personalWork, shadowedPages, tabWithin, type WorkHost } from "../../es-app/remote-host"
 import { PERF_DIR } from "./perf-log"
 import { createTranscriber, createVoice, voiceTools } from "./voice"
-import { allowGlassesMedia, allowGlassesMediaCheck, GLASSES_PICK_MS, pickDecision } from "./glasses-policy"
+import { GLASSES_PICK_MS, pickDecision } from "./glasses-policy"
 import { watchPageAnswer } from "./page-answer"
 import { appRouteURL, externalURL, internalURL, pageArrivedCrossSite, pageNavigation, plainChromeUserAgent, restorePlan, serviceHosts, serviceOrigins, serviceSelf, startupMode, startupPlan, surfaceFrameURL } from "./policy"
 import { createTabs, TITLE_BAR_HEIGHT } from "./tabs"
@@ -603,10 +603,9 @@ const listenerSession = (partition: string, listener: { origin: string; key: str
     const url = URL.parse(value)
     return !!url && ["http:", "ws:"].includes(url.protocol) && url.host === new URL(listener.origin).host
   }
-  result.setPermissionRequestHandler((_contents, permission, callback, details) =>
-    callback(allowGlassesMedia(permission, details as Parameters<typeof allowGlassesMedia>[1], listener.origin)))
-  result.setPermissionCheckHandler((_contents, permission, _requestingOrigin, details) =>
-    allowGlassesMediaCheck(permission, details, listener.origin))
+  // The glasses mic streams over Bluetooth, so no page needs browser microphone access.
+  result.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+  result.setPermissionCheckHandler(() => false)
   result.on("will-download", (event) => event.preventDefault())
   result.webRequest.onBeforeRequest((details, callback) => {
     // The failure page (main.ts showRendererLoss) is a data: document loaded by this process.

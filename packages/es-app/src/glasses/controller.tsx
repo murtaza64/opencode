@@ -55,9 +55,6 @@ function createGlasses() {
   let pendingText: string | undefined
   let micPackets: Uint8Array[] = []
   let micListener: ((event: Event) => void) | undefined
-  let micSource: "glasses" | "mac" = "mac"
-  let recorder: MediaRecorder | undefined
-  let recordedChunks: Blob[] = []
   let startedAt = Date.now()
   let lastNeedsKey = ""
 
@@ -247,56 +244,38 @@ function createGlasses() {
         }
         link.addEventListener("mic", micListener)
         await link.mic(true)
-        micSource = "glasses"
         setVoice({ phase: "recording" })
         return
       } catch {
         if (micListener) link.removeEventListener("mic", micListener)
         micListener = undefined
+        setVoice({ phase: "error", error: "The glasses mic didn't start. Tap to dismiss and try again." })
+        return
       }
     }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } })
-      recordedChunks = []
-      recorder = new MediaRecorder(stream)
-      recorder.ondataavailable = (event) => { if (event.data.size) recordedChunks.push(event.data) }
-      recorder.onstop = () => {
-        for (const track of stream.getTracks()) track.stop()
-        void transcribeBlob(new Blob(recordedChunks, { type: recorder?.mimeType || "audio/webm" }))
-      }
-      recorder.start()
-      micSource = "mac"
-      setVoice({ phase: "recording" })
-    } catch {
-      setVoice({ phase: "error", error: "Microphone unavailable." })
-    }
+    setVoice({ phase: "error", error: link ? "Glasses mic needs the left temple. Click the glasses button to connect it." : "Connect your glasses to talk." })
   }
 
   const stopRecording = () => {
     if (voice().phase !== "recording") return
     setVoice({ phase: "transcribing" })
-    if (micSource === "glasses") {
-      const currentLink = link
-      void (async () => {
-        await currentLink?.mic(false).catch(() => {})
-        if (currentLink && micListener) currentLink.removeEventListener("mic", micListener)
-        micListener = undefined
-        const packets = micPackets.filter(packet => packet.length === LC3_PACKET_BYTES)
-        micPackets = []
-        if (!packets.length) {
-          setVoice({ phase: "error", error: "No audio from glasses mic." })
-          return
-        }
-        const total = packets.reduce((sum, packet) => sum + packet.length, 0)
-        const merged = new Uint8Array(total)
-        let offset = 0
-        for (const packet of packets) { merged.set(packet, offset); offset += packet.length }
-        await transcribeBlob(new Blob([merged], { type: "application/x-g2-lc3" }))
-      })()
-      return
-    }
-    recorder?.stop()
-    recorder = undefined
+    const currentLink = link
+    void (async () => {
+      await currentLink?.mic(false).catch(() => {})
+      if (currentLink && micListener) currentLink.removeEventListener("mic", micListener)
+      micListener = undefined
+      const packets = micPackets.filter(packet => packet.length === LC3_PACKET_BYTES)
+      micPackets = []
+      if (!packets.length) {
+        setVoice({ phase: "error", error: "No audio from glasses mic." })
+        return
+      }
+      const total = packets.reduce((sum, packet) => sum + packet.length, 0)
+      const merged = new Uint8Array(total)
+      let offset = 0
+      for (const packet of packets) { merged.set(packet, offset); offset += packet.length }
+      await transcribeBlob(new Blob([merged], { type: "application/x-g2-lc3" }))
+    })()
   }
 
   const sendTranscript = async () => {
