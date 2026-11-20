@@ -317,6 +317,52 @@ it.live("InstanceState dedupes concurrent lookups", () =>
   }),
 )
 
+// A caller that goes away mid-lookup (an aborted HTTP read, a closed event stream) must not leave its interruption as
+// the directory's cached value: every later read, including the next instance boot, would fail until restart.
+it.live("InstanceState retries a lookup whose caller was interrupted", () =>
+  Effect.gen(function* () {
+    const dir = yield* tmpdirScoped()
+    const started = yield* Deferred.make<void>()
+    let n = 0
+    const state = yield* InstanceState.make(() =>
+      Effect.gen(function* () {
+        n += 1
+        if (n === 1) {
+          yield* Deferred.succeed(started, undefined)
+          yield* Effect.never
+        }
+        return { n }
+      }),
+    )
+
+    const fiber = yield* access(state, dir).pipe(Effect.forkChild)
+    yield* Deferred.await(started)
+    yield* Fiber.interrupt(fiber)
+
+    const exit = yield* access(state, dir).pipe(Effect.timeout(Duration.seconds(2)), Effect.exit)
+    expect(Exit.isSuccess(exit)).toBe(true)
+    expect(n).toBe(2)
+  }),
+)
+
+it.live("InstanceState retries a lookup that failed", () =>
+  Effect.gen(function* () {
+    const dir = yield* tmpdirScoped()
+    let n = 0
+    const state = yield* InstanceState.make(() =>
+      Effect.gen(function* () {
+        n += 1
+        if (n === 1) return yield* Effect.fail("boom")
+        return { n }
+      }),
+    )
+
+    expect(Exit.isFailure(yield* access(state, dir).pipe(Effect.exit))).toBe(true)
+    expect((yield* access(state, dir)).n).toBe(2)
+    expect((yield* access(state, dir)).n).toBe(2)
+  }),
+)
+
 it.live("InstanceState survives deferred resume from the same instance context", () =>
   Effect.gen(function* () {
     const dir = yield* tmpdirScoped({ git: true })
