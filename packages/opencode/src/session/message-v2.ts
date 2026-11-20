@@ -124,6 +124,14 @@ function hydrate(db: Database.Interface["db"], rows: (typeof MessageTable.$infer
   })
 }
 
+// Media is sent in full only for the last few user turns. Older images were re-uploaded and re-read on every turn
+// (Porter carried 6MB of base64 per turn); they become a short marker naming what was there.
+const MEDIA_TURNS = 2
+
+function omitted(attachment: { mime: string; filename?: string }) {
+  return `[${attachment.mime.startsWith("image/") ? "image" : attachment.mime}: ${attachment.filename ?? "file"} omitted]`
+}
+
 function providerMeta(metadata: Record<string, any> | undefined) {
   if (!metadata) return undefined
   const { providerExecuted: _, ...rest } = metadata
@@ -194,8 +202,12 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
     return { type: "json", value: output as never }
   }
 
-  for (const msg of input) {
+  const users = input.flatMap((msg, index) => (msg.info.role === "user" ? [index] : []))
+  const mediaFrom = users.length > MEDIA_TURNS ? users[users.length - MEDIA_TURNS] : 0
+
+  for (const [index, msg] of input.entries()) {
     if (msg.parts.length === 0) continue
+    const aged = index < mediaFrom
 
     if (msg.info.role === "user") {
       const mail = msg.info.source?.type === "editspace-mail" ? msg.info.source : undefined
@@ -226,6 +238,8 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
               type: "text",
               text: `[Attached ${part.mime}: ${part.filename ?? "file"}]`,
             })
+          } else if (aged && isMedia(part.mime)) {
+            userMessage.parts.push({ type: "text", text: omitted(part) })
           } else {
             userMessage.parts.push({
               type: "file",
@@ -309,10 +323,14 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
         if (part.type === "tool") {
           toolNames.add(part.tool)
           if (part.state.status === "completed") {
-            const outputText = part.state.time.compacted
+            const cleared = part.state.time.compacted
               ? "[Old tool result content cleared]"
               : truncateToolOutput(part.state.output, options?.toolOutputMaxChars)
-            const attachments = part.state.time.compacted || options?.stripMedia ? [] : (part.state.attachments ?? [])
+            const all = part.state.time.compacted || options?.stripMedia ? [] : (part.state.attachments ?? [])
+            const attachments = aged ? all.filter((a) => !isMedia(a.mime)) : all
+            const outputText = aged
+              ? [cleared, ...all.filter((a) => isMedia(a.mime)).map(omitted)].join("\n")
+              : cleared
 
             // For providers that don't support media in tool results, extract media files
             // (images, PDFs) to be sent as a separate user message

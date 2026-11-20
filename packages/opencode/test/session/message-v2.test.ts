@@ -462,6 +462,64 @@ describe("session.message-v2.toModelMessage", () => {
     ])
   })
 
+  // Images older than the last two user turns are re-sent on every turn otherwise (Porter: ~6MB per turn).
+  test("replaces media older than the last two user turns with a marker", async () => {
+    const image = (messageID: string, id: string, filename: string) => ({
+      ...basePart(messageID, id),
+      type: "file" as const,
+      mime: "image/png",
+      filename,
+      url: "data:image/png;base64,Zm9v",
+    })
+    const user = (id: string, text: string, extra: SessionV1.Part[] = []): SessionV1.WithParts => ({
+      info: userInfo(id),
+      parts: [{ ...basePart(id, `${id}-t`), type: "text", text }, ...extra] as SessionV1.Part[],
+    })
+    const input: SessionV1.WithParts[] = [
+      user("m1", "look", [image("m1", "m1-f", "old.png")] as SessionV1.Part[]),
+      {
+        info: assistantInfo("m2", "m1"),
+        parts: [
+          {
+            ...basePart("m2", "m2-tool"),
+            type: "tool",
+            callID: "call-1",
+            tool: "read",
+            state: {
+              status: "completed",
+              input: {},
+              output: "read it",
+              title: "Read",
+              metadata: {},
+              time: { start: 0, end: 1 },
+              attachments: [image("m2", "m2-f", "shot.png")],
+            },
+          },
+        ] as SessionV1.Part[],
+      },
+      user("m3", "again", [image("m3", "m3-f", "recent.png")] as SessionV1.Part[]),
+      user("m4", "last"),
+    ]
+
+    const messages = await MessageV2.toModelMessages(input, model)
+    expect(messages[0]).toStrictEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "look" },
+        { type: "text", text: "[image: old.png omitted]" },
+      ],
+    })
+    expect(JSON.stringify(messages[2])).toContain("read it\\n[image: shot.png omitted]")
+    expect(JSON.stringify(messages[2])).not.toContain("Zm9v")
+    expect(messages[3]).toStrictEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "again" },
+        { type: "file", mediaType: "image/png", filename: "recent.png", data: "Zm9v" },
+      ],
+    })
+  })
+
   test("preserves jpeg tool-result media for anthropic models", async () => {
     const anthropicModel: Provider.Model = {
       ...model,
