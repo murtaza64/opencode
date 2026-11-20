@@ -5,7 +5,8 @@ import { serve } from "./server"
 import { surfaceFinder, surfaceFrameFocused } from "./surface-find"
 import { localHost, personalWork, shadowedPages, tabWithin, type WorkHost } from "../../es-app/remote-host"
 import { PERF_DIR } from "./perf-log"
-import { createVoice, voiceTools } from "./voice"
+import { createTranscriber, createVoice, voiceTools } from "./voice"
+import { allowGlassesMedia, allowGlassesMediaCheck, GLASSES_PICK_MS, glassesPage, pickGlassesDevice } from "./glasses-policy"
 import { watchPageAnswer } from "./page-answer"
 import { appRouteURL, externalURL, internalURL, pageArrivedCrossSite, pageNavigation, plainChromeUserAgent, restorePlan, serviceHosts, serviceOrigins, serviceSelf, startupMode, startupPlan, surfaceFrameURL } from "./policy"
 import { createTabs, TITLE_BAR_HEIGHT } from "./tabs"
@@ -88,6 +89,12 @@ const start = async () => {
         ? () => shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
         : undefined,
   })
+  const glassesTranscriber = createTranscriber({
+    resolve: () => voiceTools({ home: app.getPath("home"), env: process.env, config: path.join(app.getPath("userData"), "voice.json"), fallback: process.platform === "darwin" ? ["/usr/bin/afconvert"] : [] }),
+    temp: app.getPath("temp"),
+    glasses: true,
+    maxSeconds: 30,
+  })
   // Without a Studio look: shrinking to 24 samples and scaling back up is this app's own soft blur. With one, a real
   // blur at a work size, shown at display resolution (blurPlan).
   const blur = async (file: string, sigma?: number) => {
@@ -161,6 +168,7 @@ const start = async () => {
       : undefined,
     renderer: app.isPackaged ? undefined : process.env.ES_DESKTOP_RENDERER,
     voice,
+    glassesTranscriber,
     perfDir: PERF_DIR,
   })
   await writeFile(portFile, new URL(server.origin).port, { mode: 0o600 })
@@ -349,6 +357,25 @@ const start = async () => {
       if (!event.isMainFrame && !surfaceFrameURL(event.url, origin)) event.preventDefault()
     })
     contents.on("will-attach-webview", (event) => event.preventDefault())
+    // Chromium re-fires this as devices are discovered, each time with a fresh callback; only the latest one counts.
+    // Exactly one callback ends the request: the matching temple, or "" (cancel) off the Glasses page or on timeout.
+    let pick: { callback: (deviceId: string) => void; timer: ReturnType<typeof setTimeout> } | undefined
+    const finishPick = (deviceId: string) => {
+      if (!pick) return
+      clearTimeout(pick.timer)
+      const { callback } = pick
+      pick = undefined
+      callback(deviceId)
+    }
+    contents.on("select-bluetooth-device", (event, devices, callback) => {
+      event.preventDefault()
+      if (!glassesPage(contents.getURL(), origin)) return callback("")
+      pick = pick ? { ...pick, callback } : { callback, timer: setTimeout(() => finishPick(""), GLASSES_PICK_MS) }
+      void contents.mainFrame.executeJavaScript("document.documentElement.dataset.glassesSide ?? ''").then((side) => {
+        const id = pickGlassesDevice(side, devices)
+        if (id) finishPick(id)
+      }, () => finishPick(""))
+    })
     showRendererLoss(contents, origin)
   }
   // A host's own served page: its origin and its sign-in flow stay in the tab; other links open externally.
@@ -567,8 +594,10 @@ const listenerSession = (partition: string, listener: { origin: string; key: str
     const url = URL.parse(value)
     return !!url && ["http:", "ws:"].includes(url.protocol) && url.host === new URL(listener.origin).host
   }
-  result.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
-  result.setPermissionCheckHandler(() => false)
+  result.setPermissionRequestHandler((_contents, permission, callback, details) =>
+    callback(allowGlassesMedia(permission, details as Parameters<typeof allowGlassesMedia>[1], listener.origin)))
+  result.setPermissionCheckHandler((_contents, permission, _requestingOrigin, details) =>
+    allowGlassesMediaCheck(permission, details, listener.origin))
   result.on("will-download", (event) => event.preventDefault())
   result.webRequest.onBeforeRequest((details, callback) => {
     // The failure page (main.ts showRendererLoss) is a data: document loaded by this process.

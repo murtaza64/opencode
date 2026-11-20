@@ -12,6 +12,7 @@ import { File } from "@opencode-ai/session-ui/file"
 import CloudPage from "./pages/cloud"
 import AgentMap from "./pages/map"
 import UsagePage from "./pages/usage"
+import GlassesPage from "./pages/glasses"
 import Desk from "./pages/desk"
 import SessionPage from "./pages/session"
 import NewSessionPage from "./pages/new-session"
@@ -141,6 +142,7 @@ render(
       <Route path="/cloud" component={CloudPage} />
       <Route path="/agents" component={AgentMap} />
       <Route path="/usage" component={UsagePage} />
+      <Route path="/glasses" component={GlassesPage} />
       {/* The map became Agents mode's default page; keep old /map links working. */}
       <Route path="/map" component={MapRedirect} />
       <Route path="/new" component={NewSessionPage} />

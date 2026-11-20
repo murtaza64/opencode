@@ -121,7 +121,7 @@ export const internalURL = (value: string, origin: string) => {
 // Published web (3181), dev (3100) and native (60302) serve the same es-app, so a link to an app route
 // on any of them opens that route in this window rather than an external browser.
 const APP_PORTS = ["3181", "3100", "60302"]
-const APP_ROUTE = /^\/(?:|cloud|map|new|desk|issue|doc|session\/[\w-]+)$/
+const APP_ROUTE = /^\/(?:|cloud|map|glasses|new|desk|issue|doc|session\/[\w-]+)$/
 
 export const appRouteURL = (value: string, origin: string) => {
   const url = URL.parse(value)

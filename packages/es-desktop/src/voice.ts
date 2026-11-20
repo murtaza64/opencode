@@ -3,6 +3,7 @@ import { createWriteStream } from "node:fs"
 import { access, constants, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises"
 import { pipeline } from "node:stream/promises"
 import path from "node:path"
+import { decodeLC3, LC3_BYTES, LC3_TYPE } from "./glasses-audio"
 
 /**
  * Operator dictation for the native shell: SoX records the default input device, then a local
@@ -208,6 +209,7 @@ export const createTranscriber = (options: {
   maxBytes?: number
   maxSeconds?: number
   timeoutMs?: number
+  glasses?: boolean
 }) => {
   const maxBytes = options.maxBytes ?? 10 * 1024 * 1024
   const maxSeconds = options.maxSeconds ?? 300
@@ -219,6 +221,7 @@ export const createTranscriber = (options: {
     ...(detail ? { detail: detail.trim().slice(-600) } : {}),
   })
   const run = async (file: string, args: string[], signal: AbortSignal) => {
+    if (signal.aborted) return { code: -1, stderr: "" }
     const child = spawn(file, args, { stdio: ["ignore", "ignore", "pipe"] })
     const kill = () => child.kill("SIGKILL")
     signal.addEventListener("abort", kill, { once: true })
@@ -230,13 +233,18 @@ export const createTranscriber = (options: {
   }
 
   const transcribe = async (input: { type?: string; length?: number; body: AsyncIterable<Uint8Array>; signal: AbortSignal }): Promise<Transcription | VoiceFailure> => {
-    const extension = AUDIO_TYPES[(input.type ?? "").split(";")[0]!.trim().toLowerCase()]
-    if (!extension) return fail("unsupported", "Send a wav or ogg clip.")
+    const type = (input.type ?? "").split(";")[0]!.trim().toLowerCase()
+    const extension = options.glasses && type === LC3_TYPE ? "lc3" : options.glasses && type === "audio/webm" ? "webm" : AUDIO_TYPES[type]
+    if (!extension) return fail("unsupported", "Unsupported audio format.")
     if (input.length === undefined || !Number.isFinite(input.length)) return fail("unsupported", "Content-Length is required.")
     if (input.length > maxBytes) return fail("too-large", `The clip is over ${Math.round(maxBytes / 1024 / 1024)} MB.`)
     if (state.busy) return fail("busy", "Another voice note is being transcribed.")
     state.busy = true
-    const dir = await mkdtemp(path.join(options.temp, "es-voice-note-"))
+    const dir = await mkdtemp(path.join(options.temp, "es-voice-note-")).catch(() => undefined)
+    if (!dir) {
+      state.busy = false
+      return fail("failed", "Couldn't prepare the recording.")
+    }
     try {
       const tools = await options.resolve()
       if ("missing" in tools) return fail("unavailable", "Couldn't transcribe: voice notes aren't set up", tools.message)
@@ -259,9 +267,15 @@ export const createTranscriber = (options: {
       // SoX reads wav and ogg; macOS afconvert (the fallback without SoX) reads wav but not ogg.
       const afconvert = path.basename(tools.recorder) === "afconvert"
       if (afconvert && extension === "ogg") return fail("unsupported", "This host can only read wav clips (ogg needs SoX).")
-      const converted = await run(tools.recorder, afconvert
-        ? ["-f", "WAVE", "-d", "LEI16@16000", "-c", "1", upload, clip]
-        : ["-q", upload, "-c", "1", "-r", "16000", "-b", "16", clip], input.signal)
+      if (extension === "lc3" && (input.length! % LC3_BYTES !== 0 || input.length! / LC3_BYTES > maxSeconds * 20))
+        return fail("unsupported", "Invalid glasses recording.")
+      const converted = extension === "lc3"
+        ? await run("/usr/bin/python3", ["-c", decodeLC3, upload, clip], input.signal)
+        : extension === "webm"
+          ? await run("/opt/homebrew/bin/ffmpeg", ["-nostdin", "-v", "error", "-protocol_whitelist", "file", "-f", "matroska", "-i", upload, "-t", String(maxSeconds + 1), "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", clip], input.signal)
+          : await run(tools.recorder, afconvert
+            ? ["-f", "WAVE", "-d", "LEI16@16000", "-c", "1", upload, clip]
+            : ["-q", upload, "-c", "1", "-r", "16000", "-b", "16", clip], input.signal)
       if (input.signal.aborted) return fail("cancelled", "Transcription cancelled.")
       if (converted.code !== 0) return fail("failed", "Couldn't read the clip", converted.stderr)
       // 16 kHz mono 16-bit after conversion: 32 bytes per millisecond after the 44-byte header.

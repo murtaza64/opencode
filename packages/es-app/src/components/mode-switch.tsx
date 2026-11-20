@@ -81,6 +81,9 @@ export const NavEntries = (props: { compact?: boolean }) => {
       <A href="/usage" end class="nav-quick-item" activeClass="active" aria-label="Usage" title="Usage">
         <Glyph name="zap" /><Show when={!props.compact}><span class="nav-quick-label">Usage</span></Show>
       </A>
+      <A href="/glasses" end class="nav-quick-item" activeClass="active" aria-label="Glasses" title="Glasses">
+        <Glyph name="eye" /><Show when={!props.compact}><span class="nav-quick-label">Glasses</span></Show>
+      </A>
       <button type="button" class="nav-quick-item" data-nav="front-desk" aria-pressed={chat.open()} title={chat.open() ? `Hide ${DESK.name}` : `Show ${DESK.name}`}
         aria-label={DESK.label} onClick={() => chat.setOpen(!chat.open())}>
         <Show when={DESK.avatar} fallback={<Glyph name="comment-discussion" />}>{src => <img class="nav-avatar" src={src()} alt="" width="16" height="16" />}</Show>

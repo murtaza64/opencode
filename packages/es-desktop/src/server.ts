@@ -14,6 +14,7 @@ import { attentionRoute, bridgedTargets, hostPath, localHost, remoteCookie, remo
 import type { Bridge } from "./bridge"
 import type { SshPeer } from "./ssh-peer"
 import type { Transcriber, Voice, VoiceFailure } from "./voice"
+import { GLASSES_TRANSCRIBE } from "./glasses-audio"
 import { findRequest, type FindRequest, type FindResult } from "./surface-find"
 import type { Appearance, HostPalette } from "./appearance"
 import type { ReleaseNotesStore } from "./release-notes"
@@ -107,6 +108,7 @@ export const serve = async (options: {
   voice?: Voice
   // Voice-note transcription of uploaded clips (POST /__es/voice/transcribe), for paired phones on a gateway.
   transcriber?: Transcriber
+  glassesTranscriber?: Transcriber
   // This laptop's palette and blurred wallpaper; never offered to paired remote clients.
   appearance?: Appearance
   // This host's colours only (no wallpaper), for paired phones on a gateway: GET /__es/palette.
@@ -298,15 +300,21 @@ export const serve = async (options: {
       if (!perf || url.search) return finish(404, "Not found")
       return perf.receive(req, finish)
     }
-    if (url.pathname === "/__es/voice/transcribe" && options.transcriber) {
+    const glassesUpload = url.pathname === GLASSES_TRANSCRIBE
+    if (glassesUpload && (pairing || !options.glassesTranscriber)) return finish(404, "Not found")
+    if (glassesUpload && !trusted(req.headers.origin)) return finish(403, "Forbidden")
+    const transcriber = glassesUpload ? options.glassesTranscriber : url.pathname === "/__es/voice/transcribe" ? options.transcriber : undefined
+    if (transcriber) {
       if (req.method !== "POST" || url.search) return finish(405, "Method not allowed")
       const abort = new AbortController()
       // The phone closing the request cancels the transcription.
       res.once("close", () => { if (!res.writableFinished) abort.abort() })
       const length = req.headers["content-length"] === undefined ? undefined : Number(req.headers["content-length"])
-      const result = await options.transcriber.transcribe({ type: req.headers["content-type"], length, body: req, signal: abort.signal })
+      const result = await transcriber.transcribe({ type: req.headers["content-type"], length, body: req, signal: abort.signal }).catch((): VoiceFailure => ({ ok: false, code: "failed", message: "Couldn't transcribe the clip." }))
       if (abort.signal.aborted) return
-      return finish(result.ok ? 200 : VOICE_STATUS[result.code], JSON.stringify(result), "application/json")
+      // Local paths and subprocess diagnostics do not belong on the lens.
+      const body = glassesUpload && !result.ok ? { ok: false, code: result.code, message: result.message } : result
+      return finish(result.ok ? 200 : VOICE_STATUS[result.code], JSON.stringify(body), "application/json")
     }
     if (/^\/__es\/voice(\/|$)/.test(url.pathname)) {
       if (!options.voice || pairing || url.search) return finish(404, "Not found")

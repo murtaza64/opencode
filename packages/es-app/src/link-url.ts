@@ -23,7 +23,7 @@ export const linkUrl = (value: string) => {
 // Published web (3181), dev (3100) and the desktop app (60302) serve the same es-app against the same
 // services, so agent-shared links to any of them open the route in whichever client was clicked.
 const APP_PORTS = ["3181", "3100", "60302"]
-const APP_ROUTE = /^\/(?:|cloud|map|new|desk|issue|doc|session\/[\w-]+)$/
+const APP_ROUTE = /^\/(?:|cloud|map|glasses|new|desk|issue|doc|session\/[\w-]+)$/
 
 /** In-app path for a link to an es-app route on this origin or a known loopback es-app origin. */
 export const appPath = (value: string, origin: string) => {

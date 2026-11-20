@@ -765,7 +765,7 @@ body:has(.desk-companion.overlay:not(.closed)) :is(.surface-head, .desk-evidence
 
 /* Top of the sidebar: Agent map, Usage and Porter/Desk on one compact row. Three equal targets,
  * icon over a short label at 240px; icons only in the collapsed rail. */
-.nav-quick { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 2px 8px 6px; }
+.nav-quick { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 2px 8px 6px; }
 .nav-quick-item { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; position: relative;
   min-block-size: 44px; padding: 4px 2px; border: 0; border-radius: 6px; background: transparent; color: var(--subtext0);
   font: inherit; text-decoration: none; cursor: pointer; }
