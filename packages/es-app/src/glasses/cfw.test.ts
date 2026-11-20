@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test"
 import { cfwPackets, clear, crcOk, drawCalls, ext, eyeShift, leasePayload, parseCfwAck, rect, text } from "./cfw"
 import { buildScene } from "./cfw-scene"
+import { lensFontReady, textWidth } from "./lens-font"
 import { crc16, frames } from "./g2-transport"
-import { connectOutcome, pickFailure, replyPages, toggleAction, toolVerb, type HudState } from "./live-hud"
+import { connectOutcome, pickFailure, replyLines, replyPages, toggleAction, toolVerb, type HudState } from "./live-hud"
 
 const hex = (bytes: ArrayLike<number>) => Buffer.from(Array.from(bytes)).toString("hex")
 
@@ -155,4 +156,45 @@ test("a desktop-cancelled pick explains the cause", () => {
   expect(pickFailure("timeout")).toContain("Take them out of the case")
   expect(pickFailure("not-glasses-page")).toBe("Open the Glasses tab to connect.")
   expect(pickFailure(undefined)).toBeUndefined()
+})
+
+/** Horizontal centre of a drawn element on the fused (both-lens) image: each lens shifts by opposite halves. */
+const fusedCenter = (meta: { kind: string; x: number; depth: number; w?: number; value?: string }) =>
+  (meta.x + eyeShift(meta.depth, false) + meta.x + eyeShift(meta.depth, true)) / 2 + (meta.kind === "rect" ? meta.w! : textWidth(meta.value!)) / 2
+
+test("centered scenes put every centered element on the panel axis with real font widths", async () => {
+  await lensFontReady
+  const scenes: Partial<HudState>[] = [
+    { mode: "voice", voice: { phase: "recording" } },
+    { mode: "voice", voice: { phase: "transcribing" } },
+    { mode: "thinking", tool: "grep" },
+    { mode: "ambient" },
+    { mode: "align" },
+  ]
+  for (const depth of [{ distance: 0, spread: 8 }, { distance: 30, spread: 12 }, { distance: -20, spread: 4 }]) {
+    for (const scene of scenes) {
+      const calls = buildScene(baseState({ ...scene, depth }), 0)
+      // Shapes are centred by construction except the row of thinking dots, whose middle dot is the axis.
+      const elements = calls.map(call => call.meta).filter(meta => meta.kind === "text" || (meta.kind === "rect" && meta.w < 600 && meta.h > 2))
+      const dots = elements.filter(meta => meta.kind === "rect" && meta.w === 20)
+      for (const meta of elements.filter(meta => !dots.includes(meta))) {
+        if (meta.kind === "clear") continue
+        // Odd-width text can only be centred to the half pixel.
+        const off = Math.abs(fusedCenter(meta as never) - 320)
+        expect({ mode: scene.mode, value: meta.kind === "text" ? meta.value : "shape", centred: off <= 0.5 }).toEqual({ mode: scene.mode, value: meta.kind === "text" ? meta.value : "shape", centred: true })
+      }
+      if (dots.length) expect(Math.abs(fusedCenter(dots[1] as never) - 320)).toBeLessThanOrEqual(0.5)
+    }
+  }
+})
+
+test("firmware font widths come from Even's tables, not a fixed estimate", async () => {
+  await lensFontReady
+  expect(textWidth("Listening")).toBe(78)
+  expect(textWidth("iiii")).toBeLessThan(textWidth("MMMM"))
+})
+
+test("body text wraps to the column's pixel width", async () => {
+  await lensFontReady
+  for (const line of replyLines("word ".repeat(80) + "supercalifragilisticexpialidocious".repeat(4), 0)) expect(textWidth(line)).toBeLessThanOrEqual(488)
 })

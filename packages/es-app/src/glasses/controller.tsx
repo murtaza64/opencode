@@ -43,6 +43,7 @@ function createGlasses() {
   const [askArmed, setAskArmed] = createSignal(false)
   const [now, setNow] = createSignal(Date.now())
   const [scene, setScene] = createSignal<Draw[]>([])
+  const [alignment, setAlignment] = createSignal(false)
   const [askFocus, setAskFocus] = createSignal(0)
   let generation = 0
 
@@ -103,7 +104,7 @@ function createGlasses() {
       awakeUntil: awakeUntil(),
     }, now())
     return {
-      mode,
+      mode: alignment() ? "align" : mode,
       voice: currentVoice,
       tool: tool(),
       reply: replyText,
@@ -542,7 +543,7 @@ function createGlasses() {
 
   return {
     connState, statusLine, latencyMs, transcribeMs, scene, askFocus,
-    distance, setDistance, spread, setSpread,
+    distance, setDistance, spread, setSpread, alignment, setAlignment,
     connect, connectLeft, disconnect, toggle,
   }
 }

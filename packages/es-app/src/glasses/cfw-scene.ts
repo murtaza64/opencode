@@ -1,8 +1,11 @@
 import { clear, eyeShift, PANEL, rect, text, type Draw } from "./cfw"
-import { linesOf, replyLines, replyPages, sanitizeLensText, toolVerb, type HudState } from "./live-hud"
+import { textWidth } from "./lens-font"
+import { lensLines, replyLines, replyPages, sanitizeLensText, toolVerb, type HudState } from "./live-hud"
 
 const layers = { far: -2, base: 0, raised: 1, card: 2, focus: 3 }
 export const DEFAULT_DEPTH = { distance: 0, spread: 8 }
+export const CENTER_X = PANEL.width / 2
+export const CENTER_Y = PANEL.height / 2
 export const layerDepth = (layer: keyof typeof layers, depth = DEFAULT_DEPTH) =>
   Math.max(-62, Math.min(62, Math.round((depth.distance + layers[layer] * depth.spread) / 2) * 2))
 
@@ -11,14 +14,17 @@ export const buildScene = (state: HudState, now: number) => {
   const at = (layer: keyof typeof layers) => layerDepth(layer, state.depth)
   const label = (value: string, x: number, y: number, layer: keyof typeof layers, brightness = 15) =>
     calls.push(text({ x, y, value: sanitizeLensText(value), depth: at(layer), brightness }))
-  const center = (value: string, y: number, layer: keyof typeof layers, brightness = 15) =>
-    label(value, Math.max(0, Math.round(320 - value.length * 5.5)), y, layer, brightness)
+  // Centred by the firmware font's real advance widths, so it sits on the same axis as the shapes around it.
+  const center = (value: string, y: number, layer: keyof typeof layers, brightness = 15) => {
+    const clean = sanitizeLensText(value)
+    label(clean, Math.max(0, Math.round(CENTER_X - textWidth(clean) / 2)), y, layer, brightness)
+  }
   const block = (value: string, y: number, count: number, layer: keyof typeof layers, brightness = 15) =>
-    linesOf(value).slice(0, count).forEach((line, i) => label(line, 76, y + i * 30, layer, brightness))
+    lensLines(value).slice(0, count).forEach((line, i) => label(line, 76, y + i * 30, layer, brightness))
   const card = (title: string, aside = "") => {
     calls.push(rect({ x: 48, y: 88, w: 544, h: 304, r: 16, depth: at("card") }))
     label(title, 76, 106, "focus")
-    if (aside) label(aside, 564 - aside.length * 11, 106, "card", 7)
+    if (aside) label(aside, 564 - Math.round(textWidth(aside)), 106, "card", 7)
     calls.push(rect({ x: 76, y: 140, w: 488, h: 2, fill: 6, border: 16, depth: at("card") }))
   }
   const dots = (y: number) => [286, 320, 354].forEach((x, i) => {
@@ -76,9 +82,20 @@ export const buildScene = (state: HudState, now: number) => {
       center(voice.phase === "sending" ? "Sending" : "Transcribing", 262, "base", 9)
     }
     if (voice.phase === "error") {
-      linesOf(voice.error ?? "Try again").slice(0, 3).forEach((line, i) => center(line, 190 + i * 30, "base"))
+      lensLines(voice.error ?? "Try again").slice(0, 3).forEach((line, i) => center(line, 190 + i * 30, "base"))
       center("Tap to dismiss", 300, "base", 7)
     }
+  }
+  if (state.mode === "align") {
+    // Every layer gets a ring and a label on the panel centre; at the right settings they fuse into one target.
+    const order = ["far", "base", "raised", "card", "focus"] as const
+    order.forEach((layer, i) => {
+      const size = 200 - i * 36
+      calls.push(rect({ x: CENTER_X - size / 2, y: CENTER_Y - size / 2, w: size, h: size, r: size / 2, border: 6 + i * 2, depth: at(layer) }))
+    })
+    calls.push(rect({ x: CENTER_X - 1, y: 60, w: 2, h: 360, fill: 4, border: 16, depth: at("base") }))
+    calls.push(rect({ x: 60, y: CENTER_Y - 1, w: 520, h: 2, fill: 4, border: 16, depth: at("base") }))
+    center("Centered?", 384, "focus")
   }
   return calls
 }
@@ -103,6 +120,12 @@ export const paintEye = (canvas: HTMLCanvasElement, calls: Draw[], right: boolea
     ctx.fillStyle = green(draw.brightness)
     ctx.font = "20px system-ui, sans-serif"
     ctx.textBaseline = "top"
-    ctx.fillText(draw.value, x, draw.y)
+    // Squeeze the browser font to the firmware font's width so the preview shows real centring and wrapping.
+    const ratio = textWidth(draw.value) / Math.max(1, ctx.measureText(draw.value).width)
+    ctx.save()
+    ctx.translate(x, draw.y)
+    ctx.scale(ratio, 1)
+    ctx.fillText(draw.value, 0, 0)
+    ctx.restore()
   }
 }

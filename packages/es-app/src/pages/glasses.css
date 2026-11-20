@@ -13,3 +13,4 @@
 .glasses-slider { display: grid; gap: 4px; font-size: 12px; color: var(--subtext0); min-width: 200px; }
 .glasses-slider input { accent-color: var(--accent); }
 @media (max-width: 720px) { .glasses-lenses { grid-template-columns: 1fr; } }
+.glasses-check { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--subtext0); }

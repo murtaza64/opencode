@@ -60,6 +60,10 @@ export default function GlassesPage() {
           <span>Layer spread ({glasses.spread()})</span>
           <input type="range" min={0} max={20} step={2} value={glasses.spread()} onInput={event => glasses.setSpread(Number(event.currentTarget.value))} />
         </label>
+        <label class="glasses-check">
+          <input type="checkbox" checked={glasses.alignment()} onChange={event => glasses.setAlignment(event.currentTarget.checked)} />
+          <span>Alignment check</span>
+        </label>
       </div>
     </main>
   )

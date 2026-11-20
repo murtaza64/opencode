@@ -29,6 +29,7 @@
     "ws": "8.21.0"
   },
   "dependencies": {
+    "@evenrealities/pretext": "0.1.4",
     "@opencode-ai/schema": "workspace:*",
     "@opencode-ai/sdk": "workspace:*",
     "@opencode-ai/session-ui": "workspace:*",

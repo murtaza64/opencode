@@ -1,7 +1,8 @@
+import { wrapPx } from "./lens-font"
 export type Voice = { phase: "idle" | "recording" | "transcribing" | "confirm" | "sending" | "error"; transcript?: string; error?: string }
 export type Ask = { id: string; kind: "question" | "permission"; title: string; detail: string; options: string[]; answerable: boolean }
 export type HudState = {
-  mode: "sleep" | "ambient" | "voice" | "thinking" | "reply" | "needs" | "ask"
+  mode: "sleep" | "ambient" | "voice" | "thinking" | "reply" | "needs" | "ask" | "align"
   voice: Voice
   tool: string
   reply: string
@@ -52,8 +53,11 @@ export const linesOf = (value: string, width = 44) => {
   return lines
 }
 const REPLY_ROWS = 8
-export const replyPages = (reply: string) => Math.max(1, Math.ceil(linesOf(reply).length / REPLY_ROWS))
-export const replyLines = (reply: string, page: number) => linesOf(reply).slice(page * REPLY_ROWS, (page + 1) * REPLY_ROWS)
+/** Body text width on the lens: the card and reply column run from x 76 to 564. */
+export const BODY_PX = 488
+export const lensLines = (value: string, maxPx = BODY_PX) => wrapPx(sanitizeLensText(value), maxPx)
+export const replyPages = (reply: string) => Math.max(1, Math.ceil(lensLines(reply).length / REPLY_ROWS))
+export const replyLines = (reply: string, page: number) => lensLines(reply).slice(page * REPLY_ROWS, (page + 1) * REPLY_ROWS)
 export const toolVerb = (tool: string) => new Map([
   ["bash", "running a command"], ["read", "reading"], ["edit", "editing"], ["write", "writing"], ["grep", "searching"],
   ["glob", "searching"], ["list", "looking around"], ["webfetch", "browsing"], ["task", "delegating"], ["todowrite", "planning"],
