@@ -1,7 +1,11 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-11-20.6",
+  "release": "2026-11-20.7",
   "items": [
+    {
+      "title": "Glasses microphone",
+      "detail": "Glasses voice uses the left temple’s microphone from any tab. If the left temple is disconnected, connect it before recording."
+    },
     {
       "title": "Laptop Porter in the sidebar",
       "detail": "When the Laptop is serving as Porter’s fallback, open its conversation directly from the sidebar. The title-bar icons are centered."
