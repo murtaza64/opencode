@@ -249,6 +249,14 @@
 @media (prefers-reduced-motion: reduce) { .busy-dot[data-animate]::after, .sidebar .dot.busy::after { animation: none; opacity: 0.5; will-change: auto; } }
 /* transcript tail while waiting for first output */
 .thinking { display: flex; padding: 10px 4px; }
+.session-spinner, .session-work-status[data-state="working"] .dot.busy, .session-work-status[data-state="retry"] .dot.busy { flex: none; inline-size: 11px; block-size: 11px; box-sizing: border-box; border-radius: 50%; border: 1.5px solid var(--surface1); border-block-start-color: var(--accent); background: none; box-shadow: none; animation: es-sidebar-spin .9s linear infinite; }
+.session-work-status .dot.busy::after { display: none; }
+@media (prefers-reduced-motion: reduce) { .session-spinner, .session-work-status .dot.busy { animation: none !important; } }
+.session-followups { display: flex; align-items: flex-start; flex-wrap: wrap; column-gap: 8px; padding-inline: 12px; }
+.session-followups > .mail-wake-bar { margin-inline-start: auto; padding-inline: 0; }
+.session-followups-todos { position: relative; color: var(--subtext0); font: 12px/1.5 var(--font-sans); }
+.session-followups-todos summary { cursor: pointer; padding-block: 2px; }
+.session-followups-list { position: absolute; z-index: 4; inset-block-end: 100%; inset-inline-start: 0; inline-size: min(320px, 70vw); max-block-size: 240px; overflow: auto; border: 1px solid var(--surface1); background: var(--mantle); padding: 8px; }
 
 /* ticket refs (SD-123, dotfiles#77) wrapped in the transcript: subtle
  * affordance, hover card with tracker info */

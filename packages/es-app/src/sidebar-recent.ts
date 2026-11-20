@@ -50,6 +50,17 @@ export const FILTERS: [SidebarFilter, string][] = [["all", "All"], ["agents", "A
 export const kindMatches = (filter: SidebarFilter, kind: RecentKind) =>
   filter === "all" || (filter === "agents" && kind === "agent") || (filter === "surfaces" && kind === "surface") || (filter === "decisions" && kind === "decision")
 
+/** The shown order after a refetch: every row in `sorted` is present at once. Rows already shown keep their
+ * relative order within their group (no reorder under the reader), a row whose group changed moves to its new
+ * group, and new rows take their sorted place instead of waiting at the end. */
+export const arrange = (held: readonly string[], sorted: readonly string[], group: (key: string) => string) => {
+  const present = new Set(sorted)
+  const queues = new Map<string, string[]>()
+  held.filter((key) => present.has(key)).forEach((key) => queues.set(group(key), [...(queues.get(group(key)) ?? []), key]))
+  const shown = new Set(held)
+  return sorted.map((key) => shown.has(key) ? queues.get(group(key))!.shift()! : key)
+}
+
 /** Keys in `next` that were not in `shown`, in their new order. */
 export const newcomers = (shown: readonly string[], next: readonly string[]) => {
   const seen = new Set(shown)

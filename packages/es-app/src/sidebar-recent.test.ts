@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { changedSinceOpened, holdOrder, newcomers, recentOrder, type RecentItem } from "./sidebar-recent"
+import { arrange, changedSinceOpened, holdOrder, newcomers, recentOrder, type RecentItem } from "./sidebar-recent"
 
 const item = (key: string, updated?: number, opened?: number): RecentItem => ({ kind: "surface", key, title: key, updated, opened })
 
@@ -32,4 +32,14 @@ test("changedSinceOpened compares the source's own timestamps", () => {
 test("refetch keeps shown order and reports only genuinely new keys", () => {
   expect(holdOrder(["a", "b", "c"], ["c", "b", "d"])).toEqual(["b", "c"])
   expect(newcomers(["a", "b"], ["c", "b", "a"])).toEqual(["c"])
+})
+
+test("arrange shows new rows in their sorted place and keeps shown rows' order within a group", () => {
+  const group = (key: string) => key.startsWith("t") ? "today" : "older"
+  // t2 was shown before t1; a refetch sorts t1 first but the shown order holds; tnew lands where it sorts.
+  expect(arrange(["t2", "t1", "o1"], ["tnew", "t1", "t2", "o1"], group)).toEqual(["tnew", "t2", "t1", "o1"])
+  // o2 got a turn today (now t-o2 is a different key in this model): a moved group follows its group.
+  expect(arrange(["t1", "o1", "o2"], ["t1", "o2", "o1"], (key) => key === "o2" ? "today" : group(key))).toEqual(["t1", "o2", "o1"])
+  // Rows that left go; nothing shown is invented.
+  expect(arrange(["t1", "gone"], ["t1"], group)).toEqual(["t1"])
 })

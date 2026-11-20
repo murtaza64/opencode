@@ -45,6 +45,7 @@ const records = [
     { sender_session: "ses_relay", deliveries: [delivery("i-read", "squadron-v2", "ses_a", { mode: "passive", state: "presented", tick: "presented", presented_ms: at + 9800 })] }),
 ]
 fixture.mail = (es, recipient) => ({ editspace: es, lane: recipient === "squadron-v2" ? recipient : "", messages: records })
+fixture.todos = new Map([["ses_a", [{ content: "Check delivery", priority: "high", status: "in_progress" }]]])
 const base = { sessionID: "ses_a", agent: "build", model: { providerID: "fixture", modelID: "test" } }
 fixture.messages = [{ info: { ...base, id: "msg_001", role: "user", time: { created: at } },
   parts: [{ id: "prt_001", messageID: "msg_001", sessionID: "ses_a", type: "text", text: "Human prompt" }] }]
@@ -115,6 +116,9 @@ try {
 
     // One bar for the session, above the composer.
     const bar = page.locator(".mail-wake-bar")
+    const followups = page.locator(".session-followups").filter({ has: bar })
+    await expect(followups.locator("summary")).toHaveText("TODO 0/1")
+    await expect(followups.getByRole("button", { name: "Wake now" })).toBeVisible()
     await expect(bar).toHaveCount(1)
     await expect(bar).toContainText("2 unread")
     await expect(bar.getByRole("button", { name: "Wake now" })).toBeVisible()

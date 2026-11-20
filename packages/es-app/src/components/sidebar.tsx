@@ -23,6 +23,7 @@ import { ringOnChange } from "../motion"
 import { Glyph, HostGlyph } from "./icons"
 import { hostRowKey, hostSessionHref, workRows, type HostFeed } from "../host-feed"
 import { host } from "../host"
+import { personas } from "../desk-identity"
 import { NavEntries } from "./mode-switch"
 import { TodayCost } from "./today-cost"
 import { waveStart } from "../wave"
@@ -109,6 +110,24 @@ const GROUP_LABEL: Record<DateGroup, string> = { today: "Today", yesterday: "Yes
 
 // The round agent shape in the unified list; the persona avatar is used when the registry has one.
 const initialOf = (text: string) => [...text.trim()][0]?.toLocaleUpperCase() ?? "?"
+
+const AgentAvatar = (props: { row: SessionRow }) => {
+  const [failed, setFailed] = createSignal<string>()
+  const source = () => {
+    if (host()?.profile === "personal") return
+    const lane = /\/lanes\/([^/]+)/.exec(props.row.directory)?.[1]
+    const entries = personas()
+    const value = entries.find(person => lane && person.owner_lane === `${props.row.project}/${lane}`)?.avatar_url
+      ?? entries.find(person => person.name === props.row.title)?.avatar_url
+    if (!value || value === failed()) return
+    if (/^https:\/\//.test(value) || /^\/(?!\/)[^\\]+$/.test(value)) return value
+  }
+  return <span class="session-avatar" aria-hidden="true">
+    <Show when={source()} fallback={initialOf(props.row.title || props.row.id)}>{(url) =>
+      <img src={url()} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(url())} />}
+    </Show>
+  </span>
+}
 
 const StatusDot = (props: { state: DotState; label?: string }) => {
   let el: HTMLElement | undefined
@@ -487,9 +506,10 @@ export default function Sidebar() {
     </a>
   ) : (
     <div class="session-entry" {...peekAttrs(s)}
-      data-nav-key={hostRowKey(s)} data-avatar={initialOf(s.title || s.id)} data-dot={dot()} data-preview-kind="Agent" data-preview-title={s.title || s.id}
+      data-nav-key={hostRowKey(s)} data-dot={dot()} data-preview-kind="Agent" data-preview-title={s.title || s.id}
       data-preview-agent={s.title || s.id} data-preview-owner={`in ${s.project ?? current()}`} data-preview-host={ownHost().label}
       data-preview-meta={[dotText(s, dot()), s.directory].filter(Boolean).join(" · ")}>
+      <AgentAvatar row={s} />
       <a
         ref={(el) => observeSession(el, s.id)}
         href={sessionHref(s.id, s.directory)}
@@ -535,9 +555,10 @@ export default function Sidebar() {
     }
     return (
     <div class="session-entry host-entry" classList={{ unavailable: down() }}
-      data-nav-key={hostRowKey(s)} data-avatar={initialOf(s.title || s.id)} data-dot={dot()} data-preview-kind="Agent" data-preview-title={s.title || s.id}
+      data-nav-key={hostRowKey(s)} data-dot={dot()} data-preview-kind="Agent" data-preview-title={s.title || s.id}
       data-preview-agent={s.title || s.id} data-preview-owner={`on ${label()}`} data-preview-host={label()}
       data-preview-meta={[dot(), down() ? "unreachable" : "current", s.directory].filter(Boolean).join(" · ")}>
+      <AgentAvatar row={s} />
       <a href={feed ? hostSessionHref(feed.host, s) : undefined} class="nav-item" classList={{ active: isOpen(s) }}
         aria-current={isOpen(s) ? "page" : undefined} aria-label={name()} aria-disabled={down() || undefined}
         title={down() ? `${label()} · unreachable since ${clock(feed?.state().since ?? Date.now())}; last-known list, actions disabled` : `${s.title || s.id} — on ${label()}`}

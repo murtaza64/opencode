@@ -1,11 +1,9 @@
-.today-cost-group { display: inline-flex; align-items: baseline; gap: 12px; min-inline-size: 0; }
+.today-cost-group { display: inline-flex; align-items: baseline; gap: 10px; min-inline-size: 0; text-decoration: none; color: inherit; }
+.today-cost-group:is(:hover, :focus-visible) .today-cost-label { text-decoration: underline; }
+.today-cost-period { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
 .sidebar-top .today-cost-group { margin-inline-start: auto; }
 .sidebar-top .today-cost-group .today-cost { margin-inline-start: 0; }
-.ori-today-cost { align-items: baseline; gap: 5px; text-decoration: none; }
-.ori-today-cost:is(:hover, :focus-visible) .today-cost-label { text-decoration: underline; }
 .today-cost { display: inline-flex; white-space: nowrap; flex-shrink: 0; }
-.today-cost-chip { display: inline-flex; align-items: baseline; gap: 5px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: default; }
-.today-cost[data-band=partial] .today-cost-amount { color: var(--subtext1); font-weight: 500; }
 /* Details: the per-host breakdown and coverage, in the top layer under the chip, aligned to its inline end;
  * anchor positioning flips them when that edge would leave the window. */
 .today-cost-details { position: fixed; inset: auto; margin: 0; top: calc(anchor(bottom) + 4px); right: anchor(right); position-try-fallbacks: flip-inline; min-inline-size: 260px; max-inline-size: 360px; padding: 8px 10px; border: 1px solid var(--surface1); border-radius: 6px; background: var(--mantle); color: var(--text); font-size: 12px; white-space: normal; }
@@ -16,12 +14,11 @@
 .today-cost-host-state { grid-column: 1 / -1; color: var(--subtext0); font-size: 11px; }
 .today-cost-coverage, .today-cost-updated { margin-block-start: 6px; color: var(--subtext0); font-size: 11px; }
 .today-cost-label { font-size: 11px; color: var(--subtext0); }
-.today-cost-amount { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.today-cost-amount { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .today-cost-approx { color: var(--subtext0); font-weight: 400; }
-.today-cost[data-band=low] .today-cost-amount { color: var(--green); }
-.today-cost[data-band=mid] .today-cost-amount { color: var(--text); }
-.today-cost[data-band=high] .today-cost-amount { color: var(--peach); }
-.today-cost[data-stale] .today-cost-amount { color: var(--subtext0); }
+.today-cost-period[data-band=low] .today-cost-amount { color: var(--green); }
+.today-cost-period[data-band=mid] .today-cost-amount { color: var(--text); }
+.today-cost-period[data-band=high] .today-cost-amount { color: var(--peach); }
 /* Web: the sidebar's top row; the badge sits at its inline end. The native title bar already pushes it there. */
 .sidebar-top .today-cost { margin-inline-start: auto; padding-inline-end: 2px; }
 /* The title bar drags the window; the badge is read-only text, so it keeps dragging but shows its tooltip. */

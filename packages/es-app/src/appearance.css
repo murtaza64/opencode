@@ -56,6 +56,7 @@
 :root .pending-bubble { background: color-mix(in srgb, var(--accent) 5%, var(--mantle)); color: var(--subtext1); border-color: color-mix(in srgb, var(--accent) 35%, transparent); border-style: solid !important; }
 :root .pending-msg[data-status="pending"] .pending-bubble { border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
 :root .pending-msg[data-status="unknown"] .pending-bubble { border-color: color-mix(in srgb, var(--yellow) 60%, transparent); }
+:root .outgoing-msg:is([data-status="sending"], [data-status="accepted"]) .pending-bubble { background: color-mix(in srgb, var(--accent) 10%, var(--mantle)); color: var(--text); border-color: transparent; box-shadow: var(--shadow-raised); }
 
 /* Composer: one raised field instead of a bordered box inside a bordered strip. */
 :root .prompt-box { border-top: 0; background: transparent; }
@@ -695,7 +696,9 @@ body:has(.desk-companion.overlay:not(.closed)) :is(.surface-head, .desk-evidence
 
 /* Kind shapes: the shape says the kind before colour does. Agents are round avatars (initial
  * fallback); Surfaces use the page glyph; decisions are diamonds; permissions are shields. */
-.session-entry[data-avatar]::before { content: attr(data-avatar); flex: none; inline-size: 22px; block-size: 22px; margin-inline-start: 12px; display: grid; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--accent) 18%, var(--surface0)); color: var(--text); font-size: 10px; font-weight: 700; }
+.session-entry[data-avatar]::before, .session-avatar { flex: none; inline-size: 22px; block-size: 22px; margin-inline-start: 12px; display: grid; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--accent) 18%, var(--surface0)); color: var(--text); font-size: 10px; font-weight: 700; }
+.session-entry[data-avatar]::before { content: attr(data-avatar); }
+.session-avatar img { inline-size: 100%; block-size: 100%; border-radius: inherit; object-fit: cover; }
 /* The status is a small dot on the avatar's corner; no separate dot row. */
 :root :is(.recent-list, .pinned-section) .session-entry[data-dot] { position: relative; }
 :root :is(.recent-list, .pinned-section) .session-entry[data-dot]::after { content: ""; position: absolute; inset-inline-start: 28px; inset-block-start: 17px; inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--overlay0); box-shadow: 0 0 0 2px var(--mantle); }
@@ -734,7 +737,7 @@ body:has(.desk-companion.overlay:not(.closed)) :is(.surface-head, .desk-evidence
 :root .unified-sidebar[data-density=expanded] .recent-list .row-secondary { display: block; order: 3; flex: 1 0 100%; margin-inline-start: 22px; font-size: 11px; color: var(--subtext0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 :root .unified-sidebar[data-density=expanded] .recent-list .session-entry { align-items: flex-start; }
 :root .unified-sidebar[data-density=expanded] .recent-list .session-entry .row-secondary { margin-inline-start: 0; }
-:root .unified-sidebar[data-density=expanded] .recent-list .session-entry[data-avatar]::before { margin-block-start: 3px; }
+:root .unified-sidebar[data-density=expanded] .recent-list .session-entry[data-avatar]::before, :root .unified-sidebar[data-density=expanded] .recent-list .session-avatar { margin-block-start: 3px; }
 :root .recent-list .session-entry .host-glyph { display: none; }
 
 /* Hover/focus/long-press preview. No side effects: it only describes the row. */
@@ -744,6 +747,14 @@ body:has(.desk-companion.overlay:not(.closed)) :is(.surface-head, .desk-evidence
 .sidebar-preview-line { margin-block: 2px; font-size: 11.5px; color: var(--subtext0); overflow-wrap: anywhere; }
 .sidebar-preview-agent { color: var(--text); font-weight: 600; }
 .sidebar-preview-new { color: var(--text); }
+.sidebar-preview-decision { margin-block-start: 6px; }
+.sidebar-preview-options { list-style: none; margin: 2px 0 0; padding: 0; font-size: 12px; color: var(--subtext1); }
+.sidebar-preview-options li { display: flex; gap: 6px; align-items: baseline; padding-block: 1px; overflow-wrap: anywhere; }
+.sidebar-preview-options li[data-chosen] { color: var(--text); font-weight: 600; }
+.sidebar-preview-mark { flex: none; inline-size: 12px; text-align: center; color: var(--overlay0); }
+.sidebar-preview-options li[data-chosen] .sidebar-preview-mark { color: var(--green); }
+.sidebar-preview-recommended { font-weight: 400; color: var(--subtext0); font-size: 11px; }
+.sidebar-preview-answer { color: var(--text); }
 .sidebar-preview-foot { margin-block-start: 6px; padding-block-start: 5px; border-block-start: 1px solid var(--surface0); font-size: 10.5px; color: var(--overlay0); }
 @media (prefers-reduced-motion: reduce) { .sidebar-preview { scroll-behavior: auto; } }
 /* The Filter popover anchors to the sidebar's edge, not the small control, so its 232px panel stays
@@ -778,3 +789,19 @@ body:has(.desk-companion.overlay:not(.closed)) :is(.surface-head, .desk-evidence
 .nav-quick-open { position: absolute; inset-block-start: 18px; inset-inline-end: calc(50% - 14px); inline-size: 6px; block-size: 6px; border-radius: 50%; background: var(--accent); }
 .nav-entries.compact .nav-quick { grid-template-columns: 1fr; padding: 4px; }
 .nav-entries.compact .nav-quick-item { min-block-size: 34px; }
+
+/* Recent (All): one leading icon slot and one trailing time column for every row kind. Icon slot: 22px at 12px
+ * from the inline start; title 8px after it; time 10px from the inline end. The agent pin button floats over the
+ * time on hover/focus instead of taking a column, so agent and non-agent times line up. Logical properties only. */
+:root .recent-list { --row-icon-start: 12px; --row-icon: 22px; --row-icon-gap: 8px; --row-end: 10px; }
+:root .recent-list :is(.session-entry, .cloud-nav-entry) { position: relative; }
+:root .recent-list :is(.session-entry, .cloud-nav-entry) > .session-avatar,
+:root .recent-list .session-entry[data-avatar]::before { margin-inline-start: var(--row-icon-start); inline-size: var(--row-icon); block-size: var(--row-icon); }
+:root .recent-list :is(.session-entry, .cloud-nav-entry) > .nav-item { padding-inline: var(--row-icon-gap) var(--row-end); gap: 6px; }
+:root .recent-list :is(.session-entry, .cloud-nav-entry) > .nav-item > :is(.dot, .cloud-runtime-icon, .host-glyph) { display: none; }
+:root .recent-list :is(.session-entry, .cloud-nav-entry) > .pin-action { position: absolute; inset-inline-end: 4px; inset-block-start: 50%; transform: translateY(-50%); margin: 0; background: var(--mantle); border-radius: 4px; }
+:root .recent-list :is(.session-entry, .cloud-nav-entry):not(:hover, :focus-within) > .pin-action:not(.pinned) { pointer-events: none; }
+:root .recent-list .recent-row > .nav-item { padding-inline: var(--row-icon-start) var(--row-end); gap: var(--row-icon-gap); }
+:root .recent-list .recent-row > .nav-item > :is(.nav-kind, .surface-glyph):first-child { margin-inline: calc((var(--row-icon) - 18px) / 2); }
+:root .recent-list .nav-title { flex: 1 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root .recent-list .row-trailing { flex: none; margin-inline-start: auto; }

@@ -1,6 +1,12 @@
 import { expect, test } from "bun:test"
 import { pendingEcho } from "./pending-echo"
 
+test("keeps the optimistic bubble until the canonical message has content", () => {
+  const submission = { messageID: "msg_new", text: "Hello", status: "accepted" }
+  expect(pendingEcho(submission, [{ id: "msg_new", role: "user", contentReady: false }])).toBe(true)
+  expect(pendingEcho(submission, [{ id: "msg_new", role: "user", text: "Hello", contentReady: true }])).toBe(false)
+})
+
 test("no submission has no echo", () => {
   expect(pendingEcho(null, [])).toBe(false)
 })

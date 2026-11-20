@@ -20,14 +20,20 @@ const posts = () => fixture.calls.filter((call) => call.method === "POST" && cal
 const users = (text) => page.locator('[data-component="user-message"]').filter({ hasText: text })
 const shot = async (name) => { if (process.env.ECHO_SHOTS) await page.screenshot({ path: `${process.env.ECHO_SHOTS}/${name}.png` }) }
 // The host's projection of a prompt: the typed text, plus a synthetic part for each attached context.
-const project = (body, context) => {
+const project = (body, context, deferParts = false) => {
   const id = body.messageID
   const info = { id, sessionID: "ses_a", role: "user", agent: "build", model: { providerID: "fixture", modelID: "test" }, time: { created: Date.now() } }
   const parts = [{ id: `prt_${id}`, sessionID: "ses_a", messageID: id, type: "text", text: body.parts[0].text },
     ...(context ? [{ id: `prt_${id}_ctx`, sessionID: "ses_a", messageID: id, type: "text", text: context, synthetic: true }] : [])]
-  fixture.messages.push({ info, parts })
+  const fixtureMessage = { info, parts: deferParts ? [] : parts }
+  fixture.messages.push(fixtureMessage)
   fixture.emit("message.updated", { info })
-  for (const part of parts) fixture.emit("message.part.updated", { part })
+  const publishParts = () => {
+    fixtureMessage.parts = parts
+    for (const part of parts) fixture.emit("message.part.updated", { part })
+  }
+  if (!deferParts) publishParts()
+  return publishParts
 }
 const send = async (text) => {
   await editor.fill(text)
@@ -40,7 +46,12 @@ try {
   // 1. Accepted send whose message carries surface context: the bubble goes once the message is shown.
   await send("the interactive buttons on the surface dont seem to work")
   await expect(ghost.locator(".outgoing-cue > span")).toHaveText("Sent")
-  project(posts()[0].body, "<surface>Squadron v2 · buttons: Approve, Reject</surface>")
+  const publishParts = project(posts()[0].body, "<surface>Squadron v2 · buttons: Approve, Reject</surface>", true)
+  // Send a frame after the metadata event, but before its parts. The outgoing bubble must stay readable.
+  await page.waitForTimeout(100)
+  await expect(ghost).toContainText("the interactive buttons on the surface dont seem to work")
+  await expect(users("the interactive buttons on the surface dont seem to work")).toHaveCount(0)
+  publishParts()
   await expect(users("the interactive buttons on the surface dont seem to work")).toHaveCount(1)
   await expect(ghost).toHaveCount(0)
   await shot("1-context")
@@ -70,7 +81,7 @@ try {
   const lost = posts()[2].body
   fixture.loseNormal = false
   await page.reload({ waitUntil: "domcontentloaded" })
-  await expect(ghost.locator(".outgoing-cue > span")).toHaveText(/^Not confirmed/)
+  await expect(ghost.locator(".outgoing-cue > span")).toHaveText(/^(Not confirmed|Not sent)/)
   project(lost)
   await expect(users("answer lost but it landed")).toHaveCount(1)
   await expect(ghost).toHaveCount(0)

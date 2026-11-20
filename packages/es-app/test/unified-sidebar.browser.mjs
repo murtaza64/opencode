@@ -122,7 +122,8 @@ try {
   await page.waitForTimeout(400)
   assert.deepEqual(writes, [], `preview wrote nothing: ${JSON.stringify(writes)}`)
 
-  // No reorder under the pointer on a refetch; new rows wait behind "N new ↑".
+  // No reorder under the pointer on a refetch. Focus is in the sidebar (the density toggle), so the list is
+  // frozen: the new row waits behind "1 new ↑". Once the pointer and focus leave, it shows in its sorted place.
   const before = await recent.locator(".nav-title").allTextContents()
   const hovered = await surfaceRow.evaluate((element) => element.closest(".recent-row")?.getAttribute("data-nav-key"))
   preview.fixture.surfaces = [
@@ -131,14 +132,12 @@ try {
   ]
   preview.fixture.emit("fixture.changed", {})
   // Surfaces poll every 15 s; wait for the refetch this test is about.
-  await page.waitForTimeout(16_000)
-  const during = await recent.locator(".nav-title").allTextContents()
-  assert.deepEqual(during, before, "refetch did not reorder the list under the pointer")
+  await expect(sidebar.locator(".new-items")).toContainText("1 new", { timeout: 60_000 })
+  assert.deepEqual(await recent.locator(".nav-title").allTextContents(), before, "refetch did not reorder the list under the pointer")
   assert.equal(await recent.locator(`.recent-row[data-nav-key="${hovered}"] .nav-title`).count(), 1)
   await page.mouse.move(600, 400)
-  await expect(sidebar.locator(".new-items")).toContainText("1 new")
-  await sidebar.locator(".new-items").click()
   await expect(recent.getByText("Brand new board")).toBeVisible()
+  assert.equal((await recent.locator(".nav-title").allTextContents()).indexOf("Brand new board"), 0, "new row sorted first")
   await expect(sidebar.locator(".new-items")).toHaveCount(0)
 
   // Keyboard: arrows move focus through the list and focus shows the preview; Enter opens the row.

@@ -1,85 +1,39 @@
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { A } from "@solidjs/router"
-import { costBand, oriCost, startTodayCost, STALE_MS, todayCost, type HostCost } from "../today-cost"
+import { createSignal, For, onCleanup, onMount, Show } from "solid-js"
+import { costBand, PERIODS, spendTotals, startTodayCost } from "../today-cost"
 import "./today-cost.css"
-import { clockTime } from "../local-time"
 
-let nextID = 0
-
-// "UTC−05:00": the offset a host bucketed today by, so a renderer that reports UTC on a non-UTC device is visible.
-const utcOffset = (minutes: number) => {
-  const sign = minutes < 0 ? "−" : "+"
-  const abs = Math.abs(minutes)
-  return `UTC${sign}${String(Math.floor(abs / 60)).padStart(2, "0")}:${String(abs % 60).padStart(2, "0")}`
-}
-
-// "tracking": the Core supports origin-only cost, but today started before it began recording origin.
-const gapLabel = (item: HostCost) => `${item.label} ${item.state === "tracking" ? "origin tracking started today" : item.state}`
-
-/** Title-bar "Work Today ~$142": one colour-banded summary of the Work hosts. When the whole day cannot be
- * combined without double counting, it shows the hosts' origin-only subtotal since a common hour
- * ("Work since 12 PM ~$80"); with neither, "Work Today partial" with no amount. Per-host figures and
- * coverage open in its details. Hidden (never $0) when no host has a cost. */
+/** Today · WTD · MTD across every WORK host. A partial amount is what is known so far (shown as "≥"); the
+ * tooltip names what is missing. A period with nothing known shows no amount, never $0. */
 export const TodayCost = () => {
-  onMount(startTodayCost)
   const [now, setNow] = createSignal(Date.now())
-  const tick = setInterval(() => setNow(Date.now()), 60_000)
-  onCleanup(() => clearInterval(tick))
-  const id = `today-cost-details-${++nextID}`
-  return <div class="today-cost-group"><Show when={todayCost(now())}>{(cost) => {
-    const time = (at: number) => clockTime(at)
-    const stale = () => now() - cost().observedAt > STALE_MS
-    const age = () => { const minutes = Math.max(0, Math.round((now() - cost().observedAt) / 60_000)); return minutes < 1 ? "just now" : `${minutes}m ago` }
-    const hostLine = (item: HostCost) => `${item.label}: ${item.cost !== undefined ? `$${item.cost.toFixed(2)}` : item.state === "pending" ? "reading…" : item.state}${item.note ? ` (${item.note})` : ""}${item.observedAt ? ` · ${time(item.observedAt)}` : ""}${item.offsetMinutes !== undefined ? ` · day as ${utcOffset(item.offsetMinutes)}` : ""}${cost().counted.includes(item.id) || item.cost === undefined ? "" : " · not in total"}`
-    const sub = () => cost().total === undefined ? cost().subtotal : undefined
-    const shown = () => cost().total ?? sub()?.cost
-    const since = () => sub() ? time(sub()!.since) : ""
-    const coverage = () => cost().total !== undefined ? ""
-      : sub() ? `partial: origin-only spend since ${since()}, summed across hosts; earlier today is not split by host yet${sub()!.unpriced ? "; some usage unpriced" : ""}`
-      : `partial: no combined total (${cost().gaps.map(gapLabel).join(", ")})`
-    const updated = () => stale() ? `last updated ${time(cost().observedAt)}` : `updated ${age()}`
-    const lines = () => [...cost().hosts.map(hostLine), coverage(), updated()].filter(Boolean)
-    const title = () => ["Estimated Work spend today (local date), API-billed work agents", ...lines()].join("\n")
-    const spoken = () => cost().total !== undefined
-      ? `about ${Math.round(cost().total!)} dollars${cost().hosts.length > 1 ? " combined" : ""}, estimate`
-      : sub() ? `about ${Math.round(sub()!.cost)} dollars since ${since()}, combined, partial estimate`
-      : `partial, no combined total; ${cost().gaps.map(gapLabel).join(", ")}`
-    return <span class="today-cost" data-band={shown() === undefined ? "partial" : costBand(shown()!)} data-scope={sub() ? "since" : undefined}
-      data-stale={stale() ? "true" : undefined} data-partial={String(cost().partial)} title={title()}
-      role="status" aria-label={`AI spend today: ${spoken()}`}>
-      <button type="button" class="today-cost-chip" popovertarget={id} style={{ "anchor-name": `--${id}` }} aria-label="Work Today details">
-        <span class="today-cost-label" aria-hidden="true">{sub() ? `Work since ${since()}` : "Work Today"}</span>
-        <Show when={shown() !== undefined} fallback={<span class="today-cost-amount today-cost-unknown" aria-hidden="true">partial</span>}>
-          <span class="today-cost-amount" aria-hidden="true"><span class="today-cost-approx">~</span>${Math.round(shown()!).toLocaleString()}</span>
-        </Show>
-      </button>
-      <div id={id} class="today-cost-details" popover="auto" style={{ "position-anchor": `--${id}` }}>
-        <div class="today-cost-details-head">Estimated Work spend today</div>
-        <For each={cost().hosts}>{(item) =>
-          <div class="today-cost-host" data-host={item.id} data-state={item.state}>
-            <bdi>{item.label}</bdi>
-            <span>{item.cost !== undefined ? `$${item.cost.toFixed(2)}` : item.state === "pending" ? "reading…" : "—"}</span>
-            <Show when={sub()?.hosts.find((part) => part.id === item.id)}>{(part) =>
-              <span class="today-cost-host-since">since {since()}: ${part().cost.toFixed(2)} (in total)</span>}
-            </Show>
-            <span class="today-cost-host-state">{item.state}{item.note ? ` · ${item.note}` : ""}{item.offsetMinutes !== undefined ? ` · day as ${utcOffset(item.offsetMinutes)}` : ""}{cost().counted.includes(item.id) || item.cost === undefined ? "" : sub() ? " · full day not in total" : " · not in total"}</span>
-          </div>}
-        </For>
-        <Show when={coverage()}><div class="today-cost-coverage">{coverage()}</div></Show>
-        <div class="today-cost-updated">{updated()}</div>
-      </div>
-    </span>
-  }}</Show>
-    <Show when={oriCost()}>{(ori) => {
-      const stale = () => now() - ori().observedAt > STALE_MS || new Date(ori().observedAt).toISOString().slice(0, 10) !== new Date(now()).toISOString().slice(0, 10)
-      const dollars = (value: number) => new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(value)
-      const label = () => stale() ? "Ori last read" : "Ori today (UTC)"
-      return <A href="/usage" class="today-cost ori-today-cost" data-band={costBand(ori().total)} data-stale={stale() ? "true" : undefined}
-        title={`Ori key · ${new Date(ori().observedAt).toISOString().slice(0, 10)} UTC\n${dollars(ori().byok)} provider-billed (BYOK) · ${dollars(ori().credits)} from OpenRouter credits\nOpen Usage for the credit limit and estimates outside OpenRouter.`}
-        aria-label={`${label()}: ${dollars(ori().total)}. Open Usage`}>
-        <span class="today-cost-label">{label()}</span>
-        <bdi class="today-cost-amount" dir="ltr">{dollars(ori().total)}</bdi>
-      </A>
-    }}</Show>
-  </div>
+  onMount(() => {
+    startTodayCost()
+    const timer = setInterval(() => setNow(Date.now()), 30_000)
+    onCleanup(() => clearInterval(timer))
+  })
+  const totals = () => spendTotals(now())
+  const money = (value: number) => value < 0.01 && value > 0 ? "<$0.01" : `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const text = (id: (typeof PERIODS)[number]["id"]) => {
+    const period = totals().periods[id]
+    return period.amount === undefined ? "not reported" : `${period.partial ? "≥" : ""}${money(period.amount)}`
+  }
+  const gaps = () => [...new Set(PERIODS.flatMap(item => totals().periods[item.id].gaps))]
+  const title = () => [
+    "Spend across Work hosts (UTC; week starts Monday): OpenRouter billing plus estimated gateway and other providers.",
+    ...PERIODS.map(item => `${item.label}: ${text(item.id)}`),
+    ...(gaps().length ? ["Partial:", ...gaps().map(gap => `· ${gap}`)] : []),
+  ].join("\n")
+  return <Show when={PERIODS.some(item => totals().periods[item.id].amount !== undefined)}>
+    <A href="/usage" class="today-cost today-cost-group" title={title()} data-partial={gaps().length ? "" : undefined}
+      aria-label={`Spend ${PERIODS.map(item => `${item.name} ${text(item.id)}`).join(", ")}${gaps().length ? ", partial" : ""}. Open Usage`}>
+      <For each={PERIODS}>{item => {
+        const period = () => totals().periods[item.id]
+        return <span class="today-cost-period" data-band={item.id === "today" && period().amount !== undefined ? costBand(period().amount!) : undefined}>
+          <span class="today-cost-label">{item.label}</span>
+          <bdi class="today-cost-amount" dir="ltr">{period().amount === undefined ? "—" : text(item.id)}</bdi>
+        </span>
+      }}</For>
+    </A>
+  </Show>
 }

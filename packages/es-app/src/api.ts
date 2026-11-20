@@ -349,9 +349,9 @@ const ocFor = (base: string) => ({
   },
 
   /** `prefix`: "" for this page's host, or "/hosts/<id>" for another Work host through this listener. */
-  usageDaily: async (days: number, signal?: AbortSignal, prefix = ""): Promise<UsageDaily | undefined> => {
+  usageDaily: async (days: number, signal?: AbortSignal, prefix = "", offsetMinutes = -new Date().getTimezoneOffset()): Promise<UsageDaily | undefined> => {
     // Days are local: the offset is east-positive minutes, the inverse of getTimezoneOffset().
-    const res = await fetch(`${prefix}/oc/experimental/usage/daily?days=${days}&offsetMinutes=${-new Date().getTimezoneOffset()}`, { signal })
+    const res = await fetch(`${prefix}/oc/experimental/usage/daily?days=${days}&offsetMinutes=${offsetMinutes}`, { signal })
     if (res.status === 404 || !res.headers.get("content-type")?.includes("application/json")) return undefined
     return json<UsageDaily>(res)
   },
@@ -710,6 +710,13 @@ export type OpenRouterUsage = {
   total_inference_usd?: number | null
   credits_today_utc_usd?: number | null
   external_byok_today_utc_usd?: number | null
+  /** Newer dashboards: OpenRouter's UTC week (from Monday) and calendar month to date. */
+  credits_week_utc_usd?: number | null
+  external_byok_week_utc_usd?: number | null
+  credits_month_utc_usd?: number | null
+  external_byok_month_utc_usd?: number | null
+  /** Newer dashboards: a one-way fingerprint of the key, so hosts sharing it count it once. */
+  key_id?: string | null
   key_limit_usd?: number | null
   key_remaining_usd?: number | null
   include_byok_in_key_limit?: boolean | null
@@ -727,8 +734,8 @@ export type OpenRouterUsage = {
 }
 
 export const es = {
-  async openrouterUsage(signal?: AbortSignal): Promise<OpenRouterUsage | undefined> {
-    const response = await fetch("/es/api/usage/openrouter", { credentials: "include", signal })
+  async openrouterUsage(signal?: AbortSignal, prefix = ""): Promise<OpenRouterUsage | undefined> {
+    const response = await fetch(`${prefix}/es/api/usage/openrouter`, { credentials: "include", signal })
     if (response.status === 404 || !response.headers.get("content-type")?.includes("application/json")) return undefined
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const value = await response.json().catch(() => undefined)

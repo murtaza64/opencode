@@ -62,7 +62,7 @@ import { livingActivity, setLivingActivity } from "../appearance"
 import { TranscriptMessage } from "../components/transcript-message"
 import { MailCauseRow } from "../components/mail-cause"
 import { InlineQuestion } from "../components/inline-question"
-import { TodoPart } from "../components/todos"
+import { TodoList, TodoPart } from "../components/todos"
 import { MailRow } from "../components/mail-row"
 import { createMailWake, MailWakeBar } from "../components/mail-wake-bar"
 import { mailUnread } from "../mail-ticks"
@@ -582,14 +582,17 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const status = () => live.data.session_status[sessionID]?.type ??
     (!activity.error(sessionID, directory) ? activity.status(sessionID) : undefined) ?? "idle"
   const messages = createMemo(() => live.data.message[sessionID] ?? [])
-  const echo = createMemo(() => pendingEcho(composer.state.normalSubmission, messages().map((message) => ({
-    id: message.id,
-    role: message.role,
-    text: message.role === "user"
-      // Typed text only: attached context arrives as synthetic text parts of the same message.
-      ? (live.data.part[message.id] ?? []).flatMap((part) => part.type === "text" && !part.synthetic ? [part.text] : []).join("")
-      : undefined,
-  }))))
+  const echo = createMemo(() => {
+    const submission = composer.state.normalSubmission
+    if (!submission) return false
+    const candidates = submission.messageID ? messages().filter(message => message.id === submission.messageID) : messages()
+    return pendingEcho(submission, candidates.map(message => {
+      const parts = live.data.part[message.id] ?? []
+      const text = message.role === "user" ? parts.flatMap(part => part.type === "text" && !part.synthetic ? [part.text] : []).join("") : undefined
+      return { id: message.id, role: message.role, text,
+        contentReady: (!submission.text || !!text) && parts.filter(part => part.type === "file" && part.mime.startsWith("image/")).length >= submission.images }
+    }))
+  })
   createEffect(() => {
     const visible = echo()
     if (visible && stick) queueMicrotask(pin)
@@ -639,7 +642,8 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const timeline = createMemo<ReturnType<typeof mailRows>>((previous) => {
     const feed = mail()
     const next = nextHandoff()
-    return mailRows(messages(), feed, previous, {
+    const pending = echo() ? composer.state.normalSubmission?.messageID : undefined
+    return mailRows(pending ? messages().filter(message => message.id !== pending) : messages(), feed, previous, {
       sessionID,
       lane: location()?.lane,
       from: session()?.time.created ?? Number.POSITIVE_INFINITY,
@@ -828,7 +832,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
     return tool ? { name: tool.name, at: tool.at } : undefined
   }, undefined, { equals: (a, b) => a?.name === b?.name && a?.at === b?.at })
   // The work line already animates while busy, so the transcript tail shows the same dot static.
-  const Thinking = () => <div class="thinking" title="waiting for the agent's first output"><span class="busy-dot" data-animate aria-hidden="true" /></div>
+  const Thinking = () => <div class="thinking" title="Waiting for the agent's first output"><span class="session-spinner" role="img" aria-label="Thinking" /></div>
   // Status words live in the dot's label; only what the person may act on stays as text (a reply, a failure).
   const WorkStatus = () => (
     <div class="session-work-status" role="status" data-state={workState()} title={backendError() || undefined}>
@@ -2444,8 +2448,18 @@ export function SessionView(props: { sessionID: string; directory: string; embed
         </div>
 
         <WorkStatus /><ComposerResults composer={composer} connected={connected()} />
-        <MailWakeBar unread={unreadMail()} status={mailWake.status()} editspace={location()?.name} session={sessionID}
-          onWoke={() => { void mailWake.refetch(); void refetchMail() }} />
+        <Show when={live.data.todo.length || unreadMail()}>
+          <div class="session-followups">
+            <Show when={live.data.todo.length}>
+              <details class="session-followups-todos">
+                <summary>TODO <span>{live.data.todo.filter(item => item.status === "completed").length}/{live.data.todo.length}</span></summary>
+                <div class="session-followups-list"><TodoList todos={live.data.todo} /></div>
+              </details>
+            </Show>
+            <MailWakeBar unread={unreadMail()} status={mailWake.status()} editspace={location()?.name} session={sessionID}
+              onWoke={() => { void mailWake.refetch(); void refetchMail() }} />
+          </div>
+        </Show>
         {/* This page's own origin is behind Cloudflare Access and its session expired (DD #897): not offline, not re-pair. */}
         <Show when={accessState() === "sign-in"}>
           <div class="access-sign-in" role="status" aria-live="polite">

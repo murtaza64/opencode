@@ -6,9 +6,9 @@
 import { createEffect, createMemo, createResource, createSignal, For, onCleanup, Show, untrack, type JSX } from "solid-js"
 import type { AttentionRecord } from "../attention"
 import { ago, sessionHref } from "../state"
-import { clockTime } from "../local-time"
+import { clockTime, shortDateTime } from "../local-time"
 import { host } from "../host"
-import { changedSinceOpened, FILTERS, holdOrder, markSidebarOpened, newcomers, openedAt, ORDER_LABEL, ORDER_MODES,
+import { arrange, changedSinceOpened, FILTERS, markSidebarOpened, newcomers, openedAt, ORDER_LABEL, ORDER_MODES,
   readDensity, readOrder, recentOrder, writeDensity, writeOrder, type Density, type RecentItem, type RecentOrder, type SidebarFilter } from "../sidebar-recent"
 import { useLocation } from "@solidjs/router"
 import { useDeskQueue } from "../desk-queue"
@@ -23,6 +23,8 @@ import { GrillSegments } from "./grilling"
 import { grilling } from "../attention-series"
 import { failureAge, failureLabel, OLD_FAILURE_MS } from "../session-failures"
 import { SurfaceGlyph } from "./surface-glyph"
+import { dateGroup, type DateGroup } from "../turn-order"
+import { decisionSummary, type DecisionSummary } from "../decision-summary"
 import { surfaceKindLabel, surfaceTags } from "../surface-tags"
 
 export type NavTab = SidebarFilter
@@ -254,6 +256,10 @@ const previewAttrs = (row: { key: string; preview: Preview }): Record<string, st
   }
 }
 
+// The same day headings as the Agents view, from each row's own last-change time.
+const GROUP_LABEL: Record<DateGroup, string> = { today: "Today", yesterday: "Yesterday", week: "This week", older: "Older", undated: "Undated" }
+const GROUP_RANK: Record<DateGroup, number> = { today: 0, yesterday: 1, week: 2, older: 3, undated: 4 }
+
 const KIND_LABEL: Record<string, string> = { agent: "Agent", surface: "Surface", decision: "Decision", permission: "Permission", question: "Question", failure: "Failure" }
 
 /** One sidebar list: Needs you on top, then Recent (blended agents, Surfaces and closed decisions).
@@ -358,12 +364,17 @@ export const UnifiedSidebar = (props: { toolbar: JSX.Element; agents: JSX.Elemen
     const agents: RecentNode[] = props.recentAgents.map(row => ({
       kind: "agent" as const, key: row.key, title: row.title, updated: row.updated, opened: openedAt(row.key), node: row.node, preview: row.preview,
     }))
-    return { agents, surfaces: surfaceRows, closed: closedRows, all: recentOrder([...agents, ...surfaceRows, ...closedRows], order()) }
+    // Blended and Updated split by day like the Agents view (the mode orders within a day); Opened is plain MRU.
+    const now = Date.now()
+    const ordered = recentOrder([...agents, ...surfaceRows, ...closedRows], order())
+    const grouped = order() === "opened" ? ordered : ordered.toSorted((a, b) => GROUP_RANK[dateGroup(a.updated, now)] - GROUP_RANK[dateGroup(b.updated, now)])
+    return { agents, surfaces: surfaceRows, closed: closedRows, all: grouped, now }
   })
+  const groupOf = (row: RecentNode | undefined) => order() === "opened" || !row ? undefined : dateGroup(row.updated, recent().now)
 
-  // Stable order: a refetch never reorders what is shown; new rows wait behind "N new ↑" until asked for.
+  const byKey = createMemo(() => new Map(recent().all.map(row => [row.key, row])))
+  // Stable order: a refetch never reorders what is shown within a day; new rows appear in place.
   const [shownKeys, setShownKeys] = createSignal<string[]>([])
-  const [pending, setPending] = createSignal<string[]>([])
   const [frozen, setFrozen] = createSignal<string[] | null>(null)
   // Until the reader has been in the list once (or a short settle), everything that arrives is part
   // of the first paint; only later arrivals queue behind the "N new" pill.
@@ -373,32 +384,39 @@ export const UnifiedSidebar = (props: { toolbar: JSX.Element; agents: JSX.Elemen
   createEffect(() => {
     const keys = recent().all.map(row => row.key)
     const current = untrack(shownKeys)
-    if (!keys.length) { setShownKeys([]); setPending([]); return }
-    if (!current.length || !untrack(settled)) { setShownKeys(keys); setPending([]); return }
-    const kept = holdOrder(current, keys)
-    // Existing rows keep their places (no reorder on refetch); newcomers append at the end and the
-    // pill offers their sorted position. Under the pointer or focus the frozen order hides them.
-    const added = newcomers(kept, keys)
-    setPending(added)
-    setShownKeys([...kept, ...added])
+    if (!keys.length) { setShownKeys([]); return }
+    if (!current.length || !untrack(settled)) { setShownKeys(keys); return }
+    // Every row shows at once: shown rows keep their order within their day, new rows take their sorted place
+    // (they used to wait at the end of the list, where a new agent looked missing). With focus in the list the
+    // frozen order holds and the pill offers the new rows.
+    const rows = untrack(byKey)
+    setShownKeys(arrange(current, keys, key => untrack(() => groupOf(rows.get(key))) ?? ""))
   })
-  const byKey = createMemo(() => new Map(recent().all.map(row => [row.key, row])))
   const shown = () => (frozen() ?? shownKeys()).flatMap(key => { const row = byKey().get(key); return row ? [row] : [] })
-  const applyNew = () => { setShownKeys(recent().all.map(row => row.key)); setPending([]); setFrozen(null) }
+  const applyNew = () => { setShownKeys(recent().all.map(row => row.key)); setFrozen(null) }
+  // Only a frozen list (focus inside it) hides new rows; the pill counts them and shows them.
+  const pending = () => { const held = frozen(); return held ? newcomers(held, shownKeys()) : [] }
 
   // Hover / focus / long-press preview. It reads only the row's own data: it never marks anything seen,
   // answers nothing and starts nothing.
   let listEl: HTMLDivElement | undefined
+  let rootEl: HTMLDivElement | undefined
   let pressTimer: ReturnType<typeof setTimeout> | undefined
-  const [preview, setPreview] = createSignal<{ data: Preview; top: number; left?: number; right?: number } | null>(null)
+  const [preview, setPreview] = createSignal<{ data: Preview; decision?: DecisionSummary; top: number; left?: number; right?: number } | null>(null)
+  // This host's decisions (open in Needs you, closed in Recent) also show what was offered and what came of it.
+  const recordFor = (key: string | undefined) => key?.startsWith("attention:")
+    ? (queue.attention.snapshot()?.value.records ?? []).find(record => `attention:${record.editspace}:${record.id}` === key) : undefined
   const showRow = (target: EventTarget | null) => {
-    const row = target instanceof Element ? target.closest<HTMLElement>("[data-preview-title]") : null
-    if (!row || !listEl?.contains(row)) { setPreview(null); return }
+    const row = target instanceof Element ? target.closest<HTMLElement>("[data-preview-title], .nav-decision[data-nav-item^='attention:']") : null
+    if (!row || !rootEl?.contains(row)) { setPreview(null); return }
+    const record = recordFor(row.dataset.navKey ?? row.dataset.navItem ?? row.querySelector<HTMLElement>("[data-nav-item]")?.dataset.navItem)
+    if (!row.dataset.previewTitle && !record) { setPreview(null); return }
     const box = row.getBoundingClientRect()
     const rtl = getComputedStyle(row).direction === "rtl"
     setPreview({
-      data: { kind: row.dataset.previewKind ?? "", title: row.dataset.previewTitle ?? "", agent: row.dataset.previewAgent,
-        owner: row.dataset.previewOwner, host: row.dataset.previewHost, meta: row.dataset.previewMeta, whatsNew: row.dataset.previewWhatsNew },
+      data: { kind: row.dataset.previewKind ?? KIND_LABEL.decision!, title: row.dataset.previewTitle ?? record!.title, agent: row.dataset.previewAgent,
+        owner: row.dataset.previewOwner ?? record?.lane ?? record?.editspace, host: row.dataset.previewHost, meta: row.dataset.previewMeta, whatsNew: row.dataset.previewWhatsNew },
+      ...(record ? { decision: decisionSummary(record) } : {}),
       top: Math.min(Math.max(8, box.top), Math.max(8, window.innerHeight - 240)),
       ...(rtl ? { right: window.innerWidth - box.left + 10 } : { left: box.right + 10 }),
     })
@@ -414,7 +432,7 @@ export const UnifiedSidebar = (props: { toolbar: JSX.Element; agents: JSX.Elemen
   }
   const focusIn = (event: FocusEvent) => showRow(event.target)
   const focusOut = (event: FocusEvent) => {
-    if (event.relatedTarget instanceof Node && listEl?.contains(event.relatedTarget)) return
+    if (event.relatedTarget instanceof Node && rootEl?.contains(event.relatedTarget)) return
     clearPreview()
   }
   const rowLinks = () => [...(listEl?.querySelectorAll<HTMLElement>("a.nav-item") ?? [])].filter(link => link.getClientRects().length > 0)
@@ -437,7 +455,7 @@ export const UnifiedSidebar = (props: { toolbar: JSX.Element; agents: JSX.Elemen
   }
   onCleanup(cancelPress)
 
-  return <div class="unified-sidebar" data-density={density()} data-filter={tab()}
+  return <div ref={rootEl} class="unified-sidebar" data-density={density()} data-filter={tab()}
     onClick={markRow} onKeyDown={onKeyDown} onPointerDown={startPress} onPointerUp={cancelPress} onPointerCancel={cancelPress}
     onPointerOver={(event) => showRow(event.target)} onPointerLeave={() => { cancelPress(); clearPreview(); unfreeze() }}
     onFocusIn={(event) => { freezekey(); focusIn(event) }} onFocusOut={focusOut}>
@@ -487,8 +505,15 @@ export const UnifiedSidebar = (props: { toolbar: JSX.Element; agents: JSX.Elemen
             </Show>
             {props.statuses}
             <div class="recent-list">
-              <For each={shown()}>{row =>
-                <Show when={row.kind === "agent"} fallback={<div class="recent-row" {...previewAttrs(row)}>{row.node}</div>}>{row.node}</Show>}</For>
+              <For each={shown()}>{(row, index) => {
+                const group = () => groupOf(row)
+                // A heading marks each change of day; a list that is all undated needs none.
+                const heading = () => group() !== undefined && (index() === 0 ? group() !== "undated" : group() !== groupOf(shown()[index() - 1]))
+                return <>
+                  <Show when={heading()}><div class="nav-heading nav-day">{GROUP_LABEL[group()!]}</div></Show>
+                  <Show when={row.kind === "agent"} fallback={<div class="recent-row" {...previewAttrs(row)}>{row.node}</div>}>{row.node}</Show>
+                </>
+              }}</For>
             </div>
             <Show when={!shown().length}><div class="dim nav-empty">{queue.surfaces.error() ?? "Nothing recent yet."}</div></Show>
           </>
@@ -574,6 +599,21 @@ export const UnifiedSidebar = (props: { toolbar: JSX.Element; agents: JSX.Elemen
       <Show when={!value().data.agent && value().data.owner}><div class="sidebar-preview-line"><bdi dir="auto">{value().data.owner}</bdi></div></Show>
       <Show when={value().data.host || value().data.meta}><div class="sidebar-preview-line">{[value().data.host, value().data.meta].filter(Boolean).join(" · ")}</div></Show>
       <Show when={value().data.whatsNew}><div class="sidebar-preview-line sidebar-preview-new" dir="auto">{value().data.whatsNew}</div></Show>
+      <Show when={value().decision}>{decision => <div class="sidebar-preview-decision">
+        <div class="sidebar-preview-line">{decision().pending ? "Options offered · none chosen yet"
+          : decision().options.some(option => option.chosen) ? `Chosen${decision().answeredAt ? ` ${shortDateTime(decision().answeredAt!)}` : ""}`
+          : decision().text ? `Answered in words${decision().answeredAt ? ` ${shortDateTime(decision().answeredAt!)}` : ""}` : "No option recorded as chosen"}</div>
+        <ul class="sidebar-preview-options">
+          <For each={decision().options}>{option => <li data-chosen={option.chosen ? "" : undefined}>
+            <span class="sidebar-preview-mark" aria-hidden="true">{option.chosen ? "✓" : "·"}</span>
+            <bdi dir="auto">{option.label}</bdi>
+            <Show when={option.chosen}><span class="sr-only"> (chosen)</span></Show>
+            <Show when={option.recommended}><span class="sidebar-preview-recommended"> · recommended</span></Show>
+          </li>}</For>
+        </ul>
+        <Show when={decision().unknownChoice}>{choice => <div class="sidebar-preview-line">Chosen: <bdi dir="auto">{choice()}</bdi> (not among the options)</div>}</Show>
+        <Show when={decision().text}>{text => <div class="sidebar-preview-line sidebar-preview-answer" dir="auto">“{text()}”</div>}</Show>
+      </div>}</Show>
       <div class="sidebar-preview-foot">preview only · nothing marked seen</div>
     </div>}</Show>
   </div>

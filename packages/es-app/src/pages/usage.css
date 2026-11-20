@@ -5,21 +5,9 @@
 .ori-number { font-size: clamp(38px, 6vw, 52px); line-height: 1; font-variant-numeric: tabular-nums; color: var(--text); }
 .ori-headline-label { font-size: 13px; line-height: 1.4; }
 .ori-source { margin-block: 6px 20px; }
-.ori-availability { border-block-start: 1px solid var(--surface1); border-block-end: 1px solid var(--surface1); padding-block: 14px; }
-.ori-availability h3 { font-size: 13px; margin-block-end: 12px; }
-.ori-budget-heading, .ori-budget-foot, .ori-provider-row, .ori-outside { display: flex; justify-content: space-between; gap: 8px 20px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
-.ori-budget-heading, .ori-provider-row, .ori-outside { font-size: 14px; }
-.ori-budget-row { padding-block: 0 12px; }
-.ori-budget { display: block; inline-size: 100%; block-size: 7px; margin-block: 8px 4px; appearance: none; border: 0; border-radius: 4px; overflow: hidden; background: var(--surface1); }
-.ori-budget::-webkit-progress-bar { background: var(--surface1); }
-.ori-budget::-webkit-progress-value { background: var(--accent); }
-.ori-budget::-moz-progress-bar { background: var(--accent); }
-.ori-budget-foot, .ori-budget-missing { font-size: 12px; color: var(--subtext0); }
-.ori-provider-row { padding-block-start: 12px; border-block-start: 1px solid var(--surface0); }
-.ori-warning { margin: 4px 0 0; color: var(--yellow); font-size: 12px; }
+.ori-outside { display: flex; justify-content: space-between; gap: 8px 20px; flex-wrap: wrap; font-variant-numeric: tabular-nums; font-size: 14px; border-block-start: 1px solid var(--surface0); padding-block-start: 14px; }
 .ori-breakdown { margin-block: 10px 18px; font-size: 12px; color: var(--subtext0); }
 .ori-breakdown summary, .usage-details > summary { cursor: pointer; color: var(--accent); }
-.ori-outside { border-block-start: 1px solid var(--surface0); padding-block-start: 14px; }
 .ori-usage > .home-source { margin-block: 4px; }
 .usage-details { margin-block: 26px; }
 .usage-details > summary { font-weight: 600; }

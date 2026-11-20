@@ -86,10 +86,6 @@ const SubscriptionSection = (props: { version: number; host: string }) => {
 }
 
 const OriUsage = (props: { value?: OpenRouterUsage; loading: boolean; today?: UsageDaily["days"][number]; refresh: () => void }) => {
-  const budget = () => props.value?.effective_budget
-  const limit = () => budget()?.limit_usd ?? props.value?.key_limit_usd
-  const left = () => budget()?.remaining_usd ?? props.value?.key_remaining_usd
-  const spend = () => budget()?.spend_usd ?? (limit() != null && left() != null ? limit()! - left()! : undefined)
   const amount = (value?: number | null) => value == null ? "not reported" : money(value)
   const expiration = () => {
     const value = Date.parse(props.value?.expires_at ?? "")
@@ -102,8 +98,6 @@ const OriUsage = (props: { value?: OpenRouterUsage; loading: boolean; today?: Us
     if (!Number.isFinite(observed) || new Date(observed).toISOString().slice(0, 10) !== new Date().toISOString().slice(0, 10)) return
     return typeof credits === "number" && Number.isFinite(credits) && credits >= 0 && typeof byok === "number" && Number.isFinite(byok) && byok >= 0 ? credits + byok : undefined
   }
-  const budgetLabel = () => `${amount(spend())} used of ${amount(limit())} · ${amount(left())} remaining`
-  const includesByok = () => budget()?.include_byok ?? props.value?.include_byok_in_key_limit
   const outside = () => props.today?.models.filter((row) => row.provider !== "openrouter" && row.coverage !== "no-usage")
   const priced = () => outside()?.filter((row) => row.cost != null && !unpriced(row))
   return <section class="ori-usage" aria-label="Inference usage">
@@ -117,21 +111,7 @@ const OriUsage = (props: { value?: OpenRouterUsage; loading: boolean; today?: Us
         <span class="ori-headline-label">spent today<br /><span class="home-muted">Ori key · UTC day</span></span>
       </div>
       <p class="ori-source home-source">{amount(props.value?.total_inference_usd)} since this key was created · as of {props.value?.observedAt ? clock(props.value.observedAt) : "not reported"}</p>
-      <div class="ori-availability" aria-label="Available spending">
-        <h3>Available</h3>
-        <div class="ori-budget-row">
-          <div class="ori-budget-heading"><span>{includesByok() === false ? "Ori key limit · credits only" : "Enforced budget"}</span><strong>{left() == null ? "Not reported" : left()! <= 0 ? "Limit reached" : `${amount(left())} left`}</strong></div>
-          <Show when={spend() != null && limit() != null && limit()! > 0} fallback={<div class="ori-budget-missing">Budget not reported</div>}>
-            <progress class="ori-budget" aria-label={`Enforced budget: ${budgetLabel()}`} max={limit()!} value={Math.max(0, Math.min(spend()!, limit()!))} />
-            <div class="ori-budget-foot"><span>{amount(spend())} used</span><span>{amount(limit())} limit</span></div>
-          </Show>
-          <span class="home-source">Key expires {expiration()}</span>
-        </div>
-        <div class="ori-provider-row"><span>Provider-billed inference <span class="home-muted">(BYOK)</span></span>
-          <strong class={includesByok() === false ? "usage-incomplete" : "home-muted"}>{includesByok() === false ? "Limit not reported" : includesByok() === true ? "Counted in budget above" : "Budget status not reported"}</strong>
-        </div>
-        <Show when={includesByok() === false}><p class="ori-warning">Provider-billed spend does not count toward the credit limit.</p></Show>
-      </div>
+      <p class="home-source">Key expires {expiration()}</p>
       <details class="ori-breakdown"><summary>How this is billed</summary>
         <p>Today (UTC): {amount(props.value?.credits_today_utc_usd)} from OpenRouter credits · {amount(props.value?.external_byok_today_utc_usd)} billed to provider.</p>
         <p>Key lifetime: {amount(props.value?.credits_usd)} from credits · {amount(props.value?.external_byok_usd)} billed to provider.</p>
