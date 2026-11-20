@@ -98,10 +98,11 @@ export const createDeskSession = () => {
     if (pointer()?.host) return
     await oc.preferModel(current.id, current.directory, model).then(setSession, () => undefined)
   }
-  const verifyDevice = async () => {
+  /** `quiet`: a background re-check of a desk that could not be read; it leaves the warning up until the read answers. */
+  const verifyDevice = async (quiet = false) => {
     const current = devicePointer()
     if (!current) return setStatus("none")
-    setStatus("checking")
+    if (!quiet) setStatus("checking")
     try {
       confirmed(await oc.session(current.session, current.directory))
     } catch (cause) {
@@ -162,12 +163,15 @@ export const createDeskSession = () => {
     const where = place(resolved)
     const key = JSON.stringify([resolved.kind, where, resolved.kind === "remote" ? resolved.view.session ?? null : null])
     setHome(resolved)
-    if (quiet && key === settled) return
+    // A desk that could not be read (Core answered 5xx or not at all) is read again on every poll, so a transient Core
+    // failure clears without the human pressing Check again.
+    const recheck = quiet && key === settled
+    if (recheck && status() !== "unavailable") return
     settled = key
     setPlaced(where ?? "home")
     if (where === "fallback") {
       setRemote(undefined)
-      return verifyDevice()
+      return verifyDevice(recheck)
     }
     if (resolved.kind === "unreachable") return setStatus("home-offline")
     if (resolved.kind === "remote") {
@@ -194,7 +198,7 @@ export const createDeskSession = () => {
       try { save(undefined) } catch { setPointer(undefined) }
       return setStatus("none")
     }
-    await verifyDevice()
+    await verifyDevice(recheck)
   }
   /** Re-read the home now: it may have been turned on or off since this page loaded. */
   const freshHome = async () => {
@@ -226,7 +230,7 @@ export const createDeskSession = () => {
   onMount(() => void verify())
   const poll = setInterval(() => {
     const kind = home().kind
-    if (kind === "remote" || kind === "unreachable" || placed() === "fallback") void verify(true)
+    if (kind === "remote" || kind === "unreachable" || placed() === "fallback" || status() === "unavailable") void verify(true)
   }, HOME_POLL)
   onCleanup(() => clearInterval(poll))
   const admit = async (value: DeskPointer & { create: CreateBody }) => {
