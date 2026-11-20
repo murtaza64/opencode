@@ -368,7 +368,7 @@ const start = async () => {
       clearTimeout(pick.timer)
       const { callback } = pick
       pick = undefined
-      await tellPage(reason)
+      if (reason) await Promise.race([tellPage(reason), new Promise<void>(resolve => setTimeout(resolve, 200))])
       callback(deviceId)
     }
     // The route comes from the main frame's own location at pick time: a same-document route change (the title-bar
@@ -378,11 +378,12 @@ const start = async () => {
       event.preventDefault()
       pick = pick ? { ...pick, callback } : { callback, timer: setTimeout(() => void finishPick("", "timeout"), GLASSES_PICK_MS) }
       void contents.mainFrame.executeJavaScript("({ href: location.href, side: document.documentElement.dataset.glassesSide ?? '' })").then((value: unknown) => {
+        if (pick?.callback !== callback) return
         const page = value as { href?: unknown; side?: unknown } | undefined
         const decision = pickDecision({ contentsURL: contents.getURL(), pageHref: page?.href, side: page?.side, devices, origin })
         if (decision.kind === "refuse") return void finishPick("", "not-glasses-page")
         if (decision.kind === "pick") void finishPick(decision.deviceId)
-      }, () => void finishPick("", "timeout"))
+      }, () => { if (pick?.callback === callback) void finishPick("", "timeout") })
     })
     showRendererLoss(contents, origin)
   }

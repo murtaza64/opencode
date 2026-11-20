@@ -1,10 +1,10 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-11-20.3",
+  "release": "2026-11-20.4",
   "items": [
     {
-      "title": "Glasses toggle",
-      "detail": "Use the title-bar glasses icon beside Porter and Theme to connect or disconnect. The connection stays active as you move between pages."
+      "title": "Glasses connection",
+      "detail": "The title-bar icon starts connecting and shows a spinner. If only the right temple connects, use the icon to retry the left temple."
     }
   ],
   "limits": ["Bluetooth pairing and in-app transcription still need hardware verification."]

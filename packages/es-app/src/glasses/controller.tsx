@@ -441,6 +441,18 @@ function createGlasses() {
     setConnState(result.state)
   }
 
+  // SPA navigation commits after the click handler. Never start a picker
+  // after activation expires or the attempt is cancelled.
+  const awaitGlassesPage = async (signal: AbortSignal) => {
+    const deadline = performance.now() + 750
+    while (location.pathname !== "/glasses" && !signal.aborted && performance.now() < deadline) {
+      await new Promise<void>(resolve => setTimeout(resolve, 16))
+    }
+    if (signal.aborted) throw new DOMException("Connection cancelled", "AbortError")
+    if (location.pathname !== "/glasses" || navigator.userActivation?.isActive === false)
+      throw new DOMException("Click Connect on the Glasses page to continue.", "SecurityError")
+  }
+
   const connect = async () => {
     if (connState() !== "disconnected") return
     if (!G2.supported) { setStatusLine("Bluetooth is unavailable here."); return }
@@ -451,9 +463,11 @@ function createGlasses() {
     setConnState("connecting")
     setStatusLine("Looking for your glasses…")
     try {
+      await awaitGlassesPage(signal)
       // Pick both temples back to back, before any GATT work: each pick needs the click's activation and the
       // Glasses route, and the handshake that follows can outlast both. A missed left pick leaves it partial.
       const right = await G2.pick("R")
+      if (!current()) return
       const pair = G2.pairOf(right)
       const left = await G2.pick("L", pair).catch(() => undefined)
       if (!current()) return
@@ -502,6 +516,7 @@ function createGlasses() {
     setConnState("connecting")
     setStatusLine("Looking for the left temple…")
     try {
+      await awaitGlassesPage(signal)
       const left = await G2.pick("L", g2.pair)
       if (!current()) return
       await finishLeft(g2, left, signal, current)

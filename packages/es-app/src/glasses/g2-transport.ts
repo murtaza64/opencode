@@ -183,7 +183,13 @@ export class G2 extends EventTarget {
     const link = new G2()
     signal.addEventListener("abort", () => link.disconnect(), { once: true })
     try {
-      link.#right = await open(device, raw => link.#receive(raw))
+      const right = await open(device, raw => link.#receive(raw))
+      if (signal.aborted || link.#closed) {
+        right.listeners.abort()
+        right.gatt.disconnect()
+        throw new DOMException("Connection cancelled", "AbortError")
+      }
+      link.#right = right
       device.addEventListener("gattserverdisconnected", () => link.disconnect(), { signal: link.#right.listeners.signal })
       signal.throwIfAborted()
       for (const [flag, payload] of handshake()) {
