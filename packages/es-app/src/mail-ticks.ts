@@ -90,6 +90,16 @@ export const unreadWakeLine = (input: { status?: MailWakeStatus; unavailable?: b
   return "No wake scheduled · read on the agent's next turn"
 }
 
+/** How an unread chip draws its wake line: `off` (nothing will wake the agent: struck bolt), `on` (a wake is
+ * scheduled or under way: plain bolt, with the countdown when there is one), or `text` (blocked or unknown: words). */
+export const wakeCue = (line: string): { kind: "off" | "on" | "text"; short?: string } => {
+  if (line === "No wake scheduled · read on the agent's next turn" || line === "Agent paused · no wake scheduled") return { kind: "off" }
+  const countdown = /^Agent wakes (in .+|now)$/.exec(line)?.[1]
+  if (countdown) return { kind: "on", short: countdown }
+  if (line === "Agent is picking this up" || line === "Agent wakes when it is free") return { kind: "on" }
+  return { kind: "text" }
+}
+
 const wakeIn = (at: number, now: number) => {
   const seconds = Math.round((at - now) / 1000)
   if (seconds <= 0) return "now"

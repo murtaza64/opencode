@@ -2294,3 +2294,10 @@ abbr.utc-time { text-decoration: underline dotted; text-underline-offset: 2px; c
 .access-sign-in { display: flex; align-items: center; gap: 8px; margin-block: 4px; padding: 4px 8px; font-size: 12px;
   color: var(--subtext1); border-block-start: 1px solid var(--surface1); }
 .access-sign-in > span { flex: 1; min-width: 0; }
+/* Unread wake cue: a bolt; struck through and grey when no wake is coming, accent when one is. */
+.mail-unread-wake[data-cue=on], .mail-unread-wake[data-cue=off] { display: inline-flex; flex: none; align-items: center; gap: 4px; padding: 0; font-size: 11px; line-height: 1; }
+.mail-wake-cue { position: relative; display: inline-flex; }
+.mail-unread-wake[data-cue=on] .mail-wake-cue { color: var(--accent, var(--lavender)); }
+.mail-unread-wake[data-cue=off] .mail-wake-cue { color: var(--overlay0); }
+.mail-unread-wake[data-cue=off] .mail-wake-cue::after { content: ""; position: absolute; inset-inline-start: -1px; inset-block-start: 50%; inline-size: calc(100% + 2px); block-size: 1.5px; background: currentColor; border-radius: 1px; transform: rotate(-45deg); }
+.mail-wake-short { font-variant-numeric: tabular-nums; }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { MailDelivery, MailWakeStatus } from "./api"
-import { mailLevel, mailUnread, outgoingMailTick, unreadWakeLine } from "./mail-ticks"
+import { mailLevel, mailUnread, outgoingMailTick, unreadWakeLine, wakeCue } from "./mail-ticks"
 
 const delivery = (extra: Partial<MailDelivery>): MailDelivery => ({ message_id: "m#1", recipient: "ux-impl", session: "ses_r", mode: "actionable",
   state: "queued", request_id: null, error: null, presented_at: null, handled_at: null, ...extra })
@@ -73,4 +73,13 @@ describe("unread incoming mail", () => {
     expect(line(undefined, {}, true)).toBe("Next wake not available")
     expect(line(undefined)).toBeUndefined()
   })
+})
+
+test("wake cue: no wake is a struck bolt, a scheduled wake a bolt with its countdown, blocked stays words", () => {
+  expect(wakeCue("No wake scheduled · read on the agent's next turn")).toEqual({ kind: "off" })
+  expect(wakeCue("Agent paused · no wake scheduled")).toEqual({ kind: "off" })
+  expect(wakeCue("Agent wakes in 12 min")).toEqual({ kind: "on", short: "in 12 min" })
+  expect(wakeCue("Agent is picking this up")).toEqual({ kind: "on" })
+  expect(wakeCue("Blocked: lane parked")).toEqual({ kind: "text" })
+  expect(wakeCue("Next wake not available")).toEqual({ kind: "text" })
 })

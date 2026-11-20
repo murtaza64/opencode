@@ -2,6 +2,7 @@ import { Show, type JSX } from "solid-js"
 import type { MailWakeState } from "../api"
 import type { MailDirection } from "../mail-timeline"
 import { Glyph } from "./icons"
+import { wakeCue } from "../mail-ticks"
 import { TickMark } from "./message-tick"
 import type { Tick } from "../message-ticks"
 import { MailParty } from "./mail-party"
@@ -84,7 +85,15 @@ export const MailSummary = (props: {
         <span class="mail-activity-status" data-status={status()}>{status()}</span>
       </>}</Show>
       <Show when={props.tick}>{(tick) => <TickMark tick={tick().tick} label={tick().label.replaceAll("\n", "; ")} />}</Show>
-      <Show when={wake()?.state === "caused" || wake()?.state === "unknown" ? wake()!.state : undefined}>{(state) =>
+      {/* Unread: the wake line as a bolt beside the inbox glyph, struck and grey when nothing will wake the agent,
+        * plain when a wake is scheduled or under way (with its countdown). The words are the tooltip; the summary's
+        * aria-label already carries them. */}
+      <Show when={props.unread?.line && wakeCue(props.unread.line).kind !== "text" ? props.unread.line : undefined}>{(line) =>
+        <span class="mail-unread-wake" data-cue={wakeCue(line()).kind} title={line()} aria-hidden="true">
+          <Show when={wakeCue(line()).short}>{(short) => <span class="mail-wake-short">{short()}</span>}</Show>
+          <span class="mail-wake-cue"><Glyph name="zap-fill" size={12} /></span>
+        </span>}</Show>
+      <Show when={!props.unread?.line && (wake()?.state === "caused" || wake()?.state === "unknown") ? wake()!.state : undefined}>{(state) =>
         <span class="mail-activity-wake" data-wake={state()} aria-hidden="true">
           <Glyph name={state() === "caused" ? "zap-fill" : "dot"} size={12} />
         </span>}
@@ -93,7 +102,9 @@ export const MailSummary = (props: {
         <Glyph name={props.direction === "out" ? "paper-airplane" : "inbox"} />
       </span>
     </span>
-    <Show when={props.unread?.line}>{(line) => <span class="mail-unread-wake" aria-hidden="true">{line()}</span>}</Show>
+    {/* Blocked or unknown wake state stays in words under the title. */}
+    <Show when={props.unread?.line && wakeCue(props.unread.line).kind === "text" ? props.unread.line : undefined}>{(line) =>
+      <span class="mail-unread-wake" data-cue="text" aria-hidden="true">{line()}</span>}</Show>
   </summary>
 }
 

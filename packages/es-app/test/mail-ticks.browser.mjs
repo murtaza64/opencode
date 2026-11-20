@@ -109,7 +109,12 @@ try {
     const unread = chip("i-unread-1")
     await expect(unread).toHaveAttribute("data-unread", "true")
     await expect(unread.locator(".mail-unread-dot")).toHaveCount(1)
-    await expect(unread.locator(".mail-unread-wake")).toHaveText("Agent wakes in 12 min")
+    // Scheduled: a plain bolt with the countdown; the words are the tooltip and part of the chip's label.
+    await expect(unread.locator(".mail-unread-wake")).toHaveAttribute("data-cue", "on")
+    await expect(unread.locator(".mail-unread-wake")).toHaveText("in 12 min")
+    await expect(unread.locator(".mail-unread-wake")).toHaveAttribute("title", "Agent wakes in 12 min")
+    await expect(unread).toHaveAttribute("aria-label", /Agent wakes in 12 min/)
+    expect(await unread.locator(".mail-wake-cue").evaluate((element) => getComputedStyle(element, "::after").content)).toBe("none")
     await expect(unread).toHaveAttribute("aria-label", /^Unread mail from Relay: .*, Agent wakes in 12 min$/)
     expect(await unread.locator(".mail-activity-party").evaluate((element) => getComputedStyle(element).fontWeight)).toBe("600")
     await expect(chip("i-read")).not.toHaveAttribute("data-unread", "true")
@@ -129,15 +134,15 @@ try {
     expect(barBox.y + barBox.height).toBeLessThanOrEqual(composer.y + 1)
     await page.screenshot({ path: join(shots, `scheduled-${dir}.png`) })
     // A long sender (porter-sidebar's Laptop Porter case) truncates: party, kind and inbox glyph stay on one line,
-    // the inbox glyph at the trailing edge, and the wake line stays under it at the same edge.
+    // the inbox glyph at the trailing edge, and the wake bolt on the same line just before it.
     const long = chip("i-unread-1")
     await long.locator(".mail-activity-party .mail-party").first().evaluate((element) => { element.textContent = "Laptop Porter · Could not load the chat while the Mac Mini is powered off and unreachable" })
     const box = async (selector) => long.locator(selector).first().boundingBox()
-    const [party, kind, glyph, line] = await Promise.all([".mail-activity-party", ".mail-activity-purpose", ".mail-activity-kind", ".mail-unread-wake"].map(box))
+    const [party, kind, glyph, line] = await Promise.all([".mail-activity-party", ".mail-activity-purpose", ".mail-activity-kind", ".mail-wake-cue"].map(box))
     const summary = await long.boundingBox()
     expect(Math.abs((party.y + party.height / 2) - (glyph.y + glyph.height / 2))).toBeLessThan(4)
     expect(Math.abs((kind.y + kind.height / 2) - (glyph.y + glyph.height / 2))).toBeLessThan(4)
-    expect(line.y).toBeGreaterThan(glyph.y + glyph.height - 2)
+    expect(Math.abs((line.y + line.height / 2) - (glyph.y + glyph.height / 2))).toBeLessThan(4)
     const trailing = (b) => dir === "ltr" ? summary.x + summary.width - (b.x + b.width) : b.x - summary.x
     expect(trailing(glyph)).toBeLessThan(16)
     expect(trailing(line)).toBeLessThan(40)
@@ -180,7 +185,14 @@ try {
       post = () => ({ status: 403, body: { error: "operator required" } })
       fixture.emitDashboard("mail")
       await expect(bar.locator(".mail-wake-now")).toHaveText("Wake now", { timeout: 20_000 })
-      await expect(chip("i-unread-1").locator(".mail-unread-wake")).toHaveText("No wake scheduled · read on the agent's next turn")
+      // No wake: a struck, grey bolt only; the words are the tooltip and the aria-label.
+      const none = chip("i-unread-1").locator(".mail-unread-wake")
+      await expect(none).toHaveAttribute("data-cue", "off")
+      await expect(none).toHaveText("")
+      await expect(none).toHaveAttribute("title", "No wake scheduled · read on the agent's next turn")
+      await expect(chip("i-unread-1")).toHaveAttribute("aria-label", /No wake scheduled · read on the agent's next turn/)
+      expect(await none.locator(".mail-wake-cue").evaluate((element) => getComputedStyle(element, "::after").content)).toBe('""')
+      await page.screenshot({ path: join(shots, "wake-cue-off.png") })
       await bar.locator(".mail-wake-now").click()
       await expect(bar.locator(".mail-wake-error")).toHaveText("Couldn't wake: operator connection unavailable")
       await expect(bar.locator(".mail-wake-now")).toHaveText("Retry")
@@ -199,7 +211,7 @@ try {
       // Paused (passive review off): the line says so and the button delivers without claiming the schedule resumed.
       wake = state("paused", { reason: "passive-review-off", at_ms: null, count: 2 })
       fixture.emitDashboard("mail")
-      await expect(chip("i-unread-1").locator(".mail-unread-wake")).toHaveText("Agent paused · no wake scheduled", { timeout: 20_000 })
+      await expect(chip("i-unread-1").locator(".mail-unread-wake")).toHaveAttribute("title", "Agent paused · no wake scheduled", { timeout: 20_000 })
       await expect(bar.locator(".mail-wake-now")).toHaveAttribute("title", /without resuming the schedule/)
 
       // Blocked (no owner): no button, the reason in words.
