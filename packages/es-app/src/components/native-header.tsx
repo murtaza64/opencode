@@ -6,6 +6,9 @@ import { TodayCost } from "./today-cost"
 import { Glyph } from "./icons"
 import { useDeskChatOptional } from "../desk-companion"
 import { DESK } from "../desk-identity"
+import { useLocation, useNavigate } from "@solidjs/router"
+import { useGlassesOptional } from "../glasses/controller"
+import { toggleAction } from "../glasses/live-hud"
 
 export const nativeHeader =
   typeof navigator !== "undefined" &&
@@ -58,6 +61,7 @@ export const NativeHeader = (props: ParentProps) => {
           <div class="native-header-project">{props.children}</div>
           <div class="native-header-session" ref={setHeaderTarget} />
           <TodayCost />
+          <GlassesToggle />
           <DeskToggle />
           {/* Offered only when this laptop has a usable wallpaper palette. */}
           <Show when={current() && themeVars(current()!.palette)}>
@@ -95,4 +99,26 @@ const DeskToggle = () => {
       title={desk().open() ? `Hide ${DESK.name}` : `Show ${DESK.name}`} onClick={() => desk().setOpen(!desk().open())}>
       <Glyph name="comment-discussion" />
     </button>}</Show>
+}
+
+/** Glasses connect/disconnect in the top bar. It shares the one connection with the Glasses page; picking a device
+ * only works there, so from another tab it opens the page and starts the same connect from this click. */
+const GlassesToggle = () => {
+  const glasses = useGlassesOptional()
+  const navigate = useNavigate()
+  const location = useLocation()
+  return <Show when={glasses}>{(g) => {
+    const state = () => g().connState()
+    const label = () => state() === "connected" ? "Disconnect glasses" : state() === "connecting" ? "Cancel connecting glasses" : "Connect glasses"
+    const click = () => {
+      const action = toggleAction(state(), location.pathname === "/glasses")
+      if (action === "disconnect" || action === "cancel") return g().disconnect()
+      if (action === "open-and-connect") navigate("/glasses")
+      void g().connect()
+    }
+    return <button type="button" class="header-glasses-toggle" role="switch" aria-checked={state() === "connected"}
+      aria-busy={state() === "connecting"} data-state={state()} aria-label={label()} title={label()} onClick={click}>
+      <Glyph name="glasses" />
+    </button>
+  }}</Show>
 }

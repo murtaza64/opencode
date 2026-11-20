@@ -34,6 +34,7 @@ const request = async (side: "R" | "L", pair?: string) => {
   if (!adapter) throw new Error("Bluetooth unavailable")
   // Electron's chooser does not receive the Web Bluetooth request filters.
   document.documentElement.dataset.glassesSide = side
+  delete document.documentElement.dataset.glassesPickResult
   try {
     const device = await adapter.requestDevice({ filters: (pair ? [`${pair}${side}_`] : ["Even G2_", "G2_"]).map(namePrefix => ({ namePrefix })), optionalServices: services })
     if (temple(device.name)?.[2] !== side || (pair && temple(device.name)?.[1] !== pair)) throw new Error("Wrong temple")

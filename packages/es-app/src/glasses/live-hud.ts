@@ -84,3 +84,16 @@ export const textFrame = (state: HudState, now: number): string[] => {
   if (state.mode === "reply") return [`Porter  ${state.page + 1}/${replyPages(state.reply)}`, ...replyLines(state.reply, state.page), "Swipe to turn page | Tap to dismiss"]
   return ["", "", state.queueKnown ? "             All clear" : "          Needs you unavailable", "", "          Double-tap to talk"]
 }
+
+/** Plain message for a temple pick that the desktop cancelled (es-desktop main.ts sets the reason before cancelling). */
+export const pickFailure = (reason: string | undefined) => {
+  if (reason === "timeout") return "Couldn't find the glasses. Take them out of the case, close any other app or tab connected to them, and check Editspace has Bluetooth access in System Settings."
+  if (reason === "not-glasses-page") return "Open the Glasses tab to connect."
+  return undefined
+}
+
+/** What the title-bar toggle does: device selection only runs on the Glasses page, so elsewhere it goes there first. */
+export const toggleAction = (state: "disconnected" | "connecting" | "connected", onGlassesPage: boolean) =>
+  state === "connected" ? "disconnect" as const
+    : state === "connecting" ? "cancel" as const
+    : onGlassesPage ? "connect" as const : "open-and-connect" as const

@@ -23,7 +23,8 @@ export const buildScene = (state: HudState, now: number) => {
   }
   const dots = (y: number) => [286, 320, 354].forEach((x, i) => {
     const active = i === Math.floor(now / 350) % 3
-    calls.push(rect({ x: x - 10, y, w: 20, h: 20, r: 10, fill: active ? 15 : 3, border: active ? 15 : 5, depth: at(active ? "focus" : "base") }))
+    // One layer for the whole row: per-dot depth would shift dots by different amounts per lens and break centering.
+    calls.push(rect({ x: x - 10, y, w: 20, h: 20, r: 10, fill: active ? 15 : 3, border: active ? 15 : 5, depth: at("raised") }))
   })
   if (state.mode === "ambient") {
     center(state.queueKnown ? "All clear" : "Needs you unavailable", 222, "far", 9)
@@ -65,7 +66,8 @@ export const buildScene = (state: HudState, now: number) => {
     }
     if (voice.phase === "recording") {
       const pulse = [24, 30, 36, 30][Math.floor(now / 350) % 4]!
-      calls.push(rect({ x: 272, y: 144, w: 96, h: 96, r: 48, depth: at("card") }), rect({ x: 320 - pulse / 2, y: 192 - pulse / 2, w: pulse, h: pulse, r: pulse / 2, fill: 15, depth: at("focus") }))
+      // Ring and dot share a layer so the dot stays centered in the ring on both lenses.
+      calls.push(rect({ x: 272, y: 144, w: 96, h: 96, r: 48, depth: at("focus") }), rect({ x: 320 - pulse / 2, y: 192 - pulse / 2, w: pulse, h: pulse, r: pulse / 2, fill: 15, depth: at("focus") }))
       center("Listening", 266, "raised")
       center("Release or double-tap when done", 306, "base", 7)
     }
@@ -74,7 +76,7 @@ export const buildScene = (state: HudState, now: number) => {
       center(voice.phase === "sending" ? "Sending" : "Transcribing", 262, "base", 9)
     }
     if (voice.phase === "error") {
-      block(voice.error ?? "Try again", 190, 3, "base")
+      linesOf(voice.error ?? "Try again").slice(0, 3).forEach((line, i) => center(line, 190 + i * 30, "base"))
       center("Tap to dismiss", 300, "base", 7)
     }
   }

@@ -110,3 +110,10 @@
 .header-desk-toggle:hover { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
 .header-desk-toggle[aria-pressed=true] { color: var(--accent); }
 .header-desk-toggle + .appearance-toggle { margin-inline-start: 0; }
+.header-glasses-toggle { -webkit-app-region: no-drag; flex: none; margin-inline-start: auto; display: grid; place-items: center; inline-size: 28px; block-size: 28px; padding: 0; color: var(--subtext0); background: transparent; border: 0; border-radius: 4px; }
+.header-glasses-toggle:hover { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
+.header-glasses-toggle[data-state=connected] { color: var(--accent); }
+.header-glasses-toggle[data-state=connecting] { color: var(--text); animation: header-glasses-pulse 1.2s ease-in-out infinite; }
+.header-glasses-toggle + .header-desk-toggle { margin-inline-start: 0; }
+@keyframes header-glasses-pulse { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .header-glasses-toggle[data-state=connecting] { animation: none; } }

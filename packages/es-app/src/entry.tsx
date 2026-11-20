@@ -30,6 +30,7 @@ import { installSidebarKeys, leftOpen } from "./ui"
 import { installAppLinks, installInkLinks } from "./link-url"
 import { trackModes } from "./components/mode-switch"
 import { DeskChatProvider, DeskCompanion } from "./desk-companion"
+import { GlassesProvider } from "./glasses/controller"
 import { installAppearance } from "./appearance"
 import { KeyboardLayer } from "./components/keyboard-layer"
 import { startPerfTelemetry } from "./perf-telemetry"
@@ -100,6 +101,7 @@ function Providers(props: ParentProps) {
               <BriefsProvider>
               <DeskQueueProvider>
               <DeskChatProvider>
+              <GlassesProvider>
               <div class="shell" ref={shellEl}>
                 {/* One wallpaper for the whole window, behind the content and the companion split (appearance.css). */}
                 <div class="wallpaper-backdrop" aria-hidden="true" />
@@ -115,6 +117,7 @@ function Providers(props: ParentProps) {
                 <EntityRefs container={() => shellEl} />
                 <KeyboardLayer />
               </div>
+              </GlassesProvider>
               </DeskChatProvider>
               </DeskQueueProvider>
               </BriefsProvider>

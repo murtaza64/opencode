@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { cfwPackets, clear, crcOk, drawCalls, ext, eyeShift, leasePayload, parseCfwAck, rect, text } from "./cfw"
 import { buildScene } from "./cfw-scene"
 import { crc16, frames } from "./g2-transport"
-import { replyPages, toolVerb, type HudState } from "./live-hud"
+import { pickFailure, replyPages, toggleAction, toolVerb, type HudState } from "./live-hud"
 
 const hex = (bytes: ArrayLike<number>) => Buffer.from(Array.from(bytes)).toString("hex")
 
@@ -120,4 +120,31 @@ test("every scene encodes within one record", () => {
     }), 0)
     expect(drawCalls(calls).length).toBeLessThan(4000)
   }
+})
+
+test("recording ring and dot share one depth so the dot stays centered on both lenses", () => {
+  const calls = buildScene(baseState({ mode: "voice", voice: { phase: "recording" } }), 0)
+  const shapes = calls.flatMap(call => (call.meta.kind === "rect" ? [call.meta] : []))
+  expect(shapes.length).toBe(2)
+  expect(new Set(shapes.map(shape => shape.depth)).size).toBe(1)
+  expect(shapes.map(shape => shape.x + shape.w / 2)).toEqual([320, 320])
+})
+
+test("thinking dots share one depth", () => {
+  const calls = buildScene(baseState({ mode: "thinking", tool: "read" }), 0)
+  const dots = calls.flatMap(call => (call.meta.kind === "rect" ? [call.meta.depth] : []))
+  expect(new Set(dots).size).toBe(1)
+})
+
+test("title-bar toggle opens the Glasses page before connecting from another tab", () => {
+  expect(toggleAction("disconnected", true)).toBe("connect")
+  expect(toggleAction("disconnected", false)).toBe("open-and-connect")
+  expect(toggleAction("connecting", false)).toBe("cancel")
+  expect(toggleAction("connected", true)).toBe("disconnect")
+})
+
+test("a desktop-cancelled pick explains the cause", () => {
+  expect(pickFailure("timeout")).toContain("Take them out of the case")
+  expect(pickFailure("not-glasses-page")).toBe("Open the Glasses tab to connect.")
+  expect(pickFailure(undefined)).toBeUndefined()
 })

@@ -360,21 +360,25 @@ const start = async () => {
     // Chromium re-fires this as devices are discovered, each time with a fresh callback; only the latest one counts.
     // Exactly one callback ends the request: the matching temple, or "" (cancel) off the Glasses page or on timeout.
     let pick: { callback: (deviceId: string) => void; timer: ReturnType<typeof setTimeout> } | undefined
-    const finishPick = (deviceId: string) => {
+    // A cancel reaches the page only as "User cancelled"; the reason goes on the document first so it can say why.
+    const tellPage = (reason: string) =>
+      contents.mainFrame.executeJavaScript(`document.documentElement.dataset.glassesPickResult = ${JSON.stringify(reason)}`).catch(() => undefined)
+    const finishPick = async (deviceId: string, reason = "") => {
       if (!pick) return
       clearTimeout(pick.timer)
       const { callback } = pick
       pick = undefined
+      await tellPage(reason)
       callback(deviceId)
     }
     contents.on("select-bluetooth-device", (event, devices, callback) => {
       event.preventDefault()
-      if (!glassesPage(contents.getURL(), origin)) return callback("")
-      pick = pick ? { ...pick, callback } : { callback, timer: setTimeout(() => finishPick(""), GLASSES_PICK_MS) }
+      if (!glassesPage(contents.getURL(), origin)) return void tellPage("not-glasses-page").then(() => callback(""))
+      pick = pick ? { ...pick, callback } : { callback, timer: setTimeout(() => void finishPick("", "timeout"), GLASSES_PICK_MS) }
       void contents.mainFrame.executeJavaScript("document.documentElement.dataset.glassesSide ?? ''").then((side) => {
         const id = pickGlassesDevice(side, devices)
-        if (id) finishPick(id)
-      }, () => finishPick(""))
+        if (id) void finishPick(id)
+      }, () => void finishPick("", "timeout"))
     })
     showRendererLoss(contents, origin)
   }
