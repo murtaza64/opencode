@@ -27,7 +27,7 @@ import { McpOAuthCallback } from "./oauth-callback"
 import { McpAuth } from "./auth"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { TuiEvent } from "@/server/tui-event"
-import { Cause, Effect, Exit, Layer, Context, Schema, Stream } from "effect"
+import { Cause, Clock, Effect, Exit, Layer, Context, Schema, Stream } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
@@ -37,6 +37,8 @@ import { McpEvent } from "@opencode-ai/schema/mcp-event"
 import { McpBrowser } from "./browser"
 
 const DEFAULT_TIMEOUT = 30_000
+// How long a new instance reuses another instance's needs_auth/failed answer for a remote server instead of probing it.
+const UNAVAILABLE_TTL_MS = 5 * 60_000
 const CLIENT_OPTIONS = {
   capabilities: {
     // https://github.com/anomalyco/opencode/issues/11948
@@ -425,6 +427,32 @@ const layer = Layer.effect(
     )
     const cfgSvc = yield* Config.Service
 
+    // A remote server's answer does not depend on the directory, so one that needed auth or failed is not probed again
+    // by every new instance (each probe can take seconds, or the full timeout). The key includes the server's config
+    // and stored tokens, so a config change or a sign-in from any process probes again at once. Only tokens: a probe
+    // itself writes client registration and OAuth state into the auth entry.
+    const unavailable = new Map<string, { fingerprint: string; status: Status; until: number }>()
+
+    const createRemembered = Effect.fn("MCP.createRemembered")(function* (key: string, mcp: ConfigMCPV1.Info) {
+      if (mcp.type !== "remote") return yield* create(key, mcp)
+      const fingerprint = JSON.stringify([mcp, (yield* auth.get(key))?.tokens ?? null])
+      const known = unavailable.get(key)
+      if (known && known.fingerprint === fingerprint && (yield* Clock.currentTimeMillis) < known.until) {
+        yield* Effect.logDebug("server unavailable (remembered)", { key, status: known.status.status })
+        return { status: known.status } satisfies CreateResult
+      }
+      const result = yield* create(key, mcp)
+      if (result.mcpClient || result.status.status === "connected" || result.status.status === "disabled")
+        unavailable.delete(key)
+      else
+        unavailable.set(key, {
+          fingerprint,
+          status: result.status,
+          until: (yield* Clock.currentTimeMillis) + UNAVAILABLE_TTL_MS,
+        })
+      return result
+    })
+
     const descendants = Effect.fnUntraced(
       function* (pid: number) {
         if (process.platform === "win32") return [] as number[]
@@ -537,7 +565,7 @@ const layer = Layer.effect(
                 s.status[key] = { status: "needs_auth" }
                 return
               }
-              const result = yield* create(key, mcp)
+              const result = yield* createRemembered(key, mcp)
               if (cacheKey && result.status.status === "needs_auth") {
                 if (authRequired.size >= 1024) authRequired.delete(authRequired.keys().next().value ?? "")
                 authRequired.set(cacheKey, Date.now() + AUTH_REQUIRED_TTL_MS)
@@ -603,6 +631,7 @@ const layer = Layer.effect(
     ) {
       const bridge = yield* EffectBridge.make()
       const previous = s.clients[name]
+      unavailable.delete(name)
       s.status[name] = { status: "connected" }
       s.clients[name] = client
       s.defs[name] = listed
