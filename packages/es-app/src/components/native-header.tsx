@@ -61,15 +61,17 @@ export const NativeHeader = (props: ParentProps) => {
           <div class="native-header-project">{props.children}</div>
           <div class="native-header-session" ref={setHeaderTarget} />
           <TodayCost />
-          <GlassesToggle />
-          <DeskToggle />
-          {/* Offered only when this laptop has a usable wallpaper palette. */}
-          <Show when={current() && themeVars(current()!.palette)}>
-            <button class="appearance-toggle" aria-pressed={enabled()} title={enabled() ? "Use the default colours" : "Use colours from your wallpaper"}
-              aria-label="Wallpaper colours" onClick={() => setEnabled(!enabled())}>
-              <span class="appearance-swatch" aria-hidden="true" />
-            </button>
-          </Show>
+          <div class="native-header-actions">
+            <GlassesToggle />
+            <DeskToggle />
+            {/* Offered only when this laptop has a usable wallpaper palette. */}
+            <Show when={current() && themeVars(current()!.palette)}>
+              <button class="appearance-toggle" aria-pressed={enabled()} title={enabled() ? "Use the default colours" : "Use colours from your wallpaper"}
+                aria-label="Wallpaper colours" onClick={() => setEnabled(!enabled())}>
+                <span class="appearance-swatch" aria-hidden="true" />
+              </button>
+            </Show>
+          </div>
         </div>
       </div>
     </Portal>

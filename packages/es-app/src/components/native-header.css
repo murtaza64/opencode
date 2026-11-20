@@ -118,4 +118,7 @@
 .header-glasses-spinner { inline-size: 12px; block-size: 12px; border: 2px solid currentColor; border-inline-end-color: transparent; border-radius: 50%; animation: header-glasses-spin 0.8s linear infinite; }
 @keyframes header-glasses-spin { to { transform: rotate(1turn); } }
 .header-glasses-toggle + .header-desk-toggle { margin-inline-start: 0; }
+.native-header-actions { display: flex; align-items: center; gap: var(--header-gap); flex: none; }
+.native-header-actions > button { margin: 0; box-sizing: border-box; min-inline-size: 28px; min-block-size: 28px; inline-size: 28px; block-size: 28px; padding: 0; border: 0; display: grid; place-items: center; }
+.native-header-actions .glyph { display: block; margin: 0; }
 @media (prefers-reduced-motion: reduce) { .header-glasses-spinner { animation-duration: 2.4s; } }

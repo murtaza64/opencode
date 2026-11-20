@@ -9,10 +9,11 @@ import { useDeskQueue } from "../desk-queue"
 import { BackendStatus } from "./backend-status"
 import { HostSwitch } from "./host-switch"
 import { useDeskChat } from "../desk-companion"
-import { useDashboard } from "../state"
+import { sessionHref, useDashboard } from "../state"
 import { deskSessionID } from "../desk-session"
 import { KEY, modeHref, modeOf, REDIRECTS, type Mode } from "../mode"
 import { DESK } from "../desk-identity"
+import { host } from "../host"
 
 /** Mounted once in the shell: records the last URL seen in each mode. */
 export const trackModes = () => {
@@ -68,6 +69,11 @@ export const ModeSwitch = (props: { compact?: boolean }) => {
 export const NavEntries = (props: { compact?: boolean }) => {
   const { activity } = useDashboard()
   const chat = useDeskChat()
+  const localPorter = () => {
+    const pointer = chat.desk.pointer()
+    if (host()?.profile === "personal" || chat.desk.placed() !== "fallback" || chat.desk.status() !== "ready" || pointer?.host) return
+    return pointer
+  }
   const deskBusy = () => {
     const pointer = chat.desk.status() === "ready" ? chat.desk.pointer() : undefined
     const status = pointer ? activity.status(pointer.session) : undefined
@@ -92,6 +98,13 @@ export const NavEntries = (props: { compact?: boolean }) => {
         <Show when={deskBusy()}><span class="dot busy nav-busy" role="status" aria-label={`${DESK.name} is working`} title={`${DESK.name} is working`} /></Show>
       </button>
     </div>
+    <Show when={localPorter()}>{(pointer) =>
+      <A class="nav-item nav-local-porter" href={sessionHref(pointer().session, pointer().directory)}
+        title="Open Laptop Porter" aria-label="Laptop Porter">
+        <Glyph name="comment-discussion" />
+        <Show when={!props.compact}><span class="nav-title">Laptop Porter</span></Show>
+      </A>
+    }</Show>
     <BackendStatus />
     <HostSwitch compact={props.compact} />
   </nav>

@@ -1,10 +1,14 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-11-20.4",
+  "release": "2026-11-20.6",
   "items": [
     {
-      "title": "Glasses connection",
-      "detail": "The title-bar icon starts connecting and shows a spinner. If only the right temple connects, use the icon to retry the left temple."
+      "title": "Laptop Porter in the sidebar",
+      "detail": "When the Laptop is serving as Porter’s fallback, open its conversation directly from the sidebar. The title-bar icons are centered."
+    },
+    {
+      "title": "Glasses alignment",
+      "detail": "HUD text uses the glasses font widths for centering. Use Alignment check in the Glasses tab to compare the center and depth layers on both lenses."
     }
   ],
   "limits": ["Bluetooth pairing and in-app transcription still need hardware verification."]

@@ -68,7 +68,7 @@ const GLYPHS = {
 export type GlyphName = keyof typeof GLYPHS
 
 export const Glyph = (props: { name: GlyphName; size?: number; class?: string }) => (
-  <svg class={`glyph ${props.class ?? ""}`} width={props.size ?? 14} height={props.size ?? 14} viewBox="0 0 16 16"
+  <svg class={`glyph ${props.class ?? ""}`} width={props.size ?? 14} height={props.size ?? 14} viewBox={props.name === "glasses" ? "0 0.85 16 16" : "0 0 16 16"}
     fill="currentColor" aria-hidden="true">
     {GLYPHS[props.name].map((d) => <path d={d} />)}
   </svg>
