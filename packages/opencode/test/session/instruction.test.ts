@@ -229,6 +229,29 @@ describe("Instruction.system", () => {
     }),
   )
 
+  it.live("an agent's exclude patterns drop matching instruction files, including ~/ patterns", () =>
+    Effect.gen(function* () {
+      const globalTmp = yield* tmpWithFiles({ "AGENTS.md": "# Global Instructions" })
+      const projectTmp = yield* tmpWithFiles({ "AGENTS.md": "# Project Instructions" })
+
+      yield* Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        const global = `Instructions from: ${path.join(globalTmp, "AGENTS.md")}\n# Global Instructions`
+        const project = `Instructions from: ${path.join(projectTmp, "AGENTS.md")}\n# Project Instructions`
+        const all = yield* svc.system([])
+        expect(all).toContain(global)
+        expect(all).toContain(project)
+        const withoutProject = yield* svc.system([path.join(projectTmp, "*")])
+        expect(withoutProject).toContain(global)
+        expect(withoutProject).not.toContain(project)
+        const withoutGlobal = yield* svc.system(["~/AGENTS.md"])
+        expect(withoutGlobal).not.toContain(global)
+        expect(withoutGlobal).toContain(project)
+        expect(withoutGlobal).toHaveLength(all.length - 1)
+      }).pipe(provideInstance(projectTmp), provideInstruction({ home: globalTmp, config: globalTmp }))
+    }),
+  )
+
   it.live("skips project and global CLAUDE.md when Claude Code prompt is disabled", () =>
     Effect.gen(function* () {
       const globalTmp = yield* tmpWithFiles({ ".claude/CLAUDE.md": "# Global Claude" })

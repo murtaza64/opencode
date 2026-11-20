@@ -11,6 +11,7 @@ import { Flag } from "@opencode-ai/core/flag/flag"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { Global } from "@opencode-ai/core/global"
+import { Wildcard } from "@opencode-ai/core/util/wildcard"
 import type { MessageV2 } from "./message-v2"
 import type { MessageID } from "./schema"
 
@@ -34,7 +35,8 @@ function extract(messages: SessionV1.WithParts[]) {
 export interface Interface {
   readonly clear: (messageID: MessageID) => Effect.Effect<void>
   readonly systemPaths: () => Effect.Effect<Set<string>, FSUtil.Error>
-  readonly system: () => Effect.Effect<string[], FSUtil.Error>
+  /** Instruction file contents for the system prompt, without the files `exclude` matches (absolute-path wildcards). */
+  readonly system: (exclude?: readonly string[]) => Effect.Effect<string[], FSUtil.Error>
   readonly find: (dir: string) => Effect.Effect<string | undefined, FSUtil.Error>
   readonly resolve: (
     messages: SessionV1.WithParts[],
@@ -152,11 +154,16 @@ const layer: Layer.Layer<
       return paths
     })
 
-    const system = Effect.fn("Instruction.system")(function* () {
+    const system = Effect.fn("Instruction.system")(function* (exclude?: readonly string[]) {
       const config = yield* cfg.get()
-      const paths = yield* systemPaths()
+      const patterns = (exclude ?? []).map((item) => (item.startsWith("~/") ? path.join(global.home, item.slice(2)) : item))
+      const paths = new Set(
+        [...(yield* systemPaths())].filter((item) => !patterns.some((pattern) => Wildcard.match(item, pattern))),
+      )
       const urls = (config.instructions ?? []).filter(
-        (item) => item.startsWith("https://") || item.startsWith("http://"),
+        (item) =>
+          (item.startsWith("https://") || item.startsWith("http://")) &&
+          !patterns.some((pattern) => Wildcard.match(item, pattern)),
       )
 
       const files = yield* Effect.forEach(Array.from(paths), read, { concurrency: 8 })

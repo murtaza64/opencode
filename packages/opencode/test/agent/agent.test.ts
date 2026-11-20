@@ -318,6 +318,24 @@ it.instance(
 )
 
 it.instance(
+  "agent instructions_exclude and compaction_threshold reach the agent, not its provider options",
+  () =>
+    Effect.gen(function* () {
+      const build = yield* load((svc) => svc.get("build"))
+      expect(build?.instructionsExclude).toEqual(["~/notes/*.md"])
+      expect(build?.compactionThreshold).toBe(60_000)
+      expect(build?.options).toEqual({})
+    }),
+  {
+    config: {
+      agent: {
+        build: { instructions_exclude: ["~/notes/*.md"], compaction_threshold: 60_000 },
+      },
+    },
+  },
+)
+
+it.instance(
   "agent mode can be overridden",
   () =>
     Effect.gen(function* () {

@@ -14,6 +14,7 @@ import { Provider } from "@/provider/provider"
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionCompaction } from "./compaction"
+import { agentThreshold } from "./overflow"
 import { SystemPrompt } from "./system"
 import { Instruction } from "./instruction"
 import { Plugin } from "../plugin"
@@ -1247,7 +1248,11 @@ const layer = Layer.effect(
           if (
             lastFinished &&
             lastFinished.summary !== true &&
-            (yield* compaction.isOverflow({ tokens: lastFinished.tokens, model }))
+            (yield* compaction.isOverflow({
+              tokens: lastFinished.tokens,
+              model,
+              threshold: agentThreshold(msgs, (yield* agents.get(lastUser.agent))?.compactionThreshold),
+            }))
           ) {
             yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
             continue
@@ -1350,7 +1355,7 @@ const layer = Layer.effect(
             const [skills, env, instructions, mcpInstructions, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
               sys.environment(model),
-              instruction.system().pipe(Effect.orDie),
+              instruction.system(agent.instructionsExclude).pipe(Effect.orDie),
               sys.mcp(agent, session.permission),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])

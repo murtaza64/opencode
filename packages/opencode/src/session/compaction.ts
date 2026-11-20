@@ -169,6 +169,7 @@ export interface Interface {
   readonly isOverflow: (input: {
     tokens: SessionV1.Assistant["tokens"]
     model: Provider.Model
+    threshold?: number
   }) => Effect.Effect<boolean>
   readonly prune: (input: { sessionID: SessionID }) => Effect.Effect<void>
   readonly process: (input: {
@@ -206,12 +207,14 @@ const layer = Layer.effect(
     const isOverflow = Effect.fn("SessionCompaction.isOverflow")(function* (input: {
       tokens: SessionV1.Assistant["tokens"]
       model: Provider.Model
+      threshold?: number
     }) {
       return overflow({
         cfg: yield* config.get(),
         tokens: input.tokens,
         model: input.model,
         outputTokenMax: flags.outputTokenMax,
+        threshold: input.threshold,
       })
     })
 

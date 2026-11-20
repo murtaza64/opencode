@@ -9,6 +9,7 @@ import * as Stream from "effect/Stream"
 import { Config } from "@/config/config"
 import { LLM } from "../../src/session/llm"
 import { SessionCompaction } from "../../src/session/compaction"
+import { agentThreshold } from "../../src/session/overflow"
 import { Token } from "@/util/token"
 import { Plugin } from "../../src/plugin"
 import { provideTmpdirInstance, TestInstance } from "../fixture/fixture"
@@ -379,6 +380,31 @@ function compactionContext(context: string) {
   })
 }
 
+describe("agentThreshold", () => {
+  const assistant = (id: string, created: number, input: number, summary?: boolean) =>
+    ({
+      info: {
+        id,
+        role: "assistant",
+        summary,
+        finish: "stop",
+        time: { created },
+        tokens: { input, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      parts: [],
+    }) as unknown as SessionV1.WithParts
+
+  // A fixed prompt above the threshold must not compact on every turn (it looped before this rule).
+  test("counts conversation growth from the first step since the session began or last compacted", () => {
+    expect(agentThreshold([], 60_000)).toBeUndefined()
+    expect(agentThreshold([assistant("a1", 1, 82_000)], undefined)).toBeUndefined()
+    expect(agentThreshold([assistant("a1", 1, 82_000), assistant("a2", 2, 90_000)], 60_000)).toBe(142_000)
+    const compacted = [assistant("a1", 1, 82_000), assistant("s", 3, 5_000, true), assistant("a3", 4, 95_000)]
+    expect(agentThreshold(compacted, 60_000)).toBe(155_000)
+    expect(agentThreshold([assistant("a1", 1, 82_000), assistant("s", 3, 5_000, true)], 60_000)).toBeUndefined()
+  })
+})
+
 describe("session.compaction.isOverflow", () => {
   it.live(
     "returns true when token count exceeds usable context",
@@ -388,6 +414,21 @@ describe("session.compaction.isOverflow", () => {
         const model = createModel({ context: 100_000, output: 32_000 })
         const tokens = { input: 75_000, output: 5_000, reasoning: 0, cache: { read: 0, write: 0 } }
         expect(yield* compact.isOverflow({ tokens, model })).toBe(true)
+      }),
+    ),
+  )
+
+  // An agent can compact well below the model's window (Porter: ~60k on a 1M-token model).
+  it.live(
+    "an agent compaction threshold triggers below the model's limit",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const compact = yield* SessionCompaction.Service
+        const model = createModel({ context: 1_000_000, output: 32_000 })
+        const tokens = { input: 55_000, output: 6_000, reasoning: 0, cache: { read: 0, write: 0 } }
+        expect(yield* compact.isOverflow({ tokens, model })).toBe(false)
+        expect(yield* compact.isOverflow({ tokens, model, threshold: 60_000 })).toBe(true)
+        expect(yield* compact.isOverflow({ tokens, model, threshold: 80_000 })).toBe(false)
       }),
     ),
   )

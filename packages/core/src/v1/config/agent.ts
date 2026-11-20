@@ -36,6 +36,14 @@ const AgentSchema = Schema.StructWithRest(
     }),
     maxSteps: Schema.optional(PositiveInt).annotate({ description: "@deprecated Use 'steps' field instead." }),
     permission: Schema.optional(ConfigPermissionV1.Info),
+    instructions_exclude: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+      description:
+        "Instruction files this agent does not load: wildcard patterns matched against each file's absolute path (~/ expands to home)",
+    }),
+    compaction_threshold: Schema.optional(PositiveInt).annotate({
+      description:
+        "Compact this agent's sessions once the conversation has grown by this many tokens since the first step after the session began or last compacted (the fixed system prompt is not counted). The model's own limit still applies.",
+    }),
   }),
   [Schema.Record(Schema.String, Schema.Any)],
 )
@@ -57,6 +65,8 @@ const KNOWN_KEYS = new Set([
   "permission",
   "disable",
   "tools",
+  "instructions_exclude",
+  "compaction_threshold",
 ])
 
 const normalize = (agent: Schema.Schema.Type<typeof AgentSchema>): Schema.Schema.Type<typeof AgentSchema> => {
