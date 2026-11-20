@@ -1,7 +1,9 @@
 .today-cost-group { display: inline-flex; align-items: baseline; gap: 10px; min-inline-size: 0; text-decoration: none; color: inherit; }
 .today-cost-group:is(:hover, :focus-visible) .today-cost-label { text-decoration: underline; }
 .today-cost-period { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
-.sidebar-top .today-cost-group { margin-inline-start: auto; }
+/* Web: the sidebar is narrow, so the three amounts take their own row at the inline end of the top bar. */
+.sidebar-top:has(.today-cost-group) { flex-wrap: wrap; row-gap: 2px; }
+.sidebar-top .today-cost-group { margin-inline-start: auto; flex-wrap: wrap; justify-content: flex-end; gap: 0 8px; max-inline-size: 100%; }
 .sidebar-top .today-cost-group .today-cost { margin-inline-start: 0; }
 .today-cost { display: inline-flex; white-space: nowrap; flex-shrink: 0; }
 /* Details: the per-host breakdown and coverage, in the top layer under the chip, aligned to its inline end;
@@ -23,3 +25,4 @@
 .sidebar-top .today-cost { margin-inline-start: auto; padding-inline-end: 2px; }
 /* The title bar drags the window; the badge is read-only text, so it keeps dragging but shows its tooltip. */
 .native-header .today-cost { -webkit-app-region: no-drag; }
+.sidebar-top .today-cost.today-cost-group { flex-shrink: 1; white-space: normal; min-inline-size: 0; }

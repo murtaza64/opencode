@@ -352,6 +352,8 @@ const ocFor = (base: string) => ({
   usageDaily: async (days: number, signal?: AbortSignal, prefix = "", offsetMinutes = -new Date().getTimezoneOffset()): Promise<UsageDaily | undefined> => {
     // Days are local: the offset is east-positive minutes, the inverse of getTimezoneOffset().
     const res = await fetch(`${prefix}/oc/experimental/usage/daily?days=${days}&offsetMinutes=${offsetMinutes}`, { signal })
+    // A host proxy that cannot reach the host answers 5xx: that is an outage, not a Core without the route.
+    if (res.status >= 500) throw new Error(`HTTP ${res.status}`)
     if (res.status === 404 || !res.headers.get("content-type")?.includes("application/json")) return undefined
     return json<UsageDaily>(res)
   },
@@ -736,6 +738,7 @@ export type OpenRouterUsage = {
 export const es = {
   async openrouterUsage(signal?: AbortSignal, prefix = ""): Promise<OpenRouterUsage | undefined> {
     const response = await fetch(`${prefix}/es/api/usage/openrouter`, { credentials: "include", signal })
+    if (response.status >= 500) throw new Error(`HTTP ${response.status}`)
     if (response.status === 404 || !response.headers.get("content-type")?.includes("application/json")) return undefined
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const value = await response.json().catch(() => undefined)
@@ -776,9 +779,9 @@ export const es = {
   mailWake: (name: string, session: string, signal?: AbortSignal): Promise<MailWakeStatus> =>
     fetch(`/es/api/mail/wake?es=${encodeURIComponent(name)}&session=${encodeURIComponent(session)}`, { signal }).then(statusJson<MailWakeStatus>),
   // Operator only (the dashboard checks the operator cookie and CSRF header); one click = one coalesced wake.
-  wakeNow: (name: string, session: string): Promise<MailWakeResult> =>
+  wakeNow: (name: string, session: string, signal?: AbortSignal): Promise<MailWakeResult> =>
     fetch(`/es/api/mail/wake?es=${encodeURIComponent(name)}&session=${encodeURIComponent(session)}`, {
-      method: "POST", headers: { "content-type": "application/json", "X-Attention-CSRF": "1" }, body: "{}",
+      method: "POST", headers: { "content-type": "application/json", "X-Attention-CSRF": "1" }, body: "{}", signal,
     }).then(statusJson<MailWakeResult>),
   wakeEvents: (name: string, session: string, signal?: AbortSignal): Promise<{ events: WakeEvent[] }> =>
     fetch(`/es/api/wake-events?es=${encodeURIComponent(name)}&session=${encodeURIComponent(session)}`, { signal }).then(statusJson<{ events: WakeEvent[] }>),

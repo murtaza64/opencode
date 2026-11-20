@@ -82,10 +82,11 @@ try {
     const heights = await Promise.all(["caused", "joined", "none", "unknown", "legacy"].map(async (id) => Math.round((await chip(page, id).boundingBox()).height)))
     expect(new Set(heights).size).toBe(1)
 
-    // The glyph sits before the party in reading order.
+    // Trailing edge: party, then the wake glyph, then the direction glyph last; the chip sits at the inline end.
     const glyph = await chip(page, "caused").locator(".mail-activity-wake").boundingBox()
     const party = await chip(page, "caused").locator(".mail-activity-party").boundingBox()
-    if (dir === "ltr" ? glyph.x > party.x : glyph.x < party.x) throw new Error(`wake glyph not before the party (${dir})`)
+    const kind = await chip(page, "caused").locator(".mail-activity-kind").boundingBox()
+    if (dir === "ltr" ? !(party.x < glyph.x && glyph.x < kind.x) : !(party.x > glyph.x && glyph.x > kind.x)) throw new Error(`party · wake · inbox order (${dir})`)
 
     // The expansion states the typed evidence per recipient.
     await chip(page, "none").click()

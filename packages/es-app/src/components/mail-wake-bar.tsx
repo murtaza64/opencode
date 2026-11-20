@@ -1,5 +1,5 @@
 import { createEffect, createResource, createSignal, onCleanup, Show, type Accessor } from "solid-js"
-import { ApiStatusError, es, type MailMessage, type MailWakeStatus } from "../api"
+import { ApiStatusError, es, type MailMessage, type MailWakeResult, type MailWakeStatus } from "../api"
 import { blockedReason, unreadWakeLine } from "../mail-ticks"
 
 // Unread passive mail and Wake now (Loupe mail-ticks.md, DD #414). The next wake comes from the dashboard's real
@@ -26,35 +26,56 @@ export const createMailWake = (input: { editspace: Accessor<string | undefined>;
   return { status, refetch, line }
 }
 
-type Phase = { kind: "idle" } | { kind: "waking"; busy: boolean } | { kind: "failed"; why: string }
+type Phase = { kind: "idle" } | { kind: "waking" } | { kind: "done"; text: string } | { kind: "failed"; why: string }
+
+/** The dashboard answers a wake at once (it re-offers admissions and returns); past this the request is reported as
+ * failed instead of leaving the button pending. A retry is safe: the runtime coalesces repeated offers. */
+export const WAKE_TIMEOUT_MS = 10_000
+/** How long an outcome stays before the button offers Wake now again (unless the mail is read first). */
+const OUTCOME_MS = 8_000
+
+/** What one Wake now did, from the dashboard's answer. */
+export const wakeOutcome = (body: MailWakeResult): Phase => {
+  if (body.state?.state === "blocked") return { kind: "failed", why: blockedReason(body.state.next?.reason) }
+  if (body.busy) return { kind: "done", text: "Already running · reads it at its next safe point" }
+  if (!body.offered) return { kind: "done", text: "Nothing to re-offer · the mail is already with the agent" }
+  return { kind: "done", text: "Woken" }
+}
 
 /** One per session, above the composer, only while unread passive mail exists: `3 unread · Wake now`. */
 export const MailWakeBar = (props: { unread: number; status: MailWakeStatus | undefined; editspace: string | undefined; session: string; onWoke: () => void }) => {
   const [phase, setPhase] = createSignal<Phase>({ kind: "idle" })
-  // The unread count dropping (the agent was shown the mail) ends a wake; a new batch starts idle again.
+  // The unread count dropping (the agent was shown the mail) ends an outcome; a new batch starts idle again.
   let seen = props.unread
   createEffect(() => {
-    if (props.unread < seen && phase().kind === "waking") setPhase({ kind: "idle" })
+    if (props.unread < seen && phase().kind === "done") setPhase({ kind: "idle" })
     seen = props.unread
+  })
+  // An outcome is shown for a few seconds, never indefinitely.
+  createEffect(() => {
+    if (phase().kind !== "done") return
+    const timer = setTimeout(() => setPhase({ kind: "idle" }), OUTCOME_MS)
+    onCleanup(() => clearTimeout(timer))
   })
   const blocked = () => props.status?.state === "blocked" ? props.status : undefined
   // Passive review off: the button delivers the pending batch now without resuming the schedule (h-r N2).
   const paused = () => props.status?.state === "paused"
   const wake = async () => {
     if (!props.editspace || phase().kind === "waking") return
-    setPhase({ kind: "waking", busy: false })
-    const result = await es.wakeNow(props.editspace, props.session).then((body) => ({ body }), (error: unknown) => ({ error }))
+    setPhase({ kind: "waking" })
+    const result = await es.wakeNow(props.editspace, props.session, AbortSignal.timeout(WAKE_TIMEOUT_MS)).then((body) => ({ body }), (error: unknown) => ({ error }))
     if ("error" in result) {
       const status = result.error instanceof ApiStatusError ? result.error.status : undefined
-      return setPhase({ kind: "failed", why: status === 401 || status === 403 ? "operator connection unavailable" : status === 404 ? "this dashboard has no wake route" : "the dashboard did not confirm it" })
+      const timedOut = result.error instanceof DOMException && result.error.name === "TimeoutError"
+      return setPhase({ kind: "failed", why: timedOut ? `no answer from the dashboard in ${WAKE_TIMEOUT_MS / 1000} s` : status === 401 || status === 403 ? "operator connection unavailable" : status === 404 ? "this dashboard has no wake route" : status ? `the dashboard answered HTTP ${status}` : "the dashboard did not confirm it" })
     }
-    if (result.body.state?.state === "blocked") return setPhase({ kind: "failed", why: blockedReason(result.body.state.next?.reason) })
-    setPhase({ kind: "waking", busy: result.body.busy })
-    props.onWoke()
+    const outcome = wakeOutcome(result.body)
+    setPhase(outcome)
+    if (outcome.kind === "done") props.onWoke()
   }
   const label = () => {
     const current = phase()
-    if (current.kind === "waking") return current.busy ? "Waking… agent is working, reads it at its next safe point" : "Waking…"
+    if (current.kind === "waking") return "Waking…"
     if (current.kind === "failed") return "Retry"
     return paused() ? "Deliver now" : "Wake now"
   }
@@ -63,6 +84,10 @@ export const MailWakeBar = (props: { unread: number; status: MailWakeStatus | un
       <span class="mail-wake-count">{props.unread} unread</span>
       <span class="mail-wake-sep" aria-hidden="true">·</span>
       <Show when={blocked()} fallback={<>
+        <Show when={phase().kind === "done"}>
+          <span class="mail-wake-outcome">{(phase() as { text: string }).text}</span>
+          <span class="mail-wake-sep" aria-hidden="true">·</span>
+        </Show>
         <Show when={phase().kind === "failed"}>
           <span class="mail-wake-error" role="alert">Couldn't wake: {(phase() as { why: string }).why}</span>
           <span class="mail-wake-sep" aria-hidden="true">·</span>

@@ -103,17 +103,16 @@ try {
   const ori = page.getByRole("region", { name: "Inference usage" })
   await expect(ori.locator(".ori-number")).toHaveText("$17.25")
   await expect(ori).toContainText("spent today")
-  await expect(ori.getByRole("progressbar")).toHaveAccessibleName("Enforced budget: $125.00 used of $2,000.00 · $1,875.00 remaining")
-  await expect(ori).toContainText("$1,875.00 left")
-  await expect(ori).toContainText("Provider-billed inference (BYOK)")
-  await expect(ori).toContainText("Limit not reported")
-  await expect(ori).toContainText("Provider-billed spend does not count toward the credit limit.")
+  // BYOK is not limited by the key's credit limit: no limit bar or remaining credit is shown.
+  await expect(ori.getByRole("progressbar")).toHaveCount(0)
+  await expect(ori).not.toContainText("$2,000")
+  await expect(ori).not.toContainText("left")
   await expect(ori.locator(".ori-outside")).toContainText("$11.20 + unpriced")
   await expect(page.locator(".usage-details")).not.toHaveAttribute("open")
   await ori.locator(".ori-breakdown summary").click()
   await expect(ori).toContainText("Today (UTC): $0.00 from OpenRouter credits · $17.25 billed to provider.")
   await page.locator(".usage-details > summary").click()
-  console.log("PASS Ori: daily spend, separate enforced credit budget and BYOK, scoped outside estimate, expandable detail")
+  console.log("PASS Ori: daily spend, no credit-limit bar, scoped outside estimate, expandable detail")
   const total = page.locator("[data-usage-total]")
   await expect(total).toHaveText("$12.35")
   await expect(page.locator(".usage-today")).toContainText("ONLY · ESTIMATE")
@@ -173,7 +172,7 @@ try {
   oriState = "partial"
   await ori.getByRole("button", { name: "Refresh", exact: true }).click()
   await expect(ori.locator(".ori-number")).toHaveText("not reported")
-  await expect(ori).toContainText("$1,875.00 left")
+  await expect(ori).toContainText("$145.00 since this key was created")
   const beforeUnavailable = pageReads().length
   oriState = "unavailable"
   await ori.getByRole("button", { name: "Refresh", exact: true }).click()

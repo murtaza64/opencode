@@ -73,22 +73,26 @@ export const MailSummary = (props: {
     data-unread={props.unread ? "true" : undefined}
     title={[relativeTime(props.sentAt), props.tick?.label ?? wake()?.label].filter(Boolean).join(" · ") || undefined}
     aria-label={`${props.unread ? "Unread mail" : "Mail"}${preposition()} ${props.partyText}: ${props.purpose}${props.status ? `, ${props.status}` : ""}${said() ? `, ${said()}` : ""}${props.unread?.line ? `, ${props.unread.line}` : ""}`}>
-    <Show when={props.unread}><span class="mail-unread-dot" aria-hidden="true" /></Show>
-    <span class="mail-activity-kind" data-direction={props.direction} data-filament-icon={props.id} aria-hidden="true">
-      <Glyph name={props.direction === "out" ? "paper-airplane" : "inbox"} />
+    {/* One line, always: party (truncates), kind, status and tick, then the wake cue and the direction glyph at the
+      * trailing edge. The unread wake line sits under it, aligned to the same trailing edge. */}
+    <span class="mail-activity-head">
+      <Show when={props.unread}><span class="mail-unread-dot" aria-hidden="true" /></Show>
+      {/* The preview slot keeps compact mail's line together; otherwise party and purpose are direct children, as before. */}
+      <Show when={compact()} fallback={line()}><span class="mail-activity-preview">{line()}</span></Show>
+      <Show when={props.status}>{(status) => <>
+        <span class="mail-activity-sep" aria-hidden="true">·</span>
+        <span class="mail-activity-status" data-status={status()}>{status()}</span>
+      </>}</Show>
+      <Show when={props.tick}>{(tick) => <TickMark tick={tick().tick} label={tick().label.replaceAll("\n", "; ")} />}</Show>
+      <Show when={wake()?.state === "caused" || wake()?.state === "unknown" ? wake()!.state : undefined}>{(state) =>
+        <span class="mail-activity-wake" data-wake={state()} aria-hidden="true">
+          <Glyph name={state() === "caused" ? "zap-fill" : "dot"} size={12} />
+        </span>}
+      </Show>
+      <span class="mail-activity-kind" data-direction={props.direction} data-filament-icon={props.id} aria-hidden="true">
+        <Glyph name={props.direction === "out" ? "paper-airplane" : "inbox"} />
+      </span>
     </span>
-    <Show when={wake()?.state === "caused" || wake()?.state === "unknown" ? wake()!.state : undefined}>{(state) =>
-      <span class="mail-activity-wake" data-wake={state()} aria-hidden="true">
-        <Glyph name={state() === "caused" ? "zap-fill" : "dot"} size={12} />
-      </span>}
-    </Show>
-    {/* The preview slot keeps compact mail's line together; otherwise party and purpose are direct children, as before. */}
-    <Show when={compact()} fallback={line()}><span class="mail-activity-preview">{line()}</span></Show>
-    <Show when={props.status}>{(status) => <>
-      <span class="mail-activity-sep" aria-hidden="true">·</span>
-      <span class="mail-activity-status" data-status={status()}>{status()}</span>
-    </>}</Show>
-    <Show when={props.tick}>{(tick) => <TickMark tick={tick().tick} label={tick().label.replaceAll("\n", "; ")} />}</Show>
     <Show when={props.unread?.line}>{(line) => <span class="mail-unread-wake" aria-hidden="true">{line()}</span>}</Show>
   </summary>
 }

@@ -96,10 +96,11 @@ try {
     const color = (id) => tick(id).evaluate((element) => getComputedStyle(element).color)
     expect(new Set([await color("o-inbox"), await color("o-read"), await color("o-failed")]).size).toBe(3)
     expect(await color("o-sending")).toBe(await color("o-inbox"))
-    // The tick is the chip's last glyph, at its inline end.
-    const end = async (id) => { const t = await tick(id).boundingBox(); const c = await chip(id).boundingBox()
+    // The direction glyph is the chip's last glyph, at its inline end; the tick sits just before it.
+    const end = async (id, part) => { const t = await part.boundingBox(); const c = await chip(id).boundingBox()
       return dir === "ltr" ? c.x + c.width - (t.x + t.width) : t.x - c.x }
-    expect(await end("o-inbox")).toBeLessThan(16)
+    expect(await end("o-inbox", chip("o-inbox").locator(".mail-activity-kind"))).toBeLessThan(16)
+    expect(await end("o-inbox", tick("o-inbox"))).toBeLessThan(40)
     // Handled stays in the expansion, never the chip.
     await chip("o-read").click()
     await expect(page.locator('.transcript [data-mail-id="o-read"] .mail-activity-details')).toContainText("Handled:")
@@ -127,6 +128,21 @@ try {
     const composer = await page.locator(".prompt-box").boundingBox()
     expect(barBox.y + barBox.height).toBeLessThanOrEqual(composer.y + 1)
     await page.screenshot({ path: join(shots, `scheduled-${dir}.png`) })
+    // A long sender (porter-sidebar's Laptop Porter case) truncates: party, kind and inbox glyph stay on one line,
+    // the inbox glyph at the trailing edge, and the wake line stays under it at the same edge.
+    const long = chip("i-unread-1")
+    await long.locator(".mail-activity-party .mail-party").first().evaluate((element) => { element.textContent = "Laptop Porter · Could not load the chat while the Mac Mini is powered off and unreachable" })
+    const box = async (selector) => long.locator(selector).first().boundingBox()
+    const [party, kind, glyph, line] = await Promise.all([".mail-activity-party", ".mail-activity-purpose", ".mail-activity-kind", ".mail-unread-wake"].map(box))
+    const summary = await long.boundingBox()
+    expect(Math.abs((party.y + party.height / 2) - (glyph.y + glyph.height / 2))).toBeLessThan(4)
+    expect(Math.abs((kind.y + kind.height / 2) - (glyph.y + glyph.height / 2))).toBeLessThan(4)
+    expect(line.y).toBeGreaterThan(glyph.y + glyph.height - 2)
+    const trailing = (b) => dir === "ltr" ? summary.x + summary.width - (b.x + b.width) : b.x - summary.x
+    expect(trailing(glyph)).toBeLessThan(16)
+    expect(trailing(line)).toBeLessThan(40)
+    expect(await long.locator(".mail-activity-party .mail-party").first().evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true)
+    await page.screenshot({ path: join(shots, `long-title-${dir}.png`) })
 
     if (dir === "ltr") {
       // Repeated clicks while a wake is in flight (agent busy) post once; the dashboard coalesces anything else.
@@ -145,7 +161,9 @@ try {
       await button.click({ force: true })
       await button.press("Enter")
       resolve()
-      await expect(button).toHaveText("Waking… agent is working, reads it at its next safe point")
+      // The outcome shows at once and never leaves the button pending.
+      await expect(bar.locator(".mail-wake-outcome")).toHaveText("Already running · reads it at its next safe point")
+      await expect(button).toHaveText("Wake now")
       await page.waitForTimeout(500)
       expect(posts().length - before).toBe(1)
       await page.screenshot({ path: join(shots, "waking-busy.png") })
@@ -167,6 +185,16 @@ try {
       await expect(bar.locator(".mail-wake-error")).toHaveText("Couldn't wake: operator connection unavailable")
       await expect(bar.locator(".mail-wake-now")).toHaveText("Retry")
       await expect(chip("i-unread-1")).toHaveAttribute("data-unread", "true")
+
+      // A wake request that hangs (dashboard queued behind a busy Core) fails within the bound with a reason.
+      await page.route("**/es/api/mail/wake**", (route) => route.request().method() === "POST" ? new Promise(() => {}) : route.continue())
+      const started = Date.now()
+      await bar.locator(".mail-wake-now").click()
+      await expect(bar.locator(".mail-wake-error")).toHaveText("Couldn't wake: no answer from the dashboard in 10 s", { timeout: 15_000 })
+      expect(Date.now() - started).toBeLessThan(13_000)
+      await expect(bar.locator(".mail-wake-now")).toHaveText("Retry")
+      await page.unroute("**/es/api/mail/wake**")
+      post = () => ({ status: 403, body: { error: "operator required" } })
 
       // Paused (passive review off): the line says so and the button delivers without claiming the schedule resumed.
       wake = state("paused", { reason: "passive-review-off", at_ms: null, count: 2 })

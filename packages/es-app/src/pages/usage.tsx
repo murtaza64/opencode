@@ -23,8 +23,8 @@ const STALE_MS = 60_000
 export default function UsagePage() {
   onMount(() => void readHost())
   const [version, setVersion] = createSignal(0)
-  const [usage] = createResource(version, () => oc.usageDaily(DAYS, AbortSignal.timeout(30_000)))
-  const [today] = createResource(version, () => oc.usageDaily(1, AbortSignal.timeout(15_000)))
+  const [usage] = createResource(version, () => oc.usageDaily(DAYS, AbortSignal.timeout(30_000)).catch(() => undefined))
+  const [today] = createResource(version, () => oc.usageDaily(1, AbortSignal.timeout(15_000)).catch(() => undefined))
   const [ori] = createResource(version, () => es.openrouterUsage().catch((): OpenRouterUsage => ({
     schema: "es-openrouter-usage/1", state: "unavailable", reason: "request failed",
   })))

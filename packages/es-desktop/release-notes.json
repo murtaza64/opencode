@@ -1,19 +1,27 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-11-20.7",
+  "release": "2026-11-20.8",
   "items": [
     {
-      "title": "Glasses microphone",
-      "detail": "Glasses voice uses the left temple’s microphone from any tab. If the left temple is disconnected, connect it before recording."
+      "title": "Spend in the title bar",
+      "detail": "The title bar shows Today, WTD and MTD spend in UTC across every Work host: OpenRouter billing plus gateway and other providers. If a host is off, ≥ marks the amount as partial and the tooltip names the host."
     },
     {
-      "title": "Laptop Porter in the sidebar",
-      "detail": "When the Laptop is serving as Porter’s fallback, open its conversation directly from the sidebar. The title-bar icons are centered."
+      "title": "All shows every session",
+      "detail": "New agents appear in All right away, under the same day headings as Agents. Icons, titles and times line up across row types."
     },
     {
-      "title": "Glasses alignment",
-      "detail": "HUD text uses the glasses font widths for centering. Use Alignment check in the Glasses tab to compare the center and depth layers on both lenses."
+      "title": "Decision details on hover",
+      "detail": "Hover or focus a decision to see the options it offered and which one was chosen, or the written answer."
+    },
+    {
+      "title": "Mail and Wake now",
+      "detail": "Mail chips sit at the trailing edge with their icon last, and long titles truncate. Wake now reports woken, already running or the failure reason within 10 seconds."
+    },
+    {
+      "title": "Laptop Porter",
+      "detail": "If Porter's chat can't be loaded, it is retried automatically."
     }
   ],
-  "limits": ["Bluetooth pairing and in-app transcription still need hardware verification."]
+  "limits": ["Agent photos are not shown yet; rows show initials."]
 }
