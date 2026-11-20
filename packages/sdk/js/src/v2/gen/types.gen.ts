@@ -1892,6 +1892,8 @@ export type AgentConfig = {
   steps?: number
   maxSteps?: number
   permission?: PermissionConfig
+  instructions_exclude?: Array<string>
+  compaction_threshold?: number
   [key: string]:
     | unknown
     | string
@@ -1916,6 +1918,7 @@ export type AgentConfig = {
     | "info"
     | number
     | PermissionConfig
+    | Array<string>
     | undefined
 }
 
@@ -2025,6 +2028,7 @@ export type McpLocalConfig = {
     [key: string]: string
   }
   enabled?: boolean
+  description?: string
   timeout?: number
 }
 
@@ -2046,6 +2050,7 @@ export type McpRemoteConfig = {
    */
   url: string
   enabled?: boolean
+  description?: string
   headers?: {
     [key: string]: string
   }
@@ -2147,6 +2152,7 @@ export type Config = {
       | McpRemoteConfig
       | {
           enabled: boolean
+          description?: string
         }
   }
   /**
@@ -2747,6 +2753,8 @@ export type Agent = {
     [key: string]: unknown
   }
   steps?: number
+  instructionsExclude?: Array<string>
+  compactionThreshold?: number
 }
 
 export type LspStatus = {
