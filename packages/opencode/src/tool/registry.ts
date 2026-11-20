@@ -17,6 +17,7 @@ import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
+import { McpServersTool, catalog as mcpCatalog } from "./mcp-servers"
 import * as Tool from "./tool"
 import { Config } from "@/config/config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
@@ -116,6 +117,7 @@ const layer = Layer.effect(
     const greptool = yield* GrepTool
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
+    const mcpServers = yield* McpServersTool
     const agent = yield* Agent.Service
     const codeMode = flags.experimentalCodeMode ? yield* Effect.promise(() => import("./code-mode")) : undefined
     const codeModeTool = codeMode ? yield* codeMode.CodeModeTool : undefined
@@ -221,6 +223,7 @@ const layer = Layer.effect(
           todo: Tool.init(todo),
           search: Tool.init(websearch),
           skill: Tool.init(skilltool),
+          mcpServers: Tool.init(mcpServers),
           patch: Tool.init(patchtool),
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
@@ -245,6 +248,7 @@ const layer = Layer.effect(
             tool.todo,
             tool.search,
             tool.skill,
+            tool.mcpServers,
             tool.patch,
             ...(tool.execute ? [tool.execute] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
@@ -308,7 +312,12 @@ const layer = Layer.effect(
       const codeModeDescription = filtered.some((tool) => tool.id === "execute")
         ? yield* describeCodeMode(input)
         : undefined
-      const visible = filtered.filter((tool) => tool.id !== "execute" || codeModeDescription)
+      // Only shown when config turns some MCP server off: the catalog of those servers is its description.
+      const mcpServersDescription = mcpCatalog((yield* config.get()).mcp ?? {})
+      const visible = filtered.filter(
+        (tool) =>
+          (tool.id !== "execute" || codeModeDescription) && (tool.id !== McpServersTool.id || mcpServersDescription),
+      )
 
       return yield* Effect.forEach(
         visible,
@@ -329,6 +338,7 @@ const layer = Layer.effect(
               output.description,
               tool.id === TaskTool.id ? yield* describeTask(input.agent) : undefined,
               tool.id === "execute" ? codeModeDescription : undefined,
+              tool.id === McpServersTool.id ? mcpServersDescription : undefined,
             ]
               .filter(Boolean)
               .join("\n"),
