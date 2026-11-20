@@ -108,6 +108,14 @@ const layer = Layer.effect(
         if (Permission.disabled(["skill"], agent.permission).has("skill")) return
 
         const list = yield* skill.available(agent)
+        // An agent whose rules allow no skill (explore) gets no skills section, rather than every name as "not enabled".
+        if (!list.some((item) => item.description !== undefined)) return
+        const allowed = new Set(list.map((item) => item.name))
+        // Denied skills stay discoverable by name only (no descriptions), so an agent can tell the human one exists.
+        const denied = (yield* skill.all())
+          .filter((item) => item.description !== undefined && !allowed.has(item.name))
+          .map((item) => item.name)
+          .toSorted()
 
         return [
           "Skills provide specialized instructions and workflows for specific tasks.",
@@ -115,6 +123,11 @@ const layer = Layer.effect(
           // Compact form: the same names and descriptions without each SKILL.md path. The skill tool resolves a
           // skill by name and reports its base directory, so the path only costs prompt bytes on every turn.
           Skill.fmt(list, { verbose: false }),
+          ...(denied.length
+            ? [
+                `Installed but not enabled for this agent (cannot be loaded; the human can enable one in config permission.skill): ${denied.join(", ")}`,
+              ]
+            : []),
         ].join("\n")
       }),
 

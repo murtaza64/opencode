@@ -76,7 +76,15 @@ const it = testEffect(
           },
           all: () => Effect.succeed(skills),
           dirs: () => Effect.succeed([]),
-          available: () => Effect.succeed(skills),
+          // The "limited" agent is denied zeta-skill; the "none" agent every skill.
+          available: (agent) =>
+            Effect.succeed(
+              agent?.name === "none"
+                ? []
+                : agent?.name === "limited"
+                  ? skills.filter((skill) => skill.name !== "zeta-skill")
+                  : skills,
+            ),
         }),
       ),
     ],
@@ -129,6 +137,21 @@ describe("session.system", () => {
       // Compact list: names and descriptions only, no SKILL.md locations.
       expect(output).not.toContain("<location>")
       expect(output).not.toContain("/tmp/alpha-skill/SKILL.md")
+    }),
+  )
+
+  it.effect("denied skills are listed by name only, without descriptions", () =>
+    Effect.gen(function* () {
+      const prompt = yield* SystemPrompt.Service
+      const all = yield* prompt.skills(build)
+      expect(all).not.toContain("not enabled for this agent")
+      const output = (yield* prompt.skills({ ...build, name: "limited" })) ?? ""
+      expect(output).not.toContain("- **zeta-skill**")
+      expect(output).not.toContain("Zeta skill.")
+      expect(yield* prompt.skills({ ...build, name: "none" })).toBeUndefined()
+      expect(output.split("\n").at(-1)).toBe(
+        "Installed but not enabled for this agent (cannot be loaded; the human can enable one in config permission.skill): zeta-skill",
+      )
     }),
   )
 
