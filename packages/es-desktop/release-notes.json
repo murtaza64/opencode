@@ -1,11 +1,11 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-11-19.1",
+  "release": "2026-11-20.1",
   "items": [
     {
-      "title": "Session switching and streaming",
-      "detail": "Session history can appear before the task list finishes loading. Plain-text streaming avoids reparsing the entire line on each update."
+      "title": "Glasses tab",
+      "detail": "The Glasses tab opens Porter, Needs You, and Even G2 controls. Audio processing runs locally."
     }
   ],
-  "limits": []
+  "limits": ["Bluetooth pairing and in-app transcription still need hardware verification."]
 }
