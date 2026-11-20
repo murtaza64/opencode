@@ -138,7 +138,7 @@ test("thinking dots share one depth", () => {
 
 test("title-bar toggle opens the Glasses page before connecting from another tab", () => {
   expect(toggleAction("disconnected", true)).toBe("connect")
-  expect(toggleAction("disconnected", false)).toBe("open-and-connect")
+  expect(toggleAction("disconnected", false)).toBe("open")
   expect(toggleAction("connecting", false)).toBe("cancel")
   expect(toggleAction("connected", true)).toBe("disconnect")
 })

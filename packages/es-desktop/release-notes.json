@@ -1,10 +1,10 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-11-20.1",
+  "release": "2026-11-20.3",
   "items": [
     {
-      "title": "Glasses tab",
-      "detail": "The Glasses tab opens Porter, Needs You, and Even G2 controls. Audio processing runs locally."
+      "title": "Glasses toggle",
+      "detail": "Use the title-bar glasses icon beside Porter and Theme to connect or disconnect. The connection stays active as you move between pages."
     }
   ],
   "limits": ["Bluetooth pairing and in-app transcription still need hardware verification."]

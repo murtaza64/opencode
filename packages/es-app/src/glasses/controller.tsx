@@ -158,8 +158,10 @@ function createGlasses() {
 
   // Porter session subscription (new replies only, plus questions/permissions).
   createEffect(() => {
+    if (connState() !== "connected") return
     const pointer = chat.desk.pointer()
     if (!pointer) return
+    let active = true
     const client = ocAt(pointer.host?.base ?? "/oc")
     const sessionID = pointer.session
     const directory = pointer.directory
@@ -168,12 +170,14 @@ function createGlasses() {
         client.permissions(directory).catch((): PermissionRequest[] => []),
         client.questions(directory).catch((): QuestionRequest[] => []),
       ])
+      if (!active) return
       const next = porterAsks(sessionID, permissions, questions)
       if (next[0]?.id !== asks()[0]?.id) { setAskSelected(0); setAskArmed(false) }
       setAsks(next)
     }
     const refreshReply = async () => {
       const messages = await client.messagesTail(sessionID, directory, 6).catch(() => [])
+      if (!active) return
       const next = latestReply(messages, sessionID, startedAt)
       if (!next || next.id === reply()?.id) return
       setReply(next)
@@ -208,7 +212,7 @@ function createGlasses() {
       if (record.type === "message.updated" && info?.role === "assistant" && info.time?.completed) void refreshReply()
       if (record.type?.startsWith("permission.") || record.type?.startsWith("question.")) void refreshAsks()
     }
-    onCleanup(() => source.close())
+    onCleanup(() => { active = false; source.close() })
   })
 
   const transcribeBlob = async (audio: Blob) => {

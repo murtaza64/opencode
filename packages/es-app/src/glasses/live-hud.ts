@@ -96,4 +96,4 @@ export const pickFailure = (reason: string | undefined) => {
 export const toggleAction = (state: "disconnected" | "connecting" | "connected", onGlassesPage: boolean) =>
   state === "connected" ? "disconnect" as const
     : state === "connecting" ? "cancel" as const
-    : onGlassesPage ? "connect" as const : "open-and-connect" as const
+    : onGlassesPage ? "connect" as const : "open" as const

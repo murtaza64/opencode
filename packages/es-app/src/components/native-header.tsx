@@ -102,18 +102,18 @@ const DeskToggle = () => {
 }
 
 /** Glasses connect/disconnect in the top bar. It shares the one connection with the Glasses page; picking a device
- * only works there, so from another tab it opens the page and starts the same connect from this click. */
+ * only works there, so from another tab it opens the page before any device request. */
 const GlassesToggle = () => {
   const glasses = useGlassesOptional()
   const navigate = useNavigate()
   const location = useLocation()
   return <Show when={glasses}>{(g) => {
     const state = () => g().connState()
-    const label = () => state() === "connected" ? "Disconnect glasses" : state() === "connecting" ? "Cancel connecting glasses" : "Connect glasses"
+    const label = () => state() === "connected" ? "Disconnect glasses" : state() === "connecting" ? "Cancel connecting glasses" : location.pathname === "/glasses" ? "Connect glasses" : "Open Glasses to connect"
     const click = () => {
       const action = toggleAction(state(), location.pathname === "/glasses")
       if (action === "disconnect" || action === "cancel") return g().disconnect()
-      if (action === "open-and-connect") navigate("/glasses")
+      if (action === "open") return navigate("/glasses")
       void g().connect()
     }
     return <button type="button" class="header-glasses-toggle" role="switch" aria-checked={state() === "connected"}
