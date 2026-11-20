@@ -8,8 +8,8 @@ import { createServerEvents, type ServerEvents } from "../event-source"
 import { globalEvent } from "../live-session"
 import { CfwSession, type Draw } from "./cfw"
 import { buildScene, DEFAULT_DEPTH } from "./cfw-scene"
-import { G2, type Gesture } from "./g2-transport"
-import { hudMode, pickFailure, replyPages, textFrame, type Ask, type HudState, type Voice } from "./live-hud"
+import { G2, type Device, type Gesture } from "./g2-transport"
+import { connectOutcome, hudMode, pickFailure, type ConnState, replyPages, textFrame, type Ask, type HudState, type Voice } from "./live-hud"
 import { latestReply, porterAsks } from "./porter"
 
 const REPLY_AWAKE_MS = 25_000
@@ -22,7 +22,7 @@ function createGlasses() {
   const chat = useDeskChat()
   const queue = useDeskQueue()
 
-  const [connState, setConnState] = createSignal<"disconnected" | "connecting" | "connected">("disconnected")
+  const [connState, setConnState] = createSignal<ConnState>("disconnected")
   const [statusLine, setStatusLine] = createSignal("Not connected.")
   const [distance, setDistance] = createSignal(DEFAULT_DEPTH.distance)
   const [spread, setSpread] = createSignal(DEFAULT_DEPTH.spread)
@@ -412,6 +412,35 @@ function createGlasses() {
     setLatencyMs(undefined)
   }
 
+  const fail = (error: unknown) => {
+    if (error instanceof DOMException && error.name === "AbortError") return
+    setStatusLine(pickFailure(document.documentElement.dataset.glassesPickResult) ?? (error instanceof Error ? error.message : "Connection failed."))
+    if (error instanceof DOMException && error.name === "SecurityError") setAskFocus(prev => prev + 1)
+  }
+
+  // Left temple GATT + firmware detection; leaves the session partial (right only) when the left is missing.
+  const finishLeft = async (g2: G2, left: Device | undefined, signal: AbortSignal, current: () => boolean) => {
+    let outcome: "connected" | "not-picked" | "failed" = left ? "connected" : "not-picked"
+    if (left) {
+      setStatusLine("Connecting left temple…")
+      outcome = await g2.connectLeft(signal, left).then(() => "connected" as const, () => "failed" as const)
+    }
+    if (!current()) return
+    const hasFaceclaw = outcome === "connected" && await g2.faceclaw().catch(() => false)
+    if (!current()) return
+    if (hasFaceclaw) {
+      const session = new CfwSession(g2)
+      await session.start()
+      if (!current()) { void session.stop(); return }
+      cfw = session
+    }
+    const result = connectOutcome({ left: outcome, faceclaw: hasFaceclaw })
+    lastFrameKey = ""
+    setAwakeUntil(Date.now() + AMBIENT_AWAKE_MS)
+    setStatusLine(result.status)
+    setConnState(result.state)
+  }
+
   const connect = async () => {
     if (connState() !== "disconnected") return
     if (!G2.supported) { setStatusLine("Bluetooth is unavailable here."); return }
@@ -420,9 +449,16 @@ function createGlasses() {
     const signal = connectAbort.signal
     const current = () => mine === generation
     setConnState("connecting")
-    setStatusLine("Connecting right temple…")
+    setStatusLine("Looking for your glasses…")
     try {
-      const g2 = await G2.connect(signal)
+      // Pick both temples back to back, before any GATT work: each pick needs the click's activation and the
+      // Glasses route, and the handshake that follows can outlast both. A missed left pick leaves it partial.
+      const right = await G2.pick("R")
+      const pair = G2.pairOf(right)
+      const left = await G2.pick("L", pair).catch(() => undefined)
+      if (!current()) return
+      setStatusLine("Connecting right temple…")
+      const g2 = await G2.connect(signal, right)
       if (!current()) { g2.disconnect(); return }
       link = g2
       startedAt = Date.now()
@@ -433,39 +469,56 @@ function createGlasses() {
         setConnState("disconnected")
         setStatusLine("Disconnected.")
       }, { once: true })
+      g2.addEventListener("left-disconnect", () => {
+        if (link !== g2 || connState() !== "connected") return
+        void cfw?.stop()
+        cfw = undefined
+        lastFrameKey = ""
+        setConnState("partial")
+        setStatusLine("Left temple disconnected. Click again to reconnect it.")
+      })
       g2.addEventListener("gesture", (event) => {
         if (link !== g2 || !(event instanceof CustomEvent)) return
         const kind = event.detail as Gesture
         if (kind === "system-exit" || kind === "abnormal-exit") { disconnect(); return }
         handleGesture(kind)
       })
-      setStatusLine("Connecting left temple…")
-      const leftOk = await g2.connectLeft(signal).then(() => true, () => false)
-      if (!current()) return
-      const hasFaceclaw = leftOk && await g2.faceclaw().catch(() => false)
-      if (!current()) return
-      if (hasFaceclaw) {
-        const session = new CfwSession(g2)
-        await session.start()
-        if (!current()) { void session.stop(); return }
-        cfw = session
-        setStatusLine("Connected (custom display).")
-      } else {
-        setStatusLine(leftOk ? "Connected (text HUD)." : "Connected right temple (text HUD).")
-      }
-      lastFrameKey = ""
-      setAwakeUntil(Date.now() + AMBIENT_AWAKE_MS)
-      setConnState("connected")
+      await finishLeft(g2, left, signal, current)
     } catch (error) {
       if (!current()) return
       disconnect()
-      if (error instanceof DOMException && error.name === "AbortError") return
-      setStatusLine(pickFailure(document.documentElement.dataset.glassesPickResult) ?? (error instanceof Error ? error.message : "Connection failed."))
-      if (error instanceof DOMException && error.name === "SecurityError") setAskFocus(prev => prev + 1)
+      fail(error)
     }
   }
 
-  const toggle = () => connState() === "disconnected" ? void connect() : disconnect()
+  // A second click from the partial state: pick and connect only the left temple, keeping the right session.
+  const connectLeft = async () => {
+    const g2 = link
+    if (connState() !== "partial" || !g2) return
+    const mine = ++generation
+    connectAbort = new AbortController()
+    const signal = connectAbort.signal
+    const current = () => mine === generation && link === g2
+    setConnState("connecting")
+    setStatusLine("Looking for the left temple…")
+    try {
+      const left = await G2.pick("L", g2.pair)
+      if (!current()) return
+      await finishLeft(g2, left, signal, current)
+    } catch (error) {
+      if (!current()) return
+      setConnState("partial")
+      setStatusLine("Right temple connected.")
+      fail(error)
+    }
+  }
+
+  const toggle = () => {
+    const state = connState()
+    if (state === "disconnected") return void connect()
+    if (state === "partial") return void connectLeft()
+    disconnect()
+  }
 
   onMount(() => {
     const timer = setInterval(() => setNow(Date.now()), 350)
@@ -475,7 +528,7 @@ function createGlasses() {
   return {
     connState, statusLine, latencyMs, transcribeMs, scene, askFocus,
     distance, setDistance, spread, setSpread,
-    connect, disconnect, toggle,
+    connect, connectLeft, disconnect, toggle,
   }
 }
 

@@ -35,3 +35,17 @@ export function pickGlassesDevice(side: unknown, devices: readonly { deviceId: s
   if (side !== "R" && side !== "L") return undefined
   return devices.find((device) => new RegExp(`_${side}_`, "i").test(device.deviceName))?.deviceId
 }
+
+/** One temple-chooser round: refuse off the Glasses page, pick the requested side, or keep waiting for it. */
+export function pickDecision(input: {
+  contentsURL: string
+  pageHref: unknown
+  side: unknown
+  devices: readonly { deviceId: string; deviceName: string }[]
+  origin: string
+}) {
+  const sameOrigin = URL.parse(input.contentsURL)?.origin === input.origin
+  if (!sameOrigin || typeof input.pageHref !== "string" || !glassesPage(input.pageHref, input.origin)) return { kind: "refuse" as const }
+  const deviceId = pickGlassesDevice(input.side, input.devices)
+  return deviceId ? { kind: "pick" as const, deviceId } : { kind: "wait" as const }
+}

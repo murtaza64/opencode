@@ -25,7 +25,7 @@
 // Web Bluetooth is not in lib.dom. Model only the GATT operations used here.
 type Characteristic = EventTarget & { uuid: string; value?: DataView; startNotifications(): Promise<unknown>; writeValueWithoutResponse(bytes: Uint8Array): Promise<void> }
 type Gatt = { connected: boolean; connect(): Promise<Gatt>; disconnect(): void; getPrimaryServices(): Promise<{ getCharacteristics(): Promise<Characteristic[]> }[]> }
-type Device = EventTarget & { name?: string; gatt?: Gatt }
+export type Device = EventTarget & { name?: string; gatt?: Gatt }
 const bluetooth = () => (navigator as Navigator & { bluetooth?: { requestDevice(options: { filters: { namePrefix: string }[]; optionalServices: string[] }): Promise<Device> } }).bluetooth
 const uuid = (suffix: string) => `00002760-08c2-11e1-9073-0e8ac72e${suffix}`
 const services = ["0000", "5450", "6450", "7450"].map(uuid)
@@ -171,8 +171,14 @@ export class G2 extends EventTarget {
 
   static get supported() { return typeof navigator !== "undefined" && !!bluetooth() }
 
-  static async connect(signal: AbortSignal) {
-    const device = await request("R")
+  /** Asks for one temple. Needs a user click (transient activation); run both picks before any GATT work. */
+  static pick(side: "R" | "L", pair?: string) { return request(side, pair) }
+
+  /** The pair prefix ("Even G2_32_") of a picked temple, used to pick its other side. */
+  static pairOf(device: Device) { return temple(device.name)?.[1] }
+
+  static async connect(signal: AbortSignal, picked?: Device) {
+    const device = picked ?? await request("R")
     signal.throwIfAborted()
     const link = new G2()
     signal.addEventListener("abort", () => link.disconnect(), { once: true })
@@ -202,14 +208,18 @@ export class G2 extends EventTarget {
     }
   }
 
+  /** Pair prefix of the connected right temple, for picking its left side. */
+  get pair() { return temple(this.#right?.device.name)?.[1] }
+
   get connected() { return this.#ready && !!this.#right?.gatt.connected && !this.#closed }
   get leftConnected() { return !!this.#left?.gatt.connected }
   get micAvailable() { return this.leftConnected && this.#left?.micReady }
 
-  async connectLeft(signal: AbortSignal) {
+  async connectLeft(signal: AbortSignal, picked?: Device) {
     const pair = temple(this.#right?.device.name)?.[1]
     if (!pair || !this.connected) throw new Error("Right temple disconnected")
-    const device = await request("L", pair)
+    const device = picked ?? await request("L", pair)
+    if (temple(device.name)?.[1] !== pair) throw new Error("That left temple belongs to another pair")
     signal.throwIfAborted()
     const left = await open(device, () => {}, raw => this.dispatchEvent(new CustomEvent("mic", { detail: raw })))
     this.#left = left

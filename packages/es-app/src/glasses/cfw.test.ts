@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { cfwPackets, clear, crcOk, drawCalls, ext, eyeShift, leasePayload, parseCfwAck, rect, text } from "./cfw"
 import { buildScene } from "./cfw-scene"
 import { crc16, frames } from "./g2-transport"
-import { pickFailure, replyPages, toggleAction, toolVerb, type HudState } from "./live-hud"
+import { connectOutcome, pickFailure, replyPages, toggleAction, toolVerb, type HudState } from "./live-hud"
 
 const hex = (bytes: ArrayLike<number>) => Buffer.from(Array.from(bytes)).toString("hex")
 
@@ -136,11 +136,19 @@ test("thinking dots share one depth", () => {
   expect(new Set(dots).size).toBe(1)
 })
 
-test("title-bar toggle opens the Glasses page before connecting from another tab", () => {
-  expect(toggleAction("disconnected", true)).toBe("connect")
-  expect(toggleAction("disconnected", false)).toBe("open")
-  expect(toggleAction("connecting", false)).toBe("cancel")
-  expect(toggleAction("connected", true)).toBe("disconnect")
+test("title-bar toggle opens the Glasses page and picks from the same click", () => {
+  expect(toggleAction("disconnected", true)).toEqual({ open: false, run: "connect" })
+  expect(toggleAction("disconnected", false)).toEqual({ open: true, run: "connect" })
+  expect(toggleAction("partial", false)).toEqual({ open: true, run: "connect-left" })
+  expect(toggleAction("connecting", false)).toEqual({ open: false, run: "cancel" })
+  expect(toggleAction("connected", true)).toEqual({ open: false, run: "disconnect" })
+})
+
+test("only both temples ready counts as connected", () => {
+  expect(connectOutcome({ left: "connected", faceclaw: true })).toEqual({ state: "connected", status: "Connected." })
+  expect(connectOutcome({ left: "connected", faceclaw: false }).state).toBe("connected")
+  expect(connectOutcome({ left: "not-picked", faceclaw: false }).state).toBe("partial")
+  expect(connectOutcome({ left: "failed", faceclaw: true }).state).toBe("partial")
 })
 
 test("a desktop-cancelled pick explains the cause", () => {

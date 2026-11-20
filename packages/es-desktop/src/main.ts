@@ -6,7 +6,7 @@ import { surfaceFinder, surfaceFrameFocused } from "./surface-find"
 import { localHost, personalWork, shadowedPages, tabWithin, type WorkHost } from "../../es-app/remote-host"
 import { PERF_DIR } from "./perf-log"
 import { createTranscriber, createVoice, voiceTools } from "./voice"
-import { allowGlassesMedia, allowGlassesMediaCheck, GLASSES_PICK_MS, glassesPage, pickGlassesDevice } from "./glasses-policy"
+import { allowGlassesMedia, allowGlassesMediaCheck, GLASSES_PICK_MS, pickDecision } from "./glasses-policy"
 import { watchPageAnswer } from "./page-answer"
 import { appRouteURL, externalURL, internalURL, pageArrivedCrossSite, pageNavigation, plainChromeUserAgent, restorePlan, serviceHosts, serviceOrigins, serviceSelf, startupMode, startupPlan, surfaceFrameURL } from "./policy"
 import { createTabs, TITLE_BAR_HEIGHT } from "./tabs"
@@ -371,13 +371,17 @@ const start = async () => {
       await tellPage(reason)
       callback(deviceId)
     }
+    // The route comes from the main frame's own location at pick time: a same-document route change (the title-bar
+    // toggle opening /glasses in the click that picks) reaches the page before contents.getURL() reports it. The
+    // listener's origin is still checked against contents.getURL(), so the gate stays "Glasses page, this origin".
     contents.on("select-bluetooth-device", (event, devices, callback) => {
       event.preventDefault()
-      if (!glassesPage(contents.getURL(), origin)) return void tellPage("not-glasses-page").then(() => callback(""))
       pick = pick ? { ...pick, callback } : { callback, timer: setTimeout(() => void finishPick("", "timeout"), GLASSES_PICK_MS) }
-      void contents.mainFrame.executeJavaScript("document.documentElement.dataset.glassesSide ?? ''").then((side) => {
-        const id = pickGlassesDevice(side, devices)
-        if (id) void finishPick(id)
+      void contents.mainFrame.executeJavaScript("({ href: location.href, side: document.documentElement.dataset.glassesSide ?? '' })").then((value: unknown) => {
+        const page = value as { href?: unknown; side?: unknown } | undefined
+        const decision = pickDecision({ contentsURL: contents.getURL(), pageHref: page?.href, side: page?.side, devices, origin })
+        if (decision.kind === "refuse") return void finishPick("", "not-glasses-page")
+        if (decision.kind === "pick") void finishPick(decision.deviceId)
       }, () => void finishPick("", "timeout"))
     })
     showRendererLoss(contents, origin)

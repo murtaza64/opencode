@@ -102,23 +102,31 @@ const DeskToggle = () => {
 }
 
 /** Glasses connect/disconnect in the top bar. It shares the one connection with the Glasses page; picking a device
- * only works there, so from another tab it opens the page before any device request. */
+ * only works there, so from another tab it opens the page and picks from the same click. */
 const GlassesToggle = () => {
   const glasses = useGlassesOptional()
   const navigate = useNavigate()
   const location = useLocation()
   return <Show when={glasses}>{(g) => {
     const state = () => g().connState()
-    const label = () => state() === "connected" ? "Disconnect glasses" : state() === "connecting" ? "Cancel connecting glasses" : location.pathname === "/glasses" ? "Connect glasses" : "Open Glasses to connect"
+    const label = () => ({
+      connected: "Disconnect glasses",
+      connecting: "Cancel connecting glasses",
+      partial: "Connect the left temple",
+      disconnected: "Connect glasses",
+    })[state()]
+    // One click: open the Glasses page if needed, then pick from this same click (it carries the user activation).
     const click = () => {
       const action = toggleAction(state(), location.pathname === "/glasses")
-      if (action === "disconnect" || action === "cancel") return g().disconnect()
-      if (action === "open") return navigate("/glasses")
-      void g().connect()
+      if (action.run === "disconnect" || action.run === "cancel") return g().disconnect()
+      if (action.open) navigate("/glasses")
+      void (action.run === "connect-left" ? g().connectLeft() : g().connect())
     }
     return <button type="button" class="header-glasses-toggle" role="switch" aria-checked={state() === "connected"}
       aria-busy={state() === "connecting"} data-state={state()} aria-label={label()} title={label()} onClick={click}>
-      <Glyph name="glasses" />
+      <Show when={state() === "connecting"} fallback={<Glyph name="glasses" />}>
+        <span class="header-glasses-spinner" aria-hidden="true" />
+      </Show>
     </button>
   }}</Show>
 }

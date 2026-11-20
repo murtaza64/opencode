@@ -92,8 +92,21 @@ export const pickFailure = (reason: string | undefined) => {
   return undefined
 }
 
-/** What the title-bar toggle does: device selection only runs on the Glasses page, so elsewhere it goes there first. */
-export const toggleAction = (state: "disconnected" | "connecting" | "connected", onGlassesPage: boolean) =>
-  state === "connected" ? "disconnect" as const
-    : state === "connecting" ? "cancel" as const
-    : onGlassesPage ? "connect" as const : "open" as const
+export type ConnState = "disconnected" | "connecting" | "partial" | "connected"
+
+/** What the title-bar toggle does. Device picks only run on the Glasses page, so from elsewhere it opens the page
+ * first and runs the same pick from this click (the desktop reads the page's current route at pick time). */
+export const toggleAction = (state: ConnState, onGlassesPage: boolean) => {
+  if (state === "connected") return { open: false, run: "disconnect" as const }
+  if (state === "connecting") return { open: false, run: "cancel" as const }
+  return { open: !onGlassesPage, run: state === "partial" ? "connect-left" as const : "connect" as const }
+}
+
+/** Connection state and status after the picks and GATT steps; only both temples ready counts as connected. */
+export const connectOutcome = (input: { left: "connected" | "not-picked" | "failed"; faceclaw: boolean }) => {
+  if (input.left === "connected") return { state: "connected" as const, status: input.faceclaw ? "Connected." : "Connected (text display)." }
+  return {
+    state: "partial" as const,
+    status: input.left === "not-picked" ? "Right temple connected. Click again to connect the left." : "Right temple connected; the left didn't. Click again to retry it.",
+  }
+}

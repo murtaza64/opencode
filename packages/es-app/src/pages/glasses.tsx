@@ -32,7 +32,7 @@ export default function GlassesPage() {
           data-connected={state() === "connected" ? "true" : undefined}
           onClick={() => glasses.toggle()}
         >
-          {state() === "disconnected" ? "Connect" : state() === "connecting" ? "Cancel" : "Disconnect"}
+          {state() === "disconnected" ? "Connect" : state() === "connecting" ? "Cancel" : state() === "partial" ? "Connect left temple" : "Disconnect"}
         </button>
         <span class="glasses-status" role="status">{glasses.statusLine()}</span>
         <span class="glasses-latency" dir="ltr">
