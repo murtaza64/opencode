@@ -1,6 +1,7 @@
 import { Select as Kobalte } from "@kobalte/core/select"
 import { Show, createMemo, onCleanup, splitProps, type ComponentProps, type JSX } from "solid-js"
 import "./select-v2.css"
+import { markAncestors } from "../../components/ancestor-mark"
 
 function groupOptions<T>(options: T[], groupBy?: (x: T) => string): { category: string; options: T[] }[] {
   if (!groupBy) {
@@ -116,10 +117,18 @@ export function SelectV2<T>(props: SelectV2Props<T>) {
   onCleanup(stop)
 
   const grouped = createMemo(() => groupOptions(local.options, local.groupBy))
+  // A host that styles itself by whether it holds a select opts in with `data-select-host`.
+  let root: HTMLElement | undefined
+  markAncestors(() => root, "[data-select-host]", "has-select")
 
   return (
     <Kobalte<T, { category: string; options: T[] }>
       {...others}
+      ref={(el: HTMLElement) => {
+        root = el
+        const forward = (others as { ref?: unknown }).ref
+        if (typeof forward === "function") forward(el)
+      }}
       multiple={false}
       allowDuplicateSelectionEvents={false}
       disabled={local.disabled}

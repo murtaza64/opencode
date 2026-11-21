@@ -10,6 +10,7 @@ import type { MailNamer } from "../mail-names"
 import { MailOriginDetail, MailRoute, MailSender, MailSummary, mailPurpose, originOf, senderText } from "./mail-summary"
 import { iconEligible, ToolChip, ToolStrip } from "./tool-run"
 import { dateTime } from "../local-time"
+import { markParent } from "../dom-marks"
 
 type MailSource = { type: "editspace-mail"; id: string; sender: string; recipient: string; senderSession?: string }
 const mailTime = (value: string | number | null) => dateTime(value)
@@ -119,7 +120,8 @@ export const TranscriptMessage = (props: ComponentProps<typeof Message> & {
       </Show>
     </details>
   </Show>}>
-    {(metadata) => <details class="mail-activity" id={`mail-${metadata().mail.id}`} data-mail-message-id={props.message.id} data-direction="in">
+    {(metadata) => <details class="mail-activity" id={`mail-${metadata().mail.id}`} data-mail-message-id={props.message.id} data-direction="in"
+      ref={(el) => markParent(() => el, ".msg-wrap", "mail-activity")}>
       {/* Mail that reached this session as input is incoming, whoever sent it. */}
       <MailSummary id={metadata().mail.id} direction="in"
         party={<MailSender from={metadata().mail.sender} evidence={props.mailRecord?.sender_session ?? metadata().mail.senderSession}

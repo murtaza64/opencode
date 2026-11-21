@@ -1,10 +1,7 @@
 @import "./menu-v2.css";
 
-/* Above modal dialogs (z-index 50); matches legacy select-content. */
-[data-popper-positioner]:has([data-slot="select-v2-content"]) {
-  z-index: 60;
-}
-
+/* Above modal dialogs (z-index 50); matches legacy select-content. Kobalte copies the content's z-index onto
+ * its positioner before the first paint. */
 /* Dropdown surface (Type=menu) — overrides shared menu-v2 defaults for selects only. */
 [data-component="menu-v2-content"][data-slot="select-v2-content"] {
   padding: 0;

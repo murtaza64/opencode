@@ -235,7 +235,7 @@ export const DirectComposer = (props: {
             </div>
             <span class="direct-session-metadata">{props.sessionMetadata}</span>
           </div>
-          <div class="direct-split" ref={menuRoot}>
+          <div class="direct-split" ref={menuRoot} data-busy={state.busy ? "" : undefined}>
             <PrimaryButton />
             {/* Always laid out so the primary button does not move when the session turns busy. */}
             <button

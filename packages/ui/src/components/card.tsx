@@ -1,5 +1,6 @@
 import { type ComponentProps, splitProps } from "solid-js"
 import { Icon, type IconProps } from "./icon"
+import { markAncestors } from "./ancestor-mark"
 
 type Variant = "normal" | "error" | "warning" | "success" | "info"
 
@@ -71,9 +72,16 @@ export function CardTitle(props: CardTitleProps) {
     return pick(split.variant ?? "normal")
   }
   const placeholder = () => !name()
+  let el: HTMLDivElement | undefined
+  markAncestors(() => el, '[data-component="card"]', "card-title")
+  markAncestors(() => el, '[data-component="card"]', "card-title-icon", show)
   return (
     <div
       {...rest}
+      ref={(node) => {
+        el = node
+        if (typeof rest.ref === "function") (rest.ref as (node: HTMLDivElement) => void)(node)
+      }}
       data-slot="card-title"
       classList={{
         ...split.classList,

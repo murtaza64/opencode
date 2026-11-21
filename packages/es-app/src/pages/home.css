@@ -133,8 +133,8 @@ button.home-add-note:focus-visible { outline: 2px solid var(--accent); outline-o
 .home-decision fieldset.home-options:not(.home-option-cards) { display: grid; gap: 4px; inline-size: 100%; }
 .home-decision fieldset.home-options:not(.home-option-cards) > label { display: flex; align-items: center; gap: 10px; min-block-size: 32px; padding: 0 12px; border: 1px solid transparent; border-radius: 6px; background: color-mix(in srgb, var(--text) 4%, transparent); font-size: 13px; }
 .home-decision fieldset.home-options:not(.home-option-cards) > label:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
-.home-decision fieldset.home-options:not(.home-option-cards) > label:has(input:checked) { border-color: color-mix(in srgb, var(--peach) 45%, transparent); }
-.home-decision fieldset.home-options:not(.home-option-cards) > label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.home-decision fieldset.home-options:not(.home-option-cards) > label[data-checked] { border-color: color-mix(in srgb, var(--peach) 45%, transparent); }
+.home-decision fieldset.home-options:not(.home-option-cards) > label[data-focus-visible] { outline: 2px solid var(--accent); outline-offset: 1px; }
 .home-decision fieldset.home-options:not(.home-option-cards) .home-option-body { flex: 1; flex-direction: row; align-items: center; gap: 8px; }
 .decision-rec { margin-inline-start: auto; padding: 0 6px; border-radius: 8px; font-size: 10px; line-height: 16px; color: var(--green); background: color-mix(in srgb, var(--green) 16%, transparent); flex: none; }
 .home-decision-more { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-block-start: 8px; }

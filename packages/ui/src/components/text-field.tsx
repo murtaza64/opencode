@@ -98,7 +98,13 @@ export function TextField(props: TextFieldProps) {
           {local.label}
         </Kobalte.Label>
       </Show>
-      <div data-slot="input-wrapper">
+      {/* The wrapper mirrors the input's Kobalte state, so text-field.css needs no `:has()`. */}
+      <div
+        data-slot="input-wrapper"
+        data-field-readonly={local.readOnly ? "" : undefined}
+        data-field-invalid={local.validationState === "invalid" ? "" : undefined}
+        data-copyable={local.copyable ? "" : undefined}
+      >
         <Show
           when={local.multiline}
           fallback={<Kobalte.Input {...others} data-slot="input-input" class={local.class} />}

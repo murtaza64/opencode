@@ -1,5 +1,5 @@
-import { Tabs as Kobalte } from "@kobalte/core/tabs"
-import { Show, splitProps, type JSX } from "solid-js"
+import { Tabs as Kobalte, useTabsContext } from "@kobalte/core/tabs"
+import { createSignal, Show, splitProps, type JSX } from "solid-js"
 import type { ComponentProps, ParentProps, Component } from "solid-js"
 
 export interface TabsProps extends ComponentProps<typeof Kobalte> {
@@ -58,10 +58,18 @@ function TabsTrigger(props: ParentProps<TabsTriggerProps>) {
     "hideCloseButton",
     "onMiddleClick",
   ])
+  // The wrapper mirrors its trigger's state, so tabs.css styles it without `:has()`.
+  const tabs = useTabsContext()
+  const [focusVisible, setFocusVisible] = createSignal(false)
   return (
     <div
       data-slot="tabs-trigger-wrapper"
       data-value={props.value}
+      data-trigger-selected={tabs.listState().selectedKey() === props.value ? "" : undefined}
+      data-trigger-focus-visible={focusVisible() ? "" : undefined}
+      data-closable={split.closeButton ? "" : undefined}
+      onFocusIn={(e) => setFocusVisible((e.target as HTMLElement).matches('[data-slot="tabs-trigger"]:focus-visible'))}
+      onFocusOut={() => setFocusVisible(false)}
       classList={{
         ...split.classList,
         [split.class ?? ""]: !!split.class,

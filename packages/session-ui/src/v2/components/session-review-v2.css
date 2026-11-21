@@ -79,7 +79,7 @@
 }
 
 [data-component="session-review-v2-sidebar-root"]
-  [data-slot="session-review-v2-sidebar-title"]:not(:has([data-component="select-v2-root"])) {
+  [data-slot="session-review-v2-sidebar-title"]:not([data-has-select]) {
   margin-inline-start: 8px;
 }
 

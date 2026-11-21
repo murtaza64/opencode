@@ -35,7 +35,7 @@ export function MessageNav(
           }
 
           return (
-            <li data-slot="message-nav-item">
+            <li data-slot="message-nav-item" data-preview-active={local.size === "normal" && message.id === local.current?.id ? "" : undefined}>
               <Switch>
                 <Match when={local.size === "compact"}>
                   <div

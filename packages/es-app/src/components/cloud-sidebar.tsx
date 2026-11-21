@@ -26,7 +26,7 @@ export const CloudNav = (props: { pin: CloudPin; mini?: boolean }) => {
 
   const initial = () => [...(props.pin.lane.trim())][0]?.toLocaleUpperCase() ?? "?"
   return <div class={props.mini ? "cloud-mini-entry" : "session-entry cloud-nav-entry"} data-cloud-owner={props.pin.owner}
-    data-avatar={props.mini ? undefined : initial()} data-dot={props.mini ? undefined : dot()}>
+    data-active={active() ? "" : undefined} data-avatar={props.mini ? undefined : initial()} data-dot={props.mini ? undefined : dot()}>
     <A href={cloudHref(props.pin)} activeClass="" class={props.mini ? "mini-item" : "nav-item cloud-nav"} classList={{ active: active() }} title={`Cloud · ${props.pin.lane} · ${props.pin.editspace} · ${status()}`}>
       <span class={`dot ${dot()}`} style={start() === undefined ? undefined : { "--wave-start": String(start()) }} {...(dot() === "failed" || dot() === "unknown" ? { role: "img", "aria-label": status() } : {})} />
       <span class="cloud-runtime-icon" aria-label="Cloud agent"><HostGlyph host="wingman" size={props.mini ? 12 : 14} /></span>

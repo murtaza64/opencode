@@ -1,5 +1,6 @@
+import { useRadioGroupContext } from "@kobalte/core/radio-group"
 import { SegmentedControl as Kobalte } from "@kobalte/core/segmented-control"
-import { For, splitProps } from "solid-js"
+import { createSignal, For, splitProps } from "solid-js"
 import type { ComponentProps, JSX } from "solid-js"
 
 export type RadioGroupProps<T> = Omit<
@@ -63,7 +64,7 @@ export function RadioGroup<T>(props: RadioGroupProps<T>) {
       defaultValue={local.defaultValue ? getValue(local.defaultValue) : undefined}
       onChange={(v) => local.onSelect?.(findOption(v))}
     >
-      <div role="presentation" data-slot="radio-group-wrapper">
+      <Wrapper values={local.options.map(getValue)}>
         <Kobalte.Indicator data-slot="radio-group-indicator" />
         <div role="presentation" data-slot="radio-group-items">
           <For each={local.options}>
@@ -77,7 +78,25 @@ export function RadioGroup<T>(props: RadioGroupProps<T>) {
             )}
           </For>
         </div>
-      </div>
+      </Wrapper>
     </Kobalte>
+  )
+}
+
+// Mirrors the checked and focus-visible state of its items, so radio-group.css needs no `:has()`.
+function Wrapper(props: { values: string[]; children: JSX.Element }) {
+  const group = useRadioGroupContext()
+  const [focusVisible, setFocusVisible] = createSignal(false)
+  return (
+    <div
+      role="presentation"
+      data-slot="radio-group-wrapper"
+      data-item-checked={props.values.some((value) => group.isSelectedValue(value)) ? "" : undefined}
+      data-item-focus-visible={focusVisible() ? "" : undefined}
+      onFocusIn={(e) => setFocusVisible((e.target as HTMLElement).matches('[data-slot="radio-group-item-input"]:focus-visible'))}
+      onFocusOut={() => setFocusVisible(false)}
+    >
+      {props.children}
+    </div>
   )
 }

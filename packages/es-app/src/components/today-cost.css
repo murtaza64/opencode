@@ -2,7 +2,7 @@
 .today-cost-group:is(:hover, :focus-visible) .today-cost-label { text-decoration: underline; }
 .today-cost-period { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
 /* Web: the sidebar is narrow, so the three amounts take their own row at the inline end of the top bar. */
-.sidebar-top:has(.today-cost-group) { flex-wrap: wrap; row-gap: 2px; }
+.sidebar-top { flex-wrap: wrap; row-gap: 2px; }
 .sidebar-top .today-cost-group { margin-inline-start: auto; flex-wrap: wrap; justify-content: flex-end; gap: 0 8px; max-inline-size: 100%; }
 .sidebar-top .today-cost-group .today-cost { margin-inline-start: 0; }
 .today-cost { display: inline-flex; white-space: nowrap; flex-shrink: 0; }

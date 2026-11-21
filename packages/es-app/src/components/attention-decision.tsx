@@ -25,6 +25,7 @@ import { optionParts, parseBriefV1, type BriefV1 } from "../brief-v1"
 import { BriefDescent } from "./brief-descent"
 import { BriefPlayback, useBriefPlayback } from "./brief-scenes"
 import { useBriefs } from "../desk-briefs"
+import { focusRing } from "../dom-marks"
 
 type Attention = ReturnType<typeof createAttention>
 
@@ -196,9 +197,9 @@ export const Answer = (props: { record: AttentionRecord; attention: Attention; o
         // radio's accessible name stay the producer's, so the card is the one and only option list.
         const outcome = () => props.prepared?.choices.find(choice => choice.id === option.id)
         const recommended = () => props.record.recommendation === option.id
-        return <label classList={{ "home-option-card": !!props.prepared }} data-recommended={recommended() ? "" : undefined} data-node={`option:${option.id}`}
+        return <label classList={{ "home-option-card": !!props.prepared }} data-recommended={recommended() ? "" : undefined} data-node={`option:${option.id}`} data-checked={choice() === option.id ? "" : undefined}
           onMouseEnter={() => showChoice(option.id)} onMouseLeave={hideChoice} onFocusIn={() => showChoice(option.id)} onFocusOut={hideChoice}>
-          <input type="radio" name={id} aria-label={option.label} aria-describedby={[recommended() ? `${id}-recommended` : "", outcome() ? `${id}-${option.id}-outcome` : ""].filter(Boolean).join(" ") || undefined} checked={choice() === option.id} onChange={() => setChoice(option.id)} />
+          <input type="radio" name={id} aria-label={option.label} aria-describedby={[recommended() ? `${id}-recommended` : "", outcome() ? `${id}-${option.id}-outcome` : ""].filter(Boolean).join(" ") || undefined} checked={choice() === option.id} onChange={() => setChoice(option.id)} {...focusRing} />
           <span class="home-option-body">
             <Show when={outcome()?.sketch}>{sketch => <Sketch title={`What ${option.label} looks like`} sketch={sketch()} />}</Show>
             {/* A plain display label when the brief gives one; the producer's exact label stays the radio's name. */}

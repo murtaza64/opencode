@@ -3,6 +3,7 @@
 import { createMemo, For, Show, type JSX } from "solid-js"
 import type { Part } from "@opencode-ai/sdk/v2"
 import { CONTEXT_MENTION_SOURCE } from "../context-mention"
+import { markParent } from "../dom-marks"
 
 /** Shown lines before the rest fold into "+N more". */
 const VISIBLE = 2
@@ -44,7 +45,7 @@ export const ContextLines = (props: { parts: Part[]; tick?: () => JSX.Element })
   const shown = () => items().slice(0, VISIBLE)
   const hidden = () => items().length - shown().length
   const partFor = (key: string) => props.parts.find(part => mention(part)?.key === key)!
-  return <Show when={items().length} fallback={<Show when={props.tick}><div class="msg-tick-row">{props.tick!()}</div></Show>}>
+  return <Show when={items().length} fallback={<Show when={props.tick}><div class="msg-tick-row" ref={(el) => markParent(() => el, ".msg-wrap", "tick-row")}>{props.tick!()}</div></Show>}>
     <div class="msg-context-lines">
       <For each={shown()}>{(item, index) => !hidden() && props.tick && index() === shown().length - 1
         ? <div class="msg-context-row"><ContextLine part={partFor(item.key)} /><span class="msg-context-tick">{props.tick!()}</span></div>

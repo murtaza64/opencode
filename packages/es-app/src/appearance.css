@@ -71,7 +71,7 @@
 :root .direct-primary { border-radius: var(--radius-control) !important; background: var(--accent); color: var(--crust); border-color: var(--accent); font-weight: 600; }
 :root .direct-primary:disabled { background: transparent; }
 :root .direct-more { border-start-end-radius: var(--radius-control) !important; border-end-end-radius: var(--radius-control) !important; }
-:root .direct-split:has(.direct-more:not(.idle)) .direct-primary { border-start-end-radius: 0 !important; border-end-end-radius: 0 !important; }
+:root .direct-split[data-busy] .direct-primary { border-start-end-radius: 0 !important; border-end-end-radius: 0 !important; }
 /* Shortcut hint: same font and baseline as the label, sized to read (the global kbd rule forces mono). */
 :root .shell .direct-button-hint { font: 500 12px/1 var(--font-sans) !important; letter-spacing: .02em; align-self: center; }
 :root .direct-primary { gap: 12px; }
@@ -86,7 +86,7 @@
  * scrolls and never re-crops when the split opens or the sidebar toggles. No backdrop-filter on content. */
 :root[data-appearance=wallpaper] .shell { position: relative; isolation: isolate; }
 :root[data-appearance=wallpaper] .wallpaper-backdrop { display: none; }
-:root[data-appearance=wallpaper] .shell:has(> .content .session-page) > .wallpaper-backdrop {
+:root[data-appearance=wallpaper] .shell[data-session-page] > .wallpaper-backdrop {
   display: block;
   position: absolute;
   inset: 0;
@@ -108,8 +108,8 @@
 }
 /* In a session split the companion shares the window image: transparent panel, scrim only, hairline divider.
  * (On a desk page there is no main session; the companion's own backdrop stays as desk-followups.css draws it.) */
-:root[data-appearance=wallpaper] .shell:has(> .content .session-page) .desk-companion { background: transparent; }
-:root[data-appearance=wallpaper] .shell:has(> .content .session-page) .desk-companion-in::before {
+:root[data-appearance=wallpaper] .shell[data-session-page] .desk-companion { background: transparent; }
+:root[data-appearance=wallpaper] .shell[data-session-page] .desk-companion-in::before {
   background: linear-gradient(color-mix(in srgb, var(--base) 48%, transparent), color-mix(in srgb, var(--base) 78%, transparent));
 }
 :root[data-appearance=wallpaper] .desk-companion-in { border-inline-start-color: color-mix(in srgb, var(--text) 18%, transparent); }
@@ -124,9 +124,9 @@
 
 @media (prefers-reduced-transparency: reduce) {
   /* The one image becomes the solid base, as each pane used to; no scrim over it. */
-  :root[data-appearance=wallpaper] .shell:has(> .content .session-page) > .wallpaper-backdrop { background: var(--base); }
+  :root[data-appearance=wallpaper] .shell[data-session-page] > .wallpaper-backdrop { background: var(--base); }
   :root[data-appearance=wallpaper] .session-page::before,
-  :root[data-appearance=wallpaper] .shell:has(> .content .session-page) .desk-companion-in::before { background: none; }
+  :root[data-appearance=wallpaper] .shell[data-session-page] .desk-companion-in::before { background: none; }
 }
 
 /* Inputs, chips and secondary buttons share the control radius; panels and rows stay square
@@ -193,7 +193,7 @@
 @media (prefers-reduced-motion: reduce) { .info-meter-fill { transition: none; } }
 /* Selected session: the band runs the full sidebar width (row plus its pin button). */
 :root .session-entry { margin-inline: 0; }
-:root .session-entry:has(> .nav-item.active) { background: var(--selected); }
+:root .session-entry[data-active] { background: var(--selected); }
 :root .session-entry > .nav-item.active { background: transparent; }
 
 /* Sidebar todos: borderless; the current item carries the weight, pending is plain, done is quiet. */
@@ -250,8 +250,8 @@
 :root .nav-entries > .host-badge, :root .nav-entries > .host-switch { justify-self: start; margin-inline-start: 14px; }
 /* The status slot sits over the last entry's trailing edge (Front desk), so that entry keeps its own busy dot clear of
  * it; the slot takes pointer events only while it shows a status button. */
-:root .nav-entries > .backend-status ~ .nav-entry, :root .nav-entries > .nav-entry:has(~ .backend-status) { padding-inline-end: 28px; }
-:root .nav-entries > .backend-status:not(:has(button)) { pointer-events: none; }
+:root .nav-entries > .backend-status ~ .nav-entry { padding-inline-end: 28px; }
+:root .nav-entries > .backend-status[data-state=ok] { pointer-events: none; }
 /* Composer footer meta (ux-feel contract) */
 /* [model] [ctx] [cost] [Send]: the meta group shrinks and ellipsizes before Send moves. */
 .composer-meta { display: flex; align-items: center; gap: 10px; flex: 0 1 auto; min-inline-size: 0; }
@@ -521,7 +521,7 @@
 /* STYLE-12 session top bar, the same in the window and the native title bar (where the bar is portaled outside
  * .session-page, which left the host glyph stacked over a wrapping label): the title leads and truncates first,
  * the host glyph and label stay on one baseline and truncate second, the state stays readable and secondary. */
-.topbar:has(> .session-title) { flex-wrap: nowrap; align-items: center; gap: 8px; min-inline-size: 0; }
+.topbar[data-session-title] { flex-wrap: nowrap; align-items: center; gap: 8px; min-inline-size: 0; }
 .topbar > .session-title { flex: 0 1 auto; min-inline-size: 6ch; }
 .topbar > .session-host { display: inline-flex; align-items: center; gap: 4px; flex: 0 0.0001 auto; min-inline-size: 14px; overflow: hidden; font-size: 12px; line-height: 1; color: var(--subtext0); white-space: nowrap; }
 .topbar > .session-host .host-glyph { flex: none; display: block; inline-size: 12px; block-size: 12px; margin: 0; }
@@ -532,7 +532,7 @@
 
 /* The narrow-window chat floats over the inline-end edge (380px); the open item's bar keeps its actions out from
  * under it, so Open and Close stay reachable without closing the chat. */
-body:has(.desk-companion.overlay:not(.closed)) :is(.surface-head, .desk-evidence-head) { padding-inline-end: calc(380px + 8px); }
+body[data-companion-overlay] :is(.surface-head, .desk-evidence-head) { padding-inline-end: calc(380px + 8px); }
 
 /* ATTN-02: a decision's header is one line: requester (truncates first) · age · agent thread at the end. Who updated
  * it or where answers go now, shown only when they differ, takes its own line below. */
@@ -574,13 +574,13 @@ body:has(.desk-companion.overlay:not(.closed)) :is(.surface-head, .desk-evidence
 /* Lists: full-width rows, 26px, a soft hover, the chosen row in the text colour with a check at the end. */
 .sidebar-filter-list label { display: flex; align-items: center; gap: 8px; min-block-size: 26px; padding: 0 6px; border-radius: 5px; color: var(--ds-text, var(--text)); cursor: pointer; }
 .sidebar-filter-list label:hover { background: color-mix(in srgb, var(--ds-text, var(--text)) 6%, transparent); }
-.sidebar-filter-list label:has(input:focus-visible) { outline: 2px solid var(--ds-accent, var(--accent)); outline-offset: -2px; }
+.sidebar-filter-list label[data-focus-visible] { outline: 2px solid var(--ds-accent, var(--accent)); outline-offset: -2px; }
 .sidebar-filter-list label bdi, .sidebar-filter-list label > span:not(.sidebar-filter-n) { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-filter-list input[type=checkbox] { flex: none; inline-size: 14px; block-size: 14px; margin: 0; accent-color: var(--ds-accent, var(--accent)); }
 .sidebar-filter-list[data-single] label { position: relative; }
 .sidebar-filter-list[data-single] input, .sidebar-filter-segments input { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; margin: 0; opacity: 0; cursor: pointer; }
-.sidebar-filter-list[data-single] label:has(input:checked) { font-weight: 600; }
-.sidebar-filter-list[data-single] label:has(input:checked)::after { content: "✓"; margin-inline-start: auto; color: var(--ds-accent, var(--accent)); font-weight: 600; }
+.sidebar-filter-list[data-single] label[data-checked] { font-weight: 600; }
+.sidebar-filter-list[data-single] label[data-checked]::after { content: "✓"; margin-inline-start: auto; color: var(--ds-accent, var(--accent)); font-weight: 600; }
 .sidebar-filter-panel .host-glyph { flex: none; margin: 0; color: var(--ds-muted, var(--subtext0)); }
 .sidebar-filter-n { margin-inline-start: auto; min-inline-size: 18px; padding: 0 5px; border-radius: 8px; font-size: 10px; line-height: 16px; text-align: center; color: var(--ds-muted, var(--subtext0));
   background: color-mix(in srgb, var(--ds-text, var(--text)) 6%, transparent); font-variant-numeric: tabular-nums; }
@@ -594,9 +594,9 @@ body:has(.desk-companion.overlay:not(.closed)) :is(.surface-head, .desk-evidence
 .sidebar-filter-segments > label:last-of-type { border-start-end-radius: 6px; border-end-end-radius: 6px; }
 .sidebar-filter-segments > label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-filter-segments > label:hover { color: var(--ds-text, var(--text)); }
-.sidebar-filter-segments > label:has(input:checked) { color: var(--ds-text, var(--text)); font-weight: 600; background: color-mix(in srgb, var(--ds-accent, var(--accent)) 22%, transparent);
+.sidebar-filter-segments > label[data-checked] { color: var(--ds-text, var(--text)); font-weight: 600; background: color-mix(in srgb, var(--ds-accent, var(--accent)) 22%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ds-accent, var(--accent)) 55%, transparent); }
-.sidebar-filter-segments > label:has(input:focus-visible) { outline: 2px solid var(--ds-accent, var(--accent)); outline-offset: 1px; z-index: 1; }
+.sidebar-filter-segments > label[data-focus-visible] { outline: 2px solid var(--ds-accent, var(--accent)); outline-offset: 1px; z-index: 1; }
 .sidebar-filter-segments legend { flex: 0 0 100%; }
 /* Footer: Clear is a quiet text action, Done the one filled button. */
 .sidebar-filter-actions { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px 6px; border-block-start: 1px solid var(--ds-line, var(--surface0)); }

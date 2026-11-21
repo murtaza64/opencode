@@ -4,6 +4,7 @@ import type { Session } from "@opencode-ai/sdk/v2"
 import { useOc, useSessionHost } from "../session-host"
 import { errorText } from "../live-session"
 import "./session-title.css"
+import { markParent } from "../dom-marks"
 
 export const SessionTitle = (props: { knownTitle?: string;
   sessionID: string
@@ -54,7 +55,7 @@ export const SessionTitle = (props: { knownTitle?: string;
     }
   }
   return (
-    <div class="session-title">
+    <div class="session-title" ref={(el) => markParent(() => el, ".topbar", "session-title")}>
       <Show when={state.editing} fallback={
         <h1><button ref={button} type="button" class="session-title-button" dir="auto"
           aria-label={readOnly ? undefined : "Rename session"} title={shown()} disabled={!props.session || readOnly}

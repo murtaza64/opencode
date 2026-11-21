@@ -2,10 +2,7 @@
   display: flex;
 }
 
-[data-popper-positioner]:has([data-component="tooltip-v2"]) {
-  z-index: 1000;
-}
-
+/* Kobalte copies the content's z-index (below) onto its positioner before the first paint. */
 [data-component="tooltip-v2"] {
   z-index: 1000;
   box-sizing: border-box;

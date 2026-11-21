@@ -18,6 +18,7 @@ import { ModelPicker } from "../components/model-picker"
 import type { Session } from "@opencode-ai/sdk/v2"
 import { shortcutLabel } from "../shortcuts"
 import "./new-session.css"
+import { markAncestor } from "../dom-marks"
 
 const DRAFT = "es-app:new-session:draft:1"
 const LAST = "es-app:new-session:last:1"
@@ -212,7 +213,7 @@ export default function NewSessionPage() {
   // An unconfirmed attempt from before a reload is checked once on open.
   if (attempt()) queueMicrotask(() => void reconcile())
 
-  return <main class="session-page new-session-page">
+  return <main class="session-page new-session-page" ref={(el) => markAncestor(() => el, ".content", "session-page", true)}>
     <div class="session-main">
       <AppHeader><h1>New session</h1></AppHeader>
       <div class="new-session-space" />

@@ -30,7 +30,11 @@ export const SubagentTranscript = (props: { sessionID: string; directory: string
   })
   return (
     <Dialog title={<bdi>{result()?.session?.title || "Subagent transcript"}</bdi>}
-      size="x-large" class="subagent-transcript-dialog">
+      size="x-large" class="subagent-transcript-dialog" ref={(el) => {
+        // The root and its overlay carry the mark the dialog's sizing and tint rules read (index.css).
+        el.setAttribute("data-subagent-transcript", "")
+        queueMicrotask(() => el.closest("[data-dialog-layer]")?.previousElementSibling?.setAttribute("data-subagent-transcript", ""))
+      }}>
       <Show when={result.loading}><p role="status">Loading subagent…</p></Show>
       <Show when={result()?.error}>{(error) => <div role="alert" class="err">
         {error()} <button disabled={result.loading} onClick={() => void refetch()}>Retry</button>
