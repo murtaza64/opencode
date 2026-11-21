@@ -311,9 +311,10 @@ export const createSessionActivity = (
       return
     }
     lastSessionRefresh = Date.now()
+    lastFocusRefresh = Date.now()
     refreshSessions()
     // Also every directory holding a live non-idle status: a session that turned busy by event after its last read
-    // would otherwise keep that status (a Core that restarted meanwhile no longer runs it) until the slow rotation.
+    // would otherwise keep that status (a Core that restarted meanwhile no longer runs it).
     const live = Object.entries(statuses()).filter(([, value]) => value.type !== "idle").map(([id]) => index().get(id)?.directory)
     // Chained after any read in flight: a fetch started before the drop may predate a Core restart.
     const dirs = [...new Set([...relevant(), ...live.filter((directory): directory is string => !!directory)])]
@@ -366,8 +367,6 @@ export const createSessionActivity = (
       void refresh()
     }
   }
-  let relevantCursor = 0
-  let backgroundCursor = 0
   let ticks = 0
   const interval = setInterval(() => {
     if (pageHidden()) return
@@ -377,23 +376,24 @@ export const createSessionActivity = (
       lastSessionRefresh = Date.now()
       refreshSessions()
     }
-    const dirs = relevant()
-    const background = [...new Set(sessions().map((session) => session.directory))].filter((directory) => !dirs.includes(directory))
-    // The global stream and dashboard notifications handle immediate attention;
-    // scan historical directories slowly for missed events without polling all of them each tick.
-    const next = [
-      ...Array.from({ length: Math.min(2, dirs.length) }, (_, i) => dirs[(relevantCursor + i) % dirs.length]!),
-      ...Array.from({ length: Math.min(4, background.length) }, (_, i) => background[(backgroundCursor + i) % background.length]!),
-    ]
-    relevantCursor += 2
-    backgroundCursor += 4
-    void refresh(next)
   }, 30_000)
+  // Directory snapshots follow the global stream, dashboard notifications and the resync on every stream open
+  // (reconnect, and showing a hidden page). There is no timed sweep of historical directories (approved removal,
+  // attention ddc5f6e6). As a bound on a missed event, focusing the window rereads the directories in view when
+  // none was reread in the last ten minutes.
+  let lastFocusRefresh = Date.now()
+  const focused = () => {
+    if (disposed || pageHidden() || Date.now() - lastFocusRefresh < 600_000) return
+    lastFocusRefresh = Date.now()
+    void refresh()
+  }
+  if (typeof window !== "undefined") window.addEventListener("focus", focused)
   onCleanup(() => {
     disposed = true
     source.close()
     clearTimeout(timer)
     clearInterval(interval)
+    if (typeof window !== "undefined") window.removeEventListener("focus", focused)
   })
   const status = (id: string) => {
     const snapshot = snapshots()[index().get(id)?.directory ?? ""]

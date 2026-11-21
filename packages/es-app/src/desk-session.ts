@@ -15,6 +15,8 @@ import { assistantOps, handled, emptyMemory, eraseMemory, nextMemory, type Memor
 import type { AttentionRecord } from "./attention"
 import { BRIEF_CONTRACT, BRIEF_SCHEMA, BRIEF_SYSTEM, type ConversationDocument, type ConversationThread, briefComplete, briefPacket, briefState, contextNote, deskContext, nextNoteSeq, recordNote, type BriefMeta, type NoteState, type BriefState, type DeskItem, SOURCE_TAIL } from "./desk"
 import { DESK } from "./desk-identity"
+import { createServerEvents } from "./event-source"
+import { pageHidden } from "./page-visible"
 
 const POINTER = "es-app:front-desk:1"
 // This device's desks that a shared desk replaced, kept so they stay one tap away, and the shared desk last announced.
@@ -466,26 +468,29 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
   // "unknown" is not settled: a job read between its prompt's admission and Core reporting it busy looks stopped,
   // and caching that would show "Brief stopped before finishing" beside a brief that finished moments later.
   const isSettled = (job: BriefJob) => ["ready", "failed"].includes(job.state.state)
-  // Other projects' anchors: next read time and last-known children. Each read holds one of the browser's six
-  // sockets until Core answers, so N projects read on every 1.5 s poll queued unrelated reads behind them.
-  const due = new Map<string, number>()
+  // Other projects' anchors: last-known children, and the anchors to read on the next refresh. They are never read on
+  // the poll timer (approved removal, attention ddc5f6e6): only on mount, an explicit refresh, window focus or
+  // showing the page, a Core session event under that anchor, or while it holds an unfinished brief.
   const elsewhereChildren = new Map<string, Session[]>()
+  const wanted = new Set<string>()
+  let everything = true
   const refresh = async (explicit = false) => {
     const target = desk()
     const local = () => pending() ? [pendingJob(pending()!)] : []
-    // Other anchors are read only, at most once a minute unless one holds an unfinished brief; one that does not
-    // exist (never used) waits five minutes. Without this project's own anchor, those briefs still show.
-    const now = Date.now()
+    // Other anchors are read only. Without this project's own anchor, those briefs still show.
     const unfinished = (session: string) => (elsewhereChildren.get(session) ?? []).some(child => metaOf(child) && !settled.has(child.id))
     const elsewhere = others().filter(other => other.session !== target?.session)
-    const reading = elsewhere.filter(other => explicit || (due.get(other.session) ?? 0) <= now || unfinished(other.session))
+    const all = explicit || everything
+    everything = false
+    const reading = elsewhere.filter(other => all || wanted.has(other.session) || unfinished(other.session))
+    for (const other of reading) wanted.delete(other.session)
     if (!target && !elsewhere.length) return setJobs(local())
     const current = ++generation
     try {
       const childrenOf = (anchor: DeskPointer) => client.children(anchor.session, anchor.directory)
+      // A failed read keeps the last-known list and is retried on the next focus, event or explicit refresh.
       const [children] = await Promise.all([target ? childrenOf(target) : [], limited(reading, 3, other => childrenOf(other).then(
-        list => { elsewhereChildren.set(other.session, list); due.set(other.session, Date.now() + OTHER_MS) },
-        cause => { due.set(other.session, Date.now() + (String(cause).includes("404") ? ABSENT_MS : OTHER_MS)) }))])
+        list => { elsewhereChildren.set(other.session, list) }, () => {}))])
       const present = new Set(elsewhere.map(other => other.session))
       for (const session of elsewhereChildren.keys()) if (!present.has(session)) elsewhereChildren.delete(session)
       const seen = new Set<string>()
@@ -523,6 +528,28 @@ export const createBriefs = (desk: () => DeskPointer | undefined, current: (key:
   createEffect(on(() => desk()?.session, (session, previous) => { if (session && session !== previous) void refresh() }, { defer: true }))
   onMount(() => {
     void refresh()
+    // A new or changed brief under another project's anchor marks that anchor for the next read.
+    const events = createServerEvents(`${options.prefix ?? ""}/oc/global/event`, { types: ["session.created", "session.updated", "session.deleted"] })
+    events.onmessage = (message) => {
+      const parent = (JSON.parse(message.data) as { payload?: { properties?: { info?: { parentID?: string } } } }).payload?.properties?.info?.parentID
+      if (!parent || !others().some(other => other.session === parent)) return
+      wanted.add(parent)
+      void refresh()
+    }
+    // A reopened stream (reconnect, page shown again) may have missed events: reread every anchor. The first
+    // open follows the mount read above.
+    let opened = false
+    events.onopen = () => { if (opened) { everything = true; void refresh() } opened = true }
+    // Focus rereads every anchor at most every ten minutes, a bound on a missed event.
+    let lastFocus = Date.now()
+    const focused = () => {
+      if (pageHidden() || Date.now() - lastFocus < 600_000) return
+      lastFocus = Date.now()
+      everything = true
+      void refresh()
+    }
+    if (typeof window !== "undefined") window.addEventListener("focus", focused)
+    onCleanup(() => { events.close(); if (typeof window !== "undefined") window.removeEventListener("focus", focused) })
     let timer: ReturnType<typeof setTimeout>
     const tick = () => {
       const active = jobs().some(job => job.state.state === "running" || job.state.state === "starting")
@@ -671,9 +698,6 @@ export const readConversation = (record: AttentionRecord) => {
 }
 
 /** Map with at most `limit` requests in flight, preserving input order. */
-const OTHER_MS = 60_000
-const ABSENT_MS = 300_000
-
 const limited = async <T, R>(items: T[], limit: number, map: (item: T) => Promise<R>) => {
   const results: R[] = new Array(items.length)
   let next = 0
