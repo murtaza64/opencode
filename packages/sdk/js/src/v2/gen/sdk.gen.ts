@@ -125,6 +125,8 @@ import type {
   Part as Part2,
   PartDeleteErrors,
   PartDeleteResponses,
+  PartGetErrors,
+  PartGetResponses,
   PartUpdateErrors,
   PartUpdateResponses,
   PathGetErrors,
@@ -4242,6 +4244,7 @@ export class Session2 extends HeyApiClient {
       before?: string
       summaryPatches?: "true" | "false"
       compact?: "true" | "false"
+      toolOutput?: "bounded" | "omit"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -4257,6 +4260,7 @@ export class Session2 extends HeyApiClient {
             { in: "query", key: "before" },
             { in: "query", key: "summaryPatches" },
             { in: "query", key: "compact" },
+            { in: "query", key: "toolOutput" },
           ],
         },
       ],
@@ -5178,6 +5182,42 @@ export class Part extends HeyApiClient {
       ],
     )
     return (options?.client ?? this.client).delete<PartDeleteResponses, PartDeleteErrors, ThrowOnError>({
+      url: "/session/{sessionID}/message/{messageID}/part/{partID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get part
+   *
+   * One full part of a message, unbounded: the on-demand fetch for a part that a compact message page shortened or referenced.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      messageID: string
+      partID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "messageID" },
+            { in: "path", key: "partID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<PartGetResponses, PartGetErrors, ThrowOnError>({
       url: "/session/{sessionID}/message/{messageID}/part/{partID}",
       ...options,
       ...params,

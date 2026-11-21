@@ -11336,6 +11336,7 @@ export type SessionMessagesData = {
     before?: string
     summaryPatches?: "true" | "false"
     compact?: "true" | "false"
+    toolOutput?: "bounded" | "omit"
   }
   url: "/session/{sessionID}/message"
 }
@@ -12389,6 +12390,42 @@ export type PartDeleteResponses = {
 }
 
 export type PartDeleteResponse = PartDeleteResponses[keyof PartDeleteResponses]
+
+export type PartGetData = {
+  body?: never
+  path: {
+    sessionID: string
+    messageID: string
+    partID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/message/{messageID}/part/{partID}"
+}
+
+export type PartGetErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type PartGetError = PartGetErrors[keyof PartGetErrors]
+
+export type PartGetResponses = {
+  /**
+   * Part
+   */
+  200: Part
+}
+
+export type PartGetResponse = PartGetResponses[keyof PartGetResponses]
 
 export type PartUpdateData = {
   body?: Part

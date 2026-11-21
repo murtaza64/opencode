@@ -63,7 +63,11 @@ export const MessagesQuery = Schema.Struct({
   }),
   compact: Schema.optional(QueryBoolean).annotate({
     description:
-      "Bound tool part sizes for initial page loads (default false): outputs over 8 KB keep their first and last 4 KB, metadata.output previews are dropped, and state.metadata.pageTruncated records the original output length. Fetch the full message with GET /session/:sessionID/message/:messageID.",
+      "Bound part sizes for initial page loads (default false): tool outputs over 8 KB keep their first and last 4 KB, metadata.output previews are dropped, and state.metadata.pageTruncated records the original output length. Inline (data URL) tool attachments and file parts over 2 KB become references: tool attachments to GET /session/:sessionID/message/:messageID/part/:partID/attachment/:index, file parts to GET /session/:sessionID/message/:messageID/part/:partID/file?bytes=<decoded size>. Fetch a full part with GET /session/:sessionID/message/:messageID/part/:partID.",
+  }),
+  toolOutput: Schema.optional(Schema.Literals(["bounded", "omit"])).annotate({
+    description:
+      "With compact: `bounded` (default) keeps 8 KB of each long tool output; `omit` sends every completed tool output as an empty string, with its length in state.metadata.pageTruncated.output.",
   }),
 })
 export const RestartStatusQuery = Schema.Struct({
@@ -161,6 +165,7 @@ export const SessionPaths = {
   unrevert: `${root}/:sessionID/unrevert`,
   permissions: `${root}/:sessionID/permissions/:permissionID`,
   deleteMessage: `${root}/:sessionID/message/:messageID`,
+  part: `${root}/:sessionID/message/:messageID/part/:partID`,
   deletePart: `${root}/:sessionID/message/:messageID/part/:partID`,
   updatePart: `${root}/:sessionID/message/:messageID/part/:partID`,
 } as const
@@ -665,6 +670,19 @@ export const SessionApi = HttpApi.make("session")
             summary: "Delete message",
             description:
               "Permanently delete a specific message and all of its parts from a session without reverting file changes.",
+          }),
+        ),
+        HttpApiEndpoint.get("part", SessionPaths.part, {
+          params: { sessionID: SessionID, messageID: MessageID, partID: PartID },
+          query: WorkspaceRoutingQuery,
+          success: described(SessionV1.Part, "Part"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "part.get",
+            summary: "Get part",
+            description:
+              "One full part of a message, unbounded: the on-demand fetch for a part that a compact message page shortened or referenced.",
           }),
         ),
         HttpApiEndpoint.delete("deletePart", SessionPaths.deletePart, {

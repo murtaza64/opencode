@@ -125,7 +125,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       query: typeof MessagesQuery.Type
     }) {
       const project = (all: SessionV1.WithParts[]) => {
-        const items = ctx.query.compact ? all.map(compactMessage) : all
+        const items = ctx.query.compact ? all.map((item) => compactMessage(item, ctx.query.toolOutput === "omit")) : all
         return ctx.query.summaryPatches !== false
           ? items
           : items.map((message) => {
@@ -219,6 +219,14 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
           Effect.provideService(Database.Service, reader),
         ),
       )
+    })
+
+    const part = Effect.fn("SessionHttpApi.part")(function* (ctx: {
+      params: { sessionID: SessionID; messageID: MessageID; partID: PartID }
+    }) {
+      const found = (yield* message({ params: ctx.params })).parts.find((item) => item.id === ctx.params.partID)
+      if (!found) return yield* new ApiNotFoundError({ name: "NotFoundError", data: { message: `Part not found: ${ctx.params.partID}` } })
+      return found
     })
 
     const create = Effect.fn("SessionHttpApi.create")(function* (ctx: { payload?: Session.CreateInput }) {
@@ -734,6 +742,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("unrevert", unrevert)
       .handle("permissionRespond", permissionRespond)
       .handle("deleteMessage", deleteMessage)
+      .handle("part", part)
       .handle("deletePart", deletePart)
       .handle("updatePart", updatePart)
   }),
@@ -746,17 +755,22 @@ const HISTORY_CHUNK = 50
 const PAGE_ATTACHMENT_INLINE = 2 * 1024
 
 /** The compact page shape: bounded tool part sizes, full data still available from the single-message route. */
-function compactMessage(message: SessionV1.WithParts): SessionV1.WithParts {
-  if (!message.parts.some((part) => part.type === "tool")) return message
+function compactMessage(message: SessionV1.WithParts, omitOutput = false): SessionV1.WithParts {
+  if (!message.parts.some((part) => part.type === "tool" || (part.type === "file" && large(part.url)))) return message
   return {
     ...message,
     parts: message.parts.map((part) => {
+      // File parts (pasted or attached images, PDFs) carried most of an image session's page as base64.
+      if (part.type === "file")
+        return large(part.url)
+          ? { ...part, url: `${filePath(part.sessionID, part.messageID, part.id)}?bytes=${decodedSize(part.url)}` }
+          : part
       if (part.type !== "tool" || part.state.status === "pending") return part
       const metadata = part.state.metadata ?? {}
       const output = part.state.status === "completed" ? part.state.output : undefined
-      const long = output !== undefined && output.length > PAGE_OUTPUT_LIMIT
+      const long = output !== undefined && (omitOutput ? output.length > 0 : output.length > PAGE_OUTPUT_LIMIT)
       const attachments = part.state.status === "completed" ? part.state.attachments : undefined
-      const inline = attachments?.some((file) => file.url.startsWith("data:") && file.url.length > PAGE_ATTACHMENT_INLINE) ?? false
+      const inline = attachments?.some((file) => large(file.url)) ?? false
       if (!long && !inline && !("output" in metadata)) return part
       const { output: _, ...rest } = metadata
       const half = PAGE_OUTPUT_LIMIT / 2
@@ -764,14 +778,18 @@ function compactMessage(message: SessionV1.WithParts): SessionV1.WithParts {
         ...part,
         state: {
           ...part.state,
-          ...(long ? { output: `${output.slice(0, half)}\n… [${output.length - PAGE_OUTPUT_LIMIT} characters omitted] …\n${output.slice(-half)}` } : {}),
+          ...(long
+            ? {
+                output: omitOutput
+                  ? ""
+                  : `${output.slice(0, half)}\n… [${output.length - PAGE_OUTPUT_LIMIT} characters omitted] …\n${output.slice(-half)}`,
+              }
+            : {}),
           // Large inline attachments become a reference to the authorized attachment route; history is unchanged.
           ...(inline && attachments
             ? {
                 attachments: attachments.map((file, index) =>
-                  file.url.startsWith("data:") && file.url.length > PAGE_ATTACHMENT_INLINE
-                    ? { ...file, url: attachmentPath(part.sessionID, part.messageID, part.id, index) }
-                    : file,
+                  large(file.url) ? { ...file, url: attachmentPath(part.sessionID, part.messageID, part.id, index) } : file,
                 ),
               }
             : {}),
@@ -782,9 +800,7 @@ function compactMessage(message: SessionV1.WithParts): SessionV1.WithParts {
               ...(inline && attachments
                 ? {
                     attachments: attachments.flatMap((file, index) =>
-                      file.url.startsWith("data:") && file.url.length > PAGE_ATTACHMENT_INLINE
-                        ? [{ index, urlLength: file.url.length }]
-                        : [],
+                      large(file.url) ? [{ index, urlLength: file.url.length }] : [],
                     ),
                   }
                 : {}),
@@ -794,6 +810,22 @@ function compactMessage(message: SessionV1.WithParts): SessionV1.WithParts {
       } as SessionV1.WithParts["parts"][number]
     }),
   }
+}
+
+function large(url: string) {
+  return url.startsWith("data:") && url.length > PAGE_ATTACHMENT_INLINE
+}
+
+function decodedSize(url: string) {
+  const comma = url.indexOf(",")
+  const data = url.slice(comma + 1)
+  if (!url.slice(0, comma).endsWith(";base64")) return data.length
+  return Math.floor((data.length * 3) / 4) - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0)
+}
+
+/** Relative route serving the bytes of one file part's inline data; see `attachmentRoute`. */
+export function filePath(sessionID: string, messageID: string, partID: string) {
+  return `/session/${sessionID}/message/${messageID}/part/${partID}/file`
 }
 
 /** Relative route serving one tool attachment of a part; see `attachmentRoute`. */

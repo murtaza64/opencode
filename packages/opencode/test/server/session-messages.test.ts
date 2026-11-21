@@ -198,6 +198,80 @@ describe("session messages endpoint", () => {
     { git: true },
   )
 
+  // Base64 image file parts were 81% of an 80-message Desktop page (harness-perf, 2026-11-21).
+  it.instance(
+    "compact pages reference large file parts with their size, omit tool output on request, and serve full parts",
+    withoutWatcher(
+      Effect.gen(function* () {
+        const current = yield* sessionScoped
+        const [user] = yield* fill(current.id, 1)
+        const session = yield* SessionNs.Service
+        const png = Buffer.alloc(30_000, 9)
+        const large = `data:image/png;base64,${png.toString("base64")}`
+        const tiny = "data:image/png;base64,iVBORw0KGgo="
+        const fileID = PartID.ascending()
+        const tinyID = PartID.ascending()
+        yield* session.updatePart({ id: fileID, sessionID: current.id, messageID: user!, type: "file", mime: "image/png", filename: "shot.png", url: large })
+        yield* session.updatePart({ id: tinyID, sessionID: current.id, messageID: user!, type: "file", mime: "image/png", url: tiny })
+        const id = MessageID.ascending()
+        yield* session.updateMessage({
+          id,
+          sessionID: current.id,
+          role: "assistant",
+          parentID: user!,
+          agent: "test",
+          mode: "test",
+          modelID: model.modelID,
+          providerID: model.providerID,
+          path: { cwd: "/", root: "/" },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: Date.now() + 10 },
+        } satisfies SessionV1.Assistant)
+        const toolID = PartID.ascending()
+        yield* session.updatePart({
+          id: toolID,
+          sessionID: current.id,
+          messageID: id,
+          type: "tool",
+          callID: "call_ls",
+          tool: "bash",
+          state: { status: "completed", input: {}, output: "x".repeat(500), title: "ls", metadata: {}, time: { start: 1, end: 2 } },
+        })
+
+        const page = yield* request(`/session/${current.id}/message?limit=10&compact=true&toolOutput=omit`).pipe(
+          Effect.flatMap(json<SessionV1.WithParts[]>),
+        )
+        const files = page[0]!.parts.filter((part): part is SessionV1.FilePart => part.type === "file")
+        const path = `/session/${current.id}/message/${user}/part/${fileID}/file`
+        expect(files.map((part) => part.url)).toEqual([`${path}?bytes=30000`, tiny])
+        const tool = page[1]!.parts[0] as SessionV1.ToolPart
+        expect(tool.state.status === "completed" && tool.state.output).toBe("")
+        expect(tool.state.status === "completed" && tool.state.metadata).toMatchObject({ pageTruncated: { output: 500 } })
+        expect(JSON.stringify(page).length).toBeLessThan(5_000)
+
+        const served = yield* request(path)
+        expect(served.status).toBe(200)
+        expect(served.headers["content-type"]).toBe("image/png")
+        expect(Buffer.from(yield* served.arrayBuffer).equals(png)).toBe(true)
+        expect((yield* request(`/session/ses_other/message/${user}/part/${fileID}/file`)).status).toBe(404)
+        expect((yield* request(`/session/${current.id}/message/${id}/part/${toolID}/file`)).status).toBe(404)
+
+        const full = yield* request(`/session/${current.id}/message/${id}/part/${toolID}`).pipe(Effect.flatMap(json<SessionV1.ToolPart>))
+        expect(full.state.status === "completed" && full.state.output).toBe("x".repeat(500))
+        const fullFile = yield* request(`/session/${current.id}/message/${user}/part/${fileID}`).pipe(Effect.flatMap(json<SessionV1.FilePart>))
+        expect(fullFile.url).toBe(large)
+        expect((yield* request(`/session/${current.id}/message/${id}/part/${PartID.ascending()}`)).status).toBe(404)
+
+        // Without toolOutput=omit, a short output stays as it was.
+        const bounded = yield* request(`/session/${current.id}/message?limit=10&compact=true`).pipe(Effect.flatMap(json<SessionV1.WithParts[]>))
+        const boundedTool = bounded[1]!.parts[0] as SessionV1.ToolPart
+        expect(boundedTool.state.status === "completed" && boundedTool.state.output).toBe("x".repeat(500))
+      }),
+    ),
+    { git: true },
+  )
+
   it.instance(
     "compact pages reference large tool attachments through an authorized route serving the exact bytes",
     withoutWatcher(
