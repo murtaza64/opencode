@@ -26,7 +26,7 @@ export const createMailWake = (input: { editspace: Accessor<string | undefined>;
   return { status, refetch, line }
 }
 
-type Phase = { kind: "idle" } | { kind: "waking" } | { kind: "done"; text: string } | { kind: "failed"; why: string }
+type Phase = { kind: "idle" } | { kind: "waking" } | { kind: "done"; text: string; nothing?: boolean } | { kind: "failed"; why: string }
 
 /** The dashboard answers a wake at once (it re-offers admissions and returns); past this the request is reported as
  * failed instead of leaving the button pending. A retry is safe: the runtime coalesces repeated offers. */
@@ -38,7 +38,7 @@ const OUTCOME_MS = 8_000
 export const wakeOutcome = (body: MailWakeResult): Phase => {
   if (body.state?.state === "blocked") return { kind: "failed", why: blockedReason(body.state.next?.reason) }
   if (body.busy) return { kind: "done", text: "Already running · reads it at its next safe point" }
-  if (!body.offered) return { kind: "done", text: "Nothing to re-offer · the mail is already with the agent" }
+  if (!body.offered) return { kind: "done", text: "Nothing to re-offer · the mail is already with the agent", nothing: true }
   return { kind: "done", text: "Woken" }
 }
 
@@ -48,12 +48,20 @@ export const MailWakeBar = (props: { unread: number; status: MailWakeStatus | un
   // The unread count dropping (the agent was shown the mail) ends an outcome; a new batch starts idle again.
   let seen = props.unread
   createEffect(() => {
-    if (props.unread < seen && phase().kind === "done") setPhase({ kind: "idle" })
+    if (props.unread !== seen && phase().kind === "done") setPhase({ kind: "idle" })
     seen = props.unread
+  })
+  // A new wake state from the dashboard (new mail, a schedule change) ends "nothing to re-offer".
+  let checked = props.status?.checked_at
+  createEffect(() => {
+    const next = props.status?.checked_at
+    if (next !== checked && (phase() as { nothing?: boolean }).nothing) setPhase({ kind: "idle" })
+    checked = next
   })
   // An outcome is shown for a few seconds, never indefinitely.
   createEffect(() => {
-    if (phase().kind !== "done") return
+    // "Nothing to re-offer" stays until the unread mail changes: offering Wake now again would only repeat it.
+    if (phase().kind !== "done" || (phase() as { nothing?: boolean }).nothing) return
     const timer = setTimeout(() => setPhase({ kind: "idle" }), OUTCOME_MS)
     onCleanup(() => clearTimeout(timer))
   })
@@ -79,6 +87,8 @@ export const MailWakeBar = (props: { unread: number; status: MailWakeStatus | un
     if (current.kind === "failed") return "Retry"
     return paused() ? "Deliver now" : "Wake now"
   }
+  // Nothing left to re-offer (from the last answer, or the dashboard's wake state): no Wake now beside that reason.
+  const nothing = () => (phase() as { nothing?: boolean }).nothing === true || props.status?.wake_now === false
   return <Show when={props.unread > 0}>
     <div class="mail-wake-bar" role="status" data-phase={phase().kind}>
       <span class="mail-wake-count">{props.unread} unread</span>
@@ -86,15 +96,17 @@ export const MailWakeBar = (props: { unread: number; status: MailWakeStatus | un
       <Show when={blocked()} fallback={<>
         <Show when={phase().kind === "done"}>
           <span class="mail-wake-outcome">{(phase() as { text: string }).text}</span>
-          <span class="mail-wake-sep" aria-hidden="true">·</span>
+          <Show when={!nothing()}><span class="mail-wake-sep" aria-hidden="true">·</span></Show>
         </Show>
         <Show when={phase().kind === "failed"}>
           <span class="mail-wake-error" role="alert">Couldn't wake: {(phase() as { why: string }).why}</span>
           <span class="mail-wake-sep" aria-hidden="true">·</span>
         </Show>
+        <Show when={!nothing()} fallback={<Show when={phase().kind !== "done"}><span class="mail-wake-outcome">Nothing to re-offer · the mail is already with the agent</span></Show>}>
         <button type="button" class="mail-wake-now" disabled={phase().kind === "waking" || !props.editspace}
           title={paused() ? "Passive review is off: delivers the unread mail now without resuming the schedule" : "Delivers the unread mail to the agent now; a working agent reads it at its next safe point"}
           onClick={() => void wake()}>{label()}</button>
+        </Show>
       </>}>{(status) => <span class="mail-wake-blocked">Blocked: {blockedReason(status().next?.reason)}</span>}</Show>
     </div>
   </Show>

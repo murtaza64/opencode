@@ -510,6 +510,8 @@ export type DocContent = {
 }
 
 export type MailMessage = {
+  /** Newer dashboards, received mail only: whether the recipient lane's `es mail check` receipt covers it. */
+  receipt?: { reader: string; read: boolean }
   /** Present on mail the Squadron bridge wrote (`from: integration:squadron`). */
   squadron?: SquadronMeta
   id: string

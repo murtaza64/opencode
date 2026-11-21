@@ -717,7 +717,7 @@ export function SessionView(props: { sessionID: string; directory: string; embed
   const receiptRecords = createMailReceiptRecords({ prefix: remote ? hostPrefix(sessionHost.id!) : "", host: remote ? sessionHost.id : undefined, directory, session: sessionID,
     editspaces: () => remote ? hostEditspaces()?.editspaces : editspaces()?.editspaces, revision: () => remote ? status() : mailRevision() })
   // Incoming mail this session's agent has not been shown (DD #414): its rows say so, one bar offers Wake now.
-  const unreadMail = createMemo(() => mail()?.messages.filter((message) => message.direction === "received" && mailUnread(message.deliveries, sessionID)).length ?? 0)
+  const unreadMail = createMemo(() => mail()?.messages.filter((message) => message.direction === "received" && mailUnread(message.deliveries, sessionID, message.receipt)).length ?? 0)
   const mailWake = createMailWake({ editspace: () => location()?.name, session: sessionID, unread: unreadMail, revision: mailRevision })
   const mailReplied = createMemo(() => new Set(mail()?.messages.flatMap((message) => message.in_reply_to ? [message.in_reply_to] : []) ?? []))
   const mailCauseRows = createMemo(() => mailCauses(timeline(), mailRecords()))

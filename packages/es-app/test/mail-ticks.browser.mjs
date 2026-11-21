@@ -108,7 +108,9 @@ try {
     // Incoming unread: dot, bolder sender, one wake line from the scheduler; presented mail is not unread.
     const unread = chip("i-unread-1")
     await expect(unread).toHaveAttribute("data-unread", "true")
-    await expect(unread.locator(".mail-unread-dot")).toHaveCount(1)
+    // Unread is the bold sender and the wake bolt; no leading dot.
+    await expect(unread.locator(".mail-unread-dot")).toHaveCount(0)
+    await expect(unread).toHaveAttribute("data-unread", "true")
     // Scheduled: a plain bolt with the countdown; the words are the tooltip and part of the chip's label.
     await expect(unread.locator(".mail-unread-wake")).toHaveAttribute("data-cue", "on")
     await expect(unread.locator(".mail-unread-wake")).toHaveText("in 12 min")
@@ -118,7 +120,7 @@ try {
     await expect(unread).toHaveAttribute("aria-label", /^Unread mail from Relay: .*, Agent wakes in 12 min$/)
     expect(await unread.locator(".mail-activity-party").evaluate((element) => getComputedStyle(element).fontWeight)).toBe("600")
     await expect(chip("i-read")).not.toHaveAttribute("data-unread", "true")
-    await expect(chip("i-read").locator(".mail-unread-dot")).toHaveCount(0)
+    await expect(chip("i-read")).not.toHaveAttribute("data-unread", "true")
 
     // One bar for the session, above the composer.
     const bar = page.locator(".mail-wake-bar")
@@ -147,6 +149,9 @@ try {
     expect(trailing(glyph)).toBeLessThan(16)
     expect(trailing(line)).toBeLessThan(40)
     expect(await long.locator(".mail-activity-party .mail-party").first().evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true)
+    // The kind is a fixed column: every chip's kind label has one width.
+    const widths = await page.locator(".transcript .mail-activity-purpose").evaluateAll((list) => [...new Set(list.map((element) => Math.round(element.getBoundingClientRect().width)))])
+    expect(widths.length).toBe(1)
     await page.screenshot({ path: join(shots, `long-title-${dir}.png`) })
 
     if (dir === "ltr") {
@@ -206,6 +211,12 @@ try {
       expect(Date.now() - started).toBeLessThan(13_000)
       await expect(bar.locator(".mail-wake-now")).toHaveText("Retry")
       await page.unroute("**/es/api/mail/wake**")
+      // Nothing to re-offer: the bar says so and offers no Wake now beside it (no contradiction).
+      post = () => ({ body: { lane: "squadron-v2", session: "ses_a", offered: 0, busy: false, review: null, state: wake } })
+      await bar.locator(".mail-wake-now").click()
+      await expect(bar.locator(".mail-wake-outcome")).toHaveText("Nothing to re-offer · the mail is already with the agent")
+      await expect(bar.locator(".mail-wake-now")).toHaveCount(0)
+      await page.screenshot({ path: join(shots, "nothing-to-reoffer.png") })
       post = () => ({ status: 403, body: { error: "operator required" } })
 
       // Paused (passive review off): the line says so and the button delivers without claiming the schedule resumed.

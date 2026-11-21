@@ -1137,7 +1137,6 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 /* Mail ticks + unread (Loupe mail-ticks.md): the tick is the chip's last glyph; unread is a 6px accent dot at
    inline-start, a bolder sender and, when known, one line on the agent's next wake. */
 .mail-activity-head > .msg-tick { margin-inline-start: 2px; }
-.mail-unread-dot { flex: none; inline-size: 6px; block-size: 6px; border-radius: 50%; background: var(--accent, var(--lavender)); }
 .mail-activity-summary[data-unread] .mail-activity-party { font-weight: 600; }
 .mail-unread-wake { max-inline-size: 100%; padding-inline-end: 22px; text-align: end; color: var(--subtext0); font-size: 12px; line-height: 16px; white-space: normal; }
 .mail-activity-sep { flex: none; color: var(--overlay1); }
@@ -1149,7 +1148,8 @@ td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--surface0); }
 .mail-wake-now:disabled { color: var(--subtext0); cursor: default; }
 .mail-wake-now:focus-visible { outline: 2px solid var(--accent, var(--lavender)); outline-offset: 2px; border-radius: 2px; }
 .mail-wake-error, .mail-wake-blocked { color: var(--red); }
-.mail-activity-purpose { flex: none; }
+/* A fixed kind column (the longest kind is "Question"), so every title truncates at the same width. */
+.mail-activity-purpose { flex: none; inline-size: 8ch; overflow: hidden; text-overflow: ellipsis; }
 .mail-activity-status { flex: none; color: var(--peach); }
 .mail-activity-status[data-status=Failed], .mail-activity-status[data-status="Not delivered"] { color: var(--red); }
 .mail-route { display: flex; align-items: baseline; gap: 0; min-width: 0; white-space: nowrap; }

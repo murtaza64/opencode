@@ -77,7 +77,6 @@ export const MailSummary = (props: {
     {/* One line, always: party (truncates), kind, status and tick, then the wake cue and the direction glyph at the
       * trailing edge. The unread wake line sits under it, aligned to the same trailing edge. */}
     <span class="mail-activity-head">
-      <Show when={props.unread}><span class="mail-unread-dot" aria-hidden="true" /></Show>
       {/* The preview slot keeps compact mail's line together; otherwise party and purpose are direct children, as before. */}
       <Show when={compact()} fallback={line()}><span class="mail-activity-preview">{line()}</span></Show>
       <Show when={props.status}>{(status) => <>

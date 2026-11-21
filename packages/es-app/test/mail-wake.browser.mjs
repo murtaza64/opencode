@@ -26,8 +26,11 @@ const incoming = (id, offset, extra) => mail(id, offset, "orchestrator", "squadr
 const records = [
   incoming("caused", 1000, { wake: "caused", wake_observations: [{ outcome: "scheduled", observedAt: at + 1000 }] }),
   incoming("joined", 2000, { wake: "joined" }),
-  // Read later by a passive review (presented), so not unread: mail-ticks.browser.mjs covers unread rows.
-  incoming("none", 3000, { mode: "passive", state: "recorded", wake: "none", presented_at: new Date(at + 3500).toISOString() }),
+  // Passive and only recorded: the one case that says "did not wake".
+  incoming("none", 3000, { mode: "passive", state: "recorded", wake: "none" }),
+  // Passive but delivered: shown in a turn (presented), or read with `es mail check` (the lane's receipt covers it).
+  incoming("read", 3200, { mode: "passive", state: "recorded", wake: "none", presented_at: new Date(at + 3500).toISOString() }),
+  { ...incoming("receipt", 3400, { mode: "passive", state: "recorded", wake: "none" }), receipt: { reader: "squadron-v2", read: true } },
   incoming("unknown", 4000, { wake: "unknown" }),
   // An older dashboard reports no typed evidence: no cue, even with a scheduling observation.
   incoming("legacy", 5000, { wake_observations: [{ outcome: "scheduled", observedAt: at + 5000 }] }),
@@ -59,18 +62,21 @@ try {
     await expect(chip(page, "out-caused").locator(".mail-activity-wake")).toHaveCount(0)
     await expect(chip(page, "out-caused").locator(".msg-tick")).toHaveAttribute("aria-label", "Read by Relay")
     await expect(chip(page, "unknown").locator('.mail-activity-wake[data-wake="unknown"]')).toHaveCount(1)
-    for (const id of ["joined", "none", "legacy"]) await expect(chip(page, id).locator(".mail-activity-wake")).toHaveCount(0)
+    for (const id of ["joined", "none", "legacy", "read", "receipt"]) await expect(chip(page, id).locator(".mail-activity-wake")).toHaveCount(0)
+    // Read passive mail is not unread and is not "did not wake".
+    for (const id of ["read", "receipt"]) await expect(chip(page, id)).not.toHaveAttribute("data-unread", "true")
 
     // Words live only in the tooltip and accessible label, never in the collapsed text.
     const labels = { caused: "Woke this agent", joined: "Arrived while this agent was working", none: "Recorded, did not wake",
-      unknown: "Wake not confirmed", "out-caused": "Read by Relay" }
+      read: "Read by this agent", receipt: "Read by this agent \\(es mail check\\)", unknown: "Wake not confirmed", "out-caused": "Read by Relay" }
     for (const [id, label] of Object.entries(labels)) {
       await expect(chip(page, id)).toHaveAttribute("title", new RegExp(`· ${label}$`))
-      await expect(chip(page, id)).toHaveAttribute("aria-label", new RegExp(`, ${label}$`))
-      await expect(chip(page, id)).not.toContainText(label)
+      await expect(chip(page, id)).toHaveAttribute("aria-label", new RegExp(`, ${label}(,|$)`))
+      await expect(chip(page, id)).not.toContainText(label.replaceAll("\\", ""))
     }
     await expect(chip(page, "legacy")).not.toHaveAttribute("aria-label", /wake|Woke/i)
-    for (const id of [...Object.keys(labels), "legacy"]) await expect(chip(page, id)).not.toContainText(/passive|wake|scheduled/i)
+    // "none" is unread here, so its line under the title states the next wake (mail-ticks.browser.mjs covers it).
+    for (const id of [...Object.keys(labels), "legacy"].filter((id) => id !== "none")) await expect(chip(page, id)).not.toContainText(/passive|wake|scheduled/i)
 
     // Only caused draws attention: heavier party; none and unknown are muted; all chips keep one height.
     const weight = (id) => chip(page, id).locator(".mail-activity-party").evaluate((element) => getComputedStyle(element).fontWeight)
@@ -79,7 +85,7 @@ try {
     const color = (id) => chip(page, id).locator(".mail-activity-purpose").evaluate((element) => getComputedStyle(element).color)
     expect(await color("none")).not.toBe(await color("joined"))
     expect(await color("unknown")).toBe(await color("none"))
-    const heights = await Promise.all(["caused", "joined", "none", "unknown", "legacy"].map(async (id) => Math.round((await chip(page, id).boundingBox()).height)))
+    const heights = await Promise.all(["caused", "joined", "read", "receipt", "unknown", "legacy"].map(async (id) => Math.round((await chip(page, id).boundingBox()).height)))
     expect(new Set(heights).size).toBe(1)
 
     // Trailing edge: party, then the wake glyph, then the direction glyph last; the chip sits at the inline end.

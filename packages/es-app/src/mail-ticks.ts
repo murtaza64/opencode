@@ -71,7 +71,9 @@ export const lostReceiptTick = (why: string): { tick: Tick; label: string; level
   ({ tick: TICK.sending, label: `Sent · delivery receipt not available (${why})`, level: "sending" })
 
 /** Incoming mail for this session that its agent has not been shown yet (Loupe: unread = presented_at null). */
-export const mailUnread = (deliveries: readonly MailDelivery[], sessionID: string | undefined) => {
+export const mailUnread = (deliveries: readonly MailDelivery[], sessionID: string | undefined, receipt?: { read: boolean }) => {
+  // The lane read it with `es mail check` (the same receipt `es mail` counts), even if no turn presented it.
+  if (receipt?.read) return false
   const own = deliveries.filter((delivery) => delivery.session === sessionID)
   return own.length > 0 && own.every((delivery) => mailLevel(delivery) === "inbox")
 }

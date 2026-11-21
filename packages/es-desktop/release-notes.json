@@ -1,7 +1,11 @@
 {
   "schema": "release-notes/1",
-  "release": "2026-11-20.10",
+  "release": "2026-11-21.1",
   "items": [
+    {
+      "title": "Mail list",
+      "detail": "Mail an agent already read, in a running turn or with es mail check, no longer counts as unread or shows a struck bolt; the unread count matches es mail. When there is nothing to re-offer, Wake now is hidden. Kind labels share one column, so titles line up."
+    },
     {
       "title": "Faster with a busy Core",
       "detail": "The Front Desk and the activity list make fewer reads at a time, so chats and the sidebar stay responsive while Core is slow."
@@ -13,10 +17,6 @@
     {
       "title": "Spend in the title bar",
       "detail": "The title bar shows Today, WTD and MTD spend in UTC across every Work host: OpenRouter billing plus gateway and other providers. If a host is off, ≥ marks the amount as partial and the tooltip names the host."
-    },
-    {
-      "title": "All shows every session",
-      "detail": "New agents appear in All right away, under the same day headings as Agents. Icons, titles and times line up across row types."
     }
   ],
   "limits": [
